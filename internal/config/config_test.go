@@ -45,6 +45,8 @@ func TestLoad_Defaults(t *testing.T) {
 			CountsHistory: 5 * time.Minute,
 			MaxInFlight:   8,
 			Jitter:        500 * time.Millisecond,
+			TargetHealth:  15 * time.Second,
+			Scaling:       60 * time.Second,
 		},
 		Retention: RetentionConfig{
 			StoppedTasks:      168 * time.Hour,
@@ -57,6 +59,10 @@ func TestLoad_Defaults(t *testing.T) {
 		},
 		PageSizeDefault: 100,
 		PageSizeMax:     500,
+		MetricsCacheTTL: 60 * time.Second,
+		LogTailIdle:     30 * time.Minute,
+		LogTailsPerUser: 2,
+		LogHistoryLimit: 500,
 	}
 
 	if cfg != want {
@@ -118,5 +124,42 @@ func TestLoad_RejectsBadDuration(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "HM_SESSION_IDLE") {
 		t.Errorf("error %q does not name HM_SESSION_IDLE", err)
+	}
+}
+
+func TestConfig_ObserveDefaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"MetricsCacheTTL", cfg.MetricsCacheTTL, 60 * time.Second},
+		{"Poll.TargetHealth", cfg.Poll.TargetHealth, 15 * time.Second},
+		{"Poll.Scaling", cfg.Poll.Scaling, 60 * time.Second},
+		{"LogTailIdle", cfg.LogTailIdle, 30 * time.Minute},
+		{"LogTailsPerUser", cfg.LogTailsPerUser, 2},
+		{"LogHistoryLimit", cfg.LogHistoryLimit, 500},
+	}
+	for _, check := range checks {
+		if check.got != check.want {
+			t.Errorf("%s = %v, want %v", check.name, check.got, check.want)
+		}
+	}
+}
+
+func TestLoad_RejectsBadObserveInteger(t *testing.T) {
+	_, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":       "postgres://example",
+		"HM_LOG_TAILS_PER_USER": "abc",
+	}))
+	if err == nil {
+		t.Fatal("Load returned nil error for invalid integer")
+	}
+	if !strings.Contains(err.Error(), "HM_LOG_TAILS_PER_USER") {
+		t.Errorf("error %q does not name HM_LOG_TAILS_PER_USER", err)
 	}
 }
