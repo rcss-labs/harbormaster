@@ -54,6 +54,10 @@ type Loop struct {
 	dirty map[string]map[string]bool
 	// taskDefinitions maps ARN -> zero time (stored) or the time a lookup failed.
 	taskDefinitions map[string]time.Time
+	// latest is the most recent services snapshot, sampled for the counts history.
+	latest map[model.ServiceKey]model.Service
+	// seenDeployments are deployment ids already offered to deployment_history by this loop.
+	seenDeployments map[string]bool
 	writes          store.WriteResult
 }
 
@@ -77,6 +81,8 @@ func newLoop(p *Poller, t awsx.Target) *Loop {
 		signatures:      map[model.ServiceKey]serviceSignature{},
 		dirty:           map[string]map[string]bool{},
 		taskDefinitions: map[string]time.Time{},
+		latest:          map[model.ServiceKey]model.Service{},
+		seenDeployments: map[string]bool{},
 	}
 	in := p.cfg.Intervals
 	add := func(name string, base time.Duration, run func(context.Context) error) {
@@ -119,6 +125,13 @@ func (l *Loop) Run(ctx context.Context) {
 		_ = l.runTier(ctx, d)
 	}
 	var wg sync.WaitGroup
+	if every := l.p.cfg.CountsHistory; every > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			l.countsLoop(ctx, every)
+		}()
+	}
 	for i, d := range l.defs {
 		wg.Add(1)
 		go func() {
@@ -127,6 +140,20 @@ func (l *Loop) Run(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+}
+
+// countsLoop samples service counts into the history every interval until ctx ends.
+func (l *Loop) countsLoop(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.recordCounts(ctx)
+		}
+	}
 }
 
 // tickTier repeats a tier until ctx ends, sleeping its jittered interval between runs.
@@ -146,7 +173,7 @@ func (l *Loop) tickTier(ctx context.Context, d tierDef, runImmediately bool) {
 	}
 }
 
-// runTier runs one tier and logs its failure. Task 15 records the outcome here too.
+// runTier runs one tier, logs its failure and records the cycle in poll_loops.
 func (l *Loop) runTier(ctx context.Context, d tierDef) error {
 	err := d.run(ctx)
 	if err != nil && ctx.Err() == nil {
@@ -155,6 +182,9 @@ func (l *Loop) runTier(ctx context.Context, d tierDef) error {
 		} else {
 			l.log.Warn("poller: tier failed", "tier", d.tier.name, "err", err)
 		}
+	}
+	if ctx.Err() == nil {
+		l.recordCycle(ctx, d.tier, err)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", d.tier.name, err)
@@ -426,6 +456,8 @@ func (l *Loop) syncServices(ctx context.Context) error {
 			return err
 		}
 		l.markChangedServicesDirty(services)
+		l.rememberServices(k.Cluster, services)
+		l.recordDeployments(ctx, services)
 
 		var definitionARNs []string
 		for _, s := range services {
@@ -436,6 +468,20 @@ func (l *Loop) syncServices(ctx context.Context) error {
 		l.ensureTaskDefinitions(ctx, api, definitionARNs)
 		return nil
 	})
+}
+
+// rememberServices replaces the cluster's entries in the latest snapshot.
+func (l *Loop) rememberServices(cluster string, services []model.Service) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key := range l.latest {
+		if key.Cluster == cluster {
+			delete(l.latest, key)
+		}
+	}
+	for _, s := range services {
+		l.latest[s.Key] = s
+	}
 }
 
 func (l *Loop) markChangedServicesDirty(services []model.Service) {
