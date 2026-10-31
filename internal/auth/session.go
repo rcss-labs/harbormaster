@@ -78,6 +78,20 @@ func (a *Service) createSession(ctx context.Context, userID int64, ip, userAgent
 	return sessionID, csrf, err
 }
 
+// StartSession signs user in without a password check (used right after first-run setup):
+// it records the sign-in, creates a session and audits it.
+func (a *Service) StartSession(ctx context.Context, user store.User, ip, userAgent string) (LoginResult, error) {
+	if err := a.store.TouchSignIn(ctx, user.ID, a.now()); err != nil {
+		return LoginResult{}, err
+	}
+	sessionID, csrf, err := a.createSession(ctx, user.ID, ip, userAgent)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	a.audit(ctx, &user, "sign_in", "Signed in.", ip)
+	return LoginResult{User: user, SessionID: sessionID, CSRFToken: csrf}, nil
+}
+
 // Logout ends the session identified by the raw cookie value.
 func (a *Service) Logout(ctx context.Context, sessionID string) error {
 	return a.store.DeleteSession(ctx, hashSessionID(a.cfg.SessionKey, sessionID))

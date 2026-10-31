@@ -67,7 +67,7 @@ func (s *Setup) Complete(ctx context.Context, token, username, password string) 
 	}
 	username = strings.ToLower(strings.TrimSpace(username))
 	if !usernamePattern.MatchString(username) {
-		return store.User{}, errors.New("Use 2-32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter.")
+		return store.User{}, &ValidationError{Msg: "Use 2-32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter."}
 	}
 	if err := ValidatePassword(password); err != nil {
 		return store.User{}, err

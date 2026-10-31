@@ -67,10 +67,15 @@ func VerifyPassword(hash, pw string) (bool, error) {
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
+// ValidationError is a user-input problem whose message is safe to show; the API maps it to 422.
+type ValidationError struct{ Msg string }
+
+func (e *ValidationError) Error() string { return e.Msg }
+
 // ValidatePassword enforces the password policy.
 func ValidatePassword(pw string) error {
 	if len([]rune(pw)) < MinPasswordLength {
-		return errors.New("Use at least 12 characters.")
+		return &ValidationError{Msg: "Use at least 12 characters."}
 	}
 	return nil
 }
