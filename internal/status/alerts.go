@@ -69,7 +69,7 @@ func ServiceAlerts(in AlertInput) []model.Alert {
 	case model.StatusFailing:
 		text, at := "Tasks fail to start.", now
 		if task := newestStoppedWithExit(in.Tasks, now); task != nil {
-			text = fmt.Sprintf("Last task stopped: %s (exit %d)", task.StoppedReason, *task.ExitCode())
+			text = fmt.Sprintf("Last task stopped: %s (exit %d)", task.StoppedReason, *taskExitCode(*task, name))
 			at = *task.StoppedAt
 		}
 		add("service_failing", model.AlertDanger, fmt.Sprintf("%s: 0 of %d tasks running", name, svc.Desired), text, at, "tasks")
@@ -131,16 +131,21 @@ func ServiceAlerts(in AlertInput) []model.Alert {
 				continue
 			}
 			add("rollout_in_progress", model.AlertInfo, fmt.Sprintf("%s: rolling out revision %d", name, deploymentRevision(dep)),
-				fmt.Sprintf("%d of %d new tasks running.", svc.Running, svc.Desired), now, "overview")
+				fmt.Sprintf("%d of %d new tasks running.", dep.Running, svc.Desired), dep.CreatedAt, "overview")
 			break
 		}
 	}
 
-	for _, ev := range in.Events {
-		if now.Sub(ev.CreatedAt) <= cannotPlaceWindow && strings.Contains(ev.Message, "unable to place a task") {
-			add("cannot_place", model.AlertDanger, name+": cannot place tasks", ev.Message, ev.CreatedAt, "overview")
-			break
+	var placeEvent *model.ServiceEvent
+	for i := range in.Events {
+		ev := &in.Events[i]
+		if now.Sub(ev.CreatedAt) <= cannotPlaceWindow && strings.Contains(ev.Message, "unable to place a task") &&
+			(placeEvent == nil || ev.CreatedAt.After(placeEvent.CreatedAt)) {
+			placeEvent = ev
 		}
+	}
+	if placeEvent != nil {
+		add("cannot_place", model.AlertDanger, name+": cannot place tasks", placeEvent.Message, placeEvent.CreatedAt, "overview")
 	}
 	return alerts
 }
@@ -182,13 +187,33 @@ func AccountAlerts(loops []LoopState, accountNames map[string]string, now time.T
 
 // SortAlerts orders danger before warning before info, newest first within a severity.
 func SortAlerts(alerts []model.Alert) {
-	rank := map[model.AlertSeverity]int{model.AlertDanger: 0, model.AlertWarning: 1, model.AlertInfo: 2}
+	rank := func(sev model.AlertSeverity) int {
+		switch sev {
+		case model.AlertDanger:
+			return 0
+		case model.AlertWarning:
+			return 1
+		case model.AlertInfo:
+			return 2
+		}
+		return 3
+	}
 	sort.SliceStable(alerts, func(i, j int) bool {
-		if ri, rj := rank[alerts[i].Severity], rank[alerts[j].Severity]; ri != rj {
+		if ri, rj := rank(alerts[i].Severity), rank(alerts[j].Severity); ri != rj {
 			return ri < rj
 		}
 		return alerts[i].At.After(alerts[j].At)
 	})
+}
+
+// taskExitCode prefers the container named after the service, else Task.ExitCode.
+func taskExitCode(task model.Task, serviceName string) *int {
+	for _, container := range task.Containers {
+		if container.Name == serviceName && container.ExitCode != nil {
+			return container.ExitCode
+		}
+	}
+	return task.ExitCode()
 }
 
 func newestStoppedWithExit(tasks []model.Task, now time.Time) *model.Task {

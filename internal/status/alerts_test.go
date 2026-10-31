@@ -130,8 +130,8 @@ func TestServiceAlerts_Table(t *testing.T) {
 		{
 			name: "rollout in progress",
 			in: AlertInput{Service: func() model.Service {
-				s := baseService(3, 1)
-				s.Deployments = []model.Deployment{{Status: "PRIMARY", RolloutState: "IN_PROGRESS", TaskDefinitionARN: "arn:aws:ecs:eu-west-1:111:task-definition/api:42", Running: 1, Desired: 3}}
+				s := baseService(3, 4)
+				s.Deployments = []model.Deployment{{Status: "PRIMARY", RolloutState: "IN_PROGRESS", TaskDefinitionARN: "arn:aws:ecs:eu-west-1:111:task-definition/api:42", Running: 1, Desired: 3, CreatedAt: alertNow.Add(-10 * time.Minute)}}
 				return s
 			}()},
 			kind:     "rollout_in_progress",
@@ -139,7 +139,7 @@ func TestServiceAlerts_Table(t *testing.T) {
 			title:    "api: rolling out revision 42",
 			text:     "1 of 3 new tasks running.",
 			tab:      "overview",
-			at:       alertNow,
+			at:       alertNow.Add(-10 * time.Minute),
 		},
 		{
 			name: "cannot place",
@@ -286,5 +286,34 @@ func TestSortAlerts_SeverityThenNewest(t *testing.T) {
 	}
 	if got := strings.Join(order, ","); got != "d-new,d-old,w-new,w-old,i" {
 		t.Errorf("order = %s", got)
+	}
+}
+
+func TestServiceAlerts_CannotPlaceUsesNewestEvent(t *testing.T) {
+	in := AlertInput{Service: baseService(2, 2), Now: alertNow, Events: []model.ServiceEvent{
+		{CreatedAt: alertNow.Add(-10 * time.Minute), Message: "unable to place a task (old)"},
+		{CreatedAt: alertNow.Add(-2 * time.Minute), Message: "unable to place a task (new)"},
+		{CreatedAt: alertNow.Add(-time.Minute), Message: "steady state"},
+	}}
+	a := alertByKind(ServiceAlerts(in), "cannot_place")
+	if a == nil || a.Text != "unable to place a task (new)" {
+		t.Fatalf("got %+v", a)
+	}
+}
+
+func TestServiceAlerts_FailingPrefersServiceNamedContainerExit(t *testing.T) {
+	task := model.Task{LastStatus: "STOPPED", StoppedAt: ago(time.Hour), StoppedReason: "boom",
+		Containers: []model.Container{{Name: "sidecar", ExitCode: intp(255)}, {Name: "api", ExitCode: intp(3)}}}
+	a := alertByKind(ServiceAlerts(AlertInput{Service: baseService(2, 0), Tasks: []model.Task{task}, Now: alertNow}), "service_failing")
+	if a == nil || a.Text != "Last task stopped: boom (exit 3)" {
+		t.Fatalf("got %+v", a)
+	}
+}
+
+func TestSortAlerts_UnknownSeverityLast(t *testing.T) {
+	alerts := []model.Alert{{Kind: "x", Severity: "weird", At: alertNow}, {Kind: "i", Severity: model.AlertInfo, At: alertNow.Add(-time.Hour)}}
+	SortAlerts(alerts)
+	if alerts[0].Kind != "i" {
+		t.Errorf("order = %v", alerts)
 	}
 }
