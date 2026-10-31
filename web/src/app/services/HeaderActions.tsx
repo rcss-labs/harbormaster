@@ -86,6 +86,7 @@ function RestartDialog({ serviceId, service, onClose }: DialogProps) {
       title={`Restart ${service.name}?`}
       sub={`Starts a new deployment of :${service.revision}. Each task is replaced, new ones first.`}
       confirmLabel="Restart"
+      confirmDisabled={restart.isPending}
       onConfirm={confirm}
       onCancel={onClose}
     />
@@ -138,7 +139,7 @@ function DesiredCountDialog({ serviceId, service, onClose }: DialogProps) {
       onClose={onClose}
       actions={[
         { label: 'Cancel', onClick: onClose },
-        { label: 'Update desired count', kind: 'primary', disabled: !valid, onClick: submit },
+        { label: 'Update desired count', kind: 'primary', disabled: !valid || setDesiredCount.isPending, onClick: submit },
       ]}
     >
       <div className={dialogStyles.stepper}>

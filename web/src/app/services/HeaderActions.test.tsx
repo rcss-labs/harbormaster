@@ -77,6 +77,35 @@ describe('HeaderActions restart', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('disables the confirm button while the restart request is pending', async () => {
+    const restartRequests = vi.fn()
+    let releaseRequest: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseRequest = resolve
+    })
+    server.use(
+      http.post(`/api/services/${SERVICE_PAYMENTS.id}/restart`, async () => {
+        restartRequests()
+        await gate
+        return HttpResponse.json({ deployment_id: 'dep-1', revision: SERVICE_PAYMENTS.revision, kind: 'restart' }, { status: 202 })
+      }),
+    )
+    renderActions()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Restart (new deployment)' }))
+    await user.click(screen.getByRole('button', { name: 'Restart' }))
+    await waitFor(() => expect(restartRequests).toHaveBeenCalledTimes(1))
+
+    const pendingConfirm = screen.getByRole('button', { name: 'Restart' })
+    expect(pendingConfirm).toBeDisabled()
+    await user.click(pendingConfirm)
+    expect(restartRequests).toHaveBeenCalledTimes(1)
+
+    releaseRequest()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('shows a rollout-in-progress toast when the server answers 409', async () => {
     server.use(
       http.post(`/api/services/${SERVICE_PAYMENTS.id}/restart`, () =>
