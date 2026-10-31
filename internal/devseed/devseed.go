@@ -26,9 +26,16 @@ const (
 	viewLogs                = authz.ActionSet(authz.View | authz.Logs)
 )
 
+// ErrDatabaseNotEmpty means the database already holds real users or accounts, so seeding the
+// demo data (which includes an admin with a publicly known password) is refused.
+var ErrDatabaseNotEmpty = errors.New("database already has users or accounts; refusing to seed demo data (unset HM_FAKE_AWS)")
+
 // Apply seeds the database. It is idempotent: existing tags, users, accounts and audit
 // history are left alone, so applying twice changes nothing.
 func Apply(ctx context.Context, st *store.Store) error {
+	if err := requireSeedable(ctx, st); err != nil {
+		return err
+	}
 	estate := fake.MockupEstate(time.Now)
 
 	for _, a := range estate.Accounts {
@@ -90,6 +97,43 @@ func Apply(ctx context.Context, st *store.Store) error {
 	}
 
 	return seedAudit(ctx, st, ids["pavel"])
+}
+
+// requireSeedable allows seeding only into an empty database or one this package already seeded
+// (recognised by its audit marker); anything else may hold real users and accounts.
+func requireSeedable(ctx context.Context, st *store.Store) error {
+	users, err := st.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	accounts, err := st.ListAccounts(ctx)
+	if err != nil {
+		return err
+	}
+	if users == 0 && len(accounts) == 0 {
+		return nil
+	}
+	seeded, err := hasSeedMarker(ctx, st)
+	if err != nil {
+		return err
+	}
+	if !seeded {
+		return ErrDatabaseNotEmpty
+	}
+	return nil
+}
+
+func hasSeedMarker(ctx context.Context, st *store.Store) (bool, error) {
+	existing, err := st.ListAudit(ctx, 500, 0)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range existing {
+		if e.Details["source"] == seedMarker {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func accountIDByName(estate *fake.Estate, name string) string {

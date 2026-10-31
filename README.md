@@ -42,7 +42,8 @@ All settings are environment variables. Durations use Go syntax (`5s`, `12h`).
 | `HM_BASE_URL` | `http://127.0.0.1:8480` | Public URL of the app |
 | `HM_COOKIE_SECURE` | `true` | Set the Secure flag on cookies. Use `false` only for plain-HTTP local runs |
 | `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` | | Secrets Manager secret with the initial `admin` password (see First run) |
-| `HM_FAKE_AWS` | `false` | Same as `serve --fake-aws` |
+| `HM_FAKE_AWS` | `false` | Local demo only, same as `serve --fake-aws`. Seeds demo users (admin `pavel` with a published password) and refuses to run against a database that already has users or accounts. Never set in production |
+| `HM_TRUSTED_PROXY` | `false` | Trust the rightmost `X-Forwarded-For` entry as the client IP. Enable only behind a proxy that appends the real client address (the Terraform module sets it for the ALB) |
 | `HM_LOG_LEVEL` | `info` | Log level |
 | `HM_SESSION_IDLE` | `12h` | Idle session timeout |
 | `HM_SESSION_ABSOLUTE` | `168h` | Maximum session lifetime |
