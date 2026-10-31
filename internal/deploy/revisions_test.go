@@ -1,0 +1,134 @@
+package deploy_test
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+
+	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
+)
+
+// summary renders items as "rev status by" for compact comparison.
+func summary(list deploy.RevisionList) []string {
+	var out []string
+	for _, r := range list.Items {
+		out = append(out, fmt.Sprintf("%d %s %s", r.Revision, r.Status, r.RegisteredBy))
+	}
+	return out
+}
+
+func TestRevisions_StatusesAndRegisteredBy(t *testing.T) {
+	h := newHarness(t)
+	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
+	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := h.svc.Revisions(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"43 not_deployed pavel", "42 deployed terraform", "41 previous terraform", "40 previous terraform"}
+	if got := summary(list); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("revisions = %v, want %v", got, want)
+	}
+	if list.DeployedRevision != 42 || list.RollingOutRevision != 0 {
+		t.Fatalf("deployed %d rolling out %d", list.DeployedRevision, list.RollingOutRevision)
+	}
+	first := list.Items[0]
+	if first.ImageTag != "1.18.3" || first.CPU == "" || first.Memory == "" || first.RegisteredAt.IsZero() || !strings.HasSuffix(first.ARN, ":43") {
+		t.Fatalf("revision 43 = %+v", first)
+	}
+}
+
+func TestRevisions_RollingOut(t *testing.T) {
+	h := newHarness(t)
+	list, err := h.svc.Revisions(t.Context(), notificationsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := summary(list)
+	if len(got) < 2 || got[0] != "10 rolling_out terraform" || got[1] != "9 deployed terraform" {
+		t.Fatalf("revisions = %v", got)
+	}
+	if list.DeployedRevision != 9 || list.RollingOutRevision != 10 {
+		t.Fatalf("deployed %d rolling out %d", list.DeployedRevision, list.RollingOutRevision)
+	}
+}
+
+func TestRevisions_ExactFamilyOnly(t *testing.T) {
+	h := newHarness(t)
+	h.fake.Estate.Mu.Lock()
+	var template ecstypes.TaskDefinition
+	for _, td := range h.fake.Estate.TaskDefinitions {
+		if aws.ToString(td.Definition.Family) == "payments-api" && td.Definition.Revision == 42 {
+			template = td.Definition
+		}
+	}
+	for _, family := range []string{"payments-api-worker", "payments-api-batch"} {
+		copied := template
+		copied.Family = aws.String(family)
+		copied.Revision = 1
+		copied.TaskDefinitionArn = aws.String(strings.Replace(aws.ToString(template.TaskDefinitionArn), "payments-api:42", family+":1", 1))
+		h.fake.Estate.TaskDefinitions = append(h.fake.Estate.TaskDefinitions, fake.TaskDefinition{AccountID: homelabAccountID, Region: homelabRegion, Definition: copied})
+	}
+	h.fake.Estate.Mu.Unlock()
+
+	list, err := h.svc.Revisions(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range list.Items {
+		if strings.Contains(r.ARN, "worker") || strings.Contains(r.ARN, "batch") {
+			t.Fatalf("revision of another family listed: %+v", r)
+		}
+	}
+	if len(list.Items) != 3 {
+		t.Fatalf("revisions = %v, want 3 payments-api revisions", summary(list))
+	}
+}
+
+func TestRevisions_DeployedInactiveStillListed(t *testing.T) {
+	h := newHarness(t)
+	h.fake.Estate.Mu.Lock()
+	for i := range h.fake.Estate.TaskDefinitions {
+		td := &h.fake.Estate.TaskDefinitions[i]
+		if aws.ToString(td.Definition.Family) == "payments-api" && td.Definition.Revision == 42 {
+			td.Definition.Status = ecstypes.TaskDefinitionStatusInactive
+		}
+	}
+	h.fake.Estate.Mu.Unlock()
+	list, err := h.svc.Revisions(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := summary(list)
+	if len(got) < 1 || got[0] != "42 deployed terraform" {
+		t.Fatalf("revisions = %v, want the INACTIVE deployed :42 listed as deployed", got)
+	}
+}
+
+func TestRevisions_CachedFor30s(t *testing.T) {
+	h := newHarness(t)
+	now := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+	h.svc.Now = func() time.Time { return now }
+	for i := 0; i < 2; i++ {
+		if _, err := h.svc.Revisions(t.Context(), paymentsKey); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := h.fake.Calls()["ListTaskDefinitions"]; n != 1 {
+		t.Fatalf("ListTaskDefinitions calls = %d within 30 s, want 1", n)
+	}
+	now = now.Add(31 * time.Second)
+	if _, err := h.svc.Revisions(t.Context(), paymentsKey); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.fake.Calls()["ListTaskDefinitions"]; n != 2 {
+		t.Fatalf("ListTaskDefinitions calls = %d after 31 s, want 2", n)
+	}
+}

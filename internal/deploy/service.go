@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -36,6 +37,29 @@ type Service struct {
 	Scaling         ScalingRangeSource
 	MaxDesiredCount int
 	Now             func() time.Time
+
+	// Per-instance caches, created on first use so a zero-value Service works.
+	cacheMu    sync.Mutex
+	imageCache *ttlCache[[]ImageTagInfo]
+	revCache   *ttlCache[[]string]
+}
+
+func (s *Service) imageTagCache() *ttlCache[[]ImageTagInfo] {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.imageCache == nil {
+		s.imageCache = newTTLCache[[]ImageTagInfo](imageTagsTTL)
+	}
+	return s.imageCache
+}
+
+func (s *Service) revisionCache() *ttlCache[[]string] {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.revCache == nil {
+		s.revCache = newTTLCache[[]string](revisionsTTL)
+	}
+	return s.revCache
 }
 
 func (s *Service) now() time.Time {
