@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { api, ApiError } from '../../api/client'
@@ -6,6 +7,7 @@ import { AuthCard, Field } from './AuthCard'
 
 export function Login() {
   const { refresh } = useAuth()
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
   const intended = (location.state as { from?: string } | null)?.from ?? '/'
@@ -19,6 +21,7 @@ export function Login() {
     setError('')
     try {
       await api.post('/api/auth/login', { username, password })
+      queryClient.clear()
       await refresh()
       navigate(intended, { replace: true })
     } catch (e) {

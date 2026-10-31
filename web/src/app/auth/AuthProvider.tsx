@@ -40,10 +40,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   useEffect(() => {
-    const onUnauthenticated = () => setMe(null)
+    const onUnauthenticated = () => {
+      setMe(null)
+      queryClient.clear() // the next person to sign in must not see this user's data
+    }
     window.addEventListener('hm:unauthenticated', onUnauthenticated)
     return () => window.removeEventListener('hm:unauthenticated', onUnauthenticated)
-  }, [])
+  }, [queryClient])
 
   const logout = useCallback(async () => {
     await api.post('/api/auth/logout')

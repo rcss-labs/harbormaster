@@ -11,8 +11,10 @@ function LocationProbe() {
 }
 
 /** Renders the real AuthProvider and routes at `route`; a hidden probe exposes the current pathname. */
-export function renderApp(route = '/'): RenderResult {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+export function renderApp(
+  route = '/',
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+): RenderResult {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[route]}>

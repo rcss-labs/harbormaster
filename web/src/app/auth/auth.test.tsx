@@ -1,6 +1,8 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
+import { QueryClient } from '@tanstack/react-query'
+import { act } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ME_ADMIN } from '../../test/fixtures'
 import { server } from '../../test/msw'
@@ -41,6 +43,36 @@ describe('Login', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/login')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/clusters'))
+  })
+})
+
+describe('Session end', () => {
+  it('drops cached data when the session expires', async () => {
+    let signedIn = true
+    server.use(
+      http.get('/api/me', () => (signedIn ? HttpResponse.json(ME_ADMIN) : unauthenticated())),
+      http.post('/api/auth/login', () => {
+        signedIn = true
+        return HttpResponse.json(ME_ADMIN)
+      }),
+    )
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['clusters'], { items: ['user A data'] })
+    renderApp('/', queryClient)
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+
+    signedIn = false
+    act(() => {
+      window.dispatchEvent(new Event('hm:unauthenticated'))
+    })
+    const user = userEvent.setup()
+    await user.type(await screen.findByLabelText('Username'), 'omer')
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery')
+    expect(queryClient.getQueryData(['clusters'])).toBeUndefined()
+    queryClient.setQueryData(['clusters'], { items: ['user A data'] })
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await screen.findByRole('heading', { name: 'Overview' })
+    expect(queryClient.getQueryData(['clusters'])).toBeUndefined()
   })
 })
 
