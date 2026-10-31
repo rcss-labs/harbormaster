@@ -63,7 +63,7 @@ var ClientVersion = "harbormaster/1.3.0.0"
 var (
 	ErrResendTimeout    = errors.New("execbridge: ssm stopped acknowledging input")
 	ErrHandshakeTimeout = errors.New("execbridge: handshake not completed in time")
-	errChannelDead      = errors.New("execbridge: data channel is not running")
+	ErrChannelClosed    = errors.New("execbridge: data channel is closed")
 )
 
 // FrameConn is the websocket as seen by the data channel. Writes must be safe
@@ -227,6 +227,12 @@ func (d *DataChannel) SessionType() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.sessionType
+}
+
+func (d *DataChannel) outstanding() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.outBuf)
 }
 
 func (d *DataChannel) currentRTO() time.Duration {
@@ -594,6 +600,11 @@ func (d *DataChannel) SendSize(ctx context.Context, cols, rows uint32) error {
 
 func (d *DataChannel) sendInput(ctx context.Context, pt PayloadType, payload []byte, waitForSpace bool) error {
 	for {
+		select {
+		case <-d.done:
+			return ErrChannelClosed
+		default:
+		}
 		d.sendMu.Lock()
 		d.mu.Lock()
 		if waitForSpace && len(d.outBuf) >= d.cfg.OutgoingCapacity {
@@ -606,7 +617,7 @@ func (d *DataChannel) sendInput(ctx context.Context, pt PayloadType, payload []b
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-d.done:
-				return errChannelDead
+				return ErrChannelClosed
 			}
 		}
 		now := d.cfg.Now()

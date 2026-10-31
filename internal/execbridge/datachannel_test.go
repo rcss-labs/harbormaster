@@ -470,7 +470,7 @@ func TestDataChannel_FirstOutputWithoutHandshake_IsShellFallback(t *testing.T) {
 }
 
 func TestDataChannel_SendInput_SequenceNumbersIncrement(t *testing.T) {
-	f := startChannel(t, nil)
+	f := startChannel(t, func(c *DataChannelConfig) { c.ResendInterval = time.Hour })
 	f.handshake()
 	for _, s := range []string{"x", "y", "z"} {
 		if err := f.dc.SendInput(context.Background(), Output, []byte(s)); err != nil {
@@ -492,7 +492,7 @@ func TestDataChannel_SendInput_SequenceNumbersIncrement(t *testing.T) {
 }
 
 func TestDataChannel_SendInput_ChunksAt1024(t *testing.T) {
-	f := startChannel(t, nil)
+	f := startChannel(t, func(c *DataChannelConfig) { c.ResendInterval = time.Hour })
 	data := bytes.Repeat([]byte("abcdefgh"), 2500/8+1)[:2500]
 	if err := f.dc.SendInput(context.Background(), Output, data); err != nil {
 		t.Fatal(err)
@@ -584,7 +584,8 @@ func TestDataChannel_Resend_StopsAfterAck(t *testing.T) {
 	}
 	first := f.agent.inputs()[0]
 	f.agent.push(ack(first))
-	time.Sleep(20 * time.Millisecond) // let the ack be processed and any in-flight resend land
+	eventually(t, "ack processed", func() bool { return f.dc.outstanding() == 0 })
+	time.Sleep(10 * time.Millisecond) // let any resend already in flight land
 	before := len(f.agent.rawBinaries())
 	time.Sleep(30 * time.Millisecond)
 	if after := len(f.agent.rawBinaries()); after != before {
@@ -706,5 +707,22 @@ func TestDataChannel_InvalidFrame_IsLoggedAndSkipped(t *testing.T) {
 	case err := <-f.runErr:
 		t.Fatalf("Run returned %v", err)
 	default:
+	}
+}
+
+func TestDataChannel_SendInput_AfterRunReturns_ErrChannelClosed(t *testing.T) {
+	f := startChannel(t, nil)
+	f.agent.push(channelClosed(0, ""))
+	if err := f.waitRunReturn(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.dc.SendInput(context.Background(), Output, []byte("x")); !errors.Is(err, ErrChannelClosed) {
+		t.Errorf("SendInput = %v, want ErrChannelClosed", err)
+	}
+	if err := f.dc.SendSize(context.Background(), 1, 1); !errors.Is(err, ErrChannelClosed) {
+		t.Errorf("SendSize = %v, want ErrChannelClosed", err)
+	}
+	if n := len(f.agent.inputs()); n != 0 {
+		t.Errorf("%d frames written after Run returned", n)
 	}
 }
