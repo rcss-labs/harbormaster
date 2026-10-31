@@ -57,7 +57,7 @@ func newHarness(t *testing.T) *harness {
 	}
 }
 
-// primaryRevision reads the PRIMARY deployment's revision of a fake service.
+// primary reads the PRIMARY deployment's revision of a fake service.
 func (h *harness) primary(t *testing.T, key model.ServiceKey) ecstypes.Deployment {
 	t.Helper()
 	h.fake.Estate.Mu.Lock()

@@ -53,6 +53,9 @@ func (s *Service) gatedService(ctx context.Context, key model.ServiceKey) (api E
 
 // Deploy points the service at revision of its family. An older revision is a rollback.
 func (s *Service) Deploy(ctx context.Context, subj authz.Subject, key model.ServiceKey, revision int) (Rollout, error) {
+	if revision <= 0 {
+		return Rollout{}, &ValidationError{Message: "Revision must be a positive number"}
+	}
 	api, family, current, _, err := s.gatedService(ctx, key)
 	if err != nil {
 		return Rollout{}, err

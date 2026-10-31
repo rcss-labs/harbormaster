@@ -2,6 +2,7 @@ package deploy_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -48,7 +49,7 @@ func TestDeploy_StartsRolloutAndAttributes(t *testing.T) {
 	}
 	primary := h.primary(t, paymentsKey)
 	if aws.ToString(primary.Id) != got.DeploymentID || primary.RolloutState != ecstypes.DeploymentRolloutStateInProgress ||
-		aws.ToString(primary.TaskDefinition) == "" {
+		!strings.HasSuffix(aws.ToString(primary.TaskDefinition), ":task-definition/payments-api:43") {
 		t.Fatalf("fake primary = %+v", primary)
 	}
 	if kind, user := deploymentKind(t, h, paymentsKey, got.DeploymentID); kind != "deploy" || user != h.pavel.UserID {
@@ -136,5 +137,14 @@ func TestRestart_ForceNewDeployment(t *testing.T) {
 	}
 	if text := lastOperationText(t, h, paymentsKey); text != "Restarted service (force new deployment) on revision 42." {
 		t.Fatalf("operation = %q", text)
+	}
+}
+
+func TestDeploy_RejectsNonPositiveRevision(t *testing.T) {
+	h := newHarness(t)
+	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 0)
+	var validation *deploy.ValidationError
+	if !errors.As(err, &validation) || validation.Message != "Revision must be a positive number" {
+		t.Fatalf("err = %v", err)
 	}
 }

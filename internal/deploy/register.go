@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -57,6 +58,9 @@ func (s *Service) Register(ctx context.Context, subj authz.Subject, key model.Se
 	out, err := ecsAPI.RegisterTaskDefinition(ctx, input)
 	if err != nil {
 		return Registered{}, wrapAWS(err)
+	}
+	if out.TaskDefinition == nil {
+		return Registered{}, errors.New("RegisterTaskDefinition returned no task definition")
 	}
 	return s.recordRegistered(ctx, subj, key, *out.TaskDefinition)
 }

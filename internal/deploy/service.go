@@ -14,6 +14,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -185,56 +186,5 @@ func (s *Service) liveService(ctx context.Context, key model.ServiceKey) (ECSCli
 
 // taskDefinitionRef summarises a described task definition for the store's snapshot table.
 func taskDefinitionRef(key model.ServiceKey, td ecstypes.TaskDefinition, now time.Time) model.TaskDefinitionRef {
-	ref := model.TaskDefinitionRef{
-		AccountID:        key.AccountID,
-		Region:           key.Region,
-		ARN:              aws.ToString(td.TaskDefinitionArn),
-		Family:           aws.ToString(td.Family),
-		Revision:         int(td.Revision),
-		CPU:              aws.ToString(td.Cpu),
-		Memory:           aws.ToString(td.Memory),
-		NetworkMode:      string(td.NetworkMode),
-		TaskRoleARN:      aws.ToString(td.TaskRoleArn),
-		ExecutionRoleARN: aws.ToString(td.ExecutionRoleArn),
-		PolledAt:         now,
-	}
-	if td.RegisteredAt != nil {
-		ref.RegisteredAt = td.RegisteredAt.UTC()
-	}
-	if raw, err := json.Marshal(td); err == nil {
-		ref.Raw = raw
-	}
-	for _, compatibility := range td.RequiresCompatibilities {
-		ref.RequiresCompatibilities = append(ref.RequiresCompatibilities, string(compatibility))
-	}
-	for _, container := range td.ContainerDefinitions {
-		def := model.ContainerDef{
-			Name:      aws.ToString(container.Name),
-			Image:     aws.ToString(container.Image),
-			Essential: aws.ToBool(container.Essential),
-		}
-		if logging := container.LogConfiguration; logging != nil {
-			def.LogDriver = string(logging.LogDriver)
-			def.LogGroup = logging.Options["awslogs-group"]
-			def.LogRegion = logging.Options["awslogs-region"]
-			def.LogStreamPrefix = logging.Options["awslogs-stream-prefix"]
-		}
-		for _, mount := range container.MountPoints {
-			def.MountPoints = append(def.MountPoints, model.MountPoint{
-				SourceVolume: aws.ToString(mount.SourceVolume), ContainerPath: aws.ToString(mount.ContainerPath), ReadOnly: aws.ToBool(mount.ReadOnly),
-			})
-		}
-		ref.Containers = append(ref.Containers, def)
-	}
-	for _, volume := range td.Volumes {
-		if volume.EfsVolumeConfiguration == nil {
-			continue
-		}
-		efs := model.EFSVolume{Name: aws.ToString(volume.Name), FileSystemID: aws.ToString(volume.EfsVolumeConfiguration.FileSystemId)}
-		if auth := volume.EfsVolumeConfiguration.AuthorizationConfig; auth != nil {
-			efs.AccessPointID = aws.ToString(auth.AccessPointId)
-		}
-		ref.EFSVolumes = append(ref.EFSVolumes, efs)
-	}
-	return ref
+	return poller.NormalizeTaskDefinition(targetOf(key), td, now)
 }

@@ -152,4 +152,14 @@ func TestRegister_AWSValidationShownVerbatim(t *testing.T) {
 	if !errors.As(err, &awsErr) || !awsErr.Validation || awsErr.Message != message {
 		t.Fatalf("err = %#v, want AWSError{Validation: true, Message: %q}", err, message)
 	}
+	ops, _ := h.store.ListOperations(t.Context(), paymentsKey, false, nil, 5)
+	for _, op := range ops {
+		if strings.HasPrefix(op.Text, "Registered") {
+			t.Fatalf("unexpected operation %q", op.Text)
+		}
+	}
+	var records int
+	if err := h.store.Pool.QueryRow(t.Context(), `select count(*) from revision_records`).Scan(&records); err != nil || records != 0 {
+		t.Fatalf("revision_records = %d, err %v; want 0", records, err)
+	}
 }
