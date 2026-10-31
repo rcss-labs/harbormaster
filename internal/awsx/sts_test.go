@@ -61,9 +61,14 @@ func TestReal_CachesCredentialsPerAccount(t *testing.T) {
 	if got := stub.calls.Load(); got != 2 {
 		t.Fatalf("different account: want 2, got %d", got)
 	}
+	before, _ := r.ECS(ctx, a)
 	r.Invalidate(a.AccountID)
-	if _, err := r.ECS(ctx, a); err != nil {
+	after, err := r.ECS(ctx, a)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("Invalidate must drop the cached client")
 	}
 	if got := stub.calls.Load(); got != 3 {
 		t.Fatalf("after Invalidate: want 3, got %d", got)
@@ -100,5 +105,43 @@ func TestReal_UnknownAccount(t *testing.T) {
 	}
 	if got := stub.calls.Load(); got != 0 {
 		t.Fatalf("want 0 AssumeRole, got %d", got)
+	}
+}
+
+// invalidatingSTS calls Invalidate from inside its first AssumeRole, as if an
+// account edit landed while credentials were being fetched.
+type invalidatingSTS struct {
+	stubSTS
+	onFirst func()
+}
+
+func (s *invalidatingSTS) AssumeRole(ctx context.Context, in *sts.AssumeRoleInput, o ...func(*sts.Options)) (*sts.AssumeRoleOutput, error) {
+	if s.calls.Load() == 0 {
+		s.onFirst()
+	}
+	return s.stubSTS.AssumeRole(ctx, in, o...)
+}
+
+func TestReal_InvalidateDuringAssumeRoleDiscardsStaleClient(t *testing.T) {
+	ctx := context.Background()
+	stub := &invalidatingSTS{}
+	r := NewReal(aws.Config{Region: "us-east-1"}, stubRoles{})
+	r.newSTS = func(aws.Config) stscreds.AssumeRoleAPIClient { return stub }
+	tgt := Target{AccountID: "111111111111", Region: "us-east-1"}
+	stub.onFirst = func() { r.Invalidate(tgt.AccountID) }
+
+	first, err := r.ECS(ctx, tgt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.calls.Load(); got != 2 {
+		t.Fatalf("stale build must be redone: want 2 AssumeRole, got %d", got)
+	}
+	second, err := r.ECS(ctx, tgt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second || stub.calls.Load() != 2 {
+		t.Fatalf("fresh client should be cached (same=%v, calls=%d)", first == second, stub.calls.Load())
 	}
 }
