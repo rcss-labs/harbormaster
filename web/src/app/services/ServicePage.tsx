@@ -11,6 +11,7 @@ import type { TagTarget } from '../clusters/tagTarget'
 import { useCrumbs } from '../shell/crumbs'
 import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
+import { useRolloutToast } from './useRolloutToast'
 import { PlaceholderTab } from './PlaceholderTab'
 import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
@@ -33,6 +34,7 @@ export function ServicePage() {
   const { me } = useAuth()
   const [editing, setEditing] = useState<TagTarget | null>(null)
   const service = serviceQuery.data
+  useRolloutToast(service)
   useCrumbs(
     service
       ? [['Clusters', '/clusters'], [service.cluster.name, `/clusters/${service.cluster.id}`], [service.name]]
