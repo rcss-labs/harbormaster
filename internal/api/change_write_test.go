@@ -475,3 +475,37 @@ func TestDeploy_RecordFailureAfterAWSAcceptedIs202WithWarning(t *testing.T) {
 		t.Errorf("response = %v", out)
 	}
 }
+
+// postRaw sends body verbatim, which apiClient.post cannot do for malformed JSON.
+func postRaw(c *apiClient, path, body string) *http.Response {
+	c.t.Helper()
+	req, err := http.NewRequest(http.MethodPost, c.base+path, strings.NewReader(body))
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", c.csrf)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return resp
+}
+
+func TestChangeBodies_TrailingJSONAndUnknownFieldsAreRejected(t *testing.T) {
+	env := newWriteEnv(t)
+	deployer := env.login("deployer")
+	for name, tc := range map[string]struct{ path, body string }{
+		"trailing JSON":           {"/deploy", `{"revision": 41}{"revision": 40}`},
+		"unknown field on deploy": {"/deploy", `{"revision": 41, "revison": 40}`},
+		"unknown field on count":  {"/desired-count", `{"desired": 3, "force": true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := postRaw(deployer, "/api/services/"+paymentsID()+tc.path, tc.body)
+			wantStatus(t, resp, http.StatusUnprocessableEntity)
+		})
+	}
+	if got := env.fk.Calls()["UpdateService"]; got != 0 {
+		t.Errorf("UpdateService called %d time(s), want none", got)
+	}
+}

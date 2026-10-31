@@ -131,7 +131,7 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body RegisterRequest
-	if err := decodeJSON(w, r, &body); err != nil {
+	if err := decodeStrictJSON(w, r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -177,7 +177,7 @@ func (s *Server) deployRevision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body DeployRequest
-	if err := decodeJSON(w, r, &body); err != nil {
+	if err := decodeStrictJSON(w, r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -217,7 +217,7 @@ func (s *Server) setDesiredCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body SetDesiredCountRequest
-	if err := decodeJSON(w, r, &body); err != nil {
+	if err := decodeStrictJSON(w, r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
