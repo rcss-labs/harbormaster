@@ -86,6 +86,20 @@ func TestToRegisterReady_PreservesMapKeysAndSecrets(t *testing.T) {
 	}
 }
 
+func TestToRegisterReady_KeepsZeroUlimitsAndDropsZeroContainerCPU(t *testing.T) {
+	c := containerAt(t, convertFixture(t, "describe_payments_api.json"), 0)
+	ulimit := c["ulimits"].([]any)[0].(map[string]any)
+	if v, ok := ulimit["softLimit"]; !ok || v != int64(0) {
+		t.Errorf("softLimit lost: %v", ulimit)
+	}
+	if v, ok := ulimit["hardLimit"]; !ok || v != int64(0) {
+		t.Errorf("hardLimit lost: %v", ulimit)
+	}
+	if _, ok := c["cpu"]; ok {
+		t.Errorf("zero container cpu should be dropped")
+	}
+}
+
 func TestToRegisterInput_RoundTrips(t *testing.T) {
 	td := loadFixture(t, "describe_payments_api.json")
 	def, err := ToRegisterReady(td)

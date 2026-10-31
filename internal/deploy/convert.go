@@ -30,11 +30,6 @@ var readOnlyFields = map[string]bool{
 	"DeregisteredAt":     true,
 }
 
-// keyOverrides covers SDK field names whose AWS CLI spelling is not a plain lower-cased first letter.
-var keyOverrides = map[string]string{
-	"FSxWindowsFileServerVolumeConfiguration": "fsxWindowsFileServerVolumeConfiguration",
-}
-
 // ToRegisterReady converts a described task definition into register-ready JSON.
 //
 // It walks the SDK struct by reflection rather than post-processing marshalled JSON, so only
@@ -72,6 +67,11 @@ func convertValue(v reflect.Value, topLevel bool) (any, bool) {
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Type().Field(i)
 			if !field.IsExported() || (topLevel && readOnlyFields[field.Name]) {
+				continue
+			}
+			if isRequiredZeroNumber(v.Type(), field, v.Field(i)) {
+				// e.g. ulimit softLimit/hardLimit 0 are real values, not "unset".
+				out[lowerCamel(field.Name)] = v.Field(i).Int()
 				continue
 			}
 			if value, ok := convertValue(v.Field(i), false); ok {
@@ -114,6 +114,17 @@ func convertValue(v reflect.Value, topLevel bool) (any, bool) {
 	}
 }
 
+// isRequiredZeroNumber reports non-pointer integer struct fields (Ulimit limits, Tmpfs size, ...)
+// whose zero must be kept. ContainerDefinition.Cpu is the exception: 0 means "not set".
+func isRequiredZeroNumber(owner reflect.Type, field reflect.StructField, value reflect.Value) bool {
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	default:
+		return false
+	}
+	return !(owner == reflect.TypeOf(ecstypes.ContainerDefinition{}) && field.Name == "Cpu")
+}
+
 func scalar(v reflect.Value) any {
 	switch v.Kind() {
 	case reflect.String:
@@ -136,9 +147,6 @@ func scalarOrEmpty(v reflect.Value) any {
 }
 
 func lowerCamel(name string) string {
-	if override, ok := keyOverrides[name]; ok {
-		return override
-	}
 	runes := []rune(name)
 	runes[0] = unicode.ToLower(runes[0])
 	return string(runes)
