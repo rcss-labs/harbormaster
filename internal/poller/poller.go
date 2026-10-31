@@ -25,6 +25,7 @@ const (
 // Intervals are the per-resource polling periods.
 type Intervals struct {
 	Services, RunningTasks, FullTasks, StoppedTasks, Clusters, ServiceList time.Duration
+	TargetHealth, Scaling                                                  time.Duration
 }
 
 // Config is the poller's runtime configuration.
@@ -45,6 +46,8 @@ func ConfigFrom(c config.Config) Config {
 			StoppedTasks: c.Poll.StoppedTasks,
 			Clusters:     c.Poll.Clusters,
 			ServiceList:  c.Poll.ServiceList,
+			TargetHealth: c.Poll.TargetHealth,
+			Scaling:      c.Poll.Scaling,
 		},
 		CountsHistory: c.Poll.CountsHistory,
 		Jitter:        c.Poll.Jitter,

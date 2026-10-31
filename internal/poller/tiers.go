@@ -14,6 +14,8 @@ const (
 	tierRunningTasks = "runningTasks"
 	tierStoppedTasks = "stoppedTasks"
 	tierFullTasks    = "fullTasks"
+	tierTargetHealth = "target_health"
+	tierScaling      = "scaling"
 )
 
 // minTickInterval keeps a misconfigured zero interval from spinning.
