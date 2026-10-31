@@ -60,6 +60,36 @@ func TestValidate(t *testing.T) {
 		smOther = "arn:aws:secretsmanager:us-east-1:482109375512:secret:elsewhere/creds-QqQqQq"
 		smNew   = "arn:aws:secretsmanager:us-east-1:482109375512:secret:payments/other-ZzZzZz"
 	)
+	const (
+		s3Old       = "arn:aws:s3:::payments-config/old.env"
+		s3New       = "arn:aws:s3:::attacker-bucket/stolen.env"
+		envFilesMsg = "Changing environment files needs a global admin"
+		fsxMsg      = "Changing FSx credentials needs a global admin"
+		firelensMsg = "Changing the FireLens config file needs a global admin"
+		credSpecMsg = "Changing credential specs needs a global admin"
+	)
+	addEnvFile := func(arn string) func(Definition) {
+		return func(d Definition) {
+			firstContainer(d)["environmentFiles"] = []any{map[string]any{"type": "s3", "value": arn}}
+		}
+	}
+	addFsx := func(parameter string) func(Definition) {
+		return func(d Definition) {
+			d["volumes"] = []any{map[string]any{"name": "share", "fsxWindowsFileServerVolumeConfiguration": map[string]any{
+				"fileSystemId": "fs-0123456789abcdef0", "rootDirectory": "share",
+				"authorizationConfig": map[string]any{"credentialsParameter": parameter, "domain": "corp.example.com"},
+			}}}
+		}
+	}
+	addFirelens := func(arn string) func(Definition) {
+		return func(d Definition) {
+			firstContainer(d)["firelensConfiguration"] = map[string]any{"type": "fluentbit",
+				"options": map[string]any{"config-file-type": "s3", "config-file-value": arn}}
+		}
+	}
+	addCredSpec := func(spec string) func(Definition) {
+		return func(d Definition) { firstContainer(d)["credentialSpecs"] = []any{spec} }
+	}
 	addSecret := func(valueFrom string) func(Definition) {
 		return func(d Definition) {
 			c := firstContainer(d)
@@ -79,6 +109,7 @@ func TestValidate(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
+		base    func(Definition) // optional edit of the deployed definition
 		mutate  func(Definition)
 		admin   bool
 		wantErr string
@@ -126,6 +157,18 @@ func TestValidate(t *testing.T) {
 		{name: "non-admin adds out-of-prefix repositoryCredentials", mutate: func(d Definition) {
 			firstContainer(d)["repositoryCredentials"] = map[string]any{"credentialsParameter": smOther}
 		}, wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
+		{name: "non-admin adds environmentFiles", mutate: addEnvFile(s3New), wantErr: envFilesMsg},
+		{name: "non-admin changes environmentFiles", base: addEnvFile(s3Old), mutate: addEnvFile(s3New), wantErr: envFilesMsg},
+		{name: "non-admin keeps environmentFiles", base: addEnvFile(s3Old), mutate: addEnvFile(s3Old)},
+		{name: "admin adds environmentFiles", admin: true, mutate: addEnvFile(s3New)},
+		{name: "non-admin adds fsx credentialsParameter", mutate: addFsx(ssmNew), wantErr: fsxMsg},
+		{name: "non-admin changes fsx credentialsParameter", base: addFsx(ssmFrom), mutate: addFsx(ssmNew), wantErr: fsxMsg},
+		{name: "non-admin keeps fsx credentialsParameter", base: addFsx(ssmFrom), mutate: addFsx(ssmFrom)},
+		{name: "admin adds fsx credentialsParameter", admin: true, mutate: addFsx(ssmNew)},
+		{name: "non-admin adds firelens s3 config", mutate: addFirelens(s3New), wantErr: firelensMsg},
+		{name: "admin adds firelens s3 config", admin: true, mutate: addFirelens(s3New)},
+		{name: "non-admin adds credentialSpecs", mutate: addCredSpec("credentialspec:" + s3New), wantErr: credSpecMsg},
+		{name: "admin adds credentialSpecs", admin: true, mutate: addCredSpec("credentialspec:" + s3New)},
 		{name: "non-integral cpu", mutate: fargate(512.7, float64(1024)), wantErr: "Task definition JSON is invalid: cpu must be a whole number"},
 		{name: "admin adds secret in other prefix", admin: true, mutate: addSecret(ssmFrom)},
 		{name: "secret removed", mutate: func(d Definition) {
@@ -138,6 +181,9 @@ func TestValidate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			base := validBase(t)
+			if tc.base != nil {
+				tc.base(base)
+			}
 			draft := cloneDefinition(t, base)
 			tc.mutate(draft)
 			err := Validate(base, draft, tc.admin, testAccount)

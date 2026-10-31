@@ -171,6 +171,24 @@ func TestRegister_NonAdminRoleChangeIs422(t *testing.T) {
 	wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
 }
 
+func TestRegister_NonAdminEnvironmentFileIs422AndNothingRegistered(t *testing.T) {
+	env := newWriteEnv(t)
+	draft := draftFor(t, env.login("pavel"))
+	first := draft["containerDefinitions"].([]any)[0].(map[string]any)
+	first["environmentFiles"] = []any{map[string]any{"type": "s3", "value": "arn:aws:s3:::attacker-bucket/stolen.env"}}
+	body := map[string]any{"base_revision": 42, "definition": draft}
+	before := env.fk.Calls()["RegisterTaskDefinition"]
+	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/revisions", body)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Changing environment files needs a global admin" {
+		t.Errorf("error = %s %q", code, msg)
+	}
+	if after := env.fk.Calls()["RegisterTaskDefinition"]; after != before {
+		t.Errorf("RegisterTaskDefinition called %d times for a rejected draft", after-before)
+	}
+	wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
+}
+
 func TestDeploy_Permissions(t *testing.T) {
 	for _, tc := range []struct {
 		user    string

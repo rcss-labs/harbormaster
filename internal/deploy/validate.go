@@ -101,6 +101,9 @@ func validateCanonical(base, draft Definition, admin bool, accountID string) err
 	if draft["taskRoleArn"] != base["taskRoleArn"] || draft["executionRoleArn"] != base["executionRoleArn"] {
 		return invalid("Changing roles needs a global admin")
 	}
+	if err := validateExecutionFetches(base, draft); err != nil {
+		return err
+	}
 	return validateSecrets(base, draft, accountID)
 }
 
@@ -257,6 +260,88 @@ func validateSecrets(base, draft Definition, accountID string) error {
 		scope, ok := parseSecretScope(reference)
 		if !ok || scope.account != accountID || !allowedPrefixes[scope.prefix] {
 			return invalid("Changing secrets outside the existing prefixes needs a global admin")
+		}
+	}
+	return nil
+}
+
+// executionFetch is one kind of reference the execution role or ECS agent dereferences besides
+// secrets: environment files, FSx credentials, a FireLens config file and credential specs.
+type executionFetch struct {
+	message    string
+	references func(def Definition) []string
+}
+
+var executionFetches = []executionFetch{
+	{"Changing environment files needs a global admin", func(def Definition) []string {
+		return collectContainerValues(def, func(container map[string]any, add func(any)) {
+			files, _ := container["environmentFiles"].([]any)
+			for _, entry := range files {
+				file, _ := entry.(map[string]any)
+				add(file["value"])
+			}
+		})
+	}},
+	{"Changing FSx credentials needs a global admin", func(def Definition) []string {
+		var references []string
+		volumes, _ := def["volumes"].([]any)
+		for _, entry := range volumes {
+			volume, _ := entry.(map[string]any)
+			fsx, _ := volume["fsxWindowsFileServerVolumeConfiguration"].(map[string]any)
+			authorization, _ := fsx["authorizationConfig"].(map[string]any)
+			if text, _ := authorization["credentialsParameter"].(string); text != "" {
+				references = append(references, text)
+			}
+		}
+		return references
+	}},
+	{"Changing the FireLens config file needs a global admin", func(def Definition) []string {
+		return collectContainerValues(def, func(container map[string]any, add func(any)) {
+			firelens, _ := container["firelensConfiguration"].(map[string]any)
+			options, _ := firelens["options"].(map[string]any)
+			if options["config-file-type"] == "s3" {
+				add(options["config-file-value"])
+			}
+		})
+	}},
+	{"Changing credential specs needs a global admin", func(def Definition) []string {
+		return collectContainerValues(def, func(container map[string]any, add func(any)) {
+			specs, _ := container["credentialSpecs"].([]any)
+			for _, spec := range specs {
+				add(spec)
+			}
+		})
+	}},
+}
+
+func collectContainerValues(def Definition, visit func(container map[string]any, add func(any))) []string {
+	var values []string
+	add := func(value any) {
+		if text, _ := value.(string); text != "" {
+			values = append(values, text)
+		}
+	}
+	containers, _ := def["containerDefinitions"].([]any)
+	for _, entry := range containers {
+		container, _ := entry.(map[string]any)
+		visit(container, add)
+	}
+	return values
+}
+
+// validateExecutionFetches lets a non-admin keep these references as deployed but not add or change
+// any: unlike secrets they have no prefix scoping (S3 ARNs carry no account), so any new value is
+// a new thing the execution role would fetch. Removing a reference is allowed.
+func validateExecutionFetches(base, draft Definition) error {
+	for _, fetch := range executionFetches {
+		existing := map[string]bool{}
+		for _, reference := range fetch.references(base) {
+			existing[reference] = true
+		}
+		for _, reference := range fetch.references(draft) {
+			if !existing[reference] {
+				return invalid("%s", fetch.message)
+			}
 		}
 	}
 	return nil
