@@ -73,20 +73,25 @@ func (s *Server) tags(r *http.Request) (authz.Tags, error) {
 	return memo.tags, memo.err
 }
 
-// pageFrom reads ?limit= (default and cap from cfg) and ?cursor= (base64url of the decimal offset).
-func pageFrom(r *http.Request, cfg config.Config) (limit, offset int, err error) {
-	limit = cfg.PageSizeDefault
-	q := r.URL.Query()
-	if raw := q.Get("limit"); raw != "" {
+// limitFrom reads ?limit= (default and cap from cfg).
+func limitFrom(r *http.Request, cfg config.Config) (int, error) {
+	limit := cfg.PageSizeDefault
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		var err error
 		limit, err = strconv.Atoi(raw)
 		if err != nil || limit < 1 {
-			return 0, 0, invalid("limit must be a positive number.")
+			return 0, invalid("limit must be a positive number.")
 		}
 	}
-	if limit > cfg.PageSizeMax {
-		limit = cfg.PageSizeMax
+	return min(limit, cfg.PageSizeMax), nil
+}
+
+// pageFrom reads ?limit= (default and cap from cfg) and ?cursor= (base64url of the decimal offset).
+func pageFrom(r *http.Request, cfg config.Config) (limit, offset int, err error) {
+	if limit, err = limitFrom(r, cfg); err != nil {
+		return 0, 0, err
 	}
-	if raw := q.Get("cursor"); raw != "" {
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		decoded, derr := base64.RawURLEncoding.DecodeString(raw)
 		if derr == nil {
 			offset, derr = strconv.Atoi(string(decoded))

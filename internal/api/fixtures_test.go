@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
+	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
@@ -90,4 +91,33 @@ func expectedReserved(f *fake.Fake, cluster string) (vcpu, gib float64, running 
 		running++
 	}
 	return vcpu, gib, running
+}
+
+// setPassword gives an existing seeded user testPassword so tests can log in as them.
+func setPassword(t *testing.T, st *store.Store, username string) {
+	t.Helper()
+	hash, err := auth.HashPassword(testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := st.GetUserByUsername(t.Context(), username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPassword(t.Context(), u.ID, hash, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedAccounts connects the two mockup AWS accounts so account names resolve in responses.
+func seedAccounts(t *testing.T, st *store.Store) {
+	t.Helper()
+	for _, a := range []store.AWSAccount{
+		{Name: "homelab-admin", AccountID: homelabAccountID, RoleARN: "arn:aws:iam::" + homelabAccountID + ":role/harbormaster-access", ExternalID: "x", Regions: []string{"us-east-1", "eu-west-1", "eu-central-1"}, Enabled: true},
+		{Name: "staging-example", AccountID: stagingAccountID, RoleARN: "arn:aws:iam::" + stagingAccountID + ":role/harbormaster-access", ExternalID: "x", Regions: []string{"us-east-1"}, Enabled: true},
+	} {
+		if _, err := st.CreateAccount(t.Context(), a); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

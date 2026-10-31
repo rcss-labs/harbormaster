@@ -322,14 +322,7 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 			Slots: []SlotDTO{},
 		}
 		for _, t := range view.tasksByService[svc.Key] {
-			health := t.HealthStatus
-			if health == "" {
-				health = "UNKNOWN"
-			}
-			detail.Slots = append(detail.Slots, SlotDTO{
-				TaskID: model.TaskID(t.Cluster.AccountID, t.Cluster.Region, t.ARN), ShortID: t.ShortID(),
-				PrivateIP: t.PrivateIP, Health: health, RollingOut: isRollingOut(svc.Service, t),
-			})
+			detail.Slots = append(detail.Slots, slotDTO(svc.Service, t))
 		}
 		events, err := s.Store.ServiceEvents(ctx, svc.Key, 1, 0)
 		if err != nil {

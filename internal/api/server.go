@@ -84,6 +84,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/overview", s.overview, routeOptions{})
 	s.handle(mux, "GET /api/clusters", s.listClusters, routeOptions{})
 	s.handle(mux, "GET /api/clusters/{clusterId}", s.getCluster, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}", s.getService, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/tasks", s.listServiceTasks, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/operations", s.serviceOperations, routeOptions{})
+	s.handle(mux, "GET /api/tasks", s.listTasks, routeOptions{})
+	s.handle(mux, "GET /api/search", s.search, routeOptions{})
+	s.handle(mux, "GET /api/poller", s.pollerStatus, routeOptions{})
 
 	// Unknown API paths are JSON 404s and never fall through to the SPA. RequirePasswordChanged
 	// still applies so a user with a pending password change sees password_change_required.
