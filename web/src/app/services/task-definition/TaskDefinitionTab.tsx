@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { isApiError, useDeploy, useImageTags, useRegisterRevision, useRevisions, useTaskDefinition, type RegisterResult } from '../../../api/change'
 import { useServiceTasks } from '../../../api/hooks'
 import type { ServiceDTO } from '../../../api/types'
@@ -11,6 +11,7 @@ import { DeployDialog } from './DeployDialog'
 import { JsonEditor } from './JsonEditor'
 import { QuickEdit, isTagInvalid } from './QuickEdit'
 import { ReviewDialog } from './ReviewDialog'
+import { RevisionsTable } from './RevisionsTable'
 import { mainImageTag, nextFargateMemory, type Definition } from './mainContainer'
 import styles from './taskDefinition.module.css'
 
@@ -44,6 +45,7 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
   const deploy = useDeploy(serviceId)
   const toast = useToast()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // null = follow the deployed definition; set on the first edit and cleared on discard or after registering.
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -51,6 +53,8 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
   const [registerError, setRegisterError] = useState<string | undefined>()
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
   const [registered, setRegistered] = useState<RegisterResult | null>(null)
+  // A revision picked from the table; the pending-revision banner can also request one with ?deploy=N.
+  const [picked, setPicked] = useState<{ revision: number; mode: 'deploy' | 'rollback' } | null>(null)
 
   const data = taskDefinition.data
   if (taskDefinition.isError && !data) {
@@ -112,17 +116,31 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
     }
   }
 
-  const onDeploy = async () => {
-    if (!registered) return
+  const runDeploy = async (revision: number, onStarted: () => void) => {
     try {
-      await deploy.mutateAsync({ revision: registered.revision })
-      setRegistered(null)
+      await deploy.mutateAsync({ revision })
+      onStarted()
       navigate(`/services/${serviceId}/overview`)
     } catch (failure) {
       if (isApiError(failure, 'conflict')) toast.show('A rollout is already running', 'bad')
       else toast.show(failure instanceof Error ? failure.message : 'The deploy could not be started.', 'bad')
     }
   }
+
+  const onDeploy = () => {
+    if (registered) void runDeploy(registered.revision, () => setRegistered(null))
+  }
+
+  const requestedRevision = Number(searchParams.get('deploy'))
+  const target = picked ?? (Number.isInteger(requestedRevision) && requestedRevision > 0 ? { revision: requestedRevision, mode: 'deploy' as const } : null)
+  const targetRevision = target ? revisions.data?.items.find((item) => item.revision === target.revision) : undefined
+  const closePicked = () => {
+    setPicked(null)
+    if (searchParams.has('deploy')) setSearchParams((previous) => { previous.delete('deploy'); return previous }, { replace: true })
+  }
+  const rolloutRunning = service.deployments.some((deployment) => deployment.rollout_state === 'IN_PROGRESS') || revisions.data?.rolling_out_revision != null
+  const lockReason = service.can.deploy ? undefined : `You need Deploy on ${service.tag.name}`
+  const controllerReason = service.controller.supported ? undefined : service.controller.banner
 
   return (
     <>
@@ -178,7 +196,16 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
           />
         </div>
       </div>
-      {/* revisions */}
+      {revisions.data && (
+        <RevisionsTable
+          serviceName={service.name}
+          revisions={revisions.data}
+          canDeploy={service.can.deploy}
+          deployDisabledReason={lockReason ?? controllerReason}
+          rolloutRunning={rolloutRunning}
+          onDeploy={(revision, mode) => setPicked({ revision, mode })}
+        />
+      )}
       {reviewing && draft && (
         <ReviewDialog
           serviceName={service.name}
@@ -214,6 +241,26 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
             setRegistered(null)
           }}
           onConfirm={onDeploy}
+        />
+      )}
+      {target && targetRevision && !registered && (
+        <DeployDialog
+          mode={target.mode}
+          serviceName={service.name}
+          clusterName={service.cluster.name}
+          revision={targetRevision.revision}
+          deployedRevision={data.deployed_revision}
+          runningCount={service.running}
+          imageTag={targetRevision.image_tag}
+          cpu={targetRevision.cpu}
+          memory={targetRevision.memory}
+          strategy={service.strategy_text}
+          effectiveTag={service.tag.name}
+          tagInherited={service.tag.inherited}
+          tagColor={service.tag.color}
+          busy={deploy.isPending}
+          onDismiss={closePicked}
+          onConfirm={() => void runDeploy(targetRevision.revision, closePicked)}
         />
       )}
     </>

@@ -1,8 +1,8 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { ALL_TASKS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE, tasksList } from '../../../test/fixtures'
+import { ALL_TASKS, REVISIONS_PAYMENTS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE, tasksList } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
 
@@ -197,7 +197,7 @@ describe('TaskDefinitionTab', () => {
     await editEnvValue()
     await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
     await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Deploy :43' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Deploy :43' }))
     expect(await screen.findByText('A rollout is already running')).toBeInTheDocument()
   })
 
@@ -209,5 +209,42 @@ describe('TaskDefinitionTab', () => {
     await userEvent.type(value, '{Backspace}')
     expect(screen.getByText('No changes')).toBeInTheDocument()
     expect(screen.getByText('based on :42')).toBeInTheDocument()
+  })
+  // ---- Revisions table wiring (task 16) ----
+  it('deploys a not-deployed revision from the table and opens the Overview tab', async () => {
+    let body: unknown
+    server.use(
+      http.post('/api/services/:id/deploy', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ deployment_id: 'd-1', started_at: '2026-10-31T10:00:00Z' }, { status: 202 })
+      }),
+    )
+    renderApp(route)
+    await userEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Deploy payments-api to :43?')
+    expect(dialog).toHaveTextContent('1.18.3')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Deploy :43' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/services/${SERVICE_PAYMENTS.id}/overview`))
+    expect(body).toEqual({ revision: 43 })
+  })
+
+  it('opens the rollback dialog for a previous revision', async () => {
+    server.use(
+      http.get('/api/services/:id/revisions', () =>
+        HttpResponse.json({
+          ...REVISIONS_PAYMENTS,
+          items: [REVISIONS_PAYMENTS.items[1], { ...REVISIONS_PAYMENTS.items[1], revision: 41, status: 'previous', image_tag: '1.18.1' }],
+        }),
+      ),
+    )
+    renderApp(route)
+    await userEvent.click(await screen.findByRole('button', { name: 'Roll back to this' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Roll back payments-api to :41?')
+  })
+
+  it('opens the deploy dialog straight away for ?deploy=N', async () => {
+    renderApp(`${route}?deploy=43`)
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Deploy payments-api to :43?')
   })
 })
