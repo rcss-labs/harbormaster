@@ -10,6 +10,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/web"
 )
@@ -24,6 +25,7 @@ type Server struct {
 	Cfg     config.Config
 	Log     *slog.Logger
 	Now     func() time.Time
+	Deploy  *deploy.Service
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.

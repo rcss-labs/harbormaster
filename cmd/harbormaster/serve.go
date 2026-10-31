@@ -24,6 +24,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -219,6 +220,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	server := api.New(api.Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
+		Deploy: &deploy.Service{Store: st, Clients: clients, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	listener, err := net.Listen("tcp", cfg.Listen)
@@ -234,6 +236,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			log.Error("poller stopped", "error", err)
 		}
 	}()
+
+	// Every task runs the outcome logger; the atomic claim in FinishDeployment prevents duplicate lines.
+	go deploy.NewOutcomeLogger(st, 5*time.Second).Run(ctx)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()
