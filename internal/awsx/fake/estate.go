@@ -29,6 +29,9 @@ type Service struct {
 	Service                        ecstypes.Service
 	// ECRTags are the tags in the service's ECR repository, newest first.
 	ECRTags []string
+	// OOMBelowMiB makes tasks of a task definition with less memory than this
+	// fail with OutOfMemoryError (0: never). Mirrors the mockup's oomBelow.
+	OOMBelowMiB int
 	// TaskDefinitionTags are the tags seeded on every revision of the family.
 	TaskDefinitionTags []ecstypes.Tag
 }
@@ -59,6 +62,10 @@ type Estate struct {
 	TaskDefinitions []TaskDefinition
 	// Events holds service events newest first, keyed by service ARN.
 	Events map[string][]ecstypes.ServiceEvent
+
+	// rollbackDeployments holds the ids of circuit-breaker rollback
+	// deployments, which are exempt from the OOM failure path (see rollout.go).
+	rollbackDeployments map[string]bool
 }
 
 func (e *Estate) now() time.Time {

@@ -465,7 +465,8 @@ func (s *seeder) addService(sp serviceSpec) {
 	c := clusterSeed(sp.cluster)
 	now := s.e.now()
 
-	// Revision -> task definition. Only revisions referenced by a task or deployment exist.
+	// Revision -> task definition. Non-OOM services get their two previous
+	// revisions (image-resizer only :6); the new revision exists only mid-rollout.
 	tdAt := func(rev int, tag string, age time.Duration) string {
 		td := s.buildTaskDefinition(sp, rev, tag, now.Add(-age))
 		s.e.TaskDefinitions = append(s.e.TaskDefinitions, td)
@@ -538,7 +539,7 @@ func (s *seeder) addService(sp serviceSpec) {
 			ContainerName:  aws.String(sp.name), ContainerPort: aws.Int32(int32(sp.port))}}
 	}
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
-		ECRTags: ecrTagsFor(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
+		ECRTags: ecrTagsFor(sp), OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
 
 	// Running tasks. With a rollout in flight, the first task is on the new revision.
 	for i := 0; i < sp.running; i++ {
@@ -643,4 +644,13 @@ func serviceNetwork(sp serviceSpec) *ecstypes.NetworkConfiguration {
 	}
 	return &ecstypes.NetworkConfiguration{AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
 		Subnets: ids, SecurityGroups: []string{"sg-0" + fmt.Sprintf("%08x", hashSeed(sp.name, 0)&0xffffffff)}, AssignPublicIp: assign}}
+}
+
+// oomBelowMiB is the memory threshold under which a service's tasks are
+// OOM-killed: image-resizer needs 1024 MiB, every other service is unaffected.
+func oomBelowMiB(sp serviceSpec) int {
+	if sp.oom {
+		return 1024
+	}
+	return 0
 }

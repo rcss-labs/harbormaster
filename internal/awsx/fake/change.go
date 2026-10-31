@@ -266,3 +266,11 @@ func (c *ecrClient) repositoryOf(svc Service) string {
 func (c *ecrClient) inScope(accountID, region string) bool {
 	return accountID == c.target.AccountID && region == c.target.Region
 }
+
+// ECR returns a target-scoped DescribeImages client (see change.go).
+func (f *Fake) ECR(_ context.Context, t awsx.Target) (awsx.ECRAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &ecrClient{f: f, target: t}, nil
+}

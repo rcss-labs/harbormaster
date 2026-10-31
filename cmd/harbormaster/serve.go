@@ -29,7 +29,11 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-const shutdownTimeout = 15 * time.Second
+const (
+	shutdownTimeout = 15 * time.Second
+	// fakeRolloutStep is how often the fake AWS estate advances rollouts.
+	fakeRolloutStep = 2400 * time.Millisecond
+)
 
 // errUsage marks command-line mistakes so main can exit with status 2.
 type errUsage struct{ msg string }
@@ -192,8 +196,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		prober  awsx.Prober
 	)
 	if fakeAWS {
-		f := fake.New(fake.MockupEstate(time.Now))
+		estate := fake.MockupEstate(time.Now)
+		f := fake.New(estate)
 		clients, prober = f, f
+		go estate.RunRollouts(ctx, fakeRolloutStep)
 		if err := devseed.Apply(ctx, st); err != nil {
 			return fmt.Errorf("seed demo data: %w", err)
 		}

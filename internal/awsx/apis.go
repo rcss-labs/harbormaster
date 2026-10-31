@@ -22,6 +22,7 @@ type ECSAPI interface {
 	ListTaskDefinitions(ctx context.Context, in *ecs.ListTaskDefinitionsInput, opts ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error)
 	ListTagsForResource(ctx context.Context, in *ecs.ListTagsForResourceInput, opts ...func(*ecs.Options)) (*ecs.ListTagsForResourceOutput, error)
 	StopTask(ctx context.Context, in *ecs.StopTaskInput, opts ...func(*ecs.Options)) (*ecs.StopTaskOutput, error)
+	UpdateService(ctx context.Context, in *ecs.UpdateServiceInput, opts ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error)
 }
 
 // ECRAPI lists only the ECR calls Harbormaster makes.
