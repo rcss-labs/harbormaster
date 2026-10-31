@@ -41,6 +41,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
           {services.map((service) => {
             const serviceMetrics = metrics?.[service.id]
             const hasMetrics = insights && serviceMetrics !== undefined
+            const cpuHistory = hasMetrics ? presentValues(serviceMetrics.cpu) : []
             return (
               <tr key={service.id}>
                 <td className={tableClass.name}>
@@ -64,7 +65,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
                 <td className={tableClass.num}>
                   {service.running} / {service.desired}
                 </td>
-                <td>{hasMetrics ? <Sparkline values={presentValues(serviceMetrics.cpu)} height={24} /> : '–'}</td>
+                <td>{cpuHistory.length > 0 ? <Sparkline values={cpuHistory} height={24} /> : '–'}</td>
                 <td className={tableClass.num}>{hasMetrics ? percentText(serviceMetrics.mem_now) : '–'}</td>
                 <td className={styles.muted}>
                   {service.last_change_at ? <Ago ts={service.last_change_at} /> : '–'}

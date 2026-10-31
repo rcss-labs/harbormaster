@@ -870,7 +870,7 @@ export const CLUSTER_METRICS_CORE: ClusterMetricsDTO = {
   timestamps: metricTimestamps,
   cluster: { cpu: clusterCpu, mem: clusterMem },
   now: { cpu: lastPoint(clusterCpu), mem: lastPoint(clusterMem) },
-  markers: [{ at: minutesAgo(150), label: 'payments-api rev 42', kind: 'deploy', failed: false, service: 'payments-api' }],
+  markers: [{ at: minutesAgo(150), label: ':42', kind: 'deploy', failed: false, service: 'payments-api' }],
   services: {
     [paymentsId]: {
       cpu: paymentsCpu,

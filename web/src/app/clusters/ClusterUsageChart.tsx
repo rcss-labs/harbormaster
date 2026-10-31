@@ -6,6 +6,7 @@ import { LineChart } from '../../charts/LineChart'
 import { Sparkline } from '../../charts/Sparkline'
 import { Tile } from '../../components/Tile'
 import { XL24 } from '../../charts/format'
+import { allNull } from '../../api/observe'
 import { MetricPanel } from '../observe/MetricPanel'
 import { percentText, presentValues } from './ServiceCardMetrics'
 
@@ -33,10 +34,12 @@ export function deployMarks(metrics: ClusterMetricsDTO) {
 interface ClusterUsageChartProps {
   metrics?: ClusterMetricsDTO
   insights: boolean
+  /** The metrics query error; shown only when there is no data to fall back on. */
+  error?: unknown
 }
 
 /** Cluster CPU and memory over 24 h with deployment markers (mockup cluster page, `g-wide` chart card). */
-export function ClusterUsageChart({ metrics, insights }: ClusterUsageChartProps) {
+export function ClusterUsageChart({ metrics, insights, error }: ClusterUsageChartProps) {
   if (!insights) {
     return (
       <Card title="Cluster CPU and memory">
@@ -45,15 +48,22 @@ export function ClusterUsageChart({ metrics, insights }: ClusterUsageChartProps)
     )
   }
 
+  if (!metrics && error) {
+    const message = error instanceof Error ? error.message : 'The metrics could not be loaded.'
+    return (
+      <Card title="Cluster CPU and memory, 24 h">
+        <Banner kind="bad">{message}</Banner>
+      </Card>
+    )
+  }
+
   const cpu = metrics?.cluster?.cpu ?? []
   const memory = metrics?.cluster?.mem ?? []
+  // Empty until metrics load (no "No data yet" while loading); then empty when there is no cluster series or every value is null.
+  const hasNoData = metrics !== undefined && (!metrics.cluster || allNull(metrics.cluster.cpu, metrics.cluster.mem))
 
   return (
-    <MetricPanel
-      title="Cluster CPU and memory, 24 h"
-      stale={metrics?.stale}
-      empty={!metrics?.cluster}
-    >
+    <MetricPanel title="Cluster CPU and memory, 24 h" stale={metrics?.stale} empty={hasNoData}>
       <Legend
         items={[
           { name: 'CPU', color: CPU_COLOR },
@@ -79,6 +89,7 @@ export function UseNowTile({ metrics, insights }: ClusterUsageChartProps) {
   if (!insights) {
     return <Tile k="Use now" v={<small>Container Insights off</small>} />
   }
+  const cpuHistory = presentValues(metrics?.cluster?.cpu ?? [])
   return (
     <Tile
       k="Use now"
@@ -90,7 +101,7 @@ export function UseNowTile({ metrics, insights }: ClusterUsageChartProps) {
         </>
       }
     >
-      <Sparkline values={presentValues(metrics?.cluster?.cpu ?? [])} color={CPU_COLOR} height={24} fluid />
+      {cpuHistory.length > 0 ? <Sparkline values={cpuHistory} color={CPU_COLOR} height={24} fluid /> : '–'}
     </Tile>
   )
 }

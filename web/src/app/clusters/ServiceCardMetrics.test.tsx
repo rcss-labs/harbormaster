@@ -20,12 +20,12 @@ describe('ServiceCardMetrics', () => {
     render(<ServiceCardMetrics service={SERVICE} m={METRICS_WITH_ALB} insights={false} />)
 
     const foot = screen.getByRole('group', { name: 'payments-api metrics' })
-    expect(within(foot).getByText('367')).toBeInTheDocument()
-    expect(within(foot).getByText('118')).toBeInTheDocument()
-    expect(within(foot).getByText('14')).toBeInTheDocument()
-    expect(foot).toHaveTextContent('req/min')
-    expect(foot).toHaveTextContent('ms p95')
-    expect(foot).toHaveTextContent('5xx today')
+    const spanTexts = within(foot)
+      .getAllByText(/./, { selector: 'span' })
+      .map((span) => span.textContent)
+    expect(spanTexts).toContain('367 req/min')
+    expect(spanTexts).toContain('118 ms p95')
+    expect(spanTexts).toContain('14 5xx today')
   })
 
   it('shows No load balancer', () => {

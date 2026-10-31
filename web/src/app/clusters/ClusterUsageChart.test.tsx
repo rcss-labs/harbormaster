@@ -19,6 +19,24 @@ describe('ClusterUsageChart', () => {
     expect(screen.getByText('payments:42')).toBeInTheDocument()
   })
 
+  it('renders No data yet when every value is null', () => {
+    const allNullMetrics: ClusterMetricsDTO = {
+      ...CLUSTER_METRICS_CORE,
+      cluster: { cpu: [null, null], mem: [null, null] },
+      now: { cpu: null, mem: null },
+    }
+
+    render(<ClusterUsageChart metrics={allNullMetrics} insights />)
+
+    expect(screen.getByText('No data yet')).toBeInTheDocument()
+  })
+
+  it('does not say No data yet while metrics are loading', () => {
+    render(<ClusterUsageChart insights />)
+
+    expect(screen.queryByText('No data yet')).not.toBeInTheDocument()
+  })
+
   it('Insights off shows the banner and no chart', () => {
     render(<ClusterUsageChart metrics={CLUSTER_METRICS_CORE} insights={false} />)
 

@@ -37,13 +37,13 @@ export function ServiceCardMetrics({ service, m, insights, children }: ServiceCa
             <div className={styles.miniK}>
               CPU <b>{percentText(m.cpu_now)}</b>
             </div>
-            <Sparkline values={presentValues(m.cpu)} color={CPU_COLOR} height={28} fluid />
+            {presentValues(m.cpu).length > 0 ? <Sparkline values={presentValues(m.cpu)} color={CPU_COLOR} height={28} fluid /> : '–'}
           </div>
           <div>
             <div className={styles.miniK}>
               Memory <b>{percentText(m.mem_now)}</b>
             </div>
-            <Sparkline values={presentValues(m.mem)} color={MEMORY_COLOR} height={28} fluid />
+            {presentValues(m.mem).length > 0 ? <Sparkline values={presentValues(m.mem)} color={MEMORY_COLOR} height={28} fluid /> : '–'}
           </div>
         </div>
       )}

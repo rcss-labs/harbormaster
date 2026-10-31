@@ -139,7 +139,7 @@ export function Cluster() {
       </div>
 
       <div className={`${styles.grid} ${styles.gWide}`}>
-        <ClusterUsageChart metrics={clusterMetrics} insights={cluster.container_insights} />
+        <ClusterUsageChart metrics={clusterMetrics} insights={cluster.container_insights} error={clusterMetricsQuery.error} />
         <Card title="Tasks by service" right="bar = running · line = desired">
           <HBars
             items={services.map((service) => ({
