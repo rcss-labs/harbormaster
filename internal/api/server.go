@@ -2,6 +2,7 @@
 package api
 
 import (
+	"cmp"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -50,7 +51,7 @@ func New(s Server) *Server {
 		s.Logs = &logs.Client{Clients: s.Clients, Now: s.Now, MaxLookback: 7 * 24 * time.Hour}
 	}
 	if s.TailLimiter == nil {
-		s.TailLimiter = logs.NewTailLimiter(s.Cfg.LogTailsPerUser)
+		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
 	}
 	return &s
 }

@@ -2,8 +2,12 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -146,5 +150,27 @@ func TestFetch_StaleRequiresEveryUncachedQueryCached(t *testing.T) {
 	mem.MetricName = "MemoryUtilized"
 	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu"), mem}); !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want throttle error (mem has no cache row)", err)
+	}
+}
+
+func TestFetch_StaleReasonIsAPIErrorMessageOnly(t *testing.T) {
+	s := storetest.Open(t)
+	now := testNow
+	client := clientWithStore(newFakeClients(), s, &now)
+	ctx := context.Background()
+	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+		t.Fatal(err)
+	}
+	now = testNow.Add(5 * time.Minute)
+	client.Clients = stubClients{cw: &stubCloudWatch{answer: func(*cloudwatch.GetMetricDataInput) (*cloudwatch.GetMetricDataOutput, error) {
+		return nil, fmt.Errorf("operation error CloudWatch: GetMetricData, https response error StatusCode: 400, RequestID: abc: %w",
+			&smithy.GenericAPIError{Code: "InvalidParameterValue", Message: "The query is invalid."})
+	}}}
+	res, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Stale || res.StaleReason != "The query is invalid." {
+		t.Fatalf("stale=%v reason=%q", res.Stale, res.StaleReason)
 	}
 }

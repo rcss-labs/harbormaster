@@ -230,3 +230,10 @@ func TestFetch_RejectsDuplicateAndIllegalIDs(t *testing.T) {
 		t.Error("illegal id accepted")
 	}
 }
+
+func TestFetch_StructLiteralClientDefaultsLogAndNow(t *testing.T) {
+	client := &Client{Clients: stubClients{cw: &stubCloudWatch{answer: emptyAnswer}}, TTL: time.Minute}
+	if _, err := client.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -310,7 +310,7 @@ func TestLogsTail_HappyPath(t *testing.T) {
 	if err != nil || ready["type"] != "ready" || ready["group"] != "/ecs/core-services/payments-api" {
 		t.Fatalf("ready frame = %v, %v", ready, err)
 	}
-	if prefixes, _ := ready["prefixes"].([]any); len(prefixes) != 1 || prefixes[0] != "ecs/payments-api/" && prefixes[0] != "ecs/otel-collector/" {
+	if prefixes, _ := ready["prefixes"].([]any); len(prefixes) != 1 || prefixes[0] != "ecs/payments-api/" {
 		t.Errorf("prefixes = %v", ready["prefixes"])
 	}
 	deadline := time.Now().Add(3 * time.Second)
@@ -377,6 +377,18 @@ func TestLogsTail_UnknownContainer4422(t *testing.T) {
 	conn := startTail(t, srv, login(t, srv, "oncall", testPassword), paymentsID(), "?container=nope")
 	if code, _ := expectClose(t, conn); code != 4422 {
 		t.Errorf("close code %d, want 4422", code)
+	}
+}
+
+func TestLogsTail_LongCloseReasonStillSendsCode(t *testing.T) {
+	srv, _, _ := tailFixture(t, time.Minute)
+	conn := startTail(t, srv, login(t, srv, "oncall", testPassword), paymentsID(), "?container="+strings.Repeat("x", 300))
+	code, reason := expectClose(t, conn)
+	if code != 4422 {
+		t.Errorf("close code %d, want 4422", code)
+	}
+	if len(reason) > 123 {
+		t.Errorf("reason is %d bytes, want <= 123", len(reason))
 	}
 }
 

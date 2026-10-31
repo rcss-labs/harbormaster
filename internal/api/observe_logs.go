@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -219,7 +220,26 @@ type tailFrame struct {
 
 // closeWith ends the socket with a close code; the reason is the short machine/human text the tab shows.
 func closeWith(conn *websocket.Conn, code websocket.StatusCode, reason string) {
-	_ = conn.Close(code, reason)
+	_ = conn.Close(code, truncateCloseReason(reason))
+}
+
+// maxCloseReasonBytes is the WebSocket control-frame payload limit (125) minus the 2-byte code.
+const (
+	maxCloseReasonBytes = 123
+	defaultTailsPerUser = 2 // used when Cfg.LogTailsPerUser is unset
+)
+
+// truncateCloseReason cuts reason to the close-frame limit on a UTF-8 rune boundary;
+// a longer reason makes the library drop the whole frame (browser sees 1006).
+func truncateCloseReason(reason string) string {
+	if len(reason) <= maxCloseReasonBytes {
+		return reason
+	}
+	cut := maxCloseReasonBytes
+	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+		cut--
+	}
+	return reason[:cut]
 }
 
 // tailLogs serves GET /api/services/{serviceId}/logs/tail as a WebSocket.
@@ -279,7 +299,7 @@ func (s *Server) tailLogs(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFrom(r.Context())
 	release, acquired := s.TailLimiter.Acquire(user.ID)
 	if !acquired {
-		closeWith(conn, closeTailLimit, fmt.Sprintf("You already have %d live tails open.", s.Cfg.LogTailsPerUser))
+		closeWith(conn, closeTailLimit, fmt.Sprintf("You already have %d live tails open.", cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser)))
 		return
 	}
 	defer release()

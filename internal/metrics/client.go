@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -43,6 +44,33 @@ func New(c awsx.Clients, s *store.Store, ttl time.Duration) *Client {
 	return &Client{Clients: c, Store: s, TTL: ttl, MaxStale: 10 * time.Minute, Now: time.Now, Log: slog.Default()}
 }
 
+func (c *Client) now() time.Time {
+	if c.Now == nil {
+		return time.Now()
+	}
+	return c.Now()
+}
+
+func (c *Client) log() *slog.Logger {
+	if c.Log == nil {
+		return slog.Default()
+	}
+	return c.Log
+}
+
+// staleReasonFor is the short text shown in the UI: a fixed sentence for
+// throttling, otherwise the API error message without SDK request plumbing.
+func staleReasonFor(cause error) string {
+	if awsx.IsThrottle(cause) {
+		return throttleReason
+	}
+	var apiErr smithy.APIError
+	if errors.As(cause, &apiErr) && apiErr.ErrorMessage() != "" {
+		return apiErr.ErrorMessage()
+	}
+	return cause.Error()
+}
+
 // cachedPayload is the JSON stored in metrics_cache.payload: the series
 // together with the grid it was aligned to, so it can be re-aligned to a later
 // grid. Bucket i starts at Start + i*Period.
@@ -58,7 +86,7 @@ func (c *Client) Fetch(ctx context.Context, t awsx.Target, span Span, queries []
 	if err != nil {
 		return nil, err
 	}
-	now := c.Now()
+	now := c.now()
 	periodDur := time.Duration(period) * time.Second
 	buckets := int((time.Duration(span) + periodDur - 1) / periodDur)
 	end := now.Truncate(periodDur)
@@ -131,12 +159,9 @@ func (c *Client) serveStale(res *Result, cause error, keys []string, cached map[
 		res.Series[i].Values = values
 	}
 	res.Stale = true
-	res.StaleReason = cause.Error()
-	if awsx.IsThrottle(cause) {
-		res.StaleReason = throttleReason
-	}
+	res.StaleReason = staleReasonFor(cause)
 	res.FetchedAt = oldest
-	c.Log.Warn("serving stale metrics", "reason", res.StaleReason, "series", len(missing))
+	c.log().Warn("serving stale metrics", "reason", res.StaleReason, "series", len(missing))
 	return res, nil
 }
 
@@ -258,7 +283,7 @@ func (c *Client) readCache(ctx context.Context, keys []string) map[string]store.
 	}
 	rows, err := c.Store.GetMetricsCache(ctx, keys)
 	if err != nil {
-		c.Log.Warn("metrics cache read failed", "err", err)
+		c.log().Warn("metrics cache read failed", "err", err)
 		return nil
 	}
 	return rows
@@ -269,7 +294,7 @@ func (c *Client) writeCache(ctx context.Context, rows []store.CachedSeries) {
 		return
 	}
 	if err := c.Store.PutMetricsCache(ctx, rows); err != nil {
-		c.Log.Warn("metrics cache write failed", "err", err)
+		c.log().Warn("metrics cache write failed", "err", err)
 	}
 }
 
