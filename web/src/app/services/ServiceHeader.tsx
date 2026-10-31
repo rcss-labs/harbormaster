@@ -4,6 +4,7 @@ import { Pill } from '../../components/Pill'
 import { statusKind, statusLabel } from '../../components/status'
 import { TagChip } from '../../components/TagChip'
 import type { TagClickHandler } from '../clusters/tagTarget'
+import { HeaderActions } from './HeaderActions'
 import styles from './service.module.css'
 
 interface ServiceHeaderProps {
@@ -40,15 +41,7 @@ export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
         </div>
       </div>
       <div className={styles.actions}>
-        <button type="button" className={styles.btn} disabled title="Available in phase 2">
-          Restart (new deployment)
-        </button>
-        <Link className={styles.btn} to={`/services/${service.id}/scaling`}>
-          Desired count: {service.desired}
-        </Link>
-        <a className={styles.btn} href={service.console_url} target="_blank" rel="noopener">
-          AWS console ↗
-        </a>
+        <HeaderActions serviceId={service.id} service={service} />
       </div>
     </div>
   )
