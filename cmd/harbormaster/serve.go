@@ -1,0 +1,207 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+
+	"github.com/rcss-labs/harbormaster/internal/api"
+	"github.com/rcss-labs/harbormaster/internal/auth"
+	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/poller"
+	"github.com/rcss-labs/harbormaster/internal/store"
+)
+
+const shutdownTimeout = 15 * time.Second
+
+// errUsage marks command-line mistakes so main can exit with status 2.
+type errUsage struct{ msg string }
+
+func (e errUsage) Error() string { return e.msg }
+
+// storeRoles resolves the role to assume for an account from the aws_accounts table.
+type storeRoles struct{ st *store.Store }
+
+func (r storeRoles) Role(ctx context.Context, accountID string) (string, string, error) {
+	account, err := r.st.GetAccountByAccountID(ctx, accountID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", "", fmt.Errorf("account %s: %w", accountID, awsx.ErrAccountUnknown)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if !account.Enabled {
+		return "", "", fmt.Errorf("account %s is disabled: %w", accountID, awsx.ErrAccountUnknown)
+	}
+	return account.RoleARN, account.ExternalID, nil
+}
+
+// databaseURLFromSecret accepts either a plain postgres URL or the RDS-managed secret JSON
+// {"username","password","host","port","dbname"} and returns a postgres URL.
+func databaseURLFromSecret(raw string) string {
+	raw = strings.TrimSpace(raw)
+	var s struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Host     string `json:"host"`
+		Port     any    `json:"port"`
+		DBName   string `json:"dbname"`
+	}
+	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Host == "" {
+		return raw
+	}
+	port := "5432"
+	switch p := s.Port.(type) {
+	case float64:
+		port = fmt.Sprintf("%d", int(p))
+	case string:
+		if p != "" {
+			port = p
+		}
+	}
+	u := url.URL{
+		Scheme: "postgres", User: url.UserPassword(s.Username, s.Password),
+		Host: net.JoinHostPort(s.Host, port), Path: "/" + s.DBName,
+	}
+	return u.String()
+}
+
+// resolveDatabaseURL returns HM_DATABASE_URL, or reads the database secret when only its ARN is set.
+func resolveDatabaseURL(ctx context.Context, cfg config.Config) (string, error) {
+	if cfg.DatabaseURL != "" {
+		return cfg.DatabaseURL, nil
+	}
+	base, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load aws config: %w", err)
+	}
+	secret, err := awsx.NewSecretReader(base).ReadSecret(ctx, cfg.DatabaseSecretARN)
+	if err != nil {
+		return "", fmt.Errorf("read database secret: %w", err)
+	}
+	return databaseURLFromSecret(secret), nil
+}
+
+func parseLevel(name string) slog.Level {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(name)); err != nil {
+		return slog.LevelInfo
+	}
+	return level
+}
+
+// runServe runs the server until ctx is cancelled or SIGINT/SIGTERM-style cancellation arrives.
+func runServe(ctx context.Context, args []string, getenv func(string) string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	fakeFlag := flags.Bool("fake-aws", false, "serve an in-memory AWS estate with demo data")
+	if err := flags.Parse(args); err != nil {
+		return errUsage{"usage: harbormaster serve [--fake-aws]"}
+	}
+	cfg, err := config.Load(getenv)
+	if err != nil {
+		return err
+	}
+	fakeAWS := *fakeFlag || cfg.FakeAWS
+	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
+
+	var base aws.Config
+	if !fakeAWS {
+		if base, err = awsconfig.LoadDefaultConfig(ctx); err != nil {
+			return fmt.Errorf("load aws config: %w", err)
+		}
+	}
+	dbURL, err := resolveDatabaseURL(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
+	st, err := store.Open(ctx, dbURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	if applied, err := st.Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	} else if len(applied) > 0 {
+		log.Info("applied migrations", "versions", applied)
+	}
+
+	var (
+		clients awsx.Clients
+		prober  awsx.Prober
+	)
+	if fakeAWS {
+		f := fake.New(fake.MockupEstate(time.Now))
+		clients, prober = f, f
+		if err := devseed.Apply(ctx, st); err != nil {
+			return fmt.Errorf("seed demo data: %w", err)
+		}
+		log.Info("fake AWS mode: demo data loaded; sign in as pavel / " + devseed.Password)
+	} else {
+		real := awsx.NewReal(base, storeRoles{st})
+		clients, prober = real, real
+		if err := auth.Bootstrap(ctx, st, awsx.NewSecretReader(base), cfg.BootstrapAdminSecretARN, log); err != nil {
+			return err
+		}
+	}
+	setup, err := auth.NewSetup(ctx, st, log)
+	if err != nil {
+		return err
+	}
+
+	server := api.New(api.Server{
+		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
+		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
+	})
+	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	listener, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		return err
+	}
+
+	pollCtx, stopPoller := context.WithCancel(ctx)
+	pollerDone := make(chan struct{})
+	go func() {
+		defer close(pollerDone)
+		if err := poller.New(st, clients, poller.ConfigFrom(cfg), log).Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("poller stopped", "error", err)
+		}
+	}()
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- httpServer.Serve(listener) }()
+	log.Info("listening", "addr", listener.Addr().String(), "fake_aws", fakeAWS)
+
+	var result error
+	select {
+	case <-ctx.Done():
+	case result = <-serveErr:
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil && result == nil {
+		result = err
+	}
+	stopPoller()
+	<-pollerDone
+	if errors.Is(result, http.ErrServerClosed) {
+		result = nil
+	}
+	return result
+}

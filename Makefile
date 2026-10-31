@@ -26,7 +26,7 @@ test-db:
 	fi
 
 run:
-	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_DATABASE_URL=$(HM_TEST_DATABASE_URL) go run ./cmd/harbormaster serve
+	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
 
 e2e:
 	@echo "e2e: added in Task 36"

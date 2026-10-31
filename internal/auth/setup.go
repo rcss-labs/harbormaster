@@ -21,6 +21,14 @@ var ErrSetupDone = errors.New("setup already done")
 
 var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{1,31}$`)
 
+// ValidateUsername enforces the username policy (already lower-cased and trimmed).
+func ValidateUsername(username string) error {
+	if !usernamePattern.MatchString(username) {
+		return &ValidationError{Msg: "Use 2-32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter."}
+	}
+	return nil
+}
+
 // Setup guards the first-run "create the first global admin" flow with a one-time token.
 type Setup struct {
 	store *store.Store
@@ -66,8 +74,8 @@ func (s *Setup) Complete(ctx context.Context, token, username, password string) 
 		return store.User{}, ErrBadToken
 	}
 	username = strings.ToLower(strings.TrimSpace(username))
-	if !usernamePattern.MatchString(username) {
-		return store.User{}, &ValidationError{Msg: "Use 2-32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter."}
+	if err := ValidateUsername(username); err != nil {
+		return store.User{}, err
 	}
 	if err := ValidatePassword(password); err != nil {
 		return store.User{}, err
