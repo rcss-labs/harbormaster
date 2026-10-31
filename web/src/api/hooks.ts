@@ -146,9 +146,10 @@ export function useAccounts(options: Options<AccountsDTO> = {}) {
   return useQuery({ queryKey: ['accounts'], queryFn: () => api.get<AccountsDTO>('/api/accounts'), ...options })
 }
 
-export function useAudit(cursor?: string) {
+export function useAudit(cursor?: string, options: Options<AuditDTO> = {}) {
   return useQuery({
     queryKey: ['audit', cursor],
     queryFn: () => api.get<AuditDTO>(`/api/audit${queryString({ cursor })}`),
+    ...options,
   })
 }

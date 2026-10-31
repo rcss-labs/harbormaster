@@ -80,6 +80,13 @@ export const handlers = [
   http.get('/api/accounts', () => HttpResponse.json(ACCOUNTS)),
   http.get('/api/accounts/external-id', () => HttpResponse.json({ external_id: ACCOUNTS.items[0].external_id })),
   http.get('/api/audit', () => HttpResponse.json(AUDIT)),
+  http.post('/api/accounts/test', async ({ request }) => {
+    const body = (await request.json()) as { regions: string[] }
+    return HttpResponse.json({ regions: body.regions.map((region) => ({ region, ok: true, clusters: 1, error: '' })) })
+  }),
+  http.post('/api/accounts', () => HttpResponse.json(ACCOUNTS.items[0], { status: 201 })),
+  http.patch('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
+  http.delete('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
 ]
 
 export const server = setupServer(...handlers)

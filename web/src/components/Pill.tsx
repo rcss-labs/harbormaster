@@ -3,6 +3,10 @@ import styles from './Pill.module.css'
 
 export type PillKind = 'ok' | 'info' | 'warn' | 'bad' | 'mute'
 
-export function Pill({ kind, children }: { kind: PillKind; children: ReactNode }) {
-  return <span className={`${styles.pill} ${styles[kind]}`}>{children}</span>
+export function Pill({ kind, children, title }: { kind: PillKind; children: ReactNode; title?: string }) {
+  return (
+    <span className={`${styles.pill} ${styles[kind]}`} title={title}>
+      {children}
+    </span>
+  )
 }

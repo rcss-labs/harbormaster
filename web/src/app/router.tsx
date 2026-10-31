@@ -4,6 +4,8 @@ import { api } from '../api/client'
 import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
+import { Accounts } from './admin/accounts/Accounts'
+import { Audit } from './admin/audit/Audit'
 import { Tags } from './admin/tags/Tags'
 import { Users } from './admin/users/Users'
 import { useAuth } from './auth/AuthProvider'
@@ -12,6 +14,7 @@ import { Clusters } from './clusters/Clusters'
 import { Overview } from './overview/Overview'
 import { ServicePage } from './services/ServicePage'
 import { Shell } from './shell/Shell'
+import { MyAccess } from './me/MyAccess'
 import { Tasks } from './tasks/Tasks'
 import styles from './auth/auth.module.css'
 
@@ -67,6 +70,9 @@ export function AppRoutes() {
           <Route path="tasks" element={<Tasks />} />
           <Route path="admin/users" element={<Users />} />
           <Route path="admin/tags" element={<Tags />} />
+          <Route path="admin/accounts" element={<Accounts />} />
+          <Route path="admin/audit" element={<Audit />} />
+          <Route path="me/access" element={<MyAccess />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>
