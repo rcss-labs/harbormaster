@@ -124,7 +124,7 @@ function TaskRow({ task, withService, desiredCount }: { task: TaskDTO; withServi
         {stopping && (
           <StopTaskDialog
             taskId={task.id}
-            shortId={task.short_id}
+            shortId={task.short_id.slice(0, 12)}
             serviceName={task.service?.name ?? null}
             serviceId={task.service?.id ?? null}
             desiredCount={desiredCount}
