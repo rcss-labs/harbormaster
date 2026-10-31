@@ -122,6 +122,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/services/{serviceId}/image-tags", s.getImageTags, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/desired-count", s.getDesiredCount, routeOptions{})
 
+	// Change-path writes (plan 02).
+	s.handle(mux, "POST /api/services/{serviceId}/revisions", s.registerRevision, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/deploy", s.deployRevision, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/restart", s.restartService, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/desired-count", s.setDesiredCount, routeOptions{})
+	s.handle(mux, "POST /api/tasks/{taskId}/stop", s.stopTask, routeOptions{})
+
 	// Unknown API paths are JSON 404s and never fall through to the SPA. RequirePasswordChanged
 	// still applies so a user with a pending password change sees password_change_required.
 	mux.Handle("/api/", auth.RequirePasswordChanged(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
