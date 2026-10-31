@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
 	"net/http"
@@ -411,8 +412,27 @@ func TestClustersMetrics_PerVisibleCluster(t *testing.T) {
 		t.Errorf("eu-apps = insights %q, %d cpu points, now %v/%v; want enabled with 48 points", euApps.Insights, len(euApps.CPU), euApps.CPUNow, euApps.MemNow)
 	}
 	edge, ok := out.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()]
-	if !ok || edge.Insights != "disabled" || edge.CPU != nil || edge.CPUNow != nil {
-		t.Errorf("edge-proxy = %+v (listed %v); want disabled with null series", edge, ok)
+	if !ok || edge.Insights != "disabled" || len(edge.CPU) != 0 || edge.CPUNow != nil {
+		t.Errorf("edge-proxy = %+v (listed %v); want disabled with empty series", edge, ok)
+	}
+}
+
+// Slices are never null in the API (01 convention): the SPA reads cpu/mem as arrays even for Insights-off clusters.
+func TestClustersMetrics_DisabledClusterSerialisesEmptyArrays(t *testing.T) {
+	h := newMetricsHarness(t, 0)
+	resp := login(t, h.srv, "omer", testPassword).get("/api/clusters/metrics")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	var raw struct {
+		Items map[string]map[string]json.RawMessage `json:"items"`
+	}
+	decode(t, resp, &raw)
+	edge := raw.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()]
+	for _, key := range []string{"cpu", "mem"} {
+		if got := string(edge[key]); got != "[]" {
+			t.Errorf("edge-proxy %s = %s, want []", key, got)
+		}
 	}
 }
 

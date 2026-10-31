@@ -831,7 +831,7 @@ export const SERVICE_METRICS_PAYMENTS: ServiceMetricsDTO = {
   polled_at: FIXTURE_NOW,
 }
 
-/** catalog-api with Container Insights off: no series, no usage numbers, but a gap-free ALB panel. */
+/** catalog-api with Container Insights off: no series, no usage numbers, but ALB data that has a gap (missing datapoints are null). */
 export const SERVICE_METRICS_CATALOG_NO_INSIGHTS: ServiceMetricsDTO = {
   range: '24h',
   period: 900,

@@ -80,6 +80,8 @@ func nullableField(shape any, key string) any {
 	return fields
 }
 
+// Known drift source: a nil Go slice serialises as null, but the shapes below say array. Handlers must emit
+// empty slices ([]) unless the field is deliberately nullable (see nullableField).
 // contractShapes lists every response body the SPA reads, keyed by the name the Vitest contract test uses.
 func contractShapes() map[string]any {
 	return map[string]any{

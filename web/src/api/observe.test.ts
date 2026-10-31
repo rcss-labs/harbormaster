@@ -5,7 +5,7 @@ import { createElement, type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
 import { server } from '../test/msw'
 import { ApiError } from './client'
-import { allNull, isAwsError, isThrottled, useLogHistory, useServiceMetrics } from './observe'
+import { allNull, isAwsError, isThrottled, useAlerts, useLogHistory, useScaling, useServiceMetrics, useTargetHealth } from './observe'
 
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -28,7 +28,7 @@ describe('observe hooks', () => {
     expect(requested).toBe('/api/services/svc1/metrics?range=6h')
   })
 
-  it('refetchInterval is 60000 and never runs in the background', async () => {
+  it('refetchInterval is 60000 and never runs in the background', () => {
     server.use(http.get('/api/services/svc1/metrics', () => HttpResponse.json({})))
     const { client, wrapper } = setup()
     renderHook(() => useServiceMetrics('svc1', '6h'), { wrapper })
@@ -55,6 +55,30 @@ describe('observe hooks', () => {
     expect(params.get('q')).toBe('a&b')
     expect(params.get('before')).toBe(before)
     expect(requested).not.toContain('a&b')
+  })
+})
+
+describe('snapshot and history polling', () => {
+  it.each<[string, () => unknown, unknown[]]>([
+    ['useTargetHealth', () => useTargetHealth('svc1'), ['service', 'svc1', 'target-health']],
+    ['useScaling', () => useScaling('svc1'), ['service', 'svc1', 'scaling']],
+    ['useAlerts', () => useAlerts({}), ['alerts', {}]],
+  ])('%s refetches every 5000 ms, not in the background', (_name, hook, queryKey) => {
+    server.use(http.get(/\/api\/.*/, () => HttpResponse.json({})))
+    const { client, wrapper } = setup()
+    renderHook(hook, { wrapper })
+    const options = client.getQueryCache().find({ queryKey })?.observers[0].options
+    expect(options?.refetchInterval).toBe(5000)
+    expect(options?.refetchIntervalInBackground).toBe(false)
+  })
+
+  it('useLogHistory never refetches', () => {
+    server.use(http.get('/api/services/svc1/logs', () => HttpResponse.json({})))
+    const { client, wrapper } = setup()
+    renderHook(() => useLogHistory('svc1', {}), { wrapper })
+    const options = client.getQueryCache().find({ queryKey: ['service', 'svc1', 'logs', undefined, undefined, undefined] })?.observers[0].options
+    expect(options?.refetchInterval).toBeUndefined()
+    expect(options?.staleTime).toBe(Infinity)
   })
 })
 

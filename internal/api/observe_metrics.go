@@ -477,7 +477,7 @@ func (s *Server) getServiceMetrics(w http.ResponseWriter, r *http.Request) {
 		p95 := scaleSeries(metrics.MeanSeries("p95", idx.group("", "p95", len(refs))...), 1000)
 		out.ALB = &ServiceALBDTO{
 			ReqPerMin: values(req), P95MS: values(p95),
-			Err5xxPerHour: HourlySeriesDTO{Timestamps: errRes.Timestamps, Values: values(errs)},
+			Err5xxPerHour: HourlySeriesDTO{Timestamps: nonNilTimes(errRes.Timestamps), Values: values(errs)},
 			ReqNow:        lastOf(req), P95Now: lastOf(p95), Err5xxToday: round2(metrics.SumAll(errs)),
 		}
 	}
@@ -679,7 +679,7 @@ func (s *Server) getClustersMetrics(w http.ResponseWriter, r *http.Request) {
 	out := ClustersMetricsDTO{Items: make(map[string]ClusterListMetricsDTO, len(rows)), Stale: stale}
 	for _, row := range rows {
 		u := util[row.Key]
-		item := ClusterListMetricsDTO{Insights: u.Insights}
+		item := ClusterListMetricsDTO{Insights: u.Insights, CPU: []*float64{}, Mem: []*float64{}}
 		if u.Insights != "disabled" {
 			item.CPU, item.Mem, item.CPUNow, item.MemNow = values(u.CPU), values(u.Mem), lastOf(u.CPU), lastOf(u.Mem)
 		}
@@ -713,6 +713,9 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cpu, mem = append(cpu, u.CPU), append(mem, u.Mem)
+	}
+	if timestamps == nil {
+		timestamps = []time.Time{}
 	}
 	out := OverviewMetricsDTO{
 		Timestamps: timestamps, Stale: stale,
@@ -789,4 +792,12 @@ func (s *Server) getTargetHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// nonNilTimes keeps an empty timestamp list serialising as [] rather than null.
+func nonNilTimes(in []time.Time) []time.Time {
+	if in == nil {
+		return []time.Time{}
+	}
+	return in
 }
