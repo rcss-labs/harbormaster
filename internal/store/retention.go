@@ -17,6 +17,9 @@ type RetentionResult map[string]int64
 // loginAttemptsRetention is fixed: it only has to outlast any sane login throttle window.
 const loginAttemptsRetention = 24 * time.Hour
 
+// metricsCacheRetention is fixed: cached CloudWatch series are only useful for a few minutes.
+const metricsCacheRetention = 10 * time.Minute
+
 // RunRetention deletes rows older than the configured ages, measured from now.
 func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (RetentionResult, error) {
 	result := RetentionResult{}
@@ -61,6 +64,12 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		return result, fmt.Errorf("retention login_attempts: %w", err)
 	}
 	result["login_attempts"] = n
+
+	n, err = s.pruneMetricsCacheBefore(ctx, now.Add(-metricsCacheRetention))
+	if err != nil {
+		return result, fmt.Errorf("retention metrics_cache: %w", err)
+	}
+	result["metrics_cache"] = n
 
 	if r.OrphanTags > 0 {
 		clusters, services, err := s.deleteOrphanedTagsBeforeCounts(ctx, now.Add(-r.OrphanTags))

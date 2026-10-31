@@ -78,3 +78,28 @@ func (s *Store) TargetHealthForService(ctx context.Context, k model.ServiceKey) 
 	}
 	return result, nil
 }
+
+// UnhealthyTargets returns the services in the target filter with at least one target group
+// that has an unhealthy target. It applies no tag visibility; callers filter when they present.
+func (s *Store) UnhealthyTargets(ctx context.Context, f TargetFilter) (map[model.ServiceKey]bool, error) {
+	var q queryArgs
+	rows, err := s.Pool.Query(ctx,
+		`select distinct t.account_id, t.region, t.cluster_name, t.service_name
+		 from target_health t where t.unhealthy > 0 and `+q.target("t", f), q.values...)
+	if err != nil {
+		return nil, fmt.Errorf("unhealthy targets: %w", err)
+	}
+	defer rows.Close()
+	unhealthy := map[model.ServiceKey]bool{}
+	for rows.Next() {
+		var key model.ServiceKey
+		if err := rows.Scan(&key.AccountID, &key.Region, &key.Cluster, &key.Service); err != nil {
+			return nil, fmt.Errorf("scan unhealthy target: %w", err)
+		}
+		unhealthy[key] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("unhealthy targets: %w", err)
+	}
+	return unhealthy, nil
+}

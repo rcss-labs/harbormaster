@@ -101,6 +101,8 @@ func newLoop(p *Poller, t awsx.Target) *Loop {
 	add(tierTargetHealth, in.TargetHealth, func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) })
 	scaling := &ScalingLoop{Store: p.store, Clients: p.clients, Every: in.Scaling}
 	add(tierScaling, in.Scaling, func(ctx context.Context) error { return scaling.Run(ctx, l.target) })
+	alerts := &AlertsLoop{Store: p.store, Every: in.Alerts}
+	add(tierAlerts, in.Alerts, func(ctx context.Context) error { return alerts.Run(ctx, l.target) })
 	return l
 }
 
