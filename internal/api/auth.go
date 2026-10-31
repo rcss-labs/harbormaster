@@ -43,7 +43,20 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.revokePresentedSession(r)
 	s.startedSession(w, r, result)
+}
+
+// revokePresentedSession deletes the session the login request arrived with, so a fresh sign-in
+// does not leave the previous session row valid until it expires.
+func (s *Server) revokePresentedSession(r *http.Request) {
+	cookie, err := r.Cookie(auth.CookieName)
+	if err != nil || cookie.Value == "" {
+		return
+	}
+	if err := s.Auth.Logout(r.Context(), cookie.Value); err != nil {
+		s.log().Warn("revoke previous session failed", "error", err)
+	}
 }
 
 // startedSession sets the cookie and answers login with {"user": MeDTO}.
