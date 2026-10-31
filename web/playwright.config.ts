@@ -16,10 +16,10 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL, trace: 'retain-on-failure' },
   // The smoke suite reads the untouched seeded estate (for example a rollout that is still in
-  // progress), so the mutating change flows run in a second project that waits for it.
+  // progress), so every other (mutating) spec runs in a second project that waits for it.
   projects: [
     { name: 'chromium', testMatch: /smoke\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-change', testMatch: /change\.spec\.ts/, dependencies: ['chromium'], use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium-flows', testIgnore: /smoke\.spec\.ts/, dependencies: ['chromium'], use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
     command: '../bin/harbormaster serve --fake-aws',

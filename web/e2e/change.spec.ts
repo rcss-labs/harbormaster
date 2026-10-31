@@ -13,30 +13,31 @@ async function openOperationsLog(page: Page, id: string) {
 }
 
 /** Edits, reviews and registers the draft, then accepts the "Deploy it now?" prompt. */
-async function registerAndDeploy(page: Page, revision: number) {
+async function registerAndDeploy(page: Page, serviceName: string, revision: number) {
   await page.getByRole('button', { name: 'Review and save' }).click()
   const review = page.getByRole('dialog')
-  await expect(review.getByText(new RegExp(`^Register .+:${revision}\\?$`))).toBeVisible()
+  await expect(review.getByText(`Register ${serviceName}:${revision}?`)).toBeVisible()
   await review.getByRole('button', { name: `Register revision :${revision}` }).click()
   const prompt = page.getByRole('dialog')
   await expect(prompt.getByText(`Revision :${revision} is registered. Deploy it now?`)).toBeVisible()
+  // The pending-revision banner behind the dialog has its own "Deploy :N" button, so scope to the dialog.
   await prompt.getByRole('button', { name: `Deploy :${revision}` }).click()
 }
+
+// The flows share one seeded estate and run in this order: register/deploy moves payments-api to :43 (the
+// stop-a-task flow then runs on its steady state), and the operator check must precede the OOM rollback,
+// whose open rollout disables Restart.
+test.describe.configure({ mode: 'serial' })
 
 test('register and deploy a new image tag', async ({ page }) => {
   await login(page, 'pavel')
   await page.goto(`/services/${paymentsApi}/task-definition`)
 
   await page.getByLabel('Image tag').selectOption({ label: '1.18.4 · newest' })
-  await page.getByRole('button', { name: 'Review and save' }).click()
-  await expect(page.getByRole('dialog').getByText('Register payments-api:43?')).toBeVisible()
-  await page.getByRole('button', { name: 'Register revision :43' }).click()
-  const prompt = page.getByRole('dialog')
-  await expect(prompt.getByText('Revision :43 is registered. Deploy it now?')).toBeVisible()
-  // The pending-revision banner behind the dialog has its own "Deploy :43" button, so scope to the dialog.
-  await prompt.getByRole('button', { name: 'Deploy :43' }).click()
+  await registerAndDeploy(page, 'payments-api', 43)
 
-  // The service view refreshes from the poller (about 5 s), so the card may need a poll to appear.
+  // The deploy is accepted at once but the service view only changes on the next 5 s poll, so allow
+  // for it (plus slack) before the card shows. The 15 s toast wait below starts once the card is up.
   await expect(page.getByText('Rollout in progress')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText(':42 → :43')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText('payments-api is running :43 on all 3 tasks.')).toBeVisible({ timeout: 15_000 })
@@ -72,7 +73,7 @@ test('OOM revision fails and rolls back', async ({ page }) => {
   await page.getByRole('button', { name: 'Add variable' }).click()
   await page.getByLabel('Name').last().fill('X')
   await page.getByLabel('Value').last().fill('1')
-  await registerAndDeploy(page, 7)
+  await registerAndDeploy(page, 'image-resizer', 7)
 
   await expect(page.getByText('image-resizer: revision :7 failed to start. Rolled back to :6.')).toBeVisible({ timeout: 20_000 })
 
@@ -89,17 +90,17 @@ test('stop a task', async ({ page }) => {
   await login(page, 'pavel')
   await page.goto(`/services/${paymentsApi}/tasks`)
 
-  await page.getByRole('button', { name: 'Stop', exact: true }).first().click()
+  const firstStoppable = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Stop', exact: true }) }).first()
+  const taskId = ((await firstStoppable.getByRole('cell').first().textContent()) ?? '').trim()
+  expect(taskId).toMatch(/^[0-9a-f]{12}$/)
+  await firstStoppable.getByRole('button', { name: 'Stop', exact: true }).click()
   const dialog = page.getByRole('dialog')
-  const title = (await dialog.getByRole('heading').first().textContent()) ?? ''
-  const shortId = /^Stop task (\S+)\?$/.exec(title.trim())?.[1]
-  expect(shortId, `short task id in dialog title "${title}"`).toBeTruthy()
+  await expect(dialog.getByRole('heading', { name: `Stop task ${taskId}?`, exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: 'Stop task' }).click()
 
-  // The dialog shows the full task id; the table shows its first 12 characters.
-  const row = page.getByRole('row').filter({ hasText: shortId!.slice(0, 12) })
+  const row = page.getByRole('row').filter({ hasText: taskId })
   await expect(row.getByText('Stopped', { exact: true })).toBeVisible({ timeout: 10_000 })
 
   await openOperationsLog(page, paymentsApi)
-  await expect(page.getByText(/Stopped task /).first()).toBeVisible()
+  await expect(page.getByText(`Stopped task ${taskId}.`).first()).toBeVisible()
 })
