@@ -1,0 +1,2143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbormaster ECS mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: Stackstead's shell (sidebar + full-width content), harbour-blue accent so it reads as a sibling product. */
+:root {
+  color-scheme: light;
+  --bg: #f2f5f8;
+  --surface: #ffffff;
+  --raised: #f6f8fa;
+  --hover: #ecf1f5;
+  --border: #dde3ea;
+  --border-strong: #c6d0da;
+  --text: #141a21;
+  --muted: #5c6979;
+  --accent: #0b6a8f;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(11, 106, 143, 0.11);
+  --success: #047857;
+  --warning: #9c4707;
+  --danger: #b91c1c;
+  --info: #5b3fc4;
+  --success-soft: rgba(4, 120, 87, 0.12);
+  --warning-soft: rgba(156, 71, 7, 0.12);
+  --danger-soft: rgba(185, 28, 28, 0.11);
+  --info-soft: rgba(91, 63, 196, 0.12);
+  --muted-soft: rgba(92, 105, 121, 0.12);
+  --series-1: #0b6a8f;
+  --series-2: #e07a1f;
+  --series-3: #7c3aed;
+  --series-4: #0f9d77;
+  --series-5: #d6336c;
+  --series-6: #8a6d00;
+  --term-bg: #0d1217;
+  --term-text: #d7e3ec;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-pop: 0 18px 50px rgba(16, 24, 40, 0.2);
+  --overlay: rgba(16, 24, 40, 0.38);
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+  --radius: 7px;
+  --sidebar-w: 232px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1216; --surface: #141a20; --raised: #1a2129; --hover: #1e2630;
+    --border: #252d37; --border-strong: #38424f; --text: #e5eaf0; --muted: #8c97a7;
+    --accent: #4cb4de; --accent-ink: #04202c; --accent-soft: rgba(76, 180, 222, 0.15);
+    --success: #34d399; --warning: #fbbf24; --danger: #f87171; --info: #a78bfa;
+    --success-soft: rgba(52, 211, 153, 0.15); --warning-soft: rgba(251, 191, 36, 0.15);
+    --danger-soft: rgba(248, 113, 113, 0.15); --info-soft: rgba(167, 139, 250, 0.16);
+    --muted-soft: rgba(140, 151, 167, 0.14); --series-1: #4cb4de; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4); --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1216; --surface: #141a20; --raised: #1a2129; --hover: #1e2630;
+  --border: #252d37; --border-strong: #38424f; --text: #e5eaf0; --muted: #8c97a7;
+  --accent: #4cb4de; --accent-ink: #04202c; --accent-soft: rgba(76, 180, 222, 0.15);
+  --success: #34d399; --warning: #fbbf24; --danger: #f87171; --info: #a78bfa;
+  --success-soft: rgba(52, 211, 153, 0.15); --warning-soft: rgba(251, 191, 36, 0.15);
+  --danger-soft: rgba(248, 113, 113, 0.15); --info-soft: rgba(167, 139, 250, 0.16);
+  --muted-soft: rgba(140, 151, 167, 0.14); --series-1: #4cb4de; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4); --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+h2 { font-size: 14px; font-weight: 600; text-wrap: balance; }
+h3 { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+a { color: inherit; text-decoration: none; }
+button, input, select, textarea { font: inherit; color: inherit; }
+code, pre, .mono { font-family: var(--mono); font-size: 12px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100%; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.brand-name { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+.brand-sub { font-size: 11px; color: var(--muted); }
+.nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; overflow: auto; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius); color: var(--muted); font-weight: 500; }
+.nav a:hover { background: var(--hover); color: var(--text); }
+.nav a.active { background: var(--accent-soft); color: var(--accent); }
+.nav .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+.nav .count.bad { color: var(--danger); font-weight: 600; }
+.nav-section { padding: 12px 10px 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.side-foot { margin-top: auto; border-top: 1px solid var(--border); padding: 12px 16px; display: grid; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.side-foot strong { color: var(--text); font-weight: 500; }
+
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.crumbs { display: flex; align-items: center; gap: 6px; color: var(--muted); min-width: 0; overflow: hidden; white-space: nowrap; }
+.crumbs a:hover { color: var(--text); }
+.crumbs .sep { opacity: 0.5; }
+.crumbs .here { color: var(--text); font-weight: 500; }
+.top-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.search-wrap { position: relative; }
+.search { width: 240px; height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); }
+.search-results { position: absolute; right: 0; top: 36px; width: 340px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); z-index: 30; padding: 4px; display: grid; }
+.search-results a { padding: 7px 10px; border-radius: 5px; display: flex; gap: 8px; align-items: baseline; }
+.search-results a:hover, .search-results a.sel { background: var(--hover); }
+.search-results .kind { font-size: 11px; color: var(--muted); width: 54px; flex: none; }
+.content { flex: 1; overflow: auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+
+select.ctl, input.ctl, textarea.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
+textarea.ctl { height: auto; padding: 8px; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.danger { color: var(--danger); }
+.btn.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.icon-btn { width: 30px; height: 30px; display: inline-grid; place-items: center; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; }
+
+.page-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.page-head .titles { display: grid; gap: 6px; min-width: 0; }
+.page-head .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+.page-head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); min-width: 0; }
+.card-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.card-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.card-body { padding: 14px; }
+.grid { display: grid; gap: 14px; }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g-wide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 1100px) { .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g3, .g-wide { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) { .g2, .g4 { grid-template-columns: minmax(0, 1fr); } }
+
+.tile { padding: 12px 14px; display: grid; gap: 4px; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; display: flex; align-items: baseline; gap: 6px; }
+.tile .v small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.tile .sub { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { color: var(--success); background: var(--success-soft); }
+.pill.warn { color: var(--warning); background: var(--warning-soft); }
+.pill.bad { color: var(--danger); background: var(--danger-soft); }
+.pill.info { color: var(--info); background: var(--info-soft); }
+.pill.mute { color: var(--muted); background: var(--muted-soft); }
+.pill.info::before { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.label { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; border: 1px solid var(--border-strong); color: var(--muted); background: var(--raised); }
+.label.c-red { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-soft); }
+.label.c-amber { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: var(--warning-soft); }
+.label.c-blue { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
+.label.c-violet { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); background: var(--info-soft); }
+.label.c-green { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); background: var(--success-soft); }
+.label.inh { border-style: dashed; }
+button.label { cursor: pointer; }
+button.label:hover { border-color: var(--accent); }
+
+table.t { width: 100%; border-collapse: collapse; }
+.t th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.t td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.t tr:last-child td { border-bottom: 0; }
+.t tbody tr.link { cursor: pointer; }
+.t tbody tr.link:hover td { background: var(--hover); }
+.t .num { text-align: right; }
+.t .name { font-weight: 500; }
+.table-wrap { overflow-x: auto; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.stripe { border-left: 3px solid transparent; }
+.stripe.bad { border-left-color: var(--danger); }
+.stripe.warn { border-left-color: var(--warning); }
+.stripe.info { border-left-color: var(--info); }
+
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 16px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tabs a { padding: 9px 12px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs a:hover { color: var(--text); }
+.tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .badge { font-size: 10.5px; margin-left: 4px; color: var(--muted); }
+
+.bar { height: 6px; border-radius: 3px; background: var(--muted-soft); overflow: hidden; display: flex; }
+.bar span { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.bar span.old { background: var(--border-strong); }
+
+.alert-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.alert-row:last-child { border-bottom: 0; }
+.alert-row .what { display: grid; gap: 2px; min-width: 0; }
+.alert-row .when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.feed { display: grid; }
+.feed-row { display: grid; grid-template-columns: 74px 92px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.feed-row:last-child { border-bottom: 0; }
+.src { font-size: 11px; font-weight: 600; }
+.src.q { color: var(--accent); }
+.src.e { color: var(--muted); }
+
+.chart { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
+.chart .grid-line { stroke: var(--border); stroke-width: 1; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 0 10px; height: 28px; cursor: pointer; font-size: 12px; }
+.seg button + button { border-left: 1px solid var(--border-strong); }
+.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.editor { width: 100%; min-height: 520px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.55; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); tab-size: 2; white-space: pre; }
+.editor.invalid { border-color: var(--danger); }
+.form-grid { display: grid; gap: 12px; }
+.field { display: grid; gap: 5px; }
+.field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+.env-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 26px; gap: 6px; }
+.env-row input { min-width: 0; }
+.hint { font-size: 12px; color: var(--muted); }
+.err { font-size: 12px; color: var(--danger); }
+.banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: var(--radius); border: 1px solid; font-size: 12.5px; }
+.banner.info { color: var(--text); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.banner.warn { color: var(--text); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 35%, transparent); }
+.banner.bad { color: var(--text); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+
+.diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); max-height: 380px; overflow: auto; background: var(--raised); }
+.diff div { padding: 0 10px; white-space: pre; }
+.diff .add { background: var(--success-soft); color: var(--success); }
+.diff .del { background: var(--danger-soft); color: var(--danger); }
+.diff .gap { color: var(--muted); background: var(--muted-soft); }
+
+.logs { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.55; border-radius: 8px; height: 520px; overflow: auto; padding: 10px 0; }
+.logs .ln { display: grid; grid-template-columns: 96px 130px minmax(0, 1fr); gap: 10px; padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.logs .ln:hover { background: rgba(255, 255, 255, 0.04); }
+.logs .ts { color: #6f8495; }
+.logs .ct { color: #7cc4e4; }
+.logs .lvl-error { color: #ff8a8a; }
+.logs .lvl-warn { color: #f5c76b; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border-radius: 8px; height: 480px; overflow: auto; padding: 12px 14px; cursor: text; }
+.term .out { white-space: pre-wrap; overflow-wrap: anywhere; }
+.term .sys { color: #7cc4e4; }
+.term .line { display: flex; gap: 8px; }
+.term input { flex: 1; background: transparent; border: 0; outline: none; color: var(--term-text); font: inherit; padding: 0; }
+.term .prompt { color: #8fdc9f; white-space: nowrap; }
+
+.net-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.net-card { padding: 14px; display: grid; gap: 10px; cursor: pointer; transition: border-color 0.15s; }
+.net-card:hover { border-color: var(--accent); }
+.net-card.off { cursor: default; opacity: 0.6; }
+.net-card.off:hover { border-color: var(--border); }
+.net-card .big { font-size: 16px; font-weight: 600; }
+.stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.stats b { color: var(--text); font-weight: 600; font-size: 14px; margin-right: 3px; }
+
+.vpc-frame { border: 2px dashed var(--border-strong); border-radius: 14px; padding: 14px; display: grid; gap: 14px; background: color-mix(in srgb, var(--accent-soft) 35%, transparent); }
+.vpc-edge { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.edge-chip { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border-strong); font-size: 12px; }
+.az-row { display: grid; gap: 10px; }
+.az-title { font-size: 12px; font-weight: 600; color: var(--muted); }
+.subnets { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+.subnet { flex: 1 1 340px; min-width: 300px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+.subnet.public { border-top: 3px solid var(--success); }
+.subnet.private { border-top: 3px solid var(--accent); }
+.subnet-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.blk-cluster { border: 1px solid var(--border-strong); border-radius: 9px; padding: 8px; display: grid; gap: 8px; background: var(--raised); }
+.blk-cluster > .h { display: flex; gap: 8px; align-items: center; font-weight: 600; font-size: 12.5px; }
+.blk-service { border: 1px solid var(--border); border-radius: 7px; padding: 7px; background: var(--surface); display: grid; gap: 6px; }
+.blk-service > .h { display: flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 500; }
+.blk-service > .h a:hover { color: var(--accent); }
+.task-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.task-chip { font-family: var(--mono); font-size: 11px; padding: 3px 7px; border-radius: 5px; background: var(--accent-soft); color: var(--text); border: 1px solid transparent; cursor: pointer; display: inline-flex; gap: 6px; }
+.task-chip:hover { border-color: var(--accent); }
+.task-chip .ip { color: var(--muted); }
+.task-chip.unhealthy { background: var(--warning-soft); }
+.empty { padding: 26px; text-align: center; color: var(--muted); }
+
+.dlg-backdrop { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.dlg { width: min(640px, 100%); max-height: calc(100% - 32px); overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-pop); display: grid; }
+.dlg.wide { width: min(920px, 100%); }
+.dlg-head { padding: 16px 18px 0; display: grid; gap: 4px; }
+.dlg-body { padding: 14px 18px; display: grid; gap: 12px; }
+.dlg-foot { padding: 12px 18px 16px; display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.radio-list { display: grid; gap: 6px; }
+.radio-list label { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.radio-list label:hover { background: var(--hover); }
+
+.toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 60; }
+.toast { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 10px 14px; max-width: 380px; animation: slide 0.2s ease-out; }
+.toast.bad { border-left-color: var(--danger); }
+.toast.ok { border-left-color: var(--success); }
+@keyframes slide { from { transform: translateY(8px); opacity: 0; } }
+
+.mock-note { font-size: 11px; color: var(--muted); padding: 2px 8px; border: 1px dashed var(--border-strong); border-radius: 999px; white-space: nowrap; }
+
+.donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.donut-v { fill: var(--text); font: 600 22px var(--sans); }
+.donut-s { fill: var(--muted); font: 11px var(--sans); }
+.donut-legend { display: grid; gap: 6px; font-size: 12.5px; min-width: 140px; flex: 1; }
+.donut-legend div { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.donut-legend i { width: 10px; height: 10px; border-radius: 3px; }
+.hbars { display: grid; gap: 9px; }
+.hbar { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 2fr) minmax(52px, auto); gap: 10px; align-items: center; font-size: 12.5px; }
+.hbar-l { display: grid; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar-l a:hover { color: var(--accent); }
+.hbar-track { position: relative; height: 10px; border-radius: 5px; background: var(--muted-soft); display: flex; overflow: visible; }
+.hbar-track span { display: block; height: 100%; }
+.hbar-track span:first-child { border-radius: 5px 0 0 5px; }
+.hbar-track span:last-of-type { border-radius: 0 5px 5px 0; }
+.hbar-track span:only-of-type { border-radius: 5px; }
+.hbar-track em { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: 0.55; border-radius: 1px; }
+.hbar-v { text-align: right; color: var(--muted); white-space: nowrap; }
+.split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--muted-soft); }
+.split span { display: block; height: 100%; }
+.dots { display: flex; gap: 4px; flex-wrap: wrap; }
+.dot { width: 10px; height: 10px; border-radius: 3px; }
+.slots { display: flex; gap: 3px; flex-wrap: wrap; }
+.slot { width: 14px; height: 14px; border-radius: 3px; border: 1px solid transparent; }
+.slot.empty { border: 1px dashed var(--danger); background: transparent; }
+.cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.xcard { padding: 14px; display: grid; gap: 12px; cursor: pointer; transition: border-color 0.15s; align-content: start; }
+.xcard:hover { border-color: var(--accent); }
+.xcard-top { display: flex; gap: 10px; align-items: flex-start; }
+.xcard-top .pill { margin-left: auto; }
+.xcard .big { font-size: 15px; font-weight: 600; }
+.mini2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mini-k { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 3px; }
+.mini-k b { color: var(--text); font-weight: 600; }
+.foot-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px; }
+.foot-stats b { color: var(--text); font-weight: 600; }
+.task-meters { display: grid; gap: 8px; }
+.task-meter { display: grid; grid-template-columns: 110px 96px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: center; font-size: 12px; }
+.meter { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 6px; align-items: center; }
+.meter .track { height: 8px; border-radius: 4px; background: var(--muted-soft); overflow: hidden; }
+.meter .track span { display: block; height: 100%; border-radius: 4px; }
+.meter b { font-weight: 500; text-align: right; }
+.timeline { position: relative; height: 92px; margin: 4px 8px 0; }
+.timeline .axis { position: absolute; left: 0; right: 0; top: 52px; border-top: 1px solid var(--border-strong); }
+.timeline .tick { position: absolute; top: 58px; font: 10px var(--mono); color: var(--muted); transform: translateX(-50%); white-space: nowrap; }
+.timeline .tick::before { content: ""; position: absolute; left: 50%; top: -9px; height: 5px; border-left: 1px solid var(--border-strong); }
+.timeline .ev { position: absolute; top: 44px; transform: translateX(-50%); display: grid; justify-items: center; }
+.timeline .ev i { width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
+.timeline .ev span { position: absolute; bottom: 22px; font: 11px var(--mono); white-space: nowrap; padding: 1px 6px; border-radius: 4px; background: var(--raised); border: 1px solid var(--border); }
+.timeline .ev.alt span { bottom: 44px; }
+.tree { overflow-x: auto; padding: 6px 2px 10px; }
+.tree ul { list-style: none; margin: 0; padding: 0 0 0 30px; position: relative; display: flex; flex-direction: column; gap: 8px; }
+.tree > ul { padding-left: 0; }
+.tree li { position: relative; display: flex; align-items: center; }
+.tree li > ul::before { content: ""; position: absolute; left: 0; top: 50%; width: 15px; border-top: 1px solid var(--border-strong); }
+.tree ul ul > li::before { content: ""; position: absolute; left: -15px; top: 50%; width: 15px; border-top: 1px solid var(--border-strong); }
+.tree ul ul > li::after { content: ""; position: absolute; left: -15px; top: -4px; bottom: -4px; border-left: 1px solid var(--border-strong); }
+.tree ul ul > li:first-child::after { top: 50%; }
+.tree ul ul > li:last-child::after { bottom: 50%; }
+.tree ul ul > li:only-child::after { display: none; }
+.node { flex: none; display: grid; gap: 3px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); min-width: 150px; font-size: 12px; box-shadow: var(--shadow); }
+.node .nh { display: flex; gap: 6px; align-items: center; font-weight: 600; white-space: nowrap; }
+.node .ns { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.node .kind { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.node button.tog { border: 1px solid var(--border-strong); background: var(--raised); border-radius: 4px; width: 18px; height: 18px; display: inline-grid; place-items: center; cursor: pointer; font-size: 11px; line-height: 1; padding: 0; margin-left: auto; }
+.node.vpc { border: 2px solid var(--accent); background: var(--accent-soft); }
+.node.az { background: var(--raised); }
+.node.subnet.public { border-left: 4px solid var(--success); }
+.node.subnet.private { border-left: 4px solid var(--accent); }
+.node.cluster { border-left: 4px solid var(--series-3); }
+.node.service { border-left: 4px solid var(--series-2); }
+.node.service a:hover, .node.cluster a:hover { color: var(--accent); }
+.node.task { min-width: 0; font-family: var(--mono); font-size: 11px; padding: 4px 8px; display: flex; gap: 8px; cursor: pointer; box-shadow: none; }
+.node.task:hover { border-color: var(--accent); }
+.node.task .ip { color: var(--muted); }
+.node.task.unhealthy { border-color: var(--warning); background: var(--warning-soft); }
+.node.none { min-width: 0; color: var(--muted); font-style: italic; border-style: dashed; box-shadow: none; }
+.ipbar { height: 4px; border-radius: 2px; background: var(--muted-soft); overflow: hidden; margin-top: 2px; }
+.ipbar span { display: block; height: 100%; background: var(--accent); }
+
+/* density pass: compact panels for an operations tool */
+.pchart { display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 16px; column-gap: 6px; }
+.pchart .py { position: relative; font: 10px var(--mono); color: var(--muted); }
+.pchart .py span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
+.pchart .pplot { position: relative; min-width: 0; border-bottom: 1px solid var(--border-strong); }
+.pchart .plot { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.pchart .gl { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pchart .mk { stroke: var(--info); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.pchart .mkl { position: absolute; top: -1px; transform: translateX(-50%); font: 9.5px var(--mono); color: var(--info); background: var(--surface); padding: 0 3px; white-space: nowrap; }
+.pchart .px { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--muted); padding-top: 3px; white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--raised); font-size: 11px; color: var(--text); }
+.chip i { width: 6px; height: 6px; border-radius: 50%; }
+.content { gap: 12px; padding: 16px 20px 32px; }
+.grid { gap: 12px; }
+h1 { font-size: 19px; }
+h2 { font-size: 12.5px; }
+.card { border-radius: 8px; }
+.card-head { padding: 8px 12px; min-height: 36px; }
+.card-body { padding: 10px 12px 12px; }
+.card-head .legend, .card-body > .legend { font-size: 11px; gap: 10px; }
+.card-body > .legend { margin-bottom: 8px; }
+.tile { padding: 10px 12px; gap: 5px; }
+.tile .k { font-size: 11.5px; }
+.tile .v { font-size: 18px; }
+.tile .v small { font-size: 12px; }
+.donut-wrap { gap: 14px; }
+.donut-legend { font-size: 12px; gap: 4px; }
+.xcard { padding: 12px; gap: 10px; }
+.xcard .big { font-size: 13.5px; }
+.cards { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.hbars { gap: 7px; }
+.hbar { font-size: 12px; }
+.hbar-track { height: 7px; }
+.slot { width: 11px; height: 11px; border-radius: 2px; }
+.timeline { height: 80px; }
+.timeline .axis { top: 44px; }
+.timeline .tick { top: 50px; }
+.timeline .ev { top: 37px; }
+.timeline .ev i { width: 13px; height: 13px; border-width: 2px; }
+.timeline .ev span { bottom: 18px; font-size: 10.5px; }
+.timeline .ev.alt span { bottom: 36px; }
+.t td { padding: 7px 12px; }
+.t th { padding: 7px 12px; }
+.logs, .term { height: 440px; }
+
+.search-results[hidden] { display: none; }
+#login-root:empty { display: none; }
+.login-wrap { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; place-items: center; padding: 16px; }
+.login-card { width: min(380px, 100%); padding: 24px; display: grid; gap: 14px; }
+.pcell { display: grid; gap: 5px; justify-items: start; }
+.ptogs { display: flex; gap: 3px; }
+.ptog { width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--surface); font: 600 11px var(--mono); color: var(--muted); cursor: pointer; padding: 0; }
+.ptog:hover { border-color: var(--accent); }
+.ptog.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.matrix td { vertical-align: top; }
+.ctl.sm { height: 26px; font-size: 12px; padding: 0 6px; }
+.tabs a.locked { opacity: 0.55; }
+.side-user { display: grid; gap: 6px; }
+
+@media (max-width: 759px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+  .nav { flex-direction: row; overflow-x: auto; padding: 6px; }
+  .nav-section, .side-foot, .nav .count { display: none; }
+  .brand { padding: 10px 16px; }
+  .topbar { padding: 0 16px; }
+  .search { width: 150px; }
+  .content { padding: 16px; }
+  .top-tools select.ctl { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+        <rect x="1" y="1" width="26" height="26" rx="7" fill="var(--accent)"/>
+        <rect x="6" y="8" width="7" height="5" rx="1" fill="var(--accent-ink)"/>
+        <rect x="15" y="8" width="7" height="5" rx="1" fill="var(--accent-ink)" opacity="0.7"/>
+        <rect x="6" y="15" width="16" height="5" rx="1" fill="var(--accent-ink)" opacity="0.85"/>
+        <rect x="4" y="22" width="20" height="2" rx="1" fill="var(--accent-ink)" opacity="0.5"/>
+      </svg>
+      <div><div class="brand-name">Harbormaster</div><div class="brand-sub">ECS control center</div></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      <div class="side-user" id="side-user"></div>
+      <div>Running on ECS · <span class="mono">harbormaster/harbormaster-server</span></div>
+      <div><span class="mock-note">Mockup · example data</span></div>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumbs" id="crumbs"></div>
+      <div class="top-tools">
+        <select class="ctl" id="f-acct" aria-label="Account"></select>
+        <select class="ctl" id="f-region" aria-label="Region"></select>
+        <div class="search-wrap">
+          <input class="search" id="search" placeholder="Jump to cluster, service, task" autocomplete="off" aria-label="Search">
+          <div class="search-results" id="search-results" hidden></div>
+        </div>
+        <button class="icon-btn" id="theme-btn" aria-label="Toggle theme" title="Toggle theme">◐</button>
+      </div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+<div id="dialog-root"></div>
+<div id="login-root"></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let seed = 11;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const hex = n => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(rnd() * 16)]).join('');
+const NOW = Date.now();
+const MIN = 60000;
+function ago(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return s + 's ago';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + ' min ago';
+  const h = Math.round(m / 60);
+  if (h < 48) return h + ' h ago';
+  return Math.round(h / 24) + ' d ago';
+}
+const clock = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const pct = v => Math.round(v) + '%';
+
+/* ---------- example data ---------- */
+const ACCOUNTS = {
+  a1: { id: 'a1', name: 'homelab-admin', number: '482109375512', role: 'arn:aws:iam::482109375512:role/harbormaster-access', checked: NOW - 40e3 },
+  a2: { id: 'a2', name: 'staging-example', number: '731022849906', role: 'arn:aws:iam::731022849906:role/harbormaster-access', checked: NOW - 52e3 },
+};
+const REGIONS = { r1: 'us-east-1', r2: 'eu-west-1', r3: 'eu-central-1' };
+const VPCS = {
+  v1: { id: 'v1', acct: 'a1', region: 'r1', name: 'homelab-main', vpcId: 'vpc-0a41c7e29b3d', cidr: '10.20.0.0/16', nat: true, subnets: [
+    { id: 'n1', name: 'private-1a', subnetId: 'subnet-03f1a9c2', cidr: '10.20.1.0/24', az: 'us-east-1a', type: 'Private', free: 231 },
+    { id: 'n2', name: 'private-1b', subnetId: 'subnet-0b77e410', cidr: '10.20.2.0/24', az: 'us-east-1b', type: 'Private', free: 236 },
+    { id: 'n3', name: 'public-1a', subnetId: 'subnet-09c2d5ee', cidr: '10.20.101.0/24', az: 'us-east-1a', type: 'Public', free: 248 } ] },
+  v5: { id: 'v5', acct: 'a1', region: 'r1', name: 'shared-services', vpcId: 'vpc-07de19a4c011', cidr: '10.21.0.0/16', nat: true, subnets: [
+    { id: 'n9', name: 'tools-1a', subnetId: 'subnet-0e1c88a1', cidr: '10.21.1.0/24', az: 'us-east-1a', type: 'Private', free: 247 },
+    { id: 'n10', name: 'tools-1c', subnetId: 'subnet-02aa71f3', cidr: '10.21.3.0/24', az: 'us-east-1c', type: 'Private', free: 249 } ] },
+  v6: { id: 'v6', acct: 'a1', region: 'r1', name: 'legacy-default', vpcId: 'vpc-5c1e0f2a', cidr: '172.31.0.0/16', nat: false, subnets: [
+    { id: 'n11', name: 'default-1a', subnetId: 'subnet-6f0a1c3e', cidr: '172.31.0.0/20', az: 'us-east-1a', type: 'Public', free: 4091 } ] },
+  v2: { id: 'v2', acct: 'a1', region: 'r2', name: 'eu-apps', vpcId: 'vpc-0f3392bb71e2', cidr: '10.30.0.0/16', nat: true, subnets: [
+    { id: 'n4', name: 'private-1a', subnetId: 'subnet-0a90f7c1', cidr: '10.30.1.0/24', az: 'eu-west-1a', type: 'Private', free: 240 },
+    { id: 'n5', name: 'private-1b', subnetId: 'subnet-0c6b1e92', cidr: '10.30.2.0/24', az: 'eu-west-1b', type: 'Private', free: 242 } ] },
+  v3: { id: 'v3', acct: 'a1', region: 'r3', name: 'edge', vpcId: 'vpc-03b1d7f0c5a8', cidr: '10.40.0.0/16', nat: true, subnets: [
+    { id: 'n6', name: 'private-1a', subnetId: 'subnet-0d2e5a77', cidr: '10.40.1.0/24', az: 'eu-central-1a', type: 'Private', free: 250 },
+    { id: 'n7', name: 'public-1a', subnetId: 'subnet-0f61c3b8', cidr: '10.40.101.0/24', az: 'eu-central-1a', type: 'Public', free: 248 } ] },
+  v4: { id: 'v4', acct: 'a2', region: 'r1', name: 'staging', vpcId: 'vpc-0b18e6cd2a91', cidr: '10.50.0.0/16', nat: true, subnets: [
+    { id: 'n8', name: 'private-a', subnetId: 'subnet-01f8a2d4', cidr: '10.50.1.0/24', az: 'us-east-1a', type: 'Private', free: 249 },
+    { id: 'n12', name: 'private-b', subnetId: 'subnet-0e7c3b19', cidr: '10.50.2.0/24', az: 'us-east-1b', type: 'Private', free: 250 } ] },
+};
+const CLUSTERS = {
+  c1: { id: 'c1', name: 'core-services', acct: 'a1', region: 'r1', vpc: 'v1', label: 'Prod', insights: true },
+  c2: { id: 'c2', name: 'background-jobs', acct: 'a1', region: 'r1', vpc: 'v1', label: null, insights: true },
+  c3: { id: 'c3', name: 'ci-tools', acct: 'a1', region: 'r1', vpc: 'v5', label: null, insights: true },
+  c4: { id: 'c4', name: 'eu-apps', acct: 'a1', region: 'r2', vpc: 'v2', label: null, insights: true },
+  c5: { id: 'c5', name: 'edge-proxy', acct: 'a1', region: 'r3', vpc: 'v3', label: null, insights: false },
+  c6: { id: 'c6', name: 'staging-web', acct: 'a2', region: 'r1', vpc: 'v4', label: 'Staging', insights: true },
+};
+const EFS = {
+  f1: { id: 'f1', name: 'jenkins-home', fsId: 'fs-0c91a4e7', acct: 'a1', region: 'r1', vpc: 'v5', sizeGiB: 38.4, mode: 'Elastic', perf: 'General Purpose', aps: [{ id: 'fsap-0a1b2c3d4e', path: '/jenkins', uid: 1000 }] },
+  f2: { id: 'f2', name: 'reports-data', fsId: 'fs-02e7d1c9', acct: 'a1', region: 'r1', vpc: 'v1', sizeGiB: 12.1, mode: 'Bursting', perf: 'General Purpose', aps: [{ id: 'fsap-07f3e9a1c2', path: '/reports', uid: 1001 }] },
+  f3: { id: 'f3', name: 'shared-certs', fsId: 'fs-0a6b33f0', acct: 'a1', region: 'r3', vpc: 'v3', sizeGiB: 0.02, mode: 'Bursting', perf: 'General Purpose', aps: [{ id: 'fsap-0e44d18b7a', path: '/certs', uid: 101 }] },
+  f4: { id: 'f4', name: 'search-index', fsId: 'fs-0d18c2ab', acct: 'a1', region: 'r2', vpc: 'v2', sizeGiB: 74.9, mode: 'Provisioned 64 MiB/s', perf: 'General Purpose', aps: [{ id: 'fsap-03c7a9e5d1', path: '/index', uid: 1000 }] },
+  f5: { id: 'f5', name: 'uploads-archive', fsId: 'fs-07a2b9e1', acct: 'a1', region: 'r1', vpc: 'v1', sizeGiB: 211.6, mode: 'Elastic', perf: 'General Purpose', aps: [] },
+};
+// id, cluster, name, desired, running, revision, repo, tag, cpu, memory, port, options
+const SERVICE_SRC = [
+  ['s1', 'c1', 'payments-api', 3, 3, 42, 'payments-api', '1.18.2', 512, 1024, 8080, { lb: true, exec: true, sidecar: true, scaling: [2, 6, 60], env: [['NODE_ENV', 'production'], ['PAYMENTS_PROVIDER', 'stripe'], ['DB_POOL_SIZE', '20']] }],
+  ['s2', 'c1', 'web-frontend', 2, 2, 87, 'web-frontend', '3.4.0', 256, 512, 3000, { lb: true, exec: true, scaling: [2, 8, 55], env: [['API_URL', 'http://payments-api.core.local:8080']] }],
+  ['s3', 'c1', 'auth-service', 2, 2, 15, 'auth-service', '0.9.7', 256, 512, 9000, { lb: true, exec: true, env: [['TOKEN_TTL', '3600'], ['ISSUER', 'https://auth.rcss.local']] }],
+  ['s4', 'c1', 'notifications', 2, 1, 9, 'notifications', '2.2.0', 256, 512, 8081, { exec: true, deploying: '2.3.0', env: [['QUEUE_URL', 'https://sqs.us-east-1.amazonaws.com/482109375512/notify']] }],
+  ['s5', 'c2', 'report-worker', 1, 1, 31, 'report-worker', '5.0.1', 1024, 2048, 0, { exec: true, efs: ['f2', '/data/reports'], env: [['REPORT_BUCKET', 'rcss-reports']] }],
+  ['s6', 'c2', 'email-sender', 1, 1, 12, 'email-sender', '1.3.3', 256, 512, 0, { exec: true, env: [['SMTP_HOST', 'email-smtp.us-east-1.amazonaws.com']] }],
+  ['s7', 'c2', 'image-resizer', 2, 0, 6, 'image-resizer', '0.4.2', 512, 512, 8090, { exec: false, oomBelow: 1024, env: [['MAX_IMAGE_MP', '40']] }],
+  ['s8', 'c3', 'jenkins-controller', 1, 1, 58, 'jenkins', '2.479.1-lts', 2048, 4096, 8080, { lb: true, exec: true, efs: ['f1', '/var/jenkins_home'], env: [['JAVA_OPTS', '-Xmx3g']] }],
+  ['s9', 'c3', 'artifact-proxy', 1, 1, 7, 'artifact-proxy', '1.0.4', 512, 1024, 8081, { exec: true, env: [['UPSTREAM', 'https://registry.npmjs.org']] }],
+  ['s10', 'c4', 'catalog-api', 2, 2, 23, 'catalog-api', '4.1.0', 512, 1024, 8080, { lb: true, exec: true, unhealthy: 1, scaling: [2, 4, 65], env: [['CACHE_TTL', '300']] }],
+  ['s11', 'c4', 'search-indexer', 1, 1, 14, 'search-indexer', '2.0.3', 1024, 4096, 0, { exec: true, efs: ['f4', '/index'], env: [['BATCH_SIZE', '500']] }],
+  ['s12', 'c5', 'edge-nginx', 2, 2, 19, 'edge-nginx', '1.27.2', 256, 512, 443, { lb: true, exec: true, public: true, efs: ['f3', '/etc/nginx/certs'], env: [['WORKER_PROCESSES', 'auto']] }],
+  ['s13', 'c5', 'cert-renewer', 1, 1, 4, 'cert-renewer', '0.2.1', 256, 512, 0, { exec: false, efs: ['f3', '/certs'], env: [['ACME_EMAIL', 'ops@rcss.local']] }],
+  ['s14', 'c6', 'web', 1, 1, 33, 'web', '3.5.0-rc.1', 256, 512, 3000, { lb: true, exec: true, env: [['API_URL', 'http://api.staging.local:8080']] }],
+  ['s15', 'c6', 'api', 1, 1, 21, 'api', '1.19.0-rc.2', 512, 1024, 8080, { lb: true, exec: true, env: [['NODE_ENV', 'staging']] }],
+];
+
+const SERVICES = {};
+const TASKS = {};
+function bumpTag(tag, d) {
+  const m = tag.match(/^(\d+)\.(\d+)\.(\d+)(.*)$/);
+  if (!m) return tag;
+  return `${m[1]}.${m[2]}.${Math.max(0, +m[3] + d)}${m[4]}`;
+}
+function ecrTags(s) {
+  const base = s.tag;
+  const list = [bumpTag(base, 2), bumpTag(base, 1), base, bumpTag(base, -1), bumpTag(base, -2)];
+  if (s.deployingTag) list.unshift(s.deployingTag);
+  return [...new Set(list)];
+}
+function series(n, base, spread, trend = 0) {
+  const out = []; let v = base;
+  for (let i = 0; i < n; i++) {
+    v += (rnd() - 0.5) * spread + trend;
+    v = Math.max(1, Math.min(98, v * 0.85 + base * 0.15));
+    out.push(v);
+  }
+  return out;
+}
+function buildTd(s, tag, cpu, mem, env) {
+  const cl = CLUSTERS[s.cluster], acct = ACCOUNTS[cl.acct], region = REGIONS[cl.region];
+  const main = {
+    name: s.name,
+    image: `${acct.number}.dkr.ecr.${region}.amazonaws.com/${s.repo}:${tag}`,
+    essential: true,
+    portMappings: s.port ? [{ containerPort: s.port, protocol: 'tcp' }] : [],
+    environment: env.map(([name, value]) => ({ name, value })),
+    mountPoints: s.efs ? [{ sourceVolume: EFS[s.efs[0]].name, containerPath: s.efs[1], readOnly: false }] : [],
+    logConfiguration: { logDriver: 'awslogs', options: { 'awslogs-group': `/ecs/${cl.name}/${s.name}`, 'awslogs-region': region, 'awslogs-stream-prefix': 'ecs' } },
+  };
+  if (s.port) main.healthCheck = { command: ['CMD-SHELL', `wget -qO- http://localhost:${s.port}/health || exit 1`], interval: 30, timeout: 5, retries: 3 };
+  const td = {
+    family: s.name,
+    taskRoleArn: `arn:aws:iam::${acct.number}:role/${s.name}-task`,
+    executionRoleArn: `arn:aws:iam::${acct.number}:role/ecs-task-execution`,
+    networkMode: 'awsvpc',
+    requiresCompatibilities: ['FARGATE'],
+    cpu: String(cpu),
+    memory: String(mem),
+    containerDefinitions: [main],
+    volumes: [],
+  };
+  if (s.sidecar) td.containerDefinitions.push({ name: 'otel-collector', image: 'public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0', essential: false, portMappings: [], environment: [], mountPoints: [], logConfiguration: main.logConfiguration });
+  if (s.efs) {
+    const f = EFS[s.efs[0]];
+    td.volumes.push({ name: f.name, efsVolumeConfiguration: { fileSystemId: f.fsId, transitEncryption: 'ENABLED', authorizationConfig: { accessPointId: f.aps[0] ? f.aps[0].id : null, iam: 'ENABLED' } } });
+  }
+  return td;
+}
+const tdImageTag = td => td.containerDefinitions[0].image.split(':').pop();
+const subnetsOf = s => {
+  const v = VPCS[CLUSTERS[s.cluster].vpc];
+  const want = s.public ? 'Public' : 'Private';
+  return v.subnets.filter(n => n.type === want);
+};
+function ipIn(subnet) {
+  const p = subnet.cidr.split('/')[0].split('.');
+  return `${p[0]}.${p[1]}.${p[2]}.${10 + Math.floor(rnd() * 200)}`;
+}
+function newTask(s, rev, idx, opts = {}) {
+  const subs = subnetsOf(s);
+  const sub = subs[idx % subs.length];
+  const t = {
+    id: hex(32), service: s.id, cluster: s.cluster, subnet: sub.id, az: sub.az, ip: ipIn(sub),
+    status: opts.status || 'RUNNING', health: opts.health || (s.port ? 'HEALTHY' : 'UNKNOWN'), rev,
+    started: opts.started || Date.now(), stopped: opts.stoppedAt || null, reason: opts.reason || null, exit: opts.exit ?? null,
+    cpu: 8 + rnd() * 45, mem: 25 + rnd() * 45, launch: rnd() > 0.85 ? 'FARGATE_SPOT' : 'FARGATE',
+  };
+  TASKS[t.id] = t;
+  return t;
+}
+for (const [id, cluster, name, desired, running, rev, repo, tag, cpu, mem, port, o] of SERVICE_SRC) {
+  const s = {
+    id, cluster, name, desired, rev, repo, tag, cpu, mem, port, label: null,
+    lb: !!o.lb, exec: !!o.exec, sidecar: !!o.sidecar, efs: o.efs || null, public: !!o.public,
+    scaling: o.scaling ? { min: o.scaling[0], max: o.scaling[1], target: o.scaling[2] } : null,
+    oomBelow: o.oomBelow || 0, unhealthyTasks: o.unhealthy || 0, state: null, deploy: null, ops: [], timer: null,
+    cpuSeries: series(72, running ? 18 + rnd() * 30 : 2, 9),
+    memSeries: series(72, running ? 35 + rnd() * 30 : 2, 5),
+    netIn: series(72, 20 + rnd() * 20, 14), netOut: series(72, 12 + rnd() * 15, 10),
+    deployingTag: o.deploying || null,
+  };
+  if (!running) { s.cpuSeries = s.cpuSeries.map(() => 0); s.memSeries = s.memSeries.map(() => 0); }
+  const env = o.env || [];
+  s.revisions = [];
+  const histTags = [bumpTag(tag, -2), bumpTag(tag, -1), tag];
+  histTags.forEach((tg, i) => {
+    const r = rev - (2 - i);
+    s.revisions.push({ rev: r, td: buildTd(s, tg, cpu, mem, env), at: NOW - (2 - i) * 4 * 86400e3 - rnd() * 86400e3, by: i === 2 ? 'terraform (TerraDuckTel)' : 'terraform (TerraDuckTel)', deployedEver: true });
+  });
+  if (o.deploying) s.revisions.push({ rev: rev + 1, td: buildTd(s, o.deploying, cpu, mem, env), at: NOW - 3 * MIN, by: 'terraform (TerraDuckTel)', deployedEver: true });
+  SERVICES[id] = s;
+  for (let i = 0; i < running; i++) {
+    newTask(s, rev, i, { started: NOW - (2 + rnd() * 70) * 3600e3, health: o.unhealthy && i < o.unhealthy ? 'UNHEALTHY' : undefined });
+  }
+  if (o.oomBelow) {
+    for (let i = 0; i < 6; i++) {
+      const at = NOW - (i * 3.5 + 0.3) * 3600e3;
+      newTask(s, rev, i, { status: 'STOPPED', started: at - 70e3, stoppedAt: at, reason: 'OutOfMemoryError: Container killed due to memory usage', exit: 137, health: 'UNKNOWN' });
+    }
+  } else {
+    const at = NOW - (20 + rnd() * 40) * 3600e3;
+    newTask(s, rev - 1, 0, { status: 'STOPPED', started: at - 86400e3, stoppedAt: at, reason: 'Scaling activity initiated by (deployment ecs-svc/' + hex(19).replace(/[a-f]/g, '7') + ')', exit: 0, health: 'UNKNOWN' });
+    for (let i = 0; i < (o.unhealthy ? 3 : 0); i++) {
+      const hat = NOW - (1 + i * 2.5) * 3600e3;
+      newTask(s, rev, i, { status: 'STOPPED', started: hat - 3 * 3600e3, stoppedAt: hat, reason: `Task failed ELB health checks in (target-group ${name}-tg)`, exit: 143, health: 'UNHEALTHY' });
+    }
+  }
+  // operations log seed: Harbormaster actions + ECS service events
+  const ev = (mins, src, actor, text) => s.ops.push({ ts: NOW - mins * MIN, src, actor, text });
+  ev(60 * 30, 'ECS', 'ECS', `(service ${name}) has reached a steady state.`);
+  ev(60 * 26, 'Harbormaster', 'pavel', `Restarted service (force new deployment) on revision ${rev}.`);
+  if (port && o.lb) ev(60 * 26 - 3, 'ECS', 'ECS', `(service ${name}) registered 1 targets in (target-group ${name}-tg).`);
+  ev(60 * 26 - 6, 'ECS', 'ECS', `(service ${name}) has reached a steady state.`);
+  if (o.oomBelow) {
+    ev(25, 'ECS', 'ECS', `(service ${name}) has started 2 tasks: (task ${hex(8)}) (task ${hex(8)}).`);
+    ev(19, 'ECS', 'ECS', `(service ${name}) has stopped 2 running tasks: (task ${hex(8)}) (task ${hex(8)}). Reason: OutOfMemoryError.`);
+    ev(18, 'ECS', 'ECS', `(service ${name}) is unable to consistently start tasks successfully.`);
+  }
+  if (o.unhealthy) ev(42, 'ECS', 'ECS', `(service ${name}) (port ${port}) is unhealthy in (target-group ${name}-tg) due to (reason Health checks failed with these codes: [503]).`);
+}
+// The notifications service is mid-rollout when the page opens.
+{
+  const s = SERVICES.s4;
+  s.ops.push({ ts: NOW - 3 * MIN, src: 'ECS', actor: 'ECS', text: `(service notifications) has started 1 tasks: (task ${hex(8)}).` });
+}
+Object.values(SERVICES).forEach(s => s.ops.sort((a, b) => b.ts - a.ts));
+
+/* ---------- app state ---------- */
+const S = {
+  fAcct: 'all', fRegion: 'all', metricsRange: '24h', tasksFilter: 'problems',
+  drafts: {}, logs: {}, terms: {}, showEcsEvents: true, listView: 'cards', treeClosed: new Set(),
+};
+try { const t = localStorage.getItem('harbormaster-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) { /* storage unavailable */ }
+
+const servicesIn = cid => Object.values(SERVICES).filter(s => s.cluster === cid && canView(s));
+const tasksOf = sid => Object.values(TASKS).filter(t => t.service === sid);
+const running = sid => tasksOf(sid).filter(t => t.status === 'RUNNING');
+const inFilter = c => (S.fAcct === 'all' || c.acct === S.fAcct) && (S.fRegion === 'all' || c.region === S.fRegion);
+const visibleClusters = () => Object.values(CLUSTERS).filter(c => inFilter(c) && canSeeCluster(c));
+const tdOf = s => s.revisions.find(r => r.rev === s.rev).td;
+const latestRev = s => Math.max(...s.revisions.map(r => r.rev));
+
+/* ---------- users, tags and permissions ---------- */
+const ACTIONS = [['view', 'View', 'V'], ['logs', 'Logs', 'L'], ['operate', 'Operate', 'O'], ['deploy', 'Deploy', 'D'], ['edit', 'Edit task definition', 'E'], ['terminal', 'Terminal', 'T']];
+const ACTION_NAME = Object.fromEntries(ACTIONS.map(a => [a[0], a[1]]));
+const PRESETS = { None: [], Viewer: ['view'], Operator: ['view', 'logs', 'operate'], Deployer: ['view', 'logs', 'operate', 'deploy', 'edit'], Full: ACTIONS.map(a => a[0]) };
+const TAG_COLORS = ['neutral', 'red', 'amber', 'blue', 'violet', 'green'];
+const TAGS = [{ name: 'Dev', color: 'neutral', builtin: true }, { name: 'Staging', color: 'amber' }, { name: 'Prod', color: 'red' }];
+const USERS = {
+  pavel: { name: 'pavel', admin: true, lastSeen: NOW - 2 * MIN, perms: {} },
+  dana: { name: 'dana', admin: false, lastSeen: NOW - 50 * MIN, perms: { Dev: PRESETS.Full.slice(), Staging: PRESETS.Deployer.slice(), Prod: ['view', 'logs'] } },
+  omer: { name: 'omer', admin: false, lastSeen: NOW - 26 * 3600e3, perms: { Dev: PRESETS.Operator.slice(), Staging: ['view'] } },
+  oncall: { name: 'oncall', admin: false, lastSeen: NOW - 3 * 86400e3, perms: { Staging: ['view', 'logs', 'operate', 'terminal'], Prod: ['view', 'logs', 'operate', 'terminal'] } },
+};
+const AUDIT = [
+  { ts: NOW - 2 * MIN, actor: 'pavel', text: 'Signed in.' },
+  { ts: NOW - 3 * 3600e3, actor: 'pavel', text: 'Gave oncall Terminal on Prod.' },
+  { ts: NOW - 5 * 3600e3, actor: 'pavel', text: 'Tagged cluster staging-web as Staging (was Dev).' },
+  { ts: NOW - 2 * 86400e3, actor: 'pavel', text: 'Created user omer with Operator on Dev.' },
+  { ts: NOW - 6 * 86400e3, actor: 'pavel', text: 'Created tag Prod.' },
+];
+let currentUser = 'pavel';
+const me = () => USERS[currentUser];
+const clusterTag = c => c.label || 'Dev';
+const serviceTag = s => s.label || clusterTag(CLUSTERS[s.cluster]);
+const permsFor = (u, tag) => u.perms[tag] || [];
+function can(action, s) {
+  const u = me();
+  if (u.admin) return true;
+  const p = permsFor(u, serviceTag(s));
+  return p.includes('view') && p.includes(action);
+}
+const canView = s => can('view', s);
+const canSeeCluster = c => me().admin || Object.values(SERVICES).some(s => s.cluster === c.id && canView(s));
+const seenTasks = () => Object.values(TASKS).filter(t => canView(SERVICES[t.service]));
+const efsUsers = f => Object.values(SERVICES).filter(s => s.efs && s.efs[0] === f.id && canView(s));
+const visibleEfs = () => Object.values(EFS).filter(f => inFilter(f) && (me().admin || efsUsers(f).length));
+// Attribute string that disables a control the current user may not use, with the reason as a tooltip.
+const gate = (action, s) => can(action, s) ? '' : `disabled title="You need ${ACTION_NAME[action]} on ${esc(serviceTag(s))}"`;
+const tagColor = name => (TAGS.find(t => t.name === name) || { color: 'neutral' }).color;
+const tagChip = (name, inherited = false) => `<span class="label c-${tagColor(name)} ${inherited ? 'inh' : ''}">${esc(name)}</span>`;
+const labelHtml = (x, kind) => {
+  const isSvc = kind === 'service';
+  const name = isSvc ? serviceTag(x) : clusterTag(x);
+  const inherited = isSvc && !x.label;
+  const title = inherited ? `Inherited from cluster ${CLUSTERS[x.cluster].name}` : `Tag set on this ${kind}`;
+  const cls = `label c-${tagColor(name)} ${inherited ? 'inh' : ''}`;
+  if (!me().admin) return `<span class="${cls}" title="${esc(title)}">${esc(name)}</span>`;
+  return `<button class="${cls}" data-action="edit-label" data-kind="${kind}" data-id="${x.id}" title="${esc(title)}. Click to change.">${esc(name)} ▾</button>`;
+};
+function addAudit(text) { AUDIT.unshift({ ts: Date.now(), actor: me().name, text }); }
+const noAccess = text => `<div class="card empty" style="padding:48px;display:grid;gap:6px;justify-items:center"><h2>No access</h2><p class="muted">${text}</p></div>`;
+const lockPanel = (action, s) => `<div class="banner warn"><span>You need <strong>${ACTION_NAME[action]}</strong> on ${tagChip(serviceTag(s))} to use this. Ask a global admin to change your permissions.</span></div>`;
+
+// Chart history for the example data: task counts, task stops, deployments, load balancer and EFS metrics.
+for (const s of Object.values(SERVICES)) {
+  const run0 = running(s.id).length;
+  s.taskHist = Array.from({ length: 72 }, (_, i) => s.oomBelow ? (i < 50 ? s.desired : Math.round(rnd() * 0.7)) : Math.max(0, s.desired - (rnd() > 0.94 ? 1 : 0)));
+  s.taskHist[71] = run0;
+  s.stopHist = Array.from({ length: 24 }, (_, i) => ({ ok: rnd() > 0.9 ? 1 : 0, err: s.oomBelow && i > 3 ? (rnd() > 0.5 ? 1 : 0) : s.unhealthyTasks && i > 20 ? 1 : 0 }));
+  s.deploys = s.revisions.filter(r => r.rev <= s.rev).map(r => ({ ts: r.at + 9 * MIN, rev: r.rev, ok: true, kind: 'deploy' }));
+  s.deploys.push({ ts: NOW - 26 * 3600e3, rev: s.rev, ok: true, kind: 'restart' });
+  if (s.oomBelow) s.deploys.push({ ts: NOW - 30 * 3600e3, rev: s.rev - 1, ok: false, kind: 'deploy' });
+  s.deploys.sort((a, b) => a.ts - b.ts);
+  if (s.lb) {
+    const scale = 0.6 + rnd() * 3;
+    s.rpm = series(72, 40 + rnd() * 20, 16).map((v, i) => v * scale * (0.6 + 0.4 * Math.sin((i / 72) * Math.PI * 2 - 1.2) + 0.4) * 10);
+    s.p95 = series(72, 30, 9).map(v => 35 + v * (s.unhealthyTasks ? 6 : 2.4));
+    s.err5xx = Array.from({ length: 24 }, (_, i) => s.unhealthyTasks && i > 19 ? 6 + Math.floor(rnd() * 14) : rnd() > 0.85 ? 1 + Math.floor(rnd() * 3) : 0);
+  }
+}
+for (const f of Object.values(EFS)) {
+  f.sizeHist = Array.from({ length: 30 }, (_, i) => f.sizeGiB * (0.78 + 0.22 * (i / 29)) * (1 + (rnd() - 0.5) * 0.02));
+  f.sizeHist[29] = f.sizeGiB;
+  f.thru = series(72, f.sizeGiB > 10 ? 25 : 4, 12);
+}
+
+function status(s) {
+  const run = running(s.id).length;
+  if (s.state === 'deploying') return { k: 'info', t: 'Deploying' };
+  if (s.desired === 0) return { k: 'mute', t: 'Scaled to 0' };
+  if (run === 0) return { k: 'bad', t: 'Failing' };
+  if (run < s.desired) return { k: 'warn', t: 'Degraded' };
+  if (running(s.id).some(t => t.health === 'UNHEALTHY')) return { k: 'warn', t: 'Unhealthy task' };
+  return { k: 'ok', t: 'Steady' };
+}
+const pill = st => `<span class="pill ${st.k}">${esc(st.t)}</span>`;
+function clusterStatus(c) {
+  const sts = servicesIn(c.id).map(status);
+  if (sts.some(x => x.k === 'bad')) return { k: 'bad', t: 'Needs attention' };
+  if (sts.some(x => x.k === 'warn')) return { k: 'warn', t: 'Degraded' };
+  if (sts.some(x => x.k === 'info')) return { k: 'info', t: 'Deploying' };
+  return { k: 'ok', t: 'Healthy' };
+}
+
+function alerts() {
+  const out = [];
+  for (const s of Object.values(SERVICES)) {
+    const c = CLUSTERS[s.cluster];
+    if (!inFilter(c) || !canView(s)) continue;
+    const run = running(s.id).length;
+    const stopped24 = tasksOf(s.id).filter(t => t.status === 'STOPPED' && t.exit && Date.now() - t.stopped < 86400e3);
+    if (s.state !== 'deploying' && s.desired > 0 && run === 0) {
+      const last = stopped24.sort((a, b) => b.stopped - a.stopped)[0];
+      out.push({ k: 'bad', s, title: `${s.name}: 0 of ${s.desired} tasks running`, text: last ? `Last task stopped ${ago(last.stopped)}: ${last.reason} (exit ${last.exit})` : 'Tasks fail to start.', ts: last ? last.stopped : Date.now() });
+    } else if (s.state !== 'deploying' && run < s.desired) {
+      out.push({ k: 'warn', s, title: `${s.name}: ${run} of ${s.desired} tasks running`, text: 'ECS is starting replacement tasks.', ts: Date.now() });
+    }
+    if (stopped24.length >= 3) out.push({ k: 'warn', s, title: `${s.name}: restart loop`, text: `${stopped24.length} tasks stopped with an error in the last 24 h.`, ts: stopped24[0].stopped });
+    const unh = running(s.id).filter(t => t.health === 'UNHEALTHY');
+    if (unh.length) out.push({ k: 'warn', s, title: `${s.name}: ${unh.length} unhealthy task`, text: 'Target group health checks fail with HTTP 503.', ts: NOW - 42 * MIN });
+    if (s.state === 'deploying') out.push({ k: 'info', s, title: `${s.name}: rolling out revision ${s.deploy.to}`, text: `${s.deploy.newRunning} of ${s.desired} new tasks running.`, ts: s.deploy.started });
+  }
+  const order = { bad: 0, warn: 1, info: 2 };
+  return out.sort((a, b) => order[a.k] - order[b.k]);
+}
+
+/* ---------- charts ---------- */
+function spark(values, color = 'var(--accent)', { w = 110, h = 26, fluid = false } = {}) {
+  const max = Math.max(10, ...values);
+  const pts = values.map((v, i) => [i * (w / (values.length - 1)), h - 2 - (v / max) * (h - 4)]);
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const end = pts[pts.length - 1];
+  const size = fluid ? `width="100%" height="${h}" preserveAspectRatio="none"` : `width="${w}" height="${h}"`;
+  return `<svg ${size} viewBox="0 0 ${w} ${h}" aria-hidden="true" style="display:block"><path d="${d} L ${w} ${h} L 0 ${h} Z" fill="${color}" opacity="0.13"/><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>${fluid ? '' : `<circle cx="${end[0]}" cy="${end[1]}" r="2.2" fill="${color}"/>`}</svg>`;
+}
+// Panels keep a fixed pixel height at any width: the plot stretches, labels are HTML so text never scales.
+function chart(list, { unit = '%', max = 100, xLabels = [], h = 130, marks = [] } = {}) {
+  const W = 1000, H = 100;
+  let svg = `<svg class="plot" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`;
+  for (let i = 0; i <= 4; i++) svg += `<line x1="0" x2="${W}" y1="${H - (i / 4) * H}" y2="${H - (i / 4) * H}" class="gl"/>`;
+  for (const m of marks) svg += `<line x1="${m.at * W}" x2="${m.at * W}" y1="0" y2="${H}" class="mk"/>`;
+  for (const { values, color } of list) {
+    const pts = values.map((v, i) => `${((i / (values.length - 1)) * W).toFixed(1)} ${(H - (Math.min(v, max) / max) * H).toFixed(2)}`);
+    svg += `<path d="M${pts.join(' L')} L${W} ${H} L0 ${H} Z" fill="${color}" opacity="${list.length > 2 ? 0.03 : 0.08}"/><path d="M${pts.join(' L')}" fill="none" stroke="${color}" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`;
+  }
+  svg += '</svg>';
+  const ys = [0, 2, 4].map(i => `<span style="top:${100 - (i / 4) * 100}%">${fmtNum((max * i) / 4)}${unit}</span>`).join('');
+  const ml = marks.map(m => `<span class="mkl" style="left:${m.at * 100}%">${esc(m.label)}</span>`).join('');
+  return `<div class="pchart" style="height:${h}px"><div class="py">${ys}</div><div class="pplot">${svg}${ml}</div><div></div><div class="px">${xLabels.map(l => `<span>${esc(l)}</span>`).join('')}</div></div>`;
+}
+const fmtNum = v => v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : v >= 10 || v === 0 ? Math.round(v) : +v.toFixed(1);
+const niceMax = v => { const p = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1)))); return Math.ceil(v / p) * p; };
+const sum = a => a.reduce((x, y) => x + y, 0);
+const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)'];
+const STATUS_COLOR = { ok: 'var(--success)', warn: 'var(--warning)', bad: 'var(--danger)', info: 'var(--info)', mute: 'var(--border-strong)' };
+const legend = items => `<div class="legend" style="flex-wrap:wrap">${items.map(i => `<span><i style="background:${i.color}"></i>${esc(i.name)}</span>`).join('')}</div>`;
+function donut(segs, { label = '', sub = '' } = {}) {
+  const total = sum(segs.map(s => s.v)) || 1, r = 52, C = 2 * Math.PI * r;
+  let off = 0;
+  const arcs = segs.filter(s => s.v > 0).map(s => {
+    const len = (s.v / total) * C;
+    const el = `<circle r="${r}" cx="66" cy="66" fill="none" stroke="${s.color}" stroke-width="14" stroke-dasharray="${Math.max(0, len - 2)} ${C - len + 2}" stroke-dashoffset="${-off}" transform="rotate(-90 66 66)"><title>${esc(s.name)}: ${s.v}</title></circle>`;
+    off += len;
+    return el;
+  }).join('');
+  return `<div class="donut-wrap"><svg width="88" height="88" viewBox="0 0 132 132" role="img"><circle r="${r}" cx="66" cy="66" fill="none" stroke="var(--muted-soft)" stroke-width="14"/>${arcs}<text x="66" y="68" text-anchor="middle" class="donut-v">${esc(label)}</text><text x="66" y="86" text-anchor="middle" class="donut-s">${esc(sub)}</text></svg>
+    <div class="donut-legend">${segs.map(s => `<div><i style="background:${s.color}"></i><span>${esc(s.name)}</span><b>${s.v}</b></div>`).join('')}</div></div>`;
+}
+// items: [{ name, href?, sub?, v | parts:[{v,color}], ghost?, label? }]
+function hbars(items, { max, unit = '' } = {}) {
+  const m = max || Math.max(1, ...items.map(i => Math.max(i.ghost || 0, i.parts ? sum(i.parts.map(p => p.v)) : i.v)));
+  if (!items.length) return '<div class="muted small">Nothing to show.</div>';
+  return `<div class="hbars">${items.map(i => `<div class="hbar"><div class="hbar-l">${i.href ? `<a href="${i.href}">${esc(i.name)}</a>` : `<span>${esc(i.name)}</span>`}${i.sub ? `<span class="muted small">${esc(i.sub)}</span>` : ''}</div>
+    <div class="hbar-track">${(i.parts || [{ v: i.v, color: i.color || 'var(--accent)' }]).filter(p => p.v > 0).map(p => `<span style="width:${(p.v / m) * 100}%;background:${p.color}"></span>`).join('')}${i.ghost ? `<em style="left:calc(${(i.ghost / m) * 100}% - 1px)" title="desired"></em>` : ''}</div>
+    <div class="hbar-v">${i.label ?? fmtNum(i.v) + unit}</div></div>`).join('')}</div>`;
+}
+// cols: [{ parts:[{v,color}], title }]; xLabels: [[index, text]]
+function vbars(cols, { h = 100, xLabels = [], unit = '' } = {}) {
+  const W = 1000, H = 100, top = niceMax(Math.max(2, ...cols.map(c => sum(c.parts.map(p => p.v))))), bw = W / cols.length;
+  let svg = `<svg class="plot" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`;
+  for (let i = 0; i <= 2; i++) svg += `<line x1="0" x2="${W}" y1="${H - (i / 2) * H}" y2="${H - (i / 2) * H}" class="gl"/>`;
+  cols.forEach((c, i) => {
+    let y = H;
+    c.parts.forEach(p => {
+      const ph = (p.v / top) * H;
+      if (ph <= 0) return;
+      y -= ph;
+      svg += `<rect x="${(i * bw + bw * 0.18).toFixed(1)}" y="${y.toFixed(2)}" width="${(bw * 0.64).toFixed(1)}" height="${ph.toFixed(2)}" fill="${p.color}"><title>${esc(c.title || '')}</title></rect>`;
+    });
+  });
+  svg += '</svg>';
+  const ys = [0, 1, 2].map(i => `<span style="top:${100 - (i / 2) * 100}%">${fmtNum((top * i) / 2)}${unit}</span>`).join('');
+  const xs = xLabels.map(([i, l]) => `<span style="position:absolute;left:${((i + 0.5) / cols.length) * 100}%;transform:translateX(-50%)">${esc(l)}</span>`).join('');
+  return `<div class="pchart" style="height:${h}px"><div class="py">${ys}</div><div class="pplot">${svg}</div><div></div><div class="px" style="position:relative">${xs}</div></div>`;
+}
+const card = (title, body, right = '') => `<div class="card"><div class="card-head"><h2>${title}</h2>${right ? `<div class="right muted small">${right}</div>` : ''}</div><div class="card-body">${body}</div></div>`;
+const XL24 = ['24 h ago', '18 h', '12 h', '6 h', 'now'];
+const dayLabel = ts => new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' });
+function deployMarks(s, hours) {
+  return s.deploys.filter(d => NOW - d.ts < hours * 3600e3 || d.ts > NOW).map(d => ({ at: Math.min(1, 1 - (Date.now() - d.ts) / (hours * 3600e3)), label: d.kind === 'restart' ? 'restart' : ':' + d.rev }));
+}
+function statusSplit(svcs) {
+  const order = ['ok', 'info', 'warn', 'bad', 'mute'];
+  const counts = order.map(k => [k, svcs.filter(s => status(s).k === k).length]).filter(x => x[1]);
+  return `<div class="split">${counts.map(([k, n]) => `<span style="flex:${n};background:${STATUS_COLOR[k]}" title="${n}"></span>`).join('')}</div>`;
+}
+function taskSlots(s) {
+  const run = running(s.id);
+  const cells = run.map(t => `<span class="slot" style="background:${s.state === 'deploying' && t.rev === s.deploy.to ? 'var(--info)' : t.health === 'UNHEALTHY' ? 'var(--warning)' : 'var(--success)'}" title="${t.id.slice(0, 12)} · ${t.ip}"></span>`);
+  for (let i = run.length; i < s.desired; i++) cells.push('<span class="slot empty" title="missing task"></span>');
+  return `<div class="slots">${cells.join('')}</div>`;
+}
+function stopReason(t) {
+  if (/OutOfMemory/.test(t.reason)) return 'Out of memory (exit 137)';
+  if (/health checks/.test(t.reason)) return 'Failed load balancer health checks';
+  if (/via Harbormaster/.test(t.reason)) return 'Stopped by a user';
+  if (/desired count/.test(t.reason)) return 'Scaled in';
+  return 'Replaced by a deployment';
+}
+const REASON_COLOR = { 'Out of memory (exit 137)': 'var(--danger)', 'Failed load balancer health checks': 'var(--warning)', 'Stopped by a user': 'var(--series-3)', 'Scaled in': 'var(--series-4)', 'Replaced by a deployment': 'var(--border-strong)' };
+function reasonBars(tasks) {
+  const by = {};
+  tasks.filter(t => t.status === 'STOPPED').forEach(t => { const r = stopReason(t); by[r] = (by[r] || 0) + 1; });
+  return hbars(Object.entries(by).sort((a, b) => b[1] - a[1]).map(([name, v]) => ({ name, v, color: REASON_COLOR[name] })));
+}
+
+/* ---------- shell ---------- */
+function parseRoute() {
+  const h = decodeURIComponent(location.hash.slice(1)) || 'overview';
+  const p = h.split('-');
+  if (p[0] === 'svc' && SERVICES[p[1]]) return { view: 'service', id: p[1], tab: p[2] || 'overview' };
+  if (p[0] === 'cl' && CLUSTERS[p[1]]) return { view: 'cluster', id: p[1] };
+  if (p[0] === 'net') return { view: 'net', acct: p[1], region: p[2], vpc: p[3] };
+  if (['overview', 'clusters', 'tasks', 'storage', 'accounts', 'users', 'tags', 'audit', 'access'].includes(h)) return { view: h };
+  return { view: 'overview' };
+}
+function renderNav(r) {
+  const nAlerts = alerts().filter(a => a.k === 'bad').length;
+  const nRun = seenTasks().filter(t => t.status === 'RUNNING' && inFilter(CLUSTERS[t.cluster])).length;
+  const items = [
+    ['overview', 'Overview', nAlerts ? `<span class="count bad">${nAlerts}</span>` : ''],
+    ['clusters', 'Clusters', `<span class="count">${visibleClusters().length}</span>`],
+    ['tasks', 'Tasks', `<span class="count">${nRun}</span>`],
+    ['net', 'Networks', ''],
+    ['storage', 'Storage', `<span class="count">${visibleEfs().length}</span>`],
+  ];
+  const active = r.view === 'service' || r.view === 'cluster' ? 'clusters' : r.view;
+  let html = items.map(([k, t, c]) => `<a href="#${k}" class="${active === k ? 'active' : ''}">${t}${c}</a>`).join('');
+  const link = (k, t, c = '') => `<a href="#${k}" class="${active === k ? 'active' : ''}">${t}${c ? `<span class="count">${c}</span>` : ''}</a>`;
+  if (me().admin) html += `<div class="nav-section">Admin</div>${link('users', 'Users and permissions', Object.keys(USERS).length)}${link('tags', 'Tags', TAGS.length)}${link('accounts', 'AWS accounts', Object.keys(ACCOUNTS).length)}${link('audit', 'Audit log')}`;
+  else html += `<div class="nav-section">Account</div>${link('access', 'My access')}`;
+  $('#nav').innerHTML = html;
+  $('#side-user').innerHTML = `<div>Signed in as <strong>${esc(me().name)}</strong> · ${me().admin ? 'Global admin' : 'User'}</div>
+    <div class="toolbar" style="gap:6px"><select class="ctl sm" id="view-as" aria-label="Switch user (mockup)" title="Mockup: switch user without signing in">${Object.keys(USERS).map(n => `<option ${n === currentUser ? 'selected' : ''}>${n}</option>`).join('')}</select><button class="btn sm" data-action="sign-out">Sign out</button></div>`;
+}
+function crumbs(parts) {
+  $('#crumbs').innerHTML = parts.map((p, i) => i === parts.length - 1 ? `<span class="here">${esc(p[0])}</span>` : `<a href="${p[1]}">${esc(p[0])}</a><span class="sep">/</span>`).join('');
+}
+function renderFilters() {
+  $('#f-acct').innerHTML = `<option value="all">All accounts</option>` + Object.values(ACCOUNTS).map(a => `<option value="${a.id}" ${S.fAcct === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+  $('#f-region').innerHTML = `<option value="all">All regions</option>` + Object.entries(REGIONS).map(([k, v]) => `<option value="${k}" ${S.fRegion === k ? 'selected' : ''}>${v}</option>`).join('');
+}
+
+let route = parseRoute();
+function render() {
+  route = parseRoute();
+  renderNav(route);
+  const views = { overview: vOverview, clusters: vClusters, cluster: vCluster, service: vService, tasks: vTasks, net: vNet, storage: vStorage, accounts: vAccounts, users: vUsers, tags: vTags, audit: vAudit, access: vAccess };
+  $('#content').innerHTML = views[route.view](route);
+  afterRender();
+}
+function rerenderIfShowing(sid) {
+  const r = parseRoute();
+  if (document.querySelector('.dlg-backdrop')) return;
+  if (r.view === 'service' && r.id === sid && ['config', 'terminal', 'logs'].includes(r.tab)) return;
+  if (r.view === 'service' && r.id !== sid) return;
+  const y = $('#content').scrollTop;
+  render();
+  $('#content').scrollTop = y;
+}
+
+/* ---------- overview ---------- */
+function vOverview() {
+  crumbs([['Overview']]);
+  const cls = visibleClusters();
+  const svcs = cls.flatMap(c => servicesIn(c.id));
+  const desired = sum(svcs.map(s => s.desired));
+  const run = sum(svcs.map(s => running(s.id).length));
+  const tasks = seenTasks().filter(t => inFilter(CLUSTERS[t.cluster]));
+  const unhealthy = tasks.filter(t => t.status === 'RUNNING' && t.health === 'UNHEALTHY').length;
+  const al = alerts();
+  const needs = svcs.filter(s => ['bad', 'warn'].includes(status(s).k)).length;
+  const feed = svcs.flatMap(s => s.ops.map(o => ({ ...o, s }))).sort((a, b) => b.ts - a.ts).slice(0, 10);
+  const accts = new Set(cls.map(c => c.acct)).size;
+  const withInsights = cls.filter(c => c.insights);
+  const byCluster = key => withInsights.map((c, i) => ({ name: c.name, color: SERIES[i % SERIES.length], values: avgSeries(servicesIn(c.id).map(s => s[key])) }));
+  const cpuBy = byCluster('cpuSeries'), memBy = byCluster('memSeries');
+  const taskHist = svcs.length ? svcs[0].taskHist.map((_, i) => sum(svcs.map(s => s.taskHist[i]))) : [0, 0];
+  const stops = Array.from({ length: 24 }, (_, h) => {
+    const ok = sum(svcs.map(s => s.stopHist[h].ok)), err = sum(svcs.map(s => s.stopHist[h].err));
+    return { parts: [{ v: ok, color: 'var(--border-strong)' }, { v: err, color: 'var(--danger)' }], title: `${24 - h} h ago: ${ok} normal, ${err} with an error` };
+  });
+  const days = Array.from({ length: 14 }, (_, i) => NOW - (13 - i) * 86400e3);
+  const deploys = days.map(d => {
+    const inDay = svcs.flatMap(s => s.deploys).filter(x => x.ts > d - 86400e3 && x.ts <= d);
+    return { parts: [{ v: inDay.filter(x => x.ok && x.kind === 'deploy').length, color: 'var(--accent)' }, { v: inDay.filter(x => x.kind === 'restart').length, color: 'var(--series-3)' }, { v: inDay.filter(x => !x.ok).length, color: 'var(--danger)' }], title: dayLabel(d) };
+  });
+  return `
+  <div class="page-head"><div class="titles"><h1>Overview</h1><div class="meta">${accts} account${accts === 1 ? '' : 's'} · ${new Set(cls.map(c => c.region)).size} regions · polled from AWS every 5 s · last poll ${ago(NOW - 4000)}</div></div></div>
+  <div class="grid g4">
+    <div class="card tile"><div class="k">Clusters</div><div class="v">${cls.length}<small>${cls.filter(c => clusterStatus(c).k === 'ok').length} healthy</small></div>
+      <div class="dots">${cls.map(c => `<a class="dot" href="#cl-${c.id}" style="width:16px;height:16px;background:${STATUS_COLOR[clusterStatus(c).k]}" title="${esc(c.name)}: ${clusterStatus(c).t}"></a>`).join('')}</div></div>
+    <div class="card tile"><div class="k">Services</div><div class="v">${svcs.length}<small>${needs ? `<span style="color:var(--danger)">${needs} need attention</span>` : 'all steady'}</small></div>${statusSplit(svcs)}</div>
+    <div class="card tile"><div class="k">Tasks running</div><div class="v">${run}<small>of ${desired} desired · ${unhealthy} unhealthy</small></div>${spark(taskHist, 'var(--accent)', { w: 300, h: 24, fluid: true })}</div>
+    <div class="card tile"><div class="k">Average use, all services</div><div class="v">${pct(avg(svcs.map(s => last(s.cpuSeries))))}<small>CPU</small> ${pct(avg(svcs.map(s => last(s.memSeries))))}<small>memory</small></div>${spark(avgSeries(svcs.map(s => s.cpuSeries)), 'var(--series-1)', { w: 300, h: 24, fluid: true })}</div>
+  </div>
+  <div class="grid g-wide">
+    ${card('CPU by cluster, 24 h', legend(cpuBy) + chart(cpuBy, { xLabels: XL24, h: 214 }), 'Container Insights')}
+    ${card('Task health', donut([
+      { name: 'Running, healthy', v: run - unhealthy, color: 'var(--success)' },
+      { name: 'Running, unhealthy', v: unhealthy, color: 'var(--warning)' },
+      { name: 'Rolling out', v: svcs.filter(s => s.state === 'deploying').reduce((a, s) => a + s.deploy.newRunning, 0), color: 'var(--info)' },
+      { name: 'Missing (desired − running)', v: Math.max(0, desired - run), color: 'var(--danger)' },
+    ], { label: `${run}/${desired}`, sub: 'tasks running' }) + `<div style="margin-top:14px">${hbars(cls.map(c => {
+      const ss = servicesIn(c.id), r = sum(ss.map(s => running(s.id).length)), d = sum(ss.map(s => s.desired));
+      return { name: c.name, href: '#cl-' + c.id, parts: [{ v: r, color: r < d ? 'var(--warning)' : 'var(--success)' }], ghost: d, label: `${r} / ${d}` };
+    }))}</div>`, 'bar = running · line = desired')}
+  </div>
+  <div class="grid g3">
+    ${card('Memory by cluster, 24 h', chart(memBy, { xLabels: XL24, h: 110 }))}
+    ${card('Task stops per hour, 24 h', legend([{ name: 'Normal (deploy, scale)', color: 'var(--border-strong)' }, { name: 'Error exit', color: 'var(--danger)' }]) + vbars(stops, { h: 110, xLabels: [[0, '24 h ago'], [12, '12 h'], [23, 'now']] }))}
+    ${card('Deployments per day, 14 days', legend([{ name: 'Deploy', color: 'var(--accent)' }, { name: 'Restart', color: 'var(--series-3)' }, { name: 'Failed', color: 'var(--danger)' }]) + vbars(deploys, { h: 110, xLabels: [[0, dayLabel(days[0])], [7, dayLabel(days[7])], [13, 'today']] }))}
+  </div>
+  <div class="grid g-wide">
+    <div class="card"><div class="card-head"><h2>Needs attention</h2><span class="right muted small">${al.length} open</span></div>
+      ${al.length ? al.map(a => `<a class="alert-row stripe ${a.k}" href="#svc-${a.s.id}-${a.k === 'bad' ? 'tasks' : 'overview'}">${pill({ k: a.k, t: a.k === 'bad' ? 'Failing' : a.k === 'warn' ? 'Warning' : 'In progress' })}<div class="what"><strong>${esc(a.title)}</strong><span class="muted small">${esc(CLUSTERS[a.s.cluster].name)} · ${esc(a.text)}</span></div><span class="when">${ago(a.ts)}</span></a>`).join('') : '<div class="empty">Nothing needs attention.</div>'}
+    </div>
+    ${card('Why tasks stopped, 3 days', reasonBars(tasks))}
+  </div>
+  <div class="card"><div class="card-head"><h2>Live events</h2><span class="right muted small">ECS service events and actions taken in Harbormaster</span></div>
+    <div class="feed">${feed.map(f => `<div class="feed-row"><span class="muted">${ago(f.ts)}</span><span><span class="src ${f.src === 'ECS' ? 'e' : 'q'}">${f.src === 'ECS' ? 'ECS' : esc(f.actor)}</span></span><span><a href="#svc-${f.s.id}-ops"><strong>${esc(f.s.name)}</strong></a> <span class="muted">${esc(f.text)}</span></span></div>`).join('')}</div>
+  </div>`;
+}
+
+const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+const last = a => a[a.length - 1];
+const avgSeries = list => list.length ? list[0].map((_, i) => avg(list.map(l => l[i]))) : [0, 0];
+
+/* ---------- clusters ---------- */
+function viewToggle() {
+  return `<div class="seg" role="group" aria-label="View">${[['cards', 'Cards'], ['table', 'Table']].map(([k, t]) => `<button class="${S.listView === k ? 'on' : ''}" data-action="list-view" data-v="${k}">${t}</button>`).join('')}</div>`;
+}
+function clusterNumbers(c) {
+  const svcs = servicesIn(c.id);
+  const d = sum(svcs.map(s => s.desired)), r = sum(svcs.map(s => running(s.id).length));
+  const cpu = avgSeries(svcs.map(s => s.cpuSeries)), mem = avgSeries(svcs.map(s => s.memSeries));
+  const runT = seenTasks().filter(t => t.cluster === c.id && t.status === 'RUNNING');
+  const vcpu = sum(runT.map(t => SERVICES[t.service].cpu)) / 1024, gib = sum(runT.map(t => SERVICES[t.service].mem)) / 1024;
+  const spot = runT.filter(t => t.launch === 'FARGATE_SPOT').length;
+  return { svcs, d, r, cpu, mem, vcpu, gib, spot };
+}
+function vClusters() {
+  crumbs([['Clusters']]);
+  const cls = visibleClusters();
+  const head = `<div class="page-head"><div class="titles"><h1>Clusters</h1><div class="meta">Created by Terraform. The environment label is stored only in Harbormaster.</div></div><div class="actions">${viewToggle()}</div></div>`;
+  if (S.listView === 'table') {
+    return head + `<div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Cluster</th><th>Label</th><th>Status</th><th>Account</th><th>Region</th><th class="num">Services</th><th class="num">Tasks</th><th>CPU, 24 h</th><th class="num">CPU now</th><th class="num">Memory now</th></tr></thead>
+    <tbody>${cls.map(c => { const n = clusterNumbers(c); return `<tr class="link" data-go="#cl-${c.id}"><td class="name">${esc(c.name)}</td><td>${labelHtml(c, 'cluster')}</td><td>${pill(clusterStatus(c))}</td><td>${esc(ACCOUNTS[c.acct].name)}</td><td>${REGIONS[c.region]}</td><td class="num">${n.svcs.length}</td><td class="num">${n.r} / ${n.d}</td><td>${c.insights ? spark(n.cpu) : '<span class="muted small">Container Insights off</span>'}</td><td class="num">${c.insights ? pct(last(n.cpu)) : '–'}</td><td class="num">${c.insights ? pct(last(n.mem)) : '–'}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+  }
+  return head + `<div class="cards">${cls.map(c => {
+    const n = clusterNumbers(c);
+    return `<div class="card xcard" data-go="#cl-${c.id}">
+      <div class="xcard-top"><div><div class="title-row"><span class="big">${esc(c.name)}</span>${labelHtml(c, 'cluster')}</div><div class="muted small">${esc(ACCOUNTS[c.acct].name)} · ${REGIONS[c.region]} · ${esc(VPCS[c.vpc].name)}</div></div>${pill(clusterStatus(c))}</div>
+      ${c.insights ? `<div class="mini2"><div><div class="mini-k">CPU, 24 h <b>${pct(last(n.cpu))}</b></div>${spark(n.cpu, 'var(--series-1)', { w: 200, h: 30, fluid: true })}</div><div><div class="mini-k">Memory, 24 h <b>${pct(last(n.mem))}</b></div>${spark(n.mem, 'var(--series-2)', { w: 200, h: 30, fluid: true })}</div></div>` : '<div class="banner warn">Container Insights is off, so there are no CPU and memory graphs.</div>'}
+      <div><div class="mini-k">Tasks <b>${n.r} running of ${n.d}</b></div><div class="bar"><span style="width:${n.d ? (n.r / n.d) * 100 : 0}%;background:${n.r < n.d ? 'var(--warning)' : 'var(--success)'}"></span></div></div>
+      <div><div class="mini-k">Services</div><div class="dots">${n.svcs.map(s => `<span class="chip" title="${esc(status(s).t)}"><i style="background:${STATUS_COLOR[status(s).k]}"></i>${esc(s.name)}</span>`).join('')}</div></div>
+      <div class="foot-stats"><span><b>${n.vcpu.toFixed(2)}</b> vCPU</span><span><b>${n.gib.toFixed(1)}</b> GiB reserved</span><span><b>${n.r ? Math.round((n.spot / n.r) * 100) : 0}%</b> on Spot</span><span>last change ${ago(Math.max(...n.svcs.map(s => s.ops[0].ts)))}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function vCluster(r) {
+  const c = CLUSTERS[r.id];
+  crumbs([['Clusters', '#clusters'], [c.name]]);
+  if (!canSeeCluster(c)) return noAccess('You have no permissions on any service in this cluster.');
+  const n = clusterNumbers(c), svcs = n.svcs;
+  const taskHist = svcs[0].taskHist.map((_, i) => sum(svcs.map(s => s.taskHist[i])));
+  const stops = Array.from({ length: 24 }, (_, h) => ({ parts: [{ v: sum(svcs.map(s => s.stopHist[h].ok)), color: 'var(--border-strong)' }, { v: sum(svcs.map(s => s.stopHist[h].err)), color: 'var(--danger)' }], title: `${24 - h} h ago` }));
+  const marks = svcs.flatMap(s => s.deploys.filter(d => NOW - d.ts < 24 * 3600e3 && d.kind === 'deploy').map(d => ({ at: 1 - (Date.now() - d.ts) / (24 * 3600e3), label: s.name.split('-')[0] + ':' + d.rev })));
+  const svcCards = svcs.map(s => {
+    const td = tdOf(s);
+    return `<div class="card xcard" data-go="#svc-${s.id}-overview">
+      <div class="xcard-top"><div><div class="title-row"><span class="big">${esc(s.name)}</span>${labelHtml(s, 'service')}</div><div class="muted small mono">:${s.rev} · ${esc(tdImageTag(td))}${latestRev(s) > s.rev && s.state !== 'deploying' ? ` · :${latestRev(s)} not deployed` : ''}</div></div>${pill(status(s))}</div>
+      ${c.insights ? `<div class="mini2"><div><div class="mini-k">CPU <b>${pct(last(s.cpuSeries))}</b></div>${spark(s.cpuSeries, 'var(--series-1)', { w: 200, h: 28, fluid: true })}</div><div><div class="mini-k">Memory <b>${pct(last(s.memSeries))}</b></div>${spark(s.memSeries, 'var(--series-2)', { w: 200, h: 28, fluid: true })}</div></div>` : ''}
+      <div><div class="mini-k">Tasks <b>${running(s.id).length} / ${s.desired}</b></div>${taskSlots(s)}</div>
+      <div class="foot-stats">${s.lb ? `<span><b>${fmtNum(last(s.rpm))}</b> req/min</span><span><b>${Math.round(last(s.p95))}</b> ms p95</span><span><b>${sum(s.err5xx)}</b> 5xx today</span>` : '<span>No load balancer</span>'}<span>${(td.cpu / 1024).toFixed(2)} vCPU · ${td.memory} MiB</span></div>
+    </div>`;
+  }).join('');
+  const svcTable = `<div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Service</th><th>Label</th><th>Status</th><th>Task definition</th><th>Image tag</th><th class="num">Tasks</th><th>CPU, 24 h</th><th class="num">Memory</th><th>Last change</th></tr></thead>
+    <tbody>${svcs.map(s => `<tr class="link" data-go="#svc-${s.id}-overview"><td class="name">${esc(s.name)}</td><td>${labelHtml(s, 'service')}</td><td>${pill(status(s))}</td><td class="mono">${esc(s.name)}:${s.rev}</td><td class="mono">${esc(tdImageTag(tdOf(s)))}</td><td class="num">${running(s.id).length} / ${s.desired}</td><td>${c.insights ? spark(s.cpuSeries) : '–'}</td><td class="num">${c.insights ? pct(last(s.memSeries)) : '–'}</td><td class="muted">${ago(s.ops[0].ts)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  return `
+  <div class="page-head"><div class="titles"><div class="title-row"><h1>${esc(c.name)}</h1>${labelHtml(c, 'cluster')}${pill(clusterStatus(c))}</div>
+    <div class="meta"><span>${esc(ACCOUNTS[c.acct].name)} (${ACCOUNTS[c.acct].number})</span><span>${REGIONS[c.region]}</span><a href="#net-${c.acct}-${c.region}-${c.vpc}" style="color:var(--accent)">${esc(VPCS[c.vpc].name)} · ${VPCS[c.vpc].vpcId}</a></div></div>
+    <div class="actions"><a class="btn" href="https://${REGIONS[c.region]}.console.aws.amazon.com/ecs/v2/clusters/${esc(c.name)}" target="_blank" rel="noopener">Open in AWS console ↗</a></div></div>
+  <div class="grid g4">
+    <div class="card tile"><div class="k">Services</div><div class="v">${svcs.length}<small>${svcs.filter(s => status(s).k === 'ok').length} steady</small></div>${statusSplit(svcs)}</div>
+    <div class="card tile"><div class="k">Tasks, 72 h</div><div class="v">${n.r}<small>of ${n.d} desired</small></div>${spark(taskHist, 'var(--accent)', { w: 300, h: 24, fluid: true })}</div>
+    <div class="card tile"><div class="k">Reserved by running tasks</div><div class="v">${n.vcpu.toFixed(2)}<small>vCPU</small> ${n.gib.toFixed(1)}<small>GiB</small></div><div class="split"><span style="flex:${n.r - n.spot || 0.001};background:var(--accent)" title="FARGATE"></span><span style="flex:${n.spot || 0.001};background:var(--series-3)" title="FARGATE_SPOT"></span></div><div class="sub"><span>${n.r - n.spot} Fargate · ${n.spot} Spot</span></div></div>
+    <div class="card tile"><div class="k">Use now</div><div class="v">${c.insights ? `${pct(last(n.cpu))}<small>CPU</small> ${pct(last(n.mem))}<small>memory</small>` : '<small>Container Insights off</small>'}</div>${c.insights ? spark(n.cpu, 'var(--series-1)', { w: 300, h: 24, fluid: true }) : ''}</div>
+  </div>
+  <div class="grid g-wide">
+    ${c.insights ? card('Cluster CPU and memory, 24 h', legend([{ name: 'CPU', color: 'var(--series-1)' }, { name: 'Memory', color: 'var(--series-2)' }, { name: 'Deployment', color: 'var(--info)' }]) + chart([{ values: n.cpu, color: 'var(--series-1)' }, { values: n.mem, color: 'var(--series-2)' }], { xLabels: XL24, h: 150, marks })) : card('Cluster CPU and memory', '<div class="banner warn">Container Insights is off for this cluster.</div>')}
+    ${card('Tasks by service', hbars(svcs.map(s => { const rr = running(s.id).length; return { name: s.name, href: `#svc-${s.id}-tasks`, parts: [{ v: rr, color: STATUS_COLOR[status(s).k] }], ghost: s.desired, label: `${rr} / ${s.desired}` }; })) + `<div style="margin-top:16px"><h3 style="margin-bottom:6px">Task stops per hour</h3>${vbars(stops, { h: 80, xLabels: [[0, '24 h ago'], [23, 'now']] })}</div>`, 'bar = running · line = desired')}
+  </div>
+  <div class="toolbar"><h2>Services</h2><span style="margin-left:auto"></span>${viewToggle()}</div>
+  ${S.listView === 'table' ? svcTable : `<div class="cards">${svcCards}</div>`}`;
+}
+
+/* ---------- service ---------- */
+const TABS = [['overview', 'Overview'], ['metrics', 'Metrics'], ['config', 'Task definition'], ['tasks', 'Tasks'], ['scaling', 'Scaling'], ['logs', 'Logs'], ['terminal', 'Terminal'], ['ops', 'Operations log']];
+function vService(r) {
+  const s = SERVICES[r.id], c = CLUSTERS[s.cluster];
+  crumbs([['Clusters', '#clusters'], [c.name, '#cl-' + c.id], [s.name]]);
+  if (!canView(s)) return noAccess(`You need View on ${esc(serviceTag(s))} to open this service.`);
+  const st = status(s);
+  const pendingRev = latestRev(s) > s.rev && s.state !== 'deploying' ? latestRev(s) : null;
+  const tabs = TABS.map(([k, t]) => {
+    let badge = '';
+    if (k === 'tasks') badge = `<span class="badge">${running(s.id).length}</span>`;
+    if (k === 'config' && pendingRev) badge = `<span class="badge">:${pendingRev} ready</span>`;
+    const need = { logs: 'logs', terminal: 'terminal' }[k];
+    const locked = need && !can(need, s);
+    return `<a href="#svc-${s.id}-${k}" class="${r.tab === k ? 'active' : ''} ${locked ? 'locked' : ''}" ${locked ? `title="You need ${ACTION_NAME[need]} on ${esc(serviceTag(s))}"` : ''}>${t}${locked ? ' ⊘' : ''}${badge}</a>`;
+  }).join('');
+  const body = { overview: sOverview, metrics: sMetrics, config: sConfig, tasks: sTasks, scaling: sScaling, logs: sLogs, terminal: sTerminal, ops: sOps }[r.tab] || sOverview;
+  return `
+  <div class="page-head"><div class="titles"><div class="title-row"><h1>${esc(s.name)}</h1>${labelHtml(s, 'service')}${pill(st)}</div>
+    <div class="meta"><a href="#cl-${c.id}" style="color:var(--accent)">${esc(c.name)}</a><span>${esc(ACCOUNTS[c.acct].name)}</span><span>${REGIONS[c.region]}</span><span class="mono">${esc(s.name)}:${s.rev}</span><span>Fargate</span></div></div>
+    <div class="actions">
+      <button class="btn" data-action="restart" data-id="${s.id}" ${s.state === 'deploying' ? 'disabled' : gate('operate', s)}>Restart (new deployment)</button>
+      <a class="btn" href="#svc-${s.id}-scaling">Desired count: ${s.desired}</a>
+      <a class="btn" href="https://${REGIONS[c.region]}.console.aws.amazon.com/ecs/v2/clusters/${esc(c.name)}/services/${esc(s.name)}" target="_blank" rel="noopener">AWS console ↗</a>
+    </div></div>
+  ${pendingRev ? `<div class="banner info"><span>Revision <strong>${esc(s.name)}:${pendingRev}</strong> is registered but not deployed. The service still runs :${s.rev}.</span><span style="margin-left:auto"><button class="btn sm primary" data-action="deploy-rev" data-id="${s.id}" data-rev="${pendingRev}" ${gate('deploy', s)}>Deploy :${pendingRev}</button></span></div>` : ''}
+  <nav class="tabs">${tabs}</nav>
+  ${body(s, c)}`;
+}
+
+function deployTimeline(s) {
+  const span = 14 * 86400e3, start = NOW - span;
+  const evs = s.deploys.filter(d => d.ts >= start);
+  const ticks = Array.from({ length: 8 }, (_, i) => start + (i / 7) * span);
+  return `<div class="timeline"><div class="axis"></div>
+    ${ticks.map(t => `<span class="tick" style="left:${((t - start) / span) * 100}%">${dayLabel(t)}</span>`).join('')}
+    ${evs.map((d, i) => `<div class="ev ${i % 2 ? 'alt' : ''}" style="left:${Math.min(100, ((d.ts - start) / span) * 100)}%" title="${new Date(d.ts).toLocaleString()}"><span style="${d.ok ? '' : 'color:var(--danger)'}">${d.kind === 'restart' ? 'restart' : ':' + d.rev}${d.ok ? '' : ' failed'}</span><i style="background:${!d.ok ? 'var(--danger)' : d.kind === 'restart' ? 'var(--series-3)' : 'var(--accent)'}"></i></div>`).join('')}
+  </div>`;
+}
+function sOverview(s, c) {
+  const td = tdOf(s), vpc = VPCS[c.vpc];
+  const run = running(s.id), subs = subnetsOf(s);
+  const healthy = run.filter(t => t.health !== 'UNHEALTHY').length;
+  const dep = s.deploy;
+  const pending = s.state === 'deploying' ? Math.max(0, s.desired - dep.newRunning) : Math.max(0, s.desired - run.length);
+  const deployCard = s.state === 'deploying'
+    ? `<div class="grid" style="gap:10px"><div class="title-row">${pill({ k: 'info', t: 'Rollout in progress' })}<span class="mono">:${dep.from} → :${dep.to}</span><span class="muted small" style="margin-left:auto">started ${ago(dep.started)}</span></div>
+       <div class="bar" style="height:10px"><span style="width:${(dep.newRunning / s.desired) * 100}%"></span><span class="old" style="width:${(dep.oldRunning / s.desired) * 100}%"></span></div>
+       <div class="small muted">${dep.newRunning} new task${dep.newRunning === 1 ? '' : 's'} on :${dep.to} · ${dep.oldRunning} old on :${dep.from} · ${dep.failures ? `<span style="color:var(--danger)">${dep.failures} failed to start</span> · ` : ''}circuit breaker with rollback is on</div></div>`
+    : `<div class="grid" style="gap:10px"><div class="title-row">${pill({ k: 'ok', t: 'Completed' })}<span class="mono">${esc(s.name)}:${s.rev}</span><span class="muted small" style="margin-left:auto">${ago(s.ops.find(o => /steady state/.test(o.text))?.ts || NOW)}</span></div>
+       <div class="bar" style="height:10px"><span style="width:100%"></span></div><div class="small muted">Rolling update · min healthy 100% · max 200% · circuit breaker with rollback is on</div></div>`;
+  const health = s.lb
+    ? donut([{ name: 'Healthy targets', v: healthy, color: 'var(--success)' }, { name: 'Unhealthy targets', v: run.length - healthy, color: 'var(--warning)' }, { name: 'Missing tasks', v: pending, color: 'var(--danger)' }], { label: `${healthy}/${s.desired}`, sub: 'healthy' })
+    : donut([{ name: 'Running', v: run.length, color: 'var(--success)' }, { name: 'Missing tasks', v: pending, color: 'var(--danger)' }], { label: `${run.length}/${s.desired}`, sub: 'running' });
+  const errCols = s.lb ? s.err5xx.map((v, i) => ({ parts: [{ v, color: 'var(--danger)' }], title: `${24 - i} h ago: ${v} errors` })) : [];
+  const rpmMax = s.lb ? niceMax(Math.max(...s.rpm)) : 0, p95Max = s.lb ? niceMax(Math.max(...s.p95)) : 0;
+  return `
+  <div class="grid g4">
+    <div class="card tile"><div class="k">Tasks</div><div class="v">${run.length}<small>running of ${s.desired} · ${pending} pending</small></div>${taskSlots(s)}</div>
+    <div class="card tile"><div class="k">Deployed revision</div><div class="v mono" style="font-size:18px">:${s.rev}</div><div class="sub"><span class="mono">${esc(tdImageTag(td))}</span><a href="#svc-${s.id}-config" style="color:var(--accent)">View →</a></div></div>
+    <div class="card tile"><div class="k">CPU (of ${s.cpu} units)</div><div class="v">${pct(last(s.cpuSeries))}</div>${spark(s.cpuSeries, 'var(--series-1)', { w: 300, h: 24, fluid: true })}</div>
+    <div class="card tile"><div class="k">Memory (of ${s.mem} MiB)</div><div class="v">${pct(last(s.memSeries))}</div>${spark(s.memSeries, 'var(--series-2)', { w: 300, h: 24, fluid: true })}</div>
+  </div>
+  <div class="grid g-wide">
+    ${card('CPU and memory, 24 h', legend([{ name: 'CPU', color: 'var(--series-1)' }, { name: 'Memory', color: 'var(--series-2)' }, { name: 'Deployment or restart', color: 'var(--info)' }]) + chart([{ values: s.cpuSeries, color: 'var(--series-1)' }, { values: s.memSeries, color: 'var(--series-2)' }], { xLabels: XL24, h: 160, marks: deployMarks(s, 24) }), `<a href="#svc-${s.id}-metrics" style="color:var(--accent)">All metrics →</a>`)}
+    ${card(s.lb ? 'Target health' : 'Task health', health + `<div style="margin-top:14px">${deployCard}</div>`, s.lb ? esc(s.name) + '-tg' : '')}
+  </div>
+  ${s.lb ? `<div class="grid g3">
+    ${card('Requests per minute, 24 h', chart([{ values: s.rpm, color: 'var(--series-4)' }], { unit: '', max: rpmMax, xLabels: XL24, h: 110 }), `now ${fmtNum(last(s.rpm))}`)}
+    ${card('Response time p95, 24 h', chart([{ values: s.p95, color: 'var(--series-3)' }], { unit: ' ms', max: p95Max, xLabels: XL24, h: 110 }), `now ${Math.round(last(s.p95))} ms`)}
+    ${card('HTTP 5xx per hour, 24 h', vbars(errCols, { h: 110, xLabels: [[0, '24 h ago'], [12, '12 h'], [23, 'now']] }), `${sum(s.err5xx)} today`)}
+  </div>` : ''}
+  <div class="grid g-wide">
+    ${card('Running tasks', run.length ? `<div class="task-meters"><div class="task-meter muted small"><span>Task</span><span>Zone</span><span>CPU</span><span>Memory</span></div>${run.map(t => `<div class="task-meter"><a class="mono" href="#svc-${s.id}-tasks" title="${t.id}">${t.id.slice(0, 12)}</a><span class="muted">${t.az}${t.launch === 'FARGATE_SPOT' ? ' · spot' : ''}</span>
+      <div class="meter"><div class="track"><span style="width:${t.cpu}%;background:var(--series-1)"></span></div><b>${pct(t.cpu)}</b></div>
+      <div class="meter"><div class="track"><span style="width:${t.mem}%;background:${t.health === 'UNHEALTHY' ? 'var(--warning)' : 'var(--series-2)'}"></span></div><b>${pct(t.mem)}</b></div></div>`).join('')}</div>` : '<div class="empty">No running tasks.</div>', `${run.length} running`)}
+    ${card('Running task count, 72 h', chart([{ values: s.taskHist, color: 'var(--accent)' }], { unit: '', max: Math.max(2, s.desired + 1), xLabels: ['72 h ago', '48 h', '24 h', 'now'], h: 110 }), `desired ${s.desired}`)}
+  </div>
+  ${card('Deployments, 14 days', legend([{ name: 'Deploy', color: 'var(--accent)' }, { name: 'Restart', color: 'var(--series-3)' }, { name: 'Failed, rolled back', color: 'var(--danger)' }]) + deployTimeline(s))}
+  <div class="grid g2">
+    <div class="card"><div class="card-head"><h2>Networking</h2><a class="right small" style="color:var(--accent)" href="#net-${c.acct}-${c.region}-${c.vpc}">Network tree →</a></div><div class="card-body"><dl class="kv">
+      <dt>VPC</dt><dd>${esc(vpc.name)} <span class="mono muted">${vpc.vpcId}</span></dd>
+      <dt>Subnets</dt><dd>${subs.map(nn => `${esc(nn.name)} <span class="muted">(${nn.az}, ${run.filter(t => t.subnet === nn.id).length} tasks)</span>`).join(', ')}</dd>
+      <dt>Security groups</dt><dd class="mono">sg-${hexFor(s.id, 8)} (${esc(s.name)})${s.lb ? `, sg-${hexFor(s.id + 'x', 8)} (alb-ingress)` : ''}</dd>
+      <dt>Public IP</dt><dd>${s.public ? 'Assigned' : 'Not assigned'}</dd>
+      <dt>Load balancer</dt><dd>${s.lb ? `${esc(s.name)}-tg → port ${s.port}` : '<span class="muted">None</span>'}</dd>
+      <dt>Service Connect</dt><dd>${s.port ? `<span class="mono">${esc(s.name)}.${esc(c.name.split('-')[0])}.local:${s.port}</span>` : '<span class="muted">Off</span>'}</dd>
+    </dl></div></div>
+    <div class="card"><div class="card-head"><h2>Task definition</h2></div><div class="card-body"><dl class="kv">
+      <dt>Family</dt><dd class="mono">${esc(td.family)}:${s.rev}</dd>
+      <dt>Size</dt><dd>${(td.cpu / 1024).toFixed(2)} vCPU · ${td.memory} MiB</dd>
+      <dt>Containers</dt><dd>${td.containerDefinitions.map(cd => `<div class="mono small">${esc(cd.name)} · ${esc(cd.image.split('/').pop())}</div>`).join('')}</dd>
+      <dt>Task role</dt><dd class="mono small">${esc(td.taskRoleArn.split('/').pop())}</dd>
+      <dt>ECS Exec</dt><dd>${s.exec ? 'On' : '<span style="color:var(--warning)">Off</span>'}</dd>
+      <dt>EFS</dt><dd>${s.efs ? `<a href="#storage" style="color:var(--accent)">${esc(EFS[s.efs[0]].name)}</a> → <span class="mono">${esc(s.efs[1])}</span>` : '<span class="muted">None</span>'}</dd>
+    </dl></div></div>
+  </div>
+  <div class="card"><div class="card-head"><h2>Recent events</h2><a class="right small" style="color:var(--accent)" href="#svc-${s.id}-ops">Operations log →</a></div>
+    <div class="feed">${s.ops.slice(0, 6).map(o => opRow(o)).join('')}</div></div>`;
+}
+
+function hexFor(key, n) { let h = 0; for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0; let out = ''; while (out.length < n) { h = (h * 1103515245 + 12345) >>> 0; out += ((h >>> 16) % 16).toString(16); } return out; }
+const opRow = o => `<div class="feed-row"><span class="muted" title="${new Date(o.ts).toLocaleString()}">${ago(o.ts)}</span><span class="src ${o.src === 'ECS' ? 'e' : 'q'}">${o.src === 'ECS' ? 'ECS event' : esc(o.actor)}</span><span>${esc(o.text)}</span></div>`;
+
+function sMetrics(s, c) {
+  if (!c.insights) return `<div class="banner warn">Container Insights is off for ${esc(c.name)}, so per-service metrics are not available. Turn it on in the cluster's Terraform (<span class="mono">setting { name = "containerInsights" value = "enhanced" }</span>).</div>`;
+  const ranges = { '1h': [12, ['1 h ago', '30 min', 'now']], '6h': [36, ['6 h ago', '3 h', 'now']], '24h': [72, ['24 h ago', '12 h', 'now']], '72h': [72, ['72 h ago', '36 h', 'now']] };
+  const [n, xl] = ranges[S.metricsRange];
+  const cut = a => a.slice(-n);
+  const seg = Object.keys(ranges).map(k => `<button class="${S.metricsRange === k ? 'on' : ''}" data-action="range" data-v="${k}">${k}</button>`).join('');
+  const netMax = Math.ceil(Math.max(...s.netIn, ...s.netOut) / 10) * 10;
+  return `
+  <div class="toolbar"><div class="seg" role="group" aria-label="Range">${seg}</div><span class="muted small">Container Insights via CloudWatch · 1-minute resolution, averaged across ${running(s.id).length} tasks</span></div>
+  <div class="grid g2">
+    <div class="card"><div class="card-head"><h2>CPU utilization</h2><span class="right muted small">now ${pct(last(s.cpuSeries))} of ${s.cpu} units</span></div><div class="card-body">${chart([{ values: cut(s.cpuSeries), color: 'var(--series-1)' }], { xLabels: xl, h: 150 })}</div></div>
+    <div class="card"><div class="card-head"><h2>Memory utilization</h2><span class="right muted small">now ${pct(last(s.memSeries))} of ${s.mem} MiB</span></div><div class="card-body">${chart([{ values: cut(s.memSeries), color: 'var(--series-2)' }], { xLabels: xl, h: 150 })}</div></div>
+    <div class="card"><div class="card-head"><h2>Network</h2><div class="right legend"><span><i style="background:var(--series-1)"></i>Received</span><span><i style="background:var(--series-2)"></i>Sent</span></div></div><div class="card-body">${chart([{ values: cut(s.netIn), color: 'var(--series-1)' }, { values: cut(s.netOut), color: 'var(--series-2)' }], { unit: ' KB/s', max: netMax, xLabels: xl, h: 150 })}</div></div>
+    <div class="card"><div class="card-head"><h2>Running task count</h2><span class="right muted small">desired ${s.desired}</span></div><div class="card-body">${chart([{ values: cut(s.cpuSeries).map((v, i) => s.desired - (running(s.id).length < s.desired && i > n - 6 ? s.desired - running(s.id).length : 0)), color: 'var(--series-1)' }], { unit: '', max: Math.max(4, s.desired + 1), xLabels: xl, h: 150 })}</div></div>
+  </div>`;
+}
+
+/* config: task definition editing */
+function draftOf(s) {
+  if (!S.drafts[s.id]) S.drafts[s.id] = { text: JSON.stringify(tdOf(s), null, 2), base: s.rev };
+  return S.drafts[s.id];
+}
+function sConfig(s, c) {
+  const ro = !can('edit', s);
+  const d = draftOf(s);
+  let td = null, err = '';
+  try { td = JSON.parse(d.text); } catch (e) { err = e.message; }
+  const dirty = d.text !== JSON.stringify(tdOf(s), null, 2);
+  const main = td && td.containerDefinitions && td.containerDefinitions[0];
+  const curTag = main ? main.image.split(':').pop() : '';
+  const tags = ecrTags(s);
+  if (curTag && !tags.includes(curTag)) tags.unshift(curTag);
+  const cpuOpts = [256, 512, 1024, 2048, 4096];
+  const memOpts = [512, 1024, 2048, 3072, 4096, 8192];
+  const form = td ? `
+    <label class="field"><span>Image tag (from ECR: ${esc(s.repo)})</span><select class="ctl" data-form="tag">${tags.map((t, i) => `<option ${t === curTag ? 'selected' : ''} value="${esc(t)}">${esc(t)}${i === 0 && t !== s.tag ? ' · newest' : ''}${t === tdImageTag(tdOf(s)) ? ' · deployed' : ''}</option>`).join('')}</select></label>
+    <div class="grid g2" style="gap:10px">
+      <label class="field"><span>Task CPU (units)</span><select class="ctl" data-form="cpu">${cpuOpts.map(v => `<option ${String(v) === td.cpu ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="field"><span>Task memory (MiB)</span><select class="ctl" data-form="memory">${memOpts.map(v => `<option ${String(v) === td.memory ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    </div>
+    <div class="field"><span>Environment variables (${esc(main.name)})</span>
+      ${(main.environment || []).map((e, i) => `<div class="env-row"><input class="ctl mono" data-form="env-k" data-i="${i}" value="${esc(e.name)}" aria-label="Name"><input class="ctl mono" data-form="env-v" data-i="${i}" value="${esc(e.value)}" aria-label="Value"><button class="icon-btn" data-action="env-del" data-i="${i}" aria-label="Remove variable">×</button></div>`).join('')}
+      <div><button class="btn sm" data-action="env-add">Add variable</button></div>
+    </div>
+    ${s.oomBelow && +td.memory < s.oomBelow ? `<div class="banner warn">Tasks of this service stop with OutOfMemoryError (exit 137) at ${td.memory} MiB. Try ${s.oomBelow} MiB.</div>` : ''}`
+    : `<div class="banner bad">The JSON has an error, so the form is paused: ${esc(err)}</div>`;
+  const revs = [...s.revisions].sort((a, b) => b.rev - a.rev);
+  return `
+  ${ro ? `<div class="banner warn"><span>Read only. You need <strong>Edit task definition</strong> on ${tagChip(serviceTag(s))} to register a new revision.</span></div>` : ''}
+  <div class="banner info" ${ro ? 'hidden' : ''}><span>Saving registers a new revision of <span class="mono">${esc(s.name)}</span>. Harbormaster then asks whether to deploy it. Terraform will show the new revision as drift on its next plan.</span></div>
+  <div class="grid" style="grid-template-columns:minmax(260px, 1fr) minmax(0, 2.2fr)">
+    <div class="card"><div class="card-head"><h2>Quick edit</h2><span class="right muted small">Edits the JSON</span></div><div class="card-body"><fieldset ${ro ? 'disabled' : ''} class="form-grid" style="border:0;padding:0;margin:0;min-width:0">${form}</fieldset></div></div>
+    <div class="card"><div class="card-head"><h2>Task definition JSON</h2><span class="right muted small">based on :${d.base}</span></div>
+      <div class="card-body form-grid">
+        <textarea class="editor ${err ? 'invalid' : ''}" id="td-editor" spellcheck="false" ${ro ? 'readonly' : ''} aria-label="Task definition JSON">${esc(d.text)}</textarea>
+        <div class="toolbar"><span class="${err ? 'err' : 'hint'}" id="td-status">${err ? esc(err) : dirty ? 'Unsaved changes' : 'No changes'}</span><span style="margin-left:auto"></span>
+          <button class="btn" data-action="draft-reset" ${dirty ? '' : 'disabled'}>Discard</button>
+          <button class="btn primary" data-action="draft-review" ${dirty && !err && !ro ? '' : 'disabled'}>Review and save</button></div>
+      </div></div>
+  </div>
+  <div class="card"><div class="card-head"><h2>Revisions</h2><span class="right muted small">${s.revisions.length} shown · newest first</span></div><div class="table-wrap"><table class="t">
+    <thead><tr><th>Revision</th><th>Status</th><th>Image tag</th><th>CPU / memory</th><th>Registered</th><th>By</th><th></th></tr></thead>
+    <tbody>${revs.map(rv => {
+      const isDep = rv.rev === s.rev, isTarget = s.state === 'deploying' && s.deploy.to === rv.rev;
+      const stp = isTarget ? { k: 'info', t: 'Rolling out' } : isDep ? { k: 'ok', t: 'Deployed' } : rv.rev > s.rev ? { k: 'mute', t: 'Not deployed' } : { k: 'mute', t: 'Previous' };
+      return `<tr><td class="mono name">${esc(s.name)}:${rv.rev}</td><td>${pill(stp)}</td><td class="mono">${esc(tdImageTag(rv.td))}</td><td>${rv.td.cpu} / ${rv.td.memory}</td><td class="muted">${ago(rv.at)}</td><td>${esc(rv.by)}</td><td class="num">${isDep || isTarget ? '' : `<button class="btn sm" data-action="deploy-rev" data-id="${s.id}" data-rev="${rv.rev}" ${s.state === 'deploying' ? 'disabled' : gate('deploy', s)}>${rv.rev < s.rev ? 'Roll back to this' : 'Deploy'}</button>`}</td></tr>`;
+    }).join('')}</tbody></table></div></div>`;
+}
+
+function sTasks(s) {
+  const all = tasksOf(s.id).sort((a, b) => (a.status === b.status ? b.started - a.started : a.status === 'RUNNING' ? -1 : 1));
+  return `
+  <div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Task</th><th>Status</th><th>Health</th><th>Revision</th><th>Subnet / IP</th><th>Capacity</th><th class="num">CPU</th><th class="num">Memory</th><th>Started</th><th>Stopped reason</th><th></th></tr></thead>
+    <tbody>${all.map(t => taskRow(t, false)).join('')}</tbody></table></div></div>`;
+}
+function taskRow(t, withService) {
+  const s = SERVICES[t.service], sub = VPCS[CLUSTERS[t.cluster].vpc].subnets.find(n => n.id === t.subnet);
+  const st = t.status === 'RUNNING' ? { k: 'ok', t: 'Running' } : t.status === 'PROVISIONING' ? { k: 'info', t: 'Provisioning' } : { k: t.exit ? 'bad' : 'mute', t: t.exit ? `Stopped (exit ${t.exit})` : 'Stopped' };
+  const hl = t.status !== 'RUNNING' ? '<span class="muted">–</span>' : t.health === 'HEALTHY' ? '<span style="color:var(--success)">Healthy</span>' : t.health === 'UNHEALTHY' ? '<span style="color:var(--warning)">Unhealthy</span>' : '<span class="muted">No check</span>';
+  return `<tr class="${t.status !== 'RUNNING' && t.exit ? 'stripe bad' : t.health === 'UNHEALTHY' ? 'stripe warn' : ''}">
+    <td class="mono" title="${t.id}">${t.id.slice(0, 12)}</td>
+    ${withService ? `<td><a href="#svc-${s.id}-tasks" style="color:var(--accent)">${esc(s.name)}</a><div class="muted small">${esc(CLUSTERS[t.cluster].name)}</div></td>` : ''}
+    <td>${pill(st)}</td><td>${hl}</td><td class="mono">:${t.rev}</td><td><span class="mono">${t.ip}</span><div class="muted small">${esc(sub.name)} · ${t.az}</div></td><td class="small">${t.launch}</td>
+    <td class="num">${t.status === 'RUNNING' ? pct(t.cpu) : '–'}</td><td class="num">${t.status === 'RUNNING' ? pct(t.mem) : '–'}</td>
+    <td class="muted">${ago(t.started)}</td><td class="small ${t.exit ? '' : 'muted'}" style="max-width:280px">${t.reason ? esc(t.reason) + ` <span class="muted">· ${ago(t.stopped)}</span>` : ''}</td>
+    <td class="num">${t.status === 'RUNNING' ? `${s.exec && can('terminal', s) ? `<button class="btn sm" data-action="exec-task" data-id="${t.id}">Terminal</button> ` : ''}<button class="btn sm danger" data-action="stop-task" data-id="${t.id}" ${gate('operate', s)}>Stop</button>` : ''}</td></tr>`;
+}
+
+function sScaling(s) {
+  const sc = s.scaling;
+  const acts = s.ops.filter(o => /desired count|scal/i.test(o.text)).slice(0, 6);
+  return `
+  <div class="grid g2">
+    <div class="card"><div class="card-head"><h2>Desired count</h2></div><div class="card-body form-grid">
+      <div class="toolbar"><button class="icon-btn" data-action="dc-step" data-d="-1" aria-label="Fewer tasks">−</button><input class="ctl" id="dc-input" type="number" min="0" max="50" value="${s.desired}" style="width:70px;text-align:center" aria-label="Desired count"><button class="icon-btn" data-action="dc-step" data-d="1" aria-label="More tasks">+</button>
+      <button class="btn primary" data-action="dc-apply" data-id="${s.id}" ${gate('operate', s)}>Update desired count</button></div>
+      <p class="hint">Running ${running(s.id).length} of ${s.desired}. ${sc ? `Auto scaling keeps this service between ${sc.min} and ${sc.max} tasks and may change a value outside that range back.` : 'No auto scaling: the count stays where you set it.'} Setting 0 stops every task without deleting the service.</p>
+    </div></div>
+    <div class="card"><div class="card-head"><h2>Auto scaling</h2><span class="right muted small">Application Auto Scaling · set in Terraform</span></div><div class="card-body">
+      ${sc ? `<dl class="kv"><dt>Minimum tasks</dt><dd>${sc.min}</dd><dt>Maximum tasks</dt><dd>${sc.max}</dd><dt>Policy</dt><dd>Target tracking · <span class="mono">ECSServiceAverageCPUUtilization</span> at ${sc.target}%</dd><dt>Scale-out cooldown</dt><dd>60 s</dd><dt>Scale-in cooldown</dt><dd>300 s</dd><dt>Scheduled actions</dt><dd>${s.id === 's1' ? 'weekdays 07:00 UTC → min 3; 20:00 UTC → min 2' : '<span class="muted">None</span>'}</dd></dl>`
+      : `<div class="empty">This service has no scalable target registered.</div>`}
+    </div></div>
+  </div>
+  <div class="card"><div class="card-head"><h2>Scaling activity</h2></div><div class="feed">${acts.length ? acts.map(opRow).join('') : `<div class="feed-row"><span class="muted">${ago(NOW - 5 * 3600e3)}</span><span class="src e">ECS event</span><span>${sc ? `Successfully set desired count to ${s.desired}. Change successfully fulfilled by ecs.` : 'No scaling activity in the last 7 days.'}</span></div>`}</div></div>`;
+}
+
+/* logs */
+const LOG_LINES = {
+  default: [['info', 'GET /health 200 2ms'], ['info', 'GET /api/v1/items 200 41ms'], ['info', 'POST /api/v1/items 201 88ms'], ['warn', 'slow query took 812ms: SELECT * FROM items WHERE owner_id = $1'], ['info', 'cache hit ratio 0.93'], ['error', 'upstream timeout after 5000ms (retrying 1/3)'], ['info', 'GET /api/v1/items/482 200 12ms']],
+  'payments-api': [['info', 'POST /v1/charges 201 143ms provider=stripe'], ['info', 'GET /health 200 1ms'], ['info', 'webhook evt_1Q8 received type=charge.succeeded'], ['warn', 'idempotency key reused key=ik_7f3a'], ['info', 'POST /v1/refunds 200 98ms'], ['error', 'card_declined code=insufficient_funds charge=ch_3Q8x']],
+  'image-resizer': [['info', 'starting image-resizer 0.4.2 on :8090'], ['info', 'loaded libvips 8.15.3'], ['info', 'resizing upload 9f2e.jpg 7952x5304 -> 2048w'], ['warn', 'memory usage 486MiB of 512MiB'], ['error', 'fatal: runtime: out of memory'], ['error', 'Container killed due to memory usage']],
+  'jenkins-controller': [['info', 'Started pipeline platform/main #1842'], ['info', 'Provisioning EKS agent pod jnlp-k8s-7c2f'], ['info', 'Agent jnlp-k8s-7c2f is connected'], ['info', 'Finished: SUCCESS'], ['warn', 'Disk usage of JENKINS_HOME at 71%']],
+};
+function logsOf(s) {
+  if (!S.logs[s.id]) {
+    const lines = [];
+    for (let i = 0; i < 70; i++) lines.push(mkLog(s, NOW - (70 - i) * 9000));
+    S.logs[s.id] = { lines, follow: true, filter: '', container: 'all', stream: 'all' };
+  }
+  return S.logs[s.id];
+}
+function mkLog(s, ts) {
+  const pool = LOG_LINES[s.name] || LOG_LINES.default;
+  const [lvl, msg] = pool[Math.floor(rnd() * pool.length)];
+  const run = running(s.id);
+  const t = run.length ? run[Math.floor(rnd() * run.length)] : tasksOf(s.id)[0];
+  const ct = s.sidecar && rnd() > 0.8 ? 'otel-collector' : s.name;
+  return { ts, lvl, msg: ct === 'otel-collector' ? 'exporter: sent 512 spans to otlp endpoint' : msg, task: t ? t.id.slice(0, 8) : '–', ct };
+}
+const logLine = l => `<div class="ln"><span class="ts">${clock(l.ts)}</span><span class="ct">${esc(l.ct)}/${l.task}</span><span class="lvl-${l.lvl}">${esc(l.msg)}</span></div>`;
+function filteredLogs(s) {
+  const L = logsOf(s), f = L.filter.toLowerCase();
+  return L.lines.filter(l => (L.container === 'all' || l.ct === L.container) && (L.stream === 'all' || (L.stream === 'errors' ? l.lvl !== 'info' : true)) && (!f || l.msg.toLowerCase().includes(f)));
+}
+function sLogs(s, c) {
+  if (!can('logs', s)) return lockPanel('logs', s);
+  const L = logsOf(s), td = tdOf(s);
+  return `
+  <div class="toolbar">
+    <select class="ctl" data-log="container" aria-label="Container"><option value="all">All containers</option>${td.containerDefinitions.map(cd => `<option ${L.container === cd.name ? 'selected' : ''}>${esc(cd.name)}</option>`).join('')}</select>
+    <select class="ctl" data-log="stream" aria-label="Level"><option value="all">All lines</option><option value="errors" ${L.stream === 'errors' ? 'selected' : ''}>Warnings and errors</option></select>
+    <input class="ctl" data-log="filter" placeholder="Search logs" value="${esc(L.filter)}" style="width:220px" aria-label="Search logs">
+    <button class="btn" data-action="log-follow">${L.follow ? 'Pause' : 'Follow'}</button>
+    <span class="muted small" style="margin-left:auto">CloudWatch Logs · <span class="mono">/ecs/${esc(c.name)}/${esc(s.name)}</span> · ${L.follow ? 'live tail' : 'paused'}</span>
+  </div>
+  <div class="logs" id="log-box" role="log">${filteredLogs(s).map(logLine).join('')}</div>`;
+}
+
+/* terminal */
+function sTerminal(s) {
+  if (!can('terminal', s)) return lockPanel('terminal', s);
+  const run = running(s.id), td = tdOf(s);
+  if (!s.exec) return `<div class="banner warn"><div><strong>ECS Exec is off for ${esc(s.name)}.</strong> Turn on <span class="mono">enable_execute_command = true</span> on the service in Terraform and give the task role the <span class="mono">ssmmessages:*</span> permissions. New tasks then accept terminal sessions.</div></div>`;
+  if (!run.length) return `<div class="empty card">No running tasks to connect to.</div>`;
+  const T = S.terms[s.id] || (S.terms[s.id] = { task: run[0].id, container: td.containerDefinitions[0].name, shell: '/bin/sh', connected: false, out: [] });
+  if (!run.find(t => t.id === T.task)) T.task = run[0].id;
+  return `
+  <div class="toolbar">
+    <label class="field" style="grid-auto-flow:column;align-items:center"><span>Task</span><select class="ctl" data-term="task" ${T.connected ? 'disabled' : ''}>${run.map(t => `<option value="${t.id}" ${t.id === T.task ? 'selected' : ''}>${t.id.slice(0, 12)} · ${t.ip} · ${t.az}</option>`).join('')}</select></label>
+    <label class="field" style="grid-auto-flow:column;align-items:center"><span>Container</span><select class="ctl" data-term="container" ${T.connected ? 'disabled' : ''}>${td.containerDefinitions.map(cd => `<option ${cd.name === T.container ? 'selected' : ''}>${esc(cd.name)}</option>`).join('')}</select></label>
+    <label class="field" style="grid-auto-flow:column;align-items:center"><span>Command</span><select class="ctl" data-term="shell" ${T.connected ? 'disabled' : ''}>${['/bin/sh', '/bin/bash'].map(x => `<option ${x === T.shell ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+    ${T.connected ? `<button class="btn danger" data-action="term-disconnect" data-id="${s.id}">Disconnect</button>` : `<button class="btn primary" data-action="term-connect" data-id="${s.id}">Connect</button>`}
+    <span class="muted small" style="margin-left:auto">ECS Exec through SSM Session Manager · sessions are recorded in the operations log</span>
+  </div>
+  <div class="term" id="term">${T.out.map(o => `<div class="out ${o.sys ? 'sys' : ''}">${esc(o.t)}</div>`).join('')}${T.connected ? `<div class="line"><span class="prompt">${esc(T.container)}:/app $</span><input id="term-in" autocomplete="off" spellcheck="false" aria-label="Terminal input"></div>` : T.out.length ? '' : '<div class="out sys">Pick a task and a container, then Connect. Try ls, env, ps, df -h, hostname, cat /etc/os-release, exit.</div>'}</div>`;
+}
+function termRun(s, cmd) {
+  const T = S.terms[s.id], t = TASKS[T.task], td = tdOf(s);
+  const cd = td.containerDefinitions.find(x => x.name === T.container) || td.containerDefinitions[0];
+  T.out.push({ t: `${T.container}:/app $ ${cmd}` });
+  const c = cmd.trim().split(/\s+/)[0];
+  const outs = {
+    '': null,
+    help: 'Commands in this mockup: ls, env, ps, df -h, hostname, whoami, pwd, cat /etc/os-release, uptime, exit',
+    ls: s.port ? 'Dockerfile  config  dist  node_modules  package.json  server.js' : 'bin  config  jobs  worker.py  requirements.txt',
+    pwd: '/app', whoami: 'app',
+    hostname: `ip-${t.ip.replace(/\./g, '-')}.${REGIONS[CLUSTERS[s.cluster].region] === 'us-east-1' ? 'ec2.internal' : REGIONS[CLUSTERS[s.cluster].region] + '.compute.internal'}`,
+    env: [...cd.environment.map(e => `${e.name}=${e.value}`), `ECS_CONTAINER_METADATA_URI_V4=http://169.254.170.2/v4/${t.id.slice(0, 12)}`, `AWS_REGION=${REGIONS[CLUSTERS[s.cluster].region]}`, 'HOME=/home/app'].join('\n'),
+    ps: 'PID   USER     TIME  COMMAND\n    1 app       2:41 ' + (s.port ? 'node server.js' : 'python worker.py') + '\n   38 root      0:00 /managed-agents/execute-command/amazon-ssm-agent\n   61 app       0:00 ' + T.shell + '\n   67 app       0:00 ps',
+    df: 'Filesystem                Size      Used Available Use% Mounted on\noverlay                  29.4G      9.8G     18.0G  35% /' + (s.efs ? `\n127.0.0.1:/                8.0E     ${EFS[s.efs[0]].sizeGiB}G      8.0E   0% ${s.efs[1]}` : '') + '\ntmpfs                    64.0M         0     64.0M   0% /dev',
+    cat: cmd.includes('os-release') ? 'NAME="Alpine Linux"\nID=alpine\nVERSION_ID=3.20.3\nPRETTY_NAME="Alpine Linux v3.20"' : 'cat: missing file name',
+    uptime: ` ${clock(Date.now())} up ${Math.round((Date.now() - t.started) / 3600e3)}:${String(Math.round(rnd() * 59)).padStart(2, '0')},  load average: 0.21, 0.18, 0.15`,
+  };
+  if (c === 'exit') {
+    T.out.push({ t: `\nExiting session with sessionId: ecs-execute-command-${hexFor(t.id, 17)}.`, sys: true });
+    T.connected = false;
+    addOp(s, 'Harbormaster', me().name, `Closed terminal session on task ${t.id.slice(0, 12)} (${T.container}).`);
+  } else if (c in outs) { if (outs[c] !== null) T.out.push({ t: outs[c] }); }
+  else T.out.push({ t: `${T.shell.split('/').pop()}: ${c}: not found` });
+}
+
+function sOps(s) {
+  const list = s.ops.filter(o => S.showEcsEvents || o.src !== 'ECS');
+  return `
+  <div class="toolbar"><label class="toolbar" style="gap:6px"><input type="checkbox" id="ecs-ev" data-action="toggle-ecs" ${S.showEcsEvents ? 'checked' : ''}> Show ECS service events</label><span class="muted small" style="margin-left:auto">Actions taken in Harbormaster are kept for 90 days. Changes made outside Harbormaster come from CloudTrail.</span></div>
+  <div class="card"><div class="feed">${list.map(opRow).join('') || '<div class="empty">No entries.</div>'}</div></div>`;
+}
+
+/* ---------- tasks (global) ---------- */
+function vTasks() {
+  crumbs([['Tasks']]);
+  const scoped = seenTasks().filter(t => inFilter(CLUSTERS[t.cluster]));
+  let all = scoped;
+  const problems = t => (t.status === 'STOPPED' && t.exit && t.exit !== 0) || t.health === 'UNHEALTHY';
+  const counts = { problems: all.filter(problems).length, running: all.filter(t => t.status === 'RUNNING').length, stopped: all.filter(t => t.status === 'STOPPED').length, all: all.length };
+  if (S.tasksFilter === 'problems') all = all.filter(t => problems(t) || t.status === 'RUNNING');
+  if (S.tasksFilter === 'running') all = all.filter(t => t.status === 'RUNNING');
+  if (S.tasksFilter === 'stopped') all = all.filter(t => t.status === 'STOPPED');
+  all.sort((a, b) => (problems(b) - problems(a)) || (a.status === b.status ? b.started - a.started : a.status === 'RUNNING' ? -1 : 1));
+  const runT = scoped.filter(t => t.status === 'RUNNING');
+  const azs = [...new Set(runT.map(t => t.az))].sort();
+  const seg = [['problems', 'Problems first'], ['running', 'Running'], ['stopped', 'Stopped'], ['all', 'All']].map(([k, t]) => `<button class="${S.tasksFilter === k ? 'on' : ''}" data-action="tasks-filter" data-v="${k}">${t} <span class="muted">${counts[k]}</span></button>`).join('');
+  return `
+  <div class="page-head"><div class="titles"><h1>Tasks</h1><div class="meta">Every task in every cluster you can see. ECS keeps stopped tasks for about an hour; Harbormaster keeps them for 7 days.</div></div></div>
+  <div class="grid g4">
+    ${card('By status', donut([
+      { name: 'Running, healthy', v: runT.filter(t => t.health !== 'UNHEALTHY').length, color: 'var(--success)' },
+      { name: 'Running, unhealthy', v: runT.filter(t => t.health === 'UNHEALTHY').length, color: 'var(--warning)' },
+      { name: 'Stopped, error', v: scoped.filter(t => t.status === 'STOPPED' && t.exit).length, color: 'var(--danger)' },
+      { name: 'Stopped, normal', v: scoped.filter(t => t.status === 'STOPPED' && !t.exit).length, color: 'var(--border-strong)' },
+    ], { label: String(runT.length), sub: 'running' }))}
+    ${card('Running by availability zone', hbars(azs.map(az => ({ name: az, v: runT.filter(t => t.az === az).length, color: 'var(--accent)' }))))}
+    ${card('Running by cluster', hbars(visibleClusters().map((c, i) => ({ name: c.name, href: '#cl-' + c.id, parts: [{ v: runT.filter(t => t.cluster === c.id && t.launch === 'FARGATE').length, color: 'var(--accent)' }, { v: runT.filter(t => t.cluster === c.id && t.launch === 'FARGATE_SPOT').length, color: 'var(--series-3)' }], label: String(runT.filter(t => t.cluster === c.id).length) }))) + `<div style="margin-top:10px">${legend([{ name: 'Fargate', color: 'var(--accent)' }, { name: 'Fargate Spot', color: 'var(--series-3)' }])}</div>`)}
+    ${card('Why tasks stopped', reasonBars(scoped))}
+  </div>
+  <div class="toolbar"><div class="seg">${seg}</div></div>
+  <div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Task</th><th>Service</th><th>Status</th><th>Health</th><th>Revision</th><th>Subnet / IP</th><th>Capacity</th><th class="num">CPU</th><th class="num">Memory</th><th>Started</th><th>Stopped reason</th><th></th></tr></thead>
+    <tbody>${all.map(t => taskRow(t, true)).join('')}</tbody></table></div></div>`;
+}
+
+/* ---------- networks ---------- */
+function vNet(r) {
+  const acctIds = r.acct && ACCOUNTS[r.acct] ? [r.acct] : Object.keys(ACCOUNTS).filter(a => S.fAcct === 'all' || a === S.fAcct);
+  if (r.vpc && VPCS[r.vpc]) return netVpc(VPCS[r.vpc]);
+  if (r.acct && r.region && REGIONS[r.region]) return netRegion(r.acct, r.region);
+  crumbs([['Networks']]);
+  return `
+  <div class="page-head"><div class="titles"><h1>Networks</h1><div class="meta">Account level: regions with active VPCs. A VPC is active when ECS tasks run in it.</div></div></div>
+  ${acctIds.map(a => {
+    const acc = ACCOUNTS[a];
+    return `<div class="grid" style="gap:10px"><h2>${esc(acc.name)} <span class="muted mono small">${acc.number}</span></h2><div class="net-cards">${Object.keys(REGIONS).map(rg => {
+      const vpcs = Object.values(VPCS).filter(v => v.acct === a && v.region === rg);
+      const active = vpcs.filter(v => vpcTasks(v).length);
+      const tasks = active.reduce((x, v) => x + vpcTasks(v).length, 0);
+      const cls = Object.values(CLUSTERS).filter(c => c.acct === a && c.region === rg && canSeeCluster(c)).length;
+      return active.length
+        ? `<a class="card net-card" href="#net-${a}-${rg}"><div class="big">${REGIONS[rg]}</div><div class="stats"><span><b>${active.length}</b>active VPC${active.length === 1 ? '' : 's'}</span><span><b>${cls}</b>clusters</span><span><b>${tasks}</b>tasks</span></div>${vpcs.length > active.length ? `<div class="muted small">${vpcs.length - active.length} VPC without tasks hidden</div>` : ''}</a>`
+        : `<div class="card net-card off"><div class="big">${REGIONS[rg]}</div><div class="muted small">No active VPCs</div></div>`;
+    }).join('')}</div></div>`;
+  }).join('')}`;
+}
+const vpcTasks = v => seenTasks().filter(t => t.status === 'RUNNING' && CLUSTERS[t.cluster].vpc === v.id);
+function netRegion(a, rg) {
+  crumbs([['Networks', '#net'], [ACCOUNTS[a].name, '#net-' + a], [REGIONS[rg]]]);
+  const vpcs = Object.values(VPCS).filter(v => v.acct === a && v.region === rg).filter(v => vpcTasks(v).length);
+  return `
+  <div class="page-head"><div class="titles"><h1>${REGIONS[rg]}</h1><div class="meta">Active VPCs in ${esc(ACCOUNTS[a].name)}</div></div></div>
+  <div class="net-cards">${vpcs.map(v => {
+    const ts = vpcTasks(v), cls = [...new Set(ts.map(t => t.cluster))];
+    return `<a class="card net-card" href="#net-${a}-${rg}-${v.id}"><div><div class="big">${esc(v.name)}</div><div class="mono muted small">${v.vpcId} · ${v.cidr}</div></div>
+      <div class="stats"><span><b>${v.subnets.length}</b>subnets</span><span><b>${cls.length}</b>clusters</span><span><b>${ts.length}</b>tasks</span></div>
+      <div class="muted small">${cls.map(c => esc(CLUSTERS[c].name)).join(', ')}</div></a>`;
+  }).join('')}</div>`;
+}
+function netVpc(v) {
+  crumbs([['Networks', '#net'], [ACCOUNTS[v.acct].name, '#net-' + v.acct], [REGIONS[v.region], `#net-${v.acct}-${v.region}`], [v.name]]);
+  const ts = vpcTasks(v);
+  const azs = [...new Set(v.subnets.map(n => n.az))].sort();
+  const closed = k => S.treeClosed.has(k);
+  const tog = (k, n) => n ? `<button class="tog" data-action="tree-toggle" data-key="${k}" aria-label="${closed(k) ? 'Expand' : 'Collapse'}" aria-expanded="${!closed(k)}">${closed(k) ? '+' : '−'}</button>` : '';
+  const branch = (k, kids) => kids && !closed(k) ? `<ul>${kids}</ul>` : '';
+  const subnetNode = n => {
+    const here = ts.filter(t => t.subnet === n.id);
+    const size = Math.pow(2, 32 - +n.cidr.split('/')[1]) - 5;
+    const used = size - n.free + here.length;
+    const byCluster = {};
+    here.forEach(t => { ((byCluster[t.cluster] ||= {})[t.service] ||= []).push(t); });
+    const kSub = 'sn:' + n.id;
+    const clusters = Object.entries(byCluster).map(([cid, svcs]) => {
+      const kCl = kSub + ':' + cid;
+      const svcNodes = Object.entries(svcs).map(([sid, list]) => {
+        const s = SERVICES[sid], kSv = kCl + ':' + sid;
+        return `<li><div class="node service"><span class="kind">Service</span><div class="nh"><a href="#svc-${sid}-overview">${esc(s.name)}</a>${pill(status(s))}${tog(kSv, list.length)}</div><span class="ns">${list.length} task${list.length === 1 ? '' : 's'} here · :${s.rev}</span></div>
+          ${branch(kSv, list.map(t => `<li><a class="node task ${t.health === 'UNHEALTHY' ? 'unhealthy' : ''}" href="#svc-${sid}-tasks" title="Task ${t.id}">${t.id.slice(0, 8)}<span class="ip">${t.ip}</span></a></li>`).join(''))}</li>`;
+      }).join('');
+      return `<li><div class="node cluster"><span class="kind">Cluster</span><div class="nh"><a href="#cl-${cid}">${esc(CLUSTERS[cid].name)}</a>${labelHtml(CLUSTERS[cid], 'cluster')}${tog(kCl, 1)}</div><span class="ns">${Object.keys(svcs).length} service${Object.keys(svcs).length === 1 ? '' : 's'} · ${Object.values(svcs).flat().length} tasks</span></div>${branch(kCl, svcNodes)}</li>`;
+    }).join('');
+    return `<li><div class="node subnet ${n.type.toLowerCase()}"><span class="kind">${n.type} subnet</span><div class="nh">${esc(n.name)}${tog(kSub, clusters ? 1 : 0)}</div><span class="ns mono">${n.subnetId} · ${n.cidr}</span><span class="ns">${used} of ${size} IPs used</span><div class="ipbar"><span style="width:${Math.max(2, (used / size) * 100)}%"></span></div></div>
+      ${clusters ? branch(kSub, clusters) : '<ul><li><div class="node none">No running tasks</div></li></ul>'}</li>`;
+  };
+  const azNodes = azs.map(az => {
+    const kAz = 'az:' + v.id + ':' + az, subs = v.subnets.filter(n => n.az === az);
+    return `<li><div class="node az"><span class="kind">Availability zone</span><div class="nh">${az}${tog(kAz, 1)}</div><span class="ns">${subs.length} subnet${subs.length === 1 ? '' : 's'} · ${ts.filter(t => t.az === az).length} tasks</span></div>${branch(kAz, subs.map(subnetNode).join(''))}</li>`;
+  }).join('');
+  const kV = 'vpc:' + v.id;
+  return `
+  <div class="page-head"><div class="titles"><h1>${esc(v.name)}</h1><div class="meta"><span class="mono">${v.vpcId}</span><span>${v.cidr}</span><span>${v.subnets.length} subnets</span><span>${ts.length} running tasks</span><span>Internet gateway${v.nat ? ' · NAT gateway' : ''}</span></div></div>
+    <div class="actions"><button class="btn" data-action="tree-expand" data-vpc="${v.id}">Expand all</button><button class="btn" data-action="tree-collapse" data-vpc="${v.id}">Collapse to services</button></div></div>
+  <div class="card"><div class="card-head"><h2>Network tree</h2><span class="right muted small">VPC ▸ availability zone ▸ subnet ▸ cluster ▸ service ▸ task</span></div>
+    <div class="card-body tree"><ul><li><div class="node vpc"><span class="kind">VPC</span><div class="nh">${esc(v.name)}${tog(kV, 1)}</div><span class="ns mono">${v.vpcId} · ${v.cidr}</span><span class="ns">${azs.length} zones · ${ts.length} tasks</span></div>${branch(kV, azNodes)}</li></ul></div></div>`;
+}
+
+/* ---------- storage ---------- */
+function vStorage() {
+  crumbs([['Storage']]);
+  const list = visibleEfs();
+  const users = efsUsers;
+  const size = g => g < 1 ? (g * 1024).toFixed(0) + ' MiB' : g.toFixed(1) + ' GiB';
+  const total = sum(list.map(f => f.sizeGiB));
+  return `
+  <div class="page-head"><div class="titles"><h1>Storage</h1><div class="meta">EFS file systems and the services that mount them. File systems are created by Terraform.</div></div></div>
+  <div class="grid g-wide">
+    ${card('Stored data by file system', hbars(list.map((f, i) => ({ name: f.name, sub: REGIONS[f.region], v: f.sizeGiB, color: users(f).length ? SERIES[i % SERIES.length] : 'var(--border-strong)', label: size(f.sizeGiB) }))), `${size(total)} in total`)}
+    ${card('Mounted or not', donut([{ name: 'Mounted by a service', v: list.filter(f => users(f).length).length, color: 'var(--accent)' }, { name: 'Not mounted, still billed', v: list.filter(f => !users(f).length).length, color: 'var(--warning)' }], { label: String(list.length), sub: 'file systems' }))}
+  </div>
+  <div class="cards">${list.map((f, i) => {
+    const us = users(f), conns = sum(us.map(s => running(s.id).length));
+    const growth = ((f.sizeHist[29] - f.sizeHist[0]) / f.sizeHist[0]) * 100;
+    return `<div class="card xcard" style="cursor:default">
+      <div class="xcard-top"><div><div class="big">${esc(f.name)}</div><div class="muted small mono">${f.fsId} · ${REGIONS[f.region]} · ${esc(VPCS[f.vpc].name)}</div></div>${us.length ? pill({ k: 'ok', t: `${conns} client${conns === 1 ? '' : 's'}` }) : pill({ k: 'warn', t: 'Not mounted' })}</div>
+      <div class="mini2"><div><div class="mini-k">Size, 30 days <b>${size(f.sizeGiB)}</b></div>${spark(f.sizeHist, SERIES[i % SERIES.length], { w: 200, h: 30, fluid: true })}<div class="muted small">${growth >= 0 ? '+' : ''}${growth.toFixed(0)}% in 30 days</div></div>
+        <div><div class="mini-k">Throughput, 24 h <b>${fmtNum(last(f.thru))} MiB/s</b></div>${spark(f.thru, 'var(--series-4)', { w: 200, h: 30, fluid: true })}<div class="muted small">${esc(f.mode)}</div></div></div>
+      <div><div class="mini-k">Access points</div>${f.aps.length ? f.aps.map(a => `<div class="mono small">${a.id} · ${esc(a.path)} · uid ${a.uid}</div>`).join('') : '<span class="muted small">None</span>'}</div>
+      <div><div class="mini-k">Mounted by</div>${us.length ? us.map(s => `<div class="small"><a href="#svc-${s.id}-overview" style="color:var(--accent)">${esc(s.name)}</a> <span class="muted">(${esc(CLUSTERS[s.cluster].name)}) → <span class="mono">${esc(s.efs[1])}</span></span></div>`).join('') : '<span class="small" style="color:var(--warning)">No service mounts this file system.</span>'}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+/* ---------- users and permissions ---------- */
+const presetOf = list => Object.entries(PRESETS).find(([, p]) => p.length === list.length && p.every(a => list.includes(a)))?.[0] || 'Custom';
+function permCell(u, tag) {
+  const p = permsFor(u, tag);
+  return `<div class="pcell"><div class="ptogs">${ACTIONS.map(([k, n, l]) => `<button class="ptog ${p.includes(k) ? 'on' : ''}" data-action="perm-toggle" data-user="${u.name}" data-tag="${esc(tag)}" data-act="${k}" title="${n}" aria-pressed="${p.includes(k)}">${l}</button>`).join('')}</div>
+    <select class="ctl sm" data-perm-preset data-user="${u.name}" data-tag="${esc(tag)}" aria-label="Preset for ${u.name} on ${esc(tag)}">${presetOf(p) === 'Custom' ? '<option selected>Custom</option>' : ''}${Object.keys(PRESETS).map(k => `<option ${presetOf(p) === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div>`;
+}
+function vUsers() {
+  crumbs([['Users and permissions']]);
+  if (!me().admin) return noAccess('Only global admins manage users and permissions.');
+  const users = Object.values(USERS);
+  return `
+  <div class="page-head"><div class="titles"><h1>Users and permissions</h1><div class="meta">Global admins can do everything. Every other user gets permissions per tag. Sign-in is username and password.</div></div>
+    <div class="actions"><button class="btn primary" data-action="add-user">Add user</button></div></div>
+  <div class="card"><div class="card-head"><h2>Permission matrix</h2><div class="right legend">${ACTIONS.map(([, n, l]) => `<span><b class="mono">${l}</b> ${n}</span>`).join('')}</div></div>
+    <div class="table-wrap"><table class="t matrix">
+      <thead><tr><th>User</th>${TAGS.map(t => `<th>${tagChip(t.name)} <span class="muted small">${Object.values(SERVICES).filter(s => serviceTag(s) === t.name).length} services</span></th>`).join('')}</tr></thead>
+      <tbody>${users.map(u => `<tr><td><div class="name">${esc(u.name)}</div><div class="muted small">${u.admin ? 'Global admin' : 'User'}</div></td>
+        ${u.admin ? `<td colspan="${TAGS.length}"><span class="pill info" style="animation:none">Everything, on every tag</span></td>` : TAGS.map(t => `<td>${permCell(u, t.name)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>
+    <div class="card-body hint">Turning on any action also turns on View. Turning off View removes everything on that tag. A user sees a cluster when they can view at least one of its services.</div>
+  </div>
+  <div class="card"><div class="card-head"><h2>Users</h2><span class="right muted small">${users.length} users</span></div><div class="table-wrap"><table class="t">
+    <thead><tr><th>Username</th><th>Role</th><th>Can see</th><th>Last sign-in</th><th></th></tr></thead>
+    <tbody>${users.map(u => `<tr><td class="name">${esc(u.name)}${u.name === currentUser ? ' <span class="muted small">(you)</span>' : ''}</td><td>${u.admin ? pill({ k: 'info', t: 'Global admin' }) : pill({ k: 'mute', t: 'User' })}</td>
+      <td>${u.admin ? '<span class="muted">Everything</span>' : TAGS.filter(t => permsFor(u, t.name).includes('view')).map(t => tagChip(t.name)).join(' ') || '<span class="muted">Nothing yet</span>'}</td>
+      <td class="muted">${ago(u.lastSeen)}</td>
+      <td class="num"><button class="btn sm" data-action="user-reset" data-user="${u.name}">Reset password</button> <button class="btn sm" data-action="user-admin" data-user="${u.name}">${u.admin ? 'Remove global admin' : 'Make global admin'}</button> <button class="btn sm danger" data-action="user-delete" data-user="${u.name}" ${u.name === currentUser ? 'disabled title="You cannot delete yourself"' : ''}>Delete</button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+/* ---------- tags ---------- */
+function vTags() {
+  crumbs([['Tags']]);
+  if (!me().admin) return noAccess('Only global admins create tags and assign them.');
+  const svcAll = Object.values(SERVICES), clAll = Object.values(CLUSTERS);
+  const opt = (cur, inheritName) => `${inheritName ? `<option value="" ${!cur ? 'selected' : ''}>Inherit (${esc(inheritName)})</option>` : ''}${TAGS.map(t => `<option ${cur === t.name ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}`;
+  return `
+  <div class="page-head"><div class="titles"><h1>Tags</h1><div class="meta">Tags decide who can do what. They live only in Harbormaster; AWS tags are never read or written. An untagged cluster is Dev; an untagged service inherits its cluster's tag.</div></div>
+    <div class="actions"><button class="btn primary" data-action="add-tag">Create tag</button></div></div>
+  <div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Tag</th><th class="num">Clusters</th><th class="num">Services tagged directly</th><th class="num">Services in effect</th><th>Users with access</th><th></th></tr></thead>
+    <tbody>${TAGS.map(t => {
+      const withAccess = Object.values(USERS).filter(u => !u.admin && permsFor(u, t.name).includes('view'));
+      return `<tr><td>${tagChip(t.name)}${t.builtin ? ' <span class="muted small">default</span>' : ''}</td><td class="num">${clAll.filter(c => clusterTag(c) === t.name).length}</td><td class="num">${svcAll.filter(s => s.label === t.name).length}</td><td class="num">${svcAll.filter(s => serviceTag(s) === t.name).length}</td>
+        <td>${withAccess.map(u => `<span class="chip">${esc(u.name)} <span class="muted">${presetOf(permsFor(u, t.name))}</span></span>`).join(' ') || '<span class="muted">Global admins only</span>'}</td>
+        <td class="num"><button class="btn sm" data-action="tag-rename" data-tag="${esc(t.name)}">Rename</button> <button class="btn sm danger" data-action="tag-delete" data-tag="${esc(t.name)}" ${t.builtin ? 'disabled title="Dev is the default tag"' : ''}>Delete</button></td></tr>`;
+    }).join('')}</tbody></table></div></div>
+  <div class="card"><div class="card-head"><h2>Assignments</h2><span class="right muted small">Dashed tags are inherited from the cluster</span></div><div class="table-wrap"><table class="t">
+    <thead><tr><th>Cluster / service</th><th>Account · region</th><th>Tag</th><th>In effect</th></tr></thead>
+    <tbody>${clAll.map(c => `<tr style="background:var(--raised)"><td class="name">${esc(c.name)}</td><td class="muted">${esc(ACCOUNTS[c.acct].name)} · ${REGIONS[c.region]}</td><td><select class="ctl sm" data-assign="cluster" data-id="${c.id}" aria-label="Tag for ${esc(c.name)}">${opt(clusterTag(c))}</select></td><td>${tagChip(clusterTag(c))}</td></tr>
+      ${svcAll.filter(s => s.cluster === c.id).map(s => `<tr><td style="padding-left:28px">${esc(s.name)}</td><td></td><td><select class="ctl sm" data-assign="service" data-id="${s.id}" aria-label="Tag for ${esc(s.name)}">${opt(s.label, clusterTag(c))}</select></td><td>${tagChip(serviceTag(s), !s.label)}</td></tr>`).join('')}`).join('')}</tbody></table></div></div>`;
+}
+
+function vAudit() {
+  crumbs([['Audit log']]);
+  if (!me().admin) return noAccess('Only global admins can read the audit log.');
+  return `
+  <div class="page-head"><div class="titles"><h1>Audit log</h1><div class="meta">Sign-ins and every change to users, permissions and tags. Service actions are in each service's operations log.</div></div></div>
+  <div class="card"><div class="feed">${AUDIT.map(a => `<div class="feed-row"><span class="muted" title="${new Date(a.ts).toLocaleString()}">${ago(a.ts)}</span><span class="src q">${esc(a.actor)}</span><span>${esc(a.text)}</span></div>`).join('')}</div></div>`;
+}
+
+function vAccess() {
+  crumbs([['My access']]);
+  const u = me();
+  if (u.admin) return `<div class="page-head"><div class="titles"><h1>My access</h1><div class="meta">You are a global admin: you can do everything, on every tag.</div></div></div>`;
+  return `
+  <div class="page-head"><div class="titles"><h1>My access</h1><div class="meta">What you can do on each tag. Ask a global admin to change it.</div></div></div>
+  <div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Tag</th>${ACTIONS.map(([, n]) => `<th>${n}</th>`).join('')}<th class="num">Services</th></tr></thead>
+    <tbody>${TAGS.map(t => `<tr><td>${tagChip(t.name)}</td>${ACTIONS.map(([k]) => `<td>${permsFor(u, t.name).includes(k) && permsFor(u, t.name).includes('view') ? '<span style="color:var(--success)">✓</span>' : '<span class="muted">–</span>'}</td>`).join('')}<td class="num">${Object.values(SERVICES).filter(s => serviceTag(s) === t.name).length}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function showLogin(err = '') {
+  $('#login-root').innerHTML = `<div class="login-wrap"><form class="card login-card" id="login-form" novalidate>
+    <div class="brand" style="padding:0;border:0"><svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="7" fill="var(--accent)"/><rect x="6" y="8" width="7" height="5" rx="1" fill="var(--accent-ink)"/><rect x="15" y="8" width="7" height="5" rx="1" fill="var(--accent-ink)" opacity="0.7"/><rect x="6" y="15" width="16" height="5" rx="1" fill="var(--accent-ink)" opacity="0.85"/></svg><div><div class="brand-name">Harbormaster</div><div class="brand-sub">ECS control center</div></div></div>
+    <h1>Sign in</h1>
+    <label class="field"><span>Username</span><input class="ctl" id="login-user" autocomplete="username" required></label>
+    <label class="field"><span>Password</span><input class="ctl" id="login-pass" type="password" autocomplete="current-password" required></label>
+    ${err ? `<div class="err">${esc(err)}</div>` : ''}
+    <button class="btn primary" type="submit" style="justify-content:center">Sign in</button>
+    <p class="hint">Mockup users: <span class="mono">pavel</span> (global admin), <span class="mono">dana</span>, <span class="mono">omer</span>, <span class="mono">oncall</span>. Any password works.</p>
+  </form></div>`;
+  $('#login-user').focus();
+}
+
+/* ---------- accounts ---------- */
+function vAccounts() {
+  crumbs([['AWS accounts']]);
+  if (!me().admin) return noAccess('Only global admins manage AWS accounts.');
+  return `
+  <div class="page-head"><div class="titles"><h1>AWS accounts</h1><div class="meta">Harbormaster runs as an ECS service and reaches each account by assuming an IAM role.</div></div>
+    <div class="actions"><button class="btn primary" data-action="add-account">Connect account</button></div></div>
+  <div class="card"><div class="table-wrap"><table class="t">
+    <thead><tr><th>Account</th><th>Role Harbormaster assumes</th><th>Regions scanned</th><th class="num">Clusters</th><th>Status</th><th>Last check</th></tr></thead>
+    <tbody>${Object.values(ACCOUNTS).map(a => `<tr><td><div class="name">${esc(a.name)}</div><div class="mono muted small">${a.number}</div></td><td class="mono small">${esc(a.role)}</td><td>${Object.values(REGIONS).join(', ')}</td><td class="num">${Object.values(CLUSTERS).filter(c => c.acct === a.id).length}</td><td>${pill({ k: 'ok', t: 'Connected' })}</td><td class="muted">${ago(a.checked)}</td></tr>`).join('')}</tbody></table></div></div>
+  <div class="grid g2">
+    <div class="card"><div class="card-head"><h2>Where Harbormaster runs</h2></div><div class="card-body"><dl class="kv">
+      <dt>Cluster / service</dt><dd class="mono">harbormaster / harbormaster-server</dd><dt>Account</dt><dd>homelab-admin · us-east-1</dd>
+      <dt>Task role</dt><dd class="mono small">arn:aws:iam::482109375512:role/harbormaster-server-task</dd>
+      <dt>Updates</dt><dd>Polls ECS every 5 s per account and region; metrics every 60 s; VPCs and EFS every 5 min</dd>
+      <dt>Own data</dt><dd>PostgreSQL on RDS: users, sessions, tags, permissions, audit and operations logs. No AWS definitions are stored.</dd></dl></div></div>
+    <div class="card"><div class="card-head"><h2>Tags</h2></div><div class="card-body form-grid">
+      <p class="hint">Tags are kept in Harbormaster only and never written to AWS. An untagged cluster is Dev; an untagged service inherits its cluster's tag.</p>
+      <div class="toolbar">${TAGS.map(t => `${tagChip(t.name)} <span class="muted small">${Object.values(SERVICES).filter(x => serviceTag(x) === t.name).length} services</span>`).join('&nbsp;&nbsp;')}</div><div><a class="btn sm" href="#tags">Manage tags</a></div>
+    </div></div>
+  </div>`;
+}
+
+/* ---------- dialogs and toasts ---------- */
+let dlgClose = null;
+function dialog({ title, sub = '', body = '', actions = [], wide = false }) {
+  const root = $('#dialog-root');
+  root.innerHTML = `<div class="dlg-backdrop"><div class="dlg ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="dlg-t"><div class="dlg-head"><h2 id="dlg-t" style="font-size:16px">${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ''}</div><div class="dlg-body">${body}</div><div class="dlg-foot">${actions.map((a, i) => `<button class="btn ${a.kind || ''}" data-dlg="${i}">${esc(a.label)}</button>`).join('')}</div></div></div>`;
+  const close = () => { root.innerHTML = ''; dlgClose = null; };
+  dlgClose = close;
+  root.querySelectorAll('[data-dlg]').forEach(b => b.addEventListener('click', () => { const a = actions[+b.dataset.dlg]; const keep = a.fn && a.fn(root) === false; if (!keep) close(); }));
+  root.querySelector('.dlg-backdrop').addEventListener('click', e => { if (e.target.classList.contains('dlg-backdrop')) close(); });
+  const f = root.querySelector('input, select, textarea, .btn.primary') || root.querySelector('.btn');
+  if (f) f.focus();
+}
+function toast(text, kind = '') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind; el.innerHTML = text;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+function addOp(s, src, actor, text) { s.ops.unshift({ ts: Date.now(), src, actor, text }); }
+
+/* line diff (LCS) */
+function diffLines(a, b) {
+  const A = a.split('\n'), B = b.split('\n'), n = A.length, m = B.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && A[i] === B[j]) { out.push([' ', A[i]]); i++; j++; }
+    else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) { out.push(['+', B[j]]); j++; }
+    else { out.push(['-', A[i]]); i++; }
+  }
+  // keep 2 lines of context around changes
+  const keep = out.map((_, k) => out.slice(Math.max(0, k - 2), k + 3).some(x => x[0] !== ' '));
+  let html = '', gap = false;
+  out.forEach(([t, l], k) => {
+    if (!keep[k]) { if (!gap) html += '<div class="gap">⋯</div>'; gap = true; return; }
+    gap = false;
+    html += `<div class="${t === '+' ? 'add' : t === '-' ? 'del' : ''}">${t} ${esc(l)}</div>`;
+  });
+  return html;
+}
+
+/* ---------- simulated AWS behaviour ---------- */
+function startDeploy(s, toRev, why) {
+  if (s.timer) clearInterval(s.timer);
+  const td = s.revisions.find(r => r.rev === toRev).td;
+  const willFail = s.oomBelow && +td.memory < s.oomBelow;
+  const fromRev = s.rev;
+  s.state = 'deploying';
+  s.deploy = { from: fromRev, to: toRev, started: Date.now(), newRunning: 0, oldRunning: running(s.id).length, failures: 0 };
+  addOp(s, 'ECS', 'ECS', `(service ${s.name}) has started deployment ecs-svc/${hexFor(s.id + toRev + Date.now(), 19).replace(/[a-f]/g, '4')} for task definition ${s.name}:${toRev}.`);
+  if (why) addOp(s, 'Harbormaster', me().name, why);
+  let idx = 0;
+  s.timer = setInterval(() => {
+    const d = s.deploy;
+    if (willFail) {
+      const t = newTask(s, toRev, idx++, { status: 'STOPPED', started: Date.now() - 40e3, stoppedAt: Date.now(), reason: 'OutOfMemoryError: Container killed due to memory usage', exit: 137, health: 'UNKNOWN' });
+      d.failures++;
+      addOp(s, 'ECS', 'ECS', `(service ${s.name}) has stopped 1 running tasks: (task ${t.id.slice(0, 12)}). Reason: OutOfMemoryError.`);
+      if (d.failures >= 3) {
+        s.deploys.push({ ts: Date.now(), rev: toRev, ok: false, kind: 'deploy' });
+        clearInterval(s.timer); s.timer = null; s.state = null; s.deploy = null;
+        addOp(s, 'ECS', 'ECS', `(service ${s.name}) deployment failed: tasks failed to start. Circuit breaker rolled back to ${s.name}:${fromRev}.`);
+        toast(`<strong>${esc(s.name)}</strong>: revision :${toRev} failed to start (OutOfMemoryError). Rolled back to :${fromRev}.`, 'bad');
+      }
+    } else if (d.newRunning < s.desired) {
+      const t = newTask(s, toRev, idx++, { started: Date.now() });
+      d.newRunning++;
+      addOp(s, 'ECS', 'ECS', `(service ${s.name}) has started 1 tasks: (task ${t.id.slice(0, 12)}).`);
+      const old = running(s.id).find(x => x.rev !== toRev || (x.rev === toRev && fromRev === toRev && x.started < d.started));
+      if (old && d.oldRunning > 0) {
+        old.status = 'STOPPED'; old.stopped = Date.now(); old.exit = 0; old.reason = `Scaling activity initiated by (deployment to ${s.name}:${toRev})`;
+        d.oldRunning--;
+        addOp(s, 'ECS', 'ECS', `(service ${s.name}) has stopped 1 running tasks: (task ${old.id.slice(0, 12)}).`);
+      }
+    } else {
+      running(s.id).filter(x => x.started < d.started).forEach(old => { old.status = 'STOPPED'; old.stopped = Date.now(); old.exit = 0; old.reason = `Scaling activity initiated by (deployment to ${s.name}:${toRev})`; });
+      clearInterval(s.timer); s.timer = null;
+      s.rev = toRev; s.state = null; s.deploy = null;
+      s.revisions.find(r => r.rev === toRev).deployedEver = true;
+      if (s.oomBelow) { s.cpuSeries = s.cpuSeries.map((v, i) => i > 66 ? 20 + rnd() * 10 : v); s.memSeries = s.memSeries.map((v, i) => i > 66 ? 45 + rnd() * 10 : v); }
+      addOp(s, 'ECS', 'ECS', `(service ${s.name}) has reached a steady state.`);
+      toast(`<strong>${esc(s.name)}</strong> is running <span class="mono">:${toRev}</span> on all ${s.desired} tasks.`, 'ok');
+      delete S.drafts[s.id];
+      s.deploys.push({ ts: Date.now(), rev: toRev, ok: true, kind: fromRev === toRev ? 'restart' : 'deploy' });
+    }
+    rerenderIfShowing(s.id);
+  }, 2400);
+  rerenderIfShowing(s.id);
+}
+function reconcile(s) {
+  const run = running(s.id);
+  if (s.state === 'deploying') return;
+  if (run.length < s.desired) {
+    setTimeout(() => {
+      if (s.oomBelow && +tdOf(s).memory < s.oomBelow) {
+        newTask(s, s.rev, 0, { status: 'STOPPED', started: Date.now() - 50e3, stoppedAt: Date.now(), reason: 'OutOfMemoryError: Container killed due to memory usage', exit: 137, health: 'UNKNOWN' });
+        addOp(s, 'ECS', 'ECS', `(service ${s.name}) has stopped 1 running tasks. Reason: OutOfMemoryError.`);
+      } else {
+        const t = newTask(s, s.rev, run.length);
+        addOp(s, 'ECS', 'ECS', `(service ${s.name}) has started 1 tasks: (task ${t.id.slice(0, 12)}).`);
+        if (running(s.id).length >= s.desired) addOp(s, 'ECS', 'ECS', `(service ${s.name}) has reached a steady state.`);
+        reconcile(s);
+      }
+      rerenderIfShowing(s.id);
+    }, 2200);
+  } else if (run.length > s.desired) {
+    setTimeout(() => {
+      const t = running(s.id)[0];
+      t.status = 'STOPPED'; t.stopped = Date.now(); t.exit = 0; t.reason = 'Scaling activity initiated by (desired count change)';
+      addOp(s, 'ECS', 'ECS', `(service ${s.name}) has stopped 1 running tasks: (task ${t.id.slice(0, 12)}).`);
+      if (running(s.id).length <= s.desired) addOp(s, 'ECS', 'ECS', `(service ${s.name}) has reached a steady state.`);
+      reconcile(s);
+      rerenderIfShowing(s.id);
+    }, 1800);
+  }
+}
+
+/* ---------- interactions ---------- */
+function editDraft(s, fn) {
+  const d = draftOf(s);
+  let td;
+  try { td = JSON.parse(d.text); } catch (e) { return; }
+  fn(td);
+  d.text = JSON.stringify(td, null, 2);
+  const ed = $('#td-editor');
+  if (ed) ed.value = d.text;
+  updateDraftStatus(s);
+}
+function updateDraftStatus(s) {
+  const d = draftOf(s), st = $('#td-status'), ed = $('#td-editor');
+  if (!st) return;
+  let err = '';
+  try { JSON.parse(d.text); } catch (e) { err = e.message; }
+  const dirty = d.text !== JSON.stringify(tdOf(s), null, 2);
+  st.className = err ? 'err' : 'hint';
+  st.textContent = err ? err : dirty ? 'Unsaved changes' : 'No changes';
+  ed.classList.toggle('invalid', !!err);
+  document.querySelector('[data-action="draft-review"]').disabled = !dirty || !!err;
+  document.querySelector('[data-action="draft-reset"]').disabled = !dirty;
+}
+function reviewDraft(s) {
+  const d = draftOf(s);
+  const before = JSON.stringify(tdOf(s), null, 2);
+  const next = JSON.parse(d.text);
+  const newRev = latestRev(s) + 1;
+  const stale = d.base !== s.rev;
+  dialog({
+    wide: true,
+    title: `Register ${esc(s.name)}:${newRev}?`,
+    sub: `Changes against the deployed revision :${s.rev}.`,
+    body: `${stale ? `<div class="banner warn">The service moved from :${d.base} to :${s.rev} while you were editing. Check the diff before saving.</div>` : ''}<div class="diff">${diffLines(before, d.text)}</div>`,
+    actions: [
+      { label: 'Keep editing' },
+      { label: `Register revision :${newRev}`, kind: 'primary', fn: () => {
+        s.revisions.push({ rev: newRev, td: next, at: Date.now(), by: me().name + ' (Harbormaster)', deployedEver: false });
+        addOp(s, 'Harbormaster', me().name, `Registered task definition ${s.name}:${newRev} (image ${tdImageTag(next)}, ${next.cpu} CPU / ${next.memory} MiB).`);
+        S.drafts[s.id] = { text: JSON.stringify(next, null, 2), base: s.rev };
+        setTimeout(() => askDeploy(s, newRev), 0);
+      } },
+    ],
+  });
+}
+function askDeploy(s, rev, fromPrompt = true) {
+  const td = s.revisions.find(r => r.rev === rev).td;
+  const rollback = rev < s.rev;
+  dialog({
+    title: fromPrompt ? `Revision :${rev} is registered. Deploy it now?` : `${rollback ? 'Roll back' : 'Deploy'} ${esc(s.name)} to :${rev}?`,
+    sub: `${esc(s.name)} runs :${s.rev} on ${running(s.id).length} task${running(s.id).length === 1 ? '' : 's'} in ${esc(CLUSTERS[s.cluster].name)}.`,
+    body: `<dl class="kv"><dt>Image</dt><dd class="mono">${esc(tdImageTag(td))}</dd><dt>Size</dt><dd>${td.cpu} CPU · ${td.memory} MiB</dd><dt>Strategy</dt><dd>Rolling update, new tasks start before old ones stop. The circuit breaker rolls back if new tasks fail.</dd><dt>Tag</dt><dd>${tagChip(serviceTag(s), !s.label)}</dd></dl>
+      ${serviceTag(s) === 'Prod' ? '<div class="banner warn">This is a Prod service.</div>' : ''}`,
+    actions: [
+      { label: fromPrompt ? 'Not now' : 'Cancel', fn: () => { if (fromPrompt) toast(`<span class="mono">${esc(s.name)}:${rev}</span> is registered. Deploy it from the service page when you are ready.`); render(); } },
+      { label: rollback ? `Roll back to :${rev}` : `Deploy :${rev}`, kind: 'primary', fn: () => { location.hash = `svc-${s.id}-overview`; startDeploy(s, rev, `${rollback ? 'Rolled back' : 'Deployed'} ${s.name}:${rev}.`); } },
+    ],
+  });
+}
+function editLabel(kind, id) {
+  if (!me().admin) return;
+  const isSvc = kind === 'service', x = isSvc ? SERVICES[id] : CLUSTERS[id];
+  const cur = isSvc ? (x.label || '') : clusterTag(x);
+  const opts = (isSvc ? [['', `Inherit from cluster ${esc(CLUSTERS[x.cluster].name)}`, tagChip(clusterTag(CLUSTERS[x.cluster]), true)]] : []).concat(TAGS.map(t => [t.name, '', tagChip(t.name)]));
+  dialog({
+    title: `Tag for ${esc(x.name)}`,
+    sub: 'Permissions follow the tag. Stored in Harbormaster only; AWS tags are not changed.',
+    body: `<div class="radio-list">${opts.map(([v, text, chip]) => `<label><input type="radio" name="lbl" value="${esc(v)}" ${v === cur ? 'checked' : ''}>${chip}${text ? `<span class="small">${text}</span>` : ''}</label>`).join('')}</div>
+      <p class="hint">Global admins create tags on the <a href="#tags" style="color:var(--accent)">Tags</a> page.</p>`,
+    actions: [{ label: 'Cancel' }, { label: 'Save tag', kind: 'primary', fn: root => assignTag(kind, id, root.querySelector('input[name="lbl"]:checked').value) }],
+  });
+}
+
+/* ---------- permission and tag interactions ---------- */
+function setPerms(u, tag, list, why) {
+  const before = permsFor(u, tag);
+  const next = list.length && !list.includes('view') ? ['view', ...list] : list;
+  u.perms[tag] = ACTIONS.map(a => a[0]).filter(a => next.includes(a));
+  const added = u.perms[tag].filter(a => !before.includes(a)), removed = before.filter(a => !u.perms[tag].includes(a));
+  if (added.length) addAudit(`Gave ${u.name} ${added.map(a => ACTION_NAME[a]).join(', ')} on ${tag}${why ? ' (' + why + ')' : ''}.`);
+  if (removed.length) addAudit(`Removed ${removed.map(a => ACTION_NAME[a]).join(', ')} on ${tag} from ${u.name}${why ? ' (' + why + ')' : ''}.`);
+}
+function tagDialog(existing) {
+  const t = existing ? TAGS.find(x => x.name === existing) : null;
+  dialog({
+    title: t ? `Rename tag ${esc(t.name)}` : 'Create tag',
+    sub: t ? 'Clusters, services and permissions keep pointing at it.' : 'New tags start with no users. Only global admins can see resources with it until you give permissions.',
+    body: `<label class="field"><span>Name</span><input class="ctl" id="tag-name" value="${t ? esc(t.name) : ''}" placeholder="QA"></label>
+      <div class="field"><span>Color</span><div class="toolbar">${TAG_COLORS.map(c => `<label class="toolbar" style="gap:5px"><input type="radio" name="tag-color" value="${c}" ${(t ? t.color : 'blue') === c ? 'checked' : ''}><span class="label c-${c}">${c}</span></label>`).join('')}</div></div>
+      <div class="err" id="tag-err"></div>`,
+    actions: [{ label: 'Cancel' }, { label: t ? 'Save' : 'Create tag', kind: 'primary', fn: root => {
+      const name = root.querySelector('#tag-name').value.trim(), color = root.querySelector('input[name="tag-color"]:checked').value;
+      const clash = TAGS.find(x => x.name.toLowerCase() === name.toLowerCase() && x !== t);
+      if (!/^[A-Za-z][A-Za-z0-9 _-]{0,23}$/.test(name) || clash) { root.querySelector('#tag-err').textContent = clash ? `A tag called ${name} already exists.` : 'Use 1–24 letters, digits, spaces, hyphens or underscores, starting with a letter.'; return false; }
+      if (t) {
+        const old = t.name;
+        t.name = name; t.color = color;
+        Object.values(CLUSTERS).forEach(c => { if (c.label === old) c.label = name; });
+        Object.values(SERVICES).forEach(s => { if (s.label === old) s.label = name; });
+        Object.values(USERS).forEach(u => { if (u.perms[old]) { u.perms[name] = u.perms[old]; delete u.perms[old]; } });
+        if (old !== name) addAudit(`Renamed tag ${old} to ${name}.`);
+      } else { TAGS.push({ name, color }); addAudit(`Created tag ${name}.`); }
+      toast(t ? `Tag saved.` : `Created tag <strong>${esc(name)}</strong>. Assign it on this page.`);
+      render();
+    } }],
+  });
+}
+function adminAction(a, el) {
+  const u = el.dataset.user ? USERS[el.dataset.user] : null;
+  if (a === 'perm-toggle') {
+    const tag = el.dataset.tag, act = el.dataset.act, cur = permsFor(u, tag);
+    if (cur.includes(act)) setPerms(u, tag, act === 'view' ? [] : cur.filter(x => x !== act));
+    else setPerms(u, tag, [...cur, act]);
+    render();
+  }
+  if (a === 'add-user') {
+    dialog({ title: 'Add user', sub: 'They sign in with this username and password. Give permissions in the matrix afterwards.',
+      body: `<label class="field"><span>Username</span><input class="ctl" id="nu-name" placeholder="alex" autocomplete="off"></label>
+        <label class="field"><span>Temporary password</span><input class="ctl mono" id="nu-pass" value="${hex(4)}-${hex(4)}-${hex(4)}" readonly></label>
+        <label class="toolbar" style="gap:6px"><input type="checkbox" id="nu-admin"> Global admin (can do everything)</label>
+        <p class="hint">They are asked to choose a new password at first sign-in.</p><div class="err" id="nu-err"></div>`,
+      actions: [{ label: 'Cancel' }, { label: 'Add user', kind: 'primary', fn: root => {
+        const name = root.querySelector('#nu-name').value.trim().toLowerCase(), admin = root.querySelector('#nu-admin').checked;
+        if (!/^[a-z][a-z0-9._-]{1,31}$/.test(name) || USERS[name]) { root.querySelector('#nu-err').textContent = USERS[name] ? `${name} already exists.` : 'Use 2–32 lowercase letters, digits, dots, hyphens or underscores.'; return false; }
+        USERS[name] = { name, admin, lastSeen: 0, perms: {} };
+        addAudit(`Created user ${name}${admin ? ' as global admin' : ''}.`);
+        toast(`Added <strong>${esc(name)}</strong>.`); render();
+      } }] });
+  }
+  if (a === 'user-reset') { addAudit(`Reset the password of ${u.name}.`); toast(`New temporary password for ${esc(u.name)}: <span class="mono">${hex(4)}-${hex(4)}-${hex(4)}</span>`); render(); }
+  if (a === 'user-admin') {
+    const admins = Object.values(USERS).filter(x => x.admin).length;
+    if (u.admin && admins === 1) { toast('Harbormaster needs at least one global admin.', 'bad'); return; }
+    dialog({ title: u.admin ? `Remove global admin from ${esc(u.name)}?` : `Make ${esc(u.name)} a global admin?`, sub: u.admin ? 'They keep only the per-tag permissions in the matrix.' : 'Global admins can do everything on every tag, and manage users, tags and AWS accounts.',
+      actions: [{ label: 'Cancel' }, { label: u.admin ? 'Remove global admin' : 'Make global admin', kind: 'primary', fn: () => { u.admin = !u.admin; addAudit(`${u.admin ? 'Made' : 'Removed'} ${u.name} ${u.admin ? 'a global admin' : 'as global admin'}.`); render(); } }] });
+  }
+  if (a === 'user-delete') {
+    dialog({ title: `Delete ${esc(u.name)}?`, sub: 'Their sessions end now. Their entries in operations and audit logs stay.',
+      actions: [{ label: 'Cancel' }, { label: 'Delete user', kind: 'danger solid', fn: () => {
+        if (u.admin && Object.values(USERS).filter(x => x.admin).length === 1) { toast('Harbormaster needs at least one global admin.', 'bad'); return; }
+        delete USERS[u.name]; addAudit(`Deleted user ${u.name}.`); render();
+      } }] });
+  }
+  if (a === 'add-tag') tagDialog(null);
+  if (a === 'tag-rename') tagDialog(el.dataset.tag);
+  if (a === 'tag-delete') {
+    const name = el.dataset.tag;
+    const cl = Object.values(CLUSTERS).filter(c => c.label === name), sv = Object.values(SERVICES).filter(s => s.label === name);
+    const us = Object.values(USERS).filter(x => x.perms[name] && x.perms[name].length);
+    dialog({ title: `Delete tag ${esc(name)}?`, sub: 'This changes who can see and do what.',
+      body: `<ul class="small" style="margin:0;padding-left:18px;display:grid;gap:4px"><li>${cl.length} cluster${cl.length === 1 ? '' : 's'} become Dev.</li><li>${sv.length} service${sv.length === 1 ? '' : 's'} go back to inheriting their cluster's tag.</li><li>${us.length} user${us.length === 1 ? '' : 's'} lose the permissions they had on ${esc(name)}${us.length ? ': ' + us.map(x => esc(x.name)).join(', ') : ''}.</li></ul>`,
+      actions: [{ label: 'Cancel' }, { label: 'Delete tag', kind: 'danger solid', fn: () => {
+        cl.forEach(c => { c.label = null; }); sv.forEach(s => { s.label = null; });
+        us.forEach(x => delete x.perms[name]);
+        TAGS.splice(TAGS.findIndex(t => t.name === name), 1);
+        addAudit(`Deleted tag ${name}.`); render();
+      } }] });
+  }
+  if (a === 'sign-out') { addAudit('Signed out.'); showLogin(); }
+}
+function assignTag(kind, id, value) {
+  const x = kind === 'cluster' ? CLUSTERS[id] : SERVICES[id];
+  const before = kind === 'cluster' ? clusterTag(x) : serviceTag(x);
+  x.label = value || null;
+  const after = kind === 'cluster' ? clusterTag(x) : serviceTag(x);
+  addAudit(`Tagged ${kind} ${x.name} as ${value || 'inherit (' + after + ')'} (was ${before}).`);
+  (kind === 'cluster' ? Object.values(SERVICES).filter(s => s.cluster === x.id) : [x]).forEach(s => addOp(s, 'Harbormaster', me().name, `Changed tag of ${kind} ${x.name} from ${before} to ${after}.`));
+  toast(`${esc(x.name)} is now ${tagChip(after, kind === 'service' && !value)}`);
+  render();
+}
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'login-form') return;
+  e.preventDefault();
+  const name = $('#login-user').value.trim().toLowerCase(), pass = $('#login-pass').value;
+  if (!USERS[name] || !pass) { showLogin('Wrong username or password.'); return; }
+  currentUser = name; USERS[name].lastSeen = Date.now(); addAudit('Signed in.');
+  $('#login-root').innerHTML = '';
+  location.hash = 'overview';
+  render();
+});
+
+document.addEventListener('click', e => {
+  const go = e.target.closest('[data-go]');
+  const act = e.target.closest('[data-action]');
+  if (act) {
+    const a = act.dataset.action, r = parseRoute(), s = r.id ? SERVICES[r.id] : null;
+    if (a === 'edit-label') { e.preventDefault(); e.stopPropagation(); editLabel(act.dataset.kind, act.dataset.id); return; }
+    if (a === 'range') { S.metricsRange = act.dataset.v; render(); }
+    if (['perm-toggle', 'add-user', 'user-reset', 'user-admin', 'user-delete', 'add-tag', 'tag-rename', 'tag-delete', 'sign-out'].includes(a)) { adminAction(a, act); return; }
+    if (a === 'tasks-filter') { S.tasksFilter = act.dataset.v; render(); }
+    if (a === 'list-view') { S.listView = act.dataset.v; render(); }
+    if (a === 'tree-toggle') { const k = act.dataset.key; S.treeClosed.has(k) ? S.treeClosed.delete(k) : S.treeClosed.add(k); render(); }
+    if (a === 'tree-expand') { S.treeClosed.clear(); render(); }
+    if (a === 'tree-collapse') {
+      S.treeClosed.clear();
+      const v = VPCS[act.dataset.vpc];
+      vpcTasks(v).forEach(t => S.treeClosed.add(`sn:${t.subnet}:${t.cluster}:${t.service}`));
+      render();
+    }
+    if (a === 'restart') {
+      const sv = SERVICES[act.dataset.id];
+      dialog({ title: `Restart ${esc(sv.name)}?`, sub: `Starts a new deployment of :${sv.rev}. Each task is replaced, new ones first.`, actions: [{ label: 'Cancel' }, { label: 'Restart', kind: 'primary', fn: () => startDeploy(sv, sv.rev, `Restarted service (force new deployment) on revision ${sv.rev}.`) }] });
+    }
+    if (a === 'deploy-rev') askDeploy(SERVICES[act.dataset.id], +act.dataset.rev, false);
+    if (a === 'draft-reset') { delete S.drafts[s.id]; render(); }
+    if (a === 'draft-review') reviewDraft(s);
+    if (a === 'env-add') { editDraft(s, td => td.containerDefinitions[0].environment.push({ name: 'NEW_VAR', value: '' })); render(); }
+    if (a === 'env-del') { editDraft(s, td => td.containerDefinitions[0].environment.splice(+act.dataset.i, 1)); render(); }
+    if (a === 'dc-step') { const i = $('#dc-input'); i.value = Math.max(0, +i.value + +act.dataset.d); }
+    if (a === 'dc-apply') {
+      const sv = SERVICES[act.dataset.id], n = Math.max(0, Math.min(50, +$('#dc-input').value || 0));
+      if (n === sv.desired) { toast('Desired count is already ' + n + '.'); return; }
+      const sc = sv.scaling, out = sc && (n < sc.min || n > sc.max);
+      dialog({ title: `Set ${esc(sv.name)} to ${n} task${n === 1 ? '' : 's'}?`, sub: `Now ${sv.desired}. ${n === 0 ? 'Every task stops. The service and its definition stay.' : ''}`,
+        body: out ? `<div class="banner warn">Auto scaling keeps this service between ${sc.min} and ${sc.max}. It will move ${n} back into that range.</div>` : '',
+        actions: [{ label: 'Cancel' }, { label: 'Update desired count', kind: 'primary', fn: () => { const prev = sv.desired; sv.desired = n; addOp(sv, 'Harbormaster', me().name, `Changed desired count from ${prev} to ${n}.`); reconcile(sv); render(); } }] });
+    }
+    if (a === 'stop-task') {
+      const t = TASKS[act.dataset.id], sv = SERVICES[t.service];
+      dialog({ title: `Stop task ${t.id.slice(0, 12)}?`, sub: `${esc(sv.name)} will start a replacement to keep ${sv.desired} running.`, actions: [{ label: 'Cancel' }, { label: 'Stop task', kind: 'danger solid', fn: () => {
+        t.status = 'STOPPED'; t.stopped = Date.now(); t.exit = 0; t.reason = `Task stopped by ${me().name} via Harbormaster`;
+        addOp(sv, 'Harbormaster', me().name, `Stopped task ${t.id.slice(0, 12)}.`);
+        reconcile(sv); render();
+      } }] });
+    }
+    if (a === 'exec-task') {
+      const t = TASKS[act.dataset.id], sv = SERVICES[t.service];
+      const T = S.terms[sv.id] || (S.terms[sv.id] = { task: t.id, container: tdOf(sv).containerDefinitions[0].name, shell: '/bin/sh', connected: false, out: [] });
+      if (!T.connected) T.task = t.id;
+      location.hash = `svc-${sv.id}-terminal`;
+    }
+    if (a === 'term-connect') {
+      const T = S.terms[s.id], t = TASKS[T.task];
+      T.connected = true;
+      T.out.push({ t: `$ aws ecs execute-command --cluster ${CLUSTERS[s.cluster].name} --task ${t.id} --container ${T.container} --interactive --command "${T.shell}"\n\nStarting session with SessionId: ecs-execute-command-${hexFor(t.id, 17)}`, sys: true });
+      addOp(s, 'Harbormaster', me().name, `Opened terminal session on task ${t.id.slice(0, 12)} (${T.container}, ${T.shell}).`);
+      render();
+    }
+    if (a === 'term-disconnect') { const T = S.terms[s.id]; termRun(s, 'exit'); T.connected = false; render(); }
+    if (a === 'log-follow') { const L = logsOf(s); L.follow = !L.follow; render(); }
+    if (a === 'add-account') {
+      dialog({ title: 'Connect an AWS account', sub: 'Harbormaster assumes this role from its own task role.',
+        body: `<label class="field"><span>Display name</span><input class="ctl" id="acc-name" placeholder="production"></label>
+          <label class="field"><span>Role ARN</span><input class="ctl mono" id="acc-role" placeholder="arn:aws:iam::123456789012:role/harbormaster-access"></label>
+          <label class="field"><span>External ID</span><input class="ctl mono" id="acc-ext" value="qs-${hex(12)}" readonly></label>
+          <div class="field"><span>Regions to scan</span><div class="toolbar">${Object.values(REGIONS).map(r => `<label class="toolbar" style="gap:5px"><input type="checkbox" checked> ${r}</label>`).join('')}</div></div>
+          <p class="hint">The role needs read access to ECS, EC2 (VPCs and subnets), EFS, CloudWatch and Logs, plus <span class="mono">ecs:RegisterTaskDefinition</span>, <span class="mono">ecs:UpdateService</span>, <span class="mono">ecs:StopTask</span>, <span class="mono">ecs:ExecuteCommand</span> and <span class="mono">iam:PassRole</span> for task roles.</p>`,
+        actions: [{ label: 'Cancel' }, { label: 'Test and connect', kind: 'primary', fn: () => { toast('This is a mockup: no account was connected.'); } }] });
+    }
+    return;
+  }
+  if (go && !e.target.closest('a, button')) location.hash = go.dataset.go.slice(1);
+});
+document.addEventListener('change', e => {
+  const r = parseRoute(), s = r.id ? SERVICES[r.id] : null, el = e.target;
+  if (el.id === 'f-acct') { S.fAcct = el.value; render(); }
+  if (el.id === 'f-region') { S.fRegion = el.value; render(); }
+  if (el.id === 'view-as') { currentUser = el.value; toast(`Now signed in as <strong>${esc(el.value)}</strong> (mockup switch).`); render(); return; }
+  if ('permPreset' in el.dataset) { setPerms(USERS[el.dataset.user], el.dataset.tag, PRESETS[el.value] || permsFor(USERS[el.dataset.user], el.dataset.tag), el.value !== 'Custom' ? 'preset ' + el.value : ''); render(); return; }
+  if (el.dataset.assign) { assignTag(el.dataset.assign, el.dataset.id, el.value); return; }
+  if (el.dataset.form === 'tag') editDraft(s, td => { const c = td.containerDefinitions[0]; c.image = c.image.replace(/:[^:]+$/, ':' + el.value); });
+  if (el.dataset.form === 'cpu') { editDraft(s, td => { td.cpu = el.value; }); render(); }
+  if (el.dataset.form === 'memory') { editDraft(s, td => { td.memory = el.value; }); render(); }
+  if (el.dataset.form === 'env-k' || el.dataset.form === 'env-v') editDraft(s, td => { td.containerDefinitions[0].environment[+el.dataset.i][el.dataset.form === 'env-k' ? 'name' : 'value'] = el.value; });
+  if (el.id === 'td-editor') render();
+  if (el.dataset.log) { logsOf(s)[el.dataset.log] = el.value; render(); }
+  if (el.dataset.term) { S.terms[s.id][el.dataset.term] = el.value; }
+  if (el.id === 'ecs-ev') { S.showEcsEvents = el.checked; render(); }
+});
+document.addEventListener('input', e => {
+  const r = parseRoute(), s = r.id ? SERVICES[r.id] : null;
+  if (e.target.id === 'td-editor') { draftOf(s).text = e.target.value; updateDraftStatus(s); }
+  if (e.target.dataset.log === 'filter') { logsOf(s).filter = e.target.value; const box = $('#log-box'); box.innerHTML = filteredLogs(s).map(logLine).join(''); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && dlgClose) { dlgClose(); return; }
+  if (e.target.id === 'term-in' && e.key === 'Enter') {
+    const s = SERVICES[parseRoute().id];
+    termRun(s, e.target.value);
+    render();
+  }
+  if (e.target.id === 'td-editor' && e.key === 'Tab') {
+    e.preventDefault();
+    const t = e.target, p = t.selectionStart;
+    t.value = t.value.slice(0, p) + '  ' + t.value.slice(t.selectionEnd);
+    t.selectionStart = t.selectionEnd = p + 2;
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+});
+function afterRender() {
+  const lb = $('#log-box'); if (lb) lb.scrollTop = lb.scrollHeight;
+  const term = $('#term'); if (term) { term.scrollTop = term.scrollHeight; const i = $('#term-in'); if (i) i.focus(); term.addEventListener('click', () => { const x = $('#term-in'); if (x) x.focus(); }); }
+}
+
+/* search */
+const search = $('#search'), results = $('#search-results');
+search.addEventListener('input', () => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) { results.hidden = true; return; }
+  const hits = [
+    ...Object.values(CLUSTERS).filter(c => canSeeCluster(c) && c.name.includes(q)).map(c => ['Cluster', c.name, '#cl-' + c.id, REGIONS[c.region]]),
+    ...Object.values(SERVICES).filter(s => canView(s) && s.name.includes(q)).map(s => ['Service', s.name, `#svc-${s.id}-overview`, CLUSTERS[s.cluster].name]),
+    ...seenTasks().filter(t => t.status === 'RUNNING' && (t.id.startsWith(q) || t.ip.startsWith(q))).map(t => ['Task', t.id.slice(0, 12), `#svc-${t.service}-tasks`, SERVICES[t.service].name + ' · ' + t.ip]),
+  ].slice(0, 8);
+  results.innerHTML = hits.length ? hits.map((h, i) => `<a href="${h[2]}" class="${i === 0 ? 'sel' : ''}"><span class="kind">${h[0]}</span><span>${esc(h[1])}</span><span class="muted small" style="margin-left:auto">${esc(h[3])}</span></a>`).join('') : '<div class="empty">No match</div>';
+  results.hidden = false;
+});
+search.addEventListener('keydown', e => { if (e.key === 'Enter') { const a = results.querySelector('a'); if (a) { location.hash = a.getAttribute('href').slice(1); search.value = ''; results.hidden = true; } } if (e.key === 'Escape') { results.hidden = true; } });
+results.addEventListener('click', () => { search.value = ''; results.hidden = true; });
+document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) results.hidden = true; });
+
+$('#theme-btn').addEventListener('click', () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('harbormaster-theme', root.dataset.theme); } catch (e) { /* storage unavailable */ }
+});
+
+/* live tail */
+setInterval(() => {
+  const r = parseRoute();
+  if (r.view !== 'service' || r.tab !== 'logs') return;
+  const s = SERVICES[r.id], L = logsOf(s);
+  if (!L.follow || !running(s.id).length) return;
+  const l = mkLog(s, Date.now());
+  L.lines.push(l);
+  if (L.lines.length > 400) L.lines.shift();
+  const f = L.filter.toLowerCase();
+  if ((L.container === 'all' || l.ct === L.container) && (L.stream === 'all' || l.lvl !== 'info') && (!f || l.msg.toLowerCase().includes(f))) {
+    const box = $('#log-box');
+    box.insertAdjacentHTML('beforeend', logLine(l));
+    box.scrollTop = box.scrollHeight;
+  }
+}, 1400);
+
+window.addEventListener('hashchange', () => { render(); $('#content').scrollTop = 0; });
+renderFilters();
+render();
+// notifications is mid-rollout from :9 to :10 when the page opens
+{
+  const s = SERVICES.s4;
+  startDeploy(s, 10, null);
+  s.deploy.started = NOW - 3 * MIN;
+}
+</script>
+</body>
+</html>
