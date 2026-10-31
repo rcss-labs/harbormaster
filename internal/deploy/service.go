@@ -37,6 +37,9 @@ type Service struct {
 	Scaling         ScalingRangeSource
 	MaxDesiredCount int
 	Now             func() time.Time
+	// InTx runs the post-AWS writes of one action in a single transaction. Nil means
+	// Store.InTx; tests replace it to make the recording step fail.
+	InTx func(ctx context.Context, fn func(store.Tx) error) error
 
 	// Per-instance caches, created on first use so a zero-value Service works.
 	cacheMu    sync.Mutex
@@ -60,6 +63,14 @@ func (s *Service) revisionCache() *ttlCache[[]string] {
 		s.revCache = newTTLCache[[]string](revisionsTTL)
 	}
 	return s.revCache
+}
+
+// inTx runs fn in one transaction on the injected or the real store.
+func (s *Service) inTx(ctx context.Context, fn func(store.Tx) error) error {
+	if s.InTx != nil {
+		return s.InTx(ctx, fn)
+	}
+	return s.Store.InTx(ctx, fn)
 }
 
 func (s *Service) now() time.Time {

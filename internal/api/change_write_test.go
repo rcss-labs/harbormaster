@@ -14,11 +14,13 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // writeEnv is a polled mockup estate with one user per permission shape on the Prod tag.
 type writeEnv struct {
 	fk    *fake.Fake
+	st    *store.Store
 	login func(user string) *apiClient
 }
 
@@ -59,7 +61,7 @@ func newWriteEnv(t *testing.T) writeEnv {
 			}
 		}
 	}
-	return writeEnv{fk: fk, login: func(user string) *apiClient { return login(t, srv, user, testPassword) }}
+	return writeEnv{fk: fk, st: st, login: func(user string) *apiClient { return login(t, srv, user, testPassword) }}
 }
 
 // draftFor returns the deployed definition of payments-api with its image tag bumped.
@@ -435,5 +437,41 @@ func TestRegister_UnknownDraftKeyIs422(t *testing.T) {
 	}
 	if got := env.fk.Calls()["RegisterTaskDefinition"]; got != 0 {
 		t.Errorf("RegisterTaskDefinition called %d time(s)", got)
+	}
+}
+
+// dropTable breaks the recording step of an action without touching what the handler reads first.
+func dropTable(t *testing.T, env writeEnv, table string) {
+	t.Helper()
+	if _, err := env.st.Pool.Exec(t.Context(), `drop table `+table+` cascade`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRegister_RecordFailureAfterAWSAcceptedIs201WithWarning(t *testing.T) {
+	env := newWriteEnv(t)
+	draft := draftFor(t, env.login("pavel"))
+	dropTable(t, env, "revision_records")
+	resp := env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+	wantStatus(t, resp, http.StatusCreated)
+	var out map[string]any
+	decode(t, resp, &out)
+	if warning, _ := out["warning"].(string); !strings.Contains(warning, "could not record") || out["revision"] != float64(43) {
+		t.Errorf("response = %v, want revision 43 with a recording warning", out)
+	}
+	if got := env.fk.Calls()["RegisterTaskDefinition"]; got != 1 {
+		t.Errorf("RegisterTaskDefinition calls = %d, want 1", got)
+	}
+}
+
+func TestDeploy_RecordFailureAfterAWSAcceptedIs202WithWarning(t *testing.T) {
+	env := newWriteEnv(t)
+	dropTable(t, env, "deployment_history")
+	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/deploy", map[string]any{"revision": 41})
+	wantStatus(t, resp, http.StatusAccepted)
+	var out map[string]any
+	decode(t, resp, &out)
+	if warning, _ := out["warning"].(string); !strings.Contains(warning, "could not record") || out["deployment_id"] == "" {
+		t.Errorf("response = %v", out)
 	}
 }

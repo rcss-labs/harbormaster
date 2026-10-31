@@ -24,7 +24,11 @@ type AttributedDeployment struct {
 // AttributeDeployment records a deployment's kind and actor. If the poller has
 // already stored the deployment, only kind and actor are overwritten.
 func (s *Store) AttributeDeployment(ctx context.Context, d AttributedDeployment) error {
-	_, err := s.Pool.Exec(ctx,
+	return attributeDeployment(ctx, s.Pool, d)
+}
+
+func attributeDeployment(ctx context.Context, db execer, d AttributedDeployment) error {
+	_, err := db.Exec(ctx,
 		`insert into deployment_history (account_id, region, cluster_name, service_name, deployment_id,
 		   task_definition_arn, revision, kind, started_at, started_by_user_id)
 		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -84,7 +88,11 @@ func (s *Store) OpenDeployments(ctx context.Context) ([]OpenDeployment, error) {
 // FinishDeployment sets a deployment's outcome if none is set yet. claimed is
 // false when another task finished it first.
 func (s *Store) FinishDeployment(ctx context.Context, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time) (claimed bool, err error) {
-	tag, err := s.Pool.Exec(ctx,
+	return finishDeployment(ctx, s.Pool, k, deploymentID, outcome, finishedAt)
+}
+
+func finishDeployment(ctx context.Context, db execer, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time) (claimed bool, err error) {
+	tag, err := db.Exec(ctx,
 		`update deployment_history set outcome = $6, finished_at = $7
 		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4
 		   and deployment_id = $5 and outcome is null`,

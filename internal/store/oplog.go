@@ -38,6 +38,10 @@ const operationActorSQL = `case when o.source = 'ecs' then 'ECS' else coalesce(o
 // AppendOperation records an operation. The actor's username and the service ARN
 // are looked up at write time; unknown ones are stored as NULL.
 func (s *Store) AppendOperation(ctx context.Context, op Operation) error {
+	return appendOperation(ctx, s.Pool, op)
+}
+
+func appendOperation(ctx context.Context, db execer, op Operation) error {
 	var details []byte
 	if op.Details != nil {
 		encoded, err := json.Marshal(op.Details)
@@ -46,7 +50,7 @@ func (s *Store) AppendOperation(ctx context.Context, op Operation) error {
 		}
 		details = encoded
 	}
-	_, err := s.Pool.Exec(ctx,
+	_, err := db.Exec(ctx,
 		`insert into operation_log (account_id, region, cluster_name, service_name, service_arn,
 		   actor_user_id, actor_username, source, text, details)
 		 values ($1, $2, $3, $4,

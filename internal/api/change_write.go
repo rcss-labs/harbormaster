@@ -27,6 +27,8 @@ type RegisterResponse struct {
 	CanDeploy bool   `json:"can_deploy"`
 	Tag       TagDTO `json:"tag"`
 	Strategy  string `json:"strategy"`
+	// Warning is non-null when AWS registered the revision but Harbormaster could not record it.
+	Warning *string `json:"warning"`
 }
 
 // DeployRequest is the body of POST /api/services/{id}/deploy.
@@ -41,6 +43,8 @@ type RolloutResponse struct {
 	ToRevision   *int   `json:"to_revision,omitempty"`
 	Revision     *int   `json:"revision,omitempty"`
 	Kind         string `json:"kind"`
+	// Warning is set when AWS started the rollout but Harbormaster could not record it.
+	Warning *string `json:"warning,omitempty"`
 }
 
 // SetDesiredCountRequest is the body of POST /api/services/{id}/desired-count.
@@ -60,6 +64,16 @@ type SetDesiredCountResponse struct {
 type StopTaskResponse struct {
 	TaskARN string `json:"task_arn"`
 	Reason  string `json:"reason"`
+	// Warning is set when AWS stopped the task but Harbormaster could not log it.
+	Warning *string `json:"warning,omitempty"`
+}
+
+// warningPointer is nil for no warning, so the JSON field is null or omitted.
+func warningPointer(warning string) *string {
+	if warning == "" {
+		return nil
+	}
+	return &warning
 }
 
 // requireAction resolves {serviceId} and demands action on the service's effective tag:
@@ -153,6 +167,7 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		CanDeploy: authz.Can(subject, authz.Deploy, row.EffectiveTagID) && deployed.Controller.Supported,
 		Tag:       inheritedTag(tags, row.EffectiveTagID, row.TagInherited),
 		Strategy:  deployed.Strategy,
+		Warning:   warningPointer(registered.Warning),
 	})
 }
 
@@ -177,6 +192,7 @@ func (s *Server) deployRevision(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusAccepted, RolloutResponse{
 		DeploymentID: rollout.DeploymentID, FromRevision: &rollout.FromRevision, ToRevision: &rollout.ToRevision, Kind: rollout.Kind,
+		Warning: warningPointer(rollout.Warning),
 	})
 }
 
@@ -190,7 +206,9 @@ func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
 		s.failChange(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, RolloutResponse{DeploymentID: rollout.DeploymentID, Revision: &rollout.ToRevision, Kind: rollout.Kind})
+	writeJSON(w, http.StatusAccepted, RolloutResponse{
+		DeploymentID: rollout.DeploymentID, Revision: &rollout.ToRevision, Kind: rollout.Kind, Warning: warningPointer(rollout.Warning),
+	})
 }
 
 func (s *Server) setDesiredCount(w http.ResponseWriter, r *http.Request) {
@@ -212,11 +230,9 @@ func (s *Server) setDesiredCount(w http.ResponseWriter, r *http.Request) {
 		s.failChange(w, err)
 		return
 	}
-	out := SetDesiredCountResponse{Desired: result.Desired, Previous: result.Previous, Changed: result.Changed}
-	if result.Warning != "" {
-		out.Warning = &result.Warning
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, SetDesiredCountResponse{
+		Desired: result.Desired, Previous: result.Previous, Changed: result.Changed, Warning: warningPointer(result.Warning),
+	})
 }
 
 func (s *Server) stopTask(w http.ResponseWriter, r *http.Request) {
@@ -251,5 +267,5 @@ func (s *Server) stopTask(w http.ResponseWriter, r *http.Request) {
 		s.failChange(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, StopTaskResponse{TaskARN: stopped.TaskARN, Reason: stopped.Reason})
+	writeJSON(w, http.StatusOK, StopTaskResponse{TaskARN: stopped.TaskARN, Reason: stopped.Reason, Warning: warningPointer(stopped.Warning)})
 }

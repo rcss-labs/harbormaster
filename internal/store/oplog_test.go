@@ -111,3 +111,27 @@ func texts(rows []store.OperationRow) string {
 	}
 	return out
 }
+
+func TestInTx_CommitsOnNilAndRollsBackOnError(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	op := func(text string) store.Operation {
+		return store.Operation{AccountID: "482109375512", Region: "us-east-1", Cluster: "core-services", Source: "harbormaster", Text: text}
+	}
+	if err := s.InTx(ctx, func(tx store.Tx) error { return tx.AppendOperation(ctx, op("kept")) }); err != nil {
+		t.Fatal(err)
+	}
+	failure := context.DeadlineExceeded
+	if err := s.InTx(ctx, func(tx store.Tx) error {
+		if err := tx.AppendOperation(ctx, op("rolled back")); err != nil {
+			return err
+		}
+		return failure
+	}); err != failure {
+		t.Fatalf("InTx() = %v, want the callback error", err)
+	}
+	rows, err := s.RecentOperations(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, 10)
+	if err != nil || len(rows) != 1 || rows[0].Text != "kept" {
+		t.Fatalf("operations = %v, %v; want only the committed one", rows, err)
+	}
+}

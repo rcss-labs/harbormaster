@@ -9,7 +9,11 @@ import (
 // RecordRevision notes which user registered a task definition revision. The
 // first record for an ARN wins; later calls for the same ARN are ignored.
 func (s *Store) RecordRevision(ctx context.Context, taskDefinitionARN string, userID int64, at time.Time) error {
-	_, err := s.Pool.Exec(ctx,
+	return recordRevision(ctx, s.Pool, taskDefinitionARN, userID, at)
+}
+
+func recordRevision(ctx context.Context, db execer, taskDefinitionARN string, userID int64, at time.Time) error {
+	_, err := db.Exec(ctx,
 		`insert into revision_records (task_definition_arn, registered_by_user_id, registered_at)
 		 values ($1, $2, $3)
 		 on conflict do nothing`,

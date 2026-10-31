@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,6 +36,8 @@ type DesiredCountResult struct {
 // Stopped is a task Harbormaster asked ECS to stop. ServiceName is empty for standalone tasks.
 type Stopped struct {
 	TaskARN, Reason, ServiceName string
+	// Warning is set when AWS stopped the task but Harbormaster could not log it.
+	Warning string
 }
 
 // maxDesired is the configured desired count ceiling, or DefaultMaxDesiredCount when unset.
@@ -106,16 +109,29 @@ func (s *Service) SetDesiredCount(ctx context.Context, subj authz.Subject, key m
 	}); err != nil {
 		return DesiredCountResult{}, wrapAWS(err)
 	}
-	err = s.Store.AppendOperation(ctx, store.Operation{
+	result.Changed = true
+	// AWS has applied the change; a failed log write is a warning, not an error that invites a retry.
+	logged := store.Operation{
 		AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Service: &key.Service,
 		ActorUserID: &subj.UserID, Source: "harbormaster",
 		Text: fmt.Sprintf("Changed desired count from %d to %d.", previous, n),
-	})
-	if err != nil {
-		return DesiredCountResult{}, err
 	}
-	result.Changed = true
+	if warning := s.logAfterAWS(ctx, logged, "desired count change"); warning != "" {
+		result.Warning = strings.TrimSpace(result.Warning + " " + warning)
+	}
 	return result, nil
+}
+
+// logAfterAWS appends op in a transaction after AWS already made the change. It returns a
+// user-facing warning when that fails, and "" on success.
+func (s *Service) logAfterAWS(ctx context.Context, op store.Operation, what string) string {
+	recordCtx := context.WithoutCancel(ctx)
+	err := s.inTx(recordCtx, func(tx store.Tx) error { return tx.AppendOperation(recordCtx, op) })
+	if err == nil {
+		return ""
+	}
+	slog.ErrorContext(ctx, "AWS accepted the change but logging it failed", "change", what, "service", op.Service, "error", err)
+	return "The change was applied, but Harbormaster could not record it in the operations log."
 }
 
 // StopTask asks ECS to stop a task. The operation is logged against the task's service,
@@ -145,10 +161,8 @@ func (s *Service) StopTask(ctx context.Context, subj authz.Subject, accountID, r
 	} else {
 		logged.Details = map[string]any{"cluster": task.Cluster.Cluster, "task_arn": taskARN}
 	}
-	if err := s.Store.AppendOperation(ctx, logged); err != nil {
-		return Stopped{}, err
-	}
-	return Stopped{TaskARN: taskARN, Reason: reason, ServiceName: task.ServiceName}, nil
+	warning := s.logAfterAWS(ctx, logged, "stop task")
+	return Stopped{TaskARN: taskARN, Reason: reason, ServiceName: task.ServiceName, Warning: warning}, nil
 }
 
 // shortTaskID is the first 12 characters of a task's id, the last segment of its ARN.

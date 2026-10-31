@@ -30,6 +30,8 @@ type OutcomeLogger struct {
 	Store    *store.Store
 	Interval time.Duration
 	Now      func() time.Time
+	// InTx replaces Store.InTx; tests use it to make the claim-and-log step fail.
+	InTx func(ctx context.Context, fn func(store.Tx) error) error
 }
 
 func NewOutcomeLogger(st *store.Store, interval time.Duration) *OutcomeLogger {
@@ -66,28 +68,34 @@ func (l *OutcomeLogger) Once(ctx context.Context) error {
 		if outcome == "" {
 			continue
 		}
-		claimed, err := l.Store.FinishDeployment(ctx, row.Key, row.DeploymentID, outcome, now)
+		// Claim and log together: if the log write fails the claim rolls back and the next pass retries.
+		err := l.inTx(ctx, func(tx store.Tx) error {
+			claimed, err := tx.FinishDeployment(ctx, row.Key, row.DeploymentID, outcome, now)
+			if err != nil || !claimed || silent {
+				return err
+			}
+			return tx.AppendOperation(ctx, store.Operation{
+				AccountID: row.Key.AccountID, Region: row.Key.Region, Cluster: row.Key.Cluster,
+				Service: &row.Key.Service, Source: "harbormaster",
+				Text: outcomeText(deploymentLabel(row), outcome, reason),
+				Details: map[string]any{
+					"deployment_id": row.DeploymentID, "outcome": outcome,
+					"kind": row.Kind, "started_by_user_id": row.StartedByUserID,
+				},
+			})
+		})
 		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if !claimed || silent {
-			continue
-		}
-		op := store.Operation{
-			AccountID: row.Key.AccountID, Region: row.Key.Region, Cluster: row.Key.Cluster,
-			Service: &row.Key.Service, Source: "harbormaster",
-			Text: outcomeText(deploymentLabel(row), outcome, reason),
-			Details: map[string]any{
-				"deployment_id": row.DeploymentID, "outcome": outcome,
-				"kind": row.Kind, "started_by_user_id": row.StartedByUserID,
-			},
-		}
-		if err := l.Store.AppendOperation(ctx, op); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (l *OutcomeLogger) inTx(ctx context.Context, fn func(store.Tx) error) error {
+	if l.InTx != nil {
+		return l.InTx(ctx, fn)
+	}
+	return l.Store.InTx(ctx, fn)
 }
 
 // decide returns the outcome of an open deployment, or "" to leave it open.
