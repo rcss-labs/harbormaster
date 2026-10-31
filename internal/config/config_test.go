@@ -29,6 +29,7 @@ func TestLoad_Defaults(t *testing.T) {
 		CookieSecure:            true,
 		BootstrapAdminSecretARN: "",
 		FakeAWS:                 false,
+		TrustedProxy:            false,
 		LogLevel:                "info",
 		SessionIdle:             12 * time.Hour,
 		SessionAbsolute:         168 * time.Hour,
@@ -118,5 +119,15 @@ func TestLoad_RejectsBadDuration(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "HM_SESSION_IDLE") {
 		t.Errorf("error %q does not name HM_SESSION_IDLE", err)
+	}
+}
+
+func TestLoad_TrustedProxy(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":  "postgres://example",
+		"HM_TRUSTED_PROXY": "true",
+	}))
+	if err != nil || !cfg.TrustedProxy {
+		t.Fatalf("TrustedProxy = %v, err %v; want true", cfg.TrustedProxy, err)
 	}
 }

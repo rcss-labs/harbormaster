@@ -38,7 +38,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Enter your username and password."))
 		return
 	}
-	result, err := s.Auth.Login(r.Context(), body.Username, body.Password, clientIP(r), r.UserAgent())
+	result, err := s.Auth.Login(r.Context(), body.Username, body.Password, s.clientIP(r), r.UserAgent())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -80,7 +80,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if user, ok := auth.UserFrom(r.Context()); ok {
 		_ = s.Store.Audit(r.Context(), store.AuditEntry{
 			ActorUserID: &user.ID, ActorUsername: user.Username,
-			Action: "sign_out", Summary: "Signed out.", IP: clientIP(r),
+			Action: "sign_out", Summary: "Signed out.", IP: s.clientIP(r),
 		})
 	}
 	s.Auth.ClearCookie(w)
@@ -133,7 +133,7 @@ func (s *Server) setupComplete(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	result, err := s.Auth.StartSession(r.Context(), user, clientIP(r), r.UserAgent())
+	result, err := s.Auth.StartSession(r.Context(), user, s.clientIP(r), r.UserAgent())
 	if err != nil {
 		s.fail(w, err)
 		return
