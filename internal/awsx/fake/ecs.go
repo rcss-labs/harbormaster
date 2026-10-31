@@ -131,7 +131,7 @@ func (c *ecsClient) DescribeClusters(_ context.Context, in *ecs.DescribeClusters
 // withStatistics fills the live task/service counts. Caller holds Mu.
 func (c *ecsClient) withStatistics(cl Cluster) ecstypes.Cluster {
 	e := c.f.Estate
-	out := cl.Cluster
+	out := deepCopy(cl.Cluster)
 	var running, pending, services int32
 	name := aws.ToString(out.ClusterName)
 	for _, t := range e.Tasks {
@@ -210,9 +210,9 @@ func (c *ecsClient) DescribeServices(_ context.Context, in *ecs.DescribeServices
 				continue
 			}
 			found = true
-			svc := s.Service
+			svc := deepCopy(s.Service)
 			events := e.Events[aws.ToString(svc.ServiceArn)]
-			svc.Events = append([]ecstypes.ServiceEvent(nil), events[:min(len(events), maxServiceEvents)]...)
+			svc.Events = deepCopy(events[:min(len(events), maxServiceEvents)])
 			out.Services = append(out.Services, svc)
 		}
 		if !found {
@@ -292,7 +292,7 @@ func (c *ecsClient) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput,
 		for _, t := range e.Tasks {
 			if c.inScope(t.AccountID, t.Region) && t.ClusterName == cluster && lastSegment(aws.ToString(t.Task.TaskArn)) == id {
 				found = true
-				out.Tasks = append(out.Tasks, t.Task)
+				out.Tasks = append(out.Tasks, deepCopy(t.Task))
 				break
 			}
 		}
@@ -338,10 +338,5 @@ func (c *ecsClient) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTa
 	if best == nil {
 		return nil, &ecstypes.ClientException{Message: aws.String("Unable to describe task definition.")}
 	}
-	return &ecs.DescribeTaskDefinitionOutput{TaskDefinition: copyTD(best)}, nil
-}
-
-func copyTD(td *ecstypes.TaskDefinition) *ecstypes.TaskDefinition {
-	cp := *td
-	return &cp
+	return &ecs.DescribeTaskDefinitionOutput{TaskDefinition: ptrTo(deepCopy(*best))}, nil
 }

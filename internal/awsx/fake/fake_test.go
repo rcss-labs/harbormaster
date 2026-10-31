@@ -202,19 +202,130 @@ func TestFakeECS_NotificationsMidRolloutAndHelpers(t *testing.T) {
 		t.Fatal("expected service events")
 	}
 
-	tasks, _ := api.ListTasks(context.Background(), &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String("notifications")})
-	if len(tasks.TaskArns) != 2 {
-		t.Fatalf("notifications running tasks = %d, want 2", len(tasks.TaskArns))
+	ctx := context.Background()
+	list := func(service, desired string) []string {
+		t.Helper()
+		in := &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String(service)}
+		if desired != "" {
+			in.DesiredStatus = ecstypes.DesiredStatus(desired)
+		}
+		out, err := api.ListTasks(ctx, in)
+		if err != nil {
+			t.Fatalf("ListTasks(%s,%s): %v", service, desired, err)
+		}
+		return out.TaskArns
 	}
-	f.Estate.StopTask(tasks.TaskArns[0], "Essential container in task exited", 1)
-	after, _ := api.ListTasks(context.Background(), &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String("notifications")})
-	if len(after.TaskArns) != 1 {
-		t.Fatalf("after StopTask running = %d, want 1", len(after.TaskArns))
+	tasks := list("notifications", "")
+	if len(tasks) != 2 {
+		t.Fatalf("notifications running tasks = %d, want 2", len(tasks))
 	}
+	stoppedBefore := len(list("notifications", "STOPPED"))
+	f.Estate.StopTask(tasks[0], "Essential container in task exited", 1)
+	if got := len(list("notifications", "")); got != 1 {
+		t.Fatalf("after StopTask running = %d, want 1", got)
+	}
+	stopped := list("notifications", "STOPPED")
+	if len(stopped) != stoppedBefore+1 || !contains(stopped, tasks[0]) {
+		t.Fatalf("stopped list %v does not contain %s", stopped, tasks[0])
+	}
+	desc, err := api.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String("core-services"), Tasks: tasks[:1]})
+	if err != nil || len(desc.Tasks) != 1 {
+		t.Fatalf("DescribeTasks: %v %+v", err, desc)
+	}
+	got := desc.Tasks[0]
+	if aws.ToString(got.LastStatus) != "STOPPED" || got.StoppedAt == nil || len(got.Containers) == 0 ||
+		aws.ToInt32(got.Containers[0].ExitCode) != 1 {
+		t.Fatalf("stopped task = %+v, want STOPPED with stoppedAt and exit 1", got)
+	}
+	after, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String("core-services"), Services: []string{"notifications"}})
+	if err != nil || len(after.Services) != 1 {
+		t.Fatal(err)
+	}
+	if after.Services[0].RunningCount != 1 {
+		t.Fatalf("service RunningCount = %d, want 1", after.Services[0].RunningCount)
+	}
+	if sum := after.Services[0].Deployments[0].RunningCount + after.Services[0].Deployments[1].RunningCount; sum != 1 {
+		t.Fatalf("deployment running counts sum = %d, want 1", sum)
+	}
+
 	f.Estate.AddRunningTasks("core-services", "web-frontend", 250)
-	big, _ := api.ListTasks(context.Background(), &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String("web-frontend")})
+	big, err := api.ListTasks(ctx, &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String("web-frontend")})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if big.NextToken == nil || len(big.TaskArns) != 100 {
 		t.Fatalf("expected a full first page of 100 with a next token, got %d", len(big.TaskArns))
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// Results handed to callers must not alias estate memory: in-place edits
+// under Mu (as later plans do) must neither change them nor race with readers.
+func TestFakeECS_ResultsDoNotAliasEstate(t *testing.T) {
+	f := newFake()
+	api := ecsFor(t, f, homelabID, "us-east-1")
+	ctx := context.Background()
+	svcOut, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String("core-services"), Services: []string{"notifications"}})
+	if err != nil || len(svcOut.Services) != 1 {
+		t.Fatal(err)
+	}
+	svc := svcOut.Services[0]
+	arns, err := api.ListTasks(ctx, &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String("notifications")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskOut, err := api.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String("core-services"), Tasks: arns.TaskArns[:1]})
+	if err != nil || len(taskOut.Tasks) != 1 {
+		t.Fatal(err)
+	}
+	task := taskOut.Tasks[0]
+	wantState := svc.Deployments[0].RolloutState
+	wantStatus := aws.ToString(task.Containers[0].LastStatus)
+	tdOut, err := api.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{TaskDefinition: aws.String("notifications:10")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTDImage := aws.ToString(tdOut.TaskDefinition.ContainerDefinitions[0].Image)
+
+	done := make(chan struct{})
+	go func() { // concurrent reader of the earlier results
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			_ = svc.Deployments[0].RolloutState
+			_ = aws.ToString(task.Containers[0].LastStatus)
+			_ = aws.ToString(tdOut.TaskDefinition.ContainerDefinitions[0].Image)
+		}
+	}()
+	f.Estate.Mu.Lock()
+	for i := range f.Estate.Services {
+		if aws.ToString(f.Estate.Services[i].Service.ServiceName) == "notifications" {
+			f.Estate.Services[i].Service.Deployments[0].RolloutState = ecstypes.DeploymentRolloutStateFailed
+		}
+	}
+	for i := range f.Estate.Tasks {
+		if aws.ToString(f.Estate.Tasks[i].Task.TaskArn) == arns.TaskArns[0] {
+			f.Estate.Tasks[i].Task.Containers[0].LastStatus = aws.String("STOPPED")
+		}
+	}
+	for i := range f.Estate.TaskDefinitions {
+		if aws.ToString(f.Estate.TaskDefinitions[i].Definition.TaskDefinitionArn) == aws.ToString(tdOut.TaskDefinition.TaskDefinitionArn) {
+			f.Estate.TaskDefinitions[i].Definition.ContainerDefinitions[0].Image = aws.String("changed")
+		}
+	}
+	f.Estate.Mu.Unlock()
+	<-done
+
+	if svc.Deployments[0].RolloutState != wantState || aws.ToString(task.Containers[0].LastStatus) != wantStatus ||
+		aws.ToString(tdOut.TaskDefinition.ContainerDefinitions[0].Image) != wantTDImage {
+		t.Fatal("earlier results changed after in-place estate edits")
 	}
 }
 
