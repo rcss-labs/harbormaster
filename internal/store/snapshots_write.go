@@ -311,10 +311,12 @@ on conflict (account_id, region, task_arn) do update set
   containers = excluded.containers, content_hash = excluded.content_hash, raw = excluded.raw,
   polled_at = excluded.polled_at
 where tasks.content_hash <> excluded.content_hash
+  and (tasks.last_status is distinct from 'STOPPED' or excluded.last_status = 'STOPPED')
 returning (xmax = 0) as inserted`
 
 // UpsertTasks writes tasks whose content changed, computing exit_code and (for
-// STOPPED tasks) stop_reason_group. Tasks absent from rows are never deleted.
+// STOPPED tasks) stop_reason_group. Tasks absent from rows are never deleted. STOPPED is
+// terminal: a non-STOPPED snapshot never replaces a STOPPED row (counted as unchanged).
 func (s *Store) UpsertTasks(ctx context.Context, rows []model.Task) (WriteResult, error) {
 	statements := make([]batchStatement, 0, len(rows))
 	for _, t := range rows {

@@ -235,3 +235,38 @@ func TestTaskDefinitions_ImmutableUpsert(t *testing.T) {
 		t.Fatalf("after = %v, %v", ok, err)
 	}
 }
+
+func TestUpsertTasks_StoppedIsTerminal(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	k := clusterKey("staging-web")
+	stopped := model.Task{Cluster: k, ARN: "arn:t/x", LastStatus: "STOPPED", DesiredStatus: "STOPPED", StoppedReason: "boom"}
+	if _, err := s.UpsertTasks(ctx, []model.Task{stopped}); err != nil {
+		t.Fatal(err)
+	}
+	stale := model.Task{Cluster: k, ARN: "arn:t/x", LastStatus: "RUNNING", DesiredStatus: "RUNNING"}
+	res, err := s.UpsertTasks(ctx, []model.Task{stale})
+	if err != nil || res != (store.WriteResult{Unchanged: 1}) {
+		t.Fatalf("stale upsert = %+v, %v; want 1 unchanged", res, err)
+	}
+	var status string
+	if err := s.Pool.QueryRow(ctx, `select last_status from tasks where task_arn = 'arn:t/x'`).Scan(&status); err != nil || status != "STOPPED" {
+		t.Fatalf("status = %q, %v; want STOPPED", status, err)
+	}
+
+	// A row marked missing is still overwritten by the real STOPPED describe.
+	if err := s.MarkTasksMissing(ctx, k, []string{"arn:t/y"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertTasks(ctx, []model.Task{{Cluster: k, ARN: "arn:t/y", LastStatus: "RUNNING"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkTasksMissing(ctx, k, []string{"arn:t/y"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	real := model.Task{Cluster: k, ARN: "arn:t/y", LastStatus: "STOPPED", StopCode: "EssentialContainerExited", StoppedReason: "real"}
+	res, err = s.UpsertTasks(ctx, []model.Task{real})
+	if err != nil || res.Updated != 1 {
+		t.Fatalf("real stopped upsert over missing row = %+v, %v; want 1 updated", res, err)
+	}
+}

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultMaxInFlight    = 5
+	defaultMaxInFlight    = 8
 	listPageSize          = 100
 	describeClustersLimit = 100
 	describeServicesLimit = 10
