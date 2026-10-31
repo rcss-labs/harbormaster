@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CLUSTERS } from '../../test/fixtures'
@@ -35,5 +35,12 @@ describe('Clusters', () => {
     const edgeProxyCard = within(await screen.findByRole('article', { name: 'edge-proxy' }))
     expect(edgeProxyCard.getByText('Container Insights is off, so there are no CPU and memory graphs.')).toBeInTheDocument()
     expect(screen.getAllByText(/Container Insights is off/)).toHaveLength(1)
+  })
+
+  it('Clusters table › CPU column shows "Container Insights off" for edge-proxy', async () => {
+    renderApp('/clusters')
+    fireEvent.click(await screen.findByRole('button', { name: 'Table' }))
+    const edgeProxyRow = within(await screen.findByRole('row', { name: /edge-proxy/ }))
+    expect(edgeProxyRow.getByText('Container Insights off')).toBeInTheDocument()
   })
 })

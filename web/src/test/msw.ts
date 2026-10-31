@@ -5,6 +5,7 @@ import {
   ASSIGNMENTS,
   AUDIT,
   CLUSTERS,
+  CLUSTERS_METRICS,
   CLUSTER_DETAILS,
   ME_ADMIN,
   OPERATIONS_FOR,
@@ -97,6 +98,7 @@ export const handlers = [
   http.post('/api/accounts', () => HttpResponse.json(ACCOUNTS.items[0], { status: 201 })),
   http.patch('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
   http.delete('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
+  http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
 ]
 
 export const server = setupServer(...handlers)

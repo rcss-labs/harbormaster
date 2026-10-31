@@ -1,4 +1,5 @@
 import { useClusters } from '../../api/hooks'
+import { useClustersMetrics } from '../../api/observe'
 import { EmptyState } from '../../components/EmptyState'
 import { Seg } from '../../components/Seg'
 import { useCrumbs } from '../shell/crumbs'
@@ -15,7 +16,9 @@ export function Clusters() {
   useCrumbs([['Clusters']])
   const { filters } = useFilters()
   const clusters = useClusters(filters)
+  const metrics = useClustersMetrics(filters)
   const items = clusters.data?.items ?? []
+  const metricsById = metrics.data?.items ?? {}
   const [view, setView] = useListView(items.length > TABLE_DEFAULT_THRESHOLD ? 'table' : 'cards')
 
   return (
@@ -33,11 +36,11 @@ export function Clusters() {
       {clusters.isError ? (
         <EmptyState>{clusters.error instanceof Error ? clusters.error.message : 'The clusters could not be loaded.'}</EmptyState>
       ) : view === 'table' ? (
-        <ClustersTable clusters={items} />
+        <ClustersTable clusters={items} metricsById={metricsById} />
       ) : (
         <div className={styles.cards}>
           {items.map((cluster) => (
-            <ClusterCard key={cluster.id} cluster={cluster} />
+            <ClusterCard key={cluster.id} cluster={cluster} metrics={metricsById[cluster.id]} />
           ))}
         </div>
       )}
