@@ -2,6 +2,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
+import { SERVICE_PAYMENTS } from '../test/fixtures'
 import { server } from '../test/msw'
 import { renderWithProviders } from '../test/setup'
 import { StopTaskDialog } from './StopTaskDialog'
@@ -21,6 +22,14 @@ describe('StopTaskDialog', () => {
     )
     expect(screen.getByRole('heading', { name: 'Stop task d4e5f6?' })).toBeInTheDocument()
     expect(screen.getByText('This task belongs to no service; nothing will replace it.')).toBeInTheDocument()
+  })
+
+  it('looks up the service desired count when the caller does not know it', async () => {
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, desired: 3 })))
+    renderWithProviders(
+      <StopTaskDialog taskId="task-1" shortId="a1b2c3" serviceName="payments-api" serviceId={SERVICE_PAYMENTS.id} desiredCount={null} onClose={vi.fn()} />,
+    )
+    expect(await screen.findByText('payments-api will start a replacement to keep 3 running.')).toBeInTheDocument()
   })
 
   it('posts the stop request for the task and closes on success', async () => {

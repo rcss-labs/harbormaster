@@ -126,6 +126,7 @@ function TaskRow({ task, withService, desiredCount }: { task: TaskDTO; withServi
             taskId={task.id}
             shortId={task.short_id}
             serviceName={task.service?.name ?? null}
+            serviceId={task.service?.id ?? null}
             desiredCount={desiredCount}
             onClose={() => setStopping(false)}
           />
