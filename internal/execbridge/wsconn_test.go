@@ -354,3 +354,50 @@ func TestDial_PingKeepalive(t *testing.T) {
 		t.Error("no ping observed")
 	}
 }
+
+func TestDial_PingKeepaliveSurvivesMissedPong(t *testing.T) {
+	var pings atomic.Int32
+	startReading := make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		<-startReading // not reading: pongs cannot be produced
+		for {
+			if _, _, err := c.Read(r.Context()); err != nil {
+				return
+			}
+		}
+	}))
+	defer s.Close()
+
+	c, err := Dial(context.Background(), wsURL(s), DialOptions{
+		AllowInsecure: true,
+		PingInterval:  20 * time.Millisecond,
+		pongTimeout:   10 * time.Millisecond,
+		onPingSent:    func() { pings.Add(1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { c.ReadFrame(ctx) }()
+
+	// Let several pings time out, then let the server answer again.
+	time.Sleep(150 * time.Millisecond)
+	if n := pings.Load(); n != 0 {
+		t.Fatalf("pings completed while server was not reading: %d", n)
+	}
+	close(startReading)
+	deadline := time.Now().Add(2 * time.Second)
+	for pings.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if pings.Load() < 1 {
+		t.Error("keepalive did not resume after missed pongs")
+	}
+}

@@ -45,6 +45,8 @@ type DialOptions struct {
 
 	// onPingSent is a test hook called after each completed ping/pong round trip.
 	onPingSent func()
+	// pongTimeout overrides the default pong wait; tests only.
+	pongTimeout time.Duration
 }
 
 // ValidateStreamURL checks that raw is a websocket URL the bridge may dial: wss
@@ -114,8 +116,12 @@ func Dial(ctx context.Context, streamURL string, o DialOptions) (FrameConn, erro
 		interval = defaultPingInterval
 	}
 	pingCtx, stopPing := context.WithCancel(context.Background())
+	pongWait := o.pongTimeout
+	if pongWait <= 0 {
+		pongWait = pingTimeout
+	}
 	c := &wsFrameConn{ws: ws, stopPing: stopPing, pingDone: make(chan struct{})}
-	go c.pingLoop(pingCtx, interval, o.onPingSent)
+	go c.pingLoop(pingCtx, interval, pongWait, logger, o.onPingSent)
 	return c, nil
 }
 
@@ -161,7 +167,6 @@ func signUpgrade(ctx context.Context, streamURL string, o DialOptions) (http.Hea
 // wsFrameConn adapts a coder/websocket connection to FrameConn.
 type wsFrameConn struct {
 	ws       *websocket.Conn
-	writeMu  sync.Mutex
 	stopPing context.CancelFunc
 	pingDone chan struct{}
 	closeOne sync.Once
@@ -185,8 +190,8 @@ func (c *wsFrameConn) WriteText(ctx context.Context, b []byte) error {
 }
 
 func (c *wsFrameConn) write(ctx context.Context, typ websocket.MessageType, b []byte) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	// coder/websocket serialises concurrent writes itself and honours ctx
+	// while waiting for its internal lock.
 	return c.ws.Write(ctx, typ, b)
 }
 
@@ -200,7 +205,11 @@ func (c *wsFrameConn) Close() error {
 	return c.closeErr
 }
 
-func (c *wsFrameConn) pingLoop(ctx context.Context, interval time.Duration, onPing func()) {
+// pingLoop sends a keepalive ping every interval. Like the SSM agent it does
+// not require pongs: a pong only arrives while a Read is running, so a missed
+// pong is logged and the loop carries on. It exits when ctx is cancelled or the
+// connection is closed.
+func (c *wsFrameConn) pingLoop(ctx context.Context, interval, pongWait time.Duration, logger *slog.Logger, onPing func()) {
 	defer close(c.pingDone)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -209,14 +218,20 @@ func (c *wsFrameConn) pingLoop(ctx context.Context, interval time.Duration, onPi
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			pctx, cancel := context.WithTimeout(ctx, pingTimeout)
+			pctx, cancel := context.WithTimeout(ctx, pongWait)
 			err := c.ws.Ping(pctx)
 			cancel()
-			if err != nil {
-				return // connection is gone or unresponsive; the reader will see it
-			}
-			if onPing != nil {
-				onPing()
+			switch {
+			case err == nil:
+				if onPing != nil {
+					onPing()
+				}
+			case ctx.Err() != nil:
+				return
+			case errors.Is(err, context.DeadlineExceeded):
+				logger.Debug("execbridge: no pong for keepalive ping; continuing", "error", err)
+			default:
+				return // connection closed; the reader will see it
 			}
 		}
 	}
