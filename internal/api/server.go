@@ -98,6 +98,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "POST /api/users/{id}/admin", s.setUserAdmin, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/permissions", s.getPermissions, routeOptions{Admin: true})
 	s.handle(mux, "PUT /api/permissions/{userId}/{tagId}", s.setPermission, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/tags", s.listTagItems, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/tags", s.createTag, routeOptions{Admin: true})
+	s.handle(mux, "PATCH /api/tags/{id}", s.updateTag, routeOptions{Admin: true})
+	s.handle(mux, "DELETE /api/tags/{id}", s.deleteTag, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/tags/{id}/impact", s.tagImpact, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/tag-assignments", s.listTagAssignments, routeOptions{Admin: true})
+	s.handle(mux, "PUT /api/tag-assignments/clusters/{clusterId}", s.assignClusterTag, routeOptions{Admin: true})
+	s.handle(mux, "PUT /api/tag-assignments/services/{serviceId}", s.assignServiceTag, routeOptions{Admin: true})
 
 	// Unknown API paths are JSON 404s and never fall through to the SPA. RequirePasswordChanged
 	// still applies so a user with a pending password change sees password_change_required.

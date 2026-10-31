@@ -256,3 +256,25 @@ func TestMarkOrphanedTags_SetsAndClears(t *testing.T) {
 		t.Errorf("DeleteOrphanedTagsBefore = %d, %v; want 2", n, err)
 	}
 }
+
+func TestClearClusterTag_FallsBackToUntagged(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	k := model.ClusterKey{AccountID: "111", Region: "us-east-1", Cluster: "c1"}
+	prod, err := s.CreateTag(ctx, "Prod", "red")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetClusterTag(ctx, k, prod.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearClusterTag(ctx, k); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.ClusterTag(ctx, k); err != nil || ok {
+		t.Fatalf("ClusterTag after clear = ok %v err %v, want untagged", ok, err)
+	}
+	if err := s.ClearClusterTag(ctx, k); err != nil {
+		t.Fatalf("clearing an untagged cluster must not fail: %v", err)
+	}
+}

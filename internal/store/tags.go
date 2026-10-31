@@ -180,6 +180,18 @@ func (s *Store) SetClusterTag(ctx context.Context, k model.ClusterKey, tag authz
 	return nil
 }
 
+// ClearClusterTag removes the cluster's explicit tag so it falls back to Dev. Clearing an
+// untagged cluster is not an error.
+func (s *Store) ClearClusterTag(ctx context.Context, k model.ClusterKey) error {
+	_, err := s.Pool.Exec(ctx,
+		`delete from cluster_tags where account_id = $1 and region = $2 and cluster_name = $3`,
+		k.AccountID, k.Region, k.Cluster)
+	if err != nil {
+		return fmt.Errorf("clear cluster tag: %w", err)
+	}
+	return nil
+}
+
 // SetServiceTag assigns a tag directly to a service; nil removes the row so the
 // service inherits from its cluster.
 func (s *Store) SetServiceTag(ctx context.Context, k model.ServiceKey, tag *authz.TagID) error {
