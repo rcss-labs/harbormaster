@@ -66,7 +66,7 @@ describe('ServicePage', () => {
     expect(tabLink('Overview').className).toContain('active')
 
     fireEvent.click(tabLink('Operations log'))
-    expect(await screen.findByText('This tab arrives in a later phase.')).toBeInTheDocument()
+    expect(await screen.findByRole('checkbox', { name: 'Show ECS service events' })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent(`/services/${SERVICE_PAYMENTS.id}/operations`)
     expect(tabLink('Operations log').className).toContain('active')
   })

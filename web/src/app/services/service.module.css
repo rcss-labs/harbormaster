@@ -42,3 +42,10 @@
 .noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
 .noAccess h2 { margin: 0; font-size: 12.5px; }
 .noAccess p { margin: 0; color: var(--muted); }
+
+/* Operations tab toolbar, panel and load-more rules (mockup sOps() and .toolbar). */
+.opsToolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.toggle { display: inline-flex; gap: 6px; align-items: center; }
+.end { margin-left: auto; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
+.more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }

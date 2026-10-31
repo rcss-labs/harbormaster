@@ -334,7 +334,7 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
   const running = items.filter((t) => t.status === 'RUNNING')
   const stopped = items.filter((t) => t.status === 'STOPPED')
   const azCounts = new Map<string, number>()
-  for (const task of items) azCounts.set(task.az, (azCounts.get(task.az) ?? 0) + 1)
+  for (const task of running) azCounts.set(task.az, (azCounts.get(task.az) ?? 0) + 1)
   const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number }>()
   for (const task of running) {
     const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0 }

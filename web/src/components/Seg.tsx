@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import styles from './Seg.module.css'
 
 interface SegProps<T extends string> {
-  options: { value: T; label: string }[]
+  options: { value: T; label: ReactNode }[]
   value: T
   onChange: (value: T) => void
   label?: string

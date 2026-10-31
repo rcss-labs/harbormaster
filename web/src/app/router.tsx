@@ -10,6 +10,7 @@ import { Clusters } from './clusters/Clusters'
 import { Overview } from './overview/Overview'
 import { ServicePage } from './services/ServicePage'
 import { Shell } from './shell/Shell'
+import { Tasks } from './tasks/Tasks'
 import styles from './auth/auth.module.css'
 
 const Loading = () => <p className={styles.loading}>Loading…</p>
@@ -61,6 +62,7 @@ export function AppRoutes() {
           <Route path="clusters" element={<Clusters />} />
           <Route path="clusters/:clusterId" element={<Cluster />} />
           <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
+          <Route path="tasks" element={<Tasks />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>

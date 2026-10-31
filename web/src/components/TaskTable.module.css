@@ -1,0 +1,16 @@
+/* Ported from the mockup's task row, status stripe, health colours, .btn.sm and .btn.danger rules (docs/design/mockup/index.html). */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.sub { color: var(--muted); font-size: 12px; }
+.accent { color: var(--accent); }
+.healthy { color: var(--success); }
+.unhealthy { color: var(--warning); }
+.reason { max-width: 280px; font-size: 12px; }
+.actions { text-align: right; white-space: nowrap; }
+.btn { height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.danger { color: var(--danger); }
+.more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }

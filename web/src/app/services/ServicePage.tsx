@@ -7,9 +7,11 @@ import { Tabs, type TabItem } from '../../components/Tabs'
 import { useAuth } from '../auth/AuthProvider'
 import type { TagClickHandler } from '../clusters/tagTarget'
 import { useCrumbs } from '../shell/crumbs'
+import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
 import { PlaceholderTab } from './PlaceholderTab'
 import { ServiceHeader } from './ServiceHeader'
+import { TasksTab } from './TasksTab'
 import { DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey } from './tabs'
 import styles from './service.module.css'
 
@@ -52,6 +54,8 @@ export function ServicePage({ onTagClick }: { onTagClick?: TagClickHandler }) {
   let body
   if (lockedOut) body = <LockPanel action={activeLock.action} tag={service.tag} />
   else if (tab === 'overview') body = <OverviewTab service={service} />
+  else if (tab === 'tasks') body = <TasksTab serviceId={serviceId} />
+  else if (tab === 'operations') body = <OperationsTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />
 
   return (
