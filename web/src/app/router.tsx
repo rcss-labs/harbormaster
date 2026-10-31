@@ -8,6 +8,7 @@ import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
 import { Overview } from './overview/Overview'
+import { ServicePage } from './services/ServicePage'
 import { Shell } from './shell/Shell'
 import styles from './auth/auth.module.css'
 
@@ -59,6 +60,7 @@ export function AppRoutes() {
           <Route index element={<Overview />} />
           <Route path="clusters" element={<Clusters />} />
           <Route path="clusters/:clusterId" element={<Cluster />} />
+          <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>
