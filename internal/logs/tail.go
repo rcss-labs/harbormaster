@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -40,18 +41,23 @@ type Tail struct {
 
 // StartTail opens a live tail. The tail stops after idle without a Touch.
 func (c *Client) StartTail(ctx context.Context, t awsx.Target, req TailRequest, idle time.Duration) (*Tail, error) {
-	api, err := c.Clients.Logs(ctx, t)
+	target := t
+	if req.Region != "" {
+		target.Region = req.Region
+	}
+	account := cmp.Or(req.AccountID, t.AccountID)
+	api, err := c.Clients.Logs(ctx, target)
 	if err != nil {
 		return nil, err
 	}
 	in := &cloudwatchlogs.StartLiveTailInput{
-		LogGroupIdentifiers:   []string{fmt.Sprintf("arn:aws:logs:%s:%s:log-group:%s", req.Region, req.AccountID, req.Group)},
+		LogGroupIdentifiers:   []string{fmt.Sprintf("arn:aws:logs:%s:%s:log-group:%s", target.Region, account, req.Group)},
 		LogEventFilterPattern: aws.String(FilterPattern(req.Query)),
 	}
 	if len(req.Prefixes) > 0 {
 		in.LogStreamNamePrefixes = req.Prefixes
 	}
-	// The stream lives as long as the tail, not as long as the caller's request.
+	// The stream ends with the tail or when the caller's ctx ends, whichever is first.
 	streamCtx, cancel := context.WithCancel(ctx)
 	stream, err := api.LiveTail(streamCtx, in)
 	if err != nil {
@@ -119,13 +125,22 @@ func (t *Tail) run(ctx context.Context, stream awsx.LiveTailStream, idle time.Du
 					Message:   aws.ToString(r.Message),
 				})
 			}
-			select {
-			case t.lines <- batch:
-			case <-t.closeReq:
-				return
-			case <-ctx.Done():
-				result = ctx.Err()
-				return
+		send:
+			for {
+				select {
+				case t.lines <- batch:
+					break send
+				case <-t.touch:
+					timer.Reset(idle)
+				case <-timer.C:
+					result = ErrIdle
+					return
+				case <-t.closeReq:
+					return
+				case <-ctx.Done():
+					result = ctx.Err()
+					return
+				}
 			}
 		}
 	}

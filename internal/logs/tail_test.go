@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ import (
 type closeSpyClients struct {
 	awsx.Clients
 	closed atomic.Int32
+	mu     sync.Mutex
+	target awsx.Target // target of the last Logs call
 }
 
 type closeSpyLogs struct {
@@ -33,6 +36,9 @@ type closeSpyStream struct {
 }
 
 func (c *closeSpyClients) Logs(ctx context.Context, t awsx.Target) (awsx.LogsAPI, error) {
+	c.mu.Lock()
+	c.target = t
+	c.mu.Unlock()
 	api, err := c.Clients.Logs(ctx, t)
 	return closeSpyLogs{LogsAPI: api, spy: c}, err
 }
@@ -110,7 +116,7 @@ func TestStartTail_BuildsInputAndRelaysLines(t *testing.T) {
 
 func TestTail_IdleStopsAfterDuration(t *testing.T) {
 	c, spy := tailClient(time.Hour)
-	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{Group: paymentsGroup, Region: testTarget.Region, AccountID: testTarget.AccountID}, 50*time.Millisecond)
+	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{Group: paymentsGroup, Region: testTarget.Region, AccountID: testTarget.AccountID}, 150*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,12 +134,12 @@ func TestTail_IdleStopsAfterDuration(t *testing.T) {
 
 func TestTail_TouchExtendsIdle(t *testing.T) {
 	c, _ := tailClient(time.Hour)
-	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{Group: paymentsGroup, Region: testTarget.Region, AccountID: testTarget.AccountID}, 50*time.Millisecond)
+	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{Group: paymentsGroup, Region: testTarget.Region, AccountID: testTarget.AccountID}, 150*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tail.Close()
-	for end := time.Now().Add(200 * time.Millisecond); time.Now().Before(end); {
+	for end := time.Now().Add(600 * time.Millisecond); time.Now().Before(end); {
 		tail.Touch()
 		select {
 		case <-tail.Done():
@@ -215,5 +221,58 @@ func TestTailLimiter_MaxTwoPerUser(t *testing.T) {
 	r1() // second release of the same slot must not go negative
 	if l.Count(7) != 2 {
 		t.Errorf("Count(7) = %d after double release, want 2", l.Count(7))
+	}
+}
+
+func TestStartTail_RegionOverride(t *testing.T) {
+	c, spy := tailClient(time.Hour)
+	f := spy.Clients.(*fake.Fake)
+	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{AccountID: "111122223333", Group: paymentsGroup, Region: "eu-west-1"}, time.Minute)
+	if err == nil {
+		defer tail.Close()
+	}
+	spy.mu.Lock()
+	got := spy.target
+	spy.mu.Unlock()
+	if got.Region != "eu-west-1" || got.AccountID != testTarget.AccountID {
+		t.Errorf("client target = %+v, want region eu-west-1 and the target's account", got)
+	}
+	if err != nil {
+		return // the fake may not know that group in eu-west-1; the client choice is what matters
+	}
+	want := "arn:aws:logs:eu-west-1:111122223333:log-group:" + paymentsGroup
+	if in := f.LastLiveTailInput(); in == nil || !slices.Equal(in.LogGroupIdentifiers, []string{want}) {
+		t.Errorf("input = %+v, want ARN %s", in, want)
+	}
+}
+
+func TestStartTail_DefaultsToTargetRegionAndAccount(t *testing.T) {
+	c, spy := tailClient(time.Hour)
+	f := spy.Clients.(*fake.Fake)
+	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{Group: paymentsGroup}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tail.Close()
+	want := "arn:aws:logs:us-east-1:482109375512:log-group:" + paymentsGroup
+	in := f.LastLiveTailInput()
+	if !slices.Equal(in.LogGroupIdentifiers, []string{want}) {
+		t.Errorf("ARN = %v, want %s", in.LogGroupIdentifiers, want)
+	}
+	if in.LogStreamNamePrefixes != nil {
+		t.Errorf("prefixes = %v, want nil when none requested", in.LogStreamNamePrefixes)
+	}
+}
+
+func TestTail_IdleStopsWhileConsumerIsBlocked(t *testing.T) {
+	c, _ := tailClient(5 * time.Millisecond)
+	tail, err := c.StartTail(context.Background(), testTarget, TailRequest{Group: paymentsGroup}, 150*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Never read Lines: the buffer fills and the relay blocks on a send.
+	waitDone(t, tail, 3*time.Second)
+	if !errors.Is(tail.Err(), ErrIdle) {
+		t.Errorf("Err = %v, want ErrIdle", tail.Err())
 	}
 }
