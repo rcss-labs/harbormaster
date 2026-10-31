@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useCluster } from '../../api/hooks'
@@ -13,12 +14,13 @@ import { Split } from '../../components/Split'
 import { STATUS_COLOR, clusterStatusKind, clusterStatusLabel, statusKind } from '../../components/status'
 import { TagChip } from '../../components/TagChip'
 import { Tile } from '../../components/Tile'
+import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { ServiceCard } from './ServiceCard'
 import { ServicesTable } from './ServicesTable'
 import styles from './clusters.module.css'
-import type { TagClickHandler } from './tagTarget'
+import type { TagTarget } from './tagTarget'
 import { LIST_VIEW_OPTIONS, useListView } from './useListView'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
@@ -39,11 +41,12 @@ function NoAccess() {
   )
 }
 
-export function Cluster({ onTagClick }: { onTagClick?: TagClickHandler }) {
+export function Cluster() {
   const { clusterId = '' } = useParams()
   const clusterQuery = useCluster(clusterId)
   const { me } = useAuth()
   const [view, setView] = useListView('cards')
+  const [editing, setEditing] = useState<TagTarget | null>(null)
   const cluster = clusterQuery.data
   useCrumbs([['Clusters', '/clusters'], [cluster?.name ?? '']])
 
@@ -55,7 +58,7 @@ export function Cluster({ onTagClick }: { onTagClick?: TagClickHandler }) {
   if (!cluster) return null
 
   // Tag chips open the tag dialog for admins only.
-  const handleTagClick = me?.admin ? onTagClick : undefined
+  const handleTagClick = me?.admin ? setEditing : undefined
   const services = cluster.services_detail
   const steadyCount = services.filter((service) => service.status === 'steady').length
   const serviceSplitParts = SERVICE_SPLIT_ORDER.map((kind) => ({
@@ -159,6 +162,9 @@ export function Cluster({ onTagClick }: { onTagClick?: TagClickHandler }) {
             <ServiceCard key={service.id} service={service} clusterName={cluster.name} onTagClick={handleTagClick} />
           ))}
         </div>
+      )}
+      {editing && (
+        <EditTagDialog kind="cluster" id={editing.id} name={editing.name} current={editing.tag.id} onClose={() => setEditing(null)} />
       )}
     </>
   )

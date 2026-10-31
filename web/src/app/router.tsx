@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
+import { Tags } from './admin/tags/Tags'
 import { Users } from './admin/users/Users'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
@@ -65,6 +66,7 @@ export function AppRoutes() {
           <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="admin/users" element={<Users />} />
+          <Route path="admin/tags" element={<Tags />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>

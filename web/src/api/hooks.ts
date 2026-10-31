@@ -134,10 +134,11 @@ export function useTags(options: Options<TagsDTO> = {}) {
   return useQuery({ queryKey: ['tags'], queryFn: () => api.get<TagsDTO>('/api/tags'), ...options })
 }
 
-export function useTagAssignments(filters: Filters = {}) {
+export function useTagAssignments(filters: Filters = {}, options: Options<TagAssignmentsDTO> = {}) {
   return useQuery({
     queryKey: ['tag-assignments', filters],
     queryFn: () => api.get<TagAssignmentsDTO>(`/api/tag-assignments${queryString({ ...filters })}`),
+    ...options,
   })
 }
 

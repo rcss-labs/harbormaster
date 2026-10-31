@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import { Navigate, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
-import { useService } from '../../api/hooks'
+import { useCluster, useService } from '../../api/hooks'
 import { EmptyState } from '../../components/EmptyState'
+import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { LockPanel } from '../../components/LockPanel'
 import { Tabs, type TabItem } from '../../components/Tabs'
 import { useAuth } from '../auth/AuthProvider'
-import type { TagClickHandler } from '../clusters/tagTarget'
+import type { TagTarget } from '../clusters/tagTarget'
 import { useCrumbs } from '../shell/crumbs'
 import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
@@ -24,10 +26,11 @@ function NoAccess() {
   )
 }
 
-export function ServicePage({ onTagClick }: { onTagClick?: TagClickHandler }) {
+export function ServicePage() {
   const { serviceId = '', tab = DEFAULT_TAB } = useParams()
   const serviceQuery = useService(serviceId)
   const { me } = useAuth()
+  const [editing, setEditing] = useState<TagTarget | null>(null)
   const service = serviceQuery.data
   useCrumbs(
     service
@@ -60,9 +63,27 @@ export function ServicePage({ onTagClick }: { onTagClick?: TagClickHandler }) {
 
   return (
     <>
-      <ServiceHeader service={service} onTagClick={me?.admin ? onTagClick : undefined} />
+      <ServiceHeader service={service} onTagClick={me?.admin ? setEditing : undefined} />
       <Tabs items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
       {body}
+      {editing && <ServiceTagEditor target={editing} clusterId={service.cluster.id} onClose={() => setEditing(null)} />}
     </>
+  )
+}
+
+/** Waits for the cluster's tag, which the inherit option needs, then opens the tag dialog for the service. */
+function ServiceTagEditor({ target, clusterId, onClose }: { target: TagTarget; clusterId: string; onClose: () => void }) {
+  const cluster = useCluster(clusterId)
+  if (!cluster.data) return null
+  return (
+    <EditTagDialog
+      kind="service"
+      id={target.id}
+      name={target.name}
+      current={target.tag.inherited ? null : target.tag.id}
+      clusterName={cluster.data.name}
+      clusterTag={cluster.data.tag}
+      onClose={onClose}
+    />
   )
 }
