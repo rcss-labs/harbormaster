@@ -56,12 +56,21 @@ func TestValidate(t *testing.T) {
 		ssmNew  = "arn:aws:ssm:us-east-1:482109375512:parameter/payments/NEW"
 		ssmFrom = "arn:aws:ssm:us-east-1:482109375512:parameter/other/X"
 		ssmAcct = "arn:aws:ssm:us-east-1:111111111111:parameter/payments/NEW"
+		smOther = "arn:aws:secretsmanager:us-east-1:482109375512:secret:elsewhere/creds-QqQqQq"
 		smNew   = "arn:aws:secretsmanager:us-east-1:482109375512:secret:payments/other-ZzZzZz"
 	)
 	addSecret := func(valueFrom string) func(Definition) {
 		return func(d Definition) {
 			c := firstContainer(d)
 			c["secrets"] = append(c["secrets"].([]any), map[string]any{"name": "NEW", "valueFrom": valueFrom})
+		}
+	}
+	addLogSecret := func(valueFrom string) func(Definition) {
+		return func(d Definition) {
+			firstContainer(d)["logConfiguration"] = map[string]any{
+				"logDriver":     "splunk",
+				"secretOptions": []any{map[string]any{"name": "token", "valueFrom": valueFrom}},
+			}
 		}
 	}
 	fargate := func(cpu, memory any) func(Definition) {
@@ -110,6 +119,13 @@ func TestValidate(t *testing.T) {
 		{name: "secret in other prefix", mutate: addSecret(ssmFrom), wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
 		{name: "secret in other account", mutate: addSecret(ssmAcct), wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
 		{name: "unparseable secret reference", mutate: addSecret("not-an-arn"), wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
+		{name: "non-admin adds out-of-prefix secretOptions", mutate: addLogSecret(ssmFrom), wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
+		{name: "admin adds out-of-prefix secretOptions", admin: true, mutate: addLogSecret(ssmFrom)},
+		{name: "non-admin adds in-prefix secretOptions", mutate: addLogSecret(ssmNew)},
+		{name: "non-admin adds out-of-prefix repositoryCredentials", mutate: func(d Definition) {
+			firstContainer(d)["repositoryCredentials"] = map[string]any{"credentialsParameter": smOther}
+		}, wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
+		{name: "non-integral cpu", mutate: fargate(512.7, float64(1024)), wantErr: "Task definition JSON is invalid: cpu must be a whole number"},
 		{name: "admin adds secret in other prefix", admin: true, mutate: addSecret(ssmFrom)},
 		{name: "secret removed", mutate: func(d Definition) {
 			c := firstContainer(d)
@@ -183,7 +199,7 @@ func TestFargateValid_Table(t *testing.T) {
 		}
 	}
 	invalid := [][2]int{
-		{256, 256}, {256, 4096}, {512, 512}, {512, 4097}, {512, 5120},
+		{256, 256}, {256, 1536}, {256, 4096}, {512, 512}, {512, 4097}, {512, 5120},
 		{1024, 1024}, {1024, 9216}, {2048, 2048}, {2048, 17408},
 		{4096, 4096}, {4096, 31744}, {8192, 12288}, {8192, 18432}, {8192, 65536},
 		{16384, 16384}, {16384, 36864}, {16384, 131072}, {128, 512}, {0, 0},

@@ -3,6 +3,7 @@ package deploy
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -41,8 +42,11 @@ func Validate(base, draft Definition, admin bool, accountID string) error {
 		return invalid("At least one container must be essential")
 	}
 
-	normalizeSizeField(draft, "cpu")
-	normalizeSizeField(draft, "memory")
+	for _, key := range []string{"cpu", "memory"} {
+		if err := normalizeSizeField(draft, key); err != nil {
+			return err
+		}
+	}
 	if err := validateFargateSize(draft); err != nil {
 		return err
 	}
@@ -68,9 +72,13 @@ func hasEssentialContainer(containers []any) bool {
 }
 
 // normalizeSizeField rewrites a numeric cpu/memory value as its decimal string.
-func normalizeSizeField(def Definition, key string) {
+// A non-integral number is rejected rather than truncated.
+func normalizeSizeField(def Definition, key string) error {
 	switch value := def[key].(type) {
 	case float64:
+		if value != math.Trunc(value) || math.IsInf(value, 0) {
+			return invalid("Task definition JSON is invalid: %s must be a whole number", key)
+		}
 		def[key] = strconv.FormatInt(int64(value), 10)
 	case int:
 		def[key] = strconv.Itoa(value)
@@ -79,6 +87,7 @@ func normalizeSizeField(def Definition, key string) {
 	case json.Number:
 		def[key] = value.String()
 	}
+	return nil
 }
 
 // validateFargateSize applies only when FARGATE is requested and both task-level sizes are set
@@ -110,26 +119,33 @@ func validateFargateSize(draft Definition) error {
 	return nil
 }
 
-type memoryRange struct{ min, max, step int }
-
 // fargateSizes is the AWS table of task CPU units to allowed memory (MiB).
-var fargateSizes = map[int]memoryRange{
-	256:   {512, 2048, 512},
-	512:   {1024, 4096, 1024},
-	1024:  {2048, 8192, 1024},
-	2048:  {4096, 16384, 1024},
-	4096:  {8192, 30720, 1024},
-	8192:  {16384, 61440, 4096},
-	16384: {32768, 122880, 8192},
+var fargateSizes = map[int][]int{
+	256:   {512, 1024, 2048},
+	512:   stepped(1024, 4096, 1024),
+	1024:  stepped(2048, 8192, 1024),
+	2048:  stepped(4096, 16384, 1024),
+	4096:  stepped(8192, 30720, 1024),
+	8192:  stepped(16384, 61440, 4096),
+	16384: stepped(32768, 122880, 8192),
+}
+
+func stepped(min, max, step int) []int {
+	var values []int
+	for value := min; value <= max; value += step {
+		values = append(values, value)
+	}
+	return values
 }
 
 // FargateValid reports whether cpuUnits with memoryMiB is a valid Fargate task size.
 func FargateValid(cpuUnits, memoryMiB int) bool {
-	allowed, ok := fargateSizes[cpuUnits]
-	if !ok || memoryMiB < allowed.min || memoryMiB > allowed.max {
-		return false
+	for _, allowed := range fargateSizes[cpuUnits] {
+		if allowed == memoryMiB {
+			return true
+		}
 	}
-	return (memoryMiB-allowed.min)%allowed.step == 0
+	return false
 }
 
 // secretScope identifies where a secret lives: account plus resource-name prefix.
@@ -150,18 +166,31 @@ func parseSecretScope(arn string) (secretScope, bool) {
 	return secretScope{account: parts[4], prefix: resource[:slash+1]}, true
 }
 
+// secretReferences lists every reference ECS resolves through the execution role: container
+// secrets, log driver secretOptions and private registry credentials.
 func secretReferences(def Definition) []string {
 	var references []string
+	add := func(value any) {
+		if text, _ := value.(string); text != "" {
+			references = append(references, text)
+		}
+	}
 	containers, _ := def["containerDefinitions"].([]any)
 	for _, entry := range containers {
 		container, _ := entry.(map[string]any)
 		secrets, _ := container["secrets"].([]any)
 		for _, secretEntry := range secrets {
 			secret, _ := secretEntry.(map[string]any)
-			if valueFrom, _ := secret["valueFrom"].(string); valueFrom != "" {
-				references = append(references, valueFrom)
-			}
+			add(secret["valueFrom"])
 		}
+		logConfig, _ := container["logConfiguration"].(map[string]any)
+		options, _ := logConfig["secretOptions"].([]any)
+		for _, optionEntry := range options {
+			option, _ := optionEntry.(map[string]any)
+			add(option["valueFrom"])
+		}
+		credentials, _ := container["repositoryCredentials"].(map[string]any)
+		add(credentials["credentialsParameter"])
 	}
 	return references
 }
