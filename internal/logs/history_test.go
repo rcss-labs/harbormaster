@@ -130,3 +130,71 @@ func TestHistory_MultiplePrefixesMergeAscending(t *testing.T) {
 		t.Errorf("containers seen %v, want both", seen)
 	}
 }
+
+// regionRecorder records the region of every Logs client request.
+type regionRecorder struct {
+	awsx.Clients
+	regions []string
+}
+
+func (r *regionRecorder) Logs(ctx context.Context, t awsx.Target) (awsx.LogsAPI, error) {
+	r.regions = append(r.regions, t.Region)
+	return r.Clients.Logs(ctx, t)
+}
+
+func TestHistory_RequestRegionOverridesTargetRegion(t *testing.T) {
+	c, _ := newTestClient()
+	rec := &regionRecorder{Clients: c.Clients}
+	c.Clients = rec
+	_, err := c.History(context.Background(), testTarget, HistoryRequest{Group: paymentsGroup, Region: "eu-west-1", Limit: 5})
+	if len(rec.regions) != 1 || rec.regions[0] != "eu-west-1" {
+		t.Fatalf("Logs client regions = %v, want [eu-west-1] (err %v)", rec.regions, err)
+	}
+}
+
+func TestHistory_CutInsideSameMillisecondLosesNothing(t *testing.T) {
+	c, f := newTestClient()
+	var lines []fake.LogLine
+	add := func(msg string, at time.Time, i int) {
+		lines = append(lines, fake.LogLine{Stream: fmt.Sprintf("ecs/payments-api/task%d", i), Timestamp: at, Message: msg})
+	}
+	for i := 0; i < 7; i++ { // newest, distinct ms
+		add(fmt.Sprintf("new %d", i), testNow.Add(-time.Duration(i)*time.Second), i)
+	}
+	tie := testNow.Add(-30 * time.Second)
+	for i := 0; i < 6; i++ { // same ms; the limit of 10 cuts after 3 of them
+		add(fmt.Sprintf("tie %d", i), tie, i)
+	}
+	for i := 0; i < 12; i++ {
+		add(fmt.Sprintf("old %d", i), testNow.Add(-time.Minute-time.Duration(i)*time.Second), i)
+	}
+	f.Estate.SetLogLines(paymentsGroup, lines)
+
+	first, err := c.History(context.Background(), testTarget, HistoryRequest{Group: paymentsGroup, Limit: 10})
+	if err != nil || first.OlderBefore == nil {
+		t.Fatalf("first page: err %v older %v", err, first.OlderBefore)
+	}
+	second, err := c.History(context.Background(), testTarget, HistoryRequest{Group: paymentsGroup, Limit: 10, Before: *first.OlderBefore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, l := range append(append([]Line{}, first.Lines...), second.Lines...) {
+		seen[l.Message]++
+	}
+	for i := 0; i < 6; i++ {
+		if seen[fmt.Sprintf("tie %d", i)] != 1 {
+			t.Errorf("tie %d seen %d times, want exactly once", i, seen[fmt.Sprintf("tie %d", i)])
+		}
+	}
+	for msg, n := range seen {
+		if n != 1 {
+			t.Errorf("%q seen %d times", msg, n)
+		}
+	}
+	for i := 0; i < 7; i++ {
+		if seen[fmt.Sprintf("new %d", i)] != 1 {
+			t.Errorf("new %d missing", i)
+		}
+	}
+}

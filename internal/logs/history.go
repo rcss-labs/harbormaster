@@ -55,6 +55,9 @@ type Client struct {
 // querying ever wider, non-overlapping time windows (15 min, then x4 each
 // step, finally up to the lookback floor) until enough lines are found.
 func (c *Client) History(ctx context.Context, t awsx.Target, req HistoryRequest) (HistoryPage, error) {
+	if req.Region != "" {
+		t.Region = req.Region
+	}
 	api, err := c.Clients.Logs(ctx, t)
 	if err != nil {
 		return HistoryPage{}, err
@@ -92,7 +95,7 @@ func (c *Client) History(ctx context.Context, t awsx.Target, req HistoryRequest)
 			windowStart = floor
 			floorReached = true
 		}
-		if windowStart.Before(windowEnd) || windowStart.Equal(windowEnd) {
+		if !windowStart.After(windowEnd) {
 			for _, prefix := range prefixes {
 				found, err := filterWindow(ctx, api, req.Group, prefix, pattern, windowStart, windowEnd)
 				if err != nil {
@@ -114,7 +117,13 @@ func (c *Client) History(ctx context.Context, t awsx.Target, req HistoryRequest)
 	page := HistoryPage{Lines: lines}
 	if len(lines) > limit {
 		page.Truncated = true
-		page.Lines = lines[len(lines)-limit:]
+		// Keep every line sharing the oldest kept millisecond so the next page
+		// (which ends 1 ms earlier) cannot lose part of that tie group.
+		cut := len(lines) - limit
+		for cut > 0 && lines[cut-1].T.Equal(lines[cut].T) {
+			cut--
+		}
+		page.Lines = slices.Clone(lines[cut:])
 	}
 	if len(page.Lines) > 0 && (!floorReached || page.Truncated) {
 		older := page.Lines[0].T.Add(-time.Millisecond)
