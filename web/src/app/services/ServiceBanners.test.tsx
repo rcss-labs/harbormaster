@@ -20,8 +20,16 @@ describe('ServicePage banners', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent('Deploy payments-api to :43?')
   })
 
-  it('hides the pending banner while a rollout is running', async () => {
+  it('hides the pending banner while the revisions response reports a rollout', async () => {
     server.use(http.get('/api/services/:id/revisions', () => HttpResponse.json({ ...REVISIONS_PAYMENTS, rolling_out_revision: 43 })))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/overview`)
+    await screen.findByText('Completed')
+    await waitFor(() => expect(screen.getByRole('link', { name: /Task definition/ })).not.toHaveTextContent('ready'))
+    expect(screen.queryByText(/is registered but not deployed/)).not.toBeInTheDocument()
+  })
+
+  it('hides the pending banner while a deployment is IN_PROGRESS', async () => {
+    server.use(http.get('/api/services/:id/revisions', () => HttpResponse.json({ ...REVISIONS_PAYMENTS, rolling_out_revision: null })))
     renderApp(`/services/${SERVICE_NOTIFICATIONS.id}/overview`)
     await screen.findByText('Rollout in progress')
     expect(screen.queryByText(/is registered but not deployed/)).not.toBeInTheDocument()

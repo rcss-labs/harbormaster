@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { isApiError, useDeploy, useImageTags, useRegisterRevision, useRevisions, useTaskDefinition, type RegisterResult } from '../../../api/change'
 import { useServiceTasks } from '../../../api/hooks'
-import type { ServiceDTO } from '../../../api/types'
+import type { RevisionsResponse, ServiceDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
 import { EmptyState } from '../../../components/EmptyState'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
+import { isRolloutRunning } from '../rollout'
 import { DeployDialog } from './DeployDialog'
 import { JsonEditor } from './JsonEditor'
 import { QuickEdit, isTagInvalid } from './QuickEdit'
@@ -36,6 +37,18 @@ function parseDefinition(text: string): { definition: Definition | null; error: 
   }
 }
 
+type PickedTarget = { revision: number; mode: 'deploy' | 'rollback' }
+
+/** Turns ?deploy=N into a dialog target, but only when the same gates as the table's buttons allow it. */
+function requestedTarget(param: string | null, service: ServiceDTO, revisions: RevisionsResponse | undefined): PickedTarget | null {
+  if (param === null || !revisions) return null
+  if (!service.can.deploy || !service.controller.supported || isRolloutRunning(service, revisions)) return null
+  const item = revisions.items.find((candidate) => String(candidate.revision) === param)
+  if (item?.status === 'not_deployed') return { revision: item.revision, mode: 'deploy' }
+  if (item?.status === 'previous') return { revision: item.revision, mode: 'rollback' }
+  return null
+}
+
 export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; service: ServiceDTO }) {
   const taskDefinition = useTaskDefinition(serviceId)
   const revisions = useRevisions(serviceId)
@@ -54,7 +67,16 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
   const [registered, setRegistered] = useState<RegisterResult | null>(null)
   // A revision picked from the table; the pending-revision banner can also request one with ?deploy=N.
-  const [picked, setPicked] = useState<{ revision: number; mode: 'deploy' | 'rollback' } | null>(null)
+  const [picked, setPicked] = useState<PickedTarget | null>(null)
+  const deployParam = searchParams.get('deploy')
+  const requested = requestedTarget(deployParam, service, revisions.data)
+
+  // Drop a ?deploy=N that cannot open a dialog, once the revisions have loaded to judge it.
+  useEffect(() => {
+    if (deployParam !== null && revisions.data && !requested) {
+      setSearchParams((previous) => { previous.delete('deploy'); return previous }, { replace: true })
+    }
+  }, [deployParam, revisions.data, requested, setSearchParams])
 
   const data = taskDefinition.data
   if (taskDefinition.isError && !data) {
@@ -131,14 +153,13 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
     if (registered) void runDeploy(registered.revision, () => setRegistered(null))
   }
 
-  const requestedRevision = Number(searchParams.get('deploy'))
-  const target = picked ?? (Number.isInteger(requestedRevision) && requestedRevision > 0 ? { revision: requestedRevision, mode: 'deploy' as const } : null)
+  const target = picked ?? requested
   const targetRevision = target ? revisions.data?.items.find((item) => item.revision === target.revision) : undefined
   const closePicked = () => {
     setPicked(null)
     if (searchParams.has('deploy')) setSearchParams((previous) => { previous.delete('deploy'); return previous }, { replace: true })
   }
-  const rolloutRunning = service.deployments.some((deployment) => deployment.rollout_state === 'IN_PROGRESS') || revisions.data?.rolling_out_revision != null
+  const rolloutRunning = isRolloutRunning(service, revisions.data)
   const lockReason = service.can.deploy ? undefined : `You need Deploy on ${service.tag.name}`
   const controllerReason = service.controller.supported ? undefined : service.controller.banner
 

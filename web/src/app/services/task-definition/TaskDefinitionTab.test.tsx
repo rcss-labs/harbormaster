@@ -247,4 +247,40 @@ describe('TaskDefinitionTab', () => {
     renderApp(`${route}?deploy=43`)
     expect(await screen.findByRole('dialog')).toHaveTextContent('Deploy payments-api to :43?')
   })
+  it('ignores ?deploy=N without Deploy permission and clears the param', async () => {
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, can: { ...SERVICE_PAYMENTS.can, deploy: false } })))
+    renderApp(`${route}?deploy=43`)
+    await screen.findByRole('heading', { name: 'Revisions' })
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(/^$/))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('clears ?deploy=N when the revision is unknown or already deployed', async () => {
+    renderApp(`${route}?deploy=999`)
+    await screen.findByRole('heading', { name: 'Revisions' })
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(/^$/))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('uses rollback mode for ?deploy=N on a previous revision', async () => {
+    server.use(
+      http.get('/api/services/:id/revisions', () =>
+        HttpResponse.json({ ...REVISIONS_PAYMENTS, items: [REVISIONS_PAYMENTS.items[1], { ...REVISIONS_PAYMENTS.items[1], revision: 41, status: 'previous' }] }),
+      ),
+    )
+    renderApp(`${route}?deploy=41`)
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Roll back payments-api to :41?')
+  })
+
+  it('titles table actions with the controller banner when the controller is unsupported', async () => {
+    server.use(
+      http.get('/api/services/:id', () =>
+        HttpResponse.json({ ...SERVICE_PAYMENTS, controller: { type: 'CODE_DEPLOY', supported: false, name: '', banner: 'This service uses CODE_DEPLOY.' } }),
+      ),
+    )
+    renderApp(route)
+    const button = await screen.findByRole('button', { name: 'Deploy' })
+    await waitFor(() => expect(button).toBeDisabled())
+    expect(button).toHaveAttribute('title', 'This service uses CODE_DEPLOY.')
+  })
 })

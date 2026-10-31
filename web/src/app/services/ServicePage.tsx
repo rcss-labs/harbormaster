@@ -11,6 +11,7 @@ import { useAuth } from '../auth/AuthProvider'
 import type { TagTarget } from '../clusters/tagTarget'
 import { useCrumbs } from '../shell/crumbs'
 import { ControllerBanner } from './ControllerBanner'
+import { isRolloutRunning } from './rollout'
 import { PendingRevisionBanner } from './PendingRevisionBanner'
 import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
@@ -56,7 +57,7 @@ export function ServicePage() {
 
   const revisionNumbers = revisions.data?.items.map((item) => item.revision) ?? []
   const newestRevision = Math.max(0, ...revisionNumbers)
-  const rolloutRunning = service.deployments.some((deployment) => deployment.rollout_state === 'IN_PROGRESS') || revisions.data?.rolling_out_revision != null
+  const rolloutRunning = isRolloutRunning(service, revisions.data)
   const pendingRevision = revisions.data && newestRevision > revisions.data.deployed_revision && !rolloutRunning ? newestRevision : null
 
   const items: TabItem[] = TABS.map(([key, label]) => {

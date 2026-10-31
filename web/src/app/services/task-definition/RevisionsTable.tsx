@@ -23,7 +23,7 @@ const STATUS: Record<RevisionDTO['status'], { kind: PillKind; label: string }> =
 
 export function RevisionsTable({ serviceName, revisions, canDeploy, deployDisabledReason, rolloutRunning, onDeploy }: RevisionsTableProps) {
   const disabled = !canDeploy || deployDisabledReason !== undefined || rolloutRunning
-  const title = !canDeploy || deployDisabledReason !== undefined ? deployDisabledReason : undefined
+  const title = !canDeploy || deployDisabledReason !== undefined ? deployDisabledReason : rolloutRunning ? 'A rollout is already running' : undefined
 
   return (
     <div>

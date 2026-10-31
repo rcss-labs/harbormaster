@@ -49,6 +49,7 @@ describe('RevisionsTable', () => {
 
   it('disables actions while a rollout runs', () => {
     render(<RevisionsTable {...base} rolloutRunning />)
+    expect(within(row(44)).getByRole('button', { name: 'Deploy' })).toHaveAttribute('title', 'A rollout is already running')
     expect(within(row(44)).getByRole('button', { name: 'Deploy' })).toBeDisabled()
     expect(within(row(41)).getByRole('button', { name: 'Roll back to this' })).toBeDisabled()
   })
