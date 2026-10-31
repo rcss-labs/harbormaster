@@ -72,7 +72,12 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 	})
 	items := make([]PollerItemDTO, 0, len(order))
 	for _, target := range order {
-		items = append(items, *byTarget[target])
+		item := *byTarget[target]
+		// AWS error text can name resources the caller cannot see; only admins, or anyone once the target fails, get it.
+		if !sc.Vis.Admin && !item.Failing {
+			item.LastError = ""
+		}
+		items = append(items, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }

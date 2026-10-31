@@ -199,3 +199,30 @@ func TestTasks_CanAndExecFlags(t *testing.T) {
 		t.Errorf("task = %+v", task)
 	}
 }
+
+func TestServiceTasks_SummaryValues(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	c := login(t, srv, "pavel", testPassword)
+
+	resizer := getTasks(t, c, "/api/services/"+serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")+"/tasks?filter=all")
+	by := resizer.Summary.ByStatus
+	if by.StoppedError != 6 || by.RunningHealthy != 0 || by.RunningUnhealthy != 0 || by.StoppedNormal != 0 {
+		t.Errorf("image-resizer by_status = %+v", by)
+	}
+	if len(resizer.Summary.StopReasons) != 1 || resizer.Summary.StopReasons[0] != (StopReasonDTO{Reason: "Out of memory (exit 137)", Count: 6}) {
+		t.Errorf("image-resizer stop_reasons = %+v", resizer.Summary.StopReasons)
+	}
+	if len(resizer.Summary.ByAZ) != 0 || len(resizer.Summary.ByCluster) != 0 {
+		t.Errorf("image-resizer runs nothing: by_az %+v by_cluster %+v", resizer.Summary.ByAZ, resizer.Summary.ByCluster)
+	}
+
+	catalog := getTasks(t, c, "/api/services/"+serviceID(homelabAccountID, "eu-west-1", "eu-apps", "catalog-api")+"/tasks?filter=all")
+	if catalog.Summary.ByStatus.RunningUnhealthy != 1 || catalog.Summary.ByStatus.RunningHealthy != 1 {
+		t.Errorf("catalog-api by_status = %+v", catalog.Summary.ByStatus)
+	}
+	if len(catalog.Summary.ByCluster) != 1 || catalog.Summary.ByCluster[0].Name != "eu-apps" {
+		t.Errorf("catalog-api by_cluster = %+v", catalog.Summary.ByCluster)
+	}
+}

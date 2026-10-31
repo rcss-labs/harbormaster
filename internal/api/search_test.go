@@ -3,6 +3,10 @@ package api
 import (
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 type searchResponse struct {
@@ -158,5 +162,46 @@ func TestPoller_HidesTargetsWithoutVisibleClusters(t *testing.T) {
 		if item.Region != "us-east-1" {
 			t.Errorf("unexpected target %+v", item)
 		}
+	}
+}
+
+func TestPoller_LastErrorOnlyForAdminsOrFailingTargets(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedAccounts(t, st)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	ctx := t.Context()
+	now := time.Now()
+	target := awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}
+	// not failing: one failure with an error text naming a resource
+	if err := st.UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
+		LastError: "AccessDenied on arn:aws:ecs:secret", Interval: time.Second, BaseInterval: time.Second, Failures: 1}); err != nil {
+		t.Fatal(err)
+	}
+	errorFor := func(user string) (lastError string, failing bool) {
+		var got struct {
+			Items []PollerItemDTO `json:"items"`
+		}
+		decode(t, login(t, srv, user, testPassword).get("/api/poller"), &got)
+		for _, item := range got.Items {
+			if item.AccountID == target.AccountID && item.Region == target.Region {
+				return item.LastError, item.Failing
+			}
+		}
+		t.Fatalf("%s: target missing in %+v", user, got.Items)
+		return "", false
+	}
+	if msg, failing := errorFor("pavel"); msg == "" || failing {
+		t.Errorf("admin: last_error %q failing %v, want the error and not failing", msg, failing)
+	}
+	if msg, _ := errorFor("omer"); msg != "" {
+		t.Errorf("omer sees last_error %q on a healthy target", msg)
+	}
+	if err := st.UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
+		LastError: "AccessDenied on arn:aws:ecs:secret", Interval: time.Second, BaseInterval: time.Second, Failures: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if msg, failing := errorFor("omer"); msg == "" || !failing {
+		t.Errorf("omer: last_error %q failing %v, want the error once failing", msg, failing)
 	}
 }

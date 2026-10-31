@@ -509,8 +509,22 @@ type TaskSummary struct {
 	StopReasons                                                   map[string]int // STOPPED since the cutoff, by reason group
 }
 
+// TaskSummaryQuery scopes a task summary; Cluster and Service narrow it when non-empty.
+type TaskSummaryQuery struct {
+	TargetFilter
+	Vis              Visibility
+	Cluster, Service string
+	Since            time.Time // stopped tasks older than this are ignored
+}
+
 // TaskSummary counts running and recently stopped (stopped_at >= since) tasks.
 func (s *Store) TaskSummary(ctx context.Context, f TargetFilter, vis Visibility, since time.Time) (TaskSummary, error) {
+	return s.TaskSummaryFor(ctx, TaskSummaryQuery{TargetFilter: f, Vis: vis, Since: since})
+}
+
+// TaskSummaryFor is TaskSummary narrowed to one cluster and/or service.
+func (s *Store) TaskSummaryFor(ctx context.Context, tq TaskSummaryQuery) (TaskSummary, error) {
+	f, vis, since := tq.TargetFilter, tq.Vis, tq.Since
 	summary := TaskSummary{
 		ByAZ:        map[string]int{},
 		ByCluster:   map[model.ClusterKey]struct{ Fargate, Spot int }{},
@@ -519,9 +533,15 @@ func (s *Store) TaskSummary(ctx context.Context, f TargetFilter, vis Visibility,
 	var q queryArgs
 	target := q.target("t", f)
 	v := q.visibility("t", vis)
+	base := taskFrom(v) + ` where ` + target + ` and ` + v.Predicate
+	if tq.Cluster != "" {
+		base += ` and t.cluster_name = ` + q.add(tq.Cluster)
+	}
+	if tq.Service != "" {
+		base += ` and t.service_name = ` + q.add(tq.Service)
+	}
 	baseArgs := append([]any(nil), q.values...) // without the cutoff, for queries that do not use it
 	sinceParam := q.add(since)
-	base := taskFrom(v) + ` where ` + target + ` and ` + v.Predicate
 
 	err := s.Pool.QueryRow(ctx, `select
 	   count(*) filter (where `+runningSQL+` and t.health_status is distinct from 'UNHEALTHY'),

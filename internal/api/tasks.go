@@ -36,7 +36,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	out, err := s.tasksList(r.Context(), r, sc, store.TaskQuery{TargetFilter: sc.Filter, Vis: sc.Vis}, nil)
+	out, err := s.tasksList(r.Context(), r, sc, store.TaskQuery{TargetFilter: sc.Filter, Vis: sc.Vis})
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -64,7 +64,7 @@ func (s *Server) listServiceTasks(w http.ResponseWriter, r *http.Request) {
 		TargetFilter: store.TargetFilter{AccountID: key.AccountID, Region: key.Region},
 		Vis:          sc.Vis, Cluster: key.Cluster, Service: key.Service,
 	}
-	out, err := s.tasksList(r.Context(), r, sc, base, &key)
+	out, err := s.tasksList(r.Context(), r, sc, base)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -72,9 +72,8 @@ func (s *Server) listServiceTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// tasksList builds the task list body. base carries the scope (target, visibility, cluster, service);
-// scopedService is non-nil when the list is limited to one service.
-func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base store.TaskQuery, scopedService *model.ServiceKey) (TasksListDTO, error) {
+// tasksList builds the task list body. base carries the scope (target, visibility, cluster, service).
+func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base store.TaskQuery) (TasksListDTO, error) {
 	query := r.URL.Query()
 	filter := query.Get("filter")
 	if filter == "" {
@@ -123,7 +122,7 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 		return TasksListDTO{}, err
 	}
 	now := s.now()
-	summary, err := s.taskSummaryDTO(ctx, sc, base, scopedService, now.Add(-taskSummaryWindow))
+	summary, err := s.taskSummaryDTO(ctx, sc, base, now.Add(-taskSummaryWindow))
 	if err != nil {
 		return TasksListDTO{}, err
 	}
@@ -168,21 +167,11 @@ func taskDTO(sc scope, view *estateView, row store.TaskRow) TaskDTO {
 }
 
 // taskSummaryDTO aggregates the visible estate, or only the scoped service when one is given.
-func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQuery, scopedService *model.ServiceKey, since time.Time) (TaskSummaryDTO, error) {
-	var summary store.TaskSummary
-	if scopedService == nil {
-		var err error
-		if summary, err = s.Store.TaskSummary(ctx, base.TargetFilter, sc.Vis, since); err != nil {
-			return TaskSummaryDTO{}, err
-		}
-	} else {
-		all := base
-		all.Filter, all.Q = "all", ""
-		rows, _, err := s.Store.ListTasks(ctx, all)
-		if err != nil {
-			return TaskSummaryDTO{}, err
-		}
-		summary = summarizeTasks(rows, since)
+func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQuery, since time.Time) (TaskSummaryDTO, error) {
+	query := store.TaskSummaryQuery{TargetFilter: base.TargetFilter, Vis: sc.Vis, Cluster: base.Cluster, Service: base.Service, Since: since}
+	summary, err := s.Store.TaskSummaryFor(ctx, query)
+	if err != nil {
+		return TaskSummaryDTO{}, err
 	}
 
 	out := TaskSummaryDTO{
@@ -212,44 +201,4 @@ func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQu
 		}
 	}
 	return out, nil
-}
-
-// summarizeTasks mirrors store.TaskSummary for an in-memory set: running tasks feed the health, zone and
-// capacity counts; tasks stopped since the cutoff feed the stop counts.
-func summarizeTasks(rows []store.TaskRow, since time.Time) store.TaskSummary {
-	summary := store.TaskSummary{
-		ByAZ:        map[string]int{},
-		ByCluster:   map[model.ClusterKey]struct{ Fargate, Spot int }{},
-		StopReasons: map[string]int{},
-	}
-	for _, t := range rows {
-		if t.LastStatus != "STOPPED" {
-			if t.HealthStatus == "UNHEALTHY" {
-				summary.RunningUnhealthy++
-			} else {
-				summary.RunningHealthy++
-			}
-			if t.AvailabilityZone != "" {
-				summary.ByAZ[t.AvailabilityZone]++
-			}
-			c := summary.ByCluster[t.Cluster]
-			if t.CapacityProvider == "FARGATE_SPOT" {
-				c.Spot++
-			} else {
-				c.Fargate++
-			}
-			summary.ByCluster[t.Cluster] = c
-			continue
-		}
-		if t.StoppedAt == nil || t.StoppedAt.Before(since) {
-			continue
-		}
-		if (t.ExitCode != nil && *t.ExitCode != 0) || t.StopCode == "TaskFailedToStart" {
-			summary.StoppedError++
-		} else {
-			summary.StoppedNormal++
-		}
-		summary.StopReasons[t.StopReasonGroup]++
-	}
-	return summary
 }

@@ -430,3 +430,48 @@ func TestTaskSummary_And_Events_And_Stops(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskSummaryFor_ServiceScopeAddsUpToTheTotals(t *testing.T) {
+	fx := newReadFixture(t)
+	ctx := context.Background()
+	admin := store.Visibility{Admin: true}
+	since := fx.now.Add(-72 * time.Hour)
+	global, err := fx.s.TaskSummary(ctx, store.TargetFilter{}, admin, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, err := fx.s.ListServices(ctx, store.TargetFilter{}, "", admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sum store.TaskSummary
+	azTotal, narrowed := 0, false
+	for _, svc := range services {
+		part, err := fx.s.TaskSummaryFor(ctx, store.TaskSummaryQuery{
+			TargetFilter: store.TargetFilter{AccountID: svc.Key.AccountID, Region: svc.Key.Region},
+			Vis:          admin, Cluster: svc.Key.Cluster, Service: svc.Key.Service, Since: since,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum.RunningHealthy += part.RunningHealthy
+		sum.RunningUnhealthy += part.RunningUnhealthy
+		sum.StoppedError += part.StoppedError
+		sum.StoppedNormal += part.StoppedNormal
+		for _, n := range part.ByAZ {
+			azTotal += n
+		}
+		narrowed = narrowed || part.RunningHealthy < global.RunningHealthy
+	}
+	if !narrowed {
+		t.Error("service scope did not narrow the summary")
+	}
+	// standalone tasks belong to no service, so the parts add up to the totals minus those
+	if sum.RunningHealthy != global.RunningHealthy || sum.RunningUnhealthy != global.RunningUnhealthy ||
+		sum.StoppedNormal != global.StoppedNormal || sum.StoppedError < 1 || sum.StoppedError > global.StoppedError {
+		t.Errorf("sum of services %+v inconsistent with global %+v", sum, global)
+	}
+	if want := global.RunningHealthy + global.RunningUnhealthy; azTotal > want {
+		t.Errorf("az total %d exceeds running %d", azTotal, want)
+	}
+}
