@@ -9,6 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
+	"github.com/aws/smithy-go"
+
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 )
@@ -130,5 +133,52 @@ func TestRevisions_CachedFor30s(t *testing.T) {
 	}
 	if n := h.fake.Calls()["ListTaskDefinitions"]; n != 2 {
 		t.Fatalf("ListTaskDefinitions calls = %d after 31 s, want 2", n)
+	}
+}
+
+func TestRevisions_RegisterEvictsCache(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.svc.Revisions(t.Context(), paymentsKey); err != nil {
+		t.Fatal(err)
+	}
+	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
+	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := h.svc.Revisions(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := summary(list); len(got) == 0 || got[0] != "43 not_deployed pavel" {
+		t.Fatalf("revisions right after Register = %v, want :43 first", got)
+	}
+}
+
+func TestRevisions_RolloutWithInactiveDeployedRevisionStillListed(t *testing.T) {
+	h := newHarness(t)
+	h.fake.Estate.Mu.Lock()
+	for i := range h.fake.Estate.TaskDefinitions {
+		td := &h.fake.Estate.TaskDefinitions[i]
+		if aws.ToString(td.Definition.Family) == "notifications" && td.Definition.Revision == 9 {
+			td.Definition.Status = ecstypes.TaskDefinitionStatusInactive
+		}
+	}
+	h.fake.Estate.Mu.Unlock()
+	list, err := h.svc.Revisions(t.Context(), notificationsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := summary(list)
+	if len(got) < 2 || got[0] != "10 rolling_out terraform" || got[1] != "9 deployed terraform" {
+		t.Fatalf("revisions = %v, want :10 rolling_out and the INACTIVE :9 deployed", got)
+	}
+}
+
+func TestRevisions_ThrottleSurfaces(t *testing.T) {
+	h := newHarness(t)
+	h.fake.FailNext("ListTaskDefinitions", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded"})
+	_, err := h.svc.Revisions(t.Context(), paymentsKey)
+	if !awsx.IsThrottle(err) {
+		t.Fatalf("err = %v, want a throttle error", err)
 	}
 }

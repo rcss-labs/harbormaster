@@ -1,12 +1,14 @@
 package deploy_test
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	"github.com/aws/smithy-go"
 
@@ -151,5 +153,64 @@ func TestImageTags_CachedFor60s(t *testing.T) {
 	}
 	if n := h.fake.Calls()["DescribeImages"]; n != 2 {
 		t.Fatalf("DescribeImages calls = %d after 61 s, want 2", n)
+	}
+}
+
+// oldestFirstECR serves 60 tagged images over pages of 25, oldest push first,
+// the opposite of the order the picker needs.
+type oldestFirstECR struct{ awsx.Clients }
+
+func (o oldestFirstECR) ECR(context.Context, awsx.Target) (awsx.ECRAPI, error) {
+	return pagedImages{}, nil
+}
+
+type pagedImages struct{}
+
+func (pagedImages) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
+	start := 0
+	if in.NextToken != nil {
+		start, _ = strconv.Atoi(*in.NextToken)
+	}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	out := &ecr.DescribeImagesOutput{}
+	end := start + 25
+	if end < 60 {
+		out.NextToken = aws.String(strconv.Itoa(end))
+	} else {
+		end = 60
+	}
+	for i := start; i < end; i++ {
+		out.ImageDetails = append(out.ImageDetails, ecrtypes.ImageDetail{
+			ImageTags: []string{"t" + strconv.Itoa(i)}, ImagePushedAt: aws.Time(base.Add(time.Duration(i) * time.Hour)),
+		})
+	}
+	return out, nil
+}
+
+func TestImageTags_NewestKeptWhenRepositoryHasMoreThan50(t *testing.T) {
+	h := newHarness(t)
+	h.svc.Clients = oldestFirstECR{Clients: h.fake}
+	got, err := h.svc.ImageTags(t.Context(), imageResizerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tags) != 50 || got.Tags[0].Tag != "t59" || got.Tags[49].Tag != "t10" {
+		t.Fatalf("got %d tags, first %q last %q; want 50, t59..t10", len(got.Tags), got.Tags[0].Tag, got.Tags[len(got.Tags)-1].Tag)
+	}
+}
+
+func TestImageTags_CallerCannotCorruptCache(t *testing.T) {
+	h := newHarness(t)
+	first, err := h.svc.ImageTags(t.Context(), imageResizerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Tags[0].Tag = "mutated"
+	second, err := h.svc.ImageTags(t.Context(), imageResizerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Tags[0].Tag == "mutated" {
+		t.Fatal("cached tags share memory with the returned slice")
 	}
 }

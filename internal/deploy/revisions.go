@@ -54,8 +54,13 @@ func (s *Service) Revisions(ctx context.Context, key model.ServiceKey) (Revision
 	if err != nil {
 		return RevisionList{}, err
 	}
-	if !containsString(arns, primaryARN) {
-		arns = append(arns, primaryARN)
+	// Deployments may reference revisions outside the newest ACTIVE ones (for example INACTIVE).
+	for _, deployment := range svc.Deployments {
+		status := aws.ToString(deployment.Status)
+		deploymentARN := aws.ToString(deployment.TaskDefinition)
+		if (status == "PRIMARY" || status == "ACTIVE") && deploymentARN != "" && !containsString(arns, deploymentARN) {
+			arns = append(arns, deploymentARN)
+		}
 	}
 
 	list := RevisionList{}
@@ -122,7 +127,7 @@ func revisionStatus(revision, primaryRevision, rollingOut int, deployed map[int]
 // familyRevisionARNs returns the ARNs of the newest ACTIVE revisions of exactly this family.
 // ListTaskDefinitions matches by prefix, so "api" would also return "api-worker".
 func (s *Service) familyRevisionARNs(ctx context.Context, key model.ServiceKey, family string) ([]string, error) {
-	cacheKey := fmt.Sprintf("%s/%s/%s", key.AccountID, key.Region, family)
+	cacheKey := revisionCacheKey(key, family)
 	if arns, ok := s.revisionCache().get(cacheKey, s.now()); ok {
 		return append([]string(nil), arns...), nil
 	}
@@ -192,4 +197,8 @@ func (s *Service) primaryDefinition(ctx context.Context, key model.ServiceKey) (
 		return ecstypes.Service{}, model.TaskDefinitionRef{}, err
 	}
 	return svc, ref, nil
+}
+
+func revisionCacheKey(key model.ServiceKey, family string) string {
+	return fmt.Sprintf("%s/%s/%s", key.AccountID, key.Region, family)
 }

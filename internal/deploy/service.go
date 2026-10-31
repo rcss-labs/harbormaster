@@ -75,7 +75,11 @@ func (s *Service) now() time.Time {
 type AWSError struct {
 	Code, Message string
 	Validation    bool
+	cause         error
 }
+
+// Unwrap exposes the SDK error so callers can still classify it (awsx.IsThrottle).
+func (e *AWSError) Unwrap() error { return e.cause }
 
 func (e *AWSError) Error() string { return e.Message }
 
@@ -90,6 +94,7 @@ func wrapAWS(err error) error {
 		Code:       code,
 		Message:    apiErr.ErrorMessage(),
 		Validation: code == "ClientException" || code == "InvalidParameterException",
+		cause:      err,
 	}
 }
 

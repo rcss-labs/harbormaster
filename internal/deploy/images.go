@@ -18,6 +18,9 @@ import (
 const (
 	imageTagsTTL = 60 * time.Second
 	maxImageTags = 50
+	// DescribeImages is not ordered by push time, so every page is needed to find the newest tags.
+	imagePageSize = 1000
+	maxImagePages = 10
 )
 
 // ImageTags are the ECR tags a service's main container image can be switched to.
@@ -57,7 +60,8 @@ func (s *Service) ImageTags(ctx context.Context, key model.ServiceKey) (ImageTag
 	repoRegion, repository := match[2], match[3]
 	cacheKey := fmt.Sprintf("%s/%s/%s", match[1], repoRegion, repository)
 
-	tags, cached := s.imageTagCache().get(cacheKey, s.now())
+	cachedTags, cached := s.imageTagCache().get(cacheKey, s.now())
+	tags := append([]ImageTagInfo(nil), cachedTags...)
 	if !cached {
 		tags, err = s.describeImageTags(ctx, key, repoRegion, repository)
 		if err != nil {
@@ -67,7 +71,7 @@ func (s *Service) ImageTags(ctx context.Context, key model.ServiceKey) (ImageTag
 			}
 			return ImageTags{}, err
 		}
-		s.imageTagCache().put(cacheKey, tags, s.now())
+		s.imageTagCache().put(cacheKey, append([]ImageTagInfo(nil), tags...), s.now())
 	}
 	result.Source = "ecr"
 	result.Repository = repository
@@ -83,10 +87,11 @@ func (s *Service) describeImageTags(ctx context.Context, key model.ServiceKey, r
 	}
 	var tags []ImageTagInfo
 	var next *string
-	for {
+	for page := 0; page < maxImagePages; page++ {
 		out, err := ecrAPI.DescribeImages(ctx, &ecr.DescribeImagesInput{
 			RepositoryName: aws.String(repository),
 			Filter:         &ecrtypes.DescribeImagesFilter{TagStatus: ecrtypes.TagStatusTagged},
+			MaxResults:     aws.Int32(imagePageSize),
 			NextToken:      next,
 		})
 		if err != nil {
@@ -98,7 +103,7 @@ func (s *Service) describeImageTags(ctx context.Context, key model.ServiceKey, r
 			}
 		}
 		next = out.NextToken
-		if next == nil || len(tags) >= maxImageTags {
+		if next == nil {
 			break
 		}
 	}

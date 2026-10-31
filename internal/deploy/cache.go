@@ -39,3 +39,9 @@ func (c *ttlCache[V]) put(key string, value V, now time.Time) {
 	defer c.mu.Unlock()
 	c.entries[key] = ttlEntry[V]{value: value, expires: now.Add(c.ttl)}
 }
+
+func (c *ttlCache[V]) delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+}

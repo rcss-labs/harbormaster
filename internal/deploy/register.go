@@ -62,7 +62,12 @@ func (s *Service) Register(ctx context.Context, subj authz.Subject, key model.Se
 	if out.TaskDefinition == nil {
 		return Registered{}, errors.New("RegisterTaskDefinition returned no task definition")
 	}
-	return s.recordRegistered(ctx, subj, key, *out.TaskDefinition)
+	registered, err := s.recordRegistered(ctx, subj, key, *out.TaskDefinition)
+	if err != nil {
+		return Registered{}, err
+	}
+	s.revisionCache().delete(revisionCacheKey(key, aws.ToString(out.TaskDefinition.Family)))
+	return registered, nil
 }
 
 // recordRegistered stores the new definition, who registered it, and the operation log entry.
