@@ -98,6 +98,30 @@ func TestFakeFilterLogEvents_StreamNamesUseRealTaskIDs(t *testing.T) {
 	}
 }
 
+func TestFakeFilterLogEvents_GeneratedLinesCarryWarnAndErrorTokens(t *testing.T) {
+	api := logsFor(t, newFake(), homelabUSEast1)
+	out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
+		LogGroupName: aws.String(paymentsLogGroup),
+		StartTime:    aws.Int64(fixedNow.Add(-time.Hour).UnixMilli()),
+		EndTime:      aws.Int64(fixedNow.UnixMilli()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warn, errs int
+	for _, ev := range out.Events {
+		switch {
+		case strings.HasPrefix(aws.ToString(ev.Message), "WARN "):
+			warn++
+		case strings.HasPrefix(aws.ToString(ev.Message), "ERROR "):
+			errs++
+		}
+	}
+	if warn == 0 || errs == 0 {
+		t.Fatalf("warn=%d error=%d in first page, want both > 0", warn, errs)
+	}
+}
+
 func TestFakeFilterLogEvents_UnknownGroupIsNotFound(t *testing.T) {
 	api := logsFor(t, newFake(), homelabUSEast1)
 	_, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{LogGroupName: aws.String("/ecs/nope/nope")})

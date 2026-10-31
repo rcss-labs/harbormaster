@@ -92,22 +92,25 @@ func TestFakeAutoScaling_PaymentsAPISetup(t *testing.T) {
 	if err != nil || len(targets.ScalableTargets) != 1 || aws.ToInt32(targets.ScalableTargets[0].MinCapacity) != 2 || aws.ToInt32(targets.ScalableTargets[0].MaxCapacity) != 6 {
 		t.Fatalf("targets = %+v, err %v; want payments-api 2..6", targets, err)
 	}
-	policies, _ := api.DescribeScalingPolicies(ctx, &applicationautoscaling.DescribeScalingPoliciesInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceId: id})
+	policies, err := api.DescribeScalingPolicies(ctx, &applicationautoscaling.DescribeScalingPoliciesInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceId: id})
+	if err != nil || len(policies.ScalingPolicies) != 1 {
+		t.Fatalf("policies = %+v, err %v; want 1", policies, err)
+	}
 	cfg := policies.ScalingPolicies[0].TargetTrackingScalingPolicyConfiguration
-	if len(policies.ScalingPolicies) != 1 || aws.ToFloat64(cfg.TargetValue) != 60 || aws.ToInt32(cfg.ScaleOutCooldown) != 60 || aws.ToInt32(cfg.ScaleInCooldown) != 300 {
+	if aws.ToFloat64(cfg.TargetValue) != 60 || aws.ToInt32(cfg.ScaleOutCooldown) != 60 || aws.ToInt32(cfg.ScaleInCooldown) != 300 {
 		t.Fatalf("policies = %+v", policies.ScalingPolicies)
 	}
-	scheduled, _ := api.DescribeScheduledActions(ctx, &applicationautoscaling.DescribeScheduledActionsInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceId: id})
-	if len(scheduled.ScheduledActions) != 2 || aws.ToString(scheduled.ScheduledActions[0].Schedule) != "cron(0 7 ? * MON-FRI *)" ||
+	scheduled, err := api.DescribeScheduledActions(ctx, &applicationautoscaling.DescribeScheduledActionsInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceId: id})
+	if err != nil || len(scheduled.ScheduledActions) != 2 || aws.ToString(scheduled.ScheduledActions[0].Schedule) != "cron(0 7 ? * MON-FRI *)" ||
 		aws.ToInt32(scheduled.ScheduledActions[0].ScalableTargetAction.MinCapacity) != 3 || aws.ToInt32(scheduled.ScheduledActions[1].ScalableTargetAction.MinCapacity) != 2 {
 		t.Fatalf("scheduled = %+v", scheduled.ScheduledActions)
 	}
-	activities, _ := api.DescribeScalingActivities(ctx, &applicationautoscaling.DescribeScalingActivitiesInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceId: id})
-	if len(activities.ScalingActivities) != 1 || aws.ToString(activities.ScalingActivities[0].StatusMessage) != "Successfully set desired count to 3. Change successfully fulfilled by ecs." {
+	activities, err := api.DescribeScalingActivities(ctx, &applicationautoscaling.DescribeScalingActivitiesInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceId: id})
+	if err != nil || len(activities.ScalingActivities) != 1 || aws.ToString(activities.ScalingActivities[0].StatusMessage) != "Successfully set desired count to 3. Change successfully fulfilled by ecs." {
 		t.Fatalf("activities = %+v", activities.ScalingActivities)
 	}
-	other, _ := api.DescribeScalableTargets(ctx, &applicationautoscaling.DescribeScalableTargetsInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceIds: []string{"service/background-jobs/email-sender"}})
-	if len(other.ScalableTargets) != 0 {
+	other, err := api.DescribeScalableTargets(ctx, &applicationautoscaling.DescribeScalableTargetsInput{ServiceNamespace: astypes.ServiceNamespaceEcs, ResourceIds: []string{"service/background-jobs/email-sender"}})
+	if err != nil || len(other.ScalableTargets) != 0 {
 		t.Fatalf("email-sender has scalable targets: %+v", other.ScalableTargets)
 	}
 }

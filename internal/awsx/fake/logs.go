@@ -214,9 +214,22 @@ func (g generatedSource) lineFor(task logTask, k int64, at time.Time) logEvent {
 		container = task.containers[1]
 		message = sidecarMessage
 	} else if len(g.pool) > 0 {
-		message = g.pool[int(unitNoise(seed^0xabcdef, uint64(k))*float64(len(g.pool)))][1]
+		entry := g.pool[int(unitNoise(seed^0xabcdef, uint64(k))*float64(len(g.pool)))]
+		message = levelPrefix(entry[0]) + entry[1]
 	}
 	return logEvent{stream: g.prefix + "/" + container + "/" + task.id, at: at, message: message}
+}
+
+// levelPrefix marks warn and error lines with a token the log level heuristic
+// recognises; info lines stay as they are.
+func levelPrefix(level string) string {
+	switch level {
+	case "warn":
+		return "WARN "
+	case "error":
+		return "ERROR "
+	}
+	return ""
 }
 
 // filterEvents applies stream names, a stream prefix and a simple filter
@@ -306,13 +319,14 @@ func (c *logsClient) LiveTail(ctx context.Context, in *cloudwatchlogs.StartLiveT
 		candidates = kept
 	}
 
-	s := &fakeLiveTail{events: make(chan logstypes.StartLiveTailResponseStream, 16), done: make(chan struct{})}
+	s := &fakeLiveTail{clock: e.now, events: make(chan logstypes.StartLiveTailResponseStream, 16), done: make(chan struct{})}
 	go s.run(ctx, in, candidates, interval, failure, failAfter)
 	return s, nil
 }
 
 // fakeLiveTail is the fake's awsx.LiveTailStream.
 type fakeLiveTail struct {
+	clock  func() time.Time // the estate clock
 	events chan logstypes.StartLiveTailResponseStream
 	done   chan struct{}
 	once   sync.Once
@@ -378,7 +392,7 @@ func (s *fakeLiveTail) run(ctx context.Context, in *cloudwatchlogs.StartLiveTail
 		}
 		count := 1 + int(unitNoise(1, uint64(updates))*3)
 		update := logstypes.LiveTailSessionUpdate{SessionMetadata: &logstypes.LiveTailSessionMetadata{}}
-		now := time.Now().UnixMilli()
+		now := s.clock().UnixMilli()
 		for i := 0; i < count; i++ {
 			ev := lines[(updates*3+i)%len(lines)]
 			update.SessionResults = append(update.SessionResults, logstypes.LiveTailSessionLogEvent{
