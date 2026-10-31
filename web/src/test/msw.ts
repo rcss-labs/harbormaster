@@ -7,6 +7,7 @@ import {
   CLUSTERS,
   CLUSTERS_METRICS,
   CLUSTER_DETAILS,
+  CLUSTER_METRICS_CORE,
   ME_ADMIN,
   OPERATIONS_FOR,
   OVERVIEW,
@@ -19,8 +20,10 @@ import {
   TARGET_HEALTH_EDGE,
   TAGS,
   USERS,
+  ALERTS,
   ALL_TASKS,
   FIXTURE_NOW,
+  OVERVIEW_METRICS,
   filterTasks,
   tasksList,
   tasksResponse,
@@ -102,12 +105,17 @@ export const handlers = [
   http.post('/api/accounts', () => HttpResponse.json(ACCOUNTS.items[0], { status: 201 })),
   http.patch('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
   http.delete('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
+  // observe (plan 03, task 16): overview metrics and alerts
+  http.get('/api/overview/metrics', () => HttpResponse.json(OVERVIEW_METRICS)),
+  http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
   http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
   // observe (plan 03, task 19): service metrics and target health
   http.get('/api/services/:id/metrics', ({ params }) =>
     HttpResponse.json(params.id === SERVICE_PAYMENTS.id ? SERVICE_METRICS_PAYMENTS : SERVICE_METRICS_CATALOG_NO_INSIGHTS),
   ),
   http.get('/api/services/:id/target-health', () => HttpResponse.json(TARGET_HEALTH_EDGE)),
+  // observe (plan 03, task 18): cluster page metrics
+  http.get('/api/clusters/:id/metrics', () => HttpResponse.json(CLUSTER_METRICS_CORE)),
 ]
 
 export const server = setupServer(...handlers)

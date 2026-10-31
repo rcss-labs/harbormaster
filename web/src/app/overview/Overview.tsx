@@ -14,6 +14,8 @@ import { HBars } from '../../charts/HBars'
 import { Legend } from '../../charts/Legend'
 import { Sparkline } from '../../charts/Sparkline'
 import { dayLabel } from '../../charts/format'
+import { AverageUseTile, CpuByClusterCard, MemoryByClusterCard } from './ClusterUsagePanels'
+import { NeedsAttention } from './NeedsAttention'
 import { useCrumbs } from '../shell/crumbs'
 import { useFilters } from '../shell/useFilters'
 import styles from './overview.module.css'
@@ -112,9 +114,12 @@ export function Overview() {
         <Tile k="Tasks running" v={tasks.running} small={`of ${tasks.desired} desired · ${tasks.unhealthy} unhealthy`}>
           <Sparkline values={tasks.history_72h.map((point) => point.running)} color="var(--accent)" height={24} fluid />
         </Tile>
+        <AverageUseTile />
       </div>
 
-      <Card title="Task health" right="bar = running · line = desired">
+      <div className={`${styles.grid} ${styles.gWide}`}>
+        <CpuByClusterCard />
+        <Card title="Task health" right="bar = running · line = desired">
         <Donut segments={donutSegments} label={`${tasks.running}/${tasks.desired}`} sub="tasks running" />
         <div className={styles.afterDonut}>
           <HBars
@@ -127,9 +132,11 @@ export function Overview() {
             }))}
           />
         </div>
-      </Card>
+        </Card>
+      </div>
 
       <div className={`${styles.grid} ${styles.g3}`}>
+        <MemoryByClusterCard />
         <Card title="Task stops per hour, 24 h">
           <div className={styles.legend}>
             <Legend
@@ -159,9 +166,12 @@ export function Overview() {
         </Card>
       </div>
 
-      <Card title="Why tasks stopped, 3 days">
-        <HBars items={data.stop_reasons.map((reason) => ({ name: reason.reason, v: reason.count, color: REASON_COLOR[reason.reason] }))} />
-      </Card>
+      <div className={`${styles.grid} ${styles.gWide}`}>
+        <NeedsAttention />
+        <Card title="Why tasks stopped, 3 days">
+          <HBars items={data.stop_reasons.map((reason) => ({ name: reason.reason, v: reason.count, color: REASON_COLOR[reason.reason] }))} />
+        </Card>
+      </div>
 
       <Card title="Live events" right="ECS service events and actions taken in Harbormaster">
         <Feed>

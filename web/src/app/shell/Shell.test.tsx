@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { MeDTO, PollerDTO } from '../../api/types'
-import { ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/fixtures'
+import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
@@ -144,5 +144,20 @@ describe('Search', () => {
     await user.keyboard('{Enter}')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/clusters/${cluster.id}`))
     expect(searchResults.queryByRole('link', { name: new RegExp(cluster.name) })).not.toBeInTheDocument()
+  })
+
+  it('Overview badge shows the danger count, hidden at zero', async () => {
+    const alerts = (danger: number) => http.get('/api/alerts', () => HttpResponse.json({ ...ALERTS, counts: { danger, warning: 0, info: 0 } }))
+    server.use(alerts(1))
+    const view = renderApp('/')
+    const overviewLink = await within(await nav()).findByRole('link', { name: /Overview/ })
+    const badge = await within(overviewLink).findByText('1')
+    expect(badge.className).toMatch(/countBad/)
+    view.unmount()
+
+    server.use(alerts(0))
+    renderApp('/')
+    const link = await within(await nav()).findByRole('link', { name: /Overview/ })
+    await waitFor(() => expect(link).toHaveTextContent(/^Overview$/))
   })
 })
