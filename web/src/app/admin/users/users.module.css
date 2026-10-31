@@ -1,0 +1,38 @@
+/* Ported from the mockup's page-head, matrix, pcell/ptog, field, hint and err rules (docs/design/mockup/index.html). */
+.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.titles { display: grid; gap: 6px; min-width: 0; }
+.meta { color: var(--muted); font-size: 12px; }
+.actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.stack { display: grid; gap: 12px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.name { font-weight: 600; }
+.num { text-align: right; white-space: nowrap; }
+
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover { background: var(--accent); filter: brightness(1.07); }
+.sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.danger { color: var(--danger); }
+
+.legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.matrix td { vertical-align: top; }
+.matrix th { white-space: nowrap; }
+.pcell { display: grid; gap: 5px; justify-items: start; }
+.ptogs { display: flex; gap: 3px; }
+.ptog { width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--surface); font: 600 11px var(--mono); color: var(--muted); cursor: pointer; padding: 0; }
+.ptog:hover { border-color: var(--accent); }
+.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+.ctl { height: 26px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
+.ctlLg { height: 30px; font-size: inherit; padding: 0 8px; }
+.field { display: grid; gap: 5px; }
+.field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+.check { display: flex; gap: 6px; align-items: center; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.err { font-size: 12px; color: var(--danger); }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.secret { font-family: var(--mono); font-size: 14px; padding: 8px 10px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); user-select: all; }
