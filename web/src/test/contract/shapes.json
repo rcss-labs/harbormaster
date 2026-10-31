@@ -1,0 +1,718 @@
+{
+  "accountTest": {
+    "regions": [
+      {
+        "clusters": "number",
+        "error": "string",
+        "ok": "boolean",
+        "region": "string"
+      }
+    ]
+  },
+  "accounts": {
+    "items": [
+      {
+        "account_id": "string",
+        "clusters": "number",
+        "enabled": "boolean",
+        "external_id": "string",
+        "id": "number",
+        "last_error": "string",
+        "last_ok_at": {
+          "$null": "time"
+        },
+        "name": "string",
+        "regions": [
+          "string"
+        ],
+        "role_arn": "string",
+        "status": "string"
+      }
+    ],
+    "runtime": {
+      "cluster": "string",
+      "intervals": {
+        "$map": "string"
+      },
+      "service": "string"
+    }
+  },
+  "audit": {
+    "items": [
+      {
+        "action": "string",
+        "actor": "string",
+        "details": {
+          "$map": "any"
+        },
+        "id": "number",
+        "ip": "string",
+        "summary": "string",
+        "target": "string",
+        "ts": "time"
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time"
+  },
+  "cluster": {
+    "account_id": "string",
+    "account_name": "string",
+    "arn": "string",
+    "console_url": "string",
+    "container_insights": "boolean",
+    "desired": "number",
+    "fargate_tasks": "number",
+    "id": "string",
+    "last_change_at": {
+      "$null": "time"
+    },
+    "name": "string",
+    "polled_at": "time",
+    "region": "string",
+    "reserved_gib": "number",
+    "reserved_vcpu": "number",
+    "running": "number",
+    "services": [
+      {
+        "id": "string",
+        "name": "string",
+        "status": "string"
+      }
+    ],
+    "services_detail": [
+      {
+        "cpu": "string",
+        "desired": "number",
+        "family": "string",
+        "id": "string",
+        "image_tag": "string",
+        "last_change_at": {
+          "$null": "time"
+        },
+        "latest_registered_revision": {
+          "$null": "number"
+        },
+        "memory": "string",
+        "name": "string",
+        "revision": "number",
+        "running": "number",
+        "slots": [
+          {
+            "health": "string",
+            "private_ip": "string",
+            "rolling_out": "boolean",
+            "short_id": "string",
+            "task_id": "string"
+          }
+        ],
+        "status": "string",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        }
+      }
+    ],
+    "spot_tasks": "number",
+    "status": "string",
+    "stops_per_hour": [
+      {
+        "error": "number",
+        "hour": "time",
+        "normal": "number"
+      }
+    ],
+    "tag": {
+      "color": "string",
+      "id": "number",
+      "inherited": "boolean",
+      "name": "string"
+    },
+    "tasks_history_72h": [
+      {
+        "desired": "number",
+        "running": "number",
+        "t": "time"
+      }
+    ]
+  },
+  "clusters": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "container_insights": "boolean",
+        "desired": "number",
+        "id": "string",
+        "last_change_at": {
+          "$null": "time"
+        },
+        "name": "string",
+        "region": "string",
+        "reserved_gib": "number",
+        "reserved_vcpu": "number",
+        "running": "number",
+        "services": [
+          {
+            "id": "string",
+            "name": "string",
+            "status": "string"
+          }
+        ],
+        "spot_tasks": "number",
+        "status": "string",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        }
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time"
+  },
+  "createUser": {
+    "temporary_password": "string",
+    "user": {
+      "admin": "boolean",
+      "can_see": [
+        {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        }
+      ],
+      "id": "number",
+      "last_sign_in_at": {
+        "$null": "time"
+      },
+      "must_change_password": "boolean",
+      "username": "string"
+    }
+  },
+  "me": {
+    "accounts": [
+      {
+        "account_id": "string",
+        "id": "number",
+        "name": "string",
+        "regions": [
+          "string"
+        ]
+      }
+    ],
+    "admin": "boolean",
+    "csrf_token": "string",
+    "id": "number",
+    "must_change_password": "boolean",
+    "perms": {
+      "$map": "number"
+    },
+    "regions": [
+      "string"
+    ],
+    "tags": [
+      {
+        "builtin": "boolean",
+        "color": "string",
+        "id": "number",
+        "name": "string",
+        "services_in_effect": "number"
+      }
+    ],
+    "username": "string"
+  },
+  "operations": {
+    "items": [
+      {
+        "actor": "string",
+        "cluster": {
+          "id": "string",
+          "name": "string"
+        },
+        "service": {
+          "id": "string",
+          "name": "string",
+          "status": "string"
+        },
+        "source": "string",
+        "text": "string",
+        "ts": "time"
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time"
+  },
+  "overview": {
+    "accounts": "number",
+    "clusters": [
+      {
+        "id": "string",
+        "name": "string",
+        "status": "string"
+      }
+    ],
+    "deployments_per_day": [
+      {
+        "day": "time",
+        "deploy": "number",
+        "failed": "number",
+        "restart": "number"
+      }
+    ],
+    "events": [
+      {
+        "actor": "string",
+        "cluster": {
+          "id": "string",
+          "name": "string"
+        },
+        "service": {
+          "id": "string",
+          "name": "string",
+          "status": "string"
+        },
+        "source": "string",
+        "text": "string",
+        "ts": "time"
+      }
+    ],
+    "per_cluster": [
+      {
+        "desired": "number",
+        "id": "string",
+        "name": "string",
+        "running": "number"
+      }
+    ],
+    "polled_at": "time",
+    "regions": "number",
+    "services": {
+      "by_status": {
+        "$map": "number"
+      },
+      "total": "number"
+    },
+    "stop_reasons": [
+      {
+        "count": "number",
+        "reason": "string"
+      }
+    ],
+    "stops_per_hour": [
+      {
+        "error": "number",
+        "hour": "time",
+        "normal": "number"
+      }
+    ],
+    "task_health": {
+      "healthy": "number",
+      "missing": "number",
+      "rolling_out": "number",
+      "unhealthy": "number"
+    },
+    "tasks": {
+      "desired": "number",
+      "history_72h": [
+        {
+          "desired": "number",
+          "running": "number",
+          "t": "time"
+        }
+      ],
+      "pending": "number",
+      "running": "number",
+      "unhealthy": "number"
+    }
+  },
+  "permissions": {
+    "tags": [
+      {
+        "color": "string",
+        "id": "number",
+        "name": "string",
+        "services_in_effect": "number"
+      }
+    ],
+    "users": [
+      {
+        "admin": "boolean",
+        "id": "number",
+        "perms": {
+          "$map": "number"
+        },
+        "username": "string"
+      }
+    ]
+  },
+  "poller": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "failing": "boolean",
+        "last_error": "string",
+        "last_ok_at": {
+          "$null": "time"
+        },
+        "region": "string",
+        "throttled": "boolean"
+      }
+    ]
+  },
+  "search": {
+    "items": [
+      {
+        "href": "string",
+        "kind": "string",
+        "label": "string",
+        "sub": "string"
+      }
+    ]
+  },
+  "service": {
+    "account_id": "string",
+    "account_name": "string",
+    "can": {
+      "$map": "boolean"
+    },
+    "circuit_breaker": {
+      "enable": "boolean",
+      "rollback": "boolean"
+    },
+    "cluster": {
+      "id": "string",
+      "name": "string"
+    },
+    "console_url": "string",
+    "counts_history_72h": [
+      {
+        "desired": "number",
+        "running": "number",
+        "t": "time"
+      }
+    ],
+    "deployment_controller": "string",
+    "deployments": [
+      {
+        "created_at": "time",
+        "desired_count": "number",
+        "failed_tasks": "number",
+        "id": "string",
+        "pending_count": "number",
+        "revision": "number",
+        "rollout_state": "string",
+        "rollout_state_reason": "string",
+        "running_count": "number",
+        "status": "string",
+        "updated_at": "time"
+      }
+    ],
+    "deployments_14d": [
+      {
+        "deployment_id": "string",
+        "finished_at": {
+          "$null": "time"
+        },
+        "kind": "string",
+        "outcome": "string",
+        "revision": "number",
+        "started_at": "time"
+      }
+    ],
+    "desired": "number",
+    "enable_execute_command": "boolean",
+    "family": "string",
+    "id": "string",
+    "image_tag": "string",
+    "launch_type": "string",
+    "max_percent": "number",
+    "min_healthy_percent": "number",
+    "name": "string",
+    "networking": {
+      "assign_public_ip": "boolean",
+      "load_balancers": [
+        {
+          "container_name": "string",
+          "container_port": "number",
+          "target_group_name": "string"
+        }
+      ],
+      "security_groups": [
+        "string"
+      ],
+      "subnets": [
+        {
+          "id": "string",
+          "tasks": "number"
+        }
+      ]
+    },
+    "pending": "number",
+    "platform_version": "string",
+    "polled_at": "time",
+    "recent_events": [
+      {
+        "actor": "string",
+        "cluster": {
+          "id": "string",
+          "name": "string"
+        },
+        "service": {
+          "id": "string",
+          "name": "string",
+          "status": "string"
+        },
+        "source": "string",
+        "text": "string",
+        "ts": "time"
+      }
+    ],
+    "region": "string",
+    "revision": "number",
+    "running": "number",
+    "running_tasks": [
+      {
+        "az": "string",
+        "exec_agent_running": "boolean",
+        "health": "string",
+        "id": "string",
+        "private_ip": "string",
+        "revision": "number",
+        "short_id": "string",
+        "spot": "boolean",
+        "subnet_id": "string"
+      }
+    ],
+    "slots": [
+      {
+        "health": "string",
+        "private_ip": "string",
+        "rolling_out": "boolean",
+        "short_id": "string",
+        "task_id": "string"
+      }
+    ],
+    "status": "string",
+    "tag": {
+      "color": "string",
+      "id": "number",
+      "inherited": "boolean",
+      "name": "string"
+    },
+    "task_definition": {
+      "containers": [
+        {
+          "essential": "boolean",
+          "image": "string",
+          "name": "string"
+        }
+      ],
+      "cpu": "string",
+      "efs_mounts": [
+        {
+          "access_point_id": "string",
+          "container_path": "string",
+          "file_system_id": "string"
+        }
+      ],
+      "family": "string",
+      "memory": "string",
+      "revision": "number",
+      "task_role_arn": "string"
+    },
+    "task_definition_arn": "string"
+  },
+  "setup": {
+    "needed": "boolean"
+  },
+  "tagAssignments": {
+    "clusters": [
+      {
+        "account_name": "string",
+        "effective": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "id": "string",
+        "name": "string",
+        "region": "string",
+        "services": [
+          {
+            "effective": {
+              "color": "string",
+              "id": "number",
+              "inherited": "boolean",
+              "name": "string"
+            },
+            "id": "string",
+            "name": "string",
+            "tag_id": {
+              "$null": "number"
+            }
+          }
+        ],
+        "tag_id": {
+          "$null": "number"
+        }
+      }
+    ]
+  },
+  "tagImpact": {
+    "clusters": [
+      {
+        "id": "string",
+        "name": "string"
+      }
+    ],
+    "services": [
+      {
+        "id": "string",
+        "name": "string"
+      }
+    ],
+    "users": [
+      "string"
+    ]
+  },
+  "tags": {
+    "items": [
+      {
+        "builtin": "boolean",
+        "clusters": "number",
+        "color": "string",
+        "id": "number",
+        "name": "string",
+        "services_direct": "number",
+        "services_effective": "number",
+        "users": [
+          {
+            "preset": "string",
+            "username": "string"
+          }
+        ]
+      }
+    ]
+  },
+  "tasks": {
+    "counts": {
+      "all": "number",
+      "problems": "number",
+      "running": "number",
+      "stopped": "number"
+    },
+    "items": [
+      {
+        "arn": "string",
+        "az": "string",
+        "can": {
+          "operate": "boolean",
+          "terminal": "boolean"
+        },
+        "capacity": "string",
+        "cluster": {
+          "id": "string",
+          "name": "string"
+        },
+        "cpu": "string",
+        "exec_enabled": "boolean",
+        "exit_code": {
+          "$null": "number"
+        },
+        "family": "string",
+        "group": "string",
+        "health": "string",
+        "id": "string",
+        "memory": "string",
+        "private_ip": "string",
+        "revision": "number",
+        "service": {
+          "$null": {
+            "id": "string",
+            "name": "string",
+            "status": "string"
+          }
+        },
+        "short_id": "string",
+        "started_at": {
+          "$null": "time"
+        },
+        "started_by": "string",
+        "status": "string",
+        "stop_code": "string",
+        "stop_reason_group": "string",
+        "stopped_at": {
+          "$null": "time"
+        },
+        "stopped_reason": "string",
+        "subnet_id": "string"
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time",
+    "summary": {
+      "by_az": [
+        {
+          "az": "string",
+          "count": "number"
+        }
+      ],
+      "by_cluster": [
+        {
+          "fargate": "number",
+          "id": "string",
+          "name": "string",
+          "spot": "number"
+        }
+      ],
+      "by_status": {
+        "running_healthy": "number",
+        "running_unhealthy": "number",
+        "stopped_error": "number",
+        "stopped_normal": "number"
+      },
+      "stop_reasons": [
+        {
+          "count": "number",
+          "reason": "string"
+        }
+      ]
+    }
+  },
+  "users": {
+    "items": [
+      {
+        "admin": "boolean",
+        "can_see": [
+          {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          }
+        ],
+        "id": "number",
+        "last_sign_in_at": {
+          "$null": "time"
+        },
+        "must_change_password": "boolean",
+        "username": "string"
+      }
+    ]
+  }
+}
