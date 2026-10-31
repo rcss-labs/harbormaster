@@ -36,6 +36,12 @@ func Apply(ctx context.Context, st *store.Store) error {
 	if err := requireSeedable(ctx, st); err != nil {
 		return err
 	}
+	return ForceApply(ctx, st)
+}
+
+// ForceApply seeds without the empty-database guard. It exists for tests that pre-create users
+// and must never be reachable from configuration.
+func ForceApply(ctx context.Context, st *store.Store) error {
 	estate := fake.MockupEstate(time.Now)
 
 	for _, a := range estate.Accounts {
