@@ -635,9 +635,10 @@ func (s *Store) RecentServiceEvents(ctx context.Context, f TargetFilter, vis Vis
 	var q queryArgs
 	target := q.target("e", f)
 	v := q.visibility("e", vis)
-	rows, err := s.Pool.Query(ctx,
-		`select `+eventColumns+` from service_events e`+v.Joins+` where `+target+` and `+v.Predicate+
-			` order by e.created_at desc, e.event_id limit nullif(`+q.add(limit)+`, 0)`, q.values...)
+	limitParam := q.add(limit)
+	sql := `select ` + eventColumns + ` from service_events e` + v.Joins + ` where ` + target + ` and ` + v.Predicate +
+		` order by e.created_at desc, e.event_id limit nullif(` + limitParam + `, 0)`
+	rows, err := s.Pool.Query(ctx, sql, q.values...)
 	if err != nil {
 		return nil, fmt.Errorf("recent service events: %w", err)
 	}

@@ -157,7 +157,10 @@ func TestListClusters_VisibleWhenAnyServiceVisible(t *testing.T) {
 			t.Errorf("%s: clusters = %v, want %v", c.name, got, c.want)
 		}
 	}
-	rows, _ := fx.s.ListClusters(ctx, store.TargetFilter{}, store.Visibility{Admin: true})
+	rows, err := fx.s.ListClusters(ctx, store.TargetFilter{}, store.Visibility{Admin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, r := range rows {
 		switch r.Key.Cluster {
 		case "core-services":
@@ -240,8 +243,8 @@ func TestListServices_InheritedFlag(t *testing.T) {
 	if effective["web"] != fx.prod || effective["image-resizer"] != fx.dev || effective["payments-api"] != fx.prod {
 		t.Errorf("effective tags = %v", effective)
 	}
-	only, _ := fx.s.ListServices(context.Background(), store.TargetFilter{}, "core-services", store.Visibility{Admin: true})
-	if len(only) != 2 || only[0].Key.Service != "notifications" {
+	only, err := fx.s.ListServices(context.Background(), store.TargetFilter{}, "core-services", store.Visibility{Admin: true})
+	if err != nil || len(only) != 2 || only[0].Key.Service != "notifications" {
 		t.Errorf("cluster filter/order = %v", only)
 	}
 }
@@ -321,8 +324,8 @@ func TestCountsHistory_SumsAcrossServices(t *testing.T) {
 	if len(points) != 1 || points[0].Running != 3 || points[0].Desired != 3 {
 		t.Fatalf("points = %+v, want one point running 3 desired 3", points)
 	}
-	none, _ := fx.s.CountsHistory(ctx, store.TargetFilter{}, "", "", fx.vis(fx.dev), fx.now.Add(-time.Hour))
-	if len(none) != 0 {
+	none, err := fx.s.CountsHistory(ctx, store.TargetFilter{}, "", "", fx.vis(fx.dev), fx.now.Add(-time.Hour))
+	if err != nil || len(none) != 0 {
 		t.Errorf("Dev viewer sees Prod history: %+v", none)
 	}
 }
@@ -335,24 +338,39 @@ func TestSearch_MatchesTaskIDPrefixAndIP(t *testing.T) {
 	if err != nil || len(hits) != 1 || hits[0].Kind != "task" || hits[0].Label != "p1ok" || hits[0].Sub != "payments-api" {
 		t.Fatalf("id prefix hits = %+v, %v", hits, err)
 	}
-	hits, _ = fx.s.Search(ctx, store.TargetFilter{}, admin, "10.0.3.", 10)
+	hits, err = fx.s.Search(ctx, store.TargetFilter{}, admin, "10.0.3.", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(hits) != 1 || hits[0].TaskARN != readTaskARN("staging-web", "w1ok") {
 		t.Errorf("ip prefix hits = %+v", hits)
 	}
-	hits, _ = fx.s.Search(ctx, store.TargetFilter{}, admin, "core", 10)
+	hits, err = fx.s.Search(ctx, store.TargetFilter{}, admin, "core", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(hits) != 1 || hits[0].Kind != "cluster" || hits[0].Sub != readAccount+" · eu-west-1" {
 		t.Errorf("cluster hits = %+v", hits)
 	}
-	hits, _ = fx.s.Search(ctx, store.TargetFilter{}, admin, "-", 3)
+	hits, err = fx.s.Search(ctx, store.TargetFilter{}, admin, "-", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(hits) != 3 || hits[0].Kind != "cluster" {
 		t.Errorf("limited hits = %+v", hits)
 	}
-	hits, _ = fx.s.Search(ctx, store.TargetFilter{}, fx.vis(fx.dev), "payments", 10)
+	hits, err = fx.s.Search(ctx, store.TargetFilter{}, fx.vis(fx.dev), "payments", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(hits) != 0 {
 		t.Errorf("Dev viewer found Prod service: %+v", hits)
 	}
 	// stopped tasks are not searchable
-	hits, _ = fx.s.Search(ctx, store.TargetFilter{}, admin, "m1", 10)
+	hits, err = fx.s.Search(ctx, store.TargetFilter{}, admin, "m1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(hits) != 0 {
 		t.Errorf("stopped task found: %+v", hits)
 	}
