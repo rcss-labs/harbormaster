@@ -23,6 +23,9 @@ const (
 	// maxStoppedTasksPerService bounds the history an always-failing service
 	// (image-resizer) accumulates while the fake ticker runs.
 	maxStoppedTasksPerService = 60
+	// failedDeploymentLingerSteps keeps a FAILED deployment visible after its
+	// rollback completes, longer than one poll interval at the 2.4 s step.
+	failedDeploymentLingerSteps = 6
 )
 
 // UpdateService supports TaskDefinition, ForceNewDeployment and DesiredCount.
@@ -109,7 +112,8 @@ func (c *ecsClient) resolveTaskDefinition(ref string) (ecstypes.TaskDefinition, 
 func (e *Estate) startDeployment(si int, targetARN string) {
 	svc := &e.Services[si].Service
 	now := e.now()
-	sd := newSeeder(e, hashSeed(aws.ToString(svc.ServiceArn), len(e.Tasks)+int(now.Unix())))
+	e.deploymentSeq++
+	sd := newSeeder(e, hashSeed(aws.ToString(svc.ServiceArn), len(e.Tasks)+int(now.Unix())+e.deploymentSeq*7919))
 	id := "ecs-svc/" + sd.digits(19)
 	deployments := append([]ecstypes.Deployment(nil), svc.Deployments...)
 	next := ecstypes.Deployment{
@@ -166,6 +170,7 @@ func (e *Estate) RunRollouts(ctx context.Context, step time.Duration) {
 func (e *Estate) Advance() {
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
+	e.expireFailedDeployments()
 	for si := range e.Services {
 		if pi := primaryIndex(e.Services[si].Service); pi >= 0 &&
 			e.Services[si].Service.Deployments[pi].RolloutState == ecstypes.DeploymentRolloutStateInProgress {
@@ -301,7 +306,11 @@ func (e *Estate) advanceRollout(si, pi int) {
 		return fresh, old
 	}
 	fresh, old := counts()
-	if int32(len(fresh)) < primary.DesiredCount {
+	if int32(len(fresh)) > primary.DesiredCount {
+		// Desired count was lowered mid-rollout: shed one surplus new task per step.
+		taskID := e.stopRunningTask(fresh[0], "Scaling activity initiated by (desired count change)")
+		e.addEvent(si, fmt.Sprintf("(service %s) has stopped 1 running tasks: (task %s).", name, taskID))
+	} else if int32(len(fresh)) < primary.DesiredCount {
 		taskID := e.newTask(si, target, id, false)
 		e.addEvent(si, fmt.Sprintf("(service %s) has started 1 tasks: (task %s).", name, taskID))
 	}
@@ -315,7 +324,19 @@ func (e *Estate) advanceRollout(si, pi int) {
 			d.RolloutState = ecstypes.DeploymentRolloutStateCompleted
 			d.RolloutStateReason = aws.String("ECS deployment " + id + " completed.")
 		})
-		svc.Deployments = []ecstypes.Deployment{svc.Deployments[pi]}
+		kept := []ecstypes.Deployment{svc.Deployments[pi]}
+		for i, d := range svc.Deployments {
+			if i != pi && d.RolloutState == ecstypes.DeploymentRolloutStateFailed {
+				kept = append(kept, d)
+				if e.failedLinger == nil {
+					e.failedLinger = map[string]int{}
+				}
+				if _, ok := e.failedLinger[aws.ToString(d.Id)]; !ok {
+					e.failedLinger[aws.ToString(d.Id)] = failedDeploymentLingerSteps
+				}
+			}
+		}
+		svc.Deployments = kept
 		delete(e.rollbackDeployments, id)
 		e.addEvent(si, fmt.Sprintf("(service %s) has reached a steady state.", name))
 	}
@@ -415,4 +436,29 @@ func (e *Estate) trimStoppedTasks() {
 		}
 	}
 	e.Tasks = kept
+}
+
+// expireFailedDeployments ages FAILED deployments that outlived their rollback
+// and drops them once their linger steps are used up. Caller holds Mu.
+func (e *Estate) expireFailedDeployments() {
+	if len(e.failedLinger) == 0 {
+		return
+	}
+	for id, left := range e.failedLinger {
+		if left > 1 {
+			e.failedLinger[id] = left - 1
+			continue
+		}
+		delete(e.failedLinger, id)
+		for si := range e.Services {
+			svc := &e.Services[si].Service
+			var kept []ecstypes.Deployment
+			for _, d := range svc.Deployments {
+				if aws.ToString(d.Id) != id {
+					kept = append(kept, d)
+				}
+			}
+			svc.Deployments = kept
+		}
+	}
 }

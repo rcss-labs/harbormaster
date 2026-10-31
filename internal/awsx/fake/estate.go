@@ -66,6 +66,11 @@ type Estate struct {
 	// rollbackDeployments holds the ids of circuit-breaker rollback
 	// deployments, which are exempt from the OOM failure path (see rollout.go).
 	rollbackDeployments map[string]bool
+	// failedLinger counts the Advance steps a FAILED deployment stays visible
+	// after its rollback completed (see failedDeploymentLingerSteps).
+	failedLinger map[string]int
+	// deploymentSeq makes deployment ids unique even within one clock instant.
+	deploymentSeq int
 }
 
 func (e *Estate) now() time.Time {

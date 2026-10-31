@@ -200,8 +200,70 @@ func TestRollout_OOMFailsAndCircuitBreakerRollsBack(t *testing.T) {
 	// dropping the FAILED ACTIVE deployment with it.
 	advance(f, 2)
 	svc = describe(t, f, "background-jobs", "image-resizer")
-	if len(svc.Deployments) != 1 || primaryOf(svc).RolloutState != ecstypes.DeploymentRolloutStateCompleted || svc.RunningCount != 2 {
+	if primaryOf(svc).RolloutState != ecstypes.DeploymentRolloutStateCompleted || svc.RunningCount != 2 {
 		t.Fatalf("after rollback: running=%d deployments=%+v", svc.RunningCount, svc.Deployments)
+	}
+
+	// The FAILED deployment stays observable for 5 more steps (longer than a
+	// poll interval), then is dropped.
+	failedCount := func() int {
+		n := 0
+		for _, d := range describe(t, f, "background-jobs", "image-resizer").Deployments {
+			if d.RolloutState == ecstypes.DeploymentRolloutStateFailed {
+				n++
+			}
+		}
+		return n
+	}
+	if failedCount() != 1 {
+		t.Fatal("FAILED deployment must survive the rollback completing")
+	}
+	for step := 1; step <= 5; step++ {
+		advance(f, 1)
+		if failedCount() != 1 {
+			t.Fatalf("FAILED deployment gone after %d steps, want it kept for 5", step)
+		}
+	}
+	advance(f, 1)
+	if failedCount() != 0 || len(describe(t, f, "background-jobs", "image-resizer").Deployments) != 1 {
+		t.Fatalf("FAILED deployment still present after 6 steps: %+v", describe(t, f, "background-jobs", "image-resizer").Deployments)
+	}
+}
+
+func TestRollout_LoweringDesiredMidRolloutStillCompletes(t *testing.T) {
+	f := newFake()
+	api := ecsFor(t, f, homelabID, "us-east-1")
+	ctx := context.Background()
+	registerRevision(t, f, homelabID, "us-east-1", "payments-api", "1024")
+	if _, err := api.UpdateService(ctx, &ecs.UpdateServiceInput{
+		Cluster: aws.String("core-services"), Service: aws.String("payments-api"), TaskDefinition: aws.String(paymentsRev43)}); err != nil {
+		t.Fatal(err)
+	}
+	advance(f, 2)
+	if _, err := api.UpdateService(ctx, &ecs.UpdateServiceInput{
+		Cluster: aws.String("core-services"), Service: aws.String("payments-api"), DesiredCount: aws.Int32(1)}); err != nil {
+		t.Fatal(err)
+	}
+	advance(f, 4)
+	svc := describe(t, f, "core-services", "payments-api")
+	if primaryOf(svc).RolloutState != ecstypes.DeploymentRolloutStateCompleted || svc.RunningCount != 1 || len(svc.Deployments) != 1 {
+		t.Fatalf("running=%d deployments=%+v", svc.RunningCount, svc.Deployments)
+	}
+}
+
+func TestRollout_DeploymentIDsAreUniqueWithinOneInstant(t *testing.T) {
+	f := newFake()
+	api := ecsFor(t, f, homelabID, "us-east-1")
+	restart := func() string {
+		out, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
+			Cluster: aws.String("core-services"), Service: aws.String("web-frontend"), ForceNewDeployment: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return aws.ToString(primaryOf(*out.Service).Id)
+	}
+	if first, second := restart(), restart(); first == second {
+		t.Fatalf("two restarts at the same instant share deployment id %s", first)
 	}
 }
 
