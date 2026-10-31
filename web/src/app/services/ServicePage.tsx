@@ -9,6 +9,7 @@ import { Tabs, type TabItem } from '../../components/Tabs'
 import { useAuth } from '../auth/AuthProvider'
 import type { TagTarget } from '../clusters/tagTarget'
 import { useCrumbs } from '../shell/crumbs'
+import { LogsTab } from './logs/LogsTab'
 import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
 import { PlaceholderTab } from './PlaceholderTab'
@@ -59,6 +60,7 @@ export function ServicePage() {
   else if (tab === 'overview') body = <OverviewTab service={service} />
   else if (tab === 'tasks') body = <TasksTab serviceId={serviceId} />
   else if (tab === 'operations') body = <OperationsTab serviceId={serviceId} />
+  else if (tab === 'logs') body = <LogsTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />
 
   return (
