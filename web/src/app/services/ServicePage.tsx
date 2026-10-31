@@ -14,6 +14,7 @@ import { MetricsTab } from './metrics/MetricsTab'
 import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
 import { PlaceholderTab } from './PlaceholderTab'
+import { ScalingTab } from './scaling/ScalingTab'
 import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
 import { DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey } from './tabs'
@@ -63,6 +64,7 @@ export function ServicePage() {
   else if (tab === 'operations') body = <OperationsTab serviceId={serviceId} />
   else if (tab === 'metrics') body = <MetricsTab serviceId={serviceId} />
   else if (tab === 'logs') body = <LogsTab serviceId={serviceId} />
+  else if (tab === 'scaling') body = <ScalingTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />
 
   return (
