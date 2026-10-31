@@ -8,12 +8,20 @@ import (
 
 // TagDTO is a tag as the frontend sees it.
 type TagDTO struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Color   string `json:"color"`
-	Builtin bool   `json:"builtin"`
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 	// Inherited is true when the resource has no tag of its own and shows its parent's (or Dev).
 	Inherited bool `json:"inherited"`
+}
+
+// MeTagDTO is a tag in /api/me, with how many services currently resolve to it.
+type MeTagDTO struct {
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Color            string `json:"color"`
+	Builtin          bool   `json:"builtin"`
+	ServicesInEffect int    `json:"services_in_effect"`
 }
 
 // MeAccountDTO is a connected AWS account visible to the caller.
@@ -33,7 +41,7 @@ type MeDTO struct {
 	MustChangePassword bool           `json:"must_change_password"`
 	CSRFToken          string         `json:"csrf_token"`
 	Perms              map[string]int `json:"perms"`
-	Tags               []TagDTO       `json:"tags"`
+	Tags               []MeTagDTO     `json:"tags"`
 	Accounts           []MeAccountDTO `json:"accounts"`
 	Regions            []string       `json:"regions"`
 }

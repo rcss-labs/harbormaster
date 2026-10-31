@@ -117,6 +117,16 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 	if len(o.Tags) == 0 || !o.Tags[0].Builtin {
 		t.Fatalf("tags = %+v, want at least the built-in Dev tag", o.Tags)
 	}
+	var rawMe struct {
+		Tags []map[string]any `json:"tags"`
+	}
+	decode(t, omer.get("/api/me"), &rawMe)
+	if _, ok := rawMe.Tags[0]["services_in_effect"]; !ok {
+		t.Errorf("me tag has no services_in_effect: %v", rawMe.Tags[0])
+	}
+	if _, ok := rawMe.Tags[0]["inherited"]; ok {
+		t.Errorf("me tag must not emit inherited: %v", rawMe.Tags[0])
+	}
 
 	// View on Dev plus one cluster with a service in homelab/eu-west-1 only: omer sees exactly that account and region.
 	omerUser, err := st.GetUserByUsername(ctx, "omer")

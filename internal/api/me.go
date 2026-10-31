@@ -32,6 +32,10 @@ func (s *Server) buildMe(ctx context.Context, user store.User, csrf string, subj
 	if err != nil {
 		return MeDTO{}, err
 	}
+	counts, err := s.Store.TagCounts(ctx)
+	if err != nil {
+		return MeDTO{}, err
+	}
 	accounts, err := s.Store.ListAccounts(ctx)
 	if err != nil {
 		return MeDTO{}, err
@@ -51,11 +55,11 @@ func (s *Server) buildMe(ctx context.Context, user store.User, csrf string, subj
 	dto := MeDTO{
 		ID: user.ID, Username: user.Username, Admin: subject.Admin,
 		MustChangePassword: user.MustChangePassword, CSRFToken: csrf,
-		Perms: map[string]int{}, Tags: make([]TagDTO, 0, len(tags)),
+		Perms: map[string]int{}, Tags: make([]MeTagDTO, 0, len(tags)),
 		Accounts: []MeAccountDTO{}, Regions: []string{},
 	}
 	for _, t := range tags {
-		dto.Tags = append(dto.Tags, TagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, Builtin: t.Builtin})
+		dto.Tags = append(dto.Tags, MeTagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, Builtin: t.Builtin, ServicesInEffect: counts[t.ID].ServicesEffective})
 		if subject.Admin {
 			dto.Perms[strconv.FormatInt(int64(t.ID), 10)] = allActions
 		}
