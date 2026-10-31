@@ -38,12 +38,25 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Enter your username and password."))
 		return
 	}
-	result, err := s.Auth.Login(r.Context(), body.Username, body.Password, clientIP(r), r.UserAgent())
+	result, err := s.Auth.Login(r.Context(), body.Username, body.Password, s.clientIP(r), r.UserAgent())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	s.revokePresentedSession(r)
 	s.startedSession(w, r, result)
+}
+
+// revokePresentedSession deletes the session the login request arrived with, so a fresh sign-in
+// does not leave the previous session row valid until it expires.
+func (s *Server) revokePresentedSession(r *http.Request) {
+	cookie, err := r.Cookie(auth.CookieName)
+	if err != nil || cookie.Value == "" {
+		return
+	}
+	if err := s.Auth.Logout(r.Context(), cookie.Value); err != nil {
+		s.log().Warn("revoke previous session failed", "error", err)
+	}
 }
 
 // startedSession sets the cookie and answers login with {"user": MeDTO}.
@@ -80,7 +93,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if user, ok := auth.UserFrom(r.Context()); ok {
 		_ = s.Store.Audit(r.Context(), store.AuditEntry{
 			ActorUserID: &user.ID, ActorUsername: user.Username,
-			Action: "sign_out", Summary: "Signed out.", IP: clientIP(r),
+			Action: "sign_out", Summary: "Signed out.", IP: s.clientIP(r),
 		})
 	}
 	s.Auth.ClearCookie(w)
@@ -133,7 +146,7 @@ func (s *Server) setupComplete(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	result, err := s.Auth.StartSession(r.Context(), user, clientIP(r), r.UserAgent())
+	result, err := s.Auth.StartSession(r.Context(), user, s.clientIP(r), r.UserAgent())
 	if err != nil {
 		s.fail(w, err)
 		return

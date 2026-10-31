@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -263,5 +264,41 @@ func TestLogin_RejectsNonJSONContentType(t *testing.T) {
 	}
 	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Send JSON (Content-Type: application/json)." {
 		t.Fatalf("%q %q", code, msg)
+	}
+}
+
+func TestLogin_RevokesSessionPresentedWithTheRequest(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	c := login(t, srv, "pavel", testPassword)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldCookie *http.Cookie
+	for _, ck := range c.http.Jar.Cookies(u) {
+		if ck.Name == auth.CookieName {
+			oldCookie = ck
+		}
+	}
+	if oldCookie == nil {
+		t.Fatal("no session cookie after login")
+	}
+
+	// Sign in again while still carrying the first session cookie.
+	resp := c.post("/api/auth/login", map[string]string{"username": "pavel", "password": testPassword})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second login: %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/me", nil)
+	req.AddCookie(oldCookie)
+	stale, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.Body.Close()
+	if stale.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old session still valid after a new login: status %d", stale.StatusCode)
 	}
 }

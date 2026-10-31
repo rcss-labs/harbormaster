@@ -47,8 +47,7 @@ test('user sees only permitted clusters', async ({ page }) => {
   await expect(page.getByRole('article', { name: 'core-services' })).toHaveCount(0)
 
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}`)
-  // The SPA retries a 404 with react-query's default back-off (about 7 s) before it renders "No access".
-  await expect(page.getByText('No access')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('No access')).toBeVisible()
 
   await page.goto('/tasks')
   await expect(page.getByText('release-build').first()).toBeVisible()

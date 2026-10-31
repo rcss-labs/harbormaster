@@ -3,8 +3,9 @@ locals {
   container_env = merge(
     var.extra_env,
     {
-      HM_LISTEN   = ":${local.container_port}"
-      HM_BASE_URL = var.base_url
+      HM_LISTEN        = ":${local.container_port}"
+      HM_BASE_URL      = var.base_url
+      HM_TRUSTED_PROXY = "true" # the task is reachable only through the ALB, which appends the client IP
     },
     var.bootstrap_admin_password_secret_arn == null ? {} : {
       HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN = var.bootstrap_admin_password_secret_arn

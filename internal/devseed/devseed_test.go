@@ -1,11 +1,13 @@
 package devseed_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
@@ -71,5 +73,25 @@ func TestDevseed_IdempotentAndMatchesMockup(t *testing.T) {
 	}
 	if perms[2] != 39 || perms[3] != 39 {
 		t.Errorf("oncall perms = %v; want Staging and Prod 39", perms)
+	}
+}
+
+func TestDevseed_RefusesPopulatedDatabase(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	if _, err := st.CreateUser(ctx, "alice", "hash", true, false); err != nil {
+		t.Fatal(err)
+	}
+
+	err := devseed.Apply(ctx, st)
+	if !errors.Is(err, devseed.ErrDatabaseNotEmpty) {
+		t.Fatalf("Apply error = %v, want ErrDatabaseNotEmpty", err)
+	}
+	if _, err := st.GetUserByUsername(ctx, "pavel"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pavel must not be created in a populated database, got err %v", err)
+	}
+	accounts, err := st.ListAccounts(ctx)
+	if err != nil || len(accounts) != 0 {
+		t.Fatalf("accounts = %v, %v; want none seeded", accounts, err)
 	}
 }

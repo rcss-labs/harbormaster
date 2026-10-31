@@ -72,7 +72,7 @@ func (s *Server) auditAdmin(r *http.Request, action, target, summary string, det
 	actor, _ := auth.UserFrom(r.Context())
 	if err := s.Store.Audit(r.Context(), store.AuditEntry{
 		ActorUserID: &actor.ID, ActorUsername: actor.Username,
-		Action: action, Target: target, Summary: summary, Details: details, IP: clientIP(r),
+		Action: action, Target: target, Summary: summary, Details: details, IP: s.clientIP(r),
 	}); err != nil {
 		s.log().Error("audit write failed", "action", action, "error", err)
 	}

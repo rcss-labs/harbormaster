@@ -483,3 +483,25 @@ func TestLogin_PerUserCountPrecheck(t *testing.T) {
 		t.Fatalf("verify calls = %d, want 1", *n)
 	}
 }
+
+func TestMiddleware_StoreErrorIs500NotAnonymous(t *testing.T) {
+	svc, st := newTestService(t)
+	mustUser(t, st, "ivy", false)
+	res := mustLogin(t, svc, "ivy", testPassword, "10.0.0.6", "ua")
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	st.Pool.Close() // every query now fails with a non-NotFound error
+
+	rec, called := authedRequest(t, svc, st, "GET", "/api/x", map[string]string{"Cookie": CookieName + "=" + res.SessionID})
+	if called || rec.Code != 500 ||
+		strings.TrimSpace(rec.Body.String()) != `{"error":{"code":"internal","message":"Something went wrong on our side."}}` {
+		t.Fatalf("code=%d called=%v body=%s", rec.Code, called, rec.Body)
+	}
+	if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "/api/x") {
+		t.Fatalf("store failure not logged with path: %q", logs.String())
+	}
+}
