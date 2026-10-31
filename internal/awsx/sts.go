@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
@@ -163,6 +164,15 @@ func (r *Real) Credentials(ctx context.Context, t Target) (aws.CredentialsProvid
 	return cfg.Credentials, nil
 }
 
+// ECR returns a DescribeImages client for the target, sharing ECS's credential cache.
+func (r *Real) ECR(ctx context.Context, t Target) (ECRAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return ecr.NewFromConfig(cfg), nil
+}
+
 func (r *Real) ECS(ctx context.Context, t Target) (ECSAPI, error) {
 	for i := 0; i < maxBuildAttempts; i++ {
 		r.mu.Lock()
@@ -203,7 +213,6 @@ func (r *Real) ELB(context.Context, Target) (ELBAPI, error)                 { re
 func (r *Real) AutoScaling(context.Context, Target) (AutoScalingAPI, error) { return nil, nil } // plan 03
 func (r *Real) CloudWatch(context.Context, Target) (CloudWatchAPI, error)   { return nil, nil } // plan 03
 func (r *Real) Logs(context.Context, Target) (LogsAPI, error)               { return nil, nil } // plan 03
-func (r *Real) ECR(context.Context, Target) (ECRAPI, error)                 { return nil, nil } // plan 02
 func (r *Real) SSM(context.Context, Target) (SSMAPI, error)                 { return nil, nil } // plan 04
 
 var (

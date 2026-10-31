@@ -279,6 +279,8 @@ export interface ServiceDTO {
   can: Record<ActionKey, boolean>
   console_url: string
   polled_at: string
+  controller: ControllerDTO
+  strategy_text: string
 }
 
 // ---- Tasks ----
@@ -443,3 +445,54 @@ export interface AuditEntryDTO {
   ip: string
 }
 export type AuditDTO = ListDTO<AuditEntryDTO>
+
+// ---- Change-path reads (plan 02) ----
+export interface ControllerRefDTO {
+  type: string
+  supported: boolean
+  name: string
+}
+export interface ControllerDTO extends ControllerRefDTO {
+  banner: string
+}
+export interface TaskDefinitionResponse {
+  family: string
+  deployed_revision: number
+  task_definition_arn: string
+  main_container: string
+  /** The register-ready definition; JSON.stringify(_, null, 2) keeps the server's key order. */
+  definition: Record<string, unknown>
+  tags: { key: string; value: string }[]
+  controller: ControllerRefDTO
+  strategy: string
+  can: { edit: boolean; deploy: boolean; operate: boolean; admin: boolean }
+  tag: TagDTO
+  polled_at: string
+}
+export interface RevisionDTO {
+  revision: number
+  arn: string
+  status: 'deployed' | 'rolling_out' | 'previous' | 'not_deployed'
+  image_tag: string
+  cpu: string
+  memory: string
+  registered_at: string
+  registered_by: string
+}
+export interface RevisionsResponse {
+  items: RevisionDTO[]
+  deployed_revision: number
+  rolling_out_revision: number | null
+}
+export interface ImageTagsResponse {
+  source: 'ecr' | 'none'
+  repository: string
+  current: string
+  tags: { tag: string; pushed_at: string }[]
+}
+export interface DesiredCountResponse {
+  desired: number
+  running: number
+  max: number
+  auto_scaling: { min: number; max: number } | null
+}

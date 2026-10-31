@@ -23,6 +23,34 @@ describe('TasksTab', () => {
     expect(within(table).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
+  it('enables Stop on running rows only', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    const runningCount = ALL_TASKS.filter((task) => task.service?.id === SERVICE_PAYMENTS.id && task.status === 'RUNNING').length
+    const stopButtons = within(table).getAllByRole('button', { name: 'Stop' })
+    expect(stopButtons).toHaveLength(runningCount)
+    stopButtons.forEach((button) => expect(button).toBeEnabled())
+  })
+
+  it('Stop opens the dialog with the 12-character short id and the service desired count', async () => {
+    const longShortId = 'abcdef0123456789abcdef0123456789'
+    server.use(
+      http.get('/api/services/:id/tasks', ({ params }) =>
+        HttpResponse.json(
+          tasksList(
+            ALL_TASKS.filter((task) => task.service?.id === params.id).map((task) => ({ ...task, short_id: longShortId })),
+          ),
+        ),
+      ),
+      http.get('/api/services/:id/desired-count', () => HttpResponse.json({ desired: 3, running: 3, max: 50, auto_scaling: null })),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    await userEvent.setup().click(within(table).getAllByRole('button', { name: 'Stop' })[0])
+    expect(await screen.findByRole('heading', { name: 'Stop task abcdef012345?' })).toBeInTheDocument()
+    expect(screen.getByText(`${SERVICE_PAYMENTS.name} will start a replacement to keep 3 running.`)).toBeInTheDocument()
+  })
+
   it('shows fractional vCPU exactly and memory in MiB', async () => {
     server.use(
       http.get('/api/services/:id/tasks', ({ params }) =>

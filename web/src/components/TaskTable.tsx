@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
 import type { TaskDTO } from '../api/types'
 import { Ago } from './Ago'
 import { Pill, type PillKind } from './Pill'
+import { StopTaskDialog } from './StopTaskDialog'
 import { Table, tableClass } from './Table'
 import styles from './TaskTable.module.css'
 
@@ -12,6 +14,8 @@ interface TaskTableProps {
   /** Cursor for the next page; "Load more" shows only when set. */
   next?: string
   onMore(): void
+  /** The service's desired count, for the Stop dialog's copy; left out on the global list. */
+  desiredCount?: number | null
 }
 
 const PROGRESS_STATUSES = ['PROVISIONING', 'PENDING', 'ACTIVATING']
@@ -64,9 +68,10 @@ function ServiceCell({ task }: { task: TaskDTO }) {
   )
 }
 
-function TaskRow({ task, withService }: { task: TaskDTO; withService: boolean }) {
+function TaskRow({ task, withService, desiredCount }: { task: TaskDTO; withService: boolean; desiredCount: number | null }) {
   const pill = statusPill(task)
   const isRunning = task.status === 'RUNNING'
+  const [stopping, setStopping] = useState(false)
   return (
     <tr className={stripeFor(task)}>
       <td className={styles.mono} title={task.id}>
@@ -112,17 +117,27 @@ function TaskRow({ task, withService }: { task: TaskDTO; withService: boolean })
           </button>
         )}{' '}
         {isRunning && task.can.operate && (
-          <button type="button" className={`${styles.btn} ${styles.danger}`} disabled title="Available in phase 2">
+          <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={() => setStopping(true)}>
             Stop
           </button>
+        )}
+        {stopping && (
+          <StopTaskDialog
+            taskId={task.id}
+            shortId={task.short_id.slice(0, 12)}
+            serviceName={task.service?.name ?? null}
+            serviceId={task.service?.id ?? null}
+            desiredCount={desiredCount}
+            onClose={() => setStopping(false)}
+          />
         )}
       </td>
     </tr>
   )
 }
 
-/** Task rows as in the mockup's taskRow(); buttons are placeholders until phases 2 and 4. */
-export function TaskTable({ items, withService, next, onMore }: TaskTableProps) {
+/** Task rows as in the mockup's taskRow(); Terminal is a placeholder until phase 4. */
+export function TaskTable({ items, withService, next, onMore, desiredCount = null }: TaskTableProps) {
   return (
     <div className={styles.panel}>
       <Table>
@@ -144,7 +159,7 @@ export function TaskTable({ items, withService, next, onMore }: TaskTableProps) 
         </thead>
         <tbody>
           {items.map((task) => (
-            <TaskRow key={task.id} task={task} withService={withService} />
+            <TaskRow key={task.id} task={task} withService={withService} desiredCount={desiredCount} />
           ))}
         </tbody>
       </Table>

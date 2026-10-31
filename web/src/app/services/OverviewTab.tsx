@@ -5,13 +5,13 @@ import { Legend } from '../../charts/Legend'
 import { LineChart } from '../../charts/LineChart'
 import { Timeline, type TimelineEvent } from '../../charts/Timeline'
 import { XL72 } from '../../charts/format'
-import { Ago, useNow } from '../../components/Ago'
+import { useNow } from '../../components/Ago'
 import { Card } from '../../components/Card'
 import { FeedRow, Feed } from '../../components/Feed'
 import { KV } from '../../components/KV'
-import { Pill } from '../../components/Pill'
 import { Slots } from '../../components/Slots'
 import { Tile } from '../../components/Tile'
+import { RolloutCard } from './overview/RolloutCard'
 import styles from './service.module.css'
 
 const FOURTEEN_DAYS_MS = 14 * 86_400_000
@@ -32,68 +32,6 @@ function timelineEvent(record: DeploymentRecordDTO): TimelineEvent {
     label: failed ? `${name} failed` : name,
     color: failed ? FAILED_COLOR : record.kind === 'restart' ? RESTART_COLOR : DEPLOY_COLOR,
   }
-}
-
-function DeploymentCard({ service }: { service: ServiceDTO }) {
-  const circuitBreaker = `circuit breaker with rollback is ${service.circuit_breaker.enable && service.circuit_breaker.rollback ? 'on' : 'off'}`
-  const primary = service.deployments.find((d) => d.status === 'PRIMARY') ?? service.deployments[0]
-  const active = service.deployments.find((d) => d.status === 'ACTIVE')
-
-  if (service.deployments[0]?.rollout_state === 'IN_PROGRESS' && primary) {
-    const fromRevision = active?.revision ?? primary.revision
-    const newCount = primary.running_count
-    const oldCount = active?.running_count ?? 0
-    const failed = primary.failed_tasks
-    const desired = Math.max(1, service.desired)
-    return (
-      <div className={styles.deployCard}>
-        <div className={styles.titleRow}>
-          <Pill kind="info">Rollout in progress</Pill>
-          <span className={styles.mono}>
-            :{fromRevision} → :{primary.revision}
-          </span>
-          <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
-            started <Ago ts={primary.created_at} />
-          </span>
-        </div>
-        <div className={styles.bar}>
-          <span style={{ width: `${(newCount / desired) * 100}%` }} />
-          <span className={styles.old} style={{ width: `${(oldCount / desired) * 100}%` }} />
-        </div>
-        <div className={`${styles.small} ${styles.muted}`}>
-          {plural(newCount, 'new task')} on :{primary.revision} · {oldCount} old on :{fromRevision} ·{' '}
-          {failed > 0 && (
-            <>
-              <span className={styles.danger}>{failed} failed to start</span> ·{' '}
-            </>
-          )}
-          {circuitBreaker}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className={styles.deployCard}>
-      <div className={styles.titleRow}>
-        <Pill kind="ok">Completed</Pill>
-        <span className={styles.mono}>
-          {service.family}:{service.revision}
-        </span>
-        {primary && (
-          <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
-            <Ago ts={primary.updated_at} />
-          </span>
-        )}
-      </div>
-      <div className={styles.bar}>
-        <span style={{ width: '100%' }} />
-      </div>
-      <div className={`${styles.small} ${styles.muted}`}>
-        Rolling update · min healthy {service.min_healthy_percent}% · max {service.max_percent}% · {circuitBreaker}
-      </div>
-    </div>
-  )
 }
 
 export function OverviewTab({ service }: { service: ServiceDTO }) {
@@ -131,7 +69,14 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
           sub="running"
         />
         <div className={styles.afterDonut}>
-          <DeploymentCard service={service} />
+          <RolloutCard
+            serviceName={service.name}
+            deployments={service.deployments}
+            desiredCount={service.desired}
+            strategyText={service.strategy_text}
+            circuitBreakerEnable={service.circuit_breaker.enable}
+            circuitBreakerRollback={service.circuit_breaker.rollback}
+          />
         </div>
       </Card>
 

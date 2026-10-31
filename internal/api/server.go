@@ -10,6 +10,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/web"
 )
@@ -24,6 +25,7 @@ type Server struct {
 	Cfg     config.Config
 	Log     *slog.Logger
 	Now     func() time.Time
+	Deploy  *deploy.Service
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
@@ -113,6 +115,19 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "PATCH /api/accounts/{id}", s.updateAccount, routeOptions{Admin: true})
 	s.handle(mux, "DELETE /api/accounts/{id}", s.deleteAccount, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/audit", s.listAudit, routeOptions{Admin: true})
+
+	// Change-path reads (plan 02).
+	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/revisions", s.getRevisions, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/image-tags", s.getImageTags, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/desired-count", s.getDesiredCount, routeOptions{})
+
+	// Change-path writes (plan 02).
+	s.handle(mux, "POST /api/services/{serviceId}/revisions", s.registerRevision, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/deploy", s.deployRevision, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/restart", s.restartService, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/desired-count", s.setDesiredCount, routeOptions{})
+	s.handle(mux, "POST /api/tasks/{taskId}/stop", s.stopTask, routeOptions{})
 
 	// Unknown API paths are JSON 404s and never fall through to the SPA. RequirePasswordChanged
 	// still applies so a user with a pending password change sees password_change_required.

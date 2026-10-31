@@ -2,8 +2,10 @@ package poller
 
 import (
 	"context"
+	"hash/fnv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -22,6 +24,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		conn      *pgxpool.Conn
 		stopSuper context.CancelFunc
 		superDone chan struct{}
+		heldKey   int64
 	)
 
 	// demote stops the supervisor (waiting for it) and releases the connection.
@@ -38,7 +41,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		}
 		if healthy {
 			uctx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
-			_, err := conn.Exec(uctx, `select pg_advisory_unlock($1)`, p.lockKey)
+			_, err := conn.Exec(uctx, `select pg_advisory_unlock($1)`, heldKey)
 			cancel()
 			if err != nil {
 				p.log.Warn("poller: unlock failed, closing connection", "err", err)
@@ -75,8 +78,16 @@ func (p *Poller) Run(ctx context.Context) error {
 			}
 			return
 		}
+		key, err := scopedLockKey(actx, c, p.lockKey)
+		if err != nil {
+			if ctx.Err() == nil {
+				p.log.Warn("poller: resolve leader lock key", "err", err)
+			}
+			_ = c.Hijack().Close(context.Background())
+			return
+		}
 		var got bool
-		if err := c.QueryRow(actx, `select pg_try_advisory_lock($1)`, p.lockKey).Scan(&got); err != nil || !got {
+		if err := c.QueryRow(actx, `select pg_try_advisory_lock($1)`, key).Scan(&got); err != nil || !got {
 			if err != nil && ctx.Err() == nil {
 				p.log.Warn("poller: try advisory lock", "err", err)
 				_ = c.Hijack().Close(context.Background())
@@ -85,7 +96,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			c.Release()
 			return
 		}
-		conn = c
+		conn, heldKey = c, key
 		p.leader.Store(true)
 		p.log.Info("poller: became leader")
 		superCtx, cancel := context.WithCancel(ctx)
@@ -108,4 +119,22 @@ func (p *Poller) Run(ctx context.Context) error {
 		case <-timer.C:
 		}
 	}
+}
+
+type queryRower interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// scopedLockKey mixes the connection's current schema into the base advisory lock key so that
+// deployments sharing one Postgres server (one schema each) elect independent leaders. The
+// advisory lock namespace is per-database, not per-schema, so an unscoped key would let one
+// schema's leader block every other schema.
+func scopedLockKey(ctx context.Context, q queryRower, base int64) (int64, error) {
+	var schema string
+	if err := q.QueryRow(ctx, `select coalesce(current_schema(), '')`).Scan(&schema); err != nil {
+		return 0, err
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(schema))
+	return base ^ int64(h.Sum64()), nil
 }

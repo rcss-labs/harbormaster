@@ -341,6 +341,8 @@ type ServiceDTO struct {
 	Can                  map[string]bool       `json:"can"`
 	ConsoleURL           string                `json:"console_url"`
 	PolledAt             time.Time             `json:"polled_at"`
+	Controller           ControllerDTO         `json:"controller"`
+	StrategyText         string                `json:"strategy_text"`
 }
 
 // TaskCanDTO is what the caller may do with one task.
