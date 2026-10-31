@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -96,12 +97,35 @@ func RolloutRunning(svc ecstypes.Service) bool {
 }
 
 // ParseService decodes the SDK service JSON stored in model.Service.Raw.
+// HookDetails is dropped first: it is a document.Interface that json.Unmarshal cannot decode,
+// and classifying a service does not need it.
 func ParseService(raw json.RawMessage) (ecstypes.Service, error) {
+	var generic map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&generic); err != nil {
+		return ecstypes.Service{}, fmt.Errorf("decode service: %w", err)
+	}
+	dropLifecycleHookDetails(generic)
+	cleaned, err := json.Marshal(generic)
+	if err != nil {
+		return ecstypes.Service{}, fmt.Errorf("re-encode service: %w", err)
+	}
 	var svc ecstypes.Service
-	if err := json.Unmarshal(raw, &svc); err != nil {
+	if err := json.Unmarshal(cleaned, &svc); err != nil {
 		return ecstypes.Service{}, fmt.Errorf("decode service: %w", err)
 	}
 	return svc, nil
+}
+
+func dropLifecycleHookDetails(service map[string]any) {
+	config, _ := service["DeploymentConfiguration"].(map[string]any)
+	hooks, _ := config["LifecycleHooks"].([]any)
+	for _, entry := range hooks {
+		if hook, ok := entry.(map[string]any); ok {
+			delete(hook, "HookDetails")
+		}
+	}
 }
 
 func isBlueGreen(svc ecstypes.Service) bool {
