@@ -1,0 +1,444 @@
+// TypeScript mirrors of the JSON DTOs served by the Go backend (internal/api/dto.go).
+// Shapes follow the API reference; keys are snake_case, times are RFC3339 strings.
+
+export type Status = 'steady' | 'deploying' | 'degraded' | 'failing' | 'unhealthy_task' | 'scaled_to_zero'
+export type ClusterStatus = 'healthy' | 'degraded' | 'deploying' | 'needs_attention'
+export type TagColor = 'neutral' | 'red' | 'amber' | 'blue' | 'violet' | 'green'
+export type Health = 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN'
+export type Capacity = 'FARGATE' | 'FARGATE_SPOT' | 'EC2'
+export type TaskStatus =
+  | 'PROVISIONING'
+  | 'PENDING'
+  | 'ACTIVATING'
+  | 'RUNNING'
+  | 'DEACTIVATING'
+  | 'STOPPING'
+  | 'DEPROVISIONING'
+  | 'STOPPED'
+
+export type ActionKey = 'view' | 'logs' | 'operate' | 'deploy' | 'edit' | 'terminal'
+/** Permission bits per action: view=1 logs=2 operate=4 deploy=8 edit=16 terminal=32. */
+export const ACTION_BITS: Record<ActionKey, number> = { view: 1, logs: 2, operate: 4, deploy: 8, edit: 16, terminal: 32 }
+
+export type ErrorCode =
+  | 'unauthenticated'
+  | 'forbidden'
+  | 'csrf'
+  | 'password_change_required'
+  | 'bad_setup_token'
+  | 'not_found'
+  | 'conflict'
+  | 'invalid'
+  | 'throttled'
+  | 'aws_error'
+
+export interface ErrorBody {
+  error: { code: ErrorCode | string; message: string }
+}
+
+/** Generic list body: `{items, next, polled_at}`. */
+export interface ListDTO<T> {
+  items: T[]
+  next: string | null
+  polled_at: string
+}
+
+// ---- Auth ----
+
+export interface MeTagDTO {
+  id: number
+  name: string
+  color: TagColor
+  builtin: boolean
+  services_in_effect: number
+}
+
+export interface MeAccountDTO {
+  id: number
+  name: string
+  account_id: string
+  regions: string[]
+}
+
+export interface MeDTO {
+  id: number
+  username: string
+  admin: boolean
+  must_change_password: boolean
+  csrf_token: string
+  perms: Record<string, number>
+  tags: MeTagDTO[]
+  accounts: MeAccountDTO[]
+  regions: string[]
+  polled_at?: string
+}
+
+export interface SetupStatusDTO {
+  needed: boolean
+}
+
+// ---- Shared ----
+
+export interface TagDTO {
+  id: number
+  name: string
+  color: TagColor
+  inherited: boolean
+}
+export interface ClusterRef {
+  id: string
+  name: string
+}
+export interface ServiceRef {
+  id: string
+  name: string
+  status: Status
+}
+export interface PointDTO {
+  t: string
+  running: number
+  desired: number
+}
+export interface EventDTO {
+  ts: string
+  source: 'ecs' | 'harbormaster'
+  actor: string
+  service: ServiceRef
+  cluster: ClusterRef
+  text: string
+}
+export interface SlotDTO {
+  task_id: string
+  short_id: string
+  private_ip: string
+  health: Health
+  rolling_out: boolean
+}
+export interface StopsHourDTO {
+  hour: string
+  normal: number
+  error: number
+}
+export interface DeploysDayDTO {
+  day: string
+  deploy: number
+  restart: number
+  failed: number
+}
+export interface ReasonCountDTO {
+  reason: string
+  count: number
+}
+
+// ---- Overview ----
+
+export interface OverviewDTO {
+  polled_at: string
+  accounts: number
+  regions: number
+  clusters: { id: string; name: string; status: ClusterStatus }[]
+  services: { total: number; by_status: Partial<Record<Status, number>> }
+  tasks: { running: number; desired: number; pending: number; unhealthy: number; history_72h: PointDTO[] }
+  task_health: { healthy: number; unhealthy: number; rolling_out: number; missing: number }
+  per_cluster: { id: string; name: string; running: number; desired: number }[]
+  stops_per_hour: StopsHourDTO[]
+  deployments_per_day: DeploysDayDTO[]
+  stop_reasons: ReasonCountDTO[]
+  events: EventDTO[]
+}
+
+// ---- Clusters ----
+
+export interface ClusterCardDTO {
+  id: string
+  name: string
+  tag: TagDTO
+  status: ClusterStatus
+  account_id: string
+  account_name: string
+  region: string
+  services: ServiceRef[]
+  running: number
+  desired: number
+  reserved_vcpu: number
+  reserved_gib: number
+  spot_tasks: number
+  container_insights: boolean
+  last_change_at: string | null
+}
+
+export interface ClusterServiceDTO {
+  id: string
+  name: string
+  tag: TagDTO
+  status: Status
+  family: string
+  revision: number
+  image_tag: string
+  running: number
+  desired: number
+  cpu: string
+  memory: string
+  slots: SlotDTO[]
+  latest_registered_revision: number | null
+  last_change_at: string | null
+}
+
+export interface ClusterDTO extends ClusterCardDTO {
+  arn: string
+  console_url: string
+  fargate_tasks: number
+  tasks_history_72h: PointDTO[]
+  stops_per_hour: StopsHourDTO[]
+  services_detail: ClusterServiceDTO[]
+  polled_at: string
+}
+
+// ---- Services ----
+
+export interface DeploymentDTO {
+  id: string
+  status: 'PRIMARY' | 'ACTIVE' | 'INACTIVE'
+  revision: number
+  desired_count: number
+  running_count: number
+  pending_count: number
+  failed_tasks: number
+  rollout_state: 'IN_PROGRESS' | 'COMPLETED' | 'FAILED'
+  rollout_state_reason: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RunningTaskDTO {
+  id: string
+  short_id: string
+  health: Health
+  az: string
+  subnet_id: string
+  private_ip: string
+  revision: number
+  spot: boolean
+  exec_agent_running: boolean
+}
+
+export interface DeploymentRecordDTO {
+  deployment_id: string
+  revision: number
+  kind: 'deploy' | 'restart' | 'rollback'
+  outcome: '' | 'succeeded' | 'failed' | 'rolled_back'
+  started_at: string
+  finished_at: string | null
+}
+
+export interface ServiceDTO {
+  id: string
+  name: string
+  cluster: ClusterRef
+  account_id: string
+  account_name: string
+  region: string
+  tag: TagDTO
+  status: Status
+  family: string
+  revision: number
+  image_tag: string
+  task_definition_arn: string
+  launch_type: string
+  platform_version: string
+  deployment_controller: string
+  desired: number
+  running: number
+  pending: number
+  enable_execute_command: boolean
+  min_healthy_percent: number
+  max_percent: number
+  circuit_breaker: { enable: boolean; rollback: boolean }
+  deployments: DeploymentDTO[]
+  running_tasks: RunningTaskDTO[]
+  slots: SlotDTO[]
+  networking: {
+    subnets: { id: string; tasks: number }[]
+    security_groups: string[]
+    assign_public_ip: boolean
+    load_balancers: { target_group_name: string; container_name: string; container_port: number }[]
+  }
+  task_definition: {
+    family: string
+    revision: number
+    cpu: string
+    memory: string
+    containers: { name: string; image: string; essential: boolean }[]
+    task_role_arn: string
+    efs_mounts: { file_system_id: string; access_point_id: string; container_path: string }[]
+  }
+  counts_history_72h: PointDTO[]
+  deployments_14d: DeploymentRecordDTO[]
+  recent_events: EventDTO[]
+  can: Record<ActionKey, boolean>
+  console_url: string
+  polled_at: string
+}
+
+// ---- Tasks ----
+
+export interface TaskDTO {
+  id: string
+  short_id: string
+  arn: string
+  service: ServiceRef | null
+  cluster: ClusterRef
+  group: string
+  started_by: string
+  status: string
+  exit_code: number | null
+  health: Health
+  family: string
+  revision: number
+  private_ip: string
+  subnet_id: string
+  az: string
+  capacity: Capacity
+  cpu: string
+  memory: string
+  started_at: string | null
+  stopped_at: string | null
+  stop_code: string
+  stopped_reason: string
+  stop_reason_group: string
+  exec_enabled: boolean
+  can: { operate: boolean; terminal: boolean }
+}
+
+export type TasksFilter = 'problems' | 'running' | 'stopped' | 'all'
+
+export interface TasksListDTO {
+  items: TaskDTO[]
+  next: string | null
+  polled_at: string
+  counts: { problems: number; running: number; stopped: number; all: number }
+  summary: {
+    by_status: { running_healthy: number; running_unhealthy: number; stopped_error: number; stopped_normal: number }
+    by_az: { az: string; count: number }[]
+    by_cluster: { id: string; name: string; fargate: number; spot: number }[]
+    stop_reasons: ReasonCountDTO[]
+  }
+}
+
+// ---- Search, operations, poller ----
+
+export interface SearchResultDTO {
+  kind: 'cluster' | 'service' | 'task'
+  label: string
+  sub: string
+  href: string
+}
+export interface SearchDTO {
+  items: SearchResultDTO[]
+}
+
+export type OperationsDTO = ListDTO<EventDTO>
+
+export interface PollerEntryDTO {
+  account_id: string
+  account_name: string
+  region: string
+  throttled: boolean
+  failing: boolean
+  last_error: string
+  last_ok_at: string | null
+}
+export interface PollerDTO {
+  items: PollerEntryDTO[]
+}
+
+// ---- Admin: users and permissions ----
+
+export interface UserDTO {
+  id: number
+  username: string
+  admin: boolean
+  must_change_password: boolean
+  last_sign_in_at: string | null
+  can_see: TagDTO[]
+}
+export interface UsersDTO {
+  items: UserDTO[]
+}
+export interface CreateUserResponse {
+  user: UserDTO
+  temporary_password: string
+}
+export interface PermissionsDTO {
+  tags: { id: number; name: string; color: TagColor; services_in_effect: number }[]
+  users: { id: number; username: string; admin: boolean; perms: Record<string, number> }[]
+}
+
+// ---- Admin: tags and assignments ----
+
+export interface TagItemDTO {
+  id: number
+  name: string
+  color: TagColor
+  builtin: boolean
+  clusters: number
+  services_direct: number
+  services_effective: number
+  users: { username: string; preset: string }[]
+}
+export interface TagsDTO {
+  items: TagItemDTO[]
+}
+export interface TagImpactDTO {
+  clusters: { id: string; name: string }[]
+  services: { id: string; name: string }[]
+  users: string[]
+}
+export interface TagAssignmentsDTO {
+  clusters: {
+    id: string
+    name: string
+    account_name: string
+    region: string
+    tag_id: number | null
+    effective: TagDTO
+    services: { id: string; name: string; tag_id: number | null; effective: TagDTO }[]
+  }[]
+}
+
+// ---- Admin: AWS accounts and audit ----
+
+export interface AccountDTO {
+  id: number
+  name: string
+  account_id: string
+  role_arn: string
+  external_id: string
+  regions: string[]
+  enabled: boolean
+  clusters: number
+  status: 'connected' | 'error' | 'disabled'
+  last_ok_at: string | null
+  last_error: string
+}
+export interface AccountsDTO {
+  items: AccountDTO[]
+  runtime: { cluster: string; service: string; intervals: Record<string, string> }
+}
+export interface RegionResult {
+  region: string
+  ok: boolean
+  clusters: number
+  error: string
+}
+export interface AuditEntryDTO {
+  id: number
+  ts: string
+  actor: string
+  action: string
+  target: string
+  summary: string
+  details: Record<string, unknown> | null
+  ip: string
+}
+export type AuditDTO = ListDTO<AuditEntryDTO>
