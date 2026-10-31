@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
 import type { Filters } from '../../api/hooks'
 import type { MeDTO } from '../../api/types'
@@ -6,9 +6,27 @@ import { useAuth } from '../auth/AuthProvider'
 
 const storageKey = (username: string) => `harbormaster-filters:${username}`
 
-function readStored(username: string): Filters {
+// Every useFilters instance (sidebar, top bar, screens) lives as long as the Shell, so they must all see writes.
+const storageListeners = new Set<() => void>()
+const subscribeToStorage = (listener: () => void) => {
+  storageListeners.add(listener)
+  return () => {
+    storageListeners.delete(listener)
+  }
+}
+
+function readRaw(username: string | undefined): string {
+  if (!username) return '{}'
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey(username)) ?? '{}')
+    return localStorage.getItem(storageKey(username)) ?? '{}'
+  } catch {
+    return '{}'
+  }
+}
+
+function parseStored(raw: string): Filters {
+  try {
+    const parsed: unknown = JSON.parse(raw)
     if (parsed && typeof parsed === 'object') {
       const { account, region } = parsed as Record<string, unknown>
       return {
@@ -28,6 +46,7 @@ function writeStored(username: string, filters: Filters) {
   } catch {
     // storage unavailable: the filter still lives in the URL
   }
+  storageListeners.forEach((listener) => listener())
 }
 
 /** Drops stored values that no longer exist in what this user can see. */
@@ -55,7 +74,8 @@ export function useFilters(): FilterState {
   const urlAccount = searchParams.get('account') ?? undefined
   const urlRegion = searchParams.get('region') ?? undefined
 
-  const restored = useMemo(() => (me ? validOnly(readStored(me.username), me) : {}), [me])
+  const rawStored = useSyncExternalStore(subscribeToStorage, () => readRaw(username))
+  const restored = useMemo(() => (me ? validOnly(parseStored(rawStored), me) : {}), [me, rawStored])
   const hasUrlFilter = urlAccount !== undefined || urlRegion !== undefined
   const filters = useMemo<Filters>(
     () => (hasUrlFilter ? { account: urlAccount, region: urlRegion } : restored),

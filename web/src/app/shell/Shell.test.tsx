@@ -75,6 +75,29 @@ describe('Shell', () => {
     expect(screen.getByTestId('search')).not.toHaveTextContent('account=')
   })
 
+  it('clearing a restored filter to All stays All', async () => {
+    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ account: ACCOUNT_STAGING.account_id }))
+    renderApp('/clusters')
+    const user = userEvent.setup()
+    const account = await screen.findByLabelText('Account filter')
+    await waitFor(() => expect(account).toHaveValue(ACCOUNT_STAGING.account_id))
+    await user.selectOptions(account, '')
+    await waitFor(() => expect(account).toHaveValue(''))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(account).toHaveValue('')
+    expect(screen.getByTestId('search')).not.toHaveTextContent('account=')
+  })
+
+  it('a filter chosen in-session survives a sidebar link', async () => {
+    renderApp('/clusters')
+    const user = userEvent.setup()
+    await user.selectOptions(await screen.findByLabelText('Account filter'), ACCOUNT_STAGING.account_id)
+    await user.click(await screen.findByRole('link', { name: /Tasks/ }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks'))
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`account=${ACCOUNT_STAGING.account_id}`))
+    expect(screen.getByLabelText('Account filter')).toHaveValue(ACCOUNT_STAGING.account_id)
+  })
+
   it('renders throttled and stale banners from poller status', async () => {
     const [base] = POLLER.items
     const poller: PollerDTO = {
