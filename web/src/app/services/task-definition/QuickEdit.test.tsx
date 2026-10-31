@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -50,12 +50,29 @@ describe('QuickEdit', () => {
     expect(screen.getByTestId('json').textContent).toContain('payments-api:bad tag!')
   })
 
-  it('limits memory to the Fargate values for the chosen CPU', async () => {
+  it('offers the Fargate memory values for the chosen CPU plus the current value', async () => {
     render(<Harness tags={ecr} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Task CPU' }), '512')
     const memory = screen.getByRole('combobox', { name: 'Task memory' })
-    expect(Array.from(memory.querySelectorAll('option')).map((option) => option.textContent)).toEqual(['1024', '2048', '3072', '4096'])
-    expect(screen.getByTestId('json').textContent).toContain('"memory":"1024"')
+    expect(Array.from(memory.querySelectorAll('option')).map((option) => option.textContent)).toEqual(['512', '1024', '2048', '3072', '4096'])
+    expect(screen.getByTestId('json').textContent).toContain('"memory":"512"')
+  })
+
+  it('keeps a memory value that is invalid for the new CPU instead of snapping it', async () => {
+    const big: Definition = { ...base, cpu: '1024', memory: '8192' }
+    function Big() {
+      const [definition, setDefinition] = useState(big)
+      return (
+        <>
+          <QuickEdit definition={definition} mainContainer="payments-api" imageTags={ecr} deployedTag="0.4.2" disabled={false} onChange={setDefinition} />
+          <output data-testid="json">{JSON.stringify(definition)}</output>
+        </>
+      )
+    }
+    render(<Big />)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Task CPU' }), '512')
+    expect(screen.getByTestId('json').textContent).toContain('"memory":"8192"')
+    expect(within(screen.getByRole('combobox', { name: 'Task memory' })).getByRole('option', { name: '8192' })).toBeInTheDocument()
   })
 
   it('shows the out of memory hint', () => {

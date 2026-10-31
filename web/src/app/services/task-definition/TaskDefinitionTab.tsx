@@ -9,9 +9,9 @@ import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
 import { DeployDialog } from './DeployDialog'
 import { JsonEditor } from './JsonEditor'
-import { QuickEdit } from './QuickEdit'
+import { QuickEdit, isTagInvalid } from './QuickEdit'
 import { ReviewDialog } from './ReviewDialog'
-import { IMAGE_TAG_RE, mainImageTag, nextFargateMemory, type Definition } from './mainContainer'
+import { mainImageTag, nextFargateMemory, type Definition } from './mainContainer'
 import styles from './taskDefinition.module.css'
 
 interface Draft {
@@ -66,9 +66,10 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
 
   const deployedTag = mainImageTag(data.definition, service.name)
   const draftTag = definition ? mainImageTag(definition, service.name) : ''
-  const tagInvalid = definition !== null && imageTags.data?.source !== 'ecr' && !IMAGE_TAG_RE.test(draftTag)
+  const tagInvalid = definition !== null && isTagInvalid(imageTags.data?.source, draftTag, deployedTag)
 
-  const setText = (next: string) => setDraft({ text: next, baseRevision: draft?.baseRevision ?? data.deployed_revision })
+  const setText = (next: string) =>
+    setDraft(trimEnd(next) === initialText ? null : { text: next, baseRevision: draft?.baseRevision ?? data.deployed_revision })
   const predictedRevision = Math.max(data.deployed_revision, ...(revisions.data?.items.map((item) => item.revision) ?? [])) + 1
 
   const oomHint = (() => {
@@ -99,11 +100,12 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
       if (isApiError(failure, 'conflict')) {
         // The service moved on: take the new deployed revision from a fresh read and show the diff again.
         const fresh = await taskDefinition.refetch()
-        if (fresh.data) {
+        if (fresh.isError || !fresh.data) {
+          setRegisterError(fresh.error instanceof Error ? fresh.error.message : 'The service could not be re-read after the conflict.')
+        } else {
           setMovedFrom(draft.baseRevision)
           setDraft({ ...draft, baseRevision: fresh.data.deployed_revision })
         }
-        setRegisterError(undefined)
       } else {
         setRegisterError(failure instanceof Error ? failure.message : 'The revision could not be registered.')
       }

@@ -30,6 +30,12 @@ describe('DeployDialog', () => {
     expect(screen.queryByText('This is a Prod service.')).not.toBeInTheDocument()
   })
 
+  it('shows the image tag alone', () => {
+    render(<DeployDialog {...props} />)
+    expect(screen.getByText('1.18.3')).toBeInTheDocument()
+    expect(screen.queryByText('payments-api:1.18.3')).not.toBeInTheDocument()
+  })
+
   it('labels the rollback button', () => {
     render(<DeployDialog {...props} mode="rollback" revision={41} />)
     expect(screen.getByRole('button', { name: 'Roll back to :41' })).toBeInTheDocument()

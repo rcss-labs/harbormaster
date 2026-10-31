@@ -7,7 +7,6 @@ import {
   fargateMemoryOptions,
   imageTagOf,
   mainContainerIndex,
-  nextFargateMemory,
   updateMainContainer,
   withImageTag,
   type Definition,
@@ -22,6 +21,11 @@ interface QuickEditProps {
   oomHint?: { memory: string; suggested: string }
   disabled: boolean
   onChange(next: Definition): void
+}
+
+/** Only free-text tags are checked, and only once the user has changed them. */
+export function isTagInvalid(source: string | undefined, tag: string, deployedTag: string): boolean {
+  return source === 'none' && tag !== deployedTag && !IMAGE_TAG_RE.test(tag)
 }
 
 interface EnvEntry {
@@ -49,10 +53,8 @@ export function QuickEdit({ definition, mainContainer, imageTags, deployedTag, o
   const setTag = (tag: string) => setMain((container) => ({ ...container, image: withImageTag(container.image, tag) }))
   const setEnvironment = (next: EnvEntry[]) => setMain((container) => ({ ...container, environment: next }))
 
-  const setCpu = (nextCpu: string) => {
-    const nextMemory = fargateMemoryOptions(nextCpu).includes(Number(memory)) ? memory : String(nextFargateMemory(nextCpu, Number(memory)) ?? memory)
-    onChange({ ...definition, cpu: nextCpu, memory: nextMemory })
-  }
+  // The memory stays as it is, even when invalid for the new CPU; the select keeps it as an extra option.
+  const setCpu = (nextCpu: string) => onChange({ ...definition, cpu: nextCpu })
 
   const cpuOptions = FARGATE_CPU_VALUES.includes(cpu) || cpu === '' ? FARGATE_CPU_VALUES : [...FARGATE_CPU_VALUES, cpu]
   const memoryValid = fargateMemoryOptions(cpu).map(String)
@@ -64,7 +66,7 @@ export function QuickEdit({ definition, mainContainer, imageTags, deployedTag, o
     const marks = [tag === ecrTags[0] && tag !== deployedTag ? 'newest' : '', tag === deployedTag ? 'deployed' : ''].filter(Boolean)
     return [tag, ...marks].join(' · ')
   }
-  const tagInvalid = imageTags?.source !== 'ecr' && !IMAGE_TAG_RE.test(currentTag)
+  const tagInvalid = isTagInvalid(imageTags?.source, currentTag, deployedTag)
 
   return (
     <fieldset className={styles.fieldset} disabled={disabled}>

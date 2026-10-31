@@ -50,7 +50,7 @@ export function DeployDialog(props: DeployDialogProps) {
     >
       <KV
         rows={[
-          ['Image', <span key="image" className="mono">{`${serviceName}:${props.imageTag}`}</span>],
+          ['Image', <span key="image" className="mono">{props.imageTag}</span>],
           ['Size', `${props.cpu} CPU · ${props.memory} MiB`],
           ['Strategy', props.strategy],
           ['Tag', <TagChip key="tag" tag={tag} />],

@@ -101,4 +101,113 @@ describe('TaskDefinitionTab', () => {
     renderApp(route)
     expect(await screen.findByText('Tasks of this service stop with OutOfMemoryError (exit 137) at 1024 MiB. Try 2048 MiB.')).toBeInTheDocument()
   })
+
+  it('blocks a bad free-text tag when ECR is not used and sends nothing', async () => {
+    let posts = 0
+    server.use(
+      http.get('/api/services/:id/image-tags', () => HttpResponse.json({ source: 'none', repository: '', current: '', tags: [] })),
+      http.post('/api/services/:id/revisions', () => {
+        posts++
+        return HttpResponse.json(result(true), { status: 201 })
+      }),
+    )
+    renderApp(route)
+    const tag = await screen.findByRole('textbox', { name: 'Image tag' })
+    await userEvent.clear(tag)
+    await userEvent.type(tag, 'bad tag!')
+    expect(screen.getByText('Tag may contain letters, digits, . _ -')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review and save' })).toBeDisabled()
+    expect(posts).toBe(0)
+  })
+
+  it('does not block review for an untagged image when the tag is not edited', async () => {
+    server.use(
+      http.get('/api/services/:id/image-tags', () => HttpResponse.json({ source: 'none', repository: '', current: '', tags: [] })),
+      http.get('/api/services/:id/task-definition', () =>
+        HttpResponse.json({
+          ...TASK_DEFINITION_EDITABLE,
+          definition: {
+            ...TASK_DEFINITION_EDITABLE.definition,
+            containerDefinitions: [{ name: 'payments-api', image: 'payments-api', essential: true, environment: [{ name: 'LOG_LEVEL', value: 'info' }] }],
+          },
+        }),
+      ),
+    )
+    renderApp(route)
+    await editEnvValue()
+    expect(screen.getByRole('button', { name: 'Review and save' })).toBeEnabled()
+  })
+
+  it('does not block review while image tags are still loading', async () => {
+    server.use(http.get('/api/services/:id/image-tags', () => new Promise(() => {})))
+    renderApp(route)
+    await editEnvValue()
+    expect(screen.getByRole('button', { name: 'Review and save' })).toBeEnabled()
+  })
+
+  it('shows a 422 message in the review dialog', async () => {
+    server.use(
+      http.post('/api/services/:id/revisions', () =>
+        HttpResponse.json({ error: { code: 'invalid', message: 'Changing roles needs a global admin' } }, { status: 422 }),
+      ),
+    )
+    renderApp(route)
+    await editEnvValue()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
+    expect(await screen.findByText('Changing roles needs a global admin')).toBeInTheDocument()
+  })
+
+  it('shows an error when the refetch after a 409 fails', async () => {
+    let reads = 0
+    server.use(
+      http.get('/api/services/:id/task-definition', () => {
+        reads++
+        return reads > 1
+          ? HttpResponse.json({ error: { code: 'internal', message: 'Refetch failed badly' } }, { status: 500 })
+          : HttpResponse.json(TASK_DEFINITION_EDITABLE)
+      }),
+      http.post('/api/services/:id/revisions', () =>
+        HttpResponse.json({ error: { code: 'conflict', message: 'stale' }, deployed_revision: 43 }, { status: 409 }),
+      ),
+    )
+    renderApp(route)
+    await editEnvValue()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
+    expect(await screen.findByText(/Refetch failed badly/)).toBeInTheDocument()
+  })
+
+  it('toasts on Not now', async () => {
+    server.use(http.post('/api/services/:id/revisions', () => HttpResponse.json(result(true), { status: 201 })))
+    renderApp(route)
+    await editEnvValue()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Not now' }))
+    expect(await screen.findByText('payments-api:43 is registered. Deploy it from the service page when you are ready.')).toBeInTheDocument()
+  })
+
+  it('toasts when a rollout is already running', async () => {
+    server.use(
+      http.post('/api/services/:id/revisions', () => HttpResponse.json(result(true), { status: 201 })),
+      http.post('/api/services/:id/deploy', () => HttpResponse.json({ error: { code: 'conflict', message: 'running' } }, { status: 409 })),
+    )
+    renderApp(route)
+    await editEnvValue()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Deploy :43' }))
+    expect(await screen.findByText('A rollout is already running')).toBeInTheDocument()
+  })
+
+  it('drops the draft when the text returns to the deployed definition', async () => {
+    renderApp(route)
+    const value = await screen.findByRole('textbox', { name: 'Value' })
+    await userEvent.type(value, 'x')
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    await userEvent.type(value, '{Backspace}')
+    expect(screen.getByText('No changes')).toBeInTheDocument()
+    expect(screen.getByText('based on :42')).toBeInTheDocument()
+  })
 })
