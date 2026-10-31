@@ -1,5 +1,3 @@
-data "aws_region" "current" {}
-
 locals {
   # Module-set keys win over extra_env on collision (merge: later maps override).
   container_env = merge(
@@ -38,8 +36,9 @@ locals {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.server.name
-          "awslogs-region"        = data.aws_region.current.id
+          "awslogs-group" = aws_cloudwatch_log_group.server.name
+          # Region from the log group ARN: data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
+          "awslogs-region"        = split(":", aws_cloudwatch_log_group.server.arn)[3]
           "awslogs-stream-prefix" = "ecs"
         }
       }
