@@ -46,3 +46,8 @@ e2e:
 .PHONY: tf-check
 tf-check:
 	tools/tf-check.sh
+
+.PHONY: test-it-exec
+# Real-AWS ECS Exec integration test. Export the HM_IT_* variables first (see README "Terminal").
+test-it-exec:
+	HM_IT_AWS=1 go test ./internal/execbridge/ -run TestIntegration -v
