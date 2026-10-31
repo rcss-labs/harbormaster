@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from './client'
-import { isApiError, useRegisterRevision, useStopTask } from './change'
+import { isApiError, useDeploy, useRegisterRevision, useStopTask } from './change'
 
 function renderWithClient<T>(useHook: () => T) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -31,6 +31,19 @@ describe('useRegisterRevision', () => {
   })
 })
 
+describe('useDeploy', () => {
+  it('posts the revision and invalidates the service and its operations', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ deployment_id: 'd-1', from_revision: 42, to_revision: 43, kind: 'deploy' })
+    const { result, invalidate } = renderWithClient(() => useDeploy('svc-1'))
+
+    await result.current.mutateAsync({ revision: 43 })
+
+    expect(post).toHaveBeenCalledWith('/api/services/svc-1/deploy', { revision: 43 })
+    expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['service', 'svc-1'] }))
+    expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['operations', 'svc-1'] }))
+  })
+})
+
 describe('useStopTask', () => {
   it('posts to /api/tasks/{id}/stop and invalidates the task lists', async () => {
     const post = vi.spyOn(api, 'post').mockResolvedValue({ task_arn: 'arn:task', reason: 'Stopped by pavel via Harbormaster' })
@@ -41,6 +54,7 @@ describe('useStopTask', () => {
     expect(post).toHaveBeenCalledWith('/api/tasks/task-9/stop')
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['tasks'] })))
     expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['service', 'svc-1', 'tasks'] }))
+    expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['service', 'svc-1'] }))
   })
 })
 

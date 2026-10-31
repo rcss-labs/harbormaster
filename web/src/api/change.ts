@@ -49,7 +49,7 @@ export interface DeployStarted {
   deployment_id: string
   from_revision: number
   to_revision: number
-  kind: 'deploy'
+  kind: 'deploy' | 'rollback'
 }
 
 /** 202 from POST /api/services/{id}/restart. */
@@ -120,6 +120,12 @@ function invalidateService(queryClient: QueryClient, serviceId: string) {
   return queryClient.invalidateQueries({ queryKey: ['service', serviceId] })
 }
 
+/** Rollouts and scaling also add entries to the operations history. */
+function invalidateServiceAndOperations(queryClient: QueryClient, serviceId: string) {
+  void queryClient.invalidateQueries({ queryKey: ['operations', serviceId] })
+  return invalidateService(queryClient, serviceId)
+}
+
 export function useRegisterRevision(serviceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -133,7 +139,7 @@ export function useDeploy(serviceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: DeployBody) => api.post<DeployStarted>(`/api/services/${serviceId}/deploy`, body),
-    onSuccess: () => invalidateService(queryClient, serviceId),
+    onSuccess: () => invalidateServiceAndOperations(queryClient, serviceId),
   })
 }
 
@@ -141,7 +147,7 @@ export function useRestart(serviceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => api.post<RestartStarted>(`/api/services/${serviceId}/restart`),
-    onSuccess: () => invalidateService(queryClient, serviceId),
+    onSuccess: () => invalidateServiceAndOperations(queryClient, serviceId),
   })
 }
 
@@ -150,7 +156,7 @@ export function useSetDesiredCount(serviceId: string) {
   return useMutation({
     mutationFn: (body: DesiredCountBody) =>
       api.post<DesiredCountResult>(`/api/services/${serviceId}/desired-count`, body),
-    onSuccess: () => invalidateService(queryClient, serviceId),
+    onSuccess: () => invalidateServiceAndOperations(queryClient, serviceId),
   })
 }
 
@@ -163,7 +169,10 @@ export function useStopTask(serviceId?: string) {
   return useMutation({
     mutationFn: (taskId: string) => api.post<StopTaskResult>(`/api/tasks/${taskId}/stop`),
     onSuccess: () => {
-      if (serviceId) queryClient.invalidateQueries({ queryKey: ['service', serviceId, 'tasks'] })
+      if (serviceId) {
+        queryClient.invalidateQueries({ queryKey: ['service', serviceId, 'tasks'] })
+        queryClient.invalidateQueries({ queryKey: ['service', serviceId] })
+      }
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
