@@ -28,15 +28,15 @@ test-db:
 run:
 	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
 
-# e2e builds the binary, recreates the dedicated hm_e2e schema (tools/e2eschema) so each
+# e2e builds the binary, recreates the dedicated schema (tools/e2eschema; HM_E2E_SCHEMA, default hm_e2e) so each
 # run starts empty, then runs the Playwright smoke suite against `serve --fake-aws`.
 e2e:
 	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
 		echo "make e2e: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
 		exit 2; \
 	fi
-	@if lsof -iTCP:8481 -sTCP:LISTEN >/dev/null 2>&1; then \
-		echo "make e2e: port 8481 is already in use; stop the process listening on it" >&2; \
+	@e2e_port="$${HM_E2E_PORT:-8481}"; if lsof -iTCP:"$$e2e_port" -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "make e2e: port $$e2e_port is already in use; stop the process listening on it" >&2; \
 		exit 2; \
 	fi
 	$(MAKE) build

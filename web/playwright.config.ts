@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const baseURL = 'http://127.0.0.1:8481'
+// HM_E2E_PORT lets parallel worktrees run e2e side by side; the default is unchanged.
+const port = process.env.HM_E2E_PORT ?? '8481'
+const baseURL = `http://127.0.0.1:${port}`
 
 // `make e2e` points HM_E2E_DATABASE_URL at a freshly created schema; running
 // `npm run e2e` directly falls back to the shared test database.
@@ -17,7 +19,7 @@ export default defineConfig({
   webServer: {
     command: '../bin/harbormaster serve --fake-aws',
     env: {
-      HM_LISTEN: '127.0.0.1:8481',
+      HM_LISTEN: `127.0.0.1:${port}`,
       HM_COOKIE_SECURE: 'false',
       HM_DATABASE_URL: databaseURL,
     },
