@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/execbridge"
 )
 
 var homelabEast = awsx.Target{AccountID: homelabID, Region: "us-east-1"}
@@ -61,6 +62,9 @@ func TestFakeECS_ExecuteCommand_ReturnsSessionForExecEnabledTask(t *testing.T) {
 	if out.Session == nil || !strings.HasPrefix(aws.ToString(out.Session.StreamUrl), base+"/v1/data-channel/") ||
 		aws.ToString(out.Session.TokenValue) == "" || !strings.HasPrefix(aws.ToString(out.Session.SessionId), "ecs-execute-command-") {
 		t.Fatalf("session = %+v, want stream URL under %s, token and id", out.Session, base)
+	}
+	if err := execbridge.ValidateStreamURL(aws.ToString(out.Session.StreamUrl), true); err != nil {
+		t.Fatalf("StreamUrl %q rejected by ValidateStreamURL: %v", aws.ToString(out.Session.StreamUrl), err)
 	}
 	if !out.Interactive || aws.ToString(out.TaskArn) != arn || aws.ToString(out.ContainerName) != "payments-api" {
 		t.Fatalf("output = %+v, want interactive for the requested task and container", out)

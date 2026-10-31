@@ -83,7 +83,7 @@ func NewSSMServer(o SSMServerOptions) *SSMServer {
 	return &SSMServer{opts: o, sessions: map[string]*ssmSessionState{}, reorder: o.ReorderOnce, ctx: ctx, cancel: cancel}
 }
 
-// Start listens on a loopback port and returns the base URL (http://127.0.0.1:port).
+// Start listens on a loopback port and returns the base URL (ws://127.0.0.1:port).
 func (s *SSMServer) Start() string {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *SSMServer) Start() string {
 	mux.HandleFunc("GET /v1/data-channel/{sessionID}", s.handle)
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	s.mu.Lock()
-	s.url = "http://" + ln.Addr().String()
+	s.url = "ws://" + ln.Addr().String()
 	s.srv = srv
 	url := s.url
 	s.mu.Unlock()
