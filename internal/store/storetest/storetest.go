@@ -12,9 +12,19 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-// Open returns a Store bound to a fresh schema t_<8 hex>, migrated and dropped
-// on cleanup. It skips the test when HM_TEST_DATABASE_URL is unset.
+// Open returns a migrated Store in a fresh isolated schema (see OpenEmpty).
 func Open(t *testing.T) *store.Store {
+	t.Helper()
+	s := OpenEmpty(t)
+	if _, err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return s
+}
+
+// OpenEmpty returns a Store bound to a fresh, unmigrated schema t_<8 hex>,
+// dropped on cleanup. It skips the test when HM_TEST_DATABASE_URL is unset.
+func OpenEmpty(t *testing.T) *store.Store {
 	t.Helper()
 	url := lookupURL()
 	if url == "" {
@@ -48,8 +58,5 @@ func Open(t *testing.T) *store.Store {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(s.Close) // runs before the drop (LIFO)
-	if _, err := s.Migrate(ctx); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	return s
 }

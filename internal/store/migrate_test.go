@@ -9,10 +9,17 @@ import (
 )
 
 func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
-	s := storetest.Open(t) // already ran Migrate once; a second run applies nothing
+	s := storetest.OpenEmpty(t)
 	ctx := context.Background()
 
 	applied, err := s.Migrate(ctx)
+	if err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+	if !reflect.DeepEqual(applied, []int{1, 2}) {
+		t.Fatalf("first Migrate applied %v, want [1 2]", applied)
+	}
+	applied, err = s.Migrate(ctx)
 	if err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}

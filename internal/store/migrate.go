@@ -52,9 +52,8 @@ func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.Pool.Exec(ctx, `create table if not exists schema_migrations (
-		version int primary key, applied_at timestamptz not null default now())`); err != nil {
-		return nil, fmt.Errorf("create schema_migrations: %w", err)
+	if err := s.ensureMigrationsTable(ctx); err != nil {
+		return nil, err
 	}
 	applied = []int{}
 	for _, m := range migrations {
@@ -92,4 +91,22 @@ func (s *Store) applyOne(ctx context.Context, m migration) (bool, error) {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+// ensureMigrationsTable creates schema_migrations while holding the migration
+// lock, so concurrent first starts cannot race on CREATE TABLE IF NOT EXISTS.
+func (s *Store) ensureMigrationsTable(ctx context.Context) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, migrationLockKey); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `create table if not exists schema_migrations (
+		version int primary key, applied_at timestamptz not null default now())`); err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+	return tx.Commit(ctx)
 }
