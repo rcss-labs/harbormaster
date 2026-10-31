@@ -23,7 +23,7 @@ describe('Overview', () => {
 
   it('task health donut legend shows Missing count', async () => {
     renderApp('/')
-    const missingRow = (await screen.findByText('Missing')).parentElement as HTMLElement
+    const missingRow = (await screen.findByText('Missing (desired − running)')).parentElement as HTMLElement
     expect(within(missingRow).getByText(String(OVERVIEW.task_health.missing), { exact: true })).toBeInTheDocument()
   })
 

@@ -18,11 +18,12 @@ import { useCrumbs } from '../shell/crumbs'
 import { useFilters } from '../shell/useFilters'
 import styles from './overview.module.css'
 
-const STOP_NORMAL_COLOR = 'var(--series-1)'
+const STOP_NORMAL_COLOR = 'var(--border-strong)'
 const STOP_ERROR_COLOR = 'var(--danger)'
-const DEPLOY_COLOR = 'var(--series-1)'
-const RESTART_COLOR = 'var(--series-2)'
+const DEPLOY_COLOR = 'var(--accent)'
+const RESTART_COLOR = 'var(--series-3)'
 const FAILED_COLOR = 'var(--danger)'
+const MISSING_COLOR = 'var(--danger)'
 
 const accountsText = (count: number) => `${count} ${count === 1 ? 'account' : 'accounts'}`
 
@@ -59,7 +60,7 @@ export function Overview() {
     { name: 'Running, healthy', v: health.healthy, color: 'var(--success)' },
     { name: 'Running, unhealthy', v: health.unhealthy, color: 'var(--warning)' },
     { name: 'Rolling out', v: health.rolling_out, color: 'var(--info)' },
-    { name: 'Missing', v: health.missing, color: 'var(--border-strong)' },
+    { name: 'Missing (desired − running)', v: health.missing, color: MISSING_COLOR },
   ]
 
   const stopColumns = data.stops_per_hour.map((hour) => ({
@@ -120,7 +121,7 @@ export function Overview() {
             items={data.per_cluster.map((cluster) => ({
               name: cluster.name,
               href: `/clusters/${cluster.id}`,
-              v: cluster.running,
+              parts: [{ v: cluster.running, color: cluster.running < cluster.desired ? 'var(--warning)' : 'var(--success)' }],
               ghost: cluster.desired,
               label: `${cluster.running} / ${cluster.desired}`,
             }))}
