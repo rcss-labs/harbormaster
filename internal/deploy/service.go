@@ -23,7 +23,7 @@ import (
 const DefaultMaxDesiredCount = 50
 
 // ScalingRangeSource reports the auto scaling range registered for a service.
-// Plan 03 wires the auto scaling snapshot; until then Service.Scaling is nil.
+// *store.Store implements it from plan 03's auto scaling snapshot; nil means no ranges.
 type ScalingRangeSource interface {
 	Range(ctx context.Context, key model.ServiceKey) (min, max int, ok bool, err error)
 }

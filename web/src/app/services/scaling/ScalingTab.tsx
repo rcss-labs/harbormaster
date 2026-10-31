@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { useDesiredCountInfo, useSetDesiredCount, type DesiredCountInfo, type DesiredCountResult } from '../../../api/change'
 import { useScaling } from '../../../api/observe'
 import { useService } from '../../../api/hooks'
 import type { ScalingDTO, ScalingPolicyDTO } from '../../../api/types'
@@ -7,7 +8,6 @@ import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { KV } from '../../../components/KV'
 import { useToast } from '../../../components/Toast'
-import { useDesiredCountInfo, useSetDesiredCount, type DesiredCountInfo, type SetDesiredCountResult } from './desiredCount'
 import styles from './ScalingTab.module.css'
 
 type SaveDesired = (desired: number) => void
@@ -48,8 +48,8 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
   if (!service.data || !info.data || !scaling.data) return null
 
   const saveDesired: SaveDesired = (desired) =>
-    setDesired.mutate(desired, {
-      onSuccess: (result: SetDesiredCountResult) =>
+    setDesired.mutate({ desired }, {
+      onSuccess: (result: DesiredCountResult) =>
         toast.show(
           result.changed ? `Desired count set to ${result.desired}.` : `Desired count is already ${result.desired}.`,
           result.changed ? 'ok' : 'info',

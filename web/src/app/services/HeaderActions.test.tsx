@@ -164,6 +164,19 @@ describe('HeaderActions desired count', () => {
     ).toBeInTheDocument()
   })
 
+  it('links to the Scaling tab and closes the dialog when followed', async () => {
+    server.use(desiredCountInfo({ auto_scaling: { min: 2, max: 6 } }))
+    renderActions()
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
+    const link = await screen.findByRole('link', { name: 'Auto scaling settings →' })
+    expect(link).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    await user.click(link)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('shows a toast and posts nothing when the value is unchanged', async () => {
     const countRequests = vi.fn()
     server.use(

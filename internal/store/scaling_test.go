@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
@@ -58,12 +59,8 @@ func TestScaling_UpsertGetNotFound(t *testing.T) {
 	}
 }
 
-// scalingRangeSource is the capacity lookup plan 02's desired-count warning depends on.
-type scalingRangeSource interface {
-	Range(ctx context.Context, key model.ServiceKey) (min, max int, ok bool, err error)
-}
-
-var _ scalingRangeSource = (*store.Store)(nil)
+// The store is the auto scaling range source plan 02's desired-count warning reads.
+var _ deploy.ScalingRangeSource = (*store.Store)(nil)
 
 func TestScaling_Range(t *testing.T) {
 	s := storetest.Open(t)
