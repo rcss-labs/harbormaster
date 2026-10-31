@@ -197,14 +197,10 @@ func (r *Real) ECS(ctx context.Context, t Target) (ECSAPI, error) {
 }
 
 // The clients below are filled in by the plans named in the conventions doc.
-func (r *Real) EC2(context.Context, Target) (EC2API, error)                 { return nil, nil } // plan 05
-func (r *Real) EFS(context.Context, Target) (EFSAPI, error)                 { return nil, nil } // plan 05
-func (r *Real) ELB(context.Context, Target) (ELBAPI, error)                 { return nil, nil } // plan 03
-func (r *Real) AutoScaling(context.Context, Target) (AutoScalingAPI, error) { return nil, nil } // plan 03
-func (r *Real) CloudWatch(context.Context, Target) (CloudWatchAPI, error)   { return nil, nil } // plan 03
-func (r *Real) Logs(context.Context, Target) (LogsAPI, error)               { return nil, nil } // plan 03
-func (r *Real) ECR(context.Context, Target) (ECRAPI, error)                 { return nil, nil } // plan 02
-func (r *Real) SSM(context.Context, Target) (SSMAPI, error)                 { return nil, nil } // plan 04
+func (r *Real) EC2(context.Context, Target) (EC2API, error) { return nil, nil } // plan 05
+func (r *Real) EFS(context.Context, Target) (EFSAPI, error) { return nil, nil } // plan 05
+func (r *Real) ECR(context.Context, Target) (ECRAPI, error) { return nil, nil } // plan 02
+func (r *Real) SSM(context.Context, Target) (SSMAPI, error) { return nil, nil } // plan 04
 
 var (
 	_ Clients = (*Real)(nil)

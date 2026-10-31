@@ -246,6 +246,7 @@ func MockupEstate(now func() time.Time) *Estate {
 	}
 	sd.addStandalone()
 	e.recountAll()
+	seedObserve(e)
 	return e
 }
 
@@ -308,7 +309,7 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 	if sp.sidecar {
 		td.ContainerDefinitions = append(td.ContainerDefinitions, ecstypes.ContainerDefinition{
 			Name: aws.String("otel-collector"), Image: aws.String("public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"),
-			Essential: aws.Bool(false), LogConfiguration: logCfg})
+			Essential: aws.Bool(false), LogConfiguration: &ecstypes.LogConfiguration{LogDriver: ecstypes.LogDriverAwsfirelens}})
 	}
 	return TaskDefinition{AccountID: c.accountID, Region: c.region, Definition: td}
 }
