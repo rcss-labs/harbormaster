@@ -806,3 +806,16 @@ export const IMAGE_TAGS_PAYMENTS: ImageTagsResponse = {
   tags: [{ tag: '1.18.4', pushed_at: FIXTURE_NOW }],
 }
 export const DESIRED_COUNT_PAYMENTS: DesiredCountResponse = { desired: 3, running: 3, max: 50, auto_scaling: null }
+
+// ---- Task definition tab (plan 02, task 15) ----
+export const TASK_DEFINITION_EDITABLE: TaskDefinitionResponse = {
+  ...TASK_DEFINITION_PAYMENTS,
+  definition: {
+    family: 'payments-api',
+    cpu: '512',
+    memory: '1024',
+    containerDefinitions: [
+      { name: 'payments-api', image: 'payments-api:1.18.2', essential: true, environment: [{ name: 'LOG_LEVEL', value: 'info' }] },
+    ],
+  },
+}

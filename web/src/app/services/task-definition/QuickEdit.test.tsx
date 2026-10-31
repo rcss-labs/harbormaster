@@ -1,0 +1,71 @@
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
+import { describe, expect, it } from 'vitest'
+import type { ImageTagsResponse } from '../../../api/change'
+import { QuickEdit } from './QuickEdit'
+import type { Definition } from './mainContainer'
+
+const ecr: ImageTagsResponse = {
+  source: 'ecr',
+  repository: 'payments-api',
+  current: '0.4.2',
+  tags: [
+    { tag: '0.4.4', pushed_at: '2026-10-30T10:00:00Z' },
+    { tag: '0.4.2', pushed_at: '2026-10-20T10:00:00Z' },
+  ],
+}
+const none: ImageTagsResponse = { source: 'none', repository: '', current: '', tags: [] }
+
+const base: Definition = {
+  family: 'payments-api',
+  cpu: '256',
+  memory: '512',
+  containerDefinitions: [{ name: 'payments-api', image: 'payments-api:0.4.2', essential: true, environment: [{ name: 'A', value: '1' }] }],
+}
+
+function Harness({ tags, oomHint }: { tags: ImageTagsResponse; oomHint?: { memory: string; suggested: string } }) {
+  const [definition, setDefinition] = useState(base)
+  return (
+    <>
+      <QuickEdit definition={definition} mainContainer="payments-api" imageTags={tags} deployedTag="0.4.2" oomHint={oomHint} disabled={false} onChange={setDefinition} />
+      <output data-testid="json">{JSON.stringify(definition)}</output>
+    </>
+  )
+}
+
+describe('QuickEdit', () => {
+  it('lists ECR tags marked newest and deployed', () => {
+    render(<Harness tags={ecr} />)
+    expect(screen.getByRole('option', { name: '0.4.4 · newest' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '0.4.2 · deployed' })).toBeInTheDocument()
+  })
+
+  it('rejects an invalid free-text tag', async () => {
+    render(<Harness tags={none} />)
+    const input = screen.getByRole('textbox', { name: 'Image tag' })
+    await userEvent.clear(input)
+    await userEvent.type(input, 'bad tag!')
+    expect(screen.getByText('Tag may contain letters, digits, . _ -')).toBeInTheDocument()
+    expect(screen.getByTestId('json').textContent).toContain('payments-api:bad tag!')
+  })
+
+  it('limits memory to the Fargate values for the chosen CPU', async () => {
+    render(<Harness tags={ecr} />)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Task CPU' }), '512')
+    const memory = screen.getByRole('combobox', { name: 'Task memory' })
+    expect(Array.from(memory.querySelectorAll('option')).map((option) => option.textContent)).toEqual(['1024', '2048', '3072', '4096'])
+    expect(screen.getByTestId('json').textContent).toContain('"memory":"1024"')
+  })
+
+  it('shows the out of memory hint', () => {
+    render(<Harness tags={ecr} oomHint={{ memory: '512', suggested: '1024' }} />)
+    expect(screen.getByText('Tasks of this service stop with OutOfMemoryError (exit 137) at 512 MiB. Try 1024 MiB.')).toBeInTheDocument()
+  })
+
+  it('adds an environment variable', async () => {
+    render(<Harness tags={ecr} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Add variable' }))
+    expect(screen.getByTestId('json').textContent).toContain('NEW_VAR')
+  })
+})
