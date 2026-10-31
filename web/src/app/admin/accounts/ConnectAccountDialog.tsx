@@ -28,9 +28,15 @@ export function ConnectAccountDialog({ onClose }: ConnectAccountDialogProps) {
   const [regions, setRegions] = useState<string[]>(DEFAULT_REGIONS)
   const [results, setResults] = useState<RegionResult[]>([])
   const [error, setError] = useState('')
+  // The endpoint issues a new random ID on every call, so the ID must stay fixed while the dialog is open:
+  // no refetch on focus or reconnect, and the cache entry is dropped on close so the next open fetches a fresh ID.
   const externalIdQuery = useQuery({
     queryKey: ['external-id'],
     queryFn: () => api.get<{ external_id: string }>('/api/accounts/external-id'),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    gcTime: 0,
   })
   const externalId = externalIdQuery.data?.external_id ?? ''
 

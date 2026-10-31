@@ -57,6 +57,42 @@ describe('Accounts', () => {
     ])
   })
 
+  it('keeps one external ID while the connect dialog is open', async () => {
+    const issuedIds: string[] = []
+    const connectBodies: { external_id: string }[] = []
+    server.use(
+      http.get('/api/accounts/external-id', () => {
+        const externalId = `external-id-${issuedIds.length + 1}`
+        issuedIds.push(externalId)
+        return HttpResponse.json({ external_id: externalId })
+      }),
+      http.post('/api/accounts', async ({ request }) => {
+        connectBodies.push((await request.json()) as { external_id: string })
+        return HttpResponse.json(ACCOUNTS.items[0], { status: 201 })
+      }),
+    )
+
+    renderApp('/admin/accounts')
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect account' }))
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() => expect(issuedIds).toHaveLength(1))
+    const firstId = issuedIds[0]
+    expect(await within(dialog).findByDisplayValue(firstId)).toBeInTheDocument()
+
+    // Returning from the AWS console refocuses the window; the field must not pick up a new ID.
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('visibilitychange'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(issuedIds).toHaveLength(1)
+    expect(within(dialog).getByDisplayValue(firstId)).toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'staging-example-2' } })
+    fireEvent.change(within(dialog).getByLabelText('Role ARN'), { target: { value: ROLE_ARN } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Test and connect' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(connectBodies.map((body) => body.external_id)).toEqual([firstId])
+  })
+
   it('status pill from last_error', async () => {
     const broken: AccountsDTO = {
       ...ACCOUNTS,
