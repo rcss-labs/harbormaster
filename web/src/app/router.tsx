@@ -5,6 +5,8 @@ import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
+import { Cluster } from './clusters/Cluster'
+import { Clusters } from './clusters/Clusters'
 import { Overview } from './overview/Overview'
 import { Shell } from './shell/Shell'
 import styles from './auth/auth.module.css'
@@ -55,6 +57,8 @@ export function AppRoutes() {
         <Route path="password" element={<ChangePassword />} />
         <Route element={<Shell />}>
           <Route index element={<Overview />} />
+          <Route path="clusters" element={<Clusters />} />
+          <Route path="clusters/:clusterId" element={<Cluster />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>
