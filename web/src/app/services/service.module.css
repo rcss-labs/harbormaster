@@ -49,3 +49,6 @@
 .end { margin-left: auto; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
 .more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }
+
+/* Metrics tab toolbar: range selector and resolution text (mockup sMetrics()). */
+.metricsToolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
