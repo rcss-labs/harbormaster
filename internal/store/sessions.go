@@ -94,3 +94,12 @@ func derefString(p *string) string {
 	}
 	return *p
 }
+
+// DeleteSessionsForUserExcept removes every session of userID except the one with keepIDHash.
+func (s *Store) DeleteSessionsForUserExcept(ctx context.Context, userID int64, keepIDHash string) error {
+	_, err := s.Pool.Exec(ctx, `delete from sessions where user_id = $1 and id_hash <> $2`, userID, keepIDHash)
+	if err != nil {
+		return fmt.Errorf("delete other sessions for user: %w", err)
+	}
+	return nil
+}
