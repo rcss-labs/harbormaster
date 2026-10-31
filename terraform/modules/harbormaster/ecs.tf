@@ -39,7 +39,7 @@ locals {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = aws_cloudwatch_log_group.server.name
-          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-region"        = data.aws_region.current.id
           "awslogs-stream-prefix" = "ecs"
         }
       }
@@ -117,5 +117,10 @@ resource "aws_ecs_service" "server" {
 
   tags = local.tags
 
-  depends_on = [aws_lb_listener.https]
+  depends_on = [
+    aws_lb_listener.https,
+    aws_iam_role_policy.execution_secrets,
+    aws_iam_role_policy_attachment.execution_managed,
+    aws_iam_role_policy.task_assume,
+  ]
 }

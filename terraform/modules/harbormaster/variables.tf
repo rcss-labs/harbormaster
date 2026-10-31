@@ -118,6 +118,11 @@ variable "extra_env" {
     condition     = alltrue([for key in keys(var.extra_env) : can(regex("^HM_[A-Z0-9_]+$", key))])
     error_message = "extra_env keys must match ^HM_[A-Z0-9_]+$."
   }
+
+  validation {
+    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN"])) == 0
+    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY or HM_METRICS_TOKEN; the module injects them from Secrets Manager."
+  }
 }
 
 variable "db_instance_class" {
