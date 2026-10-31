@@ -17,18 +17,22 @@ const DEPLOY_COLOR = 'var(--info)'
 
 /**
  * Deployment markers on the 24 h chart. Only deploys are shown (restarts are not in the legend).
- * `at` is the fraction of the 24 h window from the first timestamp; the label is `<service first segment>:<rev>`.
+ * `at` is the fraction across the plotted series (first to last timestamp), like the chart's own x axis; the label is
+ * `<service first segment>:<rev>`. The grid can end up to 40 minutes before now (the in-progress bucket is left out),
+ * so a deployment newer than the last timestamp is pinned to the right edge instead of being dropped.
  */
 export function deployMarks(metrics: ClusterMetricsDTO) {
   const firstTimestamp = metrics.timestamps[0]
+  const lastTimestamp = metrics.timestamps[metrics.timestamps.length - 1]
   const windowStart = firstTimestamp ? Date.parse(firstTimestamp) : Date.now() - DAY_MS
+  const plottedSpan = metrics.timestamps.length > 1 ? Date.parse(lastTimestamp) - windowStart : DAY_MS
   return metrics.markers
     .filter((marker) => marker.kind === 'deploy')
     .map((marker) => ({
-      at: (Date.parse(marker.at) - windowStart) / DAY_MS,
+      at: Math.min((Date.parse(marker.at) - windowStart) / plottedSpan, 1),
       label: `${marker.service ? marker.service.split('-')[0] : ''}${marker.label}`,
     }))
-    .filter((mark) => mark.at >= 0 && mark.at <= 1)
+    .filter((mark) => mark.at >= 0)
 }
 
 interface ClusterUsageChartProps {
