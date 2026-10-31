@@ -6,6 +6,7 @@ import { createElement, type ReactElement } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import type { MeDTO } from '../api/types'
+import { ToastProvider } from '../components/Toast'
 import { server } from './msw'
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
@@ -30,7 +31,7 @@ export function renderWithProviders(ui: ReactElement, { route = '/', me }: Rende
     createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(MemoryRouter, { initialEntries: [route] }, ui),
+      createElement(MemoryRouter, { initialEntries: [route] }, createElement(ToastProvider, null, ui)),
     ),
   )
 }

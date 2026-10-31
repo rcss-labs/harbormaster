@@ -1,0 +1,6 @@
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tabs a { padding: 9px 12px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; text-decoration: none; }
+.tabs a:hover { color: var(--text); }
+.tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs a.locked { opacity: 0.55; }
+.badge { font-size: 10.5px; margin-left: 4px; color: var(--muted); }

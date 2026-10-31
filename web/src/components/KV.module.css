@@ -1,0 +1,3 @@
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 16px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

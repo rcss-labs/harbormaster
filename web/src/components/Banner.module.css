@@ -1,0 +1,4 @@
+.banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: var(--radius); border: 1px solid; font-size: 12.5px; color: var(--text); }
+.info { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.warn { background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 35%, transparent); }
+.bad { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
