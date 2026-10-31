@@ -79,5 +79,5 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, ItemsResponse[PollerItemDTO]{Items: items})
 }

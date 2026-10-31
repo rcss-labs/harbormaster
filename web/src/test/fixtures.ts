@@ -306,8 +306,12 @@ function standaloneTasks(): TaskDTO[] {
   ]
 }
 
+/** A failed stop (non-zero exit, or never started) or an unhealthy task: what the API sorts first. */
 const isProblem = (task: TaskDTO) =>
-  (task.status === 'RUNNING' && task.health === 'UNHEALTHY') || (task.status === 'STOPPED' && task.exit_code !== 0)
+  (task.status === 'STOPPED' && ((task.exit_code ?? 0) !== 0 || task.stop_code === 'TaskFailedToStart')) || task.health === 'UNHEALTHY'
+
+/** The API's `problems` filter: everything not STOPPED, plus problems. `running` is also "not STOPPED". */
+const inProblemsFilter = (task: TaskDTO) => task.status !== 'STOPPED' || isProblem(task)
 
 const taskSortTime = (task: TaskDTO) => Date.parse(task.stopped_at ?? task.started_at ?? FIXTURE_NOW)
 
@@ -331,7 +335,7 @@ function stopReasons(items: TaskDTO[]): ReasonCountDTO[] {
 
 /** Builds a TasksListDTO whose counts and summary are derived from `items`. */
 export function tasksList(items: TaskDTO[]): TasksListDTO {
-  const running = items.filter((t) => t.status === 'RUNNING')
+  const running = items.filter((t) => t.status !== 'STOPPED')
   const stopped = items.filter((t) => t.status === 'STOPPED')
   const azCounts = new Map<string, number>()
   for (const task of running) azCounts.set(task.az, (azCounts.get(task.az) ?? 0) + 1)
@@ -346,19 +350,27 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
     items,
     next: null,
     polled_at: FIXTURE_NOW,
-    counts: { problems: items.filter(isProblem).length, running: running.length, stopped: stopped.length, all: items.length },
+    counts: { problems: items.filter(inProblemsFilter).length, running: running.length, stopped: stopped.length, all: items.length },
     summary: {
       by_status: {
         running_healthy: running.filter((t) => t.health !== 'UNHEALTHY').length,
         running_unhealthy: running.filter((t) => t.health === 'UNHEALTHY').length,
-        stopped_error: stopped.filter((t) => t.exit_code !== 0).length,
-        stopped_normal: stopped.filter((t) => t.exit_code === 0).length,
+        stopped_error: stopped.filter(isProblem).length,
+        stopped_normal: stopped.filter((t) => !isProblem(t)).length,
       },
       by_az: [...azCounts].map(([az, count]) => ({ az, count })).sort((a, b) => a.az.localeCompare(b.az)),
       by_cluster: [...clusters.values()],
       stop_reasons: stopReasons(items),
     },
   }
+}
+
+/** Applies the API's `?filter=` to a task list (anything but problems|running|stopped means all). */
+export function filterTasks(items: TaskDTO[], filter: string | null): TaskDTO[] {
+  if (filter === 'problems') return items.filter(inProblemsFilter)
+  if (filter === 'running') return items.filter((t) => t.status !== 'STOPPED')
+  if (filter === 'stopped') return items.filter((t) => t.status === 'STOPPED')
+  return items
 }
 
 /** The list the API returns for `/api/tasks?filter=&q=`: items are filtered, counts are for the filtered scope. */
@@ -368,11 +380,7 @@ export function tasksResponse(filter: string | null, q: string | null): TasksLis
     !needle || [t.short_id, t.family, t.service?.name ?? '', t.cluster.name, t.private_ip].some((v) => v.toLowerCase().includes(needle))
   const scoped = ALL_TASKS.filter(matchesQuery)
   const body = tasksList(scoped)
-  const items =
-    filter === 'problems' ? scoped.filter(isProblem)
-    : filter === 'running' ? scoped.filter((t) => t.status === 'RUNNING')
-    : filter === 'stopped' ? scoped.filter((t) => t.status === 'STOPPED')
-    : scoped
+  const items = filterTasks(scoped, filter)
   return { ...body, items }
 }
 
@@ -409,7 +417,7 @@ function deploymentsPerDay(): DeploysDayDTO[] {
 function serviceEvents(def: ServiceDef): EventDTO[] {
   const cluster = clusterDef(def.cluster)
   const base = { service: serviceRefOf(def), cluster: clusterRefOf(cluster) }
-  const ecs = (minutes: number, text: string): EventDTO => ({ ts: minutesAgo(minutes), source: 'ecs', actor: '', ...base, text })
+  const ecs = (minutes: number, text: string): EventDTO => ({ ts: minutesAgo(minutes), source: 'ecs', actor: 'ECS', ...base, text })
   const events: EventDTO[] = [
     ecs(60 * 30, `(service ${def.name}) has reached a steady state.`),
     { ts: minutesAgo(60 * 26), source: 'harbormaster', actor: 'pavel', ...base, text: `Restarted service (force new deployment) on revision ${def.revision}.` },

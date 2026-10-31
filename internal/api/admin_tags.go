@@ -102,7 +102,7 @@ func (s *Server) listTagItems(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, ItemsResponse[TagItemDTO]{Items: items})
 }
 
 // decodeTagBody reads and validates {name, color}; the name is returned trimmed.
@@ -238,11 +238,7 @@ func (s *Server) tagImpact(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	out := struct {
-		Clusters []idNameDTO `json:"clusters"`
-		Services []idNameDTO `json:"services"`
-		Users    []string    `json:"users"`
-	}{Clusters: []idNameDTO{}, Services: []idNameDTO{}, Users: impact.Usernames}
+	out := TagImpactResponse{Clusters: []idNameDTO{}, Services: []idNameDTO{}, Users: impact.Usernames}
 	for _, k := range impact.Clusters {
 		out.Clusters = append(out.Clusters, idNameDTO{ID: k.ID(), Name: k.Cluster})
 	}
@@ -306,9 +302,7 @@ func (s *Server) listTagAssignments(w http.ResponseWriter, r *http.Request) {
 		}
 		byCluster[svc.Key.ClusterKey] = append(byCluster[svc.Key.ClusterKey], dto)
 	}
-	out := struct {
-		Clusters []clusterAssignmentDTO `json:"clusters"`
-	}{Clusters: []clusterAssignmentDTO{}}
+	out := TagAssignmentsResponse{Clusters: []clusterAssignmentDTO{}}
 	for _, c := range clusters {
 		dto := clusterAssignmentDTO{ID: c.Key.ID(), Name: c.Key.Cluster, AccountName: names[c.Key.AccountID],
 			Region: c.Key.Region, Effective: tags[c.TagID], Services: byCluster[c.Key]}

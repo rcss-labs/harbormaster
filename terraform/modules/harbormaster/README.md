@@ -65,6 +65,10 @@ aws logs tail /ecs/harbormaster/harbormaster-server --since 15m --profile <name>
 
 If `bootstrap_admin_password_secret_arn` is set, the admin is created from that secret instead and no setup token is printed.
 
+## Database secret format
+
+`harbormaster/database-url` holds a complete `postgres://harbormaster:<password>@<host>:<port>/harbormaster?sslmode=require` URL, not JSON and not an RDS-managed master secret (those have no `host`, which Harbormaster rejects). ECS injects the whole value as `HM_DATABASE_URL`, so the server uses it as is. Do not point `HM_DATABASE_SECRET_ARN` at an RDS-managed secret.
+
 ## Destroying and re-creating
 
 Two fixed names make a destroy followed by a re-create collide:

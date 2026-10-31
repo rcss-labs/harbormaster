@@ -443,3 +443,47 @@ type PollerItemDTO struct {
 	LastError   string     `json:"last_error"`
 	LastOKAt    *time.Time `json:"last_ok_at"`
 }
+
+// ItemsResponse is the body of the unpaginated list endpoints: {"items": [...]}.
+type ItemsResponse[T any] struct {
+	Items []T `json:"items"`
+}
+
+// SetupStatusDTO is the body of GET /api/auth/setup.
+type SetupStatusDTO struct {
+	Needed bool `json:"needed"`
+}
+
+// LoginResponse is the body of a successful sign-in.
+type LoginResponse struct {
+	User MeDTO `json:"user"`
+}
+
+// CreateUserResponse is the body of POST /api/users. Fields are in key order so the JSON matches a sorted map.
+type CreateUserResponse struct {
+	TemporaryPassword string  `json:"temporary_password"`
+	User              UserDTO `json:"user"`
+}
+
+// AccountTestResponse is the body of POST /api/accounts/test.
+type AccountTestResponse struct {
+	Regions []RegionResultDTO `json:"regions"`
+}
+
+// PermissionsResponse is the body of GET /api/permissions.
+type PermissionsResponse struct {
+	Tags  []permissionTagDTO  `json:"tags"`
+	Users []permissionUserDTO `json:"users"`
+}
+
+// TagImpactResponse is the body of GET /api/tags/{id}/impact.
+type TagImpactResponse struct {
+	Clusters []idNameDTO `json:"clusters"`
+	Services []idNameDTO `json:"services"`
+	Users    []string    `json:"users"`
+}
+
+// TagAssignmentsResponse is the body of GET /api/tag-assignments.
+type TagAssignmentsResponse struct {
+	Clusters []clusterAssignmentDTO `json:"clusters"`
+}

@@ -83,10 +83,11 @@ export function useService(id: string) {
   })
 }
 
+/** The service Tasks tab shows running and stopped tasks, so it asks for `all` (the server defaults to `problems`). */
 export function useServiceTasks(id: string, cursor?: string) {
   return useQuery({
     queryKey: ['service', id, 'tasks', cursor],
-    queryFn: () => api.get<TasksListDTO>(`/api/services/${id}/tasks${queryString({ cursor })}`),
+    queryFn: () => api.get<TasksListDTO>(`/api/services/${id}/tasks${queryString({ filter: 'all', cursor })}`),
     ...live,
   })
 }

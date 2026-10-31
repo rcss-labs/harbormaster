@@ -6,3 +6,5 @@ internal/web/dist/*
 .superpowers/
 
 **/.terraform/
+web/test-results/
+web/playwright-report/

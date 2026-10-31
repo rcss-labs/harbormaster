@@ -16,6 +16,7 @@ import {
   USERS,
   ALL_TASKS,
   FIXTURE_NOW,
+  filterTasks,
   tasksList,
   tasksResponse,
 } from './fixtures'
@@ -29,7 +30,13 @@ function search(q: string): SearchResultDTO[] {
   const results: SearchResultDTO[] = [
     ...CLUSTERS.items.map((c) => ({ kind: 'cluster' as const, label: c.name, sub: `${c.account_name} · ${c.region}`, href: `/clusters/${c.id}` })),
     ...Object.values(SERVICE_DETAILS).map((s) => ({ kind: 'service' as const, label: s.name, sub: `${s.cluster.name} · ${s.region}`, href: `/services/${s.id}/overview` })),
-    ...ALL_TASKS.filter((t) => t.service).map((t) => ({ kind: 'task' as const, label: t.short_id, sub: `${t.service!.name} · ${t.cluster.name}`, href: `/services/${t.service!.id}/tasks` })),
+    // A standalone task (no service) links to its cluster.
+    ...ALL_TASKS.map((t) => ({
+      kind: 'task' as const,
+      label: t.short_id,
+      sub: t.service ? `${t.service.name} · ${t.cluster.name}` : `${t.family} · ${t.cluster.name}`,
+      href: t.service ? `/services/${t.service.id}/tasks` : `/clusters/${t.cluster.id}`,
+    })),
   ]
   return results.filter((r) => r.label.toLowerCase().includes(needle)).slice(0, 8)
 }
@@ -50,10 +57,13 @@ export const handlers = [
     const cluster = CLUSTER_DETAILS[params.id as string]
     return cluster ? HttpResponse.json(cluster) : notFound()
   }),
-  http.get('/api/services/:id/tasks', ({ params }) => {
+  http.get('/api/services/:id/tasks', ({ params, request }) => {
     const id = params.id as string
     if (!SERVICE_DETAILS[id]) return notFound()
-    return HttpResponse.json(tasksList(ALL_TASKS.filter((t) => t.service?.id === id)))
+    // Like the API: `problems` unless the caller asks for another filter.
+    const filter = new URL(request.url).searchParams.get('filter') ?? 'problems'
+    const serviceTasks = ALL_TASKS.filter((t) => t.service?.id === id)
+    return HttpResponse.json({ ...tasksList(serviceTasks), items: filterTasks(serviceTasks, filter) })
   }),
   http.get('/api/services/:id/operations', ({ params, request }) => {
     const id = params.id as string
