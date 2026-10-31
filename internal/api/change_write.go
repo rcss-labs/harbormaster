@@ -156,7 +156,7 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	registered, err := s.Deploy.Register(ctx, subject, key, deploy.RegisterInput{BaseRevision: *body.BaseRevision, Definition: body.Definition})
+	registered, err := s.Deploy.Register(ctx, subject, key, deploy.RegisterInput{BaseRevision: *body.BaseRevision, Definition: body.Definition, Deployed: &deployed})
 	if err != nil {
 		s.failChange(w, err)
 		return

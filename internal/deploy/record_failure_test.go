@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/rcss-labs/harbormaster/internal/deploy"
@@ -152,4 +153,68 @@ func TestOutcomeLogger_FailedLogWriteRollsBackClaimAndNextPassRetries(t *testing
 		t.Fatal(err)
 	}
 	assertOnlyText(t, f.operationTexts(t), "Deployment of image-resizer:7 completed.")
+}
+
+func TestDeployedDefinition_TagsAreCachedPerARNForAMinute(t *testing.T) {
+	h := newHarness(t)
+	now := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+	h.svc.Now = func() time.Time { return now }
+
+	first, err := h.svc.DeployedDefinition(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A caller editing the returned tags must not corrupt the cache.
+	if len(first.Tags) == 0 {
+		t.Fatal("fixture has no tags; the test would prove nothing")
+	}
+	first.Tags[0].Value = aws.String("tampered")
+	second, err := h.svc.DeployedDefinition(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := h.fake.Calls()["ListTagsForResource"]; calls != 1 {
+		t.Errorf("ListTagsForResource calls within the TTL = %d, want 1", calls)
+	}
+	if aws.ToString(second.Tags[0].Value) == "tampered" {
+		t.Error("caller mutation leaked into the cache")
+	}
+
+	now = now.Add(61 * time.Second)
+	if _, err := h.svc.DeployedDefinition(t.Context(), paymentsKey); err != nil {
+		t.Fatal(err)
+	}
+	if calls := h.fake.Calls()["ListTagsForResource"]; calls != 2 {
+		t.Errorf("ListTagsForResource calls after the TTL = %d, want 2", calls)
+	}
+}
+
+func TestRegister_ReusesTheDeployedDefinitionTheCallerAlreadyRead(t *testing.T) {
+	h := newHarness(t)
+	now := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
+	h.svc.Now = func() time.Time { return now }
+	deployed, err := h.svc.DeployedDefinition(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := draftFromDeployed(t, h, "payments-api:1.18.3")
+	now = now.Add(5 * time.Minute) // the tag cache has expired: only reuse avoids another read
+	before := h.fake.Calls()["ListTagsForResource"]
+	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft, Deployed: &deployed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.fake.Calls()["ListTagsForResource"] - before; got != 0 {
+		t.Errorf("ListTagsForResource calls during Register = %d, want 0 (the caller's Deployed is reused)", got)
+	}
+}
+
+func TestRegister_IgnoresAProvidedDeployedThatIsNotTheLivePrimary(t *testing.T) {
+	h := newHarness(t)
+	stale := deploy.Deployed{Family: "payments-api", Revision: 41, ARN: "arn:aws:ecs:us-east-1:482109375512:task-definition/payments-api:41"}
+	draft := draftFromDeployed(t, h, "payments-api:1.18.3")
+	_, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 41, Definition: draft, Deployed: &stale})
+	var staleBase *deploy.StaleBaseError
+	if !errors.As(err, &staleBase) || staleBase.DeployedRevision != 42 {
+		t.Fatalf("Register() = %v, want StaleBaseError against the live revision 42", err)
+	}
 }

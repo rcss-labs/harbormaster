@@ -45,6 +45,57 @@ type Service struct {
 	cacheMu    sync.Mutex
 	imageCache *ttlCache[[]ImageTagInfo]
 	revCache   *ttlCache[[]string]
+	tagCache   *ttlCache[[]ecstypes.Tag]
+}
+
+// tagsTTL is how long a revision's tags are cached. A registered revision's tags
+// essentially never change, and the Task definition tab polls every 5 s.
+const tagsTTL = 60 * time.Second
+
+func (s *Service) revisionTagCache() *ttlCache[[]ecstypes.Tag] {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.tagCache == nil {
+		s.tagCache = newTTLCache[[]ecstypes.Tag](tagsTTL)
+	}
+	return s.tagCache
+}
+
+// cloneTags copies tags so cached values cannot be changed through a returned slice.
+func cloneTags(tags []ecstypes.Tag) []ecstypes.Tag {
+	if tags == nil {
+		return nil
+	}
+	out := make([]ecstypes.Tag, len(tags))
+	for i, tag := range tags {
+		out[i] = ecstypes.Tag{Key: copyString(tag.Key), Value: copyString(tag.Value)}
+	}
+	return out
+}
+
+func copyString(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	return aws.String(*p)
+}
+
+// revisionTags returns the tags of the task definition revision arn, cached per ARN.
+func (s *Service) revisionTags(ctx context.Context, key model.ServiceKey, arn string) ([]ecstypes.Tag, error) {
+	cache := s.revisionTagCache()
+	if tags, ok := cache.get(arn, s.now()); ok {
+		return cloneTags(tags), nil
+	}
+	ecsAPI, err := s.Clients.ECS(ctx, targetOf(key))
+	if err != nil {
+		return nil, err
+	}
+	out, err := ecsAPI.ListTagsForResource(ctx, &ecs.ListTagsForResourceInput{ResourceArn: aws.String(arn)})
+	if err != nil {
+		return nil, wrapAWS(err)
+	}
+	cache.put(arn, cloneTags(out.Tags), s.now())
+	return cloneTags(out.Tags), nil
 }
 
 func (s *Service) imageTagCache() *ttlCache[[]ImageTagInfo] {
@@ -160,18 +211,14 @@ func (s *Service) deployedFrom(ctx context.Context, key model.ServiceKey, svc ec
 	if err != nil {
 		return Deployed{}, err
 	}
-	ecsAPI, err := s.Clients.ECS(ctx, targetOf(key))
+	tags, err := s.revisionTags(ctx, key, arn)
 	if err != nil {
 		return Deployed{}, err
-	}
-	tags, err := ecsAPI.ListTagsForResource(ctx, &ecs.ListTagsForResourceInput{ResourceArn: aws.String(arn)})
-	if err != nil {
-		return Deployed{}, wrapAWS(err)
 	}
 	container, _ := MainContainer(definition, key.Service)
 	return Deployed{
 		Family: family, Revision: revision, ARN: arn, MainContainer: container, Definition: definition,
-		Tags: tags.Tags, Controller: Controller(svc), Strategy: StrategyText(svc),
+		Tags: tags, Controller: Controller(svc), Strategy: StrategyText(svc),
 	}, nil
 }
 

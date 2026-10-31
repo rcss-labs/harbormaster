@@ -18,6 +18,9 @@ import (
 type RegisterInput struct {
 	BaseRevision int
 	Definition   Definition
+	// Deployed is the deployed definition the caller already read. Register uses it only when it
+	// is the live PRIMARY revision; otherwise it reads the definition again.
+	Deployed *Deployed
 }
 
 // Registered describes the new task definition revision.
@@ -44,7 +47,7 @@ func (s *Service) Register(ctx context.Context, subj authz.Subject, key model.Se
 	if err != nil {
 		return Registered{}, err
 	}
-	deployed, err := s.deployedFrom(ctx, key, live)
+	deployed, err := s.deployedForRegister(ctx, key, live, in.Deployed)
 	if err != nil {
 		return Registered{}, err
 	}
@@ -90,6 +93,17 @@ func summarizeRegistered(key model.ServiceKey, td ecstypes.TaskDefinition) (Regi
 	container, _ := MainContainer(definition, key.Service)
 	registered.ImageTag = ImageTag(definition, container)
 	return registered, nil
+}
+
+// deployedForRegister reuses the caller's Deployed when it describes the live PRIMARY revision,
+// and builds it from the live service otherwise (the caller's copy came from a possibly stale snapshot).
+func (s *Service) deployedForRegister(ctx context.Context, key model.ServiceKey, live ecstypes.Service, provided *Deployed) (Deployed, error) {
+	if primary, ok := PrimaryDeployment(live); ok && provided != nil && provided.ARN != "" && provided.ARN == aws.ToString(primary.TaskDefinition) {
+		reused := *provided
+		reused.Tags = cloneTags(provided.Tags)
+		return reused, nil
+	}
+	return s.deployedFrom(ctx, key, live)
 }
 
 // recordRegistered stores the new definition, who registered it, and the operation log entry, atomically.
