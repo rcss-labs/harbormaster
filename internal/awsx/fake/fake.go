@@ -24,6 +24,8 @@ type Fake struct {
 	// Throttle makes the next N ECS calls fail with ThrottlingException.
 	// Access it atomically once calls are in flight; setting it before is fine.
 	Throttle int32
+	// ExecServer backs ECS ExecuteCommand and SSM TerminateSession (plan 04); nil means no exec support.
+	ExecServer *SSMServer
 
 	mu    sync.Mutex
 	calls map[string]int
@@ -86,7 +88,12 @@ func (f *Fake) AutoScaling(context.Context, awsx.Target) (awsx.AutoScalingAPI, e
 func (f *Fake) CloudWatch(context.Context, awsx.Target) (awsx.CloudWatchAPI, error) { return nil, nil }
 func (f *Fake) Logs(context.Context, awsx.Target) (awsx.LogsAPI, error)             { return nil, nil }
 func (f *Fake) ECR(context.Context, awsx.Target) (awsx.ECRAPI, error)               { return nil, nil }
-func (f *Fake) SSM(context.Context, awsx.Target) (awsx.SSMAPI, error)               { return nil, nil }
+func (f *Fake) SSM(_ context.Context, t awsx.Target) (awsx.SSMAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &ssmClient{f: f}, nil
+}
 
 func (f *Fake) Credentials(_ context.Context, t awsx.Target) (aws.CredentialsProvider, error) {
 	if !f.knownAccount(t.AccountID) {

@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.103.1
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.8
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.81.2
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.6
 	github.com/aws/smithy-go v1.28.7
 	github.com/coder/websocket v1.8.15
