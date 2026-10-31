@@ -145,7 +145,9 @@ describe('Search', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/clusters/${cluster.id}`))
     expect(searchResults.queryByRole('link', { name: new RegExp(cluster.name) })).not.toBeInTheDocument()
   })
+})
 
+describe('Sidebar', () => {
   it('Overview badge shows the danger count, hidden at zero', async () => {
     const alerts = (danger: number) => http.get('/api/alerts', () => HttpResponse.json({ ...ALERTS, counts: { danger, warning: 0, info: 0 } }))
     server.use(alerts(1))

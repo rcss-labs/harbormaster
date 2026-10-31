@@ -39,7 +39,8 @@ describe('ClusterUsagePanels', () => {
       ),
     )
     renderApp('/')
-    expect((await screen.findAllByText('Container Insights is off for every cluster you can see.')).length).toBeGreaterThan(0)
+    await screen.findAllByText('Container Insights is off for every cluster you can see.')
+    expect(screen.getAllByText('Container Insights is off for every cluster you can see.')).toHaveLength(2)
   })
 
   it('shows the average tile from avg', async () => {

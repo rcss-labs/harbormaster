@@ -16,20 +16,19 @@ describe('NeedsAttention', () => {
   it('renders rows worst first with pill text', async () => {
     renderApp('/')
     const { card, rows: alertRows } = await rows()
-    expect(alertRows).toHaveLength(3)
+    expect(alertRows).toHaveLength(4)
     expect(within(alertRows[0]).getByText('Failing')).toBeInTheDocument()
-    expect(within(alertRows[1]).getByText('Warning')).toBeInTheDocument()
-    expect(within(alertRows[2]).getByText('In progress')).toBeInTheDocument()
-    // The link follows the alert's own `tab` (the fixture's first alert points at overview).
-    expect(alertRows[0]).toHaveAttribute('href', `/services/${ALERTS.items[0].service_id}/${ALERTS.items[0].tab}`)
-    expect(alertRows[1]).toHaveAttribute('href', `/services/${ALERTS.items[1].service_id}/${ALERTS.items[1].tab}`)
-    expect(within(card).getByText('3 open')).toBeInTheDocument()
+    expect(within(alertRows[2]).getByText('Warning')).toBeInTheDocument()
+    expect(within(alertRows[3]).getByText('In progress')).toBeInTheDocument()
+    expect(alertRows[0]).toHaveAttribute('href', `/services/${ALERTS.items[0].service_id}/tasks`)
+    expect(alertRows[3]).toHaveAttribute('href', `/services/${ALERTS.items[3].service_id}/overview`)
+    expect(within(card).getByText('4 open')).toBeInTheDocument()
   })
 
   it('links account alerts to /admin/accounts for admins', async () => {
     renderApp('/')
     const { rows: alertRows } = await rows()
-    expect(alertRows[2]).toHaveAttribute('href', '/admin/accounts')
+    expect(alertRows[1]).toHaveAttribute('href', '/admin/accounts')
   })
 
   it('empty state text', async () => {
@@ -45,6 +44,6 @@ describe('NeedsAttention for non-admins', () => {
     server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
     renderApp('/')
     const { rows: alertRows } = await rows()
-    expect(alertRows[2]).not.toHaveAttribute('href')
+    expect(alertRows[1]).not.toHaveAttribute('href')
   })
 })

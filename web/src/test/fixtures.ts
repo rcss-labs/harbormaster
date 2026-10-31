@@ -798,6 +798,8 @@ const lastPoint = (series: Series): number | null => series[series.length - 1] ?
 const paymentsId = serviceIdOf(serviceDef('payments-api'))
 const catalogId = serviceIdOf(serviceDef('catalog-api'))
 const edgeNginxId = serviceIdOf(serviceDef('edge-nginx'))
+const imageResizerId = serviceIdOf(serviceDef('image-resizer'))
+const backgroundJobsClusterId = clusterIdOf(clusterDef('background-jobs'))
 const edgeProxyClusterId = clusterIdOf(clusterDef('edge-proxy'))
 const euAppsClusterId = clusterIdOf(clusterDef('eu-apps'))
 const coreClusterId = clusterIdOf(clusterDef('core-services'))
@@ -975,34 +977,22 @@ export const SCALING_NONE: ScalingDTO = {
 export const ALERTS: AlertsDTO = {
   items: [
     {
-      kind: 'unhealthy_targets',
+      kind: 'service_failing',
       severity: 'danger',
-      title: 'Unhealthy target',
-      text: 'edge-nginx has 1 of 2 targets failing health checks.',
+      title: 'image-resizer: 0 of 2 tasks running',
+      text: 'No task is running; ECS keeps failing to start one.',
       at: minutesAgo(6),
-      service_id: edgeNginxId,
-      service: 'edge-nginx',
-      cluster: 'edge-proxy',
-      cluster_id: edgeProxyClusterId,
-      tab: 'overview',
+      service_id: imageResizerId,
+      service: 'image-resizer',
+      cluster: 'background-jobs',
+      cluster_id: backgroundJobsClusterId,
+      tab: 'tasks',
     },
     {
-      kind: 'deployment_failed',
-      severity: 'warning',
-      title: 'Deployment failed',
-      text: 'catalog-api rolled back to revision 22.',
-      at: minutesAgo(48),
-      service_id: catalogId,
-      service: 'catalog-api',
-      cluster: 'eu-apps',
-      cluster_id: euAppsClusterId,
-      tab: 'deployments',
-    },
-    {
-      kind: 'account_throttled',
-      severity: 'info',
-      title: 'AWS is throttling',
-      text: 'homelab-admin in eu-west-1 is being rate limited.',
+      kind: 'account_unreachable',
+      severity: 'danger',
+      title: 'homelab-admin / eu-west-1: unreachable',
+      text: 'AccessDenied: the role could not be assumed.',
       at: minutesAgo(3),
       service_id: '',
       service: '',
@@ -1010,8 +1000,32 @@ export const ALERTS: AlertsDTO = {
       cluster_id: '',
       tab: '',
     },
+    {
+      kind: 'unhealthy_task',
+      severity: 'warning',
+      title: 'catalog-api: 1 unhealthy task',
+      text: 'One task is failing its health check.',
+      at: minutesAgo(48),
+      service_id: catalogId,
+      service: 'catalog-api',
+      cluster: 'eu-apps',
+      cluster_id: euAppsClusterId,
+      tab: 'tasks',
+    },
+    {
+      kind: 'rollout_in_progress',
+      severity: 'info',
+      title: 'edge-nginx: rollout in progress',
+      text: 'Deploying revision 15, 1 of 2 tasks replaced.',
+      at: minutesAgo(9),
+      service_id: edgeNginxId,
+      service: 'edge-nginx',
+      cluster: 'edge-proxy',
+      cluster_id: edgeProxyClusterId,
+      tab: 'overview',
+    },
   ],
-  counts: { danger: 1, warning: 1, info: 1 },
+  counts: { danger: 2, warning: 1, info: 1 },
   polled_at: FIXTURE_NOW,
 }
 
