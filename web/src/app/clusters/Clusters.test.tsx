@@ -37,6 +37,12 @@ describe('Clusters', () => {
     expect(screen.getAllByText(/Container Insights is off/)).toHaveLength(1)
   })
 
+  it('card shows the 24 h CPU percent loaded from the default metrics handler', async () => {
+    renderApp('/clusters')
+    const euAppsCard = within(await screen.findByRole('article', { name: 'eu-apps' }))
+    expect(await euAppsCard.findByText('49%')).toBeInTheDocument()
+  })
+
   it('Clusters table › CPU column shows "Container Insights off" for edge-proxy', async () => {
     renderApp('/clusters')
     fireEvent.click(await screen.findByRole('button', { name: 'Table' }))

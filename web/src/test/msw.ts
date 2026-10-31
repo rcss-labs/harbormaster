@@ -61,6 +61,7 @@ export const handlers = [
     const items = CLUSTERS.items.filter((c) => (!account || c.account_id === account) && (!region || c.region === region))
     return HttpResponse.json({ ...CLUSTERS, items })
   }),
+  http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
   http.get('/api/clusters/:id', ({ params }) => {
     const cluster = CLUSTER_DETAILS[params.id as string]
     return cluster ? HttpResponse.json(cluster) : notFound()
@@ -108,7 +109,6 @@ export const handlers = [
   // observe (plan 03, task 16): overview metrics and alerts
   http.get('/api/overview/metrics', () => HttpResponse.json(OVERVIEW_METRICS)),
   http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
-  http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
   // observe (plan 03, task 19): service metrics and target health
   http.get('/api/services/:id/metrics', ({ params }) =>
     HttpResponse.json(params.id === SERVICE_PAYMENTS.id ? SERVICE_METRICS_PAYMENTS : SERVICE_METRICS_CATALOG_NO_INSIGHTS),

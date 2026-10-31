@@ -42,7 +42,6 @@
 .chip i { width: 6px; height: 6px; border-radius: 50%; }
 .footStats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px; }
 .footStats b { color: var(--text); font-weight: 600; }
-.mini2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
 .muted { color: var(--muted); }
