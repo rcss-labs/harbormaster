@@ -5,6 +5,7 @@ import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
+import { Overview } from './overview/Overview'
 import { Shell } from './shell/Shell'
 import styles from './auth/auth.module.css'
 
@@ -43,10 +44,6 @@ function PublicOnly() {
   return <Outlet />
 }
 
-function Home() {
-  return <h1>Overview</h1>
-}
-
 export function AppRoutes() {
   return (
     <Routes>
@@ -57,7 +54,7 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route path="password" element={<ChangePassword />} />
         <Route element={<Shell />}>
-          <Route index element={<Home />} />
+          <Route index element={<Overview />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>

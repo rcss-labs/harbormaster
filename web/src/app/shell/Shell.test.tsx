@@ -135,11 +135,14 @@ describe('Search', () => {
     const cluster = CLUSTERS.items[0]
     renderApp('/')
     const user = userEvent.setup()
-    await user.type(await screen.findByPlaceholderText('Jump to cluster, service, task'), cluster.name)
-    const option = await screen.findByRole('link', { name: new RegExp(cluster.name) })
+    const searchInput = await screen.findByPlaceholderText('Jump to cluster, service, task')
+    // Scope to the search box: the Overview page also links to clusters by name.
+    const searchResults = within(searchInput.parentElement as HTMLElement)
+    await user.type(searchInput, cluster.name)
+    const option = await searchResults.findByRole('link', { name: new RegExp(cluster.name) })
     expect(option).toHaveTextContent('cluster')
     await user.keyboard('{Enter}')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/clusters/${cluster.id}`))
-    expect(screen.queryByRole('link', { name: new RegExp(cluster.name) })).not.toBeInTheDocument()
+    expect(searchResults.queryByRole('link', { name: new RegExp(cluster.name) })).not.toBeInTheDocument()
   })
 })
