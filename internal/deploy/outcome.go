@@ -17,6 +17,11 @@ import (
 // covers the poller lagging behind a deployment that was just started.
 const supersededAfter = 2 * time.Minute
 
+// settledBefore is how old a deployment's last update may be for its outcome to
+// count as news. Older ones were already settled when Harbormaster first saw
+// them (e.g. a steady-state PRIMARY), so the row is closed without a log line.
+const settledBefore = 10 * time.Minute
+
 // OutcomeLogger closes deployment_history rows once ECS reports how a
 // deployment ended, and writes one line per outcome to the operations log.
 // It runs on every Harbormaster task; FinishDeployment's atomic claim ensures
@@ -57,7 +62,7 @@ func (l *OutcomeLogger) Once(ctx context.Context) error {
 	now := l.Now().UTC()
 	var errs []error
 	for _, row := range open {
-		outcome, reason := l.decide(row, now)
+		outcome, reason, silent := l.decide(row, now)
 		if outcome == "" {
 			continue
 		}
@@ -66,7 +71,7 @@ func (l *OutcomeLogger) Once(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		if !claimed {
+		if !claimed || silent {
 			continue
 		}
 		op := store.Operation{
@@ -86,20 +91,34 @@ func (l *OutcomeLogger) Once(ctx context.Context) error {
 }
 
 // decide returns the outcome of an open deployment, or "" to leave it open.
-func (l *OutcomeLogger) decide(row store.OpenDeployment, now time.Time) (outcome, reason string) {
+func (l *OutcomeLogger) decide(row store.OpenDeployment, now time.Time) (outcome, reason string, silent bool) {
 	if deployment, found := findDeployment(row); found {
+		changedAt := lastChange(deployment)
+		stale := !changedAt.IsZero() && now.Sub(changedAt) > settledBefore
 		switch deployment.RolloutState {
 		case ecstypes.DeploymentRolloutStateCompleted:
-			return "completed", ""
+			return "completed", "", stale
 		case ecstypes.DeploymentRolloutStateFailed:
-			return "failed", derefString(deployment.RolloutStateReason)
+			return "failed", derefString(deployment.RolloutStateReason), stale
 		}
-		return "", ""
+		return "", "", false
 	}
 	if now.Sub(row.StartedAt) > supersededAfter {
-		return "superseded", ""
+		return "superseded", "", false
 	}
-	return "", ""
+	return "", "", false
+}
+
+// lastChange is when ECS last updated the deployment; the zero time (treated
+// as fresh) when the snapshot carries no timestamps.
+func lastChange(d ecstypes.Deployment) time.Time {
+	if d.UpdatedAt != nil {
+		return *d.UpdatedAt
+	}
+	if d.CreatedAt != nil {
+		return *d.CreatedAt
+	}
+	return time.Time{}
 }
 
 func findDeployment(row store.OpenDeployment) (ecstypes.Deployment, bool) {
