@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -13,6 +14,10 @@ const maxBodyBytes = 1 << 20 // 1 MiB cap on JSON request bodies
 
 // decodeJSON reads the request body into v; oversized or malformed bodies become a 422.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	// Requiring JSON blocks cross-site text/plain form posts to the CSRF-exempt login and setup routes.
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+		return &APIError{Status: http.StatusUnsupportedMediaType, Code: "invalid", Message: "Send JSON (Content-Type: application/json)."}
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		return invalid("Invalid request body.")

@@ -150,14 +150,14 @@ func TestPageFrom_ClampsAndRoundTripsCursor(t *testing.T) {
 	}
 }
 
-func TestClientIP_PrefersFirstForwardedHop(t *testing.T) {
+func TestClientIP_UsesRightmostForwardedHop(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.9:5555"
 	if got := clientIP(req); got != "10.0.0.9" {
 		t.Fatalf("peer = %q", got)
 	}
-	req.Header.Set("X-Forwarded-For", " 203.0.113.7 , 10.0.0.1")
-	if got := clientIP(req); got != "203.0.113.7" {
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 10.0.0.7 ")
+	if got := clientIP(req); got != "10.0.0.7" {
 		t.Fatalf("xff = %q", got)
 	}
 }

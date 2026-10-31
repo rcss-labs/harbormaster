@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -235,4 +236,22 @@ func TestSetup_FlowWhenNoUsers(t *testing.T) {
 		t.Fatalf("second setup = %d, want 409", again.StatusCode)
 	}
 	again.Body.Close()
+}
+
+func TestLogin_RejectsNonJSONContentType(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	body := `{"username":"pavel","password":"` + testPassword + `"}`
+	resp, err := http.Post(srv.URL+"/api/auth/login", "text/plain", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", resp.StatusCode)
+	}
+	if len(resp.Cookies()) != 0 {
+		t.Fatalf("cookies set: %v", resp.Cookies())
+	}
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Send JSON (Content-Type: application/json)." {
+		t.Fatalf("%q %q", code, msg)
+	}
 }
