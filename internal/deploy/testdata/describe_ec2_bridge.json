@@ -1,0 +1,27 @@
+{
+  "taskDefinitionArn": "arn:aws:ecs:us-east-1:482109375512:task-definition/legacy-worker:7",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "482109375512.dkr.ecr.us-east-1.amazonaws.com/legacy-worker:2024.3",
+      "cpu": 256,
+      "memory": 512,
+      "portMappings": [],
+      "essential": true,
+      "environment": [{"name": "QUEUE", "value": "jobs"}],
+      "mountPoints": [],
+      "volumesFrom": []
+    }
+  ],
+  "family": "legacy-worker",
+  "networkMode": "bridge",
+  "revision": 7,
+  "volumes": [],
+  "status": "ACTIVE",
+  "requiresAttributes": [{"name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"}],
+  "placementConstraints": [],
+  "compatibilities": ["EC2"],
+  "requiresCompatibilities": ["EC2"],
+  "registeredAt": "2026-09-02T14:01:10.204000+00:00",
+  "registeredBy": "arn:aws:iam::482109375512:user/ci"
+}

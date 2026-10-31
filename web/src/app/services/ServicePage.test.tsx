@@ -24,11 +24,8 @@ describe('ServicePage', () => {
     const clusterHrefs = screen.getAllByRole('link', { name: SERVICE_PAYMENTS.cluster.name }).map((link) => link.getAttribute('href'))
     expect(clusterHrefs).toContain(`/clusters/${SERVICE_PAYMENTS.cluster.id}`)
     expect(screen.getByText('Fargate')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Restart (new deployment)' })).toBeDisabled()
-    expect(screen.getByRole('link', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` })).toHaveAttribute(
-      'href',
-      `/services/${SERVICE_PAYMENTS.id}/scaling`,
-    )
+    expect(screen.getByRole('button', { name: 'Restart (new deployment)' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` })).toBeEnabled()
     expect(screen.getByRole('link', { name: 'AWS console ↗' })).toHaveAttribute('href', SERVICE_PAYMENTS.console_url)
 
     const terminalTab = tabLink(/Terminal/)
@@ -48,7 +45,7 @@ describe('ServicePage', () => {
     renderApp(`/services/${SERVICE_NOTIFICATIONS.id}`)
     expect(await screen.findByText('Rollout in progress')).toBeInTheDocument()
     expect(screen.getByText(':9 → :10')).toBeInTheDocument()
-    expect(screen.getByText(/1 new task on :10 · 1 old on :9 · circuit breaker with rollback is off/)).toBeInTheDocument()
+    expect(screen.getByText(/1 new task on :10 · 1 old on :9 · circuit breaker is on, without rollback/)).toBeInTheDocument()
   })
 
   it('overview shows Completed card for payments-api with "min healthy 100% · max 200%"', async () => {

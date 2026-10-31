@@ -49,3 +49,9 @@
 .end { margin-left: auto; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
 .more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }
+
+/* Pending revision banner (plan 02, task 16) */
+.pendingBanner { display: flex; align-items: center; gap: 12px; width: 100%; }
+.pendingBanner > span { flex: 1; }
+.pendingDeploy { height: 26px; padding: 0 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: #fff; font: inherit; font-size: 12.5px; cursor: pointer; }
+.pendingDeploy:disabled { opacity: 0.5; cursor: not-allowed; }

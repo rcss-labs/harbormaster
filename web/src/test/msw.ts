@@ -19,6 +19,10 @@ import {
   filterTasks,
   tasksList,
   tasksResponse,
+  TASK_DEFINITION_EDITABLE,
+  REVISIONS_PAYMENTS,
+  IMAGE_TAGS_PAYMENTS,
+  DESIRED_COUNT_PAYMENTS,
 } from './fixtures'
 import type { SearchResultDTO } from '../api/types'
 
@@ -97,6 +101,11 @@ export const handlers = [
   http.post('/api/accounts', () => HttpResponse.json(ACCOUNTS.items[0], { status: 201 })),
   http.patch('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
   http.delete('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
+  // Change path reads (plan 02)
+  http.get('/api/services/:id/task-definition', () => HttpResponse.json(TASK_DEFINITION_EDITABLE)),
+  http.get('/api/services/:id/revisions', () => HttpResponse.json(REVISIONS_PAYMENTS)),
+  http.get('/api/services/:id/image-tags', () => HttpResponse.json(IMAGE_TAGS_PAYMENTS)),
+  http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
 ]
 
 export const server = setupServer(...handlers)

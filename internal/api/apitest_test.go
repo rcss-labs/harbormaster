@@ -17,6 +17,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
@@ -84,6 +85,7 @@ func newServerWithLog(t *testing.T, seedUsers bool) (*httptest.Server, *fake.Fak
 	api := New(Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: fk, Prober: fk, Cfg: cfg, Log: log, Now: time.Now,
+		Deploy: &deploy.Service{Store: st, Clients: fk, MaxDesiredCount: 50, Now: time.Now},
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

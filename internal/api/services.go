@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -171,6 +172,13 @@ func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow)
 			key.Cluster + "/services/" + key.Service,
 		PolledAt: polledAt,
 	}
+
+	parsed, err := deploy.ParseService(row.Raw)
+	if err != nil {
+		return ServiceDTO{}, err
+	}
+	dto.Controller = controllerDTO(deploy.Controller(parsed))
+	dto.StrategyText = deploy.StrategyText(parsed)
 
 	subnetTasks := map[string]int{}
 	for _, t := range tasks {
