@@ -40,6 +40,8 @@ type SSMServerOptions struct {
 	DropAcks bool
 	// AgentVersion defaults to DefaultAgentVersion.
 	AgentVersion string
+	// SilentAgent makes the agent accept the open frame but never send the handshake.
+	SilentAgent bool
 }
 
 // SSMSession is a snapshot of what the fake agent observed for one session.
@@ -48,6 +50,7 @@ type SSMSession struct {
 	Terminated     bool
 	Inputs         []byte
 	LastSize       execbridge.SizeData
+	SizeCount      int // distinct Size input messages received
 	OpenInput      execbridge.OpenDataChannelInput
 }
 
@@ -290,6 +293,14 @@ func (a *agentSession) run(ctx context.Context) (graceful bool) {
 	}
 	a.s.update(a.id, func(st *ssmSessionState) { st.Opened = true; st.OpenInput = open })
 
+	if a.s.opts.SilentAgent {
+		for {
+			if _, _, err := a.conn.Read(ctx); err != nil {
+				return false
+			}
+		}
+	}
+
 	// 2. Handshake.
 	hsCtx, hsCancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer hsCancel()
@@ -380,7 +391,7 @@ func (a *agentSession) handleInbound(ctx context.Context, m execbridge.ClientMes
 	case execbridge.Size:
 		var size execbridge.SizeData
 		if json.Unmarshal(m.Payload, &size) == nil {
-			a.s.update(a.id, func(st *ssmSessionState) { st.LastSize = size })
+			a.s.update(a.id, func(st *ssmSessionState) { st.LastSize = size; st.SizeCount++ })
 		}
 	case execbridge.Output:
 		return a.keystrokes(ctx, m.Payload)

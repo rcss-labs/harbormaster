@@ -87,6 +87,8 @@ const (
 	EventChannelClosed
 	// EventError has Err set; the channel is dead.
 	EventError
+	// EventClosed is the final Session event: Reason says why, Err is set for SSM-side failures.
+	EventClosed
 )
 
 type Event struct {
@@ -95,6 +97,7 @@ type Event struct {
 	Data        []byte
 	Closed      ChannelClosed
 	Err         error
+	Reason      CloseReason // EventClosed only
 }
 
 type DataChannelConfig struct {
