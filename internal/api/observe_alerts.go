@@ -53,17 +53,19 @@ func (s *Server) getAlerts(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	clusters, err := s.Store.ListClusters(ctx, sc.Filter, sc.Vis)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	clusterTargets := map[pollTarget]bool{}
-	for _, cluster := range clusters {
-		clusterTargets[pollTarget{cluster.Key.AccountID, cluster.Key.Region}] = true
-	}
 	// Admins see every target, including one with no cluster (an unreachable account has none visible).
-	targetVisible := func(target pollTarget) bool { return sc.Subject.Admin || clusterTargets[target] }
+	clusterTargets := map[pollTarget]bool{}
+	if !sc.Vis.Admin {
+		clusters, err := s.Store.ListClusters(ctx, sc.Filter, sc.Vis)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		for _, cluster := range clusters {
+			clusterTargets[pollTarget{cluster.Key.AccountID, cluster.Key.Region}] = true
+		}
+	}
+	targetVisible := func(target pollTarget) bool { return sc.Vis.Admin || clusterTargets[target] }
 	loops, err := s.Store.ListPollLoops(ctx)
 	if err != nil {
 		s.fail(w, err)

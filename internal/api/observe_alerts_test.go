@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -113,6 +114,9 @@ func TestAlerts_AdminSeesAllSorted(t *testing.T) {
 	if body.Counts.Danger != 1 || body.Counts.Warning != 1 || body.Counts.Info != 1 {
 		t.Errorf("counts = %+v; want danger 1, warning 1, info 1", body.Counts)
 	}
+	if body.PolledAt == nil {
+		t.Error("polled_at is null; want the alerts-tier poll time after pollAll")
+	}
 	if body.Items[0].Service != "image-resizer" || body.Items[0].Cluster != "background-jobs" {
 		t.Errorf("first item service/cluster = %q/%q; want image-resizer/background-jobs", body.Items[0].Service, body.Items[0].Cluster)
 	}
@@ -180,27 +184,45 @@ func TestAlerts_AccountUnreachableVisibleWhenAnyClusterVisible(t *testing.T) {
 				Key:      model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: account, Region: region}},
 				Kind:     "account_unreachable",
 				Severity: model.AlertDanger,
-				Title:    "unreachable " + region,
+				Title:    "unreachable " + account + " " + region,
 				At:       time.Now().UTC(),
 			},
 		}
 	}
-	// omer sees background-jobs (Dev) in homelab us-east-1; staging-example has no cluster in eu-west-1.
+	// omer (Dev Operator, Staging Viewer) sees homelab us-east-1 and eu-west-1 through their Dev clusters,
+	// but not staging-example eu-west-1, which has no cluster at all.
+	// oncall (Staging and Prod only) sees homelab us-east-1 through core-services (Prod), but not eu-west-1,
+	// whose only cluster eu-apps is Dev.
+	setPassword(t, st, "oncall")
 	replaceAlerts(t, st, fk,
 		unreachable(homelabAccountID, "us-east-1"),
+		unreachable(homelabAccountID, "eu-west-1"),
 		unreachable(stagingAccountID, "eu-west-1"),
 	)
+	homelabUSEast := "unreachable " + homelabAccountID + " us-east-1"
+	homelabEUWest := "unreachable " + homelabAccountID + " eu-west-1"
 
 	omer := getAlertsBody(t, login(t, srv, "omer", testPassword), "")
-	if got := itemTitles(omer); len(got) != 1 || got[0] != "unreachable us-east-1" {
-		t.Fatalf("omer item titles = %v; want only the account with a visible cluster", got)
+	if got := itemTitles(omer); len(got) != 2 || !slices.Contains(got, homelabUSEast) || !slices.Contains(got, homelabEUWest) {
+		t.Fatalf("omer item titles = %v; want the two homelab accounts only", got)
+	}
+	if omer.Counts.Danger != 2 {
+		t.Errorf("omer counts.danger = %d; want 2", omer.Counts.Danger)
 	}
 	if omer.Items[0].Service != "" || omer.Items[0].ServiceID != "" {
 		t.Errorf("account alert service/service_id = %q/%q; want empty", omer.Items[0].Service, omer.Items[0].ServiceID)
 	}
 
+	oncall := getAlertsBody(t, login(t, srv, "oncall", testPassword), "")
+	if got := itemTitles(oncall); len(got) != 1 || got[0] != homelabUSEast {
+		t.Fatalf("oncall item titles = %v; want only the us-east-1 account", got)
+	}
+	if oncall.Counts.Danger != 1 {
+		t.Errorf("oncall counts.danger = %d; want 1 after excluding the invisible account", oncall.Counts.Danger)
+	}
+
 	pavel := getAlertsBody(t, login(t, srv, "pavel", testPassword), "")
-	if len(pavel.Items) != 2 || pavel.Counts.Danger != 2 {
-		t.Errorf("pavel sees %d items, danger %d; want both account alerts", len(pavel.Items), pavel.Counts.Danger)
+	if len(pavel.Items) != 3 || pavel.Counts.Danger != 3 {
+		t.Errorf("pavel sees %d items, danger %d; want all three account alerts", len(pavel.Items), pavel.Counts.Danger)
 	}
 }
