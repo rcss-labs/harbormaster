@@ -72,7 +72,7 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 			status = http.StatusOK
 		}
 		s.log().Info("request", "method", r.Method, "path", r.URL.Path, "status", status,
-			"duration_ms", s.now().Sub(start).Milliseconds(), "ip", clientIP(r))
+			"duration_ms", s.now().Sub(start).Milliseconds(), "ip", s.clientIP(r))
 	})
 }
 

@@ -37,6 +37,20 @@ describe('TasksTab', () => {
     expect(within(table).getAllByText('512 MiB').length).toBeGreaterThan(0)
   })
 
+  it('asks for every task of the service, not only the default problems view', async () => {
+    const filters: (string | null)[] = []
+    server.use(
+      http.get('/api/services/:id/tasks', ({ params, request }) => {
+        filters.push(new URL(request.url).searchParams.get('filter'))
+        return HttpResponse.json(tasksList(ALL_TASKS.filter((task) => task.service?.id === params.id)))
+      }),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    await screen.findByRole('table')
+    expect(filters.length).toBeGreaterThan(0)
+    expect(new Set(filters)).toEqual(new Set(['all']))
+  })
+
   it('Load more requests the next cursor', async () => {
     const cursors: (string | null)[] = []
     server.use(

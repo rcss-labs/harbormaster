@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -40,6 +42,13 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
 
+// failInternal logs a store failure met while authenticating and answers the standard 500, so an
+// outage is not mistaken for a signed-out user.
+func failInternal(w http.ResponseWriter, r *http.Request, what string, err error) {
+	slog.Error("auth middleware: "+what, "path", r.URL.Path, "error", err)
+	writeError(w, http.StatusInternalServerError, "internal", "Something went wrong on our side.")
+}
+
 // Middleware attaches the session, user and subject to the request context when the cookie is valid.
 // A missing or invalid cookie continues unauthenticated; RequireAuth decides whether that is allowed.
 func (a *Service) Middleware(next http.Handler) http.Handler {
@@ -50,13 +59,21 @@ func (a *Service) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		sess, user, err := a.Authenticate(r.Context(), cookie.Value)
+		if errors.Is(err, store.ErrNotFound) {
+			next.ServeHTTP(w, r) // missing or expired session: anonymous, RequireAuth answers 401
+			return
+		}
 		if err != nil {
-			next.ServeHTTP(w, r)
+			failInternal(w, r, "authenticate session", err)
 			return
 		}
 		subject, err := a.store.LoadSubject(r.Context(), user.ID)
-		if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if err != nil {
+			failInternal(w, r, "load subject", err)
 			return
 		}
 		ctx := context.WithValue(r.Context(), sessionKey{}, sess)

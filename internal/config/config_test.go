@@ -29,6 +29,7 @@ func TestLoad_Defaults(t *testing.T) {
 		CookieSecure:            true,
 		BootstrapAdminSecretARN: "",
 		FakeAWS:                 false,
+		TrustedProxy:            false,
 		LogLevel:                "info",
 		SessionIdle:             12 * time.Hour,
 		SessionAbsolute:         168 * time.Hour,
@@ -147,5 +148,15 @@ func TestLoad_ExecOverrides(t *testing.T) {
 	}
 	if cfg.ExecIdleTimeout != 5*time.Minute || cfg.ExecMaxDuration != 30*time.Minute || cfg.ExecMaxSessionsPerUser != 7 {
 		t.Errorf("exec overrides = %v %v %d", cfg.ExecIdleTimeout, cfg.ExecMaxDuration, cfg.ExecMaxSessionsPerUser)
+	}
+}
+
+func TestLoad_TrustedProxy(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":  "postgres://example",
+		"HM_TRUSTED_PROXY": "true",
+	}))
+	if err != nil || !cfg.TrustedProxy {
+		t.Fatalf("TrustedProxy = %v, err %v; want true", cfg.TrustedProxy, err)
 	}
 }

@@ -42,6 +42,7 @@ type Config struct {
 	CookieSecure            bool
 	BootstrapAdminSecretARN string
 	FakeAWS                 bool
+	TrustedProxy            bool
 	LogLevel                string
 	SessionIdle             time.Duration
 	SessionAbsolute         time.Duration
@@ -133,6 +134,7 @@ func Load(getenv func(string) string) (Config, error) {
 		CookieSecure:            reader.boolean("HM_COOKIE_SECURE", true),
 		BootstrapAdminSecretARN: reader.text("HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN", ""),
 		FakeAWS:                 reader.boolean("HM_FAKE_AWS", false),
+		TrustedProxy:            reader.boolean("HM_TRUSTED_PROXY", false),
 		LogLevel:                reader.text("HM_LOG_LEVEL", "info"),
 		SessionIdle:             reader.duration("HM_SESSION_IDLE", 12*time.Hour),
 		SessionAbsolute:         reader.duration("HM_SESSION_ABSOLUTE", 168*time.Hour),

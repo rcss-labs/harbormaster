@@ -113,14 +113,17 @@ func nextCursor(limit, offset, returned int) *string {
 	return &c
 }
 
-// clientIP is the rightmost non-empty X-Forwarded-For entry, else the peer address. It assumes
-// exactly one trusted proxy (the ALB), which appends the real client IP; earlier entries are
-// client-controlled and must not be trusted.
-func clientIP(r *http.Request) string {
-	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	for i := len(hops) - 1; i >= 0; i-- {
-		if hop := strings.TrimSpace(hops[i]); hop != "" {
-			return hop
+// clientIP is the peer address, unless Cfg.TrustedProxy says exactly one trusted proxy (the ALB)
+// appends the real client IP, in which case it is the rightmost non-empty X-Forwarded-For entry.
+// Earlier entries are client-controlled and must not be trusted; without a trusted proxy the
+// whole header is.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.Cfg.TrustedProxy {
+		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		for i := len(hops) - 1; i >= 0; i-- {
+			if hop := strings.TrimSpace(hops[i]); hop != "" {
+				return hop
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

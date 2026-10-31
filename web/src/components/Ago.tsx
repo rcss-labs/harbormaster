@@ -30,8 +30,12 @@ export function useNow(intervalMs: number): number {
 
 const AGO_REFRESH_MS = 15_000
 
+/** The API sends the zero time (0001-01-01T00:00:00Z) before the first poll; anything this old means "no data yet". */
+const NO_DATA_BEFORE_MS = Date.UTC(1970, 0, 1)
+
 export function Ago({ ts, now }: AgoProps) {
   const liveNow = useNow(AGO_REFRESH_MS)
   const time = typeof ts === 'number' ? ts : Date.parse(ts)
+  if (time < NO_DATA_BEFORE_MS) return <span>no data yet</span>
   return <span title={new Date(time).toLocaleString()}>{formatAgo(ts, now ?? liveNow)}</span>
 }

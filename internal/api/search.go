@@ -22,7 +22,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	items := []SearchItemDTO{}
 	if len([]rune(q)) < searchMinLength {
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+		writeJSON(w, http.StatusOK, ItemsResponse[SearchItemDTO]{Items: items})
 		return
 	}
 	hits, err := s.Store.Search(r.Context(), sc.Filter, sc.Vis, q, searchMaxItems)
@@ -43,5 +43,5 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, ItemsResponse[SearchItemDTO]{Items: items})
 }

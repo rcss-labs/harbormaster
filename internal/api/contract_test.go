@@ -1,0 +1,124 @@
+package api
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+// contractGolden is read by web/src/test/contract/contract.test.ts, which checks the SPA fixtures against it.
+const contractGolden = "../../web/src/test/contract/shapes.json"
+
+// updateContractEnv regenerates the golden instead of failing on a difference.
+const updateContractEnv = "HM_UPDATE_CONTRACT"
+
+var timeType = reflect.TypeOf(time.Time{})
+
+// shapeOf describes how t serialises to JSON: a scalar kind name ("string", "number", "boolean", "time", "any"),
+// an object of its json keys, a one-element array for slices, {"$map": elem} for maps, and {"$null": shape} for
+// pointers (which may serialise as null).
+func shapeOf(t reflect.Type) any {
+	if t == timeType {
+		return "time"
+	}
+	switch t.Kind() {
+	case reflect.Pointer:
+		return map[string]any{"$null": shapeOf(t.Elem())}
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return "number"
+	case reflect.Interface:
+		return "any"
+	case reflect.Slice, reflect.Array:
+		return []any{shapeOf(t.Elem())}
+	case reflect.Map:
+		return map[string]any{"$map": shapeOf(t.Elem())}
+	case reflect.Struct:
+		fields := map[string]any{}
+		collectFields(t, fields)
+		return fields
+	}
+	panic("contract: unsupported type " + t.String())
+}
+
+// collectFields adds the JSON keys of struct t, flattening embedded structs like encoding/json does.
+func collectFields(t reflect.Type, into map[string]any) {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tag := field.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "-" || !field.IsExported() {
+			continue
+		}
+		if field.Anonymous && name == "" {
+			collectFields(field.Type, into)
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		into[name] = shapeOf(field.Type)
+	}
+}
+
+// contractShapes lists every response body the SPA reads, keyed by the name the Vitest contract test uses.
+func contractShapes() map[string]any {
+	return map[string]any{
+		"me":             shapeOf(reflect.TypeFor[MeDTO]()),
+		"login":          shapeOf(reflect.TypeFor[LoginResponse]()),
+		"setup":          shapeOf(reflect.TypeFor[SetupStatusDTO]()),
+		"overview":       shapeOf(reflect.TypeFor[OverviewDTO]()),
+		"clusters":       shapeOf(reflect.TypeFor[ListResponse[ClusterCardDTO]]()),
+		"cluster":        shapeOf(reflect.TypeFor[ClusterDTO]()),
+		"service":        shapeOf(reflect.TypeFor[ServiceDTO]()),
+		"tasks":          shapeOf(reflect.TypeFor[TasksListDTO]()),
+		"operations":     shapeOf(reflect.TypeFor[ListResponse[EventDTO]]()),
+		"search":         shapeOf(reflect.TypeFor[ItemsResponse[SearchItemDTO]]()),
+		"poller":         shapeOf(reflect.TypeFor[ItemsResponse[PollerItemDTO]]()),
+		"users":          shapeOf(reflect.TypeFor[ItemsResponse[UserDTO]]()),
+		"createUser":     shapeOf(reflect.TypeFor[CreateUserResponse]()),
+		"permissions":    shapeOf(reflect.TypeFor[PermissionsResponse]()),
+		"tags":           shapeOf(reflect.TypeFor[ItemsResponse[TagItemDTO]]()),
+		"tagImpact":      shapeOf(reflect.TypeFor[TagImpactResponse]()),
+		"tagAssignments": shapeOf(reflect.TypeFor[TagAssignmentsResponse]()),
+		"accounts":       shapeOf(reflect.TypeFor[AccountsDTO]()),
+		"accountTest":    shapeOf(reflect.TypeFor[AccountTestResponse]()),
+		"audit":          shapeOf(reflect.TypeFor[ListResponse[AuditEntryDTO]]()),
+	}
+}
+
+// TestContract_ShapesMatchGolden fails when a DTO changes without the golden (and so the SPA fixtures) being updated.
+// Regenerate with HM_UPDATE_CONTRACT=1 go test ./internal/api -run TestContract, then update web/src/test/fixtures.ts.
+func TestContract_ShapesMatchGolden(t *testing.T) {
+	want, err := json.MarshalIndent(contractShapes(), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+
+	if os.Getenv(updateContractEnv) == "1" {
+		if err := os.MkdirAll(filepath.Dir(contractGolden), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(contractGolden, want, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	got, err := os.ReadFile(contractGolden)
+	if err != nil {
+		t.Fatalf("read golden (create it with %s=1): %v", updateContractEnv, err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("API response shapes changed; run %s=1 go test ./internal/api -run TestContract and update the SPA types and fixtures to match", updateContractEnv)
+	}
+}
