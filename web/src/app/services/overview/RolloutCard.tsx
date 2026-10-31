@@ -10,15 +10,22 @@ interface RolloutCardProps {
   deployments: DeploymentDTO[]
   desiredCount: number
   strategyText: string
+  circuitBreakerEnable: boolean
   circuitBreakerRollback: boolean
 }
 
-export function RolloutCard({ serviceName, deployments, desiredCount, strategyText, circuitBreakerRollback }: RolloutCardProps) {
+export function RolloutCard({ serviceName, deployments, desiredCount, strategyText, circuitBreakerEnable, circuitBreakerRollback }: RolloutCardProps) {
   const primary = deployments.find((d) => d.status === 'PRIMARY') ?? deployments[0]
   const active = deployments.find((d) => d.status === 'ACTIVE')
-  const circuitBreaker = `circuit breaker with rollback is ${circuitBreakerRollback ? 'on' : 'off'}`
+  const circuitBreaker = !circuitBreakerEnable
+    ? 'circuit breaker is off'
+    : circuitBreakerRollback
+      ? 'circuit breaker with rollback is on'
+      : 'circuit breaker is on, without rollback'
+  if (!primary) return null
+  const age = (deployment: DeploymentDTO) => deployment.updated_at || deployment.created_at
 
-  if (primary?.rollout_state === 'IN_PROGRESS') {
+  if (primary.rollout_state === 'IN_PROGRESS') {
     const fromRevision = active?.revision ?? primary.revision
     const newCount = primary.running_count
     const oldCount = active?.running_count ?? 0
@@ -52,7 +59,7 @@ export function RolloutCard({ serviceName, deployments, desiredCount, strategyTe
     )
   }
 
-  if (primary?.rollout_state === 'FAILED') {
+  if (primary.rollout_state === 'FAILED') {
     return (
       <div className={styles.deployCard}>
         <div className={styles.titleRow}>
@@ -61,7 +68,7 @@ export function RolloutCard({ serviceName, deployments, desiredCount, strategyTe
             {serviceName}:{primary.revision}
           </span>
           <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
-            <Ago ts={primary.updated_at} />
+            <Ago ts={age(primary)} />
           </span>
         </div>
         <div className={styles.bar}>
@@ -77,13 +84,11 @@ export function RolloutCard({ serviceName, deployments, desiredCount, strategyTe
       <div className={styles.titleRow}>
         <Pill kind="ok">Completed</Pill>
         <span className={styles.mono}>
-          {serviceName}:{primary?.revision}
+          {serviceName}:{primary.revision}
         </span>
-        {primary && (
-          <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
-            <Ago ts={primary.updated_at} />
-          </span>
-        )}
+        <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
+          <Ago ts={age(primary)} />
+        </span>
       </div>
       <div className={styles.bar}>
         <span style={{ width: '100%' }} />

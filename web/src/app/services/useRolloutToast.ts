@@ -38,6 +38,7 @@ export function useRolloutToast(service: ServiceDTO | undefined): void {
         )
       } else if (tracked?.rollout_state === 'FAILED') {
         announced.current.add(tracked.id)
+        if (primary && primary.id !== tracked.id) announced.current.add(primary.id)
         const rolledBackTo =
           primary && primary.id !== tracked.id
             ? primary.revision

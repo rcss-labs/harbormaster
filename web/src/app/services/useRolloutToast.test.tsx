@@ -46,6 +46,11 @@ describe('useRolloutToast', () => {
       dep({ id: 'd7', status: 'ACTIVE', revision: 7, rollout_state: 'FAILED' }),
     ])} />)
     expect(screen.getByText(/revision :7 failed to start\. Rolled back to :6\./)).toBeInTheDocument()
+    rerender(<Probe service={svc([
+      dep({ id: 'd8', status: 'PRIMARY', revision: 6, rollout_state: 'COMPLETED' }),
+      dep({ id: 'd7', status: 'INACTIVE', revision: 7, rollout_state: 'FAILED' }),
+    ])} />)
+    expect(screen.queryByText(/is running :6/)).not.toBeInTheDocument()
   })
 
   it('toasts a failure using the ACTIVE revision when the PRIMARY id is unchanged', () => {

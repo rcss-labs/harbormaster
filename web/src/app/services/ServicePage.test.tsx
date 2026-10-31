@@ -45,7 +45,7 @@ describe('ServicePage', () => {
     renderApp(`/services/${SERVICE_NOTIFICATIONS.id}`)
     expect(await screen.findByText('Rollout in progress')).toBeInTheDocument()
     expect(screen.getByText(':9 → :10')).toBeInTheDocument()
-    expect(screen.getByText(/1 new task on :10 · 1 old on :9 · circuit breaker with rollback is off/)).toBeInTheDocument()
+    expect(screen.getByText(/1 new task on :10 · 1 old on :9 · circuit breaker is on, without rollback/)).toBeInTheDocument()
   })
 
   it('overview shows Completed card for payments-api with "min healthy 100% · max 200%"', async () => {

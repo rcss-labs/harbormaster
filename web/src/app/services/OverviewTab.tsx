@@ -74,7 +74,8 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
             deployments={service.deployments}
             desiredCount={service.desired}
             strategyText={service.strategy_text}
-            circuitBreakerRollback={service.circuit_breaker.enable && service.circuit_breaker.rollback}
+            circuitBreakerEnable={service.circuit_breaker.enable}
+            circuitBreakerRollback={service.circuit_breaker.rollback}
           />
         </div>
       </Card>

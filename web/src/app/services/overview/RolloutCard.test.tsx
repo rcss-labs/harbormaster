@@ -26,6 +26,7 @@ const baseProps = {
   serviceName: 'payments-api',
   desiredCount: 3,
   strategyText: 'Rolling update · min healthy 100% · max 200% · circuit breaker with rollback is on',
+  circuitBreakerEnable: true,
   circuitBreakerRollback: true,
 }
 
@@ -41,14 +42,29 @@ describe('RolloutCard', () => {
     expect(screen.getByText('2 new tasks on :10 · 1 old on :9 · circuit breaker with rollback is on', { exact: false })).toBeInTheDocument()
   })
 
+  it('says the breaker is on without rollback', () => {
+    const deployments = [
+      deployment({ rollout_state: 'IN_PROGRESS', running_count: 1 }),
+      deployment({ id: 'ecs-svc/0', status: 'ACTIVE', revision: 9, running_count: 2 }),
+    ]
+    render(<RolloutCard {...baseProps} circuitBreakerRollback={false} deployments={deployments} />)
+    expect(screen.getByText(/circuit breaker is on, without rollback/)).toBeInTheDocument()
+  })
+
+  it('falls back to created_at for the age and renders no revision without deployments', () => {
+    const { container } = render(<RolloutCard {...baseProps} deployments={[]} />)
+    expect(screen.queryByText(/payments-api:/)).not.toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it('shows the failed-to-start fragment in danger text', () => {
     const deployments = [
       deployment({ rollout_state: 'IN_PROGRESS', running_count: 1, failed_tasks: 2 }),
       deployment({ id: 'ecs-svc/0', status: 'ACTIVE', revision: 9, running_count: 2 }),
     ]
-    render(<RolloutCard {...baseProps} circuitBreakerRollback={false} deployments={deployments} />)
+    render(<RolloutCard {...baseProps} circuitBreakerEnable={false} circuitBreakerRollback={false} deployments={deployments} />)
     expect(screen.getByText('2 failed to start')).toBeInTheDocument()
-    expect(screen.getByText(/circuit breaker with rollback is off/)).toBeInTheDocument()
+    expect(screen.getByText(/ circuit breaker is off$/)).toBeInTheDocument()
   })
 
   it('shows Completed with the service revision and strategy text', () => {
