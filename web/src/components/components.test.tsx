@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SlotDTO, Status, TagDTO } from '../api/types'
 import { renderWithProviders } from '../test/setup'
 import { AdminOnly } from './AdminOnly'
@@ -16,6 +16,10 @@ import { TagChip } from './TagChip'
 const prodTag: TagDTO = { id: 3, name: 'Prod', color: 'red', inherited: false }
 
 describe('shared components', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('Pill renders label and kind class', () => {
     render(<Pill kind="warn">Degraded</Pill>)
     const pill = screen.getByText('Degraded')
@@ -27,6 +31,11 @@ describe('shared components', () => {
     const chip = screen.getByText('Prod')
     expect(chip).toHaveClass('label', 'c-red', 'inh')
     expect(chip).toHaveAttribute('title', 'Inherited from cluster payments')
+  })
+
+  it('TagChip treats tag.inherited as inherited even without a cluster name', () => {
+    render(<TagChip tag={{ ...prodTag, inherited: true }} />)
+    expect(screen.getByText('Prod')).toHaveClass('inh')
   })
 
   it('Tabs renders ⊘ and title for locked tab', () => {
@@ -75,6 +84,17 @@ describe('shared components', () => {
     rerender(<Ago ts={new Date(now - 2 * 86400_000).toISOString()} now={now} />)
     expect(screen.getByText('2 d ago')).toBeInTheDocument()
     expect(screen.getByText('2 d ago')).toHaveAttribute('title', new Date(now - 2 * 86400_000).toLocaleString())
+  })
+
+  it('Ago keeps its label live when now is omitted', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T12:00:00Z'))
+    render(<Ago ts={Date.now()} />)
+    expect(screen.getByText('0s ago')).toBeInTheDocument()
+    act(() => {
+      vi.advanceTimersByTime(2 * 60_000)
+    })
+    expect(screen.getByText('2 min ago')).toBeInTheDocument()
   })
 
   it('Slots draws desired-running dashed slots', () => {

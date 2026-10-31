@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 interface AgoProps {
   ts: string | number
@@ -18,8 +18,20 @@ export function formatAgo(ts: string | number, now: number): string {
   return `${Math.round(hours / 24)} d ago`
 }
 
+/** Current time in epoch ms, refreshed every `intervalMs`. */
+export function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(timer)
+  }, [intervalMs])
+  return now
+}
+
+const AGO_REFRESH_MS = 15_000
+
 export function Ago({ ts, now }: AgoProps) {
-  const [mountedAt] = useState(() => Date.now())
+  const liveNow = useNow(AGO_REFRESH_MS)
   const time = typeof ts === 'number' ? ts : Date.parse(ts)
-  return <span title={new Date(time).toLocaleString()}>{formatAgo(ts, now ?? mountedAt)}</span>
+  return <span title={new Date(time).toLocaleString()}>{formatAgo(ts, now ?? liveNow)}</span>
 }
