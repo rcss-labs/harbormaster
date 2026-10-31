@@ -3,49 +3,112 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 // The seed (fake.mockupScaling) gives payments-api min 2, max 6, a cpu-target tracking policy at 60%
-// with 60/300 cooldowns, and two scheduled actions named scheduled-1 and scheduled-2.
+// with 60/300 cooldowns, and two scheduled actions named scheduled-1 and scheduled-2. The test pins the
+// wire JSON, not the Go DTO, so renamed or missing keys fail here.
 func TestGetScaling_ViewerSeesConfig(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
+	setPassword(t, st, "dana")
 	pollAll(t, st, fk)
 
-	resp := login(t, srv, "pavel", testPassword).get("/api/services/" + paymentsID() + "/scaling")
+	resp := login(t, srv, "dana", testPassword).get("/api/services/" + paymentsID() + "/scaling")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
-	var out ScalingDTO
-	decode(t, resp, &out)
+	var body map[string]any
+	decode(t, resp, &body)
 
-	if !out.HasTarget || out.Min != 2 || out.Max != 6 {
-		t.Errorf("capacity = has_target %v min %d max %d; want true, 2, 6", out.HasTarget, out.Min, out.Max)
+	for _, key := range []string{"has_target", "min", "max", "policies", "scheduled_actions", "activities", "polled_at"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("response is missing %q", key)
+		}
 	}
-	if len(out.Policies) != 1 {
-		t.Fatalf("policies = %d, want 1", len(out.Policies))
+	if body["has_target"] != true || body["min"] != float64(2) || body["max"] != float64(6) {
+		t.Errorf("has_target, min, max = %v, %v, %v; want true, 2, 6", body["has_target"], body["min"], body["max"])
 	}
-	policy := out.Policies[0]
-	if policy.Name != "cpu-target" || policy.Type != "TargetTrackingScaling" || policy.Metric != "ECSServiceAverageCPUUtilization" ||
-		policy.TargetValue != 60 || policy.ScaleOutCooldown != 60 || policy.ScaleInCooldown != 300 {
-		t.Errorf("policy = %+v; want cpu-target TargetTrackingScaling ECSServiceAverageCPUUtilization 60 60/300", policy)
+	if polled, _ := body["polled_at"].(string); polled == "" {
+		t.Errorf("polled_at = %v; want a timestamp after a poll", body["polled_at"])
 	}
-	if len(out.ScheduledActions) != 2 {
-		t.Fatalf("scheduled_actions = %d, want 2", len(out.ScheduledActions))
+
+	policies := jsonArray(t, body, "policies")
+	if len(policies) != 1 {
+		t.Fatalf("policies = %d, want 1", len(policies))
 	}
-	first := out.ScheduledActions[0]
-	if first.Name != "scheduled-1" || first.Schedule != "cron(0 7 ? * MON-FRI *)" || first.MinCapacity == nil ||
-		*first.MinCapacity != 3 || first.MaxCapacity != nil {
-		t.Errorf("first scheduled action = %+v; want scheduled-1, cron(0 7 ? * MON-FRI *), min 3, max null", first)
+	assertFields(t, "policies[0]", policies[0], map[string]any{
+		"name": "cpu-target", "type": "TargetTrackingScaling", "metric": "ECSServiceAverageCPUUtilization",
+		"target_value": float64(60), "scale_out_cooldown": float64(60), "scale_in_cooldown": float64(300),
+	})
+
+	actions := jsonArray(t, body, "scheduled_actions")
+	if len(actions) != 2 {
+		t.Fatalf("scheduled_actions = %d, want 2", len(actions))
 	}
-	if len(out.Activities) != 1 || out.Activities[0].StatusCode != "Successful" {
-		t.Errorf("activities = %+v; want one Successful activity", out.Activities)
+	assertFields(t, "scheduled_actions[0]", actions[0], map[string]any{
+		"name": "scheduled-1", "schedule": "cron(0 7 ? * MON-FRI *)", "timezone": "",
+		"min_capacity": float64(3), "max_capacity": nil,
+	})
+	assertFields(t, "scheduled_actions[1]", actions[1], map[string]any{
+		"name": "scheduled-2", "schedule": "cron(0 20 ? * MON-FRI *)", "timezone": "",
+		"min_capacity": float64(2), "max_capacity": nil,
+	})
+
+	activities := jsonArray(t, body, "activities")
+	if len(activities) != 1 {
+		t.Fatalf("activities = %d, want 1", len(activities))
 	}
-	if out.PolledAt == nil {
-		t.Error("polled_at is null after a poll")
+	activity := activities[0]
+	for _, key := range []string{"id", "description", "cause", "status_code", "status_message", "started_at", "ended_at"} {
+		if _, ok := activity[key]; !ok {
+			t.Errorf("activities[0] is missing %q", key)
+		}
+	}
+	if id, _ := activity["id"].(string); id == "" {
+		t.Error("activities[0].id is empty")
+	}
+	if description, _ := activity["description"].(string); !strings.HasPrefix(description, "Setting desired count to ") {
+		t.Errorf("activities[0].description = %q; want the seeded desired-count text", description)
+	}
+	if activity["cause"] == "" || activity["status_code"] != "Successful" || activity["status_message"] == "" {
+		t.Errorf("activities[0] cause, status_code, status_message = %v, %v, %v; want non-empty cause and status_message, status_code Successful",
+			activity["cause"], activity["status_code"], activity["status_message"])
+	}
+	if started, _ := activity["started_at"].(string); started == "" {
+		t.Error("activities[0].started_at is empty")
+	}
+}
+
+// jsonArray returns body[key] as a list of objects, failing the test if it is missing or not an array.
+func jsonArray(t *testing.T, body map[string]any, key string) []map[string]any {
+	t.Helper()
+	raw, ok := body[key].([]any)
+	if !ok {
+		t.Fatalf("%s = %v; want a JSON array", key, body[key])
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("%s entry = %v; want an object", key, item)
+		}
+		out = append(out, obj)
+	}
+	return out
+}
+
+// assertFields checks that every expected key has the expected JSON value in obj.
+func assertFields(t *testing.T, label string, obj map[string]any, want map[string]any) {
+	t.Helper()
+	for key, value := range want {
+		if got := obj[key]; got != value {
+			t.Errorf("%s.%s = %v (%T); want %v", label, key, got, got, value)
+		}
 	}
 }
 
