@@ -337,11 +337,13 @@ func (s *Store) UpsertTasks(ctx context.Context, rows []model.Task) (WriteResult
 	return s.upsertBatch(ctx, "tasks", statements)
 }
 
-// KnownTaskARNs lists the cluster's task ARNs with the given last_status.
+// KnownTaskARNs lists the cluster's task ARNs with the given last_status. An empty
+// lastStatus means "any status other than STOPPED" (RUNNING, PENDING, ACTIVATING, STOPPING, ...).
 func (s *Store) KnownTaskARNs(ctx context.Context, k model.ClusterKey, lastStatus string) ([]string, error) {
 	rows, err := s.Pool.Query(ctx,
 		`select task_arn from tasks where account_id = $1 and region = $2 and cluster_name = $3
-		   and last_status = $4 order by task_arn`, k.AccountID, k.Region, k.Cluster, lastStatus)
+		   and ($4 = '' and last_status is distinct from 'STOPPED' or $4 <> '' and last_status = $4)
+		 order by task_arn`, k.AccountID, k.Region, k.Cluster, lastStatus)
 	if err != nil {
 		return nil, fmt.Errorf("known task arns: %w", err)
 	}
@@ -360,9 +362,9 @@ func (s *Store) KnownTaskARNs(ctx context.Context, k model.ClusterKey, lastStatu
 	return arns, nil
 }
 
-// MarkTasksMissing stops RUNNING rows of the cluster listed in arns (tasks ECS
-// no longer reports): STOPPED, stop_code 'Unknown', stopped_at = now if unset.
-// content_hash is replaced so the row counts as changed.
+// MarkTasksMissing stops the cluster's rows listed in arns that are not yet STOPPED
+// (RUNNING, PENDING, ACTIVATING, STOPPING ... tasks ECS no longer reports):
+// STOPPED, stop_code 'Unknown', stopped_at = now if unset. content_hash is replaced so the row counts as changed.
 func (s *Store) MarkTasksMissing(ctx context.Context, k model.ClusterKey, arns []string, now time.Time) error {
 	if len(arns) == 0 {
 		return nil
@@ -371,7 +373,7 @@ func (s *Store) MarkTasksMissing(ctx context.Context, k model.ClusterKey, arns [
 		`update tasks set last_status = 'STOPPED', desired_status = 'STOPPED', stop_code = 'Unknown',
 		   stopped_at = coalesce(stopped_at, $4), content_hash = 'missing:' || $4::text, polled_at = $4
 		 where account_id = $1 and region = $2 and cluster_name = $3
-		   and last_status = 'RUNNING' and task_arn = any($5)`,
+		   and last_status is distinct from 'STOPPED' and task_arn = any($5)`,
 		k.AccountID, k.Region, k.Cluster, now, arns)
 	if err != nil {
 		return fmt.Errorf("mark tasks missing: %w", err)

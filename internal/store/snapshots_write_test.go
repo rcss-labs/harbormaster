@@ -145,18 +145,22 @@ func TestMarkTasksMissing_StopsUnlistedRunning(t *testing.T) {
 	rows := []model.Task{
 		{Cluster: k, ARN: "arn:t/gone", LastStatus: "RUNNING", DesiredStatus: "RUNNING"},
 		{Cluster: k, ARN: "arn:t/kept", LastStatus: "RUNNING", DesiredStatus: "RUNNING"},
+		{Cluster: k, ARN: "arn:t/pending-gone", LastStatus: "PENDING", DesiredStatus: "RUNNING"},
 		{Cluster: clusterKey("other"), ARN: "arn:t/other", LastStatus: "RUNNING", DesiredStatus: "RUNNING"},
 	}
 	if _, err := s.UpsertTasks(ctx, rows); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().Truncate(time.Second)
-	if err := s.MarkTasksMissing(ctx, k, []string{"arn:t/gone", "arn:t/other"}, now); err != nil {
+	if err := s.MarkTasksMissing(ctx, k, []string{"arn:t/gone", "arn:t/pending-gone", "arn:t/other"}, now); err != nil {
 		t.Fatalf("MarkTasksMissing: %v", err)
 	}
 	running, err := s.KnownTaskARNs(ctx, k, "RUNNING")
 	if err != nil || len(running) != 1 || running[0] != "arn:t/kept" {
 		t.Fatalf("running = %v, %v; want [arn:t/kept]", running, err)
+	}
+	if open, err := s.KnownTaskARNs(ctx, k, ""); err != nil || len(open) != 1 || open[0] != "arn:t/kept" {
+		t.Fatalf("non-STOPPED = %v, %v; want only [arn:t/kept] (PENDING rows must be stopped too)", open, err)
 	}
 	var status, code string
 	var stoppedAt time.Time

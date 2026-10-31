@@ -1,0 +1,87 @@
+{
+  "Attachments": [
+    {
+      "Details": [
+        {"Name": "subnetId", "Value": "subnet-0a1b2c3d4e5f60718"},
+        {"Name": "networkInterfaceId", "Value": "eni-0123456789abcdef0"},
+        {"Name": "macAddress", "Value": "0a:5b:7c:9d:ef:01"},
+        {"Name": "privateDnsName", "Value": "ip-10-0-12-34.ec2.internal"},
+        {"Name": "privateIPv4Address", "Value": "10.0.12.34"},
+        {"Name": "publicIPv4Address", "Value": "3.88.120.45"}
+      ],
+      "Id": "6f1d2c3b-aaaa-4bbb-8ccc-0123456789ab",
+      "Status": "ATTACHED",
+      "Type": "ElasticNetworkInterface"
+    }
+  ],
+  "Attributes": [{"Name": "ecs.cpu-architecture", "TargetId": null, "TargetType": "", "Value": "x86_64"}],
+  "AvailabilityZone": "us-east-1b",
+  "CapacityProviderName": "FARGATE_SPOT",
+  "ClusterArn": "arn:aws:ecs:us-east-1:482109375512:cluster/core-services",
+  "Connectivity": "CONNECTED",
+  "ConnectivityAt": "2026-10-31T13:58:41.123+02:00",
+  "Containers": [
+    {
+      "ContainerArn": "arn:aws:ecs:us-east-1:482109375512:container/core-services/9f8e7d6c5b4a39281706f5e4d3c2b1a0/11111111-2222-4333-8444-555555555555",
+      "Cpu": "384",
+      "ExitCode": null,
+      "GpuIds": null,
+      "HealthStatus": "HEALTHY",
+      "Image": "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2",
+      "ImageDigest": "sha256:aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990",
+      "LastStatus": "RUNNING",
+      "ManagedAgents": [
+        {"LastStartedAt": "2026-10-31T13:59:10+02:00", "LastStatus": "RUNNING", "Name": "ExecuteCommandAgent", "Reason": null}
+      ],
+      "Memory": "896",
+      "MemoryReservation": null,
+      "Name": "payments-api",
+      "NetworkBindings": null,
+      "NetworkInterfaces": [{"Ipv6Address": null, "PrivateIpv4Address": "10.0.12.34", "AttachmentId": null}],
+      "Reason": null,
+      "RuntimeId": "9f8e7d6c5b4a39281706f5e4d3c2b1a0-1234567890",
+      "TaskArn": "arn:aws:ecs:us-east-1:482109375512:task/core-services/9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+    },
+    {
+      "ContainerArn": "arn:aws:ecs:us-east-1:482109375512:container/core-services/9f8e7d6c5b4a39281706f5e4d3c2b1a0/66666666-7777-4888-8999-000000000000",
+      "Cpu": "128",
+      "ExitCode": 0,
+      "HealthStatus": "UNKNOWN",
+      "Image": "public.ecr.aws/datadog/agent:7.55.0",
+      "ImageDigest": null,
+      "LastStatus": "STOPPED",
+      "Memory": "128",
+      "Name": "log-router",
+      "Reason": "Essential container in task exited",
+      "RuntimeId": "9f8e7d6c5b4a39281706f5e4d3c2b1a0-0987654321",
+      "TaskArn": "arn:aws:ecs:us-east-1:482109375512:task/core-services/9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+    }
+  ],
+  "Cpu": "512",
+  "CreatedAt": "2026-10-31T13:58:20+02:00",
+  "DesiredStatus": "RUNNING",
+  "EnableExecuteCommand": true,
+  "EphemeralStorage": {"SizeInGiB": 20},
+  "ExecutionStoppedAt": null,
+  "Group": "service:payments-api",
+  "HealthStatus": "HEALTHY",
+  "InferenceAccelerators": null,
+  "LastStatus": "RUNNING",
+  "LaunchType": "FARGATE",
+  "Memory": "1024",
+  "Overrides": {"ContainerOverrides": [], "Cpu": null, "EphemeralStorage": null, "ExecutionRoleArn": null, "InferenceAcceleratorOverrides": null, "Memory": null, "TaskRoleArn": null},
+  "PlatformFamily": "Linux",
+  "PlatformVersion": "1.4.0",
+  "PullStartedAt": "2026-10-31T13:58:45+02:00",
+  "PullStoppedAt": "2026-10-31T13:58:58+02:00",
+  "StartedAt": "2026-10-31T13:59:05+02:00",
+  "StartedBy": "ecs-svc/4012345678901234567",
+  "StopCode": "",
+  "StoppedAt": null,
+  "StoppedReason": null,
+  "StoppingAt": null,
+  "Tags": [],
+  "TaskArn": "arn:aws:ecs:us-east-1:482109375512:task/core-services/9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+  "TaskDefinitionArn": "arn:aws:ecs:us-east-1:482109375512:task-definition/payments-api:42",
+  "Version": 4
+}

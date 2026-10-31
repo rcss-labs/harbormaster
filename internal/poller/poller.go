@@ -76,7 +76,6 @@ type Poller struct {
 	lockKey       int64
 	retryInterval time.Duration
 	// loopFactory runs one target's polling loop until ctx is cancelled.
-	// Task 14 replaces defaultLoopFactory with the real per-target Loop.
 	loopFactory func(ctx context.Context, t awsx.Target)
 }
 
@@ -99,7 +98,7 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 // IsLeader reports whether this instance currently holds the leader lock.
 func (p *Poller) IsLeader() bool { return p.leader.Load() }
 
-// defaultLoopFactory is a placeholder until Task 14 adds the real per-target Loop: it idles until cancelled.
+// defaultLoopFactory runs the real per-target polling loop until ctx is cancelled.
 func (p *Poller) defaultLoopFactory(ctx context.Context, t awsx.Target) {
-	<-ctx.Done()
+	newLoop(p, t).Run(ctx)
 }

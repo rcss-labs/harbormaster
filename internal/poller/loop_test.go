@@ -1,0 +1,287 @@
+package poller
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+
+	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+)
+
+const homelabAccount = "482109375512"
+
+var (
+	loopTarget = awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	loopNow    = time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+)
+
+type loopHarness struct {
+	loop   *Loop
+	fake   *fake.Fake
+	estate *fake.Estate
+	store  *store.Store
+}
+
+func newHarness(t *testing.T, estate *fake.Estate) *loopHarness {
+	t.Helper()
+	st := storetest.Open(t)
+	f := fake.New(estate)
+	p := New(st, f, Config{MaxInFlight: 4}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return &loopHarness{loop: newLoop(p, loopTarget), fake: f, estate: estate, store: st}
+}
+
+func mockupHarness(t *testing.T) *loopHarness {
+	return newHarness(t, fake.MockupEstate(func() time.Time { return loopNow }))
+}
+
+func (h *loopHarness) runOnce(t *testing.T) {
+	t.Helper()
+	if err := h.loop.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+}
+
+func (h *loopHarness) count(t *testing.T, query string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := h.store.Pool.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// estateTasks returns the estate's tasks of the loop target whose last status matches (any when "").
+func (h *loopHarness) estateTasks(status string) []fake.Task {
+	h.estate.Mu.Lock()
+	defer h.estate.Mu.Unlock()
+	var out []fake.Task
+	for _, task := range h.estate.Tasks {
+		if task.AccountID == loopTarget.AccountID && task.Region == loopTarget.Region &&
+			(status == "" || aws.ToString(task.Task.LastStatus) == status) {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+func TestLoop_FirstCycleFillsSnapshots(t *testing.T) {
+	h := mockupHarness(t)
+	h.runOnce(t)
+
+	h.estate.Mu.Lock()
+	var wantClusters, wantServices int
+	for _, c := range h.estate.Clusters {
+		if c.AccountID == loopTarget.AccountID && c.Region == loopTarget.Region {
+			wantClusters++
+		}
+	}
+	for _, s := range h.estate.Services {
+		if s.AccountID == loopTarget.AccountID && s.Region == loopTarget.Region {
+			wantServices++
+		}
+	}
+	wantARNs := map[string]bool{}
+	for _, s := range h.estate.Services {
+		if s.AccountID != loopTarget.AccountID || s.Region != loopTarget.Region {
+			continue
+		}
+		for _, d := range s.Service.Deployments {
+			wantARNs[aws.ToString(d.TaskDefinition)] = true
+		}
+	}
+	h.estate.Mu.Unlock()
+	allTasks := h.estateTasks("")
+	for _, task := range allTasks {
+		wantARNs[aws.ToString(task.Task.TaskDefinitionArn)] = true
+	}
+
+	if wantClusters != 3 || wantServices != 9 {
+		t.Fatalf("estate sanity: clusters/services = %d/%d, want 3/9", wantClusters, wantServices)
+	}
+	if got := h.count(t, `select count(*) from clusters`); got != wantClusters {
+		t.Errorf("clusters stored = %d, want %d", got, wantClusters)
+	}
+	if got := h.count(t, `select count(*) from services`); got != wantServices {
+		t.Errorf("services stored = %d, want %d", got, wantServices)
+	}
+	if got := h.count(t, `select count(*) from tasks where last_status = 'RUNNING'`); got != len(h.estateTasks("RUNNING")) {
+		t.Errorf("running tasks stored = %d, want %d", got, len(h.estateTasks("RUNNING")))
+	}
+	if got := h.count(t, `select count(*) from tasks where last_status = 'STOPPED'`); got != len(h.estateTasks("STOPPED")) || got == 0 {
+		t.Errorf("stopped tasks stored = %d, want %d (>0)", got, len(h.estateTasks("STOPPED")))
+	}
+	if got := h.count(t, `select count(*) from service_events`); got == 0 {
+		t.Error("no service events stored")
+	}
+	for arn := range wantARNs {
+		ok, err := h.store.HasTaskDefinition(context.Background(), loopTarget.AccountID, loopTarget.Region, arn)
+		if err != nil || !ok {
+			t.Errorf("task definition %s not cached (err=%v)", arn, err)
+		}
+	}
+}
+
+func TestLoop_RunningTasks_PaginatesAndChunks(t *testing.T) {
+	h := mockupHarness(t)
+	h.estate.AddRunningTasks("core-services", "payments-api", 250)
+	h.runOnce(t)
+
+	calls := h.fake.Calls()
+	if calls["ListTasks"] < 3 || calls["DescribeTasks"] < 3 {
+		t.Fatalf("ListTasks/DescribeTasks calls = %d/%d, want both >= 3", calls["ListTasks"], calls["DescribeTasks"])
+	}
+	want := len(h.estateTasks("RUNNING"))
+	if want < 250 {
+		t.Fatalf("estate has only %d running tasks", want)
+	}
+	if got := h.count(t, `select count(*) from tasks where last_status = 'RUNNING'`); got != want {
+		t.Fatalf("running tasks stored = %d, want %d", got, want)
+	}
+}
+
+func TestLoop_DescribeServicesBatchesOfTen(t *testing.T) {
+	estate := &fake.Estate{
+		Now:      func() time.Time { return loopNow },
+		Accounts: []fake.Account{{ID: homelabAccount, Name: "homelab-admin", Regions: []string{"us-east-1"}}},
+		Events:   map[string][]ecstypes.ServiceEvent{},
+	}
+	clusterARN := "arn:aws:ecs:us-east-1:" + homelabAccount + ":cluster/bulk"
+	estate.Clusters = []fake.Cluster{{AccountID: homelabAccount, Region: "us-east-1",
+		Cluster: ecstypes.Cluster{ClusterArn: aws.String(clusterARN), ClusterName: aws.String("bulk"), Status: aws.String("ACTIVE")}}}
+	for _, name := range []string{"s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09", "s10", "s11", "s12"} {
+		estate.Services = append(estate.Services, fake.Service{AccountID: homelabAccount, Region: "us-east-1", ClusterName: "bulk",
+			Service: ecstypes.Service{ServiceName: aws.String(name), Status: aws.String("ACTIVE"),
+				ServiceArn: aws.String("arn:aws:ecs:us-east-1:" + homelabAccount + ":service/bulk/" + name)}})
+	}
+	h := newHarness(t, estate)
+	h.runOnce(t)
+
+	if got := h.fake.Calls()["DescribeServices"]; got != 2 {
+		t.Fatalf("DescribeServices calls = %d, want 2 (12 services in batches of 10)", got)
+	}
+	if got := h.count(t, `select count(*) from services`); got != 12 {
+		t.Fatalf("services stored = %d, want 12", got)
+	}
+}
+
+func TestLoop_SecondCycleWritesNothingWhenUnchanged(t *testing.T) {
+	h := mockupHarness(t)
+	h.runOnce(t)
+	first := h.loop.writeTotals()
+	if first.Inserted == 0 {
+		t.Fatal("first cycle inserted nothing")
+	}
+	h.runOnce(t)
+	second := h.loop.writeTotals()
+	if second.Inserted != first.Inserted || second.Updated != first.Updated {
+		t.Fatalf("second cycle wrote rows: totals %+v -> %+v", first, second)
+	}
+	if second.Unchanged <= first.Unchanged {
+		t.Fatalf("second cycle did not compare any rows: %+v -> %+v", first, second)
+	}
+}
+
+func TestLoop_TaskLeavingRunningIsCapturedAsStopped(t *testing.T) {
+	h := mockupHarness(t)
+	h.runOnce(t)
+
+	var victim string
+	for _, task := range h.estateTasks("RUNNING") {
+		if aws.ToString(task.Task.Group) == "service:payments-api" {
+			victim = aws.ToString(task.Task.TaskArn)
+			break
+		}
+	}
+	h.estate.StopTask(victim, "Task failed ELB health checks", 143)
+	h.runOnce(t)
+
+	var status, reason string
+	err := h.store.Pool.QueryRow(context.Background(),
+		`select last_status, coalesce(stopped_reason, '') from tasks where task_arn = $1`, victim).Scan(&status, &reason)
+	if err != nil || status != "STOPPED" || reason != "Task failed ELB health checks" {
+		t.Fatalf("victim = %q %q, %v; want STOPPED with the stop reason", status, reason, err)
+	}
+}
+
+func TestLoop_TaskVanishingFromEstateIsMarkedMissing(t *testing.T) {
+	h := mockupHarness(t)
+	h.runOnce(t)
+
+	h.estate.Mu.Lock()
+	var victim string
+	for i, task := range h.estate.Tasks {
+		if aws.ToString(task.Task.LastStatus) == "RUNNING" && aws.ToString(task.Task.Group) == "service:web-frontend" {
+			victim = aws.ToString(task.Task.TaskArn)
+			h.estate.Tasks = append(h.estate.Tasks[:i:i], h.estate.Tasks[i+1:]...)
+			break
+		}
+	}
+	h.estate.Mu.Unlock()
+	h.runOnce(t)
+
+	var status, code string
+	err := h.store.Pool.QueryRow(context.Background(),
+		`select last_status, coalesce(stop_code, '') from tasks where task_arn = $1`, victim).Scan(&status, &code)
+	if err != nil || status != "STOPPED" || code != "Unknown" {
+		t.Fatalf("vanished task = %q %q, %v; want STOPPED/Unknown", status, code, err)
+	}
+}
+
+func TestPollOnce_FillsStore(t *testing.T) {
+	estate := fake.MockupEstate(func() time.Time { return loopNow })
+	st := storetest.Open(t)
+	if err := PollOnce(context.Background(), st, fake.New(estate), Config{MaxInFlight: 4}, loopTarget); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	keys, err := st.KnownTaskARNs(context.Background(), model.ClusterKey{AccountID: homelabAccount, Region: "us-east-1", Cluster: "core-services"}, "RUNNING")
+	if err != nil || len(keys) == 0 {
+		t.Fatalf("no running tasks after PollOnce: %v %v", keys, err)
+	}
+}
+
+func TestLoop_UnknownAccountIsAnErrorNotAPanic(t *testing.T) {
+	h := mockupHarness(t)
+	h.loop.target = awsx.Target{AccountID: "000000000000", Region: "us-east-1"}
+	if err := h.loop.runOnce(context.Background()); err == nil {
+		t.Fatal("expected an error for an unknown account")
+	}
+}
+
+func TestLoop_RunTicksEveryTierAndStopsOnCancel(t *testing.T) {
+	h := mockupHarness(t)
+	tick := 20 * time.Millisecond
+	h.loop.p.cfg.Intervals = Intervals{Services: tick, RunningTasks: tick, FullTasks: tick, StoppedTasks: tick, Clusters: tick, ServiceList: tick}
+	h.loop.p.cfg.Jitter = 5 * time.Millisecond
+	for _, d := range h.loop.defs {
+		d.tier.cur, d.tier.base = tick, tick
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.loop.Run(ctx); close(done) }()
+	time.Sleep(400 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	calls := h.fake.Calls()
+	for _, op := range []string{"ListClusters", "ListServices", "DescribeServices", "ListTasks", "DescribeTasks"} {
+		if calls[op] < 2 {
+			t.Errorf("%s called %d times, want a repeating tier (>= 2)", op, calls[op])
+		}
+	}
+	if got := h.count(t, `select count(*) from tasks where last_status = 'RUNNING'`); got != len(h.estateTasks("RUNNING")) {
+		t.Errorf("running tasks stored = %d, want %d", got, len(h.estateTasks("RUNNING")))
+	}
+}
