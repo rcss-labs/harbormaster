@@ -203,4 +203,22 @@ describe('LogsTab', () => {
     fireEvent.wheel(log)
     expect(keepalives()).toBe(1)
   })
+
+  it.each([
+    ['error', 'The live tail stopped because AWS returned an error.'],
+    ['closed', 'The live tail was closed.'],
+  ])('end frame %s shows its message with Resume', async (reason, message) => {
+    serveHistory(() => supportedOnly)
+    renderApp(route)
+    await screen.findByRole('log')
+    await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+    const socket = MockSocket.instances[0]
+    act(() => {
+      socket.onmessage?.({ data: JSON.stringify({ type: 'end', reason, message }) })
+      socket.onclose?.({ code: 1000, reason: '' })
+    })
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }))
+    expect(MockSocket.instances).toHaveLength(2)
+  })
 })

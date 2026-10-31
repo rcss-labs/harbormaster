@@ -7,6 +7,8 @@ import { level } from './level'
 import { useLogTail } from './useLogTail'
 import styles from './logs.module.css'
 
+// End reasons with their own banner; every other ended reason gets the generic disconnected banner with Resume.
+const HANDLED_END_REASONS = new Set(['idle', 'csrf_invalid', 'tail_limit', 'forbidden', 'invalid'])
 const SEARCH_DEBOUNCE_MS = 400
 const NEAR_BOTTOM_PX = 24
 
@@ -171,9 +173,9 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
         {follow && tail.status === 'ended' && tail.endReason === 'csrf_invalid' && (
           <Banner kind="warn">Your session changed. Reload the page to follow logs again.</Banner>
         )}
-        {follow && tail.status === 'ended' && !tail.endMessage && tail.endReason !== 'idle' && tail.endReason !== 'csrf_invalid' && (
+        {follow && tail.status === 'ended' && !HANDLED_END_REASONS.has(tail.endReason ?? '') && (
           <Banner kind="warn">
-            Live tail disconnected.
+            {tail.endMessage || 'Live tail disconnected.'}
             <button type="button" className={`${styles.btn} ${styles.bannerAction}`} onClick={tail.resume}>
               Resume
             </button>
