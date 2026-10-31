@@ -27,6 +27,10 @@ type Cluster struct {
 type Service struct {
 	AccountID, Region, ClusterName string
 	Service                        ecstypes.Service
+	// ECRTags are the tags in the service's ECR repository, newest first.
+	ECRTags []string
+	// TaskDefinitionTags are the tags seeded on every revision of the family.
+	TaskDefinitionTags []ecstypes.Tag
 }
 
 type Task struct {
@@ -37,6 +41,8 @@ type Task struct {
 type TaskDefinition struct {
 	AccountID, Region string
 	Definition        ecstypes.TaskDefinition
+	// Tags are this revision's tags, as given to RegisterTaskDefinition.
+	Tags []ecstypes.Tag
 }
 
 // Estate is the whole fake AWS world. Mu guards every field: tests and later

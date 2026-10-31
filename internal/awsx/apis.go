@@ -3,6 +3,7 @@ package awsx
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 )
 
@@ -15,6 +16,17 @@ type ECSAPI interface {
 	ListTasks(ctx context.Context, in *ecs.ListTasksInput, opts ...func(*ecs.Options)) (*ecs.ListTasksOutput, error)
 	DescribeTasks(ctx context.Context, in *ecs.DescribeTasksInput, opts ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error)
 	DescribeTaskDefinition(ctx context.Context, in *ecs.DescribeTaskDefinitionInput, opts ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error)
+
+	// Plan 02 (change path).
+	RegisterTaskDefinition(ctx context.Context, in *ecs.RegisterTaskDefinitionInput, opts ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error)
+	ListTaskDefinitions(ctx context.Context, in *ecs.ListTaskDefinitionsInput, opts ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error)
+	ListTagsForResource(ctx context.Context, in *ecs.ListTagsForResourceInput, opts ...func(*ecs.Options)) (*ecs.ListTagsForResourceOutput, error)
+	StopTask(ctx context.Context, in *ecs.StopTaskInput, opts ...func(*ecs.Options)) (*ecs.StopTaskOutput, error)
+}
+
+// ECRAPI lists only the ECR calls Harbormaster makes.
+type ECRAPI interface {
+	DescribeImages(ctx context.Context, in *ecr.DescribeImagesInput, opts ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error)
 }
 
 // Placeholders: later plans add the methods they call (see conventions doc).
@@ -25,6 +37,5 @@ type (
 	AutoScalingAPI interface{} // plan 03
 	CloudWatchAPI  interface{} // plan 03
 	LogsAPI        interface{} // plan 03
-	ECRAPI         interface{} // plan 02
 	SSMAPI         interface{} // plan 04
 )

@@ -85,8 +85,16 @@ func (f *Fake) AutoScaling(context.Context, awsx.Target) (awsx.AutoScalingAPI, e
 }
 func (f *Fake) CloudWatch(context.Context, awsx.Target) (awsx.CloudWatchAPI, error) { return nil, nil }
 func (f *Fake) Logs(context.Context, awsx.Target) (awsx.LogsAPI, error)             { return nil, nil }
-func (f *Fake) ECR(context.Context, awsx.Target) (awsx.ECRAPI, error)               { return nil, nil }
-func (f *Fake) SSM(context.Context, awsx.Target) (awsx.SSMAPI, error)               { return nil, nil }
+
+// ECR returns a target-scoped DescribeImages client (see change.go).
+func (f *Fake) ECR(_ context.Context, t awsx.Target) (awsx.ECRAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &ecrClient{f: f, target: t}, nil
+}
+
+func (f *Fake) SSM(context.Context, awsx.Target) (awsx.SSMAPI, error) { return nil, nil }
 
 func (f *Fake) Credentials(_ context.Context, t awsx.Target) (aws.CredentialsProvider, error) {
 	if !f.knownAccount(t.AccountID) {
