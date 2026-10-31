@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CLUSTER_CORE } from '../../test/fixtures'
@@ -43,5 +43,26 @@ describe('Cluster', () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     expect(await screen.findByRole('heading', { name: 'No access' })).toBeInTheDocument()
     expect(screen.getByText('You have no permissions on any service in this cluster.')).toBeInTheDocument()
+  })
+})
+
+describe('Cluster tag edits', () => {
+  it('a service tag chip edits the service, not the cluster', async () => {
+    const puts: { url: string; body: unknown }[] = []
+    const paymentsApi = CLUSTER_CORE.services_detail.find((service) => service.name === 'payments-api')!
+    server.use(
+      http.put('/api/tag-assignments/:kind/:id', async ({ request }) => {
+        puts.push({ url: new URL(request.url).pathname, body: await request.json() })
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const card = await screen.findByRole('article', { name: 'payments-api' })
+    fireEvent.click(within(card).getByRole('button', { name: paymentsApi.tag.name }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Tag for payments-api')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Staging' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save tag' }))
+    await waitFor(() => expect(puts).toEqual([{ url: `/api/tag-assignments/services/${paymentsApi.id}`, body: { tag_id: 2 } }]))
   })
 })

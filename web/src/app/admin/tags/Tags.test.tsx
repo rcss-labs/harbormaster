@@ -33,6 +33,21 @@ describe('Tags', () => {
   })
 })
 
+describe('Tags filters', () => {
+  it('assignments follow the account filter in the URL', async () => {
+    const accounts: (string | null)[] = []
+    server.use(
+      http.get('/api/tag-assignments', ({ request }) => {
+        accounts.push(new URL(request.url).searchParams.get('account'))
+        return HttpResponse.json(ASSIGNMENTS)
+      }),
+    )
+    renderApp('/admin/tags?account=731022849906')
+    await screen.findByLabelText('Tag for web')
+    expect(accounts).toContain('731022849906')
+  })
+})
+
 describe('TagDialog', () => {
   it('rejects "9lives" with the validation message', async () => {
     const posts: unknown[] = []

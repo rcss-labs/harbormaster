@@ -5,6 +5,7 @@ import { AdminOnly } from '../../../components/AdminOnly'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useAuth } from '../../auth/AuthProvider'
+import { useFilters } from '../../shell/useFilters'
 import { useCrumbs } from '../../shell/crumbs'
 import { Assignments } from './Assignments'
 import { DeleteTagDialog } from './DeleteTagDialog'
@@ -19,7 +20,9 @@ export function Tags() {
   const isAdmin = me?.admin ?? false
   // Non-admins would get 403s, so the admin queries stay disabled for them.
   const tags = useTags({ enabled: isAdmin })
-  const assignments = useTagAssignments({}, { enabled: isAdmin })
+  const { filters } = useFilters()
+  // Only the assignments follow the account and region filters; the tag list stays global.
+  const assignments = useTagAssignments(filters, { enabled: isAdmin })
   const [dialog, setDialog] = useState<DialogState>(null)
 
   if (!me || !isAdmin) return <AdminOnly area="tags" />

@@ -163,8 +163,19 @@ export function Cluster() {
           ))}
         </div>
       )}
-      {editing && (
+      {editing?.kind === 'cluster' && (
         <EditTagDialog kind="cluster" id={editing.id} name={editing.name} current={editing.tag.id} onClose={() => setEditing(null)} />
+      )}
+      {editing?.kind === 'service' && (
+        <EditTagDialog
+          kind="service"
+          id={editing.id}
+          name={editing.name}
+          current={editing.tag.inherited ? null : editing.tag.id}
+          clusterName={cluster.name}
+          clusterTag={cluster.tag}
+          onClose={() => setEditing(null)}
+        />
       )}
     </>
   )
