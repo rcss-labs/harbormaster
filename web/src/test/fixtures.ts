@@ -2,21 +2,29 @@
 // Every body is derived from one set of service definitions so counts, ids and statuses agree across screens.
 import type {
   AccountsDTO,
+  AlertsDTO,
   AuditDTO,
   ClusterCardDTO,
   ClusterDTO,
+  ClusterMetricsDTO,
   ClusterServiceDTO,
   ClusterStatus,
+  ClustersMetricsDTO,
   DeploysDayDTO,
   EventDTO,
   ListDTO,
+  LogsHistoryDTO,
   MeDTO,
   OverviewDTO,
+  OverviewMetricsDTO,
   PermissionsDTO,
   PointDTO,
   PollerDTO,
   ReasonCountDTO,
+  ScalingDTO,
+  Series,
   ServiceDTO,
+  ServiceMetricsDTO,
   SlotDTO,
   Status,
   StopsHourDTO,
@@ -24,6 +32,7 @@ import type {
   TagColor,
   TagDTO,
   TagsDTO,
+  TargetHealthDTO,
   TaskDTO,
   TasksListDTO,
   UsersDTO,
@@ -769,4 +778,256 @@ export const POLLER: PollerDTO = {
     ...REGIONS.map((region) => ({ account_id: ACCOUNT_HOMELAB.account_id, account_name: ACCOUNT_HOMELAB.name, region })),
     { account_id: ACCOUNT_STAGING.account_id, account_name: ACCOUNT_STAGING.name, region: 'us-east-1' },
   ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0) })),
+}
+
+// ---- observe (plan 03): metrics, target health, scaling, alerts, log history ----
+
+const METRIC_POINTS = 12
+const METRIC_STEP_MIN = 30
+const metricTimestamps = Array.from({ length: METRIC_POINTS }, (_, i) => minutesAgo((METRIC_POINTS - 1 - i) * METRIC_STEP_MIN))
+
+/** A smooth deterministic series around `base`, with optional gaps (indexes that CloudWatch had no datapoint for). */
+function wave(base: number, amplitude: number, phase: number, gaps: number[] = []): Series {
+  return Array.from({ length: METRIC_POINTS }, (_, i) =>
+    gaps.includes(i) ? null : Math.round((base + amplitude * Math.sin(i / 2 + phase)) * 10) / 10,
+  )
+}
+
+const lastPoint = (series: Series): number | null => series[series.length - 1] ?? null
+
+const paymentsId = serviceIdOf(serviceDef('payments-api'))
+const catalogId = serviceIdOf(serviceDef('catalog-api'))
+const edgeNginxId = serviceIdOf(serviceDef('edge-nginx'))
+const edgeProxyClusterId = clusterIdOf(clusterDef('edge-proxy'))
+const euAppsClusterId = clusterIdOf(clusterDef('eu-apps'))
+const coreClusterId = clusterIdOf(clusterDef('core-services'))
+
+const paymentsCpu = wave(34, 10, 0)
+const paymentsMem = wave(58, 6, 1)
+
+/** payments-api, 6 h of Container Insights data: ALB, three running tasks and one deploy marker. */
+export const SERVICE_METRICS_PAYMENTS: ServiceMetricsDTO = {
+  range: '6h',
+  period: 300,
+  insights: 'enhanced',
+  timestamps: metricTimestamps,
+  series: { cpu: paymentsCpu, mem: paymentsMem, net_rx_kbps: wave(220, 60, 2), net_tx_kbps: wave(340, 80, 3), tasks: wave(3, 0, 0) },
+  now: { cpu: lastPoint(paymentsCpu), mem: lastPoint(paymentsMem), cpu_units: 512, mem_mib: 1024, running: 3 },
+  alb: {
+    req_per_min: wave(420, 90, 0.5),
+    p95_ms: wave(180, 40, 1.5),
+    err5xx_per_hour: { timestamps: metricTimestamps.slice(-6), values: [0, 0, 2, 0, 1, 0] },
+    req_now: 438,
+    p95_now: 171.2,
+    err5xx_today: 3,
+  },
+  tasks_now: [
+    { task_id: 'a1b2c3d4e5f60718', cpu: 31.2, mem: 57.4 },
+    { task_id: 'b2c3d4e5f6071829', cpu: 36.8, mem: 59.1 },
+    { task_id: 'c3d4e5f607182930', cpu: null, mem: null },
+  ],
+  markers: [{ at: minutesAgo(150), label: 'deploy rev 42', kind: 'deploy', failed: false }],
+  stale: null,
+  polled_at: FIXTURE_NOW,
+}
+
+/** catalog-api with Container Insights off: no series, no usage numbers, but a gap-free ALB panel. */
+export const SERVICE_METRICS_CATALOG_NO_INSIGHTS: ServiceMetricsDTO = {
+  range: '24h',
+  period: 900,
+  insights: 'disabled',
+  timestamps: metricTimestamps,
+  series: null,
+  now: null,
+  alb: {
+    req_per_min: wave(95, 20, 0.2, [3, 4]),
+    p95_ms: wave(310, 70, 0.9, [3, 4]),
+    err5xx_per_hour: { timestamps: metricTimestamps.slice(-6), values: [0, 4, 9, 6, 2, 1] },
+    req_now: 98,
+    p95_now: 322.5,
+    err5xx_today: 22,
+  },
+  tasks_now: null,
+  markers: [],
+  stale: null,
+  polled_at: FIXTURE_NOW,
+}
+
+export const SERVICE_METRICS_STALE: ServiceMetricsDTO = {
+  ...SERVICE_METRICS_PAYMENTS,
+  stale: { reason: 'CloudWatch is throttling requests', fetched_at: minutesAgo(12) },
+}
+
+const clusterCpu = wave(41, 8, 0.3)
+const clusterMem = wave(63, 5, 1.2)
+
+export const CLUSTER_METRICS_CORE: ClusterMetricsDTO = {
+  range: '24h',
+  period: 1800,
+  insights: 'enhanced',
+  timestamps: metricTimestamps,
+  cluster: { cpu: clusterCpu, mem: clusterMem },
+  now: { cpu: lastPoint(clusterCpu), mem: lastPoint(clusterMem) },
+  markers: [{ at: minutesAgo(150), label: 'payments-api rev 42', kind: 'deploy', failed: false, service: 'payments-api' }],
+  services: {
+    [paymentsId]: {
+      cpu: paymentsCpu,
+      mem: paymentsMem,
+      cpu_now: lastPoint(paymentsCpu),
+      mem_now: lastPoint(paymentsMem),
+      alb: { req_now: 438, p95_now: 171.2, err5xx_today: 3 },
+    },
+    [serviceIdOf(serviceDef('notifications'))]: {
+      cpu: wave(18, 4, 2),
+      mem: wave(44, 3, 0),
+      cpu_now: 17.4,
+      mem_now: 44.9,
+      alb: null,
+    },
+  },
+  stale: null,
+}
+
+export const CLUSTERS_METRICS: ClustersMetricsDTO = {
+  items: {
+    [coreClusterId]: { insights: 'enhanced', cpu: clusterCpu, mem: clusterMem, cpu_now: lastPoint(clusterCpu), mem_now: lastPoint(clusterMem) },
+    [euAppsClusterId]: { insights: 'enabled', cpu: wave(52, 9, 1), mem: wave(71, 4, 2), cpu_now: 49.3, mem_now: 72.8 },
+    [edgeProxyClusterId]: { insights: 'disabled', cpu: [], mem: [], cpu_now: null, mem_now: null },
+  },
+  stale: null,
+}
+
+export const OVERVIEW_METRICS: OverviewMetricsDTO = {
+  timestamps: metricTimestamps,
+  cpu_by_cluster: [
+    { id: coreClusterId, label: 'core-services', values: clusterCpu },
+    { id: euAppsClusterId, label: 'eu-apps', values: wave(52, 9, 1, [0]) },
+  ],
+  mem_by_cluster: [
+    { id: coreClusterId, label: 'core-services', values: clusterMem },
+    { id: euAppsClusterId, label: 'eu-apps', values: wave(71, 4, 2, [0]) },
+  ],
+  avg: { cpu: 45.1, mem: 67.9 },
+  stale: null,
+}
+
+/** edge-nginx: two targets in one group, one of them failing its health check. */
+export const TARGET_HEALTH_EDGE: TargetHealthDTO = {
+  groups: [
+    {
+      target_group_arn: `arn:aws:elasticloadbalancing:eu-west-1:${ACCOUNT_HOMELAB.account_id}:targetgroup/edge-nginx/${hex('edge-nginx-tg', 16)}`,
+      name: 'edge-nginx',
+      healthy: 1,
+      unhealthy: 1,
+      targets: [
+        { id: '10.0.2.41', port: 443, az: 'eu-west-1a', state: 'healthy', reason: '', description: '' },
+        { id: '10.0.3.17', port: 443, az: 'eu-west-1b', state: 'unhealthy', reason: 'Target.FailedHealthChecks', description: 'Health checks failed' },
+      ],
+    },
+  ],
+  healthy: 1,
+  unhealthy: 1,
+  polled_at: FIXTURE_NOW,
+}
+
+export const SCALING_PAYMENTS: ScalingDTO = {
+  has_target: true,
+  min: 2,
+  max: 8,
+  policies: [
+    { name: 'cpu-target-60', type: 'TargetTrackingScaling', metric: 'ECSServiceAverageCPUUtilization', target_value: 60, scale_out_cooldown: 60, scale_in_cooldown: 300 },
+  ],
+  scheduled_actions: [{ name: 'business-hours', schedule: 'cron(0 7 * * ? *)', timezone: 'Asia/Jerusalem', min_capacity: 3, max_capacity: null }],
+  activities: [
+    {
+      id: 'act-4f1c0e2a',
+      description: 'Setting desired count to 3.',
+      cause: 'monitor alarm TargetTracking-service/core-services/payments-api-AlarmHigh in state ALARM triggered policy cpu-target-60',
+      status_code: 'Successful',
+      status_message: 'Successfully set desired count to 3.',
+      started_at: minutesAgo(95),
+      ended_at: minutesAgo(94),
+    },
+    {
+      id: 'act-77d9b315',
+      description: 'Setting desired count to 4.',
+      cause: 'monitor alarm TargetTracking-service/core-services/payments-api-AlarmHigh in state ALARM triggered policy cpu-target-60',
+      status_code: 'InProgress',
+      status_message: '',
+      started_at: minutesAgo(1),
+      ended_at: null,
+    },
+  ],
+  polled_at: FIXTURE_NOW,
+}
+
+/** A service without a scaling target: the Scaling tab shows its empty state. */
+export const SCALING_NONE: ScalingDTO = {
+  has_target: false,
+  min: 0,
+  max: 0,
+  policies: [],
+  scheduled_actions: [],
+  activities: [],
+  polled_at: FIXTURE_NOW,
+}
+
+export const ALERTS: AlertsDTO = {
+  items: [
+    {
+      kind: 'unhealthy_targets',
+      severity: 'danger',
+      title: 'Unhealthy target',
+      text: 'edge-nginx has 1 of 2 targets failing health checks.',
+      at: minutesAgo(6),
+      service_id: edgeNginxId,
+      service: 'edge-nginx',
+      cluster: 'edge-proxy',
+      cluster_id: edgeProxyClusterId,
+      tab: 'overview',
+    },
+    {
+      kind: 'deployment_failed',
+      severity: 'warning',
+      title: 'Deployment failed',
+      text: 'catalog-api rolled back to revision 22.',
+      at: minutesAgo(48),
+      service_id: catalogId,
+      service: 'catalog-api',
+      cluster: 'eu-apps',
+      cluster_id: euAppsClusterId,
+      tab: 'deployments',
+    },
+    {
+      kind: 'account_throttled',
+      severity: 'info',
+      title: 'AWS is throttling',
+      text: 'homelab-admin in eu-west-1 is being rate limited.',
+      at: minutesAgo(3),
+      service_id: '',
+      service: '',
+      cluster: '',
+      cluster_id: '',
+      tab: '',
+    },
+  ],
+  counts: { danger: 1, warning: 1, info: 1 },
+  polled_at: FIXTURE_NOW,
+}
+
+export const LOGS_HISTORY_PAYMENTS: LogsHistoryDTO = {
+  group: '/ecs/payments-api',
+  region: 'eu-west-1',
+  containers: [
+    { name: 'app', driver: 'awslogs', supported: true, stream_prefix: 'ecs' },
+    { name: 'datadog-agent', driver: 'awslogs', supported: false, reason: 'other_group' },
+    { name: 'log-router', driver: 'awsfirelens', supported: false, reason: 'driver' },
+  ],
+  lines: [
+    { t: minutesAgo(5), container: 'app', task_id: 'a1b2c3d4e5f60718', message: 'POST /v1/charges 201 38ms' },
+    { t: minutesAgo(4), container: 'app', task_id: 'b2c3d4e5f6071829', message: 'GET /healthz 200 1ms' },
+    { t: minutesAgo(3), container: 'app', task_id: 'a1b2c3d4e5f60718', message: 'ERROR charge declined: card_expired' },
+  ],
+  older_before: minutesAgo(5),
+  truncated: false,
 }

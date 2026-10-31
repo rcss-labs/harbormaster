@@ -37,6 +37,30 @@
       "service": "string"
     }
   },
+  "alerts": {
+    "counts": {
+      "danger": "number",
+      "info": "number",
+      "warning": "number"
+    },
+    "items": [
+      {
+        "at": "time",
+        "cluster": "string",
+        "cluster_id": "string",
+        "kind": "string",
+        "service": "string",
+        "service_id": "string",
+        "severity": "string",
+        "tab": "string",
+        "text": "string",
+        "title": "string"
+      }
+    ],
+    "polled_at": {
+      "$null": "time"
+    }
+  },
   "audit": {
     "items": [
       {
@@ -140,6 +164,86 @@
       }
     ]
   },
+  "clusterMetrics": {
+    "cluster": {
+      "$null": {
+        "cpu": [
+          {
+            "$null": "number"
+          }
+        ],
+        "mem": [
+          {
+            "$null": "number"
+          }
+        ]
+      }
+    },
+    "insights": "string",
+    "markers": [
+      {
+        "at": "time",
+        "failed": "boolean",
+        "kind": "string",
+        "label": "string",
+        "service": {
+          "$optional": "string"
+        }
+      }
+    ],
+    "now": {
+      "$null": {
+        "cpu": {
+          "$null": "number"
+        },
+        "mem": {
+          "$null": "number"
+        }
+      }
+    },
+    "period": "number",
+    "range": "string",
+    "services": {
+      "$map": {
+        "alb": {
+          "$null": {
+            "err5xx_today": "number",
+            "p95_now": {
+              "$null": "number"
+            },
+            "req_now": {
+              "$null": "number"
+            }
+          }
+        },
+        "cpu": [
+          {
+            "$null": "number"
+          }
+        ],
+        "cpu_now": {
+          "$null": "number"
+        },
+        "mem": [
+          {
+            "$null": "number"
+          }
+        ],
+        "mem_now": {
+          "$null": "number"
+        }
+      }
+    },
+    "stale": {
+      "$null": {
+        "fetched_at": "time",
+        "reason": "string"
+      }
+    },
+    "timestamps": [
+      "time"
+    ]
+  },
   "clusters": {
     "items": [
       {
@@ -177,6 +281,35 @@
       "$null": "string"
     },
     "polled_at": "time"
+  },
+  "clustersMetrics": {
+    "items": {
+      "$map": {
+        "cpu": [
+          {
+            "$null": "number"
+          }
+        ],
+        "cpu_now": {
+          "$null": "number"
+        },
+        "insights": "string",
+        "mem": [
+          {
+            "$null": "number"
+          }
+        ],
+        "mem_now": {
+          "$null": "number"
+        }
+      }
+    },
+    "stale": {
+      "$null": {
+        "fetched_at": "time",
+        "reason": "string"
+      }
+    }
   },
   "createUser": {
     "temporary_password": "string",
@@ -231,6 +364,35 @@
       ],
       "username": "string"
     }
+  },
+  "logs": {
+    "containers": [
+      {
+        "driver": "string",
+        "name": "string",
+        "reason": {
+          "$optional": "string"
+        },
+        "stream_prefix": {
+          "$optional": "string"
+        },
+        "supported": "boolean"
+      }
+    ],
+    "group": "string",
+    "lines": [
+      {
+        "container": "string",
+        "message": "string",
+        "t": "time",
+        "task_id": "string"
+      }
+    ],
+    "older_before": {
+      "$null": "time"
+    },
+    "region": "string",
+    "truncated": "boolean"
   },
   "me": {
     "accounts": [
@@ -370,6 +532,47 @@
       "unhealthy": "number"
     }
   },
+  "overviewMetrics": {
+    "avg": {
+      "cpu": {
+        "$null": "number"
+      },
+      "mem": {
+        "$null": "number"
+      }
+    },
+    "cpu_by_cluster": [
+      {
+        "id": "string",
+        "label": "string",
+        "values": [
+          {
+            "$null": "number"
+          }
+        ]
+      }
+    ],
+    "mem_by_cluster": [
+      {
+        "id": "string",
+        "label": "string",
+        "values": [
+          {
+            "$null": "number"
+          }
+        ]
+      }
+    ],
+    "stale": {
+      "$null": {
+        "fetched_at": "time",
+        "reason": "string"
+      }
+    },
+    "timestamps": [
+      "time"
+    ]
+  },
   "permissions": {
     "tags": [
       {
@@ -402,6 +605,50 @@
         },
         "region": "string",
         "throttled": "boolean"
+      }
+    ]
+  },
+  "scaling": {
+    "activities": [
+      {
+        "cause": "string",
+        "description": "string",
+        "ended_at": {
+          "$null": "time"
+        },
+        "id": "string",
+        "started_at": "time",
+        "status_code": "string",
+        "status_message": "string"
+      }
+    ],
+    "has_target": "boolean",
+    "max": "number",
+    "min": "number",
+    "policies": [
+      {
+        "metric": "string",
+        "name": "string",
+        "scale_in_cooldown": "number",
+        "scale_out_cooldown": "number",
+        "target_value": "number",
+        "type": "string"
+      }
+    ],
+    "polled_at": {
+      "$null": "time"
+    },
+    "scheduled_actions": [
+      {
+        "max_capacity": {
+          "$null": "number"
+        },
+        "min_capacity": {
+          "$null": "number"
+        },
+        "name": "string",
+        "schedule": "string",
+        "timezone": "string"
       }
     ]
   },
@@ -568,6 +815,120 @@
     },
     "task_definition_arn": "string"
   },
+  "serviceMetrics": {
+    "alb": {
+      "$null": {
+        "err5xx_per_hour": {
+          "timestamps": [
+            "time"
+          ],
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        },
+        "err5xx_today": "number",
+        "p95_ms": [
+          {
+            "$null": "number"
+          }
+        ],
+        "p95_now": {
+          "$null": "number"
+        },
+        "req_now": {
+          "$null": "number"
+        },
+        "req_per_min": [
+          {
+            "$null": "number"
+          }
+        ]
+      }
+    },
+    "insights": "string",
+    "markers": [
+      {
+        "at": "time",
+        "failed": "boolean",
+        "kind": "string",
+        "label": "string",
+        "service": {
+          "$optional": "string"
+        }
+      }
+    ],
+    "now": {
+      "$null": {
+        "cpu": {
+          "$null": "number"
+        },
+        "cpu_units": "number",
+        "mem": {
+          "$null": "number"
+        },
+        "mem_mib": "number",
+        "running": "number"
+      }
+    },
+    "period": "number",
+    "polled_at": {
+      "$null": "time"
+    },
+    "range": "string",
+    "series": {
+      "$null": {
+        "cpu": [
+          {
+            "$null": "number"
+          }
+        ],
+        "mem": [
+          {
+            "$null": "number"
+          }
+        ],
+        "net_rx_kbps": [
+          {
+            "$null": "number"
+          }
+        ],
+        "net_tx_kbps": [
+          {
+            "$null": "number"
+          }
+        ],
+        "tasks": [
+          {
+            "$null": "number"
+          }
+        ]
+      }
+    },
+    "stale": {
+      "$null": {
+        "fetched_at": "time",
+        "reason": "string"
+      }
+    },
+    "tasks_now": {
+      "$null": [
+        {
+          "cpu": {
+            "$null": "number"
+          },
+          "mem": {
+            "$null": "number"
+          },
+          "task_id": "string"
+        }
+      ]
+    },
+    "timestamps": [
+      "time"
+    ]
+  },
   "setup": {
     "needed": "boolean"
   },
@@ -640,6 +1001,31 @@
         ]
       }
     ]
+  },
+  "targetHealth": {
+    "groups": [
+      {
+        "healthy": "number",
+        "name": "string",
+        "target_group_arn": "string",
+        "targets": [
+          {
+            "az": "string",
+            "description": "string",
+            "id": "string",
+            "port": "number",
+            "reason": "string",
+            "state": "string"
+          }
+        ],
+        "unhealthy": "number"
+      }
+    ],
+    "healthy": "number",
+    "polled_at": {
+      "$null": "time"
+    },
+    "unhealthy": "number"
   },
   "tasks": {
     "counts": {

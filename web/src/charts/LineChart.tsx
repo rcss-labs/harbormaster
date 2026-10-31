@@ -5,7 +5,8 @@ import { fmtNum } from './format'
 export interface LineSeries {
   name: string
   color: string
-  values: number[]
+  /** `null` is a gap: the line breaks there. */
+  values: (number | null)[]
 }
 
 interface LineChartProps {
@@ -28,6 +29,27 @@ const KEPT_SERIES = 7
 
 const lastValue = (series: LineSeries) => series.values[series.values.length - 1] ?? 0
 
+type Run = { x: number; y: number }[]
+
+/** Splits a series into runs of consecutive non-null points; each run becomes its own path segment. */
+function contiguousRuns(values: (number | null)[], max: number): Run[] {
+  const runs: Run[] = []
+  let current: Run = []
+  values.forEach((v, i) => {
+    if (v === null) {
+      if (current.length > 0) runs.push(current)
+      current = []
+      return
+    }
+    current.push({
+      x: values.length > 1 ? (i / (values.length - 1)) * VIEW_WIDTH : 0,
+      y: VIEW_HEIGHT - (Math.min(v, max) / max) * VIEW_HEIGHT,
+    })
+  })
+  if (current.length > 0) runs.push(current)
+  return runs
+}
+
 /** Keeps the 7 series with the highest last value and folds the rest into one "others" series of per-index means. */
 function collapseSeries(series: LineSeries[]): LineSeries[] {
   if (series.length <= MAX_SERIES) return series
@@ -39,7 +61,8 @@ function collapseSeries(series: LineSeries[]): LineSeries[] {
     name: 'others',
     color: 'var(--border-strong)',
     values: Array.from({ length: pointCount }, (_, i) => {
-      const samples = rest.map((s) => s.values[i]).filter((v): v is number => v !== undefined)
+      const samples = rest.map((s) => s.values[i]).filter((v): v is number => v !== undefined && v !== null)
+      if (samples.length === 0) return null
       return samples.reduce((total, v) => total + v, 0) / samples.length
     }),
   }
@@ -72,14 +95,16 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
             <line key={mark.at} x1={mark.at * VIEW_WIDTH} x2={mark.at * VIEW_WIDTH} y1={0} y2={VIEW_HEIGHT} className={styles.mk} />
           ))}
           {shown.map((line) => {
-            const points = line.values.map(
-              (v, i) =>
-                `${(line.values.length > 1 ? (i / (line.values.length - 1)) * VIEW_WIDTH : 0).toFixed(1)} ${(VIEW_HEIGHT - (Math.min(v, max) / max) * VIEW_HEIGHT).toFixed(2)}`,
-            )
-            const outline = `M${points.join(' L')}`
+            const runs = contiguousRuns(line.values, max)
+            if (runs.length === 0) return null
+            const point = (p: { x: number; y: number }) => `${p.x.toFixed(1)} ${p.y.toFixed(2)}`
+            const outline = runs.map((run) => `M${run.map(point).join(' L')}`).join(' ')
+            const fill = runs
+              .map((run) => `M${run.map(point).join(' L')} L${run[run.length - 1].x.toFixed(1)} ${VIEW_HEIGHT} L${run[0].x.toFixed(1)} ${VIEW_HEIGHT} Z`)
+              .join(' ')
             return (
               <Fragment key={line.name}>
-                <path d={`${outline} L${VIEW_WIDTH} ${VIEW_HEIGHT} L0 ${VIEW_HEIGHT} Z`} fill={line.color} opacity={fillOpacity} />
+                <path d={fill} fill={line.color} opacity={fillOpacity} />
                 <path d={outline} fill="none" stroke={line.color} strokeWidth={1.4} vectorEffect="non-scaling-stroke" className={styles.line} />
               </Fragment>
             )
