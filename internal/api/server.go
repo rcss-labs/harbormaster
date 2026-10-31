@@ -91,6 +91,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/search", s.search, routeOptions{})
 	s.handle(mux, "GET /api/poller", s.pollerStatus, routeOptions{})
 
+	s.handle(mux, "GET /api/users", s.listUsers, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/users", s.createUser, routeOptions{Admin: true})
+	s.handle(mux, "DELETE /api/users/{id}", s.deleteUser, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/users/{id}/reset-password", s.resetUserPassword, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/users/{id}/admin", s.setUserAdmin, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/permissions", s.getPermissions, routeOptions{Admin: true})
+	s.handle(mux, "PUT /api/permissions/{userId}/{tagId}", s.setPermission, routeOptions{Admin: true})
+
 	// Unknown API paths are JSON 404s and never fall through to the SPA. RequirePasswordChanged
 	// still applies so a user with a pending password change sees password_change_required.
 	mux.Handle("/api/", auth.RequirePasswordChanged(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
