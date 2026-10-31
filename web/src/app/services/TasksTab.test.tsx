@@ -23,6 +23,20 @@ describe('TasksTab', () => {
     expect(within(table).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
+  it('shows fractional vCPU exactly and memory in MiB', async () => {
+    server.use(
+      http.get('/api/services/:id/tasks', ({ params }) =>
+        HttpResponse.json(
+          tasksList(ALL_TASKS.filter((task) => task.service?.id === params.id).map((task) => ({ ...task, cpu: '256', memory: '512' }))),
+        ),
+      ),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByText('0.25 vCPU').length).toBeGreaterThan(0)
+    expect(within(table).getAllByText('512 MiB').length).toBeGreaterThan(0)
+  })
+
   it('Load more requests the next cursor', async () => {
     const cursors: (string | null)[] = []
     server.use(

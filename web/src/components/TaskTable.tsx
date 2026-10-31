@@ -1,6 +1,5 @@
 import { Link } from 'react-router'
 import type { TaskDTO } from '../api/types'
-import { fmtNum } from '../charts/format'
 import { Ago } from './Ago'
 import { Pill, type PillKind } from './Pill'
 import { Table, tableClass } from './Table'
@@ -17,6 +16,9 @@ interface TaskTableProps {
 
 const PROGRESS_STATUSES = ['PROVISIONING', 'PENDING', 'ACTIVATING']
 const titleCase = (status: string) => status.charAt(0) + status.slice(1).toLowerCase()
+
+/** vCPU from ECS CPU units: up to two decimals, trailing zeros dropped (256 → 0.25, 1024 → 1). */
+const formatVcpu = (cpuUnits: string) => String(+(Number(cpuUnits) / 1024).toFixed(2))
 
 function statusPill(task: TaskDTO): { kind: PillKind; label: string } {
   if (task.status === 'RUNNING') return { kind: 'ok', label: 'Running' }
@@ -89,7 +91,7 @@ function TaskRow({ task, withService }: { task: TaskDTO; withService: boolean })
         </div>
       </td>
       <td className={styles.small}>{task.capacity}</td>
-      <td className={tableClass.num}>{fmtNum(Number(task.cpu) / 1024)} vCPU</td>
+      <td className={tableClass.num}>{formatVcpu(task.cpu)} vCPU</td>
       <td className={tableClass.num}>{task.memory} MiB</td>
       <td className={styles.muted}>{task.started_at ? <Ago ts={task.started_at} /> : '–'}</td>
       <td className={styles.reason}>
