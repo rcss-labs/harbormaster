@@ -1,14 +1,21 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 // seededForChangeReads polls the mockup estate and loads the dev seed.
@@ -85,7 +92,7 @@ func TestGetTaskDefinition_ViewerGetsReadOnlyShape(t *testing.T) {
 
 func TestGetTaskDefinition_NoViewIs404(t *testing.T) {
 	_, as := seededForChangeReads(t)
-	// oncall has no permission on Dev only; payments-api is Prod. Use a user with no grants at all.
+	// omer has no grants on Prod, which owns payments-api's cluster, so the service is invisible to him.
 	c := as("omer")
 	for _, path := range []string{"task-definition", "revisions", "image-tags", "desired-count"} {
 		resp := c.get("/api/services/" + paymentsID() + "/" + path)
@@ -96,25 +103,109 @@ func TestGetTaskDefinition_NoViewIs404(t *testing.T) {
 	}
 }
 
+type revisionsBody struct {
+	Items []struct {
+		Revision     int    `json:"revision"`
+		Status       string `json:"status"`
+		RegisteredBy string `json:"registered_by"`
+		ImageTag     string `json:"image_tag"`
+	} `json:"items"`
+	DeployedRevision   int  `json:"deployed_revision"`
+	RollingOutRevision *int `json:"rolling_out_revision"`
+}
+
 func TestGetRevisions_Shape(t *testing.T) {
-	admin, _ := seededForChangeReads(t)
-	var out struct {
-		Items []struct {
-			Revision     int    `json:"revision"`
-			Status       string `json:"status"`
-			RegisteredBy string `json:"registered_by"`
-			ImageTag     string `json:"image_tag"`
-		} `json:"items"`
-		DeployedRevision   int  `json:"deployed_revision"`
-		RollingOutRevision *int `json:"rolling_out_revision"`
+	srv, fk, st := newTestServer(t)
+	seedAccounts(t, st)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	pavel, err := st.GetUserByUsername(t.Context(), "pavel")
+	if err != nil {
+		t.Fatal(err)
 	}
+	// Register revision 43 as pavel so registered_by comes from revision_records.
+	svc := &deploy.Service{Store: st, Clients: fk, MaxDesiredCount: 50, Now: time.Now}
+	paymentsKey := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	deployed, err := svc.DeployedDefinition(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := deploy.Definition{}
+	for k, v := range deployed.Definition {
+		draft[k] = v
+	}
+	containers := deployed.Definition["containerDefinitions"].([]any)
+	copied := make([]any, len(containers))
+	for i, c := range containers {
+		m := map[string]any{}
+		for k, v := range c.(map[string]any) {
+			m[k] = v
+		}
+		if m["name"] == "payments-api" {
+			m["image"] = homelabAccountID + ".dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3"
+		}
+		copied[i] = m
+	}
+	draft["containerDefinitions"] = copied
+	subject := authz.Subject{UserID: pavel.ID, Username: "pavel", Admin: true}
+	if _, err := svc.Register(t.Context(), subject, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+		t.Fatal(err)
+	}
+
+	admin := login(t, srv, "pavel", testPassword)
+	var out revisionsBody
 	decode(t, admin.get("/api/services/"+paymentsID()+"/revisions"), &out)
-	if out.DeployedRevision != 42 || out.RollingOutRevision != nil {
-		t.Errorf("deployed %d rolling out %v", out.DeployedRevision, out.RollingOutRevision)
+	var got []string
+	for _, item := range out.Items {
+		got = append(got, fmt.Sprintf("%d %s %s", item.Revision, item.Status, item.RegisteredBy))
 	}
-	if len(out.Items) != 3 || out.Items[0].Revision != 42 || out.Items[0].Status != "deployed" || out.Items[0].RegisteredBy != "terraform" || out.Items[0].ImageTag == "" {
-		t.Errorf("items = %+v", out.Items)
+	want := []string{"43 not_deployed pavel", "42 deployed terraform", "41 previous terraform", "40 previous terraform"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("items = %v, want %v", got, want)
 	}
+	if out.Items[0].ImageTag != "1.18.3" || out.DeployedRevision != 42 || out.RollingOutRevision != nil {
+		t.Errorf("first %+v deployed %d rolling out %v", out.Items[0], out.DeployedRevision, out.RollingOutRevision)
+	}
+
+	var rolling revisionsBody
+	decode(t, admin.get("/api/services/"+serviceID(homelabAccountID, "us-east-1", "core-services", "notifications")+"/revisions"), &rolling)
+	if rolling.DeployedRevision != 9 || rolling.RollingOutRevision == nil || *rolling.RollingOutRevision != 10 {
+		t.Errorf("notifications deployed %d rolling out %v, want 9 and 10", rolling.DeployedRevision, rolling.RollingOutRevision)
+	}
+}
+
+func TestGetTaskDefinition_ThrottledIs503(t *testing.T) {
+	admin, fk := adminWithFake(t)
+	fk.FailNext("ListTagsForResource", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded"})
+	resp := admin.get("/api/services/" + paymentsID() + "/task-definition")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", resp.StatusCode)
+	}
+	if code, _ := errorCode(t, resp); code != "throttled" {
+		t.Errorf("code %q, want throttled", code)
+	}
+}
+
+func TestGetTaskDefinition_AWSErrorIs502(t *testing.T) {
+	admin, fk := adminWithFake(t)
+	fk.FailNext("ListTagsForResource", &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "not allowed"})
+	resp := admin.get("/api/services/" + paymentsID() + "/task-definition")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status %d, want 502", resp.StatusCode)
+	}
+	if code, _ := errorCode(t, resp); code != "aws_error" {
+		t.Errorf("code %q, want aws_error", code)
+	}
+}
+
+// adminWithFake returns an admin client over a polled estate plus the fake for error injection.
+func adminWithFake(t *testing.T) (*apiClient, *fake.Fake) {
+	t.Helper()
+	srv, fk, st := newTestServer(t)
+	seedAccounts(t, st)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	return login(t, srv, "pavel", testPassword), fk
 }
 
 func TestGetImageTags_ECRAndFallback(t *testing.T) {
