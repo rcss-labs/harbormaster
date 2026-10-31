@@ -193,7 +193,7 @@ func (s *Server) testAccounts(w http.ResponseWriter, r *http.Request) {
 	for _, res := range results {
 		out = append(out, RegionResultDTO{Region: res.Region, OK: res.OK, Clusters: res.Clusters, Error: res.Error})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"regions": out})
+	writeJSON(w, http.StatusOK, AccountTestResponse{Regions: out})
 }
 
 func (s *Server) createAccount(w http.ResponseWriter, r *http.Request) {

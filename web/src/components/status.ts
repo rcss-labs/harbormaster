@@ -33,8 +33,9 @@ const CLUSTER_STATUS_LABEL: Record<ClusterStatus, string> = {
   needs_attention: 'Needs attention',
 }
 
-export const statusKind = (status: Status): PillKind => STATUS_KIND[status]
-export const statusLabel = (status: Status): string => STATUS_LABEL[status]
+/** `''` is what the API sends for an event with no service, or whose service is gone. */
+export const statusKind = (status: Status | ''): PillKind => (status === '' ? 'mute' : STATUS_KIND[status])
+export const statusLabel = (status: Status | ''): string => (status === '' ? '–' : STATUS_LABEL[status])
 export const clusterStatusKind = (status: ClusterStatus): PillKind => CLUSTER_STATUS_KIND[status]
 export const clusterStatusLabel = (status: ClusterStatus): string => CLUSTER_STATUS_LABEL[status]
 

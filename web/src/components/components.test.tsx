@@ -9,7 +9,7 @@ import { Dialog } from './Dialog'
 import { LockPanel } from './LockPanel'
 import { Pill } from './Pill'
 import { Slots } from './Slots'
-import { statusLabel } from './status'
+import { statusKind, statusLabel } from './status'
 import { Tabs } from './Tabs'
 import { TagChip } from './TagChip'
 
@@ -86,6 +86,11 @@ describe('shared components', () => {
     expect(screen.getByText('2 d ago')).toHaveAttribute('title', new Date(now - 2 * 86400_000).toLocaleString())
   })
 
+  it('Ago shows "no data yet" for the zero time the API sends before the first poll', () => {
+    render(<Ago ts="0001-01-01T00:00:00Z" now={1_700_000_000_000} />)
+    expect(screen.getByText('no data yet')).toBeInTheDocument()
+  })
+
   it('Ago keeps its label live when now is omitted', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T12:00:00Z'))
@@ -122,6 +127,11 @@ describe('shared components', () => {
     for (const [status, label] of Object.entries(expected)) {
       expect(statusLabel(status as Status)).toBe(label)
     }
+  })
+
+  it('an empty status (operation without a service, or a gone service) renders as a neutral dash', () => {
+    expect(statusLabel('')).toBe('–')
+    expect(statusKind('')).toBe('mute')
   })
 
   it('LockPanel names the action and tag', () => {

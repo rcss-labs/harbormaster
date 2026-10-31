@@ -5,7 +5,8 @@ export type Status = 'steady' | 'deploying' | 'degraded' | 'failing' | 'unhealth
 export type ClusterStatus = 'healthy' | 'degraded' | 'deploying' | 'needs_attention'
 export type TagColor = 'neutral' | 'red' | 'amber' | 'blue' | 'violet' | 'green'
 export type Health = 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN'
-export type Capacity = 'FARGATE' | 'FARGATE_SPOT' | 'EC2'
+/** FARGATE, FARGATE_SPOT, EXTERNAL, or the name of an EC2 capacity provider. */
+export type Capacity = string
 export type TaskStatus =
   | 'PROVISIONING'
   | 'PENDING'
@@ -70,7 +71,6 @@ export interface MeDTO {
   tags: MeTagDTO[]
   accounts: MeAccountDTO[]
   regions: string[]
-  polled_at?: string
 }
 
 export interface SetupStatusDTO {
@@ -92,7 +92,8 @@ export interface ClusterRef {
 export interface ServiceRef {
   id: string
   name: string
-  status: Status
+  /** `''` for an event with no service, or one whose service is gone. */
+  status: Status | ''
 }
 export interface PointDTO {
   t: string

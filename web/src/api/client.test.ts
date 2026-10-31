@@ -25,6 +25,28 @@ describe('apiFetch', () => {
     expect(seen.post).toBe('tok-123')
   })
 
+  it('sends Content-Type: application/json with every request body (the server answers 415 otherwise)', async () => {
+    const seen: Record<string, string | null> = {}
+    server.use(
+      http.post('/api/probe', ({ request }) => {
+        seen.post = request.headers.get('Content-Type')
+        return HttpResponse.json({})
+      }),
+      http.put('/api/probe', ({ request }) => {
+        seen.put = request.headers.get('Content-Type')
+        return HttpResponse.json({})
+      }),
+      http.patch('/api/probe', ({ request }) => {
+        seen.patch = request.headers.get('Content-Type')
+        return HttpResponse.json({})
+      }),
+    )
+    await api.post('/api/probe', { a: 1 })
+    await api.put('/api/probe', { a: 1 })
+    await api.patch('/api/probe', { a: 1 })
+    expect(seen).toEqual({ post: 'application/json', put: 'application/json', patch: 'application/json' })
+  })
+
   it('throws ApiError with code from the body', async () => {
     server.use(
       http.post('/api/boom', () =>

@@ -167,9 +167,15 @@ export function Overview() {
         <Feed>
           {data.events.map((event, index) => (
             <FeedRow key={index} ts={event.ts} source={event.source} actor={event.actor}>
-              <Link to={`/services/${event.service.id}/operations`}>
-                <strong>{event.service.name}</strong>
-              </Link>{' '}
+              {event.service.id === '' ? (
+                <Link to={`/clusters/${event.cluster.id}`}>
+                  <strong>{event.cluster.name}</strong>
+                </Link>
+              ) : (
+                <Link to={`/services/${event.service.id}/operations`}>
+                  <strong>{event.service.name}</strong>
+                </Link>
+              )}{' '}
               <span className={styles.muted}>{event.text}</span>
             </FeedRow>
           ))}
