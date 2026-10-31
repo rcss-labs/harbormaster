@@ -7,7 +7,12 @@ import { ToastProvider } from '../components/Toast'
 
 function LocationProbe() {
   const location = useLocation()
-  return <output data-testid="location">{location.pathname}</output>
+  return (
+    <>
+      <output data-testid="location">{location.pathname}</output>
+      <output data-testid="search">{location.search.replace(/^\?/, '')}</output>
+    </>
+  )
 }
 
 /** Renders the real AuthProvider and routes at `route`; a hidden probe exposes the current pathname. */

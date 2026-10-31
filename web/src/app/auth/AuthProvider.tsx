@@ -49,10 +49,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient])
 
   const logout = useCallback(async () => {
-    await api.post('/api/auth/logout')
-    setMe(null)
-    queryClient.clear()
-    navigate('/login')
+    try {
+      await api.post('/api/auth/logout')
+    } finally {
+      // Even if the server call failed, leave the app signed out locally; the caller decides how to report the error.
+      setMe(null)
+      queryClient.clear()
+      navigate('/login')
+    }
   }, [navigate, queryClient])
 
   const value = useMemo(() => ({ me, loading, refresh, logout }), [me, loading, refresh, logout])

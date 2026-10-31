@@ -1,14 +1,8 @@
 import { useId, type FormEvent, ReactNode } from 'react'
 import logo from '../../brand/square-logo.png'
 import logoDark from '../../brand/square-logo-dark.png'
+import { isDarkTheme } from '../theme'
 import styles from './auth.module.css'
-
-/** Dark when data-theme="dark", or when no theme is set and the OS prefers dark. */
-function isDarkTheme(): boolean {
-  const theme = document.documentElement.dataset.theme
-  if (theme) return theme === 'dark'
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
-}
 
 interface AuthCardProps {
   title: string

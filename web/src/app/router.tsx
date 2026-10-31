@@ -5,6 +5,7 @@ import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
+import { Shell } from './shell/Shell'
 import styles from './auth/auth.module.css'
 
 const Loading = () => <p className={styles.loading}>Loading…</p>
@@ -42,11 +43,6 @@ function PublicOnly() {
   return <Outlet />
 }
 
-// Task 28 replaces this with the app shell; screen tasks add their routes inside it.
-function AppLayout() {
-  return <Outlet />
-}
-
 function Home() {
   return <h1>Overview</h1>
 }
@@ -60,7 +56,7 @@ export function AppRoutes() {
       </Route>
       <Route element={<RequireAuth />}>
         <Route path="password" element={<ChangePassword />} />
-        <Route element={<AppLayout />}>
+        <Route element={<Shell />}>
           <Route index element={<Home />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
