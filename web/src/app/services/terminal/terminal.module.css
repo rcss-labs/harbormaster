@@ -1,0 +1,12 @@
+/* Ported from the mockup's .toolbar, .field, .term and button rules (docs/design/mockup/index.html). */
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.field select { height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.field select:disabled { opacity: 0.6; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; white-space: nowrap; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.note { margin-left: auto; color: var(--muted); font-size: 12px; }
+.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border-radius: 8px; height: 480px; overflow: hidden; padding: 12px 14px; width: 100%; box-sizing: border-box; }
+.term :global(.xterm) { height: 100%; }

@@ -1,0 +1,170 @@
+import '@xterm/xterm/css/xterm.css'
+import { FitAddon } from '@xterm/addon-fit'
+import { Terminal } from '@xterm/xterm'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
+import { useExecTargets } from '../../../api/exec'
+import { useMe, useService, useServiceTasks } from '../../../api/hooks'
+import type { TaskDTO } from '../../../api/types'
+import { Banner } from '../../../components/Banner'
+import { EmptyState } from '../../../components/EmptyState'
+import { LockPanel } from '../../../components/LockPanel'
+import { useExecSocket, type ExecError, type ExecStatus } from './useExecSocket'
+import styles from './terminal.module.css'
+
+const SYS = '\x1b[38;2;124;196;228m'
+const RESET = '\x1b[0m'
+
+/** The danger colour token as an ANSI truecolor escape; falls back to the dark-theme value. */
+function dangerEscape(): string {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()
+  const hex = /^#([0-9a-f]{6})$/i.exec(raw)?.[1] ?? 'f87171'
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  return `\x1b[38;2;${r};${g};${b}m`
+}
+
+export function TerminalTab({ serviceId }: { serviceId: string }) {
+  const service = useService(serviceId).data
+  const tasks = useServiceTasks(serviceId)
+  if (!service) return null
+  if (!service.can.terminal) return <LockPanel action="Terminal" tag={service.tag} />
+  if (!service.enable_execute_command) {
+    return (
+      <Banner kind="warn">
+        <strong>ECS Exec is off for {service.name}.</strong> Turn on <code>enable_execute_command = true</code> on the
+        service in Terraform and give the task role the <code>ssmmessages:*</code> permissions. New tasks then accept
+        terminal sessions.
+      </Banner>
+    )
+  }
+  const running = (tasks.data?.items ?? []).filter((task) => task.status.toUpperCase() === 'RUNNING')
+  if (running.length === 0) {
+    if (!tasks.data) return null
+    return <EmptyState>No running tasks to connect to.</EmptyState>
+  }
+  return <TerminalPanel running={running} />
+}
+
+function TerminalPanel({ running }: { running: TaskDTO[] }) {
+  const [params] = useSearchParams()
+  const csrf = useMe().data?.csrf_token ?? ''
+  const hostRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+
+  const [pickedTask, setPickedTask] = useState<string>()
+  const [pickedContainer, setPickedContainer] = useState<string>()
+  const [pickedCommand, setPickedCommand] = useState<string>()
+
+  const wanted = params.get('task')
+  const task =
+    running.find((t) => t.id === pickedTask) ?? running.find((t) => t.id === wanted || t.short_id === wanted) ?? running[0]
+
+  const sysLine = (text: string) => termRef.current?.write(`${SYS}${text}${RESET}\r\n`)
+  const errorLine = (text: string) => termRef.current?.write(`${dangerEscape()}${text}${RESET}\r\n`)
+
+  const socket = useExecSocket({
+    onData: (bytes) => termRef.current?.write(bytes),
+    onStatus: (status: ExecStatus) => {
+      if (status.state === 'connecting') sysLine('Starting session…')
+      else if (status.state === 'connected') sysLine(`Starting session with SessionId: ${status.session_id}`)
+      else {
+        termRef.current?.write(`${SYS}\r\n\r\nExiting session with sessionId: ${status.session_id ?? ''}.\r\n${RESET}`)
+        if (status.reason === 'idle_timeout') sysLine('Disconnected after 20 minutes without input.')
+        if (status.reason === 'max_duration') sysLine('Session reached the 4 hour limit.')
+      }
+    },
+    onError: (error: ExecError) => {
+      errorLine(error.message)
+      if (error.code === 'session_limit') sysLine('Close another terminal to open a new one.')
+    },
+  })
+  const { send, resize, disconnect } = socket
+  const active = socket.state === 'connecting' || socket.state === 'connected'
+
+  const targets = useExecTargets(task.id, socket.state === 'connected').data
+  const container = targets?.containers.find((c) => c.name === pickedContainer) ?? targets?.containers.find((c) => c.exec_agent === 'RUNNING') ?? targets?.containers[0]
+  const commands = targets?.commands ?? ['/bin/sh', '/bin/bash']
+  const command = commands.find((c) => c === pickedCommand) ?? (commands.includes('/bin/sh') ? '/bin/sh' : commands[0])
+  const canConnect = !active && container?.exec_agent === 'RUNNING'
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const term = new Terminal({
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace',
+      fontSize: 12.5,
+      theme: { background: '#0d1217', foreground: '#d7e3ec' },
+      cursorBlink: true,
+      scrollback: 5000,
+      convertEol: false,
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(host)
+    termRef.current = term
+    fitRef.current = fit
+    fit.fit()
+    term.write(`${SYS}Pick a task and a container, then Connect.${RESET}\r\n`)
+    const dataSub = term.onData((data) => send(data))
+    const resizeSub = term.onResize(({ cols, rows }) => resize(cols, rows))
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => fit.fit())
+    observer?.observe(host)
+    return () => {
+      observer?.disconnect()
+      dataSub.dispose()
+      resizeSub.dispose()
+      disconnect()
+      term.dispose()
+      termRef.current = null
+      fitRef.current = null
+    }
+  }, [send, resize, disconnect])
+
+  const connect = () => {
+    if (!container) return
+    fitRef.current?.fit()
+    const term = termRef.current
+    socket.connect({ taskId: task.id, container: container.name, command, cols: term?.cols ?? 80, rows: term?.rows ?? 24, csrf })
+  }
+
+  return (
+    <>
+      <div className={styles.toolbar}>
+        <label className={styles.field}>
+          <span>Task</span>
+          <select value={task.id} disabled={active} onChange={(e) => { setPickedTask(e.target.value); setPickedContainer(undefined) }}>
+            {running.map((t) => (
+              <option key={t.id} value={t.id}>{`${t.short_id.slice(0, 12)} · ${t.private_ip} · ${t.az}`}</option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>
+          <span>Container</span>
+          <select value={container?.name ?? ''} disabled={active} onChange={(e) => setPickedContainer(e.target.value)}>
+            {(targets?.containers ?? []).map((c) => (
+              <option key={c.name} value={c.name} disabled={c.exec_agent !== 'RUNNING'}>
+                {c.exec_agent === 'RUNNING' ? c.name : `${c.name} · agent ${c.exec_agent.toLowerCase()}`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>
+          <span>Command</span>
+          <select value={command} disabled={active} onChange={(e) => setPickedCommand(e.target.value)}>
+            {commands.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </label>
+        {socket.state === 'connected' ? (
+          <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={disconnect}>Disconnect</button>
+        ) : (
+          <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canConnect} onClick={connect}>Connect</button>
+        )}
+        <span className={styles.note}>ECS Exec through SSM Session Manager · sessions are recorded in the operations log</span>
+      </div>
+      <div className={styles.term} ref={hostRef} />
+    </>
+  )
+}

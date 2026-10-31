@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
+	"github.com/rcss-labs/harbormaster/internal/execbridge"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/web"
 )
@@ -26,6 +27,14 @@ type Server struct {
 	Log     *slog.Logger
 	Now     func() time.Time
 	Deploy  *deploy.Service
+
+	// plan 04: terminal
+	// ExecLimiter caps concurrent terminal sessions per user; New creates it from Cfg when nil.
+	ExecLimiter *execbridge.Limiter
+	// ExecStartTimeout is how long a new terminal socket may take to send its start frame (default 5s).
+	ExecStartTimeout time.Duration
+	// ExecAllowInsecureStream permits ws:// SSM streams to loopback; only --fake-aws and tests set it.
+	ExecAllowInsecureStream bool
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
@@ -35,6 +44,13 @@ func New(s Server) *Server {
 	}
 	if s.Now == nil {
 		s.Now = time.Now
+	}
+	// plan 04: terminal
+	if s.ExecLimiter == nil {
+		s.ExecLimiter = execbridge.NewLimiter(s.Cfg.ExecMaxSessionsPerUser)
+	}
+	if s.ExecStartTimeout <= 0 {
+		s.ExecStartTimeout = 5 * time.Second
 	}
 	return &s
 }
@@ -92,6 +108,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/tasks", s.listTasks, routeOptions{})
 	s.handle(mux, "GET /api/search", s.search, routeOptions{})
 	s.handle(mux, "GET /api/poller", s.pollerStatus, routeOptions{})
+	// plan 04: terminal
+	s.handle(mux, "GET /api/tasks/{taskId}/exec-targets", s.execTargets, routeOptions{})
+	s.handle(mux, "GET /api/tasks/{taskId}/exec", s.execWS, routeOptions{NoETag: true})
 
 	s.handle(mux, "GET /api/users", s.listUsers, routeOptions{Admin: true})
 	s.handle(mux, "POST /api/users", s.createUser, routeOptions{Admin: true})

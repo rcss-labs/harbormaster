@@ -213,7 +213,6 @@ func (r *Real) ELB(context.Context, Target) (ELBAPI, error)                 { re
 func (r *Real) AutoScaling(context.Context, Target) (AutoScalingAPI, error) { return nil, nil } // plan 03
 func (r *Real) CloudWatch(context.Context, Target) (CloudWatchAPI, error)   { return nil, nil } // plan 03
 func (r *Real) Logs(context.Context, Target) (LogsAPI, error)               { return nil, nil } // plan 03
-func (r *Real) SSM(context.Context, Target) (SSMAPI, error)                 { return nil, nil } // plan 04
 
 var (
 	_ Clients = (*Real)(nil)

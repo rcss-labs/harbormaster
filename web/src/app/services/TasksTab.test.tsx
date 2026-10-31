@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
+import type { TaskDTO } from '../../api/types'
 import { ALL_TASKS, FIXTURE_NOW, OPERATIONS_FOR, SERVICE_PAYMENTS, tasksList } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
@@ -94,6 +95,47 @@ describe('TasksTab', () => {
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Load more' }))
     await waitFor(() => expect(cursors).toContain('page-2'))
     expect(within(screen.getByRole('table')).getAllByText('Running').length).toBeGreaterThan(0)
+  })
+})
+
+describe('TasksTab Terminal link', () => {
+  const serviceTasks = () => ALL_TASKS.filter((task) => task.service?.id === SERVICE_PAYMENTS.id)
+  const terminalHref = (taskId: string) => `/services/${SERVICE_PAYMENTS.id}/terminal?task=${encodeURIComponent(taskId)}`
+
+  function withServiceTasks(map: (task: TaskDTO) => TaskDTO) {
+    server.use(http.get('/api/services/:id/tasks', () => HttpResponse.json(tasksList(serviceTasks().map(map)))))
+  }
+
+  it('shows Terminal on running rows when exec is on and user has Terminal', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    const running = serviceTasks().filter((task) => task.status === 'RUNNING')
+    const links = within(table).getAllByRole('link', { name: 'Terminal' })
+    expect(links.map((link) => link.getAttribute('href')).sort()).toEqual(running.map((task) => terminalHref(task.id)).sort())
+  })
+
+  it('hides Terminal when exec is off', async () => {
+    withServiceTasks((task) => ({ ...task, exec_enabled: false, can: { ...task.can, terminal: true } }))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('button', { name: 'Stop' }).length).toBeGreaterThan(0)
+    expect(within(table).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
+  })
+
+  it('hides Terminal without Terminal permission', async () => {
+    withServiceTasks((task) => ({ ...task, exec_enabled: true, can: { ...task.can, terminal: false } }))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('button', { name: 'Stop' }).length).toBeGreaterThan(0)
+    expect(within(table).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
+  })
+
+  it('no Terminal on stopped rows', async () => {
+    withServiceTasks((task) => ({ ...task, status: 'STOPPED', exit_code: 0, exec_enabled: true, can: { ...task.can, terminal: true } }))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByText('Stopped').length).toBeGreaterThan(0)
+    expect(within(table).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })
 })
 

@@ -199,3 +199,14 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ```
+
+## session-manager-plugin
+
+Harbormaster's ECS Exec bridge (`internal/execbridge`) is a port of parts of the AWS Session Manager plugin.
+
+- Source: https://github.com/aws/session-manager-plugin
+- Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+- Licence: Apache License, Version 2.0 (copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`)
+- Ported files: `internal/execbridge/message.go`, `internal/execbridge/datachannel.go`
+
+The ported files retain the upstream copyright and licence header; Harbormaster's modifications are noted in each file.

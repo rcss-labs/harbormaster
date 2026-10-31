@@ -20,6 +20,7 @@ import { PlaceholderTab } from './PlaceholderTab'
 import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
 import { TaskDefinitionTab } from './task-definition/TaskDefinitionTab'
+import { TerminalTab } from './terminal/TerminalTab'
 import { DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey } from './tabs'
 import styles from './service.module.css'
 
@@ -74,6 +75,7 @@ export function ServicePage() {
   else if (tab === 'tasks') body = <TasksTab serviceId={serviceId} />
   else if (tab === 'operations') body = <OperationsTab serviceId={serviceId} />
   else if (tab === 'task-definition') body = <TaskDefinitionTab key={serviceId} serviceId={serviceId} service={service} />
+  else if (tab === 'terminal') body = <TerminalTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />
 
   return (

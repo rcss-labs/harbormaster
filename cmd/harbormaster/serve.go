@@ -195,10 +195,18 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	var (
 		clients awsx.Clients
 		prober  awsx.Prober
+		// plan 04: terminal
+		execInsecureStream bool
 	)
 	if fakeAWS {
 		estate := fake.MockupEstate(time.Now)
 		f := fake.New(estate)
+		// The fake ECS hands out ws:// streams served by an in-process fake SSM agent.
+		ssmServer := fake.NewSSMServer(fake.SSMServerOptions{})
+		ssmServer.Start()
+		defer ssmServer.Close()
+		f.ExecServer = ssmServer
+		execInsecureStream = true
 		clients, prober = f, f
 		go estate.RunRollouts(ctx, fakeRolloutStep)
 		if err := devseed.Apply(ctx, st); err != nil {
@@ -220,7 +228,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	server := api.New(api.Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
-		Deploy: &deploy.Service{Store: st, Clients: clients, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
+		Deploy:                  &deploy.Service{Store: st, Clients: clients, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
+		ExecAllowInsecureStream: execInsecureStream,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	listener, err := net.Listen("tcp", cfg.Listen)

@@ -355,6 +355,7 @@ type taskOptions struct {
 	stopCode          ecstypes.TaskStopCode
 	deploymentID      string
 	group, startedBy  string // overrides for standalone tasks
+	agentPending      bool   // the ExecuteCommandAgent is PENDING instead of RUNNING (plan 04)
 }
 
 func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
@@ -410,6 +411,8 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 				agentStatus := "RUNNING"
 				if stopped {
 					agentStatus = "STOPPED"
+				} else if o.agentPending {
+					agentStatus = "PENDING"
 				}
 				ct.ManagedAgents = []ecstypes.ManagedAgent{{Name: ecstypes.ManagedAgentNameExecuteCommandAgent, LastStatus: aws.String(agentStatus)}}
 			}
@@ -555,7 +558,8 @@ func (s *seeder) addService(sp serviceSpec) {
 		if i < sp.unhealthy {
 			health = ecstypes.HealthStatusUnhealthy
 		}
-		s.addTask(sp, taskOptions{taskDefinitionARN: tdARN, slot: i, startedAt: started, health: health, deploymentID: depID})
+		s.addTask(sp, taskOptions{taskDefinitionARN: tdARN, slot: i, startedAt: started, health: health, deploymentID: depID,
+			agentPending: sp.name == "auth-service" && i == sp.running-1})
 	}
 
 	// Stopped tasks.
