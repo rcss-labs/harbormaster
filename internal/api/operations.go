@@ -79,8 +79,13 @@ func (s *Server) serviceOperations(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	unhealthy, err := s.Store.UnhealthyTargets(ctx, store.TargetFilter{AccountID: key.AccountID, Region: key.Region})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	ref := ServiceRef{ID: key.ID(), Name: key.Service,
-		Status: status.Service(status.Inputs{Service: row.Service, RunningTasks: modelTasks(tasks)})}
+		Status: status.Service(status.Inputs{Service: row.Service, RunningTasks: modelTasks(tasks), TargetUnhealthy: unhealthy[key]})}
 	operations, err := s.Store.ListOperations(ctx, key, includeECS, before, limit)
 	if err != nil {
 		s.fail(w, err)
