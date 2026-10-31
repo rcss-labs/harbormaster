@@ -1,0 +1,46 @@
+/* Ported from the mockup's page-head, btn, card, chip, field, hint, err, radio-list and colour label rules (docs/design/mockup/index.html). */
+.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.titles { display: grid; gap: 6px; min-width: 0; }
+.meta { color: var(--muted); font-size: 12px; }
+.actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.stack { display: grid; gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.indent { padding-left: 28px; }
+.clusterRow { background: var(--raised); }
+.link { color: var(--accent); }
+
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover { background: var(--accent); filter: brightness(1.07); }
+.sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.danger { color: var(--danger); }
+
+.ctl { height: 26px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
+.ctlLg { height: 30px; font-size: inherit; padding: 0 8px; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.toolbar label { display: inline-flex; gap: 5px; align-items: center; }
+.field { display: grid; gap: 5px; }
+.field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.err { font-size: 12px; color: var(--danger); }
+.impact { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; }
+
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--raised); font-size: 11px; color: var(--text); }
+
+.radioList { display: grid; gap: 6px; }
+.radioList label { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.radioList label:hover { background: var(--hover); }
+
+/* Colour swatches for the colour picker; same palette as TagChip. */
+.chipLabel { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; border: 1px solid var(--border-strong); color: var(--muted); background: var(--raised); }
+.c-neutral { color: var(--muted); }
+.c-red { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-soft); }
+.c-amber { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: var(--warning-soft); }
+.c-blue { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
+.c-violet { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); background: var(--info-soft); }
+.c-green { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); background: var(--success-soft); }

@@ -1,0 +1,2 @@
+.split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--muted-soft); }
+.split span { display: block; height: 100%; }

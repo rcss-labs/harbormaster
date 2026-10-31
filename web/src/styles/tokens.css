@@ -1,0 +1,63 @@
+/* Design tokens, ported verbatim from docs/design/mockup/index.html lines 12-73. */
+:root {
+  color-scheme: light;
+  --bg: #f2f5f8;
+  --surface: #ffffff;
+  --raised: #f6f8fa;
+  --hover: #ecf1f5;
+  --border: #dde3ea;
+  --border-strong: #c6d0da;
+  --text: #141a21;
+  --muted: #5c6979;
+  --accent: #0b6a8f;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(11, 106, 143, 0.11);
+  --success: #047857;
+  --warning: #9c4707;
+  --danger: #b91c1c;
+  --info: #5b3fc4;
+  --success-soft: rgba(4, 120, 87, 0.12);
+  --warning-soft: rgba(156, 71, 7, 0.12);
+  --danger-soft: rgba(185, 28, 28, 0.11);
+  --info-soft: rgba(91, 63, 196, 0.12);
+  --muted-soft: rgba(92, 105, 121, 0.12);
+  --series-1: #0b6a8f;
+  --series-2: #e07a1f;
+  --series-3: #7c3aed;
+  --series-4: #0f9d77;
+  --series-5: #d6336c;
+  --series-6: #8a6d00;
+  --term-bg: #0d1217;
+  --term-text: #d7e3ec;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-pop: 0 18px 50px rgba(16, 24, 40, 0.2);
+  --overlay: rgba(16, 24, 40, 0.38);
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+  --radius: 7px;
+  --sidebar-w: 232px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1216; --surface: #141a20; --raised: #1a2129; --hover: #1e2630;
+    --border: #252d37; --border-strong: #38424f; --text: #e5eaf0; --muted: #8c97a7;
+    --accent: #4cb4de; --accent-ink: #04202c; --accent-soft: rgba(76, 180, 222, 0.15);
+    --success: #34d399; --warning: #fbbf24; --danger: #f87171; --info: #a78bfa;
+    --success-soft: rgba(52, 211, 153, 0.15); --warning-soft: rgba(251, 191, 36, 0.15);
+    --danger-soft: rgba(248, 113, 113, 0.15); --info-soft: rgba(167, 139, 250, 0.16);
+    --muted-soft: rgba(140, 151, 167, 0.14); --series-1: #4cb4de; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4); --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1216; --surface: #141a20; --raised: #1a2129; --hover: #1e2630;
+  --border: #252d37; --border-strong: #38424f; --text: #e5eaf0; --muted: #8c97a7;
+  --accent: #4cb4de; --accent-ink: #04202c; --accent-soft: rgba(76, 180, 222, 0.15);
+  --success: #34d399; --warning: #fbbf24; --danger: #f87171; --info: #a78bfa;
+  --success-soft: rgba(52, 211, 153, 0.15); --warning-soft: rgba(251, 191, 36, 0.15);
+  --danger-soft: rgba(248, 113, 113, 0.15); --info-soft: rgba(167, 139, 250, 0.16);
+  --muted-soft: rgba(140, 151, 167, 0.14); --series-1: #4cb4de; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4); --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
+}

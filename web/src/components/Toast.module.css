@@ -1,0 +1,6 @@
+.toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 60; }
+.toast { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 10px 14px; max-width: 380px; animation: slide 0.2s ease-out; display: flex; gap: 10px; align-items: flex-start; }
+.bad { border-left-color: var(--danger); }
+.ok { border-left-color: var(--success); }
+.dismiss { margin-left: auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+@keyframes slide { from { transform: translateY(8px); opacity: 0; } }

@@ -1,0 +1,16 @@
+/* Ported from the mockup's page-head, grid, toolbar and legend rules (docs/design/mockup/index.html). */
+.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.titles { display: grid; gap: 6px; min-width: 0; }
+.meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+.muted { color: var(--muted); }
+
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 12px; }
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.legendRow { margin-top: 10px; }

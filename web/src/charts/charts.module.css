@@ -1,0 +1,46 @@
+/* Chart styles ported from the mockup <style> block. Panels keep a fixed pixel height. */
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+.donutWrap { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.donutV { fill: var(--text); font: 600 22px var(--sans); }
+.donutS { fill: var(--muted); font: 11px var(--sans); }
+.donutLegend { display: grid; gap: 4px; font-size: 12px; min-width: 140px; flex: 1; }
+.donutLegend div { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.donutLegend i { width: 10px; height: 10px; border-radius: 3px; }
+
+.hbars { display: grid; gap: 7px; }
+.hbar { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 2fr) minmax(52px, auto); gap: 10px; align-items: center; font-size: 12px; }
+.hbarL { display: grid; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbarL a:hover { color: var(--accent); }
+.hbarTrack { position: relative; height: 7px; border-radius: 5px; background: var(--muted-soft); display: flex; overflow: visible; }
+.hbarTrack span { display: block; height: 100%; }
+.hbarTrack span:first-child { border-radius: 5px 0 0 5px; }
+.hbarTrack span:last-of-type { border-radius: 0 5px 5px 0; }
+.hbarTrack span:only-of-type { border-radius: 5px; }
+.hbarTrack em { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: 0.55; border-radius: 1px; }
+.hbarV { text-align: right; color: var(--muted); white-space: nowrap; }
+
+.timeline { position: relative; height: 80px; margin: 4px 8px 0; }
+.timeline .axis { position: absolute; left: 0; right: 0; top: 44px; border-top: 1px solid var(--border-strong); }
+.timeline .tick { position: absolute; top: 50px; font: 10px var(--mono); color: var(--muted); transform: translateX(-50%); white-space: nowrap; }
+.timeline .tick::before { content: ""; position: absolute; left: 50%; top: -9px; height: 5px; border-left: 1px solid var(--border-strong); }
+.timeline .ev { position: absolute; top: 37px; transform: translateX(-50%); display: grid; justify-items: center; }
+.timeline .ev i { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
+.timeline .ev span { position: absolute; bottom: 18px; font: 10.5px var(--mono); white-space: nowrap; padding: 1px 6px; border-radius: 4px; background: var(--raised); border: 1px solid var(--border); }
+.timeline .ev.alt span { bottom: 36px; }
+
+/* Panel: y labels | plot, with x labels underneath. */
+.pchart { display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 16px; column-gap: 6px; }
+.pchart .py { position: relative; font: 10px var(--mono); color: var(--muted); }
+.pchart .py span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
+.pchart .pplot { position: relative; min-width: 0; border-bottom: 1px solid var(--border-strong); }
+.pchart .plot { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.pchart .gl { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.pchart .mk { stroke: var(--info); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.pchart .mkl { position: absolute; top: -1px; transform: translateX(-50%); font: 9.5px var(--mono); color: var(--info); background: var(--surface); padding: 0 3px; white-space: nowrap; }
+.pchart .px { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--muted); padding-top: 3px; white-space: nowrap; }
