@@ -72,45 +72,27 @@ func collectFields(t reflect.Type, into map[string]any) {
 
 // contractShapes lists every response body the SPA reads, keyed by the name the Vitest contract test uses.
 func contractShapes() map[string]any {
-	type items[T any] struct {
-		Items []T `json:"items"`
-	}
 	return map[string]any{
-		"me": shapeOf(reflect.TypeFor[MeDTO]()),
-		"setup": shapeOf(reflect.TypeFor[struct {
-			Needed bool `json:"needed"`
-		}]()),
-		"overview":   shapeOf(reflect.TypeFor[OverviewDTO]()),
-		"clusters":   shapeOf(reflect.TypeFor[ListResponse[ClusterCardDTO]]()),
-		"cluster":    shapeOf(reflect.TypeFor[ClusterDTO]()),
-		"service":    shapeOf(reflect.TypeFor[ServiceDTO]()),
-		"tasks":      shapeOf(reflect.TypeFor[TasksListDTO]()),
-		"operations": shapeOf(reflect.TypeFor[ListResponse[EventDTO]]()),
-		"search":     shapeOf(reflect.TypeFor[items[SearchItemDTO]]()),
-		"poller":     shapeOf(reflect.TypeFor[items[PollerItemDTO]]()),
-		"users":      shapeOf(reflect.TypeFor[items[UserDTO]]()),
-		"createUser": shapeOf(reflect.TypeFor[struct {
-			User              UserDTO `json:"user"`
-			TemporaryPassword string  `json:"temporary_password"`
-		}]()),
-		"permissions": shapeOf(reflect.TypeFor[struct {
-			Tags  []permissionTagDTO  `json:"tags"`
-			Users []permissionUserDTO `json:"users"`
-		}]()),
-		"tags": shapeOf(reflect.TypeFor[items[TagItemDTO]]()),
-		"tagImpact": shapeOf(reflect.TypeFor[struct {
-			Clusters []idNameDTO `json:"clusters"`
-			Services []idNameDTO `json:"services"`
-			Users    []string    `json:"users"`
-		}]()),
-		"tagAssignments": shapeOf(reflect.TypeFor[struct {
-			Clusters []clusterAssignmentDTO `json:"clusters"`
-		}]()),
-		"accounts": shapeOf(reflect.TypeFor[AccountsDTO]()),
-		"accountTest": shapeOf(reflect.TypeFor[struct {
-			Regions []RegionResultDTO `json:"regions"`
-		}]()),
-		"audit": shapeOf(reflect.TypeFor[ListResponse[AuditEntryDTO]]()),
+		"me":             shapeOf(reflect.TypeFor[MeDTO]()),
+		"login":          shapeOf(reflect.TypeFor[LoginResponse]()),
+		"setup":          shapeOf(reflect.TypeFor[SetupStatusDTO]()),
+		"overview":       shapeOf(reflect.TypeFor[OverviewDTO]()),
+		"clusters":       shapeOf(reflect.TypeFor[ListResponse[ClusterCardDTO]]()),
+		"cluster":        shapeOf(reflect.TypeFor[ClusterDTO]()),
+		"service":        shapeOf(reflect.TypeFor[ServiceDTO]()),
+		"tasks":          shapeOf(reflect.TypeFor[TasksListDTO]()),
+		"operations":     shapeOf(reflect.TypeFor[ListResponse[EventDTO]]()),
+		"search":         shapeOf(reflect.TypeFor[ItemsResponse[SearchItemDTO]]()),
+		"poller":         shapeOf(reflect.TypeFor[ItemsResponse[PollerItemDTO]]()),
+		"users":          shapeOf(reflect.TypeFor[ItemsResponse[UserDTO]]()),
+		"createUser":     shapeOf(reflect.TypeFor[CreateUserResponse]()),
+		"permissions":    shapeOf(reflect.TypeFor[PermissionsResponse]()),
+		"tags":           shapeOf(reflect.TypeFor[ItemsResponse[TagItemDTO]]()),
+		"tagImpact":      shapeOf(reflect.TypeFor[TagImpactResponse]()),
+		"tagAssignments": shapeOf(reflect.TypeFor[TagAssignmentsResponse]()),
+		"accounts":       shapeOf(reflect.TypeFor[AccountsDTO]()),
+		"accountTest":    shapeOf(reflect.TypeFor[AccountTestResponse]()),
+		"audit":          shapeOf(reflect.TypeFor[ListResponse[AuditEntryDTO]]()),
 	}
 }
 

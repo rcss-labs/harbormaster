@@ -64,7 +64,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, ItemsResponse[UserDTO]{Items: items})
 }
 
 // auditAdmin records an admin action attributed to the caller.
@@ -116,7 +116,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"user": dtos[0], "temporary_password": temp})
+	writeJSON(w, http.StatusCreated, CreateUserResponse{User: dtos[0], TemporaryPassword: temp})
 }
 
 func pathID(r *http.Request, name string) (int64, bool) {

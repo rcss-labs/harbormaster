@@ -56,10 +56,7 @@ func (s *Server) getPermissions(w http.ResponseWriter, r *http.Request) {
 	})
 	sort.Slice(users, func(i, j int) bool { return users[i].Username < users[j].Username })
 
-	out := struct {
-		Tags  []permissionTagDTO  `json:"tags"`
-		Users []permissionUserDTO `json:"users"`
-	}{Tags: []permissionTagDTO{}, Users: []permissionUserDTO{}}
+	out := PermissionsResponse{Tags: []permissionTagDTO{}, Users: []permissionUserDTO{}}
 	for _, t := range tags {
 		out.Tags = append(out.Tags, permissionTagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, ServicesInEffect: counts[t.ID].ServicesEffective})
 	}

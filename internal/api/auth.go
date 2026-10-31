@@ -53,7 +53,7 @@ func (s *Server) startedSession(w http.ResponseWriter, r *http.Request, result a
 		return
 	}
 	s.Auth.SetCookie(w, result.SessionID)
-	writeJSON(w, http.StatusOK, map[string]any{"user": me})
+	writeJSON(w, http.StatusOK, LoginResponse{User: me})
 }
 
 func (s *Server) meForNewSession(w http.ResponseWriter, r *http.Request, result auth.LoginResult) (MeDTO, bool) {
@@ -115,7 +115,7 @@ func (s *Server) setupNeeded(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"needed": needed})
+	writeJSON(w, http.StatusOK, SetupStatusDTO{Needed: needed})
 }
 
 func (s *Server) setupComplete(w http.ResponseWriter, r *http.Request) {

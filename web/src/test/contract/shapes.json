@@ -198,6 +198,40 @@
       "username": "string"
     }
   },
+  "login": {
+    "user": {
+      "accounts": [
+        {
+          "account_id": "string",
+          "id": "number",
+          "name": "string",
+          "regions": [
+            "string"
+          ]
+        }
+      ],
+      "admin": "boolean",
+      "csrf_token": "string",
+      "id": "number",
+      "must_change_password": "boolean",
+      "perms": {
+        "$map": "number"
+      },
+      "regions": [
+        "string"
+      ],
+      "tags": [
+        {
+          "builtin": "boolean",
+          "color": "string",
+          "id": "number",
+          "name": "string",
+          "services_in_effect": "number"
+        }
+      ],
+      "username": "string"
+    }
+  },
   "me": {
     "accounts": [
       {
