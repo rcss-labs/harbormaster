@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { useServiceMetrics } from '../../api/observe'
 import type { DeploymentRecordDTO, ServiceDTO } from '../../api/types'
 import { Donut } from '../../charts/Donut'
 import { Legend } from '../../charts/Legend'
@@ -12,6 +13,7 @@ import { KV } from '../../components/KV'
 import { Pill } from '../../components/Pill'
 import { Slots } from '../../components/Slots'
 import { Tile } from '../../components/Tile'
+import { ALBPanels, HealthCard, RunningTasksMeters, UsageChart, UsageTiles } from './overview/MetricPanels'
 import styles from './service.module.css'
 
 const FOURTEEN_DAYS_MS = 14 * 86_400_000
@@ -100,6 +102,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
   const base = `/services/${service.id}`
   const pending = Math.max(0, service.desired - service.running)
   const now = useNow(60_000)
+  const metrics = useServiceMetrics(service.id, '24h').data
   const taskDefinition = service.task_definition
   const networking = service.networking
   const loadBalancer = networking.load_balancers[0]
@@ -119,46 +122,36 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
             </Link>
           </div>
         </Tile>
+        <UsageTiles service={service} metrics={metrics} />
       </div>
 
-      <Card title="Task health">
-        <Donut
-          segments={[
-            { name: 'Running', v: service.running, color: 'var(--success)' },
-            { name: 'Missing tasks', v: pending, color: 'var(--danger)' },
-          ]}
-          label={`${service.running}/${service.desired}`}
-          sub="running"
-        />
-        <div className={styles.afterDonut}>
-          <DeploymentCard service={service} />
-        </div>
-      </Card>
+      <div className={`${styles.grid} ${styles.gWide}`}>
+        <UsageChart service={service} metrics={metrics} />
+        {loadBalancer ? (
+          <HealthCard service={service}>
+            <DeploymentCard service={service} />
+          </HealthCard>
+        ) : (
+          <Card title="Task health">
+            <Donut
+              segments={[
+                { name: 'Running', v: service.running, color: 'var(--success)' },
+                { name: 'Missing tasks', v: pending, color: 'var(--danger)' },
+              ]}
+              label={`${service.running}/${service.desired}`}
+              sub="running"
+            />
+            <div className={styles.afterDonut}>
+              <DeploymentCard service={service} />
+            </div>
+          </Card>
+        )}
+      </div>
+
+      <ALBPanels service={service} metrics={metrics} />
 
       <div className={`${styles.grid} ${styles.gWide}`}>
-        <Card title="Running tasks" right={`${service.running_tasks.length} running`}>
-          {service.running_tasks.length ? (
-            <div className={styles.taskRows}>
-              <div className={`${styles.taskRow} ${styles.muted} ${styles.small}`}>
-                <span>Task</span>
-                <span>Zone</span>
-              </div>
-              {service.running_tasks.map((task) => (
-                <div key={task.id} className={styles.taskRow}>
-                  <Link className={styles.mono} to={`${base}/tasks`} title={task.id}>
-                    {task.short_id}
-                  </Link>
-                  <span className={styles.muted}>
-                    {task.az}
-                    {task.spot ? ' · spot' : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className={styles.empty}>No running tasks.</div>
-          )}
-        </Card>
+        <RunningTasksMeters service={service} metrics={metrics} />
         <Card title="Running task count, 72 h" right={`desired ${service.desired}`}>
           <LineChart
             series={[

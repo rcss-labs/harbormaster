@@ -13,6 +13,10 @@ import {
   PERMISSIONS,
   POLLER,
   SERVICE_DETAILS,
+  SERVICE_METRICS_CATALOG_NO_INSIGHTS,
+  SERVICE_METRICS_PAYMENTS,
+  SERVICE_PAYMENTS,
+  TARGET_HEALTH_EDGE,
   TAGS,
   USERS,
   ALL_TASKS,
@@ -99,6 +103,11 @@ export const handlers = [
   http.patch('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
   http.delete('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
+  // observe (plan 03, task 19): service metrics and target health
+  http.get('/api/services/:id/metrics', ({ params }) =>
+    HttpResponse.json(params.id === SERVICE_PAYMENTS.id ? SERVICE_METRICS_PAYMENTS : SERVICE_METRICS_CATALOG_NO_INSIGHTS),
+  ),
+  http.get('/api/services/:id/target-health', () => HttpResponse.json(TARGET_HEALTH_EDGE)),
 ]
 
 export const server = setupServer(...handlers)

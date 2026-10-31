@@ -1,0 +1,15 @@
+/* Ported from the mockup's g3, task-meter and tile spark rules (docs/design/mockup/index.html). */
+.g3 { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) {
+  .g3 { grid-template-columns: minmax(0, 1fr); }
+}
+.accentLink { color: var(--accent); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.empty { color: var(--muted); text-align: center; padding: 16px; }
+.taskMeters { display: grid; gap: 8px; }
+.taskMeter { display: grid; grid-template-columns: 110px 96px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: center; font-size: 12px; }
+.taskRows { display: grid; gap: 8px; }
+.taskRow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 12px; }
+.afterDonut { margin-top: 14px; }
