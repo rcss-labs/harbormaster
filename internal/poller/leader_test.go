@@ -69,3 +69,33 @@ func TestLeader_OnlyOneHolder(t *testing.T) {
 	<-leaderDone
 	waitFor(t, 6*time.Second, "the other poller to take over", other.IsLeader)
 }
+
+func TestLeader_StepsDownWhenConnectionDropped(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "a", AccountID: "111111111111", RoleARN: "arn:aws:iam::111111111111:role/x", ExternalID: "e", Regions: []string{"eu-west-1"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	key := randomLockKey()
+	rec := newLoopRecorder()
+	p := newTestPoller(st, Config{AccountsRefresh: 50 * time.Millisecond, RetentionEvery: time.Hour}, key)
+	p.loopFactory = rec.factory
+	startRun(t, p)
+
+	waitFor(t, 2*time.Second, "leadership", p.IsLeader)
+	waitFor(t, 2*time.Second, "1 loop", func() bool { return len(rec.targets()) == 1 })
+
+	// Postgres splits a bigint advisory key into classid (high 32 bits) and objid (low 32 bits).
+	var terminated int
+	err := st.Pool.QueryRow(ctx, `select count(pg_terminate_backend(pid)) from pg_locks
+		where locktype = 'advisory' and granted and pid <> pg_backend_pid()
+		and classid = (($1::bigint >> 32) & 4294967295)::oid and objid = ($1::bigint & 4294967295)::oid`, key).Scan(&terminated)
+	if err != nil || terminated != 1 {
+		t.Fatalf("terminate lock holder: terminated=%d err=%v", terminated, err)
+	}
+
+	waitFor(t, 2*time.Second, "step down", func() bool { return !p.IsLeader() || len(rec.targets()) == 0 })
+	// Leadership and loops must return after the poller reconnects.
+	waitFor(t, 3*time.Second, "leadership regained", p.IsLeader)
+	waitFor(t, 3*time.Second, "loops regained", func() bool { return len(rec.targets()) == 1 })
+}

@@ -9,6 +9,10 @@ import (
 
 const unlockTimeout = 5 * time.Second
 
+// opTimeout bounds each per-tick database call so a half-open connection cannot stall
+// leader-loss detection (which would risk two instances polling at once).
+func (p *Poller) opTimeout() time.Duration { return min(p.retryInterval, 3*time.Second) }
+
 // Run competes for the leader lock until ctx is cancelled. The lock is a session-level advisory
 // lock on a dedicated connection; every retry tick the holder pings that connection, so a lost
 // connection (which silently drops the lock server-side) demotes this instance and stops the
@@ -51,7 +55,10 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	tick := func() {
 		if conn != nil {
-			if err := conn.Ping(ctx); err != nil {
+			pctx, cancel := context.WithTimeout(ctx, p.opTimeout())
+			err := conn.Ping(pctx)
+			cancel()
+			if err != nil {
 				if ctx.Err() == nil {
 					p.log.Warn("poller: leader connection lost, stepping down", "err", err)
 				}
@@ -59,7 +66,9 @@ func (p *Poller) Run(ctx context.Context) error {
 			}
 			return
 		}
-		c, err := p.store.Pool.Acquire(ctx)
+		actx, acancel := context.WithTimeout(ctx, p.opTimeout())
+		defer acancel()
+		c, err := p.store.Pool.Acquire(actx)
 		if err != nil {
 			if ctx.Err() == nil {
 				p.log.Warn("poller: acquire connection for leader lock", "err", err)
@@ -67,7 +76,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			return
 		}
 		var got bool
-		if err := c.QueryRow(ctx, `select pg_try_advisory_lock($1)`, p.lockKey).Scan(&got); err != nil || !got {
+		if err := c.QueryRow(actx, `select pg_try_advisory_lock($1)`, p.lockKey).Scan(&got); err != nil || !got {
 			if err != nil && ctx.Err() == nil {
 				p.log.Warn("poller: try advisory lock", "err", err)
 				_ = c.Hijack().Close(context.Background())
