@@ -15,7 +15,12 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: { baseURL, trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // The smoke suite reads the untouched seeded estate (for example a rollout that is still in
+  // progress), so the mutating change flows run in a second project that waits for it.
+  projects: [
+    { name: 'chromium', testMatch: /smoke\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium-change', testMatch: /change\.spec\.ts/, dependencies: ['chromium'], use: { ...devices['Desktop Chrome'] } },
+  ],
   webServer: {
     command: '../bin/harbormaster serve --fake-aws',
     env: {
