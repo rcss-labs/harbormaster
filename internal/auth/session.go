@@ -30,11 +30,12 @@ type Service struct {
 	store *store.Store
 	cfg   config.Config
 	now   func() time.Time
+	verify func(hash, pw string) (bool, error)
 }
 
 // NewService builds the auth service.
 func NewService(st *store.Store, cfg config.Config) *Service {
-	return &Service{store: st, cfg: cfg, now: time.Now}
+	return &Service{store: st, cfg: cfg, now: time.Now, verify: VerifyPassword}
 }
 
 // hashSessionID maps the raw cookie value to the stored identifier:

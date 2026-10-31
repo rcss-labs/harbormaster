@@ -168,7 +168,7 @@ func TestAuthenticate_TouchesAtMostOncePerMinute(t *testing.T) {
 	svc, st := newTestService(t)
 	mustUser(t, st, "erin", false)
 	ctx := context.Background()
-	res, _ := svc.Login(ctx, "erin", testPassword, "10.0.0.3", "ua")
+	res := mustLogin(t, svc, "erin", testPassword, "10.0.0.3", "ua")
 	base := time.Now()
 	svc.now = func() time.Time { return base.Add(30 * time.Second) }
 	s1, _, err := svc.Authenticate(ctx, res.SessionID)
@@ -192,8 +192,8 @@ func TestChangePassword_EndsOtherSessions(t *testing.T) {
 	svc, st := newTestService(t)
 	u := mustUser(t, st, "frank", false)
 	ctx := context.Background()
-	a, _ := svc.Login(ctx, "frank", testPassword, "10.0.0.4", "ua")
-	b, _ := svc.Login(ctx, "frank", testPassword, "10.0.0.4", "ua")
+	a := mustLogin(t, svc, "frank", testPassword, "10.0.0.4", "ua")
+	b := mustLogin(t, svc, "frank", testPassword, "10.0.0.4", "ua")
 	sessA, _, err := svc.Authenticate(ctx, a.SessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestAdminResetPassword(t *testing.T) {
 	svc, st := newTestService(t)
 	u := mustUser(t, st, "gina", false)
 	ctx := context.Background()
-	res, _ := svc.Login(ctx, "gina", testPassword, "10.0.0.4", "ua")
+	res := mustLogin(t, svc, "gina", testPassword, "10.0.0.4", "ua")
 	temp, err := svc.AdminResetPassword(ctx, u.ID)
 	if err != nil || len(temp) != 14 {
 		t.Fatalf("temp = %q, %v", temp, err)
@@ -245,7 +245,7 @@ func TestDeleteUser_EndsSessions(t *testing.T) {
 	svc, st := newTestService(t)
 	u := mustUser(t, st, "hank", false)
 	ctx := context.Background()
-	res, _ := svc.Login(ctx, "hank", testPassword, "10.0.0.5", "ua")
+	res := mustLogin(t, svc, "hank", testPassword, "10.0.0.5", "ua")
 	if err := st.DeleteUser(ctx, u.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func authedRequest(t *testing.T, svc *Service, st *store.Store, method, path str
 func TestRequireCSRF_RejectsMissingHeader(t *testing.T) {
 	svc, st := newTestService(t)
 	mustUser(t, st, "ivy", false)
-	res, _ := svc.Login(context.Background(), "ivy", testPassword, "10.0.0.6", "ua")
+	res := mustLogin(t, svc, "ivy", testPassword, "10.0.0.6", "ua")
 	cookie := CookieName + "=" + res.SessionID
 
 	rec, called := authedRequest(t, svc, st, "POST", "/api/x", map[string]string{"Cookie": cookie})
@@ -404,7 +404,7 @@ func TestRequirePasswordChanged_ExemptPaths(t *testing.T) {
 func TestRequireAdmin(t *testing.T) {
 	svc, st := newTestService(t)
 	mustUser(t, st, "kim", false)
-	res, _ := svc.Login(context.Background(), "kim", testPassword, "10.0.0.8", "ua")
+	res := mustLogin(t, svc, "kim", testPassword, "10.0.0.8", "ua")
 	called := false
 	h := svc.Middleware(RequireAdmin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })))
 	rec := httptest.NewRecorder()
@@ -429,5 +429,57 @@ func TestCookieAttributes(t *testing.T) {
 	svc.ClearCookie(rec)
 	if c := rec.Result().Cookies()[0]; c.MaxAge >= 0 {
 		t.Fatalf("clear cookie = %+v", c)
+	}
+}
+
+func mustLogin(t *testing.T, svc *Service, username, password, ip, userAgent string) LoginResult {
+	t.Helper()
+	res, err := svc.Login(context.Background(), username, password, ip, userAgent)
+	if err != nil {
+		t.Fatalf("login %s: %v", username, err)
+	}
+	return res
+}
+
+func countVerifies(svc *Service) *int {
+	n := 0
+	real := svc.verify
+	svc.verify = func(hash, pw string) (bool, error) { n++; return real(hash, pw) }
+	return &n
+}
+
+func TestLogin_LockedAccountStillPaysVerifyCost(t *testing.T) {
+	svc, st := newTestService(t)
+	mustUser(t, st, "lena", false)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		_, _ = svc.Login(ctx, "lena", "wrong-password-x", "10.0.1.1", "ua")
+	}
+	n := countVerifies(svc)
+	if _, err := svc.Login(ctx, "lena", testPassword, "10.0.1.1", "ua"); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("err = %v", err)
+	}
+	if *n != 1 {
+		t.Fatalf("locked path verify calls = %d, want 1 (timing must match unknown-user path)", *n)
+	}
+}
+
+func TestLogin_PerUserCountPrecheck(t *testing.T) {
+	svc, st := newTestService(t)
+	mustUser(t, st, "mona", false)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		_, _ = svc.Login(ctx, "mona", "wrong-password-x", "10.0.1.2", "ua")
+	}
+	// Clear the lock: the failure count alone must still reject the login.
+	if _, err := st.Pool.Exec(ctx, `update users set locked_until = null where username = 'mona'`); err != nil {
+		t.Fatal(err)
+	}
+	n := countVerifies(svc)
+	if _, err := svc.Login(ctx, "mona", testPassword, "10.0.1.3", "ua"); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("err = %v, want ErrBadCredentials", err)
+	}
+	if *n != 1 {
+		t.Fatalf("verify calls = %d, want 1", *n)
 	}
 }

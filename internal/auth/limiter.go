@@ -39,13 +39,14 @@ func (a *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		return LoginResult{}, err
 	}
 	if byIP >= a.cfg.LoginMaxPerIP {
+		_, _ = a.verify(dummyHash, password)
 		a.recordFailure(ctx, nil, username, ip)
 		return LoginResult{}, ErrBadCredentials
 	}
 
 	user, err := a.store.GetUserByUsername(ctx, username)
 	if errors.Is(err, store.ErrNotFound) {
-		_, _ = VerifyPassword(dummyHash, password)
+		_, _ = a.verify(dummyHash, password)
 		a.recordFailure(ctx, nil, username, ip)
 		return LoginResult{}, ErrBadCredentials
 	}
@@ -53,12 +54,14 @@ func (a *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		return LoginResult{}, err
 	}
 
-	if user.LockedUntil != nil && user.LockedUntil.After(now) {
+	// Locked or over the failure limit: still pay for a verify so response time does not reveal the lock.
+	if byUser >= a.cfg.LoginMaxPerUser || (user.LockedUntil != nil && user.LockedUntil.After(now)) {
+		_, _ = a.verify(user.PasswordHash, password)
 		a.recordFailure(ctx, &user, username, ip)
 		return LoginResult{}, ErrBadCredentials
 	}
 
-	ok, verr := VerifyPassword(user.PasswordHash, password)
+	ok, verr := a.verify(user.PasswordHash, password)
 	if verr != nil || !ok {
 		a.recordFailure(ctx, &user, username, ip)
 		if byUser+1 >= a.cfg.LoginMaxPerUser {
