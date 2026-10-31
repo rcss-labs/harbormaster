@@ -90,6 +90,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/tasks", s.listTasks, routeOptions{})
 	s.handle(mux, "GET /api/search", s.search, routeOptions{})
 	s.handle(mux, "GET /api/poller", s.pollerStatus, routeOptions{})
+	// plan 04: terminal
+	s.handle(mux, "GET /api/tasks/{taskId}/exec-targets", s.execTargets, routeOptions{})
 
 	s.handle(mux, "GET /api/users", s.listUsers, routeOptions{Admin: true})
 	s.handle(mux, "POST /api/users", s.createUser, routeOptions{Admin: true})
