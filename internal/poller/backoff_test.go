@@ -194,3 +194,50 @@ func TestIsThrottleInJoin(t *testing.T) {
 		t.Error("access denied is not a throttle")
 	}
 }
+
+func TestLoop_AccountHealthKeepsLastGoodTimeAndError(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "homelab", AccountID: homelabAccount, RoleARN: "arn:aws:iam::482109375512:role/hm", ExternalID: "x", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	clients := &denyingClients{Fake: fake.New(fake.MockupEstate(func() time.Time { return loopNow }))}
+	l := newFastLoop(t, clients, st, fastConfig())
+	if err := l.runOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	account := func() store.AWSAccount {
+		a, err := st.GetAccountByAccountID(ctx, homelabAccount)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	good := account()
+	if good.LastOKAt == nil || good.LastError != "" {
+		t.Fatalf("healthy account = %+v", good)
+	}
+
+	clients.deny.Store(true)
+	svc := l.tierDef(t, tierServices)
+	for i := 0; i < 3; i++ {
+		_ = l.runTier(ctx, svc)
+	}
+	failing := account()
+	if failing.LastOKAt == nil || !failing.LastOKAt.Equal(*good.LastOKAt) {
+		t.Errorf("last_ok_at = %v, want the last good time %v kept", failing.LastOKAt, good.LastOKAt)
+	}
+	if !strings.Contains(failing.LastError, "AccessDenied") {
+		t.Errorf("last_error = %q, want AccessDenied text", failing.LastError)
+	}
+
+	clients.deny.Store(false)
+	time.Sleep(5 * time.Millisecond)
+	if err := l.runTier(ctx, svc); err != nil {
+		t.Fatal(err)
+	}
+	recovered := account()
+	if recovered.LastError != "" || recovered.LastOKAt == nil || !recovered.LastOKAt.After(*good.LastOKAt) {
+		t.Errorf("recovered account = %+v, want last_error cleared and last_ok_at advanced", recovered)
+	}
+}

@@ -48,13 +48,13 @@ func (l *Loop) recordCycle(ctx context.Context, tr *tier, err error) {
 		l.log.Warn("poller: poll loop status", "tier", tr.name, "err", dbErr)
 	}
 	if flipped {
-		var okAt *time.Time
+		// Always keep the last good time; report the error only while failing, or when the
+		// very first cycle already errored, so the stored state matches reality.
 		lastError := ""
-		if !failing {
-			okAt = row.LastOKAt
-		} else {
+		if failing || err != nil {
 			lastError = row.LastError
 		}
+		okAt := row.LastOKAt
 		if dbErr := l.p.store.SetAccountHealth(ctx, l.target.AccountID, okAt, lastError); dbErr != nil && ctx.Err() == nil {
 			l.log.Warn("poller: account health", "err", dbErr)
 		}
