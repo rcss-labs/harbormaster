@@ -48,12 +48,9 @@ func (s *Service) Register(ctx context.Context, subj authz.Subject, key model.Se
 	if deployed.Revision != in.BaseRevision {
 		return Registered{}, &StaleBaseError{BaseRevision: in.BaseRevision, DeployedRevision: deployed.Revision}
 	}
-	if err := Validate(deployed.Definition, in.Definition, subj.Admin, key.AccountID); err != nil {
-		return Registered{}, err
-	}
-	input, err := ToRegisterInput(in.Definition, deployed.Tags)
+	input, err := Prepare(deployed.Definition, in.Definition, subj.Admin, key.AccountID, deployed.Tags)
 	if err != nil {
-		return Registered{}, &ValidationError{Message: "Task definition JSON is invalid: " + err.Error()}
+		return Registered{}, err
 	}
 	out, err := ecsAPI.RegisterTaskDefinition(ctx, input)
 	if err != nil {

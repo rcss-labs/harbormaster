@@ -154,18 +154,121 @@ func lowerCamel(name string) string {
 
 // ToRegisterInput builds the RegisterTaskDefinition request from a register-ready definition.
 // SDK structs have no json tags and encoding/json matches field names case-insensitively,
-// so a marshal/unmarshal round trip is enough.
+// so a marshal/unmarshal round trip is enough. Unknown keys are ignored; use decodeStrict
+// (via Prepare) for user-submitted drafts.
 func ToRegisterInput(def Definition, tags []ecstypes.Tag) (*ecs.RegisterTaskDefinitionInput, error) {
+	return decodeDefinition(def, tags, false)
+}
+
+// decodeDefinition round-trips def through JSON into the request. With strict, a key that
+// matches no request field (at any depth, case-insensitively) is an error instead of being dropped.
+func decodeDefinition(def Definition, tags []ecstypes.Tag, strict bool) (*ecs.RegisterTaskDefinitionInput, error) {
 	raw, err := json.Marshal(def)
 	if err != nil {
 		return nil, fmt.Errorf("marshal definition: %w", err)
 	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	var input ecs.RegisterTaskDefinitionInput
-	if err := json.Unmarshal(raw, &input); err != nil {
+	if err := decoder.Decode(&input); err != nil {
 		return nil, fmt.Errorf("decode definition: %w", err)
 	}
 	input.Tags = tags
 	return &input, nil
+}
+
+// canonicalDefinition converts the request that will be sent to AWS back into register-ready
+// JSON. Validation runs on this form, never on the submitted map, so the rules judge exactly
+// what encoding/json decoded (case-folded keys resolved, last one winning).
+func canonicalDefinition(input *ecs.RegisterTaskDefinitionInput) (Definition, error) {
+	withoutTags := *input
+	withoutTags.Tags = nil
+	converted, ok := convertValue(reflect.ValueOf(withoutTags), true)
+	if !ok {
+		return nil, fmt.Errorf("task definition is empty")
+	}
+	def, ok := converted.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected conversion result %T", converted)
+	}
+	return def, nil
+}
+
+// checkFoldedKeys rejects any JSON object that maps onto an SDK struct and holds two keys differing
+// only in letter case: encoding/json treats them as the same field and the last one wins, which would
+// let a duplicate override the value the validator looked at. Map-valued fields (dockerLabels, log
+// options, ...) hold user data with case-sensitive keys and are not checked, only walked.
+func checkFoldedKeys(value any, t reflect.Type, path string) error {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		switch t.Kind() {
+		case reflect.Struct:
+			keys := make([]string, 0, len(typed))
+			for key := range typed {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for i, first := range keys {
+				for _, second := range keys[i+1:] {
+					if strings.EqualFold(first, second) {
+						return invalid("Task definition JSON is invalid: keys %q and %q%s differ only in letter case", first, second, atPath(path))
+					}
+				}
+			}
+			for _, key := range keys {
+				field, found := structFieldFold(t, key)
+				if !found {
+					continue
+				}
+				if err := checkFoldedKeys(typed[key], field.Type, joinPath(path, key)); err != nil {
+					return err
+				}
+			}
+		case reflect.Map:
+			for key, item := range typed {
+				if err := checkFoldedKeys(item, t.Elem(), joinPath(path, key)); err != nil {
+					return err
+				}
+			}
+		}
+	case []any:
+		if t.Kind() == reflect.Slice {
+			for i, item := range typed {
+				if err := checkFoldedKeys(item, t.Elem(), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func structFieldFold(t reflect.Type, key string) (reflect.StructField, bool) {
+	for i := 0; i < t.NumField(); i++ {
+		if field := t.Field(i); field.IsExported() && strings.EqualFold(field.Name, key) {
+			return field, true
+		}
+	}
+	return reflect.StructField{}, false
+}
+
+func joinPath(path, key string) string {
+	if path == "" {
+		return key
+	}
+	return path + "." + key
+}
+
+func atPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return " (in " + path + ")"
 }
 
 // MainContainer returns the container named serviceName, else the first essential container

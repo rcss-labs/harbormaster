@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -375,5 +376,64 @@ func TestWrite_ThrottleIs503(t *testing.T) {
 	wantStatus(t, resp, http.StatusServiceUnavailable)
 	if code, _ := errorCode(t, resp); code != "throttled" {
 		t.Errorf("code = %q, want throttled", code)
+	}
+}
+
+// foldedKeyAttacks are drafts that try to slip a role or secret past the non-admin lock with a
+// key spelled in another letter case. encoding/json would decode them into the real field.
+func foldedKeyAttacks() map[string]func(draft map[string]any) {
+	const prodAdmin = "arn:aws:iam::" + homelabAccountID + ":role/prod-admin"
+	const stolen = "arn:aws:ssm:us-east-1:" + homelabAccountID + ":parameter/stolen/KEY"
+	first := func(draft map[string]any) map[string]any {
+		return draft["containerDefinitions"].([]any)[0].(map[string]any)
+	}
+	return map[string]func(map[string]any){
+		"taskRoleArn duplicate":      func(d map[string]any) { d["taskrolearn"] = prodAdmin },
+		"executionRoleArn duplicate": func(d map[string]any) { d["executionrolearn"] = prodAdmin },
+		"taskRoleArn lone":           func(d map[string]any) { delete(d, "taskRoleArn"); d["taskrolearn"] = prodAdmin },
+		"secrets valueFrom duplicate": func(d map[string]any) {
+			first(d)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": "arn:aws:ssm:us-east-1:" + homelabAccountID + ":parameter/payments/DB_PASS", "valuefrom": stolen}}
+		},
+		"secrets valueFrom lone": func(d map[string]any) {
+			first(d)["secrets"] = []any{map[string]any{"name": "X", "valuefrom": stolen}}
+		},
+		"secretOptions valueFrom": func(d map[string]any) {
+			first(d)["logConfiguration"] = map[string]any{"logDriver": "splunk", "secretOptions": []any{
+				map[string]any{"name": "token", "valuefrom": stolen}}}
+		},
+		"repositoryCredentials": func(d map[string]any) {
+			first(d)["repositoryCredentials"] = map[string]any{"credentialsparameter": stolen}
+		},
+	}
+}
+
+func TestRegister_NonAdminFoldedKeyBypassIs422AndNothingIsRegistered(t *testing.T) {
+	for name, attack := range foldedKeyAttacks() {
+		t.Run(name, func(t *testing.T) {
+			env := newWriteEnv(t)
+			draft := draftFor(t, env.login("pavel"))
+			attack(draft)
+			before := env.fk.Calls()["RegisterTaskDefinition"]
+			resp := env.login("editor").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+			wantStatus(t, resp, http.StatusUnprocessableEntity)
+			if got := env.fk.Calls()["RegisterTaskDefinition"]; got != before {
+				t.Errorf("RegisterTaskDefinition called %d time(s), want none", got-before)
+			}
+		})
+	}
+}
+
+func TestRegister_UnknownDraftKeyIs422(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	draft := draftFor(t, admin)
+	draft["taskRoleArnn"] = "typo"
+	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if _, msg := errorCode(t, resp); !strings.Contains(msg, "unknown key") {
+		t.Errorf("message = %q", msg)
+	}
+	if got := env.fk.Calls()["RegisterTaskDefinition"]; got != 0 {
+		t.Errorf("RegisterTaskDefinition called %d time(s)", got)
 	}
 }

@@ -3,6 +3,7 @@ package deploy
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -208,5 +209,156 @@ func TestFargateValid_Table(t *testing.T) {
 		if FargateValid(pair[0], pair[1]) {
 			t.Errorf("FargateValid(%d, %d) = true, want false", pair[0], pair[1])
 		}
+	}
+}
+
+// bypassVector edits a draft so one of the non-admin locks (roles, secrets) is attacked
+// through a key whose spelling differs only in letter case from the real field name.
+type bypassVector struct {
+	name string
+	// duplicate adds the folded key next to the untouched camelCase one (last key wins in encoding/json).
+	duplicate func(Definition)
+	// lone replaces the camelCase key by the folded one, with an attacker value.
+	lone func(Definition)
+}
+
+const attackerSecret = "arn:aws:ssm:us-east-1:482109375512:parameter/stolen/KEY"
+
+func bypassVectors() []bypassVector {
+	return []bypassVector{
+		{"taskRoleArn",
+			func(d Definition) { d["taskrolearn"] = "arn:aws:iam::482109375512:role/prod-admin" },
+			func(d Definition) {
+				delete(d, "taskRoleArn")
+				d["taskrolearn"] = "arn:aws:iam::482109375512:role/prod-admin"
+			}},
+		{"executionRoleArn",
+			func(d Definition) { d["EXECUTIONROLEARN"] = "arn:aws:iam::482109375512:role/prod-admin" },
+			func(d Definition) {
+				delete(d, "executionRoleArn")
+				d["EXECUTIONROLEARN"] = "arn:aws:iam::482109375512:role/prod-admin"
+			}},
+		{"secrets valueFrom",
+			func(d Definition) {
+				firstContainer(d)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": "arn:aws:ssm:us-east-1:482109375512:parameter/payments/DB_PASS", "valuefrom": attackerSecret}}
+			},
+			func(d Definition) {
+				firstContainer(d)["secrets"] = []any{map[string]any{"name": "X", "valuefrom": attackerSecret}}
+			}},
+		{"logConfiguration secretOptions",
+			func(d Definition) {
+				firstContainer(d)["logConfiguration"] = map[string]any{"logDriver": "splunk", "secretOptions": []any{
+					map[string]any{"name": "token", "valueFrom": "arn:aws:ssm:us-east-1:482109375512:parameter/payments/DB_PASS", "VALUEFROM": attackerSecret}}}
+			},
+			func(d Definition) {
+				firstContainer(d)["logConfiguration"] = map[string]any{"logDriver": "splunk", "secretoptions": []any{
+					map[string]any{"name": "token", "valuefrom": attackerSecret}}}
+			}},
+		{"repositoryCredentials",
+			func(d Definition) {
+				firstContainer(d)["repositoryCredentials"] = map[string]any{
+					"credentialsParameter": "arn:aws:secretsmanager:us-east-1:482109375512:secret:payments/api-key-AbCdEf",
+					"credentialsparameter": attackerSecret}
+			},
+			func(d Definition) {
+				firstContainer(d)["repositoryCredentials"] = map[string]any{"credentialsparameter": attackerSecret}
+			}},
+		{"containerDefinitions swapped wholesale",
+			func(d Definition) {
+				d["containerdefinitions"] = evilContainers(d)
+			},
+			func(d Definition) {
+				evil := evilContainers(d)
+				delete(d, "containerDefinitions")
+				d["containerdefinitions"] = evil
+			}},
+		{"secrets (long s)",
+			func(d Definition) {
+				firstContainer(d)["ſecrets"] = []any{map[string]any{"name": "X", "valueFrom": attackerSecret}}
+			},
+			func(d Definition) {
+				delete(firstContainer(d), "secrets")
+				firstContainer(d)["ſecrets"] = []any{map[string]any{"name": "X", "valueFrom": attackerSecret}}
+			}},
+	}
+}
+
+// evilContainers copies d's containers and gives the first one an attacker-controlled secret.
+func evilContainers(d Definition) []any {
+	raw, _ := json.Marshal(d["containerDefinitions"])
+	var containers []any
+	_ = json.Unmarshal(raw, &containers)
+	containers[0].(map[string]any)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": attackerSecret}}
+	return containers
+}
+
+// Case-folded duplicate keys are rejected at the boundary: encoding/json would let the last
+// spelling silently override the one the validator looked at.
+func TestValidate_FoldedDuplicateKeysAreRejected(t *testing.T) {
+	for _, vector := range bypassVectors() {
+		t.Run(vector.name, func(t *testing.T) {
+			base := validBase(t)
+			draft := cloneDefinition(t, base)
+			vector.duplicate(draft)
+			for _, admin := range []bool{false, true} {
+				err := Validate(base, draft, admin, testAccount)
+				var validation *ValidationError
+				if !errors.As(err, &validation) || !strings.Contains(validation.Message, "letter case") {
+					t.Fatalf("admin=%v: Validate() = %v, want a duplicate-key ValidationError", admin, err)
+				}
+			}
+		})
+	}
+}
+
+// A single case-folded key is decoded into the real field, so the locks must judge the
+// decoded value: validating the exact-spelling keys alone would see nothing here.
+func TestValidate_FoldedKeyIsJudgedAsDecoded(t *testing.T) {
+	for _, vector := range bypassVectors() {
+		t.Run(vector.name, func(t *testing.T) {
+			base := validBase(t)
+			// No roles and no secrets in the base: nothing to compare the exact keys against.
+			delete(base, "taskRoleArn")
+			delete(base, "executionRoleArn")
+			delete(firstContainer(base), "secrets")
+			draft := cloneDefinition(t, base)
+			vector.lone(draft)
+			err := Validate(base, draft, false, testAccount)
+			var validation *ValidationError
+			if !errors.As(err, &validation) ||
+				(validation.Message != "Changing roles needs a global admin" &&
+					validation.Message != "Changing secrets outside the existing prefixes needs a global admin") {
+				t.Fatalf("Validate() = %v, want the roles/secrets lock", err)
+			}
+		})
+	}
+}
+
+func TestValidate_UnknownKeysAreRejected(t *testing.T) {
+	for name, mutate := range map[string]func(Definition){
+		"top level": func(d Definition) { d["taskRoleARN2"] = "x" },
+		"read only": func(d Definition) { d["revision"] = 3 },
+		"nested":    func(d Definition) { firstContainer(d)["imge"] = "typo" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := validBase(t)
+			draft := cloneDefinition(t, base)
+			mutate(draft)
+			err := Validate(base, draft, true, testAccount)
+			var validation *ValidationError
+			if !errors.As(err, &validation) || !strings.Contains(validation.Message, "unknown key") {
+				t.Fatalf("Validate() = %v, want an unknown-key ValidationError", err)
+			}
+		})
+	}
+}
+
+// Map-valued fields hold user data whose keys are case sensitive; two spellings are legitimate there.
+func TestValidate_CaseDifferingMapKeysAreAllowed(t *testing.T) {
+	base := validBase(t)
+	draft := cloneDefinition(t, base)
+	firstContainer(draft)["dockerLabels"] = map[string]any{"Env": "a", "env": "b"}
+	if err := Validate(base, draft, false, testAccount); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
 	}
 }

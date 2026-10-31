@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
 // ValidationError is a user-correctable problem with a task definition draft; the API maps it to 422 "invalid".
@@ -18,9 +22,54 @@ func invalid(format string, args ...any) error {
 }
 
 // Validate checks a draft against the definition it was edited from (spec §7.1).
-// It returns nil or a *ValidationError. It mutates draft only to normalize numeric
-// cpu/memory values to strings, the form RegisterTaskDefinition expects.
+// It returns nil or a *ValidationError.
 func Validate(base, draft Definition, admin bool, accountID string) error {
+	_, err := Prepare(base, draft, admin, accountID, nil)
+	return err
+}
+
+// Prepare validates a draft and returns the request that is safe to send to AWS.
+//
+// Security: the rules run on the canonical form of the request that will actually be sent
+// (the draft after encoding/json decoded it into the SDK struct), never on the submitted map.
+// encoding/json matches keys case-insensitively and the last one wins, so a rule that reads
+// the map's exact keys can be bypassed with `taskrolearn`. Drafts holding case-folded
+// duplicate keys, or keys no request field matches, are rejected up front as well.
+// Numeric cpu/memory in the draft are rewritten as decimal strings, the form AWS expects.
+func Prepare(base, draft Definition, admin bool, accountID string, tags []ecstypes.Tag) (*ecs.RegisterTaskDefinitionInput, error) {
+	if err := checkFoldedKeys(map[string]any(draft), reflect.TypeOf(ecs.RegisterTaskDefinitionInput{}), ""); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"cpu", "memory"} {
+		if err := normalizeSizeField(draft, key); err != nil {
+			return nil, err
+		}
+	}
+	input, err := decodeDefinition(draft, tags, true)
+	if err != nil {
+		return nil, invalidDecode(err)
+	}
+	canonical, err := canonicalDefinition(input)
+	if err != nil {
+		return nil, invalid("Task definition JSON is invalid: %s", err)
+	}
+	if err := validateCanonical(base, canonical, admin, accountID); err != nil {
+		return nil, err
+	}
+	return input, nil
+}
+
+// invalidDecode turns a decode failure into the user-facing message, naming unknown keys.
+func invalidDecode(err error) error {
+	const unknownPrefix = "decode definition: json: unknown field "
+	if text := err.Error(); strings.HasPrefix(text, unknownPrefix) {
+		return invalid("Task definition JSON is invalid: unknown key %s", strings.TrimPrefix(text, unknownPrefix))
+	}
+	return invalid("Task definition JSON is invalid: %s", strings.TrimPrefix(err.Error(), "decode definition: json: "))
+}
+
+// validateCanonical applies the business rules to a canonical draft.
+func validateCanonical(base, draft Definition, admin bool, accountID string) error {
 	containers, _ := draft["containerDefinitions"].([]any)
 	if len(containers) == 0 {
 		return invalid("Task definition JSON is invalid: containerDefinitions is required")
@@ -42,11 +91,6 @@ func Validate(base, draft Definition, admin bool, accountID string) error {
 		return invalid("At least one container must be essential")
 	}
 
-	for _, key := range []string{"cpu", "memory"} {
-		if err := normalizeSizeField(draft, key); err != nil {
-			return err
-		}
-	}
 	if err := validateFargateSize(draft); err != nil {
 		return err
 	}
