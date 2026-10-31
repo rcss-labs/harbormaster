@@ -583,7 +583,7 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 	out.Markers = []MarkerDTO{}
 	for i, svc := range services {
 		prefix := fmt.Sprintf("s%d_", i)
-		entry := ClusterServiceMetricsDTO{}
+		entry := ClusterServiceMetricsDTO{CPU: []*float64{}, Mem: []*float64{}}
 		if insights != "disabled" {
 			cpu, mem := idx.percent("cpu", prefix, ""), idx.percent("mem", prefix, "")
 			entry.CPU, entry.Mem, entry.CPUNow, entry.MemNow = values(cpu), values(mem), lastOf(cpu), lastOf(mem)

@@ -436,6 +436,29 @@ func TestClustersMetrics_DisabledClusterSerialisesEmptyArrays(t *testing.T) {
 	}
 }
 
+func TestClusterMetrics_DisabledClusterServicesSerialiseEmptyArrays(t *testing.T) {
+	h := newMetricsHarness(t, 0)
+	edgeID := model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()
+	resp := login(t, h.srv, "omer", testPassword).get("/api/clusters/" + edgeID + "/metrics")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	var raw struct {
+		Services map[string]map[string]json.RawMessage `json:"services"`
+	}
+	decode(t, resp, &raw)
+	if len(raw.Services) == 0 {
+		t.Fatal("edge-proxy has no services entries")
+	}
+	for id, entry := range raw.Services {
+		for _, key := range []string{"cpu", "mem"} {
+			if got := string(entry[key]); got != "[]" {
+				t.Errorf("service %s %s = %s, want []", id, key, got)
+			}
+		}
+	}
+}
+
 func TestOverviewMetrics_TopSevenPlusOthers(t *testing.T) {
 	h := newMetricsHarness(t, 5) // 5 mockup clusters with Insights + 5 extra = 10
 	resp := login(t, h.srv, "pavel", testPassword).get("/api/overview/metrics")
