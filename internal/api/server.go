@@ -10,6 +10,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/web"
 )
@@ -24,6 +25,8 @@ type Server struct {
 	Cfg     config.Config
 	Log     *slog.Logger
 	Now     func() time.Time
+	// Metrics reads CloudWatch metrics (plan 03); New defaults it from Clients, Store and Cfg.
+	Metrics *metrics.Client
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
@@ -33,6 +36,10 @@ func New(s Server) *Server {
 	}
 	if s.Now == nil {
 		s.Now = time.Now
+	}
+	if s.Metrics == nil {
+		s.Metrics = metrics.New(s.Clients, s.Store, s.Cfg.MetricsCacheTTL)
+		s.Metrics.Now, s.Metrics.Log = s.Now, s.Log
 	}
 	return &s
 }
