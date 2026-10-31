@@ -30,3 +30,7 @@ run:
 
 e2e:
 	@echo "e2e: added in Task 36"
+
+.PHONY: tf-check
+tf-check:
+	tools/tf-check.sh
