@@ -165,4 +165,42 @@ describe('LogsTab', () => {
     fireEvent.scroll(log)
     expect(await screen.findByRole('button', { name: 'Follow' })).toBeInTheDocument()
   })
+
+  it('csrf_invalid close tells the user to reload', async () => {
+    serveHistory(() => supportedOnly)
+    renderApp(route)
+    await screen.findByRole('log')
+    await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+    act(() => MockSocket.instances[0].onclose?.({ code: 4401, reason: 'csrf_invalid' }))
+    expect(await screen.findByText('Your session changed. Reload the page to follow logs again.')).toBeInTheDocument()
+    expect(screen.queryByText(/live tail$/)).not.toBeInTheDocument()
+  })
+
+  it('other_group container gets the log group wording', async () => {
+    serveHistory(() => LOGS_HISTORY_PAYMENTS)
+    renderApp(route)
+    expect(await screen.findByText('datadog-agent logs go to a different log group. Harbormaster cannot show those logs.')).toBeInTheDocument()
+  })
+
+  it('only user activity sends keepalive, not auto-scroll', async () => {
+    serveHistory(() => supportedOnly)
+    renderApp(route)
+    const log = await screen.findByRole('log')
+    await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+    const socket = MockSocket.instances[0]
+    const keepalives = () => socket.sent.filter((frame) => JSON.parse(frame).type === 'keepalive').length
+    act(() => {
+      socket.readyState = 1
+      socket.onopen?.()
+      socket.onmessage?.({ data: JSON.stringify({ type: 'ready', group: 'g', prefixes: [] }) })
+      socket.onmessage?.({
+        data: JSON.stringify({ type: 'lines', items: [{ t: '2026-10-31T10:00:00Z', container: 'app', task_id: 'a1b2c3d4e5', message: 'tail line' }] }),
+      })
+    })
+    await screen.findByText('tail line')
+    fireEvent.scroll(log)
+    expect(keepalives()).toBe(0)
+    fireEvent.wheel(log)
+    expect(keepalives()).toBe(1)
+  })
 })

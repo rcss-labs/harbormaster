@@ -41,6 +41,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const [q, setQ] = useState('')
   const [follow, setFollow] = useState(true)
   const boxRef = useRef<HTMLDivElement>(null)
+  const autoScrollTopRef = useRef<number | null>(null)
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQ(searchInput.trim()), SEARCH_DEBOUNCE_MS)
@@ -69,6 +70,8 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
 
   const tail = useLogTail({ serviceId, container: containerParam, q: q || undefined, enabled: follow && canTail, csrf: me?.csrf_token ?? '' })
 
+  const { keepalive } = tail
+
   const loadOlder = () => {
     const page = currentPage.data
     if (!page?.older_before) return
@@ -82,22 +85,28 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
 
   useLayoutEffect(() => {
     const box = boxRef.current
-    if (follow && box) box.scrollTop = box.scrollHeight
+    if (follow && box) {
+      box.scrollTop = box.scrollHeight
+      autoScrollTopRef.current = box.scrollTop // lets onScroll tell this scroll from the user's
+    }
   }, [follow, visible.length])
 
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible') tail.keepalive()
+      if (document.visibilityState === 'visible') keepalive()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [tail])
+  }, [keepalive])
 
   const onScroll = () => {
-    tail.keepalive()
     const box = boxRef.current
+    // Scroll events from our own follow-to-bottom are not user activity; counting them would keep an unattended tab alive forever.
+    if (box && box.scrollTop === autoScrollTopRef.current) return
     if (follow && box && box.scrollHeight - box.scrollTop - box.clientHeight > NEAR_BOTTOM_PX) setFollow(false)
   }
+
+  const statusText = !follow ? 'paused' : tail.status === 'live' ? 'live tail' : tail.status === 'ended' ? 'tail stopped' : 'connecting'
 
   if (newest.isError && !info) {
     return <Banner kind="bad">{newest.error instanceof Error ? newest.error.message : 'The logs could not be loaded.'}</Banner>
@@ -143,7 +152,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           {follow ? 'Pause' : 'Follow'}
         </button>
         <span className={styles.status}>
-          CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {follow ? 'live tail' : 'paused'}
+          CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {statusText}
         </span>
       </div>
       <div className={styles.banners}>
@@ -159,7 +168,10 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
         {follow && tail.status === 'ended' && tail.endMessage && (tail.endReason === 'tail_limit' || tail.endReason === 'forbidden' || tail.endReason === 'invalid') && (
           <Banner kind="warn">{tail.endMessage}</Banner>
         )}
-        {follow && tail.status === 'ended' && (tail.endReason === 'error' || tail.endReason === 'closed') && (
+        {follow && tail.status === 'ended' && tail.endReason === 'csrf_invalid' && (
+          <Banner kind="warn">Your session changed. Reload the page to follow logs again.</Banner>
+        )}
+        {follow && tail.status === 'ended' && !tail.endMessage && tail.endReason !== 'idle' && tail.endReason !== 'csrf_invalid' && (
           <Banner kind="warn">
             Live tail disconnected.
             <button type="button" className={`${styles.btn} ${styles.bannerAction}`} onClick={tail.resume}>
@@ -168,7 +180,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           </Banner>
         )}
       </div>
-      <div className={styles.logs} ref={boxRef} role="log" onScroll={onScroll}>
+      <div className={styles.logs} ref={boxRef} role="log" onScroll={onScroll} onWheel={keepalive} onPointerDown={keepalive} onKeyDown={keepalive} onTouchMove={keepalive}>
         {olderBefore && (
           <button type="button" className={`${styles.btn} ${styles.older}`} onClick={loadOlder}>
             Load older
