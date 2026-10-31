@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -175,6 +177,7 @@ func TestDeploy_Permissions(t *testing.T) {
 		{"deployer", http.StatusAccepted, ""},
 		{"editor", http.StatusForbidden, "You need Deploy on Prod"},
 		{"operator", http.StatusForbidden, "You need Deploy on Prod"},
+		{"viewer", http.StatusForbidden, "You need Deploy on Prod"},
 		{"nobody", http.StatusNotFound, ""},
 	} {
 		t.Run(tc.user, func(t *testing.T) {
@@ -191,8 +194,10 @@ func TestDeploy_Permissions(t *testing.T) {
 				}
 				return
 			}
-			if _, msg := errorCode(t, resp); tc.message != "" && msg != tc.message {
-				t.Errorf("message = %q", msg)
+			code, msg := errorCode(t, resp)
+			wantCode := map[int]string{http.StatusForbidden: "forbidden", http.StatusNotFound: "not_found"}[tc.status]
+			if code != wantCode || (tc.message != "" && msg != tc.message) {
+				t.Errorf("error = %s %q", code, msg)
 			}
 		})
 	}
@@ -320,5 +325,55 @@ func TestWrite_RequiresCSRF(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	if code, _ := errorCode(t, resp); code != "csrf" {
 		t.Errorf("code = %q, want csrf", code)
+	}
+}
+
+func TestWrite_MissingRequiredFieldsAre422(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	id := paymentsID()
+	for _, tc := range []struct {
+		path, message string
+		body          map[string]any
+	}{
+		{"/desired-count", "desired is required.", map[string]any{}},
+		{"/deploy", "revision is required.", map[string]any{}},
+		{"/revisions", "base_revision is required.", map[string]any{"definition": map[string]any{"family": "payments-api"}}},
+	} {
+		resp := admin.post("/api/services/"+id+tc.path, tc.body)
+		wantStatus(t, resp, http.StatusUnprocessableEntity)
+		if code, msg := errorCode(t, resp); code != "invalid" || msg != tc.message {
+			t.Errorf("%s: error = %s %q", tc.path, code, msg)
+		}
+	}
+	var dc struct {
+		Desired int `json:"desired"`
+	}
+	decode(t, admin.get("/api/services/"+id+"/desired-count"), &dc)
+	if dc.Desired != 3 {
+		t.Errorf("desired count changed to %d by a body without desired", dc.Desired)
+	}
+}
+
+func TestRegister_AWSValidationIs422Verbatim(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	draft := draftFor(t, admin)
+	env.fk.FailNext("RegisterTaskDefinition", &smithy.GenericAPIError{Code: "InvalidParameterException", Message: "Container.image should not be null or empty."})
+	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Container.image should not be null or empty." {
+		t.Errorf("error = %s %q", code, msg)
+	}
+}
+
+func TestWrite_ThrottleIs503(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	atomic.StoreInt32(&env.fk.Throttle, 1)
+	resp := admin.post("/api/services/"+paymentsID()+"/restart", nil)
+	wantStatus(t, resp, http.StatusServiceUnavailable)
+	if code, _ := errorCode(t, resp); code != "throttled" {
+		t.Errorf("code = %q, want throttled", code)
 	}
 }

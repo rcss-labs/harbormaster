@@ -13,7 +13,7 @@ import (
 
 // RegisterRequest is the body of POST /api/services/{id}/revisions.
 type RegisterRequest struct {
-	BaseRevision int            `json:"base_revision"`
+	BaseRevision *int           `json:"base_revision"`
 	Definition   map[string]any `json:"definition"`
 }
 
@@ -31,7 +31,7 @@ type RegisterResponse struct {
 
 // DeployRequest is the body of POST /api/services/{id}/deploy.
 type DeployRequest struct {
-	Revision int `json:"revision"`
+	Revision *int `json:"revision"`
 }
 
 // RolloutResponse is the answer to deploy and restart. FromRevision is omitted for restarts.
@@ -45,7 +45,7 @@ type RolloutResponse struct {
 
 // SetDesiredCountRequest is the body of POST /api/services/{id}/desired-count.
 type SetDesiredCountRequest struct {
-	Desired int `json:"desired"`
+	Desired *int `json:"desired"`
 }
 
 // SetDesiredCountResponse reports the change; Warning is null when auto scaling will not interfere.
@@ -121,16 +121,17 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if body.BaseRevision == nil {
+		s.fail(w, invalid("base_revision is required."))
+		return
+	}
 	if body.Definition == nil {
 		s.fail(w, invalid("definition is required."))
 		return
 	}
 	ctx := r.Context()
-	registered, err := s.Deploy.Register(ctx, subject, key, deploy.RegisterInput{BaseRevision: body.BaseRevision, Definition: body.Definition})
-	if err != nil {
-		s.failChange(w, err)
-		return
-	}
+	// Everything the response needs is read before registering: once AWS has accepted the
+	// revision, a failed read must not turn the answer into an error the user would retry.
 	deployed, err := s.Deploy.DeployedDefinition(ctx, key)
 	if err != nil {
 		s.fail(w, err)
@@ -139,6 +140,11 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	registered, err := s.Deploy.Register(ctx, subject, key, deploy.RegisterInput{BaseRevision: *body.BaseRevision, Definition: body.Definition})
+	if err != nil {
+		s.failChange(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, RegisterResponse{
@@ -160,7 +166,11 @@ func (s *Server) deployRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	rollout, err := s.Deploy.Deploy(r.Context(), subject, key, body.Revision)
+	if body.Revision == nil {
+		s.fail(w, invalid("revision is required."))
+		return
+	}
+	rollout, err := s.Deploy.Deploy(r.Context(), subject, key, *body.Revision)
 	if err != nil {
 		s.failChange(w, err)
 		return
@@ -193,7 +203,11 @@ func (s *Server) setDesiredCount(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	result, err := s.Deploy.SetDesiredCount(r.Context(), subject, key, body.Desired)
+	if body.Desired == nil {
+		s.fail(w, invalid("desired is required."))
+		return
+	}
+	result, err := s.Deploy.SetDesiredCount(r.Context(), subject, key, *body.Desired)
 	if err != nil {
 		s.failChange(w, err)
 		return
