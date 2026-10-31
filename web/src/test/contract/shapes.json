@@ -331,6 +331,28 @@
       "username": "string"
     }
   },
+  "desiredCount": {
+    "auto_scaling": {
+      "$null": {
+        "max": "number",
+        "min": "number"
+      }
+    },
+    "desired": "number",
+    "max": "number",
+    "running": "number"
+  },
+  "imageTags": {
+    "current": "string",
+    "repository": "string",
+    "source": "string",
+    "tags": [
+      {
+        "pushed_at": "time",
+        "tag": "string"
+      }
+    ]
+  },
   "login": {
     "user": {
       "accounts": [
@@ -608,6 +630,24 @@
       }
     ]
   },
+  "revisions": {
+    "deployed_revision": "number",
+    "items": [
+      {
+        "arn": "string",
+        "cpu": "string",
+        "image_tag": "string",
+        "memory": "string",
+        "registered_at": "time",
+        "registered_by": "string",
+        "revision": "number",
+        "status": "string"
+      }
+    ],
+    "rolling_out_revision": {
+      "$null": "number"
+    }
+  },
   "scaling": {
     "activities": [
       {
@@ -677,6 +717,12 @@
       "name": "string"
     },
     "console_url": "string",
+    "controller": {
+      "banner": "string",
+      "name": "string",
+      "supported": "boolean",
+      "type": "string"
+    },
     "counts_history_72h": [
       {
         "desired": "number",
@@ -786,6 +832,7 @@
       }
     ],
     "status": "string",
+    "strategy_text": "string",
     "tag": {
       "color": "string",
       "id": "number",
@@ -1026,6 +1073,38 @@
       "$null": "time"
     },
     "unhealthy": "number"
+  },
+  "taskDefinition": {
+    "can": {
+      "admin": "boolean",
+      "deploy": "boolean",
+      "edit": "boolean",
+      "operate": "boolean"
+    },
+    "controller": {
+      "name": "string",
+      "supported": "boolean",
+      "type": "string"
+    },
+    "definition": "any",
+    "deployed_revision": "number",
+    "family": "string",
+    "main_container": "string",
+    "polled_at": "time",
+    "strategy": "string",
+    "tag": {
+      "color": "string",
+      "id": "number",
+      "inherited": "boolean",
+      "name": "string"
+    },
+    "tags": [
+      {
+        "key": "string",
+        "value": "string"
+      }
+    ],
+    "task_definition_arn": "string"
   },
   "tasks": {
     "counts": {

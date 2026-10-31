@@ -16,8 +16,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if !reflect.DeepEqual(applied, []int{1, 2, 30}) {
-		t.Fatalf("first Migrate applied %v, want [1 2 30]", applied)
+	if !reflect.DeepEqual(applied, []int{1, 2, 20, 30}) {
+		t.Fatalf("first Migrate applied %v, want [1 2 20 30]", applied)
 	}
 	applied, err = s.Migrate(ctx)
 	if err != nil {
@@ -30,8 +30,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, `select count(*) from schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 3 {
-		t.Fatalf("schema_migrations rows = %d, want 3", n)
+	if n != 4 {
+		t.Fatalf("schema_migrations rows = %d, want 4", n)
 	}
 	var versions []int
 	rows, err := s.Pool.Query(ctx, `select version from schema_migrations order by version`)
@@ -46,8 +46,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 		}
 		versions = append(versions, v)
 	}
-	if !reflect.DeepEqual(versions, []int{1, 2, 30}) {
-		t.Fatalf("versions = %v, want [1 2 30]", versions)
+	if !reflect.DeepEqual(versions, []int{1, 2, 20, 30}) {
+		t.Fatalf("versions = %v, want [1 2 20 30]", versions)
 	}
 }
 

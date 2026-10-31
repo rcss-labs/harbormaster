@@ -27,6 +27,10 @@ import {
   filterTasks,
   tasksList,
   tasksResponse,
+  TASK_DEFINITION_EDITABLE,
+  REVISIONS_PAYMENTS,
+  IMAGE_TAGS_PAYMENTS,
+  DESIRED_COUNT_PAYMENTS,
 } from './fixtures'
 import type { SearchResultDTO } from '../api/types'
 
@@ -116,6 +120,11 @@ export const handlers = [
   http.get('/api/services/:id/target-health', () => HttpResponse.json(TARGET_HEALTH_EDGE)),
   // observe (plan 03, task 18): cluster page metrics
   http.get('/api/clusters/:id/metrics', () => HttpResponse.json(CLUSTER_METRICS_CORE)),
+  // Change path reads (plan 02)
+  http.get('/api/services/:id/task-definition', () => HttpResponse.json(TASK_DEFINITION_EDITABLE)),
+  http.get('/api/services/:id/revisions', () => HttpResponse.json(REVISIONS_PAYMENTS)),
+  http.get('/api/services/:id/image-tags', () => HttpResponse.json(IMAGE_TAGS_PAYMENTS)),
+  http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
 ]
 
 export const server = setupServer(...handlers)

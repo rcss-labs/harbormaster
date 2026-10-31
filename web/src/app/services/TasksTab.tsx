@@ -1,4 +1,5 @@
 import type { TaskDTO } from '../../api/types'
+import { useDesiredCountInfo } from '../../api/change'
 import { useServiceTasks } from '../../api/hooks'
 import { useServiceMetrics } from '../../api/observe'
 import { EmptyState } from '../../components/EmptyState'
@@ -12,6 +13,7 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
   const taskUsage = useServiceMetrics(serviceId, '1h').data?.tasks_now
   // CloudWatch reports the ECS task id, which is the task's short_id.
   const utilisation = taskUsage && Object.fromEntries(taskUsage.map((usage) => [usage.task_id, { cpu: usage.cpu, mem: usage.mem }]))
+  const desired = useDesiredCountInfo(serviceId)
 
   if (page.isError) {
     return <EmptyState>{page.error instanceof Error ? page.error.message : 'The tasks could not be loaded.'}</EmptyState>
@@ -24,6 +26,7 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
       withService={false}
       utilisation={utilisation ?? undefined}
       next={next}
+      desiredCount={desired.data?.desired ?? null}
       onMore={() => {
         if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
       }}

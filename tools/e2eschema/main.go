@@ -2,7 +2,7 @@
 // the database URL that points the server at it, so every run starts from an empty
 // database and never touches data it did not create.
 //
-// Usage: HM_TEST_DATABASE_URL=postgres://... go run ./tools/e2eschema
+// Usage: HM_TEST_DATABASE_URL=postgres://... [HM_E2E_SCHEMA=name] go run ./tools/e2eschema
 package main
 
 import (
@@ -10,18 +10,32 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-const schemaName = "hm_e2e"
+// defaultSchemaName is used unless HM_E2E_SCHEMA overrides it (parallel lanes use their own).
+const defaultSchemaName = "hm_e2e"
+
+var (
+	schemaName      = defaultSchemaName
+	validSchemaName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+)
 
 func main() {
 	if len(os.Args) > 1 {
 		fmt.Fprintln(os.Stderr, "usage: HM_TEST_DATABASE_URL=postgres://... e2eschema (prints the e2e database URL)")
 		os.Exit(2)
+	}
+	if name := os.Getenv("HM_E2E_SCHEMA"); name != "" {
+		if !validSchemaName.MatchString(name) {
+			fmt.Fprintln(os.Stderr, "e2eschema: HM_E2E_SCHEMA must match [a-z_][a-z0-9_]*")
+			os.Exit(2)
+		}
+		schemaName = name
 	}
 	base := os.Getenv("HM_TEST_DATABASE_URL")
 	if base == "" {

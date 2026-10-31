@@ -123,6 +123,28 @@ var standaloneSpecs = []serviceSpec{
 	{cluster: "background-jobs", name: "db-migrate", rev: 12, repo: "db-migrate", tag: "12.0.0", cpu: 512, memory: 1024, standalone: true},
 }
 
+// seedTaskDefinitionTags are applied to every seeded task definition revision.
+var seedTaskDefinitionTags = []ecstypes.Tag{{Key: aws.String("managed-by"), Value: aws.String("terraform")}}
+
+// ecrTagsFor mirrors the mockup's ecrTags: the current tag bumped +2, +1,
+// current, -1, -2 on the patch number, with the deploying tag first when a
+// rollout is in flight. Duplicates are dropped, as the mockup's Set does.
+func ecrTagsFor(sp serviceSpec) []string {
+	tags := []string{bumpTag(sp.tag, 2), bumpTag(sp.tag, 1), sp.tag, bumpTag(sp.tag, -1), bumpTag(sp.tag, -2)}
+	if sp.deployingTag != "" {
+		tags = append([]string{sp.deployingTag}, tags...)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, tag := range tags {
+		if !seen[tag] {
+			seen[tag] = true
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
 var tagPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(.*)$`)
 
 // bumpTag shifts the patch number of a semver-ish tag (mockup bumpTag).
@@ -311,7 +333,7 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 			Name: aws.String("otel-collector"), Image: aws.String("public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"),
 			Essential: aws.Bool(false), LogConfiguration: &ecstypes.LogConfiguration{LogDriver: ecstypes.LogDriverAwsfirelens}})
 	}
-	return TaskDefinition{AccountID: c.accountID, Region: c.region, Definition: td}
+	return TaskDefinition{AccountID: c.accountID, Region: c.region, Definition: td, Tags: deepCopy(seedTaskDefinitionTags)}
 }
 
 func (s *seeder) findTaskDefinition(arn string) (ecstypes.TaskDefinition, bool) {
@@ -444,7 +466,8 @@ func (s *seeder) addService(sp serviceSpec) {
 	c := clusterSeed(sp.cluster)
 	now := s.e.now()
 
-	// Revision -> task definition. Only revisions referenced by a task or deployment exist.
+	// Revision -> task definition. Non-OOM services get their two previous
+	// revisions (image-resizer only :6); the new revision exists only mid-rollout.
 	tdAt := func(rev int, tag string, age time.Duration) string {
 		td := s.buildTaskDefinition(sp, rev, tag, now.Add(-age))
 		s.e.TaskDefinitions = append(s.e.TaskDefinitions, td)
@@ -452,6 +475,7 @@ func (s *seeder) addService(sp serviceSpec) {
 	}
 	var currentARN, previousARN, newARN string
 	if !sp.oom {
+		tdAt(sp.rev-2, bumpTag(sp.tag, -2), 6*24*time.Hour)
 		previousARN = tdAt(sp.rev-1, bumpTag(sp.tag, -1), 4*24*time.Hour+time.Duration(s.rng.Float64()*float64(24*time.Hour)))
 	}
 	currentARN = tdAt(sp.rev, sp.tag, time.Duration(s.rng.Float64()*float64(24*time.Hour)))
@@ -515,7 +539,8 @@ func (s *seeder) addService(sp serviceSpec) {
 			TargetGroupArn: aws.String("arn:aws:elasticloadbalancing:" + c.region + ":" + c.accountID + ":targetgroup/" + sp.name + "-tg/" + s.hex(16)),
 			ContainerName:  aws.String(sp.name), ContainerPort: aws.Int32(int32(sp.port))}}
 	}
-	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc})
+	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
+		ECRTags: ecrTagsFor(sp), OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
 
 	// Running tasks. With a rollout in flight, the first task is on the new revision.
 	for i := 0; i < sp.running; i++ {
@@ -593,12 +618,14 @@ func (s *seeder) addEvents(sp serviceSpec, svcARN string, now time.Time) {
 func (s *seeder) addStandalone() {
 	now := s.e.now()
 	build := standaloneSpecs[0]
+	s.e.TaskDefinitions = append(s.e.TaskDefinitions, s.buildTaskDefinition(build, build.rev-2, bumpTag(build.tag, -2), now.Add(-6*24*time.Hour)))
 	buildTD := s.buildTaskDefinition(build, build.rev, build.tag, now.Add(-10*24*time.Hour))
 	s.e.TaskDefinitions = append(s.e.TaskDefinitions, buildTD)
 	s.addTask(build, taskOptions{taskDefinitionARN: aws.ToString(buildTD.Definition.TaskDefinitionArn), slot: 0,
 		startedAt: now.Add(-25 * time.Minute), group: "family:release-build", startedBy: "events-rule/nightly-release"})
 
 	migrate := standaloneSpecs[1]
+	s.e.TaskDefinitions = append(s.e.TaskDefinitions, s.buildTaskDefinition(migrate, migrate.rev-2, bumpTag(migrate.tag, -2), now.Add(-8*24*time.Hour)))
 	migrateTD := s.buildTaskDefinition(migrate, migrate.rev, migrate.tag, now.Add(-6*24*time.Hour))
 	s.e.TaskDefinitions = append(s.e.TaskDefinitions, migrateTD)
 	at := now.Add(-2 * time.Hour)
@@ -618,4 +645,13 @@ func serviceNetwork(sp serviceSpec) *ecstypes.NetworkConfiguration {
 	}
 	return &ecstypes.NetworkConfiguration{AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
 		Subnets: ids, SecurityGroups: []string{"sg-0" + fmt.Sprintf("%08x", hashSeed(sp.name, 0)&0xffffffff)}, AssignPublicIp: assign}}
+}
+
+// oomBelowMiB is the memory threshold under which a service's tasks are
+// OOM-killed: image-resizer needs 1024 MiB, every other service is unaffected.
+func oomBelowMiB(sp serviceSpec) int {
+	if sp.oom {
+		return 1024
+	}
+	return 0
 }

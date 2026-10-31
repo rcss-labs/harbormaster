@@ -70,6 +70,19 @@ func TestLeader_OnlyOneHolder(t *testing.T) {
 	waitFor(t, 6*time.Second, "the other poller to take over", other.IsLeader)
 }
 
+// Lanes sharing one Postgres server each run in their own schema and must elect their own leader.
+func TestLeader_SchemasElectIndependentLeaders(t *testing.T) {
+	stA := storetest.Open(t)
+	stB := storetest.Open(t)
+	key := randomLockKey()
+	pA := newTestPoller(stA, Config{AccountsRefresh: time.Hour, RetentionEvery: time.Hour}, key)
+	pB := newTestPoller(stB, Config{AccountsRefresh: time.Hour, RetentionEvery: time.Hour}, key)
+	startRun(t, pA)
+	startRun(t, pB)
+
+	waitFor(t, 2*time.Second, "a leader in each schema", func() bool { return pA.IsLeader() && pB.IsLeader() })
+}
+
 func TestLeader_StepsDownWhenConnectionDropped(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -86,10 +99,14 @@ func TestLeader_StepsDownWhenConnectionDropped(t *testing.T) {
 	waitFor(t, 2*time.Second, "1 loop", func() bool { return len(rec.targets()) == 1 })
 
 	// Postgres splits a bigint advisory key into classid (high 32 bits) and objid (low 32 bits).
+	heldKey, err := scopedLockKey(ctx, st.Pool, key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var terminated int
-	err := st.Pool.QueryRow(ctx, `select count(pg_terminate_backend(pid)) from pg_locks
+	err = st.Pool.QueryRow(ctx, `select count(pg_terminate_backend(pid)) from pg_locks
 		where locktype = 'advisory' and granted and pid <> pg_backend_pid()
-		and classid = (($1::bigint >> 32) & 4294967295)::oid and objid = ($1::bigint & 4294967295)::oid`, key).Scan(&terminated)
+		and classid = (($1::bigint >> 32) & 4294967295)::oid and objid = ($1::bigint & 4294967295)::oid`, heldKey).Scan(&terminated)
 	if err != nil || terminated != 1 {
 		t.Fatalf("terminate lock holder: terminated=%d err=%v", terminated, err)
 	}

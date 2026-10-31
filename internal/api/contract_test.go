@@ -16,7 +16,10 @@ const contractGolden = "../../web/src/test/contract/shapes.json"
 // updateContractEnv regenerates the golden instead of failing on a difference.
 const updateContractEnv = "HM_UPDATE_CONTRACT"
 
-var timeType = reflect.TypeOf(time.Time{})
+var (
+	timeType    = reflect.TypeOf(time.Time{})
+	rawJSONType = reflect.TypeFor[json.RawMessage]()
+)
 
 // shapeOf describes how t serialises to JSON: a scalar kind name ("string", "number", "boolean", "time", "any"),
 // an object of its json keys, a one-element array for slices, {"$map": elem} for maps, and {"$null": shape} for
@@ -24,6 +27,9 @@ var timeType = reflect.TypeOf(time.Time{})
 func shapeOf(t reflect.Type) any {
 	if t == timeType {
 		return "time"
+	}
+	if t == rawJSONType {
+		return "any"
 	}
 	switch t.Kind() {
 	case reflect.Pointer:
@@ -113,6 +119,10 @@ func contractShapes() map[string]any {
 		"scaling":         shapeOf(reflect.TypeFor[ScalingDTO]()),
 		"alerts":          shapeOf(reflect.TypeFor[AlertsDTO]()),
 		"logs":            shapeOf(reflect.TypeFor[LogsDTO]()),
+		"taskDefinition":  shapeOf(reflect.TypeFor[TaskDefinitionResponse]()),
+		"revisions":       shapeOf(reflect.TypeFor[RevisionsResponse]()),
+		"imageTags":       shapeOf(reflect.TypeFor[ImageTagsResponse]()),
+		"desiredCount":    shapeOf(reflect.TypeFor[DesiredCountResponse]()),
 	}
 }
 

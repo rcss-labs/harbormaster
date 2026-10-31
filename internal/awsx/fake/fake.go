@@ -44,6 +44,8 @@ type Fake struct {
 
 	mu    sync.Mutex
 	calls map[string]int
+
+	failures failureQueue // see failnext.go
 }
 
 // New wraps an estate.
@@ -65,6 +67,9 @@ func (f *Fake) begin(op string) error {
 	f.mu.Lock()
 	f.calls[op]++
 	f.mu.Unlock()
+	if err := f.takeFailure(op); err != nil {
+		return err
+	}
 	for {
 		n := atomic.LoadInt32(&f.Throttle)
 		if n <= 0 {
@@ -141,7 +146,6 @@ func (f *Fake) Logs(_ context.Context, t awsx.Target) (awsx.LogsAPI, error) {
 	return &logsClient{f: f, target: t}, nil
 }
 
-func (f *Fake) ECR(context.Context, awsx.Target) (awsx.ECRAPI, error) { return nil, nil }
 func (f *Fake) SSM(context.Context, awsx.Target) (awsx.SSMAPI, error) { return nil, nil }
 
 func (f *Fake) Credentials(_ context.Context, t awsx.Target) (aws.CredentialsProvider, error) {

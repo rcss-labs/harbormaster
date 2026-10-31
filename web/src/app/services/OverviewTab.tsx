@@ -6,14 +6,14 @@ import { Legend } from '../../charts/Legend'
 import { LineChart } from '../../charts/LineChart'
 import { Timeline, type TimelineEvent } from '../../charts/Timeline'
 import { XL72 } from '../../charts/format'
-import { Ago, useNow } from '../../components/Ago'
+import { useNow } from '../../components/Ago'
 import { Card } from '../../components/Card'
 import { FeedRow, Feed } from '../../components/Feed'
 import { KV } from '../../components/KV'
-import { Pill } from '../../components/Pill'
 import { Slots } from '../../components/Slots'
 import { Tile } from '../../components/Tile'
 import { ALBPanels, HealthCard, RunningTasksMeters, UsageChart, UsageTiles } from './overview/MetricPanels'
+import { RolloutCard } from './overview/RolloutCard'
 import styles from './service.module.css'
 
 const FOURTEEN_DAYS_MS = 14 * 86_400_000
@@ -36,68 +36,6 @@ function timelineEvent(record: DeploymentRecordDTO): TimelineEvent {
   }
 }
 
-function DeploymentCard({ service }: { service: ServiceDTO }) {
-  const circuitBreaker = `circuit breaker with rollback is ${service.circuit_breaker.enable && service.circuit_breaker.rollback ? 'on' : 'off'}`
-  const primary = service.deployments.find((d) => d.status === 'PRIMARY') ?? service.deployments[0]
-  const active = service.deployments.find((d) => d.status === 'ACTIVE')
-
-  if (service.deployments[0]?.rollout_state === 'IN_PROGRESS' && primary) {
-    const fromRevision = active?.revision ?? primary.revision
-    const newCount = primary.running_count
-    const oldCount = active?.running_count ?? 0
-    const failed = primary.failed_tasks
-    const desired = Math.max(1, service.desired)
-    return (
-      <div className={styles.deployCard}>
-        <div className={styles.titleRow}>
-          <Pill kind="info">Rollout in progress</Pill>
-          <span className={styles.mono}>
-            :{fromRevision} → :{primary.revision}
-          </span>
-          <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
-            started <Ago ts={primary.created_at} />
-          </span>
-        </div>
-        <div className={styles.bar}>
-          <span style={{ width: `${(newCount / desired) * 100}%` }} />
-          <span className={styles.old} style={{ width: `${(oldCount / desired) * 100}%` }} />
-        </div>
-        <div className={`${styles.small} ${styles.muted}`}>
-          {plural(newCount, 'new task')} on :{primary.revision} · {oldCount} old on :{fromRevision} ·{' '}
-          {failed > 0 && (
-            <>
-              <span className={styles.danger}>{failed} failed to start</span> ·{' '}
-            </>
-          )}
-          {circuitBreaker}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className={styles.deployCard}>
-      <div className={styles.titleRow}>
-        <Pill kind="ok">Completed</Pill>
-        <span className={styles.mono}>
-          {service.family}:{service.revision}
-        </span>
-        {primary && (
-          <span className={`${styles.muted} ${styles.small} ${styles.pushRight}`}>
-            <Ago ts={primary.updated_at} />
-          </span>
-        )}
-      </div>
-      <div className={styles.bar}>
-        <span style={{ width: '100%' }} />
-      </div>
-      <div className={`${styles.small} ${styles.muted}`}>
-        Rolling update · min healthy {service.min_healthy_percent}% · max {service.max_percent}% · {circuitBreaker}
-      </div>
-    </div>
-  )
-}
-
 export function OverviewTab({ service }: { service: ServiceDTO }) {
   const base = `/services/${service.id}`
   const pending = Math.max(0, service.desired - service.running)
@@ -107,6 +45,16 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
   const networking = service.networking
   const loadBalancer = networking.load_balancers[0]
   const efs = taskDefinition.efs_mounts[0]
+  const rollout = (
+    <RolloutCard
+      serviceName={service.name}
+      deployments={service.deployments}
+      desiredCount={service.desired}
+      strategyText={service.strategy_text}
+      circuitBreakerEnable={service.circuit_breaker.enable}
+      circuitBreakerRollback={service.circuit_breaker.rollback}
+    />
+  )
 
   return (
     <>
@@ -128,9 +76,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
       <div className={`${styles.grid} ${styles.gWide}`}>
         <UsageChart service={service} metrics={metrics} />
         {loadBalancer ? (
-          <HealthCard service={service}>
-            <DeploymentCard service={service} />
-          </HealthCard>
+          <HealthCard service={service}>{rollout}</HealthCard>
         ) : (
           <Card title="Task health">
             <Donut
@@ -141,9 +87,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
               label={`${service.running}/${service.desired}`}
               sub="running"
             />
-            <div className={styles.afterDonut}>
-              <DeploymentCard service={service} />
-            </div>
+            <div className={styles.afterDonut}>{rollout}</div>
           </Card>
         )}
       </div>

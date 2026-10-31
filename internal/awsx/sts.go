@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
@@ -163,6 +164,15 @@ func (r *Real) Credentials(ctx context.Context, t Target) (aws.CredentialsProvid
 	return cfg.Credentials, nil
 }
 
+// ECR returns a DescribeImages client for the target, sharing ECS's credential cache.
+func (r *Real) ECR(ctx context.Context, t Target) (ECRAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return ecr.NewFromConfig(cfg), nil
+}
+
 func (r *Real) ECS(ctx context.Context, t Target) (ECSAPI, error) {
 	for i := 0; i < maxBuildAttempts; i++ {
 		r.mu.Lock()
@@ -199,7 +209,6 @@ func (r *Real) ECS(ctx context.Context, t Target) (ECSAPI, error) {
 // The clients below are filled in by the plans named in the conventions doc.
 func (r *Real) EC2(context.Context, Target) (EC2API, error) { return nil, nil } // plan 05
 func (r *Real) EFS(context.Context, Target) (EFSAPI, error) { return nil, nil } // plan 05
-func (r *Real) ECR(context.Context, Target) (ECRAPI, error) { return nil, nil } // plan 02
 func (r *Real) SSM(context.Context, Target) (SSMAPI, error) { return nil, nil } // plan 04
 
 var (

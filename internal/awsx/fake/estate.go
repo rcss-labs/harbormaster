@@ -29,6 +29,13 @@ type Cluster struct {
 type Service struct {
 	AccountID, Region, ClusterName string
 	Service                        ecstypes.Service
+	// ECRTags are the tags in the service's ECR repository, newest first.
+	ECRTags []string
+	// OOMBelowMiB makes tasks of a task definition with less memory than this
+	// fail with OutOfMemoryError (0: never). Mirrors the mockup's oomBelow.
+	OOMBelowMiB int
+	// TaskDefinitionTags are the tags seeded on every revision of the family.
+	TaskDefinitionTags []ecstypes.Tag
 }
 
 type Task struct {
@@ -39,6 +46,8 @@ type Task struct {
 type TaskDefinition struct {
 	AccountID, Region string
 	Definition        ecstypes.TaskDefinition
+	// Tags are this revision's tags, as given to RegisterTaskDefinition.
+	Tags []ecstypes.Tag
 }
 
 // Estate is the whole fake AWS world. Mu guards every field: tests and later
@@ -64,6 +73,15 @@ type Estate struct {
 	LogPools          map[string][][2]string // service name (or "default") -> [level, message]
 	ContainerInsights map[model.ClusterKey]string
 	LogLines          map[string][]LogLine // log group -> explicit lines (SetLogLines)
+
+	// rollbackDeployments holds the ids of circuit-breaker rollback
+	// deployments, which are exempt from the OOM failure path (see rollout.go).
+	rollbackDeployments map[string]bool
+	// failedLinger counts the Advance steps a FAILED deployment stays visible
+	// after its rollback completed (see failedDeploymentLingerSteps).
+	failedLinger map[string]int
+	// deploymentSeq makes deployment ids unique even within one clock instant.
+	deploymentSeq int
 }
 
 func (e *Estate) now() time.Time {

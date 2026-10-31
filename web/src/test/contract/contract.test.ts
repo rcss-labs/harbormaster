@@ -8,10 +8,13 @@ import {
   CLUSTERS_METRICS,
   CLUSTER_CORE,
   CLUSTER_METRICS_CORE,
+  DESIRED_COUNT_PAYMENTS,
+  IMAGE_TAGS_PAYMENTS,
   LOGS_HISTORY_PAYMENTS,
   ME_ADMIN,
   ME_OMER,
   OVERVIEW_METRICS,
+  REVISIONS_PAYMENTS,
   SCALING_NONE,
   SCALING_PAYMENTS,
   SERVICE_METRICS_CATALOG_NO_INSIGHTS,
@@ -20,6 +23,7 @@ import {
   SERVICE_NOTIFICATIONS,
   SERVICE_PAYMENTS,
   TARGET_HEALTH_EDGE,
+  TASK_DEFINITION_PAYMENTS,
 } from '../fixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
@@ -114,6 +118,10 @@ describe('API contract', () => {
     ['scaling', () => SCALING_NONE],
     ['alerts', () => ALERTS],
     ['logs', () => LOGS_HISTORY_PAYMENTS],
+    ['taskDefinition', () => TASK_DEFINITION_PAYMENTS],
+    ['revisions', () => REVISIONS_PAYMENTS],
+    ['imageTags', () => IMAGE_TAGS_PAYMENTS],
+    ['desiredCount', () => DESIRED_COUNT_PAYMENTS],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
     expect(shapeProblems(await load(), contract[name], name)).toEqual([])

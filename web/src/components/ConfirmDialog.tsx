@@ -7,11 +7,22 @@ interface ConfirmDialogProps {
   children?: ReactNode
   confirmLabel: string
   danger?: boolean
+  /** Disables only the confirm action, e.g. while its request is in flight. */
+  confirmDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function ConfirmDialog({ title, sub, children, confirmLabel, danger, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  title,
+  sub,
+  children,
+  confirmLabel,
+  danger,
+  confirmDisabled = false,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
   return (
     <Dialog
       title={title}
@@ -19,7 +30,7 @@ export function ConfirmDialog({ title, sub, children, confirmLabel, danger, onCo
       onClose={onCancel}
       actions={[
         { label: 'Cancel', onClick: onCancel },
-        { label: confirmLabel, kind: danger ? 'danger' : 'primary', onClick: onConfirm },
+        { label: confirmLabel, kind: danger ? 'danger' : 'primary', disabled: confirmDisabled, onClick: onConfirm },
       ]}
     >
       {children}

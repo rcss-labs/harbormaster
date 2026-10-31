@@ -59,6 +59,7 @@ type Config struct {
 	LogTailIdle             time.Duration
 	LogTailsPerUser         int
 	LogHistoryLimit         int
+	MaxDesiredCount         int
 }
 
 // envReader reads HM_* variables and remembers the first parse error, so Load
@@ -170,10 +171,14 @@ func Load(getenv func(string) string) (Config, error) {
 		LogTailIdle:     reader.duration("HM_LOG_TAIL_IDLE", 30*time.Minute),
 		LogTailsPerUser: reader.integer("HM_LOG_TAILS_PER_USER", 2),
 		LogHistoryLimit: reader.integer("HM_LOG_HISTORY_LIMIT", 500),
+		MaxDesiredCount: reader.integer("HM_MAX_DESIRED_COUNT", 50),
 	}
 
 	if reader.err != nil {
 		return Config{}, reader.err
+	}
+	if cfg.MaxDesiredCount < 1 {
+		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
 	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
 		return Config{}, errors.New("HM_DATABASE_URL or HM_DATABASE_SECRET_ARN must be set")
