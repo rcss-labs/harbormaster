@@ -11,4 +11,7 @@ func (s *Server) observeRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/clusters/{clusterId}/metrics", s.getClusterMetrics, routeOptions{})
 	s.handle(mux, "GET /api/overview/metrics", s.getOverviewMetrics, routeOptions{})
 	s.handle(mux, "GET /api/alerts", s.getAlerts, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/logs", s.getLogs, routeOptions{})
+	// The tail route must not be wrapped by the ETag middleware: the response is a WebSocket upgrade.
+	s.handle(mux, "GET /api/services/{serviceId}/logs/tail", s.tailLogs, routeOptions{NoETag: true})
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/web"
@@ -27,6 +28,10 @@ type Server struct {
 	Now     func() time.Time
 	// Metrics reads CloudWatch metrics (plan 03); New defaults it from Clients, Store and Cfg.
 	Metrics *metrics.Client
+	// Logs reads CloudWatch Logs history and live tails (plan 03); New defaults it from Clients.
+	Logs *logs.Client
+	// TailLimiter caps concurrent live tails per user; New defaults it from Cfg.LogTailsPerUser.
+	TailLimiter *logs.TailLimiter
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
@@ -40,6 +45,12 @@ func New(s Server) *Server {
 	if s.Metrics == nil {
 		s.Metrics = metrics.New(s.Clients, s.Store, s.Cfg.MetricsCacheTTL)
 		s.Metrics.Now, s.Metrics.Log = s.Now, s.Log
+	}
+	if s.Logs == nil {
+		s.Logs = &logs.Client{Clients: s.Clients, Now: s.Now, MaxLookback: 7 * 24 * time.Hour}
+	}
+	if s.TailLimiter == nil {
+		s.TailLimiter = logs.NewTailLimiter(s.Cfg.LogTailsPerUser)
 	}
 	return &s
 }
