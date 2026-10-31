@@ -54,7 +54,7 @@ func runCreateAdmin(ctx context.Context, args []string, getenv func(string) stri
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(ctx, dbURL)
+	st, err := openStore(ctx, dbURL)
 	if err != nil {
 		return err
 	}

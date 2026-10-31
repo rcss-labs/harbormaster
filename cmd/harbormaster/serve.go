@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,34 +53,77 @@ func (r storeRoles) Role(ctx context.Context, accountID string) (string, string,
 	return account.RoleARN, account.ExternalID, nil
 }
 
-// databaseURLFromSecret accepts either a plain postgres URL or the RDS-managed secret JSON
-// {"username","password","host","port","dbname"} and returns a postgres URL.
-func databaseURLFromSecret(raw string) string {
+// databaseURLFromSecret accepts either a plain postgres URL or the RDS secret JSON
+// {"username","password","host","port","dbname"[,"sslmode"]} and returns a postgres URL.
+// Errors never include the secret's content.
+func databaseURLFromSecret(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "{") {
+		if !strings.HasPrefix(raw, "postgres://") && !strings.HasPrefix(raw, "postgresql://") {
+			return "", errors.New("database secret is not a postgres URL or JSON object")
+		}
+		return raw, nil
+	}
 	var s struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		Host     string `json:"host"`
 		Port     any    `json:"port"`
 		DBName   string `json:"dbname"`
+		SSLMode  string `json:"sslmode"`
 	}
-	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Host == "" {
-		return raw
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return "", errors.New("database secret is not valid JSON")
+	}
+	var missing []string
+	for name, value := range map[string]string{"host": s.Host, "username": s.Username, "password": s.Password} {
+		if value == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return "", fmt.Errorf("database secret JSON is missing %s", strings.Join(missing, ", "))
 	}
 	port := "5432"
 	switch p := s.Port.(type) {
 	case float64:
-		port = fmt.Sprintf("%d", int(p))
+		port = strconv.Itoa(int(p))
 	case string:
 		if p != "" {
 			port = p
 		}
 	}
+	dbName := s.DBName
+	if dbName == "" {
+		dbName = "postgres"
+	}
+	sslMode := s.SSLMode
+	if sslMode == "" {
+		sslMode = "require"
+	}
 	u := url.URL{
 		Scheme: "postgres", User: url.UserPassword(s.Username, s.Password),
-		Host: net.JoinHostPort(s.Host, port), Path: "/" + s.DBName,
+		Host: net.JoinHostPort(s.Host, port), Path: "/" + dbName,
+		RawQuery: url.Values{"sslmode": {sslMode}}.Encode(),
 	}
-	return u.String()
+	return u.String(), nil
+}
+
+// openStore opens the database, scrubbing the connection string from any error so a
+// credential embedded in it never reaches logs.
+func openStore(ctx context.Context, dbURL string) (*store.Store, error) {
+	st, err := store.Open(ctx, dbURL)
+	if err != nil {
+		msg := strings.ReplaceAll(err.Error(), dbURL, "[database url]")
+		if parsed, perr := url.Parse(dbURL); perr == nil && parsed.User != nil {
+			if pw, ok := parsed.User.Password(); ok && pw != "" {
+				msg = strings.ReplaceAll(msg, pw, "[redacted]")
+			}
+		}
+		return nil, errors.New(msg)
+	}
+	return st, nil
 }
 
 // resolveDatabaseURL returns HM_DATABASE_URL, or reads the database secret when only its ARN is set.
@@ -94,7 +139,7 @@ func resolveDatabaseURL(ctx context.Context, cfg config.Config) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("read database secret: %w", err)
 	}
-	return databaseURLFromSecret(secret), nil
+	return databaseURLFromSecret(secret)
 }
 
 func parseLevel(name string) slog.Level {
@@ -131,7 +176,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 
-	st, err := store.Open(ctx, dbURL)
+	st, err := openStore(ctx, dbURL)
 	if err != nil {
 		return err
 	}

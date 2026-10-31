@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/rcss-labs/harbormaster/internal/config"
-	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // runMigrate applies pending database migrations and prints the versions applied.
@@ -19,7 +18,7 @@ func runMigrate(ctx context.Context, getenv func(string) string, stdout io.Write
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(ctx, dbURL)
+	st, err := openStore(ctx, dbURL)
 	if err != nil {
 		return err
 	}
