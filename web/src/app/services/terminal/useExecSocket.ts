@@ -95,14 +95,15 @@ export function useExecSocket(options: Options) {
       if (socketRef.current !== socket) return
       socketRef.current = null
       if (sawError) return
-      if (event.code !== 1000) {
+      // A closed status frame already explained the close (idle timeout, max duration), so no error.
+      if (event.code !== 1000 && !sawClosed) {
         const failure = { code: `closed_${event.code}`, message: `Connection closed (${event.code}).` }
         setError(failure)
         setState('error')
         optionsRef.current.onError?.(failure)
         return
       }
-      if (!sawClosed) optionsRef.current.onStatus({ state: 'closed' })
+      if (!sawClosed) optionsRef.current.onStatus({ state: 'closed', session_id: sessionIdRef.current })
       setState('closed')
     })
   }, [])

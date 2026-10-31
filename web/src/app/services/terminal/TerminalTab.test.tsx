@@ -155,7 +155,9 @@ describe('TerminalTab', () => {
     act(() => {
       socket.serverText({ type: 'status', state: 'connected', session_id: 's-1' })
       socket.serverText({ type: 'status', state: 'closed', session_id: 's-1', reason: 'idle_timeout', duration_ms: 5 })
+      socket.serverClose(4408)
     })
+    expect(output()).not.toContain('Connection closed')
     expect(output()).toContain('Exiting session with sessionId: s-1.')
     expect(output()).toContain('Disconnected after 20 minutes without input.')
     await waitFor(() => expect(screen.getByLabelText('Task')).toBeEnabled())

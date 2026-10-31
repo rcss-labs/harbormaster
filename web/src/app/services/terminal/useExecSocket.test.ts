@@ -75,4 +75,25 @@ describe('useExecSocket', () => {
     expect(socket.closedWith).toBe(1000)
     expect(result.current.state).toBe('closed')
   })
+
+  it('a closed status followed by close 4408 stays closed without an error', () => {
+    const { result, socket, onStatus } = setup()
+    act(() => {
+      socket.serverText({ type: 'status', state: 'connected', session_id: 's-1' })
+      socket.serverText({ type: 'status', state: 'closed', session_id: 's-1', reason: 'idle_timeout' })
+      socket.serverClose(4408)
+    })
+    expect(result.current.state).toBe('closed')
+    expect(result.current.error).toBeUndefined()
+    expect(onStatus.mock.calls.filter(([s]) => s.state === 'closed')).toHaveLength(1)
+  })
+
+  it('a clean close without a status frame reports the known session id', () => {
+    const { socket, onStatus } = setup()
+    act(() => {
+      socket.serverText({ type: 'status', state: 'connected', session_id: 's-1' })
+      socket.serverClose(1000)
+    })
+    expect(onStatus).toHaveBeenLastCalledWith({ state: 'closed', session_id: 's-1' })
+  })
 })
