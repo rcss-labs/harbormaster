@@ -23,6 +23,10 @@ import type {
   TagAssignmentsDTO,
   TagColor,
   TagDTO,
+  TaskDefinitionResponse,
+  RevisionsResponse,
+  ImageTagsResponse,
+  DesiredCountResponse,
   TagsDTO,
   TaskDTO,
   TasksListDTO,
@@ -602,6 +606,8 @@ function serviceDetail(def: ServiceDef): ServiceDTO {
     can: { view: true, logs: true, operate: true, deploy: true, edit: true, terminal: true },
     console_url: `https://${cluster.region}.console.aws.amazon.com/ecs/v2/clusters/${cluster.name}/services/${def.name}`,
     polled_at: FIXTURE_NOW,
+    controller: { type: 'ECS', supported: true, name: '', banner: '' },
+    strategy_text: 'Rolling update · min healthy 100% · max 200% · circuit breaker with rollback is on',
   }
 }
 
@@ -770,3 +776,33 @@ export const POLLER: PollerDTO = {
     { account_id: ACCOUNT_STAGING.account_id, account_name: ACCOUNT_STAGING.name, region: 'us-east-1' },
   ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0) })),
 }
+
+// ---- Change-path reads (plan 02) ----
+export const TASK_DEFINITION_PAYMENTS: TaskDefinitionResponse = {
+  family: 'payments-api',
+  deployed_revision: 42,
+  task_definition_arn: `arn:aws:ecs:us-east-1:${ACCOUNT_HOMELAB.account_id}:task-definition/payments-api:42`,
+  main_container: 'payments-api',
+  definition: { family: 'payments-api', cpu: '512', memory: '1024', containerDefinitions: [{ name: 'payments-api', image: 'payments-api:1.18.2', essential: true }] },
+  tags: [{ key: 'managed-by', value: 'terraform' }],
+  controller: { type: 'ECS', supported: true, name: '' },
+  strategy: 'Rolling update · min healthy 100% · max 200% · circuit breaker with rollback is on',
+  can: { edit: true, deploy: true, operate: true, admin: false },
+  tag: { ...TAG_PROD, inherited: true },
+  polled_at: FIXTURE_NOW,
+}
+export const REVISIONS_PAYMENTS: RevisionsResponse = {
+  items: [
+    { revision: 43, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:43', status: 'not_deployed', image_tag: '1.18.3', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'pavel' },
+    { revision: 42, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:42', status: 'deployed', image_tag: '1.18.2', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'terraform' },
+  ],
+  deployed_revision: 42,
+  rolling_out_revision: null,
+}
+export const IMAGE_TAGS_PAYMENTS: ImageTagsResponse = {
+  source: 'ecr',
+  repository: 'payments-api',
+  current: '1.18.2',
+  tags: [{ tag: '1.18.4', pushed_at: FIXTURE_NOW }],
+}
+export const DESIRED_COUNT_PAYMENTS: DesiredCountResponse = { desired: 3, running: 3, max: 50, auto_scaling: null }
