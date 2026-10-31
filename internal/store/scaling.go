@@ -65,3 +65,25 @@ func (s *Store) ScalingForService(ctx context.Context, k model.ServiceKey) (mode
 	}
 	return scaling, nil
 }
+
+// Range returns a service's auto scaling min and max capacity. ok is false when the service has
+// no scalable target or has never been polled; that is not an error.
+func (s *Store) Range(ctx context.Context, k model.ServiceKey) (min, max int, ok bool, err error) {
+	var hasTarget bool
+	err = s.Pool.QueryRow(ctx,
+		`select has_target, coalesce(min_capacity, 0), coalesce(max_capacity, 0)
+		 from scaling
+		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4`,
+		k.AccountID, k.Region, k.Cluster, k.Service).
+		Scan(&hasTarget, &min, &max)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("scaling range: %w", err)
+	}
+	if !hasTarget {
+		return 0, 0, false, nil
+	}
+	return min, max, true, nil
+}

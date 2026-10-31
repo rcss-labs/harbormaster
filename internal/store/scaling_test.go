@@ -57,3 +57,38 @@ func TestScaling_UpsertGetNotFound(t *testing.T) {
 			len(got.Policies), len(got.Scheduled), len(got.Activities))
 	}
 }
+
+// scalingRangeSource is the capacity lookup plan 02's desired-count warning depends on.
+type scalingRangeSource interface {
+	Range(ctx context.Context, key model.ServiceKey) (min, max int, ok bool, err error)
+}
+
+var _ scalingRangeSource = (*store.Store)(nil)
+
+func TestScaling_Range(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	cluster := model.ClusterKey{AccountID: "482109375512", Region: "us-east-1", Cluster: "core-services"}
+	withTarget := model.ServiceKey{ClusterKey: cluster, Service: "payments-api"}
+	noTarget := model.ServiceKey{ClusterKey: cluster, Service: "batch-worker"}
+	unpolled := model.ServiceKey{ClusterKey: cluster, Service: "never-polled"}
+
+	rows := []model.Scaling{
+		{Key: withTarget, HasTarget: true, Min: 2, Max: 6, PolledAt: time.Date(2026, 10, 31, 8, 30, 0, 0, time.UTC)},
+		{Key: noTarget, HasTarget: false, PolledAt: time.Date(2026, 10, 31, 8, 30, 0, 0, time.UTC)},
+	}
+	if err := s.UpsertScaling(ctx, rows); err != nil {
+		t.Fatalf("UpsertScaling: %v", err)
+	}
+
+	minCapacity, maxCapacity, ok, err := s.Range(ctx, withTarget)
+	if err != nil || !ok || minCapacity != 2 || maxCapacity != 6 {
+		t.Errorf("Range with target = (%d, %d, %v, %v); want (2, 6, true, nil)", minCapacity, maxCapacity, ok, err)
+	}
+	if _, _, ok, err := s.Range(ctx, noTarget); err != nil || ok {
+		t.Errorf("Range without target = ok %v, err %v; want ok false, err nil", ok, err)
+	}
+	if _, _, ok, err := s.Range(ctx, unpolled); err != nil || ok {
+		t.Errorf("Range never polled = ok %v, err %v; want ok false, err nil", ok, err)
+	}
+}
