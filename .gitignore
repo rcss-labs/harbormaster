@@ -4,3 +4,5 @@ internal/web/dist/*
 !internal/web/dist/index.html
 .env
 .superpowers/
+
+**/.terraform/
