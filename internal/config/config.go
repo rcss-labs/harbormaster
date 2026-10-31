@@ -52,6 +52,7 @@ type Config struct {
 	Retention               RetentionConfig
 	PageSizeDefault         int
 	PageSizeMax             int
+	MaxDesiredCount         int
 }
 
 // envReader reads HM_* variables and remembers the first parse error, so Load
@@ -156,10 +157,14 @@ func Load(getenv func(string) string) (Config, error) {
 		},
 		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:     reader.integer("HM_PAGE_SIZE_MAX", 500),
+		MaxDesiredCount: reader.integer("HM_MAX_DESIRED_COUNT", 50),
 	}
 
 	if reader.err != nil {
 		return Config{}, reader.err
+	}
+	if cfg.MaxDesiredCount < 1 {
+		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
 	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
 		return Config{}, errors.New("HM_DATABASE_URL or HM_DATABASE_SECRET_ARN must be set")

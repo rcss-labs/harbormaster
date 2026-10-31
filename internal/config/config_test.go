@@ -57,6 +57,7 @@ func TestLoad_Defaults(t *testing.T) {
 		},
 		PageSizeDefault: 100,
 		PageSizeMax:     500,
+		MaxDesiredCount: 50,
 	}
 
 	if cfg != want {
@@ -118,5 +119,25 @@ func TestLoad_RejectsBadDuration(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "HM_SESSION_IDLE") {
 		t.Errorf("error %q does not name HM_SESSION_IDLE", err)
+	}
+}
+
+func TestLoad_MaxDesiredCountDefault50(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.MaxDesiredCount != 50 {
+		t.Errorf("MaxDesiredCount = %d, want 50", cfg.MaxDesiredCount)
+	}
+}
+
+func TestLoad_RejectsMaxDesiredCountBelowOne(t *testing.T) {
+	_, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":      "postgres://example",
+		"HM_MAX_DESIRED_COUNT": "0",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "HM_MAX_DESIRED_COUNT") {
+		t.Fatalf("err = %v, want one naming HM_MAX_DESIRED_COUNT", err)
 	}
 }
