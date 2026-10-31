@@ -27,9 +27,9 @@ var ErrWrongPassword = errors.New("Current password is wrong.")
 
 // Service owns sessions and sign-in.
 type Service struct {
-	store *store.Store
-	cfg   config.Config
-	now   func() time.Time
+	store  *store.Store
+	cfg    config.Config
+	now    func() time.Time
 	verify func(hash, pw string) (bool, error)
 }
 
