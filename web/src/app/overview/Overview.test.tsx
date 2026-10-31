@@ -1,6 +1,8 @@
 import { screen, within } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { OVERVIEW } from '../../test/fixtures'
+import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
 /** The tile whose label (k) text matches; the label is a div, so the nav links are not matched. */
@@ -41,5 +43,27 @@ describe('Overview', () => {
     renderApp('/')
     const meta = await screen.findByText(/last poll/)
     expect(within(meta).getByTitle(new Date(OVERVIEW.polled_at).toLocaleString())).toBeInTheDocument()
+  })
+
+  it('says "no data yet" before the first poll (zero time)', async () => {
+    server.use(http.get('/api/overview', () => HttpResponse.json({ ...OVERVIEW, polled_at: '0001-01-01T00:00:00Z' })))
+    renderApp('/')
+    const meta = await screen.findByText(/last poll/)
+    expect(within(meta).getByText('no data yet')).toBeInTheDocument()
+  })
+
+  it('an event without a service links to its cluster instead of a broken service URL', async () => {
+    const cluster = OVERVIEW.events[0].cluster
+    const clusterEvent = {
+      ...OVERVIEW.events[0],
+      service: { id: '', name: '', status: '' },
+      cluster,
+      text: 'Edited the cluster tag.',
+    }
+    server.use(http.get('/api/overview', () => HttpResponse.json({ ...OVERVIEW, events: [clusterEvent] })))
+    renderApp('/')
+    const row = (await screen.findByText('Edited the cluster tag.')).parentElement as HTMLElement
+    const link = within(row).getByRole('link', { name: cluster.name })
+    expect(link).toHaveAttribute('href', `/clusters/${cluster.id}`)
   })
 })
