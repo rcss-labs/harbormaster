@@ -48,4 +48,17 @@ describe('apiFetch', () => {
     window.removeEventListener('hm:unauthenticated', listener)
     expect(listener).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps the session on a 401 from an auth endpoint', async () => {
+    server.use(
+      http.post('/api/auth/password', () =>
+        HttpResponse.json({ error: { code: 'unauthenticated', message: 'Current password is wrong.' } }, { status: 401 }),
+      ),
+    )
+    const listener = vi.fn()
+    window.addEventListener('hm:unauthenticated', listener)
+    await expect(api.post('/api/auth/password', { current: 'x', new: 'y' })).rejects.toBeInstanceOf(ApiError)
+    window.removeEventListener('hm:unauthenticated', listener)
+    expect(listener).not.toHaveBeenCalled()
+  })
 })

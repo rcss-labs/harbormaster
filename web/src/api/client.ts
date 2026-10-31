@@ -40,7 +40,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     } catch {
       // Non-JSON error body: keep the defaults.
     }
-    if (response.status === 401) {
+    if (response.status === 401 && !path.startsWith('/api/auth/')) {
       window.dispatchEvent(new Event('hm:unauthenticated'))
     }
     throw new ApiError(code, message, response.status)
