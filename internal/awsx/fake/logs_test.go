@@ -233,3 +233,28 @@ func TestFakeLiveTail_InjectedStreamErrorSurfacesAfterClose(t *testing.T) {
 		t.Fatalf("Err() = %v, want SessionStreamingException", err)
 	}
 }
+
+func TestFakeFilterLogEvents_HealthLineWithinAnyShortWindow(t *testing.T) {
+	api := logsFor(t, newFake(), homelabUSEast1)
+	// Every running task writes the pool's health check line at least every healthLineEvery slots, so a window of
+	// that many intervals always holds one; e2e and demos rely on seeing it without waiting for a lucky pick.
+	window := time.Duration(healthLineEvery) * logLineInterval
+	for shift := time.Duration(0); shift < 5*time.Minute; shift += 17 * time.Second {
+		end := fixedNow.Add(-shift)
+		out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
+			LogGroupName: aws.String(paymentsLogGroup),
+			StartTime:    aws.Int64(end.Add(-window).UnixMilli()),
+			EndTime:      aws.Int64(end.UnixMilli()),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, ev := range out.Events {
+			found = found || strings.Contains(aws.ToString(ev.Message), "GET /health 200")
+		}
+		if !found {
+			t.Fatalf("no health line in the %v ending %v (%d events)", window, end, len(out.Events))
+		}
+	}
+}
