@@ -18,6 +18,7 @@ const (
 	tierScaling      = "scaling"
 	tierAlerts       = "alerts"
 	tierNetwork      = "network" // plan 05
+	tierStorage      = "storage" // plan 05
 )
 
 // minTickInterval keeps a misconfigured zero interval from spinning.

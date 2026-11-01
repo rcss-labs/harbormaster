@@ -104,6 +104,8 @@ func newLoop(p *Poller, t awsx.Target) *Loop {
 	// plan 05
 	network := &NetworkLoop{Store: p.store, Clients: p.clients, Every: in.Network}
 	add(tierNetwork, in.Network, func(ctx context.Context) error { return network.Run(ctx, l.target) })
+	storage := &StorageLoop{Store: p.store, Clients: p.clients, Every: in.Storage}
+	add(tierStorage, in.Storage, func(ctx context.Context) error { return storage.Run(ctx, l.target) })
 	alerts := &AlertsLoop{Store: p.store, Every: in.Alerts}
 	add(tierAlerts, in.Alerts, func(ctx context.Context) error { return alerts.Run(ctx, l.target) })
 	return l
