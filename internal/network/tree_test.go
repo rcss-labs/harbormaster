@@ -99,7 +99,7 @@ func TestAssemble_StandaloneTasksNodeLast(t *testing.T) {
 	root := Assemble(in).Root
 	cluster := mustFind(t, root, "sn:"+private1a+":background-jobs")
 	last := cluster.Children[len(cluster.Children)-1]
-	if last.Kind != "standalone" || last.Label != "Standalone tasks" || !strings.HasSuffix(last.Key, ":_standalone") {
+	if last.Kind != "standalone" || last.Label != "Standalone tasks" || !strings.HasSuffix(last.Key, "/standalone") {
 		t.Fatalf("last child: %+v", last)
 	}
 	if last.Tasks != 1 || last.Children[0].Task.Group != "family:report-backfill" || last.Children[0].Task.ServiceID != "" {
@@ -239,4 +239,23 @@ func TestAssemble_TaskTieBreakStartedAtThenARN(t *testing.T) {
 	if want := []string{"d0000000", "a0000000", "c0000000", "b0000000"}; !reflect.DeepEqual(labels, want) {
 		t.Errorf("got %v, want %v", labels, want)
 	}
+}
+
+// ECS service names cannot contain "/", so the standalone key suffix is collision free. ECS allows a service named "_standalone"; its node must not share a key with the standalone-tasks node.
+func TestAssemble_ServiceNamedStandaloneKeepsUniqueKeys(t *testing.T) {
+	in := mainInput()
+	in.Tasks = append(in.Tasks, standaloneTask(), runningTask("background-jobs", "_standalone", private1a, "10.20.1.61", 2))
+	in.Services[serviceKey("background-jobs", "_standalone")] = ServiceInfo{ID: serviceKey("background-jobs", "_standalone").ID(), Status: model.StatusSteady, Revision: 1}
+	seen := map[string]bool{}
+	var walk func(Node)
+	walk = func(n Node) {
+		if seen[n.Key] {
+			t.Errorf("duplicate node key %q", n.Key)
+		}
+		seen[n.Key] = true
+		for _, child := range n.Children {
+			walk(child)
+		}
+	}
+	walk(Assemble(in).Root)
 }
