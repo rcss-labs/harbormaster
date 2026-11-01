@@ -41,9 +41,11 @@ export interface StorageItem {
   mounting_tasks: number
   access_points: StorageAccessPoint[]
   mounted_by: StorageMount[]
-  size_30d: StoragePoint[]
+  /** Null when the CloudWatch part failed for this file system. */
+  size_30d: StoragePoint[] | null
   growth_30d_pct: number | null
-  throughput_24h: StoragePoint[]
+  /** Null when the CloudWatch part failed for this file system. */
+  throughput_24h: StoragePoint[] | null
 }
 
 export interface StorageTotals {

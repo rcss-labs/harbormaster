@@ -1,0 +1,34 @@
+/* Page head copied from clusters.module.css; EFS card rules ported from the mockup's .xcard and .mini2 (docs/design/mockup/index.html). */
+.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.titles { display: grid; gap: 6px; min-width: 0; }
+.meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+
+.gridWide { display: grid; gap: 12px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 760px) { .gridWide { grid-template-columns: minmax(0, 1fr); } }
+
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.xcard {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 14px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s;
+}
+.xcard:hover { border-color: var(--accent); }
+.top { display: flex; gap: 10px; align-items: flex-start; }
+.top > :last-child { margin-left: auto; }
+.name { margin: 0; font-size: 15px; font-weight: 600; }
+
+.mini2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.miniKey { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 3px; }
+.miniKey b { color: var(--text); font-weight: 600; }
+
+.muted { color: var(--muted); }
+.warn { color: var(--warning); }
+.small { font-size: 12px; }
+.mono { font-family: var(--mono); font-size: 12px; }
