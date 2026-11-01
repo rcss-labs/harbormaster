@@ -200,6 +200,15 @@ describe('Tree', () => {
       expect(item(container, KEYS.azA)).toHaveAttribute('tabindex', '0')
     })
 
+    it('does not pull focus back after the user blurred to nothing', () => {
+      const { container, rerender } = render(<Harness root={buildTree()} closed={new Set()} />)
+      item(container, KEYS.taskHealthy).focus()
+      item(container, KEYS.taskHealthy).blur()
+      expect(document.body).toHaveFocus()
+      rerender(<Harness root={buildTree()} closed={new Set([KEYS.azA])} />)
+      expect(document.body).toHaveFocus()
+    })
+
     it('does not steal focus from outside the tree', () => {
       const { container, rerender } = render(
         <>

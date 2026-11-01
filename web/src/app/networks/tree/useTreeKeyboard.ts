@@ -64,7 +64,11 @@ export function useTreeKeyboard(root: TreeNode, closed: ReadonlySet<string>, onT
   }, [])
   const onFocusOut = useCallback((event: FocusEvent<HTMLElement>) => {
     const next = event.relatedTarget as Node | null
-    if (next && !event.currentTarget.contains(next)) lastFocusedRef.current = null
+    // Focus moved outside the tree, or to nothing while the element is still in the DOM (a real user blur). Only a
+    // blur caused by the element's removal keeps the ref, so the layout effect can restore focus.
+    if (next ? !event.currentTarget.contains(next) : (event.target as HTMLElement).isConnected) {
+      lastFocusedRef.current = null
+    }
   }, [])
 
   useLayoutEffect(() => {
