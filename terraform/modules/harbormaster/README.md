@@ -34,7 +34,7 @@ Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in c
 | `db_engine_version` | string | `"16"` | Major only; minor upgrades are automatic. |
 | `db_multi_az` | bool | `false` | |
 | `db_deletion_protection` | bool | `true` | |
-| `db_kms_key_id` | string | `null` | KMS key for RDS and the secrets; AWS-managed keys when null. The execution role gets `kms:Decrypt` on it when set. |
+| `db_kms_key_id` | string | `null` | KMS key for RDS and the secrets; AWS-managed keys when null. Must be a key ARN (aliases and bare key ids are rejected). The execution role gets `kms:Decrypt` on it when set, restricted by `kms:ViaService` to Secrets Manager in the module region. If the bootstrap admin secret is encrypted with this CMK, also grant `kms:Decrypt` on the key to the task role. |
 | `log_retention_days` | number | `30` | |
 | `alb_idle_timeout` | number | `1800` | Terminal and log-tail WebSockets idle up to 20 minutes. |
 | `tags` | map(string) | `{}` | Applied to every taggable resource. |

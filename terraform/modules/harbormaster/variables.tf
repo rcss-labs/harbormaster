@@ -162,9 +162,14 @@ variable "db_deletion_protection" {
 }
 
 variable "db_kms_key_id" {
-  description = "KMS key for RDS storage and the Secrets Manager secrets. Null uses the AWS-managed keys."
+  description = "KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>) for RDS storage and the Secrets Manager secrets. Aliases and bare key ids are rejected: the value is used as an IAM Resource. Null uses the AWS-managed keys."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.db_kms_key_id == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$", var.db_kms_key_id))
+    error_message = "db_kms_key_id must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>), not an alias or a bare key id."
+  }
 }
 
 variable "log_retention_days" {

@@ -41,6 +41,14 @@ data "aws_iam_policy_document" "execution_secrets" {
       sid       = "DecryptSecrets"
       actions   = ["kms:Decrypt"]
       resources = [statement.value]
+
+      # Decrypt only on behalf of Secrets Manager (ECS injects the secrets), not for direct use.
+      condition {
+        test     = "StringEquals"
+        variable = "kms:ViaService"
+        # Region from the log group ARN, as ecs.tf does.
+        values = ["secretsmanager.${split(":", aws_cloudwatch_log_group.server.arn)[3]}.amazonaws.com"]
+      }
     }
   }
 }
