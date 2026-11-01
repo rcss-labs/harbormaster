@@ -122,6 +122,7 @@ describe('API contract', () => {
     ['revisions', () => REVISIONS_PAYMENTS],
     ['imageTags', () => IMAGE_TAGS_PAYMENTS],
     ['desiredCount', () => DESIRED_COUNT_PAYMENTS],
+    ['settings', () => body('/api/settings')],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
     expect(shapeProblems(await load(), contract[name], name)).toEqual([])

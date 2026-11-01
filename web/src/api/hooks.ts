@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
+import { useMutation, useQueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   AccountsDTO,
@@ -13,6 +13,7 @@ import type {
   PollerDTO,
   SearchDTO,
   ServiceDTO,
+  SettingsDTO,
   TagAssignmentsDTO,
   TagsDTO,
   TasksFilter,
@@ -152,5 +153,23 @@ export function useAudit(cursor?: string, options: Options<AuditDTO> = {}) {
     queryKey: ['audit', cursor],
     queryFn: () => api.get<AuditDTO>(`/api/audit${queryString({ cursor })}`),
     ...options,
+  })
+}
+
+// ---- Settings ----
+
+export function useSettings() {
+  return useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsDTO>('/api/settings') })
+}
+
+/** Saving the window changes which stopped tasks show, so task and service queries refetch too. */
+export function useUpdateSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (stoppedTasksWindowMinutes: number) =>
+      api.put<SettingsDTO>('/api/settings', { stopped_tasks_window_minutes: stoppedTasksWindowMinutes }),
+    onSuccess: () => {
+      for (const key of ['settings', 'tasks', 'service']) void queryClient.invalidateQueries({ queryKey: [key] })
+    },
   })
 }

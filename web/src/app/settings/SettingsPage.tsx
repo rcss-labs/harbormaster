@@ -7,6 +7,7 @@ import { Tags } from '../admin/tags/Tags'
 import { Users } from '../admin/users/Users'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
 
 export type SettingsTab = 'general' | 'accounts' | 'users' | 'audit'
@@ -31,8 +32,12 @@ const isSettingsTab = (value: string | undefined): value is SettingsTab => SETTI
 function TabPanel({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case 'general':
-      // Task 13 adds the stopped-tasks card under <Tags />.
-      return <Tags />
+      return (
+        <>
+          <Tags />
+          <StoppedTasksCard />
+        </>
+      )
     case 'accounts':
       return <Accounts />
     case 'users':

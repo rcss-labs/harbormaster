@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { TaskDTO } from '../../api/types'
-import { ALL_TASKS, TASKS, tasksList } from '../../test/fixtures'
+import { ALL_TASKS, ME_OMER, TASKS, tasksList } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
@@ -30,6 +30,21 @@ describe('Tasks', () => {
     renderApp('/tasks?filter=running')
     const row = (await screen.findByText('family:release-build')).closest('tr')!
     expect(within(row).getByText('Standalone · started by events-rule/nightly-release')).toBeInTheDocument()
+  })
+})
+
+describe('Tasks hidden-stopped note', () => {
+  it('shows the hidden-tasks note with a Change link for admins', async () => {
+    renderApp('/tasks')
+    expect(await screen.findByText('Stopped tasks older than 10 min are hidden.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/settings/general')
+  })
+
+  it('non-admins see the note without the link', async () => {
+    server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
+    renderApp('/tasks')
+    expect(await screen.findByText('Stopped tasks older than 10 min are hidden.')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Change' })).not.toBeInTheDocument()
   })
 })
 

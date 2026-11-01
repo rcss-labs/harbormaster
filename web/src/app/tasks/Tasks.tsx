@@ -11,6 +11,7 @@ import { REASON_COLOR } from '../../components/status'
 import { TaskTable } from '../../components/TaskTable'
 import { usePagedCursor } from '../../components/usePagedCursor'
 import { useCrumbs } from '../shell/crumbs'
+import { HiddenStoppedNote } from './HiddenStoppedNote'
 import { useFilters } from '../shell/useFilters'
 import styles from './tasks.module.css'
 
@@ -123,6 +124,7 @@ export function Tasks() {
             { value: 'all', label: withCount('All', data?.counts.all) },
           ]}
         />
+        <HiddenStoppedNote />
       </div>
 
       {page.isError ? (

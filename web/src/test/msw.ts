@@ -31,6 +31,7 @@ import {
   REVISIONS_PAYMENTS,
   IMAGE_TAGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
+  SETTINGS,
 } from './fixtures'
 import type { SearchResultDTO } from '../api/types'
 
@@ -125,6 +126,8 @@ export const handlers = [
   http.get('/api/services/:id/revisions', () => HttpResponse.json(REVISIONS_PAYMENTS)),
   http.get('/api/services/:id/image-tags', () => HttpResponse.json(IMAGE_TAGS_PAYMENTS)),
   http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
+  http.get('/api/settings', () => HttpResponse.json(SETTINGS)),
+  http.put('/api/settings', async ({ request }) => HttpResponse.json(await request.json())),
 ]
 
 export const server = setupServer(...handlers)
