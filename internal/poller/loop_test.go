@@ -418,3 +418,39 @@ func TestLoop_StartIsStaggeredAcrossTiers(t *testing.T) {
 		}
 	}
 }
+
+// plan 06: spec 5.3 bounds in-flight AWS calls per loop (not only ECS ones), so the observe, network and
+// storage tiers must share the loop's semaphore.
+func TestLoop_AllAWSCallsShareTheInFlightLimit(t *testing.T) {
+	st := storetest.Open(t)
+	f := fake.New(fake.MockupEstate(func() time.Time { return loopNow }))
+	f.CallLatency = 15 * time.Millisecond
+	tick := 20 * time.Millisecond
+	const limit = 2
+	p := New(st, f, Config{
+		MaxInFlight: limit,
+		Intervals: Intervals{Services: tick, RunningTasks: tick, FullTasks: tick, StoppedTasks: tick, Clusters: tick,
+			ServiceList: tick, TargetHealth: tick, Scaling: tick, Alerts: tick, Network: tick, Storage: tick},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	loop := newLoop(p, loopTarget)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { loop.Run(ctx); close(done) }()
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+
+	services := map[string]bool{}
+	for key := range f.CallCounts() {
+		services[strings.Split(key, "|")[2]] = true
+	}
+	for _, want := range []string{"ecs", "application-autoscaling", "elasticloadbalancing", "ec2", "efs"} {
+		if !services[want] {
+			t.Fatalf("no %s calls were made (%v); the test would not prove the shared limit", want, services)
+		}
+	}
+	if got := f.MaxInFlight(loopTarget); got > limit {
+		t.Fatalf("MaxInFlight = %d, want <= %d", got, limit)
+	}
+}

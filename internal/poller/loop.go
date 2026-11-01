@@ -98,17 +98,31 @@ func newLoop(p *Poller, t awsx.Target) *Loop {
 	add(tierStoppedTasks, in.StoppedTasks, l.syncStoppedTasks)
 	add(tierFullTasks, in.FullTasks, l.syncFullTasks)
 	targetHealth := &TargetHealthLoop{Store: p.store, Clients: p.clients, Every: in.TargetHealth}
-	add(tierTargetHealth, in.TargetHealth, func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) })
+	add(tierTargetHealth, in.TargetHealth, l.gated(func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) }))
 	scaling := &ScalingLoop{Store: p.store, Clients: p.clients, Every: in.Scaling}
-	add(tierScaling, in.Scaling, func(ctx context.Context) error { return scaling.Run(ctx, l.target) })
+	add(tierScaling, in.Scaling, l.gated(func(ctx context.Context) error { return scaling.Run(ctx, l.target) }))
 	// plan 05
 	network := &NetworkLoop{Store: p.store, Clients: p.clients, Every: in.Network}
-	add(tierNetwork, in.Network, func(ctx context.Context) error { return network.Run(ctx, l.target) })
+	add(tierNetwork, in.Network, l.gated(func(ctx context.Context) error { return network.Run(ctx, l.target) }))
 	storage := &StorageLoop{Store: p.store, Clients: p.clients, Every: in.Storage}
-	add(tierStorage, in.Storage, func(ctx context.Context) error { return storage.Run(ctx, l.target) })
+	add(tierStorage, in.Storage, l.gated(func(ctx context.Context) error { return storage.Run(ctx, l.target) }))
 	alerts := &AlertsLoop{Store: p.store, Every: in.Alerts}
 	add(tierAlerts, in.Alerts, func(ctx context.Context) error { return alerts.Run(ctx, l.target) })
 	return l
+}
+
+// gated runs a tier that calls AWS sequentially while holding one slot of the loop's semaphore, so spec 5.3's
+// in-flight bound covers every AWS service of the target, not only ECS. plan 06
+func (l *Loop) gated(run func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		select {
+		case l.sem <- struct{}{}:
+			defer func() { <-l.sem }()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return run(ctx)
+	}
 }
 
 // PollOnce runs every tier once, in order, for one target. API tests use it to fill the store from a fake estate.
