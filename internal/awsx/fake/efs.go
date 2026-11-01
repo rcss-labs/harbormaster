@@ -37,7 +37,7 @@ func (c *EFS) inScope(account, region string) bool {
 func efsPage[T any](items []T, marker *string) (page []T, next *string) {
 	start := 0
 	if marker != nil {
-		start, _ = strconv.Atoi(*marker)
+		start = parsePageToken(marker)
 	}
 	if start > len(items) {
 		start = len(items)

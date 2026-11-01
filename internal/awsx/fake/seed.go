@@ -649,7 +649,7 @@ func serviceNetwork(sp serviceSpec) *ecstypes.NetworkConfiguration {
 		assign = ecstypes.AssignPublicIpEnabled
 	}
 	return &ecstypes.NetworkConfiguration{AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
-		Subnets: ids, SecurityGroups: []string{"sg-0" + fmt.Sprintf("%08x", hashSeed(sp.name, 0)&0xffffffff)}, AssignPublicIp: assign}}
+		Subnets: ids, SecurityGroups: []string{serviceSecurityGroupID(sp.name)}, AssignPublicIp: assign}}
 }
 
 // oomBelowMiB is the memory threshold under which a service's tasks are

@@ -69,7 +69,7 @@ func ec2Page[T any](items []T, maxResults *int32, token *string) (page []T, next
 	}
 	start := 0
 	if token != nil {
-		start, _ = strconv.Atoi(*token)
+		start = parsePageToken(token)
 	}
 	if start > len(items) {
 		start = len(items)
@@ -220,4 +220,13 @@ func (c *EC2) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurity
 	}
 	page, next := ec2Page(all, in.MaxResults, in.NextToken)
 	return &ec2.DescribeSecurityGroupsOutput{SecurityGroups: page, NextToken: next}, nil
+}
+
+// parsePageToken reads an offset token; garbage or negative values restart at 0.
+func parsePageToken(token *string) int {
+	n, err := strconv.Atoi(*token)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }

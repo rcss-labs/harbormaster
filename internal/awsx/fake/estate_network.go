@@ -164,8 +164,7 @@ func seedNetwork(e *Estate) {
 		n.Vpcs = append(n.Vpcs, NetVpc{AccountID: v.account, Region: v.region, Name: v.name, Vpc: ec2types.Vpc{
 			VpcId: aws.String(v.id), CidrBlock: aws.String(v.cidr), IsDefault: aws.Bool(v.isDefault),
 			State: ec2types.VpcStateAvailable, OwnerId: aws.String(v.account), Tags: nameTag(v.name)}})
-		natSubnet := ""
-		natSubnet = firstPublicOrFirstSubnetID(v)
+		natSubnet := firstPublicOrFirstSubnetID(v)
 		for _, sub := range v.subnets {
 			ss := lookupSeedSubnet(sub)
 			n.Subnets = append(n.Subnets, NetSubnet{AccountID: v.account, Region: v.region, Name: sub.name, Free: sub.free, Subnet: ec2types.Subnet{
