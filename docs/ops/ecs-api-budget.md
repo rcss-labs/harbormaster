@@ -124,6 +124,8 @@ Snapshot-table writes (`n_tup_ins + n_tup_upd` over `clusters`, `services`, `ser
 
 Back-off: with a 3 calls/s, burst 3 limit on one loop, its `services` tier interval doubled from 5 s to 10 s after the first throttled cycle; the other 19 loops stayed at 5 s. After lifting the limit, the interval was back at 5 s after about 50 s (five clean cycles at 10 s). Leader election: exactly one of two pollers led and polled; the follower recorded no loop runs; failover after cancelling the leader took 44-73 ms. That uses the test's 100 ms `retryInterval`; production retries every 5 s, so a real failover takes up to about 5 s.
 
+Final soak run (2026-11-01, `make soak` equivalent with `-count=1`, 490 s, all five tests PASS, host load average about 6 to 18): service read bucket 7.67 - 8.33 calls/s per loop, cluster resource read bucket 5.67 - 6.33 calls/s, ECS total 13.37 - 14.70 calls/s per loop and 283 calls/s across 20 loops, peak in-flight 8 on every loop, 60 non-ECS calls (application-autoscaling) in the window. Static estate: 0 snapshot-table writes and 1 044 `poll_loops` writes; with 1 800 task mutations: `tasks` 1 744, `service_status_runs` 1 594. Back-off doubled to 10 s and returned to 5 s after about 50 s; failover took 71 ms.
+
 Findings from the soak that led to fixes (all now in the code):
 
 - Scaling and target-health (and network and storage) AWS calls bypassed the loop's in-flight semaphore, so a loop could briefly exceed `HM_POLL_MAX_INFLIGHT` (measured 9). Each of those tiers now holds one semaphore slot while it runs (`TestLoop_AllAWSCallsShareTheInFlightLimit`).
