@@ -92,3 +92,13 @@ icons:
 .PHONY: check-notices
 check-notices:
 	tools/check-notices.sh
+
+# plan 06
+# soak runs the rate-limit / back-off soak tests at target estate scale (about 15 minutes, needs HM_TEST_DATABASE_URL; see 'make test-db').
+.PHONY: soak
+soak:
+	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
+		echo "make soak: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
+		exit 2; \
+	fi
+	HM_SOAK=1 go test -tags soak -run TestSoak -timeout 20m -v ./internal/poller

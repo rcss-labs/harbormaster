@@ -96,3 +96,32 @@ Requirement: the poller start-up must stagger the first cycles of the task tiers
 - Config defaults: none. All `HM_POLL_*` defaults stay as they are.
 - Start-up staggering (implemented): `Loop.Run` now delays the first cycle of stoppedTasks by one step and fullTasks by two (runningTasks starts at once), where the step is `poller.Config.StartStagger` (default 1 s, set in `ConfigFrom`; zero disables it). Covered by `TestLoop_StartIsStaggeredAcrossTiers`. `PollOnce`/`runOnce` stay un-staggered. Slow tiers still run once before the service list exists and then wait their full interval.
 - Call counts differ from spec 5.3 (spec not edited), because batching is per cluster: `DescribeServices` 40 (was 30), full `DescribeTasks` 20 (was 9).
+
+## Measured
+
+Soak test `internal/poller/soak_test.go` (`make soak`, build tag `soak`), 2026-11-01. Go 1.26.10, Apple M1 Pro (10 cores), darwin/arm64, Postgres 16 on localhost. Target estate (`fake.Generate(1, fake.TargetScale)`: 20 account x region loops, 400 clusters, 6 000 services, 18 000 tasks), production default intervals through `config.Load` and `poller.ConfigFrom`, real wall-clock time, fake call latency 5 ms, 60 s warm-up then measurement. Another agent ran a Playwright e2e suite on the same machine for part of the session (load average 20-40), so timings are not from a quiet host; the call counts do not depend on load.
+
+| Measurement (60 s steady-state window) | Result | Limit |
+|---|---|---|
+| Service read bucket (`ListServices`, `DescribeServices`) per loop | 7.67 - 8.33 calls/s (max 8.33) | 10.0/s (50 % of 20/s) |
+| Cluster resource read bucket (`ListTasks`, `DescribeTasks`) per loop | 5.67 - 6.00 calls/s | 10.0/s |
+| Cluster read bucket per loop | 0.03 calls/s | 10.0/s |
+| ECS total per loop | 13.4 - 14.7 calls/s (mean 14.1; documented estimate: about 15) | n/a |
+| ECS total across 20 loops | 282 calls/s | 600 (20 loops x 3 buckets x 10) |
+| Non-ECS calls | application-autoscaling only: 60 calls in 60 s for all 20 loops (0.05/s per loop); target health, network and storage made no calls (empty fake state) | n/a |
+| Peak in-flight calls per loop | 8 for ECS (scaling disabled: exactly 8 on all 20 loops); 9 on 1-2 of 20 loops (two runs) with scaling running, 8 plus the ungated scaling call | 8 ECS |
+
+Snapshot-table writes (`n_tup_ins + n_tup_upd` over `clusters`, `services`, `service_events`, `tasks`, `task_definitions` from `pg_stat_user_tables`, 24 400 rows at this scale):
+
+| Scenario | Result | Limit |
+|---|---|---|
+| 10 cycles (50 s), no mutations | 0 | 244 (1 %) |
+| 10 cycles, 180 changed tasks per cycle (1 800 draws of 18 000 tasks) | 1 717 and 1 747 (two runs) | at most 5 400 (3x), at least 1 620 (90 %: random draws repeat tasks) |
+
+Back-off: with a 3 calls/s, burst 3 limit on one loop, its `services` tier interval doubled from 5 s to 10 s after the first throttled cycle; the other 19 loops stayed at 5 s. After lifting the limit, the interval was back at 5 s after about 50 s (five clean cycles at 10 s). Leader election: exactly one of two pollers led and polled; the follower recorded no loop runs; failover after cancelling the leader took 66-73 ms.
+
+Findings outside the asserted tables (not asserted, recorded for review):
+
+- `service_status_runs` is rewritten for every service on every 5 s alerts cycle: about 60 000 row writes in a 62 s window on an unchanged estate (6 000 services x 10 cycles), about 100 000 when tasks changed. The `polls` counter increments on each cycle, so the upsert always changes the row. The snapshot tables themselves stay at zero writes.
+- `scaling` rewrites its rows every `HM_POLL_SCALING` interval (300 writes in the static window, 6 000 over the longer mutation window), and `alerts` re-upserts about 14 000 rows while tasks are changing.
+- Scaling and target-health tiers call AWS outside the ECS in-flight semaphore, so a loop can briefly hold `HM_POLL_MAX_INFLIGHT` + 1 calls in flight.
