@@ -129,7 +129,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   }
 
   return (
-    <>
+    <div className={styles.root}>
       <div className={styles.toolbar}>
         <label className={styles.field}>
           <span>Task</span>
@@ -164,7 +164,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
         )}
         <span className={styles.note}>ECS Exec through SSM Session Manager · sessions are recorded in the operations log</span>
       </div>
-      <div className={styles.term} ref={hostRef} />
-    </>
+      <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
+    </div>
   )
 }

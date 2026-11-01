@@ -126,7 +126,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   if (!canTail) return <div className={styles.banners}>{driverBanners}</div>
 
   return (
-    <>
+    <div className={styles.root}>
       <div className={styles.toolbar}>
         <select className={styles.ctl} aria-label="Container" value={container} onChange={(event) => setContainer(event.target.value)}>
           <option value="all">All containers</option>
@@ -193,6 +193,6 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           <LogRow key={`${line.t}|${line.task_id}|${index}`} line={line} />
         ))}
       </div>
-    </>
+    </div>
   )
 }

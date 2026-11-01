@@ -1,4 +1,6 @@
 /* Ported from the mockup's .toolbar, .field, .term and button rules (docs/design/mockup/index.html). */
+/* Root of the tab and of the standalone task page: a flex column so the terminal takes the remaining height. */
+.root { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .field select { height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
@@ -8,5 +10,5 @@
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .note { margin-left: auto; color: var(--muted); font-size: 12px; }
-.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border-radius: 8px; height: 480px; overflow: hidden; padding: 12px 14px; width: 100%; box-sizing: border-box; }
+.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border-radius: 8px; flex: 1 1 auto; min-height: 320px; overflow: hidden; padding: 12px 14px; width: 100%; box-sizing: border-box; }
 .term :global(.xterm) { height: 100%; }
