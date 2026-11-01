@@ -29,24 +29,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 
 ## How it runs
 
-```
-                     ┌────────────────────────────── harbormaster account ──────────────────────────────┐
- browser ── HTTPS ──▶│ ALB ─▶ ECS service "harbormaster" (Fargate, Go binary + embedded React build)      │
- (React SPA,         │          │  api (REST + WebSocket)                                                │
-  polls /api 5 s)    │          │  poller (leader only, Postgres advisory lock)                           │
-                     │          │  exec bridge (WebSocket ⇄ SSM data channel)                             │
-                     │          │  log tail (WebSocket ⇄ CloudWatch StartLiveTail)                        │
-                     │          ▼                                                                        │
-                     │      RDS PostgreSQL ◀── users, sessions, tags, permissions, audit, ops log,       │
-                     │                         resource snapshots, stopped-task history                 │
-                     │      Secrets Manager ◀── DB credentials, session signing key                      │
-                     └──────────┬───────────────────────────────────────────────────────────────────────┘
-                                │ sts:AssumeRole (external ID)
-              ┌─────────────────┼──────────────────────┐
-              ▼                 ▼                      ▼
-      account A role     account B role         account C role ──▶ ECS, EC2, EFS, ECR, CloudWatch,
-      (per region)       (per region)            (per region)       Logs, App Auto Scaling, ELBv2, SSM
-```
+![Harbormaster architecture: browsers reach an ALB over HTTPS in the Harbormaster AWS account; the ECS service "harbormaster" (Fargate) runs the API, the leader-only poller, the exec bridge and the log tail, backed by RDS PostgreSQL and Secrets Manager; it assumes an IAM role per region in each managed account (sts:AssumeRole with external ID) to reach ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.](docs/design/assets/AWS%20Harbormaster%20Architecture%20Overview.png)
 
 Harbormaster is one Go binary that serves an embedded React single-page app. Browsers poll `/api` about every 5 seconds, so the view stays current without a push channel. Exactly one task (the poller leader, chosen with a Postgres advisory lock) polls AWS and writes snapshots to Postgres, and any task can answer API reads from them, while logs, metrics, deploys and terminal sessions call AWS directly from whichever task serves the request. What a user can see and do comes from their tags and permissions, and the server checks them on every request, including the WebSocket endpoints for the terminal and live logs.
 
