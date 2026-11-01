@@ -108,7 +108,7 @@ export function useExecSocket(options: Options) {
     })
   }, [])
 
-  const send = useCallback((data: Uint8Array | string) => {
+  const send = useCallback((data: Uint8Array<ArrayBuffer> | string) => {
     const socket = socketRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) return
     socket.send(typeof data === 'string' ? new TextEncoder().encode(data) : data)
