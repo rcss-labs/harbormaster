@@ -123,11 +123,14 @@ func (l *Loop) runOnce(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// Run polls until ctx is cancelled. The clusters and serviceList tiers run first,
-// synchronously, because every other tier needs their results; then each tier ticks
-// in its own goroutine.
+// syncStartTiers is how many leading tiers (clusters, serviceList, services) run synchronously
+// before the others start: every other tier, the observe tiers included, reads their results.
+const syncStartTiers = 3
+
+// Run polls until ctx is cancelled. The first syncStartTiers tiers run first, synchronously;
+// then each tier ticks in its own goroutine.
 func (l *Loop) Run(ctx context.Context) {
-	for _, d := range l.defs[:2] {
+	for _, d := range l.defs[:syncStartTiers] {
 		_ = l.runTier(ctx, d)
 	}
 	var wg sync.WaitGroup
@@ -154,7 +157,7 @@ func (l *Loop) Run(ctx context.Context) {
 				case <-timer.C:
 				}
 			}
-			l.tickTier(ctx, d, i >= 2)
+			l.tickTier(ctx, d, i >= syncStartTiers)
 		}()
 	}
 	wg.Wait()

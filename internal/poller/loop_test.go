@@ -290,6 +290,56 @@ func TestLoop_RunTicksEveryTierAndStopsOnCancel(t *testing.T) {
 	}
 }
 
+// The scaling and target-health tiers list the stored services, so their first pass must run after
+// the services tier has filled the table; otherwise every restart leaves them empty for a full interval.
+func TestLoopRun_ObserveTiersSeeServicesOnFirstPass(t *testing.T) {
+	h := mockupHarness(t)
+	hour := time.Hour
+	h.loop.p.cfg.Intervals = Intervals{Services: hour, RunningTasks: hour, FullTasks: hour, StoppedTasks: hour,
+		Clusters: hour, ServiceList: hour, TargetHealth: hour, Scaling: hour, Alerts: hour}
+	for _, d := range h.loop.defs {
+		d.tier.cur, d.tier.base = hour, hour
+	}
+
+	var mu sync.Mutex
+	servicesAtFirstRun := map[string]int{}
+	for i, d := range h.loop.defs {
+		name, realRun := d.tier.name, d.run
+		switch name {
+		case tierServices:
+			// Real ECS calls take time; the observe tiers must not outrun them.
+			h.loop.defs[i].run = func(ctx context.Context) error {
+				time.Sleep(150 * time.Millisecond)
+				return realRun(ctx)
+			}
+		case tierTargetHealth, tierScaling, tierAlerts:
+			h.loop.defs[i].run = func(ctx context.Context) error {
+				mu.Lock()
+				if _, seen := servicesAtFirstRun[name]; !seen {
+					servicesAtFirstRun[name] = h.count(t, `select count(*) from services`)
+				}
+				mu.Unlock()
+				return realRun(ctx)
+			}
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.loop.Run(ctx); close(done) }()
+	time.Sleep(600 * time.Millisecond)
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, name := range []string{tierTargetHealth, tierScaling, tierAlerts} {
+		count, ran := servicesAtFirstRun[name]
+		if !ran || count == 0 {
+			t.Errorf("%s first pass saw %d stored services (ran=%v), want the services tier to have filled them", name, count, ran)
+		}
+	}
+}
+
 // plan 06: tier timings, interval and snapshot-write counts reach the telemetry registry.
 func TestLoop_ReportsTelemetry(t *testing.T) {
 	reg := telemetry.New()
