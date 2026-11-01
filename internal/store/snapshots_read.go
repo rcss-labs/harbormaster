@@ -209,7 +209,7 @@ func taskColumns(a string, lite bool) string {
 		text("capacity_provider"), text("cpu"), text("memory"), text("availability_zone"), text("subnet_id"),
 		text("private_ip"), text("public_ip"), text("eni_id"), a + ".created_at", a + ".started_at",
 		a + ".stopping_at", a + ".stopped_at", text("stop_code"), text("stopped_reason"),
-		text("stop_reason_group"), a + ".exit_code", containers, raw, a + ".polled_at",
+		text("stop_reason_group"), a + ".exit_code", containers, raw, a + ".polled_at", "coalesce(" + a + ".enable_execute_command, false)",
 	}, ", ")
 }
 
@@ -225,7 +225,7 @@ func (s *taskScan) dest() []any {
 		&t.StartedBy, &t.TaskDefinitionARN, &t.Family, &t.Revision, &t.LastStatus, &t.DesiredStatus,
 		&t.HealthStatus, &t.LaunchType, &t.CapacityProvider, &t.CPU, &t.Memory, &t.AvailabilityZone, &t.SubnetID,
 		&t.PrivateIP, &t.PublicIP, &t.ENIID, &s.createdAt, &t.StartedAt, &t.StoppingAt, &t.StoppedAt, &t.StopCode,
-		&t.StoppedReason, &s.row.StopReasonGroup, &s.row.ExitCode, &s.containers, &t.Raw, &t.PolledAt}
+		&t.StoppedReason, &s.row.StopReasonGroup, &s.row.ExitCode, &s.containers, &t.Raw, &t.PolledAt, &t.EnableExecuteCommand}
 }
 
 func (s *taskScan) finish() error {

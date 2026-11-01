@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExecTargets } from '../../../api/exec'
 import type { ServiceDTO, TaskDTO } from '../../../api/types'
-import { ALL_TASKS, SERVICE_PAYMENTS, tasksList } from '../../../test/fixtures'
+import { ALL_TASKS, ME_ADMIN, SERVICE_PAYMENTS, tasksList } from '../../../test/fixtures'
 import { MockWebSocket } from '../../../test/mockWebSocket'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -120,6 +120,15 @@ describe('TerminalTab', () => {
     const option = await screen.findByRole('option', { name: 'payments-api · agent pending' })
     expect(option).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled()
+  })
+
+  it('keeps Connect disabled while the CSRF token is unknown', async () => {
+    seed()
+    server.use(http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, csrf_token: '' })))
+    open()
+    const button = await screen.findByRole('button', { name: 'Connect' })
+    await waitFor(() => expect(screen.getByLabelText('Container')).toHaveValue('payments-api'))
+    expect(button).toBeDisabled()
   })
 
   async function connect() {
