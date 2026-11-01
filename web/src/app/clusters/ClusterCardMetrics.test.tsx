@@ -30,4 +30,16 @@ describe('ClusterCardMetrics', () => {
     expect(screen.getAllByText('–')).toHaveLength(2)
     expect(container.querySelector('svg')).toBeNull()
   })
+
+  it('shows a per-region hint when that region could not be read', () => {
+    render(
+      <ClusterCardMetrics
+        clusterId={EU_APPS_ID}
+        insights
+        targetError={{ account_id: 'a', region: 'eu-west-1', code: 'throttled', message: 'CloudWatch is throttling requests. Try again shortly.' }}
+      />,
+    )
+    expect(screen.getByText(/CPU and memory for eu-west-1 are unavailable/)).toBeInTheDocument()
+    expect(screen.getByText(/CloudWatch is throttling requests/)).toBeInTheDocument()
+  })
 })

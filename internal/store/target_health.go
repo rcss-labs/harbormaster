@@ -51,30 +51,60 @@ func (s *Store) DeleteTargetHealthNotIn(ctx context.Context, t awsx.Target, keep
 // TargetHealthForService returns a service's target groups ordered by target group ARN.
 func (s *Store) TargetHealthForService(ctx context.Context, k model.ServiceKey) ([]model.TargetHealth, error) {
 	rows, err := s.Pool.Query(ctx,
-		`select target_group_arn, load_balancer_arn, healthy, unhealthy, targets, raw, polled_at
-		 from target_health
-		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4
-		 order by target_group_arn`,
+		targetHealthSelect+` where t.account_id = $1 and t.region = $2 and t.cluster_name = $3 and t.service_name = $4
+		 order by t.target_group_arn`,
 		k.AccountID, k.Region, k.Cluster, k.Service)
 	if err != nil {
 		return nil, fmt.Errorf("target health for service: %w", err)
 	}
+	rowsByService, err := scanTargetHealth(rows)
+	if err != nil {
+		return nil, err
+	}
+	result := rowsByService[k]
+	if result == nil {
+		result = []model.TargetHealth{}
+	}
+	return result, nil
+}
+
+// TargetHealthByService returns the target groups of every service in the target filter, grouped by
+// service and ordered by target group ARN, in one query. A non-empty cluster narrows it to that cluster.
+func (s *Store) TargetHealthByService(ctx context.Context, f TargetFilter, cluster string) (map[model.ServiceKey][]model.TargetHealth, error) {
+	var q queryArgs
+	target := q.target("t", f)
+	clusterParam := q.add(cluster)
+	rows, err := s.Pool.Query(ctx,
+		targetHealthSelect+` where `+target+` and (`+clusterParam+` = '' or t.cluster_name = `+clusterParam+`)
+		 order by t.target_group_arn`, q.values...)
+	if err != nil {
+		return nil, fmt.Errorf("target health by service: %w", err)
+	}
+	return scanTargetHealth(rows)
+}
+
+const targetHealthSelect = `select t.account_id, t.region, t.cluster_name, t.service_name, t.target_group_arn,
+	   t.load_balancer_arn, t.healthy, t.unhealthy, t.targets, t.raw, t.polled_at
+	 from target_health t`
+
+func scanTargetHealth(rows pgx.Rows) (map[model.ServiceKey][]model.TargetHealth, error) {
 	defer rows.Close()
-	result := []model.TargetHealth{}
+	result := map[model.ServiceKey][]model.TargetHealth{}
 	for rows.Next() {
-		health := model.TargetHealth{Key: k}
+		var health model.TargetHealth
 		var targetsJSON json.RawMessage
-		if err := rows.Scan(&health.TargetGroupARN, &health.LoadBalancerARN, &health.Healthy,
-			&health.Unhealthy, &targetsJSON, &health.Raw, &health.PolledAt); err != nil {
+		if err := rows.Scan(&health.Key.AccountID, &health.Key.Region, &health.Key.Cluster, &health.Key.Service,
+			&health.TargetGroupARN, &health.LoadBalancerARN, &health.Healthy, &health.Unhealthy,
+			&targetsJSON, &health.Raw, &health.PolledAt); err != nil {
 			return nil, fmt.Errorf("scan target health: %w", err)
 		}
 		if err := json.Unmarshal(targetsJSON, &health.Targets); err != nil {
 			return nil, fmt.Errorf("decode target health targets: %w", err)
 		}
-		result = append(result, health)
+		result[health.Key] = append(result[health.Key], health)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("target health for service: %w", err)
+		return nil, fmt.Errorf("target health: %w", err)
 	}
 	return result, nil
 }

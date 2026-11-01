@@ -83,7 +83,8 @@ func (s *Store) DeleteAccount(ctx context.Context, id int64) error {
 	}
 
 	for _, table := range []string{"clusters", "services", "service_events", "tasks",
-		"service_counts_history", "task_definitions", "poll_loops"} {
+		"service_counts_history", "task_definitions", "poll_loops",
+		"alerts", "target_health", "scaling", "service_status_runs", "metrics_cache"} {
 		if _, err := tx.Exec(ctx, `delete from `+table+` where account_id = $1`, accountID); err != nil {
 			return fmt.Errorf("delete account %s: %w", table, err)
 		}

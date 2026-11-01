@@ -248,8 +248,8 @@ func truncateCloseReason(reason string) string {
 // {"type":"keepalive"}; the server ends with {"type":"end","reason":"idle|error|closed","message"} and
 // a close frame (1000, 4408 or 4502).
 func (s *Server) tailLogs(w http.ResponseWriter, r *http.Request) {
-	// websocket.Accept rejects a cross-origin Origin header (same-origin policy) before upgrading.
-	conn, err := websocket.Accept(w, r, nil)
+	// Same Origin policy as the exec socket: same host or the configured base URL's host; anything else gets a 403.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: s.originPatterns()})
 	if err != nil {
 		return
 	}

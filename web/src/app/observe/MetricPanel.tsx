@@ -8,6 +8,8 @@ interface MetricPanelProps {
   title: ReactNode
   right?: ReactNode
   stale?: StaleInfo | null
+  /** Shown under the title, like the stale note, e.g. for a partial failure. */
+  notice?: ReactNode
   /** Shows `emptyText` instead of the children. */
   empty?: boolean
   emptyText?: string
@@ -15,10 +17,11 @@ interface MetricPanelProps {
 }
 
 /** A Card for one metric: stale-data note under the title, and an empty state in place of the chart. */
-export function MetricPanel({ title, right, stale, empty = false, emptyText = 'No data yet', children }: MetricPanelProps) {
+export function MetricPanel({ title, right, stale, notice, empty = false, emptyText = 'No data yet', children }: MetricPanelProps) {
   return (
     <Card title={title} right={right}>
       {stale && <StaleNote stale={stale} />}
+      {notice}
       {empty ? <EmptyState>{emptyText}</EmptyState> : children}
     </Card>
   )

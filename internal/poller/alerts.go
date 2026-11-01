@@ -50,6 +50,15 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
+	// Two batched reads instead of two per service.
+	eventsByService, err := l.Store.RecentServiceEventsPerService(ctx, filter, alertEventLimit)
+	if err != nil {
+		return fmt.Errorf("service events: %w", err)
+	}
+	targetHealthByService, err := l.Store.TargetHealthByService(ctx, filter, "")
+	if err != nil {
+		return err
+	}
 
 	now := observeNow(l.Now)
 	var alerts []model.Alert
@@ -59,7 +68,7 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 		tasks := tasksByService[svc.Key]
 		var running []model.Task
 		for _, task := range tasks {
-			if task.LastStatus == "RUNNING" {
+			if task.IsRunning() {
 				running = append(running, task)
 			}
 		}
@@ -70,21 +79,13 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 		}
 		updated = append(updated, run)
 
-		events, err := l.Store.ServiceEvents(ctx, svc.Key, alertEventLimit, 0)
-		if err != nil {
-			return fmt.Errorf("service events: %w", err)
-		}
-		targetHealth, err := l.Store.TargetHealthForService(ctx, svc.Key)
-		if err != nil {
-			return err
-		}
 		degradedPolls := 0
 		if current == model.StatusDegraded {
 			degradedPolls = run.Polls
 		}
 		alerts = append(alerts, status.ServiceAlerts(status.AlertInput{
-			Service: svc, Deployments: svc.Deployments, Tasks: tasks, Events: events,
-			TargetHealth: targetHealth, DegradedPolls: degradedPolls, Now: now,
+			Service: svc, Deployments: svc.Deployments, Tasks: tasks, Events: eventsByService[svc.Key],
+			TargetHealth: targetHealthByService[svc.Key], DegradedPolls: degradedPolls, Now: now,
 		})...)
 	}
 
@@ -94,10 +95,7 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 	}
 	alerts = append(alerts, accountAlerts...)
 
-	if err := l.Store.ReplaceAlerts(ctx, t, alerts); err != nil {
-		return err
-	}
-	return l.Store.UpsertStatusRuns(ctx, updated)
+	return l.Store.ReplaceAlertsAndStatusRuns(ctx, t, alerts, updated)
 }
 
 // accountAlerts derives account_unreachable alerts from the target's poll loops.

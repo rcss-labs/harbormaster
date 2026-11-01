@@ -141,3 +141,38 @@ func TestAlertsLoop_AccountUnreachable(t *testing.T) {
 		t.Fatalf("account_unreachable alerts = %+v, want exactly one with an empty service", unreachable)
 	}
 }
+
+// An UNHEALTHY task that ECS is draining (DEPROVISIONING) counts as running for the API's
+// RunningTasks, so the alerts tier must flag it too; otherwise the service pill and the
+// Needs-attention list disagree for the whole deregistration delay.
+func TestAlertsLoop_UnhealthyDeprovisioningTaskMatchesAPIStatus(t *testing.T) {
+	h := newObserveHarness(t, loopTarget)
+	key := serviceKey(loopTarget, "core-services", "payments-api")
+	ctx := context.Background()
+	tag, err := h.store.Pool.Exec(ctx,
+		`update tasks set last_status = 'DEPROVISIONING', health_status = 'UNHEALTHY'
+		 where ctid = (select ctid from tasks where account_id = $1 and region = $2 and cluster_name = $3
+		   and service_name = $4 and last_status = 'RUNNING' limit 1)`,
+		key.AccountID, key.Region, key.Cluster, key.Service)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("seed deprovisioning task: %v, rows %d", err, tag.RowsAffected())
+	}
+	h.resetAlertState(t)
+
+	h.runAlerts(t)
+
+	apiTasks, err := h.store.RunningTasks(ctx, store.TargetFilter{AccountID: key.AccountID, Region: key.Region}, store.Visibility{Admin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiSeesUnhealthy := false
+	for _, row := range apiTasks {
+		if row.ServiceName == key.Service && row.Cluster == key.ClusterKey && row.HealthStatus == "UNHEALTHY" {
+			apiSeesUnhealthy = true
+		}
+	}
+	_, alerted := alertKinds(h.alertsFor(t, key))["unhealthy_task"]
+	if !apiSeesUnhealthy || !alerted {
+		t.Fatalf("API sees unhealthy running task = %v, alerts tier flags it = %v; both must be true", apiSeesUnhealthy, alerted)
+	}
+}

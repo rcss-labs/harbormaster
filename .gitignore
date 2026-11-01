@@ -7,4 +7,5 @@ internal/web/dist/*
 
 **/.terraform/
 web/test-results/
+web/test-results-failed/
 web/playwright-report/

@@ -163,7 +163,7 @@ func (s *Store) UpsertClusters(ctx context.Context, rows []model.Cluster) (Write
 }
 
 // DeleteClustersNotIn removes the account+region's clusters missing from keep,
-// together with their services, tasks, service events and counts history.
+// together with their services, tasks, service events, counts history and observe rows.
 func (s *Store) DeleteClustersNotIn(ctx context.Context, t awsx.Target, keep []model.ClusterKey) (int64, error) {
 	names := make([]string, 0, len(keep))
 	for _, k := range keep {
@@ -181,6 +181,15 @@ func (s *Store) DeleteClustersNotIn(ctx context.Context, t awsx.Target, keep []m
 	for _, table := range []string{"services", "tasks", "service_events", "service_counts_history"} {
 		_, err := tx.Exec(ctx,
 			`delete from `+table+` where account_id = $1 and region = $2 and not (cluster_name = any($3))`,
+			t.AccountID, t.Region, names)
+		if err != nil {
+			return 0, fmt.Errorf("delete %s of removed clusters: %w", table, err)
+		}
+	}
+	// Observe tables (plan 03). Alerts with an empty cluster_name are account-level and stay.
+	for _, table := range []string{"alerts", "target_health", "scaling", "service_status_runs"} {
+		_, err := tx.Exec(ctx,
+			`delete from `+table+` where account_id = $1 and region = $2 and cluster_name <> '' and not (cluster_name = any($3))`,
 			t.AccountID, t.Region, names)
 		if err != nil {
 			return 0, fmt.Errorf("delete %s of removed clusters: %w", table, err)
@@ -239,16 +248,34 @@ func (s *Store) UpsertServices(ctx context.Context, rows []model.Service) (Write
 	return s.upsertBatch(ctx, "services", statements)
 }
 
-// DeleteServicesNotIn removes the cluster's services missing from keep. Their
-// tasks stay so stopped history survives.
+// DeleteServicesNotIn removes the cluster's services missing from keep, with their target health,
+// scaling, status-run and alert rows. Their tasks stay so stopped history survives.
 func (s *Store) DeleteServicesNotIn(ctx context.Context, k model.ClusterKey, keep []string) (int64, error) {
 	if keep == nil {
 		keep = []string{}
 	}
-	tag, err := s.Pool.Exec(ctx,
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("delete services not in: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+
+	for _, table := range []string{"alerts", "target_health", "scaling", "service_status_runs"} {
+		_, err := tx.Exec(ctx,
+			`delete from `+table+` where account_id = $1 and region = $2 and cluster_name = $3
+			   and service_name <> '' and not (service_name = any($4))`,
+			k.AccountID, k.Region, k.Cluster, keep)
+		if err != nil {
+			return 0, fmt.Errorf("delete %s of removed services: %w", table, err)
+		}
+	}
+	tag, err := tx.Exec(ctx,
 		`delete from services where account_id = $1 and region = $2 and cluster_name = $3
 		   and not (service_name = any($4))`, k.AccountID, k.Region, k.Cluster, keep)
 	if err != nil {
+		return 0, fmt.Errorf("delete services not in: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("delete services not in: %w", err)
 	}
 	return tag.RowsAffected(), nil

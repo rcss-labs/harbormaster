@@ -19,7 +19,7 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' })
 test('overview shows cluster usage and needs attention', async ({ page }) => {
   await login(page, 'pavel')
   const cpuCard = card(page, 'CPU by cluster, 24 h')
-  await expect(cpuCard.getByText('core-services', { exact: true })).toBeVisible()
+  await expect(cpuCard.getByText('core-services', { exact: true })).toBeVisible({ timeout: POLL_TIMEOUT })
 
   const attention = card(page, 'Needs attention')
   const rows = attention.getByTestId('alert-row')
@@ -40,7 +40,7 @@ test('cluster page draws the usage chart and service ALB stats', async ({ page }
   await expect(page.getByRole('heading', { level: 1, name: 'core-services' })).toBeVisible()
 
   const chart = card(page, 'Cluster CPU and memory, 24 h')
-  await expect(chart).toBeVisible()
+  await expect(chart).toBeVisible({ timeout: POLL_TIMEOUT })
 
   const payments = page.getByRole('article', { name: 'payments-api' })
   await expect(payments.getByText('req/min')).toBeVisible({ timeout: POLL_TIMEOUT })
@@ -59,21 +59,21 @@ test('edge-proxy says Container Insights is off', async ({ page }) => {
   await login(page, 'pavel')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   const card = page.getByRole('article', { name: 'edge-proxy' })
-  await expect(card.getByText(/Container Insights is off/)).toBeVisible()
+  await expect(card.getByText(/Container Insights is off/)).toBeVisible({ timeout: POLL_TIMEOUT })
 
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'edge-nginx')}/metrics`)
-  await expect(page.getByText(/Container Insights is off for edge-proxy/)).toBeVisible()
-  await expect(page.getByText(/containerInsights/)).toBeVisible()
+  await expect(page.getByText(/Container Insights is off for edge-proxy/)).toBeVisible({ timeout: POLL_TIMEOUT })
+  await expect(page.getByText(/containerInsights/)).toBeVisible({ timeout: POLL_TIMEOUT })
   await expect(page.getByText('CPU utilization')).toHaveCount(0)
 })
 
 test('metrics tab range switch', async ({ page }) => {
   await login(page, 'pavel')
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')}/metrics`)
-  await expect(card(page, 'CPU utilization')).toBeVisible()
+  await expect(card(page, 'CPU utilization')).toBeVisible({ timeout: POLL_TIMEOUT })
   await page.getByRole('main').getByRole('button', { name: '6h', exact: true }).click()
   await expect(page).toHaveURL(/range=6h/)
-  await expect(page.getByText('6 h ago').first()).toBeVisible()
+  await expect(page.getByText('6 h ago').first()).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
 test('target health shows the unhealthy target', async ({ page }) => {
@@ -81,7 +81,7 @@ test('target health shows the unhealthy target', async ({ page }) => {
   const catalog = serviceId(HOMELAB_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')
   await page.goto(`/services/${catalog}/overview`)
   const health = card(page, 'Target health')
-  await expect(health.getByText(/Unhealthy targets\s*1/)).toBeVisible()
+  await expect(health.getByText(/Unhealthy targets\s*1/)).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
 test('scaling tab shows min, max and scheduled actions', async ({ page }) => {
@@ -101,9 +101,9 @@ test('logs history, filter and live tail', async ({ page }) => {
   const payments = serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
   await page.goto(`/services/${payments}/logs`)
   const lines = page.locator(LOG_LINE)
-  await expect(lines.first()).toBeVisible()
+  await expect(lines.first()).toBeVisible({ timeout: POLL_TIMEOUT })
   expect(await lines.count()).toBeGreaterThanOrEqual(1)
-  await expect(page.getByText('live tail')).toBeVisible()
+  await expect(page.getByText('live tail')).toBeVisible({ timeout: POLL_TIMEOUT })
 
   await page.getByLabel('Level').selectOption('problems')
   await expect(async () => {

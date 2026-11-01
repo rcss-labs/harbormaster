@@ -184,6 +184,10 @@ type EFSVolume struct {
 	AccessPointID string
 }
 
+// IsRunning is the single definition of a live task: anything ECS has not stopped, so tasks that
+// are draining (DEPROVISIONING) still count. store's runningSQL mirrors it; keep the two in step.
+func (t Task) IsRunning() bool { return t.LastStatus != "STOPPED" }
+
 // ShortID returns the full last path segment of the task ARN. The UI truncates it.
 func (t Task) ShortID() string {
 	if i := strings.LastIndex(t.ARN, "/"); i >= 0 {

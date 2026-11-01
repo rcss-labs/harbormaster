@@ -130,8 +130,17 @@ type ClusterListMetricsDTO struct {
 
 // ClustersMetricsDTO is the body of GET /api/clusters/metrics.
 type ClustersMetricsDTO struct {
-	Items map[string]ClusterListMetricsDTO `json:"items"`
-	Stale *StaleDTO                        `json:"stale"`
+	Items  map[string]ClusterListMetricsDTO `json:"items"`
+	Stale  *StaleDTO                        `json:"stale"`
+	Errors []TargetErrorDTO                 `json:"errors"`
+}
+
+// TargetErrorDTO says that one account x region could not be read, so its clusters have no series.
+type TargetErrorDTO struct {
+	AccountID string `json:"account_id"`
+	Region    string `json:"region"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
 }
 
 type ClusterSeriesDTO struct {
@@ -147,6 +156,7 @@ type OverviewMetricsDTO struct {
 	MemByCluster []ClusterSeriesDTO `json:"mem_by_cluster"`
 	Avg          CPUMemNowDTO       `json:"avg"`
 	Stale        *StaleDTO          `json:"stale"`
+	Errors       []TargetErrorDTO   `json:"errors"`
 }
 
 type TargetDTO struct {
@@ -342,6 +352,11 @@ func (s *Server) deploymentMarkers(ctx context.Context, key model.ServiceKey, si
 	if err != nil {
 		return nil, err
 	}
+	return markersOf(key, records, withService), nil
+}
+
+// markersOf turns a service's deployment records into chart markers, oldest first.
+func markersOf(key model.ServiceKey, records []store.DeploymentRecord, withService bool) []MarkerDTO {
 	markers := make([]MarkerDTO, 0, len(records))
 	for _, rec := range records {
 		marker := MarkerDTO{At: rec.StartedAt, Label: ":" + strconv.Itoa(rec.Revision), Kind: rec.Kind, Failed: rec.Outcome == "failed"}
@@ -354,7 +369,7 @@ func (s *Server) deploymentMarkers(ctx context.Context, key model.ServiceKey, si
 		markers = append(markers, marker)
 	}
 	sort.SliceStable(markers, func(i, j int) bool { return markers[i].At.Before(markers[j].At) })
-	return markers, nil
+	return markers
 }
 
 // ---- service metrics --------------------------------------------------------------------------
@@ -532,6 +547,12 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 	period := metrics.DefaultPeriod(span)
 	target := awsx.Target{AccountID: key.AccountID, Region: key.Region}
 
+	// One query for the whole cluster instead of one per service.
+	healthByService, err := s.Store.TargetHealthByService(ctx, store.TargetFilter{AccountID: key.AccountID, Region: key.Region}, key.Cluster)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	var queries, errQueries []metrics.Query
 	groupCounts := make([]int, len(services))
 	if insights != "disabled" {
@@ -542,12 +563,7 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 		if insights != "disabled" {
 			queries = append(queries, withPrefix(prefix, metrics.ServiceQueries(key.Cluster, svc.Key.Service, period), cpuMemOnly)...)
 		}
-		health, err := s.Store.TargetHealthForService(ctx, svc.Key)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		refs := metrics.ServiceTargetGroups(svc.Service, health)
+		refs := metrics.ServiceTargetGroups(svc.Service, healthByService[svc.Key])
 		groupCounts[i] = len(refs)
 		queries = append(queries, withPrefix(prefix, metrics.ALBQueries(refs, period), requestsAndLatency)...)
 		errQueries = append(errQueries, withPrefix(prefix, metrics.ALBQueries(refs, errorBucketPeriod), errorsOnly)...)
@@ -580,6 +596,11 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 	if since.IsZero() {
 		since = s.now().Add(-time.Duration(span))
 	}
+	deploymentsByService, err := s.Store.ListDeploymentsForCluster(ctx, key, since)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	out.Markers = []MarkerDTO{}
 	for i, svc := range services {
 		prefix := fmt.Sprintf("s%d_", i)
@@ -592,12 +613,7 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 			entry.ALB = albSummary(idx, errIdx, prefix, groupCounts[i], period)
 		}
 		out.Services[svc.Key.ID()] = entry
-		markers, err := s.deploymentMarkers(ctx, svc.Key, since, true)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		out.Markers = append(out.Markers, markers...)
+		out.Markers = append(out.Markers, markersOf(svc.Key, deploymentsByService[svc.Key], true)...)
 	}
 	sort.SliceStable(out.Markers, func(i, j int) bool { return out.Markers[i].At.Before(out.Markers[j].At) })
 	writeJSON(w, http.StatusOK, out)
@@ -613,8 +629,10 @@ type clusterUtilisation struct {
 
 // fetchClusterUtilisation fetches 24 h CPU and memory at listMetricsPeriod for every Insights
 // cluster in rows, one fetch per account and region. Clusters with Insights disabled are
-// reported with no series and cost no query.
-func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.ClusterRow) (map[model.ClusterKey]clusterUtilisation, []time.Time, *StaleDTO, error) {
+// reported with no series and cost no query. A target whose fetch fails degrades alone: its
+// clusters get no series and it is listed in the returned errors; only when every fetched target
+// fails is the first failure returned as the error.
+func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.ClusterRow) (map[model.ClusterKey]clusterUtilisation, []time.Time, *StaleDTO, []TargetErrorDTO, error) {
 	byTarget := map[awsx.Target][]store.ClusterRow{}
 	var targets []awsx.Target
 	for _, row := range rows {
@@ -627,6 +645,9 @@ func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.Clust
 	out := make(map[model.ClusterKey]clusterUtilisation, len(rows))
 	timestamps := []time.Time{}
 	var results []*metrics.Result
+	targetErrors := []TargetErrorDTO{}
+	fetched := 0
+	var firstErr error
 	for _, target := range targets {
 		var queries []metrics.Query
 		for i, row := range byTarget[target] {
@@ -638,7 +659,22 @@ func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.Clust
 		}
 		res, err := s.fetchMetrics(ctx, target, metrics.Span24h, queries)
 		if err != nil {
-			return nil, nil, nil, err
+			if ctx.Err() != nil {
+				return nil, nil, nil, nil, err
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			var apiErr *APIError
+			entry := TargetErrorDTO{AccountID: target.AccountID, Region: target.Region, Code: "aws_error", Message: err.Error()}
+			if errors.As(err, &apiErr) {
+				entry.Code, entry.Message = apiErr.Code, apiErr.Message
+			}
+			targetErrors = append(targetErrors, entry)
+			continue
+		}
+		if len(queries) > 0 {
+			fetched++
 		}
 		results = append(results, res)
 		if len(res.Timestamps) > len(timestamps) {
@@ -656,7 +692,10 @@ func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.Clust
 			out[row.Key] = util
 		}
 	}
-	return out, timestamps, staleOf(results...), nil
+	if firstErr != nil && fetched == 0 {
+		return nil, nil, nil, nil, firstErr
+	}
+	return out, timestamps, staleOf(results...), targetErrors, nil
 }
 
 // getClustersMetrics answers GET /api/clusters/metrics?account=&region= for the clusters page.
@@ -671,12 +710,12 @@ func (s *Server) getClustersMetrics(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	util, _, stale, err := s.fetchClusterUtilisation(r.Context(), rows)
+	util, _, stale, targetErrors, err := s.fetchClusterUtilisation(r.Context(), rows)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	out := ClustersMetricsDTO{Items: make(map[string]ClusterListMetricsDTO, len(rows)), Stale: stale}
+	out := ClustersMetricsDTO{Items: make(map[string]ClusterListMetricsDTO, len(rows)), Stale: stale, Errors: targetErrors}
 	for _, row := range rows {
 		u := util[row.Key]
 		item := ClusterListMetricsDTO{Insights: u.Insights, CPU: []*float64{}, Mem: []*float64{}}
@@ -701,7 +740,7 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	util, timestamps, stale, err := s.fetchClusterUtilisation(r.Context(), rows)
+	util, timestamps, stale, targetErrors, err := s.fetchClusterUtilisation(r.Context(), rows)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -709,7 +748,8 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 	var cpu, mem []metrics.Series
 	for _, row := range rows {
 		u := util[row.Key]
-		if u.Insights == "disabled" {
+		// An empty ID means the cluster's target failed to fetch (see targetErrors): no series to chart.
+		if u.Insights == "disabled" || u.CPU.ID == "" {
 			continue
 		}
 		cpu, mem = append(cpu, u.CPU), append(mem, u.Mem)
@@ -718,7 +758,7 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 		timestamps = []time.Time{}
 	}
 	out := OverviewMetricsDTO{
-		Timestamps: timestamps, Stale: stale,
+		Timestamps: timestamps, Stale: stale, Errors: targetErrors,
 		CPUByCluster: topSeries(cpu), MemByCluster: topSeries(mem),
 		Avg: CPUMemNowDTO{CPU: meanOfLasts(cpu), Mem: meanOfLasts(mem)},
 	}

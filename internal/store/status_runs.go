@@ -45,6 +45,11 @@ func (s *Store) StatusRuns(ctx context.Context, t awsx.Target) (map[model.Servic
 	return runs, nil
 }
 
+const upsertStatusRunSQL = `insert into service_status_runs (account_id, region, cluster_name, service_name, status, since, polls)
+	 values ($1, $2, $3, $4, $5, $6, $7)
+	 on conflict (account_id, region, cluster_name, service_name) do update set
+	   status = excluded.status, since = excluded.since, polls = excluded.polls`
+
 // UpsertStatusRuns stores each run, replacing the row for the same service.
 func (s *Store) UpsertStatusRuns(ctx context.Context, runs []StatusRun) error {
 	if len(runs) == 0 {
@@ -52,11 +57,7 @@ func (s *Store) UpsertStatusRuns(ctx context.Context, runs []StatusRun) error {
 	}
 	batch := &pgx.Batch{}
 	for _, run := range runs {
-		batch.Queue(
-			`insert into service_status_runs (account_id, region, cluster_name, service_name, status, since, polls)
-			 values ($1, $2, $3, $4, $5, $6, $7)
-			 on conflict (account_id, region, cluster_name, service_name) do update set
-			   status = excluded.status, since = excluded.since, polls = excluded.polls`,
+		batch.Queue(upsertStatusRunSQL,
 			run.Key.AccountID, run.Key.Region, run.Key.Cluster, run.Key.Service, string(run.Status), run.Since, run.Polls)
 	}
 	if err := s.execBatch(ctx, batch); err != nil {

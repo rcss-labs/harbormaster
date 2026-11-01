@@ -1,23 +1,46 @@
-import { Link } from 'react-router'
-import type { ClusterCardDTO } from '../../api/types'
-import { Ago } from '../../components/Ago'
-import { Pill } from '../../components/Pill'
-import { TagChip } from '../../components/TagChip'
-import { STATUS_COLOR, clusterStatusKind, clusterStatusLabel, statusKind, statusLabel } from '../../components/status'
-import { fmtNum, pct } from '../../charts/format'
-import { ClusterCardMetrics, type ClusterMetricsItem } from './ClusterCardMetrics'
-import styles from './clusters.module.css'
+import { Link } from "react-router";
+import type { ClusterCardDTO, TargetErrorDTO } from "../../api/types";
+import { Ago } from "../../components/Ago";
+import { Pill } from "../../components/Pill";
+import { TagChip } from "../../components/TagChip";
+import {
+  STATUS_COLOR,
+  clusterStatusKind,
+  clusterStatusLabel,
+  statusKind,
+  statusLabel,
+} from "../../components/status";
+import { fmtNum, pct } from "../../charts/format";
+import {
+  ClusterCardMetrics,
+  type ClusterMetricsItem,
+} from "./ClusterCardMetrics";
+import styles from "./clusters.module.css";
 
-export function ClusterCard({ cluster, metrics }: { cluster: ClusterCardDTO; metrics?: ClusterMetricsItem }) {
-  const barPercent = cluster.desired ? (cluster.running / cluster.desired) * 100 : 0
-  const barColor = cluster.running < cluster.desired ? 'var(--warning)' : 'var(--success)'
+export function ClusterCard({
+  cluster,
+  metrics,
+  targetError,
+}: {
+  cluster: ClusterCardDTO;
+  metrics?: ClusterMetricsItem;
+  targetError?: TargetErrorDTO;
+}) {
+  const barPercent = cluster.desired
+    ? (cluster.running / cluster.desired) * 100
+    : 0;
+  const barColor =
+    cluster.running < cluster.desired ? "var(--warning)" : "var(--success)";
 
   return (
     <article className={styles.xcard} aria-label={cluster.name}>
       <div className={styles.xcardTop}>
         <div>
           <div className={styles.titleRow}>
-            <Link to={`/clusters/${cluster.id}`} className={`${styles.big} ${styles.stretch}`}>
+            <Link
+              to={`/clusters/${cluster.id}`}
+              className={`${styles.big} ${styles.stretch}`}
+            >
               {cluster.name}
             </Link>
             <TagChip tag={cluster.tag} kind="cluster" />
@@ -26,14 +49,24 @@ export function ClusterCard({ cluster, metrics }: { cluster: ClusterCardDTO; met
             {cluster.account_name} · {cluster.region}
           </div>
         </div>
-        <Pill kind={clusterStatusKind(cluster.status)}>{clusterStatusLabel(cluster.status)}</Pill>
+        <Pill kind={clusterStatusKind(cluster.status)}>
+          {clusterStatusLabel(cluster.status)}
+        </Pill>
       </div>
 
-      <ClusterCardMetrics clusterId={cluster.id} insights={cluster.container_insights} metrics={metrics} />
+      <ClusterCardMetrics
+        clusterId={cluster.id}
+        insights={cluster.container_insights}
+        metrics={metrics}
+        targetError={targetError}
+      />
 
       <div>
         <div className={styles.miniK}>
-          Tasks <b>{cluster.running} running of {cluster.desired}</b>
+          Tasks{" "}
+          <b>
+            {cluster.running} running of {cluster.desired}
+          </b>
         </div>
         <div className={styles.bar}>
           <span style={{ width: `${barPercent}%`, background: barColor }} />
@@ -44,8 +77,14 @@ export function ClusterCard({ cluster, metrics }: { cluster: ClusterCardDTO; met
         <div className={styles.miniK}>Services</div>
         <div className={styles.chips}>
           {cluster.services.map((service) => (
-            <span key={service.id} className={styles.chip} title={statusLabel(service.status)}>
-              <i style={{ background: STATUS_COLOR[statusKind(service.status)] }} />
+            <span
+              key={service.id}
+              className={styles.chip}
+              title={statusLabel(service.status)}
+            >
+              <i
+                style={{ background: STATUS_COLOR[statusKind(service.status)] }}
+              />
               {service.name}
             </span>
           ))}
@@ -62,8 +101,11 @@ export function ClusterCard({ cluster, metrics }: { cluster: ClusterCardDTO; met
         <span>
           <b>{pct(cluster.spot_tasks, cluster.running)}%</b> on Spot
         </span>
-        <span>last change {cluster.last_change_at ? <Ago ts={cluster.last_change_at} /> : '–'}</span>
+        <span>
+          last change{" "}
+          {cluster.last_change_at ? <Ago ts={cluster.last_change_at} /> : "–"}
+        </span>
       </div>
     </article>
-  )
+  );
 }

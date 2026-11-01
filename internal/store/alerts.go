@@ -17,6 +17,12 @@ type AlertFilter struct {
 // ReplaceAlerts swaps the target's alerts for alerts in one transaction, so readers
 // never see a partial set.
 func (s *Store) ReplaceAlerts(ctx context.Context, t awsx.Target, alerts []model.Alert) error {
+	return s.ReplaceAlertsAndStatusRuns(ctx, t, alerts, nil)
+}
+
+// ReplaceAlertsAndStatusRuns swaps the target's alerts and upserts its status runs in one transaction,
+// so a reader never sees new alerts next to the previous cycle's poll counts.
+func (s *Store) ReplaceAlertsAndStatusRuns(ctx context.Context, t awsx.Target, alerts []model.Alert, runs []StatusRun) error {
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("replace alerts: %w", err)
@@ -25,24 +31,28 @@ func (s *Store) ReplaceAlerts(ctx context.Context, t awsx.Target, alerts []model
 	if _, err := tx.Exec(ctx, `delete from alerts where account_id = $1 and region = $2`, t.AccountID, t.Region); err != nil {
 		return fmt.Errorf("replace alerts: delete: %w", err)
 	}
-	if len(alerts) > 0 {
-		batch := &pgx.Batch{}
-		for _, alert := range alerts {
-			batch.Queue(
-				`insert into alerts (account_id, region, cluster_name, service_name, kind, severity, title, text, at, tab, polled_at)
-				 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())`,
-				t.AccountID, t.Region, alert.Key.Cluster, alert.Key.Service, alert.Kind, string(alert.Severity),
-				alert.Title, alert.Text, alert.At, alert.Tab)
-		}
+	batch := &pgx.Batch{}
+	for _, alert := range alerts {
+		batch.Queue(
+			`insert into alerts (account_id, region, cluster_name, service_name, kind, severity, title, text, at, tab, polled_at)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())`,
+			t.AccountID, t.Region, alert.Key.Cluster, alert.Key.Service, alert.Kind, string(alert.Severity),
+			alert.Title, alert.Text, alert.At, alert.Tab)
+	}
+	for _, run := range runs {
+		batch.Queue(upsertStatusRunSQL,
+			run.Key.AccountID, run.Key.Region, run.Key.Cluster, run.Key.Service, string(run.Status), run.Since, run.Polls)
+	}
+	if batch.Len() > 0 {
 		results := tx.SendBatch(ctx, batch)
-		for range alerts {
+		for range batch.Len() {
 			if _, err := results.Exec(); err != nil {
 				results.Close()
-				return fmt.Errorf("replace alerts: insert: %w", err)
+				return fmt.Errorf("replace alerts: write: %w", err)
 			}
 		}
 		if err := results.Close(); err != nil {
-			return fmt.Errorf("replace alerts: insert: %w", err)
+			return fmt.Errorf("replace alerts: write: %w", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
