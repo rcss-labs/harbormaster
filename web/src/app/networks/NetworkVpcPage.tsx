@@ -42,12 +42,12 @@ export function NetworkVpcPage() {
       <div className={styles.pageHead}>
         <div className={styles.titles}>
           <h1>{vpcName}</h1>
-          {data && summary && (
+          {data && summary && !notFound && (
             <div className={styles.meta}>
               <span className={styles.mono}>{data.vpc.vpc_id}</span>
               <span>{data.vpc.cidr}</span>
               <span>{`${summary.subnets} ${pluralize(summary.subnets, 'subnet', 'subnets')}`}</span>
-              <span>{`${summary.running_tasks} running tasks`}</span>
+              <span>{`${summary.running_tasks} ${pluralize(summary.running_tasks, 'running task', 'running tasks')}`}</span>
               {edges.map((edge) => (
                 <span key={edge}>{edge}</span>
               ))}
@@ -55,7 +55,7 @@ export function NetworkVpcPage() {
             </div>
           )}
         </div>
-        {data && (
+        {data && !notFound && (
           <div className={styles.actions}>
             <button type="button" className={styles.btn} onClick={treeState.expandAll}>
               Expand all

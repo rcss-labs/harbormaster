@@ -39,8 +39,7 @@ function treeResponse(overrides: Partial<VpcTreeResponse> = {}): VpcTreeResponse
   }
 }
 
-function renderVpcPage(route = VPC_ROUTE) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderVpcPage(route = VPC_ROUTE, queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[route]}>
@@ -70,6 +69,13 @@ describe('NetworkVpcPage', () => {
     expect(screen.getByText('Internet gateway')).toBeInTheDocument()
     expect(screen.getByText('NAT gateway')).toBeInTheDocument()
     expect(screen.getByText('Endpoints: ecr.api, ecr.dkr, logs, ssmmessages')).toBeInTheDocument()
+  })
+
+  it('says "1 running task" for a single task', async () => {
+    serveTree(treeResponse({ summary: { subnets: 1, zones: 1, running_tasks: 1, unplaced_tasks: 0, collapsed_by_default: false } }))
+    renderVpcPage()
+    expect(await screen.findByText('1 running task')).toBeInTheDocument()
+    expect(screen.queryByText('1 running tasks')).not.toBeInTheDocument()
   })
 
   it('Collapse to services hides task nodes, Expand all restores them', async () => {
@@ -104,6 +110,24 @@ describe('NetworkVpcPage', () => {
     renderVpcPage()
     expect(await screen.findByText('No running tasks you can see in this VPC.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Back to us-east-1' })).toHaveAttribute('href', '/networks/482109375512/us-east-1')
+  })
+
+  it('hides the header meta and actions when a refetch returns 404 after a load', async () => {
+    serveTree(treeResponse())
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderVpcPage(VPC_ROUTE, queryClient)
+    expect(await screen.findByText('10 running tasks')).toBeInTheDocument()
+
+    server.use(
+      http.get('/api/vpcs/:vpcId/tree', () =>
+        HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 }),
+      ),
+    )
+    await queryClient.invalidateQueries({ queryKey: ['vpcTree'] })
+    expect(await screen.findByText('No running tasks you can see in this VPC.')).toBeInTheDocument()
+    expect(screen.queryByText('10 running tasks')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Expand all' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Collapse to services' })).not.toBeInTheDocument()
   })
 
   it('routes resolve: the VPC URL renders the page inside the app shell', async () => {
