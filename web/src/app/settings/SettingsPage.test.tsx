@@ -53,6 +53,9 @@ describe('SettingsPage', () => {
     renderApp('/settings/users')
     expect(await screen.findByText('No access')).toBeInTheDocument()
     expect(screen.getByText('Only global admins manage users and permissions.')).toBeInTheDocument()
+    // The panel replaces the page: no Settings heading and no tab bar above it.
+    expect(screen.queryByRole('heading', { level: 1, name: 'Settings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Audit log' })).not.toBeInTheDocument()
   })
 
   it('non-admins see the settings copy on General', async () => {

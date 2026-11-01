@@ -14,10 +14,14 @@ const (
 	SettingStoppedTasksWindow = "stopped_tasks_window_minutes"
 	// DefaultStoppedTasksWindowMinutes applies when the setting is absent or not an integer.
 	DefaultStoppedTasksWindowMinutes = 10
+	// MinStoppedTasksWindowMinutes and MaxStoppedTasksWindowMinutes bound a stored window; a hand-edited
+	// row outside them (0 would hide every stopped task) falls back to the default.
+	MinStoppedTasksWindowMinutes = 1
+	MaxStoppedTasksWindowMinutes = 1440
 )
 
 // StoppedTasksWindowMinutes returns the stopped-tasks window, or the default when the
-// setting is absent or does not parse as an integer.
+// setting is absent or is not an integer in 1-1440.
 func (s *Store) StoppedTasksWindowMinutes(ctx context.Context) (int, error) {
 	var raw string
 	err := s.Pool.QueryRow(ctx, `select value from settings where key = $1`, SettingStoppedTasksWindow).Scan(&raw)
@@ -28,7 +32,7 @@ func (s *Store) StoppedTasksWindowMinutes(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("read stopped tasks window: %w", err)
 	}
 	minutes, err := strconv.Atoi(raw)
-	if err != nil {
+	if err != nil || minutes < MinStoppedTasksWindowMinutes || minutes > MaxStoppedTasksWindowMinutes {
 		return DefaultStoppedTasksWindowMinutes, nil
 	}
 	return minutes, nil

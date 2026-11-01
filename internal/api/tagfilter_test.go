@@ -2,12 +2,15 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -234,6 +237,34 @@ func TestTagFilter_Alerts(t *testing.T) {
 	)
 	pavel := login(t, srv, "pavel", testPassword)
 
+	// Account-level alerts are visible to an unfiltered admin but, under a tag filter, only where a
+	// matching cluster exists in that account x region. This pins the current narrowing behaviour.
+	allRegions := []string{"us-east-1", "eu-west-1", "eu-central-1"}
+	var accountAlerts []targetAlert
+	for _, region := range allRegions {
+		accountAlerts = append(accountAlerts, accountAlert(homelabAccountID, region, model.AlertInfo, "account notice "+region))
+	}
+	replaceAlerts(t, st, fk, accountAlerts...)
+	for _, region := range allRegions {
+		title := "account notice " + region
+		if got := itemTitles(getAlertsBody(t, pavel, "")); !slices.Contains(got, title) {
+			t.Errorf("unfiltered admin alerts = %v, want %q", got, title)
+		}
+		for _, tag := range []string{ids.Dev, ids.Staging, ids.Prod} {
+			hasCluster := false
+			for _, cluster := range listClusters(t, pavel, "?"+tag).Items {
+				hasCluster = hasCluster || (cluster.AccountID == homelabAccountID && cluster.Region == region)
+			}
+			if got := itemTitles(getAlertsBody(t, pavel, "?"+tag)); slices.Contains(got, title) != hasCluster {
+				t.Errorf("%s under %s: alerts %v, visible want %v (a matching cluster exists: %v)", title, tag, got, hasCluster, hasCluster)
+			}
+		}
+	}
+	replaceAlerts(t, st, fk,
+		serviceAlert(homelabAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
+		serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
+	)
+
 	staging := getAlertsBody(t, pavel, "?"+ids.Staging)
 	for _, item := range staging.Items {
 		if item.Service == "image-resizer" {
@@ -264,5 +295,20 @@ func TestTagFilter_Search(t *testing.T) {
 	}
 	if got := search(t, pavel, "image&"+ids.Dev); len(got.Items) < 1 {
 		t.Error("search image under Dev found nothing, want image-resizer")
+	}
+}
+
+// accountAlert builds an alert that belongs to an account x region, not to any service.
+func accountAlert(account, region string, severity model.AlertSeverity, title string) targetAlert {
+	return targetAlert{
+		target: awsx.Target{AccountID: account, Region: region},
+		alert: model.Alert{
+			Key:      model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: account, Region: region}},
+			Kind:     "account_notice",
+			Severity: severity,
+			Title:    title,
+			Text:     "detail",
+			At:       time.Now().UTC(),
+		},
 	}
 }

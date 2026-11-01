@@ -154,7 +154,13 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// File systems that no stored row describes never appear, even if a task definition mounts them.
-	visible := storage.Visible(sc.Subject, all, index)
+	// A tag filter narrows an admin to the services it matches, the same rule non-admins get; otherwise
+	// the admin would see every file system flagged as unmounted because the mount index is narrowed.
+	subject := sc.Subject
+	if sc.TagFilter != nil {
+		subject.Admin = false
+	}
+	visible := storage.Visible(subject, all, index)
 	// polled_at is only a timestamp, so it may come from every stored row without leaking a file system.
 	var polledAt time.Time
 	for _, fs := range all {

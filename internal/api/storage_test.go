@@ -276,3 +276,31 @@ func TestStorage_FetchesTargetsConcurrentlyWithinBound(t *testing.T) {
 		}
 	}
 }
+
+// An admin narrowed by ?tag= must get the same rule as a non-admin: only file systems mounted by a
+// matching service are listed, and none of them is reported as orphaned.
+func TestStorage_TagFilterNarrowsAdmin(t *testing.T) {
+	fx := newNetworkFixture(t)
+	tags, err := fx.store.ListTags(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range tags {
+		query := fmt.Sprintf("/api/storage?tag=%d", tag.ID)
+		out := getJSON[StorageDTO](t, fx.admin, query)
+		if out.Totals.NotMounted != 0 {
+			t.Errorf("tag %s: totals.not_mounted = %d, want 0", tag.Name, out.Totals.NotMounted)
+		}
+		for _, item := range out.Items {
+			if !item.Mounted || len(item.MountedBy) == 0 {
+				t.Errorf("tag %s: %s listed as not mounted (mounted_by=%d)", tag.Name, item.FileSystemID, len(item.MountedBy))
+			}
+			if item.FileSystemID == fsUploads {
+				t.Errorf("tag %s: unmounted %s must not be listed under a tag filter", tag.Name, fsUploads)
+			}
+		}
+		if tag.Name == "Dev" && len(out.Items) == 0 {
+			t.Errorf("tag Dev lists no file systems, want the Dev-mounted ones")
+		}
+	}
+}
