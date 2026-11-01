@@ -14,6 +14,8 @@ interface TaskTableProps {
   /** Cursor for the next page; "Load more" shows only when set. */
   next?: string
   onMore(): void
+  /** Live usage in percent of the reserved size, keyed by the task's short id (the id CloudWatch reports). */
+  utilisation?: Record<string, { cpu: number | null; mem: number | null }>
   /** The service's desired count, for the Stop dialog's copy; left out on the global list. */
   desiredCount?: number | null
 }
@@ -68,7 +70,21 @@ function ServiceCell({ task }: { task: TaskDTO }) {
   )
 }
 
-function TaskRow({ task, withService, desiredCount }: { task: TaskDTO; withService: boolean; desiredCount: number | null }) {
+/** "34% of 512 MiB" when usage is known, else the reserved size alone. */
+const usageOrReserved = (usedPercent: number | null | undefined, reserved: string) =>
+  usedPercent === null || usedPercent === undefined ? reserved : `${Math.round(usedPercent)}% of ${reserved}`
+
+function TaskRow({
+  task,
+  withService,
+  usage,
+  desiredCount,
+}: {
+  task: TaskDTO
+  withService: boolean
+  usage?: { cpu: number | null; mem: number | null }
+  desiredCount: number | null
+}) {
   const pill = statusPill(task)
   const isRunning = task.status === 'RUNNING'
   const [stopping, setStopping] = useState(false)
@@ -96,8 +112,8 @@ function TaskRow({ task, withService, desiredCount }: { task: TaskDTO; withServi
         </div>
       </td>
       <td className={styles.small}>{task.capacity}</td>
-      <td className={tableClass.num}>{formatVcpu(task.cpu)} vCPU</td>
-      <td className={tableClass.num}>{task.memory} MiB</td>
+      <td className={tableClass.num}>{usageOrReserved(usage?.cpu, `${formatVcpu(task.cpu)} vCPU`)}</td>
+      <td className={tableClass.num}>{usageOrReserved(usage?.mem, `${task.memory} MiB`)}</td>
       <td className={styles.muted}>{task.started_at ? <Ago ts={task.started_at} /> : '–'}</td>
       <td className={styles.reason}>
         {task.stopped_reason}
@@ -143,7 +159,7 @@ const terminalPath = (task: TaskDTO) =>
     : `/tasks/${encodeURIComponent(task.short_id)}/terminal`
 
 /** Task rows as in the mockup's taskRow(); Terminal deep-links into the service's Terminal tab. */
-export function TaskTable({ items, withService, next, onMore, desiredCount = null }: TaskTableProps) {
+export function TaskTable({ items, withService, next, onMore, utilisation, desiredCount = null }: TaskTableProps) {
   return (
     <div className={styles.panel}>
       <Table>
@@ -165,7 +181,13 @@ export function TaskTable({ items, withService, next, onMore, desiredCount = nul
         </thead>
         <tbody>
           {items.map((task) => (
-            <TaskRow key={task.id} task={task} withService={withService} desiredCount={desiredCount} />
+            <TaskRow
+              key={task.id}
+              task={task}
+              withService={withService}
+              usage={utilisation?.[task.short_id]}
+              desiredCount={desiredCount}
+            />
           ))}
         </tbody>
       </Table>

@@ -42,6 +42,10 @@ func (s *Server) loadEstate(ctx context.Context, f store.TargetFilter, vis store
 	if err != nil {
 		return nil, err
 	}
+	unhealthy, err := s.Store.UnhealthyTargets(ctx, f)
+	if err != nil {
+		return nil, err
+	}
 	view := &estateView{
 		clusters: clusters, services: services, runningTasks: tasks,
 		tasksByService:    map[model.ServiceKey][]model.Task{},
@@ -58,7 +62,9 @@ func (s *Server) loadEstate(ctx context.Context, f store.TargetFilter, vis store
 		view.tasksByService[key] = append(view.tasksByService[key], t.Task)
 	}
 	for _, svc := range services {
-		view.statusByService[svc.Key] = status.Service(status.Inputs{Service: svc.Service, RunningTasks: view.tasksByService[svc.Key]})
+		view.statusByService[svc.Key] = status.Service(status.Inputs{
+			Service: svc.Service, RunningTasks: view.tasksByService[svc.Key], TargetUnhealthy: unhealthy[svc.Key],
+		})
 		view.servicesByCluster[svc.Key.ClusterKey] = append(view.servicesByCluster[svc.Key.ClusterKey], svc)
 	}
 	return view, nil

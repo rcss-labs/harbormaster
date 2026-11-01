@@ -5,6 +5,7 @@ import { Slots } from '../../components/Slots'
 import { TagChip } from '../../components/TagChip'
 import { statusKind, statusLabel } from '../../components/status'
 import styles from './clusters.module.css'
+import { type ClusterServiceMetrics, ServiceCardMetrics } from './ServiceCardMetrics'
 import type { TagClickHandler } from './tagTarget'
 
 interface ServiceCardProps {
@@ -12,9 +13,12 @@ interface ServiceCardProps {
   clusterName: string
   /** Given only for admins; makes the tag chip open the tag dialog. */
   onTagClick?: TagClickHandler
+  /** This service's cluster metrics; undefined while loading. */
+  metrics?: ClusterServiceMetrics
+  insights?: boolean
 }
 
-export function ServiceCard({ service, clusterName, onTagClick }: ServiceCardProps) {
+export function ServiceCard({ service, clusterName, onTagClick, metrics, insights = false }: ServiceCardProps) {
   const latestNotDeployed =
     service.latest_registered_revision !== null &&
     service.latest_registered_revision > service.revision &&
@@ -53,11 +57,11 @@ export function ServiceCard({ service, clusterName, onTagClick }: ServiceCardPro
         <Slots slots={service.slots} desired={service.desired} />
       </div>
 
-      <div className={styles.footStats}>
+      <ServiceCardMetrics service={service} m={metrics} insights={insights}>
         <span>
           {cpuVcpu} vCPU · {service.memory} MiB
         </span>
-      </div>
+      </ServiceCardMetrics>
     </article>
   )
 }

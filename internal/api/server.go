@@ -2,6 +2,7 @@
 package api
 
 import (
+	"cmp"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/execbridge"
+	"github.com/rcss-labs/harbormaster/internal/logs"
+	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/web"
 )
@@ -26,7 +29,14 @@ type Server struct {
 	Cfg     config.Config
 	Log     *slog.Logger
 	Now     func() time.Time
-	Deploy  *deploy.Service
+	// Metrics reads CloudWatch metrics (plan 03); New defaults it from Clients, Store and Cfg.
+	Metrics *metrics.Client
+	// Logs reads CloudWatch Logs history and live tails (plan 03); New defaults it from Clients.
+	Logs *logs.Client
+	// TailLimiter caps concurrent live tails per user; New defaults it from Cfg.LogTailsPerUser.
+	TailLimiter *logs.TailLimiter
+	// Deploy runs the change path (plan 02).
+	Deploy *deploy.Service
 
 	// plan 04: terminal
 	// ExecLimiter caps concurrent terminal sessions per user; New creates it from Cfg when nil.
@@ -48,6 +58,16 @@ func New(s Server) *Server {
 	}
 	if s.Now == nil {
 		s.Now = time.Now
+	}
+	if s.Metrics == nil {
+		s.Metrics = metrics.New(s.Clients, s.Store, s.Cfg.MetricsCacheTTL)
+		s.Metrics.Now, s.Metrics.Log = s.Now, s.Log
+	}
+	if s.Logs == nil {
+		s.Logs = &logs.Client{Clients: s.Clients, Now: s.Now, MaxLookback: 7 * 24 * time.Hour}
+	}
+	if s.TailLimiter == nil {
+		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
 	}
 	// plan 04: terminal
 	if s.ExecLimiter == nil {
@@ -144,6 +164,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "PATCH /api/accounts/{id}", s.updateAccount, routeOptions{Admin: true})
 	s.handle(mux, "DELETE /api/accounts/{id}", s.deleteAccount, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/audit", s.listAudit, routeOptions{Admin: true})
+	s.observeRoutes(mux)
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})

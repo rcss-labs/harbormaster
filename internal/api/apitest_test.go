@@ -85,7 +85,7 @@ func newServerWithLog(t *testing.T, seedUsers bool) (*httptest.Server, *fake.Fak
 	api := New(Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: fk, Prober: fk, Cfg: cfg, Log: log, Now: time.Now,
-		Deploy: &deploy.Service{Store: st, Clients: fk, MaxDesiredCount: 50, Now: time.Now},
+		Deploy: &deploy.Service{Store: st, Clients: fk, Scaling: st, MaxDesiredCount: 50, Now: time.Now},
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

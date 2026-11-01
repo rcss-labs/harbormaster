@@ -21,3 +21,15 @@
 .muted { color: var(--muted); }
 .afterDonut { margin-top: 14px; }
 .legend { margin-bottom: 8px; }
+
+/* Observe additions (plan 03, task 16): wide grid rows and the Needs attention list (mockup .g-wide, .alert-row, .stripe). */
+.gWide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 1100px) { .gWide { grid-template-columns: minmax(0, 1fr); } }
+.alertRow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; color: inherit; text-decoration: none; }
+.alertRow:last-child { border-bottom: 0; }
+.stripeBad { border-left-color: var(--danger); }
+.stripeWarn { border-left-color: var(--warning); }
+.stripeInfo { border-left-color: var(--info); }
+.what { display: grid; gap: 2px; min-width: 0; }
+.when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.mutedSmall { color: var(--muted); font-size: 12px; }

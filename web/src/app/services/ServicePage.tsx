@@ -11,12 +11,15 @@ import { useAuth } from '../auth/AuthProvider'
 import type { TagTarget } from '../clusters/tagTarget'
 import { useCrumbs } from '../shell/crumbs'
 import { ControllerBanner } from './ControllerBanner'
+import { LogsTab } from './logs/LogsTab'
+import { MetricsTab } from './metrics/MetricsTab'
 import { isRolloutRunning } from './rollout'
 import { PendingRevisionBanner } from './PendingRevisionBanner'
 import { OperationsTab } from './OperationsTab'
 import { OverviewTab } from './OverviewTab'
 import { useRolloutToast } from './useRolloutToast'
 import { PlaceholderTab } from './PlaceholderTab'
+import { ScalingTab } from './scaling/ScalingTab'
 import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
 import { TaskDefinitionTab } from './task-definition/TaskDefinitionTab'
@@ -74,6 +77,9 @@ export function ServicePage() {
   else if (tab === 'overview') body = <OverviewTab service={service} />
   else if (tab === 'tasks') body = <TasksTab serviceId={serviceId} />
   else if (tab === 'operations') body = <OperationsTab serviceId={serviceId} />
+  else if (tab === 'metrics') body = <MetricsTab serviceId={serviceId} />
+  else if (tab === 'logs') body = <LogsTab serviceId={serviceId} />
+  else if (tab === 'scaling') body = <ScalingTab serviceId={serviceId} />
   else if (tab === 'task-definition') body = <TaskDefinitionTab key={serviceId} serviceId={serviceId} service={service} />
   else if (tab === 'terminal') body = <TerminalTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />

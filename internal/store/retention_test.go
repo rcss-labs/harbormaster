@@ -61,6 +61,13 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 	exec(`insert into login_attempts (username, ip, ts, ok) values ('u', 'i', $1, false), ('u', 'i', $2, false)`,
 		now.Add(-25*time.Hour), now.Add(-time.Hour))
 
+	if err := s.PutMetricsCache(ctx, []store.CachedSeries{
+		{Key: "cpu|stale", Target: awsxTarget(), FetchedAt: now.Add(-11 * time.Minute), Payload: []byte(`{}`)},
+		{Key: "cpu|fresh", Target: awsxTarget(), FetchedAt: now.Add(-9 * time.Minute), Payload: []byte(`{}`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	user, err := s.CreateUser(ctx, "alice", "hash", false, false)
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +110,7 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 	want := store.RetentionResult{
 		"tasks": 1, "service_events": 1, "service_counts_history": 1, "operation_log": 1,
 		"deployment_history": 1, "audit_log": 1, "sessions": 1, "login_attempts": 1,
-		"cluster_tags": 1, "service_tags": 1,
+		"cluster_tags": 1, "service_tags": 1, "metrics_cache": 1,
 	}
 	for key, n := range want {
 		if res[key] != n {
@@ -111,7 +118,7 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 		}
 	}
 	remaining := map[string]int{"tasks": 1, "service_events": 1, "service_counts_history": 1, "operation_log": 1,
-		"deployment_history": 1, "audit_log": 1, "sessions": 1, "login_attempts": 1, "cluster_tags": 1, "service_tags": 1}
+		"deployment_history": 1, "audit_log": 1, "sessions": 1, "login_attempts": 1, "cluster_tags": 1, "service_tags": 1, "metrics_cache": 1}
 	for table, n := range remaining {
 		var got int
 		if err := s.Pool.QueryRow(ctx, `select count(*) from `+table).Scan(&got); err != nil || got != n {

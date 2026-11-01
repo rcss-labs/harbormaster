@@ -254,8 +254,16 @@ func TestGetDesiredCount_Shape(t *testing.T) {
 	if raw["desired"] != float64(3) || raw["running"] != float64(3) || raw["max"] != float64(50) {
 		t.Errorf("desired-count = %v", raw)
 	}
+	// The poller's scaling snapshot (fake.mockupScaling: payments-api min 2, max 6) feeds the range.
+	if v, _ := raw["auto_scaling"].(map[string]any); v["min"] != float64(2) || v["max"] != float64(6) || len(v) != 2 {
+		t.Errorf("auto_scaling = %v, want {min:2 max:6}", raw["auto_scaling"])
+	}
+
+	// edge-nginx has no scalable target in the seed.
+	raw = nil
+	decode(t, admin.get("/api/services/"+edgeNginxID()+"/desired-count"), &raw)
 	if v, has := raw["auto_scaling"]; !has || v != nil {
-		t.Errorf("auto_scaling = %v (present %v), want null", v, has)
+		t.Errorf("edge-nginx auto_scaling = %v (present %v), want null", v, has)
 	}
 }
 

@@ -5,17 +5,25 @@ import {
   ASSIGNMENTS,
   AUDIT,
   CLUSTERS,
+  CLUSTERS_METRICS,
   CLUSTER_DETAILS,
+  CLUSTER_METRICS_CORE,
   ME_ADMIN,
   OPERATIONS_FOR,
   OVERVIEW,
   PERMISSIONS,
   POLLER,
   SERVICE_DETAILS,
+  SERVICE_METRICS_CATALOG_NO_INSIGHTS,
+  SERVICE_METRICS_PAYMENTS,
+  SERVICE_PAYMENTS,
+  TARGET_HEALTH_EDGE,
   TAGS,
   USERS,
+  ALERTS,
   ALL_TASKS,
   FIXTURE_NOW,
+  OVERVIEW_METRICS,
   filterTasks,
   tasksList,
   tasksResponse,
@@ -57,6 +65,7 @@ export const handlers = [
     const items = CLUSTERS.items.filter((c) => (!account || c.account_id === account) && (!region || c.region === region))
     return HttpResponse.json({ ...CLUSTERS, items })
   }),
+  http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
   http.get('/api/clusters/:id', ({ params }) => {
     const cluster = CLUSTER_DETAILS[params.id as string]
     return cluster ? HttpResponse.json(cluster) : notFound()
@@ -101,6 +110,16 @@ export const handlers = [
   http.post('/api/accounts', () => HttpResponse.json(ACCOUNTS.items[0], { status: 201 })),
   http.patch('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
   http.delete('/api/accounts/:id', () => new HttpResponse(null, { status: 204 })),
+  // observe (plan 03, task 16): overview metrics and alerts
+  http.get('/api/overview/metrics', () => HttpResponse.json(OVERVIEW_METRICS)),
+  http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
+  // observe (plan 03, task 19): service metrics and target health
+  http.get('/api/services/:id/metrics', ({ params }) =>
+    HttpResponse.json(params.id === SERVICE_PAYMENTS.id ? SERVICE_METRICS_PAYMENTS : SERVICE_METRICS_CATALOG_NO_INSIGHTS),
+  ),
+  http.get('/api/services/:id/target-health', () => HttpResponse.json(TARGET_HEALTH_EDGE)),
+  // observe (plan 03, task 18): cluster page metrics
+  http.get('/api/clusters/:id/metrics', () => HttpResponse.json(CLUSTER_METRICS_CORE)),
   // Change path reads (plan 02)
   http.get('/api/services/:id/task-definition', () => HttpResponse.json(TASK_DEFINITION_EDITABLE)),
   http.get('/api/services/:id/revisions', () => HttpResponse.json(REVISIONS_PAYMENTS)),

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { isApiError, useDesiredCountInfo, useRestart, useSetDesiredCount } from '../../api/change'
 import type { ServiceDTO } from '../../api/types'
 import { Banner } from '../../components/Banner'
@@ -178,6 +179,12 @@ function DesiredCountDialog({ serviceId, service, onClose }: DialogProps) {
           that range.
         </Banner>
       )}
+      {/* Plan 03's Scaling tab shows the auto scaling range and policies behind the warning above. */}
+      <div className={dialogStyles.scalingLink}>
+        <Link className={styles.accentLink} to={`/services/${serviceId}/scaling`} onClick={onClose}>
+          Auto scaling settings →
+        </Link>
+      </div>
     </Dialog>
   )
 }

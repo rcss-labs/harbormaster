@@ -1,14 +1,14 @@
 import { Link } from 'react-router'
 import type { ClusterCardDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
-import { Banner } from '../../components/Banner'
 import { Pill } from '../../components/Pill'
 import { TagChip } from '../../components/TagChip'
 import { STATUS_COLOR, clusterStatusKind, clusterStatusLabel, statusKind, statusLabel } from '../../components/status'
 import { fmtNum, pct } from '../../charts/format'
+import { ClusterCardMetrics, type ClusterMetricsItem } from './ClusterCardMetrics'
 import styles from './clusters.module.css'
 
-export function ClusterCard({ cluster }: { cluster: ClusterCardDTO }) {
+export function ClusterCard({ cluster, metrics }: { cluster: ClusterCardDTO; metrics?: ClusterMetricsItem }) {
   const barPercent = cluster.desired ? (cluster.running / cluster.desired) * 100 : 0
   const barColor = cluster.running < cluster.desired ? 'var(--warning)' : 'var(--success)'
 
@@ -29,9 +29,7 @@ export function ClusterCard({ cluster }: { cluster: ClusterCardDTO }) {
         <Pill kind={clusterStatusKind(cluster.status)}>{clusterStatusLabel(cluster.status)}</Pill>
       </div>
 
-      {!cluster.container_insights && (
-        <Banner kind="warn">Container Insights is off, so there are no CPU and memory graphs.</Banner>
-      )}
+      <ClusterCardMetrics clusterId={cluster.id} insights={cluster.container_insights} metrics={metrics} />
 
       <div>
         <div className={styles.miniK}>

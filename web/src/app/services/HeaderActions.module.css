@@ -14,3 +14,8 @@
   color: inherit;
   font: inherit;
 }
+
+.scalingLink {
+  margin-top: 10px;
+  font-size: 12.5px;
+}

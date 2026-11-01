@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
-import { useAccounts, useClusters, useOverview, useTags, useTasks, useUsers } from '../../api/hooks'
+import { useAlerts } from '../../api/observe'
+import { useAccounts, useClusters, useTags, useTasks, useUsers } from '../../api/hooks'
 import logo from '../../brand/square-logo.png'
 import logoDark from '../../brand/square-logo-dark.png'
 import { useToast } from '../../components/Toast'
@@ -49,7 +50,7 @@ export function Sidebar() {
   const dark = useIsDark()
   const { filters } = useFilters()
   const isAdmin = me?.admin ?? false
-  const overview = useOverview(filters)
+  const alerts = useAlerts(filters)
   const clusters = useClusters(filters)
   const running = useTasks({ ...filters, filter: 'running' })
   const users = useUsers({ enabled: isAdmin })
@@ -57,7 +58,7 @@ export function Sidebar() {
   const accounts = useAccounts({ enabled: isAdmin })
   if (!me) return null
 
-  const failing = overview.data?.services.by_status.failing ?? 0
+  const dangerAlerts = alerts.data?.counts.danger ?? 0
   const signOut = async () => {
     try {
       await logout()
@@ -76,7 +77,7 @@ export function Sidebar() {
         </div>
       </div>
       <nav className={styles.nav} aria-label="Main">
-        <NavItem to="/" end label="Overview" count={failing > 0 ? failing : undefined} bad />
+        <NavItem to="/" end label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
         <NavItem to="/clusters" label="Clusters" count={clusters.data?.items.length} alsoActiveFor={['/clusters', '/services']} />
         <NavItem to="/tasks" label="Tasks" count={running.data?.counts.running} />
         <DisabledNavItem label="Networks" />

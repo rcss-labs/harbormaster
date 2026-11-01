@@ -1,6 +1,7 @@
 import type { TaskDTO } from '../../api/types'
 import { useDesiredCountInfo } from '../../api/change'
 import { useServiceTasks } from '../../api/hooks'
+import { useServiceMetrics } from '../../api/observe'
 import { EmptyState } from '../../components/EmptyState'
 import { TaskTable } from '../../components/TaskTable'
 import { usePagedCursor } from '../../components/usePagedCursor'
@@ -9,6 +10,9 @@ import { usePagedCursor } from '../../components/usePagedCursor'
 export function TasksTab({ serviceId }: { serviceId: string }) {
   const paged = usePagedCursor<TaskDTO>(serviceId)
   const page = useServiceTasks(serviceId, paged.cursor)
+  const taskUsage = useServiceMetrics(serviceId, '1h').data?.tasks_now
+  // CloudWatch reports the ECS task id, which is the task's short_id.
+  const utilisation = taskUsage && Object.fromEntries(taskUsage.map((usage) => [usage.task_id, { cpu: usage.cpu, mem: usage.mem }]))
   const desired = useDesiredCountInfo(serviceId)
 
   if (page.isError) {
@@ -20,6 +24,7 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
     <TaskTable
       items={[...paged.earlier, ...(page.data?.items ?? [])]}
       withService={false}
+      utilisation={utilisation ?? undefined}
       next={next}
       desiredCount={desired.data?.desired ?? null}
       onMore={() => {

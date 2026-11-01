@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useCluster } from '../../api/hooks'
+import { useClusterMetrics } from '../../api/observe'
 import { BarChart } from '../../charts/BarChart'
 import { Sparkline } from '../../charts/Sparkline'
 import { fmtNum } from '../../charts/format'
@@ -17,6 +18,7 @@ import { Tile } from '../../components/Tile'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { ClusterUsageChart, UseNowTile } from './ClusterUsageChart'
 import { ServiceCard } from './ServiceCard'
 import { ServicesTable } from './ServicesTable'
 import styles from './clusters.module.css'
@@ -44,10 +46,12 @@ function NoAccess() {
 export function Cluster() {
   const { clusterId = '' } = useParams()
   const clusterQuery = useCluster(clusterId)
+  const clusterMetricsQuery = useClusterMetrics(clusterId, '24h')
   const { me } = useAuth()
   const [view, setView] = useListView('cards')
   const [editing, setEditing] = useState<TagTarget | null>(null)
   const cluster = clusterQuery.data
+  const clusterMetrics = clusterMetricsQuery.data
   useCrumbs([['Clusters', '/clusters'], [cluster?.name ?? '']])
 
   if (clusterQuery.error instanceof ApiError && clusterQuery.error.status === 404) return <NoAccess />
@@ -131,23 +135,27 @@ export function Cluster() {
             </span>
           </div>
         </Tile>
+        <UseNowTile metrics={clusterMetrics} insights={cluster.container_insights} />
       </div>
 
-      <Card title="Tasks by service" right="bar = running · line = desired">
-        <HBars
-          items={services.map((service) => ({
-            name: service.name,
-            href: `/services/${service.id}/tasks`,
-            parts: [{ v: service.running, color: STATUS_COLOR[statusKind(service.status)] }],
-            ghost: service.desired,
-            label: `${service.running} / ${service.desired}`,
-          }))}
-        />
-        <div className={styles.stopsBlock}>
-          <h3 className={styles.stopsTitle}>Task stops per hour</h3>
-          <BarChart cols={stopColumns} height={80} xLabels={[[0, '24 h ago'], [23, 'now']]} />
-        </div>
-      </Card>
+      <div className={`${styles.grid} ${styles.gWide}`}>
+        <ClusterUsageChart metrics={clusterMetrics} insights={cluster.container_insights} error={clusterMetricsQuery.error} />
+        <Card title="Tasks by service" right="bar = running · line = desired">
+          <HBars
+            items={services.map((service) => ({
+              name: service.name,
+              href: `/services/${service.id}/tasks`,
+              parts: [{ v: service.running, color: STATUS_COLOR[statusKind(service.status)] }],
+              ghost: service.desired,
+              label: `${service.running} / ${service.desired}`,
+            }))}
+          />
+          <div className={styles.stopsBlock}>
+            <h3 className={styles.stopsTitle}>Task stops per hour</h3>
+            <BarChart cols={stopColumns} height={80} xLabels={[[0, '24 h ago'], [23, 'now']]} />
+          </div>
+        </Card>
+      </div>
 
       <div className={styles.toolbar}>
         <h2>Services</h2>
@@ -155,11 +163,24 @@ export function Cluster() {
         <Seg label="View" options={LIST_VIEW_OPTIONS} value={view} onChange={setView} />
       </div>
       {view === 'table' ? (
-        <ServicesTable services={services} clusterName={cluster.name} onTagClick={handleTagClick} />
+        <ServicesTable
+          services={services}
+          clusterName={cluster.name}
+          onTagClick={handleTagClick}
+          metrics={clusterMetrics?.services}
+          insights={cluster.container_insights}
+        />
       ) : (
         <div className={styles.cards}>
           {services.map((service) => (
-            <ServiceCard key={service.id} service={service} clusterName={cluster.name} onTagClick={handleTagClick} />
+            <ServiceCard
+              key={service.id}
+              service={service}
+              clusterName={cluster.name}
+              onTagClick={handleTagClick}
+              metrics={clusterMetrics?.services[service.id]}
+              insights={cluster.container_insights}
+            />
           ))}
         </div>
       )}

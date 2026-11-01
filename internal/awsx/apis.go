@@ -3,8 +3,13 @@ package awsx
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	logstypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
@@ -40,10 +45,43 @@ type SSMAPI interface {
 
 // Placeholders: later plans add the methods they call (see conventions doc).
 type (
-	EC2API         interface{} // plan 05
-	EFSAPI         interface{} // plan 05
-	ELBAPI         interface{} // plan 03
-	AutoScalingAPI interface{} // plan 03
-	CloudWatchAPI  interface{} // plan 03
-	LogsAPI        interface{} // plan 03
+	EC2API interface{} // plan 05
+	EFSAPI interface{} // plan 05
 )
+
+// CloudWatchAPI lists the CloudWatch calls Harbormaster makes (plan 03).
+type CloudWatchAPI interface {
+	GetMetricData(ctx context.Context, in *cloudwatch.GetMetricDataInput, opts ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricDataOutput, error)
+}
+
+// ELBAPI lists the ELBv2 calls Harbormaster makes (plan 03).
+type ELBAPI interface {
+	DescribeTargetGroups(ctx context.Context, in *elasticloadbalancingv2.DescribeTargetGroupsInput, opts ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error)
+	DescribeTargetHealth(ctx context.Context, in *elasticloadbalancingv2.DescribeTargetHealthInput, opts ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error)
+}
+
+// AutoScalingAPI lists the Application Auto Scaling calls Harbormaster makes (plan 03).
+type AutoScalingAPI interface {
+	DescribeScalableTargets(ctx context.Context, in *applicationautoscaling.DescribeScalableTargetsInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalableTargetsOutput, error)
+	DescribeScalingPolicies(ctx context.Context, in *applicationautoscaling.DescribeScalingPoliciesInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingPoliciesOutput, error)
+	DescribeScheduledActions(ctx context.Context, in *applicationautoscaling.DescribeScheduledActionsInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScheduledActionsOutput, error)
+	DescribeScalingActivities(ctx context.Context, in *applicationautoscaling.DescribeScalingActivitiesInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingActivitiesOutput, error)
+}
+
+// LogsAPI lists the CloudWatch Logs calls Harbormaster makes (plan 03).
+type LogsAPI interface {
+	FilterLogEvents(ctx context.Context, in *cloudwatchlogs.FilterLogEventsInput, opts ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.FilterLogEventsOutput, error)
+	// LiveTail departs from the SDK signature: the SDK's
+	// *StartLiveTailEventStream is a concrete struct that cannot be faked, so
+	// the real client wraps it in a LiveTailStream.
+	LiveTail(ctx context.Context, in *cloudwatchlogs.StartLiveTailInput) (LiveTailStream, error)
+}
+
+// LiveTailStream is a running Logs Live Tail session.
+type LiveTailStream interface {
+	// Events is closed when the stream ends.
+	Events() <-chan logstypes.StartLiveTailResponseStream
+	// Err reports why the stream ended; read it after Events() closes.
+	Err() error
+	Close() error
+}

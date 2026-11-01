@@ -118,6 +118,10 @@ func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow)
 	if err != nil {
 		return ServiceDTO{}, err
 	}
+	unhealthy, err := s.Store.UnhealthyTargets(ctx, filter)
+	if err != nil {
+		return ServiceDTO{}, err
+	}
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
 		return ServiceDTO{}, err
@@ -147,7 +151,9 @@ func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow)
 		return ServiceDTO{}, err
 	}
 
-	serviceStatus := status.Service(status.Inputs{Service: row.Service, RunningTasks: modelTasks(tasks)})
+	serviceStatus := status.Service(status.Inputs{
+		Service: row.Service, RunningTasks: modelTasks(tasks), TargetUnhealthy: unhealthy[key],
+	})
 	ref := ServiceRef{ID: key.ID(), Name: key.Service, Status: serviceStatus}
 	dto := ServiceDTO{
 		ID: key.ID(), Name: key.Service, Cluster: ClusterRef{ID: key.ClusterKey.ID(), Name: key.Cluster},

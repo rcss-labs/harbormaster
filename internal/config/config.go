@@ -19,6 +19,8 @@ type PollConfig struct {
 	CountsHistory time.Duration
 	MaxInFlight   int
 	Jitter        time.Duration
+	TargetHealth  time.Duration
+	Scaling       time.Duration
 }
 
 // RetentionConfig holds how long each kind of recorded data is kept.
@@ -53,6 +55,10 @@ type Config struct {
 	Retention               RetentionConfig
 	PageSizeDefault         int
 	PageSizeMax             int
+	MetricsCacheTTL         time.Duration
+	LogTailIdle             time.Duration
+	LogTailsPerUser         int
+	LogHistoryLimit         int
 	MaxDesiredCount         int
 
 	// plan 04: terminal
@@ -152,6 +158,8 @@ func Load(getenv func(string) string) (Config, error) {
 			CountsHistory: reader.duration("HM_POLL_COUNTS_HISTORY", 5*time.Minute),
 			MaxInFlight:   reader.integer("HM_POLL_MAX_INFLIGHT", 8),
 			Jitter:        reader.duration("HM_POLL_JITTER", 500*time.Millisecond),
+			TargetHealth:  reader.duration("HM_POLL_TARGET_HEALTH", 15*time.Second),
+			Scaling:       reader.duration("HM_POLL_SCALING", 60*time.Second),
 		},
 		Retention: RetentionConfig{
 			StoppedTasks:      reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),
@@ -164,6 +172,10 @@ func Load(getenv func(string) string) (Config, error) {
 		},
 		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:     reader.integer("HM_PAGE_SIZE_MAX", 500),
+		MetricsCacheTTL: reader.duration("HM_METRICS_CACHE_TTL", 60*time.Second),
+		LogTailIdle:     reader.duration("HM_LOG_TAIL_IDLE", 30*time.Minute),
+		LogTailsPerUser: reader.integer("HM_LOG_TAILS_PER_USER", 2),
+		LogHistoryLimit: reader.integer("HM_LOG_HISTORY_LIMIT", 500),
 		MaxDesiredCount: reader.integer("HM_MAX_DESIRED_COUNT", 50),
 
 		// plan 04: terminal

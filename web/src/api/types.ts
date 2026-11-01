@@ -446,6 +446,165 @@ export interface AuditEntryDTO {
 }
 export type AuditDTO = ListDTO<AuditEntryDTO>
 
+// ---- Observe (plan 03): metrics, target health, scaling, alerts, log history. Mirrors internal/api/observe_*.go. ----
+export type Range = '1h' | '6h' | '24h' | '72h'
+/** A metric series; `null` is a missing datapoint. */
+export type Series = (number | null)[]
+export interface StaleInfo {
+  reason: string
+  fetched_at: string
+}
+export type InsightsMode = 'disabled' | 'enabled' | 'enhanced'
+export interface MetricMarkerDTO {
+  at: string
+  label: string
+  kind: 'deploy' | 'restart'
+  failed: boolean
+  /** Set only on cluster charts. */
+  service?: string
+}
+export interface ServiceMetricsDTO {
+  range: Range
+  period: number
+  insights: InsightsMode
+  timestamps: string[]
+  series: { cpu: Series; mem: Series; net_rx_kbps: Series; net_tx_kbps: Series; tasks: Series } | null
+  now: { cpu: number | null; mem: number | null; cpu_units: number; mem_mib: number; running: number } | null
+  alb: {
+    req_per_min: Series
+    p95_ms: Series
+    err5xx_per_hour: { timestamps: string[]; values: Series }
+    req_now: number | null
+    p95_now: number | null
+    err5xx_today: number
+  } | null
+  tasks_now: { task_id: string; cpu: number | null; mem: number | null }[] | null
+  markers: MetricMarkerDTO[]
+  stale: StaleInfo | null
+  polled_at: string | null
+}
+export interface ClusterMetricsDTO {
+  range: Range
+  period: number
+  insights: string
+  timestamps: string[]
+  cluster: { cpu: Series; mem: Series } | null
+  now: { cpu: number | null; mem: number | null } | null
+  markers: MetricMarkerDTO[]
+  services: Record<
+    string,
+    {
+      cpu: Series
+      mem: Series
+      cpu_now: number | null
+      mem_now: number | null
+      alb: { req_now: number | null; p95_now: number | null; err5xx_today: number } | null
+    }
+  >
+  stale: StaleInfo | null
+}
+export interface ClustersMetricsDTO {
+  items: Record<string, { insights: string; cpu: Series; mem: Series; cpu_now: number | null; mem_now: number | null }>
+  stale: StaleInfo | null
+}
+export interface ClusterSeriesDTO {
+  id: string
+  label: string
+  values: Series
+}
+export interface OverviewMetricsDTO {
+  timestamps: string[]
+  cpu_by_cluster: ClusterSeriesDTO[]
+  mem_by_cluster: ClusterSeriesDTO[]
+  avg: { cpu: number | null; mem: number | null }
+  stale: StaleInfo | null
+}
+export interface TargetDTO {
+  id: string
+  port: number
+  az: string
+  state: string
+  reason: string
+  description: string
+}
+export interface TargetHealthDTO {
+  groups: { target_group_arn: string; name: string; healthy: number; unhealthy: number; targets: TargetDTO[] }[]
+  healthy: number
+  unhealthy: number
+  polled_at: string | null
+}
+export interface ScalingPolicyDTO {
+  name: string
+  type: string
+  metric: string
+  target_value: number
+  scale_out_cooldown: number
+  scale_in_cooldown: number
+}
+export interface ScheduledActionDTO {
+  name: string
+  schedule: string
+  timezone: string
+  min_capacity: number | null
+  max_capacity: number | null
+}
+export interface ScalingActivityDTO {
+  id: string
+  description: string
+  cause: string
+  status_code: string
+  status_message: string
+  started_at: string
+  ended_at: string | null
+}
+export interface ScalingDTO {
+  has_target: boolean
+  min: number
+  max: number
+  policies: ScalingPolicyDTO[]
+  scheduled_actions: ScheduledActionDTO[]
+  activities: ScalingActivityDTO[]
+  polled_at: string | null
+}
+export interface AlertDTO {
+  kind: string
+  severity: 'danger' | 'warning' | 'info'
+  title: string
+  text: string
+  at: string
+  service_id: string
+  service: string
+  cluster: string
+  cluster_id: string
+  tab: string
+}
+export interface AlertsDTO {
+  items: AlertDTO[]
+  counts: { danger: number; warning: number; info: number }
+  polled_at: string | null
+}
+export interface LogLine {
+  t: string
+  container: string
+  task_id: string
+  message: string
+}
+export interface LogContainerDTO {
+  name: string
+  driver: string
+  supported: boolean
+  stream_prefix?: string
+  reason?: 'driver' | 'other_group'
+}
+export interface LogsHistoryDTO {
+  group: string
+  region: string
+  containers: LogContainerDTO[]
+  lines: LogLine[]
+  older_before: string | null
+  truncated: boolean
+}
+
 // ---- Change-path reads (plan 02) ----
 export interface ControllerRefDTO {
   type: string

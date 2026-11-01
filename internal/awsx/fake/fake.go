@@ -5,9 +5,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -26,6 +28,21 @@ type Fake struct {
 	Throttle int32
 	// ExecServer backs ECS ExecuteCommand and SSM TerminateSession (plan 04); nil means no exec support.
 	ExecServer *SSMServer
+
+	// Plan 03 (observe) knobs. The Throttle* counters work like Throttle but
+	// for their own service; set them before calls are in flight or access
+	// them atomically.
+	ThrottleCloudWatch  int32
+	ThrottleELB         int32
+	ThrottleAutoScaling int32
+	ThrottleLogs        int32
+	CloudWatchPageSize  int           // datapoints per GetMetricData page; 0 means 100,800 (the AWS limit)
+	LogsPageSize        int           // events per FilterLogEvents page; 0 means 100
+	LiveTailInterval    time.Duration // gap between live tail updates; 0 means 2 s
+	LiveTailError       error         // ends every live tail stream with this error (see LiveTailErrorAfter)
+	LiveTailErrorAfter  int           // number of SessionUpdates sent before LiveTailError ends the stream
+	liveTailMu          sync.Mutex
+	lastLiveTailInput   *cloudwatchlogs.StartLiveTailInput
 
 	mu    sync.Mutex
 	calls map[string]int
@@ -66,6 +83,22 @@ func (f *Fake) begin(op string) error {
 	}
 }
 
+// beginThrottled counts the call and applies a per-service throttle knob.
+func (f *Fake) beginThrottled(op string, knob *int32) error {
+	f.mu.Lock()
+	f.calls[op]++
+	f.mu.Unlock()
+	for {
+		n := atomic.LoadInt32(knob)
+		if n <= 0 {
+			return nil
+		}
+		if atomic.CompareAndSwapInt32(knob, n, n-1) {
+			return &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded", Fault: smithy.FaultClient}
+		}
+	}
+}
+
 func (f *Fake) knownAccount(id string) bool {
 	f.Estate.Mu.Lock()
 	defer f.Estate.Mu.Unlock()
@@ -86,12 +119,35 @@ func (f *Fake) ECS(_ context.Context, t awsx.Target) (awsx.ECSAPI, error) {
 
 func (f *Fake) EC2(context.Context, awsx.Target) (awsx.EC2API, error) { return nil, nil }
 func (f *Fake) EFS(context.Context, awsx.Target) (awsx.EFSAPI, error) { return nil, nil }
-func (f *Fake) ELB(context.Context, awsx.Target) (awsx.ELBAPI, error) { return nil, nil }
-func (f *Fake) AutoScaling(context.Context, awsx.Target) (awsx.AutoScalingAPI, error) {
-	return nil, nil
+
+func (f *Fake) ELB(_ context.Context, t awsx.Target) (awsx.ELBAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &elbClient{f: f, target: t}, nil
 }
-func (f *Fake) CloudWatch(context.Context, awsx.Target) (awsx.CloudWatchAPI, error) { return nil, nil }
-func (f *Fake) Logs(context.Context, awsx.Target) (awsx.LogsAPI, error)             { return nil, nil }
+
+func (f *Fake) AutoScaling(_ context.Context, t awsx.Target) (awsx.AutoScalingAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &autoScalingClient{f: f, target: t}, nil
+}
+
+func (f *Fake) CloudWatch(_ context.Context, t awsx.Target) (awsx.CloudWatchAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &cloudWatchClient{f: f, target: t}, nil
+}
+
+func (f *Fake) Logs(_ context.Context, t awsx.Target) (awsx.LogsAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &logsClient{f: f, target: t}, nil
+}
+
 func (f *Fake) SSM(_ context.Context, t awsx.Target) (awsx.SSMAPI, error) {
 	if !f.knownAccount(t.AccountID) {
 		return nil, awsx.ErrAccountUnknown

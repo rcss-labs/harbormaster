@@ -7,6 +7,11 @@ import (
 	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	logstypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
@@ -38,3 +43,59 @@ func (r *Real) SSM(ctx context.Context, t Target) (SSMAPI, error) {
 	}
 	return ssm.NewFromConfig(cfg), nil
 }
+
+// The plan 03 clients are cheap to build (credentials are cached per account
+// inside configFor), so they are constructed per call.
+
+func (r *Real) CloudWatch(ctx context.Context, t Target) (CloudWatchAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return cloudwatch.NewFromConfig(cfg), nil
+}
+
+func (r *Real) ELB(ctx context.Context, t Target) (ELBAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return elasticloadbalancingv2.NewFromConfig(cfg), nil
+}
+
+func (r *Real) AutoScaling(ctx context.Context, t Target) (AutoScalingAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return applicationautoscaling.NewFromConfig(cfg), nil
+}
+
+func (r *Real) Logs(ctx context.Context, t Target) (LogsAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return &realLogs{Client: cloudwatchlogs.NewFromConfig(cfg)}, nil
+}
+
+// realLogs adds the LiveTail abstraction to the SDK client; FilterLogEvents
+// comes from the embedded client.
+type realLogs struct{ *cloudwatchlogs.Client }
+
+func (l *realLogs) LiveTail(ctx context.Context, in *cloudwatchlogs.StartLiveTailInput) (LiveTailStream, error) {
+	out, err := l.Client.StartLiveTail(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return sdkLiveTail{out.GetStream()}, nil
+}
+
+// sdkLiveTail adapts the SDK's concrete event stream to LiveTailStream.
+type sdkLiveTail struct {
+	s *cloudwatchlogs.StartLiveTailEventStream
+}
+
+func (s sdkLiveTail) Events() <-chan logstypes.StartLiveTailResponseStream { return s.s.Events() }
+func (s sdkLiveTail) Err() error                                           { return s.s.Err() }
+func (s sdkLiveTail) Close() error                                         { return s.s.Close() }

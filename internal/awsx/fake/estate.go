@@ -9,6 +9,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 // Account is a connected AWS account.
@@ -62,6 +64,15 @@ type Estate struct {
 	TaskDefinitions []TaskDefinition
 	// Events holds service events newest first, keyed by service ARN.
 	Events map[string][]ecstypes.ServiceEvent
+
+	// Plan 03 (observe) state; see seed_observe.go. All guarded by Mu.
+	MetricProfiles    map[model.ServiceKey]MetricProfile
+	TargetGroups      map[model.ServiceKey]TargetGroup   // each service's primary target group
+	ExtraTargetGroups map[model.ServiceKey][]TargetGroup // further groups (AddTargetGroup)
+	ScalingConfig     map[model.ServiceKey]*ScalingSeed
+	LogPools          map[string][][2]string // service name (or "default") -> [level, message]
+	ContainerInsights map[model.ClusterKey]string
+	LogLines          map[string][]LogLine // log group -> explicit lines (SetLogLines)
 
 	// rollbackDeployments holds the ids of circuit-breaker rollback
 	// deployments, which are exempt from the OOM failure path (see rollout.go).
