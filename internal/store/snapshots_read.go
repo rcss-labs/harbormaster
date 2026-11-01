@@ -392,6 +392,7 @@ const (
 	stoppedErrorSQL = `coalesce(t.last_status = 'STOPPED' and (coalesce(t.exit_code, 0) <> 0 or t.stop_code = 'TaskFailedToStart'), false)`
 	// problemSQL: a failed stop or an unhealthy task; never NULL.
 	problemSQL = `(` + stoppedErrorSQL + ` or coalesce(t.health_status = 'UNHEALTHY', false))`
+	// runningSQL mirrors model.Task.IsRunning.
 	runningSQL = `t.last_status is distinct from 'STOPPED'`
 )
 

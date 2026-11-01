@@ -59,7 +59,7 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 		tasks := tasksByService[svc.Key]
 		var running []model.Task
 		for _, task := range tasks {
-			if task.LastStatus == "RUNNING" {
+			if task.IsRunning() {
 				running = append(running, task)
 			}
 		}

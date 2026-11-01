@@ -50,7 +50,7 @@ func ServiceAlerts(in AlertInput) []model.Alert {
 	now := in.Now
 	var running []model.Task
 	for _, task := range in.Tasks {
-		if task.LastStatus == "RUNNING" {
+		if task.IsRunning() {
 			running = append(running, task)
 		}
 	}
