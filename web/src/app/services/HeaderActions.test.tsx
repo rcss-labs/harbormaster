@@ -77,6 +77,19 @@ describe('HeaderActions restart', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('shows the recording warning from a restart response as a toast', async () => {
+    server.use(
+      http.post(`/api/services/${SERVICE_PAYMENTS.id}/restart`, () =>
+        HttpResponse.json({ deployment_id: 'dep-1', revision: SERVICE_PAYMENTS.revision, kind: 'restart', warning: 'Rolled out, but Harbormaster could not record it in the operations history.' }, { status: 202 }),
+      ),
+    )
+    renderActions()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Restart (new deployment)' }))
+    await user.click(screen.getByRole('button', { name: 'Restart' }))
+    expect(await screen.findByText('Rolled out, but Harbormaster could not record it in the operations history.')).toBeInTheDocument()
+  })
+
   it('disables the confirm button while the restart request is pending', async () => {
     const restartRequests = vi.fn()
     let releaseRequest: () => void = () => {}
@@ -123,6 +136,23 @@ describe('HeaderActions restart', () => {
 })
 
 describe('HeaderActions desired count', () => {
+  it('shows the warning from a desired count response as a toast', async () => {
+    server.use(
+      desiredCountInfo(),
+      http.post(`/api/services/${SERVICE_PAYMENTS.id}/desired-count`, () =>
+        HttpResponse.json({ desired: 0, previous: 3, changed: true, warning: 'Auto scaling may change it back.' }),
+      ),
+    )
+    renderActions()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
+    const input = await screen.findByRole('spinbutton')
+    await user.clear(input)
+    await user.type(input, '0')
+    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
+    expect(await screen.findByText('Auto scaling may change it back.')).toBeInTheDocument()
+  })
+
   it('shows the zero sentence and posts nothing until confirmed', async () => {
     const countRequests = vi.fn()
     server.use(

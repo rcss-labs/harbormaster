@@ -47,6 +47,17 @@ describe('StopTaskDialog', () => {
     expect(stopped).toEqual(['task-1'])
   })
 
+  it('shows the recording warning from a stop response as a toast', async () => {
+    server.use(
+      http.post('/api/tasks/:id/stop', () =>
+        HttpResponse.json({ task_arn: 'arn:task-1', reason: 'Stopped by Harbormaster', warning: 'Stopped, but not logged.' }),
+      ),
+    )
+    renderWithProviders(<StopTaskDialog {...serviceProps} onClose={vi.fn()} />)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Stop task' }))
+    expect(await screen.findByText('Stopped, but not logged.')).toBeInTheDocument()
+  })
+
   it('shows the API error message in a toast and stays open', async () => {
     server.use(
       http.post('/api/tasks/:id/stop', () =>
