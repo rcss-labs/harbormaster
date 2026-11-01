@@ -1044,6 +1044,9 @@
       "time"
     ]
   },
+  "settings": {
+    "stopped_tasks_window_minutes": "number"
+  },
   "setup": {
     "needed": "boolean"
   },

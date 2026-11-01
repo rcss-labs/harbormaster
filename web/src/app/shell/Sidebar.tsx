@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
-import { useAccounts, useClusters, useTags, useTasks, useUsers } from '../../api/hooks'
+import { useClusters, useTasks } from '../../api/hooks'
 import { Brand } from '../../components/Brand'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
@@ -42,9 +42,6 @@ export function Sidebar() {
   const alerts = useAlerts(filters)
   const clusters = useClusters(filters)
   const running = useTasks({ ...filters, filter: 'running' })
-  const users = useUsers({ enabled: isAdmin })
-  const tags = useTags({ enabled: isAdmin })
-  const accounts = useAccounts({ enabled: isAdmin })
   if (!me) return null
 
   const dangerAlerts = alerts.data?.counts.danger ?? 0
@@ -71,10 +68,7 @@ export function Sidebar() {
         {isAdmin ? (
           <>
             <Section>Admin</Section>
-            <NavItem to="/admin/users" label="Users and permissions" count={users.data?.items.length} />
-            <NavItem to="/admin/tags" label="Tags" count={tags.data?.items.length} />
-            <NavItem to="/admin/accounts" label="AWS accounts" count={accounts.data?.items.length} />
-            <NavItem to="/admin/audit" label="Audit log" />
+            <NavItem to="/settings/general" label="Settings" alsoActiveFor={['/settings']} />
           </>
         ) : (
           <>

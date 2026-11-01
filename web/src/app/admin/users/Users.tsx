@@ -1,15 +1,12 @@
 import { useState } from 'react'
 import { usePermissions, useUsers } from '../../../api/hooks'
-import { AdminOnly } from '../../../components/AdminOnly'
 import { useAuth } from '../../auth/AuthProvider'
-import { useCrumbs } from '../../shell/crumbs'
 import { AddUserDialog } from './AddUserDialog'
 import { PermissionMatrix } from './PermissionMatrix'
 import { UsersTable } from './UsersTable'
 import styles from './users.module.css'
 
 export function Users() {
-  useCrumbs([['Users and permissions']])
   const { me } = useAuth()
   const isAdmin = me?.admin ?? false
   // Non-admins would get 403s, so the admin queries stay disabled for them.
@@ -17,13 +14,13 @@ export function Users() {
   const permissions = usePermissions({ enabled: isAdmin })
   const [adding, setAdding] = useState(false)
 
-  if (!me || !isAdmin) return <AdminOnly area="users" />
+  if (!me || !isAdmin) return null
 
   return (
     <>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>Users and permissions</h1>
+          <h2>Users and permissions</h2>
           <div className={styles.meta}>
             Global admins can do everything. Every other user gets permissions per tag. Sign-in is username and password.
           </div>

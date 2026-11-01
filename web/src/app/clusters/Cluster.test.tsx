@@ -74,7 +74,7 @@ describe('Cluster tag edits', () => {
     fireEvent.click(within(card).getByRole('button', { name: paymentsApi.tag.name }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Tag for payments-api')).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Staging' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'Staging' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save tag' }))
     await waitFor(() => expect(puts).toEqual([{ url: `/api/tag-assignments/services/${paymentsApi.id}`, body: { tag_id: 2 } }]))
   })

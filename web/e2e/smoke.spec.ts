@@ -26,7 +26,8 @@ test('admin walks the read-only product', async ({ page }) => {
   await page.getByRole('link', { name: /^Operations log/ }).click()
   await expect(page.getByText('has reached a steady state.').first()).toBeVisible()
 
-  await page.getByRole('link', { name: /Users and permissions/ }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click()
+  await page.getByRole('link', { name: 'Users & permissions' }).click()
   await expect(page.getByRole('row', { name: /^omer User V L O D E T/ })).toBeVisible()
   await page.getByRole('link', { name: /AWS accounts/ }).click()
   await expect(page.getByRole('main').getByText('homelab-admin').first()).toBeVisible()

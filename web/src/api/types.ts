@@ -680,3 +680,6 @@ export interface DesiredCountResponse {
   max: number
   auto_scaling: { min: number; max: number } | null
 }
+export interface SettingsDTO {
+  stopped_tasks_window_minutes: number
+}

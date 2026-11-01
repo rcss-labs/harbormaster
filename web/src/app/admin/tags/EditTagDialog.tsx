@@ -79,7 +79,7 @@ export function EditTagDialog({ kind, id, name, current, clusterName, clusterTag
       </div>
       <p className={styles.hint}>
         Global admins create tags on the{' '}
-        <Link className={styles.link} to="/admin/tags">
+        <Link className={styles.link} to="/settings/general">
           Tags
         </Link>{' '}
         page.

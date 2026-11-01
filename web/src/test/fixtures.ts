@@ -38,6 +38,7 @@ import type {
   TagsDTO,
   TargetHealthDTO,
   TaskDTO,
+  SettingsDTO,
   TasksListDTO,
   UsersDTO,
 } from '../api/types'
@@ -1107,3 +1108,6 @@ export const TASK_DEFINITION_EDITABLE: TaskDefinitionResponse = {
     ],
   },
 }
+
+// ---- Settings (Task 13) ----
+export const SETTINGS: SettingsDTO = { stopped_tasks_window_minutes: 10 }

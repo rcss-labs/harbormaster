@@ -105,6 +105,13 @@ describe('TasksTab', () => {
   })
 })
 
+describe('TasksTab hidden-stopped note', () => {
+  it('shows the hidden-tasks note', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    expect(await screen.findByText('Stopped tasks older than 10 min are hidden.')).toBeInTheDocument()
+  })
+})
+
 describe('TasksTab Terminal link', () => {
   const serviceTasks = () => ALL_TASKS.filter((task) => task.service?.id === SERVICE_PAYMENTS.id)
   const terminalHref = (taskId: string) => `/services/${SERVICE_PAYMENTS.id}/terminal?task=${encodeURIComponent(taskId)}`

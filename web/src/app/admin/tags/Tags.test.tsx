@@ -23,7 +23,8 @@ function assignmentsWithPaymentsTagged(tagId: number): TagAssignmentsDTO {
 
 describe('Tags', () => {
   it('Delete disabled for Dev', async () => {
-    renderApp('/admin/tags')
+    renderApp('/settings/general')
+    expect(await screen.findByRole('heading', { level: 2, name: 'Tags' })).toBeInTheDocument()
     const deleteButtons = await screen.findAllByRole('button', { name: 'Delete' })
     const devRow = deleteButtons[0].closest('tr') as HTMLElement
     expect(within(devRow).getByText('Dev')).toBeInTheDocument()
@@ -33,7 +34,7 @@ describe('Tags', () => {
   })
 
   it('Rename disabled for Dev, enabled for other tags (spec 6.9: Dev cannot be renamed)', async () => {
-    renderApp('/admin/tags')
+    renderApp('/settings/general')
     const renameButtons = await screen.findAllByRole('button', { name: 'Rename' })
     const devRow = renameButtons[0].closest('tr') as HTMLElement
     expect(within(devRow).getByText('Dev')).toBeInTheDocument()
@@ -52,7 +53,7 @@ describe('Tags filters', () => {
         return HttpResponse.json(ASSIGNMENTS)
       }),
     )
-    renderApp('/admin/tags?account=731022849906')
+    renderApp('/settings/general?account=731022849906')
     await screen.findByLabelText('Tag for web')
     expect(accounts).toContain('731022849906')
   })
@@ -67,7 +68,7 @@ describe('TagDialog', () => {
         return HttpResponse.json({}, { status: 201 })
       }),
     )
-    renderApp('/admin/tags')
+    renderApp('/settings/general')
     fireEvent.click(await screen.findByRole('button', { name: 'Create tag' }))
     const dialog = screen.getByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: '9lives' } })
@@ -90,7 +91,7 @@ describe('DeleteTagDialog', () => {
       users: ['dana', 'omer'],
     }
     server.use(http.get(`/api/tags/${STAGING_TAG_ID}/impact`, () => HttpResponse.json(impact)))
-    renderApp('/admin/tags')
+    renderApp('/settings/general')
     fireEvent.click((await screen.findAllByRole('button', { name: 'Delete' }))[1])
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Delete tag Staging?')).toBeInTheDocument()
@@ -110,7 +111,7 @@ describe('Assignments', () => {
         return new HttpResponse(null, { status: 204 })
       }),
     )
-    renderApp('/admin/tags')
+    renderApp('/settings/general')
     const select = (await screen.findByLabelText('Tag for payments-api')) as HTMLSelectElement
     const inherit = within(select).getByRole('option', { name: 'Inherit (Prod)' })
     expect(inherit).toHaveProperty('value', '')
@@ -132,7 +133,7 @@ describe('EditTagDialog', () => {
     fireEvent.click(await screen.findByRole('button', { name: SERVICE_PAYMENTS.tag.name }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Tag for payments-api')).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Staging' }))
+    fireEvent.click(await within(dialog).findByRole('radio', { name: 'Staging' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save tag' }))
     await waitFor(() => expect(bodies).toEqual([{ tag_id: STAGING_TAG_ID }]))
   })

@@ -19,8 +19,10 @@ describe('Shell', () => {
     renderApp('/')
     const adminNav = await nav()
     expect(within(adminNav).getByText('Admin')).toBeInTheDocument()
-    expect(within(adminNav).getByRole('link', { name: /Users and permissions/ })).toHaveAttribute('href', '/admin/users')
-    expect(within(adminNav).getByRole('link', { name: /Audit log/ })).toBeInTheDocument()
+    expect(within(adminNav).getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings/general')
+    for (const gone of ['Users and permissions', 'Tags', 'AWS accounts', 'Audit log']) {
+      expect(within(adminNav).queryByRole('link', { name: new RegExp(gone) })).not.toBeInTheDocument()
+    }
     expect(within(adminNav).queryByText('My access')).not.toBeInTheDocument()
   })
 
