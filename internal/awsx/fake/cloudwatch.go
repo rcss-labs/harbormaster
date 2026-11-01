@@ -153,6 +153,8 @@ func (c *cloudWatchClient) valuesFor(stat *cwtypes.MetricStat, stamps []time.Tim
 		point = c.ecsPoint(aws.ToString(m.MetricName), dims)
 	case "AWS/ApplicationELB":
 		point = c.elbPoint(aws.ToString(m.MetricName), aws.ToString(stat.Stat), dims, period)
+	case "AWS/EFS": // plan 05
+		point = c.efsPoint(aws.ToString(m.MetricName), dims, period)
 	}
 	values := make([]float64, len(stamps))
 	if point == nil {
