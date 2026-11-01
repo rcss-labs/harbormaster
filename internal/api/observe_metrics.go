@@ -342,6 +342,11 @@ func (s *Server) deploymentMarkers(ctx context.Context, key model.ServiceKey, si
 	if err != nil {
 		return nil, err
 	}
+	return markersOf(key, records, withService), nil
+}
+
+// markersOf turns a service's deployment records into chart markers, oldest first.
+func markersOf(key model.ServiceKey, records []store.DeploymentRecord, withService bool) []MarkerDTO {
 	markers := make([]MarkerDTO, 0, len(records))
 	for _, rec := range records {
 		marker := MarkerDTO{At: rec.StartedAt, Label: ":" + strconv.Itoa(rec.Revision), Kind: rec.Kind, Failed: rec.Outcome == "failed"}
@@ -354,7 +359,7 @@ func (s *Server) deploymentMarkers(ctx context.Context, key model.ServiceKey, si
 		markers = append(markers, marker)
 	}
 	sort.SliceStable(markers, func(i, j int) bool { return markers[i].At.Before(markers[j].At) })
-	return markers, nil
+	return markers
 }
 
 // ---- service metrics --------------------------------------------------------------------------
@@ -532,6 +537,12 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 	period := metrics.DefaultPeriod(span)
 	target := awsx.Target{AccountID: key.AccountID, Region: key.Region}
 
+	// One query for the whole cluster instead of one per service.
+	healthByService, err := s.Store.TargetHealthByService(ctx, store.TargetFilter{AccountID: key.AccountID, Region: key.Region}, key.Cluster)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	var queries, errQueries []metrics.Query
 	groupCounts := make([]int, len(services))
 	if insights != "disabled" {
@@ -542,12 +553,7 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 		if insights != "disabled" {
 			queries = append(queries, withPrefix(prefix, metrics.ServiceQueries(key.Cluster, svc.Key.Service, period), cpuMemOnly)...)
 		}
-		health, err := s.Store.TargetHealthForService(ctx, svc.Key)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		refs := metrics.ServiceTargetGroups(svc.Service, health)
+		refs := metrics.ServiceTargetGroups(svc.Service, healthByService[svc.Key])
 		groupCounts[i] = len(refs)
 		queries = append(queries, withPrefix(prefix, metrics.ALBQueries(refs, period), requestsAndLatency)...)
 		errQueries = append(errQueries, withPrefix(prefix, metrics.ALBQueries(refs, errorBucketPeriod), errorsOnly)...)
@@ -580,6 +586,11 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 	if since.IsZero() {
 		since = s.now().Add(-time.Duration(span))
 	}
+	deploymentsByService, err := s.Store.ListDeploymentsForCluster(ctx, key, since)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	out.Markers = []MarkerDTO{}
 	for i, svc := range services {
 		prefix := fmt.Sprintf("s%d_", i)
@@ -592,12 +603,7 @@ func (s *Server) getClusterMetrics(w http.ResponseWriter, r *http.Request) {
 			entry.ALB = albSummary(idx, errIdx, prefix, groupCounts[i], period)
 		}
 		out.Services[svc.Key.ID()] = entry
-		markers, err := s.deploymentMarkers(ctx, svc.Key, since, true)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		out.Markers = append(out.Markers, markers...)
+		out.Markers = append(out.Markers, markersOf(svc.Key, deploymentsByService[svc.Key], true)...)
 	}
 	sort.SliceStable(out.Markers, func(i, j int) bool { return out.Markers[i].At.Before(out.Markers[j].At) })
 	writeJSON(w, http.StatusOK, out)
