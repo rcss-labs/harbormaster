@@ -51,3 +51,11 @@ tf-check:
 # Real-AWS ECS Exec integration test. Export the HM_IT_* variables first (see README "Terminal").
 test-it-exec:
 	HM_IT_AWS=1 go test ./internal/execbridge/ -run TestIntegration -v
+
+# plan 06
+.PHONY: image check-image
+image:
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
+
+check-image:
+	tools/check-image.sh harbormaster:$(VERSION)
