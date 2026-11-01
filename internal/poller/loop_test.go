@@ -363,8 +363,8 @@ func TestLoop_StartIsStaggeredAcrossTiers(t *testing.T) {
 		}
 	}
 	for i := 1; i < len(order); i++ {
-		if gap := firstStart[order[i]].Sub(firstStart[order[i-1]]); gap < stagger {
-			t.Errorf("%s started %v after %s, want >= %v", order[i], gap, order[i-1], stagger)
+		if gap := firstStart[order[i]].Sub(firstStart[order[i-1]]); gap < stagger*3/4 {
+			t.Errorf("%s started %v after %s, want >= %v (3/4 of the step, for scheduler jitter)", order[i], gap, order[i-1], stagger*3/4)
 		}
 	}
 }

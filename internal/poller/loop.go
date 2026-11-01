@@ -138,13 +138,15 @@ func (l *Loop) Run(ctx context.Context) {
 			l.countsLoop(ctx, every)
 		}()
 	}
+	// One shared reference keeps the gaps between tiers at the step, whatever the goroutine scheduling.
+	startedAt := time.Now()
 	stagger := l.startDelays()
 	for i, d := range l.defs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if delay := stagger[d.tier.name]; delay > 0 {
-				timer := time.NewTimer(delay)
+			if wait := time.Until(startedAt.Add(stagger[d.tier.name])); wait > 0 {
+				timer := time.NewTimer(wait)
 				select {
 				case <-ctx.Done():
 					timer.Stop()
