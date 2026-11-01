@@ -17,6 +17,7 @@ const (
 	tierTargetHealth = "target_health"
 	tierScaling      = "scaling"
 	tierAlerts       = "alerts"
+	tierNetwork      = "network" // plan 05
 )
 
 // minTickInterval keeps a misconfigured zero interval from spinning.

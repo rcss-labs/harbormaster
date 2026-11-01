@@ -48,6 +48,8 @@ func TestLoad_Defaults(t *testing.T) {
 			Jitter:        500 * time.Millisecond,
 			TargetHealth:  15 * time.Second,
 			Scaling:       60 * time.Second,
+			Network:       5 * time.Minute,
+			Storage:       5 * time.Minute,
 		},
 		Retention: RetentionConfig{
 			StoppedTasks:      168 * time.Hour,
@@ -222,5 +224,28 @@ func TestLoad_RejectsMaxDesiredCountBelowOne(t *testing.T) {
 	}))
 	if err == nil || !strings.Contains(err.Error(), "HM_MAX_DESIRED_COUNT") {
 		t.Fatalf("err = %v, want one naming HM_MAX_DESIRED_COUNT", err)
+	}
+}
+
+func TestLoad_PollIntervalsDefault5m(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Poll.Network != 5*time.Minute || cfg.Poll.Storage != 5*time.Minute {
+		t.Fatalf("Poll.Network = %v, Poll.Storage = %v, want 5m each", cfg.Poll.Network, cfg.Poll.Storage)
+	}
+}
+
+func TestLoad_PollNetworkIntervalParsed(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_POLL_NETWORK": "90s"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Poll.Network != 90*time.Second {
+		t.Fatalf("Poll.Network = %v, want 90s", cfg.Poll.Network)
+	}
+	if _, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_POLL_STORAGE": "x"})); err == nil {
+		t.Fatal("bad HM_POLL_STORAGE accepted, want error")
 	}
 }

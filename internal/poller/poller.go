@@ -29,6 +29,7 @@ const alertsInterval = 5 * time.Second
 type Intervals struct {
 	Services, RunningTasks, FullTasks, StoppedTasks, Clusters, ServiceList time.Duration
 	TargetHealth, Scaling, Alerts                                          time.Duration
+	Network, Storage                                                       time.Duration // plan 05
 }
 
 // Config is the poller's runtime configuration.
@@ -52,6 +53,8 @@ func ConfigFrom(c config.Config) Config {
 			TargetHealth: c.Poll.TargetHealth,
 			Scaling:      c.Poll.Scaling,
 			Alerts:       alertsInterval,
+			Network:      c.Poll.Network, // plan 05
+			Storage:      c.Poll.Storage, // plan 05
 		},
 		CountsHistory: c.Poll.CountsHistory,
 		Jitter:        c.Poll.Jitter,
