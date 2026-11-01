@@ -87,7 +87,7 @@ func (s *Server) Handler() http.Handler {
 	var h http.Handler = mux
 	h = onlyAPI(s.Auth.Middleware, h)
 	h = withTagsMemo(h)
-	h = securityHeaders(h)
+	h = SecurityHeaders(h)
 	h = s.requestLog(h)
 	return s.recoverMiddleware(h)
 }

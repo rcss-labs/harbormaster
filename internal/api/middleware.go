@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
-	"strings"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 )
@@ -73,20 +72,6 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 		}
 		s.log().Info("request", "method", r.Method, "path", r.URL.Path, "status", status,
 			"duration_ms", s.now().Sub(start).Milliseconds(), "ip", s.clientIP(r))
-	})
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "same-origin")
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'")
-		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-			h.Set("Cache-Control", "no-store")
-		}
-		next.ServeHTTP(w, r)
 	})
 }
 
