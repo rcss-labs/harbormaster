@@ -10,3 +10,6 @@ web/test-results/
 web/test-results-failed/
 web/playwright-report/
 web/e2e/.auth/
+
+# IDE settings (local only)
+.idea/
