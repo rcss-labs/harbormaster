@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
@@ -16,6 +19,9 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/storage"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
+
+// storageMetricsConcurrency bounds how many account x region CloudWatch fetches run at once.
+const storageMetricsConcurrency = 6
 
 // metricsUnavailable is the only thing a client learns about a failed CloudWatch read.
 const metricsUnavailable = "CloudWatch metrics are unavailable right now."
@@ -205,22 +211,45 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 		out.Items = append(out.Items, item)
 	}
 
-	for target, positions := range byTarget {
-		ids := make([]string, len(positions))
-		for i, pos := range positions {
-			ids[i] = out.Items[pos].FileSystemID
+	// Targets are fetched concurrently (each makes three CloudWatch reads); every goroutine writes only the
+	// items of its own target, so the result order is the fixed item order whatever finishes first.
+	targets := make([]awsTarget, 0, len(byTarget))
+	for target := range byTarget {
+		targets = append(targets, target)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].accountID != targets[j].accountID {
+			return targets[i].accountID < targets[j].accountID
 		}
-		series, err := s.fetchEFSSeries(ctx, awsx.Target{AccountID: target.accountID, Region: target.region}, ids)
-		if err != nil {
-			s.log().Warn("storage metrics", "account", target.accountID, "region", target.region, "error", err)
-			out.MetricsError = metricsUnavailable
-			continue
-		}
-		for i, pos := range positions {
-			item := &out.Items[pos]
-			item.Size30d, item.Throughput24h = series[i].size, series[i].throughput
-			item.GrowthPct, item.ClientConnections = series[i].growth, series[i].connections
-		}
+		return targets[i].region < targets[j].region
+	})
+	var metricsFailed atomic.Bool
+	var group errgroup.Group
+	group.SetLimit(storageMetricsConcurrency)
+	for _, target := range targets {
+		positions := byTarget[target]
+		group.Go(func() error {
+			ids := make([]string, len(positions))
+			for i, pos := range positions {
+				ids[i] = out.Items[pos].FileSystemID
+			}
+			series, err := s.fetchEFSSeries(ctx, awsx.Target{AccountID: target.accountID, Region: target.region}, ids)
+			if err != nil {
+				s.log().Warn("storage metrics", "account", target.accountID, "region", target.region, "error", err)
+				metricsFailed.Store(true)
+				return nil // one target's failure must not cancel the others
+			}
+			for i, pos := range positions {
+				item := &out.Items[pos]
+				item.Size30d, item.Throughput24h = series[i].size, series[i].throughput
+				item.GrowthPct, item.ClientConnections = series[i].growth, series[i].connections
+			}
+			return nil
+		})
+	}
+	_ = group.Wait() // the goroutines never return an error
+	if metricsFailed.Load() {
+		out.MetricsError = metricsUnavailable
 	}
 	writeJSON(w, http.StatusOK, out)
 }
