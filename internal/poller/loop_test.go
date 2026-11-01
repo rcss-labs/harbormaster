@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -315,5 +316,55 @@ func TestLoop_ReportsTelemetry(t *testing.T) {
 	}
 	if len(reg.Snapshot().LoopInterval) == 0 {
 		t.Error("no loop interval recorded")
+	}
+}
+
+// plan 06: a fresh loop must not start the task tiers together (ECS cluster-resource-read bucket is 100 tokens).
+func TestLoop_StartIsStaggeredAcrossTiers(t *testing.T) {
+	h := mockupHarness(t)
+	stagger := 80 * time.Millisecond
+	h.loop.p.cfg.StartStagger = stagger
+	hour := time.Hour
+	h.loop.p.cfg.Intervals = Intervals{Services: hour, RunningTasks: hour, FullTasks: hour, StoppedTasks: hour, Clusters: hour, ServiceList: hour}
+	for _, d := range h.loop.defs {
+		d.tier.cur, d.tier.base = hour, hour
+	}
+
+	var mu sync.Mutex
+	firstStart := map[string]time.Time{}
+	for i, d := range h.loop.defs {
+		switch d.tier.name {
+		case tierRunningTasks, tierStoppedTasks, tierFullTasks:
+			name := d.tier.name
+			h.loop.defs[i].run = func(context.Context) error {
+				mu.Lock()
+				defer mu.Unlock()
+				if _, seen := firstStart[name]; !seen {
+					firstStart[name] = time.Now()
+				}
+				return nil
+			}
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.loop.Run(ctx); close(done) }()
+	time.Sleep(6 * stagger)
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	order := []string{tierRunningTasks, tierStoppedTasks, tierFullTasks}
+	for _, name := range order {
+		if firstStart[name].IsZero() {
+			t.Fatalf("tier %s never ran its first cycle", name)
+		}
+	}
+	for i := 1; i < len(order); i++ {
+		if gap := firstStart[order[i]].Sub(firstStart[order[i-1]]); gap < stagger {
+			t.Errorf("%s started %v after %s, want >= %v", order[i], gap, order[i-1], stagger)
+		}
 	}
 }

@@ -18,8 +18,10 @@ import (
 const LockKey int64 = 0x484D504F4C4C
 
 const (
-	defaultRetryInterval   = 5 * time.Second
-	defaultRetentionEvery  = time.Hour
+	defaultRetryInterval  = 5 * time.Second
+	defaultRetentionEvery = time.Hour
+	// defaultStartStagger spaces the task tiers' first cycles: 1 s refills 20 tokens of ECS's cluster-resource-read bucket.
+	defaultStartStagger    = time.Second
 	defaultAccountsRefresh = 30 * time.Second
 )
 
@@ -40,6 +42,9 @@ type Config struct {
 	Retention                                              store.Retention
 	// Telemetry receives loop timings, leadership and write counts (plan 06); nil means telemetry.Default.
 	Telemetry *telemetry.Registry
+	// StartStagger spaces the first cycles of the task tiers (runningTasks, stoppedTasks, fullTasks)
+	// so a fresh loop does not drain ECS's cluster-resource-read bucket; zero disables staggering.
+	StartStagger time.Duration
 }
 
 // ConfigFrom derives the poller configuration from the server configuration.
@@ -68,6 +73,7 @@ func ConfigFrom(c config.Config) Config {
 			AuditLog:          c.Retention.AuditLog,
 			OrphanTags:        c.Retention.OrphanTags,
 		},
+		StartStagger:    defaultStartStagger,
 		RetentionEvery:  defaultRetentionEvery,
 		AccountsRefresh: defaultAccountsRefresh,
 	}

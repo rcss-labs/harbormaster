@@ -138,14 +138,31 @@ func (l *Loop) Run(ctx context.Context) {
 			l.countsLoop(ctx, every)
 		}()
 	}
+	stagger := l.startDelays()
 	for i, d := range l.defs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if delay := stagger[d.tier.name]; delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
 			l.tickTier(ctx, d, i >= 2)
 		}()
 	}
 	wg.Wait()
+}
+
+// startDelays staggers the first cycles of the task tiers, which all hit ECS's cluster-resource-read
+// bucket (100 tokens, 20/s refill): runningTasks starts at once, stoppedTasks one step later, fullTasks two.
+func (l *Loop) startDelays() map[string]time.Duration {
+	step := l.p.cfg.StartStagger
+	return map[string]time.Duration{tierStoppedTasks: step, tierFullTasks: 2 * step}
 }
 
 // countsLoop samples service counts into the history every interval until ctx ends.
