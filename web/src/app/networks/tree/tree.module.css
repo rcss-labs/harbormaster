@@ -1,0 +1,46 @@
+/* Ported from docs/design/mockup/index.html .tree rules. Connector lines are pseudo-elements only. */
+.tree { overflow-x: auto; padding: 6px 2px 10px; }
+.tree ul { list-style: none; margin: 0; padding: 0 0 0 30px; position: relative; display: flex; flex-direction: column; gap: 8px; }
+.tree > ul { padding-left: 0; }
+.tree li { position: relative; display: flex; align-items: center; }
+.tree li > ul::before { content: ""; position: absolute; left: 0; top: 50%; width: 15px; border-top: 1px solid var(--border-strong); }
+.tree ul ul > li::before { content: ""; position: absolute; left: -15px; top: 50%; width: 15px; border-top: 1px solid var(--border-strong); }
+.tree ul ul > li::after { content: ""; position: absolute; left: -15px; top: -4px; bottom: -4px; border-left: 1px solid var(--border-strong); }
+.tree ul ul > li:first-child::after { top: 50%; }
+.tree ul ul > li:last-child::after { bottom: 50%; }
+.tree ul ul > li:only-child::after { display: none; }
+
+/* The focus ring goes on the node box, not on the whole li (which contains the subtree). */
+.item { outline: none; }
+.item:focus-visible > .node { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.node { flex: none; display: grid; gap: 3px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); min-width: 150px; font-size: 12px; box-shadow: var(--shadow); color: inherit; text-decoration: none; }
+.nh { display: flex; gap: 6px; align-items: center; font-weight: 600; white-space: nowrap; }
+.ns { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.mono { font-family: var(--mono); }
+.kind { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+.tog { border: 1px solid var(--border-strong); background: var(--raised); border-radius: 4px; width: 18px; height: 18px; display: inline-grid; place-items: center; cursor: pointer; font-size: 11px; line-height: 1; padding: 0; margin-left: auto; color: inherit; }
+@media (prefers-reduced-motion: no-preference) {
+  .tog { transition: background-color 0.12s ease; }
+}
+.tog:hover { background: var(--hover); }
+
+.vpc { border: 2px solid var(--accent); background: var(--accent-soft); }
+.az { background: var(--raised); }
+.nosubnet { background: var(--raised); border-style: dashed; }
+.subnet.public { border-left: 4px solid var(--success); }
+.subnet.private { border-left: 4px solid var(--accent); }
+.cluster { border-left: 4px solid var(--series-3); }
+.service { border-left: 4px solid var(--series-2); }
+.standalone { border-left: 4px solid var(--series-3); border-style: dashed; }
+.service a:hover, .cluster a:hover { color: var(--accent); }
+
+.task { min-width: 0; font-family: var(--mono); font-size: 11px; padding: 4px 8px; display: flex; gap: 8px; cursor: pointer; box-shadow: none; }
+.task:hover { border-color: var(--accent); }
+.task .ip, .task .group { color: var(--muted); }
+.task.unhealthy { border-color: var(--warning); background: var(--warning-soft); }
+
+.none { min-width: 0; color: var(--muted); font-style: italic; border-style: dashed; box-shadow: none; }
+
+.ipbar { height: 4px; border-radius: 2px; background: var(--muted-soft); overflow: hidden; margin-top: 2px; }
+.ipbar span { display: block; height: 100%; background: var(--accent); }
