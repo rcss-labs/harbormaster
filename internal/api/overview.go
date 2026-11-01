@@ -52,7 +52,16 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		for _, svc := range view.servicesByCluster[row.Key] {
 			per.Running += svc.Running
 			per.Desired += svc.Desired
+			for _, t := range view.tasksByService[svc.Key] {
+				if t.HealthStatus == "UNHEALTHY" {
+					per.Unhealthy++
+				}
+				if isRollingOut(svc.Service, t) {
+					per.RollingOut++
+				}
+			}
 		}
+		per.Missing = max(per.Desired-per.Running, 0)
 		out.PerCluster = append(out.PerCluster, per)
 	}
 	out.Accounts, out.Regions = len(accounts), len(regions)

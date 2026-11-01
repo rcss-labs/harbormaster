@@ -557,8 +557,11 @@
       {
         "desired": "number",
         "id": "string",
+        "missing": "number",
         "name": "string",
-        "running": "number"
+        "rolling_out": "number",
+        "running": "number",
+        "unhealthy": "number"
       }
     ],
     "polled_at": "time",
