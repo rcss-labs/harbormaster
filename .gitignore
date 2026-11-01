@@ -9,3 +9,4 @@ internal/web/dist/*
 web/test-results/
 web/test-results-failed/
 web/playwright-report/
+web/e2e/.auth/

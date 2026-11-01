@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures/test'
 import { login, serviceId } from './helpers'
 
 // Ids come from the fake estate (internal/awsx/fake/seed.go): both clusters live in the homelab account, us-east-1.

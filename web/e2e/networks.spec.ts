@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { asUser, expect, test, type Page } from './fixtures/test'
 import { login, saveScreenshot, serviceId } from './helpers'
 
 const HOMELAB_ACCOUNT_ID = '482109375512'
@@ -82,4 +82,66 @@ test('service networking card links to the tree', async ({ page }) => {
   await expect(page).toHaveURL(new RegExp(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/vpc-`))
   await expect(page.getByRole('heading', { level: 1, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
   await expect(page.getByRole('tree', { name: 'Network tree' })).toBeVisible({ timeout: POLL_TIMEOUT })
+})
+
+// plan 06 (task 19): the account and VPC lists, the tree's structure and keyboard model. The tests above already cover the
+// pavel drill-down, Collapse to services / Expand all, omer's tree without core-services and the arrow-key focus move.
+const MAIN_VPC = 'vpc-0a41c7e29b3d'
+
+test.describe('networks as pavel', () => {
+  test.use(asUser('pavel'))
+
+  test('lists the regions of both accounts', async ({ page }) => {
+    await page.goto('/networks')
+    const homelab = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: /homelab-admin/ }) })
+    await expect(homelab.getByRole('link', { name: /us-east-1/ })).toBeVisible({ timeout: POLL_TIMEOUT })
+    await expect(homelab.getByRole('link', { name: /eu-west-1/ })).toBeVisible()
+    await expect(homelab.getByRole('link', { name: /eu-central-1/ })).toBeVisible()
+    const staging = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: /staging-example/ }) })
+    await expect(staging.getByRole('link', { name: /us-east-1/ })).toBeVisible()
+  })
+
+  test('the region page lists the active VPCs and hides the one without tasks', async ({ page }) => {
+    await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1`)
+    await expect(page.getByRole('link', { name: /homelab-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
+    await expect(page.getByRole('link', { name: /shared-services/ })).toBeVisible()
+    await expect(page.getByRole('link', { name: /legacy-default/ })).toHaveCount(0)
+  })
+
+  test('the homelab-main tree shows the AZ, subnet, cluster, service and task nodes and the NAT gateway', async ({ page }) => {
+    await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/${MAIN_VPC}`)
+    await expect(page.getByRole('heading', { level: 1, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
+    await expect(page.getByText('NAT gateway')).toBeVisible()
+
+    const tree = page.getByRole('tree', { name: 'Network tree' })
+    await expect(tree.getByRole('treeitem', { name: 'Availability zone us-east-1a' })).toBeVisible()
+    await expect(tree.getByText('subnet-03f1a9c2')).toBeVisible()
+    await expect(tree.getByRole('treeitem', { name: 'Cluster core-services' }).first()).toBeVisible()
+    await expect(tree.getByRole('treeitem', { name: 'Service payments-api' }).first()).toBeVisible()
+    await expect(tree.getByTitle(/^Task /).first()).toBeVisible()
+  })
+})
+
+test.describe('network tree keyboard', () => {
+  test.use(asUser('pavel'))
+
+  test('arrow keys walk VPC, zone and subnet; Enter on a service opens its page', async ({ page }) => {
+    await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/${MAIN_VPC}`)
+    const tree = page.getByRole('tree', { name: 'Network tree' })
+    await expect(tree).toBeVisible({ timeout: POLL_TIMEOUT })
+
+    const vpc = tree.getByRole('treeitem', { name: /^VPC/ })
+    await vpc.focus()
+    await page.keyboard.press('ArrowDown')
+    const zone = tree.getByRole('treeitem', { name: /^Availability zone/ }).first()
+    await expect(zone).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(tree.getByRole('treeitem', { name: /subnet/i }).first()).toBeFocused()
+    await page.keyboard.press('ArrowUp')
+    await expect(zone).toBeFocused()
+
+    await tree.getByRole('treeitem', { name: 'Service payments-api' }).first().focus()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(new RegExp(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}/overview$`))
+  })
 })

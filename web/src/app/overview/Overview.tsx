@@ -13,7 +13,7 @@ import { Donut } from '../../charts/Donut'
 import { HBars } from '../../charts/HBars'
 import { Legend } from '../../charts/Legend'
 import { Sparkline } from '../../charts/Sparkline'
-import { dayLabel } from '../../charts/format'
+import { bucketDayLabel } from '../../charts/format'
 import { AverageUseTile, CpuByClusterCard, MemoryByClusterCard } from './ClusterUsagePanels'
 import { NeedsAttention } from './NeedsAttention'
 import { useCrumbs } from '../shell/crumbs'
@@ -79,7 +79,7 @@ export function Overview() {
       { v: day.restart, color: RESTART_COLOR },
       { v: day.failed, color: FAILED_COLOR },
     ],
-    title: `${dayLabel(Date.parse(`${day.day}T00:00:00`))}: ${day.deploy} deploys, ${day.restart} restarts, ${day.failed} failed`,
+    title: `${bucketDayLabel(day.day)}: ${day.deploy} deploys, ${day.restart} restarts, ${day.failed} failed`,
   }))
   const firstDay = data.deployments_per_day[0]
 
@@ -161,7 +161,7 @@ export function Overview() {
           <BarChart
             cols={deployColumns}
             height={110}
-            xLabels={firstDay ? [[0, dayLabel(Date.parse(`${firstDay.day}T00:00:00`))], [13, 'today']] : [[13, 'today']]}
+            xLabels={firstDay ? [[0, bucketDayLabel(firstDay.day)], [13, 'today']] : [[13, 'today']]}
           />
         </Card>
       </div>

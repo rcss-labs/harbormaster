@@ -19,3 +19,6 @@ export const dayLabel = (ts: number): string => new Date(ts).toLocaleDateString(
 
 export const XL24 = ['24 h ago', '18 h', '12 h', '6 h', 'now']
 export const XL72 = ['72 h ago', '48 h', '24 h', 'now']
+
+/** Short date for a bucket day from the API, which is a bare date or an RFC 3339 midnight ("2026-10-31T00:00:00Z"). */
+export const bucketDayLabel = (day: string): string => dayLabel(Date.parse(`${day.slice(0, 10)}T00:00:00`))

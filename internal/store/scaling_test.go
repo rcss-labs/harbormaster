@@ -89,3 +89,36 @@ func TestScaling_Range(t *testing.T) {
 		t.Errorf("Range never polled = ok %v, err %v; want ok false, err nil", ok, err)
 	}
 }
+
+// plan 06: re-storing identical scaling state every 60 s must not rewrite 6000 rows on a static estate.
+func TestScaling_UnchangedRowsAreNotRewritten(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "482109375512", Region: "eu-west-1", Cluster: "prod"}, Service: "worker"}
+	row := model.Scaling{Key: key, HasTarget: true, Min: 2, Max: 6, PolledAt: time.Now()}
+	version := func() string {
+		var xmin string
+		if err := s.Pool.QueryRow(ctx, `select xmin::text from scaling`).Scan(&xmin); err != nil {
+			t.Fatal(err)
+		}
+		return xmin
+	}
+	if err := s.UpsertScaling(ctx, []model.Scaling{row}); err != nil {
+		t.Fatal(err)
+	}
+	first := version()
+	row.PolledAt = row.PolledAt.Add(time.Minute)
+	if err := s.UpsertScaling(ctx, []model.Scaling{row}); err != nil {
+		t.Fatal(err)
+	}
+	if got := version(); got != first {
+		t.Fatalf("unchanged scaling row was rewritten (xmin %s -> %s)", first, got)
+	}
+	row.Max = 8
+	if err := s.UpsertScaling(ctx, []model.Scaling{row}); err != nil {
+		t.Fatal(err)
+	}
+	if got := version(); got == first {
+		t.Fatal("changed scaling row was not written")
+	}
+}

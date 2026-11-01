@@ -22,11 +22,12 @@ var _ awsx.EFSAPI = (*EFS)(nil)
 
 const efsPageSize = 2
 
-func (c *EFS) begin(op string) error {
-	if err := c.f.beginThrottled(op, &c.f.ThrottleEFS); err != nil {
-		return err
+func (c *EFS) begin(op string) (func(), error) {
+	done, err := c.f.beginThrottled(c.target, "efs", op, &c.f.ThrottleEFS)
+	if err != nil {
+		return done, err
 	}
-	return c.f.takeFailure(op)
+	return done, c.f.takeFailure(op)
 }
 
 func (c *EFS) inScope(account, region string) bool {
@@ -52,7 +53,9 @@ func efsPage[T any](items []T, marker *string) (page []T, next *string) {
 func optionalMatch(want *string, got string) bool { return want == nil || *want == got }
 
 func (c *EFS) DescribeFileSystems(_ context.Context, in *efs.DescribeFileSystemsInput, _ ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error) {
-	if err := c.begin("DescribeFileSystems"); err != nil {
+	done, err := c.begin("DescribeFileSystems")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -69,7 +72,9 @@ func (c *EFS) DescribeFileSystems(_ context.Context, in *efs.DescribeFileSystems
 }
 
 func (c *EFS) DescribeAccessPoints(_ context.Context, in *efs.DescribeAccessPointsInput, _ ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error) {
-	if err := c.begin("DescribeAccessPoints"); err != nil {
+	done, err := c.begin("DescribeAccessPoints")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -87,7 +92,9 @@ func (c *EFS) DescribeAccessPoints(_ context.Context, in *efs.DescribeAccessPoin
 }
 
 func (c *EFS) DescribeMountTargets(_ context.Context, in *efs.DescribeMountTargetsInput, _ ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error) {
-	if err := c.begin("DescribeMountTargets"); err != nil {
+	done, err := c.begin("DescribeMountTargets")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

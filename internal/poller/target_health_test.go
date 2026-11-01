@@ -21,6 +21,7 @@ type observeHarness struct {
 	fake   *fake.Fake
 	estate *fake.Estate
 	target awsx.Target
+	alerts *AlertsLoop // lazily created by alertsLoop
 }
 
 func newObserveHarness(t *testing.T, target awsx.Target) *observeHarness {

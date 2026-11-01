@@ -26,7 +26,9 @@ const (
 )
 
 func (c *ecsClient) RegisterTaskDefinition(_ context.Context, in *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
-	if err := c.f.begin("RegisterTaskDefinition"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "RegisterTaskDefinition")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	family := aws.ToString(in.Family)
@@ -74,7 +76,9 @@ func (c *ecsClient) RegisterTaskDefinition(_ context.Context, in *ecs.RegisterTa
 // ListTaskDefinitions matches AWS: family-prefix filter, ACTIVE unless a status
 // is given, grouped by family then revision, descending when asked.
 func (c *ecsClient) ListTaskDefinitions(_ context.Context, in *ecs.ListTaskDefinitionsInput, _ ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error) {
-	if err := c.f.begin("ListTaskDefinitions"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "ListTaskDefinitions")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -116,7 +120,9 @@ func (c *ecsClient) ListTaskDefinitions(_ context.Context, in *ecs.ListTaskDefin
 
 // ListTagsForResource answers for task definition ARNs in this target.
 func (c *ecsClient) ListTagsForResource(_ context.Context, in *ecs.ListTagsForResourceInput, _ ...func(*ecs.Options)) (*ecs.ListTagsForResourceOutput, error) {
-	if err := c.f.begin("ListTagsForResource"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "ListTagsForResource")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -135,7 +141,9 @@ func (c *ecsClient) ListTagsForResource(_ context.Context, in *ecs.ListTagsForRe
 // StopTask marks a running task STOPPED and records a service event for it.
 // A task that is already stopped is returned unchanged.
 func (c *ecsClient) StopTask(_ context.Context, in *ecs.StopTaskInput, _ ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
-	if err := c.f.begin("StopTask"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "StopTask")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -217,7 +225,9 @@ var _ awsx.ECRAPI = (*ecrClient)(nil)
 // DescribeImages returns one image per seeded tag of the repository, newest
 // first. A repository is one that a service in this target pulls from.
 func (c *ecrClient) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
-	if err := c.f.begin("DescribeImages"); err != nil {
+	done, err := c.f.begin(c.target, "ecr", "DescribeImages")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

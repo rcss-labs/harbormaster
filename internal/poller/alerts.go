@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -20,6 +21,17 @@ type AlertsLoop struct {
 	Store *store.Store
 	Every time.Duration
 	Now   func() time.Time
+
+	// consecutive counts polls in the current status per service. It lives in memory so an unchanged status
+	// writes nothing; the stored run keeps only the status and when it began. After a restart or failover the
+	// count starts again, which delays the degraded alert by a few polls at most.
+	mu          sync.Mutex
+	consecutive map[model.ServiceKey]consecutivePolls
+}
+
+type consecutivePolls struct {
+	status model.Status
+	polls  int
 }
 
 func (l *AlertsLoop) Name() string            { return tierAlerts }
@@ -62,7 +74,10 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 
 	now := observeNow(l.Now)
 	var alerts []model.Alert
-	updated := make([]store.StatusRun, 0, len(services))
+	var changed []store.StatusRun // only new or changed runs are written
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	counts := make(map[model.ServiceKey]consecutivePolls, len(services))
 	for _, row := range services {
 		svc := row.Service
 		tasks := tasksByService[svc.Key]
@@ -73,15 +88,18 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 			}
 		}
 		current := status.Service(status.Inputs{Service: svc, RunningTasks: running, TargetUnhealthy: unhealthy[svc.Key]})
-		run := store.StatusRun{Key: svc.Key, Status: current, Since: now, Polls: 1}
-		if previous, ok := runs[svc.Key]; ok && previous.Status == current {
-			run.Since, run.Polls = previous.Since, previous.Polls+1
+		polls := 1
+		if seen, ok := l.consecutive[svc.Key]; ok && seen.status == current {
+			polls = seen.polls + 1
 		}
-		updated = append(updated, run)
+		counts[svc.Key] = consecutivePolls{status: current, polls: polls}
+		if previous, ok := runs[svc.Key]; !ok || previous.Status != current {
+			changed = append(changed, store.StatusRun{Key: svc.Key, Status: current, Since: now, Polls: 1})
+		}
 
 		degradedPolls := 0
 		if current == model.StatusDegraded {
-			degradedPolls = run.Polls
+			degradedPolls = polls
 		}
 		alerts = append(alerts, status.ServiceAlerts(status.AlertInput{
 			Service: svc, Deployments: svc.Deployments, Tasks: tasks, Events: eventsByService[svc.Key],
@@ -95,7 +113,11 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 	}
 	alerts = append(alerts, accountAlerts...)
 
-	return l.Store.ReplaceAlertsAndStatusRuns(ctx, t, alerts, updated)
+	if err := l.Store.ReplaceAlertsAndStatusRuns(ctx, t, alerts, changed); err != nil {
+		return err
+	}
+	l.consecutive = counts
+	return nil
 }
 
 // accountAlerts derives account_unreachable alerts from the target's poll loops.

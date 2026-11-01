@@ -83,7 +83,9 @@ func (c *ecsClient) inScope(accountID, region string) bool {
 }
 
 func (c *ecsClient) ListClusters(_ context.Context, in *ecs.ListClustersInput, _ ...func(*ecs.Options)) (*ecs.ListClustersOutput, error) {
-	if err := c.f.begin("ListClusters"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "ListClusters")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -104,7 +106,9 @@ func (c *ecsClient) ListClusters(_ context.Context, in *ecs.ListClustersInput, _
 
 // DescribeClusters always returns statistics and settings, whatever Include says.
 func (c *ecsClient) DescribeClusters(_ context.Context, in *ecs.DescribeClustersInput, _ ...func(*ecs.Options)) (*ecs.DescribeClustersOutput, error) {
-	if err := c.f.begin("DescribeClusters"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "DescribeClusters")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -164,7 +168,9 @@ func (c *ecsClient) withStatistics(cl Cluster) ecstypes.Cluster {
 }
 
 func (c *ecsClient) ListServices(_ context.Context, in *ecs.ListServicesInput, _ ...func(*ecs.Options)) (*ecs.ListServicesOutput, error) {
-	if err := c.f.begin("ListServices"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "ListServices")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -188,7 +194,9 @@ func (c *ecsClient) ListServices(_ context.Context, in *ecs.ListServicesInput, _
 }
 
 func (c *ecsClient) DescribeServices(_ context.Context, in *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
-	if err := c.f.begin("DescribeServices"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "DescribeServices")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	if len(in.Services) > describeServicesLimit {
@@ -228,7 +236,9 @@ func (c *ecsClient) DescribeServices(_ context.Context, in *ecs.DescribeServices
 
 // ListTasks filters by DesiredStatus (default RUNNING), ServiceName and Family.
 func (c *ecsClient) ListTasks(_ context.Context, in *ecs.ListTasksInput, _ ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
-	if err := c.f.begin("ListTasks"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "ListTasks")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -272,7 +282,9 @@ func familyOf(taskDefinitionARN string) string {
 }
 
 func (c *ecsClient) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
-	if err := c.f.begin("DescribeTasks"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "DescribeTasks")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	if len(in.Tasks) > describeTasksLimit {
@@ -309,7 +321,9 @@ func (c *ecsClient) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput,
 
 // DescribeTaskDefinition accepts an ARN, "family:revision" or a bare family (latest).
 func (c *ecsClient) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error) {
-	if err := c.f.begin("DescribeTaskDefinition"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "DescribeTaskDefinition")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

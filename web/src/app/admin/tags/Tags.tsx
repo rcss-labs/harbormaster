@@ -111,7 +111,13 @@ function TagsTable({ tags, onRename, onDelete }: TagsTableProps) {
                 )}
               </td>
               <td className={tableClass.num}>
-                <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => onRename(tag)}>
+                <button
+                  type="button"
+                  className={`${styles.btn} ${styles.sm}`}
+                  disabled={tag.builtin}
+                  title={tag.builtin ? 'Dev is the default tag' : undefined}
+                  onClick={() => onRename(tag)}
+                >
                   Rename
                 </button>{' '}
                 <button

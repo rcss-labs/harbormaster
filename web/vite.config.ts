@@ -10,6 +10,8 @@ export default defineConfig({
   build: {
     outDir: '../internal/web/dist',
     emptyOutDir: true,
+    // The CSP (font-src 'self') blocks data: fonts, so woff files must be emitted as files, never inlined.
+    assetsInlineLimit: (filePath) => (/\.woff2?$/.test(filePath) ? false : undefined),
   },
   test: {
     environment: 'jsdom',

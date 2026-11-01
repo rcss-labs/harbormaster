@@ -12,8 +12,12 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
+// alertsLoop returns the harness's one AlertsLoop, so its in-memory poll counts persist across runs like the real tier's.
 func (h *observeHarness) alertsLoop() *AlertsLoop {
-	return &AlertsLoop{Store: h.store, Every: 5 * time.Second, Now: func() time.Time { return loopNow }}
+	if h.alerts == nil {
+		h.alerts = &AlertsLoop{Store: h.store, Every: 5 * time.Second, Now: func() time.Time { return loopNow }}
+	}
+	return h.alerts
 }
 
 func (h *observeHarness) runAlerts(t *testing.T) {
@@ -26,6 +30,7 @@ func (h *observeHarness) runAlerts(t *testing.T) {
 // resetAlertState forgets what PollOnce's own alerts pass recorded, so a test counts runs from zero.
 func (h *observeHarness) resetAlertState(t *testing.T) {
 	t.Helper()
+	h.alerts = nil
 	for _, table := range []string{"service_status_runs", "alerts"} {
 		if _, err := h.store.Pool.Exec(context.Background(), `delete from `+table); err != nil {
 			t.Fatal(err)
@@ -54,6 +59,44 @@ func alertKinds(alerts []model.Alert) map[string]model.Alert {
 		kinds[alert.Kind] = alert
 	}
 	return kinds
+}
+
+// statusRunVersions returns each status run's row version (xmin), which changes whenever the row is written.
+func (h *observeHarness) statusRunVersions(t *testing.T) map[string]string {
+	t.Helper()
+	rows, err := h.store.Pool.Query(context.Background(),
+		`select cluster_name || '/' || service_name, xmin::text from service_status_runs`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	versions := map[string]string{}
+	for rows.Next() {
+		var name, xmin string
+		if err := rows.Scan(&name, &xmin); err != nil {
+			t.Fatal(err)
+		}
+		versions[name] = xmin
+	}
+	return versions
+}
+
+// A static estate must not rewrite one status-run row per service every cycle (plan 06 soak: 60 000 writes/min).
+func TestAlertsLoop_UnchangedStatusWritesNoStatusRuns(t *testing.T) {
+	h := newObserveHarness(t, loopTarget)
+	h.runAlerts(t)
+	before := h.statusRunVersions(t)
+	if len(before) == 0 {
+		t.Fatal("first alerts run stored no status runs")
+	}
+	h.runAlerts(t)
+	h.runAlerts(t)
+	after := h.statusRunVersions(t)
+	for name, version := range before {
+		if after[name] != version {
+			t.Errorf("status run %s was rewritten although its status did not change", name)
+		}
+	}
 }
 
 func TestAlertsLoop_WritesFailingAndRestartLoop(t *testing.T) {
