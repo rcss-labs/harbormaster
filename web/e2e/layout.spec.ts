@@ -54,7 +54,8 @@ test('narrow viewport wraps the tiles without horizontal overflow', async ({ pag
   await page.goto('/')
   const main = page.getByRole('main')
   await expect(main.getByText('Tasks running', { exact: true })).toBeVisible()
-  const overflow = await page.evaluate(() => document.scrollingElement!.scrollWidth - window.innerWidth)
+  // <main> is the scroll container (overflow: auto), so overflow shows up on it, never on the document.
+  const overflow = await main.evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 
   const grid = main.getByText('Clusters', { exact: true }).locator('../..')

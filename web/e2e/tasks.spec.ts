@@ -10,11 +10,15 @@ test.describe('tasks as pavel', () => {
     const stoppedResizer = page.getByRole('row').filter({ hasText: 'image-resizer' }).filter({ hasText: 'Stopped (exit 137)' })
     await expect(stoppedResizer.first()).toContainText('OutOfMemoryError')
     await expect.poll(() => stoppedResizer.count()).toBeGreaterThanOrEqual(1)
-    // Only the 4-minute stop is inside the default 10-minute window; the 16 to 64 minute stops are hidden.
-    // One auto-retrying check over a snapshot: rows can drop out of the window mid-check. The 4-minute stop ages out
-    // about 6 minutes after seeding, so the observe phase must run within roughly 6 minutes of the server starting.
+    // The 16 to 64 minute seeded stops are outside the default 10-minute window. Check the API's stopped_at instead of
+    // the rendered "N min ago" text: that text rounds, so a stop just inside the window can already read "10 min ago".
+    const tenMinutesAndSlack = 10 * 60_000 + 30_000
     await expect
-      .poll(async () => (await stoppedResizer.allTextContents()).every((text) => /\b[0-9] min ago|just now|\d+s ago/.test(text)))
+      .poll(async () => {
+        const response = await page.request.get('/api/tasks?filter=stopped&limit=500')
+        const { items } = (await response.json()) as { items: { stopped_at: string | null }[] }
+        return items.length > 0 && items.every((task) => task.stopped_at !== null && Date.now() - Date.parse(task.stopped_at) <= tenMinutesAndSlack)
+      })
       .toBe(true)
     await expect(page.getByText('Stopped tasks older than 10 min are hidden.')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Change', exact: true })).toBeVisible()
