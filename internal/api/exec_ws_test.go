@@ -589,6 +589,56 @@ func TestExecWS_IdleTimeout_4408(t *testing.T) {
 	}
 }
 
+// A browser that stops answering pings (sleeping laptop, dropped NAT flow) must not hold a session
+// and a per-user slot until the idle timeout.
+func TestExecWS_DeadBrowserPeer_SessionTerminatedAndSlotFreed(t *testing.T) {
+	r := newExecRig(t, func(s *Server) {
+		s.Cfg.ExecMaxSessionsPerUser = 1
+		s.ExecPingInterval = 30 * time.Millisecond
+		s.ExecPingTimeout = 100 * time.Millisecond
+	})
+	id := r.paymentsTask(t)
+	c := login(t, r.srv, "pavel", testPassword)
+	w := r.open(t, c, id, "payments-api", "/bin/sh")
+	w.sendText(startFrame(c.csrf))
+	connected, _ := w.waitStatus("connected")
+	// From here the client never reads again, so it never answers a ping.
+
+	eventually(t, "dead peer's session terminated", func() bool {
+		s, _ := r.ssm.Session(connected.SessionID)
+		return s.Terminated
+	})
+	eventually(t, "close row", func() bool { return len(r.operations(t, "Closed terminal session%")) == 1 })
+
+	// The single slot is free again.
+	w2 := r.open(t, c, id, "payments-api", "/bin/sh")
+	w2.sendText(startFrame(c.csrf))
+	w2.waitStatus("connected")
+}
+
+func TestExecWS_LiveBrowserPeer_SurvivesPings(t *testing.T) {
+	r := newExecRig(t, func(s *Server) {
+		s.ExecPingInterval = 20 * time.Millisecond
+		s.ExecPingTimeout = 2 * time.Second
+	})
+	id := r.paymentsTask(t)
+	c := login(t, r.srv, "pavel", testPassword)
+	w := r.open(t, c, id, "payments-api", "/bin/sh")
+	w.sendText(startFrame(c.csrf))
+	connected, _ := w.waitStatus("connected")
+
+	// Keep reading (which answers pings) across many ping intervals.
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	_, _, err := w.conn.Read(ctx)
+	if websocket.CloseStatus(err) != -1 {
+		t.Fatalf("socket closed while the peer was answering pings: %v", err)
+	}
+	if s, _ := r.ssm.Session(connected.SessionID); s.Terminated {
+		t.Fatal("session terminated although the peer answered pings")
+	}
+}
+
 func TestExecWS_UpstreamDrop_4502(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)

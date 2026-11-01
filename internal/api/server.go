@@ -33,6 +33,10 @@ type Server struct {
 	ExecLimiter *execbridge.Limiter
 	// ExecStartTimeout is how long a new terminal socket may take to send its start frame (default 5s).
 	ExecStartTimeout time.Duration
+	// ExecPingInterval and ExecPingTimeout drive the keepalive ping on the browser socket
+	// (defaults 30s and 15s); a peer that misses one is treated as gone.
+	ExecPingInterval time.Duration
+	ExecPingTimeout  time.Duration
 	// ExecAllowInsecureStream permits ws:// SSM streams to loopback; only --fake-aws and tests set it.
 	ExecAllowInsecureStream bool
 }
@@ -51,6 +55,12 @@ func New(s Server) *Server {
 	}
 	if s.ExecStartTimeout <= 0 {
 		s.ExecStartTimeout = 5 * time.Second
+	}
+	if s.ExecPingInterval <= 0 {
+		s.ExecPingInterval = 30 * time.Second
+	}
+	if s.ExecPingTimeout <= 0 {
+		s.ExecPingTimeout = 15 * time.Second
 	}
 	return &s
 }
