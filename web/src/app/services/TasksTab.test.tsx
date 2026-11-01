@@ -7,6 +7,13 @@ import { ALL_TASKS, FIXTURE_NOW, OPERATIONS_FOR, SERVICE_PAYMENTS, tasksList } f
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
+/** The table renders as soon as the page mounts, before the tasks request resolves; wait for a data row. */
+async function findTaskTable() {
+  const table = await screen.findByRole('table')
+  await waitFor(() => expect(within(table).getAllByRole('row').length).toBeGreaterThan(1))
+  return table
+}
+
 describe('TasksTab', () => {
   it('hides Stop when can.operate is false', async () => {
     server.use(
@@ -19,14 +26,14 @@ describe('TasksTab', () => {
       ),
     )
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     expect(within(table).getAllByText('Running').length).toBeGreaterThan(0)
     expect(within(table).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
   it('enables Stop on running rows only', async () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     const runningCount = ALL_TASKS.filter((task) => task.service?.id === SERVICE_PAYMENTS.id && task.status === 'RUNNING').length
     const stopButtons = within(table).getAllByRole('button', { name: 'Stop' })
     expect(stopButtons).toHaveLength(runningCount)
@@ -46,7 +53,7 @@ describe('TasksTab', () => {
       http.get('/api/services/:id/desired-count', () => HttpResponse.json({ desired: 3, running: 3, max: 50, auto_scaling: null })),
     )
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     await userEvent.setup().click(within(table).getAllByRole('button', { name: 'Stop' })[0])
     expect(await screen.findByRole('heading', { name: 'Stop task abcdef012345?' })).toBeInTheDocument()
     expect(screen.getByText(`${SERVICE_PAYMENTS.name} will start a replacement to keep 3 running.`)).toBeInTheDocument()
@@ -61,7 +68,7 @@ describe('TasksTab', () => {
       ),
     )
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     expect(within(table).getAllByText('0.25 vCPU').length).toBeGreaterThan(0)
     expect(within(table).getAllByText('512 MiB').length).toBeGreaterThan(0)
   })
@@ -108,7 +115,7 @@ describe('TasksTab Terminal link', () => {
 
   it('shows Terminal on running rows when exec is on and user has Terminal', async () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     const running = serviceTasks().filter((task) => task.status === 'RUNNING')
     const links = within(table).getAllByRole('link', { name: 'Terminal' })
     expect(links.map((link) => link.getAttribute('href')).sort()).toEqual(running.map((task) => terminalHref(task.id)).sort())
@@ -117,7 +124,7 @@ describe('TasksTab Terminal link', () => {
   it('hides Terminal when exec is off', async () => {
     withServiceTasks((task) => ({ ...task, exec_enabled: false, can: { ...task.can, terminal: true } }))
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     expect(within(table).getAllByRole('button', { name: 'Stop' }).length).toBeGreaterThan(0)
     expect(within(table).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })
@@ -125,7 +132,7 @@ describe('TasksTab Terminal link', () => {
   it('hides Terminal without Terminal permission', async () => {
     withServiceTasks((task) => ({ ...task, exec_enabled: true, can: { ...task.can, terminal: false } }))
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     expect(within(table).getAllByRole('button', { name: 'Stop' }).length).toBeGreaterThan(0)
     expect(within(table).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })
@@ -133,7 +140,7 @@ describe('TasksTab Terminal link', () => {
   it('no Terminal on stopped rows', async () => {
     withServiceTasks((task) => ({ ...task, status: 'STOPPED', exit_code: 0, exec_enabled: true, can: { ...task.can, terminal: true } }))
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
-    const table = await screen.findByRole('table')
+    const table = await findTaskTable()
     expect(within(table).getAllByText('Stopped').length).toBeGreaterThan(0)
     expect(within(table).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })

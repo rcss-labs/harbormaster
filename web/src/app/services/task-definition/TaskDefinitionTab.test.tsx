@@ -222,7 +222,9 @@ describe('TaskDefinitionTab', () => {
     await editEnvValue()
     await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
     await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Deploy :43' }))
+    // The review dialog stays up until the register request resolves; wait for the deploy prompt before clicking.
+    await screen.findByRole('heading', { name: 'Revision :43 is registered. Deploy it now?' })
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deploy :43' }))
     expect(await screen.findByText('A rollout is already running')).toBeInTheDocument()
   })
 

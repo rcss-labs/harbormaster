@@ -9,7 +9,7 @@ import type { MeDTO } from '../api/types'
 import { ToastProvider } from '../components/Toast'
 import { server } from './msw'
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
   cleanup()
   server.resetHandlers()
