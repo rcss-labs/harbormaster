@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { expect, test as setup } from '@playwright/test'
-import { authFile } from './fixtures/test'
+import { authFile, expect, test as setup } from './fixtures/test'
 import { USERS, type Role } from './fixtures/users'
 import { login } from './helpers'
 

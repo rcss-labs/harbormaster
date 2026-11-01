@@ -3,12 +3,6 @@ import { fileURLToPath } from 'node:url'
 import { expect, test as base } from '@playwright/test'
 import type { Role } from './users'
 
-declare global {
-  interface Window {
-    __csp?: string[]
-  }
-}
-
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 /** Path of the storageState file auth.setup.ts writes for a role (independent of the cwd). */
@@ -19,25 +13,30 @@ export function asUser(role: Role) {
   return { storageState: authFile(role) }
 }
 
-// Drop-in replacement for Playwright's test: an automatic fixture collects CSP violations in every page
-// and fails the test with the list when any occurred.
+// Drop-in replacement for Playwright's test. An automatic fixture records every CSP violation, from every
+// document of every page in the test's context, on the Node side (so navigations, closed pages and evaluate
+// failures cannot lose them), and fails the test with the list when any occurred.
 export const test = base.extend<{ cspViolations: string[] }>({
   cspViolations: [
     async ({ context }, use) => {
+      const violations: string[] = []
+      await context.exposeBinding('__hmCsp', (_source, violation: string) => {
+        violations.push(violation)
+      })
       await context.addInitScript(() => {
-        window.__csp = []
         document.addEventListener('securitypolicyviolation', (e) => {
-          window.__csp?.push(`${e.violatedDirective} blocked ${e.blockedURI || 'inline'} (${e.sourceFile ?? ''}:${e.lineNumber})`)
+          const report = `${e.violatedDirective} blocked ${e.blockedURI || 'inline'} (${e.sourceFile ?? ''}:${e.lineNumber})`
+          void (window as unknown as { __hmCsp: (v: string) => Promise<void> }).__hmCsp(report)
         })
       })
-      await use([])
-      const violations = await Promise.all(
-        context.pages().map((p) => (p.isClosed() ? [] : p.evaluate(() => window.__csp ?? []).catch(() => []))),
-      )
-      expect(violations.flat(), 'CSP violations').toEqual([])
+      await use(violations)
+      // Violation reports are queued events; give in-flight binding calls a moment to land.
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(violations, 'CSP violations').toEqual([])
     },
     { auto: true },
   ],
 })
 
 export { expect }
+export type { Page } from '@playwright/test'

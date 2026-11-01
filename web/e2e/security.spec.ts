@@ -8,8 +8,11 @@ test.describe('security', () => {
   test.use(asUser('pavel'))
 
   test('every response carries security headers', async ({ request }) => {
-    for (const url of ['/', '/api/nope', '/healthz']) {
+    const expected = { '/': 200, '/api/nope': 404, '/healthz': 200 }
+    for (const [url, status] of Object.entries(expected)) {
       const res = await request.get(url)
+      expect(res.status(), url).toBe(status)
+      if (url === '/api/nope') expect(res.headers()['content-type']).toContain('application/json')
       const headers = res.headers()
       expect(headers['content-security-policy'], url).toBe(CSP)
       expect(headers['strict-transport-security'], url).toBeTruthy()
@@ -28,6 +31,7 @@ test.describe('security', () => {
   test('no CSP violations on the overview', async ({ page }) => {
     // The automatic cspViolations fixture fails the test after it ends if any violation was recorded.
     await page.goto('/')
+    await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
     await page.waitForLoadState('networkidle')
   })
 

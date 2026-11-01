@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures/test'
 import { login, serviceId } from './helpers'
 
 const HOMELAB_ACCOUNT_ID = '482109375512'

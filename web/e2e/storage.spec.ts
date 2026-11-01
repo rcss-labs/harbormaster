@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './fixtures/test'
 import { login, saveScreenshot } from './helpers'
 
 // The storage tier's first pass runs a few seconds after the server starts.
