@@ -14,10 +14,19 @@ func TestActiveVPCs_CountsOnlyGivenTasks(t *testing.T) {
 }
 
 func TestSummarizeRegion_HiddenVPCs(t *testing.T) {
-	got := SummarizeRegion(testRegion, testVPCs(), testSubnets(), allTasks())
+	got := SummarizeRegion(testRegion, testVPCs(), testSubnets(), allTasks(), allTasks())
 	want := RegionSummary{Region: testRegion, ActiveVPCs: 2, HiddenVPCs: 1, Clusters: 3, Tasks: 12}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// A VPC whose tasks the caller cannot see is neither active nor hidden: hidden only counts
+// VPCs with no running task at all, so the number is the same for every caller.
+func TestSummarizeRegion_HiddenIgnoresVisibility(t *testing.T) {
+	got := SummarizeRegion(testRegion, testVPCs(), testSubnets(), nil, allTasks())
+	if got.ActiveVPCs != 0 || got.HiddenVPCs != 1 {
+		t.Errorf("got %+v, want 0 active and 1 hidden", got)
 	}
 }
 
@@ -27,7 +36,7 @@ func TestSummarizeRegion_UnplacedTasks(t *testing.T) {
 		runningTask("core-services", "payments-api", "subnet-new", "10.20.9.9", 20),
 		runningTask("edge-ec2", "proxy", "", "", 21), // bridge task, cluster has no awsvpc task
 	)
-	got := SummarizeRegion(testRegion, testVPCs(), testSubnets(), tasks)
+	got := SummarizeRegion(testRegion, testVPCs(), testSubnets(), tasks, tasks)
 	if got.UnplacedTasks != 2 || got.Tasks != 12 || got.Clusters != 3 {
 		t.Errorf("got %+v", got)
 	}

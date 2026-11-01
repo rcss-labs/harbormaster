@@ -130,6 +130,8 @@ func TestNetworks_AdminSeesAllAccountsAndDimmedRegions(t *testing.T) {
 	if east.Tasks != wantEastTasks || east.Clusters != wantEastClusters {
 		t.Errorf("us-east-1 tasks/clusters = %d/%d, want %d/%d", east.Tasks, east.Clusters, wantEastTasks, wantEastClusters)
 	}
+	// The seeded estate runs tasks in every configured region of both accounts, so the "dimmed" case
+	// (a region with no active VPC) is covered for the none user in TestNetworks_NoPermissionsIsEmptyRegions.
 	staging := accountEntry(t, out, stagingAccountID)
 	if len(staging.Regions) != 1 || staging.Regions[0].Region != "us-east-1" {
 		t.Errorf("staging regions = %+v", staging.Regions)
@@ -151,6 +153,18 @@ func TestNetworks_DevUserSeesOnlyDevTasks(t *testing.T) {
 	}
 	if dev.HiddenVPCs != admin.HiddenVPCs {
 		t.Errorf("hidden_vpcs changed: dev %d, admin %d", dev.HiddenVPCs, admin.HiddenVPCs)
+	}
+}
+
+// hidden_vpcs counts VPCs with no running task at all, so it is the same for every caller and
+// reveals nothing about tasks the caller cannot see.
+func TestNetworks_HiddenVPCsIsSameForEveryCaller(t *testing.T) {
+	fx := newNetworkFixture(t)
+	for name, c := range map[string]*apiClient{"admin": fx.admin, "none": fx.none, "prodOnly": fx.prodOnly, "devOnly": fx.devOnly} {
+		east := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, c, "/api/networks"), homelabAccountID), "us-east-1")
+		if east.HiddenVPCs != 1 {
+			t.Errorf("%s: hidden_vpcs = %d, want 1 (legacy-default only)", name, east.HiddenVPCs)
+		}
 	}
 }
 
@@ -200,6 +214,26 @@ func TestNetworkRegion_ListsActiveVPCsOnly(t *testing.T) {
 	if shared.Name != "shared-services" || shared.Subnets != 2 || shared.Tasks != wantSharedTasks {
 		t.Errorf("shared-services = %+v", shared)
 	}
+}
+
+func TestNetworkRegion_NoPermissionsIsEmptyList(t *testing.T) {
+	fx := newNetworkFixture(t)
+	out := getJSON[NetworkRegionVPCsDTO](t, fx.none, "/api/networks/"+homelabAccountID+"/us-east-1")
+	if out.Items == nil || len(out.Items) != 0 {
+		t.Errorf("items = %#v, want empty non-nil", out.Items)
+	}
+}
+
+func TestNetworkRegion_DisabledAccountIs404(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	if _, err := st.Pool.Exec(t.Context(), `update aws_accounts set enabled = false where account_id = $1`, stagingAccountID); err != nil {
+		t.Fatal(err)
+	}
+	admin := login(t, srv, "pavel", testPassword)
+	expectError(t, admin, "/api/networks/"+stagingAccountID+"/us-east-1", http.StatusNotFound, "not_found")
+	expectError(t, admin, "/api/vpcs/vpc-0b18e6cd2a91/tree?account="+stagingAccountID+"&region=us-east-1", http.StatusNotFound, "not_found")
 }
 
 func TestNetworkRegion_UnknownAccountIs404(t *testing.T) {

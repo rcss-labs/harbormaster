@@ -78,27 +78,45 @@ func (s *Server) networkRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/vpcs/{vpcId}/tree", s.getVPCTree, routeOptions{})
 }
 
-func notFound() *APIError {
-	return &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Not found."}
+// visibleTasks keeps the RUNNING tasks of rows that the caller may see.
+func visibleTasks(sc scope, rows []store.TaskRow) []model.Task {
+	tasks := make([]model.Task, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, row.Task)
+	}
+	return network.FilterTasks(network.Visibility(sc.Subject, sc.Tags), tasks)
 }
 
-// visibleRunningTasks returns the RUNNING tasks the caller may see within f, grouped per account x region.
-func (s *Server) visibleRunningTasks(ctx context.Context, sc scope, f store.TargetFilter) (map[awsTarget][]model.Task, []model.Task, error) {
+// visibleRunningTasks returns the caller's visible RUNNING tasks within f, grouped per account x region.
+func (s *Server) visibleRunningTasks(ctx context.Context, sc scope, f store.TargetFilter) (map[awsTarget][]model.Task, error) {
 	rows, err := s.Store.RunningTasks(ctx, f, sc.Vis)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	all := make([]model.Task, 0, len(rows))
+	return groupByTarget(visibleTasks(sc, rows)), nil
+}
+
+// allRunningTasks returns every RUNNING task within f regardless of the caller, grouped per account x region.
+// It only feeds counts that must not depend on the caller (hidden_vpcs).
+func (s *Server) allRunningTasks(ctx context.Context, f store.TargetFilter) (map[awsTarget][]model.Task, error) {
+	rows, err := s.Store.RunningTasks(ctx, f, store.Visibility{Admin: true})
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]model.Task, 0, len(rows))
 	for _, row := range rows {
-		all = append(all, row.Task)
+		tasks = append(tasks, row.Task)
 	}
-	all = network.FilterTasks(network.Visibility(sc.Subject, sc.Tags), all)
+	return groupByTarget(tasks), nil
+}
+
+func groupByTarget(tasks []model.Task) map[awsTarget][]model.Task {
 	byTarget := map[awsTarget][]model.Task{}
-	for _, task := range all {
+	for _, task := range tasks {
 		target := awsTarget{task.Cluster.AccountID, task.Cluster.Region}
 		byTarget[target] = append(byTarget[target], task)
 	}
-	return byTarget, all, nil
+	return byTarget
 }
 
 // awsTarget is an account x region pair.
@@ -136,7 +154,12 @@ func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	byTarget, _, err := s.visibleRunningTasks(ctx, sc, sc.Filter)
+	byTarget, err := s.visibleRunningTasks(ctx, sc, sc.Filter)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	everyTask, err := s.allRunningTasks(ctx, sc.Filter)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -163,7 +186,7 @@ func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tasks := byTarget[awsTarget{account.AccountID, region}]
-			summary := network.SummarizeRegion(region, vpcs, subnets, tasks)
+			summary := network.SummarizeRegion(region, vpcs, subnets, tasks, everyTask[awsTarget{account.AccountID, region}])
 			item.Regions = append(item.Regions, NetworkRegionDTO{
 				Region: region, ActiveVPCs: summary.ActiveVPCs, HiddenVPCs: summary.HiddenVPCs,
 				Clusters: summary.Clusters, Tasks: summary.Tasks, UnplacedTasks: summary.UnplacedTasks,
@@ -189,7 +212,7 @@ func (s *Server) findAccountRegion(ctx context.Context, accountID, region string
 			return account, nil
 		}
 	}
-	return store.AWSAccount{}, notFound()
+	return store.AWSAccount{}, store.ErrNotFound
 }
 
 // listRegionVPCs answers GET /api/networks/{account}/{region}: the active VPCs the caller can see.
@@ -207,7 +230,7 @@ func (s *Server) listRegionVPCs(w http.ResponseWriter, r *http.Request) {
 	}
 	region := r.PathValue("region")
 	target := store.TargetFilter{AccountID: account.AccountID, Region: region}
-	byTarget, _, err := s.visibleRunningTasks(ctx, sc, target)
+	byTarget, err := s.visibleRunningTasks(ctx, sc, target)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -270,13 +293,9 @@ func (s *Server) getVPCTree(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	allRows := make([]model.Task, 0, len(view.runningTasks))
-	for _, row := range view.runningTasks {
-		allRows = append(allRows, row.Task)
-	}
-	tasks := network.FilterTasks(network.Visibility(sc.Subject, sc.Tags), allRows)
+	tasks := visibleTasks(sc, view.runningTasks)
 	if network.ActiveVPCs(subnets, tasks)[vpc.VPCID] == 0 {
-		s.fail(w, notFound())
+		s.fail(w, store.ErrNotFound)
 		return
 	}
 	edges, err := s.Store.ListVPCEdges(ctx, accountID, region, vpc.VPCID)

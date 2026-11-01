@@ -36,16 +36,20 @@ func ActiveVPCs(subnets []model.Subnet, tasks []model.Task) map[string]int {
 	return counts
 }
 
-// SummarizeRegion builds the region card. Tasks are distinct placed tasks;
-// clusters are those with a placed task in an active VPC (decision 5).
-func SummarizeRegion(region string, vpcs []model.VPC, subnets []model.Subnet, tasks []model.Task) RegionSummary {
+// SummarizeRegion builds the region card. tasks are the caller's visible running tasks: they give
+// the active VPCs, tasks and clusters (decision 5). hidden_vpcs counts VPCs with no running task
+// at all (allTasks, unfiltered), so it is the same for every caller and leaks nothing; a VPC that
+// only holds tasks the caller cannot see is neither active nor hidden.
+func SummarizeRegion(region string, vpcs []model.VPC, subnets []model.Subnet, tasks, allTasks []model.Task) RegionSummary {
 	place := newPlacement(subnets, tasks)
 	active := ActiveVPCs(subnets, tasks)
+	anyTask := ActiveVPCs(subnets, allTasks)
 	summary := RegionSummary{Region: region}
 	for _, vpc := range vpcs {
-		if active[vpc.VPCID] > 0 {
+		switch {
+		case active[vpc.VPCID] > 0:
 			summary.ActiveVPCs++
-		} else {
+		case anyTask[vpc.VPCID] == 0:
 			summary.HiddenVPCs++
 		}
 	}
