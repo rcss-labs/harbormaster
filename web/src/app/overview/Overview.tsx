@@ -57,6 +57,10 @@ export function Overview() {
     { n: statusCount('scaled_to_zero'), color: STATUS_COLOR.mute },
   ]
 
+  const clustersNeedingAttention = data.per_cluster.filter(
+    (cluster) => cluster.unhealthy + cluster.rolling_out + cluster.missing > 0,
+  )
+
   const { task_health: health, tasks } = data
   const donutSegments = [
     { name: 'Running, healthy', v: health.healthy, color: 'var(--success)' },
@@ -119,18 +123,30 @@ export function Overview() {
 
       <div className={`${styles.grid} ${styles.gWide}`}>
         <CpuByClusterCard />
-        <Card title="Task health" right="bar = running · line = desired">
+        <Card title="Task health" right="bars to desired · colour = reason">
         <Donut segments={donutSegments} label={`${tasks.running}/${tasks.desired}`} sub="tasks running" />
         <div className={styles.afterDonut}>
-          <HBars
-            items={data.per_cluster.map((cluster) => ({
-              name: cluster.name,
-              href: `/clusters/${cluster.id}`,
-              parts: [{ v: cluster.running, color: cluster.running < cluster.desired ? 'var(--warning)' : 'var(--success)' }],
-              ghost: cluster.desired,
-              label: `${cluster.running} / ${cluster.desired}`,
-            }))}
-          />
+          {clustersNeedingAttention.length === 0 ? (
+            <div className={styles.allHealthy}>All clusters healthy</div>
+          ) : (
+            <HBars
+              items={clustersNeedingAttention.map((cluster) => {
+                const healthy = cluster.running - cluster.unhealthy - cluster.rolling_out
+                return {
+                  name: cluster.name,
+                  href: `/clusters/${cluster.id}`,
+                  parts: [
+                    { v: healthy, color: 'var(--success)' },
+                    { v: cluster.unhealthy, color: 'var(--warning)' },
+                    { v: cluster.rolling_out, color: 'var(--info)' },
+                    { v: cluster.missing, color: MISSING_COLOR },
+                  ],
+                  ghost: cluster.desired,
+                  label: `${cluster.running} / ${cluster.desired}`,
+                }
+              })}
+            />
+          )}
         </div>
         </Card>
       </div>
