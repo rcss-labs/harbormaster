@@ -4,7 +4,7 @@
 .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
 .muted { color: var(--muted); }
 
-.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-bottom: 12px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); margin-bottom: 12px; }
 
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .legendRow { margin-top: 10px; }

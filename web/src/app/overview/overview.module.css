@@ -4,8 +4,8 @@
 .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
 
 .grid { display: grid; gap: 12px; }
-.g3 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-.g4 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
 
 .dots { display: flex; gap: 4px; flex-wrap: wrap; }
 .dot { width: 16px; height: 16px; border-radius: 3px; }

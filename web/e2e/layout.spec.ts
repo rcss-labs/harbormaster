@@ -77,3 +77,14 @@ test('stop reason labels wrap instead of truncating', async ({ page }) => {
     expect(fits, `label ${index} is truncated`).toBe(true)
   }
 })
+
+test('long tabs keep their full height inside the scrolling content', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 500 })
+  for (const tab of ['', 'tasks']) {
+    await page.goto(serviceUrl(...SVC.paymentsApi, tab || undefined))
+    const panel = page.locator('[class*="tabPanel"]')
+    await expect(panel).toBeVisible()
+    const overflow = await panel.evaluate((el) => el.scrollHeight - el.clientHeight)
+    expect(overflow, `tab "${tab}" panel is squashed`).toBeLessThanOrEqual(1)
+  }
+})
