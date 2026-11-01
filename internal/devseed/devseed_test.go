@@ -7,6 +7,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
@@ -33,6 +34,19 @@ func TestDevseed_IdempotentAndMatchesMockup(t *testing.T) {
 		if wantTags[tag.Name] != int64(tag.ID) {
 			t.Errorf("tag %s has id %d, want %d", tag.Name, tag.ID, wantTags[tag.Name])
 		}
+	}
+	var prodID authz.TagID
+	for _, tag := range tags {
+		if tag.Name == "Prod" {
+			prodID = tag.ID
+		}
+	}
+	ciTools := model.ClusterKey{AccountID: "482109375512", Region: "us-east-1", Cluster: "ci-tools"}
+	if got, ok, err := st.ServiceTag(ctx, model.ServiceKey{ClusterKey: ciTools, Service: "artifact-proxy"}); err != nil || !ok || got != prodID {
+		t.Errorf("artifact-proxy tag = %v, %v, %v; want explicit Prod %v", got, ok, err, prodID)
+	}
+	if _, ok, err := st.ClusterTag(ctx, ciTools); err != nil || ok {
+		t.Errorf("ci-tools cluster tag ok = %v, %v; want untagged (Dev)", ok, err)
 	}
 	accounts, err := st.ListAccounts(ctx)
 	if err != nil || len(accounts) != 2 {

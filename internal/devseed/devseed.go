@@ -101,6 +101,14 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	if err := st.SetClusterTag(ctx, model.ClusterKey{AccountID: accountIDByName(estate, "staging-example"), Region: "us-east-1", Cluster: "staging-web"}, staging.ID); err != nil {
 		return fmt.Errorf("tag staging-web: %w", err)
 	}
+	// An explicit service tag on an otherwise Dev cluster exercises the cluster-matching rule.
+	artifactProxy := model.ServiceKey{
+		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "us-east-1", Cluster: "ci-tools"},
+		Service:    "artifact-proxy",
+	}
+	if err := st.SetServiceTag(ctx, artifactProxy, &prod.ID); err != nil {
+		return fmt.Errorf("tag artifact-proxy: %w", err)
+	}
 
 	return seedAudit(ctx, st, ids["pavel"])
 }
