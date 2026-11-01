@@ -53,19 +53,23 @@ test.describe('tag filter as pavel', () => {
 
     await nav(page).getByRole('link', { name: /^Overview/ }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
-    const clusterSquares = main(page).getByText('Clusters', { exact: true }).locator('..').getByRole('link')
-    await expect(clusterSquares).toHaveCount(4)
-    const attention = main(page).getByText('Needs attention', { exact: true }).locator('../..')
-    await expect(attention).toContainText('image-resizer', { timeout: 30_000 })
+    // Tile reads its number straight from the DOM: "Clusters" label, then the count.
+    const clustersTile = main(page).getByText('Clusters', { exact: true }).locator('..')
+    await expect(clustersTile).toContainText(/^Clusters4\d+ healthy$/)
+    const resizerAlerts = main(page).getByTestId('alert-row').filter({ hasText: 'image-resizer' })
+    await expect(resizerAlerts.first()).toBeVisible({ timeout: 30_000 })
 
     // Switch Dev -> Prod.
     await toggleTag(page, 'Dev')
     await toggleTag(page, 'Prod')
-    await expect(clusterSquares).toHaveCount(2)
-    await expect(attention).not.toContainText('image-resizer')
+    await expect(clustersTile).toContainText(/^Clusters2\d+ healthy$/)
+    await expect(main(page).getByText('Needs attention', { exact: true })).toBeVisible()
+    await expect(resizerAlerts).toHaveCount(0)
 
     await page.goto('/tasks?filter=running')
     await expect(page).toHaveURL(/tag=/)
+    // Wait for a Prod row first, so the absence check cannot pass on a table that has not rendered.
+    await expect(page.getByRole('row').filter({ hasText: 'core-services' }).first()).toBeVisible()
     await expect(page.getByRole('row').filter({ hasText: 'release-build' })).toHaveCount(0)
   })
 
@@ -88,7 +92,7 @@ test.describe('tag filter as omer', () => {
     await expect(page.getByRole('article')).toHaveCount(0)
     await expect(page.getByText(/No clusters match/)).toBeVisible()
     await tagButton(page).click()
-    await expect(tagOptions(page).getByRole('checkbox', { name: 'Prod' })).toHaveCount(0)
     await expect(tagOptions(page).getByRole('checkbox', { name: 'Dev' })).toHaveCount(1)
+    await expect(tagOptions(page).getByRole('checkbox', { name: 'Prod' })).toHaveCount(0)
   })
 })
