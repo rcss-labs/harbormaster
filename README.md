@@ -70,6 +70,8 @@ docker push <acct>.dkr.ecr.eu-west-1.amazonaws.com/harbormaster:v1.0.0
 
 Replace `<acct>` with your AWS account ID. The image must be pinned to a tag; the module rejects `:latest`.
 
+`make image` builds `--platform linux/amd64` by default, matching the module's default `cpu_architecture = "X86_64"`, whatever machine you build on (Apple silicon included; the Go and web stages cross-compile natively, so no emulation is needed to build). To run on Graviton, set `cpu_architecture = "ARM64"` in the module and build with `make image VERSION=v1.0.0 ARCH=arm64`. The image architecture must match the module setting, otherwise ECS tasks fail with `exec format error`.
+
 ### Terraform and the harbormaster module
 
 Deploy Harbormaster with the `harbormaster` module, pinned to the release tag:
@@ -166,7 +168,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_LISTEN` | `:8480` | Address the HTTP server listens on |
 | `HM_BASE_URL` | `http://127.0.0.1:8480` | Public URL of the app |
 | `HM_DATABASE_URL` | | Postgres URL. Either this or `HM_DATABASE_SECRET_ARN` is required |
-| `HM_DATABASE_SECRET_ARN` | | Secrets Manager secret holding the database credentials (a postgres URL or RDS secret JSON) |
+| `HM_DATABASE_SECRET_ARN` | | Secrets Manager secret holding the database credentials (a postgres URL, or JSON with `username`, `password`, `host`, `port` and `dbname`; RDS-managed master secrets have no `host` and are rejected) |
 | `HM_SESSION_KEY` | | Secret key mixed into session id hashes. Set a long random value in production |
 | `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` | | Secrets Manager secret with the initial `admin` password (see First run) |
 | `HM_METRICS_TOKEN` | | Bearer token for `GET /metrics`. Empty disables the endpoint (it returns 404) |
@@ -311,12 +313,13 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 - `make lint`: check gofmt, run `go vet`, run web lint and typecheck, and check third-party notices
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
 - `make run`: run the server locally against fake AWS data and the test database
-- `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `npx --prefix web playwright install chromium`. Port 8481 must be free
+- `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free
 - `make soak`: soak test at target estate scale. Requires `HM_TEST_DATABASE_URL`
 - `make tf-check`: validate every Terraform root under `terraform/` locally (fmt, init without a backend, validate, and tflint if installed). It never plans or applies
-- `make image VERSION=v1.0.0`: build the image locally as `harbormaster:v1.0.0`
-- `make check-image`: check the runtime contract of `harbormaster:$(VERSION)` (non-root, healthcheck, read-only root filesystem). Local Docker only; nothing is pushed
-- `make release`: run lint, tests, build, image and image check in order. Afterwards restore the tracked placeholder with `git checkout -- internal/web/dist/index.html`
+- `make image VERSION=v1.0.0 [ARCH=amd64|arm64]`: build the image locally as `harbormaster:v1.0.0` with `docker build --platform linux/$(ARCH)`; `ARCH` defaults to `amd64`
+- `make check-image`: check the runtime contract of `harbormaster:$(VERSION)` (non-root, healthcheck, read-only root filesystem). If this machine cannot execute the image's architecture (for example an amd64 image on Apple silicon without emulation), it checks the shipped image's static contract and runs the runtime checks on a host-architecture build of the same Dockerfile (`harbormaster:$(VERSION)-check`). Local Docker only; nothing is pushed
+- `make release-check`: the tag gate. Fails unless `HEAD` is tagged and `VERSION` is not `-dirty`
+- `make release`: run lint, tests, build, image and image check in order. It does not run `release-check`, so to cut a release run `make release-check release`. Afterwards restore the tracked placeholder with `git checkout -- internal/web/dist/index.html`
 - `make test-it-exec`: opt-in integration test of the Terminal against a real ECS task. Needs AWS credentials and the `HM_IT_*` variables (see below). `make test` never runs it
 
 ### Terminal integration test against real AWS

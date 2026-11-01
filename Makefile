@@ -66,12 +66,27 @@ test-it-exec:
 	HM_IT_AWS=1 go test ./internal/execbridge/ -run TestIntegration -v
 
 # plan 06
+# ARCH is the image architecture. The default matches the module's cpu_architecture = "X86_64"; pass ARCH=arm64
+# together with cpu_architecture = "ARM64". check-image runs the image as built (emulated on a different host arch).
+ARCH ?= amd64
 .PHONY: image check-image release release-check
 image:
-	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
+	docker build --platform linux/$(ARCH) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
 
+# check-image runs the shipped image when this host can execute it (same architecture, or emulation such as
+# binfmt/Rosetta). Otherwise it checks the shipped image's static contract, then builds the same Dockerfile for
+# the host architecture and runs the runtime checks on that build. Only the target platform differs, and the
+# arch-independent contract (user, healthcheck, distroless, read-only start) is what the checks cover.
 check-image:
-	tools/check-image.sh harbormaster:$(VERSION)
+	@if tools/check-image.sh --can-run harbormaster:$(VERSION); then \
+		tools/check-image.sh harbormaster:$(VERSION); \
+	else \
+		native="$$(docker info --format '{{.Architecture}}' | sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/')"; \
+		echo "check-image: host cannot run harbormaster:$(VERSION); static checks on it, runtime checks on a native $$native build"; \
+		CHECK_IMAGE_STATIC_ONLY=1 tools/check-image.sh harbormaster:$(VERSION) && \
+		docker build -q --platform linux/$$native --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION)-check . >/dev/null && \
+		tools/check-image.sh harbormaster:$(VERSION)-check; \
+	fi
 
 # release runs its prerequisites in order (do not use make -j). The build step generates the web app,
 # so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
@@ -101,4 +116,4 @@ soak:
 		echo "make soak: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
 		exit 2; \
 	fi
-	HM_SOAK=1 go test -tags soak -run TestSoak -timeout 20m -v ./internal/poller
+	HM_SOAK=1 go test -count=1 -tags soak -run TestSoak -timeout 20m -v ./internal/poller
