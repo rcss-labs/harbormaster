@@ -16,6 +16,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 	"github.com/rcss-labs/harbormaster/internal/web"
 )
 
@@ -45,6 +46,12 @@ type Server struct {
 	ExecStartTimeout time.Duration
 	// ExecAllowInsecureStream permits ws:// SSM streams to loopback; only --fake-aws and tests set it.
 	ExecAllowInsecureStream bool
+
+	// plan 06
+	// MetricsToken is the bearer token for GET /metrics; empty disables the endpoint.
+	MetricsToken string
+	// Telemetry is the registry /metrics renders; New defaults it to telemetry.Default.
+	Telemetry *telemetry.Registry
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
@@ -64,6 +71,10 @@ func New(s Server) *Server {
 	}
 	if s.TailLimiter == nil {
 		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
+	}
+	// plan 06
+	if s.Telemetry == nil {
+		s.Telemetry = telemetry.Default
 	}
 	// plan 04: terminal
 	if s.ExecLimiter == nil {
@@ -112,6 +123,8 @@ func (s *Server) handle(mux *http.ServeMux, pattern string, h http.HandlerFunc, 
 // routes registers every route. Plans 02-05 append their handlers here.
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", s.healthz)
+	// plan 06: token-protected, deliberately outside session auth, CSRF and ETag.
+	mux.Handle("GET /metrics", MetricsHandler(s.MetricsToken, s.Telemetry))
 
 	s.handle(mux, "POST /api/auth/login", s.login, routeOptions{Public: true})
 	s.handle(mux, "GET /api/auth/setup", s.setupNeeded, routeOptions{Public: true})

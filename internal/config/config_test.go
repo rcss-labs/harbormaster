@@ -238,6 +238,16 @@ func TestLoad_MetricsToken(t *testing.T) {
 		t.Errorf("MetricsToken = %q, want abc", cfg.MetricsToken)
 	}
 
+	for raw, want := range map[string]string{"abc\n": "abc", "  ": ""} {
+		cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_METRICS_TOKEN": raw}))
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+		if cfg.MetricsToken != want {
+			t.Errorf("MetricsToken for %q = %q, want %q", raw, cfg.MetricsToken, want)
+		}
+	}
+
 	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
 	if err != nil {
 		t.Fatalf("Load returned error without HM_METRICS_TOKEN: %v", err)

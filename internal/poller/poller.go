@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 // LockKey is the Postgres advisory lock key held by the leader ("HMPOLL").
@@ -37,6 +38,8 @@ type Config struct {
 	CountsHistory, Jitter, RetentionEvery, AccountsRefresh time.Duration
 	MaxInFlight                                            int
 	Retention                                              store.Retention
+	// Telemetry receives loop timings, leadership and write counts (plan 06); nil means telemetry.Default.
+	Telemetry *telemetry.Registry
 }
 
 // ConfigFrom derives the poller configuration from the server configuration.
@@ -93,6 +96,9 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 	}
 	if cfg.AccountsRefresh <= 0 {
 		cfg.AccountsRefresh = defaultAccountsRefresh
+	}
+	if cfg.Telemetry == nil {
+		cfg.Telemetry = telemetry.Default
 	}
 	p := &Poller{
 		store: st, clients: clients, cfg: cfg, log: log,

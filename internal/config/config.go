@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -187,7 +188,7 @@ func Load(getenv func(string) string) (Config, error) {
 		ExecMaxSessionsPerUser: reader.integer("HM_EXEC_MAX_SESSIONS_PER_USER", 3),
 
 		// plan 06: metrics endpoint token
-		MetricsToken: reader.text("HM_METRICS_TOKEN", ""),
+		MetricsToken: strings.TrimSpace(reader.text("HM_METRICS_TOKEN", "")),
 	}
 
 	if reader.err != nil {

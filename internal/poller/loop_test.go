@@ -1,9 +1,11 @@
 package poller
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 const homelabAccount = "482109375512"
@@ -283,5 +286,34 @@ func TestLoop_RunTicksEveryTierAndStopsOnCancel(t *testing.T) {
 	}
 	if got := h.count(t, `select count(*) from tasks where last_status = 'RUNNING'`); got != len(h.estateTasks("RUNNING")) {
 		t.Errorf("running tasks stored = %d, want %d", got, len(h.estateTasks("RUNNING")))
+	}
+}
+
+// plan 06: tier timings, interval and snapshot-write counts reach the telemetry registry.
+func TestLoop_ReportsTelemetry(t *testing.T) {
+	reg := telemetry.New()
+	st := storetest.Open(t)
+	f := fake.New(fake.MockupEstate(func() time.Time { return loopNow }))
+	p := New(st, f, Config{MaxInFlight: 4, Telemetry: reg}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := newLoop(p, loopTarget).runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	var out bytes.Buffer
+	if err := reg.WritePrometheus(&out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		`tier="services"`,
+		`harbormaster_snapshot_rows_written_total{table="services"}`,
+		`harbormaster_snapshot_rows_written_total{table="tasks"}`,
+		`harbormaster_snapshot_rows_written_total{table="clusters"}`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("metrics lack %s:\n%s", want, text)
+		}
+	}
+	if len(reg.Snapshot().LoopInterval) == 0 {
+		t.Error("no loop interval recorded")
 	}
 }
