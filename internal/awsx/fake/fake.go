@@ -36,6 +36,8 @@ type Fake struct {
 	ThrottleELB         int32
 	ThrottleAutoScaling int32
 	ThrottleLogs        int32
+	ThrottleEC2         int32         // plan 05
+	ThrottleEFS         int32         // plan 05
 	CloudWatchPageSize  int           // datapoints per GetMetricData page; 0 means 100,800 (the AWS limit)
 	LogsPageSize        int           // events per FilterLogEvents page; 0 means 100
 	LiveTailInterval    time.Duration // gap between live tail updates; 0 means 2 s
@@ -117,8 +119,20 @@ func (f *Fake) ECS(_ context.Context, t awsx.Target) (awsx.ECSAPI, error) {
 	return &ecsClient{f: f, target: t}, nil
 }
 
-func (f *Fake) EC2(context.Context, awsx.Target) (awsx.EC2API, error) { return nil, nil }
-func (f *Fake) EFS(context.Context, awsx.Target) (awsx.EFSAPI, error) { return nil, nil }
+// plan 05
+func (f *Fake) EC2(_ context.Context, t awsx.Target) (awsx.EC2API, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &EC2{f: f, target: t}, nil
+}
+
+func (f *Fake) EFS(_ context.Context, t awsx.Target) (awsx.EFSAPI, error) {
+	if !f.knownAccount(t.AccountID) {
+		return nil, awsx.ErrAccountUnknown
+	}
+	return &EFS{f: f, target: t}, nil
+}
 
 func (f *Fake) ELB(_ context.Context, t awsx.Target) (awsx.ELBAPI, error) {
 	if !f.knownAccount(t.AccountID) {

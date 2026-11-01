@@ -74,6 +74,9 @@ type Estate struct {
 	ContainerInsights map[model.ClusterKey]string
 	LogLines          map[string][]LogLine // log group -> explicit lines (SetLogLines)
 
+	// Plan 05 (networks and storage) state; see estate_network.go. Guarded by Mu.
+	Network NetworkEstate
+
 	// rollbackDeployments holds the ids of circuit-breaker rollback
 	// deployments, which are exempt from the OOM failure path (see rollout.go).
 	rollbackDeployments map[string]bool

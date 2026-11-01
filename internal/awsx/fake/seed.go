@@ -269,6 +269,7 @@ func MockupEstate(now func() time.Time) *Estate {
 	sd.addStandalone()
 	e.recountAll()
 	seedObserve(e)
+	seedNetwork(e) // plan 05
 	return e
 }
 
