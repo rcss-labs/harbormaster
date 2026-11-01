@@ -518,6 +518,7 @@ function clusterDetail(def: ClusterDef): ClusterDTO {
     tasks_history_72h: history(card.running, card.desired),
     stops_per_hour: stopsPerHour(def.name.length, def.status === 'needs_attention' || def.status === 'degraded' ? [20, 21, 22] : []),
     services_detail: services,
+    vpc: { vpc_id: 'vpc-0a41c7e29b3d', name: 'homelab-main' },
     polled_at: FIXTURE_NOW,
   }
 }
@@ -593,6 +594,8 @@ function serviceDetail(def: ServiceDef): ServiceDTO {
     slots: slotsOf(def),
     networking: {
       subnets,
+      vpc: { vpc_id: 'vpc-0a41c7e29b3d', name: 'homelab-main' },
+      security_group_names: { [`sg-0${hex(`${def.name}-sg`, 8)}`]: def.name },
       security_groups: [`sg-0${hex(`${def.name}-sg`, 8)}`],
       assign_public_ip: def.name === 'edge-nginx',
       load_balancers: def.lb ? [{ target_group_name: `${def.name}-tg`, container_name: def.name, container_port: def.port }] : [],

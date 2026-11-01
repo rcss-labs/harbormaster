@@ -213,6 +213,7 @@ type ClusterDTO struct {
 	TasksHistory72h []PointDTO          `json:"tasks_history_72h"`
 	StopsPerHour    []StopBucketDTO     `json:"stops_per_hour"`
 	ServicesDetail  []ClusterServiceDTO `json:"services_detail"`
+	VPC             *VPCRefDTO          `json:"vpc"` // plan 05: most common VPC of the visible running tasks
 	PolledAt        time.Time           `json:"polled_at"`
 }
 
@@ -279,6 +280,15 @@ type NetworkingDTO struct {
 	SecurityGroups []string          `json:"security_groups"`
 	AssignPublicIP bool              `json:"assign_public_ip"`
 	LoadBalancers  []LoadBalancerDTO `json:"load_balancers"`
+	// plan 05: VPC of the service's first subnet (null when unknown) and the names of its security groups.
+	VPC                *VPCRefDTO        `json:"vpc"`
+	SecurityGroupNames map[string]string `json:"security_group_names"`
+}
+
+// VPCRefDTO links a service or cluster to its VPC (plan 05).
+type VPCRefDTO struct {
+	VPCID string `json:"vpc_id"`
+	Name  string `json:"name"`
 }
 
 // ContainerDefDTO is a container of the task definition.

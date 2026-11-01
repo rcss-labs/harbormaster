@@ -150,3 +150,20 @@ func TestCluster_SlotsAndReserved(t *testing.T) {
 		t.Errorf("notifications slots %d rolling %d, want 2 and 1", len(services["notifications"].Slots), rolling)
 	}
 }
+
+func TestClusterDetail_IncludesVPC(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedAccounts(t, st)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	c := login(t, srv, "pavel", testPassword)
+	resp := c.get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var got ClusterDTO
+	decode(t, resp, &got)
+	if got.VPC == nil || got.VPC.VPCID != vpcMain || got.VPC.Name != "homelab-main" {
+		t.Errorf("vpc = %+v, want %s homelab-main", got.VPC, vpcMain)
+	}
+}

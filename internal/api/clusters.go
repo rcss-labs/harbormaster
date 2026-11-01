@@ -302,6 +302,12 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 		ServicesDetail:  []ClusterServiceDTO{},
 		PolledAt:        polledAt,
 	}
+	lookup, err := s.loadVPCLookup(ctx, key.AccountID, key.Region)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	dto.VPC = lookup.mostCommonVPC(visibleTasks(sc, view.tasksByCluster[key]))
 	_, _, spot := reserved(view.tasksByCluster[key])
 	dto.FargateTasks = len(view.tasksByCluster[key]) - spot
 

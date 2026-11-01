@@ -61,6 +61,13 @@ func testConfig() config.Config {
 // admin "pavel" and non-admin "omer" (both with testPassword) before the setup token is generated.
 func newServerWithLog(t *testing.T, seedUsers bool) (*httptest.Server, *fake.Fake, *store.Store, *syncBuffer) {
 	t.Helper()
+	return newServerCustom(t, seedUsers, nil)
+}
+
+// newServerCustom is newServerWithLog with a hook that adjusts the Server before New (plan 05: inject
+// a failing metrics fetcher).
+func newServerCustom(t *testing.T, seedUsers bool, mutate func(*Server)) (*httptest.Server, *fake.Fake, *store.Store, *syncBuffer) {
+	t.Helper()
 	st := storetest.Open(t)
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewTextHandler(logs, nil))
@@ -82,11 +89,15 @@ func newServerWithLog(t *testing.T, seedUsers bool) (*httptest.Server, *fake.Fak
 		t.Fatal(err)
 	}
 	fk := fake.New(fake.MockupEstate(time.Now))
-	api := New(Server{
+	server := Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: fk, Prober: fk, Cfg: cfg, Log: log, Now: time.Now,
 		Deploy: &deploy.Service{Store: st, Clients: fk, Scaling: st, MaxDesiredCount: 50, Now: time.Now},
-	})
+	}
+	if mutate != nil {
+		mutate(&server)
+	}
+	api := New(server)
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	return srv, fk, st, logs

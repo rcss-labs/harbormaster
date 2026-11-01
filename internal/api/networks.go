@@ -347,3 +347,58 @@ func (s *Server) networkClusterTags(ctx context.Context, tags authz.Tags, tasks 
 	}
 	return out, nil
 }
+
+// vpcLookup maps subnet IDs to VPC IDs and VPC IDs to VPC refs for one account x region (plan 05).
+type vpcLookup struct {
+	subnetVPC map[string]string
+	refs      map[string]VPCRefDTO
+}
+
+func (s *Server) loadVPCLookup(ctx context.Context, accountID, region string) (vpcLookup, error) {
+	vpcs, err := s.Store.ListVPCs(ctx, accountID, region)
+	if err != nil {
+		return vpcLookup{}, err
+	}
+	subnets, err := s.Store.ListSubnets(ctx, accountID, region)
+	if err != nil {
+		return vpcLookup{}, err
+	}
+	lookup := vpcLookup{subnetVPC: map[string]string{}, refs: map[string]VPCRefDTO{}}
+	for _, vpc := range vpcs {
+		lookup.refs[vpc.VPCID] = VPCRefDTO{VPCID: vpc.VPCID, Name: vpc.Name}
+	}
+	for _, subnet := range subnets {
+		lookup.subnetVPC[subnet.SubnetID] = subnet.VPCID
+	}
+	return lookup, nil
+}
+
+// ref is the VPC of a subnet, or nil when either is unknown.
+func (l vpcLookup) ref(subnetID string) *VPCRefDTO {
+	ref, ok := l.refs[l.subnetVPC[subnetID]]
+	if !ok {
+		return nil
+	}
+	return &ref
+}
+
+// mostCommonVPC is the VPC holding the most of the given tasks, ties broken by VPC ID; nil when no task has a known subnet.
+func (l vpcLookup) mostCommonVPC(tasks []model.Task) *VPCRefDTO {
+	counts := map[string]int{}
+	for _, task := range tasks {
+		if ref := l.ref(task.SubnetID); ref != nil {
+			counts[ref.VPCID]++
+		}
+	}
+	best := ""
+	for id, n := range counts {
+		if best == "" || n > counts[best] || (n == counts[best] && id < best) {
+			best = id
+		}
+	}
+	if best == "" {
+		return nil
+	}
+	ref := l.refs[best]
+	return &ref
+}

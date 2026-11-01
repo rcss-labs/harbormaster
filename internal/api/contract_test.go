@@ -127,6 +127,7 @@ func contractShapes() map[string]any {
 		"networks":      shapeOf(reflect.TypeFor[NetworksOverviewDTO]()),
 		"networkRegion": shapeOf(reflect.TypeFor[NetworkRegionVPCsDTO]()),
 		"vpcTree":       shapeOf(reflect.TypeFor[VPCTreeDTO]()),
+		"storage":       shapeOf(reflect.TypeFor[StorageDTO]()),
 	}
 }
 

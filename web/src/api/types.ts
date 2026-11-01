@@ -192,7 +192,13 @@ export interface ClusterDTO extends ClusterCardDTO {
   tasks_history_72h: PointDTO[]
   stops_per_hour: StopsHourDTO[]
   services_detail: ClusterServiceDTO[]
+  vpc: VPCRefDTO | null
   polled_at: string
+}
+
+export interface VPCRefDTO {
+  vpc_id: string
+  name: string
 }
 
 // ---- Services ----
@@ -263,6 +269,8 @@ export interface ServiceDTO {
     security_groups: string[]
     assign_public_ip: boolean
     load_balancers: { target_group_name: string; container_name: string; container_port: number }[]
+    vpc: VPCRefDTO | null
+    security_group_names: Record<string, string>
   }
   task_definition: {
     family: string

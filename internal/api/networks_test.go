@@ -23,7 +23,13 @@ type networkFixture struct {
 
 func newNetworkFixture(t *testing.T) networkFixture {
 	t.Helper()
-	srv, fk, st := newTestServer(t)
+	return newNetworkFixtureWith(t, nil)
+}
+
+// newNetworkFixtureWith is newNetworkFixture over a Server adjusted by mutate.
+func newNetworkFixtureWith(t *testing.T, mutate func(*Server)) networkFixture {
+	t.Helper()
+	srv, fk, st, _ := newServerCustom(t, true, mutate)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	tags, err := st.ListTags(t.Context())
