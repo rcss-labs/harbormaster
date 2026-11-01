@@ -62,7 +62,8 @@ export const handlers = [
     const url = new URL(request.url)
     const account = url.searchParams.get('account')
     const region = url.searchParams.get('region')
-    const items = CLUSTERS.items.filter((c) => (!account || c.account_id === account) && (!region || c.region === region))
+    const tags = url.searchParams.getAll('tag').map(Number)
+    const items = CLUSTERS.items.filter((c) => (!account || c.account_id === account) && (!region || c.region === region) && (tags.length === 0 || tags.includes(c.tag.id)))
     return HttpResponse.json({ ...CLUSTERS, items })
   }),
   http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),

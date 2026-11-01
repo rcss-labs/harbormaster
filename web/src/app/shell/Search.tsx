@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useSearch } from '../../api/hooks'
+import { useFilters } from './useFilters'
 import styles from './shell.module.css'
 
 const MAX_RESULTS = 8
@@ -11,7 +12,8 @@ export function Search() {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   const query = text.trim()
-  const { data } = useSearch(query)
+  const { filters } = useFilters()
+  const { data } = useSearch(query, filters)
   const items = (data?.items ?? []).slice(0, MAX_RESULTS)
 
   useEffect(() => {
