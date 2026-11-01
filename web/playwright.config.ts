@@ -17,13 +17,14 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [['list']],
-  use: { baseURL, trace: 'retain-on-failure' },
+  use: { baseURL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   // The smoke suite reads the untouched seeded estate (for example a rollout that is still in progress), then the
   // observe suite reads it before any flow changes it (it expects image-resizer failing and payments-api's log history),
   // so every mutating spec runs in a last project that waits for both.
   projects: [
     { name: 'chromium', testMatch: /smoke\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-observe', testMatch: /observe\.spec\.ts/, dependencies: ['chromium'], use: { ...devices['Desktop Chrome'] } },
+    // retries: 1 because a failed dependency skips every flow spec; the observe specs only read, so a retry is safe.
+    { name: 'chromium-observe', testMatch: /observe\.spec\.ts/, dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
     { name: 'chromium-flows', testIgnore: /(smoke|observe)\.spec\.ts/, dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
@@ -32,7 +33,7 @@ export default defineConfig({
       HM_LISTEN: `127.0.0.1:${port}`,
       HM_COOKIE_SECURE: 'false',
       HM_DATABASE_URL: databaseURL,
-      // The first scaling and target-health passes can run before the service list exists; a short interval keeps the observe specs from waiting a minute.
+      // Short observe tiers keep the observe specs from waiting a minute for their first figures.
       HM_POLL_SCALING: '5s',
       HM_POLL_TARGET_HEALTH: '5s',
     },

@@ -37,7 +37,8 @@ run:
 	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
 
 # e2e builds the binary, recreates the dedicated schema (tools/e2eschema; HM_E2E_SCHEMA, default hm_e2e) so each
-# run starts empty, then runs the Playwright smoke and flow specs against `serve --fake-aws`.
+# run starts empty, then runs the Playwright smoke and flow specs against `serve --fake-aws`. Playwright wipes
+# web/test-results on every run, so a failed run's traces and screenshots are copied to web/test-results-failed/<time>.
 e2e:
 	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
 		echo "make e2e: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
@@ -49,7 +50,11 @@ e2e:
 	fi
 	$(MAKE) build
 	@e2e_url="$$(go run ./tools/e2eschema)" || { echo "make e2e: could not prepare the e2e schema" >&2; exit 1; }; \
-	cd web && HM_E2E_DATABASE_URL="$$e2e_url" npx playwright test
+	cd web && rm -rf test-results && { HM_E2E_DATABASE_URL="$$e2e_url" npx playwright test; status=$$?; \
+		if [ $$status -ne 0 ] && [ -d test-results ]; then \
+			keep="test-results-failed/$$(date +%Y%m%dT%H%M%S)"; mkdir -p "$$keep" && cp -R test-results/. "$$keep"/ \
+				&& echo "make e2e: failure artifacts kept in web/$$keep" >&2; \
+		fi; exit $$status; }
 
 .PHONY: tf-check
 tf-check:
