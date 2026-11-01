@@ -54,8 +54,9 @@ test.describe('overview as oncall', () => {
 
   test('payments-api shows 3 running of 3, the target health donut and the deployments timeline', async ({ page }) => {
     await page.goto(paymentsApi())
-    // change.spec stops a payments-api task; ECS replaces it within a few polls.
-    await expect(page.getByText('running of 3 · 0 pending')).toBeVisible({ timeout: 30_000 })
+    // The tile value is "<running>" plus a <small> "running of <desired> · <pending> pending". change.spec stops a
+    // payments-api task; ECS replaces it within a few polls, so wait for the whole value to read 3 of 3.
+    await expect(page.getByText(/^3\s*running of 3 · 0 pending$/)).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('heading', { name: 'Target health' })).toBeVisible()
     await expect(page.getByRole('img').filter({ hasText: '3/3' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Deployments, 14 days' })).toBeVisible()
@@ -106,15 +107,13 @@ test.describe('task definition: registering', () => {
       await page.goto(stagingApi('task-definition'))
       const revisionsBefore = await revisionRowCount(page)
 
-      const imageTag = page.getByLabel('Image tag')
-      if ((await imageTag.evaluate((element) => element.tagName)) === 'SELECT') {
-        // Pick any tag other than the current one.
-        const options = await imageTag.locator('option').evaluateAll((all) => all.map((option) => (option as HTMLOptionElement).value))
-        const current = await imageTag.inputValue()
-        await imageTag.selectOption(options.find((value) => value !== current) ?? current)
-      } else {
-        await imageTag.fill('1.19.0-rc.3')
-      }
+      // The seeded ECR repository for staging `api` has tags, so quick edit renders a select (not a free-text input).
+      const imageTag = page.getByRole('combobox', { name: 'Image tag' })
+      const labels = await imageTag.getByRole('option').allTextContents()
+      const other = labels.find((label) => !label.includes('deployed'))
+      expect(other, 'a tag other than the deployed one').toBeDefined()
+      await imageTag.selectOption({ label: other })
+      await expect(imageTag).not.toHaveValue('1.19.0-rc.2')
       await page.getByRole('button', { name: 'Review and save' }).click()
       const review = page.getByRole('dialog')
       await expect(review.getByText('Register api:22?')).toBeVisible()
@@ -192,9 +191,11 @@ test.describe('scaling', () => {
     test('shows the auto scaling range and target read-only and cannot update the count', async ({ page }) => {
       await page.goto(paymentsApi('scaling'))
       await expect(page.getByRole('button', { name: 'Update desired count' })).toBeDisabled()
-      const rangeValue = (label: string) => page.getByText(label, { exact: true }).locator('xpath=following-sibling::dd[1]')
-      await expect(rangeValue('Minimum tasks')).toHaveText('2')
-      await expect(rangeValue('Maximum tasks')).toHaveText('6')
+      // dt/dd pairs: the definition that follows a term is the n-th definition, so match the pair by position.
+      const terms = await page.getByRole('term').allTextContents()
+      const definitions = page.getByRole('definition')
+      await expect(definitions.nth(terms.indexOf('Minimum tasks'))).toHaveText('2')
+      await expect(definitions.nth(terms.indexOf('Maximum tasks'))).toHaveText('6')
       await expect(page.getByText(/at 60%/)).toBeVisible()
     })
   })
@@ -211,10 +212,11 @@ test.describe('logs', () => {
       await expect(healthLines.first()).toBeVisible({ timeout: 15_000 })
 
       const container = page.getByLabel('Container')
-      await expect(container.locator('option', { hasText: 'payments-api' })).toHaveCount(1)
-      await expect(container.locator('option', { hasText: 'otel-collector' })).toHaveCount(1)
+      await expect(container.getByRole('option', { name: 'payments-api' })).toHaveCount(1)
+      await expect(container.getByRole('option', { name: 'otel-collector' })).toHaveCount(1)
 
-      const rowCount = () => log.evaluate((element) => element.children.length)
+      // Each log row carries one "<container>/<task id prefix>" label, so count those.
+      const rowCount = () => log.getByText(/^[\w-]+\/[0-9a-f]{8}$/).count()
       const allRows = await rowCount()
       await page.getByLabel('Level').selectOption({ label: 'Warnings and errors' })
       await expect(healthLines).toHaveCount(0)
@@ -293,7 +295,7 @@ test.describe('operations log as pavel', () => {
   test('is newest first, and the toggle hides ECS service events', async ({ page }) => {
     const response = await page.request.get(`/api/services/${serviceId(...SVC.paymentsApi)}/operations?include_ecs=true`)
     expect(response.ok()).toBe(true)
-    const { items } = (await response.json()) as { items: { ts: string }[] }
+    const { items } = (await response.json()) as { items: { ts: string; text: string }[] }
     const stamps = items.map((item) => Date.parse(item.ts))
     expect(stamps.length).toBeGreaterThan(1)
     expect(stamps).toEqual([...stamps].sort((a, b) => b - a))
@@ -301,6 +303,12 @@ test.describe('operations log as pavel', () => {
     await page.goto(paymentsApi('operations'))
     const ecsRows = page.getByText('ECS event', { exact: true })
     await expect(ecsRows.first()).toBeVisible()
+    // The rendered list follows the API order: the first two entries with unique text appear top to bottom.
+    const unique = items.filter((item) => items.filter((other) => other.text === item.text).length === 1).slice(0, 2)
+    expect(unique).toHaveLength(2)
+    const top = await page.getByText(unique[0].text, { exact: true }).boundingBox()
+    const below = await page.getByText(unique[1].text, { exact: true }).boundingBox()
+    expect(top!.y).toBeLessThan(below!.y)
     await page.getByLabel('Show ECS service events').uncheck()
     await expect(ecsRows).toHaveCount(0)
   })
