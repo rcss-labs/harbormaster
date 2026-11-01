@@ -11,17 +11,21 @@ test.describe('my access as omer', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'My access' })).toBeVisible()
     await expect(page.getByText('What you can do on each tag. Ask a global admin to change it.')).toBeVisible()
 
-    const row = (tag: string) => page.getByRole('row').filter({ has: page.getByText(tag, { exact: true }) })
-    // Columns: Tag, View, Logs, Operate, Deploy, Edit task definition, Terminal, Services.
-    const marks = async (tag: string) => (await row(tag).getByRole('cell').allTextContents()).slice(1, 7)
-    await expect(row('Dev')).toBeVisible()
-    expect(await marks('Dev')).toEqual(['✓', '✓', '✓', '–', '–', '–'])
-    expect(await marks('Staging')).toEqual(['✓', '–', '–', '–', '–', '–'])
-    expect(await marks('Prod')).toEqual(['–', '–', '–', '–', '–', '–'])
+    const table = page.getByRole('table')
+    const row = (tag: string) => table.getByRole('row').filter({ has: page.getByText(tag, { exact: true }) })
+    // Columns: Tag, View, Logs, Operate, Deploy, Edit task definition, Terminal, Services. Each read retries.
+    const expectMarks = async (tag: string, marks: string[]) => {
+      const cells = row(tag).getByRole('cell')
+      for (const [index, mark] of marks.entries()) await expect(cells.nth(index + 1)).toHaveText(mark)
+    }
+    await expectMarks('Dev', ['✓', '✓', '✓', '–', '–', '–'])
+    await expectMarks('Staging', ['✓', '–', '–', '–', '–', '–'])
+    await expectMarks('Prod', ['–', '–', '–', '–', '–', '–'])
 
-    // One data row per tag and nothing editable.
-    await expect(page.getByRole('table').getByRole('combobox')).toHaveCount(0)
-    await expect(page.getByRole('row').filter({ hasText: 'omer' })).toHaveCount(0)
+    // Exactly one data row per tag (plus the header row), none for other users, and nothing editable.
+    await expect(table.getByRole('row')).toHaveCount(4)
+    await expect(table.getByRole('row').filter({ hasText: /pavel|dana|oncall|omer/ })).toHaveCount(0)
+    await expect(table.getByRole('combobox')).toHaveCount(0)
   })
 })
 

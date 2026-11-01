@@ -1,7 +1,9 @@
-import { asUser, expect, newGuardedContext, test } from './fixtures/test'
+import { asUser, expect, newGuardedContext, test, type Page } from './fixtures/test'
 import { SEED_PASSWORD } from './helpers'
 
 // Mutating: runs in the flows project. Everything a test creates has a unique name, and what it changes is put back.
+const savedPermission = (page: Page) =>
+  page.waitForResponse((response) => response.url().includes('/api/permissions/') && response.request().method() === 'PUT' && response.ok())
 const unique = () => Math.random().toString(36).slice(2, 8)
 
 test.describe('admin pages as omer', () => {
@@ -25,8 +27,8 @@ test.describe('admin pages as omer', () => {
     const response = await page.request.get('/api/users')
     expect(response.status()).toBe(403)
     const body = await response.json()
-    expect(body.error.code).toBe('forbidden')
-    expect(body.items).toBeUndefined()
+    expect(body).toEqual({ error: { code: 'forbidden', message: expect.any(String) } })
+    expect(JSON.stringify(body)).not.toMatch(/pavel|dana|oncall/)
   })
 })
 
@@ -52,17 +54,19 @@ test.describe('admin pages as pavel', () => {
     const prod = page.getByLabel('Preset for omer on Prod')
     await expect(prod).toHaveValue('None')
     try {
-      await prod.selectOption('Viewer')
+      // The select updates optimistically, so wait for the saved response before leaving the page.
+      await Promise.all([savedPermission(page), prod.selectOption('Viewer')])
       await expect(prod).toHaveValue('Viewer')
 
       await page.goto('/admin/audit')
       const entry = page.getByText('Gave omer View on Prod.')
       await expect(entry).toBeVisible()
-      // Newest first: no row comes before it.
-      await expect(entry.locator('xpath=..').locator('xpath=preceding-sibling::*')).toHaveCount(0)
+      // Newest first: the audit log has no roles, so the newest row is the first one containing the entry text, and the
+      // first row mentioning both names is this one.
+      await expect(page.getByText(/omer.*Prod|Prod.*omer/).first()).toHaveText('Gave omer View on Prod.')
     } finally {
       await page.goto('/admin/users')
-      await page.getByLabel('Preset for omer on Prod').selectOption('None')
+      await Promise.all([savedPermission(page), page.getByLabel('Preset for omer on Prod').selectOption('None')])
       await expect(page.getByLabel('Preset for omer on Prod')).toHaveValue('None')
     }
   })
@@ -115,9 +119,10 @@ test.describe('admin pages as pavel', () => {
     await page.goto('/admin/tags')
     await expect(page.getByRole('heading', { level: 1, name: 'Tags' })).toBeVisible()
 
-    // The Dev tag is the default and cannot be deleted (its Delete button is disabled).
+    // The Dev tag is built in: neither Rename nor Delete is available.
     const dev = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Rename' }) }).filter({ hasText: /^Dev\s*default/ })
     await expect(dev.getByRole('button', { name: 'Delete' })).toBeDisabled()
+    await expect(dev.getByRole('button', { name: 'Rename' })).toBeDisabled()
 
     await page.getByRole('button', { name: 'Create tag' }).first().click()
     let dialog = page.getByRole('dialog')
