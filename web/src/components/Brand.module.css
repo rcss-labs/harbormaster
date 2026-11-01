@@ -2,4 +2,5 @@
 .symbol { width: 32px; height: 32px; }
 .symbolLarge { width: 40px; height: 40px; }
 .wordmark { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
-.lockup { display: block; width: 220px; max-width: 100%; height: auto; }
+/* the lockup PNG carries transparent padding; pull it back so the logo aligns with the form edge */
+.lockup { display: block; width: 220px; max-width: 100%; height: auto; margin: -4px 0 -8px -10px; }

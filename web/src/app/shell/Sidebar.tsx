@@ -67,10 +67,8 @@ export function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
-        <div>
-          <Brand variant="sidebar" />
-          <div className={styles.brandSub}>ECS control center</div>
-        </div>
+        <Brand variant="sidebar" />
+        <div className={styles.brandSub}>ECS control center</div>
       </div>
       <nav className={styles.nav} aria-label="Main">
         <NavItem to="/" end label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
