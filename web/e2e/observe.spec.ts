@@ -11,6 +11,8 @@ const LOG_LINE = '[class*="_ln_"]'
 const card = (page: Page, title: string) => page.getByRole('heading', { level: 2, name: title, exact: true }).locator('xpath=../..')
 
 const ALERTS_TIMEOUT = 30_000
+// Scaling and ALB figures also wait for their poll tier's first pass after the server starts.
+const POLL_TIMEOUT = 20_000
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' })
 
@@ -41,13 +43,11 @@ test('cluster page draws the usage chart and service ALB stats', async ({ page }
   await expect(chart).toBeVisible()
 
   const payments = page.getByRole('article', { name: 'payments-api' })
-  await expect(payments.getByText('req/min')).toBeVisible()
+  await expect(payments.getByText('req/min')).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
-// Not yet explained: the 24 h chart renders but no deployment marker label ("<service>:<revision>") ever appears
-// (waited 30 s), although the seed has notifications rolling out 3 min ago. Suspect deployment_history is not
-// recorded for the seeded rollout, or deployMarks drops the marker. Needs a product-side look; no fix attempted here.
-test.fixme('cluster chart shows a deployment marker label', async ({ page }) => {
+// The grid ends before now, so the fresh rollout's marker sits at the right edge (see deployMarks).
+test('cluster chart shows a deployment marker label', async ({ page }) => {
   await login(page, 'pavel')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   await page.getByRole('link', { name: /core-services/ }).first().click()
@@ -84,14 +84,12 @@ test('target health shows the unhealthy target', async ({ page }) => {
   await expect(health.getByText(/Unhealthy targets\s*1/)).toBeVisible()
 })
 
-// The Scaling tab also needs GET /api/services/{id}/desired-count, which belongs to plan 02 and is not in this lane (ruling R4):
-// without it the tab renders "Not found." instead of the Auto scaling card. Re-enable once plan 02 is merged.
-test.fixme('scaling tab shows min, max and scheduled actions', async ({ page }) => {
+test('scaling tab shows min, max and scheduled actions', async ({ page }) => {
   await login(page, 'pavel')
   const payments = serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
   await page.goto(`/services/${payments}/scaling`)
   const autoScaling = card(page, 'Auto scaling')
-  await expect(autoScaling).toContainText(/Minimum tasks\s*2/)
+  await expect(autoScaling).toContainText(/Minimum tasks\s*2/, { timeout: POLL_TIMEOUT })
   await expect(autoScaling).toContainText(/Maximum tasks\s*6/)
   // Two scheduled actions: min 3 on weekday mornings, min 2 in the evening (shown as cron expressions, not "weekdays").
   await expect(autoScaling.getByText('weekdays')).toHaveCount(0)
