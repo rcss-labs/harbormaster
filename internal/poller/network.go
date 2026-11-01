@@ -3,6 +3,8 @@ package poller
 import (
 	"context"
 	"fmt"
+	"iter"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +20,14 @@ import (
 
 // networkPageSize is the MaxResults sent to paginated EC2 describes (accepted by every call used here).
 const networkPageSize = 100
+
+// ec2FilterValueLimit is the most values sent in one EC2 filter. EC2 rejects more than 200 with FilterLimitExceeded; 100 keeps a margin.
+const ec2FilterValueLimit = 100
+
+// chunkValues splits filter values into slices of at most ec2FilterValueLimit; an empty list yields nothing.
+func chunkValues(values []string) iter.Seq[[]string] {
+	return slices.Chunk(values, ec2FilterValueLimit)
+}
 
 // ecsEndpointNames are the VPC endpoint services an ECS-on-Fargate task needs; other endpoints are not cached.
 var ecsEndpointNames = map[string]bool{"ecr.api": true, "ecr.dkr": true, "logs": true, "ssmmessages": true}
@@ -78,9 +88,11 @@ func pollNetwork(ctx context.Context, t awsx.Target, ec2c awsx.EC2API, st networ
 	var igws []ec2types.InternetGateway
 	var nats []ec2types.NatGateway
 	var endpoints []ec2types.VpcEndpoint
-	if len(vpcIDs) > 0 { // an empty filter value list is rejected by EC2
+	// An empty filter value list is rejected by EC2, and so is one with more than ec2FilterValueLimit values;
+	// chunkValues yields nothing for an empty list and bounded chunks otherwise.
+	for vpcChunk := range chunkValues(vpcIDs) {
 		igwPages := ec2.NewDescribeInternetGatewaysPaginator(ec2c, &ec2.DescribeInternetGatewaysInput{
-			Filters: []ec2types.Filter{{Name: aws.String("attachment.vpc-id"), Values: vpcIDs}},
+			Filters: []ec2types.Filter{{Name: aws.String("attachment.vpc-id"), Values: vpcChunk}},
 		}, func(o *ec2.DescribeInternetGatewaysPaginatorOptions) { o.Limit = networkPageSize })
 		for igwPages.HasMorePages() {
 			page, err := igwPages.NextPage(ctx)
@@ -91,7 +103,7 @@ func pollNetwork(ctx context.Context, t awsx.Target, ec2c awsx.EC2API, st networ
 		}
 		natPages := ec2.NewDescribeNatGatewaysPaginator(ec2c, &ec2.DescribeNatGatewaysInput{
 			Filter: []ec2types.Filter{
-				{Name: aws.String("vpc-id"), Values: vpcIDs},
+				{Name: aws.String("vpc-id"), Values: vpcChunk},
 				{Name: aws.String("state"), Values: []string{"available", "pending"}},
 			},
 		}, func(o *ec2.DescribeNatGatewaysPaginatorOptions) { o.Limit = networkPageSize })
@@ -103,7 +115,7 @@ func pollNetwork(ctx context.Context, t awsx.Target, ec2c awsx.EC2API, st networ
 			nats = append(nats, page.NatGateways...)
 		}
 		endpointPages := ec2.NewDescribeVpcEndpointsPaginator(ec2c, &ec2.DescribeVpcEndpointsInput{
-			Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: vpcIDs}},
+			Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: vpcChunk}},
 		}, func(o *ec2.DescribeVpcEndpointsPaginatorOptions) { o.Limit = networkPageSize })
 		for endpointPages.HasMorePages() {
 			page, err := endpointPages.NextPage(ctx)
@@ -120,9 +132,9 @@ func pollNetwork(ctx context.Context, t awsx.Target, ec2c awsx.EC2API, st networ
 		return err
 	}
 	var groups []ec2types.SecurityGroup
-	if len(groupIDs) > 0 {
+	for groupChunk := range chunkValues(groupIDs) {
 		groupPages := ec2.NewDescribeSecurityGroupsPaginator(ec2c, &ec2.DescribeSecurityGroupsInput{
-			Filters: []ec2types.Filter{{Name: aws.String("group-id"), Values: groupIDs}},
+			Filters: []ec2types.Filter{{Name: aws.String("group-id"), Values: groupChunk}},
 		}, func(o *ec2.DescribeSecurityGroupsPaginatorOptions) { o.Limit = networkPageSize })
 		for groupPages.HasMorePages() {
 			page, err := groupPages.NextPage(ctx)

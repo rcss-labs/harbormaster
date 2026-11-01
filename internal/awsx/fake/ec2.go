@@ -2,11 +2,13 @@ package fake
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 )
@@ -21,6 +23,20 @@ type EC2 struct {
 var _ awsx.EC2API = (*EC2)(nil)
 
 const ec2PageSize = 2
+
+// ec2MaxFilterValues is the number of values EC2 accepts in one filter; more is FilterLimitExceeded.
+const ec2MaxFilterValues = 200
+
+// checkFilterLimit rejects any filter with more than ec2MaxFilterValues values, like EC2.
+func checkFilterLimit(filters []ec2types.Filter) error {
+	for _, flt := range filters {
+		if len(flt.Values) > ec2MaxFilterValues {
+			return &smithy.GenericAPIError{Code: "FilterLimitExceeded",
+				Message: fmt.Sprintf("filter %s has %d values, the limit is %d", aws.ToString(flt.Name), len(flt.Values), ec2MaxFilterValues)}
+		}
+	}
+	return nil
+}
 
 // begin counts the call, applies FailNext and the ThrottleEC2 knob.
 func (c *EC2) begin(op string) error {
@@ -85,6 +101,9 @@ func (c *EC2) DescribeVpcs(_ context.Context, in *ec2.DescribeVpcsInput, _ ...fu
 	if err := c.begin("DescribeVpcs"); err != nil {
 		return nil, err
 	}
+	if err := checkFilterLimit(in.Filters); err != nil {
+		return nil, err
+	}
 	e := c.f.Estate
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
@@ -121,6 +140,9 @@ func (c *EC2) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _
 	if err := c.begin("DescribeSubnets"); err != nil {
 		return nil, err
 	}
+	if err := checkFilterLimit(in.Filters); err != nil {
+		return nil, err
+	}
 	e := c.f.Estate
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
@@ -144,6 +166,9 @@ func (c *EC2) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGateways
 	if err := c.begin("DescribeNatGateways"); err != nil {
 		return nil, err
 	}
+	if err := checkFilterLimit(in.Filter); err != nil {
+		return nil, err
+	}
 	e := c.f.Estate
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
@@ -160,6 +185,9 @@ func (c *EC2) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGateways
 
 func (c *EC2) DescribeInternetGateways(_ context.Context, in *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
 	if err := c.begin("DescribeInternetGateways"); err != nil {
+		return nil, err
+	}
+	if err := checkFilterLimit(in.Filters); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -189,6 +217,9 @@ func (c *EC2) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpoin
 	if err := c.begin("DescribeVpcEndpoints"); err != nil {
 		return nil, err
 	}
+	if err := checkFilterLimit(in.Filters); err != nil {
+		return nil, err
+	}
 	e := c.f.Estate
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
@@ -205,6 +236,9 @@ func (c *EC2) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpoin
 
 func (c *EC2) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
 	if err := c.begin("DescribeSecurityGroups"); err != nil {
+		return nil, err
+	}
+	if err := checkFilterLimit(in.Filters); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

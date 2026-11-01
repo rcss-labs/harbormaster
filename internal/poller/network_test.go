@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -234,3 +235,41 @@ func TestPollNetwork_ThrottleReturnsThrottleAndWritesNothing(t *testing.T) {
 }
 
 func nilSGInput() *ec2.DescribeSecurityGroupsInput { return &ec2.DescribeSecurityGroupsInput{} }
+
+func TestPollNetwork_ChunksFilterValuesAboveEC2Limit(t *testing.T) {
+	f, api := newNetworkEC2(t)
+	const extraVPCs, extraGroups = 250, 450
+	e := f.Estate
+	e.Mu.Lock()
+	var groupIDs []string
+	for i := 0; i < extraVPCs; i++ {
+		id := fmt.Sprintf("vpc-bulk%04d", i)
+		e.Network.Vpcs = append(e.Network.Vpcs, fake.NetVpc{AccountID: networkTarget.AccountID, Region: networkTarget.Region, Name: id,
+			Vpc: ec2types.Vpc{VpcId: aws.String(id), CidrBlock: aws.String("10.0.0.0/16")}})
+	}
+	for i := 0; i < extraGroups; i++ {
+		id := fmt.Sprintf("sg-bulk%04d", i)
+		groupIDs = append(groupIDs, id)
+		e.Network.SecurityGroups = append(e.Network.SecurityGroups, fake.NetSecurityGroup{AccountID: networkTarget.AccountID, Region: networkTarget.Region,
+			Group: ec2types.SecurityGroup{GroupId: aws.String(id), GroupName: aws.String("name-" + id), VpcId: aws.String("vpc-bulk0000")}})
+	}
+	e.Mu.Unlock()
+
+	st := &recordingNetworkStore{services: []store.ServiceRow{serviceWithGroups(groupIDs...)}}
+	if err := pollNetwork(context.Background(), networkTarget, api, st, loopNow); err != nil {
+		t.Fatalf("pollNetwork with %d groups and %d extra vpcs: %v", extraGroups, extraVPCs, err)
+	}
+	if st.replaces != 1 || len(st.vpcs) != 3+extraVPCs || len(st.sgs) != extraGroups {
+		t.Fatalf("replaces %d vpcs %d groups %d, want 1, %d and %d", st.replaces, len(st.vpcs), len(st.sgs), 3+extraVPCs, extraGroups)
+	}
+	if len(st.subnets) != 6 {
+		t.Fatalf("subnets = %d, want 6", len(st.subnets))
+	}
+	names := map[string]bool{}
+	for _, sg := range st.sgs {
+		names[sg.Name] = true
+	}
+	if !names["name-sg-bulk0449"] {
+		t.Error("security group names from the last chunk are missing")
+	}
+}
