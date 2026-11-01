@@ -114,7 +114,7 @@ func pollNetwork(ctx context.Context, t awsx.Target, ec2c awsx.EC2API, st networ
 		}
 	}
 
-	// On a fresh database the first network run can precede the services tier, so security groups fill on the next interval.
+	// The clusters, service-list and services tiers run synchronously before the other tiers (syncStartTiers in loop.go), so on a fresh database their rows are already stored when the first network run reads the service security groups.
 	groupIDs, err := serviceSecurityGroupIDs(ctx, t, st)
 	if err != nil {
 		return err

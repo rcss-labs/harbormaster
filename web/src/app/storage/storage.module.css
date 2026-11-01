@@ -22,7 +22,8 @@
 .xcard:hover { border-color: var(--accent); }
 .top { display: flex; gap: 10px; align-items: flex-start; }
 .top > :last-child { margin-left: auto; }
-.name { margin: 0; font-size: 15px; font-weight: 600; }
+.name { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: normal; }
+.link { color: var(--accent); }
 
 .mini2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .miniKey { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 3px; }

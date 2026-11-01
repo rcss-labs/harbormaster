@@ -79,7 +79,7 @@ export function EfsCard({ fs, colour }: EfsCardProps) {
         ) : (
           fs.mounted_by.map((mount, index) => (
             <div key={index} className={styles.small}>
-              <Link to={`/services/${mount.service_id}/overview`}>{mount.service}</Link>{' '}
+              <Link to={`/services/${mount.service_id}/overview`} className={styles.link}>{mount.service}</Link>{' '}
               <span className={styles.muted}>{`(${mount.cluster}) →`}</span>{' '}
               <span className={styles.mono}>{mount.container_path}</span>
             </div>

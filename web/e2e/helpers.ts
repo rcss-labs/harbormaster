@@ -15,3 +15,9 @@ export async function login(page: Page, username: string, password = SEED_PASSWO
 export function serviceId(accountId: string, region: string, cluster: string, service: string) {
   return Buffer.from([accountId, region, cluster, service].join('|')).toString('base64url')
 }
+
+/** Saves a full-page screenshot into HM_E2E_SCREENSHOT_DIR when it is set (for visual review); a no-op otherwise. */
+export async function saveScreenshot(page: Page, name: string) {
+  const dir = process.env.HM_E2E_SCREENSHOT_DIR
+  if (dir) await page.screenshot({ path: `${dir}/${name}`, fullPage: true })
+}
