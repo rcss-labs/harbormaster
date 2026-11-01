@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { MeDTO, PollerDTO } from '../../api/types'
 import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/fixtures'
 import { server } from '../../test/msw'
@@ -10,6 +10,11 @@ import { renderApp } from '../../test/renderApp'
 beforeEach(() => {
   localStorage.clear()
   window.history.replaceState(null, '', '/')
+})
+
+// Let requests still in flight from an unmounted app finish, so they cannot reach the next test's handlers.
+afterEach(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 100))
 })
 
 const nav = () => screen.findByRole('navigation', { name: 'Main' })
@@ -128,7 +133,14 @@ describe('Shell', () => {
     )
     renderApp('/clusters')
     expect(await screen.findByRole('button', { name: 'Tag filter' })).toHaveTextContent('Staging')
-    await waitFor(() => expect(tagParams[tagParams.length - 1]).toEqual(['2']))
+    await waitFor(() => expect(tagParams.length).toBeGreaterThan(0))
+    expect(tagParams.every((tags) => tags.length === 1 && tags[0] === '2')).toBe(true)
+  })
+
+  it('restores stored tags sorted ascending into the URL', async () => {
+    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [3, 2] }))
+    renderApp('/clusters')
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('tag=2&tag=3'))
   })
 
   it('non-admins only see tags they can View in the tag filter options', async () => {

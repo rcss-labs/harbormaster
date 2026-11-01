@@ -32,7 +32,7 @@ export function visibleTagIds(me: MeDTO): number[] {
 }
 
 const uniqueNumbers = (values: unknown[]): number[] | undefined => {
-  const numbers = [...new Set(values.filter((v): v is number => typeof v === 'number' && Number.isInteger(v)))]
+  const numbers = [...new Set(values.filter((v): v is number => typeof v === 'number' && Number.isInteger(v)))].sort((a, b) => a - b)
   return numbers.length > 0 ? numbers : undefined
 }
 
@@ -145,6 +145,6 @@ export function useFilters(): FilterState {
 
   const setAccount = useCallback((account: string | undefined) => update('account', account), [update])
   const setRegion = useCallback((region: string | undefined) => update('region', region), [update])
-  const setTags = useCallback((ids: number[]) => update('tag', [...ids].sort((a, b) => a - b)), [update])
+  const setTags = useCallback((ids: number[]) => update('tag', ids), [update])
   return { filters, setAccount, setRegion, setTags }
 }
