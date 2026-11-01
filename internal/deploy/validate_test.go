@@ -61,12 +61,23 @@ func TestValidate(t *testing.T) {
 		smNew   = "arn:aws:secretsmanager:us-east-1:482109375512:secret:payments/other-ZzZzZz"
 	)
 	const (
-		s3Old       = "arn:aws:s3:::payments-config/old.env"
-		s3New       = "arn:aws:s3:::attacker-bucket/stolen.env"
-		envFilesMsg = "Changing environment files needs a global admin"
-		fsxMsg      = "Changing FSx credentials needs a global admin"
-		firelensMsg = "Changing the FireLens config file needs a global admin"
-		credSpecMsg = "Changing credential specs needs a global admin"
+		s3Old             = "arn:aws:s3:::payments-config/old.env"
+		s3New             = "arn:aws:s3:::attacker-bucket/stolen.env"
+		envFilesMsg       = "Changing environment files needs a global admin"
+		fsxMsg            = "Changing FSx credentials needs a global admin"
+		firelensMsg       = "Changing the FireLens config file needs a global admin"
+		credSpecMsg       = "Changing credential specs needs a global admin"
+		privilegedMsg     = "Changing privileged mode needs a global admin"
+		capabilitiesMsg   = "Adding Linux capabilities needs a global admin"
+		devicesMsg        = "Changing host devices needs a global admin"
+		pidMsg            = "Sharing the host process namespace needs a global admin"
+		ipcMsg            = "Sharing the host IPC namespace needs a global admin"
+		networkMsg        = "Using host networking needs a global admin"
+		hostVolumeMsg     = "Changing host volume mounts needs a global admin"
+		dockerVolumeMsg   = "Changing Docker volume configuration needs a global admin"
+		s3FilesMsg        = "Changing S3 Files volume configuration needs a global admin"
+		systemControlsMsg = "Changing system controls (sysctls) needs a global admin"
+		securityOptsMsg   = "Changing Docker security options needs a global admin"
 	)
 	addEnvFile := func(arn string) func(Definition) {
 		return func(d Definition) {
@@ -103,6 +114,27 @@ func TestValidate(t *testing.T) {
 				"secretOptions": []any{map[string]any{"name": "token", "valueFrom": valueFrom}},
 			}
 		}
+	}
+	setContainer := func(key string, value any) func(Definition) {
+		return func(d Definition) { firstContainer(d)[key] = value }
+	}
+	setLinux := func(linux map[string]any) func(Definition) {
+		return func(d Definition) { firstContainer(d)["linuxParameters"] = linux }
+	}
+	setTop := func(key string, value any) func(Definition) {
+		return func(d Definition) { d[key] = value }
+	}
+	setVolume := func(volume map[string]any) func(Definition) {
+		return func(d Definition) { d["volumes"] = []any{volume} }
+	}
+	hostVolume := func(path string) map[string]any {
+		return map[string]any{"name": "data", "host": map[string]any{"sourcePath": path}}
+	}
+	dockerVolume := func(driver string) map[string]any {
+		return map[string]any{"name": "data", "dockerVolumeConfiguration": map[string]any{"scope": "shared", "autoprovision": true, "driver": driver}}
+	}
+	s3FilesVolume := func(arn string) map[string]any {
+		return map[string]any{"name": "data", "s3filesVolumeConfiguration": map[string]any{"fileSystemArn": arn}}
 	}
 	fargate := func(cpu, memory any) func(Definition) {
 		return func(d Definition) { d["cpu"], d["memory"] = cpu, memory }
@@ -169,6 +201,64 @@ func TestValidate(t *testing.T) {
 		{name: "admin adds firelens s3 config", admin: true, mutate: addFirelens(s3New)},
 		{name: "non-admin adds credentialSpecs", mutate: addCredSpec("credentialspec:" + s3New), wantErr: credSpecMsg},
 		{name: "admin adds credentialSpecs", admin: true, mutate: addCredSpec("credentialspec:" + s3New)},
+		// Host-escape fields (spec §7.1 class: admin-only, keep or remove allowed).
+		{name: "non-admin adds privileged", mutate: setContainer("privileged", true), wantErr: privilegedMsg},
+		{name: "non-admin keeps privileged", base: setContainer("privileged", true), mutate: setContainer("privileged", true)},
+		{name: "non-admin removes privileged", base: setContainer("privileged", true), mutate: func(d Definition) { delete(firstContainer(d), "privileged") }},
+		{name: "non-admin sets privileged false", mutate: setContainer("privileged", false)},
+		{name: "non-admin adds privileged via case-folded key", mutate: setContainer("PRIVILEGED", true), wantErr: privilegedMsg},
+		{name: "admin adds privileged", admin: true, mutate: setContainer("privileged", true)},
+		{name: "non-admin adds capability", mutate: setLinux(map[string]any{"capabilities": map[string]any{"add": []any{"SYS_ADMIN"}}}), wantErr: capabilitiesMsg},
+		{name: "non-admin keeps capability", base: setLinux(map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}}),
+			mutate: setLinux(map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}})},
+		{name: "non-admin adds another capability", base: setLinux(map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}}),
+			mutate: setLinux(map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN", "SYS_PTRACE"}}}), wantErr: capabilitiesMsg},
+		{name: "non-admin may drop capabilities", mutate: setLinux(map[string]any{"capabilities": map[string]any{"drop": []any{"ALL"}}})},
+		{name: "admin adds capability", admin: true, mutate: setLinux(map[string]any{"capabilities": map[string]any{"add": []any{"SYS_ADMIN"}}})},
+		{name: "non-admin adds device", mutate: setLinux(map[string]any{"devices": []any{map[string]any{"hostPath": "/dev/sda"}}}), wantErr: devicesMsg},
+		{name: "non-admin keeps device", base: setLinux(map[string]any{"devices": []any{map[string]any{"hostPath": "/dev/fuse"}}}),
+			mutate: setLinux(map[string]any{"devices": []any{map[string]any{"hostPath": "/dev/fuse"}}})},
+		{name: "non-admin changes device", base: setLinux(map[string]any{"devices": []any{map[string]any{"hostPath": "/dev/fuse"}}}),
+			mutate: setLinux(map[string]any{"devices": []any{map[string]any{"hostPath": "/dev/sda"}}}), wantErr: devicesMsg},
+		{name: "admin adds device", admin: true, mutate: setLinux(map[string]any{"devices": []any{map[string]any{"hostPath": "/dev/sda"}}})},
+		{name: "non-admin sets pidMode host", mutate: setTop("pidMode", "host"), wantErr: pidMsg},
+		{name: "non-admin keeps pidMode host", base: setTop("pidMode", "host"), mutate: setTop("pidMode", "host")},
+		{name: "non-admin sets pidMode task", mutate: setTop("pidMode", "task")},
+		{name: "admin sets pidMode host", admin: true, mutate: setTop("pidMode", "host")},
+		{name: "non-admin sets ipcMode host", mutate: setTop("ipcMode", "host"), wantErr: ipcMsg},
+		{name: "non-admin keeps ipcMode host", base: setTop("ipcMode", "host"), mutate: setTop("ipcMode", "host")},
+		{name: "non-admin sets ipcMode none", mutate: setTop("ipcMode", "none")},
+		{name: "admin sets ipcMode host", admin: true, mutate: setTop("ipcMode", "host")},
+		{name: "non-admin switches to networkMode host", mutate: setTop("networkMode", "host"), wantErr: networkMsg},
+		{name: "non-admin keeps networkMode host", base: setTop("networkMode", "host"), mutate: setTop("networkMode", "host")},
+		{name: "non-admin keeps networkMode awsvpc", base: setTop("networkMode", "awsvpc"), mutate: setTop("networkMode", "awsvpc")},
+		{name: "non-admin switches host to bridge", base: setTop("networkMode", "host"), mutate: setTop("networkMode", "bridge")},
+		{name: "admin switches to networkMode host", admin: true, mutate: setTop("networkMode", "host")},
+		{name: "non-admin adds host volume", mutate: setVolume(hostVolume("/var/run/docker.sock")), wantErr: hostVolumeMsg},
+		{name: "non-admin changes host volume path", base: setVolume(hostVolume("/data")), mutate: setVolume(hostVolume("/")), wantErr: hostVolumeMsg},
+		{name: "non-admin keeps host volume", base: setVolume(hostVolume("/data")), mutate: setVolume(hostVolume("/data"))},
+		{name: "non-admin adds scratch volume", mutate: setVolume(map[string]any{"name": "scratch"})},
+		{name: "non-admin adds empty-path host volume", mutate: setVolume(map[string]any{"name": "scratch", "host": map[string]any{}})},
+		{name: "admin adds host volume", admin: true, mutate: setVolume(hostVolume("/var/run/docker.sock"))},
+		{name: "non-admin adds docker volume config", mutate: setVolume(dockerVolume("local")), wantErr: dockerVolumeMsg},
+		{name: "non-admin changes docker volume config", base: setVolume(dockerVolume("local")), mutate: setVolume(dockerVolume("rexray")), wantErr: dockerVolumeMsg},
+		{name: "non-admin keeps docker volume config", base: setVolume(dockerVolume("local")), mutate: setVolume(dockerVolume("local"))},
+		{name: "admin adds docker volume config", admin: true, mutate: setVolume(dockerVolume("local"))},
+		{name: "non-admin adds s3files volume", mutate: setVolume(s3FilesVolume("arn:aws:s3files:us-east-1:482109375512:file-system/fs-1")), wantErr: s3FilesMsg},
+		{name: "non-admin changes s3files volume", base: setVolume(s3FilesVolume("arn:aws:s3files:us-east-1:482109375512:file-system/fs-1")),
+			mutate: setVolume(s3FilesVolume("arn:aws:s3files:us-east-1:482109375512:file-system/fs-2")), wantErr: s3FilesMsg},
+		{name: "non-admin keeps s3files volume", base: setVolume(s3FilesVolume("arn:aws:s3files:us-east-1:482109375512:file-system/fs-1")),
+			mutate: setVolume(s3FilesVolume("arn:aws:s3files:us-east-1:482109375512:file-system/fs-1"))},
+		{name: "admin adds s3files volume", admin: true, mutate: setVolume(s3FilesVolume("arn:aws:s3files:us-east-1:482109375512:file-system/fs-1"))},
+		{name: "non-admin adds dockerSecurityOptions", mutate: setContainer("dockerSecurityOptions", []any{"apparmor:unconfined"}), wantErr: securityOptsMsg},
+		{name: "non-admin keeps dockerSecurityOptions", base: setContainer("dockerSecurityOptions", []any{"label:type:foo"}), mutate: setContainer("dockerSecurityOptions", []any{"label:type:foo"})},
+		{name: "non-admin adds systemControls", mutate: setContainer("systemControls", []any{map[string]any{"namespace": "net.ipv4.ip_forward", "value": "1"}}), wantErr: systemControlsMsg},
+		{name: "non-admin changes systemControls", base: setContainer("systemControls", []any{map[string]any{"namespace": "net.ipv4.ip_forward", "value": "0"}}),
+			mutate: setContainer("systemControls", []any{map[string]any{"namespace": "net.ipv4.ip_forward", "value": "1"}}), wantErr: systemControlsMsg},
+		{name: "non-admin keeps systemControls", base: setContainer("systemControls", []any{map[string]any{"namespace": "net.ipv4.ip_forward", "value": "0"}}),
+			mutate: setContainer("systemControls", []any{map[string]any{"namespace": "net.ipv4.ip_forward", "value": "0"}})},
+		{name: "admin adds systemControls", admin: true, mutate: setContainer("systemControls", []any{map[string]any{"namespace": "net.ipv4.ip_forward", "value": "1"}})},
+		{name: "admin adds dockerSecurityOptions", admin: true, mutate: setContainer("dockerSecurityOptions", []any{"apparmor:unconfined"})},
 		{name: "non-integral cpu", mutate: fargate(512.7, float64(1024)), wantErr: "Task definition JSON is invalid: cpu must be a whole number"},
 		{name: "admin adds secret in other prefix", admin: true, mutate: addSecret(ssmFrom)},
 		{name: "secret removed", mutate: func(d Definition) {

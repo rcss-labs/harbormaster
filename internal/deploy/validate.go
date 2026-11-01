@@ -104,6 +104,9 @@ func validateCanonical(base, draft Definition, admin bool, accountID string) err
 	if err := validateExecutionFetches(base, draft); err != nil {
 		return err
 	}
+	if err := validateHostEscalations(base, draft); err != nil {
+		return err
+	}
 	return validateSecrets(base, draft, accountID)
 }
 
@@ -341,6 +344,136 @@ func validateExecutionFetches(base, draft Definition) error {
 		for _, reference := range fetch.references(draft) {
 			if !existing[reference] {
 				return invalid("%s", fetch.message)
+			}
+		}
+	}
+	return nil
+}
+
+// hostEscalation is one setting that gives a container more reach into the host than a default
+// task has. Like executionFetch, each lists the current values as comparable signatures.
+type hostEscalation struct {
+	message    string
+	signatures func(def Definition) []string
+}
+
+// containerSignatures collects one signature per value found by visit, prefixed with the container
+// name so moving a value to another container counts as adding it.
+func containerSignatures(def Definition, visit func(container map[string]any, add func(value any))) []string {
+	var signatures []string
+	containers, _ := def["containerDefinitions"].([]any)
+	for _, entry := range containers {
+		container, _ := entry.(map[string]any)
+		name, _ := container["name"].(string)
+		visit(container, func(value any) {
+			encoded, _ := json.Marshal(value)
+			signatures = append(signatures, name+"|"+string(encoded))
+		})
+	}
+	return signatures
+}
+
+// topLevelHost yields a signature when a task-level mode is "host".
+func topLevelHost(key string) func(def Definition) []string {
+	return func(def Definition) []string {
+		if def[key] == "host" {
+			return []string{"host"}
+		}
+		return nil
+	}
+}
+
+// volumeSignatures yields one signature per volume that carries the given configuration key.
+func volumeSignatures(configure func(volume map[string]any) any) func(def Definition) []string {
+	return func(def Definition) []string {
+		var signatures []string
+		volumes, _ := def["volumes"].([]any)
+		for _, entry := range volumes {
+			volume, _ := entry.(map[string]any)
+			if value := configure(volume); value != nil {
+				encoded, _ := json.Marshal(value)
+				name, _ := volume["name"].(string)
+				signatures = append(signatures, name+"|"+string(encoded))
+			}
+		}
+		return signatures
+	}
+}
+
+// hostEscalations are admin-only for non-admins (spec §7.1, same class as roles and secrets): they
+// can own the container host on EC2 capacity. Rules read the canonical decoded form.
+var hostEscalations = []hostEscalation{
+	{"Changing privileged mode needs a global admin", func(def Definition) []string {
+		return containerSignatures(def, func(container map[string]any, add func(any)) {
+			if container["privileged"] == true {
+				add(true)
+			}
+		})
+	}},
+	{"Adding Linux capabilities needs a global admin", func(def Definition) []string {
+		return containerSignatures(def, func(container map[string]any, add func(any)) {
+			linux, _ := container["linuxParameters"].(map[string]any)
+			capabilities, _ := linux["capabilities"].(map[string]any)
+			added, _ := capabilities["add"].([]any)
+			for _, capability := range added {
+				add(capability)
+			}
+		})
+	}},
+	{"Changing host devices needs a global admin", func(def Definition) []string {
+		return containerSignatures(def, func(container map[string]any, add func(any)) {
+			linux, _ := container["linuxParameters"].(map[string]any)
+			devices, _ := linux["devices"].([]any)
+			for _, device := range devices {
+				add(device)
+			}
+		})
+	}},
+	{"Sharing the host process namespace needs a global admin", topLevelHost("pidMode")},
+	{"Sharing the host IPC namespace needs a global admin", topLevelHost("ipcMode")},
+	{"Using host networking needs a global admin", topLevelHost("networkMode")},
+	{"Changing host volume mounts needs a global admin", volumeSignatures(func(volume map[string]any) any {
+		host, _ := volume["host"].(map[string]any)
+		if path, _ := host["sourcePath"].(string); path != "" {
+			return path
+		}
+		return nil
+	})},
+	{"Changing Docker volume configuration needs a global admin", volumeSignatures(func(volume map[string]any) any {
+		return volume["dockerVolumeConfiguration"]
+	})},
+	{"Changing S3 Files volume configuration needs a global admin", volumeSignatures(func(volume map[string]any) any {
+		return volume["s3filesVolumeConfiguration"]
+	})},
+	{"Changing system controls (sysctls) needs a global admin", func(def Definition) []string {
+		return containerSignatures(def, func(container map[string]any, add func(any)) {
+			controls, _ := container["systemControls"].([]any)
+			for _, control := range controls {
+				add(control)
+			}
+		})
+	}},
+	{"Changing Docker security options needs a global admin", func(def Definition) []string {
+		return containerSignatures(def, func(container map[string]any, add func(any)) {
+			options, _ := container["dockerSecurityOptions"].([]any)
+			for _, option := range options {
+				add(option)
+			}
+		})
+	}},
+}
+
+// validateHostEscalations lets a non-admin keep or remove these settings as deployed but not add
+// or change any.
+func validateHostEscalations(base, draft Definition) error {
+	for _, escalation := range hostEscalations {
+		existing := map[string]bool{}
+		for _, signature := range escalation.signatures(base) {
+			existing[signature] = true
+		}
+		for _, signature := range escalation.signatures(draft) {
+			if !existing[signature] {
+				return invalid("%s", escalation.message)
 			}
 		}
 	}
