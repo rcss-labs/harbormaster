@@ -131,7 +131,7 @@ export function Overview() {
           ) : (
             <HBars
               items={clustersNeedingAttention.map((cluster) => {
-                const healthy = cluster.running - cluster.unhealthy - cluster.rolling_out
+                const healthy = Math.max(0, cluster.running - cluster.unhealthy - cluster.rolling_out)
                 return {
                   name: cluster.name,
                   href: `/clusters/${cluster.id}`,

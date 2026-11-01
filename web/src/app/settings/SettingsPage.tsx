@@ -1,5 +1,5 @@
 import { Navigate, useParams } from 'react-router'
-import { AdminOnly, type AdminArea } from '../../components/AdminOnly'
+import { AdminOnly } from '../../components/AdminOnly'
 import { Tabs } from '../../components/Tabs'
 import { Accounts } from '../admin/accounts/Accounts'
 import { Audit } from '../admin/audit/Audit'
@@ -18,14 +18,6 @@ export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['users', 'Users & permissions'],
   ['audit', 'Audit log'],
 ]
-
-/** The admin area each tab belongs to, for the non-admin explanation. */
-const AREA_FOR_TAB: Record<SettingsTab, AdminArea> = {
-  general: 'general',
-  accounts: 'accounts',
-  users: 'users',
-  audit: 'audit',
-}
 
 const isSettingsTab = (value: string | undefined): value is SettingsTab => SETTINGS_TABS.some(([key]) => key === value)
 
@@ -56,6 +48,9 @@ export function SettingsPage() {
 
   if (!activeTab) return <Navigate to="/settings/general" replace />
 
+  // Tab keys are AdminOnly area names. Non-admins get the explanation instead of the page, heading and tabs included.
+  if (!me?.admin) return <AdminOnly area={activeTab} />
+
   return (
     <>
       <div className={styles.pageHead}>
@@ -66,7 +61,9 @@ export function SettingsPage() {
         active={activeTab}
         hrefFor={(key) => `/settings/${key}`}
       />
-      <div className={styles.panel}>{me?.admin ? <TabPanel tab={activeTab} /> : <AdminOnly area={AREA_FOR_TAB[activeTab]} />}</div>
+      <div className={styles.panel}>
+        <TabPanel tab={activeTab} />
+      </div>
     </>
   )
 }

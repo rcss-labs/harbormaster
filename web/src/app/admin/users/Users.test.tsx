@@ -39,7 +39,7 @@ describe('matrix', () => {
       }),
     )
     renderApp('/settings/users')
-    expect(await screen.findByRole('heading', { level: 2, name: 'Users and permissions' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Users & permissions' })).toBeInTheDocument()
     const row = await omerRow()
     // Columns are Dev, Staging, Prod: Prod is the third cell.
     fireEvent.click(within(row).getAllByTitle('Logs')[2])

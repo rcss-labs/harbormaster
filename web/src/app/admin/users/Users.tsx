@@ -20,7 +20,7 @@ export function Users() {
     <>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h2>Users and permissions</h2>
+          <h2>Users &amp; permissions</h2>
           <div className={styles.meta}>
             Global admins can do everything. Every other user gets permissions per tag. Sign-in is username and password.
           </div>

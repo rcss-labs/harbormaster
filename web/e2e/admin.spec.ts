@@ -40,7 +40,7 @@ test.describe('admin pages as pavel', () => {
     await page.goto('/admin/users')
     await expect(page).toHaveURL(/\/settings\/users$/)
     await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
-    await expect(page.getByRole('heading', { level: 2, name: 'Users and permissions' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 2, name: 'Users & permissions' })).toBeVisible()
     for (const tag of ['Dev', 'Staging', 'Prod']) {
       await expect(page.getByRole('columnheader', { name: new RegExp(`^${tag}\\b`) })).toBeVisible()
     }

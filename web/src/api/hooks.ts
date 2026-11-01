@@ -176,7 +176,9 @@ export function useUpdateSettings() {
   return useMutation({
     mutationFn: (stoppedTasksWindowMinutes: number) =>
       api.put<SettingsDTO>('/api/settings', { stopped_tasks_window_minutes: stoppedTasksWindowMinutes }),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      // Show the saved value immediately; the invalidation below then confirms it.
+      queryClient.setQueryData(['settings'], saved)
       for (const key of ['settings', 'tasks', 'service']) void queryClient.invalidateQueries({ queryKey: [key] })
     },
   })
