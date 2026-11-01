@@ -113,6 +113,10 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 	}
 	alerts = append(alerts, accountAlerts...)
 
+	alerts, err = l.keepStandingTimes(ctx, t, alerts, now)
+	if err != nil {
+		return err
+	}
 	if err := l.Store.ReplaceAlertsAndStatusRuns(ctx, t, alerts, changed); err != nil {
 		return err
 	}
@@ -145,4 +149,29 @@ func (l *AlertsLoop) accountAlerts(ctx context.Context, t awsx.Target, now time.
 		names[account.AccountID] = account.Name
 	}
 	return status.AccountAlerts(states, names, now), nil
+}
+
+// keepStandingTimes stops alerts that are stamped with the poll time from changing on every cycle: when an
+// alert stamped "now" is otherwise identical to the stored one (same severity, title, text and tab), it keeps
+// the stored time, i.e. the moment it first appeared. That lets the store skip the write.
+func (l *AlertsLoop) keepStandingTimes(ctx context.Context, t awsx.Target, alerts []model.Alert, now time.Time) ([]model.Alert, error) {
+	stored, err := l.Store.ListAlerts(ctx, store.AlertFilter{AccountID: t.AccountID, Region: t.Region})
+	if err != nil {
+		return nil, fmt.Errorf("list alerts: %w", err)
+	}
+	type identity struct{ cluster, service, kind string }
+	byIdentity := make(map[identity]model.Alert, len(stored))
+	for _, alert := range stored {
+		byIdentity[identity{alert.Key.Cluster, alert.Key.Service, alert.Kind}] = alert
+	}
+	for i, alert := range alerts {
+		if !alert.At.Equal(now) {
+			continue
+		}
+		previous, ok := byIdentity[identity{alert.Key.Cluster, alert.Key.Service, alert.Kind}]
+		if ok && previous.Severity == alert.Severity && previous.Title == alert.Title && previous.Text == alert.Text && previous.Tab == alert.Tab {
+			alerts[i].At = previous.At
+		}
+	}
+	return alerts, nil
 }

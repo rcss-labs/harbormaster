@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -217,5 +218,44 @@ func TestAlertsLoop_UnhealthyDeprovisioningTaskMatchesAPIStatus(t *testing.T) {
 	_, alerted := alertKinds(h.alertsFor(t, key))["unhealthy_task"]
 	if !apiSeesUnhealthy || !alerted {
 		t.Fatalf("API sees unhealthy running task = %v, alerts tier flags it = %v; both must be true", apiSeesUnhealthy, alerted)
+	}
+}
+
+// alertRowVersions returns each alert row's id and xmin; both change when a row is deleted and reinserted.
+func (h *observeHarness) alertRowVersions(t *testing.T) map[string]string {
+	t.Helper()
+	rows, err := h.store.Pool.Query(context.Background(),
+		`select cluster_name || '/' || service_name || '/' || kind, id::text || ':' || xmin::text from alerts`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	versions := map[string]string{}
+	for rows.Next() {
+		var key, version string
+		if err := rows.Scan(&key, &version); err != nil {
+			t.Fatal(err)
+		}
+		versions[key] = version
+	}
+	return versions
+}
+
+// A static estate with standing alerts must cause no alert writes across cycles (plan 06 review I3), even
+// though the wall clock moves: alerts stamped with the poll time keep the time they first appeared.
+func TestAlertsLoop_StandingAlertsAreNotRewrittenWhileUnchanged(t *testing.T) {
+	h := newObserveHarness(t, loopTarget)
+	clock := loopNow
+	h.alerts = &AlertsLoop{Store: h.store, Every: 5 * time.Second, Now: func() time.Time { clock = clock.Add(5 * time.Second); return clock }}
+	h.runAlerts(t)
+	before := h.alertRowVersions(t)
+	if len(before) < 2 {
+		t.Fatalf("first alerts run stored %d alerts, want standing alerts to test with", len(before))
+	}
+	for range 3 {
+		h.runAlerts(t)
+	}
+	if after := h.alertRowVersions(t); !reflect.DeepEqual(before, after) {
+		t.Fatalf("alert rows were rewritten on a static estate:\nbefore %v\nafter  %v", before, after)
 	}
 }
