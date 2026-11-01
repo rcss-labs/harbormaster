@@ -448,6 +448,40 @@
     ],
     "username": "string"
   },
+  "networkRegion": {
+    "items": [
+      {
+        "cidr": "string",
+        "clusters": [
+          "string"
+        ],
+        "name": "string",
+        "subnets": "number",
+        "tasks": "number",
+        "vpc_id": "string"
+      }
+    ],
+    "polled_at": "time"
+  },
+  "networks": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "regions": [
+          {
+            "active_vpcs": "number",
+            "clusters": "number",
+            "hidden_vpcs": "number",
+            "region": "string",
+            "tasks": "number",
+            "unplaced_tasks": "number"
+          }
+        ]
+      }
+    ],
+    "polled_at": "time"
+  },
   "operations": {
     "items": [
       {
@@ -1213,5 +1247,36 @@
         "username": "string"
       }
     ]
+  },
+  "vpcTree": {
+    "edges": [
+      {
+        "detail": {
+          "$optional": "string"
+        },
+        "id": "string",
+        "kind": "string",
+        "subnet_id": {
+          "$optional": "string"
+        }
+      }
+    ],
+    "polled_at": "time",
+    "root": "any",
+    "summary": {
+      "collapsed_by_default": "boolean",
+      "running_tasks": "number",
+      "subnets": "number",
+      "unplaced_tasks": "number",
+      "zones": "number"
+    },
+    "vpc": {
+      "account_id": "string",
+      "account_name": "string",
+      "cidr": "string",
+      "name": "string",
+      "region": "string",
+      "vpc_id": "string"
+    }
   }
 }

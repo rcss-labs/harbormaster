@@ -178,6 +178,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "DELETE /api/accounts/{id}", s.deleteAccount, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/audit", s.listAudit, routeOptions{Admin: true})
 	s.observeRoutes(mux)
+	s.networkRoutes(mux) // plan 05
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
