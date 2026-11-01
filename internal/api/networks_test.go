@@ -7,6 +7,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 // admin, devOnly ({Dev: View}), prodOnly ({Prod: View}) and none (no permissions).
 type networkFixture struct {
 	admin, devOnly, prodOnly, none *apiClient
+	store                          *store.Store
 }
 
 func newNetworkFixture(t *testing.T) networkFixture {
@@ -58,6 +60,7 @@ func newNetworkFixtureWith(t *testing.T, mutate func(*Server)) networkFixture {
 	}
 	view := authz.Presets["Viewer"]
 	return networkFixture{
+		store:    st,
 		admin:    login(t, srv, "pavel", testPassword),
 		devOnly:  addUser("devonly", map[authz.TagID]authz.ActionSet{tagID["Dev"]: view}),
 		prodOnly: addUser("prodonly", map[authz.TagID]authz.ActionSet{tagID["Prod"]: view}),

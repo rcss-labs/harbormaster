@@ -25,15 +25,20 @@ type efsMetrics interface {
 	Fetch(ctx context.Context, t awsx.Target, span metrics.Span, qs []metrics.Query) (*metrics.Result, error)
 }
 
+// StoragePointDTO is one sample of a storage series.
 type StoragePointDTO struct {
 	T time.Time `json:"t"`
 	V float64   `json:"v"`
 }
+
+// StorageAccessPointDTO is an EFS access point of a file system.
 type StorageAccessPointDTO struct {
 	AccessPointID string `json:"access_point_id"`
 	Path          string `json:"path"`
 	UID           *int64 `json:"uid"`
 }
+
+// StorageMountDTO is a visible service that mounts a file system.
 type StorageMountDTO struct {
 	ServiceID     string `json:"service_id"`
 	Service       string `json:"service"`
@@ -41,6 +46,8 @@ type StorageMountDTO struct {
 	ContainerPath string `json:"container_path"`
 	Tasks         int    `json:"tasks"`
 }
+
+// StorageItemDTO is one EFS file system on GET /api/storage.
 type StorageItemDTO struct {
 	FileSystemID      string                  `json:"file_system_id"`
 	Name              string                  `json:"name"`
@@ -59,11 +66,15 @@ type StorageItemDTO struct {
 	GrowthPct         *float64                `json:"growth_30d_pct"`
 	Throughput24h     []StoragePointDTO       `json:"throughput_24h"`
 }
+
+// StorageTotalsDTO sums the file systems listed to the caller.
 type StorageTotalsDTO struct {
 	SizeBytes  int64 `json:"size_bytes"`
 	Mounted    int   `json:"mounted"`
 	NotMounted int   `json:"not_mounted"`
 }
+
+// StorageDTO is the body of GET /api/storage.
 type StorageDTO struct {
 	Items        []StorageItemDTO `json:"items"`
 	Totals       StorageTotalsDTO `json:"totals"`
@@ -138,6 +149,13 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	// File systems that no stored row describes never appear, even if a task definition mounts them.
 	visible := storage.Visible(sc.Subject, all, index)
+	// polled_at is only a timestamp, so it may come from every stored row without leaking a file system.
+	var polledAt time.Time
+	for _, fs := range all {
+		if fs.PolledAt.After(polledAt) {
+			polledAt = fs.PolledAt
+		}
+	}
 	accessPoints, err := s.Store.ListAccessPoints(ctx, sc.Filter.AccountID, sc.Filter.Region)
 	if err != nil {
 		s.fail(w, err)
@@ -154,7 +172,7 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := StorageDTO{Items: make([]StorageItemDTO, 0, len(visible))}
+	out := StorageDTO{Items: make([]StorageItemDTO, 0, len(visible)), PolledAt: polledAt}
 	byTarget := map[awsTarget][]int{} // item positions per account x region
 	for _, fs := range visible {
 		item := StorageItemDTO{
@@ -182,9 +200,6 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 			out.Totals.NotMounted++
 		}
 		out.Totals.SizeBytes += fs.SizeBytes
-		if fs.PolledAt.After(out.PolledAt) {
-			out.PolledAt = fs.PolledAt
-		}
 		target := awsTarget{fs.AccountID, fs.Region}
 		byTarget[target] = append(byTarget[target], len(out.Items))
 		out.Items = append(out.Items, item)

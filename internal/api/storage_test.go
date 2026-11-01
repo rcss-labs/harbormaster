@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/model"
+
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 )
@@ -165,5 +168,47 @@ func TestStorage_FilterByRegion(t *testing.T) {
 	}
 	if out.Totals.Mounted != 1 || out.Totals.NotMounted != 0 {
 		t.Errorf("totals = %+v", out.Totals)
+	}
+}
+
+// Tagging cert-renewer Prod splits shared-certs: Dev viewers keep only edge-nginx, Prod viewers only cert-renewer.
+func TestStorage_MountedByOmitsInvisibleServices(t *testing.T) {
+	fx := newNetworkFixture(t)
+	tags, err := fx.store.ListTags(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prod authz.TagID
+	for _, tag := range tags {
+		if tag.Name == "Prod" {
+			prod = tag.ID
+		}
+	}
+	renewer := model.ServiceKey{
+		ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"},
+		Service:    "cert-renewer",
+	}
+	if err := fx.store.SetServiceTag(t.Context(), renewer, &prod); err != nil {
+		t.Fatal(err)
+	}
+
+	dev := storageItem(t, getJSON[StorageDTO](t, fx.devOnly, "/api/storage"), fsCerts)
+	if len(dev.MountedBy) != 1 || dev.MountedBy[0].Service != "edge-nginx" || dev.MountingTasks != 2 {
+		t.Errorf("dev sees mounted_by %+v, mounting_tasks %d; want only edge-nginx, 2", dev.MountedBy, dev.MountingTasks)
+	}
+	prodOut := getJSON[StorageDTO](t, fx.prodOnly, "/api/storage")
+	if len(prodOut.Items) != 1 {
+		t.Fatalf("prod sees %d file systems, want 1", len(prodOut.Items))
+	}
+	p := storageItem(t, prodOut, fsCerts)
+	if len(p.MountedBy) != 1 || p.MountedBy[0].Service != "cert-renewer" || p.MountingTasks != 1 {
+		t.Errorf("prod sees mounted_by %+v, mounting_tasks %d; want only cert-renewer, 1", p.MountedBy, p.MountingTasks)
+	}
+}
+
+func TestStorage_PolledAtSetWhenCallerSeesNothing(t *testing.T) {
+	fx := newNetworkFixture(t)
+	if out := getJSON[StorageDTO](t, fx.prodOnly, "/api/storage"); out.PolledAt.IsZero() {
+		t.Error("polled_at is zero for a caller without file systems")
 	}
 }
