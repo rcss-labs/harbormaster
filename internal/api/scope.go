@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,43 @@ type scope struct {
 	Vis     store.Visibility
 	Filter  store.TargetFilter
 	Tags    authz.Tags
+	// TagFilter is the ?tag= selection (nil = no tag filter); it only ever narrows Vis.
+	TagFilter []authz.TagID
+}
+
+// tagMatches reports whether a service/task/cluster with this effective tag passes the ?tag= filter.
+func (sc scope) tagMatches(tag authz.TagID) bool {
+	return sc.TagFilter == nil || slices.Contains(sc.TagFilter, tag)
+}
+
+// parseTagFilter reads the repeatable ?tag= values into a de-duplicated list; nil when none were given.
+func parseTagFilter(values []string) ([]authz.TagID, error) {
+	var out []authz.TagID
+	for _, raw := range values {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, invalid("tag must be a number.")
+		}
+		if !slices.Contains(out, authz.TagID(id)) {
+			out = append(out, authz.TagID(id))
+		}
+	}
+	return out, nil
+}
+
+// narrowVisibility restricts vis to the selected tags. An admin becomes a tag-limited viewer of exactly
+// those tags; anyone else keeps only the selected tags they may already see, so the filter never widens access.
+func narrowVisibility(vis store.Visibility, tags []authz.TagID) store.Visibility {
+	if len(tags) == 0 {
+		return vis
+	}
+	narrowed := make([]int64, 0, len(tags))
+	for _, tag := range tags {
+		if vis.Admin || slices.Contains(vis.TagIDs, int64(tag)) {
+			narrowed = append(narrowed, int64(tag))
+		}
+	}
+	return store.Visibility{Admin: false, TagIDs: narrowed}
 }
 
 // visibilityOf converts a subject to the store's visibility filter (never a nil tag list).
@@ -40,11 +78,16 @@ func (s *Server) scopeFrom(r *http.Request) (scope, error) {
 	}
 	subject := auth.SubjectFrom(r.Context())
 	q := r.URL.Query()
+	tagFilter, err := parseTagFilter(q["tag"])
+	if err != nil {
+		return scope{}, err
+	}
 	return scope{
-		Subject: subject,
-		Vis:     visibilityOf(subject),
-		Filter:  store.TargetFilter{AccountID: q.Get("account"), Region: q.Get("region")},
-		Tags:    tags,
+		Subject:   subject,
+		Vis:       narrowVisibility(visibilityOf(subject), tagFilter),
+		Filter:    store.TargetFilter{AccountID: q.Get("account"), Region: q.Get("region")},
+		Tags:      tags,
+		TagFilter: tagFilter,
 	}, nil
 }
 

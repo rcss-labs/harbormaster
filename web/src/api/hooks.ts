@@ -24,6 +24,8 @@ import type {
 export interface Filters {
   account?: string
   region?: string
+  /** Tag ids; sent as a repeated ?tag= */
+  tag?: number[]
 }
 
 export interface TasksParams extends Filters {
@@ -33,11 +35,17 @@ export interface TasksParams extends Filters {
   limit?: number
 }
 
-/** Builds `?a=b&c=d`, leaving out unset values. */
-export function queryString(params: Record<string, string | number | boolean | undefined | null>): string {
+/** Builds `?a=b&c=d`, leaving out unset values. Arrays repeat the key once per element (scalars come first). */
+export function queryString(
+  params: Record<string, string | number | boolean | undefined | null | readonly (string | number)[]>,
+): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) continue
     if (value !== undefined && value !== null && value !== '') search.set(key, String(value))
+  }
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) for (const item of value) search.append(key, String(item))
   }
   const text = search.toString()
   return text ? `?${text}` : ''
@@ -101,10 +109,10 @@ export function useTasks(params: TasksParams = {}) {
   })
 }
 
-export function useSearch(q: string) {
+export function useSearch(q: string, filters: Filters = {}) {
   return useQuery({
-    queryKey: ['search', q],
-    queryFn: () => api.get<SearchDTO>(`/api/search${queryString({ q })}`),
+    queryKey: ['search', q, filters],
+    queryFn: () => api.get<SearchDTO>(`/api/search${queryString({ q, ...filters })}`),
     enabled: q.length >= 2,
   })
 }

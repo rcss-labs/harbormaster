@@ -51,3 +51,11 @@
 
 /* Two-column CPU and memory sparklines on a cluster card (mockup .mini2). */
 .mini2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* Clusters filter bar (status toggles, name search, shared scope). */
+.filterBar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.statusToggles { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.statusToggles button { border: 0; background: var(--surface); color: var(--text); padding: 0 10px; height: 28px; cursor: pointer; font-size: 12px; font-family: inherit; }
+.statusToggles button + button { border-left: 1px solid var(--border-strong); }
+.statusToggles button.statusOn { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nameSearch { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: 12px; font-family: inherit; min-width: 160px; }
