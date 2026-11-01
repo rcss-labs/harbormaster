@@ -1,9 +1,7 @@
 /* Ported from docs/design/mockup/index.html: .login-wrap/.login-card/.field/.err/.hint/.brand. */
 .wrap { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; place-items: center; padding: 16px; overflow-y: auto; }
 .card { width: min(380px, 100%); padding: 24px; display: grid; gap: 14px; }
-.brand { display: flex; align-items: center; gap: 10px; }
-.logo { width: 28px; height: 28px; border-radius: 7px; }
-.brandName { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+.brand { display: grid; gap: 4px; justify-items: start; }
 .brandSub { font-size: 11px; color: var(--muted); }
 .title { margin: 0; font-size: 18px; }
 .sub { margin: 0; font-size: 13px; color: var(--muted); }

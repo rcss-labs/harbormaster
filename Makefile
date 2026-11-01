@@ -59,3 +59,8 @@ image:
 
 check-image:
 	tools/check-image.sh harbormaster:$(VERSION)
+
+# plan 06
+.PHONY: icons
+icons:
+	node web/scripts/render-icons.mjs
