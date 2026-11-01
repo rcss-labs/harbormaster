@@ -29,14 +29,6 @@ function NavItem({ to, label, count, bad, alsoActiveFor = [], end }: NavItemProp
   )
 }
 
-function DisabledNavItem({ label }: { label: string }) {
-  return (
-    <a className={styles.disabled} aria-disabled="true" title="Phase 5">
-      {label}
-    </a>
-  )
-}
-
 function Section({ children }: { children: ReactNode }) {
   return <div className={styles.navSection}>{children}</div>
 }
@@ -74,8 +66,8 @@ export function Sidebar() {
         <NavItem to="/" end label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
         <NavItem to="/clusters" label="Clusters" count={clusters.data?.items.length} alsoActiveFor={['/clusters', '/services']} />
         <NavItem to="/tasks" label="Tasks" count={running.data?.counts.running} />
-        <DisabledNavItem label="Networks" />
-        <DisabledNavItem label="Storage" />
+        <NavItem to="/networks" label="Networks" />
+        <NavItem to="/storage" label="Storage" />
         {isAdmin ? (
           <>
             <Section>Admin</Section>

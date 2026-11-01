@@ -11,10 +11,14 @@ import { Users } from './admin/users/Users'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
+import { NetworkRegionPage } from './networks/NetworkRegionPage'
+import { NetworkVpcPage } from './networks/NetworkVpcPage'
+import { NetworksPage } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
 import { ServicePage } from './services/ServicePage'
 import { Shell } from './shell/Shell'
 import { MyAccess } from './me/MyAccess'
+import { StoragePage } from './storage/StoragePage'
 import { Tasks } from './tasks/Tasks'
 import { TaskTerminal } from './tasks/TaskTerminal'
 import styles from './auth/auth.module.css'
@@ -75,6 +79,11 @@ export function AppRoutes() {
           <Route path="admin/accounts" element={<Accounts />} />
           <Route path="admin/audit" element={<Audit />} />
           <Route path="me/access" element={<MyAccess />} />
+          {/* plan 05: networks and storage */}
+          <Route path="networks" element={<NetworksPage />} />
+          <Route path="networks/:accountId/:region" element={<NetworkRegionPage />} />
+          <Route path="networks/:accountId/:region/:vpcId" element={<NetworkVpcPage />} />
+          <Route path="storage" element={<StoragePage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>
