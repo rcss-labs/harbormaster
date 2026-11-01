@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
 import type { Filters } from '../../api/hooks'
 import type { MeDTO } from '../../api/types'
@@ -115,15 +115,24 @@ export function useFilters(): FilterState {
     )
   }, [hasUrlFilter, restored, setSearchParams])
 
+  // Several setters may run in one event (e.g. "Clear filters"); each must build on the previous one, not on the last render.
+  const latestFilters = useRef(filters)
+  const pendingParams = useRef<URLSearchParams | null>(null)
+  useEffect(() => {
+    latestFilters.current = filters
+    pendingParams.current = null
+  })
+
   const update = useCallback(
     (key: 'account' | 'region' | 'tag', value: string | number[] | undefined) => {
       if (!username) return
-      const next: Filters = { ...filters, [key]: value }
+      const next: Filters = { ...latestFilters.current, [key]: value }
+      latestFilters.current = next
       // Persist first so the restore effect cannot resurrect the value being cleared.
       writeStored(username, { account: next.account, region: next.region, tag: next.tag?.length ? next.tag : undefined })
       setSearchParams(
-        (current) => {
-          const params = new URLSearchParams(current)
+        (rendered) => {
+          const params = new URLSearchParams(pendingParams.current ?? rendered)
           params.delete(key)
           if (Array.isArray(value)) for (const id of value) params.append(key, String(id))
           else if (value) params.set(key, value)
@@ -135,12 +144,13 @@ export function useFilters(): FilterState {
             params.delete('tag')
             for (const id of next.tag ?? []) params.append('tag', String(id))
           }
+          pendingParams.current = params
           return params
         },
         { replace: true },
       )
     },
-    [filters, setSearchParams, username],
+    [setSearchParams, username],
   )
 
   const setAccount = useCallback((account: string | undefined) => update('account', account), [update])
