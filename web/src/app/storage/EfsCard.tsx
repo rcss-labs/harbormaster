@@ -7,6 +7,8 @@ import styles from './storage.module.css'
 
 interface EfsCardProps {
   fs: StorageItem
+  /** Colour of the size sparkline; matches the file system's bar in the stored-data chart. */
+  colour: string
 }
 
 const clientLabel = (count: number) => `${count} ${count === 1 ? 'client' : 'clients'}`
@@ -18,11 +20,12 @@ const growthLabel = (pct: number) => {
 }
 
 /** One EFS file system: identity, 30-day size and 24-hour throughput, access points and the services that mount it. */
-export function EfsCard({ fs }: EfsCardProps) {
+export function EfsCard({ fs, colour }: EfsCardProps) {
   const identity = [fs.file_system_id, fs.region, fs.vpc?.name].filter(Boolean).join(' · ')
   const clients = fs.client_connections ?? fs.mounting_tasks
-  const sizeSeries = fs.size_30d?.map((point) => point.v) ?? null
-  const throughputSeries = fs.throughput_24h?.map((point) => point.v) ?? null
+  // CloudWatch returning no datapoints is treated like a failed call: both mean there is nothing to draw.
+  const sizeSeries = fs.size_30d?.length ? fs.size_30d.map((point) => point.v) : null
+  const throughputSeries = fs.throughput_24h?.length ? fs.throughput_24h.map((point) => point.v) : null
   const latestThroughput = throughputSeries?.at(-1)
   const metricsMissing = sizeSeries === null && throughputSeries === null
 
@@ -42,7 +45,7 @@ export function EfsCard({ fs }: EfsCardProps) {
             <span>Size, 30 days</span>
             <b>{formatSize(fs.size_bytes)}</b>
           </div>
-          {sizeSeries && <Sparkline values={sizeSeries} height={28} fluid />}
+          {sizeSeries && <Sparkline values={sizeSeries} color={colour} height={28} fluid />}
           {fs.growth_30d_pct !== null && <div className={`${styles.muted} ${styles.small}`}>{growthLabel(fs.growth_30d_pct)}</div>}
         </div>
         <div>

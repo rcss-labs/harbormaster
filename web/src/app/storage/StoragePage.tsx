@@ -1,4 +1,4 @@
-import { useStorage } from '../../api/storage'
+import { type StorageItem, useStorage } from '../../api/storage'
 import { HBars } from '../../charts/HBars'
 import { Donut } from '../../charts/Donut'
 import { Card } from '../../components/Card'
@@ -26,6 +26,7 @@ export function StoragePage() {
   if (!response) return <PageHead />
 
   const mountedCount = items.filter((fs) => fs.mounted).length
+  const barColour = (fs: StorageItem, index: number) => (fs.mounted ? SERIES[index % SERIES.length] : 'var(--border-strong)')
 
   return (
     <>
@@ -41,7 +42,7 @@ export function StoragePage() {
                   name: fs.name,
                   sub: fs.region,
                   v: fs.size_bytes,
-                  color: fs.mounted ? SERIES[index % SERIES.length] : 'var(--border-strong)',
+                  color: barColour(fs, index),
                   label: formatSize(fs.size_bytes),
                 }))}
               />
@@ -58,8 +59,8 @@ export function StoragePage() {
             </Card>
           </div>
           <div className={styles.cards}>
-            {items.map((fs) => (
-              <EfsCard key={fs.file_system_id} fs={fs} />
+            {items.map((fs, index) => (
+              <EfsCard key={fs.file_system_id} fs={fs} colour={barColour(fs, index)} />
             ))}
           </div>
         </>

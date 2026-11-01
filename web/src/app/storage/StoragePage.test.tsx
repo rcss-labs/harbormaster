@@ -126,6 +126,16 @@ describe('StoragePage', () => {
     )
     expect(card.getByText('(ci-tools) →')).toBeInTheDocument()
     expect(card.getByText('/var/jenkins_home')).toBeInTheDocument()
+    expect(card.getByRole('link', { name: 'jenkins-controller' }).parentElement).toHaveTextContent(
+      'jenkins-controller (ci-tools) → /var/jenkins_home',
+    )
+  })
+
+  it('colours the size sparkline with the same series colour as the file system bar', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage()
+    const region = await screen.findByRole('region', { name: 'jenkins-home' })
+    expect(region.querySelector('path[stroke]')).toHaveAttribute('stroke', 'var(--series-1)')
   })
 
   it('marks an unmounted file system with no access points and no mounts', async () => {
@@ -145,6 +155,17 @@ describe('StoragePage', () => {
     renderStoragePage()
     expect(await screen.findByText('Metrics unavailable')).toBeInTheDocument()
     expect(screen.queryByText('+29% in 30 days')).not.toBeInTheDocument()
+    expect((await screen.findByRole('region', { name: 'jenkins-home' })).querySelector('svg')).toBeNull()
+  })
+
+  it('treats empty series like null: Metrics unavailable and no sparklines', async () => {
+    serveStorage({
+      ...STORAGE,
+      items: [{ ...JENKINS, size_30d: [], throughput_24h: [], growth_30d_pct: null }],
+    })
+    renderStoragePage()
+    expect(await screen.findByText('Metrics unavailable')).toBeInTheDocument()
+    expect((await screen.findByRole('region', { name: 'jenkins-home' })).querySelector('svg')).toBeNull()
   })
 
   it('shows the empty state when there are no file systems', async () => {

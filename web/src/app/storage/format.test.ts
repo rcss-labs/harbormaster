@@ -7,6 +7,9 @@ describe('formatSize', () => {
     [41231686041, '38.4 GiB'],
     [227204155801, '211.6 GiB'],
     [0, '0 MiB'],
+    [2621440, '2 MiB'],
+    [524288, '0 MiB'],
+    [11010048, '10 MiB'],
   ])('formats %i bytes as %s', (bytes, text) => {
     expect(formatSize(bytes)).toBe(text)
   })
