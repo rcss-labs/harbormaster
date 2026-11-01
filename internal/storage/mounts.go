@@ -77,7 +77,9 @@ type MountedBy struct {
 
 // MountIndex maps file system ID to the services mounting it, sorted by
 // cluster then service name. taskDefs is keyed by task definition ARN; a
-// service whose definition is missing or unparsable is skipped.
+// service whose definition is missing or unparsable is skipped. A service that
+// mounts the same file system more than once appears once, with the first
+// container path.
 func MountIndex(services []model.Service, taskDefs map[string]json.RawMessage, running map[model.ServiceKey]int) map[string][]MountedBy {
 	index := map[string][]MountedBy{}
 	for _, svc := range services {

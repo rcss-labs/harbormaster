@@ -11,9 +11,12 @@ import (
 )
 
 func efsQuery(id, metric, stat, fsID string, period int32) cwtypes.MetricDataQuery {
+	dims := []cwtypes.Dimension{{Name: aws.String("FileSystemId"), Value: aws.String(fsID)}}
+	if metric == "StorageBytes" { // only the size builder adds StorageClass
+		dims = append(dims, cwtypes.Dimension{Name: aws.String("StorageClass"), Value: aws.String("Total")})
+	}
 	return cwtypes.MetricDataQuery{Id: aws.String(id), MetricStat: &cwtypes.MetricStat{
-		Metric: &cwtypes.Metric{Namespace: aws.String("AWS/EFS"), MetricName: aws.String(metric), Dimensions: []cwtypes.Dimension{
-			{Name: aws.String("FileSystemId"), Value: aws.String(fsID)}, {Name: aws.String("StorageClass"), Value: aws.String("Total")}}},
+		Metric: &cwtypes.Metric{Namespace: aws.String("AWS/EFS"), MetricName: aws.String(metric), Dimensions: dims},
 		Period: aws.Int32(period), Stat: aws.String(stat)}}
 }
 
@@ -25,8 +28,10 @@ func efsFetch(t *testing.T, q cwtypes.MetricDataQuery, window time.Duration) cwt
 		target.Region = "eu-central-1"
 	}
 	api := cloudWatchFor(t, newFake(), target)
+	// metrics.Fetch floors End to the period, so the last stamp is end-period.
+	end := fixedNow.Truncate(time.Duration(aws.ToInt32(q.MetricStat.Period)) * time.Second)
 	out, err := api.GetMetricData(context.Background(), &cloudwatch.GetMetricDataInput{
-		MetricDataQueries: []cwtypes.MetricDataQuery{q}, StartTime: aws.Time(fixedNow.Add(-window)), EndTime: aws.Time(fixedNow),
+		MetricDataQueries: []cwtypes.MetricDataQuery{q}, StartTime: aws.Time(end.Add(-window)), EndTime: aws.Time(end),
 		ScanBy: cwtypes.ScanByTimestampAscending})
 	if err != nil {
 		t.Fatal(err)

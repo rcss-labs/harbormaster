@@ -79,18 +79,19 @@ func TestMountIndex_GroupsAndSorts(t *testing.T) {
 	renewer := svc("edge-proxy", "cert-renewer", "td-renewer")
 	orphan := svc("edge-proxy", "zz-missing", "td-gone")
 	other := svc("background-jobs", "report-worker", "td-report")
+	early := svc("archive", "zz-sync", "td-sync") // earlier cluster, later name
 	taskDefs := map[string]json.RawMessage{
 		"td-nginx": efsTaskDef("fs-0a6b33f0", "/etc/nginx/certs"), "td-renewer": efsTaskDef("fs-0a6b33f0", "/certs"),
-		"td-report": efsTaskDef("fs-02e7d1c9", "/data/reports"),
+		"td-report": efsTaskDef("fs-02e7d1c9", "/data/reports"), "td-sync": efsTaskDef("fs-0a6b33f0", "/sync"),
 	}
 	running := map[model.ServiceKey]int{nginx.Key: 2, renewer.Key: 1}
-	idx := MountIndex([]model.Service{nginx, orphan, renewer, other}, taskDefs, running)
+	idx := MountIndex([]model.Service{nginx, orphan, renewer, other, early}, taskDefs, running)
 
 	got := idx["fs-0a6b33f0"]
-	if len(got) != 2 || got[0].ServiceName != "cert-renewer" || got[1].ServiceName != "edge-nginx" {
-		t.Fatalf("fs-0a6b33f0 = %+v, want cert-renewer then edge-nginx", got)
+	if len(got) != 3 || got[0].ServiceName != "zz-sync" || got[1].ServiceName != "cert-renewer" || got[2].ServiceName != "edge-nginx" {
+		t.Fatalf("fs-0a6b33f0 = %+v, want zz-sync (cluster archive), cert-renewer, edge-nginx", got)
 	}
-	if got[0].RunningTasks != 1 || got[1].RunningTasks != 2 || got[1].ContainerPath != "/etc/nginx/certs" || got[0].ServiceID != renewer.Key.ID() || got[0].Cluster != "edge-proxy" {
+	if got[1].RunningTasks != 1 || got[2].RunningTasks != 2 || got[2].ContainerPath != "/etc/nginx/certs" || got[1].ServiceID != renewer.Key.ID() || got[1].Cluster != "edge-proxy" {
 		t.Fatalf("unexpected fields: %+v", got)
 	}
 	if len(idx["fs-02e7d1c9"]) != 1 {

@@ -15,7 +15,7 @@ const efsSizeWindow = 30 * 24 * time.Hour
 //     30 days with +-1 % noise; the latest point is exactly the seeded size.
 //   - MeteredIOBytes averages 25 MiB/s (size > 10 GiB) or 4 MiB/s, +-50 %.
 //   - ClientConnections is the number of running tasks mounting the file system.
-func (c *cloudWatchClient) efsPoint(metric string, dims map[string]string, period time.Duration) func(time.Time, float64) float64 {
+func (c *cloudWatchClient) efsPoint(metric string, dims map[string]string, period time.Duration, end time.Time) func(time.Time, float64) float64 {
 	e := c.f.Estate
 	fsID := dims["FileSystemId"]
 	var size float64
@@ -28,14 +28,14 @@ func (c *cloudWatchClient) efsPoint(metric string, dims map[string]string, perio
 	if !found {
 		return nil
 	}
-	now := e.now()
 	switch metric {
 	case "StorageBytes":
 		return func(ts time.Time, u float64) float64 {
-			age := now.Sub(ts)
-			if age <= period {
+			// The final requested bucket is the seeded size, whatever End is.
+			if !ts.Add(period).Before(end) {
 				return size
 			}
+			age := end.Sub(ts)
 			progress := 1 - min(1, float64(age)/float64(efsSizeWindow))
 			return size * (0.78 + 0.22*progress) * (1 + (u-0.5)*0.02)
 		}
