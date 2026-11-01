@@ -26,9 +26,9 @@ export default defineConfig({
     { name: 'setup', testMatch: /auth\.setup\.ts/, use: { ...devices['Desktop Chrome'] } }, // plan 06: signs in each role, writes e2e/.auth/*.json
     { name: 'chromium', testMatch: /smoke\.spec\.ts/, dependencies: ['setup'], use: { ...devices['Desktop Chrome'] } }, // plan 06: dependencies
     // retries: 1 because a failed dependency skips every flow spec; the observe specs only read, so a retry is safe.
-    { name: 'chromium-observe', testMatch: /(observe|networks|storage|security)\.spec\.ts/, // plan 05/06: read-only networks/storage specs read the unmutated seed
+    { name: 'chromium-observe', testMatch: /(observe|networks|storage|security|overview|clusters|cluster|tasks)\.spec\.ts/, // plan 05/06: plan 06 (task 17) added overview, clusters, cluster, tasks: read-only networks/storage specs read the unmutated seed
       dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-flows', testIgnore: /(smoke|observe|networks|storage|security)\.spec\.ts/, // plan 05/06
+    { name: 'chromium-flows', testIgnore: /(smoke|observe|networks|storage|security|overview|clusters|cluster|tasks)\.spec\.ts/, // plan 05/06, plan 06 task 17
       dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
