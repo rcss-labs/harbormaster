@@ -22,6 +22,7 @@ lint:
 	@unformatted="$$(gofmt -l cmd internal)"; if [ -n "$$unformatted" ]; then echo "gofmt needed for:"; echo "$$unformatted"; exit 1; fi
 	go vet ./...
 	if [ -f web/package.json ]; then npm --prefix web run lint && npm --prefix web run typecheck; fi
+	tools/check-notices.sh
 
 test-db:
 	if docker inspect hm-test-pg >/dev/null 2>&1; then \
@@ -82,3 +83,7 @@ release-check:
 .PHONY: icons
 icons:
 	node web/scripts/render-icons.mjs
+
+.PHONY: check-notices
+check-notices:
+	tools/check-notices.sh
