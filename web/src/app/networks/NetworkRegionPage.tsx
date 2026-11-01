@@ -2,7 +2,7 @@ import { useParams } from 'react-router'
 import { useNetworkRegion, useNetworks } from '../../api/networks'
 import { EmptyState } from '../../components/EmptyState'
 import { useCrumbs } from '../shell/crumbs'
-import { NetCard } from './NetCard'
+import { NetCard, pluralize } from './NetCard'
 import styles from './networks.module.css'
 
 export function NetworkRegionPage() {
@@ -35,9 +35,9 @@ export function NetworkRegionPage() {
               title={vpc.name}
               subtitle={`${vpc.vpc_id} · ${vpc.cidr}`}
               stats={[
-                { value: vpc.subnets, label: vpc.subnets === 1 ? 'subnet' : 'subnets' },
-                { value: vpc.clusters.length, label: vpc.clusters.length === 1 ? 'cluster' : 'clusters' },
-                { value: vpc.tasks, label: vpc.tasks === 1 ? 'task' : 'tasks' },
+                { value: vpc.subnets, label: pluralize(vpc.subnets, 'subnet', 'subnets') },
+                { value: vpc.clusters.length, label: pluralize(vpc.clusters.length, 'cluster', 'clusters') },
+                { value: vpc.tasks, label: pluralize(vpc.tasks, 'task', 'tasks') },
               ]}
               note={vpc.clusters.join(', ')}
               to={`/networks/${accountId}/${region}/${vpc.vpc_id}`}

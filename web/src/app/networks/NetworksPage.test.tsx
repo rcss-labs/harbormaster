@@ -44,6 +44,15 @@ function renderNetworksPage(route = '/networks') {
 const statText = (text: string) => (_: string, element: Element | null) =>
   element?.tagName === 'SPAN' && element.textContent === text
 
+/** Serves one account whose only region is `region`. */
+function serveRegion(region: NetworksResponse['items'][number]['regions'][number]) {
+  server.use(
+    http.get('/api/networks', () =>
+      HttpResponse.json({ ...NETWORKS, items: [{ ...NETWORKS.items[0], regions: [region] }] }),
+    ),
+  )
+}
+
 describe('NetworksPage', () => {
   it('shows each account with its name and account number', async () => {
     server.use(http.get('/api/networks', () => HttpResponse.json(NETWORKS)))
@@ -63,10 +72,30 @@ describe('NetworksPage', () => {
     expect(within(card).getByText('1 VPC without tasks hidden')).toBeInTheDocument()
   })
 
+  it('pluralises the hidden-VPC note when more than one VPC is hidden', async () => {
+    serveRegion({ region: 'us-east-1', active_vpcs: 1, hidden_vpcs: 2, clusters: 1, tasks: 3, unplaced_tasks: 0 })
+    renderNetworksPage()
+    expect(await screen.findByText('2 VPCs without tasks hidden')).toBeInTheDocument()
+  })
+
   it('renders a region without active VPCs as dimmed text with no link', async () => {
     server.use(http.get('/api/networks', () => HttpResponse.json(NETWORKS)))
     renderNetworksPage()
     const dimmedText = await screen.findByText('No active VPCs')
     expect(dimmedText.closest('a')).toBeNull()
+  })
+
+  it('keeps the unplaced-tasks note on a region without active VPCs, with no link', async () => {
+    serveRegion({ region: 'eu-west-1', active_vpcs: 0, hidden_vpcs: 0, clusters: 0, tasks: 0, unplaced_tasks: 2 })
+    renderNetworksPage()
+    const dimmedText = await screen.findByText('No active VPCs')
+    expect(screen.getByText('2 tasks without a subnet not shown')).toBeInTheDocument()
+    expect(dimmedText.closest('a')).toBeNull()
+  })
+
+  it('uses the singular unplaced-tasks note for one task', async () => {
+    serveRegion({ region: 'us-east-1', active_vpcs: 1, hidden_vpcs: 0, clusters: 1, tasks: 1, unplaced_tasks: 1 })
+    renderNetworksPage()
+    expect(await screen.findByText('1 task without a subnet not shown')).toBeInTheDocument()
   })
 })

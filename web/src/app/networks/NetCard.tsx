@@ -18,9 +18,14 @@ interface NetCardProps {
   off?: boolean
 }
 
+/** The word for a count: "cluster" for 1, "clusters" otherwise. */
+export function pluralize(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : plural
+}
+
 /** "1 cluster" or "3 clusters", chosen by the count. */
 export function countLabel(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`
+  return `${count} ${pluralize(count, singular, plural)}`
 }
 
 export function NetCard({ title, subtitle, stats, note, to, off = false }: NetCardProps) {

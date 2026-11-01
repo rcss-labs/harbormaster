@@ -1,7 +1,7 @@
 import { useNetworks } from '../../api/networks'
 import { EmptyState } from '../../components/EmptyState'
 import { useCrumbs } from '../shell/crumbs'
-import { countLabel, NetCard } from './NetCard'
+import { countLabel, NetCard, pluralize } from './NetCard'
 import styles from './networks.module.css'
 
 export function NetworksPage() {
@@ -28,26 +28,49 @@ export function NetworksPage() {
             </h2>
             <div className={styles.netCards}>
               {account.regions.map((region) => {
+                const unplacedNote =
+                  region.unplaced_tasks > 0 ? (
+                    <div>{countLabel(region.unplaced_tasks, 'task without a subnet not shown', 'tasks without a subnet not shown')}</div>
+                  ) : null
+
                 if (region.active_vpcs === 0) {
-                  return <NetCard key={region.region} title={region.region} stats={[]} note="No active VPCs" off />
+                  return (
+                    <NetCard
+                      key={region.region}
+                      title={region.region}
+                      stats={[]}
+                      note={
+                        <>
+                          <div>No active VPCs</div>
+                          {unplacedNote}
+                        </>
+                      }
+                      off
+                    />
+                  )
                 }
-                const notes = []
-                if (region.hidden_vpcs > 0) {
-                  notes.push(<div key="hidden">{countLabel(region.hidden_vpcs, 'VPC without tasks hidden', 'VPCs without tasks hidden')}</div>)
-                }
-                if (region.unplaced_tasks > 0) {
-                  notes.push(<div key="unplaced">{`${region.unplaced_tasks} tasks without a subnet not shown`}</div>)
-                }
+
+                const hiddenNote =
+                  region.hidden_vpcs > 0 ? (
+                    <div>{countLabel(region.hidden_vpcs, 'VPC without tasks hidden', 'VPCs without tasks hidden')}</div>
+                  ) : null
                 return (
                   <NetCard
                     key={region.region}
                     title={region.region}
                     stats={[
-                      { value: region.active_vpcs, label: region.active_vpcs === 1 ? 'active VPC' : 'active VPCs' },
-                      { value: region.clusters, label: region.clusters === 1 ? 'cluster' : 'clusters' },
-                      { value: region.tasks, label: region.tasks === 1 ? 'task' : 'tasks' },
+                      { value: region.active_vpcs, label: pluralize(region.active_vpcs, 'active VPC', 'active VPCs') },
+                      { value: region.clusters, label: pluralize(region.clusters, 'cluster', 'clusters') },
+                      { value: region.tasks, label: pluralize(region.tasks, 'task', 'tasks') },
                     ]}
-                    note={notes.length > 0 ? notes : undefined}
+                    note={
+                      hiddenNote || unplacedNote ? (
+                        <>
+                          {hiddenNote}
+                          {unplacedNote}
+                        </>
+                      ) : undefined
+                    }
                     to={`/networks/${account.account_id}/${region.region}`}
                   />
                 )

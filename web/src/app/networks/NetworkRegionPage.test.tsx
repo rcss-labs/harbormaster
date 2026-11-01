@@ -45,7 +45,7 @@ function renderRegionPage(route = '/networks/482109375512/us-east-1') {
   )
 }
 
-/** Matches a stat span by its full reading ("2 active VPCs"), since the number is in its own <b>. */
+/** Matches a stat span by its full reading ("3 subnets"), since the number is in its own <b>. */
 const statText = (text: string) => (_: string, element: Element | null) =>
   element?.tagName === 'SPAN' && element.textContent === text
 
@@ -57,10 +57,19 @@ describe('NetworkRegionPage', () => {
     )
     renderRegionPage()
     expect(await screen.findByRole('heading', { name: 'us-east-1' })).toBeInTheDocument()
-    expect(screen.getByText('Active VPCs in homelab-admin')).toBeInTheDocument()
+    expect(await screen.findByText('Active VPCs in homelab-admin')).toBeInTheDocument()
   })
 
-  it('renders each active VPC with its id, CIDR, subnets and cluster names, linking to the VPC', async () => {
+  it('falls back to the account id when the account is not in the account list', async () => {
+    server.use(
+      http.get('/api/networks', () => HttpResponse.json({ ...ACCOUNTS, items: [] })),
+      http.get('/api/networks/:accountId/:region', () => HttpResponse.json(REGION)),
+    )
+    renderRegionPage()
+    expect(await screen.findByText('Active VPCs in 482109375512')).toBeInTheDocument()
+  })
+
+  it('renders each active VPC with its id, CIDR, subnets, clusters and tasks, linking to the VPC', async () => {
     server.use(
       http.get('/api/networks', () => HttpResponse.json(ACCOUNTS)),
       http.get('/api/networks/:accountId/:region', () => HttpResponse.json(REGION)),
@@ -70,6 +79,8 @@ describe('NetworkRegionPage', () => {
     expect(card).toHaveAttribute('href', '/networks/482109375512/us-east-1/vpc-0a41c7e29b3d')
     expect(within(card).getByText('vpc-0a41c7e29b3d · 10.20.0.0/16')).toBeInTheDocument()
     expect(within(card).getByText(statText('3 subnets'))).toBeInTheDocument()
+    expect(within(card).getByText(statText('2 clusters'))).toBeInTheDocument()
+    expect(within(card).getByText(statText('10 tasks'))).toBeInTheDocument()
     expect(within(card).getByText('core-services, background-jobs')).toBeInTheDocument()
   })
 
