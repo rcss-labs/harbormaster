@@ -71,10 +71,10 @@ docker run -d --name "$pg_name" --network "$network" \
   -e POSTGRES_USER=hm -e POSTGRES_PASSWORD=hm -e POSTGRES_DB=hm \
   "$postgres_image" >/dev/null
 for _ in $(seq 1 30); do
-  docker exec "$pg_name" pg_isready -U hm -d hm >/dev/null 2>&1 && break
+  docker exec "$pg_name" pg_isready -h 127.0.0.1 -U hm -d hm >/dev/null 2>&1 && break
   sleep 1
 done
-docker exec "$pg_name" pg_isready -U hm -d hm >/dev/null 2>&1 || fail "postgres did not become ready"
+docker exec "$pg_name" pg_isready -h 127.0.0.1 -U hm -d hm >/dev/null 2>&1 || fail "postgres did not become ready"
 
 # --read-only without a tmpfs proves the binary needs no writable root filesystem (matches ECS).
 docker run -d --name "$app_name" --network "$network" --read-only \
