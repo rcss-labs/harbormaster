@@ -23,6 +23,10 @@ export function Clusters() {
   const items = clusters.data?.items ?? [];
   const { page, setStatus, setQ, clearAll } = useClusterFilters();
   const visible = filterClusters(items, page);
+  const anyFilterActive =
+    page.status.length > 0 ||
+    page.q !== "" ||
+    Boolean(filters.account || filters.region || filters.tag?.length);
   const metricsById = metrics.data?.items ?? {};
   const targetErrors = metrics.data?.errors ?? [];
   const [view, setView] = useListView(
@@ -57,7 +61,7 @@ export function Clusters() {
             ? clusters.error.message
             : "The clusters could not be loaded."}
         </EmptyState>
-      ) : items.length > 0 && visible.length === 0 ? (
+      ) : clusters.isSuccess && visible.length === 0 && (items.length > 0 || anyFilterActive) ? (
         <EmptyState>
           No clusters match these filters.{" "}
           <button type="button" className={styles.btn} onClick={clearAll}>

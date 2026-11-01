@@ -86,15 +86,9 @@ test.describe('tag filter as omer', () => {
   test('cannot widen to Prod', async ({ page }) => {
     await page.goto('/clusters?tag=3')
     await expect(page.getByRole('article')).toHaveCount(0)
+    await expect(page.getByText(/No clusters match/)).toBeVisible()
     await tagButton(page).click()
     await expect(tagOptions(page).getByRole('checkbox', { name: 'Prod' })).toHaveCount(0)
     await expect(tagOptions(page).getByRole('checkbox', { name: 'Dev' })).toHaveCount(1)
-  })
-
-  // Brief expects an empty state. Clusters.tsx only renders one when items.length > 0 && visible.length === 0, so a server-side
-  // empty result (omer holds no Prod access) leaves a blank page; fixme until the product shows one (see task-9 report).
-  test.fixme('shows an empty state when the tag leaves no clusters', async ({ page }) => {
-    await page.goto('/clusters?tag=3')
-    await expect(page.getByText(/No clusters match/)).toBeVisible()
   })
 })

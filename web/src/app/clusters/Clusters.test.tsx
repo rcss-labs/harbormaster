@@ -75,6 +75,15 @@ describe('Clusters', () => {
     expect(screen.getByTestId('search').textContent).not.toMatch(/status=|q=/)
   })
 
+  it('a scope filter that matches nothing shows the empty state', async () => {
+    const user = userEvent.setup()
+    renderApp('/clusters?tag=99999')
+    const message = await screen.findByText('No clusters match these filters.')
+    expect(screen.queryAllByRole('article')).toHaveLength(0)
+    await user.click(within(message).getByRole('button', { name: 'Clear filters' }))
+    expect(await screen.findAllByRole('article')).toHaveLength(6)
+  })
+
   it('the table honours the status filter from the URL', async () => {
     const user = userEvent.setup()
     renderApp('/clusters?status=healthy')
