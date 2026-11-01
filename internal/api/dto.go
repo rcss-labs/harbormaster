@@ -116,6 +116,10 @@ type PerClusterDTO struct {
 	Name    string `json:"name"`
 	Running int    `json:"running"`
 	Desired int    `json:"desired"`
+	// Unhealthy, RollingOut and Missing use the same definitions as TaskHealthDTO.
+	Unhealthy  int `json:"unhealthy"`
+	RollingOut int `json:"rolling_out"`
+	Missing    int `json:"missing"`
 }
 
 // DeployDayDTO counts deployment activity on one UTC day.

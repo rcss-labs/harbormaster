@@ -100,3 +100,34 @@ func TestOverview_JSONNeverNull(t *testing.T) {
 		t.Error("tasks.history_72h is null")
 	}
 }
+
+func TestOverview_PerClusterHealth(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	got := getOverview(t, login(t, srv, "pavel", testPassword), "")
+
+	byName := map[string]PerClusterDTO{}
+	var unhealthy, rollingOut, missing int
+	for _, c := range got.PerCluster {
+		byName[c.Name] = c
+		unhealthy += c.Unhealthy
+		rollingOut += c.RollingOut
+		missing += c.Missing
+	}
+	if byName["eu-apps"].Unhealthy != 1 {
+		t.Errorf("eu-apps unhealthy %d, want 1", byName["eu-apps"].Unhealthy)
+	}
+	if byName["background-jobs"].Missing != 2 {
+		t.Errorf("background-jobs missing %d, want 2", byName["background-jobs"].Missing)
+	}
+	if byName["core-services"].RollingOut != 1 {
+		t.Errorf("core-services rolling_out %d, want 1", byName["core-services"].RollingOut)
+	}
+	if s := byName["staging-web"]; s.Unhealthy != 0 || s.RollingOut != 0 || s.Missing != 0 {
+		t.Errorf("staging-web %+v, want all zero", s)
+	}
+	if unhealthy != got.TaskHealth.Unhealthy || rollingOut != got.TaskHealth.RollingOut || missing != got.TaskHealth.Missing {
+		t.Errorf("per-cluster sums %d/%d/%d, want totals %+v", unhealthy, rollingOut, missing, got.TaskHealth)
+	}
+}

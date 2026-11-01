@@ -33,3 +33,4 @@
 .what { display: grid; gap: 2px; min-width: 0; }
 .when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .mutedSmall { color: var(--muted); font-size: 12px; }
+.allHealthy { color: var(--muted); font-size: 12px; }
