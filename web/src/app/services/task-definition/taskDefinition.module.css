@@ -1,4 +1,4 @@
-.diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); max-height: 380px; overflow: auto; background: var(--raised); }
+.diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); max-height: max(380px, 70dvh); overflow: auto; background: var(--raised); }
 .diff div { padding: 0 10px; white-space: pre; }
 .diff .add { background: var(--success-soft); color: var(--success); }
 .diff .del { background: var(--danger-soft); color: var(--danger); }

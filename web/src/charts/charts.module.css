@@ -15,7 +15,7 @@
 
 .hbars { display: grid; gap: 7px; }
 .hbar { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 2fr) minmax(52px, auto); gap: 10px; align-items: center; font-size: 12px; }
-.hbarL { display: grid; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbarL { display: grid; min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .hbarL a:hover { color: var(--accent); }
 .hbarTrack { position: relative; height: 7px; border-radius: 5px; background: var(--muted-soft); display: flex; overflow: visible; }
 .hbarTrack span { display: block; height: 100%; }

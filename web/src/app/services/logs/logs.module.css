@@ -1,4 +1,6 @@
 /* Logs tab (mockup .toolbar, .logs and .ln rules). */
+/* Root of the tab: a flex column so the log box takes the remaining height. */
+.root { display: flex; flex-direction: column; flex: 1 0 auto; }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .ctl { height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: inherit; font: inherit; }
 .search { width: 220px; }
@@ -8,7 +10,7 @@
 .mono { font-family: var(--mono); }
 .banners { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .bannerAction { margin-left: 10px; }
-.logs { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.55; border-radius: 8px; height: 520px; overflow: auto; padding: 10px 0; }
+.logs { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.55; border-radius: 8px; flex: 1 1 0; min-height: 320px; overflow: auto; padding: 10px 0; }
 .older { display: block; margin: 0 12px 8px; }
 .ln { display: grid; grid-template-columns: 96px 130px minmax(0, 1fr); gap: 10px; padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ln:hover { background: rgba(255, 255, 255, 0.04); }

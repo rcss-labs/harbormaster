@@ -1,8 +1,5 @@
 /* Ported from the mockup's g3, task-meter and tile spark rules (docs/design/mockup/index.html). */
-.g3 { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 1100px) {
-  .g3 { grid-template-columns: minmax(0, 1fr); }
-}
+.g3 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 .accentLink { color: var(--accent); }
 .mono { font-family: var(--mono); font-size: 12px; }
 .muted { color: var(--muted); }
