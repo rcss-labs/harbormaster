@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"sort"
 	"strconv"
@@ -17,10 +18,11 @@ var (
 // WritePrometheus renders all families in the Prometheus text exposition
 // format, sorted by family name and then by label values.
 func (r *Registry) WritePrometheus(w io.Writer) error {
+	// Render into memory under the lock, then write after releasing it so a
+	// slow client cannot block metric recording.
+	var buf bytes.Buffer
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	bw := bufio.NewWriter(w)
+	bw := bufio.NewWriter(&buf)
 
 	// Families in alphabetical order by name.
 	writeHeader(bw, "harbormaster_aws_api_calls_total", "AWS API calls made by Harbormaster.", "counter")
@@ -70,7 +72,13 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		writeSample(bw, "harbormaster_snapshot_rows_written_total", []string{"table"}, k, "", utoa(r.snapshotRows[k]))
 	}
 
-	return bw.Flush()
+	err := bw.Flush()
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(buf.Bytes())
+	return err
 }
 
 func writeHeader(bw *bufio.Writer, name, help, typ string) {

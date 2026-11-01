@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -68,5 +69,47 @@ func TestWritePrometheus_DeterministicOrder(t *testing.T) {
 	r.SetLoopInterval("a", "r", "t", 30*time.Second)
 	if a, b := render(t, r), render(t, r); a != b {
 		t.Fatalf("output differs between calls")
+	}
+}
+
+// blockingWriter blocks every Write until release is closed.
+type blockingWriter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingWriter) Write(p []byte) (int, error) {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return len(p), nil
+}
+
+func TestWritePrometheus_SlowWriterDoesNotBlockRecording(t *testing.T) {
+	r := New()
+	for i := 0; i < 200; i++ { // enough output to exceed any internal write buffer
+		r.CountAWSCall("acct", "us-east-1", "ecs", fmt.Sprintf("Op%d", i), "ok")
+	}
+	w := &blockingWriter{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() { done <- r.WritePrometheus(w) }()
+	defer func() { close(w.release); <-done }()
+
+	select {
+	case <-w.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("WritePrometheus never wrote")
+	}
+	recorded := make(chan struct{})
+	go func() {
+		r.CountAWSCall("acct", "us-east-1", "ecs", "Late", "ok")
+		close(recorded)
+	}()
+	select {
+	case <-recorded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CountAWSCall blocked while a client write was stalled")
 	}
 }
