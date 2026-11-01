@@ -29,11 +29,12 @@ func TestSecurityHeaders_Present(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	want := map[string]string{
-		"X-Content-Type-Options":  "nosniff",
-		"X-Frame-Options":         "DENY",
-		"Referrer-Policy":         "same-origin",
-		"Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'",
-		"Cache-Control":           "no-store",
+		"X-Content-Type-Options":    "nosniff",
+		"X-Frame-Options":           "DENY",
+		"Referrer-Policy":           "same-origin",
+		"Content-Security-Policy":   CSPValue,
+		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+		"Cache-Control":             "no-store",
 	}
 	for k, v := range want {
 		if got := resp.Header.Get(k); got != v {

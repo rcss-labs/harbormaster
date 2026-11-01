@@ -86,6 +86,31 @@ describe('TaskDefinitionTab', () => {
     expect(await screen.findByText('Registered. Someone with Deploy on Prod can roll it out.')).toBeInTheDocument()
   })
 
+  it('shows the recording warning from a register response as a toast', async () => {
+    server.use(
+      http.post('/api/services/:id/revisions', () =>
+        HttpResponse.json({ ...result(false), warning: 'Registered, but Harbormaster could not record it.' }, { status: 201 }),
+      ),
+    )
+    renderApp(route)
+    await editEnvValue()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and save' }))
+    await userEvent.click(await screen.findByRole('button', { name: /Register revision/ }))
+    expect(await screen.findByText('Registered, but Harbormaster could not record it.')).toBeInTheDocument()
+  })
+
+  it('shows the recording warning from a deploy response as a toast', async () => {
+    server.use(
+      http.post('/api/services/:id/deploy', () =>
+        HttpResponse.json({ deployment_id: 'd-1', warning: 'Rolled out, but Harbormaster could not record it in the operations history.' }, { status: 202 }),
+      ),
+    )
+    renderApp(route)
+    await userEvent.click(await screen.findByRole('button', { name: 'Deploy' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Deploy :43' }))
+    expect(await screen.findByText('Rolled out, but Harbormaster could not record it in the operations history.')).toBeInTheDocument()
+  })
+
   it('asks to deploy when the user can', async () => {
     server.use(http.post('/api/services/:id/revisions', () => HttpResponse.json(result(true), { status: 201 })))
     renderApp(route)

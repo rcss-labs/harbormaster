@@ -124,8 +124,10 @@ type Task struct {
 	StopCode          string
 	StoppedReason     string
 	Containers        []Container
-	Raw               json.RawMessage
-	PolledAt          time.Time
+	// EnableExecuteCommand is the task's own DescribeTasks flag: whether RunTask/StartTask turned ECS Exec on.
+	EnableExecuteCommand bool
+	Raw                  json.RawMessage
+	PolledAt             time.Time
 }
 
 type Container struct {

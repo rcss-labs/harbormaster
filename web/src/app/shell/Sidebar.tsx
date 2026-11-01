@@ -2,11 +2,9 @@ import type { ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
 import { useAccounts, useClusters, useTags, useTasks, useUsers } from '../../api/hooks'
-import logo from '../../brand/square-logo.png'
-import logoDark from '../../brand/square-logo-dark.png'
+import { Brand } from '../../components/Brand'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
-import { useIsDark } from '../theme'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
 
@@ -47,7 +45,6 @@ export function Sidebar() {
   const { me, logout } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
-  const dark = useIsDark()
   const { filters } = useFilters()
   const isAdmin = me?.admin ?? false
   const alerts = useAlerts(filters)
@@ -70,11 +67,8 @@ export function Sidebar() {
   return (
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
-        <img src={dark ? logoDark : logo} alt="" width={32} height={32} />
-        <div>
-          <div className={styles.brandName}>Harbormaster</div>
-          <div className={styles.brandSub}>ECS control center</div>
-        </div>
+        <Brand variant="sidebar" />
+        <div className={styles.brandSub}>ECS control center</div>
       </div>
       <nav className={styles.nav} aria-label="Main">
         <NavItem to="/" end label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />

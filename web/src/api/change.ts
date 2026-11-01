@@ -38,6 +38,7 @@ export interface RegisterResult {
   can_deploy: boolean
   tag: TagDTO
   strategy: string
+  warning: string | null
 }
 
 export interface DeployBody {
@@ -50,6 +51,7 @@ export interface DeployStarted {
   from_revision: number
   to_revision: number
   kind: 'deploy' | 'rollback'
+  warning?: string | null
 }
 
 /** 202 from POST /api/services/{id}/restart. */
@@ -57,6 +59,7 @@ export interface RestartStarted {
   deployment_id: string
   revision: number
   kind: 'restart'
+  warning?: string | null
 }
 
 export type RolloutStarted = DeployStarted | RestartStarted
@@ -77,6 +80,7 @@ export interface DesiredCountResult {
 export interface StopTaskResult {
   task_arn: string
   reason: string
+  warning?: string | null
 }
 
 // ---- Reads ----

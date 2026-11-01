@@ -14,19 +14,27 @@ import (
 var ExecCommands = []string{"/bin/sh", "/bin/bash"}
 
 // ExecAgentStatus is the ECS Exec agent state of one container: RUNNING, PENDING, STOPPED,
-// or MISSING when the container is unknown or reports no ExecuteCommandAgent.
+// or MISSING when the container is unknown or reports no ExecuteCommandAgent. Any other status
+// ECS reports (STOPPING, DEACTIVATING, ...) means the agent is going away and reads as STOPPED.
 func ExecAgentStatus(t model.Task, container string) string {
 	for _, c := range t.Containers {
-		if c.Name == container && c.ExecAgentStatus != "" {
+		if c.Name != container || c.ExecAgentStatus == "" {
+			continue
+		}
+		switch c.ExecAgentStatus {
+		case "RUNNING", "PENDING", "STOPPED":
 			return c.ExecAgentStatus
 		}
+		return "STOPPED"
 	}
 	return "MISSING"
 }
 
-// ExecEnabled reports whether the service allows ECS Exec. Standalone tasks (zero service) are
-// never exec-enabled in v1 because the Terminal tab lives on the service page.
+// ExecEnabled reports whether the service allows ECS Exec.
 func ExecEnabled(svc model.Service) bool { return svc.EnableExecuteCommand }
+
+// execEnabledForStandalone is the task's own enableExecuteCommand flag; a standalone task has no service to ask.
+func execEnabledForStandalone(t model.Task) bool { return t.EnableExecuteCommand }
 
 // TaskTag is the tag that governs t: its service's tag, or the cluster's for standalone tasks.
 func TaskTag(tags authz.Tags, t model.Task) authz.TagID {
@@ -74,7 +82,9 @@ func (s *Server) execTargets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	enabled := false
-	if task.ServiceName != "" {
+	if task.ServiceName == "" {
+		enabled = execEnabledForStandalone(task)
+	} else {
 		svc, err := s.Store.GetService(ctx, model.ServiceKey{ClusterKey: task.Cluster, Service: task.ServiceName})
 		switch {
 		case err == nil:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -67,6 +68,9 @@ type Config struct {
 	ExecIdleTimeout        time.Duration
 	ExecMaxDuration        time.Duration
 	ExecMaxSessionsPerUser int
+
+	// plan 06: metrics endpoint token; empty disables /metrics
+	MetricsToken string
 }
 
 // envReader reads HM_* variables and remembers the first parse error, so Load
@@ -186,6 +190,9 @@ func Load(getenv func(string) string) (Config, error) {
 		ExecIdleTimeout:        reader.duration("HM_EXEC_IDLE_TIMEOUT", 20*time.Minute),
 		ExecMaxDuration:        reader.duration("HM_EXEC_MAX_DURATION", 4*time.Hour),
 		ExecMaxSessionsPerUser: reader.integer("HM_EXEC_MAX_SESSIONS_PER_USER", 3),
+
+		// plan 06: metrics endpoint token
+		MetricsToken: strings.TrimSpace(reader.text("HM_METRICS_TOKEN", "")),
 	}
 
 	if reader.err != nil {

@@ -15,10 +15,13 @@ func TestExecAgentStatus_FromContainer(t *testing.T) {
 		{Name: "pending", ExecAgentStatus: "PENDING"},
 		{Name: "stopped", ExecAgentStatus: "STOPPED"},
 		{Name: "noagent"},
+		{Name: "stopping", ExecAgentStatus: "STOPPING"},
+		{Name: "deactivating", ExecAgentStatus: "DEACTIVATING"},
 	}}
 	for _, tc := range []struct{ container, want string }{
 		{"running", "RUNNING"}, {"pending", "PENDING"}, {"stopped", "STOPPED"},
 		{"noagent", "MISSING"}, {"unknown", "MISSING"},
+		{"stopping", "STOPPED"}, {"deactivating", "STOPPED"},
 	} {
 		if got := ExecAgentStatus(task, tc.container); got != tc.want {
 			t.Errorf("ExecAgentStatus(%q) = %q, want %q", tc.container, got, tc.want)
@@ -134,11 +137,43 @@ func TestExecTargets_StoppedTask_404(t *testing.T) {
 	getExecTargets(t, login(t, srv, "pavel", testPassword), id, http.StatusNotFound)
 }
 
-func TestExecTargets_StandaloneTask_UsesClusterTag(t *testing.T) {
-	srv := seededExecServer(t)
+func TestExecTargets_StandaloneTask_UsesClusterTagAndOwnFlag(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	setPassword(t, st, "dana")
+	pollAll(t, st, fk)
 	id := taskIDWhere(t, srv, "", "release-build", "RUNNING")
 	got := getExecTargets(t, login(t, srv, "dana", testPassword), id, http.StatusOK)
+	if !got.ExecEnabled || !got.CanTerminal {
+		t.Errorf("exec on: got %+v, want exec_enabled and can_terminal true", got)
+	}
+
+	setStandaloneExecFlag(t, st, fk, false)
+	got = getExecTargets(t, login(t, srv, "dana", testPassword), id, http.StatusOK)
 	if got.ExecEnabled || !got.CanTerminal {
-		t.Errorf("got %+v, want exec_enabled false, can_terminal true", got)
+		t.Errorf("exec off: got %+v, want exec_enabled false, can_terminal true", got)
+	}
+}
+
+func TestTasksList_StandaloneExecEnabledFollowsTaskFlag(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	admin := login(t, srv, "pavel", testPassword)
+	standaloneExec := func() bool {
+		for _, task := range getTasks(t, admin, "/api/tasks?filter=running&limit=500").Items {
+			if task.Service == nil && task.Family == "release-build" {
+				return task.ExecEnabled
+			}
+		}
+		t.Fatal("standalone release-build not listed")
+		return false
+	}
+	if !standaloneExec() {
+		t.Error("exec on: exec_enabled = false")
+	}
+	setStandaloneExecFlag(t, st, fk, false)
+	if standaloneExec() {
+		t.Error("exec off: exec_enabled = true")
 	}
 }

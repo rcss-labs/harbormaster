@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 // RoleSource resolves the role to assume for a connected account. It must
@@ -140,6 +142,8 @@ func (r *Real) buildConfig(ctx context.Context, t Target) (aws.Config, uint64, e
 	cfg := r.base.Copy()
 	cfg.Region = t.Region
 	cfg.Credentials = c
+	// plan 06: count every SDK call of every client built from this config.
+	cfg.APIOptions = append(cfg.APIOptions, TelemetryMiddleware(t.AccountID, t.Region, telemetry.Default))
 	cfg.Retryer = func() aws.Retryer { return retry.AddWithMaxAttempts(retry.NewStandard(), maxAttempts) }
 	return cfg, gen, nil
 }

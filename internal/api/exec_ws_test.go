@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/coder/websocket"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -588,6 +589,56 @@ func TestExecWS_IdleTimeout_4408(t *testing.T) {
 	}
 }
 
+// A browser that stops answering pings (sleeping laptop, dropped NAT flow) must not hold a session
+// and a per-user slot until the idle timeout.
+func TestExecWS_DeadBrowserPeer_SessionTerminatedAndSlotFreed(t *testing.T) {
+	r := newExecRig(t, func(s *Server) {
+		s.Cfg.ExecMaxSessionsPerUser = 1
+		s.ExecPingInterval = 30 * time.Millisecond
+		s.ExecPingTimeout = 100 * time.Millisecond
+	})
+	id := r.paymentsTask(t)
+	c := login(t, r.srv, "pavel", testPassword)
+	w := r.open(t, c, id, "payments-api", "/bin/sh")
+	w.sendText(startFrame(c.csrf))
+	connected, _ := w.waitStatus("connected")
+	// From here the client never reads again, so it never answers a ping.
+
+	eventually(t, "dead peer's session terminated", func() bool {
+		s, _ := r.ssm.Session(connected.SessionID)
+		return s.Terminated
+	})
+	eventually(t, "close row", func() bool { return len(r.operations(t, "Closed terminal session%")) == 1 })
+
+	// The single slot is free again.
+	w2 := r.open(t, c, id, "payments-api", "/bin/sh")
+	w2.sendText(startFrame(c.csrf))
+	w2.waitStatus("connected")
+}
+
+func TestExecWS_LiveBrowserPeer_SurvivesPings(t *testing.T) {
+	r := newExecRig(t, func(s *Server) {
+		s.ExecPingInterval = 20 * time.Millisecond
+		s.ExecPingTimeout = 2 * time.Second
+	})
+	id := r.paymentsTask(t)
+	c := login(t, r.srv, "pavel", testPassword)
+	w := r.open(t, c, id, "payments-api", "/bin/sh")
+	w.sendText(startFrame(c.csrf))
+	connected, _ := w.waitStatus("connected")
+
+	// Keep reading (which answers pings) across many ping intervals.
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	_, _, err := w.conn.Read(ctx)
+	if websocket.CloseStatus(err) != -1 {
+		t.Fatalf("socket closed while the peer was answering pings: %v", err)
+	}
+	if s, _ := r.ssm.Session(connected.SessionID); s.Terminated {
+		t.Fatal("session terminated although the peer answered pings")
+	}
+}
+
 func TestExecWS_UpstreamDrop_4502(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
@@ -617,8 +668,48 @@ func TestExecWS_ExecuteCommandFailure_4502(t *testing.T) {
 	}
 }
 
-func TestExecWS_StandaloneTask_Refused(t *testing.T) {
+// setStandaloneExec turns the task-level enableExecuteCommand flag of the standalone release-build
+// task on or off in the fake estate and re-polls, as a changed RunTask setting would show up.
+func (r *execRig) setStandaloneExec(t *testing.T, enabled bool) {
+	t.Helper()
+	setStandaloneExecFlag(t, r.st, r.fk, enabled)
+}
+
+func setStandaloneExecFlag(t *testing.T, st *store.Store, fk *fake.Fake, enabled bool) {
+	t.Helper()
+	fk.Estate.Mu.Lock()
+	for i := range fk.Estate.Tasks {
+		task := &fk.Estate.Tasks[i].Task
+		if aws.ToString(task.Group) == "family:release-build" {
+			task.EnableExecuteCommand = enabled
+		}
+	}
+	fk.Estate.Mu.Unlock()
+	pollAll(t, st, fk)
+}
+
+func TestExecWS_StandaloneTask_ExecOn_OpensOnClusterTag(t *testing.T) {
 	r := newExecRig(t, nil)
+	id := taskIDWhere(t, r.srv, "", "release-build", "RUNNING")
+	// dana has Terminal on the cluster's tag, not on a service.
+	c := login(t, r.srv, "dana", testPassword)
+	container := getExecTargets(t, c, id, http.StatusOK).Containers[0].Name
+	w := r.open(t, c, id, container, "/bin/sh")
+	w.sendText(startFrame(c.csrf))
+	connected, _ := w.waitStatus("connected")
+	if connected.SessionID == "" {
+		t.Fatalf("connected = %+v", connected)
+	}
+	w.sendBinary("exit\r")
+	frames, _, _ := w.drain()
+	if closed, ok := lastFrameOfType(frames, "status"); !ok || closed.State != "closed" {
+		t.Fatalf("frames %+v", frames)
+	}
+}
+
+func TestExecWS_StandaloneTask_ExecOff_Refused(t *testing.T) {
+	r := newExecRig(t, nil)
+	r.setStandaloneExec(t, false)
 	id := taskIDWhere(t, r.srv, "", "release-build", "RUNNING")
 	c := login(t, r.srv, "pavel", testPassword)
 	container := getExecTargets(t, c, id, http.StatusOK).Containers[0].Name

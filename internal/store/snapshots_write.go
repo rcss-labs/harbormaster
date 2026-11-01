@@ -294,9 +294,9 @@ insert into tasks (account_id, region, task_arn, cluster_name, service_name, "gr
   task_definition_arn, family, revision, last_status, desired_status, health_status, launch_type,
   capacity_provider, cpu, memory, availability_zone, subnet_id, private_ip, public_ip, eni_id,
   created_at, started_at, stopping_at, stopped_at, stop_code, stopped_reason, stop_reason_group,
-  exit_code, containers, content_hash, raw, polled_at)
+  exit_code, containers, content_hash, raw, polled_at, enable_execute_command)
 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-  $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+  $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
 on conflict (account_id, region, task_arn) do update set
   cluster_name = excluded.cluster_name, service_name = excluded.service_name, "group" = excluded."group",
   started_by = excluded.started_by, task_definition_arn = excluded.task_definition_arn,
@@ -309,7 +309,7 @@ on conflict (account_id, region, task_arn) do update set
   stopped_at = excluded.stopped_at, stop_code = excluded.stop_code, stopped_reason = excluded.stopped_reason,
   stop_reason_group = excluded.stop_reason_group, exit_code = excluded.exit_code,
   containers = excluded.containers, content_hash = excluded.content_hash, raw = excluded.raw,
-  polled_at = excluded.polled_at
+  polled_at = excluded.polled_at, enable_execute_command = excluded.enable_execute_command
 where tasks.content_hash <> excluded.content_hash
   and (tasks.last_status is distinct from 'STOPPED' or excluded.last_status = 'STOPPED')
 returning (xmax = 0) as inserted`
@@ -333,7 +333,7 @@ func (s *Store) UpsertTasks(ctx context.Context, rows []model.Task) (WriteResult
 			nullString(t.AvailabilityZone), nullString(t.SubnetID), nullString(t.PrivateIP),
 			nullString(t.PublicIP), nullString(t.ENIID), nullTime(t.CreatedAt), t.StartedAt, t.StoppingAt,
 			t.StoppedAt, nullString(t.StopCode), nullString(t.StoppedReason), stopGroup, t.ExitCode(),
-			jsonArray(t.Containers), ContentHash(t), rawOrEmpty(t.Raw), polledAtOrNow(t.PolledAt),
+			jsonArray(t.Containers), ContentHash(t), rawOrEmpty(t.Raw), polledAtOrNow(t.PolledAt), t.EnableExecuteCommand,
 		}})
 	}
 	return s.upsertBatch(ctx, "tasks", statements)

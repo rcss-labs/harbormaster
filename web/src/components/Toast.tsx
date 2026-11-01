@@ -3,7 +3,7 @@ import styles from './Toast.module.css'
 
 export const TOAST_DURATION_MS = 5200
 
-type ToastKind = 'ok' | 'bad' | 'info'
+type ToastKind = 'ok' | 'bad' | 'info' | 'warn'
 
 interface ToastItem {
   id: number
@@ -12,7 +12,7 @@ interface ToastItem {
   sticky: boolean
 }
 
-interface ToastApi {
+export interface ToastApi {
   show: (message: ReactNode, kind?: ToastKind, opts?: { sticky?: boolean }) => void
 }
 
@@ -71,4 +71,9 @@ export function useToast(): ToastApi {
   const api = useContext(ToastContext)
   if (!api) throw new Error('useToast must be used inside <ToastProvider>')
   return api
+}
+
+/** Shows the API's nullable `warning` (the action worked but Harbormaster could not record it) as a warning toast. */
+export function showWarning(toast: ToastApi, warning: string | null | undefined) {
+  if (warning) toast.show(warning, 'warn')
 }

@@ -156,7 +156,7 @@ func taskDTO(sc scope, view *estateView, row store.TaskRow) TaskDTO {
 		PrivateIP: row.PrivateIP, SubnetID: row.SubnetID, AZ: row.AvailabilityZone, Capacity: capacity,
 		CPU: row.CPU, Memory: row.Memory, StartedAt: row.StartedAt, StoppedAt: row.StoppedAt,
 		StopCode: row.StopCode, StoppedReason: row.StoppedReason, StopReasonGroup: row.StopReasonGroup,
-		ExecEnabled: row.ServiceEnableExec && execAgentRunning(row.Task),
+		ExecEnabled: taskExecEnabled(row) && execAgentRunning(row.Task),
 		Can:         TaskCanDTO{Operate: authz.Can(sc.Subject, authz.Operate, tag), Terminal: authz.Can(sc.Subject, authz.Terminal, tag)},
 	}
 	if row.ServiceName != "" {
@@ -201,4 +201,12 @@ func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQu
 		}
 	}
 	return out, nil
+}
+
+// taskExecEnabled is the service's setting for service tasks and the task's own flag for standalone ones.
+func taskExecEnabled(row store.TaskRow) bool {
+	if row.ServiceName == "" {
+		return row.EnableExecuteCommand
+	}
+	return row.ServiceEnableExec
 }

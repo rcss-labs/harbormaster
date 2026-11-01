@@ -223,7 +223,9 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 	}
 
 	enabled := false
-	if task.ServiceName != "" {
+	if task.ServiceName == "" {
+		enabled = execEnabledForStandalone(task)
+	} else {
 		svc, err := s.Store.GetService(ctx, model.ServiceKey{ClusterKey: task.Cluster, Service: task.ServiceName})
 		switch {
 		case err == nil:
@@ -234,7 +236,7 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 		}
 	}
 	if !enabled {
-		what := "standalone tasks"
+		what := "this standalone task (it was not started with ECS Exec enabled)"
 		if task.ServiceName != "" {
 			what = task.ServiceName
 		}
@@ -286,6 +288,10 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 		closing = s.pumpSessionEvents(sock, sess)
 	}()
 
+	// A half-open peer (sleeping laptop, dropped NAT flow) never fails a read or a small write, so ping it.
+	stopPing := s.pingBrowser(sock, sess)
+	defer stopPing()
+
 	// Browser -> session; any read error means the browser is gone or misbehaving.
 	s.pumpBrowserInput(ctx, sock, sess)
 	sess.Close(execbridge.CloseByClient)
@@ -294,6 +300,40 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 	if opened {
 		ops.logClosed(sess, closing.Reason)
 	}
+}
+
+// pingBrowser pings the browser every ExecPingInterval. A missed pong ends the session (which
+// terminates the SSM session) and drops the socket so the input pump stops and the per-user slot is
+// released. The input pump supplies the concurrent Read that coder/websocket needs to see pongs.
+func (s *Server) pingBrowser(sock *execSocket, sess *execbridge.Session) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(s.ExecPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), s.ExecPingTimeout)
+			err := sock.conn.Ping(ctx)
+			cancel()
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if err != nil {
+				s.log().Warn("exec: browser ping failed", "session", sess.ID(), "error", err)
+				sess.Close(execbridge.CloseByClient)
+				_ = sock.conn.CloseNow()
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
 }
 
 func (s *Server) execInternalError(sock *execSocket, what string, err error) {

@@ -1,9 +1,12 @@
 package poller
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 const homelabAccount = "482109375512"
@@ -283,5 +287,84 @@ func TestLoop_RunTicksEveryTierAndStopsOnCancel(t *testing.T) {
 	}
 	if got := h.count(t, `select count(*) from tasks where last_status = 'RUNNING'`); got != len(h.estateTasks("RUNNING")) {
 		t.Errorf("running tasks stored = %d, want %d", got, len(h.estateTasks("RUNNING")))
+	}
+}
+
+// plan 06: tier timings, interval and snapshot-write counts reach the telemetry registry.
+func TestLoop_ReportsTelemetry(t *testing.T) {
+	reg := telemetry.New()
+	st := storetest.Open(t)
+	f := fake.New(fake.MockupEstate(func() time.Time { return loopNow }))
+	p := New(st, f, Config{MaxInFlight: 4, Telemetry: reg}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := newLoop(p, loopTarget).runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	var out bytes.Buffer
+	if err := reg.WritePrometheus(&out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{
+		`tier="services"`,
+		`harbormaster_snapshot_rows_written_total{table="services"}`,
+		`harbormaster_snapshot_rows_written_total{table="tasks"}`,
+		`harbormaster_snapshot_rows_written_total{table="clusters"}`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("metrics lack %s:\n%s", want, text)
+		}
+	}
+	if len(reg.Snapshot().LoopInterval) == 0 {
+		t.Error("no loop interval recorded")
+	}
+}
+
+// plan 06: a fresh loop must not start the task tiers together (ECS cluster-resource-read bucket is 100 tokens).
+func TestLoop_StartIsStaggeredAcrossTiers(t *testing.T) {
+	h := mockupHarness(t)
+	stagger := 80 * time.Millisecond
+	h.loop.p.cfg.StartStagger = stagger
+	hour := time.Hour
+	h.loop.p.cfg.Intervals = Intervals{Services: hour, RunningTasks: hour, FullTasks: hour, StoppedTasks: hour, Clusters: hour, ServiceList: hour}
+	for _, d := range h.loop.defs {
+		d.tier.cur, d.tier.base = hour, hour
+	}
+
+	var mu sync.Mutex
+	firstStart := map[string]time.Time{}
+	for i, d := range h.loop.defs {
+		switch d.tier.name {
+		case tierRunningTasks, tierStoppedTasks, tierFullTasks:
+			name := d.tier.name
+			h.loop.defs[i].run = func(context.Context) error {
+				mu.Lock()
+				defer mu.Unlock()
+				if _, seen := firstStart[name]; !seen {
+					firstStart[name] = time.Now()
+				}
+				return nil
+			}
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.loop.Run(ctx); close(done) }()
+	time.Sleep(6 * stagger)
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	order := []string{tierRunningTasks, tierStoppedTasks, tierFullTasks}
+	for _, name := range order {
+		if firstStart[name].IsZero() {
+			t.Fatalf("tier %s never ran its first cycle", name)
+		}
+	}
+	for i := 1; i < len(order); i++ {
+		if gap := firstStart[order[i]].Sub(firstStart[order[i-1]]); gap < stagger*3/4 {
+			t.Errorf("%s started %v after %s, want >= %v (3/4 of the step, for scheduler jitter)", order[i], gap, order[i-1], stagger*3/4)
+		}
 	}
 }

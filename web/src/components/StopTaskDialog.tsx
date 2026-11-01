@@ -1,7 +1,7 @@
 import { isApiError, useStopTask } from '../api/change'
 import { useService } from '../api/hooks'
 import { Dialog } from './Dialog'
-import { useToast } from './Toast'
+import { showWarning, useToast } from './Toast'
 
 interface StopTaskDialogProps {
   taskId: string
@@ -40,7 +40,10 @@ function StopTaskConfirm({ taskId, shortId, serviceName, serviceId, desiredCount
 
   const confirm = () =>
     stopTask.mutate(taskId, {
-      onSuccess: onClose,
+      onSuccess: (stopped) => {
+        showWarning(toast, stopped.warning)
+        onClose()
+      },
       onError: (error) => toast.show(isApiError(error) ? error.message : 'The task could not be stopped.', 'bad'),
     })
 

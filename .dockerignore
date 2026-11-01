@@ -1,0 +1,10 @@
+.git
+.idea
+bin
+web/node_modules
+web/dist
+web/e2e/.auth
+web/test-results
+docs
+terraform
+*.md

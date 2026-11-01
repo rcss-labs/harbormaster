@@ -143,14 +143,33 @@ func (l *Loop) Run(ctx context.Context) {
 			l.countsLoop(ctx, every)
 		}()
 	}
+	// One shared reference keeps the gaps between tiers at the step, whatever the goroutine scheduling.
+	startedAt := time.Now()
+	stagger := l.startDelays()
 	for i, d := range l.defs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if wait := time.Until(startedAt.Add(stagger[d.tier.name])); wait > 0 {
+				timer := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
 			l.tickTier(ctx, d, i >= 2)
 		}()
 	}
 	wg.Wait()
+}
+
+// startDelays staggers the first cycles of the task tiers, which all hit ECS's cluster-resource-read
+// bucket (100 tokens, 20/s refill): runningTasks starts at once, stoppedTasks one step later, fullTasks two.
+func (l *Loop) startDelays() map[string]time.Duration {
+	step := l.p.cfg.StartStagger
+	return map[string]time.Duration{tierStoppedTasks: step, tierFullTasks: 2 * step}
 }
 
 // countsLoop samples service counts into the history every interval until ctx ends.
@@ -186,6 +205,7 @@ func (l *Loop) tickTier(ctx context.Context, d tierDef, runImmediately bool) {
 
 // runTier runs one tier, logs its failure and records the cycle in poll_loops.
 func (l *Loop) runTier(ctx context.Context, d tierDef) error {
+	started := time.Now()
 	err := d.run(ctx)
 	if err != nil && ctx.Err() == nil {
 		if errors.Is(err, awsx.ErrAccountUnknown) {
@@ -196,6 +216,12 @@ func (l *Loop) runTier(ctx context.Context, d tierDef) error {
 	}
 	if ctx.Err() == nil {
 		l.recordCycle(ctx, d.tier, err)
+		// plan 06: recordCycle has applied backoff, so cur is the interval the tier will run at next.
+		d.tier.mu.Lock()
+		interval := d.tier.cur
+		d.tier.mu.Unlock()
+		l.p.cfg.Telemetry.ObserveLoop(l.target.AccountID, l.target.Region, d.tier.name, time.Since(started), err == nil)
+		l.p.cfg.Telemetry.SetLoopInterval(l.target.AccountID, l.target.Region, d.tier.name, interval)
 	}
 	if err != nil {
 		return fmt.Errorf("%s: %w", d.tier.name, err)
@@ -210,7 +236,8 @@ func (l *Loop) writeTotals() store.WriteResult {
 	return l.writes
 }
 
-func (l *Loop) recordWrite(res store.WriteResult) {
+func (l *Loop) recordWrite(table string, res store.WriteResult) {
+	l.p.cfg.Telemetry.CountSnapshotWrites(table, res.Inserted+res.Updated)
 	l.mu.Lock()
 	l.writes.Inserted += res.Inserted
 	l.writes.Updated += res.Updated
@@ -369,7 +396,7 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	l.recordWrite(res)
+	l.recordWrite("clusters", res)
 
 	// Keep every listed cluster, even one whose describe failed, so a hiccup never deletes data.
 	keys := make([]model.ClusterKey, 0, len(arns))
@@ -462,7 +489,7 @@ func (l *Loop) syncServices(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		l.recordWrite(res)
+		l.recordWrite("services", res)
 		if _, err := l.p.store.InsertServiceEvents(ctx, events); err != nil {
 			return err
 		}
@@ -676,7 +703,7 @@ func (l *Loop) describeAndStoreTasks(ctx context.Context, api awsx.ECSAPI, k mod
 	if err != nil {
 		return err
 	}
-	l.recordWrite(res)
+	l.recordWrite("tasks", res)
 	if markMissing {
 		if err := l.p.store.MarkTasksMissing(ctx, k, missing, now); err != nil {
 			return err

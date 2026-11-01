@@ -1,11 +1,18 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+# Evaluated once: a recursive `?=` would re-run git describe after `build` dirties the tree,
+# so the binary and the image tag could disagree.
+ifeq ($(origin VERSION),undefined)
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+endif
+ifeq ($(origin COMMIT),undefined)
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+endif
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test test-db e2e lint run
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
-	go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/harbormaster ./cmd/harbormaster
+	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster ./cmd/harbormaster
 
 test:
 	go test ./...
@@ -15,6 +22,7 @@ lint:
 	@unformatted="$$(gofmt -l cmd internal)"; if [ -n "$$unformatted" ]; then echo "gofmt needed for:"; echo "$$unformatted"; exit 1; fi
 	go vet ./...
 	if [ -f web/package.json ]; then npm --prefix web run lint && npm --prefix web run typecheck; fi
+	tools/check-notices.sh
 
 test-db:
 	if docker inspect hm-test-pg >/dev/null 2>&1; then \
@@ -51,3 +59,31 @@ tf-check:
 # Real-AWS ECS Exec integration test. Export the HM_IT_* variables first (see README "Terminal").
 test-it-exec:
 	HM_IT_AWS=1 go test ./internal/execbridge/ -run TestIntegration -v
+
+# plan 06
+.PHONY: image check-image release release-check
+image:
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
+
+check-image:
+	tools/check-image.sh harbormaster:$(VERSION)
+
+# release runs its prerequisites in order (do not use make -j). The build step generates the web app,
+# so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
+release: lint test build image check-image
+	@echo "image: harbormaster:$(VERSION)"
+	bin/harbormaster version
+
+# release-check refuses an untagged HEAD and a -dirty VERSION.
+release-check:
+	@if [ -z "$$(git tag --points-at HEAD)" ]; then echo "release-check: HEAD is not tagged" >&2; exit 1; fi
+	@case "$(VERSION)" in *-dirty) echo "release-check: VERSION $(VERSION) is dirty; commit or stash changes" >&2; exit 1;; esac
+
+# plan 06
+.PHONY: icons
+icons:
+	node web/scripts/render-icons.mjs
+
+.PHONY: check-notices
+check-notices:
+	tools/check-notices.sh

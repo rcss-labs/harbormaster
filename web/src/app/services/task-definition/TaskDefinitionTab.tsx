@@ -6,7 +6,7 @@ import type { RevisionsResponse, ServiceDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
 import { EmptyState } from '../../../components/EmptyState'
 import { TagChip } from '../../../components/TagChip'
-import { useToast } from '../../../components/Toast'
+import { showWarning, useToast } from '../../../components/Toast'
 import { isRolloutRunning } from '../rollout'
 import { DeployDialog } from './DeployDialog'
 import { JsonEditor } from './JsonEditor'
@@ -120,6 +120,7 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
       const result = await register.mutateAsync({ base_revision: draft.baseRevision, definition })
       closeReview()
       setDraft(null)
+      showWarning(toast, result.warning)
       if (result.can_deploy) setRegistered(result)
       else toast.show(`Registered. Someone with Deploy on ${result.tag.name} can roll it out.`, 'ok')
     } catch (failure) {
@@ -140,7 +141,8 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
 
   const runDeploy = async (revision: number, onStarted: () => void) => {
     try {
-      await deploy.mutateAsync({ revision })
+      const started = await deploy.mutateAsync({ revision })
+      showWarning(toast, started.warning)
       onStarted()
       navigate(`/services/${serviceId}/overview`)
     } catch (failure) {

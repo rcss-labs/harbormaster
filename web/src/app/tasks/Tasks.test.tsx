@@ -72,8 +72,18 @@ describe('Tasks Terminal link', () => {
     expect(within(row).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
-  it('no Terminal on standalone rows', async () => {
+  it('shows Terminal on a running standalone row, linking to the standalone terminal page', async () => {
     withTasks([{ ...standaloneRunning, exec_enabled: true, can: { ...standaloneRunning.can, terminal: true } }])
+    renderApp('/tasks?filter=running')
+    const row = (await screen.findByText(`family:${standaloneRunning.family}`)).closest('tr')!
+    expect(within(row).getByRole('link', { name: 'Terminal' })).toHaveAttribute(
+      'href',
+      `/tasks/${encodeURIComponent(standaloneRunning.short_id)}/terminal`,
+    )
+  })
+
+  it('hides Terminal on a standalone row when the task was started without exec', async () => {
+    withTasks([{ ...standaloneRunning, exec_enabled: false, can: { ...standaloneRunning.can, terminal: true } }])
     renderApp('/tasks?filter=running')
     const row = (await screen.findByText(`family:${standaloneRunning.family}`)).closest('tr')!
     expect(within(row).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
