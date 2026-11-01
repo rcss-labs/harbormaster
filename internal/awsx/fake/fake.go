@@ -46,14 +46,23 @@ type Fake struct {
 	liveTailMu          sync.Mutex
 	lastLiveTailInput   *cloudwatchlogs.StartLiveTailInput
 
-	mu    sync.Mutex
-	calls map[string]int
+	// CallLatency delays every API call (plan 06), so concurrent callers overlap and MaxInFlight is meaningful.
+	CallLatency time.Duration
+
+	mu         sync.Mutex
+	calls      map[string]int
+	callCounts map[string]uint64       // "account|region|service|operation"; see CallCounts
+	inFlight   map[awsx.Target]*flight // plan 06
+	limits     map[awsx.Target]*tokenBucket
 
 	failures failureQueue // see failnext.go
 }
 
 // New wraps an estate.
-func New(e *Estate) *Fake { return &Fake{Estate: e, calls: map[string]int{}} }
+func New(e *Estate) *Fake {
+	return &Fake{Estate: e, calls: map[string]int{}, callCounts: map[string]uint64{},
+		inFlight: map[awsx.Target]*flight{}, limits: map[awsx.Target]*tokenBucket{}}
+}
 
 // Calls returns a copy of the per-operation call counters (throttled calls count).
 func (f *Fake) Calls() map[string]int {
@@ -66,39 +75,54 @@ func (f *Fake) Calls() map[string]int {
 	return out
 }
 
-// begin counts the call and applies the throttle knob.
-func (f *Fake) begin(op string) error {
-	f.mu.Lock()
-	f.calls[op]++
-	f.mu.Unlock()
+// plan 06: begin and beginThrottled are the single dispatch point of every
+// fake API call. Each call is counted (Calls, CallCounts), tracked as in
+// flight for its target (MaxInFlight), delayed by CallLatency, then checked
+// against the per-target rate limit (SetRateLimit), FailNext and the
+// Throttle knobs. The returned function ends the in-flight tracking; callers
+// run it with defer, also on error.
+//
+// Service names used in CallCounts keys (stable, lowercase): "ecs", "ecr",
+// "ec2", "efs", "elasticloadbalancing", "application-autoscaling",
+// "cloudwatch", "logs", "ssm". The fake SSM client has no target, so its
+// calls are counted under the zero Target (empty account and region).
+
+// begin counts the call and applies the ECS throttle knob.
+func (f *Fake) begin(t awsx.Target, service, op string) (func(), error) {
+	done := f.enter(t, service, op)
 	if err := f.takeFailure(op); err != nil {
-		return err
+		return done, err
 	}
-	for {
-		n := atomic.LoadInt32(&f.Throttle)
-		if n <= 0 {
-			return nil
-		}
-		if atomic.CompareAndSwapInt32(&f.Throttle, n, n-1) {
-			return &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded", Fault: smithy.FaultClient}
-		}
+	if err := f.takeRateToken(t); err != nil {
+		return done, err
 	}
+	return done, takeThrottle(&f.Throttle)
 }
 
 // beginThrottled counts the call and applies a per-service throttle knob.
-func (f *Fake) beginThrottled(op string, knob *int32) error {
-	f.mu.Lock()
-	f.calls[op]++
-	f.mu.Unlock()
+func (f *Fake) beginThrottled(t awsx.Target, service, op string, knob *int32) (func(), error) {
+	done := f.enter(t, service, op)
+	if err := f.takeRateToken(t); err != nil {
+		return done, err
+	}
+	return done, takeThrottle(knob)
+}
+
+// takeThrottle consumes one unit of a Throttle knob, if any is left.
+func takeThrottle(knob *int32) error {
 	for {
 		n := atomic.LoadInt32(knob)
 		if n <= 0 {
 			return nil
 		}
 		if atomic.CompareAndSwapInt32(knob, n, n-1) {
-			return &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded", Fault: smithy.FaultClient}
+			return throttlingError()
 		}
 	}
+}
+
+func throttlingError() error {
+	return &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded", Fault: smithy.FaultClient}
 }
 
 func (f *Fake) knownAccount(id string) bool {

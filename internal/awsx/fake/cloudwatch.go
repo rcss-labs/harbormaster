@@ -38,7 +38,9 @@ var _ awsx.CloudWatchAPI = (*cloudWatchClient)(nil)
 // Like AWS, results are newest first unless ScanBy asks for ascending, and
 // are paged once the datapoints exceed the page size.
 func (c *cloudWatchClient) GetMetricData(_ context.Context, in *cloudwatch.GetMetricDataInput, _ ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricDataOutput, error) {
-	if err := c.f.beginThrottled("GetMetricData", &c.f.ThrottleCloudWatch); err != nil {
+	done, err := c.f.beginThrottled(c.target, "cloudwatch", "GetMetricData", &c.f.ThrottleCloudWatch)
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	if len(in.MetricDataQueries) > maxMetricQueries {

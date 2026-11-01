@@ -53,7 +53,9 @@ func logGroupName(identifier string) string {
 
 // FilterLogEvents serves the group's lines in [StartTime, EndTime], oldest first.
 func (c *logsClient) FilterLogEvents(_ context.Context, in *cloudwatchlogs.FilterLogEventsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.FilterLogEventsOutput, error) {
-	if err := c.f.beginThrottled("FilterLogEvents", &c.f.ThrottleLogs); err != nil {
+	done, err := c.f.beginThrottled(c.target, "logs", "FilterLogEvents", &c.f.ThrottleLogs)
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	group := aws.ToString(in.LogGroupName)
@@ -273,7 +275,9 @@ func patternTerms(pattern string) []string {
 // one to three lines every Fake.LiveTailInterval (default 2 s) until Close or
 // ctx is cancelled. The input is recorded for Fake.LastLiveTailInput.
 func (c *logsClient) LiveTail(ctx context.Context, in *cloudwatchlogs.StartLiveTailInput) (awsx.LiveTailStream, error) {
-	if err := c.f.beginThrottled("StartLiveTail", &c.f.ThrottleLogs); err != nil {
+	done, err := c.f.beginThrottled(c.target, "logs", "StartLiveTail", &c.f.ThrottleLogs)
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	recorded := *in

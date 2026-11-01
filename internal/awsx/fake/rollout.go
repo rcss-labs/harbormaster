@@ -32,7 +32,9 @@ const (
 // A task definition or force-new-deployment starts a deployment even while
 // another is in progress, as ECS does.
 func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
-	if err := c.f.begin("UpdateService"); err != nil {
+	done, err := c.f.begin(c.target, "ecs", "UpdateService")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

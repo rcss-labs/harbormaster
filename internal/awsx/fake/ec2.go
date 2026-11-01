@@ -23,11 +23,12 @@ var _ awsx.EC2API = (*EC2)(nil)
 const ec2PageSize = 2
 
 // begin counts the call, applies FailNext and the ThrottleEC2 knob.
-func (c *EC2) begin(op string) error {
-	if err := c.f.beginThrottled(op, &c.f.ThrottleEC2); err != nil {
-		return err
+func (c *EC2) begin(op string) (func(), error) {
+	done, err := c.f.beginThrottled(c.target, "ec2", op, &c.f.ThrottleEC2)
+	if err != nil {
+		return done, err
 	}
-	return c.f.takeFailure(op)
+	return done, c.f.takeFailure(op)
 }
 
 func (c *EC2) inScope(account, region string) bool {
@@ -82,7 +83,9 @@ func ec2Page[T any](items []T, maxResults *int32, token *string) (page []T, next
 }
 
 func (c *EC2) DescribeVpcs(_ context.Context, in *ec2.DescribeVpcsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
-	if err := c.begin("DescribeVpcs"); err != nil {
+	done, err := c.begin("DescribeVpcs")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -118,7 +121,9 @@ func (e *Estate) runningTasksBySubnet(account, region string) map[string]int {
 }
 
 func (c *EC2) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
-	if err := c.begin("DescribeSubnets"); err != nil {
+	done, err := c.begin("DescribeSubnets")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -141,7 +146,9 @@ func (c *EC2) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _
 }
 
 func (c *EC2) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
-	if err := c.begin("DescribeNatGateways"); err != nil {
+	done, err := c.begin("DescribeNatGateways")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -159,7 +166,9 @@ func (c *EC2) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGateways
 }
 
 func (c *EC2) DescribeInternetGateways(_ context.Context, in *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
-	if err := c.begin("DescribeInternetGateways"); err != nil {
+	done, err := c.begin("DescribeInternetGateways")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -186,7 +195,9 @@ func (c *EC2) DescribeInternetGateways(_ context.Context, in *ec2.DescribeIntern
 }
 
 func (c *EC2) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
-	if err := c.begin("DescribeVpcEndpoints"); err != nil {
+	done, err := c.begin("DescribeVpcEndpoints")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -204,7 +215,9 @@ func (c *EC2) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpoin
 }
 
 func (c *EC2) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-	if err := c.begin("DescribeSecurityGroups"); err != nil {
+	done, err := c.begin("DescribeSecurityGroups")
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

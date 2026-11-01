@@ -29,7 +29,9 @@ func targetGroupName(arn string) string {
 }
 
 func (c *elbClient) DescribeTargetGroups(_ context.Context, in *elasticloadbalancingv2.DescribeTargetGroupsInput, _ ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error) {
-	if err := c.f.beginThrottled("DescribeTargetGroups", &c.f.ThrottleELB); err != nil {
+	done, err := c.f.beginThrottled(c.target, "elasticloadbalancing", "DescribeTargetGroups", &c.f.ThrottleELB)
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -104,7 +106,9 @@ func (c *elbClient) DescribeTargetGroups(_ context.Context, in *elasticloadbalan
 // DescribeTargetHealth lists one target per running task of the group's
 // service (by private IP); the first Unhealthy targets fail their health check.
 func (c *elbClient) DescribeTargetHealth(_ context.Context, in *elasticloadbalancingv2.DescribeTargetHealthInput, _ ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error) {
-	if err := c.f.beginThrottled("DescribeTargetHealth", &c.f.ThrottleELB); err != nil {
+	done, err := c.f.beginThrottled(c.target, "elasticloadbalancing", "DescribeTargetHealth", &c.f.ThrottleELB)
+	defer done()
+	if err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
