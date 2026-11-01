@@ -67,6 +67,35 @@ func (s *Store) ListDeployments(ctx context.Context, k model.ServiceKey, since t
 	return deployments, nil
 }
 
+// ListDeploymentsForCluster returns the deployments started at or after since of every service in the
+// cluster, grouped by service and newest first, in one query.
+func (s *Store) ListDeploymentsForCluster(ctx context.Context, k model.ClusterKey, since time.Time) (map[model.ServiceKey][]DeploymentRecord, error) {
+	rows, err := s.Pool.Query(ctx,
+		`select d.service_name, d.deployment_id, coalesce(d.task_definition_arn, ''), coalesce(d.revision, 0), d.kind,
+		   d.started_at, d.finished_at, coalesce(d.outcome, ''), d.started_by_user_id
+		 from deployment_history d
+		 where d.account_id = $1 and d.region = $2 and d.cluster_name = $3 and d.started_at >= $4
+		 order by d.started_at desc`,
+		k.AccountID, k.Region, k.Cluster, since)
+	if err != nil {
+		return nil, fmt.Errorf("list deployments for cluster: %w", err)
+	}
+	defer rows.Close()
+	byService := map[model.ServiceKey][]DeploymentRecord{}
+	for rows.Next() {
+		r := DeploymentRecord{Key: model.ServiceKey{ClusterKey: k}}
+		if err := rows.Scan(&r.Key.Service, &r.DeploymentID, &r.TaskDefinitionARN, &r.Revision, &r.Kind,
+			&r.StartedAt, &r.FinishedAt, &r.Outcome, &r.StartedByUserID); err != nil {
+			return nil, fmt.Errorf("scan deployment: %w", err)
+		}
+		byService[r.Key] = append(byService[r.Key], r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list deployments for cluster: %w", err)
+	}
+	return byService, nil
+}
+
 // DeployDay is one UTC day of deployment activity. Days without deployments are absent.
 type DeployDay struct {
 	Day                     time.Time

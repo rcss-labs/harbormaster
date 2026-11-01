@@ -651,6 +651,33 @@ func (s *Store) ServiceEvents(ctx context.Context, k model.ServiceKey, limit, of
 	return scanServiceEvents(rows)
 }
 
+// RecentServiceEventsPerService returns each service's newest limit events (newest first) for the
+// target, in one query. No visibility filter: the alerts tier derives for every service.
+func (s *Store) RecentServiceEventsPerService(ctx context.Context, f TargetFilter, limit int) (map[model.ServiceKey][]model.ServiceEvent, error) {
+	var q queryArgs
+	target := q.target("e", f)
+	limitParam := q.add(limit)
+	rows, err := s.Pool.Query(ctx,
+		`select `+eventColumns+` from (
+		   select e.*, row_number() over (partition by e.account_id, e.region, e.cluster_name, e.service_name
+		     order by e.created_at desc, e.event_id) as rn
+		   from service_events e where `+target+`
+		 ) e where e.rn <= `+limitParam+`
+		 order by e.created_at desc, e.event_id`, q.values...)
+	if err != nil {
+		return nil, fmt.Errorf("recent service events per service: %w", err)
+	}
+	events, err := scanServiceEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+	byService := map[model.ServiceKey][]model.ServiceEvent{}
+	for _, e := range events {
+		byService[e.Key] = append(byService[e.Key], e)
+	}
+	return byService, nil
+}
+
 // RecentServiceEvents returns the newest events of visible services; limit 0 means no limit.
 func (s *Store) RecentServiceEvents(ctx context.Context, f TargetFilter, vis Visibility, limit int) ([]model.ServiceEvent, error) {
 	var q queryArgs
