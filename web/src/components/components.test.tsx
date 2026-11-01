@@ -112,7 +112,8 @@ describe('shared components', () => {
     expect(container.querySelectorAll('.slot')).toHaveLength(5)
     expect(container.querySelectorAll('.slot.empty')).toHaveLength(2)
     expect(screen.getAllByTitle('missing task')).toHaveLength(2)
-    expect(container.querySelectorAll('.slot')[2]).toHaveStyle({ background: 'var(--info)' })
+    // Read the inline style: jsdom 30's computed style no longer carries var() through the background shorthand.
+    expect((container.querySelectorAll<HTMLElement>('.slot')[2]).style.background).toBe('var(--info)')
   })
 
   it('statusLabel covers every status', () => {
