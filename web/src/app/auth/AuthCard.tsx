@@ -1,7 +1,5 @@
 import { useId, type FormEvent, ReactNode } from 'react'
-import logo from '../../brand/square-logo.png'
-import logoDark from '../../brand/square-logo-dark.png'
-import { isDarkTheme } from '../theme'
+import { Brand } from '../../components/Brand'
 import styles from './auth.module.css'
 
 interface AuthCardProps {
@@ -23,11 +21,8 @@ export function AuthCard({ title, sub, error, submitLabel, busy, onSubmit, child
     <div className={styles.wrap}>
       <form className={`card ${styles.card}`} onSubmit={handleSubmit} noValidate>
         <div className={styles.brand}>
-          <img className={styles.logo} src={isDarkTheme() ? logoDark : logo} alt="" />
-          <div>
-            <div className={styles.brandName}>Harbormaster</div>
-            <div className={styles.brandSub}>ECS control center</div>
-          </div>
+          <Brand variant="signin" />
+          <div className={styles.brandSub}>ECS control center</div>
         </div>
         <h1 className={styles.title}>{title}</h1>
         {sub && <p className={styles.sub}>{sub}</p>}

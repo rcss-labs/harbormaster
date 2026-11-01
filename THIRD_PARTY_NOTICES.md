@@ -4,6 +4,10 @@ Harbormaster bundles the following fonts (via the @fontsource packages), both un
 
 ## IBM Plex Sans
 
+- Copyright: Copyright 2019 IBM Corp.
+- Source package: `@fontsource/ibm-plex-sans`
+- Licence copy: `third_party/licenses/OFL-ibm-plex-sans.txt`
+
 ```
 Copyright 2019 IBM Corp. All rights reserved. IBMPlexSans-Italic[wdth,wght].ttf: Copyright 2019 IBM Corp. All rights reserved.
 
@@ -102,6 +106,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
 
 ## Geist Mono
+
+- Copyright: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git)
+- Source: Vercel's geist-font repository (https://github.com/vercel/geist-font.git)
+- Source package: `@fontsource/geist-mono`
+- Licence copy: `third_party/licenses/OFL-geist-mono.txt`
 
 ```
 Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git) GeistMono-Italic[wght].ttf: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git)
@@ -206,7 +215,11 @@ Harbormaster's ECS Exec bridge (`internal/execbridge`) is a port of parts of the
 
 - Source: https://github.com/aws/session-manager-plugin
 - Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-- Licence: Apache License, Version 2.0 (copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`)
+- Licence: Apache-2.0 (Apache License, Version 2.0; copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`)
 - Ported files: `internal/execbridge/message.go`, `internal/execbridge/datachannel.go`
 
 The ported files retain the upstream copyright and licence header; Harbormaster's modifications are noted in each file.
+
+## Go modules and npm packages
+
+Licences for Go modules and npm packages are in each module's or package's source. `go-licenses` and `license-checker` are not run in CI.

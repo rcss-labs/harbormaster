@@ -31,6 +31,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	// healthy=false closes the connection instead of returning it to the pool.
 	demote := func(healthy bool) {
 		p.leader.Store(false)
+		p.cfg.Telemetry.SetLeader(false)
 		if stopSuper != nil {
 			stopSuper()
 			<-superDone
@@ -98,6 +99,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		}
 		conn, heldKey = c, key
 		p.leader.Store(true)
+		p.cfg.Telemetry.SetLeader(true)
 		p.log.Info("poller: became leader")
 		superCtx, cancel := context.WithCancel(ctx)
 		stopSuper, superDone = cancel, make(chan struct{})

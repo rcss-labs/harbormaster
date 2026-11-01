@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <style>@media (prefers-color-scheme: dark){ .n,.g{fill:#45B5E3} }</style>
+  <rect class="n" x="1" y="1" width="4" height="8" fill="#0B2545"/>
+  <rect class="n" x="11" y="1" width="4" height="8" fill="#0B2545"/>
+  <rect class="n" x="5" y="4" width="6" height="3" fill="#0B2545"/>
+  <rect class="g" x="1" y="9" width="4" height="6" fill="#0B7A66"/>
+  <rect class="g" x="11" y="9" width="4" height="6" fill="#0B7A66"/>
+</svg>

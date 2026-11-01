@@ -224,3 +224,35 @@ func TestLoad_RejectsMaxDesiredCountBelowOne(t *testing.T) {
 		t.Fatalf("err = %v, want one naming HM_MAX_DESIRED_COUNT", err)
 	}
 }
+
+// plan 06: metrics endpoint token
+func TestLoad_MetricsToken(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":  "postgres://example",
+		"HM_METRICS_TOKEN": "abc",
+	}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.MetricsToken != "abc" {
+		t.Errorf("MetricsToken = %q, want abc", cfg.MetricsToken)
+	}
+
+	for raw, want := range map[string]string{"abc\n": "abc", "  ": ""} {
+		cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_METRICS_TOKEN": raw}))
+		if err != nil {
+			t.Fatalf("Load returned error: %v", err)
+		}
+		if cfg.MetricsToken != want {
+			t.Errorf("MetricsToken for %q = %q, want %q", raw, cfg.MetricsToken, want)
+		}
+	}
+
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error without HM_METRICS_TOKEN: %v", err)
+	}
+	if cfg.MetricsToken != "" {
+		t.Errorf("MetricsToken = %q, want empty when unset", cfg.MetricsToken)
+	}
+}

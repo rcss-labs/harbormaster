@@ -28,6 +28,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 const (
@@ -225,11 +226,14 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 
+	telemetry.Default.SetBuildInfo(version) // plan 06
 	server := api.New(api.Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
 		Deploy:                  &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
 		ExecAllowInsecureStream: execInsecureStream,
+		MetricsToken:            cfg.MetricsToken, // plan 06
+		Telemetry:               telemetry.Default,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	listener, err := net.Listen("tcp", cfg.Listen)

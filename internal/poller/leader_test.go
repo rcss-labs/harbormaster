@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -115,4 +116,21 @@ func TestLeader_StepsDownWhenConnectionDropped(t *testing.T) {
 	// Leadership and loops must return after the poller reconnects.
 	waitFor(t, 3*time.Second, "leadership regained", p.IsLeader)
 	waitFor(t, 3*time.Second, "loops regained", func() bool { return len(rec.targets()) == 1 })
+}
+
+// plan 06: leadership transitions are mirrored into telemetry.
+func TestLeader_ReportsTelemetry(t *testing.T) {
+	st := storetest.Open(t)
+	reg := telemetry.New()
+	p := newTestPoller(st, Config{AccountsRefresh: time.Hour, RetentionEvery: time.Hour, Telemetry: reg}, randomLockKey())
+	cancel, done := startRun(t, p)
+	waitFor(t, 2*time.Second, "leadership", p.IsLeader)
+	if !reg.Snapshot().Leader {
+		t.Error("telemetry leader = false while leading")
+	}
+	cancel()
+	<-done
+	if reg.Snapshot().Leader {
+		t.Error("telemetry leader = true after release")
+	}
 }
