@@ -43,10 +43,15 @@ test.describe('settings as pavel', () => {
       await page.goto('/settings/audit')
       await expect(page.getByText('Changed the stopped tasks window from 10 to 90 minutes.').first()).toBeVisible()
     } finally {
-      await page.goto('/settings/general')
-      await windowInput(page).fill('10')
-      await page.getByRole('button', { name: 'Save' }).click()
-      await expect(page.getByText('Saved.')).toBeVisible()
+      try {
+        await page.goto('/settings/general')
+        await windowInput(page).fill('10')
+        await page.getByRole('button', { name: 'Save' }).click()
+        await expect(page.getByText('Saved.')).toBeVisible()
+      } finally {
+        // Independent of the UI: never leave the global window changed for later specs.
+        await page.request.put('/api/settings', { data: { stopped_tasks_window_minutes: 10 } })
+      }
       await expect
         .poll(async () => (await (await page.request.get('/api/settings')).json()).stopped_tasks_window_minutes)
         .toBe(10)
