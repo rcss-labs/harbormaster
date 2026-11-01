@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import { useTagAssignments, useTags } from '../../../api/hooks'
 import type { TagItemDTO } from '../../../api/types'
-import { AdminOnly } from '../../../components/AdminOnly'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useAuth } from '../../auth/AuthProvider'
 import { useFilters } from '../../shell/useFilters'
-import { useCrumbs } from '../../shell/crumbs'
 import { Assignments } from './Assignments'
 import { DeleteTagDialog } from './DeleteTagDialog'
 import { TagDialog } from './TagDialog'
@@ -15,7 +13,6 @@ import styles from './tags.module.css'
 type DialogState = { kind: 'create' } | { kind: 'rename' | 'delete'; tag: TagItemDTO } | null
 
 export function Tags() {
-  useCrumbs([['Tags']])
   const { me } = useAuth()
   const isAdmin = me?.admin ?? false
   // Non-admins would get 403s, so the admin queries stay disabled for them.
@@ -25,7 +22,7 @@ export function Tags() {
   const assignments = useTagAssignments(filters, { enabled: isAdmin })
   const [dialog, setDialog] = useState<DialogState>(null)
 
-  if (!me || !isAdmin) return <AdminOnly area="tags" />
+  if (!me || !isAdmin) return null
 
   const close = () => setDialog(null)
 
@@ -33,7 +30,7 @@ export function Tags() {
     <>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>Tags</h1>
+          <h2>Tags</h2>
           <div className={styles.meta}>
             Tags decide who can do what. They live only in Harbormaster; AWS tags are never read or written. An untagged cluster is
             Dev; an untagged service inherits its cluster's tag.

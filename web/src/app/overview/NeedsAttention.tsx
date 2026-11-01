@@ -19,7 +19,7 @@ const SEVERITY: Record<AlertDTO['severity'], { kind: PillKind; label: string; st
 /** Where an alert row leads: its service tab, the accounts page for account alerts (admins only), else nowhere. */
 function alertTarget(alert: AlertDTO, isAdmin: boolean): string | null {
   if (alert.service_id !== '') return `/services/${alert.service_id}/${alert.tab || 'overview'}`
-  return isAdmin ? '/admin/accounts' : null
+  return isAdmin ? '/settings/accounts' : null
 }
 
 export function NeedsAttention() {

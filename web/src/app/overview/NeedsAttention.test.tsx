@@ -25,10 +25,10 @@ describe('NeedsAttention', () => {
     expect(within(card).getByText('4 open')).toBeInTheDocument()
   })
 
-  it('links account alerts to /admin/accounts for admins', async () => {
+  it('links account alerts to /settings/accounts for admins', async () => {
     renderApp('/')
     const { rows: alertRows } = await rows()
-    expect(alertRows[1]).toHaveAttribute('href', '/admin/accounts')
+    expect(alertRows[1]).toHaveAttribute('href', '/settings/accounts')
   })
 
   it('empty state text', async () => {

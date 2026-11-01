@@ -30,7 +30,8 @@ describe('Accounts', () => {
       }),
     )
 
-    renderApp('/admin/accounts')
+    renderApp('/settings/accounts')
+    expect(await screen.findByRole('heading', { level: 2, name: 'AWS accounts' })).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Connect account' }))
     const dialog = screen.getByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'staging-example-2' } })
@@ -72,7 +73,7 @@ describe('Accounts', () => {
       }),
     )
 
-    renderApp('/admin/accounts')
+    renderApp('/settings/accounts')
     fireEvent.click(await screen.findByRole('button', { name: 'Connect account' }))
     const dialog = screen.getByRole('dialog')
     await waitFor(() => expect(issuedIds).toHaveLength(1))
@@ -102,7 +103,7 @@ describe('Accounts', () => {
     }
     server.use(http.get('/api/accounts', () => HttpResponse.json(broken)))
 
-    renderApp('/admin/accounts')
+    renderApp('/settings/accounts')
     const pill = await screen.findByText('Error')
     expect(pill).toHaveAttribute('title', 'AccessDenied: role trust policy rejects the external ID')
   })
