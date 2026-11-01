@@ -4,6 +4,12 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+
+	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 func getTasks(t *testing.T, c *apiClient, path string) TasksListDTO {
@@ -33,6 +39,10 @@ func TestTasks_StandaloneVisibleByClusterTag(t *testing.T) {
 	setPassword(t, st, "oncall")
 	pollAll(t, st, fk)
 
+	// db-migrate stopped 2 h ago; widen the window to a day so the test is about visibility only.
+	if resp := putWindow(login(t, srv, "pavel", testPassword), map[string]any{"stopped_tasks_window_minutes": 1440}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT settings status %d", resp.StatusCode)
+	}
 	omer := getTasks(t, login(t, srv, "omer", testPassword), "/api/tasks?filter=all&limit=500")
 	families := map[string]TaskDTO{}
 	for _, task := range omer.Items {
@@ -81,8 +91,8 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 	if !stopped137 || !unhealthyCatalog {
 		t.Errorf("problems missing image-resizer 137 (%v) or catalog-api unhealthy (%v)", stopped137, unhealthyCatalog)
 	}
-	if got.Counts.Stopped < 10 {
-		t.Errorf("counts.stopped = %d, want >= 10", got.Counts.Stopped)
+	if want := estateStoppedWithin(fk, 10*time.Minute); got.Counts.Stopped != want || want == 0 {
+		t.Errorf("counts.stopped = %d, want %d (stops inside the 10 minute window)", got.Counts.Stopped, want)
 	}
 	if got.Counts.Running != 22 { // 21 service tasks + the standalone release-build
 		t.Errorf("counts.running = %d, want 22", got.Counts.Running)
@@ -96,6 +106,14 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 	}
 	if got.Counts.Problems != len(got.Items) {
 		t.Errorf("counts.problems = %d, items %d", got.Counts.Problems, len(got.Items))
+	}
+	for _, task := range all.Items {
+		if task.Status == "STOPPED" && (task.StoppedAt == nil || time.Since(*task.StoppedAt) > 10*time.Minute+time.Minute) {
+			t.Errorf("stopped task outside the window listed: %s stopped %v", task.ShortID, task.StoppedAt)
+		}
+	}
+	if got.Summary.ByStatus.StoppedError <= got.Counts.Stopped {
+		t.Errorf("summary.by_status.stopped_error = %d must still cover all 72 h stops (> %d)", got.Summary.ByStatus.StoppedError, got.Counts.Stopped)
 	}
 	if got.Summary.ByStatus.StoppedError == 0 || got.Summary.ByStatus.RunningUnhealthy != 1 {
 		t.Errorf("summary.by_status = %+v", got.Summary.ByStatus)
@@ -164,7 +182,12 @@ func TestServiceTasks_ScopedAndInvisible(t *testing.T) {
 	pollAll(t, st, fk)
 	imageResizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
 
-	got := getTasks(t, login(t, srv, "pavel", testPassword), "/api/services/"+imageResizer+"/tasks?filter=all&limit=100")
+	pavel := login(t, srv, "pavel", testPassword)
+	// The six OOM stops are 4-64 min old; widen the window so all of them are listed.
+	if resp := putWindow(pavel, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT settings status %d", resp.StatusCode)
+	}
+	got := getTasks(t, pavel, "/api/services/"+imageResizer+"/tasks?filter=all&limit=100")
 	if len(got.Items) != 6 {
 		t.Fatalf("image-resizer tasks = %d, want 6", len(got.Items))
 	}
@@ -224,5 +247,79 @@ func TestServiceTasks_SummaryValues(t *testing.T) {
 	}
 	if len(catalog.Summary.ByCluster) != 1 || catalog.Summary.ByCluster[0].Name != "eu-apps" {
 		t.Errorf("catalog-api by_cluster = %+v", catalog.Summary.ByCluster)
+	}
+}
+
+// estateStoppedWithin counts the mockup estate's STOPPED tasks stopped no more than window ago.
+func estateStoppedWithin(fk *fake.Fake, window time.Duration) int {
+	fk.Estate.Mu.Lock()
+	defer fk.Estate.Mu.Unlock()
+	n := 0
+	for _, task := range fk.Estate.Tasks {
+		if aws.ToString(task.Task.LastStatus) == "STOPPED" && task.Task.StoppedAt != nil && time.Since(*task.Task.StoppedAt) <= window {
+			n++
+		}
+	}
+	return n
+}
+
+func TestTasks_WindowFollowsSetting(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	c := login(t, srv, "pavel", testPassword)
+	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status %d", resp.StatusCode)
+	}
+
+	want := estateStoppedWithin(fk, 90*time.Minute)
+	if want < 7 {
+		t.Fatalf("estate has %d stops in 90 min, expected at least the 6 image-resizer ones plus catalog-api", want)
+	}
+	stopped := getTasks(t, c, "/api/tasks?filter=stopped&limit=500")
+	if len(stopped.Items) != want || stopped.Counts.Stopped != want {
+		t.Errorf("stopped items/count = %d/%d, want %d", len(stopped.Items), stopped.Counts.Stopped, want)
+	}
+
+	resizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
+	svc := getTasks(t, c, "/api/services/"+resizer+"/tasks?filter=all&limit=500")
+	var wantSvc int
+	for _, task := range stopped.Items {
+		if task.Service != nil && task.Service.Name == "image-resizer" {
+			wantSvc++
+		}
+	}
+	var gotSvc int
+	var oldest TaskDTO
+	for _, task := range svc.Items {
+		if task.Status == "STOPPED" {
+			gotSvc++
+			if oldest.StoppedAt == nil || task.StoppedAt.Before(*oldest.StoppedAt) {
+				oldest = task
+			}
+		}
+	}
+	if gotSvc != wantSvc || gotSvc != 6 {
+		t.Fatalf("service tasks stopped = %d, want %d (6 image-resizer OOM stops)", gotSvc, wantSvc)
+	}
+
+	// A task stopped 64 min ago is hidden from the 10 minute list but its by-id reads still work.
+	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 10}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status %d", resp.StatusCode)
+	}
+	hidden := getTasks(t, c, "/api/services/"+resizer+"/tasks?filter=all&limit=500")
+	for _, task := range hidden.Items {
+		if task.ID == oldest.ID {
+			t.Fatal("64 minute old stop still listed under the 10 minute window")
+		}
+	}
+	// No HTTP route reads a stopped task by id (exec-targets 404s for any non-RUNNING task), so
+	// check the store read behind the by-id endpoints.
+	account, region, arn, err := model.ParseTaskID(oldest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetTask(t.Context(), account, region, arn); err != nil {
+		t.Errorf("by-id read of a task outside the window failed: %v", err)
 	}
 }

@@ -182,6 +182,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "PATCH /api/accounts/{id}", s.updateAccount, routeOptions{Admin: true})
 	s.handle(mux, "DELETE /api/accounts/{id}", s.deleteAccount, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/audit", s.listAudit, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/settings", s.getSettings, routeOptions{})
+	s.handle(mux, "PUT /api/settings", s.putSettings, routeOptions{Admin: true})
 	s.observeRoutes(mux)
 	s.networkRoutes(mux) // plan 05
 	s.storageRoutes(mux) // plan 05

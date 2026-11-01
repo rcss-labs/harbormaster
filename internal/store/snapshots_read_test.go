@@ -475,3 +475,72 @@ func TestTaskSummaryFor_ServiceScopeAddsUpToTheTotals(t *testing.T) {
 		t.Errorf("az total %d exceeds running %d", azTotal, want)
 	}
 }
+
+// upsertWindowTasks adds a recent (5 min) and an old (30 min) failed stop to payments-api.
+func upsertWindowTasks(t *testing.T, fx readFixture) {
+	t.Helper()
+	started := fx.now.Add(-2 * time.Hour)
+	var tasks []model.Task
+	for id, ago := range map[string]time.Duration{"p5recent": 5 * time.Minute, "p6old": 30 * time.Minute} {
+		stopped := fx.now.Add(-ago)
+		tasks = append(tasks, model.Task{Cluster: clusterKey("core-services"), ARN: readTaskARN("core-services", id),
+			ServiceName: "payments-api", LastStatus: "STOPPED", Family: "payments-api-fam", AvailabilityZone: "eu-west-1a",
+			CapacityProvider: "FARGATE", CreatedAt: started, StartedAt: &started, StoppedAt: &stopped, PolledAt: fx.now,
+			Containers: []model.Container{{Name: "app", ExitCode: intPtr(1)}}})
+	}
+	if _, err := fx.s.UpsertTasks(context.Background(), tasks); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func shortIDs(rows []store.TaskRow) map[string]bool {
+	ids := map[string]bool{}
+	for _, row := range rows {
+		ids[row.ShortID()] = true
+	}
+	return ids
+}
+
+func TestListTasks_StoppedAfterHidesOldStoppedOnly(t *testing.T) {
+	fx := newReadFixture(t)
+	upsertWindowTasks(t, fx)
+	admin := store.Visibility{Admin: true}
+	cutoff := fx.now.Add(-10 * time.Minute)
+
+	all, _ := listAll(t, fx, store.TaskQuery{Vis: admin, Filter: "all"})
+	unwindowed := shortIDs(all)
+	windowed, _ := listAll(t, fx, store.TaskQuery{Vis: admin, Filter: "all", StoppedAfter: cutoff})
+	ids := shortIDs(windowed)
+	if !ids["p5recent"] || ids["p6old"] {
+		t.Errorf("all: p5recent=%v p6old=%v, want true/false", ids["p5recent"], ids["p6old"])
+	}
+	for _, row := range all {
+		if row.LastStatus == "RUNNING" && !ids[row.ShortID()] {
+			t.Errorf("running task %s hidden by the window", row.ShortID())
+		}
+	}
+	if !unwindowed["p6old"] {
+		t.Fatal("fixture: p6old should exist without a window")
+	}
+
+	problems, _ := listAll(t, fx, store.TaskQuery{Vis: admin, Filter: "problems", StoppedAfter: cutoff})
+	pids := shortIDs(problems)
+	if !pids["p5recent"] || pids["p6old"] {
+		t.Errorf("problems: p5recent=%v p6old=%v, want true/false", pids["p5recent"], pids["p6old"])
+	}
+
+	stopped, total := listAll(t, fx, store.TaskQuery{Vis: admin, Filter: "stopped", StoppedAfter: cutoff})
+	// Fixture stops are all 1 h old; only the 5-minute stop is inside the window.
+	if total != 1 || len(stopped) != 1 || stopped[0].ShortID() != "p5recent" {
+		t.Errorf("stopped = %d/%d, want only p5recent", len(stopped), total)
+	}
+}
+
+func TestListTasks_StoppedAfterZeroMeansNoWindow(t *testing.T) {
+	fx := newReadFixture(t)
+	upsertWindowTasks(t, fx)
+	rows, _ := listAll(t, fx, store.TaskQuery{Vis: store.Visibility{Admin: true}, Filter: "all"})
+	if !shortIDs(rows)["p6old"] {
+		t.Error("zero StoppedAfter must not hide old stopped tasks")
+	}
+}

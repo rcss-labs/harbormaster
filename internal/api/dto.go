@@ -499,3 +499,8 @@ type TagImpactResponse struct {
 type TagAssignmentsResponse struct {
 	Clusters []clusterAssignmentDTO `json:"clusters"`
 }
+
+// SettingsDTO is the body of GET and PUT /api/settings.
+type SettingsDTO struct {
+	StoppedTasksWindowMinutes int `json:"stopped_tasks_window_minutes"`
+}
