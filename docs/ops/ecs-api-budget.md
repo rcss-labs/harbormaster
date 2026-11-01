@@ -120,7 +120,7 @@ Snapshot-table writes (`n_tup_ins + n_tup_upd` over `clusters`, `services`, `ser
 | Same window, every other table | only `poll_loops` wrote: 1 045 (20 loops x 12 tiers, one row per tier cycle) | `poll_loops` at most 20 x 12 x 14 = 3 360; `service_status_runs` 60; `scaling` and any unlisted table 100; `service_counts_history` 6 100 (5 min tier, outside the window) |
 | 10 cycles, 180 changed tasks per cycle (1 800 draws of 18 000 tasks) | `tasks` 1 724 (earlier runs 1 717, 1 729, 1 747) | at most 5 400 (3x), at least 1 620 (90 %: random draws repeat tasks) |
 | Same, `service_status_runs` | 1 550 | at most 3 600 (2 per mutated task) |
-| Same, `alerts` (replaced wholesale per target each cycle, not budgeted) | about 14 200 | n/a |
+| Same, `alerts` (diffed per target since the final review; was about 14 200 when replaced wholesale each cycle; not budgeted) | 1 606 (0 in the static window) | n/a |
 
 Back-off: with a 3 calls/s, burst 3 limit on one loop, its `services` tier interval doubled from 5 s to 10 s after the first throttled cycle; the other 19 loops stayed at 5 s. After lifting the limit, the interval was back at 5 s after about 50 s (five clean cycles at 10 s). Leader election: exactly one of two pollers led and polled; the follower recorded no loop runs; failover after cancelling the leader took 44-73 ms. That uses the test's 100 ms `retryInterval`; production retries every 5 s, so a real failover takes up to about 5 s.
 
