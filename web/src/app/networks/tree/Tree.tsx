@@ -12,9 +12,9 @@ interface TreeProps {
 
 /** Left-to-right network tree: ARIA tree with roving tabindex; connectors are CSS pseudo-elements. */
 export function Tree({ root, closed, onToggle, ariaLabel }: TreeProps) {
-  const { containerRef, tabbableKey, setFocusedKey, onItemKeyDown } = useTreeKeyboard(root, closed, onToggle)
+  const { containerRef, tabbableKey, setFocusedKey, onItemKeyDown, onFocusIn, onFocusOut } = useTreeKeyboard(root, closed, onToggle)
   return (
-    <div className={styles.tree} ref={containerRef}>
+    <div className={styles.tree} ref={containerRef} onFocus={onFocusIn} onBlur={onFocusOut}>
       <ul role="tree" aria-label={ariaLabel}>
         <TreeItem
           node={root}

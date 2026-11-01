@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { Tree } from './Tree'
@@ -33,6 +34,15 @@ describe('Tree', () => {
     expect(item(container, KEYS.taskHealthy)).not.toHaveAttribute('aria-expanded')
     expect(item(container, KEYS.vpc)).toHaveAttribute('tabindex', '0')
     expect(item(container, KEYS.azA)).toHaveAttribute('tabindex', '-1')
+    const group = item(container, KEYS.azA).querySelector(':scope > ul')
+    expect(group).toHaveAttribute('role', 'group')
+  })
+
+  it('names items from their kind and label and describes them with their detail lines', () => {
+    const { container } = renderTree()
+    expect(item(container, KEYS.subnetA)).toHaveAccessibleName('Private subnet private-a')
+    expect(item(container, KEYS.subnetA)).toHaveAccessibleDescription(/subnet-aaa · 10.20.1.0\/24.*27 of 251 IPs used/)
+    expect(item(container, KEYS.subnetEmpty)).toHaveAccessibleDescription(/No running tasks/)
   })
 
   it('shows "No running tasks" under an empty subnet', () => {
@@ -91,13 +101,13 @@ describe('Tree', () => {
   it('renders no tag chip when the cluster tag is unknown', () => {
     const { container } = renderTree()
     expect(within(item(container, KEYS.clusterA)).getByText('Prod')).toBeInTheDocument()
-    expect(within(item(container, KEYS.clusterCi).querySelector('.node, [class*="node"]') as HTMLElement).queryByText('Prod')).toBeNull()
+    expect(within(item(container, KEYS.clusterA)).getAllByTitle('Tag set on this cluster')).toHaveLength(1)
+    expect(within(item(container, KEYS.clusterCi)).queryByTitle('Tag set on this cluster')).toBeNull()
   })
 
   it('keyboard: ArrowDown/ArrowUp move focus, ArrowLeft collapses then moves to parent, ArrowRight expands then enters, Home/End', async () => {
     const user = userEvent.setup()
     // Stateful wrapper so collapse/expand work.
-    const { useState } = await import('react')
     function Harness() {
       const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
       const onToggle = (key: string) =>
@@ -158,5 +168,54 @@ describe('Tree', () => {
     item(container, KEYS.azA).focus()
     await user.keyboard('{Enter}')
     expect(toggled).toEqual([KEYS.azA])
+  })
+
+  describe('focus recovery', () => {
+    function Harness({ root, closed }: { root: ReturnType<typeof buildTree>; closed: ReadonlySet<string> }) {
+      return (
+        <MemoryRouter>
+          <Tree root={root} closed={closed} onToggle={() => {}} ariaLabel="Network tree" />
+        </MemoryRouter>
+      )
+    }
+
+    it('moves focus to the nearest visible ancestor when the focused task disappears', () => {
+      const none = new Set<string>()
+      const { container, rerender } = render(<Harness root={buildTree()} closed={none} />)
+      item(container, KEYS.taskUnhealthy).focus()
+      expect(item(container, KEYS.taskUnhealthy)).toHaveFocus()
+      const without = buildTree()
+      const payments = without.children![0].children![0].children![0].children![0]
+      payments.children = payments.children!.filter((task) => task.key !== KEYS.taskUnhealthy)
+      rerender(<Harness root={without} closed={none} />)
+      expect(item(container, KEYS.payments)).toHaveFocus()
+      expect(item(container, KEYS.payments)).toHaveAttribute('tabindex', '0')
+    })
+
+    it('moves focus to the collapsed ancestor when it closes around the focused descendant', () => {
+      const { container, rerender } = render(<Harness root={buildTree()} closed={new Set()} />)
+      item(container, KEYS.taskHealthy).focus()
+      rerender(<Harness root={buildTree()} closed={new Set([KEYS.azA])} />)
+      expect(item(container, KEYS.azA)).toHaveFocus()
+      expect(item(container, KEYS.azA)).toHaveAttribute('tabindex', '0')
+    })
+
+    it('does not steal focus from outside the tree', () => {
+      const { container, rerender } = render(
+        <>
+          <button type="button">outside</button>
+          <Harness root={buildTree()} closed={new Set()} />
+        </>,
+      )
+      screen.getByText('outside').focus()
+      rerender(
+        <>
+          <button type="button">outside</button>
+          <Harness root={buildTree()} closed={new Set([KEYS.azA])} />
+        </>,
+      )
+      expect(screen.getByText('outside')).toHaveFocus()
+      expect(item(container, KEYS.azA)).not.toHaveFocus()
+    })
   })
 })

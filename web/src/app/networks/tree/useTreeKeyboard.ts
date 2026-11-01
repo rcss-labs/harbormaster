@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { nodeHref, type TreeNode } from '../../../api/networks'
 
@@ -25,7 +25,6 @@ function visibleItems(root: TreeNode, closed: ReadonlySet<string>): VisibleItem[
 export function useTreeKeyboard(root: TreeNode, closed: ReadonlySet<string>, onToggle: (key: string) => void) {
   const navigate = useNavigate()
   const containerRef = useRef<HTMLDivElement>(null)
-  const [focusedKey, setFocusedKey] = useState(root.key)
 
   const items = useMemo(() => visibleItems(root, closed), [root, closed])
 
@@ -40,12 +39,43 @@ export function useTreeKeyboard(root: TreeNode, closed: ReadonlySet<string>, onT
     return parents
   }, [root])
 
+  // The focused key and its ancestors (self first), captured when focus moves. If a refetch removes the focused node
+  // the path still names its ancestors, so the tabbable item falls back to the nearest one that is visible.
+  const [focusedPath, setFocusedPath] = useState<string[]>([root.key])
+  const setFocusedKey = useCallback(
+    (key: string) => {
+      const path = [key]
+      for (let parent = parentOf.get(key); parent !== undefined; parent = parentOf.get(parent)) path.push(parent)
+      setFocusedPath(path)
+    },
+    [parentOf],
+  )
+
   const tabbableKey = useMemo(() => {
     const visibleKeys = new Set(items.map((item) => item.node.key))
-    let key: string | undefined = focusedKey
-    while (key !== undefined && !visibleKeys.has(key)) key = parentOf.get(key)
-    return key ?? root.key
-  }, [items, focusedKey, parentOf, root.key])
+    return focusedPath.find((key) => visibleKeys.has(key)) ?? root.key
+  }, [items, focusedPath, root.key])
+
+  // The element that last held focus inside the tree, cleared when focus moves to something outside it. If a refetch or
+  // a collapse removes that element, the browser drops focus to <body>; the effect below hands it to the tabbable item.
+  const lastFocusedRef = useRef<HTMLElement | null>(null)
+  const onFocusIn = useCallback((event: FocusEvent<HTMLElement>) => {
+    lastFocusedRef.current = event.target as HTMLElement
+  }, [])
+  const onFocusOut = useCallback((event: FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget as Node | null
+    if (next && !event.currentTarget.contains(next)) lastFocusedRef.current = null
+  }, [])
+
+  useLayoutEffect(() => {
+    const lost = lastFocusedRef.current
+    const active = document.activeElement
+    if (!lost || lost.isConnected || (active && active !== document.body)) return
+    const target = [...(containerRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])].find(
+      (element) => element.dataset.key === tabbableKey,
+    )
+    target?.focus()
+  }, [items, tabbableKey])
 
   const focusItem = useCallback((key: string) => {
     setFocusedKey(key)
@@ -56,7 +86,7 @@ export function useTreeKeyboard(root: TreeNode, closed: ReadonlySet<string>, onT
         return
       }
     }
-  }, [])
+  }, [setFocusedKey])
 
   const onItemKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>, node: TreeNode) => {
@@ -103,5 +133,5 @@ export function useTreeKeyboard(root: TreeNode, closed: ReadonlySet<string>, onT
     [items, closed, focusItem, onToggle, navigate],
   )
 
-  return { containerRef, tabbableKey, setFocusedKey, onItemKeyDown }
+  return { containerRef, tabbableKey, setFocusedKey, onItemKeyDown, onFocusIn, onFocusOut }
 }

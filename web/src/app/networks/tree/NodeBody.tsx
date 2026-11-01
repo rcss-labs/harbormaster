@@ -23,20 +23,33 @@ export function ipBarPercent(used: number, total: number): number {
   return Math.min(100, Math.max(2, percent))
 }
 
+/** Number of `.ns` detail lines each node kind renders; they get ids `${base}-d0`, `-d1`, … for aria-describedby. */
+const DETAIL_LINES: Record<TreeNode['kind'], number> = { vpc: 2, az: 1, nosubnet: 1, subnet: 2, cluster: 1, service: 1, standalone: 1, task: 0 }
+
+export function describedByIds(node: TreeNode, base: string): string[] {
+  return Array.from({ length: DETAIL_LINES[node.kind] }, (_, index) => `${base}-d${index}`)
+}
+
 interface NodeBodyProps {
   node: TreeNode
+  /** Unique id prefix of the owning treeitem; see describedByIds. */
+  base: string
   closed: boolean
   onToggle(key: string): void
 }
 
-export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
+export function NodeBody({ node, base, closed, onToggle }: NodeBodyProps) {
   const href = nodeHref(node)
-  const name = href ? (
-    <Link to={href} tabIndex={-1}>
-      {node.label}
-    </Link>
-  ) : (
-    node.label
+  const name = (
+    <span id={`${base}-n`}>
+      {href ? (
+        <Link to={href} tabIndex={-1}>
+          {node.label}
+        </Link>
+      ) : (
+        node.label
+      )}
+    </span>
   )
   const toggle = (node.children?.length ?? 0) > 0 && (
     <button
@@ -59,6 +72,7 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
           to={href ?? '/tasks'}
           tabIndex={-1}
           className={`${styles.node} ${styles.task} ${task.unhealthy ? styles.unhealthy : ''}`}
+          id={`${base}-n`}
           title={`Task ${task.task_id}`}
         >
           {node.label}
@@ -70,15 +84,15 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
     case 'vpc':
       return (
         <div className={`${styles.node} ${styles.vpc}`}>
-          <span className={styles.kind}>{KIND_LABEL.vpc}</span>
+          <span id={`${base}-k`} className={styles.kind}>{KIND_LABEL.vpc}</span>
           <div className={styles.nh}>
             {name}
             {toggle}
           </div>
-          <span className={`${styles.ns} ${styles.mono}`}>
+          <span id={`${base}-d0`} className={`${styles.ns} ${styles.mono}`}>
             {node.vpc.vpc_id} · {node.vpc.cidr}
           </span>
-          <span className={styles.ns}>
+          <span id={`${base}-d1`} className={styles.ns}>
             {plural(node.vpc.zones, 'zone')} · {plural(node.tasks, 'task')}
           </span>
         </div>
@@ -86,12 +100,12 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
     case 'az':
       return (
         <div className={`${styles.node} ${styles.az}`}>
-          <span className={styles.kind}>{KIND_LABEL.az}</span>
+          <span id={`${base}-k`} className={styles.kind}>{KIND_LABEL.az}</span>
           <div className={styles.nh}>
             {name}
             {toggle}
           </div>
-          <span className={styles.ns}>
+          <span id={`${base}-d0`} className={styles.ns}>
             {plural(node.az.subnets, 'subnet')} · {plural(node.tasks, 'task')}
           </span>
         </div>
@@ -99,27 +113,27 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
     case 'nosubnet':
       return (
         <div className={`${styles.node} ${styles.nosubnet}`}>
-          <span className={styles.kind}>{KIND_LABEL.nosubnet}</span>
+          <span id={`${base}-k`} className={styles.kind}>{KIND_LABEL.nosubnet}</span>
           <div className={styles.nh}>
             {name}
             {toggle}
           </div>
-          <span className={styles.ns}>{plural(node.tasks, 'task')}</span>
+          <span id={`${base}-d0`} className={styles.ns}>{plural(node.tasks, 'task')}</span>
         </div>
       )
     case 'subnet': {
       const { subnet } = node
       return (
         <div className={`${styles.node} ${styles.subnet} ${subnet.public ? styles.public : styles.private}`}>
-          <span className={styles.kind}>{subnet.public ? 'Public subnet' : 'Private subnet'}</span>
+          <span id={`${base}-k`} className={styles.kind}>{subnet.public ? 'Public subnet' : 'Private subnet'}</span>
           <div className={styles.nh}>
             {name}
             {toggle}
           </div>
-          <span className={`${styles.ns} ${styles.mono}`}>
+          <span id={`${base}-d0`} className={`${styles.ns} ${styles.mono}`}>
             {subnet.subnet_id} · {subnet.cidr}
           </span>
-          <span className={styles.ns}>
+          <span id={`${base}-d1`} className={styles.ns}>
             {subnet.ips_used} of {subnet.ips_total} IPs used
           </span>
           {/* With no usable addresses (total 0) there is nothing to measure, so no bar is drawn. */}
@@ -137,13 +151,13 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
       const tagDto: TagDTO = { id: 0, name: tag.name, color: tag.color as TagColor, inherited: false }
       return (
         <div className={`${styles.node} ${styles.cluster}`}>
-          <span className={styles.kind}>{KIND_LABEL.cluster}</span>
+          <span id={`${base}-k`} className={styles.kind}>{KIND_LABEL.cluster}</span>
           <div className={styles.nh}>
             {name}
             {tag.name !== '' && <TagChip tag={tagDto} kind="cluster" />}
             {toggle}
           </div>
-          <span className={styles.ns}>
+          <span id={`${base}-d0`} className={styles.ns}>
             {plural(node.cluster.services, 'service')} · {plural(node.tasks, 'task')}
           </span>
         </div>
@@ -152,13 +166,13 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
     case 'service':
       return (
         <div className={`${styles.node} ${styles.service}`}>
-          <span className={styles.kind}>{KIND_LABEL.service}</span>
+          <span id={`${base}-k`} className={styles.kind}>{KIND_LABEL.service}</span>
           <div className={styles.nh}>
             {name}
             <Pill kind={statusKind(node.service.status)}>{statusLabel(node.service.status)}</Pill>
             {toggle}
           </div>
-          <span className={styles.ns}>
+          <span id={`${base}-d0`} className={styles.ns}>
             {plural(node.tasks, 'task')} here · :{node.service.revision}
           </span>
         </div>
@@ -167,10 +181,10 @@ export function NodeBody({ node, closed, onToggle }: NodeBodyProps) {
       return (
         <div className={`${styles.node} ${styles.standalone}`}>
           <div className={styles.nh}>
-            <span className={styles.kind}>{KIND_LABEL.standalone}</span>
+            <span id={`${base}-k`} className={styles.kind}>{KIND_LABEL.standalone}</span>
             {toggle}
           </div>
-          <span className={styles.ns}>{plural(node.tasks, 'task')}</span>
+          <span id={`${base}-d0`} className={styles.ns}>{plural(node.tasks, 'task')}</span>
         </div>
       )
   }

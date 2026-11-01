@@ -1,6 +1,6 @@
-import type { KeyboardEvent } from 'react'
+import { useId, type KeyboardEvent } from 'react'
 import type { TreeNode as TreeNodeData } from '../../../api/networks'
-import { NodeBody } from './NodeBody'
+import { describedByIds, NodeBody } from './NodeBody'
 import styles from './tree.module.css'
 
 interface TreeItemProps {
@@ -19,13 +19,19 @@ export function TreeItem(props: TreeItemProps) {
   const children = node.children ?? []
   const hasChildren = children.length > 0
   const isClosed = closed.has(node.key)
+  const base = useId()
+  const emptySubnet = node.kind === 'subnet' && node.tasks === 0
+  // Name = kind + label (the standalone node has only its kind); description = the detail lines.
+  const labelledBy = node.kind === 'standalone' ? `${base}-k` : node.kind === 'task' ? `${base}-n` : `${base}-k ${base}-n`
+  const describedBy = [...describedByIds(node, base), ...(emptySubnet ? [`${base}-none`] : [])].join(' ')
   return (
     <li
       role="treeitem"
       aria-level={level}
       aria-expanded={hasChildren ? !isClosed : undefined}
       aria-selected={tabbableKey === node.key}
-      aria-label={node.label}
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy || undefined}
       tabIndex={tabbableKey === node.key ? 0 : -1}
       data-key={node.key}
       className={styles.item}
@@ -34,7 +40,7 @@ export function TreeItem(props: TreeItemProps) {
       }}
       onKeyDown={(event) => onItemKeyDown(event, node)}
     >
-      <NodeBody node={node} closed={isClosed} onToggle={onToggle} />
+      <NodeBody node={node} base={base} closed={isClosed} onToggle={onToggle} />
       {hasChildren && !isClosed && (
         <ul role="group">
           {children.map((child) => (
@@ -42,10 +48,10 @@ export function TreeItem(props: TreeItemProps) {
           ))}
         </ul>
       )}
-      {node.kind === 'subnet' && node.tasks === 0 && (
+      {emptySubnet && (
         <ul role="group">
           <li role="none">
-            <div className={`${styles.node} ${styles.none}`}>No running tasks</div>
+            <div id={`${base}-none`} className={`${styles.node} ${styles.none}`}>No running tasks</div>
           </li>
         </ul>
       )}
