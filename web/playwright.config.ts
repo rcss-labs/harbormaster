@@ -24,8 +24,10 @@ export default defineConfig({
   projects: [
     { name: 'chromium', testMatch: /smoke\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
     // retries: 1 because a failed dependency skips every flow spec; the observe specs only read, so a retry is safe.
-    { name: 'chromium-observe', testMatch: /observe\.spec\.ts/, dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-flows', testIgnore: /(smoke|observe)\.spec\.ts/, dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium-observe', testMatch: /(observe|networks|storage)\.spec\.ts/, // plan 05: read-only networks/storage specs read the unmutated seed
+      dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium-flows', testIgnore: /(smoke|observe|networks|storage)\.spec\.ts/, // plan 05
+      dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
     command: '../bin/harbormaster serve --fake-aws',
@@ -36,6 +38,8 @@ export default defineConfig({
       // Short observe tiers keep the observe specs from waiting a minute for their first figures.
       HM_POLL_SCALING: '5s',
       HM_POLL_TARGET_HEALTH: '5s',
+      HM_POLL_NETWORK: '5s', // plan 05
+      HM_POLL_STORAGE: '5s', // plan 05
     },
     url: `${baseURL}/healthz`,
     reuseExistingServer: false,
