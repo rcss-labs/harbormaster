@@ -35,7 +35,11 @@ export function StoppedTasksCard() {
     }
     setError('')
     update.mutate(minutes, {
-      onSuccess: () => toast.show('Saved.', 'ok'),
+      onSuccess: () => {
+        // Drop the local edit so the input follows the server value refetched after the save.
+        setEdited(null)
+        toast.show('Saved.', 'ok')
+      },
       onError: (caught) => toast.show(caught.message, 'bad'),
     })
   }

@@ -57,4 +57,18 @@ describe('StoppedTasksCard', () => {
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
     expect(bodies).toEqual([{ stopped_tasks_window_minutes: 30 }])
   })
+
+  it('follows the server value after a save and refetch', async () => {
+    renderApp('/settings/general')
+    const input = await screen.findByLabelText(WINDOW_LABEL)
+    await waitFor(() => expect(input).toHaveValue(10))
+    server.use(http.get('/api/settings', () => HttpResponse.json({ stopped_tasks_window_minutes: 45 })))
+    const user = userEvent.setup()
+
+    await user.clear(input)
+    await user.type(input, '30')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(input).toHaveValue(45))
+  })
 })
