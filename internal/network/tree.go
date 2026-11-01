@@ -6,6 +6,9 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
+// DefaultCollapseThreshold applies when Input.CollapseThreshold is not positive.
+const DefaultCollapseThreshold = 150
+
 const noSubnetLabel = "No subnet (bridge or host network mode)"
 
 type ServiceInfo struct {
@@ -26,7 +29,7 @@ type Input struct {
 	Tasks             []model.Task // visible RUNNING tasks of the account x region
 	Services          map[model.ServiceKey]ServiceInfo
 	ClusterTags       map[model.ClusterKey]TagInfo
-	CollapseThreshold int
+	CollapseThreshold int // <= 0 means DefaultCollapseThreshold (150)
 }
 
 // Node is one tree node; Kind decides which data block is set.
@@ -107,6 +110,10 @@ type Tree struct {
 // running tasks that belong to it.
 func Assemble(in Input) Tree {
 	vpcID := in.VPC.VPCID
+	threshold := in.CollapseThreshold
+	if threshold <= 0 {
+		threshold = DefaultCollapseThreshold
+	}
 	place := newPlacement(in.Subnets, in.Tasks)
 
 	tasksBySubnet := map[string][]model.Task{}
@@ -188,7 +195,7 @@ func Assemble(in Input) Tree {
 			Zones:              len(zones),
 			RunningTasks:       placed,
 			UnplacedTasks:      unplaced,
-			CollapsedByDefault: placed > in.CollapseThreshold,
+			CollapsedByDefault: placed > threshold,
 		},
 	}
 }

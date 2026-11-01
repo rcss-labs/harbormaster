@@ -8,14 +8,27 @@ import (
 )
 
 func TestVisibility_ServiceTaskUsesEffectiveServiceTag(t *testing.T) {
-	visible := Visibility(subjectWith(prodTag), testTags())
 	payments := runningTask("core-services", "payments-api", private1a, "10.20.1.23", 1)
-	worker := runningTask("background-jobs", "report-worker", private1a, "10.20.1.50", 2)
-	if !visible(payments) {
-		t.Error("Prod-only subject must see payments-api")
+	// auth-service carries its own Dev tag although its cluster is Prod.
+	auth := runningTask("core-services", "auth-service", private1a, "10.20.1.26", 2)
+	worker := runningTask("background-jobs", "report-worker", private1a, "10.20.1.50", 3)
+
+	prodOnly := Visibility(subjectWith(prodTag), testTags())
+	if !prodOnly(payments) {
+		t.Error("Prod-only subject must see payments-api (inherits Prod)")
 	}
-	if visible(worker) {
+	if prodOnly(auth) {
+		t.Error("Prod-only subject must not see auth-service (own Dev tag)")
+	}
+	if prodOnly(worker) {
 		t.Error("Prod-only subject must not see report-worker (Dev)")
+	}
+	devOnly := Visibility(subjectWith(devTag), testTags())
+	if !devOnly(auth) {
+		t.Error("Dev-only subject must see auth-service")
+	}
+	if devOnly(payments) {
+		t.Error("Dev-only subject must not see payments-api (Prod)")
 	}
 }
 

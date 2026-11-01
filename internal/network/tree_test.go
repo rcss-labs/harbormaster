@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
@@ -71,7 +72,7 @@ func TestAssemble_OrdersAZsSubnetsClustersServicesTasks(t *testing.T) {
 		t.Errorf("clusters: %v", got)
 	}
 	core := mustFind(t, root, "sn:"+private1a+":core-services")
-	want := []string{"auth-api", "gateway", "notifier", "payments-api"}
+	want := []string{"auth-service", "notifications", "payments-api", "web-frontend"}
 	var got []string
 	for _, child := range core.Children {
 		got = append(got, child.Label)
@@ -93,7 +94,9 @@ func TestAssemble_EmptySubnetHasNoChildren(t *testing.T) {
 }
 
 func TestAssemble_StandaloneTasksNodeLast(t *testing.T) {
-	root := Assemble(mainInput()).Root
+	in := mainInput()
+	in.Tasks = append(in.Tasks, standaloneTask())
+	root := Assemble(in).Root
 	cluster := mustFind(t, root, "sn:"+private1a+":background-jobs")
 	last := cluster.Children[len(cluster.Children)-1]
 	if last.Kind != "standalone" || last.Label != "Standalone tasks" || !strings.HasSuffix(last.Key, ":_standalone") {
@@ -102,7 +105,7 @@ func TestAssemble_StandaloneTasksNodeLast(t *testing.T) {
 	if last.Tasks != 1 || last.Children[0].Task.Group != "family:report-backfill" || last.Children[0].Task.ServiceID != "" {
 		t.Errorf("standalone task: %+v", last.Children[0])
 	}
-	if cluster.Cluster.Services != 1 || cluster.Tasks != 2 {
+	if cluster.Cluster.Services != 2 || cluster.Tasks != 3 {
 		t.Errorf("cluster: %+v tasks %d", cluster.Cluster, cluster.Tasks)
 	}
 }
@@ -148,16 +151,18 @@ func TestAssemble_UnknownSubnetIsUnplaced(t *testing.T) {
 
 func TestAssemble_CollapsedByDefaultAbove150(t *testing.T) {
 	for _, row := range []struct {
+		threshold int
 		tasks     int
 		collapsed bool
-	}{{151, true}, {150, false}} {
+	}{{150, 151, true}, {150, 150, false}, {0, 151, true}, {0, 150, false}, {-1, 151, true}, {10, 11, true}} {
 		in := mainInput()
+		in.CollapseThreshold = row.threshold
 		in.Tasks = nil
 		for i := 0; i < row.tasks; i++ {
 			in.Tasks = append(in.Tasks, runningTask("core-services", "payments-api", private1a, "10.20.1.23", i))
 		}
 		if got := Assemble(in).Summary.CollapsedByDefault; got != row.collapsed {
-			t.Errorf("%d tasks: collapsed=%v", row.tasks, got)
+			t.Errorf("threshold %d, %d tasks: collapsed=%v", row.threshold, row.tasks, got)
 		}
 	}
 }
@@ -211,5 +216,27 @@ func TestAssemble_IgnoresTasksOfOtherVPCs(t *testing.T) {
 	}
 	if _, found := findNode(tree.Root, "sn:"+shared1a); found {
 		t.Error("shared-services subnet must not appear")
+	}
+}
+
+func TestAssemble_TaskTieBreakStartedAtThenARN(t *testing.T) {
+	at := baseTime
+	later := baseTime.Add(time.Minute)
+	mk := func(arnSuffix string, started *time.Time) model.Task {
+		task := runningTask("core-services", "payments-api", private1a, "10.20.1."+arnSuffix, 1)
+		task.ARN = "arn:aws:ecs:us-east-1:4821:task/core-services/" + arnSuffix + "0000000"
+		task.StartedAt = started
+		return task
+	}
+	in := mainInput()
+	in.Tasks = []model.Task{mk("c", &at), mk("b", &later), mk("d", nil), mk("a", &at)}
+	payments := mustFind(t, Assemble(in).Root, "sn:"+private1a+":core-services:payments-api")
+	var labels []string
+	for _, child := range payments.Children {
+		labels = append(labels, child.Label)
+	}
+	// nil StartedAt first, then StartedAt ascending, ARN breaks the tie.
+	if want := []string{"d0000000", "a0000000", "c0000000", "b0000000"}; !reflect.DeepEqual(labels, want) {
+		t.Errorf("got %v, want %v", labels, want)
 	}
 }
