@@ -1,11 +1,12 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test test-db e2e lint run
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
-	go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/harbormaster ./cmd/harbormaster
+	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster ./cmd/harbormaster
 
 test:
 	go test ./...
@@ -53,12 +54,23 @@ test-it-exec:
 	HM_IT_AWS=1 go test ./internal/execbridge/ -run TestIntegration -v
 
 # plan 06
-.PHONY: image check-image
+.PHONY: image check-image release release-check
 image:
 	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
 
 check-image:
 	tools/check-image.sh harbormaster:$(VERSION)
+
+# release runs its prerequisites in order (do not use make -j). The build step generates the web app,
+# so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
+release: lint test build image check-image
+	@echo "image: harbormaster:$(VERSION)"
+	bin/harbormaster version
+
+# release-check refuses an untagged HEAD and a -dirty VERSION.
+release-check:
+	@if [ -z "$$(git tag --points-at HEAD)" ]; then echo "release-check: HEAD is not tagged" >&2; exit 1; fi
+	@case "$(VERSION)" in *-dirty) echo "release-check: VERSION $(VERSION) is dirty; commit or stash changes" >&2; exit 1;; esac
 
 # plan 06
 .PHONY: icons
