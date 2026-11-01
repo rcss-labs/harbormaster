@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/coder/websocket"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -617,8 +618,48 @@ func TestExecWS_ExecuteCommandFailure_4502(t *testing.T) {
 	}
 }
 
-func TestExecWS_StandaloneTask_Refused(t *testing.T) {
+// setStandaloneExec turns the task-level enableExecuteCommand flag of the standalone release-build
+// task on or off in the fake estate and re-polls, as a changed RunTask setting would show up.
+func (r *execRig) setStandaloneExec(t *testing.T, enabled bool) {
+	t.Helper()
+	setStandaloneExecFlag(t, r.st, r.fk, enabled)
+}
+
+func setStandaloneExecFlag(t *testing.T, st *store.Store, fk *fake.Fake, enabled bool) {
+	t.Helper()
+	fk.Estate.Mu.Lock()
+	for i := range fk.Estate.Tasks {
+		task := &fk.Estate.Tasks[i].Task
+		if aws.ToString(task.Group) == "family:release-build" {
+			task.EnableExecuteCommand = enabled
+		}
+	}
+	fk.Estate.Mu.Unlock()
+	pollAll(t, st, fk)
+}
+
+func TestExecWS_StandaloneTask_ExecOn_OpensOnClusterTag(t *testing.T) {
 	r := newExecRig(t, nil)
+	id := taskIDWhere(t, r.srv, "", "release-build", "RUNNING")
+	// dana has Terminal on the cluster's tag, not on a service.
+	c := login(t, r.srv, "dana", testPassword)
+	container := getExecTargets(t, c, id, http.StatusOK).Containers[0].Name
+	w := r.open(t, c, id, container, "/bin/sh")
+	w.sendText(startFrame(c.csrf))
+	connected, _ := w.waitStatus("connected")
+	if connected.SessionID == "" {
+		t.Fatalf("connected = %+v", connected)
+	}
+	w.sendBinary("exit\r")
+	frames, _, _ := w.drain()
+	if closed, ok := lastFrameOfType(frames, "status"); !ok || closed.State != "closed" {
+		t.Fatalf("frames %+v", frames)
+	}
+}
+
+func TestExecWS_StandaloneTask_ExecOff_Refused(t *testing.T) {
+	r := newExecRig(t, nil)
+	r.setStandaloneExec(t, false)
 	id := taskIDWhere(t, r.srv, "", "release-build", "RUNNING")
 	c := login(t, r.srv, "pavel", testPassword)
 	container := getExecTargets(t, c, id, http.StatusOK).Containers[0].Name

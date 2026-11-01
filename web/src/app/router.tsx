@@ -16,6 +16,7 @@ import { ServicePage } from './services/ServicePage'
 import { Shell } from './shell/Shell'
 import { MyAccess } from './me/MyAccess'
 import { Tasks } from './tasks/Tasks'
+import { TaskTerminal } from './tasks/TaskTerminal'
 import styles from './auth/auth.module.css'
 
 const Loading = () => <p className={styles.loading}>Loading…</p>
@@ -68,6 +69,7 @@ export function AppRoutes() {
           <Route path="clusters/:clusterId" element={<Cluster />} />
           <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
           <Route path="tasks" element={<Tasks />} />
+          <Route path="tasks/:shortId/terminal" element={<TaskTerminal />} />
           <Route path="admin/users" element={<Users />} />
           <Route path="admin/tags" element={<Tags />} />
           <Route path="admin/accounts" element={<Accounts />} />

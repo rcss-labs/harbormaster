@@ -119,7 +119,7 @@ var seedServices = []serviceSpec{
 }
 
 var standaloneSpecs = []serviceSpec{
-	{cluster: "ci-tools", name: "release-build", rev: 3, repo: "release-build", tag: "3.0.0", cpu: 1024, memory: 2048, standalone: true},
+	{cluster: "ci-tools", name: "release-build", rev: 3, repo: "release-build", tag: "3.0.0", cpu: 1024, memory: 2048, standalone: true, exec: true},
 	{cluster: "background-jobs", name: "db-migrate", rev: 12, repo: "db-migrate", tag: "12.0.0", cpu: 512, memory: 1024, standalone: true},
 }
 

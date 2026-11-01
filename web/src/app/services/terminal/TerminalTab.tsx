@@ -45,7 +45,7 @@ export function TerminalTab({ serviceId }: { serviceId: string }) {
   return <TerminalPanel running={running} />
 }
 
-function TerminalPanel({ running }: { running: TaskDTO[] }) {
+export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   const [params] = useSearchParams()
   const csrf = useMe().data?.csrf_token ?? ''
   const hostRef = useRef<HTMLDivElement>(null)
@@ -86,7 +86,7 @@ function TerminalPanel({ running }: { running: TaskDTO[] }) {
   const container = targets?.containers.find((c) => c.name === pickedContainer) ?? targets?.containers.find((c) => c.exec_agent === 'RUNNING') ?? targets?.containers[0]
   const commands = targets?.commands ?? ['/bin/sh', '/bin/bash']
   const command = commands.find((c) => c === pickedCommand) ?? (commands.includes('/bin/sh') ? '/bin/sh' : commands[0])
-  const canConnect = !active && container?.exec_agent === 'RUNNING'
+  const canConnect = !active && container?.exec_agent === 'RUNNING' && csrf !== ''
 
   useEffect(() => {
     const host = hostRef.current

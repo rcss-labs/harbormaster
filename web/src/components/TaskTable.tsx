@@ -127,8 +127,8 @@ function TaskRow({
         )}
       </td>
       <td className={styles.actions}>
-        {isRunning && task.service && task.can.terminal && task.exec_enabled && (
-          <Link to={`/services/${task.service.id}/terminal?task=${encodeURIComponent(task.id)}`} className={styles.btn}>
+        {isRunning && task.can.terminal && task.exec_enabled && (
+          <Link to={terminalPath(task)} className={styles.btn}>
             Terminal
           </Link>
         )}{' '}
@@ -151,6 +151,12 @@ function TaskRow({
     </tr>
   )
 }
+
+/** Service tasks open the service's Terminal tab; standalone tasks have no service and get their own page. */
+const terminalPath = (task: TaskDTO) =>
+  task.service
+    ? `/services/${task.service.id}/terminal?task=${encodeURIComponent(task.id)}`
+    : `/tasks/${encodeURIComponent(task.short_id)}/terminal`
 
 /** Task rows as in the mockup's taskRow(); Terminal deep-links into the service's Terminal tab. */
 export function TaskTable({ items, withService, next, onMore, utilisation, desiredCount = null }: TaskTableProps) {

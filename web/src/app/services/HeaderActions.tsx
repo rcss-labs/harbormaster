@@ -5,7 +5,7 @@ import type { ServiceDTO } from '../../api/types'
 import { Banner } from '../../components/Banner'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Dialog } from '../../components/Dialog'
-import { useToast } from '../../components/Toast'
+import { showWarning, useToast } from '../../components/Toast'
 import styles from './service.module.css'
 import dialogStyles from './HeaderActions.module.css'
 
@@ -72,8 +72,9 @@ function RestartDialog({ serviceId, service, onClose }: DialogProps) {
 
   const confirm = () =>
     restart.mutate(undefined, {
-      onSuccess: () => {
+      onSuccess: (started) => {
         toast.show('Restart started.', 'ok')
+        showWarning(toast, started.warning)
         onClose()
       },
       onError: (error) => {
@@ -118,8 +119,9 @@ function DesiredCountDialog({ serviceId, service, onClose }: DialogProps) {
     setDesiredCount.mutate(
       { desired: value },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           toast.show(`Desired count set to ${value}.`, 'ok')
+          showWarning(toast, result.warning)
           onClose()
         },
         onError: (error) => {

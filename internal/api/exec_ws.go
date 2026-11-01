@@ -223,7 +223,9 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 	}
 
 	enabled := false
-	if task.ServiceName != "" {
+	if task.ServiceName == "" {
+		enabled = execEnabledForStandalone(task)
+	} else {
 		svc, err := s.Store.GetService(ctx, model.ServiceKey{ClusterKey: task.Cluster, Service: task.ServiceName})
 		switch {
 		case err == nil:
@@ -234,7 +236,7 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 		}
 	}
 	if !enabled {
-		what := "standalone tasks"
+		what := "this standalone task (it was not started with ECS Exec enabled)"
 		if task.ServiceName != "" {
 			what = task.ServiceName
 		}
