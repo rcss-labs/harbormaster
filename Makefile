@@ -1,6 +1,12 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-LDFLAGS = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+# Evaluated once: a recursive `?=` would re-run git describe after `build` dirties the tree,
+# so the binary and the image tag could disagree.
+ifeq ($(origin VERSION),undefined)
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+endif
+ifeq ($(origin COMMIT),undefined)
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+endif
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test test-db e2e lint run
 
