@@ -145,6 +145,6 @@ export function useFilters(): FilterState {
 
   const setAccount = useCallback((account: string | undefined) => update('account', account), [update])
   const setRegion = useCallback((region: string | undefined) => update('region', region), [update])
-  const setTags = useCallback((ids: number[]) => update('tag', ids), [update])
+  const setTags = useCallback((ids: number[]) => update('tag', uniqueNumbers(ids) ?? []), [update])
   return { filters, setAccount, setRegion, setTags }
 }
