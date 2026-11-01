@@ -66,4 +66,13 @@ describe('Overview', () => {
     const link = within(row).getByRole('link', { name: cluster.name })
     expect(link).toHaveAttribute('href', `/clusters/${cluster.id}`)
   })
+
+  it('labels the deployments chart from the API day format (RFC 3339 midnight), never "Invalid Date"', async () => {
+    // The Go API serialises the bucket as a time.Time, e.g. 2026-10-18T00:00:00Z, not a bare date.
+    const days = OVERVIEW.deployments_per_day.map((day) => ({ ...day, day: `${day.day.slice(0, 10)}T00:00:00Z` }))
+    server.use(http.get('/api/overview', () => HttpResponse.json({ ...OVERVIEW, deployments_per_day: days })))
+    renderApp('/')
+    await screen.findByText('Deployments per day, 14 days')
+    expect(document.body.textContent).not.toContain('Invalid Date')
+  })
 })
