@@ -65,6 +65,10 @@ func TestLoad_Defaults(t *testing.T) {
 		LogTailsPerUser: 2,
 		LogHistoryLimit: 500,
 		MaxDesiredCount: 50,
+		// plan 04: terminal
+		ExecIdleTimeout:        20 * time.Minute,
+		ExecMaxDuration:        4 * time.Hour,
+		ExecMaxSessionsPerUser: 3,
 	}
 
 	if cfg != want {
@@ -163,6 +167,31 @@ func TestLoad_RejectsBadObserveInteger(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "HM_LOG_TAILS_PER_USER") {
 		t.Errorf("error %q does not name HM_LOG_TAILS_PER_USER", err)
+	}
+}
+
+func TestLoad_ExecDefaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExecIdleTimeout != 20*time.Minute || cfg.ExecMaxDuration != 4*time.Hour || cfg.ExecMaxSessionsPerUser != 3 {
+		t.Errorf("exec defaults = %v %v %d", cfg.ExecIdleTimeout, cfg.ExecMaxDuration, cfg.ExecMaxSessionsPerUser)
+	}
+}
+
+func TestLoad_ExecOverrides(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":               "postgres://example",
+		"HM_EXEC_IDLE_TIMEOUT":          "5m",
+		"HM_EXEC_MAX_DURATION":          "30m",
+		"HM_EXEC_MAX_SESSIONS_PER_USER": "7",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ExecIdleTimeout != 5*time.Minute || cfg.ExecMaxDuration != 30*time.Minute || cfg.ExecMaxSessionsPerUser != 7 {
+		t.Errorf("exec overrides = %v %v %d", cfg.ExecIdleTimeout, cfg.ExecMaxDuration, cfg.ExecMaxSessionsPerUser)
 	}
 }
 

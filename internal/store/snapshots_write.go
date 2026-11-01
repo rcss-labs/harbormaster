@@ -385,7 +385,11 @@ func (s *Store) MarkTasksMissing(ctx context.Context, k model.ClusterKey, arns [
 
 // UpsertTaskDefinition stores a task definition revision; they are immutable, so existing rows are kept.
 func (s *Store) UpsertTaskDefinition(ctx context.Context, td model.TaskDefinitionRef) error {
-	_, err := s.Pool.Exec(ctx,
+	return upsertTaskDefinition(ctx, s.Pool, td)
+}
+
+func upsertTaskDefinition(ctx context.Context, db execer, td model.TaskDefinitionRef) error {
+	_, err := db.Exec(ctx,
 		`insert into task_definitions (account_id, region, arn, family, revision, cpu, memory, network_mode,
 		   task_role_arn, execution_role_arn, requires_compatibilities, containers, efs_volumes,
 		   registered_at, raw, polled_at)

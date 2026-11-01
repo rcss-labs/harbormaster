@@ -60,6 +60,11 @@ type Config struct {
 	LogTailsPerUser         int
 	LogHistoryLimit         int
 	MaxDesiredCount         int
+
+	// plan 04: terminal
+	ExecIdleTimeout        time.Duration
+	ExecMaxDuration        time.Duration
+	ExecMaxSessionsPerUser int
 }
 
 // envReader reads HM_* variables and remembers the first parse error, so Load
@@ -172,6 +177,11 @@ func Load(getenv func(string) string) (Config, error) {
 		LogTailsPerUser: reader.integer("HM_LOG_TAILS_PER_USER", 2),
 		LogHistoryLimit: reader.integer("HM_LOG_HISTORY_LIMIT", 500),
 		MaxDesiredCount: reader.integer("HM_MAX_DESIRED_COUNT", 50),
+
+		// plan 04: terminal
+		ExecIdleTimeout:        reader.duration("HM_EXEC_IDLE_TIMEOUT", 20*time.Minute),
+		ExecMaxDuration:        reader.duration("HM_EXEC_MAX_DURATION", 4*time.Hour),
+		ExecMaxSessionsPerUser: reader.integer("HM_EXEC_MAX_SESSIONS_PER_USER", 3),
 	}
 
 	if reader.err != nil {

@@ -127,10 +127,10 @@ function TaskRow({
         )}
       </td>
       <td className={styles.actions}>
-        {isRunning && task.can.terminal && (
-          <button type="button" className={styles.btn} disabled title="Available in phase 4">
+        {isRunning && task.service && task.can.terminal && task.exec_enabled && (
+          <Link to={`/services/${task.service.id}/terminal?task=${encodeURIComponent(task.id)}`} className={styles.btn}>
             Terminal
-          </button>
+          </Link>
         )}{' '}
         {isRunning && task.can.operate && (
           <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={() => setStopping(true)}>
@@ -152,7 +152,7 @@ function TaskRow({
   )
 }
 
-/** Task rows as in the mockup's taskRow(); Terminal is a placeholder until phase 4. */
+/** Task rows as in the mockup's taskRow(); Terminal deep-links into the service's Terminal tab. */
 export function TaskTable({ items, withService, next, onMore, utilisation, desiredCount = null }: TaskTableProps) {
   return (
     <div className={styles.panel}>

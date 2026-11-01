@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -13,11 +14,13 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // writeEnv is a polled mockup estate with one user per permission shape on the Prod tag.
 type writeEnv struct {
 	fk    *fake.Fake
+	st    *store.Store
 	login func(user string) *apiClient
 }
 
@@ -58,7 +61,7 @@ func newWriteEnv(t *testing.T) writeEnv {
 			}
 		}
 	}
-	return writeEnv{fk: fk, login: func(user string) *apiClient { return login(t, srv, user, testPassword) }}
+	return writeEnv{fk: fk, st: st, login: func(user string) *apiClient { return login(t, srv, user, testPassword) }}
 }
 
 // draftFor returns the deployed definition of payments-api with its image tag bumped.
@@ -164,6 +167,24 @@ func TestRegister_NonAdminRoleChangeIs422(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Changing roles needs a global admin" {
 		t.Errorf("error = %s %q", code, msg)
+	}
+	wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
+}
+
+func TestRegister_NonAdminEnvironmentFileIs422AndNothingRegistered(t *testing.T) {
+	env := newWriteEnv(t)
+	draft := draftFor(t, env.login("pavel"))
+	first := draft["containerDefinitions"].([]any)[0].(map[string]any)
+	first["environmentFiles"] = []any{map[string]any{"type": "s3", "value": "arn:aws:s3:::attacker-bucket/stolen.env"}}
+	body := map[string]any{"base_revision": 42, "definition": draft}
+	before := env.fk.Calls()["RegisterTaskDefinition"]
+	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/revisions", body)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Changing environment files needs a global admin" {
+		t.Errorf("error = %s %q", code, msg)
+	}
+	if after := env.fk.Calls()["RegisterTaskDefinition"]; after != before {
+		t.Errorf("RegisterTaskDefinition called %d times for a rejected draft", after-before)
 	}
 	wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
 }
@@ -375,5 +396,134 @@ func TestWrite_ThrottleIs503(t *testing.T) {
 	wantStatus(t, resp, http.StatusServiceUnavailable)
 	if code, _ := errorCode(t, resp); code != "throttled" {
 		t.Errorf("code = %q, want throttled", code)
+	}
+}
+
+// foldedKeyAttacks are drafts that try to slip a role or secret past the non-admin lock with a
+// key spelled in another letter case. encoding/json would decode them into the real field.
+func foldedKeyAttacks() map[string]func(draft map[string]any) {
+	const prodAdmin = "arn:aws:iam::" + homelabAccountID + ":role/prod-admin"
+	const stolen = "arn:aws:ssm:us-east-1:" + homelabAccountID + ":parameter/stolen/KEY"
+	first := func(draft map[string]any) map[string]any {
+		return draft["containerDefinitions"].([]any)[0].(map[string]any)
+	}
+	return map[string]func(map[string]any){
+		"taskRoleArn duplicate":      func(d map[string]any) { d["taskrolearn"] = prodAdmin },
+		"executionRoleArn duplicate": func(d map[string]any) { d["executionrolearn"] = prodAdmin },
+		"taskRoleArn lone":           func(d map[string]any) { delete(d, "taskRoleArn"); d["taskrolearn"] = prodAdmin },
+		"secrets valueFrom duplicate": func(d map[string]any) {
+			first(d)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": "arn:aws:ssm:us-east-1:" + homelabAccountID + ":parameter/payments/DB_PASS", "valuefrom": stolen}}
+		},
+		"secrets valueFrom lone": func(d map[string]any) {
+			first(d)["secrets"] = []any{map[string]any{"name": "X", "valuefrom": stolen}}
+		},
+		"secretOptions valueFrom": func(d map[string]any) {
+			first(d)["logConfiguration"] = map[string]any{"logDriver": "splunk", "secretOptions": []any{
+				map[string]any{"name": "token", "valuefrom": stolen}}}
+		},
+		"repositoryCredentials": func(d map[string]any) {
+			first(d)["repositoryCredentials"] = map[string]any{"credentialsparameter": stolen}
+		},
+	}
+}
+
+func TestRegister_NonAdminFoldedKeyBypassIs422AndNothingIsRegistered(t *testing.T) {
+	for name, attack := range foldedKeyAttacks() {
+		t.Run(name, func(t *testing.T) {
+			env := newWriteEnv(t)
+			draft := draftFor(t, env.login("pavel"))
+			attack(draft)
+			before := env.fk.Calls()["RegisterTaskDefinition"]
+			resp := env.login("editor").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+			wantStatus(t, resp, http.StatusUnprocessableEntity)
+			if got := env.fk.Calls()["RegisterTaskDefinition"]; got != before {
+				t.Errorf("RegisterTaskDefinition called %d time(s), want none", got-before)
+			}
+		})
+	}
+}
+
+func TestRegister_UnknownDraftKeyIs422(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	draft := draftFor(t, admin)
+	draft["taskRoleArnn"] = "typo"
+	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if _, msg := errorCode(t, resp); !strings.Contains(msg, "unknown key") {
+		t.Errorf("message = %q", msg)
+	}
+	if got := env.fk.Calls()["RegisterTaskDefinition"]; got != 0 {
+		t.Errorf("RegisterTaskDefinition called %d time(s)", got)
+	}
+}
+
+// dropTable breaks the recording step of an action without touching what the handler reads first.
+func dropTable(t *testing.T, env writeEnv, table string) {
+	t.Helper()
+	if _, err := env.st.Pool.Exec(t.Context(), `drop table `+table+` cascade`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRegister_RecordFailureAfterAWSAcceptedIs201WithWarning(t *testing.T) {
+	env := newWriteEnv(t)
+	draft := draftFor(t, env.login("pavel"))
+	dropTable(t, env, "revision_records")
+	resp := env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+	wantStatus(t, resp, http.StatusCreated)
+	var out map[string]any
+	decode(t, resp, &out)
+	if warning, _ := out["warning"].(string); !strings.Contains(warning, "could not record") || out["revision"] != float64(43) {
+		t.Errorf("response = %v, want revision 43 with a recording warning", out)
+	}
+	if got := env.fk.Calls()["RegisterTaskDefinition"]; got != 1 {
+		t.Errorf("RegisterTaskDefinition calls = %d, want 1", got)
+	}
+}
+
+func TestDeploy_RecordFailureAfterAWSAcceptedIs202WithWarning(t *testing.T) {
+	env := newWriteEnv(t)
+	dropTable(t, env, "deployment_history")
+	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/deploy", map[string]any{"revision": 41})
+	wantStatus(t, resp, http.StatusAccepted)
+	var out map[string]any
+	decode(t, resp, &out)
+	if warning, _ := out["warning"].(string); !strings.Contains(warning, "could not record") || out["deployment_id"] == "" {
+		t.Errorf("response = %v", out)
+	}
+}
+
+// postRaw sends body verbatim, which apiClient.post cannot do for malformed JSON.
+func postRaw(c *apiClient, path, body string) *http.Response {
+	c.t.Helper()
+	req, err := http.NewRequest(http.MethodPost, c.base+path, strings.NewReader(body))
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", c.csrf)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	return resp
+}
+
+func TestChangeBodies_TrailingJSONAndUnknownFieldsAreRejected(t *testing.T) {
+	env := newWriteEnv(t)
+	deployer := env.login("deployer")
+	for name, tc := range map[string]struct{ path, body string }{
+		"trailing JSON":           {"/deploy", `{"revision": 41}{"revision": 40}`},
+		"unknown field on deploy": {"/deploy", `{"revision": 41, "revison": 40}`},
+		"unknown field on count":  {"/desired-count", `{"desired": 3, "force": true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := postRaw(deployer, "/api/services/"+paymentsID()+tc.path, tc.body)
+			wantStatus(t, resp, http.StatusUnprocessableEntity)
+		})
+	}
+	if got := env.fk.Calls()["UpdateService"]; got != 0 {
+		t.Errorf("UpdateService called %d time(s), want none", got)
 	}
 }

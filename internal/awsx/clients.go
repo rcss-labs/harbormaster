@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	logstypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
 // ErrAccountUnknown is returned when an account is not connected or is disabled.
@@ -32,6 +33,15 @@ type Clients interface {
 	ECR(ctx context.Context, t Target) (ECRAPI, error)                          // 02
 	SSM(ctx context.Context, t Target) (SSMAPI, error)                          // 04
 	Credentials(ctx context.Context, t Target) (aws.CredentialsProvider, error) // 04 SigV4 on ssmmessages; 03 if needed
+}
+
+// SSM returns an SSM client for the target, built from the cached assumed-role config (plan 04).
+func (r *Real) SSM(ctx context.Context, t Target) (SSMAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return ssm.NewFromConfig(cfg), nil
 }
 
 // The plan 03 clients are cheap to build (credentials are cached per account

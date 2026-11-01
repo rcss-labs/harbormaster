@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"mime"
 	"net/http"
 	"strings"
@@ -12,14 +14,31 @@ import (
 
 const maxBodyBytes = 1 << 20 // 1 MiB cap on JSON request bodies
 
-// decodeJSON reads the request body into v; oversized or malformed bodies become a 422.
+// decodeJSON reads the request body into v; oversized, malformed or trailing-data bodies become a 422.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	return decodeBody(w, r, v, false)
+}
+
+// decodeStrictJSON is decodeJSON that also rejects keys v has no field for, so a misspelled
+// field is an error instead of being silently ignored (used by the change endpoints).
+func decodeStrictJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	return decodeBody(w, r, v, true)
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, v any, strict bool) error {
 	// Requiring JSON blocks cross-site text/plain form posts to the CSRF-exempt login and setup routes.
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		return &APIError{Status: http.StatusUnsupportedMediaType, Code: "invalid", Message: "Send JSON (Content-Type: application/json)."}
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(v); err != nil {
+		return invalid("Invalid request body.")
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return invalid("Invalid request body.")
 	}
 	return nil

@@ -27,6 +27,7 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 - `make lint`: check gofmt, run `go vet`, and run web lint and typecheck
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`
 - `make run`: run the server locally against fake AWS data and the test database
+- `make test-it-exec`: opt-in integration test of the Terminal against a real ECS task. Needs AWS credentials and the `HM_IT_*` variables (see Terminal). `make test` never runs it
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `npx --prefix web playwright install chromium`. Port 8481 must be free.
 
 ## Configuration
@@ -78,3 +79,56 @@ On a database with no users, the server needs a first global admin:
 - **CLI.** `harbormaster create-admin` creates an administrator account directly.
 
 `--fake-aws` skips all of this by seeding demo users.
+
+## Terminal
+
+The Terminal tab on a service page opens an interactive shell in a running task through ECS Exec (`ecs:ExecuteCommand` plus the SSM Session Manager data channel). Harbormaster checks the user's Terminal permission before it opens a session.
+
+### What the target account needs
+
+- **Service:** set `enable_execute_command = true` on the `aws_ecs_service`. The Terminal tab shows a banner when the service has ECS Exec off.
+- **Task role:** the task's own role needs `ssmmessages:CreateControlChannel`, `ssmmessages:CreateDataChannel`, `ssmmessages:OpenControlChannel` and `ssmmessages:OpenDataChannel`.
+- **`harbormaster-access` role:** needs `ecs:ExecuteCommand` and `ssm:TerminateSession` in addition to the actions in the design spec §11.2. The Terraform module `terraform/modules/harbormaster-access` grants them.
+
+### Limits
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a session after this long without keystrokes or resizes. Output does not count |
+| `HM_EXEC_MAX_DURATION` | `4h` | Close a session this long after it opened |
+| `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent sessions per user. The limit is enforced per Harbormaster task, so with more than one Harbormaster task a user can open up to the limit on each |
+
+Harbormaster calls `ssm:TerminateSession` whenever a session ends, for any reason.
+
+### Recording
+
+- Harbormaster does not record keystrokes or terminal output. The operations log records who opened a session, the task, container and command, and how long it lasted.
+- To keep a full transcript, turn on Session Manager logging to S3 or CloudWatch Logs in Terraform.
+- KMS-encrypted Session Manager preferences are not supported in v1.
+
+### Integration test against real AWS
+
+`internal/execbridge/integration_test.go` runs a real shell round trip and a rejection check when exec is off. It is skipped unless `HM_IT_AWS=1`, so `make test` never calls AWS. Required variables:
+
+- `HM_IT_ROLE_ARN`: the `harbormaster-access` role in the test account
+- `HM_IT_EXTERNAL_ID`: that role's external ID
+- `HM_IT_REGION`, `HM_IT_ACCOUNT_ID`, `HM_IT_CLUSTER`, `HM_IT_TASK_ARN`: a running task with exec enabled
+- `HM_IT_CONTAINER` (optional): the container name. When empty the test uses the task's first container
+- `HM_IT_COMMAND` (optional): the shell to start. Defaults to `/bin/sh`
+- `HM_IT_TASK_ARN_NOEXEC` (optional): a running task whose service has exec off. Enables the rejection check
+
+Log in first, then run the test with the admin profile:
+
+```sh
+aws sso login --profile admin
+export AWS_PROFILE=admin
+export HM_IT_ROLE_ARN='arn:aws:iam::<account-id>:role/harbormaster-access'
+export HM_IT_EXTERNAL_ID='<external-id>'
+export HM_IT_REGION=us-east-1
+export HM_IT_ACCOUNT_ID='<account-id>'
+export HM_IT_CLUSTER='<cluster>'
+export HM_IT_TASK_ARN='arn:aws:ecs:us-east-1:<account-id>:task/<cluster>/<task-id>'
+make test-it-exec
+```
+
+The test starts a session, runs an `echo` in the shell, runs `exit`, and checks that the session closes as ended by the agent. It makes real ECS and SSM calls, so run it only against an account you intend to exercise.

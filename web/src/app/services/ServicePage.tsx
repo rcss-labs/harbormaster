@@ -23,6 +23,7 @@ import { ScalingTab } from './scaling/ScalingTab'
 import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
 import { TaskDefinitionTab } from './task-definition/TaskDefinitionTab'
+import { TerminalTab } from './terminal/TerminalTab'
 import { DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey } from './tabs'
 import styles from './service.module.css'
 
@@ -80,6 +81,7 @@ export function ServicePage() {
   else if (tab === 'logs') body = <LogsTab serviceId={serviceId} />
   else if (tab === 'scaling') body = <ScalingTab serviceId={serviceId} />
   else if (tab === 'task-definition') body = <TaskDefinitionTab key={serviceId} serviceId={serviceId} service={service} />
+  else if (tab === 'terminal') body = <TerminalTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />
 
   return (
