@@ -12,8 +12,8 @@ COPY web/ ./
 # vite.config.ts writes to ../internal/web/dist, i.e. /src/internal/web/dist
 RUN npm run build
 
-# golang:1.26.10-alpine3.24
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine3.24@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS go-build
+# golang:1.27.3-alpine3.24
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS go-build
 ARG VERSION=dev
 ARG COMMIT=none
 ARG TARGETARCH

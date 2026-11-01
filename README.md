@@ -273,8 +273,8 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 
 ### Prerequisites
 
-- Go 1.26
-- Node 22
+- Go 1.27
+- Node 26
 - Docker (for the local Postgres test container)
 
 ### Run it locally
