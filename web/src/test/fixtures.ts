@@ -903,6 +903,7 @@ export const CLUSTERS_METRICS: ClustersMetricsDTO = {
     [edgeProxyClusterId]: { insights: 'disabled', cpu: [], mem: [], cpu_now: null, mem_now: null },
   },
   stale: null,
+  errors: [],
 }
 
 export const OVERVIEW_METRICS: OverviewMetricsDTO = {
@@ -917,6 +918,7 @@ export const OVERVIEW_METRICS: OverviewMetricsDTO = {
   ],
   avg: { cpu: 45.1, mem: 67.9 },
   stale: null,
+  errors: [],
 }
 
 /** edge-nginx: two targets in one group, one of them failing its health check. */

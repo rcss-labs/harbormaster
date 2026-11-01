@@ -503,9 +503,17 @@ export interface ClusterMetricsDTO {
   >
   stale: StaleInfo | null
 }
+/** One account x region whose metrics could not be read; its clusters have no series. */
+export interface TargetErrorDTO {
+  account_id: string
+  region: string
+  code: string
+  message: string
+}
 export interface ClustersMetricsDTO {
   items: Record<string, { insights: string; cpu: Series; mem: Series; cpu_now: number | null; mem_now: number | null }>
   stale: StaleInfo | null
+  errors: TargetErrorDTO[]
 }
 export interface ClusterSeriesDTO {
   id: string
@@ -518,6 +526,7 @@ export interface OverviewMetricsDTO {
   mem_by_cluster: ClusterSeriesDTO[]
   avg: { cpu: number | null; mem: number | null }
   stale: StaleInfo | null
+  errors: TargetErrorDTO[]
 }
 export interface TargetDTO {
   id: string

@@ -1,5 +1,6 @@
 import { allNull, useOverviewMetrics } from '../../api/observe'
 import type { ClusterSeriesDTO, OverviewMetricsDTO } from '../../api/types'
+import { Banner } from '../../components/Banner'
 import { Tile } from '../../components/Tile'
 import { SERIES } from '../../components/status'
 import { Legend } from '../../charts/Legend'
@@ -26,6 +27,13 @@ function meanSeries(clusters: ClusterSeriesDTO[]): number[] {
     if (samples.length > 0) means.push(samples.reduce((total, v) => total + v, 0) / samples.length)
   }
   return means
+}
+
+/** Names the account x regions that could not be read, so a partial chart is not mistaken for a full one. */
+function RegionErrors({ data }: { data?: OverviewMetricsDTO }) {
+  const regions = [...new Set((data?.errors ?? []).map((error) => error.region))]
+  if (regions.length === 0) return null
+  return <Banner kind="warn">CloudWatch could not be read for {regions.join(', ')}; those clusters are missing from this chart.</Banner>
 }
 
 const hasNoInsights = (data: OverviewMetricsDTO, clusters: ClusterSeriesDTO[]) =>
@@ -80,6 +88,7 @@ export function CpuByClusterCard() {
       title="CPU by cluster, 24 h"
       right="Container Insights"
       stale={data?.stale}
+      notice={<RegionErrors data={data} />}
       empty={!data || hasNoInsights(data, clusters)}
       emptyText={data ? INSIGHTS_OFF_TEXT : 'No data yet'}
     >
@@ -96,6 +105,7 @@ export function MemoryByClusterCard() {
     <MetricPanel
       title="Memory by cluster, 24 h"
       stale={data?.stale}
+      notice={<RegionErrors data={data} />}
       empty={!data || hasNoInsights(data, clusters)}
       emptyText={data ? INSIGHTS_OFF_TEXT : 'No data yet'}
     >

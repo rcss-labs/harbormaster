@@ -52,4 +52,20 @@ describe('ClusterUsagePanels', () => {
     expect(tile).toHaveTextContent('68%')
     expect(tile).toHaveTextContent('memory')
   })
+
+  it('names the regions that could not be read, on both charts', async () => {
+    server.use(
+      http.get('/api/overview/metrics', () =>
+        HttpResponse.json({
+          ...OVERVIEW_METRICS,
+          errors: [{ account_id: '482109375512', region: 'eu-west-1', code: 'throttled', message: 'CloudWatch is throttling requests. Try again shortly.' }],
+        }),
+      ),
+    )
+    renderApp('/')
+    const cpu = await card('CPU by cluster, 24 h')
+    expect(await within(cpu).findByText(/eu-west-1/)).toBeInTheDocument()
+    const memory = await card('Memory by cluster, 24 h')
+    expect(within(memory).getByText(/eu-west-1/)).toBeInTheDocument()
+  })
 })

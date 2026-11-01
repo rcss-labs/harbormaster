@@ -130,8 +130,17 @@ type ClusterListMetricsDTO struct {
 
 // ClustersMetricsDTO is the body of GET /api/clusters/metrics.
 type ClustersMetricsDTO struct {
-	Items map[string]ClusterListMetricsDTO `json:"items"`
-	Stale *StaleDTO                        `json:"stale"`
+	Items  map[string]ClusterListMetricsDTO `json:"items"`
+	Stale  *StaleDTO                        `json:"stale"`
+	Errors []TargetErrorDTO                 `json:"errors"`
+}
+
+// TargetErrorDTO says that one account x region could not be read, so its clusters have no series.
+type TargetErrorDTO struct {
+	AccountID string `json:"account_id"`
+	Region    string `json:"region"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
 }
 
 type ClusterSeriesDTO struct {
@@ -147,6 +156,7 @@ type OverviewMetricsDTO struct {
 	MemByCluster []ClusterSeriesDTO `json:"mem_by_cluster"`
 	Avg          CPUMemNowDTO       `json:"avg"`
 	Stale        *StaleDTO          `json:"stale"`
+	Errors       []TargetErrorDTO   `json:"errors"`
 }
 
 type TargetDTO struct {
@@ -619,8 +629,10 @@ type clusterUtilisation struct {
 
 // fetchClusterUtilisation fetches 24 h CPU and memory at listMetricsPeriod for every Insights
 // cluster in rows, one fetch per account and region. Clusters with Insights disabled are
-// reported with no series and cost no query.
-func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.ClusterRow) (map[model.ClusterKey]clusterUtilisation, []time.Time, *StaleDTO, error) {
+// reported with no series and cost no query. A target whose fetch fails degrades alone: its
+// clusters get no series and it is listed in the returned errors; only when every fetched target
+// fails is the first failure returned as the error.
+func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.ClusterRow) (map[model.ClusterKey]clusterUtilisation, []time.Time, *StaleDTO, []TargetErrorDTO, error) {
 	byTarget := map[awsx.Target][]store.ClusterRow{}
 	var targets []awsx.Target
 	for _, row := range rows {
@@ -633,6 +645,9 @@ func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.Clust
 	out := make(map[model.ClusterKey]clusterUtilisation, len(rows))
 	timestamps := []time.Time{}
 	var results []*metrics.Result
+	targetErrors := []TargetErrorDTO{}
+	fetched := 0
+	var firstErr error
 	for _, target := range targets {
 		var queries []metrics.Query
 		for i, row := range byTarget[target] {
@@ -644,7 +659,22 @@ func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.Clust
 		}
 		res, err := s.fetchMetrics(ctx, target, metrics.Span24h, queries)
 		if err != nil {
-			return nil, nil, nil, err
+			if ctx.Err() != nil {
+				return nil, nil, nil, nil, err
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			var apiErr *APIError
+			entry := TargetErrorDTO{AccountID: target.AccountID, Region: target.Region, Code: "aws_error", Message: err.Error()}
+			if errors.As(err, &apiErr) {
+				entry.Code, entry.Message = apiErr.Code, apiErr.Message
+			}
+			targetErrors = append(targetErrors, entry)
+			continue
+		}
+		if len(queries) > 0 {
+			fetched++
 		}
 		results = append(results, res)
 		if len(res.Timestamps) > len(timestamps) {
@@ -662,7 +692,10 @@ func (s *Server) fetchClusterUtilisation(ctx context.Context, rows []store.Clust
 			out[row.Key] = util
 		}
 	}
-	return out, timestamps, staleOf(results...), nil
+	if firstErr != nil && fetched == 0 {
+		return nil, nil, nil, nil, firstErr
+	}
+	return out, timestamps, staleOf(results...), targetErrors, nil
 }
 
 // getClustersMetrics answers GET /api/clusters/metrics?account=&region= for the clusters page.
@@ -677,12 +710,12 @@ func (s *Server) getClustersMetrics(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	util, _, stale, err := s.fetchClusterUtilisation(r.Context(), rows)
+	util, _, stale, targetErrors, err := s.fetchClusterUtilisation(r.Context(), rows)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	out := ClustersMetricsDTO{Items: make(map[string]ClusterListMetricsDTO, len(rows)), Stale: stale}
+	out := ClustersMetricsDTO{Items: make(map[string]ClusterListMetricsDTO, len(rows)), Stale: stale, Errors: targetErrors}
 	for _, row := range rows {
 		u := util[row.Key]
 		item := ClusterListMetricsDTO{Insights: u.Insights, CPU: []*float64{}, Mem: []*float64{}}
@@ -707,7 +740,7 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	util, timestamps, stale, err := s.fetchClusterUtilisation(r.Context(), rows)
+	util, timestamps, stale, targetErrors, err := s.fetchClusterUtilisation(r.Context(), rows)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -715,7 +748,8 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 	var cpu, mem []metrics.Series
 	for _, row := range rows {
 		u := util[row.Key]
-		if u.Insights == "disabled" {
+		// An empty ID means the cluster's target failed to fetch (see targetErrors): no series to chart.
+		if u.Insights == "disabled" || u.CPU.ID == "" {
 			continue
 		}
 		cpu, mem = append(cpu, u.CPU), append(mem, u.Mem)
@@ -724,7 +758,7 @@ func (s *Server) getOverviewMetrics(w http.ResponseWriter, r *http.Request) {
 		timestamps = []time.Time{}
 	}
 	out := OverviewMetricsDTO{
-		Timestamps: timestamps, Stale: stale,
+		Timestamps: timestamps, Stale: stale, Errors: targetErrors,
 		CPUByCluster: topSeries(cpu), MemByCluster: topSeries(mem),
 		Avg: CPUMemNowDTO{CPU: meanOfLasts(cpu), Mem: meanOfLasts(mem)},
 	}

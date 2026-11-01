@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -31,9 +32,26 @@ type recordingClients struct {
 	awsx.Clients
 	mu         sync.Mutex
 	namespaces map[string]int
+	// throttledRegions makes CloudWatch fail with a throttle for those regions only (the fake's knob is global).
+	throttledRegions map[string]bool
+}
+
+func (c *recordingClients) throttleRegions(regions ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.throttledRegions = map[string]bool{}
+	for _, region := range regions {
+		c.throttledRegions[region] = true
+	}
 }
 
 func (c *recordingClients) CloudWatch(ctx context.Context, t awsx.Target) (awsx.CloudWatchAPI, error) {
+	c.mu.Lock()
+	throttled := c.throttledRegions[t.Region]
+	c.mu.Unlock()
+	if throttled {
+		return nil, &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded", Fault: smithy.FaultClient}
+	}
 	api, err := c.Clients.CloudWatch(ctx, t)
 	if err != nil {
 		return nil, err
@@ -524,5 +542,69 @@ func TestTargetHealth_NoLoadBalancerIsEmpty(t *testing.T) {
 	decode(t, resp, &out)
 	if out.Groups == nil || len(out.Groups) != 0 || out.Healthy != 0 || out.Unhealthy != 0 || out.PolledAt != nil {
 		t.Errorf("health = %+v; want empty groups (not null), zero counts and null polled_at", out)
+	}
+}
+
+// A target that is throttled with a cold cache degrades only its own clusters; the rest keep their series.
+func TestClustersMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
+	h := newMetricsHarness(t, 0)
+	h.cw.throttleRegions("eu-west-1")
+	resp := login(t, h.srv, "pavel", testPassword).get("/api/clusters/metrics")
+	if resp.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, resp)
+		t.Fatalf("status %d (%s: %s), want 200", resp.StatusCode, code, msg)
+	}
+	var out ClustersMetricsDTO
+	decode(t, resp, &out)
+
+	core := out.Items[coreServicesID()]
+	if len(core.CPU) == 0 || core.CPUNow == nil {
+		t.Errorf("core-services (healthy target) = %d cpu points, now %v; want its series", len(core.CPU), core.CPUNow)
+	}
+	euApps := out.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-west-1", Cluster: "eu-apps"}.ID()]
+	if len(euApps.CPU) != 0 || euApps.CPUNow != nil {
+		t.Errorf("eu-apps (throttled target) = %d cpu points, now %v; want empty", len(euApps.CPU), euApps.CPUNow)
+	}
+	if len(out.Errors) != 1 || out.Errors[0].AccountID != homelabAccountID || out.Errors[0].Region != "eu-west-1" || out.Errors[0].Code != "throttled" {
+		t.Errorf("errors = %+v; want one throttled entry for eu-west-1", out.Errors)
+	}
+}
+
+func TestOverviewMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
+	h := newMetricsHarness(t, 0)
+	h.cw.throttleRegions("eu-west-1")
+	resp := login(t, h.srv, "pavel", testPassword).get("/api/overview/metrics")
+	if resp.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, resp)
+		t.Fatalf("status %d (%s: %s), want 200", resp.StatusCode, code, msg)
+	}
+	var out OverviewMetricsDTO
+	decode(t, resp, &out)
+
+	if len(out.CPUByCluster) == 0 || out.Avg.CPU == nil {
+		t.Errorf("cpu_by_cluster = %d series, avg %+v; want the healthy target's clusters", len(out.CPUByCluster), out.Avg)
+	}
+	if len(out.Errors) != 1 || out.Errors[0].Region != "eu-west-1" {
+		t.Errorf("errors = %+v; want one entry for eu-west-1", out.Errors)
+	}
+}
+
+// When no target can be read there is nothing to show, so the whole response keeps failing as before.
+func TestClustersMetrics_EveryTargetThrottledIs503(t *testing.T) {
+	h := newMetricsHarness(t, 0)
+	h.cw.throttleRegions("us-east-1", "eu-west-1")
+	resp := login(t, h.srv, "pavel", testPassword).get("/api/clusters/metrics")
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", resp.StatusCode)
+	}
+}
+
+func TestClustersMetrics_NoErrorsSerialisesEmptyArray(t *testing.T) {
+	h := newMetricsHarness(t, 0)
+	resp := login(t, h.srv, "pavel", testPassword).get("/api/clusters/metrics")
+	var raw map[string]json.RawMessage
+	decode(t, resp, &raw)
+	if got := string(raw["errors"]); got != "[]" {
+		t.Errorf("errors = %s, want []", got)
 	}
 }

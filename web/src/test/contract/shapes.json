@@ -283,6 +283,14 @@
     "polled_at": "time"
   },
   "clustersMetrics": {
+    "errors": [
+      {
+        "account_id": "string",
+        "code": "string",
+        "message": "string",
+        "region": "string"
+      }
+    ],
     "items": {
       "$map": {
         "cpu": [
@@ -572,6 +580,14 @@
             "$null": "number"
           }
         ]
+      }
+    ],
+    "errors": [
+      {
+        "account_id": "string",
+        "code": "string",
+        "message": "string",
+        "region": "string"
       }
     ],
     "mem_by_cluster": [
