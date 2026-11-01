@@ -1,12 +1,14 @@
 //go:build soak
 
 // Soak tests at the target estate scale (spec 5.3): 20 account x region loops, 400 clusters, 6 000 services,
-// 18 000 tasks, production default intervals, real wall-clock time. They take about 15 minutes in total; run them
+// 18 000 tasks, production default intervals, real wall-clock time. They take about 10 minutes in total; run them
 // with `make soak` (needs HM_TEST_DATABASE_URL). The logged numbers are recorded in docs/ops/ecs-api-budget.md.
 package poller
 
 import (
 	"context"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,10 +27,9 @@ const (
 	// maxBucketCallsPerSecond is 50 % of the documented 20/s refill of every ECS throttle bucket
 	// (docs/ops/ecs-api-budget.md, "Documented limits").
 	maxBucketCallsPerSecond = 10.0
-	// maxInFlightPerTarget is the ECS semaphore (HM_POLL_MAX_INFLIGHT, default 8) plus one in-flight call for each
-	// tier that bypasses it: scaling (application-autoscaling) and target health (elasticloadbalancing). The fake's
-	// MaxInFlight counts every AWS service of a target. With scaling disabled the soak measured exactly 8.
-	maxInFlightPerTarget = 8 + 2
+	// maxInFlightPerTarget is spec 5.3's bound on in-flight calls per loop, across every AWS service
+	// (HM_POLL_MAX_INFLIGHT, default 8): the fake's MaxInFlight counts all services of a target.
+	maxInFlightPerTarget = 8
 	// snapshotRowsAtTargetScale is 400 clusters + 6 000 services + 18 000 tasks.
 	snapshotRowsAtTargetScale = 24_400
 	warmUp                    = 60 * time.Second // the longest default tier interval
@@ -43,10 +44,20 @@ var ecsBuckets = map[string][]string{
 	"service read":          {"ListServices", "DescribeServices"},
 	"cluster resource read": {"ListTasks", "DescribeTasks"},
 	"cluster read":          {"ListClusters", "DescribeClusters"},
+	"task definition read":  {"DescribeTaskDefinition", "ListTaskDefinitions"},
 }
 
 // snapshotTables are the tables the diff writer keeps current; their row total is snapshotRowsAtTargetScale.
 var snapshotTables = []string{"clusters", "services", "service_events", "tasks", "task_definitions"}
+
+func knownECSOperation(op string) bool {
+	for _, ops := range ecsBuckets {
+		if slices.Contains(ops, op) {
+			return true
+		}
+	}
+	return false
+}
 
 type soakEnv struct {
 	st      *store.Store
@@ -60,6 +71,9 @@ type soakEnv struct {
 // the production poller configuration (config defaults through ConfigFrom).
 func newSoakEnv(t *testing.T, scale fake.Scale) *soakEnv {
 	t.Helper()
+	if os.Getenv("HM_SOAK") != "1" {
+		t.Skip("set HM_SOAK=1 (make soak)")
+	}
 	st := storetest.Open(t)
 	estate := fake.Generate(1, scale)
 	f := fake.New(estate)
@@ -196,6 +210,11 @@ func TestSoak_SteadyStateCallBudget(t *testing.T) {
 				nonECS += n
 			}
 		}
+		for op := range perOp {
+			if !knownECSOperation(op) {
+				t.Errorf("%v: ECS operation %s is in no throttle bucket of ecsBuckets; add it", target, op)
+			}
+		}
 		for bucket, ops := range ecsBuckets {
 			var n uint64
 			for _, op := range ops {
@@ -234,12 +253,44 @@ func TestSoak_DiffWritesNearZeroWhenStatic(t *testing.T) {
 	sleep(t, warmUp+pgStatSettle, "warm-up and stats flush")
 	before := env.tableWrites(t)
 
-	sleep(t, 10*cycle, "static window (10 cycles)")
+	// 13 cycles (65 s) so every 60 s tier (clusters, serviceList, scaling) runs at least once inside the window.
+	const window = 13 * cycle
+	sleep(t, window, "static window (13 cycles)")
 	stop()
 	sleep(t, pgStatSettle, "stats flush")
-	total := snapshotWriteDelta(t, before, env.tableWrites(t))
+	after := env.tableWrites(t)
+	total := snapshotWriteDelta(t, before, after)
 	if limit := int64(snapshotRowsAtTargetScale / 100); total > limit {
 		t.Errorf("static window wrote %d snapshot rows, limit %d (1 %% of %d)", total, limit, snapshotRowsAtTargetScale)
+	}
+
+	const otherTableBudget = 100 // any table without its own budget
+	loops := int64(len(env.targets))
+	tiers := int64(len(newLoop(env.newPoller(env.cfg), env.targets[0]).defs))
+	budgets := map[string]int64{
+		"service_status_runs": 60, // 1 % of 6 000 services; unchanged statuses write nothing
+		// poll_loops records one cycle per loop and tier: every tier cycle in the window, plus one spare each.
+		"poll_loops": loops * tiers * (int64(window/cycle) + 1),
+		// scaling stores only changed rows (the estate is static); allow a small residue.
+		"scaling": otherTableBudget,
+		// service_counts_history samples every 5 min (HM_POLL_COUNTS_HISTORY), outside this window; allow one sample.
+		"service_counts_history": snapshotRowsAtTargetScale / 4,
+	}
+	snapshot := map[string]bool{}
+	for _, table := range snapshotTables {
+		snapshot[table] = true
+	}
+	for table, n := range after {
+		if snapshot[table] {
+			continue // asserted together above
+		}
+		limit, ok := budgets[table]
+		if !ok {
+			limit = otherTableBudget
+		}
+		if delta := n - before[table]; delta > limit {
+			t.Errorf("table %s: %d writes in the static window, budget %d", table, delta, limit)
+		}
 	}
 }
 
@@ -262,8 +313,12 @@ func TestSoak_WritesTrackMutations(t *testing.T) {
 	sleep(t, 35*time.Second, "drain so the last mutations are polled")
 	stop()
 	sleep(t, pgStatSettle, "stats flush")
-	total := snapshotWriteDelta(t, before, env.tableWrites(t))
+	after := env.tableWrites(t)
+	total := snapshotWriteDelta(t, before, after)
 	mutated := int64(rounds * perTarget * len(env.targets))
+	if runs := after["service_status_runs"] - before["service_status_runs"]; runs > 2*mutated {
+		t.Errorf("service_status_runs: %d writes for %d mutated tasks, limit %d", runs, mutated, 2*mutated)
+	}
 	t.Logf("mutations applied: %d (draws; repeats can coalesce or flip back)", mutated)
 	if limit := 3 * mutated; total > limit {
 		t.Errorf("wrote %d snapshot rows for %d mutations, limit %d", total, mutated, limit)

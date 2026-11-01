@@ -94,7 +94,7 @@ check-notices:
 	tools/check-notices.sh
 
 # plan 06
-# soak runs the rate-limit / back-off soak tests at target estate scale (about 15 minutes, needs HM_TEST_DATABASE_URL; see 'make test-db').
+# soak runs the rate-limit / back-off soak tests at target estate scale (about 10 minutes, needs HM_TEST_DATABASE_URL; see 'make test-db').
 .PHONY: soak
 soak:
 	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
