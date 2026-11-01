@@ -20,6 +20,9 @@ import (
 // recordingNetworkStore serves a fixed service list and captures the last ReplaceNetwork call.
 type recordingNetworkStore struct {
 	services []store.ServiceRow
+	listed   int
+	filter   store.TargetFilter
+	vis      store.Visibility
 	replaces int
 	vpcs     []model.VPC
 	subnets  []model.Subnet
@@ -27,7 +30,9 @@ type recordingNetworkStore struct {
 	sgs      []model.SecurityGroup
 }
 
-func (r *recordingNetworkStore) ListServices(context.Context, store.TargetFilter, string, store.Visibility) ([]store.ServiceRow, error) {
+func (r *recordingNetworkStore) ListServices(_ context.Context, f store.TargetFilter, _ string, vis store.Visibility) ([]store.ServiceRow, error) {
+	r.listed++
+	r.filter, r.vis = f, vis
 	return r.services, nil
 }
 
@@ -50,8 +55,13 @@ func TestNormalizeEdges_KeepsOnlyEcsEndpoints(t *testing.T) {
 			VpcEndpointId: aws.String("vpce-" + svc),
 			VpcId:         aws.String("vpc-1"),
 			ServiceName:   aws.String("com.amazonaws.us-east-1." + svc),
+			State:         ec2types.StateAvailable,
 		})
 	}
+	eps = append(eps, ec2types.VpcEndpoint{
+		VpcEndpointId: aws.String("vpce-gone"), VpcId: aws.String("vpc-1"),
+		ServiceName: aws.String("com.amazonaws.us-east-1.logs"), State: ec2types.StateDeleted,
+	})
 	edges := normalizeEdges(networkTarget, nil, nil, eps, time.Now())
 	if len(edges) != 4 {
 		t.Fatalf("edges = %d, want 4", len(edges))
@@ -144,8 +154,27 @@ func TestPollNetwork_WritesEstate(t *testing.T) {
 	for _, e := range st.edges {
 		counts[e.Kind]++
 	}
-	if counts[model.VPCEdgeIGW] != 2 || counts[model.VPCEdgeNAT] != 2 || counts[model.VPCEdgeEndpoint] != 4 {
-		t.Fatalf("edge counts = %v, want igw 2 (the seeded default VPC has none) nat 2 endpoint 4", counts)
+	if counts[model.VPCEdgeIGW] != 3 || counts[model.VPCEdgeNAT] != 2 || counts[model.VPCEdgeEndpoint] != 4 {
+		t.Fatalf("edge counts = %v, want igw 3 nat 2 endpoint 4", counts)
+	}
+	if st.listed != 1 || !reflect.DeepEqual(st.vis, store.Visibility{Admin: true}) || !reflect.DeepEqual(st.filter, store.TargetFilter{AccountID: networkTarget.AccountID, Region: networkTarget.Region}) {
+		t.Fatalf("ListServices called %d times with filter %+v vis %+v", st.listed, st.filter, st.vis)
+	}
+	subnetIDs := map[string]bool{}
+	for _, s := range st.subnets {
+		subnetIDs[s.SubnetID] = true
+	}
+	for _, e := range st.edges {
+		switch e.Kind {
+		case model.VPCEdgeIGW:
+			if e.Detail != "" {
+				t.Errorf("igw %s detail = %q, want empty", e.ResourceID, e.Detail)
+			}
+		case model.VPCEdgeNAT:
+			if e.Detail != "available" || !subnetIDs[e.SubnetID] {
+				t.Errorf("nat %s detail %q subnet %q, want available and a polled subnet", e.ResourceID, e.Detail, e.SubnetID)
+			}
+		}
 	}
 	for _, v := range st.vpcs {
 		if v.Name == "legacy-default" && !v.IsDefault {

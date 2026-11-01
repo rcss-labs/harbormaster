@@ -114,6 +114,7 @@ func pollNetwork(ctx context.Context, t awsx.Target, ec2c awsx.EC2API, st networ
 		}
 	}
 
+	// On a fresh database the first network run can precede the services tier, so security groups fill on the next interval.
 	groupIDs, err := serviceSecurityGroupIDs(ctx, t, st)
 	if err != nil {
 		return err
@@ -230,6 +231,9 @@ func normalizeEdges(t awsx.Target, igws []ec2types.InternetGateway, nats []ec2ty
 		})
 	}
 	for _, e := range eps {
+		if !liveEndpointState(e.State) {
+			continue
+		}
 		short, ok := endpointShortName(aws.ToString(e.ServiceName))
 		if !ok {
 			continue
@@ -241,6 +245,16 @@ func normalizeEdges(t awsx.Target, igws []ec2types.InternetGateway, nats []ec2ty
 		})
 	}
 	return out
+}
+
+// liveEndpointState keeps endpoints that exist or are about to (available, pending, pendingAcceptance);
+// deleting, deleted, rejected, failed and expired ones are not usable by tasks.
+func liveEndpointState(state ec2types.State) bool {
+	switch state {
+	case ec2types.StateAvailable, ec2types.StatePending, ec2types.StatePendingAcceptance:
+		return true
+	}
+	return false
 }
 
 func normalizeSecurityGroups(t awsx.Target, in []ec2types.SecurityGroup, now time.Time) []model.SecurityGroup {

@@ -171,9 +171,7 @@ func seedNetwork(e *Estate) {
 				SubnetId: aws.String(ss.id), VpcId: aws.String(v.id), CidrBlock: aws.String(ss.cidr), AvailabilityZone: aws.String(ss.az),
 				MapPublicIpOnLaunch: aws.Bool(ss.public), State: ec2types.SubnetStateAvailable, OwnerId: aws.String(v.account), Tags: nameTag(sub.name)}})
 		}
-		if v.isDefault {
-			continue
-		}
+		// Every VPC, the default one included, has an internet gateway.
 		n.InternetGateways = append(n.InternetGateways, NetIgw{AccountID: v.account, Region: v.region, Igw: ec2types.InternetGateway{
 			InternetGatewayId: aws.String("igw-" + hexString("igw:"+v.id, 8)), OwnerId: aws.String(v.account),
 			Attachments: []ec2types.InternetGatewayAttachment{{VpcId: aws.String(v.id), State: ec2types.AttachmentStatusAttached}}, Tags: nameTag(v.name + "-igw")}})
