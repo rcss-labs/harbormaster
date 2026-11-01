@@ -14,7 +14,7 @@ Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in c
 | Variable | Type | Default | Notes |
 |---|---|---|---|
 | `vpc_id` | string | required | |
-| `private_subnet_ids` | list(string) | required | Service tasks and RDS; Two subnets in different AZs are expected; only the count (at least 2) is validated. |
+| `private_subnet_ids` | list(string) | required | Service tasks and RDS; two subnets in different AZs are expected; only the count (at least 2) is validated. |
 | `public_subnet_ids` | list(string) | `[]` | ALB when `internal = false`; must be non-empty unless `internal` (enforced by a precondition). |
 | `internal` | bool | `false` | Internal ALB in `private_subnet_ids`. |
 | `allowed_cidrs` | list(string) | `["0.0.0.0/0"]` | ALB ingress. |
@@ -28,7 +28,7 @@ Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in c
 | `access_role_arns` | list(string) | `["arn:aws:iam::*:role/harbormaster-access"]` | What the task role may assume. Tighten to explicit role ARNs, for example `["arn:aws:iam::111111111111:role/harbormaster-access"]`, so the wildcard account is not trusted. |
 | `bootstrap_admin_password_secret_arn` | string | `null` | When set: env var `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` and `secretsmanager:GetSecretValue` on exactly this ARN for the task role. |
 | `enable_metrics` | bool | `true` | Creates the metrics token secret and injects `HM_METRICS_TOKEN`. |
-| `extra_env` | map(string) | `{}` | Additional `HM_*` variables (keys validated). Module-set keys win on collision; `HM_DATABASE_URL`, `HM_SESSION_KEY` and `HM_METRICS_TOKEN` are rejected (injected from Secrets Manager). |
+| `extra_env` | map(string) | `{}` | Additional `HM_*` variables (keys validated). Module-set keys win on collision; `HM_DATABASE_URL`, `HM_SESSION_KEY` and `HM_METRICS_TOKEN` are rejected (injected from Secrets Manager), as are `HM_FAKE_AWS` (demo mode seeds a known-password admin) and `HM_TRUSTED_PROXY` (the module sets it for the ALB). |
 | `db_instance_class` | string | `"db.t4g.micro"` | |
 | `db_allocated_storage` / `db_max_allocated_storage` | number | `20` / `100` | gp3. |
 | `db_engine_version` | string | `"16"` | Major only; minor upgrades are automatic. |
