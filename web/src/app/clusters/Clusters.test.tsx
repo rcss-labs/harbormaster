@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { CLUSTERS } from '../../test/fixtures'
+import { ACCOUNT_STAGING, CLUSTERS, TAG_STAGING } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
@@ -69,8 +69,8 @@ describe('Clusters', () => {
     await waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(0))
     expect(screen.getByText('No clusters match these filters.')).toBeInTheDocument()
 
-    // The bar and the empty state each carry a Clear filters button.
-    await user.click(screen.getAllByRole('button', { name: 'Clear filters' })[0])
+    const emptyState = screen.getByText('No clusters match these filters.')
+    await user.click(within(emptyState).getByRole('button', { name: 'Clear filters' }))
     expect(await screen.findAllByRole('article')).toHaveLength(6)
     expect(screen.getByTestId('search').textContent).not.toMatch(/status=|q=/)
   })
@@ -98,5 +98,24 @@ describe('Clusters', () => {
     const cards = await screen.findAllByRole('article')
     expect(cards).toHaveLength(1)
     expect(screen.getByRole('article', { name: 'staging-web' })).toBeInTheDocument()
+  })
+
+  it('Clear filters in the bar also clears account, region and tag from the URL and the remembered scope', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(
+      'harbormaster-filters:pavel',
+      JSON.stringify({ account: ACCOUNT_STAGING.account_id, region: 'us-east-1', tag: [TAG_STAGING.id] }),
+    )
+    renderApp(`/clusters?status=healthy&q=web&account=${ACCOUNT_STAGING.account_id}&region=us-east-1&tag=${TAG_STAGING.id}`)
+    expect(await screen.findAllByRole('article')).toHaveLength(1)
+
+    await user.click(within(screen.getByRole('group', { name: 'Cluster filters' })).getByRole('button', { name: 'Clear filters' }))
+
+    expect(await screen.findAllByRole('article')).toHaveLength(6)
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe(''))
+    const stored = JSON.parse(localStorage.getItem('harbormaster-filters:pavel') ?? '{}')
+    expect(stored.account).toBeUndefined()
+    expect(stored.region).toBeUndefined()
+    expect(stored.tag).toBeUndefined()
   })
 })

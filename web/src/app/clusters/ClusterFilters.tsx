@@ -16,7 +16,7 @@ export function ClusterFilters({ page, onStatus, onQ, onClear }: ClusterFiltersP
   const toggle = (status: ClusterStatus) =>
     onStatus(page.status.includes(status) ? page.status.filter((s) => s !== status) : [...page.status, status])
   return (
-    <div className={styles.filterBar}>
+    <div className={styles.filterBar} role="group" aria-label="Cluster filters">
       <div className={styles.statusToggles} role="group" aria-label="Status filter">
         {CLUSTER_STATUSES.map((status) => {
           const on = page.status.includes(status)

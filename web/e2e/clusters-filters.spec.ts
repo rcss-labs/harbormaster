@@ -18,7 +18,10 @@ test.describe('clusters filter bar as pavel', () => {
     await expect(page.getByRole('article')).toHaveCount(0)
     await expect(page.getByText('No clusters match these filters.')).toBeVisible()
 
-    await page.getByRole('button', { name: 'Clear filters' }).first().click()
+    await page
+      .getByText('No clusters match these filters.')
+      .getByRole('button', { name: 'Clear filters' })
+      .click()
     await expect(page.getByRole('article')).toHaveCount(6)
 
     await page.getByRole('searchbox', { name: 'Cluster name' }).fill('eu')
