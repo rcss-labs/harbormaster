@@ -152,3 +152,23 @@ func TestService_CanFlagsFollowPermissions(t *testing.T) {
 		t.Errorf("tag = %q, want Staging", got.Tag.Name)
 	}
 }
+
+func TestServiceDetail_IncludesVPCAndSecurityGroupNames(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedAccounts(t, st)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	pollAll(t, st, fk) // the first network run can precede services, so SG names need a second pass
+	got := getService(t, login(t, srv, "pavel", testPassword), paymentsID())
+	if got.Networking.VPC == nil || got.Networking.VPC.VPCID != vpcMain || got.Networking.VPC.Name != "homelab-main" {
+		t.Errorf("vpc = %+v, want %s homelab-main", got.Networking.VPC, vpcMain)
+	}
+	if got.Networking.SecurityGroupNames == nil || len(got.Networking.SecurityGroups) == 0 {
+		t.Fatalf("security groups %v names %v", got.Networking.SecurityGroups, got.Networking.SecurityGroupNames)
+	}
+	for _, id := range got.Networking.SecurityGroups {
+		if got.Networking.SecurityGroupNames[id] == "" {
+			t.Errorf("no name for %s in %v", id, got.Networking.SecurityGroupNames)
+		}
+	}
+}

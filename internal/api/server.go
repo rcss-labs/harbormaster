@@ -51,6 +51,8 @@ type Server struct {
 	// ExecAllowInsecureStream permits ws:// SSM streams to loopback; only --fake-aws and tests set it.
 	ExecAllowInsecureStream bool
 
+	// plan 05: reads EFS metrics for GET /api/storage; New defaults it to Metrics. Tests inject a failing one.
+	efsFetcher efsMetrics
 	// plan 06
 	// MetricsToken is the bearer token for GET /metrics; empty disables the endpoint.
 	MetricsToken string
@@ -69,6 +71,9 @@ func New(s Server) *Server {
 	if s.Metrics == nil {
 		s.Metrics = metrics.New(s.Clients, s.Store, s.Cfg.MetricsCacheTTL)
 		s.Metrics.Now, s.Metrics.Log = s.Now, s.Log
+	}
+	if s.efsFetcher == nil {
+		s.efsFetcher = s.Metrics // plan 05
 	}
 	if s.Logs == nil {
 		s.Logs = &logs.Client{Clients: s.Clients, Now: s.Now, MaxLookback: 7 * 24 * time.Hour}
@@ -178,6 +183,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "DELETE /api/accounts/{id}", s.deleteAccount, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/audit", s.listAudit, routeOptions{Admin: true})
 	s.observeRoutes(mux)
+	s.networkRoutes(mux) // plan 05
+	s.storageRoutes(mux) // plan 05
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})

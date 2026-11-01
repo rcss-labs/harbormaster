@@ -43,6 +43,11 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
   const metrics = useServiceMetrics(service.id, '24h').data
   const taskDefinition = service.task_definition
   const networking = service.networking
+  const vpc = networking.vpc
+  const securityGroupLabel = (groupId: string) => {
+    const groupName = networking.security_group_names[groupId]
+    return groupName ? `${groupId} (${groupName})` : groupId
+  }
   const loadBalancer = networking.load_balancers[0]
   const efs = taskDefinition.efs_mounts[0]
   const rollout = (
@@ -122,15 +127,36 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
       </Card>
 
       <div className={`${styles.grid} ${styles.g2}`}>
-        <Card title="Networking">
+        <Card
+          title="Networking"
+          right={
+            vpc ? (
+              <Link className={styles.accentLink} to={`/networks/${service.account_id}/${service.region}/${vpc.vpc_id}`}>
+                Network tree →
+              </Link>
+            ) : undefined
+          }
+        >
           <KV
             rows={[
-              ['VPC', <span className={styles.muted}>—</span>],
+              [
+                'VPC',
+                vpc ? (
+                  <>
+                    {vpc.name} <span className={`${styles.mono} ${styles.muted}`}>{vpc.vpc_id}</span>
+                  </>
+                ) : (
+                  <span className={styles.muted}>—</span>
+                ),
+              ],
               [
                 'Subnets',
                 networking.subnets.map((subnet) => `${subnet.id} (${plural(subnet.tasks, 'task')})`).join(', '),
               ],
-              ['Security groups', <span className={styles.mono}>{networking.security_groups.join(', ')}</span>],
+              [
+                'Security groups',
+                <span className={styles.mono}>{networking.security_groups.map(securityGroupLabel).join(', ')}</span>,
+              ],
               ['Public IP', networking.assign_public_ip ? 'Assigned' : 'Not assigned'],
               [
                 'Load balancer',

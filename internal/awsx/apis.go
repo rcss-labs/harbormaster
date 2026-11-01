@@ -7,8 +7,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	logstypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
@@ -43,11 +45,24 @@ type SSMAPI interface {
 	TerminateSession(ctx context.Context, in *ssm.TerminateSessionInput, opts ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error)
 }
 
-// Placeholders: later plans add the methods they call (see conventions doc).
-type (
-	EC2API interface{} // plan 05
-	EFSAPI interface{} // plan 05
-)
+// plan 05 (networks and storage)
+
+// EC2API lists the EC2 calls Harbormaster makes.
+type EC2API interface {
+	DescribeVpcs(ctx context.Context, in *ec2.DescribeVpcsInput, opts ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
+	DescribeSubnets(ctx context.Context, in *ec2.DescribeSubnetsInput, opts ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
+	DescribeNatGateways(ctx context.Context, in *ec2.DescribeNatGatewaysInput, opts ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
+	DescribeInternetGateways(ctx context.Context, in *ec2.DescribeInternetGatewaysInput, opts ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
+	DescribeVpcEndpoints(ctx context.Context, in *ec2.DescribeVpcEndpointsInput, opts ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error)
+	DescribeSecurityGroups(ctx context.Context, in *ec2.DescribeSecurityGroupsInput, opts ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+}
+
+// EFSAPI lists the EFS calls Harbormaster makes.
+type EFSAPI interface {
+	DescribeFileSystems(ctx context.Context, in *efs.DescribeFileSystemsInput, opts ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error)
+	DescribeAccessPoints(ctx context.Context, in *efs.DescribeAccessPointsInput, opts ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error)
+	DescribeMountTargets(ctx context.Context, in *efs.DescribeMountTargetsInput, opts ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error)
+}
 
 // CloudWatchAPI lists the CloudWatch calls Harbormaster makes (plan 03).
 type CloudWatchAPI interface {

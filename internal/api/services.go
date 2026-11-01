@@ -199,6 +199,9 @@ func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow)
 		}
 	}
 	dto.Networking = networkingDTO(row.Service, subnetTasks)
+	if err := s.enrichNetworking(ctx, row.Service, &dto.Networking); err != nil {
+		return ServiceDTO{}, err
+	}
 	dto.TaskDefinition = taskDefinitionDTO(row.Service, td)
 	for _, rec := range records {
 		dto.Deployments14d = append(dto.Deployments14d, DeploymentRecordDTO{
@@ -231,6 +234,29 @@ func deploymentDTOs(deployments []model.Deployment) []DeploymentDTO {
 		})
 	}
 	return out
+}
+
+// enrichNetworking adds the VPC of the service's first subnet and its security group names (plan 05).
+func (s *Server) enrichNetworking(ctx context.Context, svc model.Service, out *NetworkingDTO) error {
+	out.SecurityGroupNames = map[string]string{}
+	key := svc.Key
+	if len(svc.Subnets) > 0 {
+		lookup, err := s.loadVPCLookup(ctx, key.AccountID, key.Region)
+		if err != nil {
+			return err
+		}
+		out.VPC = lookup.ref(svc.Subnets[0])
+	}
+	if len(svc.SecurityGroups) > 0 {
+		groups, err := s.Store.ListSecurityGroups(ctx, key.AccountID, key.Region, svc.SecurityGroups)
+		if err != nil {
+			return err
+		}
+		for _, group := range groups {
+			out.SecurityGroupNames[group.GroupID] = group.Name
+		}
+	}
+	return nil
 }
 
 // networkingDTO lists every configured subnet, plus any subnet only tasks use, with its running task count.

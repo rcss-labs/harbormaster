@@ -1,0 +1,28 @@
+import { describe, expect, it } from 'vitest'
+import { formatMiBps, formatSize } from './format'
+
+describe('formatSize', () => {
+  it.each([
+    [21474836, '20 MiB'],
+    [41231686041, '38.4 GiB'],
+    [227204155801, '211.6 GiB'],
+    [0, '0 MiB'],
+    [2621440, '2 MiB'],
+    [524288, '0 MiB'],
+    [11010048, '10 MiB'],
+    [1342177280, '1.2 GiB'],
+    [1879048192, '1.8 GiB'],
+  ])('formats %i bytes as %s', (bytes, text) => {
+    expect(formatSize(bytes)).toBe(text)
+  })
+})
+
+describe('formatMiBps', () => {
+  it('shows whole numbers from 10 MiB/s up', () => {
+    expect(formatMiBps(29.4)).toBe('29 MiB/s')
+  })
+
+  it('shows one decimal below 10 MiB/s', () => {
+    expect(formatMiBps(5.37)).toBe('5.4 MiB/s')
+  })
+})

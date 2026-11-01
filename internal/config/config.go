@@ -22,6 +22,8 @@ type PollConfig struct {
 	Jitter        time.Duration
 	TargetHealth  time.Duration
 	Scaling       time.Duration
+	Network       time.Duration // plan 05
+	Storage       time.Duration // plan 05
 }
 
 // RetentionConfig holds how long each kind of recorded data is kept.
@@ -164,6 +166,8 @@ func Load(getenv func(string) string) (Config, error) {
 			Jitter:        reader.duration("HM_POLL_JITTER", 500*time.Millisecond),
 			TargetHealth:  reader.duration("HM_POLL_TARGET_HEALTH", 15*time.Second),
 			Scaling:       reader.duration("HM_POLL_SCALING", 60*time.Second),
+			Network:       reader.duration("HM_POLL_NETWORK", 5*time.Minute), // plan 05
+			Storage:       reader.duration("HM_POLL_STORAGE", 5*time.Minute), // plan 05
 		},
 		Retention: RetentionConfig{
 			StoppedTasks:      reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),

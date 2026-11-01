@@ -11,6 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	logstypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/efs"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
@@ -53,6 +55,24 @@ func (r *Real) CloudWatch(ctx context.Context, t Target) (CloudWatchAPI, error) 
 		return nil, err
 	}
 	return cloudwatch.NewFromConfig(cfg), nil
+}
+
+// plan 05: EC2 and EFS clients, built like the plan 03 ones.
+
+func (r *Real) EC2(ctx context.Context, t Target) (EC2API, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return ec2.NewFromConfig(cfg), nil
+}
+
+func (r *Real) EFS(ctx context.Context, t Target) (EFSAPI, error) {
+	cfg, err := r.configFor(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return efs.NewFromConfig(cfg), nil
 }
 
 func (r *Real) ELB(ctx context.Context, t Target) (ELBAPI, error) {

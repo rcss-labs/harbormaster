@@ -95,7 +95,7 @@ func (c *cloudWatchClient) GetMetricData(_ context.Context, in *cloudwatch.GetMe
 			for ts := start; ts.Before(end); ts = ts.Add(period) {
 				s.stamps = append(s.stamps, ts)
 			}
-			s.values = c.valuesFor(q.MetricStat, s.stamps, period)
+			s.values = c.valuesFor(q.MetricStat, s.stamps, period, end)
 			if !ascending {
 				slices.Reverse(s.stamps)
 				slices.Reverse(s.values)
@@ -135,7 +135,7 @@ func (c *cloudWatchClient) GetMetricData(_ context.Context, in *cloudwatch.GetMe
 }
 
 // valuesFor computes one value per timestamp. Caller holds Mu.
-func (c *cloudWatchClient) valuesFor(stat *cwtypes.MetricStat, stamps []time.Time, period time.Duration) []float64 {
+func (c *cloudWatchClient) valuesFor(stat *cwtypes.MetricStat, stamps []time.Time, period time.Duration, end time.Time) []float64 {
 	m := stat.Metric
 	dims := map[string]string{}
 	seedParts := []string{aws.ToString(m.Namespace), aws.ToString(m.MetricName), aws.ToString(stat.Stat), period.String()}
@@ -153,6 +153,8 @@ func (c *cloudWatchClient) valuesFor(stat *cwtypes.MetricStat, stamps []time.Tim
 		point = c.ecsPoint(aws.ToString(m.MetricName), dims)
 	case "AWS/ApplicationELB":
 		point = c.elbPoint(aws.ToString(m.MetricName), aws.ToString(stat.Stat), dims, period)
+	case "AWS/EFS": // plan 05
+		point = c.efsPoint(aws.ToString(m.MetricName), dims, period, end)
 	}
 	values := make([]float64, len(stamps))
 	if point == nil {

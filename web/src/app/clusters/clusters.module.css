@@ -3,6 +3,7 @@
 .titles { display: grid; gap: 6px; min-width: 0; }
 .titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+.accentLink { color: var(--accent); }
 .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .btn:hover { background: var(--hover); }

@@ -162,7 +162,13 @@
         "running": "number",
         "t": "time"
       }
-    ]
+    ],
+    "vpc": {
+      "$null": {
+        "name": "string",
+        "vpc_id": "string"
+      }
+    }
   },
   "clusterMetrics": {
     "cluster": {
@@ -455,6 +461,40 @@
       }
     ],
     "username": "string"
+  },
+  "networkRegion": {
+    "items": [
+      {
+        "cidr": "string",
+        "clusters": [
+          "string"
+        ],
+        "name": "string",
+        "subnets": "number",
+        "tasks": "number",
+        "vpc_id": "string"
+      }
+    ],
+    "polled_at": "time"
+  },
+  "networks": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "regions": [
+          {
+            "active_vpcs": "number",
+            "clusters": "number",
+            "hidden_vpcs": "number",
+            "region": "string",
+            "tasks": "number",
+            "unplaced_tasks": "number"
+          }
+        ]
+      }
+    ],
+    "polled_at": "time"
   },
   "operations": {
     "items": [
@@ -792,6 +832,9 @@
           "target_group_name": "string"
         }
       ],
+      "security_group_names": {
+        "$map": "string"
+      },
       "security_groups": [
         "string"
       ],
@@ -800,7 +843,13 @@
           "id": "string",
           "tasks": "number"
         }
-      ]
+      ],
+      "vpc": {
+        "$null": {
+          "name": "string",
+          "vpc_id": "string"
+        }
+      }
     },
     "pending": "number",
     "platform_version": "string",
@@ -994,6 +1043,72 @@
   },
   "setup": {
     "needed": "boolean"
+  },
+  "storage": {
+    "items": [
+      {
+        "access_points": [
+          {
+            "access_point_id": "string",
+            "path": "string",
+            "uid": {
+              "$null": "number"
+            }
+          }
+        ],
+        "account_id": "string",
+        "client_connections": {
+          "$null": "number"
+        },
+        "file_system_id": "string",
+        "growth_30d_pct": {
+          "$null": "number"
+        },
+        "mounted": "boolean",
+        "mounted_by": [
+          {
+            "cluster": "string",
+            "container_path": "string",
+            "service": "string",
+            "service_id": "string",
+            "tasks": "number"
+          }
+        ],
+        "mounting_tasks": "number",
+        "name": "string",
+        "performance_mode": "string",
+        "region": "string",
+        "size_30d": [
+          {
+            "t": "time",
+            "v": "number"
+          }
+        ],
+        "size_bytes": "number",
+        "throughput_24h": [
+          {
+            "t": "time",
+            "v": "number"
+          }
+        ],
+        "throughput_mode": "string",
+        "vpc": {
+          "$null": {
+            "name": "string",
+            "vpc_id": "string"
+          }
+        }
+      }
+    ],
+    "metrics_error": {
+      "$optional": "string"
+    },
+    "polled_at": "time",
+    "totals": {
+      "mounted": "number",
+      "not_mounted": "number",
+      "size_bytes": "number"
+    }
   },
   "tagAssignments": {
     "clusters": [
@@ -1229,5 +1344,36 @@
         "username": "string"
       }
     ]
+  },
+  "vpcTree": {
+    "edges": [
+      {
+        "detail": {
+          "$optional": "string"
+        },
+        "id": "string",
+        "kind": "string",
+        "subnet_id": {
+          "$optional": "string"
+        }
+      }
+    ],
+    "polled_at": "time",
+    "root": "any",
+    "summary": {
+      "collapsed_by_default": "boolean",
+      "running_tasks": "number",
+      "subnets": "number",
+      "unplaced_tasks": "number",
+      "zones": "number"
+    },
+    "vpc": {
+      "account_id": "string",
+      "account_name": "string",
+      "cidr": "string",
+      "name": "string",
+      "region": "string",
+      "vpc_id": "string"
+    }
   }
 }

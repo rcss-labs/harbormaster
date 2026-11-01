@@ -162,4 +162,18 @@ describe('Sidebar', () => {
     const link = await within(await nav()).findByRole('link', { name: /Overview/ })
     await waitFor(() => expect(link).toHaveTextContent(/^Overview$/))
   })
+
+  it('Networks link is enabled and points to /networks', async () => {
+    renderApp('/')
+    const link = within(await nav()).getByRole('link', { name: 'Networks' })
+    expect(link).toHaveAttribute('href', '/networks')
+    expect(link).not.toHaveAttribute('aria-disabled')
+  })
+
+  it('Storage link is enabled and points to /storage', async () => {
+    renderApp('/')
+    const link = within(await nav()).getByRole('link', { name: 'Storage' })
+    expect(link).toHaveAttribute('href', '/storage')
+    expect(link).not.toHaveAttribute('aria-disabled')
+  })
 })
