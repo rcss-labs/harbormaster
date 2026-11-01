@@ -223,7 +223,7 @@ func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
 
 // tailFixture serves the API with a small tail idle timeout and a 2-tail limit, sharing the store and
 // fake of the standard fixture. It returns the server, its limiter and the user ids.
-func tailFixture(t *testing.T, idle time.Duration) (*httptest.Server, *Server, *store.Store) {
+func tailFixture(t *testing.T, idle time.Duration, tweak ...func(*Server)) (*httptest.Server, *Server, *store.Store) {
 	t.Helper()
 	_, fk, st := logsFixture(t)
 	fk.LiveTailInterval = 20 * time.Millisecond
@@ -231,6 +231,9 @@ func tailFixture(t *testing.T, idle time.Duration) (*httptest.Server, *Server, *
 	cfg.LogTailIdle = idle
 	cfg.LogTailsPerUser = 2
 	api := New(Server{Store: st, Auth: auth.NewService(st, cfg), Clients: fk, Prober: fk, Cfg: cfg, Now: time.Now})
+	for _, f := range tweak {
+		f(api)
+	}
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	return srv, api, st
@@ -461,4 +464,32 @@ func TestLogsTail_ClientCloseReleasesSlot(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func dialTailWithOrigin(srv *httptest.Server, c *apiClient, id, origin string) (*websocket.Conn, *http.Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/services/" + id + "/logs/tail"
+	return websocket.Dial(ctx, url, &websocket.DialOptions{HTTPClient: c.http, HTTPHeader: http.Header{"Origin": []string{origin}}})
+}
+
+func TestLogsTail_BadOrigin_Rejected(t *testing.T) {
+	srv, _, _ := tailFixture(t, time.Minute, func(s *Server) { s.Cfg.BaseURL = "http://hm.example.test" })
+	conn, resp, err := dialTailWithOrigin(srv, login(t, srv, "oncall", testPassword), paymentsID(), "https://evil.example")
+	if conn != nil {
+		conn.CloseNow()
+	}
+	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("err = %v resp = %v, want 403 before upgrade", err, resp)
+	}
+}
+
+// Behind a proxy that rewrites Host, the configured base URL's origin must still be accepted, as for exec.
+func TestLogsTail_BaseURLOrigin_Accepted(t *testing.T) {
+	srv, _, _ := tailFixture(t, time.Minute, func(s *Server) { s.Cfg.BaseURL = "http://hm.example.test" })
+	conn, _, err := dialTailWithOrigin(srv, login(t, srv, "oncall", testPassword), paymentsID(), "http://hm.example.test")
+	if err != nil {
+		t.Fatalf("dial with the base URL origin: %v", err)
+	}
+	conn.CloseNow()
 }
