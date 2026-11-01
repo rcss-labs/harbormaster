@@ -23,11 +23,12 @@ export default defineConfig({
   // so every mutating spec runs in a last project that waits for both. The read-only networks and storage specs (plan 05)
   // run in the observe project too, so they also read the unmutated seed.
   projects: [
-    { name: 'chromium', testMatch: /smoke\.spec\.ts/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'setup', testMatch: /auth\.setup\.ts/, use: { ...devices['Desktop Chrome'] } }, // plan 06: signs in each role, writes e2e/.auth/*.json
+    { name: 'chromium', testMatch: /smoke\.spec\.ts/, dependencies: ['setup'], use: { ...devices['Desktop Chrome'] } }, // plan 06: dependencies
     // retries: 1 because a failed dependency skips every flow spec; the observe specs only read, so a retry is safe.
-    { name: 'chromium-observe', testMatch: /(observe|networks|storage)\.spec\.ts/, // plan 05: read-only networks/storage specs read the unmutated seed
+    { name: 'chromium-observe', testMatch: /(observe|networks|storage|security)\.spec\.ts/, // plan 05/06: read-only networks/storage specs read the unmutated seed
       dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-flows', testIgnore: /(smoke|observe|networks|storage)\.spec\.ts/, // plan 05
+    { name: 'chromium-flows', testIgnore: /(smoke|observe|networks|storage|security)\.spec\.ts/, // plan 05/06
       dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
@@ -41,6 +42,7 @@ export default defineConfig({
       HM_POLL_TARGET_HEALTH: '5s',
       HM_POLL_NETWORK: '5s', // plan 05
       HM_POLL_STORAGE: '5s', // plan 05
+      HM_METRICS_TOKEN: 'e2e-metrics-token', // plan 06
     },
     url: `${baseURL}/healthz`,
     reuseExistingServer: false,
