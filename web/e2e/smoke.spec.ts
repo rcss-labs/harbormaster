@@ -13,8 +13,9 @@ test('admin walks the read-only product', async ({ page }) => {
   await page.getByRole('link', { name: /core-services/ }).first().click()
   const clusterHeading = page.getByRole('heading', { level: 1, name: 'core-services' })
   await expect(clusterHeading).toBeVisible()
-  // The cluster's own status pill sits in the heading row, not in a service card below.
-  await expect(clusterHeading.locator('..').getByText('Deploying', { exact: true })).toBeVisible()
+  // The cluster's own status pill sits in the heading row, not in a service card below. The seeded notifications
+  // rollout finishes a few fake-AWS steps after startup, so the pill may already read Healthy by the time we get here.
+  await expect(clusterHeading.locator('..').getByText(/^(Deploying|Healthy)$/)).toBeVisible()
 
   await page.getByRole('link', { name: /payments-api/ }).first().click()
   await expect(page.getByRole('heading', { level: 1, name: 'payments-api' })).toBeVisible()
