@@ -31,6 +31,16 @@ describe('Tags', () => {
     expect(deleteButtons[0]).toHaveAttribute('title', 'Dev is the default tag')
     expect(deleteButtons[1]).toBeEnabled()
   })
+
+  it('Rename disabled for Dev, enabled for other tags (spec 6.9: Dev cannot be renamed)', async () => {
+    renderApp('/admin/tags')
+    const renameButtons = await screen.findAllByRole('button', { name: 'Rename' })
+    const devRow = renameButtons[0].closest('tr') as HTMLElement
+    expect(within(devRow).getByText('Dev')).toBeInTheDocument()
+    expect(renameButtons[0]).toBeDisabled()
+    expect(renameButtons[0]).toHaveAttribute('title', 'Dev is the default tag')
+    expect(renameButtons[1]).toBeEnabled()
+  })
 })
 
 describe('Tags filters', () => {
