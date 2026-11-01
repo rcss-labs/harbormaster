@@ -16,7 +16,7 @@ export const KEYS = {
   taskUnhealthy: 'task:22222222bbbb',
   taskOrders: 'task:33333333cccc',
   clusterCi: 'sn:subnet-ccc:cl-ci',
-  standalone: 'sn:subnet-ccc:cl-ci:_standalone',
+  standalone: 'sn:subnet-ccc:cl-ci/standalone',
   taskStandalone: 'task:44444444dddd',
 } as const
 

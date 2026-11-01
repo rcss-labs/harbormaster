@@ -253,7 +253,7 @@ func buildClusters(prefix string, tasks []model.Task, in Input) []Node {
 			clusterNode.Children = append(clusterNode.Children, serviceNode)
 		}
 		if len(standalone) > 0 {
-			standaloneNode := Node{Kind: "standalone", Key: clusterPrefix + ":_standalone", Label: "Standalone tasks"}
+			standaloneNode := Node{Kind: "standalone", Key: clusterPrefix + "/standalone", Label: "Standalone tasks"}
 			standaloneNode.Children = taskNodes(standalone, "")
 			standaloneNode.Tasks = len(standaloneNode.Children)
 			clusterNode.Children = append(clusterNode.Children, standaloneNode)

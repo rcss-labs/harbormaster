@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -210,5 +214,65 @@ func TestStorage_PolledAtSetWhenCallerSeesNothing(t *testing.T) {
 	fx := newNetworkFixture(t)
 	if out := getJSON[StorageDTO](t, fx.prodOnly, "/api/storage"); out.PolledAt.IsZero() {
 		t.Error("polled_at is zero for a caller without file systems")
+	}
+}
+
+// concurrencyFetcher answers every read after a short delay and records how many reads overlap.
+type concurrencyFetcher struct {
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+	failAccount string
+}
+
+func (c *concurrencyFetcher) Fetch(_ context.Context, t awsx.Target, _ metrics.Span, _ []metrics.Query) (*metrics.Result, error) {
+	c.mu.Lock()
+	c.inFlight++
+	c.maxInFlight = max(c.maxInFlight, c.inFlight)
+	c.mu.Unlock()
+	time.Sleep(40 * time.Millisecond)
+	c.mu.Lock()
+	c.inFlight--
+	c.mu.Unlock()
+	if t.AccountID == c.failAccount {
+		return nil, errors.New("boom")
+	}
+	return &metrics.Result{}, nil
+}
+
+func TestStorage_FetchesTargetsConcurrentlyWithinBound(t *testing.T) {
+	fetcher := &concurrencyFetcher{failAccount: "999900000003"}
+	fx := newNetworkFixtureWith(t, func(s *Server) { s.efsFetcher = fetcher })
+	const extraTargets = 16
+	for i := 0; i < extraTargets; i++ {
+		account := fmt.Sprintf("9999000000%02d", i)
+		fs := model.FileSystem{AccountID: account, Region: "us-east-1", FileSystemID: fmt.Sprintf("fs-bulk%04d", i), Name: "bulk",
+			LifecycleState: "available", Raw: json.RawMessage(`{}`), PolledAt: time.Now()}
+		if err := fx.store.ReplaceStorage(t.Context(), account, "us-east-1", []model.FileSystem{fs}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := getJSON[StorageDTO](t, fx.admin, "/api/storage")
+	if len(out.Items) != 5+extraTargets {
+		t.Fatalf("items = %d, want %d", len(out.Items), 5+extraTargets)
+	}
+	if fetcher.maxInFlight < 2 {
+		t.Errorf("max reads in flight = %d, want several (targets fetched concurrently)", fetcher.maxInFlight)
+	}
+	if fetcher.maxInFlight > 8 {
+		t.Errorf("max reads in flight = %d, want at most 8", fetcher.maxInFlight)
+	}
+	// A failing target only blanks its own metrics.
+	if out.MetricsError == "" {
+		t.Error("metrics_error is empty although one target failed")
+	}
+	for _, item := range out.Items {
+		failed := item.AccountID == "999900000003"
+		if failed && item.Size30d != nil {
+			t.Errorf("%s has metrics despite its target failing", item.FileSystemID)
+		}
+		if !failed && item.Size30d == nil {
+			t.Errorf("%s lost its metrics because another target failed", item.FileSystemID)
+		}
 	}
 }
