@@ -35,8 +35,10 @@ Batching is per cluster in code (`chunk` runs inside the per-cluster loop), so c
 | services (`HM_POLL_SERVICES`, 5 s) | `DescribeServices` | 40 | 5 s | 8.00 | 40.0 % |
 | serviceList (`HM_POLL_SERVICE_LIST`, 60 s) | `ListServices` | 20 | 60 s | 0.33 | 1.7 % |
 | runningTasks (`HM_POLL_RUNNING_TASKS`, 5 s) | `ListTasks` RUNNING | 20 | 5 s | 4.00 | 20.0 % |
-| runningTasks, changed tasks | `DescribeTasks` | 0-5 (worst case 5) | 5 s | 0-1.00 | 0-5.0 % |
-| runningTasks, dirty services | `ListTasks` per changed service | 0-5 (assumed) | 5 s | 0-1.00 | 0-5.0 % |
+| runningTasks, changed tasks (spec typical band) | `DescribeTasks` | 0-5 | 5 s | 0-1.00 | 0-5.0 % |
+| runningTasks, dirty services (spec typical band) | `ListTasks` per changed service | 0-5 (assumed) | 5 s | 0-1.00 | 0-5.0 % |
+| runningTasks, estate-wide rollout (code worst case) | `DescribeTasks`, one batch per cluster with changes | up to 20 | 5 s | up to 4.00 | up to 20 % (transient) |
+| runningTasks, estate-wide rollout (code worst case) | `ListTasks` per dirty service | up to 1 per changed service (300 if every service changes) | 5 s | adds on top | transient |
 | fullTasks (`HM_POLL_FULL_TASKS`, 30 s) | `DescribeTasks` | 20 | 30 s | 0.67 | 3.3 % |
 | stoppedTasks (`HM_POLL_STOPPED_TASKS`, 15 s) | `ListTasks` STOPPED | 20 | 15 s | 1.33 | 6.7 % |
 | stoppedTasks, new stops | `DescribeTasks` | 0-20 (worst case 20) | 15 s | 0-1.33 | 0-6.7 % |
@@ -48,7 +50,8 @@ Per shared bucket (what ECS actually throttles on):
 | Bucket | Typical | Worst case | Share of refill |
 |---|---|---|---|
 | Service read | 8.33/s | 8.33/s | 41.7 % |
-| Cluster resource read | 6.00/s | 9.33/s | 30 % typical, 46.7 % worst |
+| Cluster resource read | 6.00/s | 9.33/s (typical change band) | 30 % typical, 46.7 % at the top of the typical change band |
+| Cluster resource read, estate-wide rollout | n/a | at least 11.33/s | at least 56.7 % (transient) |
 | Cluster read | 0.03/s | 0.03/s | 0.2 % |
 
 Caveats: busy clusters with more than 100 running or recently stopped tasks need extra `ListTasks` pages and `DescribeTasks` batches, which are not in these counts. The spec's "about 10-11 calls/s" is a total across buckets; the code's total is about 15/s, but spread over two 20/s buckets.
@@ -57,13 +60,15 @@ Caveats: busy clusters with more than 100 running or recently stopped tasks need
 
 At the target estate (1x), every row and every shared bucket is at or below 50 % of its sustained refill rate. The largest are the Service read bucket (41.7 %) and the Cluster resource read bucket (46.7 % worst case, 30 % typical). No tier interval needs to change.
 
+Rollout worst case: the code issues one `DescribeTasks` batch per cluster with changes plus one `ListTasks` per dirty service (`internal/poller/loop.go`, `syncRunningTasks`). In an estate-wide rollout that is up to 20 `DescribeTasks` per 5 s on top of the base: (20 `ListTasks` + 20 `DescribeTasks`) / 5 s = 8.00/s, plus stoppedTasks (20 + 20) / 15 s = 2.67/s, plus fullTasks 20 / 30 s = 0.67/s, total 11.33/s = 56.7 % of the 20/s refill, before the dirty-service `ListTasks`. Per the controller ruling, spec 5.3's 50 % rule applies to the sustained steady state, which is at or below 50 %. The rollout spike (about 57 % and up) is transient and is absorbed by the 100-token bucket and the throttle back-off. Task 7's soak should assert steady state, not the rollout spike.
+
 Margin warning: the Cluster resource read bucket is close to the line in the worst case. The spec says to design for 2x headroom; if that means 2x clusters/services/tasks inside one account x region, `DescribeServices` alone becomes 80 % of the Service read bucket and the 50 % rule fails. Under 2x per loop, raise `HM_POLL_SERVICES` to 10 s (40 % at 2x). More accounts or regions do not add load to a bucket.
 
 Known edge (ruling): the requirement is "under 50 %" at the 1x target estate, so `HM_POLL_SERVICES` stays at 5 s even though a 2x-estate reading would put `DescribeServices` at 80 % of the Service read bucket. Operators with a larger estate per account x region should raise it.
 
 ## Burst behaviour
 
-A fresh loop runs clusters and serviceList first (synchronously), then starts every other tier at the same moment, with no stagger. First cycle demand per bucket, worst case, 20 clusters:
+Before the stagger change (commit 4d0af25), a fresh loop ran clusters and serviceList first (synchronously), then started every other tier at the same moment, with no stagger. First cycle demand per bucket, worst case, 20 clusters:
 
 | Bucket | Calls in the first second | Bucket size | Fits? |
 |---|---|---|---|
@@ -90,4 +95,4 @@ Requirement: the poller start-up must stagger the first cycles of the task tiers
 
 - Config defaults: none. All `HM_POLL_*` defaults stay as they are.
 - Start-up staggering (implemented): `Loop.Run` now delays the first cycle of stoppedTasks by one step and fullTasks by two (runningTasks starts at once), where the step is `poller.Config.StartStagger` (default 1 s, set in `ConfigFrom`; zero disables it). Covered by `TestLoop_StartIsStaggeredAcrossTiers`. `PollOnce`/`runOnce` stay un-staggered. Slow tiers still run once before the service list exists and then wait their full interval.
-- Spec 5.3 call counts corrected to per-cluster batching: `DescribeServices` 40 (was 30), full `DescribeTasks` 20 (was 9).
+- Call counts differ from spec 5.3 (spec not edited), because batching is per cluster: `DescribeServices` 40 (was 30), full `DescribeTasks` 20 (was 9).
