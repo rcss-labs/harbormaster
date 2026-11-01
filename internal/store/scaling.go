@@ -25,7 +25,11 @@ func (s *Store) UpsertScaling(ctx context.Context, rows []model.Scaling) error {
 			   has_target = excluded.has_target, min_capacity = excluded.min_capacity,
 			   max_capacity = excluded.max_capacity, policies = excluded.policies,
 			   scheduled_actions = excluded.scheduled_actions, activities = excluded.activities,
-			   polled_at = excluded.polled_at`,
+			   polled_at = excluded.polled_at
+			 where (scaling.has_target, scaling.min_capacity, scaling.max_capacity, scaling.policies,
+			   scaling.scheduled_actions, scaling.activities) is distinct from
+			   (excluded.has_target, excluded.min_capacity, excluded.max_capacity, excluded.policies,
+			   excluded.scheduled_actions, excluded.activities)`,
 			row.Key.AccountID, row.Key.Region, row.Key.Cluster, row.Key.Service, row.HasTarget,
 			row.Min, row.Max, jsonArray(row.Policies), jsonArray(row.Scheduled), jsonArray(row.Activities),
 			row.PolledAt)
