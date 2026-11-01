@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useCluster } from '../../api/hooks'
 import { useClusterMetrics } from '../../api/observe'
@@ -96,6 +96,11 @@ export function Cluster() {
               {cluster.account_name} ({cluster.account_id})
             </span>
             <span>{cluster.region}</span>
+            {cluster.vpc && (
+              <Link className={styles.accentLink} to={`/networks/${cluster.account_id}/${cluster.region}/${cluster.vpc.vpc_id}`}>
+                {cluster.vpc.name}
+              </Link>
+            )}
           </div>
         </div>
         <div className={styles.actions}>

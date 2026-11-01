@@ -34,6 +34,19 @@ describe('Cluster', () => {
     expect(notifications.getByText('Deploying')).toBeInTheDocument()
   })
 
+  it('cluster header links to the VPC tree', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const vpcLink = await screen.findByRole('link', { name: CLUSTER_CORE.vpc!.name })
+    expect(vpcLink).toHaveAttribute('href', `/networks/${CLUSTER_CORE.account_id}/${CLUSTER_CORE.region}/${CLUSTER_CORE.vpc!.vpc_id}`)
+  })
+
+  it('omits the VPC link when the cluster has no VPC', async () => {
+    server.use(http.get('/api/clusters/:id', () => HttpResponse.json({ ...CLUSTER_CORE, vpc: null })))
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    await screen.findByRole('heading', { name: CLUSTER_CORE.name, level: 1 })
+    expect(screen.queryByRole('link', { name: CLUSTER_CORE.vpc!.name })).not.toBeInTheDocument()
+  })
+
   it('shows No access on 404', async () => {
     server.use(
       http.get('/api/clusters/:id', () =>
