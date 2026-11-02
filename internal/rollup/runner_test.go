@@ -60,7 +60,7 @@ func newHarnessRegions(t *testing.T, regions ...string) *harness {
 	logs := &bytes.Buffer{}
 	return &harness{st: st, fake: f, logs: logs, regions: regions, runner: &rollup.Runner{
 		Store: st, Clients: f, Now: func() time.Time { return now }, UtilEnabled: true,
-		SampleInterval: 5 * time.Minute, Log: slog.New(slog.NewTextHandler(logs, nil)),
+		SampleInterval: 5 * time.Minute, CountsRetention: 168 * time.Hour, Log: slog.New(slog.NewTextHandler(logs, nil)),
 	}}
 }
 
@@ -100,7 +100,7 @@ func availabilityDays(t *testing.T, h *harness) []string {
 	return days
 }
 
-func TestRunner_BackfillsSixDaysOnEmptyTable(t *testing.T) {
+func TestRunner_BackfillsCompleteDaysInsideDefaultRetention(t *testing.T) {
 	h := newHarness(t)
 	for offset := -8; offset <= 0; offset++ { // noon of today-8 .. today
 		h.sample(t, day(offset).Add(12*time.Hour), "gateway", 1, 1)
@@ -120,6 +120,31 @@ func TestRunner_BackfillsSixDaysOnEmptyTable(t *testing.T) {
 	since, err := h.st.DailyDataSince(context.Background())
 	if err != nil || since[store.TableServiceAvailabilityDaily] == nil || !since[store.TableServiceAvailabilityDaily].Equal(day(-6)) {
 		t.Errorf("data since = %v (err %v), want %s", since[store.TableServiceAvailabilityDaily], err, day(-6))
+	}
+}
+
+func TestRunner_BackfillReachFollowsCountsRetention(t *testing.T) {
+	// At 10:00 UTC, 60h of retention keeps the source rows back to 22:00 on the 7th, so only the 8th and 9th
+	// are complete days that still have all their rows; 0 means keep forever and falls back to the 30-day cap.
+	for _, tc := range []struct {
+		retention time.Duration
+		want      []string
+	}{
+		{60 * time.Hour, []string{"2026-03-08", "2026-03-09"}},
+		{10 * time.Hour, nil},
+		{0, []string{"2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06", "2026-03-07", "2026-03-08", "2026-03-09"}},
+	} {
+		h := newHarness(t)
+		h.runner.CountsRetention = tc.retention
+		for offset := -8; offset <= 0; offset++ {
+			h.sample(t, day(offset).Add(12*time.Hour), "gateway", 1, 1)
+		}
+		if _, err := h.runner.RunDue(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := availabilityDays(t, h); strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("retention %v: days rolled up = %v, want %v", tc.retention, got, tc.want)
+		}
 	}
 }
 

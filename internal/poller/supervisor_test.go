@@ -122,6 +122,9 @@ func TestSupervisor_RollupRunsBeforeRetention(t *testing.T) {
 		Retention: store.Retention{CountsHistory: 24 * time.Hour},
 	}, randomLockKey())
 	p.loopFactory = newLoopRecorder().factory
+	// The runner normally reads the same retention as the delete; widen only its backfill reach so a row that is
+	// already past the 24h retention is still inside the window and the ordering is what the test observes.
+	p.rollups.CountsRetention = 7 * 24 * time.Hour
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { p.runSupervisor(runCtx); close(done) }()

@@ -125,7 +125,7 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 	p.loopFactory = p.defaultLoopFactory
 	p.rollups = &rollup.Runner{
 		Store: st, Clients: clients, Now: time.Now, UtilEnabled: cfg.AnalyticsUtil,
-		SampleInterval: cfg.CountsHistory, Log: log,
+		SampleInterval: cfg.CountsHistory, CountsRetention: cfg.Retention.CountsHistory, Log: log,
 	}
 	return p
 }

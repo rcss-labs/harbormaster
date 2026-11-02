@@ -116,7 +116,7 @@ func (s *Store) AnalyticsAtScalingMax(ctx context.Context, f TargetFilter, vis V
 // SubnetLow is a subnet with under 10% of its usable addresses free.
 type SubnetLow struct {
 	AccountID, Region, SubnetID, Name, AZ string
-	AvailableIPs, TotalIPs                int // total = CIDR size minus the 5 addresses AWS reserves
+	AvailableIPs, TotalIPs                int     // total = CIDR size minus the 5 addresses AWS reserves
 	UsedPct                               float64 // fraction 0..1 of usable addresses in use
 }
 

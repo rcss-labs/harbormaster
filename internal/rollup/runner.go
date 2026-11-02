@@ -15,9 +15,8 @@ import (
 type Result map[string]int
 
 const (
-	// backfillDays is how many complete days a first run reaches back; it matches the default counts-history
-	// retention (168h), after which the source rows are gone.
-	backfillDays = 6
+	// maxBackfillDays caps how far back a first run reaches, including when counts history is kept forever.
+	maxBackfillDays = 30
 	// defaultSampleInterval is the counts-history poll interval, used to turn below-desired samples into minutes.
 	defaultSampleInterval = 5 * time.Minute
 )
@@ -32,7 +31,10 @@ type Runner struct {
 	UtilEnabled bool
 	// SampleInterval is the counts-history interval (HM_POLL_COUNTS_HISTORY); zero means 5 minutes.
 	SampleInterval time.Duration
-	Log            *slog.Logger
+	// CountsRetention is the counts-history retention (HM_RETENTION_COUNTS_HISTORY); zero keeps forever. It sets how
+	// far back a first run can still find source rows.
+	CountsRetention time.Duration
+	Log             *slog.Logger
 }
 
 func (r *Runner) now() time.Time {
@@ -47,6 +49,17 @@ func (r *Runner) log() *slog.Logger {
 		return r.Log
 	}
 	return slog.Default()
+}
+
+// backfillDays is how many complete UTC days before today still have all their counts-history rows: day today-k
+// starts no earlier than now minus the retention. It is capped at maxBackfillDays and never negative.
+func (r *Runner) backfillDays(now time.Time) int {
+	if r.CountsRetention <= 0 {
+		return maxBackfillDays
+	}
+	sinceMidnight := now.Sub(now.Truncate(24 * time.Hour))
+	days := int((r.CountsRetention - sinceMidnight) / (24 * time.Hour))
+	return min(max(days, 0), maxBackfillDays)
 }
 
 func (r *Runner) sampleInterval() time.Duration {

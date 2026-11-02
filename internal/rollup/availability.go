@@ -8,7 +8,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-// availability rolls up every complete day after the table's watermark, at most backfillDays back. A watermark
+// availability rolls up every complete day after the table's watermark, as far back as counts-history retention still holds complete days. A watermark
 // older than that window means the leader was down for longer than the source rows live: the days in between are
 // logged as a gap and left empty.
 func (r *Runner) availability(ctx context.Context, today time.Time, res Result) error {
@@ -16,7 +16,7 @@ func (r *Runner) availability(ctx context.Context, today time.Time, res Result) 
 	if err != nil {
 		return err
 	}
-	first := today.AddDate(0, 0, -backfillDays)
+	first := today.AddDate(0, 0, -r.backfillDays(r.now()))
 	if mark := marks[store.TableServiceAvailabilityDaily]; mark != nil {
 		if next := mark.AddDate(0, 0, 1); next.After(first) {
 			first = next
