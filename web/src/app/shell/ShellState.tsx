@@ -48,6 +48,9 @@ function isEditable(target: EventTarget | null): boolean {
   return target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
 }
 
+/** True while a modal dialog is open, where a bare `[` must not change the page behind it. */
+const modalDialogOpen = () => document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') !== null
+
 export function ShellStateProvider({ children }: { children: ReactNode }) {
   const [width, setWidth] = useState(() => window.innerWidth)
   const [sidebarChoice, setSidebarChoice] = useState<SidebarChoice>(readSidebarChoice)
@@ -87,7 +90,7 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
         return
       }
       if (event.key === '[' && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditable(event.target)) {
-        if (paletteOpen) return
+        if (paletteOpen || modalDialogOpen()) return
         toggleSidebar()
       }
     }

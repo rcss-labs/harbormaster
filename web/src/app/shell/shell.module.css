@@ -59,7 +59,7 @@
 .here { color: var(--text); font-weight: 500; }
 .topTools { margin-left: auto; flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .pulse { display: flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--muted); padding-right: 4px; white-space: nowrap; }
-.pulseDot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: pulse 2s ease-in-out infinite; }
+.pulseDot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 2s ease-in-out infinite; }
 .pulseStale .pulseDot { background: var(--warning); animation: none; }
 @keyframes pulse { 50% { opacity: 0.25; } }
 .searchBtn { flex: 1; min-width: 120px; max-width: 300px; height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--dim); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; }
@@ -75,7 +75,11 @@
 .btn { height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
 .btn:hover { background: var(--hover); }
 .btnOn { background: var(--accent-soft); border-color: var(--accent-soft-border); color: var(--accent); }
-.sideActions .btn { height: 24px; font-size: 11.5px; padding: 0 8px; background: transparent; color: var(--text-2); }
+.avatarBtn { border: 0; padding: 0; cursor: pointer; }
+.avatarBtn:hover { background: var(--accent-soft); }
+/* The sidebar clips its overflow, so the collapsed account menu is fixed beside the 52px rail. */
+.accountMenu { position: fixed; left: 58px; bottom: 44px; z-index: 30; display: grid; gap: 4px; padding: 6px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-pop); }
+.sideActions .btn, .accountMenu .btn { height: 24px; font-size: 11.5px; padding: 0 8px; background: transparent; color: var(--text-2); }
 
 /* Activity rail: docked as the third grid column, or a fixed overlay with a backdrop. */
 .rail { background: var(--chrome); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }

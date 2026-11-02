@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
 import { useAuthOptions, useClusters, usePollerStatus, useSettings, useTasks } from '../../api/hooks'
@@ -79,6 +79,14 @@ export function Sidebar() {
   const poller = usePollerStatus()
   const { pinned } = usePinnedServices()
   const [linking, setLinking] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuShown = menuOpen && sidebarCollapsed
+  useEffect(() => {
+    if (!menuShown) return
+    const onKeyDown = (event: KeyboardEvent) => event.key === 'Escape' && setMenuOpen(false)
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [menuShown])
   if (!me) return null
 
   const canLinkSSO = authOptions.data?.sso != null && me.has_password && !me.sso_linked
@@ -101,6 +109,24 @@ export function Sidebar() {
       toast.show('Sign out failed on the server. You were signed out in this browser.', 'bad')
     }
   }
+
+  const actions = (
+    <>
+      {me.has_password && (
+        <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
+          Change password
+        </button>
+      )}
+      {canLinkSSO && (
+        <button type="button" className={styles.btn} onClick={() => setLinking(true)}>
+          Link SSO account
+        </button>
+      )}
+      <button type="button" className={styles.btn} onClick={signOut}>
+        Sign out
+      </button>
+    </>
+  )
 
   return (
     <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`} aria-label="Sidebar">
@@ -138,28 +164,37 @@ export function Sidebar() {
       </nav>
       <div className={styles.sideFoot}>
         <div className={styles.user}>
-          <span className={styles.avatar} aria-hidden="true" title={me.username}>
-            {initials(me.username)}
-          </span>
+          {sidebarCollapsed ? (
+            // The text block and the action buttons are hidden when collapsed, so the avatar opens them as a menu.
+            <button
+              type="button"
+              className={`${styles.avatar} ${styles.avatarBtn}`}
+              aria-label={`Account menu for ${me.username}`}
+              aria-haspopup="true"
+              aria-expanded={menuShown}
+              title={me.username}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              {initials(me.username)}
+            </button>
+          ) : (
+            <span className={styles.avatar} aria-hidden="true" title={me.username}>
+              {initials(me.username)}
+            </span>
+          )}
           <div className={styles.userText}>
             Signed in as <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
           </div>
         </div>
-        <div className={styles.sideActions}>
-          {me.has_password && (
-            <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
-              Change password
-            </button>
-          )}
-          {canLinkSSO && (
-            <button type="button" className={styles.btn} onClick={() => setLinking(true)}>
-              Link SSO account
-            </button>
-          )}
-          <button type="button" className={styles.btn} onClick={signOut}>
-            Sign out
-          </button>
-        </div>
+        {sidebarCollapsed ? (
+          menuShown && (
+            <div className={styles.accountMenu} role="group" aria-label="Account" onClick={() => setMenuOpen(false)}>
+              {actions}
+            </div>
+          )
+        ) : (
+          <div className={styles.sideActions}>{actions}</div>
+        )}
         <button
           type="button"
           className={styles.collapseBtn}

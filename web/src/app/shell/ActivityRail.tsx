@@ -72,7 +72,7 @@ export function ActivityRail() {
       <div className={styles.railList}>
         {rows.length === 0 && <div className={styles.railEmpty}>Nothing here.</div>}
         {rows.map((row) => (
-          <div key={`${row.kind}${row.subject}${row.text}`} className={styles.railRow}>
+          <div key={`${row.kind}|${row.subject}|${row.text}`} className={styles.railRow}>
             <span className={`${styles.railDot} ${SEVERITY_CLASS[row.severity]}`} aria-hidden="true" />
             <div className={styles.railBody}>
               <div className={styles.railTop}>

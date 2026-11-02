@@ -60,6 +60,37 @@ describe('collapsible sidebar', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('ignores [ while a modal dialog is open', async () => {
+    renderApp('/')
+    const toggle = await sidebarToggle()
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('aria-modal', 'true')
+    document.body.appendChild(dialog)
+    try {
+      await userEvent.setup().keyboard('[[')
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    } finally {
+      dialog.remove()
+    }
+  })
+
+  it('keeps Sign out, Change password reachable from the avatar menu when collapsed', async () => {
+    setWidth(1000)
+    renderApp('/')
+    await sidebarToggle()
+    const user = userEvent.setup()
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
+    const avatar = await screen.findByRole('button', { name: /^Account menu/ })
+    expect(avatar).toHaveAttribute('aria-expanded', 'false')
+    await user.click(avatar)
+    expect(avatar).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Change password' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
+  })
+
   it('collapses by itself under 1100px, and an explicit choice wins over that', async () => {
     setWidth(1000)
     renderApp('/')

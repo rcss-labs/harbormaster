@@ -7,13 +7,18 @@ import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/f
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
+const originalWidth = window.innerWidth
+
 beforeEach(() => {
+  // Wide enough that the sidebar is expanded and shows its account actions inline.
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 })
   localStorage.clear()
   window.history.replaceState(null, '', '/')
 })
 
 // Let requests still in flight from an unmounted app finish, so they cannot reach the next test's handlers.
 afterEach(async () => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: originalWidth })
   await new Promise((resolve) => setTimeout(resolve, 100))
 })
 

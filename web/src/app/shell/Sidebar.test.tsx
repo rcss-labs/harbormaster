@@ -10,13 +10,18 @@ import { navigateExternal } from './navigateExternal'
 
 vi.mock('./navigateExternal', () => ({ navigateExternal: vi.fn() }))
 
+const originalWidth = window.innerWidth
+
 beforeEach(() => {
+  // Wide enough that the sidebar is expanded and shows its account actions inline.
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 })
   localStorage.clear()
   window.history.replaceState(null, '', '/')
   vi.mocked(navigateExternal).mockClear()
 })
 
 afterEach(async () => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: originalWidth })
   await new Promise((resolve) => setTimeout(resolve, 100))
 })
 
