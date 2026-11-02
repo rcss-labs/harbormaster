@@ -3,6 +3,7 @@ package devseed_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -151,11 +152,13 @@ func TestApply_SeedsAnalyticsHistoryOnceAndForceApplyDoesNot(t *testing.T) {
 	if first[0] == 0 || first[1] == 0 || first[2] == 0 || first[3] < 3 {
 		t.Errorf("availability/capacity/util/failed = %v, want history in every table and at least 3 failures with a reason", first)
 	}
-	// Every table covers at least the 30 complete days ending yesterday.
+	// Every table covers at least the 30 complete UTC days ending yesterday. Days are UTC like the rollups, so
+	// the check must not use current_date, which follows the database's time zone.
+	todayUTC := time.Now().UTC().Truncate(24 * time.Hour)
 	for _, table := range []string{"service_availability_daily", "cluster_capacity_daily", "service_util_daily"} {
-		const want = 1
 		var days int
-		if err := st.Pool.QueryRow(ctx, `select count(distinct day) from `+table+` where day >= current_date - 30 and day <= current_date - $1::int`, want).Scan(&days); err != nil {
+		if err := st.Pool.QueryRow(ctx, `select count(distinct day) from `+table+` where day >= $1::date and day < $2::date`,
+			todayUTC.AddDate(0, 0, -30), todayUTC).Scan(&days); err != nil {
 			t.Fatal(err)
 		}
 		if days < 30 {
