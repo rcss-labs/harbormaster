@@ -41,6 +41,8 @@ function RequireAuth() {
   const location = useLocation()
   if (loading) return <Loading />
   if (!me) return <RedirectToSignIn />
+  // Change password needs a current password; SSO-only accounts have none.
+  if (!me.has_password && location.pathname === '/password') return <Navigate to="/" replace />
   if (me.must_change_password && location.pathname !== '/password') return <Navigate to="/password" replace />
   return <Outlet />
 }
