@@ -59,3 +59,13 @@ describe('CapacityTab subnets', () => {
     expect(row.querySelector('[data-bar]')).toHaveStyle({ width: '92%' })
   })
 })
+
+describe('CapacityTab whole-cluster labels', () => {
+  it('says the cluster_capacity_daily panels total whole clusters across all tags', async () => {
+    await renderTab(ANALYTICS_CAPACITY_DAILY)
+    for (const name of ['Reserved vs used vCPU, last 90 days', 'Spot share, last 90 days', 'Memory reserved vs used p95']) {
+      expect(within(screen.getByRole('region', { name: new RegExp(name) })).getByText(/whole cluster, all tags/)).toBeInTheDocument()
+    }
+    expect(within(screen.getByRole('region', { name: /Most over-reserved/ })).queryByText(/whole cluster/)).not.toBeInTheDocument()
+  })
+})

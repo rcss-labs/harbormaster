@@ -107,7 +107,9 @@ type CapacityDailyPoint struct {
 }
 
 // AnalyticsCapacityDaily reads cluster_capacity_daily for days in [from, to). A cluster counts when the caller
-// is admin or can see at least one of its services, like the clusters list.
+// is admin or can see at least one of its services, like the clusters list. The totals are deliberately for the
+// whole cluster, across all tags: the rollup stores one row per cluster, not per service, so a viewer who sees
+// only some of a cluster's services still gets its full reservation. The Capacity tab labels the panels so.
 func (s *Store) AnalyticsCapacityDaily(ctx context.Context, f TargetFilter, vis Visibility, from, to time.Time) ([]CapacityDailyPoint, error) {
 	var q queryArgs
 	target := q.target("c", f)

@@ -17,6 +17,9 @@ const DAY_MINUTES = 24 * 60
 /** The most recent non-null value of a line, for legends that show "now". */
 const latest = (values: (number | null)[]) => [...values].reverse().find((value): value is number => value !== null)
 
+/** cluster_capacity_daily is per cluster, so these totals ignore service tags (owner decision). */
+const WHOLE_CLUSTER_NOTE = 'whole cluster, all tags'
+
 export function CapacityTab({ data, showSources, showProposed }: TabProps<AnalyticsCapacity>) {
   const { me } = useAuth()
   const { kpis, window } = data
@@ -154,6 +157,7 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
         <SeriesPanel
           {...ninetyDays}
           title="Reserved vs used vCPU, last 90 days"
+          sub={WHOLE_CLUSTER_NOTE}
           span="full"
           series={data.reserved_vs_used_90d.data}
           proposed={data.reserved_vs_used_90d}
@@ -166,6 +170,7 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
         <SeriesPanel
           {...ninetyDays}
           title="Spot share, last 90 days"
+          sub={WHOLE_CLUSTER_NOTE}
           span="half"
           series={data.spot_share_90d.data}
           proposed={data.spot_share_90d}
@@ -178,7 +183,7 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
         <SeriesPanel
           {...ninetyDays}
           title="Memory reserved vs used p95"
-          sub="GiB"
+          sub={`GiB · reserved is ${WHOLE_CLUSTER_NOTE}`}
           span="half"
           series={data.memory_90d.data}
           proposed={data.memory_90d}
