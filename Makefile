@@ -90,9 +90,14 @@ check-image:
 
 # release runs its prerequisites in order (do not use make -j). The build step generates the web app,
 # so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
-release: lint test build image check-image
+release: lint test vulncheck build image check-image
 	@echo "image: harbormaster:$(VERSION)"
 	bin/harbormaster version
+
+# vulncheck scans the call graph of every package against the Go vulnerability database (needs network access).
+.PHONY: vulncheck
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 # release-check refuses an untagged HEAD and a -dirty VERSION.
 release-check:

@@ -42,6 +42,13 @@ requiredNoticeStrings=(
 	"IBM Plex Sans"
 	"Geist Mono"
 	"SIL Open Font License"
+	"crewjam/saml"
+	"BSD-2-Clause"
+	"beevik/etree"
+	"russellhaering/goxmldsig"
+	"mattermost/xml-roundtrip-validator"
+	"jonboulle/clockwork"
+	"golang-jwt/jwt"
 )
 if [[ ! -f "$notices" ]]; then
 	fail "$notices is missing"
