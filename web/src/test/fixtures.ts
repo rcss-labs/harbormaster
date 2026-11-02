@@ -55,6 +55,7 @@ import type {
   AnalyticsSeries,
   AnalyticsSource,
   AnalyticsWindow,
+  Proposed,
 } from '../api/analytics'
 
 /** Reference "now" for every fixture timestamp; tests can freeze the clock here. */
@@ -1673,4 +1674,143 @@ export const ANALYTICS_OPERATIONS: AnalyticsOperations = {
     rows: [{ service_id: analyticsPaymentsId, service: 'payments-api', cluster: 'core-services', tag: TAG_PROD, restarts: 5, people: 2, last_at: minutesAgo(120) }],
     total: 1,
   },
+}
+
+// ---- analytics with the Phase 2 rollups available ------------------------------------------------
+
+/** A 90-day daily series ending today, as the rollup panels return it: `value` is null before the rollup began. */
+function analyticsDailySeries(lines: { key: string; label: string }[], value: (line: number, daysAgo: number) => number | null): AnalyticsSeries {
+  return {
+    timestamps: Array.from({ length: 90 }, (_, j) => minutesAgo((89 - j) * 1440)),
+    series: lines.map((line, i) => ({
+      key: line.key,
+      label: line.label,
+      expected: false,
+      values: Array.from({ length: 90 }, (_, j) => value(i, 89 - j)),
+    })),
+  }
+}
+
+const availablePanel = <T>(dataSinceDaysAgo: number, data: T): Proposed<T> => ({
+  available: true,
+  data_since: minutesAgo(dataSinceDaysAgo * 1440),
+  needs: null,
+  data,
+})
+
+/** Reliability once service_availability_daily has 45 days of rows: partial 90-day charts and a getting-worse table. */
+export const ANALYTICS_RELIABILITY_DAILY: AnalyticsReliability = {
+  ...ANALYTICS_RELIABILITY,
+  sources: [
+    ...ANALYTICS_RELIABILITY.sources,
+    source('service_availability_daily', 'Daily availability and time below desired per service', '8760h', 'HM_RETENTION_AVAILABILITY_DAILY'),
+  ],
+  availability_90d: availablePanel(
+    45,
+    analyticsDailySeries([{ key: 'availability', label: 'Availability' }], (_, daysAgo) => (daysAgo > 45 ? null : 99.2 + ((daysAgo * 7) % 8) / 10)),
+  ),
+  below_desired_90d: availablePanel(
+    45,
+    analyticsDailySeries([{ key: 'minutes_below', label: 'Minutes below desired' }], (_, daysAgo) => (daysAgo > 45 ? null : (daysAgo * 13) % 90)),
+  ),
+  getting_worse: availablePanel(45, {
+    rows: [
+      { service_id: analyticsPaymentsId, service: 'payments-api', cluster: 'core-services', tag: TAG_PROD, previous: 0.9991, current: 0.9874, change_pts: -1.17 },
+      { service_id: analyticsCatalogId, service: 'catalog', cluster: 'core-services', tag: { ...TAG_PROD, inherited: true }, previous: 0.9999, current: 0.9981, change_pts: -0.18 },
+    ],
+    total: 2,
+  }),
+}
+
+/** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */
+export const ANALYTICS_CAPACITY_DAILY: AnalyticsCapacity = {
+  ...ANALYTICS_CAPACITY,
+  sources: [
+    ...ANALYTICS_CAPACITY.sources,
+    source('cluster_capacity_daily', 'Daily average reserved vCPU and memory per cluster', '8760h', 'HM_RETENTION_CAPACITY_DAILY'),
+    source('service_util_daily', 'Daily CPU and memory use as a share of reserved', '2160h', 'HM_RETENTION_UTIL_DAILY'),
+  ],
+  reserved_vs_used_90d: availablePanel(
+    30,
+    analyticsDailySeries(
+      [
+        { key: 'reserved', label: 'Reserved' },
+        { key: 'used_p95', label: 'Used p95' },
+        { key: 'used_avg', label: 'Used avg' },
+      ],
+      (line, daysAgo) => (daysAgo > 30 ? null : [14, 8.5, 5][line] + (daysAgo % 4) / 4),
+    ),
+  ),
+  spot_share_90d: availablePanel(30, analyticsDailySeries([{ key: 'spot_share', label: 'Spot share' }], (_, daysAgo) => (daysAgo > 30 ? null : 22 + (daysAgo % 5)))),
+  memory_90d: availablePanel(
+    30,
+    analyticsDailySeries(
+      [
+        { key: 'reserved', label: 'Reserved' },
+        { key: 'used_p95', label: 'Used p95' },
+      ],
+      (line, daysAgo) => (daysAgo > 30 ? null : [28, 17][line] + (daysAgo % 3) / 2),
+    ),
+  ),
+  over_reserved: availablePanel(30, {
+    rows: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        tag: TAG_PROD,
+        reserved_vcpu: 2,
+        used_p95_vcpu: 0.5,
+        reserved_mem_gib: 4,
+        used_p95_mem_gib: 1.4,
+        wasted_vcpu: 9,
+      },
+    ],
+    total: 1,
+  }),
+}
+
+/** Delivery once rollouts record why they failed (first reason 12 days ago). */
+export const ANALYTICS_DELIVERY_FAILURES: AnalyticsDelivery = {
+  ...ANALYTICS_DELIVERY,
+  failure_reasons: availablePanel(
+    12,
+    analyticsSeries(
+      '30d',
+      [
+        { key: 'circuit_breaker', label: 'Circuit breaker' },
+        { key: 'health_check', label: 'Health check' },
+        { key: 'failed_to_start', label: 'Failed to start' },
+        { key: 'out_of_memory', label: 'Out of memory' },
+      ],
+      (line, bucket) => (bucket < 18 ? 0 : (bucket + line) % 4 === 0 ? 1 : 0),
+    ),
+  ),
+  recent_failures: availablePanel(12, {
+    rows: [
+      {
+        at: minutesAgo(180),
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        from_revision: 41,
+        to_revision: 42,
+        reason: 'circuit_breaker',
+        detail: 'ECS deployment circuit breaker: tasks failed to start.',
+        ran_for_s: 412,
+      },
+      {
+        at: minutesAgo(3000),
+        service_id: analyticsCatalogId,
+        service: 'catalog',
+        cluster: 'core-services',
+        from_revision: null,
+        to_revision: 7,
+        reason: 'out_of_memory',
+        detail: 'OutOfMemoryError: Container killed due to memory usage',
+        ran_for_s: null,
+      },
+    ],
+    total: 2,
+  }),
 }

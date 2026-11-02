@@ -166,8 +166,11 @@ export interface AvailabilityTrendRow {
   service: string
   cluster: string
   tag: TagDTO
+  /** Availability of the 30 days before the last 30, as a 0..1 fraction. */
   previous: number
+  /** Availability of the last 30 days, as a 0..1 fraction. */
   current: number
+  /** current - previous in percentage points (negative: getting worse), e.g. -1.25. */
   change_pts: number
 }
 

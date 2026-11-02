@@ -3,7 +3,7 @@ import { fmtNum } from '../../charts/format'
 import type { DataTableColumn } from '../../components/DataTable'
 import { KpiStrip } from '../../components/KpiStrip'
 import { BarCell, MonoCell, ServiceLink, TagCell } from './cells'
-import { averageOf, COLOR, minutesText, percent, sourceFor, sumOf, whole, windowDays } from './format'
+import { averageOf, COLOR, daysBefore, minutesText, percent, sourceFor, sumOf, whole, windowDays } from './format'
 import { KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
@@ -27,6 +27,10 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
   const { kpis, window } = data
   const common = { window, showSources, showProposed }
   const counts = sourceFor(data.sources, 'service_counts_history')
+  const daily = sourceFor(data.sources, 'service_availability_daily')
+  // The rollup panels look back 90 days (60 for the comparison of two 30-day periods), whatever the tab's range.
+  const ninetyDays = { ...common, window: { from: daysBefore(window.to, 90) } }
+  const sixtyDays = { ...common, window: { from: daysBefore(window.to, 60) } }
   const stoppedTasks = (column: string) => sourceFor(data.sources, 'tasks', `tasks.${column}`)
   const availability = kpis.availability
   const days = windowDays(window.used)
@@ -142,12 +146,13 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
           legend={(lines) => lines.slice(0, 3).map((line) => ({ label: line.label, color: line.color, value: fmtNum(sumOf(line.values)) }))}
         />
         <SeriesPanel
-          {...common}
+          {...ninetyDays}
           title="Availability, last 90 days"
           sub="daily"
           span="half"
           series={data.availability_90d.data}
           proposed={data.availability_90d}
+          source={daily}
           mode="area"
           colors={{ availability: COLOR.ok }}
           yMin={96}
@@ -156,21 +161,23 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
           reference={{ value: 99.5, label: '99.5%' }}
         />
         <SeriesPanel
-          {...common}
+          {...ninetyDays}
           title="Time below desired, last 90 days"
           sub="summed across services"
           span="half"
           series={data.below_desired_90d.data}
           proposed={data.below_desired_90d}
+          source={daily}
           mode="area"
           colors={{ minutes_below: COLOR.warn }}
           yFormat={minutesText}
         />
         <TablePanel
-          {...common}
+          {...sixtyDays}
           title="Services getting less available"
           sub="last 30 days vs the 30 before"
           proposed={data.getting_worse}
+          source={daily}
           rows={worse.rows}
           columns={worseColumns}
           rowKey={(row) => row.service_id}

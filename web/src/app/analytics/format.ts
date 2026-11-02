@@ -27,6 +27,9 @@ export const TAG_COLOR: Record<TagColor, string> = {
   neutral: COLOR.gray,
 }
 
+/** The instant `days` days before `iso`; the start of the rolling windows of the daily-rollup panels. */
+export const daysBefore = (iso: string, days: number) => new Date(Date.parse(iso) - days * 86_400_000).toISOString()
+
 export const whole = (value: number) => Math.round(value).toLocaleString('en-US')
 
 /** One decimal, dropped when whole: 14.5, 36. */

@@ -9,7 +9,20 @@ import { KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabP
 import styles from './analytics.module.css'
 
 const OUTCOME_COLORS = { completed: COLOR.accent, failed: COLOR.bad, superseded: COLOR.gray }
-const REASON_COLORS = { circuit_breaker: COLOR.bad, health_check: COLOR.warn, task_failed_to_start: COLOR.orange, stopped_by_user: COLOR.gray }
+const REASON_COLORS = {
+  circuit_breaker: COLOR.bad,
+  health_check: COLOR.warn,
+  failed_to_start: COLOR.orange,
+  out_of_memory: COLOR.pink,
+  stopped_by_user: COLOR.gray,
+  other: COLOR.gray2,
+}
+
+/** The stored failure_reason group as words: "out_of_memory" -> "Out of memory". */
+const reasonLabel = (reason: string) => {
+  const words = reason.replaceAll('_', ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
 
 const rateColor = (rate: number) => (rate > 0.2 ? COLOR.bad : rate > 0.1 ? COLOR.warn : COLOR.accent)
 const rateStatus = (rate: number) => (rate > 0.2 ? 'bad' : rate > 0.1 ? 'warn' : undefined)
@@ -55,7 +68,7 @@ export function DeliveryTab({ data, showSources, showProposed }: TabProps<Analyt
       width: '110px',
       render: (row) => <MonoCell>{row.from_revision === null ? `:${row.to_revision}` : `:${row.from_revision} → :${row.to_revision}`}</MonoCell>,
     },
-    { key: 'reason', header: 'Reason', width: '150px', render: (row) => <strong>{row.reason}</strong> },
+    { key: 'reason', header: 'Reason', width: '150px', render: (row) => <strong>{reasonLabel(row.reason)}</strong> },
     { key: 'detail', header: 'Detail', width: 'minmax(240px, 2.2fr)', render: (row) => <span className={styles.dimMono}>{row.detail}</span> },
     { key: 'ran', header: 'Ran for', width: '90px', align: 'right', render: (row) => <MonoCell>{row.ran_for_s === null ? '—' : durationText(row.ran_for_s)}</MonoCell> },
   ]
@@ -127,6 +140,7 @@ export function DeliveryTab({ data, showSources, showProposed }: TabProps<Analyt
           span="full"
           series={data.failure_reasons.data}
           proposed={data.failure_reasons}
+          source={source}
           mode="stacked"
           colors={REASON_COLORS}
           legend={(lines) => lines.map((line) => ({ label: line.label, color: line.color, value: fmtNum(sumOf(line.values)) }))}
@@ -135,6 +149,7 @@ export function DeliveryTab({ data, showSources, showProposed }: TabProps<Analyt
           {...common}
           title="Recent failed rollouts, with reason"
           proposed={data.recent_failures}
+          source={source}
           rows={failures.rows}
           columns={failureColumns}
           rowKey={(row) => `${row.service_id}-${row.at}`}

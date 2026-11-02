@@ -5,7 +5,7 @@ import type { DataTableColumn } from '../../components/DataTable'
 import { KpiStrip } from '../../components/KpiStrip'
 import { useAuth } from '../auth/AuthProvider'
 import { BarCell, MonoCell, ServiceLink, TagCell } from './cells'
-import { COLOR, memoryText, minutesText, oneDecimal, percent, sourceFor, TAG_COLOR, whole } from './format'
+import { COLOR, daysBefore, memoryText, minutesText, oneDecimal, percent, sourceFor, TAG_COLOR, whole } from './format'
 import { DonutPanel, KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
@@ -24,6 +24,10 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
   const polledAt = Date.parse(data.polled_at)
   const tasks = sourceFor(data.sources, 'tasks')
   const counts = sourceFor(data.sources, 'service_counts_history')
+  const capacityDaily = sourceFor(data.sources, 'cluster_capacity_daily')
+  const utilDaily = sourceFor(data.sources, 'service_util_daily')
+  // The rollup panels look back 90 days, whatever the 7-day window of the live panels.
+  const ninetyDays = { ...common, window: { from: daysBefore(window.to, 90) } }
   const tagColors = Object.fromEntries((me?.tags ?? []).map((tag) => [String(tag.id), TAG_COLOR[tag.color]]))
   const topShare = Math.max(0, ...data.clusters.rows.map((row) => row.share))
 
@@ -148,44 +152,48 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
           source={tasks ? { table: 'tasks.capacity_provider', kept: tasks.kept } : undefined}
         />
         <SeriesPanel
-          {...common}
+          {...ninetyDays}
           title="Reserved vs used vCPU, last 90 days"
           span="full"
           series={data.reserved_vs_used_90d.data}
           proposed={data.reserved_vs_used_90d}
+          source={capacityDaily}
           mode="line"
           colors={USAGE_COLORS}
           yFormat={fmtNum}
           legend={(lines) => lines.map((line) => ({ label: line.label.toLowerCase(), color: line.color, value: fmtNum(latest(line.values) ?? 0) }))}
         />
         <SeriesPanel
-          {...common}
+          {...ninetyDays}
           title="Spot share, last 90 days"
           span="half"
           series={data.spot_share_90d.data}
           proposed={data.spot_share_90d}
+          source={capacityDaily}
           mode="area"
           colors={{ spot_share: COLOR.info }}
           yFormat={(value) => `${value.toFixed(0)}%`}
           legend={(lines) => lines.map((line) => ({ label: 'now', color: line.color, value: `${(latest(line.values) ?? 0).toFixed(0)}%` }))}
         />
         <SeriesPanel
-          {...common}
+          {...ninetyDays}
           title="Memory reserved vs used p95"
           sub="GiB"
           span="half"
           series={data.memory_90d.data}
           proposed={data.memory_90d}
+          source={utilDaily}
           mode="line"
           colors={USAGE_COLORS}
           yFormat={fmtNum}
           legend={(lines) => lines.map((line) => ({ label: line.label.toLowerCase(), color: line.color, value: fmtNum(latest(line.values) ?? 0) }))}
         />
         <TablePanel
-          {...common}
+          {...ninetyDays}
           title="Most over-reserved services"
           sub="90-day p95 use vs what the task definition reserves"
           proposed={data.over_reserved}
+          source={utilDaily}
           rows={over.rows}
           columns={overColumns}
           rowKey={(row) => row.service_id}
