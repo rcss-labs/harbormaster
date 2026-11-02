@@ -176,11 +176,13 @@ test.describe('scaling', () => {
       await page.getByLabel('Scale to', { exact: true }).fill('3')
       await expect(page.getByText(/Outside the auto scaling range/)).toHaveCount(0)
       await page.getByRole('button', { name: 'Update desired count' }).click()
+      await page.getByRole('dialog').getByRole('button', { name: 'Update desired count' }).click()
       await expect(page.getByRole('group', { name: 'Desired count' }).getByRole('spinbutton')).toHaveValue('3', { timeout: 10_000 })
 
       // Put the estate back so later specs see the seeded count.
       await page.getByLabel('Scale to', { exact: true }).fill('2')
       await page.getByRole('button', { name: 'Update desired count' }).click()
+      await page.getByRole('dialog').getByRole('button', { name: 'Update desired count' }).click()
       await expect(page.getByRole('group', { name: 'Desired count' }).getByRole('spinbutton')).toHaveValue('2', { timeout: 10_000 })
     })
   })

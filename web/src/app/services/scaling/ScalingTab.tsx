@@ -8,9 +8,11 @@ import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { KV } from '../../../components/KV'
 import { useToast } from '../../../components/Toast'
+import type { ServiceDTO } from '../../../api/types'
+import { DesiredCountDialog } from '../DesiredCountDialog'
 import styles from './ScalingTab.module.css'
 
-type SaveDesired = (desired: number) => void
+type SaveDesired = (desired: number, onSettled: () => void) => void
 
 /** The desired count as a whole number of tasks, or null while the draft is blank or not a count. */
 function parseCount(draft: string): number | null {
@@ -47,14 +49,19 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
   }
   if (!service.data || !info.data || !scaling.data) return null
 
-  const saveDesired: SaveDesired = (desired) =>
+  const saveDesired: SaveDesired = (desired, onSettled) =>
     setDesired.mutate({ desired }, {
-      onSuccess: (result: DesiredCountResult) =>
+      onSuccess: (result: DesiredCountResult) => {
         toast.show(
           result.changed ? `Desired count set to ${result.desired}.` : `Desired count is already ${result.desired}.`,
           result.changed ? 'ok' : 'info',
-        ),
-      onError: (caught) => toast.show(caught.message, 'bad'),
+        )
+        onSettled()
+      },
+      onError: (caught) => {
+        toast.show(caught.message, 'bad')
+        onSettled()
+      },
     })
 
   return (
@@ -65,8 +72,7 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
           key={info.data.desired}
           info={info.data}
           scaling={scaling.data}
-          canOperate={service.data.can.operate}
-          tagName={service.data.tag.name}
+          service={service.data}
           saving={setDesired.isPending}
           onSave={saveDesired}
         />
@@ -96,15 +102,20 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
 interface DesiredCountCardProps {
   info: DesiredCountInfo
   scaling: ScalingDTO
-  canOperate: boolean
-  tagName: string
+  service: ServiceDTO
   saving: boolean
   onSave: SaveDesired
 }
 
-function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }: DesiredCountCardProps) {
+function DesiredCountCard({ info, scaling, service, saving, onSave }: DesiredCountCardProps) {
   const [draft, setDraft] = useState(String(info.desired))
-  const draftCount = parseCount(draft)
+  const [confirming, setConfirming] = useState(false)
+  const canOperate = service.can.operate
+  const tagName = service.tag.name
+  const parsed = parseCount(draft)
+  // A count above the service's maximum is not a valid draft: it cannot be applied or confirmed.
+  const draftCount = parsed !== null && parsed <= info.max ? parsed : null
+  const outOfRange = parsed !== null && draftCount === null
   const outsideAutoScaling = draftCount !== null && scaling.has_target && (draftCount < scaling.min || draftCount > scaling.max)
 
   const step = (delta: number) => {
@@ -140,14 +151,22 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
           className={styles.btn}
           disabled={!canOperate || draftCount === null || saving}
           title={canOperate ? undefined : `You need Operate on ${tagName}`}
-          onClick={() => {
-            if (draftCount !== null) onSave(draftCount)
-          }}
+          onClick={() => setConfirming(true)}
         >
           Update desired count
         </button>
       </div>
       {outsideAutoScaling && <p className={styles.warning}>{`Outside the auto scaling range ${scaling.min}–${scaling.max}.`}</p>}
+      {outOfRange && <p className={styles.warning}>{`The most this service can run is ${info.max} tasks.`}</p>}
+      {confirming && (
+        <DesiredCountDialog
+          service={service}
+          count={draftCount}
+          pending={saving}
+          onConfirm={() => draftCount !== null && onSave(draftCount, () => setConfirming(false))}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
       <p className={styles.hint}>
         {`Running ${info.running} of ${info.desired}. ${autoScalingNote} Setting 0 stops every task without deleting the service.`}
       </p>

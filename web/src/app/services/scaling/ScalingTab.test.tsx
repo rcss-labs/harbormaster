@@ -1,7 +1,7 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SCALING_NONE, SCALING_PAYMENTS, SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -87,8 +87,35 @@ describe('ScalingTab', () => {
     expect(input).toHaveValue(4)
     await user.click(screen.getByRole('button', { name: 'Update desired count' }))
 
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent(`Set ${SERVICE_PAYMENTS.name} to 4 tasks?`)
+    expect(posted).toEqual([])
+    await user.click(within(dialog).getByRole('button', { name: 'Update desired count' }))
+
     expect(await screen.findByText('Desired count set to 4.')).toBeInTheDocument()
     expect(posted).toEqual([{ desired: 4 }])
+  })
+
+  it('cancelling the confirm dialog posts nothing', async () => {
+    mockDesiredCount()
+    const posted = vi.fn()
+    server.use(
+      http.post('/api/services/:id/desired-count', () => {
+        posted()
+        return HttpResponse.json({ desired: 4, previous: 3, changed: true, warning: null })
+      }),
+    )
+    const user = userEvent.setup()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    await screen.findByRole('spinbutton', { name: 'Scale to' })
+    await user.click(screen.getByRole('button', { name: 'More tasks' }))
+    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(posted).not.toHaveBeenCalled()
+    expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(4)
   })
 
   it('warns when the value is outside the auto scaling range', async () => {
