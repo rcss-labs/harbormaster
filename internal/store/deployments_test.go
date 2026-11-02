@@ -95,11 +95,11 @@ func TestFinishDeployment_ClaimsOnce(t *testing.T) {
 	insertOpenDeployment(t, s, key, "ecs-svc/1")
 	finishedAt := time.Date(2026, 10, 30, 9, 5, 0, 0, time.UTC)
 
-	claimed, err := s.FinishDeployment(ctx, key, "ecs-svc/1", "completed", finishedAt)
+	claimed, err := s.FinishDeployment(ctx, key, "ecs-svc/1", "completed", finishedAt, nil)
 	if err != nil || !claimed {
 		t.Fatalf("first finish = %v, %v; want true, nil", claimed, err)
 	}
-	claimed, err = s.FinishDeployment(ctx, key, "ecs-svc/1", "failed", finishedAt.Add(time.Minute))
+	claimed, err = s.FinishDeployment(ctx, key, "ecs-svc/1", "failed", finishedAt.Add(time.Minute), nil)
 	if err != nil || claimed {
 		t.Fatalf("second finish = %v, %v; want false, nil", claimed, err)
 	}
@@ -122,7 +122,7 @@ func TestFinishDeployment_AcceptsSuperseded(t *testing.T) {
 	key := serviceKey("core-services", "notifications")
 	insertOpenDeployment(t, s, key, "ecs-svc/1")
 
-	claimed, err := s.FinishDeployment(ctx, key, "ecs-svc/1", "superseded", time.Now())
+	claimed, err := s.FinishDeployment(ctx, key, "ecs-svc/1", "superseded", time.Now(), nil)
 	if err != nil || !claimed {
 		t.Fatalf("finish superseded = %v, %v; want true, nil", claimed, err)
 	}
@@ -157,5 +157,38 @@ func assertAttribution(t *testing.T, s *store.Store, key model.ServiceKey, wantK
 	}
 	if kind != wantKind || userID == nil || *userID != wantUser {
 		t.Fatalf("attribution = (%s, %v), want (%s, %d)", kind, userID, wantKind, wantUser)
+	}
+}
+
+func TestFinishDeployment_WritesFailureColumns(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	key := serviceKey("core-services", "notifications")
+	insertOpenDeployment(t, s, key, "ecs-svc/1")
+	insertOpenDeployment(t, s, key, "ecs-svc/2")
+
+	failure := &store.FailureInfo{Group: "circuit_breaker", Detail: "ECS deployment circuit breaker: tasks failed to start."}
+	if claimed, err := s.FinishDeployment(ctx, key, "ecs-svc/1", "failed", time.Now(), failure); err != nil || !claimed {
+		t.Fatalf("finish failed = %v, %v; want true, nil", claimed, err)
+	}
+	if claimed, err := s.FinishDeployment(ctx, key, "ecs-svc/2", "completed", time.Now(), nil); err != nil || !claimed {
+		t.Fatalf("finish completed = %v, %v; want true, nil", claimed, err)
+	}
+
+	read := func(id string) (reason, detail *string) {
+		t.Helper()
+		if err := s.Pool.QueryRow(ctx,
+			`select failure_reason, failure_detail from deployment_history where deployment_id = $1`, id).
+			Scan(&reason, &detail); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		return reason, detail
+	}
+	reason, detail := read("ecs-svc/1")
+	if reason == nil || *reason != failure.Group || detail == nil || *detail != failure.Detail {
+		t.Fatalf("failed row = (%v, %v), want (%s, %s)", reason, detail, failure.Group, failure.Detail)
+	}
+	if reason, detail = read("ecs-svc/2"); reason != nil || detail != nil {
+		t.Fatalf("completed row = (%v, %v), want both NULL", reason, detail)
 	}
 }
