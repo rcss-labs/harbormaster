@@ -33,6 +33,14 @@ func (s *Server) analyticsCapacity(w http.ResponseWriter, r *http.Request) {
 	win := clampWindow(Range7d, retention, s.now())
 	win.requested, win.clamped = requested, false
 
+	daily, err := s.Store.DailyDataSince(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	dailyIn := capacityDailyInputs{capacitySince: daily[store.TableClusterCapacityDaily], utilSince: daily[store.TableServiceUtilDaily]}
+	dailyWin := newDailyWindow(s.now())
+
 	var (
 		facts      []store.CapacityTaskFact
 		clusters   []store.ClusterRow
@@ -69,6 +77,22 @@ func (s *Server) analyticsCapacity(w http.ResponseWriter, r *http.Request) {
 		services, err = s.Store.AnalyticsServiceCount(gctx, sc.Filter, sc.Vis)
 		return err
 	})
+	if dailyIn.capacitySince != nil {
+		group.Go(func() (err error) {
+			dailyIn.capacity, err = s.Store.AnalyticsCapacityDaily(gctx, sc.Filter, sc.Vis, dailyWin.from, dailyWin.to())
+			return err
+		})
+	}
+	if dailyIn.utilSince != nil {
+		group.Go(func() (err error) {
+			dailyIn.util, err = s.Store.AnalyticsUtilDaily(gctx, sc.Filter, sc.Vis, dailyWin.from, dailyWin.to())
+			return err
+		})
+		group.Go(func() (err error) {
+			dailyIn.overReserved, err = s.Store.AnalyticsOverReserved(gctx, sc.Filter, sc.Vis, dailyWin.from)
+			return err
+		})
+	}
 	group.Go(func() (err error) {
 		tags, err = s.tagDTOs(gctx)
 		return err
@@ -96,6 +120,17 @@ func (s *Server) analyticsCapacity(w http.ResponseWriter, r *http.Request) {
 	dto.KPIs.SubnetsLowIPs = len(subnets)
 	fillCapacityTasks(&dto, facts, clusters, tags, accountMap)
 	fillCapacityTrend(&dto, win, trend, tags)
+	fillCapacityDaily(&dto, dailyWin, dailyIn, tags)
+	if dailyIn.capacitySince != nil {
+		dto.Sources = append(dto.Sources, prunedTableSource(store.TableClusterCapacityDaily,
+			"Daily average reserved vCPU and memory and spot share per cluster, for the 90-day panels",
+			s.Cfg.Retention.CapacityDaily, "HM_RETENTION_CAPACITY_DAILY"))
+	}
+	if dailyIn.utilSince != nil {
+		dto.Sources = append(dto.Sources, prunedTableSource(store.TableServiceUtilDaily,
+			"Daily CPU and memory use as a share of what each service reserves, for the 90-day panels",
+			s.Cfg.Retention.UtilDaily, "HM_RETENTION_UTIL_DAILY"))
+	}
 	for _, row := range atMax {
 		dto.AtScalingMax = append(dto.AtScalingMax, AtMaxRowDTO{
 			ServiceID: row.Key.ID(), Service: row.Key.Service, Cluster: row.Key.Cluster,

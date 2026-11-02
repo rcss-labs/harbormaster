@@ -67,14 +67,23 @@ func (s *Server) analyticsReliability(w http.ResponseWriter, r *http.Request) {
 	win := clampWindow(requested, retention, now)
 	eventsWin := clampWindow(requested, cfg.ServiceEvents, now)
 	interval := s.countsInterval()
+	daily, err := s.Store.DailyDataSince(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	availabilitySince := daily[store.TableServiceAvailabilityDaily]
+	dailyWin := newDailyWindow(now)
 
 	var (
-		buckets   []store.AvailBucket
-		perSvc    []store.ServiceAvail
-		stops     store.StopsResult
-		placement int
-		tags      map[authz.TagID]TagDTO
-		polledAt  time.Time
+		dailyPoints []store.DailyAvailabilityPoint
+		trend       []store.AvailabilityTrendFact
+		buckets     []store.AvailBucket
+		perSvc      []store.ServiceAvail
+		stops       store.StopsResult
+		placement   int
+		tags        map[authz.TagID]TagDTO
+		polledAt    time.Time
 	)
 	group, gctx := errgroup.WithContext(ctx)
 	group.Go(func() (err error) {
@@ -93,6 +102,16 @@ func (s *Server) analyticsReliability(w http.ResponseWriter, r *http.Request) {
 		placement, err = s.Store.AnalyticsPlacementFailures(gctx, sc.Filter, sc.Vis, eventsWin.from, eventsWin.to)
 		return err
 	})
+	if availabilitySince != nil {
+		group.Go(func() (err error) {
+			dailyPoints, err = s.Store.AnalyticsAvailabilityDaily(gctx, sc.Filter, sc.Vis, dailyWin.from, dailyWin.to())
+			return err
+		})
+		group.Go(func() (err error) {
+			trend, err = s.Store.AnalyticsAvailabilityTrend(gctx, sc.Filter, sc.Vis, now)
+			return err
+		})
+	}
 	group.Go(func() (err error) {
 		tags, err = s.tagDTOs(gctx)
 		return err
@@ -115,6 +134,12 @@ func (s *Server) analyticsReliability(w http.ResponseWriter, r *http.Request) {
 	fillServiceAvailability(&dto, perSvc, stops, tags, interval)
 	fillStops(&dto, win, stops)
 	dto.KPIs.PlacementFailures = placement
+	if availabilitySince != nil {
+		fillReliabilityDaily(&dto, availabilitySince, dailyWin, dailyPoints, trend, tags)
+		dto.Sources = append(dto.Sources, prunedTableSource(store.TableServiceAvailabilityDaily,
+			"Daily availability and time below desired per service, for the 90-day panels",
+			cfg.AvailabilityDaily, "HM_RETENTION_AVAILABILITY_DAILY"))
+	}
 	writeJSON(w, http.StatusOK, dto)
 }
 

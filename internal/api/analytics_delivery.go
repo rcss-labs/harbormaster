@@ -270,6 +270,20 @@ func (s *Server) analyticsDelivery(w http.ResponseWriter, r *http.Request) {
 	out.FailureRate = aggregate.failureRate
 	out.Duration = aggregate.duration
 	out.Services = deliveryServiceRows(aggregate.services, tags)
+	if hasFailureReason(facts) {
+		since, err := s.Store.AnalyticsFailureReasonSince(ctx, sc.Filter, sc.Vis)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		recent, total, err := s.Store.AnalyticsRecentFailures(ctx, sc.Filter, sc.Vis, window.from, window.to, deliveryOpsRowCap)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		out.FailureReasons = availablePanel(since, failureReasonsSeries(facts, window))
+		out.RecentFailures = availablePanel(since, recentFailuresTable(recent, total))
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
