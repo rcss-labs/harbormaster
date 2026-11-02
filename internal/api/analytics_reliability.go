@@ -250,7 +250,7 @@ func fillStops(dto *ReliabilityDTO, win windowSpec, stops store.StopsResult) {
 		if !store.IsExpectedStopReason(c.Key) {
 			dto.KPIs.UnexpectedStops += c.Count
 		}
-		if c.Key == status.StopReasonGroups[0] {
+		if c.Key == status.StopReasonOutOfMemory {
 			dto.KPIs.OutOfMemory += c.Count
 		}
 		if line := lineOf[c.Key]; line != nil {

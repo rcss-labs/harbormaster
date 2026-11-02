@@ -234,13 +234,13 @@ func ClassifyFailure(rolloutStateReason string, lastStop *store.StoppedTaskReaso
 		return "other"
 	}
 	switch lastStop.Group {
-	case status.StopReasonGroups[0]:
+	case status.StopReasonOutOfMemory:
 		return "out_of_memory"
-	case status.StopReasonGroups[1]:
+	case status.StopReasonHealthChecks:
 		return "health_check"
-	case status.StopReasonGroups[2]:
+	case status.StopReasonStoppedByUser:
 		return "stopped_by_user"
-	case status.StopReasonGroups[4]:
+	case status.StopReasonFailedToStart:
 		return "failed_to_start"
 	}
 	return "other"
