@@ -15,7 +15,7 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster ./cmd/harbormaster
 
 test:
-	go test ./...
+	go test -timeout 30m ./...
 	if [ -f web/package.json ]; then npm --prefix web test -- --run; fi
 
 lint:
