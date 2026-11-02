@@ -140,6 +140,7 @@ export function Sidebar() {
         <NavItem to="/tasks" glyph="TK" label="Tasks" badges={taskBadges} />
         <NavItem to="/networks" glyph="NW" label="Networks" />
         <NavItem to="/storage" glyph="ST" label="Storage" />
+        <NavItem to="/analytics/delivery" glyph="AN" label="Analytics" alsoActiveFor={['/analytics']} />
         {isAdmin ? (
           <>
             <div className={styles.navSection}>Admin</div>
