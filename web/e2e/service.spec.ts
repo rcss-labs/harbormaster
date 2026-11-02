@@ -218,7 +218,7 @@ test.describe('logs', () => {
       // Each log row carries one "<container>/<task id prefix>" label, so count those.
       const rowCount = () => log.getByText(/^[\w-]+\/[0-9a-f]{8}$/).count()
       const allRows = await rowCount()
-      await page.getByLabel('Level').selectOption({ label: 'Warnings and errors' })
+      await page.getByRole('radiogroup', { name: 'Level' }).getByRole('radio', { name: 'Warn+' }).click()
       await expect(healthLines).toHaveCount(0)
       await expect.poll(rowCount).toBeLessThan(allRows)
     })
