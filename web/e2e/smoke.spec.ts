@@ -51,7 +51,7 @@ test('user sees only permitted clusters', async ({ page }) => {
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}`)
   await expect(page.getByText('No access')).toBeVisible()
 
-  await page.goto('/tasks')
+  await page.goto('/tasks?filter=running')
   await expect(page.getByText('release-build').first()).toBeVisible()
 })
 

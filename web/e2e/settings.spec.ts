@@ -40,7 +40,7 @@ test.describe('settings as pavel', () => {
       await page.getByRole('button', { name: 'Save' }).click()
       await expect(page.getByText('Saved.')).toBeVisible()
 
-      await page.goto('/tasks?filter=stopped')
+      await page.goto('/tasks?filter=stopped&group=0')
       const stoppedResizer = page.getByRole('row').filter({ hasText: 'image-resizer' }).filter({ hasText: 'Stopped (exit 137)' })
       // The seed holds six stops (4 to 64 min ago); change.spec may have added more.
       await expect.poll(() => stoppedResizer.count()).toBeGreaterThanOrEqual(6)

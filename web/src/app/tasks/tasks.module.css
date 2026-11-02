@@ -1,13 +1,9 @@
-/* Ported from the mockup's page-head, grid, toolbar and legend rules (docs/design/mockup/index.html). */
-.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.titles { display: grid; gap: 6px; min-width: 0; }
-.meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
-.muted { color: var(--muted); }
+.pageHead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.pageHead h1 { margin: 0; }
+.meta { color: var(--muted); font-size: 12px; }
+.caption { font: 400 11.5px var(--sans, inherit); color: var(--muted); }
 
-.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); margin-bottom: 12px; }
-
-.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-.legendRow { margin-top: 10px; }
-.viewAll { margin-top: 10px; }
-.btn { height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; font-family: inherit; }
-.btn:hover { background: var(--hover); }
+.toolbar { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+.search { width: 280px; max-width: 100%; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; }
+.search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note { margin-top: 8px; color: var(--muted); font-size: 12px; }
