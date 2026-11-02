@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-label="Harbormaster">
+  <g fill="#45B5E3">
+    <polygon points="178,330 432,196 432,625 178,752"></polygon>
+    <polygon points="1076,752 822,625 822,196 1076,330"></polygon>
+    <rect x="455" y="460" width="343" height="123"></rect>
+  </g>
+  <g fill="#45B5E3">
+    <polygon points="178,775 292,725 292,1055 238,1098 178,1098"></polygon>
+    <polygon points="1076,1098 1016,1098 962,1055 962,725 1076,775"></polygon>
+    <polygon points="311,715 368,690 368,1020 311,1045"></polygon>
+    <polygon points="943,1045 886,1020 886,690 943,715"></polygon>
+    <polygon points="387,675 434,655 434,965 387,988"></polygon>
+    <polygon points="867,988 820,965 820,655 867,675"></polygon>
+    <polygon points="453,650 538,610 538,880 453,938"></polygon>
+    <polygon points="801,938 716,880 716,610 801,650"></polygon>
+  </g>
+</svg>
