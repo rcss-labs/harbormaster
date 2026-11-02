@@ -173,8 +173,9 @@ func TestAnalyticsDelivery_EndToEnd(t *testing.T) {
 		}
 	}
 
+	windowEnd := now.Truncate(analyticsPollStep) // the handler's window ends at "now" truncated to 5 minutes
 	// The poll itself records the estate's rollouts, so compare with what the store holds.
-	stored, err := st.AnalyticsDeployments(t.Context(), store.TargetFilter{}, store.Visibility{Admin: true}, now.Add(-7*24*time.Hour), now.Add(time.Minute))
+	stored, err := st.AnalyticsDeployments(t.Context(), store.TargetFilter{}, store.Visibility{Admin: true}, windowEnd.Add(-7*24*time.Hour), windowEnd)
 	if err != nil || len(stored) < len(services) {
 		t.Fatalf("stored rollouts = %d, %v; want at least %d", len(stored), err, len(services))
 	}
