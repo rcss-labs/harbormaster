@@ -19,7 +19,9 @@
 .ct { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg { overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
 .ln[data-level="warn"] { background: rgba(251, 191, 36, 0.07); }
+.ln[data-level="warn"]:hover { background: rgba(251, 191, 36, 0.14); }
 .ln[data-level="warn"] .msg { color: var(--warning); }
 .ln[data-level="error"] { background: rgba(248, 113, 113, 0.09); }
+.ln[data-level="error"]:hover { background: rgba(248, 113, 113, 0.17); }
 .ln[data-level="error"] .msg { color: var(--danger); }
 .empty { color: var(--dim); padding: 0 12px; }

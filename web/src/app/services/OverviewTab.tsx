@@ -117,7 +117,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
           actions={
             vpc ? (
               <Link className={styles.accentLink} to={`/networks/${service.account_id}/${service.region}/${vpc.vpc_id}`}>
-                Network tree →
+                Network placement →
               </Link>
             ) : undefined
           }

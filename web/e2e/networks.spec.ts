@@ -57,7 +57,7 @@ test('dev user does not see Prod clusters in the placement outline', async ({ pa
 test('service networking card opens the VPC on the Networks page', async ({ page }) => {
   await login(page, 'pavel')
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}/overview`)
-  await page.getByRole('link', { name: 'Network tree →' }).click()
+  await page.getByRole('link', { name: 'Network placement →' }).click()
   // The old /networks/<account>/<region>/<vpc> link redirects to the selection in the URL.
   await expect(page).toHaveURL(new RegExp(`/networks\\?vpc=${HOMELAB_ACCOUNT_ID}%2Fus-east-1%2Fvpc-`))
   await expect(page.getByRole('heading', { level: 2, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
