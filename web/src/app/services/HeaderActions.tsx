@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { isApiError, useDesiredCountInfo, useRestart, useSetDesiredCount } from '../../api/change'
+import { useDesiredCountInfo, useSetDesiredCount } from '../../api/change'
 import type { ServiceDTO } from '../../api/types'
-import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { showWarning, useToast } from '../../components/Toast'
 import styles from './service.module.css'
+import { DesiredCountDialog } from './DesiredCountDialog'
+import { RestartDialog, restartBlockedTitle } from './RestartDialog'
 import stepperStyles from './HeaderActions.module.css'
-
-const ROLLOUT_RUNNING_MESSAGE = 'A rollout is already running'
 
 interface HeaderActionsProps {
   serviceId: string
@@ -18,15 +17,8 @@ interface HeaderActionsProps {
 export function HeaderActions({ serviceId, service }: HeaderActionsProps) {
   const [restarting, setRestarting] = useState(false)
 
-  const rolloutRunning = service.deployments.some((deployment) => deployment.rollout_state === 'IN_PROGRESS')
   const operateTitle = service.can.operate ? undefined : `You need Operate on ${service.tag.name}`
-  const restartBlockedTitle = !service.can.operate
-    ? operateTitle
-    : !service.controller.supported
-      ? service.controller.banner || 'This controller does not support restarts'
-      : rolloutRunning
-        ? ROLLOUT_RUNNING_MESSAGE
-        : undefined
+  const restartBlocked = restartBlockedTitle(service)
 
   return (
     <>
@@ -35,8 +27,8 @@ export function HeaderActions({ serviceId, service }: HeaderActionsProps) {
         type="button"
         className={styles.btn}
         aria-label="Restart (new deployment)"
-        disabled={restartBlockedTitle !== undefined}
-        title={restartBlockedTitle}
+        disabled={restartBlocked !== undefined}
+        title={restartBlocked}
         onClick={() => setRestarting(true)}
       >
         Restart
@@ -46,41 +38,6 @@ export function HeaderActions({ serviceId, service }: HeaderActionsProps) {
       </a>
       {restarting && <RestartDialog serviceId={serviceId} service={service} onClose={() => setRestarting(false)} />}
     </>
-  )
-}
-
-interface DialogProps {
-  serviceId: string
-  service: ServiceDTO
-  onClose: () => void
-}
-
-function RestartDialog({ serviceId, service, onClose }: DialogProps) {
-  const toast = useToast()
-  const restart = useRestart(serviceId)
-
-  const confirm = () =>
-    restart.mutate(undefined, {
-      onSuccess: (started) => {
-        toast.show('Restart started.', 'ok')
-        showWarning(toast, started.warning)
-        onClose()
-      },
-      onError: (error) => {
-        toast.show(isApiError(error, 'conflict') ? ROLLOUT_RUNNING_MESSAGE : errorMessage(error, 'Restart failed.'), 'bad')
-        onClose()
-      },
-    })
-
-  return (
-    <ConfirmDialog
-      title={`Restart ${service.name}?`}
-      sub={`Starts a new deployment of :${service.revision}. Each task is replaced, new ones first.`}
-      confirmLabel="Restart"
-      confirmDisabled={restart.isPending}
-      onConfirm={confirm}
-      onCancel={onClose}
-    />
   )
 }
 
@@ -114,7 +71,6 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
   // Steps start from the field's current number, or from the service's count when the field is empty or invalid.
   const stepFrom = valid ? value : service.desired
   const locked = disabledTitle !== undefined
-  const taskWord = value === 1 ? 'task' : 'tasks'
 
   const apply = () =>
     setDesiredCount.mutate(
@@ -176,11 +132,10 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
         </p>
       )}
       {confirming && (
-        <ConfirmDialog
-          title={`Set ${service.name} to ${valid ? `${value} ${taskWord}` : 'a valid number of tasks'}?`}
-          sub={`Now ${service.desired}.${valid && value === 0 ? ' Every task stops. The service and its definition stay.' : ''}`}
-          confirmLabel="Update desired count"
-          confirmDisabled={!valid || setDesiredCount.isPending}
+        <DesiredCountDialog
+          service={service}
+          count={valid ? value : null}
+          pending={setDesiredCount.isPending}
           onConfirm={apply}
           onCancel={() => setConfirming(false)}
         />
