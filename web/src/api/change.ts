@@ -124,6 +124,21 @@ function invalidateService(queryClient: QueryClient, serviceId: string) {
   return queryClient.invalidateQueries({ queryKey: ['service', serviceId] })
 }
 
+// The server's snapshot only reflects an ECS change after its next poll (about 5 s), and the page refetches every 5 s.
+// Two timers of the same period drift in and out of step: a refetch that lands just before the poll leaves the old value
+// on screen for another whole period (about 10 s in all). So after a write, refetch every SETTLE_STEP_MS for
+// SETTLE_WINDOW_MS, which bounds the wait to the poll plus one step.
+const SETTLE_STEP_MS = 2_000
+const SETTLE_WINDOW_MS = 10_000
+
+/** Runs refetch now and then every SETTLE_STEP_MS until SETTLE_WINDOW_MS has passed. Returns the immediate refetch. */
+function refetchWhileSettling(refetch: () => Promise<void>): Promise<void> {
+  for (let elapsed = SETTLE_STEP_MS; elapsed <= SETTLE_WINDOW_MS; elapsed += SETTLE_STEP_MS) {
+    setTimeout(() => void refetch(), elapsed)
+  }
+  return refetch()
+}
+
 /** Rollouts and scaling also add entries to the operations history. */
 function invalidateServiceAndOperations(queryClient: QueryClient, serviceId: string) {
   void queryClient.invalidateQueries({ queryKey: ['operations', serviceId] })
@@ -160,7 +175,8 @@ export function useSetDesiredCount(serviceId: string) {
   return useMutation({
     mutationFn: (body: DesiredCountBody) =>
       api.post<DesiredCountResult>(`/api/services/${serviceId}/desired-count`, body),
-    onSuccess: () => invalidateServiceAndOperations(queryClient, serviceId),
+    // The count changes in AWS at once but the stored service only on the next poll, so keep refetching until it does.
+    onSuccess: () => refetchWhileSettling(() => invalidateServiceAndOperations(queryClient, serviceId)),
   })
 }
 
@@ -172,13 +188,14 @@ export function useStopTask(serviceId?: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (taskId: string) => api.post<StopTaskResult>(`/api/tasks/${taskId}/stop`),
-    onSuccess: () => {
-      if (serviceId) {
-        queryClient.invalidateQueries({ queryKey: ['service', serviceId, 'tasks'] })
-        queryClient.invalidateQueries({ queryKey: ['service', serviceId] })
-      }
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    },
+    onSuccess: () =>
+      refetchWhileSettling(async () => {
+        if (serviceId) {
+          void queryClient.invalidateQueries({ queryKey: ['service', serviceId, 'tasks'] })
+          void queryClient.invalidateQueries({ queryKey: ['service', serviceId] })
+        }
+        await queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      }),
   })
 }
 
