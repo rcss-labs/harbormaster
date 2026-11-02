@@ -127,6 +127,14 @@ describe('Networks VPC list', () => {
     expect(screen.getByTestId('search').textContent).toContain(`vpc=${encodeURIComponent(SHARED_KEY)}`)
   })
 
+  it('an unknown ?vpc= key shows a no-access state instead of opening another VPC', async () => {
+    serveEstate()
+    renderApp(`/networks?vpc=${encodeURIComponent(`${HOMELAB}/us-east-1/vpc-gone`)}`)
+    expect(await screen.findByText('No running tasks you can see in this VPC.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'homelab-main', level: 2 })).not.toBeInTheDocument()
+    expect(await within(vpcList()).findByRole('button', { name: /homelab-main/ })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('restores the selected VPC and the filter from the URL', async () => {
     serveEstate()
     renderApp(`/networks?vpc=${encodeURIComponent(SHARED_KEY)}&q=us-east`)

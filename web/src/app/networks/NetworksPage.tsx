@@ -44,7 +44,10 @@ export function NetworksPage() {
   const needle = q.trim().toLowerCase()
   const visible = needle ? vpcs.filter((vpc) => matches(vpc, needle)) : vpcs
   // A selection hidden by the filter stays open; with none chosen the first listed VPC opens.
-  const selected = vpcs.find((vpc) => vpc.key === selectedKey) ?? visible[0] ?? vpcs[0]
+  // A chosen key that is not in the list (gone, or not visible to this user) never opens another VPC.
+  const chosen = selectedKey ? vpcs.find((vpc) => vpc.key === selectedKey) : undefined
+  const selected = selectedKey ? chosen : (visible[0] ?? vpcs[0])
+  const unknownSelection = Boolean(selectedKey) && !chosen && !isLoading
   const subnetTotal = vpcs.reduce((sum, vpc) => sum + vpc.subnets, 0)
   const taskTotal = vpcs.reduce((sum, vpc) => sum + vpc.tasks, 0)
 
@@ -109,7 +112,10 @@ export function NetworksPage() {
               <div className={styles.listFoot}>{`${hiddenVpcs} ${hiddenVpcs === 1 ? 'VPC' : 'VPCs'} without tasks hidden`}</div>
             )}
           </section>
-          <div className={styles.detail}>{selected && <VpcDetail key={selected.key} entry={selected} />}</div>
+          <div className={styles.detail}>
+            {selected && <VpcDetail key={selected.key} entry={selected} />}
+            {unknownSelection && <EmptyState>No running tasks you can see in this VPC.</EmptyState>}
+          </div>
         </div>
       )}
     </div>
