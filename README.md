@@ -195,6 +195,15 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_RETENTION_DEPLOYMENT_HISTORY` | `2160h` | How long deployment history is kept |
 | `HM_RETENTION_AUDIT_LOG` | `8760h` | How long the audit log is kept |
 | `HM_RETENTION_ORPHAN_TAGS` | `720h` | How long tags whose resource no longer exists are kept |
+| `HM_RETENTION_AVAILABILITY_DAILY` | `8760h` | How long daily service availability rollups are kept |
+| `HM_RETENTION_CAPACITY_DAILY` | `8760h` | How long daily cluster capacity rollups are kept |
+| `HM_RETENTION_UTIL_DAILY` | `2160h` | How long daily service utilisation rollups are kept |
+
+### Analytics
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_ANALYTICS_UTIL` | `true` | Daily CloudWatch utilisation rollup for the Capacity tab; one GetMetricData batch per account and region a day |
 
 ### Limits
 
