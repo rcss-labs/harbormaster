@@ -172,7 +172,7 @@ function taskBase(
   cluster: ClusterDef,
   seed: string,
   index: number,
-): Pick<TaskDTO, 'id' | 'short_id' | 'arn' | 'cluster' | 'az' | 'subnet_id' | 'private_ip'> {
+): Pick<TaskDTO, 'id' | 'short_id' | 'arn' | 'cluster' | 'account_name' | 'region' | 'az' | 'subnet_id' | 'private_ip'> {
   const arn = `arn:aws:ecs:${cluster.region}:${cluster.account.account_id}:task/${cluster.name}/${hex(seed, 32)}`
   const [az, subnet] = AZ_SUBNETS[cluster.region][index % 2]
   const octet = REGIONS.indexOf(cluster.region) + 1
@@ -181,6 +181,8 @@ function taskBase(
     short_id: hex(seed, 8),
     arn,
     cluster: clusterRefOf(cluster),
+    account_name: cluster.account.name,
+    region: cluster.region,
     az,
     subnet_id: subnet,
     private_ip: `10.${octet}.${index % 2}.${10 + (parseInt(hex(seed, 2), 16) % 200)}`,
@@ -368,7 +370,13 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
     items,
     next: null,
     polled_at: FIXTURE_NOW,
-    counts: { problems: items.filter(inProblemsFilter).length, running: running.length, stopped: stopped.length, all: items.length },
+    counts: {
+      problems: items.filter(inProblemsFilter).length,
+      running: running.length,
+      stopped: stopped.length,
+      all: items.length,
+      stopped_error: stopped.filter(isProblem).length,
+    },
     summary: {
       by_status: {
         running_healthy: running.filter((t) => t.health !== 'UNHEALTHY').length,

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MeDTO } from '../../api/types'
-import { AUTH_OPTIONS_ON, ME_ADMIN, ME_SSO_USER } from '../../test/fixtures'
+import { AUTH_OPTIONS_ON, ME_ADMIN, ME_SSO_USER, TASKS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 import { navigateExternal } from './navigateExternal'
@@ -128,5 +128,55 @@ describe('Shell sso_link toasts', () => {
   it('any other sso_link value shows the generic message', async () => {
     renderApp('/?sso_link=link_user_gone')
     expect(await screen.findByText('Linking failed. Ask a global admin to check the audit log.')).toBeInTheDocument()
+  })
+})
+
+describe('Sidebar Tasks badges', () => {
+  const tasksWith = (unhealthy: number, stoppedError: number) =>
+    server.use(
+      http.get('/api/tasks', () =>
+        HttpResponse.json({
+          ...TASKS,
+          counts: { ...TASKS.counts, stopped_error: stoppedError },
+          summary: { ...TASKS.summary, by_status: { ...TASKS.summary.by_status, running_unhealthy: unhealthy } },
+        }),
+      ),
+    )
+  const tasksLink = async () => {
+    const link = await screen.findByRole('link', { name: /^Tasks/ })
+    // Let the tasks query resolve before reading the link.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    return link
+  }
+
+  it('shows no number when nothing is unhealthy or stopped with errors, not even the running total', async () => {
+    tasksWith(0, 0)
+    renderApp('/')
+    expect(await tasksLink()).toHaveTextContent(/^Tasks$/)
+  })
+
+  it('shows only the yellow unhealthy count', async () => {
+    tasksWith(3, 0)
+    renderApp('/')
+    const link = await tasksLink()
+    await waitFor(() => expect(link).toHaveTextContent(/^Tasks3$/))
+    expect(within(link).getByLabelText('3 unhealthy')).toBeInTheDocument()
+    expect(within(link).queryByLabelText(/stopped with errors/)).not.toBeInTheDocument()
+  })
+
+  it('shows only the red stopped-with-errors count, using the stopped-tasks window', async () => {
+    tasksWith(0, 2)
+    renderApp('/')
+    const link = await tasksLink()
+    await waitFor(() => expect(link).toHaveTextContent(/^Tasks2$/))
+    expect(within(link).getByLabelText(/^2 stopped with errors in the last \d+ min$/)).toBeInTheDocument()
+    expect(within(link).queryByLabelText(/unhealthy/)).not.toBeInTheDocument()
+  })
+
+  it('shows both, yellow first', async () => {
+    tasksWith(3, 2)
+    renderApp('/')
+    const link = await tasksLink()
+    await waitFor(() => expect(link).toHaveTextContent(/^Tasks32$/))
   })
 })

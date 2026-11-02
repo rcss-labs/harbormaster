@@ -312,6 +312,8 @@ export interface TaskDTO {
   arn: string
   service: ServiceRef | null
   cluster: ClusterRef
+  account_name: string
+  region: string
   group: string
   started_by: string
   status: string
@@ -340,7 +342,7 @@ export interface TasksListDTO {
   items: TaskDTO[]
   next: string | null
   polled_at: string
-  counts: { problems: number; running: number; stopped: number; all: number }
+  counts: { problems: number; running: number; stopped: number; all: number; stopped_error: number }
   summary: {
     by_status: { running_healthy: number; running_unhealthy: number; stopped_error: number; stopped_normal: number }
     by_az: { az: string; count: number }[]

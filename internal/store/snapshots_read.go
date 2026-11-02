@@ -459,6 +459,8 @@ func (s *Store) ListTasks(ctx context.Context, tq TaskQuery) ([]TaskRow, int, er
 		where = append(where, runningSQL)
 	case "stopped":
 		where = append(where, "t.last_status = 'STOPPED'")
+	case "stopped_error":
+		where = append(where, stoppedErrorSQL)
 	case "problems":
 		where = append(where, "("+runningSQL+" or "+problemSQL+")")
 	}

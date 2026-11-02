@@ -15,9 +15,6 @@
 .indentRegion { padding-left: 24px; }
 .indentCluster { padding-left: 44px; }
 .indentService { padding-left: 64px; }
-.disclosure { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 4px; margin-left: -4px; color: inherit; font: inherit; cursor: pointer; border-radius: var(--radius); }
-.disclosure:hover { background: var(--hover); }
-.caret { width: 10px; color: var(--muted); }
 .summary { margin-left: 10px; font-size: 12px; font-weight: 400; }
 .treeControls { display: inline-flex; gap: 6px; margin-left: 12px; }
 .link { color: var(--accent); }

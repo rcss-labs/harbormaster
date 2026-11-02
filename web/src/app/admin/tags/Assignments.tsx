@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useMemo, useState } from 'react'
 import type { TagAssignmentsDTO, TagDTO, TagItemDTO } from '../../../api/types'
 import { Card } from '../../../components/Card'
+import { Disclosure } from '../../../components/Disclosure'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
@@ -63,17 +64,6 @@ function distinctTags(clusters: ClusterAssignment[]): TagDTO[] {
 const accountKey = (account: string) => `a:${account}`
 const regionKey = (account: string, region: string) => `r:${account}|${region}`
 const clusterKey = (clusterId: string) => `c:${clusterId}`
-
-function Disclosure({ label, expanded, onToggle }: { label: string; expanded: boolean; onToggle: () => void }) {
-  return (
-    <button type="button" className={styles.disclosure} aria-expanded={expanded} onClick={onToggle}>
-      <span className={styles.caret} aria-hidden="true">
-        {expanded ? '▾' : '▸'}
-      </span>
-      {label}
-    </button>
-  )
-}
 
 /** Account → region → cluster → services, all collapsed at first. Changing a select saves straight away. */
 export function Assignments({ clusters, tags }: { clusters: ClusterAssignment[]; tags: TagItemDTO[] }) {
