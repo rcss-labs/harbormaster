@@ -25,14 +25,41 @@ type User struct {
 	CreatedAt          time.Time
 	LastSignInAt       *time.Time
 	LockedUntil        *time.Time
+
+	// BreakGlass lets the user sign in with a password while SSO is on; it requires a password.
+	BreakGlass bool
+	// The SSO identity: all three are empty or all three are set.
+	IdPEntityID, ExternalID, ExternalIDFormat string
+	Email, DisplayName                        *string
+	// Admin-set pre-link (empty PendingLinkNameID when none).
+	PendingLinkNameID      string
+	PendingLinkExpiresAt   *time.Time
+	PendingLinkSetAt       *time.Time
+	PendingLinkSetByUserID *int64
 }
 
-const userColumns = `id, username, password_hash, is_admin, must_change_password, created_at, last_sign_in_at, locked_until`
+// HasPassword reports whether the user can sign in with a password. PasswordHash is empty when
+// the column is NULL.
+func (u User) HasPassword() bool { return u.PasswordHash != "" }
+
+// SSOLinked reports whether an SSO identity is bound to the user.
+func (u User) SSOLinked() bool { return u.ExternalID != "" }
+
+// PendingLinkActive reports whether an unexpired admin-set pending link exists at now.
+func (u User) PendingLinkActive(now time.Time) bool {
+	return u.PendingLinkNameID != "" && u.PendingLinkExpiresAt != nil && now.Before(*u.PendingLinkExpiresAt)
+}
+
+const userColumns = `id, username, coalesce(password_hash, ''), is_admin, must_change_password, created_at, last_sign_in_at, locked_until,
+	break_glass, coalesce(idp_entity_id, ''), coalesce(external_id, ''), coalesce(external_id_format, ''), email, display_name,
+	coalesce(pending_link_name_id, ''), pending_link_expires_at, pending_link_set_at, pending_link_set_by_user_id`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Admin, &u.MustChangePassword,
-		&u.CreatedAt, &u.LastSignInAt, &u.LockedUntil)
+		&u.CreatedAt, &u.LastSignInAt, &u.LockedUntil,
+		&u.BreakGlass, &u.IdPEntityID, &u.ExternalID, &u.ExternalIDFormat, &u.Email, &u.DisplayName,
+		&u.PendingLinkNameID, &u.PendingLinkExpiresAt, &u.PendingLinkSetAt, &u.PendingLinkSetByUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -183,4 +210,208 @@ func (s *Store) DeleteLoginAttemptsBefore(ctx context.Context, t time.Time) (int
 		return 0, fmt.Errorf("delete login attempts: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// Errors returned by the SSO identity and break-glass methods.
+var (
+	ErrAlreadyLinked    = errors.New("already linked")
+	ErrSSOIdentityTaken = errors.New("sso identity taken")
+	ErrNotLinked        = errors.New("not linked")
+	ErrNeedsPassword    = errors.New("needs password")
+)
+
+// NewSAMLUser describes a user created on first SSO sign-in.
+type NewSAMLUser struct {
+	Username, IdPEntityID, ExternalID, ExternalIDFormat string
+	Email, DisplayName                                  *string
+}
+
+// CreateSAMLUser inserts a password-less, non-admin user bound to an SSO identity.
+// A taken username or identity returns ErrConflict.
+func (s *Store) CreateSAMLUser(ctx context.Context, n NewSAMLUser) (User, error) {
+	u, err := scanUser(s.Pool.QueryRow(ctx,
+		`insert into users (username, password_hash, is_admin, must_change_password,
+		                    idp_entity_id, external_id, external_id_format, email, display_name)
+		 values ($1, null, false, false, $2, $3, $4, $5, $6) returning `+userColumns,
+		n.Username, n.IdPEntityID, n.ExternalID, n.ExternalIDFormat, n.Email, n.DisplayName))
+	if isUniqueViolation(err) {
+		return User{}, ErrConflict
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("create saml user: %w", err)
+	}
+	return u, nil
+}
+
+// GetUserByExternalID returns the user linked to (idpEntityID, externalID), or ErrNotFound.
+func (s *Store) GetUserByExternalID(ctx context.Context, idpEntityID, externalID string) (User, error) {
+	return scanUser(s.Pool.QueryRow(ctx,
+		`select `+userColumns+` from users where idp_entity_id = $1 and external_id = $2`,
+		idpEntityID, externalID))
+}
+
+// GetUserByPendingLink returns the user whose unexpired pending link equals nameID, or ErrNotFound.
+// Pending links are not stored with an entity ID; the caller passes the configured one and the
+// store clears pending links when the entity ID changes. The match is exact and case-sensitive.
+func (s *Store) GetUserByPendingLink(ctx context.Context, _ /* idpEntityID */, nameID string, now time.Time) (User, error) {
+	return scanUser(s.Pool.QueryRow(ctx,
+		`select `+userColumns+` from users
+		 where pending_link_name_id = $1 and pending_link_expires_at > $2`, nameID, now))
+}
+
+// UpdateSAMLProfile changes only the non-nil fields. Returns ErrNotFound if the user is absent.
+func (s *Store) UpdateSAMLProfile(ctx context.Context, id int64, email, displayName *string) error {
+	return s.execExpectOne(ctx,
+		`update users set email = coalesce($2, email), display_name = coalesce($3, display_name) where id = $1`,
+		id, email, displayName)
+}
+
+// CountBreakGlassAdmins returns the number of global admins flagged break-glass.
+func (s *Store) CountBreakGlassAdmins(ctx context.Context) (int, error) {
+	var n int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from users where is_admin and break_glass`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count break-glass admins: %w", err)
+	}
+	return n, nil
+}
+
+// CountPasswordUsersNotBreakGlass counts users who have a password but are not break-glass, i.e.
+// who lose password sign-in when SSO is enabled.
+func (s *Store) CountPasswordUsersNotBreakGlass(ctx context.Context) (int, error) {
+	var n int
+	if err := s.Pool.QueryRow(ctx,
+		`select count(*) from users where password_hash is not null and not break_glass`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count password users: %w", err)
+	}
+	return n, nil
+}
+
+// BindSSO describes an identity to attach to an existing user.
+type BindSSO struct {
+	UserID                                    int64
+	IdPEntityID, ExternalID, ExternalIDFormat string
+	Email, DisplayName                        *string
+}
+
+// BindSSOIdentity attaches an SSO identity to a user in one transaction: it clears any pending
+// link, syncs the non-nil profile fields and never touches the password. ErrAlreadyLinked when the
+// user has an identity, ErrSSOIdentityTaken when another user holds it, ErrNotFound when absent.
+func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return User{}, fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var linked bool
+	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 for update`, b.UserID).Scan(&linked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, fmt.Errorf("load user: %w", err)
+	}
+	if linked {
+		return User{}, ErrAlreadyLinked
+	}
+	u, err := scanUser(tx.QueryRow(ctx,
+		`update users set idp_entity_id = $2, external_id = $3, external_id_format = $4,
+		        email = coalesce($5, email), display_name = coalesce($6, display_name),
+		        pending_link_name_id = null, pending_link_set_at = null,
+		        pending_link_expires_at = null, pending_link_set_by_user_id = null
+		 where id = $1 returning `+userColumns,
+		b.UserID, b.IdPEntityID, b.ExternalID, b.ExternalIDFormat, b.Email, b.DisplayName))
+	if isUniqueViolation(err) {
+		return User{}, ErrSSOIdentityTaken
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("bind identity: %w", err)
+	}
+	return u, tx.Commit(ctx)
+}
+
+// SetPendingLink records an admin pre-link on an unlinked user, replacing any earlier one.
+// ErrAlreadyLinked when the user has an identity; ErrSSOIdentityTaken when nameID is linked to or
+// pending on another user.
+func (s *Store) SetPendingLink(ctx context.Context, id int64, nameID string, setBy int64, expires time.Time) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var linked bool
+	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 for update`, id).Scan(&linked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("load user: %w", err)
+	}
+	if linked {
+		return ErrAlreadyLinked
+	}
+	var taken bool
+	if err := tx.QueryRow(ctx,
+		`select exists (select 1 from users where id <> $1 and (external_id = $2 or pending_link_name_id = $2))`,
+		id, nameID).Scan(&taken); err != nil {
+		return fmt.Errorf("check name id: %w", err)
+	}
+	if taken {
+		return ErrSSOIdentityTaken
+	}
+	_, err = tx.Exec(ctx,
+		`update users set pending_link_name_id = $2, pending_link_set_at = now(),
+		        pending_link_expires_at = $3, pending_link_set_by_user_id = $4 where id = $1`,
+		id, nameID, expires, setBy)
+	if isUniqueViolation(err) {
+		return ErrSSOIdentityTaken
+	}
+	if err != nil {
+		return fmt.Errorf("set pending link: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// ClearPendingLink removes a pending link. Returns ErrNotFound when the user has none.
+func (s *Store) ClearPendingLink(ctx context.Context, id int64) error {
+	return s.execExpectOne(ctx,
+		`update users set pending_link_name_id = null, pending_link_set_at = null,
+		        pending_link_expires_at = null, pending_link_set_by_user_id = null
+		 where id = $1 and pending_link_name_id is not null`, id)
+}
+
+// UnlinkSSO detaches the user's SSO identity and ends their SSO sessions. When the user has no
+// password it sets newHash with must_change_password so they keep a credential (passwordSet).
+// ErrNotLinked when no identity is bound; ErrNotFound when the user is absent.
+func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwordSet bool, sessionsEnded int64, err error) {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, 0, fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var linked, hasPassword bool
+	if err := tx.QueryRow(ctx,
+		`select external_id is not null, password_hash is not null from users where id = $1 for update`, id).
+		Scan(&linked, &hasPassword); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, 0, ErrNotFound
+		}
+		return false, 0, fmt.Errorf("load user: %w", err)
+	}
+	if !linked {
+		return false, 0, ErrNotLinked
+	}
+	if hasPassword {
+		_, err = tx.Exec(ctx,
+			`update users set idp_entity_id = null, external_id = null, external_id_format = null where id = $1`, id)
+	} else {
+		_, err = tx.Exec(ctx,
+			`update users set idp_entity_id = null, external_id = null, external_id_format = null,
+			        password_hash = $2, must_change_password = true where id = $1`, id, newHash)
+	}
+	if err != nil {
+		return false, 0, fmt.Errorf("unlink: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `delete from sessions where user_id = $1 and auth_source = 'saml'`, id)
+	if err != nil {
+		return false, 0, fmt.Errorf("end saml sessions: %w", err)
+	}
+	return !hasPassword, tag.RowsAffected(), tx.Commit(ctx)
 }
