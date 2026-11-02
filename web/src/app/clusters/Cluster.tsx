@@ -1,38 +1,33 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useCluster } from '../../api/hooks'
 import { useClusterMetrics } from '../../api/observe'
 import { BarChart } from '../../charts/BarChart'
-import { Sparkline } from '../../charts/Sparkline'
-import { fmtNum } from '../../charts/format'
-import { Card } from '../../components/Card'
-import { EmptyState } from '../../components/EmptyState'
 import { HBars } from '../../charts/HBars'
-import { Pill, type PillKind } from '../../components/Pill'
-import { Seg } from '../../components/Seg'
-import { Split } from '../../components/Split'
-import { STATUS_COLOR, clusterStatusKind, clusterStatusLabel, statusKind } from '../../components/status'
+import { fmtNum } from '../../charts/format'
+import { EmptyState } from '../../components/EmptyState'
+import { KpiStrip } from '../../components/KpiStrip'
+import { Panel } from '../../components/Panel'
+import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
-import { Tile } from '../../components/Tile'
+import { STATUS_COLOR, statusKind } from '../../components/status'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
-import { ClusterUsageChart, UseNowTile } from './ClusterUsageChart'
-import { ServiceCard } from './ServiceCard'
+import { ClusterUsageChart } from './ClusterUsageChart'
+import { formatPercent } from './clusterMetrics'
 import { ServicesTable } from './ServicesTable'
+import { presentValues } from './ServiceCardMetrics'
 import styles from './clusters.module.css'
+import { serviceSeverity } from './serviceSeverity'
 import type { TagTarget } from './tagTarget'
-import { LIST_VIEW_OPTIONS, useListView } from './useListView'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
 const STOP_ERROR_COLOR = 'var(--danger)'
-const FARGATE_COLOR = 'var(--accent)'
-const SPOT_COLOR = 'var(--series-3)'
 const TASK_LINE_COLOR = 'var(--accent)'
-
-/** Order in which service status counts stack in the Services tile. */
-const SERVICE_SPLIT_ORDER: PillKind[] = ['ok', 'info', 'warn', 'bad', 'mute']
+/** The Tasks by service panel lists this many services, problems first; the table below has them all. */
+const BARS_SHOWN = 10
 
 function NoAccess() {
   return (
@@ -43,12 +38,18 @@ function NoAccess() {
   )
 }
 
+const withSub = (value: ReactNode, sub: ReactNode) => (
+  <>
+    {value}
+    <small className={styles.kpiSub}>{sub}</small>
+  </>
+)
+
 export function Cluster() {
   const { clusterId = '' } = useParams()
   const clusterQuery = useCluster(clusterId)
   const clusterMetricsQuery = useClusterMetrics(clusterId, '24h')
   const { me } = useAuth()
-  const [view, setView] = useListView('cards')
   const [editing, setEditing] = useState<TagTarget | null>(null)
   const cluster = clusterQuery.data
   const clusterMetrics = clusterMetricsQuery.data
@@ -65,10 +66,11 @@ export function Cluster() {
   const handleTagClick = me?.admin ? setEditing : undefined
   const services = cluster.services_detail
   const steadyCount = services.filter((service) => service.status === 'steady').length
-  const serviceSplitParts = SERVICE_SPLIT_ORDER.map((kind) => ({
-    n: services.filter((service) => statusKind(service.status) === kind).length,
-    color: STATUS_COLOR[kind],
-  }))
+  const missing = cluster.desired - cluster.running
+  const insights = cluster.container_insights
+  const cpuHistory = presentValues(clusterMetrics?.cluster?.cpu ?? [])
+  const memHistory = presentValues(clusterMetrics?.cluster?.mem ?? [])
+  const bySeverity = [...services].sort((a, b) => serviceSeverity(b.status) - serviceSeverity(a.status) || a.name.localeCompare(b.name))
 
   const stopColumns = cluster.stops_per_hour.map((hour) => ({
     parts: [
@@ -79,28 +81,39 @@ export function Cluster() {
   }))
 
   return (
-    <>
-      <div className={styles.pageHead}>
+    <div className={styles.page}>
+      <header className={styles.pageHead}>
         <div className={styles.titles}>
           <div className={styles.titleRow}>
-            <h1>{cluster.name}</h1>
+            <h1 className={styles.monoTitle}>{cluster.name}</h1>
             <TagChip
               tag={cluster.tag}
               kind="cluster"
               onClick={handleTagClick && (() => handleTagClick({ kind: 'cluster', id: cluster.id, name: cluster.name, tag: cluster.tag }))}
             />
-            <Pill kind={clusterStatusKind(cluster.status)}>{clusterStatusLabel(cluster.status)}</Pill>
+            <StatusDot clusterStatus={cluster.status} />
           </div>
-          <div className={styles.meta}>
+          <div className={styles.metaLine}>
             <span>
               {cluster.account_name} ({cluster.account_id})
             </span>
+            <span>·</span>
             <span>{cluster.region}</span>
             {cluster.vpc && (
-              <Link className={styles.accentLink} to={`/networks/${cluster.account_id}/${cluster.region}/${cluster.vpc.vpc_id}`}>
-                {cluster.vpc.name}
-              </Link>
+              <>
+                <span>·</span>
+                <Link
+                  className={styles.accentLink}
+                  to={`/networks?${new URLSearchParams({ vpc: `${cluster.account_id}/${cluster.region}/${cluster.vpc.vpc_id}` })}`}
+                >
+                  {cluster.vpc.name}
+                </Link>
+              </>
             )}
+            <span>·</span>
+            <span>
+              {cluster.fargate_tasks} Fargate · {cluster.spot_tasks} Spot
+            </span>
           </div>
         </div>
         <div className={styles.actions}>
@@ -108,46 +121,40 @@ export function Cluster() {
             Open in AWS console ↗
           </a>
         </div>
-      </div>
+      </header>
 
-      <div className={`${styles.grid} ${styles.g4}`}>
-        <Tile k="Services" v={services.length} small={`${steadyCount} steady`}>
-          <Split parts={serviceSplitParts} />
-        </Tile>
-        <Tile k="Tasks, 72 h" v={cluster.running} small={`of ${cluster.desired} desired`}>
-          <Sparkline values={cluster.tasks_history_72h.map((point) => point.running)} color={TASK_LINE_COLOR} height={24} fluid />
-        </Tile>
-        <Tile
-          k="Reserved by running tasks"
-          v={
-            <>
-              {fmtNum(cluster.reserved_vcpu)}
-              <small>vCPU</small>
-              {fmtNum(cluster.reserved_gib)}
-              <small>GiB</small>
-            </>
-          }
-        >
-          <Split
-            parts={[
-              { n: cluster.fargate_tasks, color: FARGATE_COLOR },
-              { n: cluster.spot_tasks, color: SPOT_COLOR },
-            ]}
-          />
-          <div className={styles.tileSub}>
-            <span>
-              {cluster.fargate_tasks} Fargate · {cluster.spot_tasks} Spot
-            </span>
-          </div>
-        </Tile>
-        <UseNowTile metrics={clusterMetrics} insights={cluster.container_insights} />
-      </div>
+      <KpiStrip
+        label="Cluster summary"
+        items={[
+          { label: 'Services', value: withSub(services.length, `${steadyCount} steady`) },
+          {
+            label: 'Tasks',
+            value: withSub(`${cluster.running}/${cluster.desired}`, missing > 0 ? `${missing} missing` : 'all running'),
+            valueColor: missing > 0 ? 'var(--warning)' : undefined,
+            spark: cluster.tasks_history_72h.map((point) => point.running),
+            sparkColor: TASK_LINE_COLOR,
+          },
+          { label: 'Reserved', value: withSub(fmtNum(cluster.reserved_vcpu), `vCPU · ${fmtNum(cluster.reserved_gib)} GiB`) },
+          {
+            label: 'CPU now',
+            value: insights ? formatPercent(clusterMetrics?.now?.cpu) : withSub('–', 'Insights off'),
+            spark: cpuHistory,
+            sparkColor: 'var(--series-1)',
+          },
+          {
+            label: 'Memory now',
+            value: insights ? formatPercent(clusterMetrics?.now?.mem) : withSub('–', 'Insights off'),
+            spark: memHistory,
+            sparkColor: 'var(--series-2)',
+          },
+        ]}
+      />
 
-      <div className={`${styles.grid} ${styles.gWide}`}>
-        <ClusterUsageChart metrics={clusterMetrics} insights={cluster.container_insights} error={clusterMetricsQuery.error} />
-        <Card title="Tasks by service" right="bar = running · line = desired">
+      <div className={styles.twoCol}>
+        <ClusterUsageChart metrics={clusterMetrics} insights={insights} error={clusterMetricsQuery.error} />
+        <Panel title="Tasks by service" actions={<span>bar = running · tick = desired</span>}>
           <HBars
-            items={services.map((service) => ({
+            items={bySeverity.slice(0, BARS_SHOWN).map((service) => ({
               name: service.name,
               href: `/services/${service.id}/tasks`,
               parts: [{ v: service.running, color: STATUS_COLOR[statusKind(service.status)] }],
@@ -155,40 +162,30 @@ export function Cluster() {
               label: `${service.running} / ${service.desired}`,
             }))}
           />
+          {bySeverity.length > BARS_SHOWN && (
+            <div className={styles.note}>{`${bySeverity.length - BARS_SHOWN} more in the table below`}</div>
+          )}
           <div className={styles.stopsBlock}>
             <h3 className={styles.stopsTitle}>Task stops per hour</h3>
             <BarChart cols={stopColumns} height={80} xLabels={[[0, '24 h ago'], [23, 'now']]} />
           </div>
-        </Card>
+        </Panel>
       </div>
 
-      <div className={styles.toolbar}>
-        <h2>Services</h2>
-        <span className={styles.toolbarEnd} />
-        <Seg label="View" options={LIST_VIEW_OPTIONS} value={view} onChange={setView} />
-      </div>
-      {view === 'table' ? (
+      <Panel
+        title="Services"
+        flush
+        toolbar={<span className={styles.count}>{`${services.length} ${services.length === 1 ? 'service' : 'services'} · problems first`}</span>}
+      >
         <ServicesTable
           services={services}
           clusterName={cluster.name}
           onTagClick={handleTagClick}
           metrics={clusterMetrics?.services}
-          insights={cluster.container_insights}
+          insights={insights}
         />
-      ) : (
-        <div className={styles.cards}>
-          {services.map((service) => (
-            <ServiceCard
-              key={service.id}
-              service={service}
-              clusterName={cluster.name}
-              onTagClick={handleTagClick}
-              metrics={clusterMetrics?.services[service.id]}
-              insights={cluster.container_insights}
-            />
-          ))}
-        </div>
-      )}
+      </Panel>
+
       {editing?.kind === 'cluster' && (
         <EditTagDialog kind="cluster" id={editing.id} name={editing.name} current={editing.tag.id} onClose={() => setEditing(null)} />
       )}
@@ -203,6 +200,6 @@ export function Cluster() {
           onClose={() => setEditing(null)}
         />
       )}
-    </>
+    </div>
   )
 }

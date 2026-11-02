@@ -24,14 +24,15 @@ test('wide screens fill the content width', async ({ page }) => {
   expect(Math.abs(last.x + last.width - (gridBox.x + gridBox.width))).toBeLessThanOrEqual(2)
 })
 
-test('cluster cards grow more columns on wide screens', async ({ page }) => {
-  await page.setViewportSize({ width: 2560, height: 1440 })
+test('the clusters table scrolls inside its panel at 920px without widening the page', async ({ page }) => {
+  await page.setViewportSize({ width: 920, height: 800 })
   await page.goto('/clusters')
-  const cards = page.getByRole('main').getByRole('article')
-  await expect(cards).toHaveCount(6)
-  const rows = new Set<number>()
-  for (let index = 0; index < 6; index++) rows.add(Math.round((await cards.nth(index).boundingBox())!.y))
-  expect(rows.size).toBe(1)
+  const table = page.getByRole('table', { name: 'Clusters' })
+  await expect(table.getByRole('row')).toHaveCount(7)
+  const main = page.getByRole('main')
+  expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+  // The table keeps its minimum width, so it is wider than the panel that scrolls it.
+  expect((await table.boundingBox())!.width).toBeGreaterThanOrEqual(1120)
 })
 
 test('logs and terminal fill the viewport height', async ({ page }) => {
