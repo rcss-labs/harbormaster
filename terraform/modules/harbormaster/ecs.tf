@@ -117,10 +117,17 @@ resource "aws_ecs_service" "server" {
 
   tags = local.tags
 
+  # The task definition references only the secret ARNs, and the database URL value is
+  # written after RDS is up (several minutes). Without waiting for the versions, the first
+  # tasks fail with "can't find the specified secret value for staging label: AWSCURRENT"
+  # and the circuit breaker fails the initial deployment.
   depends_on = [
     aws_lb_listener.https,
     aws_iam_role_policy.execution_secrets,
     aws_iam_role_policy_attachment.execution_managed,
     aws_iam_role_policy.task_assume,
+    aws_secretsmanager_secret_version.database_url,
+    aws_secretsmanager_secret_version.session_key,
+    aws_secretsmanager_secret_version.metrics_token,
   ]
 }
