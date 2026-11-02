@@ -153,6 +153,28 @@ describe('TasksTab Terminal link', () => {
   })
 })
 
+describe('TasksTab segments', () => {
+  it('filters the loaded tasks to Running or Stopped and counts each', async () => {
+    const own = ALL_TASKS.filter((task) => task.service?.id === SERVICE_PAYMENTS.id && task.status === 'RUNNING')
+    const stopped = { ...own[0], id: 'stopped-1', short_id: 'dead00000001', status: 'STOPPED', exit_code: 137 }
+    server.use(http.get('/api/services/:id/tasks', () => HttpResponse.json(tasksList([...own, stopped]))))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await findTaskTable()
+    const segments = screen.getByRole('radiogroup', { name: 'Task state' })
+    expect(within(segments).getByRole('radio', { name: `Running ${own.length}` })).toBeInTheDocument()
+    expect(within(segments).getByRole('radio', { name: 'Stopped 1' })).toBeInTheDocument()
+    expect(within(segments).getByRole('radio', { name: 'All' + ` ${own.length + 1}` })).toBeChecked()
+
+    await userEvent.setup().click(within(segments).getByRole('radio', { name: 'Stopped 1' }))
+    expect(within(table).queryByText('Running')).not.toBeInTheDocument()
+    expect(within(table).getByText('dead00000001')).toBeInTheDocument()
+
+    await userEvent.setup().click(within(segments).getByRole('radio', { name: `Running ${own.length}` }))
+    expect(within(table).queryByText('dead00000001')).not.toBeInTheDocument()
+    expect(within(table).getAllByText('Running').length).toBeGreaterThan(0)
+  })
+})
+
 describe('OperationsTab', () => {
   it('unchecking the toggle requests include_ecs=false', async () => {
     const requested: string[] = []

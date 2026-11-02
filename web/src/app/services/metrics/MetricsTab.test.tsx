@@ -14,7 +14,7 @@ import { renderApp } from '../../../test/renderApp'
 const metricsPath = `/services/${SERVICE_PAYMENTS.id}/metrics`
 
 describe('MetricsTab', () => {
-  it('renders four panels for 24h and the resolution text', async () => {
+  it('renders six panels for 24h and the resolution text', async () => {
     const ranges: (string | null)[] = []
     server.use(
       http.get('/api/services/:id/metrics', ({ request }) => {
@@ -28,10 +28,22 @@ describe('MetricsTab', () => {
     expect(screen.getByText('Memory utilization')).toBeInTheDocument()
     expect(screen.getByText('Network')).toBeInTheDocument()
     expect(screen.getByText('Running task count')).toBeInTheDocument()
+    expect(screen.getByText('Requests per minute')).toBeInTheDocument()
+    expect(screen.getByText('Response time p95')).toBeInTheDocument()
     expect(
       screen.getByText(`Container Insights via CloudWatch · 5-minute resolution, averaged across ${SERVICE_PAYMENTS.running} tasks`),
     ).toBeInTheDocument()
     expect(ranges).toContain('24h')
+  })
+
+  it('leaves out the request and latency charts when there is no load balancer data', async () => {
+    server.use(http.get('/api/services/:id/metrics', () => HttpResponse.json({ ...SERVICE_METRICS_PAYMENTS, alb: null })))
+    renderApp(metricsPath)
+
+    expect(await screen.findByText('CPU utilization')).toBeInTheDocument()
+    expect(screen.getByText('Running task count')).toBeInTheDocument()
+    expect(screen.queryByText('Requests per minute')).not.toBeInTheDocument()
+    expect(screen.queryByText('Response time p95')).not.toBeInTheDocument()
   })
 
   it('changing the range updates ?range= and refetches with range=6h', async () => {
@@ -95,7 +107,7 @@ describe('MetricsTab', () => {
     renderApp(metricsPath)
 
     const notes = await screen.findAllByText(/Showing data from/)
-    expect(notes).toHaveLength(4)
+    expect(notes).toHaveLength(6)
     expect(notes[0]).toHaveTextContent('CloudWatch is throttling requests')
   })
 })
