@@ -1,0 +1,4 @@
+.toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-2); font-size: 12px; }
+.toggle input { accent-color: var(--accent); margin: 0; width: 13px; height: 13px; cursor: inherit; }
+.toggle:hover { color: var(--text); }
+.disabled { opacity: 0.55; cursor: not-allowed; }
