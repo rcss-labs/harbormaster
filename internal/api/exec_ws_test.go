@@ -512,7 +512,7 @@ func TestExecWS_HappyPath_StatusOutputAndOplog(t *testing.T) {
 	if len(ops) != 1 || ops[0].Text != "Opened terminal session on task "+short+" (payments-api, /bin/sh)." || ops[0].Actor != "pavel" {
 		t.Fatalf("operations = %+v", ops)
 	}
-	if ops[0].Details["session_id"] != connected.SessionID || ops[0].Details["container"] != "payments-api" ||
+	if ops[0].Details["op"] != "terminal" || ops[0].Details["session_id"] != connected.SessionID || ops[0].Details["container"] != "payments-api" ||
 		ops[0].Details["command"] != "/bin/sh" || ops[0].Details["task_arn"] == "" {
 		t.Errorf("details = %+v", ops[0].Details)
 	}
@@ -546,7 +546,7 @@ func TestExecWS_ClientClose_TerminatesAndLogsClose(t *testing.T) {
 	pattern := regexp.MustCompile(`^Closed terminal session on task ` + taskShortID(t, id) + ` \(payments-api\) after \d+s\.$`)
 	eventually(t, "close operation row", func() bool { return len(r.operations(t, "Closed terminal session%")) == 1 })
 	ops := r.operations(t, "Closed terminal session%")
-	if !pattern.MatchString(ops[0].Text) || ops[0].Details["reason"] != "client" || ops[0].Details["session_id"] != connected.SessionID {
+	if !pattern.MatchString(ops[0].Text) || ops[0].Details["op"] != "terminal_close" || ops[0].Details["reason"] != "client" || ops[0].Details["session_id"] != connected.SessionID {
 		t.Errorf("close row = %+v", ops[0])
 	}
 	if _, ok := ops[0].Details["duration_ms"]; !ok {

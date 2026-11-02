@@ -6,15 +6,26 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
+// The stop-reason groups by name; callers compare against these rather than indexing StopReasonGroups.
+const (
+	StopReasonOutOfMemory        = "Out of memory (exit 137)"
+	StopReasonHealthChecks       = "Failed load balancer health checks"
+	StopReasonStoppedByUser      = "Stopped by a user"
+	StopReasonScaledIn           = "Scaled in"
+	StopReasonFailedToStart      = "Failed to start"
+	StopReasonContainerExited    = "Container exited with an error"
+	StopReasonDeploymentReplaced = "Replaced by a deployment"
+)
+
 // StopReasonGroups lists the stop-reason groups in chart order.
 var StopReasonGroups = []string{
-	"Out of memory (exit 137)",
-	"Failed load balancer health checks",
-	"Stopped by a user",
-	"Scaled in",
-	"Failed to start",
-	"Container exited with an error",
-	"Replaced by a deployment",
+	StopReasonOutOfMemory,
+	StopReasonHealthChecks,
+	StopReasonStoppedByUser,
+	StopReasonScaledIn,
+	StopReasonFailedToStart,
+	StopReasonContainerExited,
+	StopReasonDeploymentReplaced,
 }
 
 // StopReasonGroup buckets a stopped task by why it stopped. Checks run in order and the first match wins.
@@ -22,19 +33,19 @@ func StopReasonGroup(task model.Task) string {
 	reason := strings.ToLower(task.StoppedReason)
 	switch {
 	case strings.Contains(reason, "outofmemory") || hasContainerExit(task, 137):
-		return StopReasonGroups[0]
+		return StopReasonOutOfMemory
 	case strings.Contains(reason, "health checks"):
-		return StopReasonGroups[1]
+		return StopReasonHealthChecks
 	case strings.Contains(reason, "via harbormaster") || task.StopCode == "UserInitiated":
-		return StopReasonGroups[2]
+		return StopReasonStoppedByUser
 	case strings.Contains(reason, "desired count"):
-		return StopReasonGroups[3]
+		return StopReasonScaledIn
 	case task.StopCode == "TaskFailedToStart":
-		return StopReasonGroups[4]
+		return StopReasonFailedToStart
 	case task.StopCode == "EssentialContainerExited" && hasNonZeroExit(task):
-		return StopReasonGroups[5]
+		return StopReasonContainerExited
 	default:
-		return StopReasonGroups[6]
+		return StopReasonDeploymentReplaced
 	}
 }
 

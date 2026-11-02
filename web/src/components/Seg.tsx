@@ -15,9 +15,11 @@ interface SegProps<T extends string> {
   label?: string
   /** `toggle`: group of aria-pressed buttons (default). `radio`: single-choice filter with radiogroup semantics. */
   semantics?: 'toggle' | 'radio'
+  /** Marks every control aria-disabled without disabling it, so it stays focusable and clicks can still explain why. */
+  disabled?: boolean
 }
 
-export function Seg<T extends string>({ options, value, onChange, label, semantics = 'toggle' }: SegProps<T>) {
+export function Seg<T extends string>({ options, value, onChange, label, semantics = 'toggle', disabled }: SegProps<T>) {
   const radio = semantics === 'radio'
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -40,6 +42,7 @@ export function Seg<T extends string>({ options, value, onChange, label, semanti
             type="button"
             className={on ? styles.on : ''}
             {...(radio ? { role: 'radio', 'aria-checked': on, tabIndex: on ? 0 : -1, onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => onKeyDown(e, index) } : { 'aria-pressed': on })}
+            aria-disabled={disabled || undefined}
             onClick={() => onChange(option.value)}
           >
             {option.label}

@@ -185,3 +185,22 @@ describe('Sidebar Tasks badges', () => {
     await waitFor(() => expect(link).toHaveTextContent(/^TKTasks32$/))
   })
 })
+
+describe('Sidebar Analytics', () => {
+  it('shows Analytics between Storage and Settings', async () => {
+    renderApp('/')
+    await screen.findByRole('link', { name: /^Analytics/ })
+    const names = within(screen.getByRole('navigation', { name: 'Main' }))
+      .getAllByRole('link')
+      .map((link) => link.textContent?.replace(/^[A-Z]{2}/, ''))
+    expect(names.indexOf('Analytics')).toBe(names.indexOf('Storage') + 1)
+    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 1)
+  })
+
+  it('is active on every analytics tab', async () => {
+    renderApp('/analytics/reliability')
+    const link = await screen.findByRole('link', { name: /^Analytics/ })
+    expect(link.className).toMatch(/active/)
+    expect(screen.getByRole('link', { name: /^Storage/ }).className).not.toMatch(/active/)
+  })
+})

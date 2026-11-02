@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest'
 import shapes from './shapes.json'
 import {
   ALERTS,
+  ANALYTICS_CAPACITY,
+  ANALYTICS_CAPACITY_DAILY,
+  ANALYTICS_DELIVERY,
+  ANALYTICS_DELIVERY_FAILURES,
+  ANALYTICS_OPERATIONS,
+  ANALYTICS_RELIABILITY,
+  ANALYTICS_RELIABILITY_DAILY,
   ALL_TASKS,
   AUTH_OPTIONS_OFF,
   AUTH_OPTIONS_ON,
@@ -141,6 +148,14 @@ describe('API contract', () => {
     ['ssoTestResult', () => SSO_TEST_OK],
     ['ssoTestResult', () => SSO_TEST_WOULD_LINK],
     ['ssoTestResult', () => SSO_TEST_FAIL],
+    ['analyticsDelivery', () => ANALYTICS_DELIVERY],
+    ['analyticsReliability', () => ANALYTICS_RELIABILITY],
+    ['analyticsCapacity', () => ANALYTICS_CAPACITY],
+    ['analyticsDelivery', () => ANALYTICS_DELIVERY_FAILURES],
+    ['analyticsReliability', () => ANALYTICS_RELIABILITY_DAILY],
+    ['analyticsCapacity', () => ANALYTICS_CAPACITY_DAILY],
+    ['analyticsOperations', () => ANALYTICS_OPERATIONS],
+    ['analyticsReliability', () => body('/api/analytics/reliability?range=30d')],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
     expect(shapeProblems(await load(), contract[name], name)).toEqual([])

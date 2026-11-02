@@ -61,6 +61,814 @@
       "$null": "time"
     }
   },
+  "analyticsCapacity": {
+    "at_scaling_max": [
+      {
+        "at_max_since": {
+          "$null": "time"
+        },
+        "cluster": "string",
+        "desired": "number",
+        "max_capacity": "number",
+        "service": "string",
+        "service_id": "string"
+      }
+    ],
+    "clusters": {
+      "rows": [
+        {
+          "account_id": "string",
+          "account_name": "string",
+          "cluster": "string",
+          "cluster_id": "string",
+          "mem_gib": "number",
+          "share": "number",
+          "spot_share": "number",
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          },
+          "tasks": "number",
+          "vcpu": "number"
+        }
+      ],
+      "total": "number"
+    },
+    "kpis": {
+      "at_scaling_max": "number",
+      "reserved_mem_gib": "number",
+      "reserved_vcpu": "number",
+      "running_tasks": "number",
+      "services": "number",
+      "spot_share": {
+        "$null": "number"
+      },
+      "subnets_low_ips": "number"
+    },
+    "memory_90d": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "series": [
+            {
+              "expected": "boolean",
+              "key": "string",
+              "label": "string",
+              "values": [
+                {
+                  "$null": "number"
+                }
+              ]
+            }
+          ],
+          "timestamps": [
+            "time"
+          ]
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "over_reserved": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "rows": [
+            {
+              "cluster": "string",
+              "reserved_mem_gib": "number",
+              "reserved_vcpu": "number",
+              "service": "string",
+              "service_id": "string",
+              "tag": {
+                "color": "string",
+                "id": "number",
+                "inherited": "boolean",
+                "name": "string"
+              },
+              "used_p95_mem_gib": "number",
+              "used_p95_vcpu": "number",
+              "wasted_vcpu": "number"
+            }
+          ],
+          "total": "number"
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "polled_at": "time",
+    "reserved_vcpu_7d": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "reserved_vs_used_90d": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "series": [
+            {
+              "expected": "boolean",
+              "key": "string",
+              "label": "string",
+              "values": [
+                {
+                  "$null": "number"
+                }
+              ]
+            }
+          ],
+          "timestamps": [
+            "time"
+          ]
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "sources": [
+      {
+        "kept": "string",
+        "reads": "string",
+        "setting": {
+          "$null": "string"
+        },
+        "table": "string",
+        "window_used": {
+          "$null": "string"
+        }
+      }
+    ],
+    "spot_share_90d": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "series": [
+            {
+              "expected": "boolean",
+              "key": "string",
+              "label": "string",
+              "values": [
+                {
+                  "$null": "number"
+                }
+              ]
+            }
+          ],
+          "timestamps": [
+            "time"
+          ]
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "subnets_low": [
+      {
+        "account_id": "string",
+        "available_ips": "number",
+        "az": "string",
+        "name": "string",
+        "region": "string",
+        "subnet_id": "string",
+        "total_ips": "number",
+        "used_pct": "number"
+      }
+    ],
+    "tab": "string",
+    "tasks_by_capacity_provider": {
+      "slices": [
+        {
+          "key": "string",
+          "label": "string",
+          "value": "number"
+        }
+      ],
+      "total": "number"
+    },
+    "vcpu_by_account": {
+      "slices": [
+        {
+          "key": "string",
+          "label": "string",
+          "value": "number"
+        }
+      ],
+      "total": "number"
+    },
+    "window": {
+      "bucket": "string",
+      "clamped": "boolean",
+      "from": "time",
+      "range_applies": "boolean",
+      "requested": "string",
+      "retention": "string",
+      "to": "time",
+      "used": "string"
+    }
+  },
+  "analyticsDelivery": {
+    "duration": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "failure_rate": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "failure_reasons": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "series": [
+            {
+              "expected": "boolean",
+              "key": "string",
+              "label": "string",
+              "values": [
+                {
+                  "$null": "number"
+                }
+              ]
+            }
+          ],
+          "timestamps": [
+            "time"
+          ]
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "kpis": {
+      "change_failure_rate": {
+        "$null": "number"
+      },
+      "median_rollout_s": {
+        "$null": "number"
+      },
+      "p90_rollout_s": {
+        "$null": "number"
+      },
+      "rollbacks": "number",
+      "rollouts": "number",
+      "rollouts_per_day": "number",
+      "superseded": "number",
+      "time_to_recover_s": {
+        "$null": "number"
+      }
+    },
+    "polled_at": "time",
+    "recent_failures": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "rows": [
+            {
+              "at": "time",
+              "cluster": "string",
+              "detail": "string",
+              "from_revision": {
+                "$null": "number"
+              },
+              "ran_for_s": {
+                "$null": "number"
+              },
+              "reason": "string",
+              "service": "string",
+              "service_id": "string",
+              "to_revision": "number"
+            }
+          ],
+          "total": "number"
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "rollouts": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "services": {
+      "rows": [
+        {
+          "account_id": "string",
+          "cluster": "string",
+          "failed": "number",
+          "failure_rate": "number",
+          "last_failed_at": {
+            "$null": "time"
+          },
+          "median_s": {
+            "$null": "number"
+          },
+          "recover_s": {
+            "$null": "number"
+          },
+          "rollouts": "number",
+          "service": "string",
+          "service_id": "string",
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          }
+        }
+      ],
+      "total": "number"
+    },
+    "sources": [
+      {
+        "kept": "string",
+        "reads": "string",
+        "setting": {
+          "$null": "string"
+        },
+        "table": "string",
+        "window_used": {
+          "$null": "string"
+        }
+      }
+    ],
+    "tab": "string",
+    "window": {
+      "bucket": "string",
+      "clamped": "boolean",
+      "from": "time",
+      "range_applies": "boolean",
+      "requested": "string",
+      "retention": "string",
+      "to": "time",
+      "used": "string"
+    }
+  },
+  "analyticsOperations": {
+    "by_type": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "hands_on": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "kpis": {
+      "operations": "number",
+      "people": "number",
+      "restarts": "number",
+      "revisions_registered": "number",
+      "scale_changes": "number",
+      "tasks_stopped": "number",
+      "terminal_sessions": "number"
+    },
+    "most_restarted": {
+      "rows": [
+        {
+          "cluster": "string",
+          "last_at": "time",
+          "people": "number",
+          "restarts": "number",
+          "service": "string",
+          "service_id": "string",
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          }
+        }
+      ],
+      "total": "number"
+    },
+    "polled_at": "time",
+    "restarts_per_100_deploys": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "sources": [
+      {
+        "kept": "string",
+        "reads": "string",
+        "setting": {
+          "$null": "string"
+        },
+        "table": "string",
+        "window_used": {
+          "$null": "string"
+        }
+      }
+    ],
+    "tab": "string",
+    "who": {
+      "rows": [
+        {
+          "deploy": "number",
+          "last_at": "time",
+          "restart": "number",
+          "scale": "number",
+          "terminal": "number",
+          "total": "number",
+          "username": "string"
+        }
+      ],
+      "total": "number"
+    },
+    "window": {
+      "bucket": "string",
+      "clamped": "boolean",
+      "from": "time",
+      "range_applies": "boolean",
+      "requested": "string",
+      "retention": "string",
+      "to": "time",
+      "used": "string"
+    }
+  },
+  "analyticsReliability": {
+    "availability": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "availability_90d": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "series": [
+            {
+              "expected": "boolean",
+              "key": "string",
+              "label": "string",
+              "values": [
+                {
+                  "$null": "number"
+                }
+              ]
+            }
+          ],
+          "timestamps": [
+            "time"
+          ]
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "below_desired_90d": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "series": [
+            {
+              "expected": "boolean",
+              "key": "string",
+              "label": "string",
+              "values": [
+                {
+                  "$null": "number"
+                }
+              ]
+            }
+          ],
+          "timestamps": [
+            "time"
+          ]
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "exit_codes": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "getting_worse": {
+      "available": "boolean",
+      "data": {
+        "$null": {
+          "rows": [
+            {
+              "change_pts": "number",
+              "cluster": "string",
+              "current": "number",
+              "previous": "number",
+              "service": "string",
+              "service_id": "string",
+              "tag": {
+                "color": "string",
+                "id": "number",
+                "inherited": "boolean",
+                "name": "string"
+              }
+            }
+          ],
+          "total": "number"
+        }
+      },
+      "data_since": {
+        "$null": "time"
+      },
+      "needs": {
+        "$null": {
+          "how": "string",
+          "size": "string",
+          "table": "string"
+        }
+      }
+    },
+    "kpis": {
+      "availability": {
+        "$null": "number"
+      },
+      "minutes_below_desired": "number",
+      "out_of_memory": "number",
+      "placement_failures": "number",
+      "services_below": "number",
+      "task_stops": "number",
+      "unexpected_stops": "number"
+    },
+    "least_available": {
+      "rows": [
+        {
+          "availability": "number",
+          "cluster": "string",
+          "minutes_below": "number",
+          "service": "string",
+          "service_id": "string",
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          },
+          "top_reason": {
+            "$null": "string"
+          },
+          "unexpected_stops": "number"
+        }
+      ],
+      "total": "number"
+    },
+    "polled_at": "time",
+    "services_below": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "sources": [
+      {
+        "kept": "string",
+        "reads": "string",
+        "setting": {
+          "$null": "string"
+        },
+        "table": "string",
+        "window_used": {
+          "$null": "string"
+        }
+      }
+    ],
+    "stops_by_reason": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "tab": "string",
+    "unexpected_by_zone": {
+      "series": [
+        {
+          "expected": "boolean",
+          "key": "string",
+          "label": "string",
+          "values": [
+            {
+              "$null": "number"
+            }
+          ]
+        }
+      ],
+      "timestamps": [
+        "time"
+      ]
+    },
+    "window": {
+      "bucket": "string",
+      "clamped": "boolean",
+      "from": "time",
+      "range_applies": "boolean",
+      "requested": "string",
+      "retention": "string",
+      "to": "time",
+      "used": "string"
+    }
+  },
   "audit": {
     "items": [
       {

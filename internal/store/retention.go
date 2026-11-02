@@ -9,6 +9,8 @@ import (
 // Retention sets how long each kind of row is kept; a zero duration keeps that table forever.
 type Retention struct {
 	StoppedTasks, ServiceEvents, CountsHistory, OperationLog, DeploymentHistory, AuditLog, OrphanTags time.Duration
+	// Daily analytics tables are keyed by day and pruned on day < cutoff date.
+	AvailabilityDaily, CapacityDaily, UtilDaily time.Duration
 }
 
 // RetentionResult maps a table key ("tasks", "service_events", ...) to rows deleted.
@@ -36,6 +38,10 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		{"service_counts_history", `delete from service_counts_history where ts < $1`, r.CountsHistory},
 		{"operation_log", `delete from operation_log where ts < $1`, r.OperationLog},
 		{"deployment_history", `delete from deployment_history where started_at < $1`, r.DeploymentHistory},
+		// Daily tables are keyed by UTC date; the cutoff is passed as a timestamp and cast.
+		{"service_availability_daily", `delete from service_availability_daily where day < $1::date`, r.AvailabilityDaily},
+		{"cluster_capacity_daily", `delete from cluster_capacity_daily where day < $1::date`, r.CapacityDaily},
+		{"service_util_daily", `delete from service_util_daily where day < $1::date`, r.UtilDaily},
 	}
 	for _, step := range timed {
 		if step.age <= 0 {

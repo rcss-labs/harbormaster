@@ -225,8 +225,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/settings", s.getSettings, routeOptions{})
 	s.handle(mux, "PUT /api/settings", s.putSettings, routeOptions{Admin: true})
 	s.observeRoutes(mux)
-	s.networkRoutes(mux) // plan 05
-	s.storageRoutes(mux) // plan 05
+	s.networkRoutes(mux)   // plan 05
+	s.storageRoutes(mux)   // plan 05
+	s.analyticsRoutes(mux) // analytics
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})

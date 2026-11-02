@@ -64,6 +64,39 @@ describe('chart primitives', () => {
     expect(screen.getByText('Degraded').parentElement).toHaveTextContent('Degraded0')
   })
 
+  it('Donut default size is unchanged', () => {
+    const { container } = renderWithProviders(<Donut segments={[{ name: 'Steady', v: 5, color: 'green' }]} label="5" sub="services" />)
+    const svg = container.querySelector('svg')!
+    expect(svg).toHaveAttribute('width', '88')
+    expect(svg.querySelector('circle')).toHaveAttribute('stroke-width', '14')
+  })
+
+  it('Donut size, ring and centerLabel are configurable', () => {
+    const { container } = renderWithProviders(
+      <Donut segments={[{ name: 'Steady', v: 5, color: 'green' }]} label="5" sub="vCPU" size={132} ring={16} centerLabel="12.5" />,
+    )
+    const svg = container.querySelector('svg')!
+    expect(svg).toHaveAttribute('width', '132')
+    expect(svg.querySelector('circle')).toHaveAttribute('stroke-width', '16')
+    expect(svg.querySelectorAll('text')[0]).toHaveTextContent('12.5')
+  })
+
+  it('Donut legend pct mode shows value and percent', () => {
+    renderWithProviders(
+      <Donut
+        segments={[
+          { name: 'Steady', v: 6, color: 'green' },
+          { name: 'Failing', v: 2, color: 'red' },
+        ]}
+        label="8"
+        sub="services"
+        legend="pct"
+      />,
+    )
+    expect(screen.getByText('Failing').parentElement).toHaveTextContent('Failing225%')
+    expect(screen.getByText('Steady').parentElement).toHaveTextContent('Steady675%')
+  })
+
   it('HBars shows "Nothing to show." when empty', () => {
     renderWithProviders(<HBars items={[]} />)
     expect(screen.getByText('Nothing to show.')).toBeInTheDocument()

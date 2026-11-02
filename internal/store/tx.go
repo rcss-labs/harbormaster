@@ -42,6 +42,6 @@ func (t Tx) AttributeDeployment(ctx context.Context, d AttributedDeployment) err
 	return attributeDeployment(ctx, t.tx, d)
 }
 
-func (t Tx) FinishDeployment(ctx context.Context, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time) (bool, error) {
-	return finishDeployment(ctx, t.tx, k, deploymentID, outcome, finishedAt)
+func (t Tx) FinishDeployment(ctx context.Context, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time, failure *FailureInfo) (bool, error) {
+	return finishDeployment(ctx, t.tx, k, deploymentID, outcome, finishedAt, failure)
 }

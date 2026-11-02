@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
+	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -68,20 +70,33 @@ func (l *OutcomeLogger) Once(ctx context.Context) error {
 		if outcome == "" {
 			continue
 		}
+		var failure *store.FailureInfo
+		if outcome == "failed" {
+			info, err := l.failureInfo(ctx, row, reason)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			failure = &info
+		}
 		// Claim and log together: if the log write fails the claim rolls back and the next pass retries.
 		err := l.inTx(ctx, func(tx store.Tx) error {
-			claimed, err := tx.FinishDeployment(ctx, row.Key, row.DeploymentID, outcome, now)
+			claimed, err := tx.FinishDeployment(ctx, row.Key, row.DeploymentID, outcome, now, failure)
 			if err != nil || !claimed || silent {
 				return err
+			}
+			details := map[string]any{
+				"op": "outcome", "deployment_id": row.DeploymentID, "outcome": outcome,
+				"kind": row.Kind, "started_by_user_id": row.StartedByUserID,
+			}
+			if failure != nil {
+				details["failure_reason"] = failure.Group
 			}
 			return tx.AppendOperation(ctx, store.Operation{
 				AccountID: row.Key.AccountID, Region: row.Key.Region, Cluster: row.Key.Cluster,
 				Service: &row.Key.Service, Source: "harbormaster",
-				Text: outcomeText(deploymentLabel(row), outcome, reason),
-				Details: map[string]any{
-					"deployment_id": row.DeploymentID, "outcome": outcome,
-					"kind": row.Kind, "started_by_user_id": row.StartedByUserID,
-				},
+				Text:    outcomeText(deploymentLabel(row), outcome, reason),
+				Details: details,
 			})
 		})
 		if err != nil {
@@ -176,4 +191,57 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// failureInfo classifies a failed deployment. The last stopped task is only
+// looked up when the rollout reason alone does not say why.
+func (l *OutcomeLogger) failureInfo(ctx context.Context, row store.OpenDeployment, rolloutReason string) (store.FailureInfo, error) {
+	var lastStop *store.StoppedTaskReason
+	if classifyRolloutReason(rolloutReason) == "" {
+		var err error
+		if lastStop, err = l.Store.LastStoppedTaskReason(ctx, row.Key, row.DeploymentID); err != nil {
+			return store.FailureInfo{}, err
+		}
+	}
+	detail := rolloutReason
+	if detail == "" && lastStop != nil {
+		detail = lastStop.Reason
+	}
+	return store.FailureInfo{Group: ClassifyFailure(rolloutReason, lastStop), Detail: detail}, nil
+}
+
+// classifyRolloutReason recognises ECS rollout reasons that name the cause; "" otherwise.
+func classifyRolloutReason(reason string) string {
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "circuit breaker"):
+		return "circuit_breaker"
+	case strings.Contains(lower, "health check"):
+		return "health_check"
+	}
+	return ""
+}
+
+// ClassifyFailure buckets a failed deployment as circuit_breaker, health_check,
+// failed_to_start, out_of_memory, stopped_by_user or other. The ECS rollout
+// reason wins; otherwise the stop-reason group of the deployment's newest
+// stopped task decides.
+func ClassifyFailure(rolloutStateReason string, lastStop *store.StoppedTaskReason) string {
+	if group := classifyRolloutReason(rolloutStateReason); group != "" {
+		return group
+	}
+	if lastStop == nil {
+		return "other"
+	}
+	switch lastStop.Group {
+	case status.StopReasonOutOfMemory:
+		return "out_of_memory"
+	case status.StopReasonHealthChecks:
+		return "health_check"
+	case status.StopReasonStoppedByUser:
+		return "stopped_by_user"
+	case status.StopReasonFailedToStart:
+		return "failed_to_start"
+	}
+	return "other"
 }

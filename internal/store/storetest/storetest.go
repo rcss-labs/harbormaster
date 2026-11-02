@@ -13,7 +13,7 @@ import (
 )
 
 // Open returns a migrated Store in a fresh isolated schema (see OpenEmpty).
-func Open(t *testing.T) *store.Store {
+func Open(t testing.TB) *store.Store {
 	t.Helper()
 	s := OpenEmpty(t)
 	if _, err := s.Migrate(context.Background()); err != nil {
@@ -24,7 +24,7 @@ func Open(t *testing.T) *store.Store {
 
 // OpenEmpty returns a Store bound to a fresh, unmigrated schema t_<8 hex>,
 // dropped on cleanup. It skips the test when HM_TEST_DATABASE_URL is unset.
-func OpenEmpty(t *testing.T) *store.Store {
+func OpenEmpty(t testing.TB) *store.Store {
 	t.Helper()
 	url := lookupURL()
 	if url == "" {
