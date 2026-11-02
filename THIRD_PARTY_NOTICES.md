@@ -223,3 +223,43 @@ The ported files retain the upstream copyright and licence header; Harbormaster'
 ## Go modules and npm packages
 
 Licences for Go modules and npm packages are in each module's or package's source. `go-licenses` and `license-checker` are not run in CI.
+
+### github.com/crewjam/saml
+
+- Version: v0.5.1
+- Licence: BSD-2-Clause
+- Copyright: Copyright (c) 2015, Ross Kinder
+- Source: https://github.com/crewjam/saml (licence file: `LICENSE` at tag v0.5.1)
+
+### github.com/russellhaering/goxmldsig
+
+- Version: v1.6.1
+- Licence: Apache-2.0
+- Source: https://github.com/russellhaering/goxmldsig (licence file: `LICENSE` at tag v1.6.1)
+
+### github.com/beevik/etree
+
+- Version: v1.7.0
+- Licence: BSD-2-Clause
+- Copyright: Copyright 2015-2024 Brett Vickers. All rights reserved.
+- Source: https://github.com/beevik/etree (licence file: `LICENSE` at tag v1.7.0)
+
+### github.com/jonboulle/clockwork
+
+- Version: v0.5.0
+- Licence: Apache-2.0
+- Source: https://github.com/jonboulle/clockwork (licence file: `LICENSE` at tag v0.5.0)
+
+### github.com/mattermost/xml-roundtrip-validator
+
+- Version: v0.1.0
+- Licence: Apache-2.0
+- Source: https://github.com/mattermost/xml-roundtrip-validator (licence file: `LICENSE.txt` at tag v0.1.0)
+
+### github.com/golang-jwt/jwt/v4
+
+- Version: v4.5.2
+- Licence: MIT
+- Copyright: Copyright (c) 2012 Dave Grijalva; Copyright (c) 2021 golang-jwt maintainers
+- Source: https://github.com/golang-jwt/jwt (licence file: `LICENSE` at tag v4.5.2)
+- Note: required by the module graph (via crewjam/saml's `samlsp` package); Harbormaster does not import it.

@@ -32,6 +32,10 @@ import {
   IMAGE_TAGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
   SETTINGS,
+  AUTH_OPTIONS_OFF,
+  SSO_CONFIGURED_OFF,
+  SSO_TEST_OK,
+  SSO_UNCONFIGURED,
 } from './fixtures'
 import type { SearchResultDTO } from '../api/types'
 
@@ -129,6 +133,32 @@ export const handlers = [
   http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
   http.get('/api/settings', () => HttpResponse.json(SETTINGS)),
   http.put('/api/settings', async ({ request }) => HttpResponse.json(await request.json())),
+  // Single sign-on (plan 07). Admin routes answer with SSOConfigDTO; override per test to change the state.
+  http.get('/api/auth/options', () => HttpResponse.json(AUTH_OPTIONS_OFF)),
+  http.get('/api/auth/saml/metadata', () =>
+    HttpResponse.text('<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"/>', {
+      headers: { 'Content-Type': 'application/samlmetadata+xml' },
+    }),
+  ),
+  http.post('/api/auth/saml/link', () => HttpResponse.json({ redirect_url: 'https://idp.example/sso?x' })),
+  http.get('/api/sso', () => HttpResponse.json(SSO_UNCONFIGURED)),
+  http.put('/api/sso', () => HttpResponse.json(SSO_CONFIGURED_OFF)),
+  http.post('/api/sso/metadata', () => HttpResponse.json(SSO_CONFIGURED_OFF)),
+  http.put('/api/sso/enabled', async ({ request }) => {
+    const body = (await request.json()) as { enabled: boolean }
+    return HttpResponse.json({ ...SSO_CONFIGURED_OFF, enabled: body.enabled })
+  }),
+  http.post('/api/sso/key', () => HttpResponse.json(SSO_CONFIGURED_OFF)),
+  http.get('/api/sso/tests/:id', () => HttpResponse.json(SSO_TEST_OK)),
+  http.post('/api/users/:id/break-glass', () => new HttpResponse(null, { status: 204 })),
+  http.put('/api/users/:id/sso-link', () => new HttpResponse(null, { status: 204 })),
+  http.delete('/api/users/:id/sso-link', () => new HttpResponse(null, { status: 204 })),
+  // Only alex has no password, so only alex gets a temporary one back.
+  http.post('/api/users/:id/sso-unlink', ({ params }) => {
+    const user = USERS.items.find((u) => String(u.id) === params.id)
+    if (!user) return notFound()
+    return HttpResponse.json(user.has_password ? {} : { temporary_password: 'tmp-pass-1234' })
+  }),
 ]
 
 export const server = setupServer(...handlers)

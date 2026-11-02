@@ -57,7 +57,9 @@ func minTime(a, b time.Time) time.Time {
 	return b
 }
 
-func (a *Service) createSession(ctx context.Context, userID int64, ip, userAgent string) (sessionID, csrf string, err error) {
+// createSession stores a new session. authSource is "password" or "saml"; notAfter, when set, is the
+// IdP's SessionNotOnOrAfter and ends the session at that instant regardless of activity.
+func (a *Service) createSession(ctx context.Context, userID int64, ip, userAgent, authSource string, notAfter *time.Time) (sessionID, csrf string, err error) {
 	if sessionID, err = randomToken(); err != nil {
 		return "", "", err
 	}
@@ -74,6 +76,8 @@ func (a *Service) createSession(ctx context.Context, userID int64, ip, userAgent
 		ExpiresAt:  minTime(now.Add(a.cfg.SessionIdle), now.Add(a.cfg.SessionAbsolute)),
 		IP:         ip,
 		UserAgent:  userAgent,
+		AuthSource: authSource,
+		NotAfter:   notAfter,
 	})
 	return sessionID, csrf, err
 }
@@ -84,7 +88,7 @@ func (a *Service) StartSession(ctx context.Context, user store.User, ip, userAge
 	if err := a.store.TouchSignIn(ctx, user.ID, a.now()); err != nil {
 		return LoginResult{}, err
 	}
-	sessionID, csrf, err := a.createSession(ctx, user.ID, ip, userAgent)
+	sessionID, csrf, err := a.createSession(ctx, user.ID, ip, userAgent, "password", nil)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -115,6 +119,10 @@ func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Ses
 		_ = a.store.DeleteSession(ctx, sess.IDHash)
 		return store.Session{}, store.User{}, ErrUnauthenticated
 	}
+	if sess.NotAfter != nil && now.After(*sess.NotAfter) {
+		_ = a.store.DeleteSession(ctx, sess.IDHash)
+		return store.Session{}, store.User{}, ErrUnauthenticated
+	}
 	user, err := a.store.GetUser(ctx, sess.UserID)
 	if errors.Is(err, store.ErrNotFound) {
 		return store.Session{}, store.User{}, ErrUnauthenticated
@@ -138,6 +146,9 @@ func (a *Service) ChangePassword(ctx context.Context, userID int64, current, nex
 	user, err := a.store.GetUser(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if !user.HasPassword() {
+		return ErrNoPassword
 	}
 	if ok, verr := VerifyPassword(user.PasswordHash, current); verr != nil || !ok {
 		return ErrWrongPassword

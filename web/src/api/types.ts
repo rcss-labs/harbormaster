@@ -71,6 +71,11 @@ export interface MeDTO {
   tags: MeTagDTO[]
   accounts: MeAccountDTO[]
   regions: string[]
+  has_password: boolean
+  sso_linked: boolean
+  break_glass: boolean
+  email: string | null
+  display_name: string | null
 }
 
 export interface SetupStatusDTO {
@@ -373,6 +378,8 @@ export interface PollerDTO {
 
 // ---- Admin: users and permissions ----
 
+export type SSOState = 'none' | 'linked' | 'pending' | 'pending_expired'
+
 export interface UserDTO {
   id: number
   username: string
@@ -380,6 +387,14 @@ export interface UserDTO {
   must_change_password: boolean
   last_sign_in_at: string | null
   can_see: TagDTO[]
+  has_password: boolean
+  break_glass: boolean
+  sso: SSOState
+  /** Linked or pending NameID, the admin-visible identifier. */
+  sso_name_id: string | null
+  pending_link_expires_at: string | null
+  email: string | null
+  display_name: string | null
 }
 export interface UsersDTO {
   items: UserDTO[]
@@ -682,4 +697,60 @@ export interface DesiredCountResponse {
 }
 export interface SettingsDTO {
   stopped_tasks_window_minutes: number
+}
+
+// ---- Single sign-on (plan 07). Mirrors internal/api/saml_public.go and dto.go. ----
+
+/** Public `GET /api/auth/options`: `sso` is null until a configuration row exists. */
+export interface AuthOptionsDTO {
+  sso: { enabled: boolean; label: string } | null
+  password_login: 'all' | 'break_glass'
+}
+
+export interface CertDTO {
+  fingerprint: string
+  subject: string
+  not_after: string
+}
+
+export type SPKeyState = 'ok' | 'missing' | 'undecryptable'
+
+/** Admin `GET /api/sso` and the bodies of the other admin SSO endpoints. The IdP PEM is never sent back. */
+export interface SSOConfigDTO {
+  configured: boolean
+  enabled: boolean
+  idp_entity_id: string
+  idp_sso_redirect_url: string
+  idp_certs: CertDTO[]
+  metadata_url: string | null
+  metadata_fetched_at: string | null
+  sp_entity_id: string
+  acs_url: string
+  metadata_path: string
+  sp_cert: CertDTO | null
+  sp_key_state: SPKeyState
+  name_id_format: string
+  attr_email: string | null
+  attr_display_name: string | null
+  attr_username: string | null
+  clock_skew_seconds: number
+  button_label: string
+  break_glass_admins: number
+  password_users_blocked_on_enable: number
+  warnings: string[]
+}
+
+export type SSOTestOutcome = 'would_create' | 'would_sign_in' | 'would_link'
+
+/** One-time result of a Test sign-in. `outcome` is empty when the test failed. */
+export interface SSOTestResultDTO {
+  ok: boolean
+  reason: string
+  message: string
+  name_id: string
+  name_id_format: string
+  attributes: Record<string, string[]>
+  username: string
+  outcome: SSOTestOutcome | ''
+  existing_user: string | null
 }

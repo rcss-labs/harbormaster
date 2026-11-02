@@ -19,15 +19,19 @@ type Session struct {
 	ExpiresAt  time.Time
 	IP         string
 	UserAgent  string
+	// AuthSource is "password" (the default when empty) or "saml".
+	AuthSource string
+	// NotAfter is the IdP's SessionNotOnOrAfter, when it sent one.
+	NotAfter *time.Time
 }
 
 // CreateSession stores a new session.
 func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 	_, err := s.Pool.Exec(ctx,
-		`insert into sessions (id_hash, user_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent)
-		 values ($1, $2, $3, $4, $5, $6, nullif($7, ''), nullif($8, ''))`,
+		`insert into sessions (id_hash, user_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent, auth_source, not_after)
+		 values ($1, $2, $3, $4, $5, $6, nullif($7, ''), nullif($8, ''), coalesce(nullif($9, ''), 'password'), $10)`,
 		sess.IDHash, sess.UserID, sess.CSRFToken, sess.CreatedAt, sess.LastSeenAt, sess.ExpiresAt,
-		sess.IP, sess.UserAgent)
+		sess.IP, sess.UserAgent, sess.AuthSource, sess.NotAfter)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -39,10 +43,10 @@ func (s *Store) GetSession(ctx context.Context, idHash string) (Session, error) 
 	var sess Session
 	var ip, userAgent *string
 	err := s.Pool.QueryRow(ctx,
-		`select id_hash, user_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent
+		`select id_hash, user_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent, auth_source, not_after
 		 from sessions where id_hash = $1 and expires_at >= now()`, idHash).
 		Scan(&sess.IDHash, &sess.UserID, &sess.CSRFToken, &sess.CreatedAt, &sess.LastSeenAt,
-			&sess.ExpiresAt, &ip, &userAgent)
+			&sess.ExpiresAt, &ip, &userAgent, &sess.AuthSource, &sess.NotAfter)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
@@ -102,4 +106,22 @@ func (s *Store) DeleteSessionsForUserExcept(ctx context.Context, userID int64, k
 		return fmt.Errorf("delete other sessions for user: %w", err)
 	}
 	return nil
+}
+
+// DeleteSAMLSessions removes every session opened through SSO and returns how many were removed.
+func (s *Store) DeleteSAMLSessions(ctx context.Context) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `delete from sessions where auth_source = 'saml'`)
+	if err != nil {
+		return 0, fmt.Errorf("delete saml sessions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteSAMLSessionsForUser removes the SSO sessions of one user and returns how many were removed.
+func (s *Store) DeleteSAMLSessionsForUser(ctx context.Context, userID int64) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `delete from sessions where auth_source = 'saml' and user_id = $1`, userID)
+	if err != nil {
+		return 0, fmt.Errorf("delete saml sessions for user: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }

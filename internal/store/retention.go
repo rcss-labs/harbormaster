@@ -20,6 +20,9 @@ const loginAttemptsRetention = 24 * time.Hour
 // metricsCacheRetention is fixed: cached CloudWatch series are only useful for a few minutes.
 const metricsCacheRetention = 10 * time.Minute
 
+// samlRetiredKeyRetention is fixed: SP metadata advertises a retired key for 7 days (spec D4).
+const samlRetiredKeyRetention = 7 * 24 * time.Hour
+
 // RunRetention deletes rows older than the configured ages, measured from now.
 func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (RetentionResult, error) {
 	result := RetentionResult{}
@@ -70,6 +73,22 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		return result, fmt.Errorf("retention metrics_cache: %w", err)
 	}
 	result["metrics_cache"] = n
+
+	for _, step := range []struct{ key, sql string }{
+		{"saml_requests", `delete from saml_requests where expires_at < $1`},
+		{"saml_assertion_ids", `delete from saml_assertion_ids where expires_at < $1`},
+		{"saml_sp_keys", `delete from saml_sp_keys where retired_at < $1`},
+	} {
+		cutoff := now
+		if step.key == "saml_sp_keys" {
+			cutoff = now.Add(-samlRetiredKeyRetention)
+		}
+		tag, err := s.Pool.Exec(ctx, step.sql, cutoff)
+		if err != nil {
+			return result, fmt.Errorf("retention %s: %w", step.key, err)
+		}
+		result[step.key] = tag.RowsAffected()
+	}
 
 	if r.OrphanTags > 0 {
 		clusters, services, err := s.deleteOrphanedTagsBeforeCounts(ctx, now.Add(-r.OrphanTags))

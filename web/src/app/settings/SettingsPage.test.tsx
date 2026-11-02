@@ -24,6 +24,14 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Tags' })).toBeInTheDocument()
   })
 
+  it('has a Single sign-on tab after Users & permissions', async () => {
+    renderApp('/settings/sso')
+    expect(await screen.findByRole('link', { name: 'Single sign-on' })).toBeInTheDocument()
+    expect(location()).toHaveTextContent('/settings/sso')
+    const labels = screen.getAllByRole('link').map((link) => link.textContent)
+    expect(labels.indexOf('Single sign-on')).toBe(labels.indexOf('Users & permissions') + 1)
+  })
+
   it('tabs switch content', async () => {
     renderApp('/settings/general')
     await userEvent.click(await screen.findByRole('link', { name: 'Users & permissions' }))

@@ -67,6 +67,7 @@ func TestLoad_Defaults(t *testing.T) {
 		LogTailsPerUser: 2,
 		LogHistoryLimit: 500,
 		MaxDesiredCount: 50,
+		SAMLRequestTTL:  10 * time.Minute,
 		// plan 04: terminal
 		ExecIdleTimeout:        20 * time.Minute,
 		ExecMaxDuration:        4 * time.Hour,
@@ -279,5 +280,50 @@ func TestLoad_MetricsToken(t *testing.T) {
 	}
 	if cfg.MetricsToken != "" {
 		t.Errorf("MetricsToken = %q, want empty when unset", cfg.MetricsToken)
+	}
+}
+
+func TestLoad_SAMLRequestTTL_Default(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.SAMLRequestTTL != 10*time.Minute {
+		t.Errorf("SAMLRequestTTL = %v, want 10m", cfg.SAMLRequestTTL)
+	}
+}
+
+func TestLoad_SAMLRequestTTL_Bounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{name: "below minimum", raw: "30s", wantErr: true},
+		{name: "above maximum", raw: "1h", wantErr: true},
+		{name: "within bounds", raw: "5m", wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load(envFromMap(map[string]string{
+				"HM_DATABASE_URL":     "postgres://example",
+				"HM_SAML_REQUEST_TTL": tt.raw,
+			}))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Load returned nil error for HM_SAML_REQUEST_TTL=%s", tt.raw)
+				}
+				if !strings.Contains(err.Error(), "HM_SAML_REQUEST_TTL: must be between 1m and 30m") {
+					t.Errorf("error %q does not carry the bounds message", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+			if cfg.SAMLRequestTTL != 5*time.Minute {
+				t.Errorf("SAMLRequestTTL = %v, want 5m", cfg.SAMLRequestTTL)
+			}
+		})
 	}
 }

@@ -34,7 +34,7 @@ test('admin walks the read-only product', async ({ page }) => {
   await expect(page.getByRole('main').getByText('homelab-admin').first()).toBeVisible()
 
   await page.getByRole('button', { name: 'Sign out' }).click()
-  await expect(page).toHaveURL(/\/login$/)
+  await expect(page).toHaveURL(/\/login(\?signed_out=1)?$/)
 })
 
 test('user sees only permitted clusters', async ({ page }) => {

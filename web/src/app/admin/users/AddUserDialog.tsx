@@ -9,7 +9,7 @@ const USERNAME_PATTERN = /^[a-z][a-z0-9._-]{1,31}$/
 const USERNAME_MESSAGE = 'Use 2–32 lowercase letters, digits, dots, hyphens or underscores.'
 
 /** Creates a user, then shows the one-time temporary password in a follow-up dialog. */
-export function AddUserDialog({ onClose }: { onClose: () => void }) {
+export function AddUserDialog({ onClose, ssoOn = false }: { onClose: () => void; ssoOn?: boolean }) {
   const queryClient = useQueryClient()
   const [username, setUsername] = useState('')
   const [admin, setAdmin] = useState(false)
@@ -76,6 +76,12 @@ export function AddUserDialog({ onClose }: { onClose: () => void }) {
         everything)
       </label>
       <p className={styles.hint}>They are asked to choose a new password at first sign-in.</p>
+      {ssoOn && (
+        <p className={styles.hint}>
+          New local users can only sign in with a password if you make them break-glass. SSO users are created automatically at
+          their first sign-in, or set a pending link to attach one to an existing account.
+        </p>
+      )}
       <div className={styles.err} role="alert">
         {error}
       </div>

@@ -57,6 +57,8 @@ func (s *Server) buildMe(ctx context.Context, user store.User, csrf string, subj
 		MustChangePassword: user.MustChangePassword, CSRFToken: csrf,
 		Perms: map[string]int{}, Tags: make([]MeTagDTO, 0, len(tags)),
 		Accounts: []MeAccountDTO{}, Regions: []string{},
+		HasPassword: user.HasPassword(), SSOLinked: user.SSOLinked(), BreakGlass: user.BreakGlass,
+		Email: user.Email, DisplayName: user.DisplayName,
 	}
 	for _, t := range tags {
 		dto.Tags = append(dto.Tags, MeTagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, Builtin: t.Builtin, ServicesInEffect: counts[t.ID].ServicesEffective})

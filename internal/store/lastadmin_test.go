@@ -48,3 +48,161 @@ func TestDeleteUserChecked_RefusesLastAdmin(t *testing.T) {
 		t.Fatalf("err = %v, want ErrLastAdmin", err)
 	}
 }
+
+func enableSAMLRaw(t *testing.T, st *store.Store, enabled bool) {
+	t.Helper()
+	_, err := st.Pool.Exec(t.Context(), `insert into saml_config
+		(id, enabled, idp_entity_id, idp_sso_redirect_url, idp_certs, sp_entity_id, updated_at)
+		values (1, $1, 'e', 'https://idp/sso', '{}', 'sp', now())
+		on conflict (id) do update set enabled = excluded.enabled`, enabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetBreakGlassChecked_RefusesPasswordlessUser(t *testing.T) {
+	st := storetest.Open(t)
+	u, err := st.CreateSAMLUser(t.Context(), store.NewSAMLUser{Username: "jit", IdPEntityID: "e", ExternalID: "n", ExternalIDFormat: "unspecified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetBreakGlassChecked(t.Context(), u.ID, true); !errors.Is(err, store.ErrNeedsPassword) {
+		t.Fatalf("err = %v, want ErrNeedsPassword", err)
+	}
+	if _, err := st.SetBreakGlassChecked(t.Context(), 9999, true); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetBreakGlassChecked_LinkedUserWithPasswordAllowed(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	u, _ := st.CreateUser(ctx, "alpha", "h", true, false)
+	if _, err := st.BindSSOIdentity(ctx, store.BindSSO{UserID: u.ID, IdPEntityID: "e", ExternalID: "n", ExternalIDFormat: "unspecified"}); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := st.SetBreakGlassChecked(ctx, u.ID, true)
+	if err != nil || !changed {
+		t.Fatalf("grant = %v, %v", changed, err)
+	}
+	changed, err = st.SetBreakGlassChecked(ctx, u.ID, true)
+	if err != nil || changed {
+		t.Fatalf("repeat grant = %v, %v; want unchanged", changed, err)
+	}
+	got, _ := st.GetUser(ctx, u.ID)
+	if !got.BreakGlass {
+		t.Fatalf("break_glass not set: %+v", got)
+	}
+}
+
+func TestSetBreakGlassChecked_LastWhileEnabled(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	a, _ := st.CreateUser(ctx, "alpha", "h", true, false)
+	b, _ := st.CreateUser(ctx, "bravo", "h", true, false)
+	for _, id := range []int64{a.ID, b.ID} {
+		if _, err := st.SetBreakGlassChecked(ctx, id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enableSAMLRaw(t, st, true)
+	if _, err := st.SetBreakGlassChecked(ctx, a.ID, false); err != nil {
+		t.Fatalf("revoking one of two: %v", err)
+	}
+	if _, err := st.SetBreakGlassChecked(ctx, b.ID, false); !errors.Is(err, store.ErrLastBreakGlassAdmin) {
+		t.Fatalf("revoking last err = %v, want ErrLastBreakGlassAdmin", err)
+	}
+	enableSAMLRaw(t, st, false)
+	if changed, err := st.SetBreakGlassChecked(ctx, b.ID, false); err != nil || !changed {
+		t.Fatalf("revoking last while disabled = %v, %v", changed, err)
+	}
+}
+
+func TestSetAdminChecked_DemoteLastBreakGlassAdminWhileEnabled(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	a, _ := st.CreateUser(ctx, "alpha", "h", true, false)
+	_, _ = st.CreateUser(ctx, "bravo", "h", true, false)
+	if _, err := st.SetBreakGlassChecked(ctx, a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	enableSAMLRaw(t, st, true)
+	if _, err := st.SetAdminChecked(ctx, a.ID, false); !errors.Is(err, store.ErrLastBreakGlassAdmin) {
+		t.Fatalf("demote err = %v, want ErrLastBreakGlassAdmin", err)
+	}
+	enableSAMLRaw(t, st, false)
+	if changed, err := st.SetAdminChecked(ctx, a.ID, false); err != nil || !changed {
+		t.Fatalf("demote while disabled = %v, %v", changed, err)
+	}
+}
+
+func TestDeleteUserChecked_LastBreakGlassAdminWhileEnabled(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	a, _ := st.CreateUser(ctx, "alpha", "h", true, false)
+	b, _ := st.CreateUser(ctx, "bravo", "h", true, false)
+	if _, err := st.SetBreakGlassChecked(ctx, a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	enableSAMLRaw(t, st, true)
+	if err := st.DeleteUserChecked(ctx, a.ID); !errors.Is(err, store.ErrLastBreakGlassAdmin) {
+		t.Fatalf("delete err = %v, want ErrLastBreakGlassAdmin", err)
+	}
+	if err := st.DeleteUserChecked(ctx, b.ID); err != nil {
+		t.Fatalf("deleting a non-break-glass admin: %v", err)
+	}
+	enableSAMLRaw(t, st, false)
+	if err := st.DeleteUserChecked(ctx, a.ID); !errors.Is(err, store.ErrLastAdmin) {
+		t.Fatalf("last admin delete err = %v, want ErrLastAdmin (disabled, only admin left)", err)
+	}
+}
+
+// Enabling SSO and revoking the last break-glass flag race: exactly one may win, and SSO is never
+// left enabled with zero break-glass admins.
+func TestSetSAMLEnabled_ConcurrentRevokeAndEnable_OneFails(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	a, _ := st.CreateUser(ctx, "alpha", "h", true, false)
+	if _, err := st.UpsertSAMLConfig(ctx, store.SAMLConfigRow{
+		IdPEntityID: "e", IdPSSORedirectURL: "https://idp/sso", IdPCertsPEM: []string{"c"},
+		SPEntityID: "sp", NameIDFormat: "unspecified", ClockSkewSeconds: 120, ButtonLabel: "SSO",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 50 {
+		if _, err := st.SetBreakGlassChecked(ctx, a.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		var enableErr, revokeErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); _, enableErr = st.SetSAMLEnabled(ctx, true) }()
+		go func() { defer wg.Done(); _, revokeErr = st.SetBreakGlassChecked(ctx, a.ID, false) }()
+		wg.Wait()
+		on, err := st.SAMLEnabled(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := st.CountBreakGlassAdmins(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if on && n == 0 {
+			t.Fatalf("round %d: SSO enabled with zero break-glass admins (enable %v, revoke %v)", i, enableErr, revokeErr)
+		}
+		switch {
+		case enableErr == nil && revokeErr == nil:
+			// Revoke ran first while disabled, then enable must have failed; or enable first and revoke must have failed.
+			t.Fatalf("round %d: both succeeded", i)
+		case enableErr != nil && revokeErr != nil:
+			t.Fatalf("round %d: both failed (enable %v, revoke %v)", i, enableErr, revokeErr)
+		case enableErr != nil && !errors.Is(enableErr, store.ErrNoBreakGlassAdmin):
+			t.Fatalf("round %d: enable err = %v", i, enableErr)
+		case revokeErr != nil && !errors.Is(revokeErr, store.ErrLastBreakGlassAdmin):
+			t.Fatalf("round %d: revoke err = %v", i, revokeErr)
+		}
+		if _, err := st.SetSAMLEnabled(ctx, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -16,8 +16,9 @@
 | 04 | [Terminal: ECS Exec bridge](2026-10-31-04-terminal.md) | phase 4 | 01 |
 | 05 | [Networks and storage](2026-10-31-05-networks-storage.md) | phase 5 | 01, 03 (metrics client and cache for EFS charts) |
 | 06 | [Hardening: Terraform, image, limits, docs](2026-10-31-06-hardening.md) | phase 6 | 01–05 |
+| 07 | [SAML single sign-on with break-glass accounts](2026-11-02-07-saml-sso.md) | [spec](../specs/2026-11-02-saml-sso-design.md) (replaces §10's "SSO later") | 01, 06, UX round 1 (Settings page) |
 
-02, 03 and 04 depend only on 01 and may run in any order; 05 needs 03's `internal/metrics`.
+02, 03 and 04 depend only on 01 and may run in any order; 05 needs 03's `internal/metrics`. 07 follows the UX round 1 plan because it adds a Settings tab.
 
 ## Global constraints (every plan)
 

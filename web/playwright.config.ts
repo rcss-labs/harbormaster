@@ -36,6 +36,9 @@ export default defineConfig({
     env: {
       HM_LISTEN: `127.0.0.1:${port}`,
       HM_COOKIE_SECURE: 'false',
+      HM_SESSION_KEY: 'e2e-session-key', // plan 07: SAML request state and SP key encryption
+      // The fake IdP and SP metadata use this origin; it must match the port Playwright serves on.
+      HM_BASE_URL: baseURL,
       HM_DATABASE_URL: databaseURL,
       // Short observe tiers keep the observe specs from waiting a minute for their first figures.
       HM_POLL_SCALING: '5s',

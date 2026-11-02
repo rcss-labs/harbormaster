@@ -64,6 +64,9 @@ type Config struct {
 	LogHistoryLimit         int
 	MaxDesiredCount         int
 
+	// SAML: how long a sign-in request (and its binding cookie) stays valid
+	SAMLRequestTTL time.Duration
+
 	// plan 04: terminal
 	ExecIdleTimeout        time.Duration
 	ExecMaxDuration        time.Duration
@@ -185,6 +188,7 @@ func Load(getenv func(string) string) (Config, error) {
 		LogTailsPerUser: reader.integer("HM_LOG_TAILS_PER_USER", 2),
 		LogHistoryLimit: reader.integer("HM_LOG_HISTORY_LIMIT", 500),
 		MaxDesiredCount: reader.integer("HM_MAX_DESIRED_COUNT", 50),
+		SAMLRequestTTL:  reader.duration("HM_SAML_REQUEST_TTL", 10*time.Minute),
 
 		// plan 04: terminal
 		ExecIdleTimeout:        reader.duration("HM_EXEC_IDLE_TIMEOUT", 20*time.Minute),
@@ -200,6 +204,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.MaxDesiredCount < 1 {
 		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
+	}
+	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
+		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")
 	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
 		return Config{}, errors.New("HM_DATABASE_URL or HM_DATABASE_SECRET_ARN must be set")

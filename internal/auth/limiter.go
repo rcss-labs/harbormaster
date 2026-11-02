@@ -56,13 +56,12 @@ func (a *Service) Login(ctx context.Context, username, password, ip, userAgent s
 
 	// Locked or over the failure limit: still pay for a verify so response time does not reveal the lock.
 	if byUser >= a.cfg.LoginMaxPerUser || (user.LockedUntil != nil && user.LockedUntil.After(now)) {
-		_, _ = a.verify(user.PasswordHash, password)
+		a.verifyPassword(user, password)
 		a.recordFailure(ctx, &user, username, ip)
 		return LoginResult{}, ErrBadCredentials
 	}
 
-	ok, verr := a.verify(user.PasswordHash, password)
-	if verr != nil || !ok {
+	if !a.verifyPassword(user, password) {
 		a.recordFailure(ctx, &user, username, ip)
 		if byUser+1 >= a.cfg.LoginMaxPerUser {
 			if err := a.store.LockUser(ctx, user.ID, now.Add(a.cfg.LoginWindow)); err != nil {
@@ -72,28 +71,60 @@ func (a *Service) Login(ctx context.Context, username, password, ip, userAgent s
 		return LoginResult{}, ErrBadCredentials
 	}
 
+	// Only after the password verified: refusing earlier would reveal break-glass status to anyone.
+	ssoOn, err := a.store.SAMLEnabled(ctx)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	if ssoOn && !user.BreakGlass {
+		a.recordFailureReason(ctx, &user, username, ip, "sso_required")
+		return LoginResult{}, ErrSSORequired
+	}
+
 	if err := a.store.RecordLoginAttempt(ctx, username, ip, true); err != nil {
 		return LoginResult{}, err
 	}
 	if err := a.store.TouchSignIn(ctx, user.ID, now); err != nil {
 		return LoginResult{}, err
 	}
-	sessionID, csrf, err := a.createSession(ctx, user.ID, ip, userAgent)
+	sessionID, csrf, err := a.createSession(ctx, user.ID, ip, userAgent, "password", nil)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	a.audit(ctx, &user, "sign_in", "Signed in.", ip)
+	if ssoOn {
+		a.auditDetails(ctx, &user, "sign_in", "Signed in with password (break-glass).", ip, map[string]any{"break_glass": true})
+	} else {
+		a.audit(ctx, &user, "sign_in", "Signed in.", ip)
+	}
 	return LoginResult{User: user, SessionID: sessionID, CSRFToken: csrf}, nil
 }
 
-// recordFailure stores the failed attempt and audit entry; bookkeeping errors must not change the login outcome.
+// verifyPassword reports whether password matches. A user without a password never matches, whatever
+// the verifier says; a dummy verify keeps the timing the same as for a wrong password.
+func (a *Service) verifyPassword(user store.User, password string) bool {
+	if !user.HasPassword() {
+		_, _ = a.verify(dummyHash, password)
+		return false
+	}
+	ok, err := a.verify(user.PasswordHash, password)
+	return err == nil && ok
+}
+
 func (a *Service) recordFailure(ctx context.Context, user *store.User, username, ip string) {
+	a.recordFailureReason(ctx, user, username, ip, "")
+}
+
+// recordFailureReason stores the failed attempt and audit entry; bookkeeping errors must not change the login outcome.
+func (a *Service) recordFailureReason(ctx context.Context, user *store.User, username, ip, reason string) {
 	_ = a.store.RecordLoginAttempt(ctx, username, ip, false)
 	entry := store.AuditEntry{
 		Action:        "sign_in_failed",
 		Summary:       fmt.Sprintf("Failed sign-in for %s.", username),
 		ActorUsername: username,
 		IP:            ip,
+	}
+	if reason != "" {
+		entry.Details = map[string]any{"reason": reason}
 	}
 	if user != nil {
 		entry.ActorUserID = &user.ID
@@ -103,7 +134,11 @@ func (a *Service) recordFailure(ctx context.Context, user *store.User, username,
 }
 
 func (a *Service) audit(ctx context.Context, user *store.User, action, summary, ip string) {
-	entry := store.AuditEntry{Action: action, Summary: summary, IP: ip}
+	a.auditDetails(ctx, user, action, summary, ip, nil)
+}
+
+func (a *Service) auditDetails(ctx context.Context, user *store.User, action, summary, ip string, details map[string]any) {
+	entry := store.AuditEntry{Action: action, Summary: summary, IP: ip, Details: details}
 	if user != nil {
 		entry.ActorUserID = &user.ID
 		entry.ActorUsername = user.Username
