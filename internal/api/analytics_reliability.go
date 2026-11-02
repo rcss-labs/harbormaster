@@ -136,10 +136,10 @@ func (s *Server) analyticsReliability(w http.ResponseWriter, r *http.Request) {
 	dto.KPIs.PlacementFailures = placement
 	if availabilitySince != nil {
 		fillReliabilityDaily(&dto, availabilitySince, dailyWin, dailyPoints, trend, tags)
-		dto.Sources = append(dto.Sources, prunedTableSource(store.TableServiceAvailabilityDaily,
-			"Daily availability and time below desired per service, for the 90-day panels",
-			cfg.AvailabilityDaily, "HM_RETENTION_AVAILABILITY_DAILY"))
 	}
+	dto.Sources = append(dto.Sources, prunedTableSource(store.TableServiceAvailabilityDaily,
+		"Daily availability and time below desired per service, for the 90-day panels",
+		cfg.AvailabilityDaily, "HM_RETENTION_AVAILABILITY_DAILY"))
 	writeJSON(w, http.StatusOK, dto)
 }
 
