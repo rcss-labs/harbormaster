@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../../../api/client'
 import type { SSOConfigDTO } from '../../../api/types'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { KV } from '../../../components/KV'
 import { useToast } from '../../../components/Toast'
@@ -30,7 +30,7 @@ export function SPCard({ config }: { config: SSOConfigDTO }) {
   const showUndecryptable = config.sp_key_state === 'undecryptable' && !config.warnings.includes(UNDECRYPTABLE)
 
   return (
-    <Card title="Service provider">
+    <Panel title="Service provider">
       <div className={styles.stack}>
         <KV
           rows={[
@@ -76,6 +76,6 @@ export function SPCard({ config }: { config: SSOConfigDTO }) {
           }}
         />
       )}
-    </Card>
+    </Panel>
   )
 }

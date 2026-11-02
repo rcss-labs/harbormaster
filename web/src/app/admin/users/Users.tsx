@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuthOptions, usePermissions, useSSOConfig, useUsers } from '../../../api/hooks'
 import { useAuth } from '../../auth/AuthProvider'
+import { HeaderAction } from '../../settings/HeaderAction'
 import { AddUserDialog } from './AddUserDialog'
 import { PermissionMatrix } from './PermissionMatrix'
 import { UsersTable } from './UsersTable'
@@ -20,22 +21,15 @@ export function Users() {
 
   return (
     <>
-      <div className={styles.pageHead}>
-        <div className={styles.titles}>
-          <h2>Users &amp; permissions</h2>
-          <div className={styles.meta}>
-            Global admins can do everything. Every other user gets permissions per tag.{' '}
-            {ssoOn
-              ? 'Sign-in is single sign-on; break-glass accounts can also use a password.'
-              : 'Sign-in is username and password.'}
-          </div>
-        </div>
-        <div className={styles.actions}>
-          <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={() => setAdding(true)}>
-            Add user
-          </button>
-        </div>
-      </div>
+      <HeaderAction>
+        <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={() => setAdding(true)}>
+          Add user
+        </button>
+      </HeaderAction>
+      <p className={styles.meta}>
+        Global admins can do everything. Every other user gets permissions per tag.{' '}
+        {ssoOn ? 'Sign-in is single sign-on; break-glass accounts can also use a password.' : 'Sign-in is username and password.'}
+      </p>
       <div className={styles.stack}>
         {permissions.data && <PermissionMatrix data={permissions.data} />}
         {users.data && <UsersTable users={users.data.items} meId={me.id} ssoConfigured={ssoConfigured} />}

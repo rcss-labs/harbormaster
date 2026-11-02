@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { AccountsDTO, RegionResult } from '../../../api/types'
-import { ACCOUNTS } from '../../../test/fixtures'
+import { ACCOUNTS, POLLER } from '../../../test/fixtures'
 import { renderApp } from '../../../test/renderApp'
 import { server } from '../../../test/msw'
 
@@ -106,5 +106,64 @@ describe('Accounts', () => {
     renderApp('/settings/accounts')
     const pill = await screen.findByText('Error')
     expect(pill).toHaveAttribute('title', 'AccessDenied: role trust policy rejects the external ID')
+  })
+
+  it('shows "Slowed by AWS throttling" for an account whose poller is throttled', async () => {
+    server.use(
+      http.get('/api/poller', () =>
+        HttpResponse.json({
+          items: POLLER.items.map((entry) =>
+            entry.account_id === ACCOUNTS.items[0].account_id && entry.region === 'eu-west-1' ? { ...entry, throttled: true } : entry,
+          ),
+        }),
+      ),
+    )
+    renderApp('/settings/accounts')
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    expect(await within(row).findByText('Slowed by AWS throttling')).toBeInTheDocument()
+    const other = screen.getByText('staging-example', { selector: 'div' }).closest('[role="row"]') as HTMLElement
+    expect(within(other).queryByText('Slowed by AWS throttling')).not.toBeInTheDocument()
+  })
+
+  it('shows "Data is N min old" with the error when the poller is failing', async () => {
+    const lastOk = new Date(Date.now() - 12 * 60_000).toISOString()
+    server.use(
+      http.get('/api/poller', () =>
+        HttpResponse.json({
+          items: POLLER.items.map((entry) =>
+            entry.account_id === ACCOUNTS.items[0].account_id && entry.region === 'us-east-1'
+              ? { ...entry, failing: true, last_error: 'ExpiredToken', last_ok_at: lastOk }
+              : entry,
+          ),
+        }),
+      ),
+    )
+    renderApp('/settings/accounts')
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    expect(await within(row).findByText('Data is 12 min old: ExpiredToken')).toBeInTheDocument()
+  })
+
+  it('Test now posts the account role, external id and regions and reports each region', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.post('/api/accounts/test', async ({ request }) => {
+        const body = (await request.json()) as { regions: string[] }
+        bodies.push(body)
+        return HttpResponse.json({
+          regions: body.regions.map((region) => ({ region, ok: region !== 'eu-west-1', clusters: 2, error: region === 'eu-west-1' ? 'AccessDenied' : '' })),
+        })
+      }),
+    )
+    renderApp('/settings/accounts')
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: 'Test now' }))
+    expect(await screen.findByText(/eu-west-1: AccessDenied/)).toBeInTheDocument()
+    expect(bodies).toEqual([
+      {
+        role_arn: ACCOUNTS.items[0].role_arn,
+        external_id: ACCOUNTS.items[0].external_id,
+        regions: ACCOUNTS.items[0].regions,
+      },
+    ])
   })
 })

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { api } from '../../../api/client'
 import type { UserDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { Pill } from '../../../components/Pill'
 import { Table, tableClass } from '../../../components/Table'
@@ -119,7 +119,7 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
   }
 
   return (
-    <Card title="Users" right={<span className={`${styles.muted} ${styles.small}`}>{users.length} users</span>}>
+    <Panel title="Users" flush actions={<span>{users.length} users</span>}>
       <Table>
         <thead>
           <tr>
@@ -281,6 +281,6 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
           onCancel={() => setPending(null)}
         />
       )}
-    </Card>
+    </Panel>
   )
 }
