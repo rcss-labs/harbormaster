@@ -54,11 +54,12 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
   const setDesiredCount = useSetDesiredCount(serviceId)
   const [draft, setDraft] = useState(String(service.desired))
   const [confirming, setConfirming] = useState(false)
-  // Follow the service's count when it changes underneath us (a poll, or an applied change).
+  // Follow the service's count when it changes underneath us (a poll, or an applied change), but never
+  // overwrite an edit in progress: only a draft still equal to the previous server value is resynced.
   const [seenDesired, setSeenDesired] = useState(service.desired)
   if (seenDesired !== service.desired) {
     setSeenDesired(service.desired)
-    setDraft(String(service.desired))
+    if (!confirming && draft === String(seenDesired)) setDraft(String(service.desired))
   }
 
   const max = info.data?.max
@@ -66,7 +67,7 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
   // An empty field parses to NaN, which fails the integer check and disables Apply.
   const value = draft.trim() === '' ? Number.NaN : Number(draft)
   const valid = Number.isInteger(value) && value >= 0 && (max === undefined || value <= max)
-  const dirty = draft !== String(service.desired)
+  const dirty = value !== service.desired
   const outsideAutoScaling = valid && autoScaling !== null && (value < autoScaling.min || value > autoScaling.max)
   // Steps start from the field's current number, or from the service's count when the field is empty or invalid.
   const stepFrom = valid ? value : service.desired

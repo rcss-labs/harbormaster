@@ -1,5 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { SCALING_NONE, SCALING_PAYMENTS, SERVICE_PAYMENTS } from '../../../test/fixtures'
@@ -116,6 +117,35 @@ describe('ScalingTab', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(posted).not.toHaveBeenCalled()
     expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(4)
+  })
+
+  it('keeps the draft and the open confirm dialog when a poll changes the running count', async () => {
+    mockDesiredCount()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`, queryClient)
+
+    await screen.findByRole('spinbutton', { name: 'Scale to' })
+    await user.click(screen.getByRole('button', { name: 'More tasks' }))
+    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
+    await screen.findByRole('dialog')
+
+    act(() => queryClient.setQueryData(['service', SERVICE_PAYMENTS.id, 'desired-count'], desiredInfo({ desired: 6 })))
+
+    await screen.findByText(/Running 3 of 6\./)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(4)
+  })
+
+  it('follows the running count from a poll when the draft is untouched', async () => {
+    mockDesiredCount()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`, queryClient)
+
+    await screen.findByRole('spinbutton', { name: 'Scale to' })
+    act(() => queryClient.setQueryData(['service', SERVICE_PAYMENTS.id, 'desired-count'], desiredInfo({ desired: 6 })))
+
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(6))
   })
 
   it('warns when the value is outside the auto scaling range', async () => {

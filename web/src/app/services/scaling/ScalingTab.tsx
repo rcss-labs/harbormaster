@@ -68,8 +68,6 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
     <>
       <div className={styles.grid}>
         <DesiredCountCard
-          // Remounts with the server's count after a save, so the draft always starts from what is running.
-          key={info.data.desired}
           info={info.data}
           scaling={scaling.data}
           service={service.data}
@@ -110,6 +108,13 @@ interface DesiredCountCardProps {
 function DesiredCountCard({ info, scaling, service, saving, onSave }: DesiredCountCardProps) {
   const [draft, setDraft] = useState(String(info.desired))
   const [confirming, setConfirming] = useState(false)
+  // Follow the running count when it changes (a poll, or a saved change) without dropping an edit in progress
+  // or an open confirm dialog: only a draft still equal to the previous server value is resynced.
+  const [seenDesired, setSeenDesired] = useState(info.desired)
+  if (seenDesired !== info.desired) {
+    setSeenDesired(info.desired)
+    if (!confirming && draft === String(seenDesired)) setDraft(String(info.desired))
+  }
   const canOperate = service.can.operate
   const tagName = service.tag.name
   const parsed = parseCount(draft)

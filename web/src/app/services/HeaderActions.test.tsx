@@ -1,4 +1,5 @@
 import { screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
@@ -211,6 +212,63 @@ describe('HeaderActions desired count stepper', () => {
     await waitFor(() => expect(countRequests).toHaveBeenCalledWith({ desired: 0 }))
     expect(await screen.findByText('Desired count set to 0.')).toBeInTheDocument()
     expect(await screen.findByText('Auto scaling may change it back.')).toBeInTheDocument()
+  })
+
+  describe('when the server count changes after a poll', () => {
+    const NEW_COUNT = SERVICE_PAYMENTS.desired + 2
+    function PollingHarness() {
+      const [desired, setDesired] = useState(SERVICE_PAYMENTS.desired)
+      return (
+        <>
+          <button type="button" onClick={() => setDesired(NEW_COUNT)}>
+            simulate poll
+          </button>
+          <HeaderActions serviceId={SERVICE_PAYMENTS.id} service={{ ...SERVICE_PAYMENTS, desired }} />
+        </>
+      )
+    }
+
+    it('follows the new count when the user is not editing', async () => {
+      server.use(desiredCountInfo())
+      renderWithProviders(<PollingHarness />)
+      const user = userEvent.setup()
+      const field = await countField()
+      await user.click(screen.getByRole('button', { name: 'simulate poll' }))
+      expect(field).toHaveValue(NEW_COUNT)
+    })
+
+    it('keeps an edit in progress', async () => {
+      server.use(desiredCountInfo())
+      renderWithProviders(<PollingHarness />)
+      const user = userEvent.setup()
+      const field = await countField()
+      await user.click(screen.getByRole('button', { name: 'Increase desired count' }))
+      await user.click(screen.getByRole('button', { name: 'simulate poll' }))
+      expect(field).toHaveValue(SERVICE_PAYMENTS.desired + 1)
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument()
+    })
+
+    it('keeps the draft while the confirm dialog is open', async () => {
+      server.use(desiredCountInfo())
+      renderWithProviders(<PollingHarness />)
+      const user = userEvent.setup()
+      const field = await countField()
+      await user.click(screen.getByRole('button', { name: 'Increase desired count' }))
+      await user.click(screen.getByRole('button', { name: 'Apply' }))
+      await user.click(screen.getByRole('button', { name: 'simulate poll' }))
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(field).toHaveValue(SERVICE_PAYMENTS.desired + 1)
+    })
+  })
+
+  it('does not offer Apply when the draft is the same number written differently', async () => {
+    server.use(desiredCountInfo())
+    renderActions()
+    const user = userEvent.setup()
+    const field = await countField()
+    await user.clear(field)
+    await user.type(field, `0${SERVICE_PAYMENTS.desired}`)
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
   })
 
   it('cancelling the confirm dialog posts nothing and keeps the draft', async () => {
