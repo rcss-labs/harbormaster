@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useSettings, useUpdateSettings } from '../../api/hooks'
-import { Card } from '../../components/Card'
+import { Panel } from '../../components/Panel'
 import { useToast } from '../../components/Toast'
+import { HeaderAction } from './HeaderAction'
 import styles from './settings.module.css'
 
 const MIN_MINUTES = 1
@@ -45,7 +46,17 @@ export function StoppedTasksCard() {
   }
 
   return (
-    <Card title="Stopped tasks">
+    <Panel title="Stopped tasks">
+      <HeaderAction>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.primary}`}
+          disabled={loadedMinutes === undefined || update.isPending}
+          onClick={save}
+        >
+          Save
+        </button>
+      </HeaderAction>
       <div className={styles.windowRow}>
         <span>Show stopped tasks from the last</span>
         <input
@@ -62,15 +73,12 @@ export function StoppedTasksCard() {
           }}
         />
         <span>minutes</span>
-        <button type="button" className={styles.saveButton} disabled={loadedMinutes === undefined || update.isPending} onClick={save}>
-          Save
-        </button>
       </div>
       {error && (
         <p role="alert" className={styles.error}>
           {error}
         </p>
       )}
-    </Card>
+    </Panel>
   )
 }

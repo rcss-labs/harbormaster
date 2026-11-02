@@ -2,17 +2,18 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../../../api/client'
-import { useAccounts, useTags } from '../../../api/hooks'
-import type { AccountDTO } from '../../../api/types'
+import { useAccounts, usePollerStatus, useTags } from '../../../api/hooks'
+import type { AccountDTO, PollerEntryDTO, RegionResult } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
-import { Card } from '../../../components/Card'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
+import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { KV } from '../../../components/KV'
-import { Pill } from '../../../components/Pill'
-import { Table, tableClass } from '../../../components/Table'
+import { Panel } from '../../../components/Panel'
+import { StatusDot } from '../../../components/StatusDot'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
+import { HeaderAction } from '../../settings/HeaderAction'
 import { ConnectAccountDialog } from './ConnectAccountDialog'
 import { EditAccountDialog } from './EditAccountDialog'
 import { invalidateAccountQueries } from './accountApi'
@@ -20,12 +21,35 @@ import styles from './accounts.module.css'
 
 type DialogState = { kind: 'connect' } | { kind: 'edit' | 'disconnect'; account: AccountDTO } | null
 
-/** Status pill per account: connected, error (with the last error as its title) or disabled. */
-function StatusPill({ account }: { account: AccountDTO }) {
-  if (account.status === 'error') return <Pill kind="bad" title={account.last_error}>Error</Pill>
-  if (account.status === 'disabled') return <Pill kind="mute">Disabled</Pill>
-  return <Pill kind="ok">Connected</Pill>
+const minutesSince = (iso: string) => Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 60_000))
+
+/** Status of one account: its own state, then what the poller reports for its regions. */
+function AccountStatus({ account, polled }: { account: AccountDTO; polled: PollerEntryDTO[] }) {
+  const failing = polled.filter((entry) => entry.failing)
+  const throttled = polled.some((entry) => entry.throttled)
+  return (
+    <>
+      {account.status === 'error' ? (
+        <StatusDot kind="bad" title={account.last_error}>
+          Error
+        </StatusDot>
+      ) : account.status === 'disabled' ? (
+        <StatusDot kind="mute">Disabled</StatusDot>
+      ) : (
+        <StatusDot kind="ok">Connected</StatusDot>
+      )}
+      {failing.map((entry) => (
+        <div key={entry.region} className={styles.statusNote} title={entry.region}>
+          {`Data is ${entry.last_ok_at ? `${minutesSince(entry.last_ok_at)} min old` : 'unavailable'}: ${entry.last_error}`}
+        </div>
+      ))}
+      {throttled && <div className={`${styles.statusNote} ${styles.throttled}`}>Slowed by AWS throttling</div>}
+    </>
+  )
 }
+
+const describeRegion = (result: RegionResult) =>
+  result.ok ? `${result.region}: ${result.clusters} ${result.clusters === 1 ? 'cluster' : 'clusters'}` : `${result.region}: ${result.error}`
 
 export function Accounts() {
   const { me } = useAuth()
@@ -33,6 +57,7 @@ export function Accounts() {
   // Non-admins would get 403s, so the admin queries stay disabled for them.
   const accounts = useAccounts({ enabled: isAdmin })
   const tags = useTags({ enabled: isAdmin })
+  const poller = usePollerStatus()
   const queryClient = useQueryClient()
   const toast = useToast()
   const [dialog, setDialog] = useState<DialogState>(null)
@@ -52,76 +77,117 @@ export function Accounts() {
     onError: (caught) => toast.show(caught.message, 'bad'),
   })
 
+  const testNow = useMutation({
+    mutationFn: (account: AccountDTO) =>
+      api
+        .post<{ regions: RegionResult[] }>('/api/accounts/test', {
+          role_arn: account.role_arn,
+          external_id: account.external_id,
+          regions: account.regions,
+        })
+        .then((body) => ({ account, regions: body.regions })),
+    onSuccess: ({ account, regions }) => {
+      const allOk = regions.every((region) => region.ok)
+      toast.show(`${account.name}: ${regions.map(describeRegion).join('; ')}`, allOk ? 'ok' : 'bad')
+      void queryClient.invalidateQueries({ queryKey: ['poller'] })
+    },
+    onError: (caught) => toast.show(caught.message, 'bad'),
+  })
+
   if (!me || !isAdmin) return null
 
   const close = () => setDialog(null)
   const runtime = accounts.data?.runtime
+  const polledFor = (account: AccountDTO) => (poller.data?.items ?? []).filter((entry) => entry.account_id === account.account_id)
+
+  const columns: DataTableColumn<AccountDTO>[] = [
+    {
+      key: 'account',
+      header: 'Account',
+      width: 'minmax(150px, 1.2fr)',
+      render: (account) => (
+        <>
+          <div className={styles.accountName}>{account.name}</div>
+          <div className={`${styles.mono} ${styles.muted} ${styles.small}`}>{account.account_id}</div>
+        </>
+      ),
+    },
+    {
+      key: 'role',
+      header: 'Role Harbormaster assumes',
+      width: 'minmax(220px, 2fr)',
+      render: (account) => <span className={`${styles.mono} ${styles.small}`}>{account.role_arn}</span>,
+    },
+    { key: 'regions', header: 'Regions scanned', width: 'minmax(150px, 1fr)', render: (account) => account.regions.join(', ') },
+    { key: 'clusters', header: 'Clusters', width: '80px', align: 'right', render: (account) => account.clusters },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 'minmax(200px, 1.5fr)',
+      render: (account) => <AccountStatus account={account} polled={polledFor(account)} />,
+    },
+    {
+      key: 'last',
+      header: 'Last check',
+      width: '100px',
+      render: (account) => <span className={styles.muted}>{account.last_ok_at ? <Ago ts={account.last_ok_at} /> : '–'}</span>,
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: '250px',
+      align: 'right',
+      render: (account) => (
+        <span className={styles.rowActions}>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.sm}`}
+            disabled={testNow.isPending}
+            onClick={() => testNow.mutate(account)}
+          >
+            Test now
+          </button>
+          <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => setDialog({ kind: 'edit', account })}>
+            Edit
+          </button>
+          <button type="button" className={`${styles.btn} ${styles.sm} ${styles.danger}`} onClick={() => setDialog({ kind: 'disconnect', account })}>
+            Disconnect
+          </button>
+        </span>
+      ),
+    },
+  ]
 
   return (
     <>
-      <div className={styles.pageHead}>
-        <div className={styles.titles}>
-          <h2>AWS accounts</h2>
-          <div className={styles.meta}>Harbormaster runs as an ECS service and reaches each account by assuming an IAM role.</div>
-        </div>
-        <div className={styles.actions}>
-          <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={() => setDialog({ kind: 'connect' })}>
-            Connect account
-          </button>
-        </div>
-      </div>
+      <HeaderAction>
+        <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={() => setDialog({ kind: 'connect' })}>
+          Connect account
+        </button>
+      </HeaderAction>
 
       <div className={styles.stack}>
         {accounts.data && (
-          <div className={styles.card}>
-            <Table>
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Role Harbormaster assumes</th>
-                  <th>Regions scanned</th>
-                  <th className={tableClass.num}>Clusters</th>
-                  <th>Status</th>
-                  <th>Last check</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.data.items.map((account) => (
-                  <tr key={account.id}>
-                    <td>
-                      <div className={tableClass.name}>{account.name}</div>
-                      <div className={`${styles.mono} ${styles.muted} ${styles.small}`}>{account.account_id}</div>
-                    </td>
-                    <td className={`${styles.mono} ${styles.small}`}>{account.role_arn}</td>
-                    <td>{account.regions.join(', ')}</td>
-                    <td className={tableClass.num}>{account.clusters}</td>
-                    <td>
-                      <StatusPill account={account} />
-                    </td>
-                    <td className={styles.muted}>{account.last_ok_at ? <Ago ts={account.last_ok_at} /> : '–'}</td>
-                    <td>
-                      <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => setDialog({ kind: 'edit', account })}>
-                        Edit
-                      </button>{' '}
-                      <button
-                        type="button"
-                        className={`${styles.btn} ${styles.sm} ${styles.danger}`}
-                        onClick={() => setDialog({ kind: 'disconnect', account })}
-                      >
-                        Disconnect
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
+          <Panel title="AWS accounts" flush actions={<span>Reached by assuming an IAM role</span>}>
+            <DataTable
+              label="AWS accounts"
+              columns={columns}
+              rows={accounts.data.items}
+              rowKey={(account) => String(account.id)}
+              minWidth={1100}
+              empty="No accounts connected."
+              rowStatus={(account) => {
+                const polled = polledFor(account)
+                if (account.status === 'error' || polled.some((entry) => entry.failing)) return 'bad'
+                return polled.some((entry) => entry.throttled) ? 'warn' : undefined
+              }}
+            />
+          </Panel>
         )}
 
         {runtime && (
           <div className={styles.grid}>
-            <Card title="Where Harbormaster runs">
+            <Panel title="Where Harbormaster runs">
               <KV
                 rows={[
                   ['Cluster / service', <span className={styles.mono}>{`${runtime.cluster} / ${runtime.service}`}</span>],
@@ -135,9 +201,9 @@ export function Accounts() {
                   ],
                 ]}
               />
-            </Card>
+            </Panel>
             {tags.data && (
-              <Card title="Tags">
+              <Panel title="Tags">
                 <div className={styles.form}>
                   <p className={styles.hint}>
                     Tags are kept in Harbormaster only and never written to AWS. An untagged cluster is Dev; an untagged service
@@ -152,12 +218,12 @@ export function Accounts() {
                     ))}
                   </div>
                   <div>
-                    <Link to="/settings/general" className={`${styles.btn} ${styles.sm}`}>
+                    <Link to="/settings/tags" className={`${styles.btn} ${styles.sm}`}>
                       Manage tags
                     </Link>
                   </div>
                 </div>
-              </Card>
+              </Panel>
             )}
           </div>
         )}

@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router'
 import { useSSOTestResult } from '../../../api/hooks'
 import type { SSOConfigDTO, SSOTestResultDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import styles from './sso.module.css'
 
 function outcomeText(result: SSOTestResultDTO): string | null {
@@ -80,7 +80,7 @@ export function TestCard({ config }: { config: SSOConfigDTO }) {
   }
 
   return (
-    <Card title="Test sign-in">
+    <Panel title="Test sign-in">
       <div className={styles.stack}>
         <div className={styles.row}>
           {config.configured ? (
@@ -108,6 +108,6 @@ export function TestCard({ config }: { config: SSOConfigDTO }) {
         )}
         {testId !== null && result.data && <Result result={result.data} onDismiss={dismiss} />}
       </div>
-    </Card>
+    </Panel>
   )
 }

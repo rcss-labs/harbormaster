@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useTagAssignments, useTags } from '../../../api/hooks'
 import type { TagItemDTO } from '../../../api/types'
+import { Panel } from '../../../components/Panel'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useAuth } from '../../auth/AuthProvider'
+import { HeaderAction } from '../../settings/HeaderAction'
 import { useFilters } from '../../shell/useFilters'
 import { Assignments } from './Assignments'
 import { DeleteTagDialog } from './DeleteTagDialog'
@@ -28,20 +30,11 @@ export function Tags() {
 
   return (
     <>
-      <div className={styles.pageHead}>
-        <div className={styles.titles}>
-          <h2>Tags</h2>
-          <div className={styles.meta}>
-            Tags decide who can do what. They live only in Harbormaster; AWS tags are never read or written. An untagged cluster is
-            Dev; an untagged service inherits its cluster's tag.
-          </div>
-        </div>
-        <div className={styles.actions}>
-          <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={() => setDialog({ kind: 'create' })}>
-            Create tag
-          </button>
-        </div>
-      </div>
+      <HeaderAction>
+        <button type="button" className={`${styles.btn} ${styles.primary}`} onClick={() => setDialog({ kind: 'create' })}>
+          Create tag
+        </button>
+      </HeaderAction>
       <div className={styles.stack}>
         {tags.data && (
           <TagsTable
@@ -67,7 +60,15 @@ interface TagsTableProps {
 
 function TagsTable({ tags, onRename, onDelete }: TagsTableProps) {
   return (
-    <div className={styles.card}>
+    <Panel
+      title="Tags"
+      flush
+      actions={
+        <span title="Tags live only in Harbormaster; AWS tags are never read or written. An untagged cluster is Dev; an untagged service inherits its cluster's tag.">
+          Kept in Harbormaster only
+        </span>
+      }
+    >
       <Table>
         <thead>
           <tr>
@@ -131,6 +132,6 @@ function TagsTable({ tags, onRename, onDelete }: TagsTableProps) {
           ))}
         </tbody>
       </Table>
-    </div>
+    </Panel>
   )
 }

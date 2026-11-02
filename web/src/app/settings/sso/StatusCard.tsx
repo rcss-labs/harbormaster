@@ -3,11 +3,12 @@ import { useState } from 'react'
 import { api } from '../../../api/client'
 import type { SSOConfigDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { Pill } from '../../../components/Pill'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
+import { HeaderAction } from '../HeaderAction'
 import styles from './sso.module.css'
 
 const GUARD_TITLE =
@@ -37,24 +38,24 @@ export function StatusCard({ config }: { config: SSOConfigDTO }) {
   const guarded = turningOn && config.break_glass_admins === 0
 
   return (
-    <Card title="Status" right={<Pill kind={config.enabled ? 'ok' : 'mute'}>{config.enabled ? 'SSO on' : 'SSO off'}</Pill>}>
+    <Panel title="Status" actions={<Pill kind={config.enabled ? 'ok' : 'mute'}>{config.enabled ? 'SSO on' : 'SSO off'}</Pill>}>
+      <HeaderAction>
+        <button
+          type="button"
+          className={`${styles.btn} ${turningOn ? styles.primary : ''}`}
+          disabled={guarded || setEnabled.isPending}
+          title={guarded ? GUARD_TITLE : undefined}
+          onClick={() => setConfirming(true)}
+        >
+          {turningOn ? 'Turn on single sign-on' : 'Turn off single sign-on'}
+        </button>
+      </HeaderAction>
       <div className={styles.stack}>
         {config.warnings.map((warning) => (
           <Banner key={warning} kind="warn">
             {warning}
           </Banner>
         ))}
-        <div className={styles.row}>
-          <button
-            type="button"
-            className={`${styles.btn} ${turningOn ? styles.primary : ''}`}
-            disabled={guarded || setEnabled.isPending}
-            title={guarded ? GUARD_TITLE : undefined}
-            onClick={() => setConfirming(true)}
-          >
-            {turningOn ? 'Turn on single sign-on' : 'Turn off single sign-on'}
-          </button>
-        </div>
         {me && !me.sso_linked && (
           <p className={styles.hint}>
             Link your own account first so you can sign in with SSO: use Link SSO account in the sidebar.
@@ -78,6 +79,6 @@ export function StatusCard({ config }: { config: SSOConfigDTO }) {
           }}
         />
       )}
-    </Card>
+    </Panel>
   )
 }
