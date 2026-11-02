@@ -18,7 +18,7 @@ const eightSeries: OverviewMetricsDTO = {
 
 const card = async (title: string): Promise<HTMLElement> => {
   const heading = await screen.findByRole('heading', { name: title })
-  return heading.closest('div')?.parentElement as HTMLElement
+  return (heading.closest('section') ?? heading.closest('div')?.parentElement) as HTMLElement
 }
 
 describe('ClusterUsagePanels', () => {

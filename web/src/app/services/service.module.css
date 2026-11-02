@@ -15,7 +15,7 @@
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .accentLink { color: var(--accent); }
 
-.grid { display: grid; gap: 12px; }
+.grid { display: grid; gap: 14px; }
 .g2 { grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); }
 .g4 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
 .gWide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
