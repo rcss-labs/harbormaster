@@ -1,10 +1,11 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
-import { useClusters, useTasks } from '../../api/hooks'
+import { useAuthOptions, useClusters, useTasks } from '../../api/hooks'
 import { Brand } from '../../components/Brand'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
+import { LinkSSODialog } from './LinkSSODialog'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
 
@@ -42,8 +43,11 @@ export function Sidebar() {
   const alerts = useAlerts(filters)
   const clusters = useClusters(filters)
   const running = useTasks({ ...filters, filter: 'running' })
+  const authOptions = useAuthOptions()
+  const [linking, setLinking] = useState(false)
   if (!me) return null
 
+  const canLinkSSO = authOptions.data?.sso != null && me.has_password && !me.sso_linked
   const dangerAlerts = alerts.data?.counts.danger ?? 0
   const signOut = async () => {
     try {
@@ -82,9 +86,16 @@ export function Sidebar() {
           Signed in as <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
         </div>
         <div className={styles.sideActions}>
-          <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
-            Change password
-          </button>
+          {me.has_password && (
+            <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
+              Change password
+            </button>
+          )}
+          {canLinkSSO && (
+            <button type="button" className={styles.btn} onClick={() => setLinking(true)}>
+              Link SSO account
+            </button>
+          )}
           <button type="button" className={styles.btn} onClick={signOut}>
             Sign out
           </button>
@@ -93,6 +104,7 @@ export function Sidebar() {
           Running on ECS · <code>harbormaster/harbormaster-server</code>
         </div>
       </div>
+      {linking && <LinkSSODialog onClose={() => setLinking(false)} />}
     </aside>
   )
 }
