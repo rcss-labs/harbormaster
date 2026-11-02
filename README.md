@@ -87,7 +87,7 @@ On the first start, with no users in the database, Harbormaster needs a first gl
 
   Open the app, enter the token, and choose a username and password. The token is regenerated on each start until a user exists.
 - **Bootstrap secret.** Set `bootstrap_admin_password_secret_arn` in the module (`HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN`) to a Secrets Manager secret holding the initial `admin` password. The server then creates the `admin` user from it and prints no setup token. The secret value is never logged.
-- **CLI.** `harbormaster create-admin --username <name>` creates an administrator directly. Add `--password-stdin` to pass the password on standard input.
+- **CLI.** `harbormaster create-admin --username <name>` creates an administrator directly. Add `--password-stdin` to pass the password on standard input. The account is a break-glass admin, so it can sign in with its password while single sign-on is on (see Single sign-on (SAML)).
 
 ## Connecting AWS accounts
 
@@ -152,10 +152,10 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_BASE_URL` | `http://127.0.0.1:8480` | Public URL of the app |
 | `HM_DATABASE_URL` | | Postgres URL. Either this or `HM_DATABASE_SECRET_ARN` is required |
 | `HM_DATABASE_SECRET_ARN` | | Secrets Manager secret holding the database credentials (a postgres URL, or JSON with `username`, `password`, `host`, `port` and `dbname`; RDS-managed master secrets have no `host` and are rejected) |
-| `HM_SESSION_KEY` | | Secret key mixed into session id hashes. Set a long random value in production |
+| `HM_SESSION_KEY` | | Secret key mixed into session id hashes, and the key the SSO signing key is encrypted under. Set a long random value in production. Required before single sign-on can be configured (see Single sign-on) |
 | `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` | | Secrets Manager secret with the initial `admin` password (see First run) |
 | `HM_METRICS_TOKEN` | | Bearer token for `GET /metrics`. Empty disables the endpoint (it returns 404) |
-| `HM_COOKIE_SECURE` | `true` | Set the Secure flag on cookies. Use `false` only for plain-HTTP local runs |
+| `HM_COOKIE_SECURE` | `true` | Set the Secure flag on cookies. Use `false` only for plain-HTTP local runs. It does not relax SSO metadata fetching: only `HM_FAKE_AWS` allows `http` and private addresses there |
 | `HM_FAKE_AWS` | `false` | Local demo only, same as `serve --fake-aws`. Seeds demo users (admin `pavel` with a published password) and refuses to run against a database that already has users or accounts. Never set in production |
 | `HM_TRUSTED_PROXY` | `false` | Trust the rightmost `X-Forwarded-For` entry as the client IP. Enable only behind a proxy that appends the real client address (the Terraform module sets it for the ALB) |
 | `HM_LOG_LEVEL` | `info` | Log level |
@@ -164,6 +164,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_LOGIN_MAX_PER_USER` | `5` | Login attempts allowed per user in the window |
 | `HM_LOGIN_MAX_PER_IP` | `30` | Login attempts allowed per client IP in the window |
 | `HM_LOGIN_WINDOW` | `15m` | Login rate-limit window |
+| `HM_SAML_REQUEST_TTL` | `10m` | How long a started SSO sign-in may take before it must be restarted. Allowed range 1m to 30m |
 
 ### Polling intervals
 
@@ -209,6 +210,99 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
 | `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, enforced per Harbormaster task (see Running more than one task) |
+
+### Single sign-on (SAML)
+
+Harbormaster can sign users in through a SAML 2.0 identity provider (IdP) such as Okta, Entra ID, Google Workspace or Keycloak. A global admin sets it up in Settings → Single sign-on. It is off until the admin turns it on. Once it is on, SSO is the normal way in, and only break-glass accounts can also sign in with a password.
+
+#### Before you start
+
+- `HM_SESSION_KEY` must be set. Harbormaster encrypts its SSO signing key under it, and saving the SSO configuration fails with "Set HM_SESSION_KEY before configuring single sign-on." without it.
+- `HM_BASE_URL` must be the URL users open in their browser. The SP entity ID, the ACS URL and the destination check of every sign-in come from it.
+- At least one global admin must be a break-glass admin before SSO can be turned on (see Break-glass and recovery).
+
+#### Set up the identity provider
+
+Replace `{base_url}` with your `HM_BASE_URL`, for example `https://harbormaster.example.com`.
+
+| Value | URL |
+| --- | --- |
+| ACS URL (POST binding) | `{base_url}/api/auth/saml/acs` |
+| SP entity ID (audience) | `{base_url}/api/auth/saml/metadata` (the default; Settings shows the value in use) |
+| App login URL | `{base_url}/api/auth/saml/login` |
+
+The SP metadata is at `{base_url}/api/auth/saml/metadata`, and Settings has a "Download SP metadata" link. Upload it to the IdP if the IdP asks for a metadata file.
+
+Set up the Harbormaster app in your IdP with these values. The steps below name only the fields that matter for Harbormaster. For everything else, follow your IdP's standard SAML app setup and check its documentation for the field names.
+
+- **Okta:** set the ACS URL and the audience to the values above. Set "Login initiated by" to "Either Okta or App" and the App login URL to `{base_url}/api/auth/saml/login`, so the Okta tile starts sign-in at Harbormaster.
+- **Entra ID:** set the identifier to the SP entity ID, the reply URL to the ACS URL, and the **Sign on URL** to `{base_url}/api/auth/saml/login`. The My Apps tile opens the Sign on URL.
+- **Google Workspace:** set the ACS URL and entity ID to the values above, and set the **Start URL** to `{base_url}/api/auth/saml/login`.
+- **Keycloak:** set the ACS URL and entity ID to the values above. Set the client's **Home URL** to `{base_url}/api/auth/saml/login`. Turn **Client signature required** off. Harbormaster does not sign its sign-in requests.
+
+Then give Harbormaster the IdP's settings in Settings → Single sign-on → Identity provider:
+
+- **Metadata URL** or **Metadata file**: the simplest choice. A metadata URL must be `https` and must not point at a loopback, link-local or private address. For an IdP on a private network (for example an internal Keycloak), upload the metadata XML file instead.
+- **Manual**: the entity ID, the SSO URL (HTTP-Redirect binding) and one or more signing certificates in PEM form.
+
+Harbormaster reads the identity provider's signing certificates from this configuration. It accepts an assertion only when one of them signed it.
+
+#### NameID
+
+Under Settings → Single sign-on → Sign-in options, the default NameID format is "Let the IdP choose" (`unspecified`). "Email address" and "Persistent" also work. Transient NameIDs are rejected, and Test sign-in shows the error. Harbormaster identifies a user by the IdP entity ID and the NameID, not by email, so the NameID must stay the same for each person.
+
+#### Turn it on
+
+Follow this order. Each step is a safe stop point, and nobody is locked out before SSO is enabled.
+
+1. **Configure.** Save the identity provider settings and sign-in options, and set the app values in your IdP.
+2. **Test.** Use Settings → Single sign-on → Test sign-in. It shows the NameID, its format, the attributes it received and the username Harbormaster would create. It creates no user and no session, and it works while SSO is off.
+3. **Link your own account.** Open "Link SSO account" in the sidebar, enter your current password, and sign in at the IdP as yourself (see Linking users).
+4. **Flag a break-glass admin.** On the Users page, make at least one admin break-glass, so you can still sign in with a password if the IdP fails.
+5. **Set pending links.** For existing local users who should sign in with SSO, set a pending link to the NameID that Test sign-in showed.
+6. **Enable.** Turn on single sign-on. The confirm dialog says how many users with a password are not break-glass and so can no longer sign in with one.
+
+#### Linking users
+
+- **First SSO sign-in.** When no link exists, the sign-in creates a new user with no permissions and not admin. The username comes from the IdP attributes. Harbormaster never attaches an SSO sign-in to an existing user by username or email. A global admin grants access in Users and permissions.
+- **Self-link.** A signed-in user with a password can open "Link SSO account" in the sidebar, enter their current password, and sign in at the IdP. This works once SSO is configured, even before it is enabled.
+- **Pending link.** A global admin sets a pending link on a local user on the Users page, with the exact NameID the IdP issues. The user's first SSO sign-in with that NameID uses the existing account and keeps its permissions. A pending link expires after 14 days ("Link expired" on the Users page). Set it again if needed.
+- **Unlink.** A global admin can unlink a user on the Users page. The user's SSO sessions end. If the user has no password, Harbormaster sets a temporary password and shows it once; the user must change it at the next sign-in. Users cannot unlink themselves.
+
+#### Passwords
+
+Passwords are never cleared. Linking, enabling SSO and using a pending link leave a user's password as it is.
+
+- **While SSO is on,** only break-glass accounts can sign in with a password. Other users who enter their password get "Use single sign-on to sign in to this account."
+- **While SSO is off,** everyone who still has a password can sign in with it again.
+- **Users without a password** (for example SSO users created at first sign-in) cannot use a password until an admin sets one with "Set password" on the Users page.
+
+#### Break-glass and recovery
+
+A break-glass account is a local admin who can also sign in with a password while SSO is on. Break-glass requires a password, so an SSO-only user can be made break-glass only after an admin sets a password for them. Keep only a few break-glass accounts.
+
+- Enabling SSO requires at least one global admin who is break-glass. While SSO is on, the last break-glass admin cannot be removed, demoted or deleted.
+- If the IdP is down or misconfigured, a break-glass admin signs in with the password. The login page offers "Sign in with a password instead" when SSO is on.
+- If no break-glass admin can sign in, run `harbormaster create-admin --username <name>` with the same database settings as the server. It always creates a break-glass admin. Add `--password-stdin` to pass the password on standard input.
+
+#### Changing the setup
+
+- **Changing the IdP entity ID** signs out every SSO user and detaches every linked identity of users who have a password. Pending links are cleared. Users without a password keep their old identity, which no longer matches any sign-in. An admin unlinks them (which sets a temporary password) and links them again. Users keep their permissions.
+- **Turning SSO off** signs out every SSO user. Turning SSO off restores password sign-in for everyone who has a password.
+- **Removing an IdP signing certificate** signs out SSO users. Adding one does not.
+- **Changing `HM_BASE_URL`** changes the SP entity ID and the ACS URL. Update the IdP and upload the new SP metadata.
+- **Rotating `HM_SESSION_KEY`** makes the stored SP key impossible to decrypt. Settings then shows that the SP key cannot be decrypted. Click "Generate new certificate" in Settings, and upload the new SP metadata to the IdP. The old certificate keeps decrypting assertions for 7 days after a new one is generated.
+
+#### Test sign-in
+
+Settings → Single sign-on → "Test sign-in" opens a sign-in in a new tab and shows the result in Settings. It runs the same checks as a real sign-in. It is the first place to look when a sign-in fails: it shows the NameID to use for pending links, the attributes received, and the reason code for any failure.
+
+#### Limitations
+
+- **No Single Logout.** "Sign out" ends the Harbormaster session only. Sign out at the IdP separately.
+- **No IdP-initiated sign-in.** Sign-in must start from Harbormaster. Use the login URLs above for app tiles and launchers.
+- **No group mapping.** Permissions are granted per user in Users and permissions.
+- **Sign-in time limit.** A sign-in must complete within `HM_SAML_REQUEST_TTL` (10 minutes by default). If it takes longer, start again.
 
 ## Operating
 
@@ -267,6 +361,9 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 - Server-side authorization on every endpoint and every WebSocket; list endpoints filter by visibility; IDs of invisible resources return 404, not 403.
 - Secrets (DB password, signing key) only from Secrets Manager; never logged. Environment variable values from task definitions are shown to users with View (they are visible in the ECS console to the same people); values from `secrets` (SSM/Secrets Manager references) are shown as references only, never resolved.
 - Security headers: CSP (self + fonts), HSTS, `X-Frame-Options: DENY`.
+- Single sign-on accepts only assertions signed by a configured IdP certificate and addressed to this Harbormaster. Unsigned responses and responses to sign-ins Harbormaster did not start are rejected.
+- Each sign-in request is single use and expires after `HM_SAML_REQUEST_TTL`. Assertion and response IDs are recorded, so a captured response cannot be replayed. A binding cookie must match the request, so a response from another browser is refused.
+- The SP private key is stored encrypted in the database under `HM_SESSION_KEY`. SAML messages, certificate PEM and private keys are never written to logs. Audit entries carry fingerprints and field names only.
 - Task definition fields that can reach the container host are admin-only. Non-admins may keep or remove them relative to the deployed revision but cannot add or change them: task and execution roles, secrets outside existing prefixes, `environmentFiles`, FSx credentials, the FireLens S3 config, `credentialSpecs`, `privileged`, `linuxParameters.capabilities.add` and `devices`, `dockerSecurityOptions`, `systemControls`, `pidMode`/`ipcMode`/`networkMode` set to `host`, host volumes (`volumes[].host.sourcePath`), `dockerVolumeConfiguration` and `s3filesVolumeConfiguration`. A rejected draft returns 422 and nothing is registered.
 
 ## Development
@@ -294,6 +391,7 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 - `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` binary
 - `make test`: run Go tests, plus web tests (Vitest) when the web app exists. Go tests need `HM_TEST_DATABASE_URL`
 - `make lint`: check gofmt, run `go vet`, run web lint and typecheck, and check third-party notices
+- `make vulncheck`: scan all packages with `govulncheck` against the Go vulnerability database (needs network access). `make release` runs it
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
 - `make run`: run the server locally against fake AWS data and the test database
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free

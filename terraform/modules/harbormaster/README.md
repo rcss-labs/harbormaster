@@ -65,6 +65,10 @@ aws logs tail /ecs/harbormaster/harbormaster-server --since 15m --profile <name>
 
 If `bootstrap_admin_password_secret_arn` is set, the admin is created from that secret instead and no setup token is printed.
 
+## Single sign-on
+
+The module has no SSO inputs. SSO is configured in Harbormaster's Settings page after the module is applied, and it needs `HM_SESSION_KEY`, which the module already injects. Sign-in is browser-mediated: the identity provider posts its response through the user's browser to `{base_url}/api/auth/saml/acs`, so the IdP never calls the ALB directly. An internal ALB works, and `allowed_cidrs` only has to admit your users' networks. The one call the task makes itself is fetching a metadata URL, so the IdP must have a public `https` address, or upload its metadata XML instead. `base_url` is also the SP identity: changing it changes the SP entity ID and ACS URL, so update the IdP. See [Single sign-on (SAML)](../../../README.md#single-sign-on-saml) in the root README.
+
 ## Database secret format
 
 `harbormaster/database-url` holds a complete `postgres://harbormaster:<password>@<host>:<port>/harbormaster?sslmode=require` URL, not JSON and not an RDS-managed master secret (those have no `host`, which Harbormaster rejects). ECS injects the whole value as `HM_DATABASE_URL`, so the server uses it as is. Do not point `HM_DATABASE_SECRET_ARN` at an RDS-managed secret.
