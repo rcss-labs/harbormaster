@@ -144,3 +144,40 @@ func TestSupervisor_RollupRunsBeforeRetention(t *testing.T) {
 		t.Errorf("daily rows for %s = %d with %d minutes below, want 2 rows and 5 minutes", sampledAt.Format(time.DateOnly), rows, below)
 	}
 }
+
+// After a deploy or a leader change the daily panels must not stay empty until the first hourly tick.
+func TestSupervisor_RunsRollupsAndRetentionOnStartWithoutWaitingForTheTicker(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	sampledAt := today.AddDate(0, 0, -2).Add(12 * time.Hour)
+	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "c"}, Service: "api"}
+	if err := st.InsertCountsHistory(ctx, sampledAt, []model.Service{{Key: key, Running: 1, Desired: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	stoppedAt := time.Now().Add(-8 * 24 * time.Hour)
+	if _, err := st.UpsertTasks(ctx, []model.Task{{
+		Cluster: key.ClusterKey, ARN: "arn:t/old", ServiceName: "api", LastStatus: "STOPPED", DesiredStatus: "STOPPED", StoppedAt: &stoppedAt,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// The hourly ticker never fires inside this test.
+	p := newTestPoller(st, Config{
+		AccountsRefresh: time.Hour, RetentionEvery: time.Hour, CountsHistory: 5 * time.Minute,
+		Retention: store.Retention{CountsHistory: 7 * 24 * time.Hour, StoppedTasks: 7 * 24 * time.Hour},
+	}, randomLockKey())
+	p.loopFactory = newLoopRecorder().factory
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { p.runSupervisor(runCtx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	waitFor(t, 3*time.Second, "daily availability row", func() bool {
+		var n int
+		return st.Pool.QueryRow(ctx, `select count(*) from service_availability_daily`).Scan(&n) == nil && n == 1
+	})
+	waitFor(t, 3*time.Second, "old stopped task deleted", func() bool {
+		var n int
+		return st.Pool.QueryRow(ctx, `select count(*) from tasks`).Scan(&n) == nil && n == 0
+	})
+}
