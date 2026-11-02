@@ -6,12 +6,12 @@ const windowInput = (page: import('@playwright/test').Page) => page.getByLabel('
 test.describe('settings as pavel', () => {
   test.use(asUser('pavel'))
 
-  test('sidebar Settings opens General with tags and the window card', async ({ page }) => {
+  test('sidebar Settings opens General with the window card', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click()
     await expect(page).toHaveURL(/\/settings\/general$/)
     await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Create tag' }).first()).toBeVisible()
+    await expect(page.getByRole('heading', { level: 2, name: 'Tags' })).toHaveCount(0)
     await expect(windowInput(page)).toHaveValue('10')
   })
 
@@ -21,6 +21,12 @@ test.describe('settings as pavel', () => {
     await expect(page).toHaveURL(/\/settings\/accounts$/)
     await expect(page.getByRole('heading', { level: 2, name: 'AWS accounts' })).toBeVisible()
 
+    await page.getByRole('link', { name: 'Tags', exact: true }).click()
+    await expect(page).toHaveURL(/\/settings\/tags$/)
+    await expect(page.getByRole('heading', { level: 2, name: 'Tags' })).toBeVisible()
+
+    await page.goto('/admin/tags')
+    await expect(page).toHaveURL(/\/settings\/tags$/)
     await page.goto('/admin/audit')
     await expect(page).toHaveURL(/\/settings\/audit$/)
     await page.goto('/settings/bogus')

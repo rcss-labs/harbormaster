@@ -378,6 +378,8 @@ type TaskDTO struct {
 	ARN             string      `json:"arn"`
 	Service         *ServiceRef `json:"service"`
 	Cluster         ClusterRef  `json:"cluster"`
+	AccountName     string      `json:"account_name"`
+	Region          string      `json:"region"`
 	Group           string      `json:"group"`
 	StartedBy       string      `json:"started_by"`
 	Status          string      `json:"status"`
@@ -406,6 +408,8 @@ type TaskCountsDTO struct {
 	Running  int `json:"running"`
 	Stopped  int `json:"stopped"`
 	All      int `json:"all"`
+	// StoppedError counts failed stops inside the stopped-tasks window.
+	StoppedError int `json:"stopped_error"`
 }
 
 // TaskStatusSummaryDTO splits tasks by running health and recent stop outcome.

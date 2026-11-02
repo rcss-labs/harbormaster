@@ -11,12 +11,13 @@ import { SSOPage } from './sso/SSOPage'
 import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
 
-export type SettingsTab = 'general' | 'accounts' | 'users' | 'sso' | 'audit'
+export type SettingsTab = 'general' | 'accounts' | 'users' | 'tags' | 'sso' | 'audit'
 
 export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['general', 'General'],
   ['accounts', 'AWS accounts'],
   ['users', 'Users & permissions'],
+  ['tags', 'Tags'],
   ['sso', 'Single sign-on'],
   ['audit', 'Audit log'],
 ]
@@ -26,12 +27,9 @@ const isSettingsTab = (value: string | undefined): value is SettingsTab => SETTI
 function TabPanel({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case 'general':
-      return (
-        <>
-          <Tags />
-          <StoppedTasksCard />
-        </>
-      )
+      return <StoppedTasksCard />
+    case 'tags':
+      return <Tags />
     case 'accounts':
       return <Accounts />
     case 'users':
@@ -60,11 +58,7 @@ export function SettingsPage() {
       <div className={styles.pageHead}>
         <h1>Settings</h1>
       </div>
-      <Tabs
-        items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))}
-        active={activeTab}
-        hrefFor={(key) => `/settings/${key}`}
-      />
+      <Tabs items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
       <div className={styles.panel}>
         <TabPanel tab={activeTab} />
       </div>

@@ -8,7 +8,15 @@
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .indent { padding-left: 28px; }
+/* Tree levels: account > region > cluster > service, indented in steps of 20px. */
+.accountRow { background: var(--raised); font-weight: 600; }
+.regionRow { background: var(--surface); }
 .clusterRow { background: var(--raised); }
+.indentRegion { padding-left: 24px; }
+.indentCluster { padding-left: 44px; }
+.indentService { padding-left: 64px; }
+.summary { margin-left: 10px; font-size: 12px; font-weight: 400; }
+.treeControls { display: inline-flex; gap: 6px; margin-left: 12px; }
 .link { color: var(--accent); }
 
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }

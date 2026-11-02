@@ -459,6 +459,8 @@ func (s *Store) ListTasks(ctx context.Context, tq TaskQuery) ([]TaskRow, int, er
 		where = append(where, runningSQL)
 	case "stopped":
 		where = append(where, "t.last_status = 'STOPPED'")
+	case "stopped_error":
+		where = append(where, stoppedErrorSQL)
 	case "problems":
 		where = append(where, "("+runningSQL+" or "+problemSQL+")")
 	}
@@ -521,6 +523,7 @@ type TaskSummaryQuery struct {
 	Vis              Visibility
 	Cluster, Service string
 	Since            time.Time // stopped tasks older than this are ignored
+	StatusSince      time.Time // when set, overrides Since for the stopped counts only, not StopReasons
 }
 
 // TaskSummary counts running and recently stopped (stopped_at >= since) tasks.
@@ -547,14 +550,20 @@ func (s *Store) TaskSummaryFor(ctx context.Context, tq TaskSummaryQuery) (TaskSu
 		base += ` and t.service_name = ` + q.add(tq.Service)
 	}
 	baseArgs := append([]any(nil), q.values...) // without the cutoff, for queries that do not use it
+	// Both cutoff queries use the same placeholder; only the bound value differs.
 	sinceParam := q.add(since)
+	statusSince := since
+	if !tq.StatusSince.IsZero() {
+		statusSince = tq.StatusSince
+	}
+	statusArgs := append(append([]any(nil), baseArgs...), statusSince)
 
 	err := s.Pool.QueryRow(ctx, `select
 	   count(*) filter (where `+runningSQL+` and t.health_status is distinct from 'UNHEALTHY'),
 	   count(*) filter (where `+runningSQL+` and t.health_status = 'UNHEALTHY'),
 	   count(*) filter (where t.last_status = 'STOPPED' and t.stopped_at >= `+sinceParam+` and `+stoppedErrorSQL+`),
 	   count(*) filter (where t.last_status = 'STOPPED' and t.stopped_at >= `+sinceParam+` and not `+stoppedErrorSQL+`)`+
-		base, q.values...).Scan(&summary.RunningHealthy, &summary.RunningUnhealthy, &summary.StoppedError, &summary.StoppedNormal)
+		base, statusArgs...).Scan(&summary.RunningHealthy, &summary.RunningUnhealthy, &summary.StoppedError, &summary.StoppedNormal)
 	if err != nil {
 		return TaskSummary{}, fmt.Errorf("task summary counts: %w", err)
 	}

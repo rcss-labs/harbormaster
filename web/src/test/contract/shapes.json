@@ -1354,10 +1354,12 @@
       "all": "number",
       "problems": "number",
       "running": "number",
-      "stopped": "number"
+      "stopped": "number",
+      "stopped_error": "number"
     },
     "items": [
       {
+        "account_name": "string",
         "arn": "string",
         "az": "string",
         "can": {
@@ -1380,6 +1382,7 @@
         "id": "string",
         "memory": "string",
         "private_ip": "string",
+        "region": "string",
         "revision": "number",
         "service": {
           "$null": {
