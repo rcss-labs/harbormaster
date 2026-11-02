@@ -10,6 +10,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -94,6 +95,8 @@ type Poller struct {
 	clients awsx.Clients
 	cfg     Config
 	log     *slog.Logger
+	// rollups computes the daily analytics tables; it runs in the retention tick, before retention deletes sources.
+	rollups *rollup.Runner
 
 	leader atomic.Bool
 
@@ -120,6 +123,10 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 		lockKey: LockKey, retryInterval: defaultRetryInterval,
 	}
 	p.loopFactory = p.defaultLoopFactory
+	p.rollups = &rollup.Runner{
+		Store: st, Clients: clients, Now: time.Now, UtilEnabled: cfg.AnalyticsUtil,
+		SampleInterval: cfg.CountsHistory, Log: log,
+	}
 	return p
 }
 

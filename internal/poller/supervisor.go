@@ -12,7 +12,7 @@ type runningLoop struct{ cancel context.CancelFunc }
 
 // runSupervisor keeps one polling loop per enabled account x region. It refreshes the account
 // list at start and every cfg.AccountsRefresh, and runs retention every cfg.RetentionEvery
-// (the first run happens one interval after start, not immediately). It returns after ctx is
+// (the first run happens one interval after start, not immediately); each retention tick first runs the daily rollups. It returns after ctx is
 // cancelled and every loop has exited.
 func (p *Poller) runSupervisor(ctx context.Context) {
 	loops := map[awsx.Target]runningLoop{}
@@ -74,9 +74,20 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 		case <-refreshTicker.C:
 			refresh()
 		case <-retentionTicker.C:
+			p.runRollups(ctx)
 			p.runRetention(ctx)
 		}
 	}
+}
+
+// runRollups computes the daily analytics rollups that are due. It must run before runRetention in the same
+// tick so the raw rows it reads are still there. Errors are logged, never fatal: retention goes ahead regardless.
+func (p *Poller) runRollups(ctx context.Context) {
+	result, err := p.rollups.RunDue(ctx)
+	if err != nil && ctx.Err() == nil {
+		p.log.Error("poller: rollups", "err", err)
+	}
+	p.log.Debug("poller: rollups done", "rows", result)
 }
 
 // runRetention marks orphaned tags, then deletes expired rows. Errors are logged, never fatal.

@@ -103,3 +103,41 @@ func TestSupervisor_RunsRetention(t *testing.T) {
 		return st.Pool.QueryRow(ctx, `select count(*) from tasks`).Scan(&n) == nil && n == 0
 	})
 }
+
+func TestSupervisor_RollupRunsBeforeRetention(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	// Three days old: inside the six-day backfill window but past the 24h counts retention, so the same tick
+	// that deletes it must roll it up first.
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	sampledAt := today.AddDate(0, 0, -3).Add(12 * time.Hour)
+	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "c"}, Service: "api"}
+	if err := st.InsertCountsHistory(ctx, sampledAt, []model.Service{
+		{Key: key, Running: 1, Desired: 2}, {Key: model.ServiceKey{ClusterKey: key.ClusterKey, Service: "web"}, Running: 2, Desired: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := newTestPoller(st, Config{
+		AccountsRefresh: time.Hour, RetentionEvery: 50 * time.Millisecond, CountsHistory: 5 * time.Minute,
+		Retention: store.Retention{CountsHistory: 24 * time.Hour},
+	}, randomLockKey())
+	p.loopFactory = newLoopRecorder().factory
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { p.runSupervisor(runCtx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	waitFor(t, 3*time.Second, "source rows deleted", func() bool {
+		var n int
+		return st.Pool.QueryRow(ctx, `select count(*) from service_counts_history`).Scan(&n) == nil && n == 0
+	})
+	var rows, below int
+	if err := st.Pool.QueryRow(ctx,
+		`select count(*), coalesce(sum(minutes_below), 0) from service_availability_daily where day = $1::date`,
+		sampledAt.Format(time.DateOnly)).Scan(&rows, &below); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || below != 5 {
+		t.Errorf("daily rows for %s = %d with %d minutes below, want 2 rows and 5 minutes", sampledAt.Format(time.DateOnly), rows, below)
+	}
+}
