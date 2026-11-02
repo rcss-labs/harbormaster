@@ -238,7 +238,7 @@ Set up the Harbormaster app in your IdP with these values. The steps below name 
 - **Okta:** set the ACS URL and the audience to the values above. Set "Login initiated by" to "Either Okta or App" and the App login URL to `{base_url}/api/auth/saml/login`, so the Okta tile starts sign-in at Harbormaster.
 - **Entra ID:** set the identifier to the SP entity ID, the reply URL to the ACS URL, and the **Sign on URL** to `{base_url}/api/auth/saml/login`. The My Apps tile opens the Sign on URL.
 - **Google Workspace:** set the ACS URL and entity ID to the values above, and set the **Start URL** to `{base_url}/api/auth/saml/login`.
-- **Keycloak:** set the ACS URL and entity ID to the values above. Set the client's **Home URL** to `{base_url}/api/auth/saml/login`. Turn **Client signature required** off. Harbormaster does not sign its sign-in requests.
+- **Keycloak:** set the ACS URL and entity ID to the values above. Set the client's **Home URL** to `{base_url}/api/auth/saml/login`. Turn **Client signature required** off. Harbormaster does not sign its sign-in requests. Do not add an **Audience** protocol mapper to the client: Harbormaster reads only one `Audience` per audience restriction, so extra audiences make sign-in fail with reason `audience` (Test sign-in shows it).
 
 Then give Harbormaster the IdP's settings in Settings → Single sign-on → Identity provider:
 
