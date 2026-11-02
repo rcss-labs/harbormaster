@@ -59,7 +59,11 @@ func TestLoad_Defaults(t *testing.T) {
 			DeploymentHistory: 2160 * time.Hour,
 			AuditLog:          8760 * time.Hour,
 			OrphanTags:        720 * time.Hour,
+			AvailabilityDaily: 8760 * time.Hour,
+			CapacityDaily:     8760 * time.Hour,
+			UtilDaily:         2160 * time.Hour,
 		},
+		Analytics:       AnalyticsConfig{Util: true},
 		PageSizeDefault: 100,
 		PageSizeMax:     500,
 		MetricsCacheTTL: 60 * time.Second,
@@ -325,5 +329,18 @@ func TestLoad_SAMLRequestTTL_Bounds(t *testing.T) {
 				t.Errorf("SAMLRequestTTL = %v, want 5m", cfg.SAMLRequestTTL)
 			}
 		})
+	}
+}
+
+func TestLoad_ParsesAnalyticsUtilFalse(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":   "postgres://example",
+		"HM_ANALYTICS_UTIL": "false",
+	}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Analytics.Util {
+		t.Errorf("Analytics.Util = true, want false")
 	}
 }

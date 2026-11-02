@@ -1,18 +1,19 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { allNull, useTargetHealth } from '../../../api/observe'
-import type { ServiceDTO, ServiceMetricsDTO } from '../../../api/types'
+import type { RunningTaskDTO, ServiceDTO, ServiceMetricsDTO } from '../../../api/types'
 import { BarChart } from '../../../charts/BarChart'
 import { Donut } from '../../../charts/Donut'
 import { Legend } from '../../../charts/Legend'
 import { LineChart } from '../../../charts/LineChart'
-import { Sparkline } from '../../../charts/Sparkline'
 import { XL24, fmtNum, niceMax } from '../../../charts/format'
 import { useNow } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
-import { Card } from '../../../components/Card'
+import { DataTable, type DataTableColumn } from '../../../components/DataTable'
+import { Panel } from '../../../components/Panel'
+import { StopTaskDialog } from '../../../components/StopTaskDialog'
 import { Meter } from '../../../components/Meter'
-import { Tile } from '../../../components/Tile'
+import { KpiStrip, type KpiItem } from '../../../components/KpiStrip'
 import { MetricPanel } from '../../observe/MetricPanel'
 import styles from './MetricPanels.module.css'
 
@@ -32,37 +33,77 @@ const nonNull = (values: (number | null)[]) => values.filter((value): value is n
 const insightsOff = (metrics?: ServiceMetricsDTO) => metrics !== undefined && (metrics.insights === 'disabled' || metrics.series === null)
 const hasLoadBalancer = (service: ServiceDTO) => service.networking.load_balancers.length > 0
 
-function UsageTile({ title, now, values, color, off }: { title: string; now?: number | null; values: number[]; color: string; off: boolean }) {
-  return (
-    <Tile k={title} v={off ? '–' : percentLabel(now)} small={off ? 'Container Insights off' : undefined}>
-      {!off && values.length > 0 && <Sparkline values={values} color={color} height={24} fluid />}
-    </Tile>
-  )
-}
+const sub = (text: string) => <small className={styles.kpiSub}>{text}</small>
 
-/** The CPU and memory tiles for the Overview tiles row. */
-export function UsageTiles({ service, metrics }: MetricsProps) {
+/** The Overview KPI strip: tasks, revision, CPU, memory and, behind a load balancer, requests, p95 and 5xx. */
+export function ServiceKpis({ service, metrics }: MetricsProps) {
   const off = insightsOff(metrics)
   const cpuUnits = metrics?.now?.cpu_units ?? Number(service.task_definition.cpu)
   const memMib = metrics?.now?.mem_mib ?? Number(service.task_definition.memory)
-  return (
-    <>
-      <UsageTile
-        title={`CPU (of ${cpuUnits} units)`}
-        now={metrics?.now?.cpu}
-        values={nonNull(metrics?.series?.cpu ?? [])}
-        color={CPU_COLOR}
-        off={off}
-      />
-      <UsageTile
-        title={`Memory (of ${memMib} MiB)`}
-        now={metrics?.now?.mem}
-        values={nonNull(metrics?.series?.mem ?? [])}
-        color={MEMORY_COLOR}
-        off={off}
-      />
-    </>
-  )
+  const pending = Math.max(0, service.desired - service.running)
+  const alb = hasLoadBalancer(service) ? metrics?.alb : null
+
+  const usage = (label: string, now: number | null | undefined, values: number[], color: string, unit: string): KpiItem => ({
+    label,
+    value: off ? (
+      <>
+        –{sub('Container Insights off')}
+      </>
+    ) : (
+      <>
+        {percentLabel(now)}
+        {sub(unit)}
+      </>
+    ),
+    spark: off ? undefined : values,
+    sparkColor: color,
+  })
+
+  const items: KpiItem[] = [
+    {
+      label: 'Tasks',
+      value: (
+        <>
+          {service.running}/{service.desired}
+          {sub(pending > 0 ? `${pending} pending` : 'all running')}
+        </>
+      ),
+      valueColor: pending > 0 ? 'var(--warning)' : undefined,
+    },
+    {
+      label: 'Revision',
+      value: (
+        <>
+          :{service.revision}
+          {sub(service.image_tag)}
+        </>
+      ),
+    },
+    usage('CPU', metrics?.now?.cpu, nonNull(metrics?.series?.cpu ?? []), CPU_COLOR, `of ${cpuUnits} units`),
+    usage('Memory', metrics?.now?.mem, nonNull(metrics?.series?.mem ?? []), MEMORY_COLOR, `of ${memMib} MiB`),
+  ]
+  if (alb) {
+    items.push(
+      {
+        label: 'Req / min',
+        value: alb.req_now === null ? '–' : fmtNum(alb.req_now),
+        spark: nonNull(alb.req_per_min),
+        sparkColor: 'var(--series-3)',
+      },
+      {
+        label: 'p95',
+        value: alb.p95_now === null ? '–' : <>{Math.round(alb.p95_now)}{sub('ms')}</>,
+        spark: nonNull(alb.p95_ms),
+        sparkColor: 'var(--series-4)',
+      },
+      {
+        label: 'HTTP 5xx',
+        value: <>{fmtNum(alb.err5xx_today)}{sub('today')}</>,
+        valueColor: alb.err5xx_today > 0 ? 'var(--danger)' : undefined,
+      },
+    )
+  }
+  return <KpiStrip label="Service summary" items={items} />
 }
 
 /** CPU and memory over the last 24 h with deploy and restart markers. `now` is injectable for tests. */
@@ -127,7 +168,7 @@ export function HealthCard({ service, children }: { service: ServiceDTO; childre
   const missing = Math.max(0, service.desired - healthy - unhealthy)
 
   return (
-    <Card title="Target health" right={loadBalancer?.target_group_name}>
+    <Panel title="Target health" actions={loadBalancer?.target_group_name}>
       <Donut
         segments={[
           { name: 'Healthy targets', v: healthy, color: 'var(--success)' },
@@ -138,7 +179,7 @@ export function HealthCard({ service, children }: { service: ServiceDTO; childre
         sub="healthy"
       />
       {children && <div className={styles.afterDonut}>{children}</div>}
-    </Card>
+    </Panel>
   )
 }
 
@@ -184,50 +225,97 @@ function UsageMeter({ value, color }: { value: number | null | undefined; color:
   return value === null || value === undefined ? <span className={styles.muted}>–</span> : <Meter pct={value} color={color} />
 }
 
-/** Running tasks card: per-task CPU and memory meters when the metrics carry `tasks_now`, else the plain task rows. */
+/** Running tasks panel: per-task CPU and memory meters when the metrics carry `tasks_now`, with Shell, Logs and Stop per task. */
 export function RunningTasksMeters({ service, metrics }: MetricsProps) {
   const base = `/services/${service.id}`
+  const [stopping, setStopping] = useState<RunningTaskDTO | null>(null)
   const usageByTask = new Map((metrics?.tasks_now ?? []).map((usage) => [usage.task_id, usage]))
   const withMeters = metrics?.tasks_now != null
+  const canShell = service.can.terminal && service.enable_execute_command
+
+  const columns: DataTableColumn<RunningTaskDTO>[] = [
+    {
+      key: 'task',
+      header: 'Task',
+      width: '120px',
+      render: (task) => (
+        <Link className={styles.mono} to={`${base}/tasks`} title={task.id}>
+          {task.short_id}
+        </Link>
+      ),
+    },
+    {
+      key: 'zone',
+      header: 'Zone',
+      width: '110px',
+      render: (task) => (
+        <span className={styles.muted}>
+          {task.az}
+          {task.spot ? ' · spot' : ''}
+        </span>
+      ),
+    },
+    ...(withMeters
+      ? [
+          { key: 'cpu', header: 'CPU', render: (task: RunningTaskDTO) => <UsageMeter value={usageByTask.get(task.short_id)?.cpu} color={CPU_COLOR} /> },
+          {
+            key: 'mem',
+            header: 'Memory',
+            render: (task: RunningTaskDTO) => (
+              <UsageMeter value={usageByTask.get(task.short_id)?.mem} color={task.health === 'UNHEALTHY' ? 'var(--warning)' : MEMORY_COLOR} />
+            ),
+          },
+        ]
+      : []),
+    {
+      key: 'actions',
+      header: '',
+      width: '170px',
+      align: 'right',
+      render: (task) => (
+        <span className={styles.rowActions}>
+          {canShell && task.exec_agent_running && (
+            <Link className={styles.rowBtn} to={`${base}/terminal?task=${encodeURIComponent(task.id)}`}>
+              Shell
+            </Link>
+          )}
+          {service.can.logs && (
+            <Link className={styles.rowBtn} to={`${base}/logs`}>
+              Logs
+            </Link>
+          )}
+          {service.can.operate && (
+            <button type="button" className={`${styles.rowBtn} ${styles.rowDanger}`} onClick={() => setStopping(task)}>
+              Stop
+            </button>
+          )}
+        </span>
+      ),
+    },
+  ]
 
   return (
-    <Card title="Running tasks" right={`${service.running_tasks.length} running`}>
-      {service.running_tasks.length === 0 ? (
-        <div className={styles.empty}>No running tasks.</div>
-      ) : (
-        <div className={withMeters ? styles.taskMeters : styles.taskRows}>
-          <div className={`${withMeters ? styles.taskMeter : styles.taskRow} ${styles.muted} ${styles.small}`}>
-            <span>Task</span>
-            <span>Zone</span>
-            {withMeters && (
-              <>
-                <span>CPU</span>
-                <span>Memory</span>
-              </>
-            )}
-          </div>
-          {service.running_tasks.map((task) => {
-            const usage = usageByTask.get(task.short_id)
-            return (
-              <div key={task.id} className={withMeters ? styles.taskMeter : styles.taskRow}>
-                <Link className={styles.mono} to={`${base}/tasks`} title={task.id}>
-                  {task.short_id}
-                </Link>
-                <span className={styles.muted}>
-                  {task.az}
-                  {task.spot ? ' · spot' : ''}
-                </span>
-                {withMeters && (
-                  <>
-                    <UsageMeter value={usage?.cpu} color={CPU_COLOR} />
-                    <UsageMeter value={usage?.mem} color={task.health === 'UNHEALTHY' ? 'var(--warning)' : MEMORY_COLOR} />
-                  </>
-                )}
-              </div>
-            )
-          })}
-        </div>
+    <Panel title="Running tasks" actions={`${service.running_tasks.length} running`} flush>
+      <DataTable
+        label="Running tasks"
+        columns={columns}
+        rows={service.running_tasks}
+        rowKey={(task) => task.id}
+        rowStatus={(task) => (task.health === 'UNHEALTHY' ? 'warn' : undefined)}
+        empty="No running tasks."
+        minWidth={560}
+        pageSize={25}
+      />
+      {stopping && (
+        <StopTaskDialog
+          taskId={stopping.id}
+          shortId={stopping.short_id.slice(0, 12)}
+          serviceName={service.name}
+          serviceId={service.id}
+          desiredCount={service.desired}
+          onClose={() => setStopping(null)}
+        />
       )}
-    </Card>
+    </Panel>
   )
 }

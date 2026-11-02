@@ -86,7 +86,10 @@ export function ServicePage() {
 
   return (
     <>
-      <ServiceHeader service={service} onTagClick={me?.admin ? setEditing : undefined} />
+      <div className={styles.stickyHead}>
+        <ServiceHeader service={service} onTagClick={me?.admin ? setEditing : undefined} />
+        <Tabs items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
+      </div>
       {!service.controller.supported && <ControllerBanner banner={service.controller.banner} />}
       {pendingRevision !== null && revisions.data && (
         <PendingRevisionBanner
@@ -98,7 +101,6 @@ export function ServicePage() {
           onDeploy={() => navigate(`/services/${serviceId}/task-definition?deploy=${pendingRevision}`)}
         />
       )}
-      <Tabs items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
       <div className={styles.tabPanel}>{body}</div>
       {editing && <ServiceTagEditor target={editing} clusterId={service.cluster.id} onClose={() => setEditing(null)} />}
     </>

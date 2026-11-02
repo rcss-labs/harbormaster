@@ -125,7 +125,7 @@ func (s *Service) recordRollout(ctx context.Context, subj authz.Subject, key mod
 			return tx.AppendOperation(recordCtx, store.Operation{
 				AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Service: &key.Service,
 				ActorUserID: &subj.UserID, Source: "harbormaster", Text: text,
-				Details: map[string]any{"deployment_id": rollout.DeploymentID, "from_revision": from, "to_revision": to},
+				Details: map[string]any{"op": kind, "deployment_id": rollout.DeploymentID, "from_revision": from, "to_revision": to},
 			})
 		})
 	}

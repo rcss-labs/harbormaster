@@ -10,6 +10,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -41,6 +42,8 @@ type Config struct {
 	CountsHistory, Jitter, RetentionEvery, AccountsRefresh time.Duration
 	MaxInFlight                                            int
 	Retention                                              store.Retention
+	// AnalyticsUtil enables the daily CloudWatch utilisation rollup (HM_ANALYTICS_UTIL); read by the rollup runner.
+	AnalyticsUtil bool
 	// Telemetry receives loop timings, leadership and write counts (plan 06); nil means telemetry.Default.
 	Telemetry *telemetry.Registry
 	// StartStagger spaces the first cycles of the task tiers (runningTasks, stoppedTasks, fullTasks)
@@ -75,7 +78,11 @@ func ConfigFrom(c config.Config) Config {
 			DeploymentHistory: c.Retention.DeploymentHistory,
 			AuditLog:          c.Retention.AuditLog,
 			OrphanTags:        c.Retention.OrphanTags,
+			AvailabilityDaily: c.Retention.AvailabilityDaily,
+			CapacityDaily:     c.Retention.CapacityDaily,
+			UtilDaily:         c.Retention.UtilDaily,
 		},
+		AnalyticsUtil:   c.Analytics.Util,
 		StartStagger:    defaultStartStagger,
 		RetentionEvery:  defaultRetentionEvery,
 		AccountsRefresh: defaultAccountsRefresh,
@@ -88,6 +95,8 @@ type Poller struct {
 	clients awsx.Clients
 	cfg     Config
 	log     *slog.Logger
+	// rollups computes the daily analytics tables; it runs in the retention tick, before retention deletes sources.
+	rollups *rollup.Runner
 
 	leader atomic.Bool
 
@@ -114,6 +123,10 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 		lockKey: LockKey, retryInterval: defaultRetryInterval,
 	}
 	p.loopFactory = p.defaultLoopFactory
+	p.rollups = &rollup.Runner{
+		Store: st, Clients: clients, Now: time.Now, UtilEnabled: cfg.AnalyticsUtil,
+		SampleInterval: cfg.CountsHistory, CountsRetention: cfg.Retention.CountsHistory, Log: log,
+	}
 	return p
 }
 

@@ -58,6 +58,15 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 		exec(`insert into deployment_history (account_id, region, cluster_name, service_name, deployment_id, kind, started_at)
 		      values ('a', 'r', 'c', 'api', $1, 'deploy', $2)`, age.String(), now.Add(-age))
 	}
+	for _, age := range []time.Duration{366 * day, 1 * day} {
+		exec(`insert into service_availability_daily (account_id, region, cluster_name, service_name, day, samples, samples_ok, minutes_below, unexpected_stops)
+		      values ('a', 'r', 'c', 'api', $1::date, 1, 1, 0, 0)`, now.Add(-age))
+		exec(`insert into cluster_capacity_daily (account_id, region, cluster_name, day, samples, vcpu_sum, vcpu_max, mem_gib_sum, mem_gib_max, tasks_sum, tasks_max, spot_sum)
+		      values ('a', 'r', 'c', $1::date, 1, 1, 1, 1, 1, 1, 1, 0)`, now.Add(-age))
+	}
+	for _, age := range []time.Duration{91 * day, 1 * day} {
+		exec(`insert into service_util_daily (account_id, region, cluster_name, service_name, day) values ('a', 'r', 'c', 'api', $1::date)`, now.Add(-age))
+	}
 	exec(`insert into login_attempts (username, ip, ts, ok) values ('u', 'i', $1, false), ('u', 'i', $2, false)`,
 		now.Add(-25*time.Hour), now.Add(-time.Hour))
 
@@ -103,6 +112,7 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 	res, err := s.RunRetention(ctx, now, store.Retention{
 		StoppedTasks: 7 * day, ServiceEvents: 30 * day, CountsHistory: 7 * day, OperationLog: 90 * day,
 		DeploymentHistory: 90 * day, AuditLog: 365 * day, OrphanTags: 30 * day,
+		AvailabilityDaily: 365 * day, CapacityDaily: 365 * day, UtilDaily: 90 * day,
 	})
 	if err != nil {
 		t.Fatalf("RunRetention: %v", err)
@@ -111,6 +121,7 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 		"tasks": 1, "service_events": 1, "service_counts_history": 1, "operation_log": 1,
 		"deployment_history": 1, "audit_log": 1, "sessions": 1, "login_attempts": 1,
 		"cluster_tags": 1, "service_tags": 1, "metrics_cache": 1,
+		"service_availability_daily": 1, "cluster_capacity_daily": 1, "service_util_daily": 1,
 	}
 	for key, n := range want {
 		if res[key] != n {
@@ -118,7 +129,8 @@ func TestRunRetention_DeletesByAge(t *testing.T) {
 		}
 	}
 	remaining := map[string]int{"tasks": 1, "service_events": 1, "service_counts_history": 1, "operation_log": 1,
-		"deployment_history": 1, "audit_log": 1, "sessions": 1, "login_attempts": 1, "cluster_tags": 1, "service_tags": 1, "metrics_cache": 1}
+		"deployment_history": 1, "audit_log": 1, "sessions": 1, "login_attempts": 1, "cluster_tags": 1, "service_tags": 1, "metrics_cache": 1,
+		"service_availability_daily": 1, "cluster_capacity_daily": 1, "service_util_daily": 1}
 	for table, n := range remaining {
 		var got int
 		if err := s.Pool.QueryRow(ctx, `select count(*) from `+table).Scan(&got); err != nil || got != n {
@@ -133,12 +145,23 @@ func TestRunRetention_ZeroDurationSkipsTable(t *testing.T) {
 	if _, err := s.UpsertTasks(ctx, []model.Task{stoppedTask("c", "arn:t/old", time.Now().Add(-1000*time.Hour))}); err != nil {
 		t.Fatal(err)
 	}
+	for _, sql := range []string{
+		`insert into service_availability_daily (account_id, region, cluster_name, service_name, day, samples, samples_ok, minutes_below, unexpected_stops) values ('a', 'r', 'c', 'api', '2000-01-01', 1, 1, 0, 0)`,
+		`insert into cluster_capacity_daily (account_id, region, cluster_name, day, samples, vcpu_sum, vcpu_max, mem_gib_sum, mem_gib_max, tasks_sum, tasks_max, spot_sum) values ('a', 'r', 'c', '2000-01-01', 1, 1, 1, 1, 1, 1, 1, 0)`,
+		`insert into service_util_daily (account_id, region, cluster_name, service_name, day) values ('a', 'r', 'c', 'api', '2000-01-01')`,
+	} {
+		if _, err := s.Pool.Exec(ctx, sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
 	if _, err := s.RunRetention(ctx, time.Now(), store.Retention{}); err != nil {
 		t.Fatalf("RunRetention: %v", err)
 	}
-	var n int
-	if err := s.Pool.QueryRow(ctx, `select count(*) from tasks`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("tasks = %d, %v; want 1", n, err)
+	for _, table := range []string{"tasks", "service_availability_daily", "cluster_capacity_daily", "service_util_daily"} {
+		var n int
+		if err := s.Pool.QueryRow(ctx, `select count(*) from `+table).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("%s = %d, %v; want 1", table, n, err)
+		}
 	}
 }
 

@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
 import { api } from '../api/client'
+import { AnalyticsPage, AnalyticsRedirect } from './analytics/AnalyticsPage'
 import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
-import { NetworkRegionPage } from './networks/NetworkRegionPage'
-import { NetworkVpcPage } from './networks/NetworkVpcPage'
-import { NetworksPage } from './networks/NetworksPage'
+import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
 import { SettingsPage } from './settings/SettingsPage'
 import { ServicePage } from './services/ServicePage'
@@ -82,9 +81,11 @@ export function AppRoutes() {
           <Route path="me/access" element={<MyAccess />} />
           {/* plan 05: networks and storage */}
           <Route path="networks" element={<NetworksPage />} />
-          <Route path="networks/:accountId/:region" element={<NetworkRegionPage />} />
-          <Route path="networks/:accountId/:region/:vpcId" element={<NetworkVpcPage />} />
+          <Route path="networks/:accountId/:region" element={<NetworkRegionRedirect />} />
+          <Route path="networks/:accountId/:region/:vpcId" element={<NetworkVpcRedirect />} />
           <Route path="storage" element={<StoragePage />} />
+          <Route path="analytics" element={<AnalyticsRedirect />} />
+          <Route path="analytics/:tab" element={<AnalyticsPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>

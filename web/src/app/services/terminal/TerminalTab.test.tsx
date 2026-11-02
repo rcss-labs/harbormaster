@@ -76,6 +76,16 @@ describe('TerminalTab', () => {
     xterm.dataHandlers = []
   })
 
+  it('shows a session panel with the idle and duration limits and says keystrokes are not recorded', async () => {
+    seed()
+    open()
+    const panel = await screen.findByRole('region', { name: 'Session' })
+    expect(panel).toHaveTextContent('ECS Exec')
+    expect(panel).toHaveTextContent('Idle timeout20 minutes')
+    expect(panel).toHaveTextContent('Max duration4 hours')
+    expect(panel).toHaveTextContent('Keystrokes and output are not recorded.')
+  })
+
   it('shows the lock panel without Terminal permission', async () => {
     seed({ service: { can: { ...SERVICE_PAYMENTS.can, terminal: false } } })
     open()

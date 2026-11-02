@@ -25,7 +25,8 @@ describe('ServicePage', () => {
     expect(clusterHrefs).toContain(`/clusters/${SERVICE_PAYMENTS.cluster.id}`)
     expect(screen.getByText('Fargate')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Restart (new deployment)' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` })).toBeEnabled()
+    expect(screen.getByRole('spinbutton', { name: 'Desired count' })).toHaveValue(SERVICE_PAYMENTS.desired)
+    expect(screen.getByRole('spinbutton', { name: 'Desired count' })).toBeEnabled()
     expect(screen.getByRole('link', { name: 'AWS console ↗' })).toHaveAttribute('href', SERVICE_PAYMENTS.console_url)
 
     const terminalTab = tabLink(/Terminal/)
@@ -78,14 +79,14 @@ describe('ServicePage', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)
     await screen.findByText('Completed')
     const { vpc, security_group_names: securityGroupNames } = SERVICE_PAYMENTS.networking
-    const treeLink = screen.getByRole('link', { name: 'Network tree →' })
+    const treeLink = screen.getByRole('link', { name: 'Network placement →' })
     expect(treeLink).toHaveAttribute('href', `/networks/${SERVICE_PAYMENTS.account_id}/${SERVICE_PAYMENTS.region}/${vpc!.vpc_id}`)
     for (const [groupId, groupName] of Object.entries(securityGroupNames)) {
       expect(screen.getByText(`${groupId} (${groupName})`)).toBeInTheDocument()
     }
   })
 
-  it('omits the Network tree link when the service has no VPC', async () => {
+  it('omits the Network placement link when the service has no VPC', async () => {
     server.use(
       http.get('/api/services/:id', () =>
         HttpResponse.json({ ...SERVICE_PAYMENTS, networking: { ...SERVICE_PAYMENTS.networking, vpc: null } }),
@@ -93,7 +94,7 @@ describe('ServicePage', () => {
     )
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)
     await screen.findByText('Completed')
-    expect(screen.queryByRole('link', { name: 'Network tree →' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Network placement →' })).not.toBeInTheDocument()
   })
 
   it('404 shows No access with "You need View on <tag> to open this service."', async () => {

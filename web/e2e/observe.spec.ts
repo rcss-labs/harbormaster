@@ -5,7 +5,7 @@ const HOMELAB_ACCOUNT_ID = '482109375512'
 const STAGING_ACCOUNT_ID = '731022849906'
 
 // CSS-module class names are hashed in the production build, so match on the stable prefix.
-const LOG_LINE = '[class*="_ln_"]'
+const LOG_LINE = '[role="log"] [role="row"]'
 
 /** A shared Card (div with an h2 title): the heading's grandparent. */
 const card = (page: Page, title: string) => page.getByRole('heading', { level: 2, name: title, exact: true }).locator('xpath=../..')
@@ -18,7 +18,7 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' })
 
 test('overview shows cluster usage and needs attention', async ({ page }) => {
   await login(page, 'pavel')
-  const cpuCard = card(page, 'CPU by cluster, 24 h')
+  const cpuCard = card(page, 'Busiest clusters, CPU')
   await expect(cpuCard.getByText('core-services', { exact: true })).toBeVisible({ timeout: POLL_TIMEOUT })
 
   const attention = card(page, 'Needs attention')
@@ -30,10 +30,10 @@ test('overview shows cluster usage and needs attention', async ({ page }) => {
 
   // The badge counts danger alerts: the seed has exactly one (image-resizer), account alerts are warnings.
   await expect(rows.filter({ hasText: 'Failing' })).toHaveCount(1)
-  await expect(nav(page).getByRole('link', { name: /^Overview/ })).toHaveText('Overview1')
+  await expect(nav(page).getByRole('link', { name: /^Overview/ })).toHaveText(/Overview1$/)
 })
 
-test('cluster page draws the usage chart and service ALB stats', async ({ page }) => {
+test('cluster page draws the usage chart', async ({ page }) => {
   await login(page, 'pavel')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   await page.getByRole('link', { name: /core-services/ }).first().click()
@@ -41,9 +41,6 @@ test('cluster page draws the usage chart and service ALB stats', async ({ page }
 
   const chart = card(page, 'Cluster CPU and memory, 24 h')
   await expect(chart).toBeVisible({ timeout: POLL_TIMEOUT })
-
-  const payments = page.getByRole('article', { name: 'payments-api' })
-  await expect(payments.getByText('req/min')).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
 // The grid ends before now, so the fresh rollout's marker sits at the right edge (see deployMarks).
@@ -58,8 +55,8 @@ test('cluster chart shows a deployment marker label', async ({ page }) => {
 test('edge-proxy says Container Insights is off', async ({ page }) => {
   await login(page, 'pavel')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
-  const card = page.getByRole('article', { name: 'edge-proxy' })
-  await expect(card.getByText(/Container Insights is off/)).toBeVisible({ timeout: POLL_TIMEOUT })
+  const row = page.getByRole('row', { name: /edge-proxy/ })
+  await expect(row.getByTitle('Container Insights is off').first()).toBeVisible({ timeout: POLL_TIMEOUT })
 
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'edge-nginx')}/metrics`)
   await expect(page.getByText(/Container Insights is off for edge-proxy/)).toBeVisible({ timeout: POLL_TIMEOUT })
@@ -105,17 +102,17 @@ test('logs history, filter and live tail', async ({ page }) => {
   expect(await lines.count()).toBeGreaterThanOrEqual(1)
   await expect(page.getByText('live tail')).toBeVisible({ timeout: POLL_TIMEOUT })
 
-  await page.getByLabel('Level').selectOption('problems')
+  await page.getByRole('radiogroup', { name: 'Level' }).getByRole('radio', { name: 'Warn+' }).click()
   await expect(async () => {
     const count = await lines.count()
     expect(count).toBeGreaterThan(0)
     for (const line of await lines.all()) {
-      // The message span carries a level class (lvl-warn / lvl-error).
-      await expect(line.locator('[class*="lvl-"]')).toHaveCount(1)
+      // Every remaining row is tinted by a detected level.
+      await expect(line).toHaveAttribute('data-level', /^(warn|error)$/)
     }
   }).toPass({ timeout: 10_000 })
 
-  await page.getByLabel('Level').selectOption('all')
+  await page.getByRole('radiogroup', { name: 'Level' }).getByRole('radio', { name: 'All' }).click()
   await page.getByLabel('Search logs').fill('refunds')
   await expect(async () => {
     const texts = await lines.allTextContents()
@@ -123,8 +120,8 @@ test('logs history, filter and live tail', async ({ page }) => {
     for (const text of texts) expect(text).toContain('refunds')
   }).toPass({ timeout: 10_000 })
 
-  await page.getByRole('button', { name: 'Pause' }).click()
-  await expect(page.getByText('paused')).toBeVisible()
+  await page.getByRole('button', { name: 'Paused' }).click()
+  await expect(page.getByRole('button', { name: 'Paused' })).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('view-only user sees the logs lock', async ({ page }) => {

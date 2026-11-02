@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Navigate, useParams } from 'react-router'
 import { AdminOnly } from '../../components/AdminOnly'
 import { Tabs } from '../../components/Tabs'
@@ -7,6 +8,7 @@ import { Tags } from '../admin/tags/Tags'
 import { Users } from '../admin/users/Users'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { HeaderActionSlot } from './HeaderAction'
 import { SSOPage } from './sso/SSOPage'
 import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
@@ -44,6 +46,7 @@ function TabPanel({ tab }: { tab: SettingsTab }) {
 export function SettingsPage() {
   const { tab } = useParams()
   const { me } = useAuth()
+  const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
   const activeTab = isSettingsTab(tab) ? tab : null
   const tabLabel = SETTINGS_TABS.find(([key]) => key === activeTab)?.[1]
   useCrumbs(tabLabel ? [['Settings', '/settings/general'], [tabLabel]] : [['Settings']])
@@ -54,14 +57,17 @@ export function SettingsPage() {
   if (!me?.admin) return <AdminOnly area={activeTab} />
 
   return (
-    <>
-      <div className={styles.pageHead}>
-        <h1>Settings</h1>
+    <HeaderActionSlot.Provider value={actionSlot}>
+      <div className={styles.sticky}>
+        <div className={styles.pageHead}>
+          <h1>Settings</h1>
+          <div role="group" aria-label="Tab actions" className={styles.actions} ref={setActionSlot} />
+        </div>
+        <Tabs items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
       </div>
-      <Tabs items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
       <div className={styles.panel}>
         <TabPanel tab={activeTab} />
       </div>
-    </>
+    </HeaderActionSlot.Provider>
   )
 }

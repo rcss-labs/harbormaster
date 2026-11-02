@@ -5,46 +5,44 @@ import { asUser, expect, test } from './fixtures/test'
 test.describe('clusters filter bar as pavel', () => {
   test.use(asUser('pavel'))
 
-  test('status, name and view', async ({ page }) => {
+  // The table has a header row, so N clusters are N + 1 rows.
+  test('environment, status and name filters', async ({ page }) => {
     await page.goto('/clusters')
-    await expect(page.getByRole('article')).toHaveCount(6)
+    const rows = page.getByRole('table', { name: 'Clusters' }).getByRole('row')
+    await expect(rows).toHaveCount(7)
+    // Worst first by default.
+    await expect(rows.nth(1)).toContainText('background-jobs')
 
-    await page.getByRole('group', { name: 'Status filter' }).getByRole('button', { name: 'Needs attention' }).click()
-    await expect(page.getByRole('article')).toHaveCount(1)
-    await expect(page.getByRole('article', { name: 'background-jobs' })).toBeVisible()
-    await expect(page).toHaveURL(/status=needs_attention/)
+    await page.getByRole('radiogroup', { name: 'Status' }).getByRole('radio', { name: /^Problems/ }).click()
+    await expect(rows).toHaveCount(3)
+    await expect(page.getByRole('row', { name: /background-jobs/ })).toBeVisible()
+    await expect(page).toHaveURL(/status=problems/)
 
-    await page.getByRole('searchbox', { name: 'Cluster name' }).fill('core')
-    await expect(page.getByRole('article')).toHaveCount(0)
+    await page.getByRole('searchbox', { name: 'Filter clusters' }).fill('core')
     await expect(page.getByText('No clusters match these filters.')).toBeVisible()
 
     await page
       .getByText('No clusters match these filters.')
       .getByRole('button', { name: 'Clear filters' })
       .click()
-    await expect(page.getByRole('article')).toHaveCount(6)
+    await expect(rows).toHaveCount(7)
 
-    await page.getByRole('searchbox', { name: 'Cluster name' }).fill('eu')
-    await expect(page.getByRole('article')).toHaveCount(1)
-    await expect(page.getByRole('article', { name: 'eu-apps' })).toBeVisible()
+    await page.getByRole('searchbox', { name: 'Filter clusters' }).fill('eu')
+    // Header row + eu-apps (name, eu-west-1) + edge-proxy (eu-central-1): the filter also matches the region.
+    await expect(rows).toHaveCount(3)
+    await expect(page.getByRole('row', { name: /eu-apps/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /edge-proxy/ })).toBeVisible()
 
-    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Table' }).click()
-    // Header row plus eu-apps.
-    await expect(page.getByRole('row')).toHaveCount(2)
-    await expect(page.getByRole('searchbox', { name: 'Cluster name' })).toHaveValue('eu')
-
-    await page.goto('/clusters?status=healthy&q=web')
-    await expect(page.getByRole('row')).toHaveCount(2)
+    await page.goto('/clusters?env=staging&q=web')
+    await expect(rows).toHaveCount(2)
     await expect(page.getByRole('row', { name: /staging-web/ })).toBeVisible()
   })
 
-  test('account select in the bar drives the top bar', async ({ page }) => {
+  test('the top bar account select narrows the table', async ({ page }) => {
     await page.goto('/clusters')
-    await expect(page.getByRole('article')).toHaveCount(6)
-    await page.getByRole('combobox', { name: 'Account', exact: true }).selectOption({ label: 'staging-example' })
-    await expect(page.getByRole('combobox', { name: 'Account filter' })).toHaveValue(
-      await page.getByRole('combobox', { name: 'Account', exact: true }).inputValue(),
-    )
-    await expect(page.getByRole('article')).toHaveCount(1)
+    const rows = page.getByRole('table', { name: 'Clusters' }).getByRole('row')
+    await expect(rows).toHaveCount(7)
+    await page.getByRole('combobox', { name: 'Account filter' }).selectOption({ label: 'staging-example' })
+    await expect(rows).toHaveCount(2)
   })
 })

@@ -1,11 +1,11 @@
 /* Scaling tab layout and stepper, ported from the mockup's sScaling() grid, toolbar, icon-btn and hint rules (docs/design/mockup/index.html). */
 .grid {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .activity {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 @media (max-width: 700px) {
   .grid {
@@ -72,3 +72,9 @@
   font-family: var(--mono);
   font-size: 12px;
 }
+
+/* Range bar: track, shaded auto scaling span, desired marker (prototype Scaling tab). */
+.rangeBar { position: relative; height: 8px; margin: 6px 0 30px; border-radius: 4px; background: var(--hover-strong); }
+.rangeSpan { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent-soft); border: 1px solid var(--accent-soft-border); box-sizing: border-box; }
+.rangeMark { position: absolute; top: -4px; width: 3px; height: 16px; margin-left: -1px; border-radius: 2px; background: var(--accent); }
+.rangeScale { position: absolute; top: 14px; left: 0; right: 0; display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--dim); }

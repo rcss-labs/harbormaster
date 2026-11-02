@@ -123,15 +123,21 @@ func inheritedTag(tags map[authz.TagID]TagDTO, id authz.TagID, inherited bool) T
 // reserved sums vCPU and GiB over tasks and counts the spot ones; unparsable sizes count as zero.
 func reserved(tasks []store.TaskRow) (vcpu, gib float64, spot int) {
 	for _, t := range tasks {
-		cpu, _ := strconv.Atoi(t.CPU)
-		mem, _ := strconv.Atoi(t.Memory)
-		vcpu += float64(cpu) / 1024
-		gib += float64(mem) / 1024
+		taskVCPU, taskGiB := reservedSize(t.CPU, t.Memory)
+		vcpu += taskVCPU
+		gib += taskGiB
 		if t.CapacityProvider == "FARGATE_SPOT" {
 			spot++
 		}
 	}
 	return vcpu, gib, spot
+}
+
+// reservedSize converts a task's CPU units and memory MiB (as stored, text) to vCPU and GiB; unparsable sizes are zero.
+func reservedSize(cpuUnits, memoryMiB string) (vcpu, gib float64) {
+	cpu, _ := strconv.Atoi(cpuUnits)
+	mem, _ := strconv.Atoi(memoryMiB)
+	return float64(cpu) / 1024, float64(mem) / 1024
 }
 
 var clusterStatusRank = map[model.ClusterStatus]int{

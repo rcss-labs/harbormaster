@@ -98,7 +98,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         await expect(dana.page).toHaveURL(/\/(\?.*)?$/)
         await expect(dana.page.getByText('Signed in as')).toContainText('dana')
         await dana.page.goto('/clusters')
-        await expect(dana.page.getByRole('article')).toHaveCount(6)
+        await expect(dana.page.getByRole('table', { name: 'Clusters' }).getByRole('row')).toHaveCount(7)
         await dana.assertClean()
         await dana.context.close()
       }
@@ -123,7 +123,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
         await alex.page.reload()
         await alex.page.goto('/clusters')
-        await expect(alex.page.getByRole('article').first()).toBeVisible()
+        await expect(alex.page.getByRole('table', { name: 'Clusters' }).getByRole('row').nth(1)).toBeVisible()
         await alex.assertClean()
         await alex.context.close()
       }

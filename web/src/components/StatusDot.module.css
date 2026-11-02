@@ -1,0 +1,9 @@
+.status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 500; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.ok { color: var(--success); }
+.warn { color: var(--warning); }
+.bad { color: var(--danger); }
+.info { color: var(--info); }
+.info .dot { animation: pulse 1.2s ease-in-out infinite; }
+.mute { color: var(--muted); }
+@keyframes pulse { 50% { opacity: 0.25; } }

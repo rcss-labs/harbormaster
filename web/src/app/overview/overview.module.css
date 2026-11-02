@@ -1,29 +1,86 @@
-/* Ported from the mockup's page-head, grid, dots and feed rules (docs/design/mockup/index.html). */
-.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.titles { display: grid; gap: 6px; min-width: 0; }
-.meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+/* The page is a size container: two-column rows stack on the width of the main column, not the viewport. */
+.page { display: flex; flex-direction: column; gap: 14px; container-type: inline-size; min-width: 0; }
+.pageHead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pageHead h1 { margin: 0; }
+.meta { color: var(--muted); font-size: 12px; }
+.layoutToggle { margin-left: auto; }
 
-.grid { display: grid; gap: 12px; }
-.g3 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
-.g4 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+.kpiNote { display: block; margin: 2px 0 0; font-family: var(--sans); font-size: 11.5px; font-weight: 400; color: var(--muted); letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.dots { display: flex; gap: 4px; flex-wrap: wrap; }
-.dot { width: 16px; height: 16px; border-radius: 3px; }
+.twoCol { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; }
+.stack { display: grid; gap: 14px; min-width: 0; align-content: start; }
+@container (max-width: 1100px) {
+  .twoCol { grid-template-columns: minmax(0, 1fr); }
+}
 
-.danger { color: var(--danger); }
-.muted { color: var(--muted); }
-.afterDonut { margin-top: 14px; }
-.legend { margin-bottom: 8px; }
+/* Needs attention */
+.attention { min-width: 0; container-type: inline-size; container-name: attention; }
+.alertRow { display: grid; grid-template-columns: 104px minmax(0, 1.2fr) minmax(0, 1.4fr) 56px auto; align-items: center; gap: 12px; min-height: 40px; padding: 4px 12px; border-bottom: 1px solid var(--row-border); border-left: 3px solid transparent; }
+.alertRow:hover { background: var(--hover); }
+.stripe_bad { border-left-color: var(--danger); }
+.stripe_warn { border-left-color: var(--warning); }
+.stripe_info { border-left-color: var(--info); }
+.what { display: grid; line-height: 1.25; min-width: 0; }
+.whatTitle { font-weight: 600; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.whatTitle:hover { color: var(--accent); }
+.where { font: 10.5px/1.3 var(--mono); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.when { font: 11px var(--mono); color: var(--muted); text-align: right; white-space: nowrap; }
+.rowActions { display: flex; gap: 4px; justify-content: flex-end; min-width: 0; }
+.rowAction { height: 24px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--raised); color: var(--text-2); cursor: pointer; font: inherit; font-size: 11.5px; display: inline-flex; align-items: center; text-decoration: none; white-space: nowrap; }
+.rowAction:hover:not(:disabled) { background: var(--hover-strong); color: var(--text); }
+.rowAction:disabled { opacity: 0.5; cursor: not-allowed; }
+.showAll { width: 100%; height: 32px; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; }
+.showAll:hover { background: var(--hover); }
+/* Narrow panel: drop the detail column. */
+@container attention (max-width: 760px) {
+  .alertRow { grid-template-columns: 104px minmax(0, 1fr) 56px auto; }
+  .detail { display: none; }
+}
 
-/* Observe additions (plan 03, task 16): wide grid rows and the Needs attention list (mockup .g-wide, .alert-row, .stripe). */
-.gWide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
-@media (max-width: 1100px) { .gWide { grid-template-columns: minmax(0, 1fr); } }
-.alertRow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 14px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; color: inherit; text-decoration: none; }
-.alertRow:last-child { border-bottom: 0; }
-.stripeBad { border-left-color: var(--danger); }
-.stripeWarn { border-left-color: var(--warning); }
-.stripeInfo { border-left-color: var(--info); }
-.what { display: grid; gap: 2px; min-width: 0; }
-.when { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.mutedSmall { color: var(--muted); font-size: 12px; }
-.allHealthy { color: var(--muted); font-size: 12px; }
+/* Estate map */
+.legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.legendItem { display: inline-flex; align-items: center; gap: 5px; }
+.legendItem i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.mapRows { display: grid; gap: 8px; }
+.mapRow { display: grid; grid-template-columns: minmax(0, 140px) minmax(0, 1fr); gap: 12px; align-items: center; }
+.mapName { display: grid; line-height: 1.2; min-width: 0; }
+.mapAccount { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapSub { font: 10.5px var(--mono); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cells { display: flex; flex-wrap: wrap; gap: 3px; }
+.cell { width: 14px; height: 14px; border-radius: 3px; display: block; }
+.cell:hover, .cell:focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
+
+/* Busiest clusters */
+.busyRow { display: grid; grid-template-columns: minmax(0, 1fr) 90px 36px; gap: 10px; align-items: center; padding: 0 12px; height: 34px; border-bottom: 1px solid var(--row-border); color: inherit; text-decoration: none; }
+.busyRow:last-child { border-bottom: 0; }
+.busyRow:hover { background: var(--hover); }
+.busyName { display: grid; line-height: 1.2; min-width: 0; }
+.busyCluster { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.busyTrack { height: 4px; border-radius: 2px; background: var(--border); display: flex; overflow: hidden; }
+.busyFill { display: block; border-radius: 2px; }
+.busyValue { font: 11.5px var(--mono); text-align: right; }
+
+/* Estate layout */
+.toolbarLabel { font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin-left: 6px; white-space: nowrap; }
+.estateFilter { width: 220px; max-width: 100%; height: 26px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--chrome); color: var(--text); font: inherit; }
+.summary { font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+.estateScroll { overflow-x: auto; }
+.estateTable { min-width: 640px; }
+.estateGroup { border-bottom: 1px solid var(--row-border); }
+.groupHead { width: 100%; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; border: 0; background: var(--chrome); color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.groupHead:hover { background: var(--raised); }
+.chevron { width: 10px; font: 10px var(--mono); color: var(--dim); }
+.groupDot { width: 6px; height: 6px; border-radius: 50%; flex: none; display: inline-block; }
+.groupName { font-weight: 600; }
+.groupWhere { font: 11px var(--mono); color: var(--dim); }
+.groupCounts { margin-left: auto; display: flex; gap: 12px; font: 11px var(--mono); color: var(--muted); }
+.estateRows { list-style: none; margin: 0; padding: 0; }
+.estateRow { display: grid; grid-template-columns: minmax(0, 1.3fr) 130px 120px; align-items: center; gap: 10px; min-height: 32px; padding: 0 12px 0 12px; border-top: 1px solid var(--row-border); border-left: 3px solid transparent; }
+.estateRow:hover { background: var(--hover); }
+.estateService { display: flex; gap: 8px; align-items: baseline; min-width: 0; padding-left: 14px; }
+.groupNote { display: flex; align-items: center; gap: 12px; min-height: 28px; padding: 0 12px 0 41px; font-size: 11.5px; color: var(--dim); border-top: 1px solid var(--row-border); }
+.hiddenNote { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; color: var(--muted); font-size: 12px; }
+.linkButton { border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
+.linkButton:hover { text-decoration: underline; }
+.panelNotes:not(:empty) { padding: 8px 12px 0; }

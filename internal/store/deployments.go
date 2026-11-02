@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
@@ -85,18 +88,55 @@ func (s *Store) OpenDeployments(ctx context.Context) ([]OpenDeployment, error) {
 	return open, nil
 }
 
-// FinishDeployment sets a deployment's outcome if none is set yet. claimed is
-// false when another task finished it first.
-func (s *Store) FinishDeployment(ctx context.Context, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time) (claimed bool, err error) {
-	return finishDeployment(ctx, s.Pool, k, deploymentID, outcome, finishedAt)
+// FailureInfo says why a deployment failed: Group is one of circuit_breaker,
+// health_check, failed_to_start, out_of_memory, stopped_by_user or other;
+// Detail is the raw ECS rollout reason or the last stopped task's reason.
+type FailureInfo struct {
+	Group  string
+	Detail string
 }
 
-func finishDeployment(ctx context.Context, db execer, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time) (claimed bool, err error) {
+// StoppedTaskReason is why a task stopped: its stop-reason group and raw stopped reason.
+type StoppedTaskReason struct {
+	Group  string
+	Reason string
+}
+
+// LastStoppedTaskReason returns the newest stopped task started by the
+// deployment, or nil when there is none.
+func (s *Store) LastStoppedTaskReason(ctx context.Context, k model.ServiceKey, deploymentID string) (*StoppedTaskReason, error) {
+	var stop StoppedTaskReason
+	err := s.Pool.QueryRow(ctx,
+		`select coalesce(stop_reason_group, ''), coalesce(stopped_reason, '') from tasks
+		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4
+		   and started_by = $5 and stopped_at is not null
+		 order by stopped_at desc limit 1`,
+		k.AccountID, k.Region, k.Cluster, k.Service, deploymentID).Scan(&stop.Group, &stop.Reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("last stopped task reason: %w", err)
+	}
+	return &stop, nil
+}
+
+// FinishDeployment sets a deployment's outcome if none is set yet. claimed is
+// false when another task finished it first.
+func (s *Store) FinishDeployment(ctx context.Context, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time, failure *FailureInfo) (claimed bool, err error) {
+	return finishDeployment(ctx, s.Pool, k, deploymentID, outcome, finishedAt, failure)
+}
+
+func finishDeployment(ctx context.Context, db execer, k model.ServiceKey, deploymentID, outcome string, finishedAt time.Time, failure *FailureInfo) (claimed bool, err error) {
+	var failureReason, failureDetail *string
+	if failure != nil {
+		failureReason, failureDetail = &failure.Group, &failure.Detail
+	}
 	tag, err := db.Exec(ctx,
-		`update deployment_history set outcome = $6, finished_at = $7
+		`update deployment_history set outcome = $6, finished_at = $7, failure_reason = $8, failure_detail = $9
 		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4
 		   and deployment_id = $5 and outcome is null`,
-		k.AccountID, k.Region, k.Cluster, k.Service, deploymentID, outcome, finishedAt)
+		k.AccountID, k.Region, k.Cluster, k.Service, deploymentID, outcome, finishedAt, failureReason, failureDetail)
 	if err != nil {
 		return false, fmt.Errorf("finish deployment: %w", err)
 	}

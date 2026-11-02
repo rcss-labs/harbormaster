@@ -2,6 +2,10 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import {
   ACCOUNTS,
+  ANALYTICS_CAPACITY,
+  ANALYTICS_DELIVERY,
+  ANALYTICS_OPERATIONS,
+  ANALYTICS_RELIABILITY,
   ASSIGNMENTS,
   AUDIT,
   CLUSTERS,
@@ -119,6 +123,15 @@ export const handlers = [
   // observe (plan 03, task 16): overview metrics and alerts
   http.get('/api/overview/metrics', () => HttpResponse.json(OVERVIEW_METRICS)),
   http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
+  // analytics: the fixture for the tab, with the requested range echoed into window.requested
+  http.get('/api/analytics/:tab', ({ params, request }) => {
+    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS }[
+      params.tab as string
+    ]
+    if (!fixture) return notFound()
+    const range = new URL(request.url).searchParams.get('range') ?? '30d'
+    return HttpResponse.json({ ...fixture, window: { ...fixture.window, requested: range } })
+  }),
   // observe (plan 03, task 19): service metrics and target health
   http.get('/api/services/:id/metrics', ({ params }) =>
     HttpResponse.json(params.id === SERVICE_PAYMENTS.id ? SERVICE_METRICS_PAYMENTS : SERVICE_METRICS_CATALOG_NO_INSIGHTS),
