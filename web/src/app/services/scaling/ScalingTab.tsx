@@ -3,14 +3,16 @@ import { useDesiredCountInfo, useSetDesiredCount, type DesiredCountInfo, type De
 import { useScaling } from '../../../api/observe'
 import { useService } from '../../../api/hooks'
 import type { ScalingDTO, ScalingPolicyDTO } from '../../../api/types'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { KV } from '../../../components/KV'
 import { useToast } from '../../../components/Toast'
+import type { ServiceDTO } from '../../../api/types'
+import { DesiredCountDialog } from '../DesiredCountDialog'
 import styles from './ScalingTab.module.css'
 
-type SaveDesired = (desired: number) => void
+type SaveDesired = (desired: number, onSettled: () => void) => void
 
 /** The desired count as a whole number of tasks, or null while the draft is blank or not a count. */
 function parseCount(draft: string): number | null {
@@ -47,33 +49,35 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
   }
   if (!service.data || !info.data || !scaling.data) return null
 
-  const saveDesired: SaveDesired = (desired) =>
+  const saveDesired: SaveDesired = (desired, onSettled) =>
     setDesired.mutate({ desired }, {
-      onSuccess: (result: DesiredCountResult) =>
+      onSuccess: (result: DesiredCountResult) => {
         toast.show(
           result.changed ? `Desired count set to ${result.desired}.` : `Desired count is already ${result.desired}.`,
           result.changed ? 'ok' : 'info',
-        ),
-      onError: (caught) => toast.show(caught.message, 'bad'),
+        )
+        onSettled()
+      },
+      onError: (caught) => {
+        toast.show(caught.message, 'bad')
+        onSettled()
+      },
     })
 
   return (
     <>
       <div className={styles.grid}>
         <DesiredCountCard
-          // Remounts with the server's count after a save, so the draft always starts from what is running.
-          key={info.data.desired}
           info={info.data}
           scaling={scaling.data}
-          canOperate={service.data.can.operate}
-          tagName={service.data.tag.name}
+          service={service.data}
           saving={setDesired.isPending}
           onSave={saveDesired}
         />
         <AutoScalingCard scaling={scaling.data} />
       </div>
       <div className={styles.activity}>
-        <Card title="Scaling activity">
+        <Panel title="Scaling activity" flush>
           {scaling.data.activities.length === 0 ? (
             <EmptyState>No scaling activity in the last 7 days.</EmptyState>
           ) : (
@@ -87,7 +91,7 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
                 ))}
             </Feed>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   )
@@ -96,15 +100,27 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
 interface DesiredCountCardProps {
   info: DesiredCountInfo
   scaling: ScalingDTO
-  canOperate: boolean
-  tagName: string
+  service: ServiceDTO
   saving: boolean
   onSave: SaveDesired
 }
 
-function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }: DesiredCountCardProps) {
+function DesiredCountCard({ info, scaling, service, saving, onSave }: DesiredCountCardProps) {
   const [draft, setDraft] = useState(String(info.desired))
-  const draftCount = parseCount(draft)
+  const [confirming, setConfirming] = useState(false)
+  // Follow the running count when it changes (a poll, or a saved change) without dropping an edit in progress
+  // or an open confirm dialog: only a draft still equal to the previous server value is resynced.
+  const [seenDesired, setSeenDesired] = useState(info.desired)
+  if (seenDesired !== info.desired) {
+    setSeenDesired(info.desired)
+    if (!confirming && draft === String(seenDesired)) setDraft(String(info.desired))
+  }
+  const canOperate = service.can.operate
+  const tagName = service.tag.name
+  const parsed = parseCount(draft)
+  // A count above the service's maximum is not a valid draft: it cannot be applied or confirmed.
+  const draftCount = parsed !== null && parsed <= info.max ? parsed : null
+  const outOfRange = parsed !== null && draftCount === null
   const outsideAutoScaling = draftCount !== null && scaling.has_target && (draftCount < scaling.min || draftCount > scaling.max)
 
   const step = (delta: number) => {
@@ -117,7 +133,8 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
     : 'No auto scaling: the count stays where you set it.'
 
   return (
-    <Card title="Desired count">
+    <Panel title="Desired count">
+      {scaling.has_target && <RangeBar scaling={scaling} desired={draftCount ?? info.desired} />}
       <div className={styles.toolbar}>
         <button type="button" className={styles.icon} aria-label="Fewer tasks" onClick={() => step(-1)}>
           −
@@ -128,7 +145,7 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
           min={0}
           max={info.max}
           value={draft}
-          aria-label="Desired count"
+          aria-label="Scale to"
           onChange={(event) => setDraft(event.target.value)}
         />
         <button type="button" className={styles.icon} aria-label="More tasks" onClick={() => step(1)}>
@@ -139,27 +156,56 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
           className={styles.btn}
           disabled={!canOperate || draftCount === null || saving}
           title={canOperate ? undefined : `You need Operate on ${tagName}`}
-          onClick={() => {
-            if (draftCount !== null) onSave(draftCount)
-          }}
+          onClick={() => setConfirming(true)}
         >
           Update desired count
         </button>
       </div>
       {outsideAutoScaling && <p className={styles.warning}>{`Outside the auto scaling range ${scaling.min}–${scaling.max}.`}</p>}
+      {outOfRange && <p className={styles.warning}>{`The most this service can run is ${info.max} tasks.`}</p>}
+      {confirming && (
+        <DesiredCountDialog
+          service={service}
+          count={draftCount}
+          pending={saving}
+          onConfirm={() => draftCount !== null && onSave(draftCount, () => setConfirming(false))}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
       <p className={styles.hint}>
         {`Running ${info.running} of ${info.desired}. ${autoScalingNote} Setting 0 stops every task without deleting the service.`}
       </p>
-    </Card>
+    </Panel>
+  )
+}
+
+/** Track from 0 to the larger of max and desired, with the auto scaling min-max span shaded and the desired count marked. */
+function RangeBar({ scaling, desired }: { scaling: ScalingDTO; desired: number }) {
+  const top = Math.max(scaling.max, desired, 1)
+  const pct = (count: number) => `${(count / top) * 100}%`
+  return (
+    <div
+      className={styles.rangeBar}
+      role="img"
+      aria-label={`Auto scaling range ${scaling.min} to ${scaling.max} tasks, desired ${desired}`}
+    >
+      <span className={styles.rangeSpan} style={{ left: pct(scaling.min), width: `calc(${pct(scaling.max)} - ${pct(scaling.min)})` }} />
+      <span className={styles.rangeMark} style={{ left: pct(desired) }} />
+      <span className={styles.rangeScale}>
+        <span>0</span>
+        <span>{`min ${scaling.min}`}</span>
+        <span>{`max ${scaling.max}`}</span>
+      </span>
+    </div>
   )
 }
 
 function AutoScalingCard({ scaling }: { scaling: ScalingDTO }) {
   if (!scaling.has_target) {
     return (
-      <Card title="Auto scaling" right="Application Auto Scaling · set in Terraform">
+      <Panel title="Auto scaling" actions="Application Auto Scaling · set in Terraform">
         <EmptyState>This service has no scalable target registered.</EmptyState>
-      </Card>
+      </Panel>
     )
   }
   const rows: [ReactNode, ReactNode][] = [
@@ -173,8 +219,8 @@ function AutoScalingCard({ scaling }: { scaling: ScalingDTO }) {
     ['Scheduled actions', describeScheduled(scaling)],
   ]
   return (
-    <Card title="Auto scaling" right="Application Auto Scaling · set in Terraform">
+    <Panel title="Auto scaling" actions="Application Auto Scaling · set in Terraform">
       <KV rows={rows} />
-    </Card>
+    </Panel>
   )
 }

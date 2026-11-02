@@ -10,13 +10,18 @@ import { navigateExternal } from './navigateExternal'
 
 vi.mock('./navigateExternal', () => ({ navigateExternal: vi.fn() }))
 
+const originalWidth = window.innerWidth
+
 beforeEach(() => {
+  // Wide enough that the sidebar is expanded and shows its account actions inline.
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 })
   localStorage.clear()
   window.history.replaceState(null, '', '/')
   vi.mocked(navigateExternal).mockClear()
 })
 
 afterEach(async () => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: originalWidth })
   await new Promise((resolve) => setTimeout(resolve, 100))
 })
 
@@ -152,14 +157,14 @@ describe('Sidebar Tasks badges', () => {
   it('shows no number when nothing is unhealthy or stopped with errors, not even the running total', async () => {
     tasksWith(0, 0)
     renderApp('/')
-    expect(await tasksLink()).toHaveTextContent(/^Tasks$/)
+    expect(await tasksLink()).toHaveTextContent(/^TKTasks$/)
   })
 
   it('shows only the yellow unhealthy count', async () => {
     tasksWith(3, 0)
     renderApp('/')
     const link = await tasksLink()
-    await waitFor(() => expect(link).toHaveTextContent(/^Tasks3$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^TKTasks3$/))
     expect(within(link).getByLabelText('3 unhealthy')).toBeInTheDocument()
     expect(within(link).queryByLabelText(/stopped with errors/)).not.toBeInTheDocument()
   })
@@ -168,7 +173,7 @@ describe('Sidebar Tasks badges', () => {
     tasksWith(0, 2)
     renderApp('/')
     const link = await tasksLink()
-    await waitFor(() => expect(link).toHaveTextContent(/^Tasks2$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^TKTasks2$/))
     expect(within(link).getByLabelText(/^2 stopped with errors in the last \d+ min$/)).toBeInTheDocument()
     expect(within(link).queryByLabelText(/unhealthy/)).not.toBeInTheDocument()
   })
@@ -177,6 +182,6 @@ describe('Sidebar Tasks badges', () => {
     tasksWith(3, 2)
     renderApp('/')
     const link = await tasksLink()
-    await waitFor(() => expect(link).toHaveTextContent(/^Tasks32$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^TKTasks32$/))
   })
 })

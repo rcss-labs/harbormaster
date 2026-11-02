@@ -1,7 +1,8 @@
-import { screen } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SCALING_NONE, SCALING_PAYMENTS, SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -46,6 +47,22 @@ describe('ScalingTab', () => {
     expect(definitionFor('Scheduled actions')).toHaveTextContent('business-hours: cron(0 7 * * ? *) → min 3')
   })
 
+  it('draws the auto scaling range with the desired count marked', async () => {
+    mockDesiredCount()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    const bar = await screen.findByRole('img', { name: `Auto scaling range ${SCALING_PAYMENTS.min} to ${SCALING_PAYMENTS.max} tasks, desired 3` })
+    expect(bar).toBeInTheDocument()
+  })
+
+  it('omits the range bar without a scalable target', async () => {
+    mockDesiredCount(desiredInfo({ auto_scaling: null }), SCALING_NONE)
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    await screen.findByText('This service has no scalable target registered.')
+    expect(screen.queryByRole('img', { name: /Auto scaling range/ })).not.toBeInTheDocument()
+  })
+
   it('stepper posts the new count and toasts', async () => {
     mockDesiredCount()
     const posted: unknown[] = []
@@ -64,15 +81,71 @@ describe('ScalingTab', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
 
     const input = await screen.findByRole('spinbutton', {
-      name: 'Desired count',
+      name: 'Scale to',
     })
     expect(input).toHaveValue(3)
     await user.click(screen.getByRole('button', { name: 'More tasks' }))
     expect(input).toHaveValue(4)
     await user.click(screen.getByRole('button', { name: 'Update desired count' }))
 
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent(`Set ${SERVICE_PAYMENTS.name} to 4 tasks?`)
+    expect(posted).toEqual([])
+    await user.click(within(dialog).getByRole('button', { name: 'Update desired count' }))
+
     expect(await screen.findByText('Desired count set to 4.')).toBeInTheDocument()
     expect(posted).toEqual([{ desired: 4 }])
+  })
+
+  it('cancelling the confirm dialog posts nothing', async () => {
+    mockDesiredCount()
+    const posted = vi.fn()
+    server.use(
+      http.post('/api/services/:id/desired-count', () => {
+        posted()
+        return HttpResponse.json({ desired: 4, previous: 3, changed: true, warning: null })
+      }),
+    )
+    const user = userEvent.setup()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    await screen.findByRole('spinbutton', { name: 'Scale to' })
+    await user.click(screen.getByRole('button', { name: 'More tasks' }))
+    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(posted).not.toHaveBeenCalled()
+    expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(4)
+  })
+
+  it('keeps the draft and the open confirm dialog when a poll changes the running count', async () => {
+    mockDesiredCount()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`, queryClient)
+
+    await screen.findByRole('spinbutton', { name: 'Scale to' })
+    await user.click(screen.getByRole('button', { name: 'More tasks' }))
+    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
+    await screen.findByRole('dialog')
+
+    act(() => queryClient.setQueryData(['service', SERVICE_PAYMENTS.id, 'desired-count'], desiredInfo({ desired: 6 })))
+
+    await screen.findByText(/Running 3 of 6\./)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(4)
+  })
+
+  it('follows the running count from a poll when the draft is untouched', async () => {
+    mockDesiredCount()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`, queryClient)
+
+    await screen.findByRole('spinbutton', { name: 'Scale to' })
+    act(() => queryClient.setQueryData(['service', SERVICE_PAYMENTS.id, 'desired-count'], desiredInfo({ desired: 6 })))
+
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toHaveValue(6))
   })
 
   it('warns when the value is outside the auto scaling range', async () => {
@@ -81,7 +154,7 @@ describe('ScalingTab', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
 
     const input = await screen.findByRole('spinbutton', {
-      name: 'Desired count',
+      name: 'Scale to',
     })
     expect(screen.queryByText(/Outside the auto scaling range/)).not.toBeInTheDocument()
     await user.clear(input)

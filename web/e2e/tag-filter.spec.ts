@@ -2,7 +2,7 @@ import { asUser, expect, test } from './fixtures/test'
 import type { Page } from '@playwright/test'
 
 // Read-only: runs in the observe project. Tag ids on a fresh DB: Dev 1, Staging 2, Prod 3.
-// Always target the top bar control by its exact name: the Clusters filter bar has a second control labelled "Tags".
+// Always target the top bar control by its exact name so other controls with "Tag" in their label never match.
 const tagButton = (page: Page) => page.getByRole('button', { name: 'Tag filter', exact: true })
 const tagOptions = (page: Page) => page.getByRole('group', { name: 'Tag filter options' })
 const main = (page: Page) => page.getByRole('main')
@@ -14,6 +14,9 @@ async function toggleTag(page: Page, name: string) {
   await page.keyboard.press('Escape')
 }
 
+/** Header row plus one row per listed cluster. */
+const clusterRows = (page: Page) => page.getByRole('table', { name: 'Clusters' }).getByRole('row')
+
 test.describe('tag filter as pavel', () => {
   test.use(asUser('pavel'))
 
@@ -21,18 +24,18 @@ test.describe('tag filter as pavel', () => {
     await page.goto('/clusters')
     await toggleTag(page, 'Prod')
     await expect(page).toHaveURL(/tag=3(&|$)/)
-    await expect(page.getByRole('article')).toHaveCount(2)
-    const ciTools = page.getByRole('article', { name: 'ci-tools' })
+    await expect(clusterRows(page)).toHaveCount(3)
+    const ciTools = page.getByRole('row', { name: /ci-tools/ })
     await expect(ciTools).toContainText('artifact-proxy')
     await expect(ciTools).not.toContainText('jenkins-controller')
-    await expect(nav(page).getByRole('link', { name: /^Clusters/ })).toHaveText('Clusters2')
+    await expect(nav(page).getByRole('link', { name: /^Clusters/ })).toHaveText(/Clusters2$/)
   })
 
   test('Prod + Staging is OR', async ({ page }) => {
     await page.goto('/clusters')
     await toggleTag(page, 'Prod')
     await toggleTag(page, 'Staging')
-    await expect(page.getByRole('article')).toHaveCount(3)
+    await expect(clusterRows(page)).toHaveCount(4)
     // Tag ids are kept sorted ascending in the URL (controller ruling), not in click order.
     await expect(page).toHaveURL(/tag=2&tag=3/)
   })
@@ -40,8 +43,8 @@ test.describe('tag filter as pavel', () => {
   test('Dev matches untagged clusters and non-overridden services', async ({ page }) => {
     await page.goto('/clusters')
     await toggleTag(page, 'Dev')
-    await expect(page.getByRole('article')).toHaveCount(4)
-    const ciTools = page.getByRole('article', { name: 'ci-tools' })
+    await expect(clusterRows(page)).toHaveCount(5)
+    const ciTools = page.getByRole('row', { name: /ci-tools/ })
     await expect(ciTools).toContainText('jenkins-controller')
     await expect(ciTools).not.toContainText('artifact-proxy')
   })
@@ -49,7 +52,7 @@ test.describe('tag filter as pavel', () => {
   test('the filter follows to Overview, Tasks and Needs attention', async ({ page }) => {
     await page.goto('/clusters')
     await toggleTag(page, 'Dev')
-    await expect(page.getByRole('article')).toHaveCount(4)
+    await expect(clusterRows(page)).toHaveCount(5)
 
     await nav(page).getByRole('link', { name: /^Overview/ }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
@@ -63,7 +66,7 @@ test.describe('tag filter as pavel', () => {
     await toggleTag(page, 'Dev')
     await toggleTag(page, 'Prod')
     await expect(clustersTile).toContainText(/^Clusters2\d+ healthy$/)
-    await expect(main(page).getByText('Needs attention', { exact: true })).toBeVisible()
+    await expect(main(page).getByRole('heading', { name: 'Needs attention' })).toBeVisible()
     await expect(resizerAlerts).toHaveCount(0)
 
     await page.goto('/tasks?filter=running')
@@ -89,7 +92,7 @@ test.describe('tag filter as omer', () => {
 
   test('cannot widen to Prod', async ({ page }) => {
     await page.goto('/clusters?tag=3')
-    await expect(page.getByRole('article')).toHaveCount(0)
+    await expect(page.getByRole('row', { name: /core-services/ })).toHaveCount(0)
     await expect(page.getByText(/No clusters match/)).toBeVisible()
     await tagButton(page).click()
     await expect(tagOptions(page).getByRole('checkbox', { name: 'Dev' })).toHaveCount(1)

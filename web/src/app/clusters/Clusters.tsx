@@ -1,91 +1,90 @@
-import { useClusters } from "../../api/hooks";
-import { useClustersMetrics } from "../../api/observe";
-import { EmptyState } from "../../components/EmptyState";
-import { Seg } from "../../components/Seg";
-import { useCrumbs } from "../shell/crumbs";
-import { useFilters } from "../shell/useFilters";
-import { ClusterFilters } from "./ClusterFilters";
-import { ClusterCard } from "./ClusterCard";
-import { ClustersTable } from "./ClustersTable";
-import styles from "./clusters.module.css";
-import { filterClusters } from "./filterClusters";
-import { useClusterFilters } from "./useClusterFilters";
-import { LIST_VIEW_OPTIONS, useListView } from "./useListView";
-
-/** Above this many clusters the table is the default view, since cards would run long. */
-const TABLE_DEFAULT_THRESHOLD = 30;
+import { useClusters } from '../../api/hooks'
+import { useClustersMetrics } from '../../api/observe'
+import { EmptyState } from '../../components/EmptyState'
+import { SegmentedFilter } from '../../components/Seg'
+import { useCrumbs } from '../shell/crumbs'
+import { useFilters } from '../shell/useFilters'
+import { ClustersTable } from './ClustersTable'
+import styles from './clusters.module.css'
+import { clusterCounts, filterClusters } from './filterClusters'
+import { useClusterFilters } from './useClusterFilters'
 
 export function Clusters() {
-  useCrumbs([["Clusters"]]);
-  const { filters } = useFilters();
-  const clusters = useClusters(filters);
-  const metrics = useClustersMetrics(filters);
-  const items = clusters.data?.items ?? [];
-  const { page, setStatus, setQ, clearAll } = useClusterFilters();
-  const visible = filterClusters(items, page);
-  const anyFilterActive =
-    page.status.length > 0 ||
-    page.q !== "" ||
-    Boolean(filters.account || filters.region || filters.tag?.length);
-  const metricsById = metrics.data?.items ?? {};
-  const targetErrors = metrics.data?.errors ?? [];
-  const [view, setView] = useListView(
-    items.length > TABLE_DEFAULT_THRESHOLD ? "table" : "cards",
-  );
+  useCrumbs([['Clusters']])
+  const { filters: scope } = useFilters()
+  const clusters = useClusters(scope)
+  const metrics = useClustersMetrics(scope)
+  const items = clusters.data?.items ?? []
+  const { filters, sort, page, setEnv, setStatus, setQ, setSort, setPage, clearAll } = useClusterFilters()
+  const visible = filterClusters(items, filters)
+  const counts = clusterCounts(items)
+
+  const empty = (
+    <div>
+      No clusters match these filters.{' '}
+      <button type="button" className={styles.btn} onClick={clearAll}>
+        Clear filters
+      </button>
+    </div>
+  )
 
   return (
-    <>
+    <div className={styles.page}>
       <div className={styles.pageHead}>
-        <div className={styles.titles}>
-          <h1>Clusters</h1>
-          <div className={styles.meta}>
-            Created by Terraform. The environment label is stored only in
-            Harbormaster.
-          </div>
-        </div>
-        <div className={styles.actions}>
-          <Seg
-            label="View"
-            options={LIST_VIEW_OPTIONS}
-            value={view}
-            onChange={setView}
-          />
-        </div>
+        <h1>Clusters</h1>
+        <span className={styles.meta}>Created by Terraform. The environment label is stored only in Harbormaster.</span>
       </div>
 
-      <ClusterFilters page={page} onStatus={setStatus} onQ={setQ} onClear={clearAll} />
+      <div className={styles.filterBar} role="group" aria-label="Cluster filters">
+        <SegmentedFilter
+          label="Environment"
+          value={filters.env}
+          onChange={setEnv}
+          options={[
+            { value: 'all', label: 'All', count: counts.env.all },
+            { value: 'prod', label: 'Prod', count: counts.env.prod },
+            { value: 'staging', label: 'Staging', count: counts.env.staging },
+            { value: 'dev', label: 'Dev', count: counts.env.dev },
+          ]}
+        />
+        <SegmentedFilter
+          label="Status"
+          value={filters.status}
+          onChange={setStatus}
+          options={[
+            { value: 'any', label: 'Any status', count: counts.status.any },
+            { value: 'problems', label: 'Problems', count: counts.status.problems },
+            { value: 'deploying', label: 'Deploying', count: counts.status.deploying },
+            { value: 'healthy', label: 'Healthy', count: counts.status.healthy },
+          ]}
+        />
+        <input
+          className={styles.nameSearch}
+          type="search"
+          aria-label="Filter clusters"
+          placeholder="Filter by cluster, account or region"
+          value={filters.q}
+          onChange={(event) => setQ(event.target.value)}
+        />
+        <button type="button" className={styles.btn} onClick={clearAll}>
+          Clear filters
+        </button>
+      </div>
 
       {clusters.isError ? (
-        <EmptyState>
-          {clusters.error instanceof Error
-            ? clusters.error.message
-            : "The clusters could not be loaded."}
-        </EmptyState>
-      ) : clusters.isSuccess && visible.length === 0 && (items.length > 0 || anyFilterActive) ? (
-        <EmptyState>
-          No clusters match these filters.{" "}
-          <button type="button" className={styles.btn} onClick={clearAll}>
-            Clear filters
-          </button>
-        </EmptyState>
-      ) : view === "table" ? (
-        <ClustersTable clusters={visible} metricsById={metricsById} />
+        <EmptyState>{clusters.error instanceof Error ? clusters.error.message : 'The clusters could not be loaded.'}</EmptyState>
       ) : (
-        <div className={styles.cards}>
-          {visible.map((cluster) => (
-            <ClusterCard
-              key={cluster.id}
-              cluster={cluster}
-              metrics={metricsById[cluster.id]}
-              targetError={targetErrors.find(
-                (e) =>
-                  e.account_id === cluster.account_id &&
-                  e.region === cluster.region,
-              )}
-            />
-          ))}
-        </div>
+        <ClustersTable
+          clusters={visible}
+          metricsById={metrics.data?.items ?? {}}
+          sort={sort}
+          onSortChange={setSort}
+          page={page}
+          onPageChange={setPage}
+          empty={clusters.isSuccess ? empty : undefined}
+        />
       )}
-    </>
-  );
+      <span className={styles.note}>A dash in CPU and memory means Container Insights is off for that cluster.</span>
+    </div>
+  )
 }

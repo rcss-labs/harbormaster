@@ -1,59 +1,58 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { OverviewMetricsDTO } from '../../api/types'
 import { OVERVIEW_METRICS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
-const values = Array.from({ length: 24 }, (_, i) => 20 + i)
-const eightSeries: OverviewMetricsDTO = {
+beforeEach(() => localStorage.clear())
+
+const flat = (value: number) => Array.from({ length: 24 }, () => value)
+const withCpu = (series: { id: string; label: string; values: (number | null)[] }[]): OverviewMetricsDTO => ({
   ...OVERVIEW_METRICS,
-  cpu_by_cluster: Array.from({ length: 8 }, (_, i) => ({
-    id: `c${i}`,
-    label: i === 7 ? 'others' : `cluster-${i}`,
-    values,
-  })),
-}
+  cpu_by_cluster: series,
+})
 
-const card = async (title: string): Promise<HTMLElement> => {
-  const heading = await screen.findByRole('heading', { name: title })
-  return heading.closest('div')?.parentElement as HTMLElement
-}
+const busiest = () => screen.findByRole('region', { name: 'Busiest clusters, CPU' })
 
-describe('ClusterUsagePanels', () => {
-  it('renders one legend entry per cluster plus others', async () => {
-    server.use(http.get('/api/overview/metrics', () => HttpResponse.json(eightSeries)))
+describe('Busiest clusters panel', () => {
+  it('lists the top 6 clusters by latest CPU, highest first, skipping "others"', async () => {
+    const series = Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, label: `cluster-${i}`, values: flat(10 + i * 5) }))
+    series.push({ id: 'others', label: 'others', values: flat(99) })
+    server.use(http.get('/api/overview/metrics', () => HttpResponse.json(withCpu(series))))
     renderApp('/')
-    const cpu = await card('CPU by cluster, 24 h')
-    expect(await within(cpu).findByText('cluster-0')).toBeInTheDocument()
-    for (let i = 0; i < 7; i++) expect(within(cpu).getByText(`cluster-${i}`)).toBeInTheDocument()
-    expect(within(cpu).getByText('others')).toBeInTheDocument()
-    expect(within(cpu).getByText('Container Insights')).toBeInTheDocument()
+    const region = await busiest()
+    const links = await within(region).findAllByRole('link', { name: /^cluster-/ })
+    expect(links.map((link) => link.textContent)).toEqual(
+      ['cluster-7', 'cluster-6', 'cluster-5', 'cluster-4', 'cluster-3', 'cluster-2'].map((name) => expect.stringContaining(name)),
+    )
+    expect(within(region).queryByText('others')).not.toBeInTheDocument()
+    expect(links[0]).toHaveTextContent('45%')
+    expect(links[0]).toHaveAttribute('href', '/clusters/c7')
   })
 
-  it('shows the all-off message', async () => {
+  it('uses the latest datapoint that exists', async () => {
+    server.use(
+      http.get('/api/overview/metrics', () =>
+        HttpResponse.json(withCpu([{ id: 'c1', label: 'only-cluster', values: [...flat(30).slice(0, 22), 62, null] }])),
+      ),
+    )
+    renderApp('/')
+    expect(await within(await busiest()).findByRole('link', { name: /only-cluster/ })).toHaveTextContent('62%')
+  })
+
+  it('shows the Container Insights message when no cluster reports CPU', async () => {
     server.use(
       http.get('/api/overview/metrics', () =>
         HttpResponse.json({ ...OVERVIEW_METRICS, cpu_by_cluster: [], mem_by_cluster: [], avg: { cpu: null, mem: null } }),
       ),
     )
     renderApp('/')
-    await screen.findAllByText('Container Insights is off for every cluster you can see.')
-    expect(screen.getAllByText('Container Insights is off for every cluster you can see.')).toHaveLength(2)
+    expect(await within(await busiest()).findByText('Container Insights is off for every cluster you can see.')).toBeInTheDocument()
   })
 
-  it('shows the average tile from avg', async () => {
-    renderApp('/')
-    const label = await screen.findByText('Average use, all services', { selector: 'div' })
-    const tile = label.parentElement as HTMLElement
-    await waitFor(() => expect(tile).toHaveTextContent('45%'))
-    expect(tile).toHaveTextContent('CPU')
-    expect(tile).toHaveTextContent('68%')
-    expect(tile).toHaveTextContent('memory')
-  })
-
-  it('names the regions that could not be read, on both charts', async () => {
+  it('names the regions that could not be read', async () => {
     server.use(
       http.get('/api/overview/metrics', () =>
         HttpResponse.json({
@@ -63,9 +62,6 @@ describe('ClusterUsagePanels', () => {
       ),
     )
     renderApp('/')
-    const cpu = await card('CPU by cluster, 24 h')
-    expect(await within(cpu).findByText(/eu-west-1/)).toBeInTheDocument()
-    const memory = await card('Memory by cluster, 24 h')
-    expect(within(memory).getByText(/eu-west-1/)).toBeInTheDocument()
+    expect(await within(await busiest()).findByText(/CloudWatch could not be read for eu-west-1/)).toBeInTheDocument()
   })
 })

@@ -4,7 +4,7 @@ import { api } from '../../../api/client'
 import type { SSOConfigDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { KV } from '../../../components/KV'
 import { Seg } from '../../../components/Seg'
@@ -89,7 +89,7 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
   }
 
   return (
-    <Card title="Identity provider">
+    <Panel title="Identity provider">
       <div className={styles.stack}>
         <Seg
           label="Import mode"
@@ -222,6 +222,6 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
           onCancel={() => setReplacing(null)}
         />
       )}
-    </Card>
+    </Panel>
   )
 }

@@ -1,61 +1,55 @@
-/* Ported from the mockup's page-head, toolbar, cards, xcard, mini, foot-stats, chip, panel and no-access rules (docs/design/mockup/index.html). */
-.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.titles { display: grid; gap: 6px; min-width: 0; }
+/* Clusters list and cluster detail (docs/redesign/README.md, screens 2 and 3). The page is a size container, so the
+   two-column grid stacks when the main column, not the viewport, is under 1100px. */
+.page { display: flex; flex-direction: column; gap: 14px; min-width: 0; container-type: inline-size; }
+.pageHead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.pageHead h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+.titles { display: grid; gap: 4px; min-width: 0; }
 .titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
+.monoTitle { font-family: var(--mono); letter-spacing: -0.02em; }
+.meta { color: var(--muted); font-size: 12px; align-self: baseline; }
+.metaLine { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font: 11.5px var(--mono); color: var(--dim); }
+.metaLine > span:not(:only-child) { color: var(--muted); }
 .accentLink { color: var(--accent); }
-.actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.btn:hover { background: var(--hover); }
+.actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { height: 28px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--hover-strong); }
 
-.grid { display: grid; gap: 12px; }
-.g4 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
-.gWide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
-@media (max-width: 1100px) {
-  .gWide { grid-template-columns: minmax(0, 1fr); }
+.filterBar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.nameSearch { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; width: 260px; max-width: 100%; }
+
+.tablePanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; overflow: hidden; }
+.note { font-size: 11.5px; color: var(--dim); }
+
+.twoCol { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+@container (max-width: 1100px) {
+  .twoCol { grid-template-columns: minmax(0, 1fr); }
 }
-.tileSub { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-
-.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.toolbarEnd { margin-left: auto; }
 .stopsBlock { margin-top: 16px; }
-.stopsTitle { margin-bottom: 6px; }
+.stopsTitle { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+.count { font: 11px var(--mono); color: var(--muted); }
+.kpiSub { font: 400 11.5px var(--sans); letter-spacing: 0; color: var(--muted); margin-left: 6px; white-space: nowrap; }
 
-.cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
-.xcard { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; padding: 14px; display: grid; gap: 12px; align-content: start; transition: border-color 0.15s; }
-.xcard:hover { border-color: var(--accent); }
-.xcardTop { display: flex; gap: 10px; align-items: flex-start; }
-.xcardTop > :last-child { margin-left: auto; }
-.big { font-size: 15px; font-weight: 600; }
-/* Makes the whole card clickable through the name link without nesting interactive elements. */
-.stretch::after { content: ''; position: absolute; inset: 0; border-radius: 8px; }
-.above { position: relative; z-index: 1; }
-.miniK { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 3px; }
-.miniK b { color: var(--text); font-weight: 600; }
-.bar { height: 6px; border-radius: 3px; background: var(--muted-soft); overflow: hidden; display: flex; }
-.bar span { display: block; height: 100%; }
-.chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--raised); font-size: 11px; color: var(--text); }
-.chip i { width: 6px; height: 6px; border-radius: 50%; }
-.footStats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px; }
-.footStats b { color: var(--text); font-weight: 600; }
+/* Table cells */
+.mono { font-family: var(--mono); font-size: 11.5px; }
+.muted { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.dim { color: var(--dim); }
+.nameCell { display: grid; line-height: 1.25; min-width: 0; }
+.clusterLink { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clusterLink:hover { color: var(--accent); }
+.where { font: 10.5px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svcPreview { display: flex; gap: 10px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
+.svcLink { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+.svcLink:hover { color: var(--text); }
+.svcDot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; flex: none; }
+.svcMore { font: 11px var(--mono); color: var(--dim); }
+.tasks { display: flex; align-items: center; gap: 8px; }
+.track { flex: 1; min-width: 20px; height: 4px; border-radius: 2px; background: var(--border); display: flex; overflow: hidden; }
+.track > span { display: block; height: 100%; }
+.usage { display: flex; align-items: center; gap: 6px; }
+.usage > svg { flex: 1; min-width: 0; }
+.usageGap { flex: 1; }
+.usageNow { font: 11.5px var(--mono); width: 34px; text-align: right; }
 
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
-.muted { color: var(--muted); }
-.small { font-size: 12px; }
-.mono { font-family: var(--mono); font-size: 12px; }
-
-.noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .noAccess h2 { margin: 0; font-size: 12.5px; }
 .noAccess p { margin: 0; color: var(--muted); }
-
-/* Two-column CPU and memory sparklines on a cluster card (mockup .mini2). */
-.mini2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-/* Clusters filter bar (status toggles, name search, shared scope). */
-.filterBar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-.statusToggles { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
-.statusToggles button { border: 0; background: var(--surface); color: var(--text); padding: 0 10px; height: 28px; cursor: pointer; font-size: 12px; font-family: inherit; }
-.statusToggles button + button { border-left: 1px solid var(--border-strong); }
-.statusToggles button.statusOn { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.nameSearch { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-size: 12px; font-family: inherit; min-width: 160px; }

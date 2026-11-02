@@ -6,6 +6,7 @@ import { Legend } from '../../../charts/Legend'
 import { LineChart } from '../../../charts/LineChart'
 import { Banner } from '../../../components/Banner'
 import { Seg } from '../../../components/Seg'
+import { fmtNum, niceMax } from '../../../charts/format'
 import { percentText } from '../../clusters/ServiceCardMetrics'
 import { MetricPanel } from '../../observe/MetricPanel'
 import styles from '../service.module.css'
@@ -17,6 +18,8 @@ const NETWORK_MIN_MAX = 10
 const TASK_COUNT_MIN_MAX = 4
 const CPU_COLOR = 'var(--series-1)'
 const MEMORY_COLOR = 'var(--series-2)'
+const REQUESTS_COLOR = 'var(--series-3)'
+const P95_COLOR = 'var(--series-4)'
 
 /** CloudWatch period in seconds to the label shown in the toolbar. */
 const PERIOD_LABELS: Record<number, string | undefined> = { 60: '1-minute', 300: '5-minute', 1200: '20-minute', 3600: '1-hour' }
@@ -71,6 +74,9 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
   const received = metrics?.series?.net_rx_kbps ?? []
   const sent = metrics?.series?.net_tx_kbps ?? []
   const tasks = metrics?.series?.tasks ?? []
+  const alb = service.networking.load_balancers.length > 0 ? metrics?.alb : null
+  const requestMax = alb ? niceMax(Math.max(0, ...alb.req_per_min.filter((value): value is number => value !== null))) : 0
+  const p95Max = alb ? niceMax(Math.max(0, ...alb.p95_ms.filter((value): value is number => value !== null))) : 0
   const networkMax = Math.max(NETWORK_MIN_MAX, Math.ceil(peakOf(received, sent) / 10) * 10)
   const taskCountMax = Math.max(TASK_COUNT_MIN_MAX, service.desired + 1)
   const resolution = metrics ? PERIOD_LABELS[metrics.period] ?? `${metrics.period}-second` : ''
@@ -87,7 +93,7 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
         )}
       </div>
       {metrics && (
-        <div className={`${styles.grid} ${styles.g2}`}>
+        <div className={styles.metricsGrid}>
           <MetricPanel
             title="CPU utilization"
             right={`now ${percentText(metrics.now?.cpu)} of ${metrics.now?.cpu_units ?? '–'} units`}
@@ -104,6 +110,26 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
           >
             <LineChart series={[{ name: 'Memory', color: MEMORY_COLOR, values: memory }]} xLabels={xLabels} height={CHART_HEIGHT} />
           </MetricPanel>
+          {alb && (
+            <>
+              <MetricPanel
+                title="Requests per minute"
+                right={alb.req_now === null ? undefined : `now ${fmtNum(alb.req_now)}`}
+                stale={metrics.stale}
+                empty={allNull(alb.req_per_min)}
+              >
+                <LineChart series={[{ name: 'Requests', color: REQUESTS_COLOR, values: alb.req_per_min }]} unit="" max={requestMax} xLabels={xLabels} height={CHART_HEIGHT} />
+              </MetricPanel>
+              <MetricPanel
+                title="Response time p95"
+                right={alb.p95_now === null ? undefined : `now ${Math.round(alb.p95_now)} ms`}
+                stale={metrics.stale}
+                empty={allNull(alb.p95_ms)}
+              >
+                <LineChart series={[{ name: 'p95', color: P95_COLOR, values: alb.p95_ms }]} unit=" ms" max={p95Max} xLabels={xLabels} height={CHART_HEIGHT} />
+              </MetricPanel>
+            </>
+          )}
           <MetricPanel
             title="Network"
             right={

@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event'
 import { screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
@@ -12,24 +13,37 @@ import {
 } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderWithProviders } from '../../../test/setup'
-import { ALBPanels, HealthCard, RunningTasksMeters, UsageChart, UsageTiles } from './MetricPanels'
+import { ALBPanels, HealthCard, RunningTasksMeters, ServiceKpis, UsageChart } from './MetricPanels'
 
 const CATALOG = Object.values(SERVICE_DETAILS).find((service) => service.name === 'catalog-api')!
 const MS_PER_HOUR = 3_600_000
 
-describe('UsageTiles', () => {
-  it('shows percentages and sparklines', () => {
-    const { container } = renderWithProviders(<UsageTiles service={SERVICE_PAYMENTS} metrics={SERVICE_METRICS_PAYMENTS} />)
-    expect(screen.getByText('CPU (of 512 units)')).toBeInTheDocument()
-    expect(screen.getByText('Memory (of 1024 MiB)')).toBeInTheDocument()
-    const cpuNow = SERVICE_METRICS_PAYMENTS.now!.cpu!
-    expect(screen.getByText(`${Math.round(cpuNow)}%`)).toBeInTheDocument()
-    expect(container.querySelectorAll('svg')).toHaveLength(2)
+describe('ServiceKpis', () => {
+  const cell = (label: string) => screen.getByText(label, { selector: 'span' }).closest('li') as HTMLElement
+
+  it('shows tasks, revision, usage percentages, load balancer numbers and sparklines', () => {
+    const { container } = renderWithProviders(<ServiceKpis service={SERVICE_PAYMENTS} metrics={SERVICE_METRICS_PAYMENTS} />)
+    expect(cell('Tasks')).toHaveTextContent(`${SERVICE_PAYMENTS.running}/${SERVICE_PAYMENTS.desired}`)
+    expect(cell('Revision')).toHaveTextContent(`:${SERVICE_PAYMENTS.revision}`)
+    expect(cell('CPU')).toHaveTextContent(`${Math.round(SERVICE_METRICS_PAYMENTS.now!.cpu!)}%`)
+    expect(cell('CPU')).toHaveTextContent('of 512 units')
+    expect(cell('Memory')).toHaveTextContent('of 1024 MiB')
+    expect(cell('Req / min')).toHaveTextContent('438')
+    expect(cell('p95')).toHaveTextContent('171')
+    expect(cell('HTTP 5xx')).toHaveTextContent('3today')
+    expect(container.querySelectorAll('svg')).toHaveLength(4)
   })
 
-  it('shows a dash and a note when Container Insights is off', () => {
-    renderWithProviders(<UsageTiles service={CATALOG} metrics={SERVICE_METRICS_CATALOG_NO_INSIGHTS} />)
+  it('flags missing tasks', () => {
+    renderWithProviders(<ServiceKpis service={{ ...SERVICE_PAYMENTS, running: SERVICE_PAYMENTS.desired - 1 }} metrics={SERVICE_METRICS_PAYMENTS} />)
+    expect(cell('Tasks')).toHaveTextContent('1 pending')
+  })
+
+  it('shows a dash and a note when Container Insights is off, and omits load balancer cells without a load balancer', () => {
+    const noLoadBalancer = { ...CATALOG, networking: { ...CATALOG.networking, load_balancers: [] } }
+    renderWithProviders(<ServiceKpis service={noLoadBalancer} metrics={SERVICE_METRICS_CATALOG_NO_INSIGHTS} />)
     expect(screen.getAllByText('Container Insights off')).toHaveLength(2)
+    expect(screen.queryByText('Req / min')).not.toBeInTheDocument()
   })
 })
 
@@ -104,7 +118,7 @@ describe('RunningTasksMeters', () => {
       tasks_now: SERVICE_PAYMENTS.running_tasks.map((task, index) => ({ task_id: task.short_id, cpu: 31.2 + index, mem: 57.4 })),
     }
     renderWithProviders(<RunningTasksMeters service={SERVICE_PAYMENTS} metrics={metrics} />)
-    const card = screen.getByText('Running tasks').closest('div')!.parentElement!
+    const card = screen.getByRole('region', { name: 'Running tasks' })
     expect(within(card).getByText('CPU')).toBeInTheDocument()
     expect(within(card).getByText('Memory')).toBeInTheDocument()
     expect(within(card).getAllByText('57%')).toHaveLength(SERVICE_PAYMENTS.running_tasks.length)
@@ -118,3 +132,40 @@ describe('RunningTasksMeters', () => {
   })
 })
 
+describe('RunningTasksMeters actions', () => {
+  const task = SERVICE_PAYMENTS.running_tasks[0]
+  const enabled = {
+    ...SERVICE_PAYMENTS,
+    enable_execute_command: true,
+    running_tasks: SERVICE_PAYMENTS.running_tasks.map((t) => ({ ...t, exec_agent_running: true })),
+  }
+
+  it('offers Shell and Logs links and a Stop button per running task', () => {
+    renderWithProviders(<RunningTasksMeters service={enabled} metrics={SERVICE_METRICS_PAYMENTS} />)
+    const row = screen.getByRole('row', { name: new RegExp(task.short_id) })
+    expect(within(row).getByRole('link', { name: 'Shell' })).toHaveAttribute('href', `/services/${enabled.id}/terminal?task=${encodeURIComponent(task.id)}`)
+    expect(within(row).getByRole('link', { name: 'Logs' })).toHaveAttribute('href', `/services/${enabled.id}/logs`)
+    expect(within(row).getByRole('button', { name: 'Stop' })).toBeEnabled()
+  })
+
+  it('Stop opens the confirm dialog instead of stopping straight away', async () => {
+    renderWithProviders(<RunningTasksMeters service={enabled} metrics={SERVICE_METRICS_PAYMENTS} />)
+    const row = screen.getByRole('row', { name: new RegExp(task.short_id) })
+    await userEvent.setup().click(within(row).getByRole('button', { name: 'Stop' }))
+    expect(await screen.findByRole('heading', { name: `Stop task ${task.short_id.slice(0, 12)}?` })).toBeInTheDocument()
+  })
+
+  it('hides Shell without Terminal or exec, Logs without Logs, and Stop without Operate', () => {
+    const limited = { ...enabled, can: { ...enabled.can, terminal: false, logs: false, operate: false } }
+    renderWithProviders(<RunningTasksMeters service={limited} metrics={SERVICE_METRICS_PAYMENTS} />)
+    expect(screen.queryByRole('link', { name: 'Shell' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Logs' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
+  it('hides Shell when ECS Exec is off or the agent is not running', () => {
+    const noExec = { ...enabled, enable_execute_command: false }
+    renderWithProviders(<RunningTasksMeters service={noExec} metrics={SERVICE_METRICS_PAYMENTS} />)
+    expect(screen.queryByRole('link', { name: 'Shell' })).not.toBeInTheDocument()
+  })
+})

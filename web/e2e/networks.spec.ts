@@ -3,145 +3,98 @@ import { login, saveScreenshot, serviceId } from './helpers'
 
 const HOMELAB_ACCOUNT_ID = '482109375512'
 const LEGACY_VPC = 'vpc-5c1e0f2a'
+const MAIN_VPC = 'vpc-0a41c7e29b3d'
 // The network tier's first pass runs a few seconds after the server starts.
 const POLL_TIMEOUT = 30_000
 
-const TASK_CHIP = '[role="treeitem"] a[title^="Task "]'
+const vpcList = (page: Page) => page.getByRole('region', { name: 'VPCs' })
+const placement = (page: Page) => page.getByRole('region', { name: 'Placement' })
+const vpcUrl = (vpc: string) => `/networks?vpc=${encodeURIComponent(`${HOMELAB_ACCOUNT_ID}/us-east-1/${vpc}`)}`
 
-/** The us-east-1 card inside the homelab-admin account section (other accounts have a us-east-1 card too). */
-const homelabRegionCard = (page: Page) =>
-  page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: /homelab-admin/ }) }).getByRole('link', { name: /us-east-1/ })
-
-test('admin drills from accounts to the homelab-main tree', async ({ page }) => {
+test('admin picks homelab-main from the VPC list and walks the placement outline', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await login(page, 'pavel')
   await page.goto('/networks')
   await expect(page.getByRole('heading', { level: 1, name: 'Networks' })).toBeVisible()
 
-  const regionCard = homelabRegionCard(page)
-  await expect(regionCard).toBeVisible({ timeout: POLL_TIMEOUT })
-  await expect(regionCard).toContainText('14 tasks')
-  await expect(regionCard).toContainText('3 clusters')
-  await expect(regionCard).toContainText('2 active VPCs')
-  await expect(regionCard).toContainText('1 VPC without tasks hidden')
-  await regionCard.click()
+  const main = vpcList(page).getByRole('button', { name: /homelab-main/ })
+  await expect(main).toBeVisible({ timeout: POLL_TIMEOUT })
+  await expect(main).toContainText('3 cl')
+  await expect(vpcList(page).getByText('1 VPC without tasks hidden')).toBeVisible()
+  await main.click()
+  await expect(page).toHaveURL(new RegExp(`vpc=${HOMELAB_ACCOUNT_ID}%2Fus-east-1%2F${MAIN_VPC}`))
+  await expect(page.getByRole('heading', { level: 2, name: 'homelab-main' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'VPC summary' })).toContainText('11')
 
-  await page.getByRole('link', { name: /homelab-main/ }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'homelab-main' })).toBeVisible()
-  await expect(page.getByText('11 running tasks')).toBeVisible()
+  // Clusters are collapsed to start with; an admin sees Prod, which the omer test below must not.
+  const core = placement(page).getByRole('button', { name: /core-services/ }).first()
+  await expect(core).toHaveAttribute('aria-expanded', 'false')
+  await expect(placement(page).getByRole('link', { name: 'payments-api' })).toHaveCount(0)
+  await saveScreenshot(page, 'vpc-placement.png')
 
-  const tree = page.getByRole('tree', { name: 'Network tree' })
-  await expect(tree).toBeVisible()
-  const chips = page.locator(TASK_CHIP)
-  await expect(chips.first()).toBeVisible()
-  await expect(chips).toHaveCount(11)
-  // Admin sees Prod: the negative check for omer below only means something with this positive one.
-  await expect(tree.getByText('core-services').first()).toBeVisible()
-  await saveScreenshot(page, 'vpc-tree.png')
+  await placement(page).getByRole('button', { name: 'Expand all' }).click()
+  await expect(placement(page).getByRole('link', { name: 'payments-api' }).first()).toBeVisible()
+  await placement(page).getByRole('button', { name: 'Collapse to clusters' }).click()
+  await expect(placement(page).getByRole('link', { name: 'payments-api' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Collapse to services' }).click()
-  await expect(chips).toHaveCount(0)
-  await page.getByRole('button', { name: 'Expand all' }).click()
-  await expect(chips).toHaveCount(11)
-
-  // Keyboard: ArrowDown moves focus from the VPC item to the next visible item.
-  const vpcItem = tree.getByRole('treeitem').first()
-  await vpcItem.focus()
-  await expect(vpcItem).toBeFocused()
-  const focusedLabel = () => page.evaluate(() => document.activeElement?.textContent ?? '')
-  const before = await focusedLabel()
-  await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('ArrowDown')
-  await expect.poll(focusedLabel).not.toBe(before)
-  await expect(vpcItem).not.toBeFocused()
-  await expect(tree.locator('[role="treeitem"]:focus')).toHaveCount(1)
-
-  await tree.getByRole('link', { name: 'payments-api' }).first().click()
+  await core.click()
+  await placement(page).getByRole('link', { name: 'payments-api' }).first().click()
   await expect(page).toHaveURL(new RegExp(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}/overview$`))
 })
 
-test('dev user does not see Prod clusters in the tree', async ({ page }) => {
+test('dev user does not see Prod clusters in the placement outline', async ({ page }) => {
   await login(page, 'omer')
-  await page.goto('/networks')
-  await homelabRegionCard(page).click()
-  await page.getByRole('link', { name: /homelab-main/ }).click()
+  await page.goto(vpcUrl(MAIN_VPC))
 
-  const tree = page.getByRole('tree', { name: 'Network tree' })
-  await expect(tree).toBeVisible({ timeout: POLL_TIMEOUT })
-  await expect(tree.getByText('background-jobs').first()).toBeVisible()
-  await expect(tree.getByText('core-services')).toHaveCount(0)
+  await expect(placement(page)).toBeVisible({ timeout: POLL_TIMEOUT })
+  await expect(placement(page).getByRole('button', { name: /background-jobs/ }).first()).toBeVisible()
+  await expect(placement(page).getByRole('button', { name: /core-services/ })).toHaveCount(0)
 
-  await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/${LEGACY_VPC}`)
-  await expect(page.getByText('No running tasks you can see in this VPC.')).toBeVisible()
+  await page.goto(vpcUrl(LEGACY_VPC))
+  await expect(page.getByText('No running tasks you can see in this VPC.')).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
-test('service networking card links to the tree', async ({ page }) => {
+test('service networking card opens the VPC on the Networks page', async ({ page }) => {
   await login(page, 'pavel')
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}/overview`)
-  await page.getByRole('link', { name: 'Network tree →' }).click()
-  await expect(page).toHaveURL(new RegExp(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/vpc-`))
-  await expect(page.getByRole('heading', { level: 1, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
-  await expect(page.getByRole('tree', { name: 'Network tree' })).toBeVisible({ timeout: POLL_TIMEOUT })
+  await page.getByRole('link', { name: 'Network placement →' }).click()
+  // The old /networks/<account>/<region>/<vpc> link redirects to the selection in the URL.
+  await expect(page).toHaveURL(new RegExp(`/networks\\?vpc=${HOMELAB_ACCOUNT_ID}%2Fus-east-1%2Fvpc-`))
+  await expect(page.getByRole('heading', { level: 2, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
+  await expect(placement(page)).toBeVisible({ timeout: POLL_TIMEOUT })
 })
-
-// plan 06 (task 19): the account and VPC lists, the tree's structure and keyboard model. The tests above already cover the
-// pavel drill-down, Collapse to services / Expand all, omer's tree without core-services and the arrow-key focus move.
-const MAIN_VPC = 'vpc-0a41c7e29b3d'
 
 test.describe('networks as pavel', () => {
   test.use(asUser('pavel'))
 
-  test('lists the regions of both accounts', async ({ page }) => {
+  test('lists the VPCs of both accounts, grouped by account', async ({ page }) => {
     await page.goto('/networks')
-    const homelab = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: /homelab-admin/ }) })
-    await expect(homelab.getByRole('link', { name: /us-east-1/ })).toBeVisible({ timeout: POLL_TIMEOUT })
-    await expect(homelab.getByRole('link', { name: /eu-west-1/ })).toBeVisible()
-    await expect(homelab.getByRole('link', { name: /eu-central-1/ })).toBeVisible()
-    const staging = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: /staging-example/ }) })
-    await expect(staging.getByRole('link', { name: /us-east-1/ })).toBeVisible()
+    await expect(vpcList(page).getByRole('button', { name: /homelab-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
+    await expect(vpcList(page).getByRole('button', { name: /shared-services/ })).toBeVisible()
+    await expect(vpcList(page).getByText('homelab-admin', { exact: true })).toBeVisible()
+    await expect(vpcList(page).getByText('staging-example', { exact: true })).toBeVisible()
+    await expect(vpcList(page).getByRole('button', { name: /legacy-default/ })).toHaveCount(0)
   })
 
-  test('the region page lists the active VPCs and hides the one without tasks', async ({ page }) => {
+  test('the filter narrows the list and the old region URL still works', async ({ page }) => {
+    await page.goto('/networks')
+    await expect(vpcList(page).getByRole('button', { name: /homelab-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
+    await page.getByRole('searchbox', { name: 'Filter VPCs' }).fill('staging')
+    await expect(vpcList(page).getByRole('button', { name: /homelab-main/ })).toHaveCount(0)
+    await expect(page).toHaveURL(/q=staging/)
+
     await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1`)
-    await expect(page.getByRole('link', { name: /homelab-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
-    await expect(page.getByRole('link', { name: /shared-services/ })).toBeVisible()
-    await expect(page.getByRole('link', { name: /legacy-default/ })).toHaveCount(0)
+    await expect(page).toHaveURL(/\/networks\?q=us-east-1/)
+    await expect(vpcList(page).getByRole('button', { name: /homelab-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
   })
 
-  test('the homelab-main tree shows the AZ, subnet, cluster, service and task nodes and the NAT gateway', async ({ page }) => {
-    await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/${MAIN_VPC}`)
-    await expect(page.getByRole('heading', { level: 1, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
-    await expect(page.getByText('NAT gateway')).toBeVisible()
+  test('homelab-main shows subnets, the placement zones and the NAT gateway', async ({ page }) => {
+    await page.goto(vpcUrl(MAIN_VPC))
+    await expect(page.getByRole('heading', { level: 2, name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
+    await expect(page.getByRole('region', { name: 'Gateways and endpoints' }).getByText(/nat-/)).toBeVisible()
 
-    const tree = page.getByRole('tree', { name: 'Network tree' })
-    await expect(tree.getByRole('treeitem', { name: 'Availability zone us-east-1a' })).toBeVisible()
-    await expect(tree.getByText('subnet-03f1a9c2')).toBeVisible()
-    await expect(tree.getByRole('treeitem', { name: 'Cluster core-services' }).first()).toBeVisible()
-    await expect(tree.getByRole('treeitem', { name: 'Service payments-api' }).first()).toBeVisible()
-    await expect(tree.getByTitle(/^Task /).first()).toBeVisible()
-  })
-})
-
-test.describe('network tree keyboard', () => {
-  test.use(asUser('pavel'))
-
-  test('arrow keys walk VPC, zone and subnet; Enter on a service opens its page', async ({ page }) => {
-    await page.goto(`/networks/${HOMELAB_ACCOUNT_ID}/us-east-1/${MAIN_VPC}`)
-    const tree = page.getByRole('tree', { name: 'Network tree' })
-    await expect(tree).toBeVisible({ timeout: POLL_TIMEOUT })
-
-    const vpc = tree.getByRole('treeitem', { name: /^VPC/ })
-    await vpc.focus()
-    await page.keyboard.press('ArrowDown')
-    const zone = tree.getByRole('treeitem', { name: /^Availability zone/ }).first()
-    await expect(zone).toBeFocused()
-    await page.keyboard.press('ArrowDown')
-    await expect(tree.getByRole('treeitem', { name: /subnet/i }).first()).toBeFocused()
-    await page.keyboard.press('ArrowUp')
-    await expect(zone).toBeFocused()
-
-    await tree.getByRole('treeitem', { name: 'Service payments-api' }).first().focus()
-    await page.keyboard.press('Enter')
-    await expect(page).toHaveURL(new RegExp(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}/overview$`))
+    await expect(page.getByRole('table', { name: 'Subnets' }).getByText('subnet-03f1a9c2')).toBeVisible()
+    await expect(placement(page).getByText('us-east-1a')).toBeVisible()
+    await expect(placement(page).getByRole('button', { name: /core-services/ }).first()).toBeVisible()
   })
 })

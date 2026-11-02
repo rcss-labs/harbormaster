@@ -8,30 +8,32 @@ test('wide screens fill the content width', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 1440 })
   await page.goto('/')
   const main = page.getByRole('main')
-  await expect(main.getByText('Tasks running', { exact: true })).toBeVisible()
+  await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
+  // Grid is sidebar | main | docked activity rail (>= 1280px): 2560 - 212 - 300 = 2048.
   const mainBox = await main.boundingBox()
-  expect(mainBox!.width).toBeGreaterThan(2200)
+  expect(mainBox!.width).toBeGreaterThan(1900)
 
-  // Clusters, Services, Tasks running and the average-use tile share the first stat grid.
-  const grid = main.getByText('Clusters', { exact: true }).locator('../..')
-  const gridBox = (await grid.boundingBox())!
-  const tiles = grid.locator(':scope > *')
-  await expect(tiles).toHaveCount(4)
-  const boxes = await Promise.all([0, 1, 2, 3].map((index) => tiles.nth(index).boundingBox()))
+  // The six KPI cells share one strip that spans the content width.
+  const strip = main.getByRole('list', { name: 'Estate key figures' })
+  const stripBox = (await strip.boundingBox())!
+  const cells = strip.getByRole('listitem')
+  await expect(cells).toHaveCount(6)
+  const boxes = await Promise.all([0, 1, 2, 3, 4, 5].map((index) => cells.nth(index).boundingBox()))
   for (const box of boxes) expect(Math.abs(box!.width - boxes[0]!.width)).toBeLessThan(2)
-  const last = boxes[3]!
-  expect(Math.abs(last.x + last.width - (gridBox.x + gridBox.width))).toBeLessThanOrEqual(2)
+  const last = boxes[5]!
+  expect(Math.abs(last.x + last.width - (stripBox.x + stripBox.width))).toBeLessThanOrEqual(2)
 })
 
-test('cluster cards grow more columns on wide screens', async ({ page }) => {
-  await page.setViewportSize({ width: 2560, height: 1440 })
+test('the clusters table scrolls inside its panel at 920px without widening the page', async ({ page }) => {
+  await page.setViewportSize({ width: 920, height: 800 })
   await page.goto('/clusters')
-  const cards = page.getByRole('main').getByRole('article')
-  await expect(cards).toHaveCount(6)
-  const rows = new Set<number>()
-  for (let index = 0; index < 6; index++) rows.add(Math.round((await cards.nth(index).boundingBox())!.y))
-  expect(rows.size).toBe(1)
+  const table = page.getByRole('table', { name: 'Clusters' })
+  await expect(table.getByRole('row')).toHaveCount(7)
+  const main = page.getByRole('main')
+  expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+  // The table keeps its minimum width, so it is wider than the panel that scrolls it.
+  expect((await table.boundingBox())!.width).toBeGreaterThanOrEqual(1120)
 })
 
 test('logs and terminal fill the viewport height', async ({ page }) => {
@@ -49,20 +51,14 @@ test('logs and terminal fill the viewport height', async ({ page }) => {
   expect((await host.boundingBox())!.height).toBeGreaterThan(480)
 })
 
-test('narrow viewport wraps the tiles without horizontal overflow', async ({ page }) => {
+test('narrow viewport has no horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 800 })
   await page.goto('/')
   const main = page.getByRole('main')
-  await expect(main.getByText('Tasks running', { exact: true })).toBeVisible()
+  await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
   // <main> is the scroll container (overflow: auto), so overflow shows up on it, never on the document.
   const overflow = await main.evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)
-
-  const grid = main.getByText('Clusters', { exact: true }).locator('../..')
-  const tiles = grid.locator(':scope > *')
-  const ys = new Set<number>()
-  for (let index = 0; index < (await tiles.count()); index++) ys.add(Math.round((await tiles.nth(index).boundingBox())!.y))
-  expect(ys.size).toBeGreaterThan(1)
 })
 
 test('stop reason labels wrap instead of truncating', async ({ page }) => {

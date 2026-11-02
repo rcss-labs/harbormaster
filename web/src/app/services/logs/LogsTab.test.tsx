@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LogsHistoryDTO } from '../../../api/types'
-import { LOGS_HISTORY_PAYMENTS, SERVICE_PAYMENTS } from '../../../test/fixtures'
+import { LOGS_HISTORY_PAYMENTS, SERVICE_PAYMENTS, minutesAgo } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
 
@@ -50,26 +50,64 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('LogsTab', () => {
-  it('renders history lines with level classes', async () => {
-    serveHistory(() => supportedOnly)
+  const mixedLevels: LogsHistoryDTO = {
+    ...supportedOnly,
+    lines: [
+      { t: minutesAgo(5), container: 'app', task_id: 'a1b2c3d4e5f60718', message: 'GET /healthz 200 1ms' },
+      { t: minutesAgo(4), container: 'app', task_id: 'a1b2c3d4e5f60718', message: 'WARN slow upstream: 2400ms' },
+      { t: minutesAgo(3), container: 'app', task_id: 'a1b2c3d4e5f60718', message: 'ERROR charge declined: card_expired' },
+    ],
+  }
+
+  it('renders each history line as one row: time, an unwrapped stream cell and the message, tinted by level', async () => {
+    serveHistory(() => mixedLevels)
     renderApp(route)
     const log = await screen.findByRole('log')
-    const error = await within(log).findByText('ERROR charge declined: card_expired')
-    expect(error.className).toMatch(/lvl-error|lvlError/)
-    expect(within(log).getByText('POST /v1/charges 201 38ms').className).not.toMatch(/error|warn/i)
-    expect(within(log).getAllByText('app/a1b2c3d4')).toHaveLength(2)
+    const rows = await within(log).findAllByRole('row')
+    expect(rows).toHaveLength(3)
+
+    const [info, warn, error] = rows
+    expect(info).not.toHaveAttribute('data-level')
+    expect(warn).toHaveAttribute('data-level', 'warn')
+    expect(error).toHaveAttribute('data-level', 'error')
+
+    // The stream column is one cell holding "container/task prefix" as a single text node, never split across lines.
+    const cells = within(error).getAllByRole('cell')
+    expect(cells).toHaveLength(3)
+    expect(cells[1]).toHaveTextContent(/^app\/a1b2c3d4$/)
+    expect(cells[1]).toHaveAttribute('title', 'app/a1b2c3d4e5f60718')
+    expect(cells[2]).toHaveTextContent('ERROR charge declined: card_expired')
+    expect(cells[2]).toHaveAttribute('title', 'ERROR charge declined: card_expired')
     expect(screen.getByText('/ecs/payments-api')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument()
   })
 
-  it('Warnings and errors hides info lines', async () => {
-    serveHistory(() => supportedOnly)
+  it('level filter: Warn+ keeps warnings and errors, Errors keeps errors, All restores everything', async () => {
+    serveHistory(() => mixedLevels)
     renderApp(route)
     const log = await screen.findByRole('log')
     await within(log).findByText('GET /healthz 200 1ms')
-    await userEvent.selectOptions(screen.getByLabelText('Level'), 'Warnings and errors')
+    const level = screen.getByRole('radiogroup', { name: 'Level' })
+    expect(within(level).getByRole('radio', { name: 'All' })).toBeChecked()
+
+    await userEvent.click(within(level).getByRole('radio', { name: 'Warn+' }))
     expect(within(log).queryByText('GET /healthz 200 1ms')).not.toBeInTheDocument()
+    expect(within(log).getByText('WARN slow upstream: 2400ms')).toBeInTheDocument()
     expect(within(log).getByText('ERROR charge declined: card_expired')).toBeInTheDocument()
+
+    await userEvent.click(within(level).getByRole('radio', { name: 'Errors' }))
+    expect(within(log).queryByText('WARN slow upstream: 2400ms')).not.toBeInTheDocument()
+    expect(within(log).getByText('ERROR charge declined: card_expired')).toBeInTheDocument()
+
+    await userEvent.click(within(level).getByRole('radio', { name: 'All' }))
+    expect(within(log).getByText('GET /healthz 200 1ms')).toBeInTheDocument()
+  })
+
+  it('starts Live and shows the tail status', async () => {
+    serveHistory(() => supportedOnly)
+    renderApp(route)
+    await screen.findByRole('log')
+    expect(screen.getByRole('button', { name: 'Live' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Paused' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('Load older requests before=older_before and prepends', async () => {
@@ -134,15 +172,15 @@ describe('LogsTab', () => {
     expect(MockSocket.instances).toHaveLength(2)
   })
 
-  it('Pause closes the socket and Follow reconnects', async () => {
+  it('Paused closes the socket and Live reconnects', async () => {
     serveHistory(() => supportedOnly)
     renderApp(route)
     await screen.findByRole('log')
     await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
-    await userEvent.click(screen.getByRole('button', { name: 'Pause' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Paused' }))
     expect(MockSocket.instances[0].readyState).toBe(3)
-    expect(screen.getByText(/paused/)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Follow' }))
+    expect(screen.getByText('CloudWatch Logs', { exact: false })).toHaveTextContent('paused')
+    await userEvent.click(screen.getByRole('button', { name: 'Live' }))
     expect(MockSocket.instances).toHaveLength(2)
   })
 
@@ -163,7 +201,7 @@ describe('LogsTab', () => {
     Object.defineProperty(log, 'clientHeight', { configurable: true, value: 500 })
     log.scrollTop = 100
     fireEvent.scroll(log)
-    expect(await screen.findByRole('button', { name: 'Follow' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Paused' })).toHaveAttribute('aria-pressed', 'true'))
   })
 
   it('csrf_invalid close tells the user to reload', async () => {

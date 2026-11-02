@@ -1,14 +1,12 @@
 import type { ClusterMetricsDTO } from '../../api/types'
-import { Banner } from '../../components/Banner'
-import { Card } from '../../components/Card'
+import { allNull } from '../../api/observe'
 import { Legend } from '../../charts/Legend'
 import { LineChart } from '../../charts/LineChart'
-import { Sparkline } from '../../charts/Sparkline'
-import { Tile } from '../../components/Tile'
 import { XL24 } from '../../charts/format'
-import { allNull } from '../../api/observe'
-import { MetricPanel } from '../observe/MetricPanel'
-import { percentText, presentValues } from './ServiceCardMetrics'
+import { Banner } from '../../components/Banner'
+import { EmptyState } from '../../components/EmptyState'
+import { Panel } from '../../components/Panel'
+import { StaleNote } from '../../components/StaleNote'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const CPU_COLOR = 'var(--series-1)'
@@ -42,22 +40,22 @@ interface ClusterUsageChartProps {
   error?: unknown
 }
 
-/** Cluster CPU and memory over 24 h with deployment markers (mockup cluster page, `g-wide` chart card). */
+/** Cluster CPU and memory over 24 h with deployment markers. */
 export function ClusterUsageChart({ metrics, insights, error }: ClusterUsageChartProps) {
   if (!insights) {
     return (
-      <Card title="Cluster CPU and memory">
+      <Panel title="Cluster CPU and memory">
         <Banner kind="warn">Container Insights is off for this cluster.</Banner>
-      </Card>
+      </Panel>
     )
   }
 
   if (!metrics && error) {
     const message = error instanceof Error ? error.message : 'The metrics could not be loaded.'
     return (
-      <Card title="Cluster CPU and memory, 24 h">
+      <Panel title="Cluster CPU and memory, 24 h">
         <Banner kind="bad">{message}</Banner>
-      </Card>
+      </Panel>
     )
   }
 
@@ -67,45 +65,30 @@ export function ClusterUsageChart({ metrics, insights, error }: ClusterUsageChar
   const hasNoData = metrics !== undefined && (!metrics.cluster || allNull(metrics.cluster.cpu, metrics.cluster.mem))
 
   return (
-    <MetricPanel title="Cluster CPU and memory, 24 h" stale={metrics?.stale} empty={hasNoData}>
-      <Legend
-        items={[
-          { name: 'CPU', color: CPU_COLOR },
-          { name: 'Memory', color: MEMORY_COLOR },
-          { name: 'Deployment', color: DEPLOY_COLOR },
-        ]}
-      />
-      <LineChart
-        series={[
-          { name: 'CPU', color: CPU_COLOR, values: cpu },
-          { name: 'Memory', color: MEMORY_COLOR, values: memory },
-        ]}
-        xLabels={XL24}
-        height={150}
-        marks={metrics ? deployMarks(metrics) : []}
-      />
-    </MetricPanel>
-  )
-}
-
-/** The "Use now" tile: current cluster CPU and memory with a CPU sparkline. */
-export function UseNowTile({ metrics, insights }: ClusterUsageChartProps) {
-  if (!insights) {
-    return <Tile k="Use now" v={<small>Container Insights off</small>} />
-  }
-  const cpuHistory = presentValues(metrics?.cluster?.cpu ?? [])
-  return (
-    <Tile
-      k="Use now"
-      v={
+    <Panel title="Cluster CPU and memory, 24 h" actions={<span>Container Insights</span>}>
+      {metrics?.stale && <StaleNote stale={metrics.stale} />}
+      {hasNoData ? (
+        <EmptyState>No data yet</EmptyState>
+      ) : (
         <>
-          {percentText(metrics?.now?.cpu)}
-          <small>CPU</small> {percentText(metrics?.now?.mem)}
-          <small>memory</small>
+          <Legend
+            items={[
+              { name: 'CPU', color: CPU_COLOR },
+              { name: 'Memory', color: MEMORY_COLOR },
+              { name: 'Deployment', color: DEPLOY_COLOR },
+            ]}
+          />
+          <LineChart
+            series={[
+              { name: 'CPU', color: CPU_COLOR, values: cpu },
+              { name: 'Memory', color: MEMORY_COLOR, values: memory },
+            ]}
+            xLabels={XL24}
+            height={150}
+            marks={metrics ? deployMarks(metrics) : []}
+          />
         </>
-      }
-    >
-      {cpuHistory.length > 0 ? <Sparkline values={cpuHistory} color={CPU_COLOR} height={24} fluid /> : '–'}
-    </Tile>
+      )}
+    </Panel>
   )
 }

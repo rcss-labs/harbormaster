@@ -122,12 +122,13 @@ test.describe('admin pages as pavel', () => {
     await page.goto('/settings/tags')
     await expect(page.getByRole('heading', { level: 2, name: 'Tags' })).toBeVisible()
 
-    // Assignments start collapsed; expanding shows the cluster selects.
-    await expect(page.getByLabel(/^Tag for /)).toHaveCount(0)
-    await page.getByRole('button', { name: 'Expand all' }).click()
+    // Assignments list clusters under account and region headers; services appear when the clusters are expanded.
     await expect(page.getByLabel(/^Tag for /).first()).toBeVisible()
+    const collapsed = await page.getByLabel(/^Tag for /).count()
+    await page.getByRole('button', { name: 'Expand all' }).click()
+    await expect.poll(() => page.getByLabel(/^Tag for /).count()).toBeGreaterThan(collapsed)
     await page.getByRole('button', { name: 'Collapse all' }).click()
-    await expect(page.getByLabel(/^Tag for /)).toHaveCount(0)
+    await expect.poll(() => page.getByLabel(/^Tag for /).count()).toBe(collapsed)
 
     // The Dev tag is built in: neither Rename nor Delete is available.
     const dev = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Rename' }) }).filter({ hasText: /^Dev\s*default/ })

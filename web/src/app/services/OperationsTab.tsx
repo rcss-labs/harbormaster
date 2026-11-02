@@ -3,6 +3,8 @@ import type { EventDTO } from '../../api/types'
 import { useOperations } from '../../api/hooks'
 import { EmptyState } from '../../components/EmptyState'
 import { Feed, FeedRow } from '../../components/Feed'
+import { Panel } from '../../components/Panel'
+import { Toggle } from '../../components/Toggle'
 import { usePagedCursor } from '../../components/usePagedCursor'
 import styles from './service.module.css'
 
@@ -20,42 +22,40 @@ export function OperationsTab({ serviceId }: { serviceId: string }) {
   const next = page.data?.next
 
   return (
-    <>
-      <div className={styles.opsToolbar}>
-        <label className={styles.toggle}>
-          <input type="checkbox" checked={includeEcs} onChange={(event) => setIncludeEcs(event.target.checked)} />
-          Show ECS service events
-        </label>
-        <span className={`${styles.muted} ${styles.small} ${styles.end}`}>
+    <Panel
+      title="Operations log"
+      toolbar={<Toggle checked={includeEcs} onChange={setIncludeEcs}>Show ECS service events</Toggle>}
+      actions={
+        <span className={`${styles.muted} ${styles.small}`}>
           Actions taken in Harbormaster are kept for 90 days. Changes made outside Harbormaster come from CloudTrail.
         </span>
-      </div>
-      <div className={styles.panel}>
-        {items.length === 0 ? (
-          <EmptyState>No entries.</EmptyState>
-        ) : (
-          <Feed>
-            {items.map((event, index) => (
-              <FeedRow key={index} ts={event.ts} source={event.source} actor={event.actor}>
-                {event.text}
-              </FeedRow>
-            ))}
-          </Feed>
-        )}
-        {next && (
-          <div className={styles.more}>
-            <button
-              type="button"
-              className={styles.btn}
-              onClick={() => {
-                if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
-              }}
-            >
-              Load more
-            </button>
-          </div>
-        )}
-      </div>
-    </>
+      }
+      flush
+    >
+      {items.length === 0 ? (
+        <EmptyState>No entries.</EmptyState>
+      ) : (
+        <Feed>
+          {items.map((event, index) => (
+            <FeedRow key={index} ts={event.ts} source={event.source} actor={event.actor}>
+              {event.text}
+            </FeedRow>
+          ))}
+        </Feed>
+      )}
+      {next && (
+        <div className={styles.more}>
+          <button
+            type="button"
+            className={styles.btn}
+            onClick={() => {
+              if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
+            }}
+          >
+            Load more
+          </button>
+        </div>
+      )}
+    </Panel>
   )
 }

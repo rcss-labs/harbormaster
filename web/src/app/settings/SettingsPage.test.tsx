@@ -98,4 +98,32 @@ describe('SettingsPage', () => {
     await within(crumbs).findByText('Audit log')
     expect(crumbs).toHaveTextContent('Settings/Audit log')
   })
+
+  it.each([
+    ['general', 'Save'],
+    ['accounts', 'Connect account'],
+    ['users', 'Add user'],
+    ['tags', 'Create tag'],
+    ['sso', 'Turn on single sign-on'],
+  ])('puts the primary action of the %s tab in the header: %s', async (tab, action) => {
+    renderApp(`/settings/${tab}`)
+    const header = await screen.findByRole('group', { name: 'Tab actions' })
+    expect(await within(header).findByRole('button', { name: action })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: action })).toHaveLength(1)
+  })
+
+  it('the Audit log tab has no primary action', async () => {
+    renderApp('/settings/audit')
+    await screen.findByRole('heading', { level: 2, name: 'Audit log' })
+    expect(screen.getByRole('group', { name: 'Tab actions' })).toBeEmptyDOMElement()
+  })
+
+  it('the header action follows the active tab', async () => {
+    renderApp('/settings/tags')
+    const header = await screen.findByRole('group', { name: 'Tab actions' })
+    await within(header).findByRole('button', { name: 'Create tag' })
+    await userEvent.click(screen.getByRole('link', { name: 'Users & permissions' }))
+    expect(await within(header).findByRole('button', { name: 'Add user' })).toBeInTheDocument()
+    expect(within(header).queryByRole('button', { name: 'Create tag' })).not.toBeInTheDocument()
+  })
 })

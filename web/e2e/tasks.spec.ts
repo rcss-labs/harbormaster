@@ -23,7 +23,7 @@ test.describe('tasks as pavel', () => {
     await expect(page.getByText('Stopped tasks older than 10 min are hidden.')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Change', exact: true })).toBeVisible()
 
-    await page.getByRole('group', { name: 'Task filter' }).getByRole('button', { name: /^Running/ }).click()
+    await page.getByRole('radiogroup', { name: 'Task filter' }).getByRole('radio', { name: /^Running/ }).click()
     await expect(page).toHaveURL(/filter=running/)
     await expect(page.getByRole('row').filter({ hasText: 'Running' }).first()).toBeVisible()
     await expect(page.getByRole('row').filter({ hasText: 'Stopped (exit 137)' })).toHaveCount(0)
@@ -34,7 +34,7 @@ test.describe('tasks as omer', () => {
   test.use(asUser('omer'))
 
   test('no Prod tasks; Stop but no Terminal on a Dev row', async ({ page }) => {
-    await page.goto('/tasks?filter=running')
+    await page.goto('/tasks?filter=running&group=0')
     const reportWorker = page.getByRole('row').filter({ hasText: 'report-worker' })
     await expect(reportWorker.first()).toBeVisible()
     await expect(reportWorker.first().getByRole('button', { name: 'Stop' })).toBeVisible()

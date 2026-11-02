@@ -1,74 +1,172 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import type { ClusterCardDTO } from '../../api/types'
+import { fmtNum } from '../../charts/format'
 import { Sparkline } from '../../charts/Sparkline'
-import { Pill } from '../../components/Pill'
-import { Table, tableClass } from '../../components/Table'
+import { Ago } from '../../components/Ago'
+import { DataTable, type DataTableColumn, type RowStatus, type SortState } from '../../components/DataTable'
+import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
-import { clusterStatusKind, clusterStatusLabel } from '../../components/status'
-import { type ClusterMetricsItem, formatPercent, presentPoints } from './ClusterCardMetrics'
+import { STATUS_COLOR, clusterStatusKind, statusKind } from '../../components/status'
+import { type ClusterMetricsItem, formatPercent, presentPoints } from './clusterMetrics'
 import styles from './clusters.module.css'
+import { clusterSeverity } from './filterClusters'
+import { serviceSeverity } from './serviceSeverity'
 
-export function ClustersTable({
-  clusters,
-  metricsById,
-}: {
+export const CLUSTERS_PAGE_SIZE = 25
+const SERVICE_PREVIEW = 3
+const INSIGHTS_OFF = 'Container Insights is off'
+
+interface ClusterRow {
+  cluster: ClusterCardDTO
+  metrics?: ClusterMetricsItem
+}
+
+const ROW_STATUS: Partial<Record<ClusterCardDTO['status'], RowStatus>> = { needs_attention: 'bad', degraded: 'warn', deploying: 'info' }
+
+/** The first services, problems first. */
+function ServicePreview({ cluster }: { cluster: ClusterCardDTO }) {
+  const ordered = [...cluster.services].sort((a, b) => serviceSeverity(b.status) - serviceSeverity(a.status))
+  const rest = ordered.length - SERVICE_PREVIEW
+  return (
+    <span className={styles.svcPreview}>
+      {ordered.slice(0, SERVICE_PREVIEW).map((service) => (
+        <Link key={service.id} to={`/services/${service.id}/overview`} className={styles.svcLink}>
+          <i className={styles.svcDot} style={{ background: STATUS_COLOR[statusKind(service.status)] }} aria-hidden="true" />
+          {service.name}
+        </Link>
+      ))}
+      {rest > 0 && <span className={styles.svcMore}>{`+${rest}`}</span>}
+    </span>
+  )
+}
+
+function UsageCell({ cluster, points, now, color }: { cluster: ClusterCardDTO; points: number[]; now: number | null | undefined; color: string }) {
+  if (!cluster.container_insights) {
+    return (
+      <span className={styles.dim} title={INSIGHTS_OFF}>
+        –
+      </span>
+    )
+  }
+  return (
+    <span className={styles.usage}>
+      {points.length > 0 ? <Sparkline values={points} color={color} height={18} fluid /> : <span className={styles.usageGap} />}
+      <span className={styles.usageNow}>{formatPercent(now)}</span>
+    </span>
+  )
+}
+
+function columns(): DataTableColumn<ClusterRow>[] {
+  return [
+    {
+      key: 'name',
+      header: 'Cluster',
+      width: 'minmax(0,1.3fr)',
+      sortValue: (r) => r.cluster.name,
+      render: ({ cluster }): ReactNode => (
+        <span className={styles.nameCell}>
+          <Link to={`/clusters/${cluster.id}`} className={styles.clusterLink}>
+            {cluster.name}
+          </Link>
+          <span className={styles.where}>
+            {cluster.account_name} · {cluster.region}
+          </span>
+        </span>
+      ),
+    },
+    { key: 'env', header: 'Env', width: '84px', render: ({ cluster }) => <TagChip tag={cluster.tag} kind="cluster" /> },
+    {
+      key: 'status',
+      header: 'Status',
+      width: '120px',
+      sortValue: (r) => clusterSeverity(r.cluster.status) * 1000 + (r.cluster.desired - r.cluster.running),
+      render: ({ cluster }) => <StatusDot clusterStatus={cluster.status} />,
+    },
+    {
+      key: 'services',
+      header: 'Services',
+      width: 'minmax(0,1.6fr)',
+      sortValue: (r) => r.cluster.services.length,
+      render: ({ cluster }) => <ServicePreview cluster={cluster} />,
+    },
+    {
+      key: 'tasks',
+      header: 'Tasks',
+      width: '110px',
+      sortValue: (r) => r.cluster.desired,
+      render: ({ cluster }) => {
+        const share = cluster.desired > 0 ? Math.min(100, (cluster.running / cluster.desired) * 100) : 0
+        return (
+          <span className={styles.tasks}>
+            <span className={styles.mono}>
+              {cluster.running}/{cluster.desired}
+            </span>
+            <span className={styles.track} aria-hidden="true">
+              <span style={{ width: `${share}%`, background: STATUS_COLOR[clusterStatusKind(cluster.status)] }} />
+            </span>
+          </span>
+        )
+      },
+    },
+    {
+      key: 'cpu',
+      header: 'CPU 24h',
+      width: 'minmax(0,1fr)',
+      sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.cpu_now ?? null) : null),
+      render: ({ cluster, metrics }) => (
+        <UsageCell cluster={cluster} points={presentPoints(metrics?.cpu ?? [])} now={metrics?.cpu_now} color="var(--series-1)" />
+      ),
+    },
+    {
+      key: 'mem',
+      header: 'Memory 24h',
+      width: 'minmax(0,1fr)',
+      sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.mem_now ?? null) : null),
+      render: ({ cluster, metrics }) => (
+        <UsageCell cluster={cluster} points={presentPoints(metrics?.mem ?? [])} now={metrics?.mem_now} color="var(--series-2)" />
+      ),
+    },
+    { key: 'vcpu', header: 'vCPU', width: '56px', align: 'right', render: ({ cluster }) => <span className={styles.mono}>{fmtNum(cluster.reserved_vcpu)}</span> },
+    { key: 'spot', header: 'Spot', width: '52px', align: 'right', render: ({ cluster }) => <span className={styles.mono}>{cluster.spot_tasks}</span> },
+    {
+      key: 'change',
+      header: 'Last change',
+      width: '92px',
+      render: ({ cluster }) => <span className={styles.muted}>{cluster.last_change_at ? <Ago ts={cluster.last_change_at} /> : '–'}</span>,
+    },
+  ]
+}
+
+interface ClustersTableProps {
   clusters: ClusterCardDTO[]
   metricsById: Record<string, ClusterMetricsItem>
-}) {
+  sort: SortState
+  onSortChange: (sort: SortState) => void
+  page: number
+  onPageChange: (page: number) => void
+  empty: ReactNode
+}
+
+export function ClustersTable({ clusters, metricsById, sort, onSortChange, page, onPageChange, empty }: ClustersTableProps) {
+  // Name order first, so rows that tie on the sort key stay alphabetical.
+  const rows = [...clusters].sort((a, b) => a.name.localeCompare(b.name)).map((cluster) => ({ cluster, metrics: metricsById[cluster.id] }))
   return (
-    <div className={styles.panel}>
-      <Table>
-        <thead>
-          <tr>
-            <th>Cluster</th>
-            <th>Label</th>
-            <th>Status</th>
-            <th>Account</th>
-            <th>Region</th>
-            <th className={tableClass.num}>Services</th>
-            <th className={tableClass.num}>Tasks</th>
-            <th>CPU, 24 h</th>
-            <th className={tableClass.num}>CPU now</th>
-            <th className={tableClass.num}>Memory now</th>
-          </tr>
-        </thead>
-        <tbody>
-          {clusters.map((cluster) => {
-            const metrics = metricsById[cluster.id]
-            const cpuPoints = presentPoints(metrics?.cpu ?? [])
-            return (
-              <tr key={cluster.id}>
-                <td className={tableClass.name}>
-                  <Link to={`/clusters/${cluster.id}`}>{cluster.name}</Link>
-                </td>
-                <td>
-                  <TagChip tag={cluster.tag} kind="cluster" />
-                </td>
-                <td>
-                  <Pill kind={clusterStatusKind(cluster.status)}>{clusterStatusLabel(cluster.status)}</Pill>
-                </td>
-                <td>{cluster.account_name}</td>
-                <td>{cluster.region}</td>
-                <td className={tableClass.num}>{cluster.services.length}</td>
-                <td className={tableClass.num}>
-                  {cluster.running} / {cluster.desired}
-                </td>
-                <td>
-                  {!cluster.container_insights ? (
-                    <span className={`${styles.muted} ${styles.small}`}>Container Insights off</span>
-                  ) : cpuPoints.length > 0 ? (
-                    <Sparkline values={cpuPoints} color="var(--series-1)" height={26} />
-                  ) : (
-                    '–'
-                  )}
-                </td>
-                <td className={tableClass.num}>{cluster.container_insights ? formatPercent(metrics?.cpu_now) : '–'}</td>
-                <td className={tableClass.num}>{cluster.container_insights ? formatPercent(metrics?.mem_now) : '–'}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </Table>
+    <div className={styles.tablePanel}>
+      <DataTable
+        label="Clusters"
+        columns={columns()}
+        rows={rows}
+        rowKey={(row) => row.cluster.id}
+        minWidth={1120}
+        rowStatus={(row) => ROW_STATUS[row.cluster.status]}
+        sort={sort}
+        onSortChange={onSortChange}
+        pageSize={CLUSTERS_PAGE_SIZE}
+        page={page}
+        onPageChange={onPageChange}
+        empty={empty}
+      />
     </div>
   )
 }

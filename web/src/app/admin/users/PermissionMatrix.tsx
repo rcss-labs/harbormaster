@@ -1,5 +1,5 @@
 import type { PermissionsDTO } from '../../../api/types'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { Pill } from '../../../components/Pill'
 import { Table } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
@@ -18,7 +18,7 @@ export function PermissionMatrix({ data }: { data: PermissionsDTO }) {
     </span>
   )
   return (
-    <Card title="Permission matrix" right={legend}>
+    <Panel title="Users & permissions" actions={legend}>
       <Table>
         <thead>
           <tr>
@@ -63,6 +63,6 @@ export function PermissionMatrix({ data }: { data: PermissionsDTO }) {
         Turning on any action also turns on View. Turning off View removes everything on that tag. A user sees a cluster when
         they can view at least one of its services.
       </p>
-    </Card>
+    </Panel>
   )
 }

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../../../api/client'
 import type { SSOConfigDTO } from '../../../api/types'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { useToast } from '../../../components/Toast'
 import { configBody } from './configBody'
 import styles from './sso.module.css'
@@ -70,7 +70,7 @@ export function OptionsCard({ config }: { config: SSOConfigDTO }) {
   }
 
   return (
-    <Card title="Sign-in options">
+    <Panel title="Sign-in options">
       <div className={`${styles.form} ${styles.formWide}`}>
         <div className={styles.grid}>
           <label className={styles.field}>
@@ -135,6 +135,6 @@ export function OptionsCard({ config }: { config: SSOConfigDTO }) {
           </button>
         </div>
       </div>
-    </Card>
+    </Panel>
   )
 }

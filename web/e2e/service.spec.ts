@@ -42,8 +42,8 @@ test.describe('header: Prod viewer', () => {
     const restart = page.getByRole('button', { name: 'Restart (new deployment)' })
     await expect(restart).toBeDisabled()
     await expect(restart).toHaveAttribute('title', 'You need Operate on Prod')
-    const desired = page.getByRole('button', { name: 'Desired count: 3' })
-    await expect(desired).toBeDisabled()
+    const desired = page.getByRole('group', { name: 'Desired count' })
+    await expect(desired.getByRole('spinbutton')).toBeDisabled()
     await expect(desired).toHaveAttribute('title', 'You need Operate on Prod')
     await expect(page.getByRole('link', { name: /AWS console/ })).toHaveAttribute('href', /.+/)
   })
@@ -54,9 +54,9 @@ test.describe('overview as oncall', () => {
 
   test('payments-api shows 3 running of 3, the target health donut and the deployments timeline', async ({ page }) => {
     await page.goto(paymentsApi())
-    // The tile value is "<running>" plus a <small> "running of <desired> · <pending> pending". change.spec stops a
-    // payments-api task; ECS replaces it within a few polls, so wait for the whole value to read 3 of 3.
-    await expect(page.getByText(/^3\s*running of 3 · 0 pending$/)).toBeVisible({ timeout: 30_000 })
+    // The Tasks KPI reads "<running>/<desired>" plus "all running" or "<n> pending". change.spec stops a
+    // payments-api task; ECS replaces it within a few polls, so wait for the whole value to read 3/3.
+    await expect(page.getByRole('list', { name: 'Service summary' }).getByText(/^3\/3\s*all running$/)).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('heading', { name: 'Target health' })).toBeVisible()
     await expect(page.getByRole('img').filter({ hasText: '3/3' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Deployments, 14 days' })).toBeVisible()
@@ -95,7 +95,7 @@ test.describe('task definition: read-only Prod viewer', () => {
     await expect(page.getByText(/Read only\. You need\s+Edit task definition\s+on\s+Prod\s+to register a new revision\./)).toBeVisible()
     await expect(page.getByLabel('Task definition JSON')).not.toBeEditable()
     await expect(page.getByLabel('Image tag')).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Review and save' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: /^Review and register :\d+$/ })).toBeDisabled()
   })
 })
 
@@ -114,7 +114,7 @@ test.describe('task definition: registering', () => {
       expect(other, 'a tag other than the deployed one').toBeDefined()
       await imageTag.selectOption({ label: other })
       await expect(imageTag).not.toHaveValue('1.19.0-rc.2')
-      await page.getByRole('button', { name: 'Review and save' }).click()
+      await page.getByRole('button', { name: /^Review and register :\d+$/ }).click()
       const review = page.getByRole('dialog')
       await expect(review.getByText('Register api:22?')).toBeVisible()
       await review.getByRole('button', { name: 'Register revision :22' }).click()
@@ -140,7 +140,7 @@ test.describe('task definition: registering', () => {
       const revisionsBefore = await revisionRowCount(page)
 
       await editDefinitionJson(page, (json) => json.replace(/("taskRoleArn":\s*"[^"]*)"/, '$1-other"'))
-      await page.getByRole('button', { name: 'Review and save' }).click()
+      await page.getByRole('button', { name: /^Review and register :\d+$/ }).click()
       const review = page.getByRole('dialog')
       await review.getByRole('button', { name: 'Register revision :59' }).click()
       await expect(review.getByText('Changing roles needs a global admin')).toBeVisible()
@@ -157,7 +157,7 @@ test.describe('task definition: registering', () => {
     test('changing the family is refused: Use Terraform to create a new family', async ({ page }) => {
       await page.goto(paymentsApi('task-definition'))
       await editDefinitionJson(page, (json) => json.replace(/("family":\s*"payments-api)"/, '$1-copy"'))
-      await page.getByRole('button', { name: 'Review and save' }).click()
+      await page.getByRole('button', { name: /^Review and register :\d+$/ }).click()
       const review = page.getByRole('dialog')
       // change.spec may already have registered :43, so the number is not fixed here.
       await review.getByRole('button', { name: /^Register revision :\d+$/ }).click()
@@ -173,15 +173,17 @@ test.describe('scaling', () => {
     test('sets the desired count to 3 from the tab, without an auto scaling warning', async ({ page }) => {
       await page.goto(imageResizer('scaling'))
       await expect(page.getByText(/No auto scaling: the count stays where you set it\./)).toBeVisible()
-      await page.getByLabel('Desired count', { exact: true }).fill('3')
+      await page.getByLabel('Scale to', { exact: true }).fill('3')
       await expect(page.getByText(/Outside the auto scaling range/)).toHaveCount(0)
       await page.getByRole('button', { name: 'Update desired count' }).click()
-      await expect(page.getByRole('button', { name: 'Desired count: 3' })).toBeVisible({ timeout: 10_000 })
+      await page.getByRole('dialog').getByRole('button', { name: 'Update desired count' }).click()
+      await expect(page.getByRole('group', { name: 'Desired count' }).getByRole('spinbutton')).toHaveValue('3', { timeout: 10_000 })
 
       // Put the estate back so later specs see the seeded count.
-      await page.getByLabel('Desired count', { exact: true }).fill('2')
+      await page.getByLabel('Scale to', { exact: true }).fill('2')
       await page.getByRole('button', { name: 'Update desired count' }).click()
-      await expect(page.getByRole('button', { name: 'Desired count: 2' })).toBeVisible({ timeout: 10_000 })
+      await page.getByRole('dialog').getByRole('button', { name: 'Update desired count' }).click()
+      await expect(page.getByRole('group', { name: 'Desired count' }).getByRole('spinbutton')).toHaveValue('2', { timeout: 10_000 })
     })
   })
 
@@ -218,7 +220,7 @@ test.describe('logs', () => {
       // Each log row carries one "<container>/<task id prefix>" label, so count those.
       const rowCount = () => log.getByText(/^[\w-]+\/[0-9a-f]{8}$/).count()
       const allRows = await rowCount()
-      await page.getByLabel('Level').selectOption({ label: 'Warnings and errors' })
+      await page.getByRole('radiogroup', { name: 'Level' }).getByRole('radio', { name: 'Warn+' }).click()
       await expect(healthLines).toHaveCount(0)
       await expect.poll(rowCount).toBeLessThan(allRows)
     })

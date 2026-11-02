@@ -1,6 +1,14 @@
-.pageHead { margin-bottom: 12px; }
-.panel { margin-top: 16px; }
+/* Header and tabs stay in view while a long tab (users, tags, audit) scrolls. */
+.sticky { position: sticky; top: 0; z-index: 5; background: var(--bg); padding-top: 2px; }
+.pageHead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; min-height: 30px; }
+.actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.panel { margin-top: 16px; display: grid; gap: 12px; min-width: 0; }
 .windowRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.windowInput { width: 88px; }
-.saveButton { margin-left: 4px; }
+.windowInput { width: 88px; height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
 .error { color: var(--danger); font-size: 12px; margin: 8px 0 0; }
+.hint { color: var(--muted); font-size: 12px; margin: 0; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover { background: var(--accent); filter: brightness(1.07); }

@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   AccountsDTO,
@@ -117,6 +117,8 @@ export function useSearch(q: string, filters: Filters = {}) {
     queryKey: ['search', q, filters],
     queryFn: () => api.get<SearchDTO>(`/api/search${queryString({ q, ...filters })}`),
     enabled: q.length >= 2,
+    // Keep the last results on screen while the next query loads, so the command palette does not flicker.
+    placeholderData: keepPreviousData,
   })
 }
 

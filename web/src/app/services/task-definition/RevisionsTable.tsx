@@ -1,5 +1,6 @@
 import type { RevisionDTO, RevisionsResponse } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
+import { Panel } from '../../../components/Panel'
 import { Pill, type PillKind } from '../../../components/Pill'
 import { Table } from '../../../components/Table'
 import styles from './taskDefinition.module.css'
@@ -26,11 +27,7 @@ export function RevisionsTable({ serviceName, revisions, canDeploy, deployDisabl
   const title = !canDeploy || deployDisabledReason !== undefined ? deployDisabledReason : rolloutRunning ? 'A rollout is already running' : undefined
 
   return (
-    <div>
-      <div className={styles.cardHead}>
-        <h2>Revisions</h2>
-        <span className={styles.note}>{`${revisions.items.length} shown · newest first`}</span>
-      </div>
+    <Panel title="Revisions" actions={<span className={styles.note}>{`${revisions.items.length} shown · newest first`}</span>} flush>
       <Table>
         <thead>
           <tr>
@@ -77,6 +74,6 @@ export function RevisionsTable({ serviceName, revisions, canDeploy, deployDisabl
           })}
         </tbody>
       </Table>
-    </div>
+    </Panel>
   )
 }

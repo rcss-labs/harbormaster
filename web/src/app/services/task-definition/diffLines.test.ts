@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffLines } from './diffLines'
+import { changedLineNumbers, diffLines } from './diffLines'
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `line${i + 1}`)
 
@@ -31,5 +31,19 @@ describe('diffLines', () => {
     const out = diffLines('a\nb', 'a\nb\nc')
     expect(out.filter((l) => l.kind === '+')).toEqual([{ kind: '+', text: 'c' }])
     expect(out.filter((l) => l.kind === '-')).toHaveLength(0)
+  })
+})
+
+describe('changedLineNumbers', () => {
+  it('is empty when nothing changed', () => {
+    expect(changedLineNumbers('a\nb', 'a\nb').size).toBe(0)
+  })
+
+  it('numbers (1-based) the lines of the new text that were added or edited', () => {
+    expect([...changedLineNumbers('a\nb\nc', 'a\nB\nc\nd')]).toEqual([2, 4])
+  })
+
+  it('ignores deleted lines, which have no line in the new text', () => {
+    expect(changedLineNumbers('a\nb\nc', 'a\nc').size).toBe(0)
   })
 })

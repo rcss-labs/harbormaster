@@ -3,34 +3,301 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { TaskDTO } from '../../api/types'
-import { ALL_TASKS, ME_OMER, TASKS, tasksList } from '../../test/fixtures'
+import { ALL_TASKS, ME_OMER, tasksList } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
-describe('Tasks', () => {
-  it('seg buttons show counts and set ?filter=', async () => {
-    renderApp('/tasks?keep=1')
-    expect(await screen.findByRole('button', { name: `Problems first ${TASKS.counts.problems}` })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: `Running ${TASKS.counts.running}` })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: `Stopped ${TASKS.counts.stopped}` })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: `All ${TASKS.counts.all}` })).toBeInTheDocument()
+const runningTemplate = ALL_TASKS.find((task) => task.service && task.status === 'RUNNING' && task.health === 'HEALTHY')!
 
-    fireEvent.click(screen.getByRole('button', { name: `Stopped ${TASKS.counts.stopped}` }))
-    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('filter=stopped'))
-    expect(screen.getByTestId('search')).toHaveTextContent('keep=1')
+type TaskOverrides = Partial<TaskDTO> & { serviceName?: string; clusterName?: string }
+
+let counter = 0
+/** A task cloned from a real fixture task; every call gets a unique id, short id and IP. */
+function makeTask(overrides: TaskOverrides): TaskDTO {
+  const { serviceName = 'svc-a', clusterName = 'cluster-a', ...rest } = overrides
+  counter++
+  const n = String(counter).padStart(4, '0')
+  return {
+    ...runningTemplate,
+    id: `task-id-${n}`,
+    short_id: `abcdef${n}0000`,
+    arn: `arn:aws:ecs:eu-west-1:1:task/${clusterName}/${n}`,
+    private_ip: `10.9.${Math.floor(counter / 200)}.${counter % 200}`,
+    service: { ...runningTemplate.service!, id: `svc-id-${serviceName}`, name: serviceName },
+    cluster: { id: `cluster-id-${clusterName}`, name: clusterName },
+    started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    ...rest,
+  }
+}
+const stoppedError = (extra: TaskOverrides = {}) =>
+  makeTask({
+    status: 'STOPPED',
+    exit_code: 137,
+    health: 'UNKNOWN',
+    stop_code: 'EssentialContainerExited',
+    stopped_reason: 'OutOfMemoryError',
+    stop_reason_group: 'Out of memory (exit 137)',
+    stopped_at: new Date(Date.now() - 120_000).toISOString(),
+    ...extra,
+  })
+const stoppedNormal = (extra: TaskOverrides = {}) =>
+  makeTask({
+    status: 'STOPPED',
+    exit_code: 0,
+    health: 'UNKNOWN',
+    stop_code: 'ServiceSchedulerInitiated',
+    stopped_reason: 'Scaling activity',
+    stop_reason_group: 'Scaled in',
+    stopped_at: new Date(Date.now() - 240_000).toISOString(),
+    ...extra,
+  })
+const unhealthy = (extra: TaskOverrides = {}) => makeTask({ health: 'UNHEALTHY', ...extra })
+const healthy = (extra: TaskOverrides = {}) => makeTask({ health: 'HEALTHY', ...extra })
+
+function serve(items: TaskDTO[]) {
+  server.use(http.get('/api/tasks', () => HttpResponse.json(tasksList(items))))
+}
+
+const taskRows = () => within(screen.getByRole('table', { name: 'Tasks' })).getAllByRole('row').slice(1)
+const shortId = (task: TaskDTO) => task.short_id.slice(0, 12)
+const search = () => screen.getByTestId('search').textContent ?? ''
+
+describe('Tasks segments', () => {
+  const sample = () => [
+    healthy(),
+    healthy({ serviceName: 'svc-b' }),
+    unhealthy({ serviceName: 'svc-c' }),
+    stoppedError({ serviceName: 'svc-d' }),
+    stoppedError({ serviceName: 'svc-e' }),
+    stoppedNormal({ serviceName: 'svc-f' }),
+  ]
+
+  it('shows Problems / Running / Stopped / All with counts, Problems first', async () => {
+    serve(sample())
+    renderApp('/tasks?keep=1')
+    expect(await screen.findByRole('radio', { name: 'Problems 3' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Running 3' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Stopped 3' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'All 6' })).toBeInTheDocument()
+    await waitFor(() => expect(taskRows()).toHaveLength(3))
   })
 
-  it('error-exit row has bad stripe and "Stopped (exit 137)"', async () => {
+  it('switching segment lists that segment and sets ?filter= keeping other params', async () => {
+    serve(sample())
+    renderApp('/tasks?keep=1')
+    fireEvent.click(await screen.findByRole('radio', { name: 'Stopped 3' }))
+    await waitFor(() => expect(search()).toContain('filter=stopped'))
+    expect(search()).toContain('keep=1')
+    await waitFor(() => expect(taskRows()).toHaveLength(3))
+    fireEvent.click(screen.getByRole('radio', { name: 'All 6' }))
+    await waitFor(() => expect(taskRows()).toHaveLength(6))
+  })
+
+  it('shows KPI strip cells for running, unhealthy and stopped tasks', async () => {
     renderApp('/tasks')
-    const [pill] = await screen.findAllByText('Stopped (exit 137)')
-    const row = pill.closest('tr')!
-    expect(row).toHaveClass('stripe', 'bad')
+    const strip = await screen.findByRole('list', { name: 'Task summary' })
+    for (const label of ['Running', 'Unhealthy', 'Stopped, error', 'Stopped, normal', 'On spot']) {
+      expect(within(strip).getByText(label)).toBeInTheDocument()
+    }
+    expect(within(strip).getAllByText(/last 10 min/).length).toBeGreaterThan(0)
+  })
+})
+
+describe('Tasks query', () => {
+  it('matches task ID, service, cluster or IP and updates the counts and URL', async () => {
+    serve([
+      healthy({ serviceName: 'billing-api', clusterName: 'alpha' }),
+      healthy({ serviceName: 'other-a', clusterName: 'zeta-cluster' }),
+      healthy({ serviceName: 'other-b', clusterName: 'beta', private_ip: '10.77.7.7' }),
+      healthy({ serviceName: 'other-c', clusterName: 'beta', short_id: 'feedbeef1234' }),
+    ])
+    renderApp('/tasks?filter=running')
+    const input = await screen.findByRole('searchbox', { name: 'Filter tasks' })
+    await waitFor(() => expect(taskRows()).toHaveLength(4))
+
+    await userEvent.type(input, 'billing')
+    await waitFor(() => expect(taskRows()).toHaveLength(1))
+    expect(screen.getByRole('radio', { name: 'Running 1' })).toBeInTheDocument()
+    expect(search()).toContain('q=billing')
+
+    await userEvent.clear(input)
+    await userEvent.type(input, 'zeta-clu')
+    await waitFor(() => expect(taskRows()).toHaveLength(1))
+    expect(within(taskRows()[0]).getByText('other-a')).toBeInTheDocument()
+
+    await userEvent.clear(input)
+    await userEvent.type(input, '10.77.7.7')
+    await waitFor(() => expect(taskRows()).toHaveLength(1))
+    expect(within(taskRows()[0]).getByText('other-b')).toBeInTheDocument()
+
+    await userEvent.clear(input)
+    await userEvent.type(input, 'feedbeef')
+    await waitFor(() => expect(taskRows()).toHaveLength(1))
+    expect(within(taskRows()[0]).getByText('other-c')).toBeInTheDocument()
+  })
+
+  it('shows an empty message when nothing matches', async () => {
+    serve([healthy()])
+    renderApp('/tasks?filter=running&q=nomatch')
+    expect(await screen.findByText('No tasks match.')).toBeInTheDocument()
+  })
+})
+
+describe('Tasks group repeats', () => {
+  it('is on by default and collapses same service + stop reason into one xN row', async () => {
+    const repeated = [stoppedError(), stoppedError(), stoppedError()]
+    const otherReason = stoppedError({ stop_reason_group: 'Failed health checks', stopped_reason: 'Task failed ELB health checks' })
+    const otherService = stoppedError({ serviceName: 'svc-z' })
+    serve([...repeated, otherReason, otherService])
+    renderApp('/tasks')
+    expect(await screen.findByRole('checkbox', { name: 'Group repeats' })).toBeChecked()
+    await waitFor(() => expect(taskRows()).toHaveLength(3))
+    expect(screen.getByRole('button', { name: /×3 tasks/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(shortId(repeated[0]))).not.toBeInTheDocument()
+    expect(screen.getByText(shortId(otherReason))).toBeInTheDocument()
+    expect(screen.getByText(shortId(otherService))).toBeInTheDocument()
+  })
+
+  it('groups unhealthy running tasks by service + health and keeps different health apart', async () => {
+    serve([unhealthy(), unhealthy(), healthy(), healthy()])
+    renderApp('/tasks?filter=running')
+    await waitFor(() => expect(taskRows()).toHaveLength(2))
+    expect(screen.getAllByRole('button', { name: /×2 tasks/ })).toHaveLength(2)
+  })
+
+  it('expands a group to its tasks and records it in the URL', async () => {
+    const repeated = [stoppedError(), stoppedError(), stoppedError()]
+    serve(repeated)
+    renderApp('/tasks')
+    await userEvent.click(await screen.findByRole('button', { name: /×3 tasks/ }))
+    expect(screen.getByRole('button', { name: /×3 tasks/ })).toHaveAttribute('aria-expanded', 'true')
+    for (const task of repeated) expect(screen.getByText(shortId(task))).toBeInTheDocument()
+    expect(taskRows()).toHaveLength(4)
+    expect(search()).toContain('open=')
+
+    await userEvent.click(screen.getByRole('button', { name: /×3 tasks/ }))
+    expect(taskRows()).toHaveLength(1)
+    expect(search()).not.toContain('open=')
+  })
+
+  it('restores open groups from the URL', async () => {
+    const repeated = [stoppedError(), stoppedError()]
+    serve(repeated)
+    const { unmount } = renderApp('/tasks')
+    await userEvent.click(await screen.findByRole('button', { name: /×2 tasks/ }))
+    const url = `/tasks?${search()}`
+    unmount()
+    renderApp(url)
+    expect(await screen.findByText(shortId(repeated[0]))).toBeInTheDocument()
+  })
+
+  it('turning it off lists every task and sets group=0; turning it on again clears it', async () => {
+    serve([stoppedError(), stoppedError(), stoppedError()])
+    renderApp('/tasks')
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Group repeats' }))
+    await waitFor(() => expect(taskRows()).toHaveLength(3))
+    expect(search()).toContain('group=0')
+    expect(screen.queryByRole('button', { name: /×3 tasks/ })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Group repeats' }))
+    await waitFor(() => expect(taskRows()).toHaveLength(1))
+    expect(search()).not.toContain('group=')
+  })
+
+  it('bounds an expanded group by the page size', async () => {
+    serve(Array.from({ length: 120 }, () => stoppedError()))
+    renderApp('/tasks')
+    await userEvent.click(await screen.findByRole('button', { name: /×120 tasks/ }))
+    expect(taskRows()).toHaveLength(50)
+    expect(screen.getByText('1–50 of 121')).toBeInTheDocument()
+  })
+})
+
+describe('Tasks paging', () => {
+  const many = (count: number) => Array.from({ length: count }, (_, i) => healthy({ serviceName: `svc-${String(i).padStart(3, '0')}` }))
+
+  it('shows 50 rows per page; groups count as one row each', async () => {
+    serve(many(120))
+    renderApp('/tasks?filter=running')
+    expect(await screen.findByText('1–50 of 120')).toBeInTheDocument()
+    expect(taskRows()).toHaveLength(50)
+    await userEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(await screen.findByText('51–100 of 120')).toBeInTheDocument()
+    expect(search()).toContain('page=2')
+  })
+
+  it('reads the page from the URL and resets to page 1 when the segment changes', async () => {
+    serve(many(120))
+    renderApp('/tasks?filter=running&page=3')
+    expect(await screen.findByText('101–120 of 120')).toBeInTheDocument()
+    expect(taskRows()).toHaveLength(20)
+    fireEvent.click(screen.getByRole('radio', { name: /^All/ }))
+    await waitFor(() => expect(search()).not.toContain('page='))
+  })
+
+  it('loads every API page so grouping and paging see the whole filtered set', async () => {
+    const all = many(7)
+    server.use(
+      http.get('/api/tasks', ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        const start = cursor ? Number(cursor) : 0
+        return HttpResponse.json({ ...tasksList(all), items: all.slice(start, start + 3), next: start + 3 < all.length ? String(start + 3) : null })
+      }),
+    )
+    renderApp('/tasks?filter=running')
+    await waitFor(() => expect(taskRows()).toHaveLength(7))
+  })
+
+  it('states the number of tasks actually loaded when the page cap truncates the list', async () => {
+    const all = many(30)
+    server.use(
+      http.get('/api/tasks', ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        const start = cursor ? Number(cursor) : 0
+        return HttpResponse.json({ ...tasksList(all), items: all.slice(start, start + 3), next: String(start + 3) })
+      }),
+    )
+    renderApp('/tasks?filter=running')
+    expect(await screen.findByText(/Showing the first 12 tasks\./)).toBeInTheDocument()
+  })
+})
+
+describe('Tasks URL round trip', () => {
+  it('restores segment, query, grouping and page from the URL', async () => {
+    serve([...Array.from({ length: 60 }, (_, i) => stoppedError({ serviceName: `svc-${String(i).padStart(3, '0')}` })), healthy()])
+    renderApp('/tasks?filter=stopped&q=svc-&group=0&page=2')
+    expect(await screen.findByRole('radio', { name: /^Stopped/ })).toBeChecked()
+    expect(screen.getByRole('searchbox', { name: 'Filter tasks' })).toHaveValue('svc-')
+    expect(screen.getByRole('checkbox', { name: 'Group repeats' })).not.toBeChecked()
+    expect(await screen.findByText('51–60 of 60')).toBeInTheDocument()
+  })
+})
+
+describe('Tasks rows', () => {
+  it('error-exit row has the bad stripe and "Stopped (exit 137)"', async () => {
+    serve([stoppedError()])
+    renderApp('/tasks')
+    const [status] = await screen.findAllByText('Stopped (exit 137)')
+    expect(status.closest('[role="row"]')).toHaveAttribute('data-status', 'bad')
+  })
+
+  it('unhealthy running row has the warn stripe', async () => {
+    serve([unhealthy()])
+    renderApp('/tasks')
+    const row = within(await screen.findByRole('table', { name: 'Tasks' })).getByText('Unhealthy').closest('[role="row"]')!
+    expect(row).toHaveAttribute('data-status', 'warn')
   })
 
   it('standalone row shows group and started_by', async () => {
     renderApp('/tasks?filter=running')
-    const row = (await screen.findByText('family:release-build')).closest('tr')!
+    const row = (await screen.findByText('family:release-build')).closest('[role="row"]') as HTMLElement
     expect(within(row).getByText('Standalone · started by events-rule/nightly-release')).toBeInTheDocument()
+  })
+
+  it('Stop opens the confirm dialog', async () => {
+    serve([healthy()])
+    renderApp('/tasks?filter=running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })
 
@@ -49,59 +316,53 @@ describe('Tasks hidden-stopped note', () => {
   })
 })
 
-describe('Tasks summary windows', () => {
-  it('labels By status with the stopped-tasks window and Why tasks stopped with 72 h', async () => {
-    renderApp('/tasks')
-    const byStatus = (await screen.findByRole('heading', { name: 'By status' })).parentElement!
-    expect(within(byStatus).getByText('Stopped: last 10 min')).toBeInTheDocument()
-    const reasons = screen.getByRole('heading', { name: 'Why tasks stopped' }).parentElement!
-    expect(within(reasons).getByText('Last 72 h')).toBeInTheDocument()
-  })
-})
-
 describe('Tasks Terminal link', () => {
   const serviceRunning = ALL_TASKS.find((task) => task.service && task.status === 'RUNNING')!
   const standaloneRunning = ALL_TASKS.find((task) => !task.service && task.status === 'RUNNING')!
-
-  function withTasks(items: TaskDTO[]) {
-    server.use(http.get('/api/tasks', () => HttpResponse.json(tasksList(items))))
-  }
+  const rowOf = (text: string) => screen.findByText(text).then((cell) => cell.closest('[role="row"]') as HTMLElement)
 
   it('shows Terminal on a running service row when exec is on and user has Terminal', async () => {
-    withTasks([{ ...serviceRunning, exec_enabled: true, can: { ...serviceRunning.can, terminal: true } }])
+    serve([{ ...serviceRunning, exec_enabled: true, can: { ...serviceRunning.can, terminal: true } }])
     renderApp('/tasks?filter=running')
     const link = await screen.findByRole('link', { name: 'Terminal' })
     expect(link).toHaveAttribute('href', `/services/${serviceRunning.service!.id}/terminal?task=${encodeURIComponent(serviceRunning.id)}`)
   })
 
   it('hides Terminal when exec is off', async () => {
-    withTasks([{ ...serviceRunning, exec_enabled: false, can: { ...serviceRunning.can, terminal: true } }])
+    serve([{ ...serviceRunning, exec_enabled: false, can: { ...serviceRunning.can, terminal: true } }])
     renderApp('/tasks?filter=running')
-    const row = (await screen.findByText(serviceRunning.service!.name)).closest('tr')!
+    const row = await rowOf(serviceRunning.service!.name)
     expect(within(row).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(within(row).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })
 
   it('hides Terminal without Terminal permission', async () => {
-    withTasks([{ ...serviceRunning, exec_enabled: true, can: { ...serviceRunning.can, terminal: false } }])
+    serve([{ ...serviceRunning, exec_enabled: true, can: { ...serviceRunning.can, terminal: false } }])
     renderApp('/tasks?filter=running')
-    const row = (await screen.findByText(serviceRunning.service!.name)).closest('tr')!
+    const row = await rowOf(serviceRunning.service!.name)
     expect(within(row).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(within(row).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })
 
-  it('no Terminal on stopped rows', async () => {
-    withTasks([{ ...serviceRunning, status: 'STOPPED', exit_code: 0, exec_enabled: true, can: { ...serviceRunning.can, terminal: true } }])
+  it('hides Stop without operate permission', async () => {
+    serve([{ ...serviceRunning, can: { operate: false, terminal: false } }])
+    renderApp('/tasks?filter=running')
+    const row = await rowOf(serviceRunning.service!.name)
+    expect(within(row).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
+  it('no Terminal or Stop on stopped rows', async () => {
+    serve([{ ...serviceRunning, status: 'STOPPED', exit_code: 0, exec_enabled: true, can: { ...serviceRunning.can, terminal: true } }])
     renderApp('/tasks?filter=stopped')
-    const row = (await screen.findByText(serviceRunning.service!.name)).closest('tr')!
+    const row = await rowOf(serviceRunning.service!.name)
     expect(within(row).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
     expect(within(row).queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
   })
 
   it('shows Terminal on a running standalone row, linking to the standalone terminal page', async () => {
-    withTasks([{ ...standaloneRunning, exec_enabled: true, can: { ...standaloneRunning.can, terminal: true } }])
+    serve([{ ...standaloneRunning, exec_enabled: true, can: { ...standaloneRunning.can, terminal: true } }])
     renderApp('/tasks?filter=running')
-    const row = (await screen.findByText(`family:${standaloneRunning.family}`)).closest('tr')!
+    const row = await rowOf(`family:${standaloneRunning.family}`)
     expect(within(row).getByRole('link', { name: 'Terminal' })).toHaveAttribute(
       'href',
       `/tasks/${encodeURIComponent(standaloneRunning.short_id)}/terminal`,
@@ -109,148 +370,10 @@ describe('Tasks Terminal link', () => {
   })
 
   it('hides Terminal on a standalone row when the task was started without exec', async () => {
-    withTasks([{ ...standaloneRunning, exec_enabled: false, can: { ...standaloneRunning.can, terminal: true } }])
+    serve([{ ...standaloneRunning, exec_enabled: false, can: { ...standaloneRunning.can, terminal: true } }])
     renderApp('/tasks?filter=running')
-    const row = (await screen.findByText(`family:${standaloneRunning.family}`)).closest('tr')!
+    const row = await rowOf(`family:${standaloneRunning.family}`)
     expect(within(row).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(within(row).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
-  })
-})
-
-describe('Tasks running by cluster', () => {
-  /** n clusters; cluster i runs i tasks (half of them Spot), so the highest number is the last one. */
-  const clusterCapacities = (count: number) =>
-    Array.from({ length: count }, (_, index) => {
-      const total = index + 1
-      return { id: `id-${total}`, name: `cluster-${String(total).padStart(2, '0')}`, fargate: Math.ceil(total / 2), spot: Math.floor(total / 2) }
-    })
-
-  const withClusters = (count: number) =>
-    server.use(
-      http.get('/api/tasks', () =>
-        HttpResponse.json({ ...TASKS, summary: { ...TASKS.summary, by_cluster: clusterCapacities(count) } }),
-      ),
-    )
-
-  const card = async () => (await screen.findByRole('heading', { name: 'Running by cluster' })).closest('div')!.parentElement!
-
-  it('shows the 10 busiest clusters, highest first, and a View all button when there are more', async () => {
-    withClusters(12)
-    renderApp('/tasks')
-    const section = within(await card())
-    const names = section.getAllByRole('link').map((link) => link.textContent)
-    expect(names).toEqual(['cluster-12', 'cluster-11', 'cluster-10', 'cluster-09', 'cluster-08', 'cluster-07', 'cluster-06', 'cluster-05', 'cluster-04', 'cluster-03'])
-    expect(section.getByRole('button', { name: 'View all (12)' })).toBeInTheDocument()
-  })
-
-  it('breaks ties by name and hides View all at 10 clusters or fewer', async () => {
-    server.use(
-      http.get('/api/tasks', () =>
-        HttpResponse.json({
-          ...TASKS,
-          summary: {
-            ...TASKS.summary,
-            by_cluster: [
-              { id: 'b', name: 'beta', fargate: 2, spot: 0 },
-              { id: 'a', name: 'alpha', fargate: 1, spot: 1 },
-              { id: 'c', name: 'gamma', fargate: 5, spot: 0 },
-            ],
-          },
-        }),
-      ),
-    )
-    renderApp('/tasks')
-    const section = within(await card())
-    expect(section.getAllByRole('link').map((link) => link.textContent)).toEqual(['gamma', 'alpha', 'beta'])
-    expect(section.queryByRole('button', { name: /View all/ })).not.toBeInTheDocument()
-  })
-
-  it('View all opens a floating window with every cluster, without extending the card', async () => {
-    withClusters(12)
-    renderApp('/tasks')
-    const section = within(await card())
-    await userEvent.click(section.getByRole('button', { name: 'View all (12)' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Running by cluster' })
-    expect(within(dialog).getAllByRole('link')).toHaveLength(12)
-    expect(within(dialog).getByRole('link', { name: 'cluster-01' })).toHaveAttribute('href', '/clusters/id-1')
-    expect(within(dialog).getByText('Fargate Spot')).toBeInTheDocument()
-    expect(section.getAllByRole('link')).toHaveLength(10)
-  })
-
-  it.each([
-    ['the Close button', async (dialog: HTMLElement) => userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))],
-    ['a click outside the window', async (dialog: HTMLElement) => userEvent.click(dialog.parentElement!)],
-    ['Escape', async () => userEvent.keyboard('{Escape}')],
-  ])('closes the window on %s', async (_name, close) => {
-    withClusters(12)
-    renderApp('/tasks')
-    await userEvent.click(within(await card()).getByRole('button', { name: 'View all (12)' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Running by cluster' })
-    await close(dialog)
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-  })
-
-  it('does not close when clicking inside the window', async () => {
-    withClusters(12)
-    renderApp('/tasks')
-    await userEvent.click(within(await card()).getByRole('button', { name: 'View all (12)' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Running by cluster' })
-    await userEvent.click(within(dialog).getByText('Fargate'))
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-  })
-})
-
-describe('Tasks grouping', () => {
-  const toggle = (name: string) => screen.getByRole('button', { name })
-  const paymentsRows = () => screen.queryAllByRole('link', { name: 'payments-api' })
-
-  it('groups by account, region and cluster, all expanded by default, with counts', async () => {
-    renderApp('/tasks?filter=running')
-    await screen.findByRole('button', { name: 'homelab-admin' })
-    for (const name of ['homelab-admin', 'staging-example', 'us-east-1', 'eu-west-1', 'eu-central-1', 'core-services', 'eu-apps', 'edge-proxy']) {
-      const buttons = screen.getAllByRole('button', { name })
-      expect(buttons.length).toBeGreaterThan(0)
-      for (const button of buttons) expect(button).toHaveAttribute('aria-expanded', 'true')
-    }
-    expect(paymentsRows().length).toBeGreaterThan(0)
-    const coreRunning = TASKS.items.filter((task) => task.cluster.name === 'core-services' && task.status !== 'STOPPED').length
-    expect(toggle('core-services').closest('tr')).toHaveTextContent(`${coreRunning} task${coreRunning === 1 ? '' : 's'}`)
-  })
-
-  it('collapses and expands each level on its own', async () => {
-    renderApp('/tasks?filter=running')
-    await screen.findByRole('button', { name: 'core-services' })
-
-    await userEvent.click(toggle('core-services'))
-    expect(toggle('core-services')).toHaveAttribute('aria-expanded', 'false')
-    expect(paymentsRows()).toHaveLength(0)
-    expect(screen.getAllByRole('link', { name: 'catalog-api' }).length).toBeGreaterThan(0)
-
-    await userEvent.click(toggle('core-services'))
-    expect(paymentsRows().length).toBeGreaterThan(0)
-
-    // Collapsing the region hides its clusters, and the cluster keeps its own state underneath.
-    await userEvent.click(screen.getAllByRole('button', { name: 'us-east-1' })[0])
-    expect(screen.queryByRole('button', { name: 'core-services' })).not.toBeInTheDocument()
-    expect(paymentsRows()).toHaveLength(0)
-    await userEvent.click(screen.getAllByRole('button', { name: 'us-east-1' })[0])
-    expect(paymentsRows().length).toBeGreaterThan(0)
-
-    await userEvent.click(toggle('homelab-admin'))
-    expect(screen.queryByRole('button', { name: 'eu-west-1' })).not.toBeInTheDocument()
-    expect(screen.queryAllByRole('link', { name: 'catalog-api' })).toHaveLength(0)
-  })
-
-  it('Collapse all and Expand all', async () => {
-    renderApp('/tasks?filter=running')
-    await screen.findByRole('button', { name: 'core-services' })
-    await userEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
-    expect(screen.getByRole('button', { name: 'homelab-admin' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('button', { name: 'core-services' })).not.toBeInTheDocument()
-    expect(paymentsRows()).toHaveLength(0)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Expand all' }))
-    expect(toggle('core-services')).toHaveAttribute('aria-expanded', 'true')
-    expect(paymentsRows().length).toBeGreaterThan(0)
   })
 })

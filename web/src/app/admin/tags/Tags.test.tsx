@@ -10,9 +10,29 @@ const STAGING_TAG_ID = 2
 
 const open = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
 
-/** Expand account, region and cluster in turn (each button appears once its parent is open). */
+/** Expands the named clusters (each button appears once the assignments have loaded). */
 async function expandPath(...names: string[]) {
   for (const name of names) open(await screen.findByRole('button', { name }).then(() => name))
+}
+
+/** Group header cells (account / region names) in the assignments table; the name can also appear in filters elsewhere. */
+const groupHeaders = (name: string) =>
+  screen.queryAllByText(name).filter((element) => element.closest('tr')?.querySelector('select') === null && element.closest('tr') !== null)
+
+const groupRowOf = (name: string) => groupHeaders(name)[0].closest('tr') as HTMLElement
+
+/** The fixture's first cluster, repeated so the assignments need several pages. */
+function manyClusters(count: number): TagAssignmentsDTO {
+  const template = ASSIGNMENTS.clusters[0]
+  return {
+    ...ASSIGNMENTS,
+    clusters: Array.from({ length: count }, (_, index) => ({
+      ...template,
+      id: `cluster-${index + 1}`,
+      name: `cluster-${String(index + 1).padStart(2, '0')}`,
+      services: [{ ...template.services[0], id: `svc-${index + 1}`, name: `service-${String(index + 1).padStart(2, '0')}` }],
+    })),
+  }
 }
 
 /** Assignments fixture with payments-api explicitly tagged, so choosing "Inherit" is a real change. */
@@ -76,7 +96,7 @@ describe('Tags filters', () => {
       }),
     )
     renderApp('/settings/tags?account=731022849906')
-    await screen.findByRole('button', { name: 'homelab-admin' })
+    await screen.findByRole('button', { name: 'core-services' })
     expect(accounts).toContain('731022849906')
   })
 })
@@ -136,7 +156,7 @@ describe('Assignments', () => {
       }),
     )
     renderApp('/settings/tags')
-    await expandPath('homelab-admin', 'us-east-1', 'core-services')
+    await expandPath('core-services')
     const select = (await screen.findByLabelText('Tag for payments-api')) as HTMLSelectElement
     const inherit = within(select).getByRole('option', {
       name: 'Inherit (Prod)',
@@ -166,45 +186,110 @@ describe('EditTagDialog', () => {
   })
 })
 
-describe('Assignments tree', () => {
-  it('is collapsed by default: levels shown, no cluster selects', async () => {
+describe('Assignments list', () => {
+  it('is collapsed by default: one row per cluster with its tag select, no service selects', async () => {
     renderApp('/settings/tags')
-    const account = await screen.findByRole('button', {
-      name: 'homelab-admin',
-    })
-    expect(account).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('button', { name: 'staging-example' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('button', { name: 'us-east-1' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText(/^Tag for /)).not.toBeInTheDocument()
-    expect(screen.getByText(/^5 clusters · \d+ services$/)).toBeInTheDocument()
+    const cluster = await screen.findByRole('button', { name: 'core-services' })
+    expect(cluster).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByLabelText('Tag for core-services')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tag for staging-web')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Tag for payments-api')).not.toBeInTheDocument()
     expect(screen.getByText('Dashed tags are inherited from the cluster')).toBeInTheDocument()
   })
 
-  it('account row shows the distinct tags inside it', async () => {
+  it('groups clusters under their account, then region, with group headers above them in that order', async () => {
     renderApp('/settings/tags')
-    const row = (await screen.findByRole('button', { name: 'homelab-admin' })).closest('tr') as HTMLElement
-    expect(within(row).getByText('Prod')).toBeInTheDocument()
-    expect(within(row).getAllByText('Dev')).toHaveLength(1)
-    expect(within(row).queryByText('Staging')).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: 'core-services' })
+    const rows = screen.getAllByRole('row')
+    const indexOfRow = (element: HTMLElement) => rows.indexOf(element.closest('tr') as HTMLElement)
+    const account = indexOfRow(groupHeaders('homelab-admin')[0])
+    const usEast = indexOfRow(groupHeaders('us-east-1')[0])
+    const core = indexOfRow(screen.getByRole('button', { name: 'core-services' }))
+    const euWest = indexOfRow(groupHeaders('eu-west-1')[0])
+    const euApps = indexOfRow(screen.getByRole('button', { name: 'eu-apps' }))
+    const stagingAccount = indexOfRow(groupHeaders('staging-example')[0])
+    const stagingWeb = indexOfRow(screen.getByRole('button', { name: 'staging-web' }))
+    expect(account).toBeLessThan(usEast)
+    expect(usEast).toBeLessThan(core)
+    expect(core).toBeLessThan(euWest)
+    expect(euWest).toBeLessThan(euApps)
+    expect(euApps).toBeLessThan(stagingAccount)
+    expect(stagingAccount).toBeLessThan(stagingWeb)
   })
 
-  it('expanding account then region shows its clusters with their selects; other regions stay hidden', async () => {
+  it('summarises each group with its cluster and service counts and the distinct tags inside it', async () => {
     renderApp('/settings/tags')
-    await expandPath('homelab-admin', 'us-east-1')
-    expect(await screen.findByLabelText('Tag for core-services')).toBeInTheDocument()
-    expect(screen.getByLabelText('Tag for ci-tools')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Tag for eu-apps')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Tag for staging-web')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Tag for payments-api')).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: 'core-services' })
+    const accountRow = groupRowOf('homelab-admin')
+    expect(within(accountRow).getByText(/^5 clusters · \d+ services$/)).toBeInTheDocument()
+    expect(within(accountRow).getByText('Prod')).toBeInTheDocument()
+    expect(within(accountRow).getAllByText('Dev')).toHaveLength(1)
+    expect(within(accountRow).queryByText('Staging')).not.toBeInTheDocument()
+    const regionRow = groupRowOf('eu-west-1')
+    expect(within(regionRow).getByText(/^1 cluster · \d+ services?$/)).toBeInTheDocument()
+    expect(within(regionRow).getByText('Dev')).toBeInTheDocument()
+    expect(within(regionRow).queryByText('Prod')).not.toBeInTheDocument()
   })
 
   it('expanding a cluster shows its services', async () => {
     renderApp('/settings/tags')
-    await expandPath('homelab-admin', 'us-east-1', 'core-services')
+    await expandPath('core-services')
     expect(await screen.findByLabelText('Tag for payments-api')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'core-services' })).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('changing a cluster tag keeps the tree expanded after the refetch', async () => {
+  it('pages 15 clusters at a time and keeps open rows when the page changes', async () => {
+    server.use(http.get('/api/tag-assignments', () => HttpResponse.json(manyClusters(32))))
+    renderApp('/settings/tags')
+    await expandPath('cluster-01')
+    expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(15)
+    expect(screen.getByText('1–15 of 32')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tag for service-01')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Tag for cluster-16')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getByText('16–30 of 32')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tag for cluster-16')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Tag for cluster-01')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
+    expect(screen.getByRole('button', { name: 'cluster-01' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByLabelText('Tag for service-01')).toBeInTheDocument()
+  })
+
+  it('repeats the account and region headers at the top of a page when a group continues from the previous one', async () => {
+    const base = manyClusters(20)
+    const split: TagAssignmentsDTO = {
+      ...base,
+      clusters: base.clusters.map((cluster, index) => (index < 18 ? cluster : { ...cluster, region: 'eu-west-1' })),
+    }
+    server.use(http.get('/api/tag-assignments', () => HttpResponse.json(split)))
+    renderApp('/settings/tags')
+    await screen.findByRole('button', { name: 'cluster-01' })
+    expect(groupHeaders('homelab-admin')).toHaveLength(1)
+    expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(15)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    const table = screen.getByRole('button', { name: 'cluster-16' }).closest('table') as HTMLElement
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent(/^homelab-admin/)
+    expect(rows[1]).toHaveTextContent(/^us-east-1/)
+    expect(within(rows[2]).getByRole('button', { name: 'cluster-16' })).toBeInTheDocument()
+    expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(5)
+    expect(groupHeaders('eu-west-1')).toHaveLength(1)
+  })
+
+  it('shows no pager when the clusters fit one page', async () => {
+    renderApp('/settings/tags')
+    await screen.findByRole('button', { name: 'core-services' })
+    expect(screen.queryByRole('navigation', { name: 'Pagination' })).not.toBeInTheDocument()
+  })
+
+  it('changing a cluster tag keeps the row expanded after the refetch', async () => {
     let puts = 0
     server.use(
       http.put(/\/api\/tag-assignments\/clusters\/.+/, () => {
@@ -213,25 +298,22 @@ describe('Assignments tree', () => {
       }),
     )
     renderApp('/settings/tags')
-    await expandPath('homelab-admin', 'us-east-1', 'core-services')
+    await expandPath('core-services')
     const select = await screen.findByLabelText('Tag for core-services')
     fireEvent.change(select, { target: { value: String(STAGING_TAG_ID) } })
     await waitFor(() => expect(puts).toBe(1))
     await screen.findByText(/is now/)
-    expect(screen.getByLabelText('Tag for core-services')).toBeInTheDocument()
     expect(screen.getByLabelText('Tag for payments-api')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'homelab-admin' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'core-services' })).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('Expand all opens every level and Collapse all closes them again', async () => {
+  it('Expand all opens every cluster on the page and Collapse all closes them again', async () => {
     renderApp('/settings/tags')
-    await screen.findByRole('button', { name: 'homelab-admin' })
+    await screen.findByRole('button', { name: 'core-services' })
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }))
-    expect(screen.getByLabelText('Tag for staging-web')).toBeInTheDocument()
-    expect(screen.getByLabelText('Tag for eu-apps')).toBeInTheDocument()
     expect(screen.getByLabelText('Tag for payments-api')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
-    expect(screen.queryByLabelText(/^Tag for /)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'homelab-admin' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByLabelText('Tag for payments-api')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'core-services' })).toHaveAttribute('aria-expanded', 'false')
   })
 })
