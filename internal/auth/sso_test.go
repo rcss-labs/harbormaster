@@ -311,23 +311,23 @@ func TestStartLink_RequiresPasswordAndUnlinked(t *testing.T) {
 	svc, st := newTestService(t)
 	ctx := context.Background()
 	dana := mustUser(t, st, "dana", false)
-	if _, err := svc.StartLink(ctx, dana.ID, "wrong-password-1"); !errors.Is(err, ErrWrongPassword) {
+	if _, err := svc.StartLink(ctx, dana.ID, "wrong-password-1", "10.0.0.9"); !errors.Is(err, ErrWrongPassword) {
 		t.Fatalf("wrong password: %v", err)
 	}
-	if u, err := svc.StartLink(ctx, dana.ID, testPassword); err != nil || u.ID != dana.ID {
+	if u, err := svc.StartLink(ctx, dana.ID, testPassword, "10.0.0.9"); err != nil || u.ID != dana.ID {
 		t.Fatalf("ok: %+v %v", u, err)
 	}
 	res, _, err := svc.LoginSSO(ctx, ssoIdentity("jit", "jit@example.test"), ssoCfg(), "ip", "ua")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartLink(ctx, res.User.ID, ""); !errors.Is(err, ErrNoPassword) {
+	if _, err := svc.StartLink(ctx, res.User.ID, "", "10.0.0.9"); !errors.Is(err, ErrNoPassword) {
 		t.Fatalf("passwordless: %v", err)
 	}
 	if _, err := svc.LinkSSO(ctx, dana.ID, ssoIdentity("d1", ""), ssoCfg(), "ip"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartLink(ctx, dana.ID, testPassword); !errors.Is(err, store.ErrAlreadyLinked) {
+	if _, err := svc.StartLink(ctx, dana.ID, testPassword, "10.0.0.9"); !errors.Is(err, store.ErrAlreadyLinked) {
 		t.Fatalf("linked: %v", err)
 	}
 }
@@ -339,7 +339,7 @@ func TestStartLink_PasswordlessIgnoresVerifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartLink(context.Background(), res.User.ID, "anything-at-all-1"); !errors.Is(err, ErrNoPassword) {
+	if _, err := svc.StartLink(context.Background(), res.User.ID, "anything-at-all-1", "10.0.0.9"); !errors.Is(err, ErrNoPassword) {
 		t.Fatalf("err = %v, want ErrNoPassword", err)
 	}
 }
@@ -625,5 +625,30 @@ func TestLoginSSO_FakeIdPEndToEnd(t *testing.T) {
 	res, outcome, err := svc.LoginSSO(context.Background(), id, cfg, "ip", "ua")
 	if err != nil || outcome != SSOOutcome("create") || res.User.Username != "casey" {
 		t.Fatalf("res = %+v outcome = %q err = %v", res.User, outcome, err)
+	}
+}
+
+func TestStartLink_WrongPasswordsCountAndLockLikeSignIn(t *testing.T) {
+	svc, st := newTestService(t)
+	ctx := context.Background()
+	dana := mustUser(t, st, "dana", false)
+	for i := 0; i < testConfig().LoginMaxPerUser; i++ {
+		if _, err := svc.StartLink(ctx, dana.ID, "wrong-password-1", "10.0.0.9"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	if n := len(auditEntries(t, st, "sign_in_failed")); n != testConfig().LoginMaxPerUser {
+		t.Fatalf("sign_in_failed audits = %d, want %d", n, testConfig().LoginMaxPerUser)
+	}
+	byUser, byIP, err := st.FailedAttempts(ctx, "dana", "10.0.0.9", time.Now().Add(-time.Hour))
+	if err != nil || byUser != testConfig().LoginMaxPerUser || byIP != byUser {
+		t.Fatalf("failed attempts = %d/%d, %v", byUser, byIP, err)
+	}
+	// Locked: even the right password is refused, exactly as Login refuses it.
+	if _, err := svc.StartLink(ctx, dana.ID, testPassword, "10.0.0.9"); !errors.Is(err, ErrWrongPassword) {
+		t.Fatalf("locked user with right password: %v", err)
+	}
+	if _, err := svc.Login(ctx, "dana", testPassword, "10.0.0.8", "ua"); !errors.Is(err, ErrBadCredentials) {
+		t.Fatalf("Login for the same user must be locked too: %v", err)
 	}
 }

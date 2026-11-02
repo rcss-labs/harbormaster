@@ -203,8 +203,10 @@ func (a *Service) startSSOSession(ctx context.Context, user store.User, id saml.
 }
 
 // StartLink checks that userID may start a self-link: it has a password (re-entered here as
-// re-authentication) and no SSO identity yet.
-func (a *Service) StartLink(ctx context.Context, userID int64, password string) (store.User, error) {
+// re-authentication) and no SSO identity yet. The password check shares Login's per-user failure
+// limit and lockout: a wrong password is recorded and audited like a failed password sign-in, and a
+// locked user is refused even with the right password. ip is the caller's address for that bookkeeping.
+func (a *Service) StartLink(ctx context.Context, userID int64, password, ip string) (store.User, error) {
 	user, err := a.store.GetUser(ctx, userID)
 	if err != nil {
 		return store.User{}, err
@@ -212,7 +214,20 @@ func (a *Service) StartLink(ctx context.Context, userID int64, password string) 
 	if !user.HasPassword() {
 		return store.User{}, ErrNoPassword
 	}
-	if !a.verifyPassword(user, password) {
+	now := a.now()
+	byUser, _, err := a.store.FailedAttempts(ctx, user.Username, ip, now.Add(-a.cfg.LoginWindow))
+	if err != nil {
+		return store.User{}, err
+	}
+	locked := byUser >= a.cfg.LoginMaxPerUser || (user.LockedUntil != nil && user.LockedUntil.After(now))
+	ok := a.verifyPassword(user, password)
+	if locked || !ok {
+		a.recordFailureReason(ctx, &user, user.Username, ip, "link_start")
+		if !locked && byUser+1 >= a.cfg.LoginMaxPerUser {
+			if err := a.store.LockUser(ctx, user.ID, now.Add(a.cfg.LoginWindow)); err != nil {
+				return store.User{}, err
+			}
+		}
 		return store.User{}, ErrWrongPassword
 	}
 	if user.SSOLinked() {
