@@ -46,6 +46,16 @@ import type {
   TasksListDTO,
   UsersDTO,
 } from '../api/types'
+import type {
+  AnalyticsCapacity,
+  AnalyticsDelivery,
+  AnalyticsOperations,
+  AnalyticsRange,
+  AnalyticsReliability,
+  AnalyticsSeries,
+  AnalyticsSource,
+  AnalyticsWindow,
+} from '../api/analytics'
 
 /** Reference "now" for every fixture timestamp; tests can freeze the clock here. */
 export const FIXTURE_NOW = '2026-10-31T12:00:00Z'
@@ -1323,4 +1333,344 @@ export const SSO_TEST_FAIL: SSOTestResultDTO = {
   username: '',
   outcome: '',
   existing_user: null,
+}
+
+// ---- analytics (plan: docs/analytics_design/PLAN.md section 1) ----
+
+const ANALYTICS_RANGES: Record<AnalyticsRange, { buckets: number; bucketMinutes: number; bucket: AnalyticsWindow['bucket'] }> = {
+  '24h': { buckets: 24, bucketMinutes: 60, bucket: '1h' },
+  '7d': { buckets: 42, bucketMinutes: 240, bucket: '4h' },
+  '30d': { buckets: 30, bucketMinutes: 1440, bucket: '1d' },
+  '90d': { buckets: 45, bucketMinutes: 2880, bucket: '2d' },
+}
+const ANALYTICS_RANGE_DAYS: Record<AnalyticsRange, number> = { '24h': 1, '7d': 7, '30d': 30, '90d': 90 }
+
+/** The window block for `used`, as the API reports it; `requested` defaults to `used`. */
+export function analyticsWindow(
+  used: AnalyticsRange,
+  options: { requested?: string; clamped?: boolean; rangeApplies?: boolean; retention?: string } = {},
+): AnalyticsWindow {
+  const { bucket } = ANALYTICS_RANGES[used]
+  return {
+    requested: options.requested ?? used,
+    used,
+    clamped: options.clamped ?? false,
+    range_applies: options.rangeApplies ?? true,
+    bucket,
+    from: minutesAgo(ANALYTICS_RANGE_DAYS[used] * 1440),
+    to: FIXTURE_NOW,
+    retention: options.retention ?? `${ANALYTICS_RANGE_DAYS[used] * 24}h`,
+  }
+}
+
+/** A series with deterministic values: line i at bucket j is `value(i, j)`; null values mean no sample. */
+function analyticsSeries(
+  range: AnalyticsRange,
+  lines: { key: string; label: string; expected?: boolean }[],
+  value: (line: number, bucket: number) => number | null,
+): AnalyticsSeries {
+  const { buckets, bucketMinutes } = ANALYTICS_RANGES[range]
+  return {
+    timestamps: Array.from({ length: buckets }, (_, j) => minutesAgo((buckets - 1 - j) * bucketMinutes)),
+    series: lines.map((line, i) => ({
+      key: line.key,
+      label: line.label,
+      expected: line.expected ?? false,
+      values: Array.from({ length: buckets }, (_, j) => value(i, j)),
+    })),
+  }
+}
+
+const analyticsWave = (line: number, bucket: number, base: number, amplitude: number) => base + ((bucket * 7 + line * 3) % 5) * amplitude
+
+const source = (table: string, reads: string, kept: string, setting: string | null, windowUsed: string | null = null): AnalyticsSource => ({
+  table,
+  reads,
+  kept,
+  setting,
+  window_used: windowUsed,
+})
+
+const analyticsPaymentsId = serviceId('482109375512', 'us-east-1', 'core-services', 'payments-api')
+const analyticsCatalogId = serviceId('482109375512', 'us-east-1', 'core-services', 'catalog')
+const analyticsCoreClusterId = clusterId('482109375512', 'us-east-1', 'core-services')
+const analyticsStagingClusterId = clusterId('731022849906', 'us-east-1', 'staging-web')
+
+export const ANALYTICS_DELIVERY: AnalyticsDelivery = {
+  tab: 'delivery',
+  window: analyticsWindow('30d', { retention: '2160h' }),
+  sources: [source('deployment_history', 'Rollouts with outcome, revisions and timings', '90 days', 'HM_RETENTION_DEPLOYMENT_HISTORY')],
+  polled_at: FIXTURE_NOW,
+  kpis: {
+    rollouts: 48,
+    rollouts_per_day: 1.6,
+    change_failure_rate: 0.083,
+    median_rollout_s: 312,
+    p90_rollout_s: 780,
+    time_to_recover_s: 1080,
+    rollbacks: 2,
+    superseded: 3,
+  },
+  rollouts: analyticsSeries(
+    '30d',
+    [
+      { key: 'completed', label: 'Completed' },
+      { key: 'failed', label: 'Failed' },
+      { key: 'superseded', label: 'Superseded' },
+    ],
+    (line, j) => (line === 0 ? 1 + (j % 3) : line === 1 ? (j % 7 === 0 ? 1 : 0) : j % 11 === 0 ? 1 : 0),
+  ),
+  failure_rate: analyticsSeries('30d', [{ key: 'failure_rate', label: 'Change failure rate' }], (_, j) => (j % 6 === 5 ? null : analyticsWave(0, j, 2, 2))),
+  duration: analyticsSeries(
+    '30d',
+    [
+      { key: 'median', label: 'Median' },
+      { key: 'p90', label: 'p90' },
+    ],
+    (line, j) => (line === 0 ? 280 + (j % 4) * 20 : 700 + (j % 5) * 30),
+  ),
+  services: {
+    rows: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        account_id: '482109375512',
+        tag: TAG_PROD,
+        rollouts: 12,
+        failed: 2,
+        failure_rate: 0.167,
+        median_s: 420,
+        recover_s: 1500,
+        last_failed_at: minutesAgo(3 * 1440),
+      },
+      {
+        service_id: analyticsCatalogId,
+        service: 'catalog',
+        cluster: 'core-services',
+        account_id: '482109375512',
+        tag: { ...TAG_PROD, inherited: true },
+        rollouts: 9,
+        failed: 0,
+        failure_rate: 0,
+        median_s: 240,
+        recover_s: null,
+        last_failed_at: null,
+      },
+    ],
+    total: 2,
+  },
+  failure_reasons: {
+    available: false,
+    data_since: null,
+    needs: { table: 'deployment_history.failure_reason', size: '< 1 MB', how: 'The outcome logger records the reason on each failed rollout.' },
+    data: null,
+  },
+  recent_failures: {
+    available: false,
+    data_since: null,
+    needs: { table: 'deployment_history.failure_reason', size: '< 1 MB', how: 'The outcome logger records the reason on each failed rollout.' },
+    data: null,
+  },
+}
+
+export const ANALYTICS_RELIABILITY: AnalyticsReliability = {
+  tab: 'reliability',
+  window: analyticsWindow('7d', { requested: '30d', clamped: true, retention: '168h' }),
+  sources: [
+    source('service_counts_history', '5-minute running and desired counts', '7 days', 'HM_RETENTION_COUNTS_HISTORY'),
+    source('tasks', 'Stopped tasks with stop reason and exit codes', '7 days', 'HM_RETENTION_STOPPED_TASKS'),
+    source('service_events', 'Events mentioning "unable to place"', '30 days', 'HM_RETENTION_SERVICE_EVENTS', '30d'),
+  ],
+  polled_at: FIXTURE_NOW,
+  kpis: {
+    availability: 0.9962,
+    minutes_below_desired: 95,
+    services_below: 2,
+    task_stops: 31,
+    unexpected_stops: 6,
+    out_of_memory: 1,
+    placement_failures: 2,
+  },
+  availability: analyticsSeries('7d', [{ key: 'availability', label: 'Availability' }], (_, j) => 99 + ((j * 3) % 10) / 10),
+  services_below: analyticsSeries('7d', [{ key: 'services_below', label: 'Services below desired' }], (_, j) => (j % 9 === 0 ? 2 : j % 4 === 0 ? 1 : 0)),
+  stops_by_reason: analyticsSeries(
+    '7d',
+    [
+      { key: 'deployment', label: 'Deployment', expected: true },
+      { key: 'scale_in', label: 'Scale-in', expected: true },
+      { key: 'essential_exit', label: 'Essential container exited' },
+      { key: 'oom', label: 'Out of memory' },
+    ],
+    (line, j) => (line < 2 ? (j + line) % 4 : j % (6 + line) === 0 ? 1 : 0),
+  ),
+  unexpected_by_zone: analyticsSeries(
+    '7d',
+    [
+      { key: 'us-east-1a', label: 'us-east-1a' },
+      { key: 'us-east-1b', label: 'us-east-1b' },
+    ],
+    (line, j) => (j % (5 + line) === 0 ? 1 : 0),
+  ),
+  exit_codes: analyticsSeries(
+    '7d',
+    [
+      { key: '1', label: '1' },
+      { key: '137', label: '137' },
+      { key: 'other', label: 'other' },
+    ],
+    (line, j) => (j % (4 + line * 3) === 0 ? 1 : 0),
+  ),
+  least_available: {
+    rows: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        tag: TAG_PROD,
+        availability: 0.9921,
+        minutes_below: 80,
+        unexpected_stops: 4,
+        top_reason: 'Essential container exited',
+      },
+      { service_id: analyticsCatalogId, service: 'catalog', cluster: 'core-services', tag: { ...TAG_PROD, inherited: true }, availability: 0.9994, minutes_below: 15, unexpected_stops: 0, top_reason: null },
+    ],
+    total: 2,
+  },
+  availability_90d: {
+    available: false,
+    data_since: null,
+    needs: { table: 'service_availability_daily', size: '~35 MB a year', how: 'A nightly rollup of counts history and stopped tasks.' },
+    data: null,
+  },
+  below_desired_90d: {
+    available: true,
+    data_since: minutesAgo(20 * 1440),
+    needs: null,
+    data: analyticsSeries('90d', [{ key: 'minutes_below', label: 'Minutes below desired' }], (_, j) => (j < 35 ? null : (j * 5) % 40)),
+  },
+  getting_worse: {
+    available: false,
+    data_since: null,
+    needs: { table: 'service_availability_daily', size: '~35 MB a year', how: 'A nightly rollup of counts history and stopped tasks.' },
+    data: null,
+  },
+}
+
+export const ANALYTICS_CAPACITY: AnalyticsCapacity = {
+  tab: 'capacity',
+  window: analyticsWindow('7d', { requested: '30d', rangeApplies: false, retention: '168h' }),
+  sources: [
+    source('tasks', 'Running tasks: cpu, memory, capacity provider', 'latest poll', null),
+    source('service_counts_history', 'Running count over time, for the 7-day trend', '7 days', 'HM_RETENTION_COUNTS_HISTORY'),
+    source('subnets', 'Available IP addresses per subnet', 'latest poll', null),
+  ],
+  polled_at: FIXTURE_NOW,
+  kpis: { reserved_vcpu: 14.5, reserved_mem_gib: 36, running_tasks: 27, services: 15, spot_share: 0.22, at_scaling_max: 1, subnets_low_ips: 1 },
+  reserved_vcpu_7d: analyticsSeries(
+    '7d',
+    [
+      { key: String(TAG_PROD.id), label: TAG_PROD.name },
+      { key: String(TAG_STAGING.id), label: TAG_STAGING.name },
+      { key: String(TAG_DEV.id), label: TAG_DEV.name },
+    ],
+    (line, j) => 2 + line * 2 + (j % 3) * 0.5,
+  ),
+  vcpu_by_account: {
+    total: 14.5,
+    slices: [
+      { key: '1', label: ACCOUNT_HOMELAB.name, value: 12 },
+      { key: '2', label: ACCOUNT_STAGING.name, value: 2.5 },
+    ],
+  },
+  tasks_by_capacity_provider: {
+    total: 27,
+    slices: [
+      { key: 'FARGATE', label: 'FARGATE', value: 21 },
+      { key: 'FARGATE_SPOT', label: 'FARGATE_SPOT', value: 6 },
+    ],
+  },
+  clusters: {
+    rows: [
+      { cluster_id: analyticsCoreClusterId, cluster: 'core-services', account_id: '482109375512', account_name: ACCOUNT_HOMELAB.name, tag: TAG_PROD, tasks: 12, vcpu: 8, mem_gib: 18, share: 0.55, spot_share: 0.1 },
+      { cluster_id: analyticsStagingClusterId, cluster: 'staging-web', account_id: '731022849906', account_name: ACCOUNT_STAGING.name, tag: TAG_STAGING, tasks: 4, vcpu: 2.5, mem_gib: 5, share: 0.17, spot_share: 0.5 },
+    ],
+    total: 2,
+  },
+  at_scaling_max: [
+    { service_id: analyticsPaymentsId, service: 'payments-api', cluster: 'core-services', desired: 6, max_capacity: 6, at_max_since: minutesAgo(180) },
+    { service_id: analyticsCatalogId, service: 'catalog', cluster: 'core-services', desired: 4, max_capacity: 4, at_max_since: null },
+  ],
+  subnets_low: [
+    { subnet_id: 'subnet-0a1b2c3d', name: 'private-a', az: 'us-east-1a', account_id: '482109375512', region: 'us-east-1', available_ips: 20, total_ips: 256, used_pct: 0.92 },
+  ],
+  reserved_vs_used_90d: {
+    available: false,
+    data_since: null,
+    needs: { table: 'cluster_capacity_daily', size: '~5 MB a year', how: 'Running tasks sampled on the counts-history poll.' },
+    data: null,
+  },
+  spot_share_90d: {
+    available: false,
+    data_since: null,
+    needs: { table: 'cluster_capacity_daily', size: '~5 MB a year', how: 'Running tasks sampled on the counts-history poll.' },
+    data: null,
+  },
+  memory_90d: {
+    available: false,
+    data_since: null,
+    needs: { table: 'service_util_daily', size: '~8 MB for 90 days', how: 'One CloudWatch batch per account and region a day.' },
+    data: null,
+  },
+  over_reserved: {
+    available: false,
+    data_since: null,
+    needs: { table: 'service_util_daily', size: '~8 MB for 90 days', how: 'One CloudWatch batch per account and region a day.' },
+    data: null,
+  },
+}
+
+export const ANALYTICS_OPERATIONS: AnalyticsOperations = {
+  tab: 'operations',
+  window: analyticsWindow('30d', { retention: '2160h' }),
+  sources: [
+    source('operation_log', 'Operations by Harbormaster users, classified by kind', '90 days', 'HM_RETENTION_OPERATION_LOG'),
+    source('revision_records', 'Task definition revisions registered', 'while the service exists', null),
+  ],
+  polled_at: FIXTURE_NOW,
+  kpis: { operations: 120, people: 4, revisions_registered: 18, scale_changes: 22, restarts: 9, tasks_stopped: 5, terminal_sessions: 7 },
+  by_type: analyticsSeries(
+    '30d',
+    [
+      { key: 'deploy', label: 'Deploy' },
+      { key: 'rollback', label: 'Rollback' },
+      { key: 'task_definition', label: 'Task definition' },
+      { key: 'scale', label: 'Scale' },
+      { key: 'restart', label: 'Restart' },
+      { key: 'stop_task', label: 'Stop task' },
+      { key: 'terminal', label: 'Terminal' },
+    ],
+    (line, j) => (j + line) % (line + 2) === 0 ? 1 : 0,
+  ),
+  hands_on: analyticsSeries(
+    '30d',
+    [
+      { key: 'restart', label: 'Restart' },
+      { key: 'stop_task', label: 'Stop task' },
+      { key: 'terminal', label: 'Terminal' },
+    ],
+    (line, j) => (j % (3 + line) === 0 ? 1 : 0),
+  ),
+  restarts_per_100_deploys: analyticsSeries('30d', [{ key: 'restarts_per_100_deploys', label: 'Restarts per 100 deploys' }], (_, j) => (j % 5 === 4 ? null : 10 + (j % 4) * 5)),
+  who: {
+    rows: [
+      { username: 'pavel', total: 70, deploy: 40, restart: 5, scale: 15, terminal: 4, last_at: minutesAgo(25) },
+      { username: 'omer', total: 30, deploy: 10, restart: 4, scale: 7, terminal: 3, last_at: minutesAgo(600) },
+    ],
+    total: 2,
+  },
+  most_restarted: {
+    rows: [{ service_id: analyticsPaymentsId, service: 'payments-api', cluster: 'core-services', tag: TAG_PROD, restarts: 5, people: 2, last_at: minutesAgo(120) }],
+    total: 1,
+  },
 }

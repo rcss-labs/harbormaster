@@ -1,0 +1,294 @@
+// Wire types for GET /api/analytics/{delivery,reliability,capacity,operations}. They mirror
+// internal/api/analytics_dto.go; the hook that fetches them comes with the page.
+import type { TagDTO } from './types'
+
+export type AnalyticsTab = 'delivery' | 'reliability' | 'capacity' | 'operations'
+export type AnalyticsRange = '24h' | '7d' | '30d' | '90d'
+
+export interface AnalyticsWindow {
+  requested: string
+  used: string
+  clamped: boolean
+  /** False on capacity, which always reads the latest poll plus 7 days of counts history. */
+  range_applies: boolean
+  bucket: '1h' | '4h' | '1d' | '2d'
+  from: string
+  to: string
+  /** Governing table's retention such as "168h"; empty when kept forever. */
+  retention: string
+}
+
+export interface AnalyticsSource {
+  table: string
+  reads: string
+  kept: string
+  setting: string | null
+  /** Set when this table's window differs from the tab's, e.g. "30d". */
+  window_used: string | null
+}
+
+export interface SeriesLine {
+  key: string
+  label: string
+  /** Grey styling for expected events. */
+  expected: boolean
+  /** null means no sample; counts are zero-filled instead. */
+  values: (number | null)[]
+}
+
+export interface AnalyticsSeries {
+  timestamps: string[]
+  series: SeriesLine[]
+}
+
+export interface DonutSlice {
+  key: string
+  label: string
+  value: number
+}
+
+export interface AnalyticsDonut {
+  total: number
+  slices: DonutSlice[]
+}
+
+export interface Needs {
+  table: string
+  size: string
+  how: string
+}
+
+/** A panel that needs a phase 2 rollup: `data` is null until `available`. */
+export interface Proposed<T> {
+  available: boolean
+  /** Earliest day in the rollup table once it has data. */
+  data_since: string | null
+  needs: Needs | null
+  data: T | null
+}
+
+/** At most 50 rows; `total` is the size of the matching population. */
+export interface TopTable<R> {
+  rows: R[]
+  total: number
+}
+
+interface Envelope<Tab extends AnalyticsTab> {
+  tab: Tab
+  window: AnalyticsWindow
+  sources: AnalyticsSource[]
+  polled_at: string
+}
+
+// ---- delivery ----
+
+export interface DeliveryKpis {
+  rollouts: number
+  rollouts_per_day: number
+  /** 0..1; null with zero rollouts. */
+  change_failure_rate: number | null
+  median_rollout_s: number | null
+  p90_rollout_s: number | null
+  time_to_recover_s: number | null
+  rollbacks: number
+  superseded: number
+}
+
+export interface DeliveryServiceRow {
+  service_id: string
+  service: string
+  cluster: string
+  account_id: string
+  tag: TagDTO
+  rollouts: number
+  failed: number
+  failure_rate: number
+  median_s: number | null
+  recover_s: number | null
+  last_failed_at: string | null
+}
+
+export interface FailedRolloutRow {
+  at: string
+  service_id: string
+  service: string
+  cluster: string
+  from_revision: number | null
+  to_revision: number
+  reason: string
+  detail: string
+  ran_for_s: number | null
+}
+
+export interface AnalyticsDelivery extends Envelope<'delivery'> {
+  kpis: DeliveryKpis
+  rollouts: AnalyticsSeries
+  failure_rate: AnalyticsSeries
+  duration: AnalyticsSeries
+  services: TopTable<DeliveryServiceRow>
+  failure_reasons: Proposed<AnalyticsSeries>
+  recent_failures: Proposed<TopTable<FailedRolloutRow>>
+}
+
+// ---- reliability ----
+
+export interface ReliabilityKpis {
+  /** 0..1; null without samples. */
+  availability: number | null
+  minutes_below_desired: number
+  services_below: number
+  task_stops: number
+  unexpected_stops: number
+  out_of_memory: number
+  placement_failures: number
+}
+
+export interface ReliabilityServiceRow {
+  service_id: string
+  service: string
+  cluster: string
+  tag: TagDTO
+  availability: number
+  minutes_below: number
+  unexpected_stops: number
+  top_reason: string | null
+}
+
+export interface AvailabilityTrendRow {
+  service_id: string
+  service: string
+  cluster: string
+  tag: TagDTO
+  previous: number
+  current: number
+  change_pts: number
+}
+
+export interface AnalyticsReliability extends Envelope<'reliability'> {
+  kpis: ReliabilityKpis
+  availability: AnalyticsSeries
+  services_below: AnalyticsSeries
+  stops_by_reason: AnalyticsSeries
+  unexpected_by_zone: AnalyticsSeries
+  exit_codes: AnalyticsSeries
+  least_available: TopTable<ReliabilityServiceRow>
+  availability_90d: Proposed<AnalyticsSeries>
+  below_desired_90d: Proposed<AnalyticsSeries>
+  getting_worse: Proposed<TopTable<AvailabilityTrendRow>>
+}
+
+// ---- capacity ----
+
+export interface CapacityKpis {
+  reserved_vcpu: number
+  reserved_mem_gib: number
+  running_tasks: number
+  services: number
+  /** 0..1; null without running tasks. */
+  spot_share: number | null
+  at_scaling_max: number
+  subnets_low_ips: number
+}
+
+export interface CapacityClusterRow {
+  cluster_id: string
+  cluster: string
+  account_id: string
+  account_name: string
+  tag: TagDTO
+  tasks: number
+  vcpu: number
+  mem_gib: number
+  share: number
+  spot_share: number
+}
+
+export interface AtMaxRow {
+  service_id: string
+  service: string
+  cluster: string
+  desired: number
+  max_capacity: number
+  /** Null when counts history cannot say. */
+  at_max_since: string | null
+}
+
+export interface SubnetRow {
+  subnet_id: string
+  name: string
+  az: string
+  account_id: string
+  region: string
+  available_ips: number
+  total_ips: number
+  used_pct: number
+}
+
+export interface OverReservedRow {
+  service_id: string
+  service: string
+  cluster: string
+  tag: TagDTO
+  reserved_vcpu: number
+  used_p95_vcpu: number
+  reserved_mem_gib: number
+  used_p95_mem_gib: number
+  wasted_vcpu: number
+}
+
+export interface AnalyticsCapacity extends Envelope<'capacity'> {
+  kpis: CapacityKpis
+  reserved_vcpu_7d: AnalyticsSeries
+  vcpu_by_account: AnalyticsDonut
+  tasks_by_capacity_provider: AnalyticsDonut
+  clusters: TopTable<CapacityClusterRow>
+  at_scaling_max: AtMaxRow[]
+  subnets_low: SubnetRow[]
+  reserved_vs_used_90d: Proposed<AnalyticsSeries>
+  spot_share_90d: Proposed<AnalyticsSeries>
+  memory_90d: Proposed<AnalyticsSeries>
+  over_reserved: Proposed<TopTable<OverReservedRow>>
+}
+
+// ---- operations ----
+
+export interface OperationsKpis {
+  operations: number
+  people: number
+  revisions_registered: number
+  scale_changes: number
+  restarts: number
+  tasks_stopped: number
+  terminal_sessions: number
+}
+
+export interface OperatorRow {
+  username: string
+  total: number
+  deploy: number
+  restart: number
+  scale: number
+  terminal: number
+  last_at: string
+}
+
+export interface RestartedServiceRow {
+  service_id: string
+  service: string
+  cluster: string
+  tag: TagDTO
+  restarts: number
+  people: number
+  last_at: string
+}
+
+export interface AnalyticsOperations extends Envelope<'operations'> {
+  kpis: OperationsKpis
+  by_type: AnalyticsSeries
+  hands_on: AnalyticsSeries
+  restarts_per_100_deploys: AnalyticsSeries
+  who: TopTable<OperatorRow>
+  most_restarted: TopTable<RestartedServiceRow>
+}
+
+export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations
