@@ -7,16 +7,12 @@ import { averageOf, COLOR, daysBefore, minutesText, percent, sourceFor, sumOf, w
 import { KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
+/** Keyed by the API's stop_reason_group strings (internal/status/stopreason.go); the expected groups are drawn grey by linesOf. */
 const STOP_COLORS = {
-  deployment: COLOR.gray,
-  scale_in: COLOR.gray2,
-  essential_exit: COLOR.bad,
-  container_exited: COLOR.bad,
-  health_check: COLOR.warn,
-  oom: COLOR.orange,
-  out_of_memory: COLOR.orange,
-  spot: COLOR.info,
-  spot_interruption: COLOR.info,
+  'Out of memory (exit 137)': COLOR.orange,
+  'Failed load balancer health checks': COLOR.warn,
+  'Failed to start': COLOR.pink,
+  'Container exited with an error': COLOR.bad,
 }
 const EXIT_COLORS = { '1': COLOR.bad, '137': COLOR.orange, '143': COLOR.warn, '255': COLOR.pink, other: COLOR.gray }
 

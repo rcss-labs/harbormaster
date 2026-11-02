@@ -1498,10 +1498,10 @@ export const ANALYTICS_RELIABILITY: AnalyticsReliability = {
   stops_by_reason: analyticsSeries(
     '7d',
     [
-      { key: 'deployment', label: 'Deployment', expected: true },
-      { key: 'scale_in', label: 'Scale-in', expected: true },
-      { key: 'essential_exit', label: 'Essential container exited' },
-      { key: 'oom', label: 'Out of memory' },
+      { key: 'Replaced by a deployment', label: 'Replaced by a deployment', expected: true },
+      { key: 'Scaled in', label: 'Scaled in', expected: true },
+      { key: 'Container exited with an error', label: 'Container exited with an error' },
+      { key: 'Out of memory (exit 137)', label: 'Out of memory (exit 137)' },
     ],
     (line, j) => (line < 2 ? (j + line) % 4 : j % (6 + line) === 0 ? 1 : 0),
   ),

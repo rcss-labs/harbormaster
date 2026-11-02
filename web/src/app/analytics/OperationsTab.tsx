@@ -48,7 +48,7 @@ export function OperationsTab({ data, showSources, showProposed }: TabProps<Anal
         label="Operations key figures"
         items={[
           { label: 'Operations', value: <>{whole(kpis.operations)}<KpiNote>{`by ${whole(kpis.people)} ${kpis.people === 1 ? 'person' : 'people'}`}</KpiNote></> },
-          { label: 'Revisions registered', value: <>{whole(kpis.revisions_registered)}<KpiNote>from revision_records</KpiNote></> },
+          { label: 'Revisions registered', value: <>{whole(kpis.revisions_registered)}<KpiNote>from the operation log</KpiNote></> },
           { label: 'Scale changes', value: <>{whole(kpis.scale_changes)}<KpiNote>desired count updates</KpiNote></> },
           { label: 'Restarts', value: <>{whole(kpis.restarts)}<KpiNote>force new deployment</KpiNote></> },
           { label: 'Tasks stopped by hand', value: <>{whole(kpis.tasks_stopped)}<KpiNote>Stop task</KpiNote></> },

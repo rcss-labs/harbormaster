@@ -48,3 +48,23 @@ describe('ReliabilityTab proposed panels', () => {
     expect(within(panel).getByText(/^needs new data service_availability_daily/)).toBeInTheDocument()
   })
 })
+
+describe('ReliabilityTab stop reasons', () => {
+  it('colours each API stop-reason group by its real name and greys the expected ones', () => {
+    const base = ANALYTICS_RELIABILITY_DAILY.stops_by_reason
+    const line = (key: string, expected = false) => ({ key, label: key, values: base.series[0].values.map(() => 1), expected })
+    renderTab({
+      ...ANALYTICS_RELIABILITY_DAILY,
+      stops_by_reason: {
+        ...base,
+        series: [line('Failed load balancer health checks'), line('Out of memory (exit 137)'), line('Container exited with an error'), line('Scaled in', true)],
+      },
+    })
+    const legend = within(screen.getByRole('region', { name: /Task stops by reason/ }))
+    const swatch = (label: string) => (legend.getByText(label).previousElementSibling as HTMLElement).style.background
+    expect(swatch('Failed load balancer health checks')).toBe('var(--warning)')
+    expect(swatch('Out of memory (exit 137)')).toBe('var(--series-2)')
+    expect(swatch('Container exited with an error')).toBe('var(--danger)')
+    expect(swatch('Scaled in')).toBe('var(--muted)')
+  })
+})

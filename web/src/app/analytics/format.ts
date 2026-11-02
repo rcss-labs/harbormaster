@@ -68,6 +68,16 @@ export const memoryText = (gib: number) => (gib >= 1024 ? `${(gib / 1024).toFixe
 const WINDOW_TEXT: Record<string, string> = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', '90d': '90 days' }
 export const windowText = (window: string) => WINDOW_TEXT[window] ?? window
 
+/** A retention such as "168h" in words ("7 days"); empty means kept forever. */
+export function retentionText(retention: string): string {
+  if (!retention) return 'forever'
+  const hours = Number.parseInt(retention, 10)
+  if (!Number.isFinite(hours) || !retention.endsWith('h')) return retention
+  if (hours % 24 !== 0) return `${hours} hours`
+  const days = hours / 24
+  return days === 1 ? '1 day' : `${days} days`
+}
+
 /** Length of a window such as "7d" or "24h" in days. */
 export function windowDays(window: string): number {
   const amount = Number.parseInt(window, 10)

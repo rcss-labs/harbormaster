@@ -13,7 +13,7 @@ import { useCrumbs } from '../shell/crumbs'
 import { visibleTagIds } from '../shell/useFilters'
 import { CapacityTab } from './CapacityTab'
 import { DeliveryTab } from './DeliveryTab'
-import { windowText } from './format'
+import { retentionText, windowText } from './format'
 import { OperationsTab } from './OperationsTab'
 import { ReliabilityTab } from './ReliabilityTab'
 import { useAnalyticsPrefs } from './prefs'
@@ -66,7 +66,7 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
   const notice = rangeFixed
     ? CAPACITY_NOTICE
     : data?.window.clamped
-      ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${windowText(data.window.used)}.${
+      ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${retentionText(data.window.retention)}.${
           tab === 'reliability' && prefs.showProposed ? ' The dashed 90-day panels show what the proposed daily rollup would keep.' : ''
         }`
       : null
@@ -85,9 +85,10 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
             onChange={(value) => setTags(value === 'all' ? [] : [Number(value)])}
             options={[{ value: 'all', label: 'All' }, ...visibleTags.map((t) => ({ value: String(t.id), label: t.name }))]}
           />
-          <div className={rangeFixed ? styles.dimmed : undefined} aria-disabled={rangeFixed || undefined}>
+          <div className={rangeFixed ? styles.dimmed : undefined}>
             <SegmentedFilter
               label="Range"
+              disabled={rangeFixed}
               value={range}
               onChange={(value: AnalyticsRange) => (rangeFixed ? toast.show('This page does not use the range filter') : setRange(value))}
               options={ANALYTICS_RANGES.map((r) => ({ value: r, label: r }))}

@@ -94,6 +94,16 @@ describe('Analytics notices', () => {
     expect(await screen.findByText(/Showing the last 7 days\. Stopped tasks and task-count history are kept 7 days\./)).toBeInTheDocument()
   })
 
+  it('the clamped notice names the retention for what is kept and the used window for what is shown', async () => {
+    server.use(
+      http.get('/api/analytics/reliability', () =>
+        HttpResponse.json({ ...ANALYTICS_RELIABILITY, window: { ...ANALYTICS_RELIABILITY.window, used: '7d', clamped: true, retention: '240h' } }),
+      ),
+    )
+    renderApp('/analytics/reliability?range=90d')
+    expect(await screen.findByText(/Showing the last 7 days\. Stopped tasks and task-count history are kept 10 days\./)).toBeInTheDocument()
+  })
+
   it('delivery has no notice when the window is not clamped', async () => {
     renderApp('/analytics/delivery')
     await screen.findByRole('list', { name: 'Delivery key figures' })
@@ -104,7 +114,12 @@ describe('Analytics notices', () => {
     renderApp('/analytics/capacity?range=24h')
     const user = userEvent.setup()
     const group = await screen.findByRole('radiogroup', { name: 'Range' })
-    expect(group.closest('[aria-disabled="true"]')).not.toBeNull()
+    const radios = within(group).getAllByRole('radio')
+    for (const radio of radios) {
+      expect(radio).toHaveAttribute('aria-disabled', 'true')
+      expect(radio).not.toBeDisabled() // stays focusable so the explanatory toast still works
+    }
+    expect(within(screen.getByRole('radiogroup', { name: 'Tag' })).getAllByRole('radio')[0]).not.toHaveAttribute('aria-disabled')
     expect(await screen.findByText(/Breakdowns use the latest poll/)).toBeInTheDocument()
     await user.click(within(group).getByRole('radio', { name: '90d' }))
     expect(await screen.findByText('This page does not use the range filter')).toBeInTheDocument()
@@ -223,7 +238,9 @@ describe('Analytics KPI strips', () => {
 
   it('operations', async () => {
     renderApp('/analytics/operations')
-    expectKpis(await kpis('Operations key figures'), {
+    const strip = await kpis('Operations key figures')
+    expect(screen.getByText('from the operation log')).toBeInTheDocument()
+    expectKpis(strip, {
       Operations: '120by 4 people',
       'Revisions registered': '18',
       'Scale changes': '22',
