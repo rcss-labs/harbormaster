@@ -1,9 +1,10 @@
 .label { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: var(--radius-chip); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; border: 1px solid var(--border-strong); color: var(--muted); background: var(--raised); font-family: inherit; }
-.c-red { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-soft); }
-.c-amber { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: var(--warning-soft); }
-.c-blue { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
-.c-violet { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); background: var(--info-soft); }
-.c-green { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); background: var(--success-soft); }
+.c-red { color: var(--tag-red-text); border-color: var(--tag-red-border); background: transparent; }
+.c-amber { color: var(--tag-amber-text); border-color: var(--tag-amber-border); background: transparent; }
+.c-neutral { color: var(--tag-neutral-text); border-color: var(--tag-neutral-border); background: transparent; }
+.c-blue { color: var(--tag-blue-text); border-color: var(--tag-blue-border); background: transparent; }
+.c-green { color: var(--tag-green-text); border-color: var(--tag-green-border); background: transparent; }
+.c-violet { color: var(--tag-violet-text); border-color: var(--tag-violet-border); background: transparent; }
 .inh { border-style: dashed; }
 button.label { cursor: pointer; }
 button.label:hover { border-color: var(--accent); }

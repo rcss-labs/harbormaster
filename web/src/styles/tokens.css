@@ -40,6 +40,13 @@
   --series-6: #8a6d00;
   --term-bg: #0d1217;
   --term-text: #d7e3ec;
+  /* Tag chip text / border; chips have no fill. Dark values are the README's exact pairs. */
+  --tag-red-text: #b91c1c; --tag-red-border: #e5b4b4;
+  --tag-amber-text: #9c4707; --tag-amber-border: #e3c49b;
+  --tag-neutral-text: #5c6979; --tag-neutral-border: #c6d0da;
+  --tag-blue-text: #0b6a8f; --tag-blue-border: #a3cfe0;
+  --tag-green-text: #047857; --tag-green-border: #a4d6c4;
+  --tag-violet-text: #5b3fc4; --tag-violet-border: #c6bcee;
   --shadow: none;
   --shadow-pop: 0 18px 50px rgba(16, 24, 40, 0.2);
   --overlay: rgba(16, 24, 40, 0.38);
@@ -63,6 +70,12 @@
     --muted-soft: rgba(140, 151, 167, 0.14);
     --danger-border: #4a2a2e; --danger-hover: #2a1619; --healthy-cell: #1f5c48;
     --series-1: #45b5e3; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
+    --tag-red-text: #f87171; --tag-red-border: #4a2a2e;
+    --tag-amber-text: #fbbf24; --tag-amber-border: #4a3a1a;
+    --tag-neutral-text: #8c97a7; --tag-neutral-border: #2a333e;
+    --tag-blue-text: #45b5e3; --tag-blue-border: #1c3a48;
+    --tag-green-text: #34d399; --tag-green-border: #1a3d31;
+    --tag-violet-text: #a78bfa; --tag-violet-border: #33295a;
     --shadow: none; --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
   }
 }
@@ -78,5 +91,11 @@
   --muted-soft: rgba(140, 151, 167, 0.14);
   --danger-border: #4a2a2e; --danger-hover: #2a1619; --healthy-cell: #1f5c48;
   --series-1: #45b5e3; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
+  --tag-red-text: #f87171; --tag-red-border: #4a2a2e;
+  --tag-amber-text: #fbbf24; --tag-amber-border: #4a3a1a;
+  --tag-neutral-text: #8c97a7; --tag-neutral-border: #2a333e;
+  --tag-blue-text: #45b5e3; --tag-blue-border: #1c3a48;
+  --tag-green-text: #34d399; --tag-green-border: #1a3d31;
+  --tag-violet-text: #a78bfa; --tag-violet-border: #33295a;
   --shadow: none; --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
 }
