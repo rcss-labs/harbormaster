@@ -766,6 +766,11 @@ does not check or enforce it.
 
 ## 10. Authentication
 
+> **Update 2026-11-02:** SAML 2.0 single sign-on (SP-initiated, single IdP, JIT
+> users with no permissions, break-glass password accounts) is specified in
+> [`docs/superpowers/specs/2026-11-02-saml-sso-design.md`](../superpowers/specs/2026-11-02-saml-sso-design.md)
+> and planned in plan 07. Everything below stays true when SSO is not configured.
+
 - Username + password only. Passwords hashed with **argon2id** (memory 64 MiB,
   iterations 3, parallelism 2, 16-byte salt); minimum length 12.
 - **First run:** if no users exist, the server logs a one-time setup token on
