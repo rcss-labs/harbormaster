@@ -79,7 +79,7 @@ func (l *OutcomeLogger) Once(ctx context.Context) error {
 				Service: &row.Key.Service, Source: "harbormaster",
 				Text: outcomeText(deploymentLabel(row), outcome, reason),
 				Details: map[string]any{
-					"deployment_id": row.DeploymentID, "outcome": outcome,
+					"op": "outcome", "deployment_id": row.DeploymentID, "outcome": outcome,
 					"kind": row.Kind, "started_by_user_id": row.StartedByUserID,
 				},
 			})

@@ -132,7 +132,7 @@ func TestOutcomeLogger_CompletedWritesOnce(t *testing.T) {
 	if rows[0].Source != "harbormaster" || rows[0].Actor != "" {
 		t.Errorf("source = %q, actor = %q; want harbormaster and no actor", rows[0].Source, rows[0].Actor)
 	}
-	want := map[string]any{"deployment_id": "ecs-svc/1", "outcome": "completed", "kind": "deploy", "started_by_user_id": nil}
+	want := map[string]any{"op": "outcome", "deployment_id": "ecs-svc/1", "outcome": "completed", "kind": "deploy", "started_by_user_id": nil}
 	if !reflect.DeepEqual(rows[0].Details, want) {
 		t.Errorf("details = %v, want %v", rows[0].Details, want)
 	}

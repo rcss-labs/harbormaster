@@ -122,7 +122,7 @@ func (s *Service) recordRegistered(ctx context.Context, subj authz.Subject, key 
 			ActorUserID: &subj.UserID, Source: "harbormaster",
 			Text: fmt.Sprintf("Registered task definition %s:%d (image %s, %s CPU / %s MiB).",
 				family, registered.Revision, registered.ImageTag, registered.CPU, registered.Memory),
-			Details: map[string]any{"revision": registered.Revision, "task_definition_arn": registered.ARN},
+			Details: map[string]any{"op": "task_definition", "revision": registered.Revision, "task_definition_arn": registered.ARN},
 		})
 	})
 }
