@@ -5,6 +5,8 @@ import shapes from './shapes.json'
 import {
   ALERTS,
   ALL_TASKS,
+  AUTH_OPTIONS_OFF,
+  AUTH_OPTIONS_ON,
   CLUSTERS_METRICS,
   CLUSTER_CORE,
   CLUSTER_METRICS_CORE,
@@ -13,6 +15,7 @@ import {
   LOGS_HISTORY_PAYMENTS,
   ME_ADMIN,
   ME_OMER,
+  ME_SSO_USER,
   OVERVIEW_METRICS,
   REVISIONS_PAYMENTS,
   SCALING_NONE,
@@ -22,6 +25,12 @@ import {
   SERVICE_METRICS_STALE,
   SERVICE_NOTIFICATIONS,
   SERVICE_PAYMENTS,
+  SSO_CONFIGURED_OFF,
+  SSO_CONFIGURED_ON,
+  SSO_TEST_FAIL,
+  SSO_TEST_OK,
+  SSO_TEST_WOULD_LINK,
+  SSO_UNCONFIGURED,
   TARGET_HEALTH_EDGE,
   TASK_DEFINITION_PAYMENTS,
 } from '../fixtures'
@@ -88,6 +97,7 @@ describe('API contract', () => {
   const cases: [string, () => Promise<unknown> | unknown][] = [
     ['me', () => ME_ADMIN],
     ['me', () => ME_OMER],
+    ['me', () => ME_SSO_USER],
     ['setup', () => body('/api/auth/setup')],
     ['overview', () => body('/api/overview')],
     ['clusters', () => body('/api/clusters')],
@@ -123,6 +133,14 @@ describe('API contract', () => {
     ['imageTags', () => IMAGE_TAGS_PAYMENTS],
     ['desiredCount', () => DESIRED_COUNT_PAYMENTS],
     ['settings', () => body('/api/settings')],
+    ['authOptions', () => AUTH_OPTIONS_OFF],
+    ['authOptions', () => AUTH_OPTIONS_ON],
+    ['sso', () => SSO_UNCONFIGURED],
+    ['sso', () => SSO_CONFIGURED_OFF],
+    ['sso', () => SSO_CONFIGURED_ON],
+    ['ssoTestResult', () => SSO_TEST_OK],
+    ['ssoTestResult', () => SSO_TEST_WOULD_LINK],
+    ['ssoTestResult', () => SSO_TEST_FAIL],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
     expect(shapeProblems(await load(), contract[name], name)).toEqual([])
