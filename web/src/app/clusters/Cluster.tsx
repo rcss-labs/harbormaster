@@ -117,6 +117,9 @@ export function Cluster() {
           </div>
         </div>
         <div className={styles.actions}>
+          <Link className={styles.btn} to={`/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`}>
+            Tasks in this cluster
+          </Link>
           <a className={styles.btn} href={cluster.console_url} target="_blank" rel="noopener">
             Open in AWS console ↗
           </a>

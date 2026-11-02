@@ -44,6 +44,16 @@ describe('Cluster', () => {
     )
   })
 
+  it('links to the Tasks page filtered to this cluster', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const heading = await screen.findByRole('heading', { name: CLUSTER_CORE.name, level: 1 })
+    const header = heading.closest('header') as HTMLElement
+    expect(within(header).getByRole('link', { name: 'Tasks in this cluster' })).toHaveAttribute(
+      'href',
+      `/tasks?${new URLSearchParams({ filter: 'all', q: CLUSTER_CORE.name })}`,
+    )
+  })
+
   it('omits the VPC link when the cluster has no VPC', async () => {
     serveCluster({ ...CLUSTER_CORE, vpc: null })
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
