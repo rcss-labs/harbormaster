@@ -85,7 +85,8 @@ func TestTags_AdminOnlyAndList(t *testing.T) {
 		t.Fatalf("items = %+v, want Dev, Prod, Staging", out.Items)
 	}
 	prod := out.Items[1]
-	if prod.Clusters != 1 || prod.ServicesDirect != 0 || prod.ServicesEffective == 0 || prod.Color != "red" || prod.Builtin {
+	if prod.Clusters != 1 || prod.ServicesDirect != 1 || // artifact-proxy is overridden to Prod in devseed
+		prod.ServicesEffective == 0 || prod.Color != "red" || prod.Builtin {
 		t.Fatalf("prod = %+v", prod)
 	}
 	if len(prod.Users) != 2 || prod.Users[0].Username != "dana" || prod.Users[0].Preset != "Custom" || prod.Users[1].Username != "oncall" {
@@ -228,7 +229,8 @@ func TestTags_ImpactLists(t *testing.T) {
 	if len(impact.Clusters) != 1 || impact.Clusters[0].Name != "core-services" || impact.Clusters[0].ID != web.ClusterKey.ID() {
 		t.Fatalf("clusters = %+v", impact.Clusters)
 	}
-	if len(impact.Services) != 1 || impact.Services[0].Name != "web-frontend" || impact.Services[0].ID != web.ID() {
+	// artifact-proxy is overridden to Prod in devseed, so it is listed alongside the explicit web-frontend tag.
+	if len(impact.Services) != 2 || impact.Services[0].Name != "artifact-proxy" || impact.Services[1].Name != "web-frontend" || impact.Services[1].ID != web.ID() {
 		t.Fatalf("services = %+v", impact.Services)
 	}
 	if !reflect.DeepEqual(impact.Users, []string{"dana", "oncall"}) {

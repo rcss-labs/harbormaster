@@ -87,13 +87,13 @@ func TestServiceAlerts_Table(t *testing.T) {
 		{
 			name: "restart loop",
 			in: AlertInput{Service: baseService(2, 2), Tasks: []model.Task{
-				stoppedTask(137, "x", 5*time.Hour), stoppedTask(1, "x", 2*time.Hour), stoppedTask(2, "x", 3*time.Hour)}},
+				stoppedTask(137, "x", 30*time.Minute), stoppedTask(1, "x", 10*time.Minute), stoppedTask(2, "x", 20*time.Minute)}},
 			kind:     "restart_loop",
 			severity: model.AlertWarning,
 			title:    "api: restart loop",
-			text:     "3 tasks stopped with an error in the last 24 h.",
+			text:     "3 tasks stopped with an error in the last hour.",
 			tab:      "tasks",
-			at:       alertNow.Add(-2 * time.Hour),
+			at:       alertNow.Add(-10 * time.Minute),
 		},
 		{
 			name:     "unhealthy single task",
@@ -201,19 +201,53 @@ func TestServiceAlerts_DegradedNeedsThreePolls(t *testing.T) {
 	}
 }
 
-func TestServiceAlerts_RestartLoopCountsOnlyNonZeroExitsIn24h(t *testing.T) {
-	tasks := []model.Task{
-		stoppedTask(137, "x", time.Hour), stoppedTask(137, "x", 2*time.Hour),
-		stoppedTask(0, "x", 3*time.Hour), stoppedTask(1, "x", 48*time.Hour),
+func TestServiceAlerts_RestartLoopCountsOnlyNonZeroExitsInLastHour(t *testing.T) {
+	errored := func(ages ...time.Duration) []model.Task {
+		var tasks []model.Task
+		for _, age := range ages {
+			tasks = append(tasks, stoppedTask(137, "x", age))
+		}
+		return tasks
 	}
-	in := AlertInput{Service: baseService(2, 2), Tasks: tasks, Now: alertNow}
+	in := AlertInput{Service: baseService(2, 2), Now: alertNow,
+		Tasks: errored(10*time.Minute, 30*time.Minute, 50*time.Minute)}
+	if a := alertByKind(ServiceAlerts(in), "restart_loop"); a == nil || a.Text != "3 tasks stopped with an error in the last hour." {
+		t.Fatalf("three stops inside the hour: got %+v", a)
+	}
+	in.Tasks = errored(10*time.Minute, 30*time.Minute, 61*time.Minute)
 	if a := alertByKind(ServiceAlerts(in), "restart_loop"); a != nil {
-		t.Fatalf("unexpected alert: %+v", *a)
+		t.Fatalf("one stop outside the hour should leave no alert: %+v", *a)
 	}
-	in.Tasks = append(in.Tasks, stoppedTask(137, "x", 4*time.Hour))
-	a := alertByKind(ServiceAlerts(in), "restart_loop")
-	if a == nil || !strings.HasPrefix(a.Text, "3 tasks stopped") {
-		t.Fatalf("got %+v", a)
+	in.Tasks = []model.Task{stoppedTask(0, "x", 10*time.Minute), stoppedTask(0, "x", 20*time.Minute), stoppedTask(0, "x", 30*time.Minute)}
+	if a := alertByKind(ServiceAlerts(in), "restart_loop"); a != nil {
+		t.Fatalf("clean stops alerted: %+v", *a)
+	}
+}
+
+func TestServiceAlerts_DeploymentFailedClearsWhenRolledBackAndSteady(t *testing.T) {
+	deployments := func(primaryRunning int) []model.Deployment {
+		return []model.Deployment{
+			{Status: "ACTIVE", RolloutState: "FAILED", Running: 0, CreatedAt: alertNow.Add(-time.Hour), UpdatedAt: alertNow.Add(-time.Hour)},
+			{Status: "PRIMARY", RolloutState: "COMPLETED", Running: primaryRunning, CreatedAt: alertNow.Add(-3 * time.Hour)},
+		}
+	}
+	cases := []struct {
+		name      string
+		svc       model.Service
+		primary   int
+		wantAlert bool
+	}{
+		{"steady with serving primary", baseService(2, 2), 2, false},
+		{"service below desired", baseService(2, 1), 2, true},
+		{"primary below desired", baseService(2, 2), 1, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			alerts := ServiceAlerts(AlertInput{Service: tc.svc, Now: alertNow, Deployments: deployments(tc.primary)})
+			if got := alertByKind(alerts, "deployment_failed") != nil; got != tc.wantAlert {
+				t.Errorf("deployment_failed present = %v, want %v", got, tc.wantAlert)
+			}
+		})
 	}
 }
 

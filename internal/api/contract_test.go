@@ -99,6 +99,7 @@ func contractShapes() map[string]any {
 		"cluster":         shapeOf(reflect.TypeFor[ClusterDTO]()),
 		"service":         shapeOf(reflect.TypeFor[ServiceDTO]()),
 		"tasks":           shapeOf(reflect.TypeFor[TasksListDTO]()),
+		"settings":        shapeOf(reflect.TypeFor[SettingsDTO]()),
 		"operations":      shapeOf(reflect.TypeFor[ListResponse[EventDTO]]()),
 		"search":          shapeOf(reflect.TypeFor[ItemsResponse[SearchItemDTO]]()),
 		"poller":          shapeOf(reflect.TypeFor[ItemsResponse[PollerItemDTO]]()),

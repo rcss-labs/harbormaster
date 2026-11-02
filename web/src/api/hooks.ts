@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
+import { useMutation, useQueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   AccountsDTO,
@@ -13,6 +13,7 @@ import type {
   PollerDTO,
   SearchDTO,
   ServiceDTO,
+  SettingsDTO,
   TagAssignmentsDTO,
   TagsDTO,
   TasksFilter,
@@ -23,6 +24,8 @@ import type {
 export interface Filters {
   account?: string
   region?: string
+  /** Tag ids; sent as a repeated ?tag= */
+  tag?: number[]
 }
 
 export interface TasksParams extends Filters {
@@ -32,11 +35,17 @@ export interface TasksParams extends Filters {
   limit?: number
 }
 
-/** Builds `?a=b&c=d`, leaving out unset values. */
-export function queryString(params: Record<string, string | number | boolean | undefined | null>): string {
+/** Builds `?a=b&c=d`, leaving out unset values. Arrays repeat the key once per element (scalars come first). */
+export function queryString(
+  params: Record<string, string | number | boolean | undefined | null | readonly (string | number)[]>,
+): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) continue
     if (value !== undefined && value !== null && value !== '') search.set(key, String(value))
+  }
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) for (const item of value) search.append(key, String(item))
   }
   const text = search.toString()
   return text ? `?${text}` : ''
@@ -100,10 +109,10 @@ export function useTasks(params: TasksParams = {}) {
   })
 }
 
-export function useSearch(q: string) {
+export function useSearch(q: string, filters: Filters = {}) {
   return useQuery({
-    queryKey: ['search', q],
-    queryFn: () => api.get<SearchDTO>(`/api/search${queryString({ q })}`),
+    queryKey: ['search', q, filters],
+    queryFn: () => api.get<SearchDTO>(`/api/search${queryString({ q, ...filters })}`),
     enabled: q.length >= 2,
   })
 }
@@ -152,5 +161,25 @@ export function useAudit(cursor?: string, options: Options<AuditDTO> = {}) {
     queryKey: ['audit', cursor],
     queryFn: () => api.get<AuditDTO>(`/api/audit${queryString({ cursor })}`),
     ...options,
+  })
+}
+
+// ---- Settings ----
+
+export function useSettings() {
+  return useQuery({ queryKey: ['settings'], queryFn: () => api.get<SettingsDTO>('/api/settings') })
+}
+
+/** Saving the window changes which stopped tasks show, so task and service queries refetch too. */
+export function useUpdateSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (stoppedTasksWindowMinutes: number) =>
+      api.put<SettingsDTO>('/api/settings', { stopped_tasks_window_minutes: stoppedTasksWindowMinutes }),
+    onSuccess: (saved) => {
+      // Show the saved value immediately; the invalidation below then confirms it.
+      queryClient.setQueryData(['settings'], saved)
+      for (const key of ['settings', 'tasks', 'service']) void queryClient.invalidateQueries({ queryKey: [key] })
+    },
   })
 }

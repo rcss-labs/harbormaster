@@ -37,7 +37,7 @@ func TestMockupEstate_Counts(t *testing.T) {
 	if len(e.Accounts) != 2 || len(e.Clusters) != 6 || len(e.Services) != 15 {
 		t.Fatalf("accounts/clusters/services = %d/%d/%d, want 2/6/15", len(e.Accounts), len(e.Clusters), len(e.Services))
 	}
-	var runningService, runningStandalone, stoppedResizer, desired int
+	var runningService, runningStandalone, stoppedResizer, desired, resizerWithin10m, resizerWithin1h int
 	for _, s := range e.Services {
 		desired += int(s.Service.DesiredCount)
 	}
@@ -50,11 +50,22 @@ func TestMockupEstate_Counts(t *testing.T) {
 			runningStandalone++
 		case aws.ToString(task.Task.LastStatus) == "STOPPED" && group == "service:image-resizer":
 			stoppedResizer++
+			// UX round 1: one OOM stop inside 10 min, five inside 1 h.
+			age := fixedNow.Sub(*task.Task.StoppedAt)
+			if age <= 10*time.Minute {
+				resizerWithin10m++
+			}
+			if age <= time.Hour {
+				resizerWithin1h++
+			}
 		}
 	}
 	if runningService != 21 || runningStandalone != 1 || desired != 23 || stoppedResizer != 6 {
 		t.Fatalf("running service/standalone/desired/resizer-stopped = %d/%d/%d/%d, want 21/1/23/6",
 			runningService, runningStandalone, desired, stoppedResizer)
+	}
+	if resizerWithin10m != 1 || resizerWithin1h != 5 {
+		t.Fatalf("image-resizer stops within 10m/1h = %d/%d, want 1/5", resizerWithin10m, resizerWithin1h)
 	}
 	for _, td := range e.TaskDefinitions {
 		if aws.ToString(td.Definition.Family) == "image-resizer" {

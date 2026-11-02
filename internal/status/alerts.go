@@ -11,11 +11,13 @@ import (
 )
 
 const (
-	alertWindow           = 24 * time.Hour
-	cannotPlaceWindow     = 15 * time.Minute
-	unreachableAfter      = time.Minute
-	restartLoopThreshold  = 3
-	degradedPollThreshold = 2 // alert when DegradedPolls is greater than this
+	deploymentFailedWindow = 24 * time.Hour
+	restartLoopWindow      = time.Hour
+	stoppedTaskLookback    = 24 * time.Hour // for the failing alert's "last task stopped" text
+	cannotPlaceWindow      = 15 * time.Minute
+	unreachableAfter       = time.Minute
+	restartLoopThreshold   = 3
+	degradedPollThreshold  = 2 // alert when DegradedPolls is greater than this
 )
 
 // AlertInput is everything ServiceAlerts needs for one service.
@@ -83,7 +85,7 @@ func ServiceAlerts(in AlertInput) []model.Alert {
 	var errored int
 	var newestErr time.Time
 	for _, task := range in.Tasks {
-		if task.StoppedAt == nil || now.Sub(*task.StoppedAt) > alertWindow {
+		if task.StoppedAt == nil || now.Sub(*task.StoppedAt) > restartLoopWindow {
 			continue
 		}
 		if code := task.ExitCode(); code != nil && *code != 0 {
@@ -95,7 +97,7 @@ func ServiceAlerts(in AlertInput) []model.Alert {
 	}
 	if errored >= restartLoopThreshold {
 		add("restart_loop", model.AlertWarning, name+": restart loop",
-			fmt.Sprintf("%d tasks stopped with an error in the last 24 h.", errored), newestErr, "tasks")
+			fmt.Sprintf("%d tasks stopped with an error in the last hour.", errored), newestErr, "tasks")
 	}
 
 	unhealthyTasks := 0
@@ -121,7 +123,7 @@ func ServiceAlerts(in AlertInput) []model.Alert {
 	}
 
 	if newest := newestDeployment(svc.Deployments); newest != nil &&
-		newest.RolloutState == "FAILED" && now.Sub(newest.UpdatedAt) <= alertWindow {
+		newest.RolloutState == "FAILED" && now.Sub(newest.UpdatedAt) <= deploymentFailedWindow && !deploymentFailedStale(svc) {
 		add("deployment_failed", model.AlertDanger, name+": deployment failed", newest.RolloutStateReason, newest.UpdatedAt, "overview")
 	}
 
@@ -220,7 +222,7 @@ func newestStoppedWithExit(tasks []model.Task, now time.Time) *model.Task {
 	var best *model.Task
 	for i := range tasks {
 		task := &tasks[i]
-		if task.StoppedAt == nil || now.Sub(*task.StoppedAt) > alertWindow || task.ExitCode() == nil {
+		if task.StoppedAt == nil || now.Sub(*task.StoppedAt) > stoppedTaskLookback || task.ExitCode() == nil {
 			continue
 		}
 		if best == nil || task.StoppedAt.After(*best.StoppedAt) {
@@ -239,6 +241,20 @@ func firstUnhealthyTarget(rows []model.TargetHealth) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// deploymentFailedStale reports a service that is steady again after a failed deployment: it runs at
+// least its desired count, nothing is rolling out, and a PRIMARY deployment itself serves the desired count.
+func deploymentFailedStale(svc model.Service) bool {
+	if svc.Running < svc.Desired || hasRolloutInProgress(svc.Deployments) {
+		return false
+	}
+	for _, dep := range svc.Deployments {
+		if dep.Status == "PRIMARY" && dep.Running >= svc.Desired {
+			return true
+		}
+	}
+	return false
 }
 
 func newestDeployment(deps []model.Deployment) *model.Deployment {

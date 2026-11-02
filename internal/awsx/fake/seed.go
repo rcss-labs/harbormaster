@@ -567,7 +567,7 @@ func (s *seeder) addService(sp serviceSpec) {
 	// Stopped tasks.
 	if sp.oom {
 		for i := 0; i < 6; i++ {
-			at := now.Add(-time.Duration((float64(i)*3.5 + 0.3) * float64(time.Hour)))
+			at := now.Add(-time.Duration((float64(i)*12 + 4) * float64(time.Minute)))
 			s.addTask(sp, taskOptions{taskDefinitionARN: currentARN, slot: i, startedAt: at.Add(-70 * time.Second), stoppedAt: at,
 				reason: "OutOfMemoryError: Container killed due to memory usage", exitCode: 137,
 				stopCode: ecstypes.TaskStopCodeEssentialContainerExited, deploymentID: primaryID})

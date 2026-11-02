@@ -1,22 +1,19 @@
 import { useAudit } from '../../../api/hooks'
 import type { AuditEntryDTO } from '../../../api/types'
-import { AdminOnly } from '../../../components/AdminOnly'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { usePagedCursor } from '../../../components/usePagedCursor'
 import { useAuth } from '../../auth/AuthProvider'
-import { useCrumbs } from '../../shell/crumbs'
 import styles from './audit.module.css'
 
 /** Sign-ins and admin changes, newest first, with "Load more" for older pages. */
 export function Audit() {
-  useCrumbs([['Audit log']])
   const { me } = useAuth()
   const isAdmin = me?.admin ?? false
   // Non-admins would get 403s, so the audit query stays disabled for them.
   const paged = usePagedCursor<AuditEntryDTO>('audit')
   const page = useAudit(paged.cursor, { enabled: isAdmin })
 
-  if (!me || !isAdmin) return <AdminOnly area="audit" />
+  if (!me || !isAdmin) return null
 
   const entries = [...paged.earlier, ...(page.data?.items ?? [])]
   const next = page.data?.next
@@ -25,7 +22,7 @@ export function Audit() {
     <>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>Audit log</h1>
+          <h2>Audit log</h2>
           <div className={styles.meta}>
             Sign-ins and every change to users, permissions and tags. Service actions are in each service's operations log.
           </div>

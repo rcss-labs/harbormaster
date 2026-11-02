@@ -143,8 +143,8 @@ describe('shared components', () => {
   })
 
   it('AdminOnly shows the per-area copy', () => {
-    render(<AdminOnly area="audit" />)
+    render(<AdminOnly area="general" />)
     expect(screen.getByRole('heading', { name: 'No access' })).toBeInTheDocument()
-    expect(screen.getByText('Only global admins can read the audit log.')).toBeInTheDocument()
+    expect(screen.getByText('Only global admins change settings.')).toBeInTheDocument()
   })
 })

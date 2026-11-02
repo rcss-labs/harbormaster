@@ -31,6 +31,7 @@ import {
   REVISIONS_PAYMENTS,
   IMAGE_TAGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
+  SETTINGS,
 } from './fixtures'
 import type { SearchResultDTO } from '../api/types'
 
@@ -62,7 +63,8 @@ export const handlers = [
     const url = new URL(request.url)
     const account = url.searchParams.get('account')
     const region = url.searchParams.get('region')
-    const items = CLUSTERS.items.filter((c) => (!account || c.account_id === account) && (!region || c.region === region))
+    const tags = url.searchParams.getAll('tag').map(Number)
+    const items = CLUSTERS.items.filter((c) => (!account || c.account_id === account) && (!region || c.region === region) && (tags.length === 0 || tags.includes(c.tag.id)))
     return HttpResponse.json({ ...CLUSTERS, items })
   }),
   http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
@@ -125,6 +127,8 @@ export const handlers = [
   http.get('/api/services/:id/revisions', () => HttpResponse.json(REVISIONS_PAYMENTS)),
   http.get('/api/services/:id/image-tags', () => HttpResponse.json(IMAGE_TAGS_PAYMENTS)),
   http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
+  http.get('/api/settings', () => HttpResponse.json(SETTINGS)),
+  http.put('/api/settings', async ({ request }) => HttpResponse.json(await request.json())),
 ]
 
 export const server = setupServer(...handlers)

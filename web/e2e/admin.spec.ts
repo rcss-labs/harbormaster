@@ -18,7 +18,7 @@ test.describe('admin pages as omer', () => {
   })
 
   test('admin routes refuse omer', async ({ page }) => {
-    await page.goto('/admin/users')
+    await page.goto('/settings/users')
     await expect(page.getByRole('heading', { name: 'No access' })).toBeVisible()
     await expect(page.getByText('Only global admins manage users and permissions.')).toBeVisible()
     await expect(page.getByRole('table')).toHaveCount(0)
@@ -36,8 +36,11 @@ test.describe('admin pages as pavel', () => {
   test.use(asUser('pavel'))
 
   test('the permission matrix shows the seeded users and their presets', async ({ page }) => {
+    // The old admin path still works: it redirects into Settings.
     await page.goto('/admin/users')
-    await expect(page.getByRole('heading', { level: 1, name: 'Users and permissions' })).toBeVisible()
+    await expect(page).toHaveURL(/\/settings\/users$/)
+    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 2, name: 'Users & permissions' })).toBeVisible()
     for (const tag of ['Dev', 'Staging', 'Prod']) {
       await expect(page.getByRole('columnheader', { name: new RegExp(`^${tag}\\b`) })).toBeVisible()
     }
@@ -50,7 +53,7 @@ test.describe('admin pages as pavel', () => {
   })
 
   test('changing a preset is recorded in the audit log, then restored', async ({ page }) => {
-    await page.goto('/admin/users')
+    await page.goto('/settings/users')
     const prod = page.getByLabel('Preset for omer on Prod')
     await expect(prod).toHaveValue('None')
     try {
@@ -58,14 +61,14 @@ test.describe('admin pages as pavel', () => {
       await Promise.all([savedPermission(page), prod.selectOption('Viewer')])
       await expect(prod).toHaveValue('Viewer')
 
-      await page.goto('/admin/audit')
+      await page.goto('/settings/audit')
       const entry = page.getByText('Gave omer View on Prod.')
       await expect(entry).toBeVisible()
       // Newest first: the audit log has no roles, so the newest row is the first one containing the entry text, and the
       // first row mentioning both names is this one.
       await expect(page.getByText(/omer.*Prod|Prod.*omer/).first()).toHaveText('Gave omer View on Prod.')
     } finally {
-      await page.goto('/admin/users')
+      await page.goto('/settings/users')
       await Promise.all([savedPermission(page), page.getByLabel('Preset for omer on Prod').selectOption('None')])
       await expect(page.getByLabel('Preset for omer on Prod')).toHaveValue('None')
     }
@@ -73,7 +76,7 @@ test.describe('admin pages as pavel', () => {
 
   test('adds a user, who must change the temporary password, then deletes them and cannot delete self', async ({ page, browser, baseURL }) => {
     const username = `nobody19-${unique()}`
-    await page.goto('/admin/users')
+    await page.goto('/settings/users')
     await page.getByRole('button', { name: 'Add user' }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Username').fill(username)
@@ -116,8 +119,8 @@ test.describe('admin pages as pavel', () => {
 
   test('tags: Dev is the default, a new tag can be created, refused a duplicate name and deleted', async ({ page }) => {
     const tagName = `Canary-${unique()}`
-    await page.goto('/admin/tags')
-    await expect(page.getByRole('heading', { level: 1, name: 'Tags' })).toBeVisible()
+    await page.goto('/settings/general')
+    await expect(page.getByRole('heading', { level: 2, name: 'Tags' })).toBeVisible()
 
     // The Dev tag is built in: neither Rename nor Delete is available.
     const dev = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Rename' }) }).filter({ hasText: /^Dev\s*default/ })
@@ -150,8 +153,8 @@ test.describe('admin pages as pavel', () => {
   })
 
   test('AWS accounts: both rows with their role ARN, and a generated external ID', async ({ page }) => {
-    await page.goto('/admin/accounts')
-    await expect(page.getByRole('heading', { level: 1, name: 'AWS accounts' })).toBeVisible()
+    await page.goto('/settings/accounts')
+    await expect(page.getByRole('heading', { level: 2, name: 'AWS accounts' })).toBeVisible()
     const homelab = page.getByRole('row').filter({ hasText: 'homelab-admin' })
     await expect(homelab).toContainText('arn:aws:iam::482109375512:role/harbormaster-access')
     await expect(homelab).toContainText('us-east-1, eu-west-1, eu-central-1')

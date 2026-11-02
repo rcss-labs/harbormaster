@@ -1,6 +1,6 @@
 /* Base element styles, ported from docs/design/mockup/index.html lines 75-86. */
 *, *::before, *::after { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body, #root { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
 h1, h2, h3, p { margin: 0; }
 h1 { font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }

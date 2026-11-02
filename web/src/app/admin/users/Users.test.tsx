@@ -38,7 +38,8 @@ describe('matrix', () => {
         return HttpResponse.json({ actions: 3 })
       }),
     )
-    renderApp('/admin/users')
+    renderApp('/settings/users')
+    expect(await screen.findByRole('heading', { level: 2, name: 'Users & permissions' })).toBeInTheDocument()
     const row = await omerRow()
     // Columns are Dev, Staging, Prod: Prod is the third cell.
     fireEvent.click(within(row).getAllByTitle('Logs')[2])
@@ -53,7 +54,7 @@ describe('matrix', () => {
         return HttpResponse.json({ actions: 7 })
       }),
     )
-    renderApp('/admin/users')
+    renderApp('/settings/users')
     await omerRow()
     fireEvent.change(screen.getByLabelText('Preset for omer on Prod'), { target: { value: 'Operator' } })
     await waitFor(() => expect(bodies).toEqual([{ actions: 7 }]))
@@ -62,7 +63,7 @@ describe('matrix', () => {
 
 describe('users', () => {
   it('Delete disabled for current user', async () => {
-    renderApp('/admin/users')
+    renderApp('/settings/users')
     const you = await screen.findByText('(you)')
     const row = you.closest('tr') as HTMLElement
     expect(within(row).getByRole('button', { name: 'Delete' })).toBeDisabled()
@@ -80,7 +81,7 @@ describe('add user', () => {
         return HttpResponse.json({ user: { ...USERS.items[2], id: 9, username: 'alex' }, temporary_password: 'abcd-1234-ef56' }, { status: 201 })
       }),
     )
-    renderApp('/admin/users')
+    renderApp('/settings/users')
     fireEvent.click(await screen.findByRole('button', { name: 'Add user' }))
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alex' } })
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add user' }))

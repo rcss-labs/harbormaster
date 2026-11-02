@@ -405,6 +405,8 @@ type TaskQuery struct {
 	Filter           string
 	Q                string
 	Limit, Offset    int
+	// StoppedAfter hides STOPPED rows whose stopped_at is older than it; zero = no window.
+	StoppedAfter time.Time
 }
 
 func (s *Store) queryTaskRows(ctx context.Context, sql string, args []any) ([]TaskRow, error) {
@@ -448,6 +450,9 @@ func (s *Store) ListTasks(ctx context.Context, tq TaskQuery) ([]TaskRow, int, er
 	}
 	if tq.Service != "" {
 		where = append(where, "t.service_name = "+q.add(tq.Service))
+	}
+	if !tq.StoppedAfter.IsZero() {
+		where = append(where, "(t.last_status is distinct from 'STOPPED' or t.stopped_at >= "+q.add(tq.StoppedAfter)+")")
 	}
 	switch tq.Filter {
 	case "running":

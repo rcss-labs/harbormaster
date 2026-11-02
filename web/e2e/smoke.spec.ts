@@ -13,8 +13,9 @@ test('admin walks the read-only product', async ({ page }) => {
   await page.getByRole('link', { name: /core-services/ }).first().click()
   const clusterHeading = page.getByRole('heading', { level: 1, name: 'core-services' })
   await expect(clusterHeading).toBeVisible()
-  // The cluster's own status pill sits in the heading row, not in a service card below.
-  await expect(clusterHeading.locator('..').getByText('Deploying', { exact: true })).toBeVisible()
+  // The cluster's own status pill sits in the heading row, not in a service card below. The seeded notifications
+  // rollout finishes a few fake-AWS steps after startup, so the pill may already read Healthy by the time we get here.
+  await expect(clusterHeading.locator('..').getByText(/^(Deploying|Healthy)$/)).toBeVisible()
 
   await page.getByRole('link', { name: /payments-api/ }).first().click()
   await expect(page.getByRole('heading', { level: 1, name: 'payments-api' })).toBeVisible()
@@ -26,7 +27,8 @@ test('admin walks the read-only product', async ({ page }) => {
   await page.getByRole('link', { name: /^Operations log/ }).click()
   await expect(page.getByText('has reached a steady state.').first()).toBeVisible()
 
-  await page.getByRole('link', { name: /Users and permissions/ }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click()
+  await page.getByRole('link', { name: 'Users & permissions' }).click()
   await expect(page.getByRole('row', { name: /^omer User V L O D E T/ })).toBeVisible()
   await page.getByRole('link', { name: /AWS accounts/ }).click()
   await expect(page.getByRole('main').getByText('homelab-admin').first()).toBeVisible()

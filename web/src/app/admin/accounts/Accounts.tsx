@@ -5,7 +5,6 @@ import { api } from '../../../api/client'
 import { useAccounts, useTags } from '../../../api/hooks'
 import type { AccountDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
-import { AdminOnly } from '../../../components/AdminOnly'
 import { Card } from '../../../components/Card'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { KV } from '../../../components/KV'
@@ -14,7 +13,6 @@ import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
-import { useCrumbs } from '../../shell/crumbs'
 import { ConnectAccountDialog } from './ConnectAccountDialog'
 import { EditAccountDialog } from './EditAccountDialog'
 import { invalidateAccountQueries } from './accountApi'
@@ -30,7 +28,6 @@ function StatusPill({ account }: { account: AccountDTO }) {
 }
 
 export function Accounts() {
-  useCrumbs([['AWS accounts']])
   const { me } = useAuth()
   const isAdmin = me?.admin ?? false
   // Non-admins would get 403s, so the admin queries stay disabled for them.
@@ -55,7 +52,7 @@ export function Accounts() {
     onError: (caught) => toast.show(caught.message, 'bad'),
   })
 
-  if (!me || !isAdmin) return <AdminOnly area="accounts" />
+  if (!me || !isAdmin) return null
 
   const close = () => setDialog(null)
   const runtime = accounts.data?.runtime
@@ -64,7 +61,7 @@ export function Accounts() {
     <>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>AWS accounts</h1>
+          <h2>AWS accounts</h2>
           <div className={styles.meta}>Harbormaster runs as an ECS service and reaches each account by assuming an IAM role.</div>
         </div>
         <div className={styles.actions}>
@@ -155,7 +152,7 @@ export function Accounts() {
                     ))}
                   </div>
                   <div>
-                    <Link to="/admin/tags" className={`${styles.btn} ${styles.sm}`}>
+                    <Link to="/settings/general" className={`${styles.btn} ${styles.sm}`}>
                       Manage tags
                     </Link>
                   </div>

@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { MeDTO, PollerDTO } from '../../api/types'
 import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/fixtures'
 import { server } from '../../test/msw'
@@ -12,6 +12,11 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
+// Let requests still in flight from an unmounted app finish, so they cannot reach the next test's handlers.
+afterEach(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 100))
+})
+
 const nav = () => screen.findByRole('navigation', { name: 'Main' })
 
 describe('Shell', () => {
@@ -19,8 +24,10 @@ describe('Shell', () => {
     renderApp('/')
     const adminNav = await nav()
     expect(within(adminNav).getByText('Admin')).toBeInTheDocument()
-    expect(within(adminNav).getByRole('link', { name: /Users and permissions/ })).toHaveAttribute('href', '/admin/users')
-    expect(within(adminNav).getByRole('link', { name: /Audit log/ })).toBeInTheDocument()
+    expect(within(adminNav).getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings/general')
+    for (const gone of ['Users and permissions', 'Tags', 'AWS accounts', 'Audit log']) {
+      expect(within(adminNav).queryByRole('link', { name: new RegExp(gone) })).not.toBeInTheDocument()
+    }
     expect(within(adminNav).queryByText('My access')).not.toBeInTheDocument()
   })
 
@@ -98,6 +105,66 @@ describe('Shell', () => {
     expect(screen.getByLabelText('Account filter')).toHaveValue(ACCOUNT_STAGING.account_id)
   })
 
+  it('tag filter writes repeated tag= params and localStorage', async () => {
+    renderApp('/clusters')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Tag filter' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Staging' }))
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('tag=2'))
+    expect(screen.getByTestId('search')).toHaveTextContent('tag=3')
+    expect(JSON.parse(localStorage.getItem('harbormaster-filters:pavel')!)).toEqual({ tag: [2, 3] })
+  })
+
+  it('URL tag= wins over the stored tags', async () => {
+    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [2] }))
+    renderApp('/clusters?tag=3')
+    expect(await screen.findByRole('button', { name: 'Tag filter' })).toHaveTextContent('Prod')
+    expect(screen.getByRole('button', { name: 'Tag filter' })).not.toHaveTextContent('Staging')
+  })
+
+  it('drops stored tag ids the user can no longer see', async () => {
+    server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
+    localStorage.setItem('harbormaster-filters:omer', JSON.stringify({ tag: [3, 2] }))
+    const tagParams: string[][] = []
+    server.use(
+      http.get('/api/clusters', ({ request }) => {
+        tagParams.push(new URL(request.url).searchParams.getAll('tag'))
+        return HttpResponse.json(CLUSTERS)
+      }),
+    )
+    renderApp('/clusters')
+    expect(await screen.findByRole('button', { name: 'Tag filter' })).toHaveTextContent('Staging')
+    await waitFor(() => expect(tagParams.length).toBeGreaterThan(0))
+    expect(tagParams.every((tags) => tags.length === 1 && tags[0] === '2')).toBe(true)
+  })
+
+  it('restores stored tags sorted ascending into the URL', async () => {
+    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [3, 2] }))
+    renderApp('/clusters')
+    await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('tag=2&tag=3'))
+  })
+
+  it('non-admins only see tags they can View in the tag filter options', async () => {
+    server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
+    renderApp('/clusters')
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Tag filter' }))
+    expect(screen.getByRole('checkbox', { name: 'Dev' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Staging' })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Prod' })).not.toBeInTheDocument()
+  })
+
+  it('a tag filter chosen in-session survives a sidebar link', async () => {
+    renderApp('/clusters')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Tag filter' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
+    await user.click(await screen.findByRole('link', { name: /Tasks/ }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks'))
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('tag=3'))
+    expect(screen.getByRole('button', { name: 'Tag filter' })).toHaveTextContent('Prod')
+  })
+
   it('renders throttled and stale banners from poller status', async () => {
     const [base] = POLLER.items
     const poller: PollerDTO = {
@@ -144,6 +211,29 @@ describe('Search', () => {
     await user.keyboard('{Enter}')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/clusters/${cluster.id}`))
     expect(searchResults.queryByRole('link', { name: new RegExp(cluster.name) })).not.toBeInTheDocument()
+  })
+})
+
+describe('Search filters', () => {
+  it('search sends the current filters', async () => {
+    const urls: URL[] = []
+    server.use(
+      http.get('/api/search', ({ request }) => {
+        urls.push(new URL(request.url))
+        return HttpResponse.json({ items: [] })
+      }),
+    )
+    renderApp('/clusters')
+    const user = userEvent.setup()
+    await user.selectOptions(await screen.findByLabelText('Account filter'), ACCOUNT_STAGING.account_id)
+    await user.click(screen.getByRole('button', { name: 'Tag filter' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
+    await user.keyboard('{Escape}')
+    await user.type(screen.getByPlaceholderText('Jump to cluster, service, task'), 'pa')
+    await waitFor(() => expect(urls.length).toBeGreaterThan(0))
+    const last = urls[urls.length - 1]
+    expect(last.searchParams.get('account')).toBe(ACCOUNT_STAGING.account_id)
+    expect(last.searchParams.getAll('tag')).toEqual(['3'])
   })
 })
 

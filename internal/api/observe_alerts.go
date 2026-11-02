@@ -99,7 +99,8 @@ func alertVisible(sc scope, targetVisible func(pollTarget) bool, alert model.Ale
 	if alert.Key.Service == "" {
 		return targetVisible(pollTarget{alert.Key.AccountID, alert.Key.Region})
 	}
-	return authz.Can(sc.Subject, authz.View, authz.EffectiveServiceTag(sc.Tags, alert.Key))
+	tag := authz.EffectiveServiceTag(sc.Tags, alert.Key)
+	return authz.Can(sc.Subject, authz.View, tag) && sc.tagMatches(tag)
 }
 
 // newestAlertsPoll returns the latest successful alerts-tier poll among the visible targets.

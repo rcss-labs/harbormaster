@@ -114,6 +114,35 @@ func TestAlertsLoop_WritesFailingAndRestartLoop(t *testing.T) {
 	if text := kinds["service_failing"].Text; !strings.HasSuffix(text, "(exit 137)") {
 		t.Errorf("service_failing text = %q, want suffix (exit 137)", text)
 	}
+	if text := kinds["restart_loop"].Text; text != "5 tasks stopped with an error in the last hour." {
+		t.Errorf("restart_loop text = %q, want the five OOM stops inside the last hour", text)
+	}
+}
+
+// A failed deployment that ECS rolled back must stop alerting once the service is steady again.
+func TestAlertsLoop_DeploymentFailedClearsOnNextCycle(t *testing.T) {
+	h := newObserveHarness(t, loopTarget)
+	ctx := context.Background()
+	key := serviceKey(loopTarget, "core-services", "payments-api")
+	svc, err := h.store.GetService(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Deployments = []model.Deployment{
+		{Status: "ACTIVE", RolloutState: "FAILED", Running: 0, CreatedAt: loopNow.Add(-time.Hour), UpdatedAt: loopNow.Add(-time.Hour)},
+		{Status: "PRIMARY", RolloutState: "COMPLETED", Running: svc.Desired, CreatedAt: loopNow.Add(-3 * time.Hour), UpdatedAt: loopNow.Add(-3 * time.Hour)},
+	}
+	for _, running := range []int{svc.Desired, svc.Desired - 1} {
+		svc.Running = running
+		if _, err := h.store.UpsertServices(ctx, []model.Service{svc}); err != nil {
+			t.Fatal(err)
+		}
+		h.runAlerts(t)
+		_, failed := alertKinds(h.alertsFor(t, key))["deployment_failed"]
+		if want := running < svc.Desired; failed != want {
+			t.Fatalf("running %d of %d: deployment_failed present = %v, want %v", running, svc.Desired, failed, want)
+		}
+	}
 }
 
 func TestAlertsLoop_DegradedAppearsOnThirdRun(t *testing.T) {

@@ -22,6 +22,10 @@ const (
 	defaultLiveTailGap = 2 * time.Second
 	logTokenPrefix     = "fakelog-"
 	sidecarMessage     = "exporter: sent 512 spans to otlp endpoint"
+	// healthLineEvery makes every n-th slot of a task the pool's health check line (when it has one), so a
+	// log view always shows one within a few lines instead of depending on the pseudo-random pick.
+	healthLineEvery = 4
+	healthMarker    = "GET /health"
 )
 
 // logsClient is the fake CloudWatch Logs API scoped to one account and region.
@@ -212,7 +216,9 @@ func (g generatedSource) lineFor(task logTask, k int64, at time.Time) logEvent {
 		container = task.containers[0]
 	}
 	message := ""
-	if len(task.containers) > 1 && unitNoise(seed, uint64(k)) < sidecarLinePercent {
+	if healthEntry, ok := g.healthEntry(); ok && k%healthLineEvery == 0 {
+		message = levelPrefix(healthEntry[0]) + healthEntry[1]
+	} else if len(task.containers) > 1 && unitNoise(seed, uint64(k)) < sidecarLinePercent {
 		container = task.containers[1]
 		message = sidecarMessage
 	} else if len(g.pool) > 0 {
@@ -220,6 +226,16 @@ func (g generatedSource) lineFor(task logTask, k int64, at time.Time) logEvent {
 		message = levelPrefix(entry[0]) + entry[1]
 	}
 	return logEvent{stream: g.prefix + "/" + container + "/" + task.id, at: at, message: message}
+}
+
+// healthEntry returns the pool's health check line, if the service has one.
+func (g generatedSource) healthEntry() ([2]string, bool) {
+	for _, entry := range g.pool {
+		if strings.Contains(entry[1], healthMarker) {
+			return entry, true
+		}
+	}
+	return [2]string{}, false
 }
 
 // levelPrefix marks warn and error lines with a token the log level heuristic

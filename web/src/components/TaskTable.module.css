@@ -7,7 +7,7 @@
 .accent { color: var(--accent); }
 .healthy { color: var(--success); }
 .unhealthy { color: var(--warning); }
-.reason { max-width: 280px; font-size: 12px; }
+.reason { font-size: 12px; overflow-wrap: anywhere; }
 .actions { text-align: right; white-space: nowrap; }
 .btn { height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; white-space: nowrap; }
 .btn:hover { background: var(--hover); }

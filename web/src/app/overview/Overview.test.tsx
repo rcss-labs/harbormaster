@@ -75,4 +75,45 @@ describe('Overview', () => {
     await screen.findByText('Deployments per day, 14 days')
     expect(document.body.textContent).not.toContain('Invalid Date')
   })
+
+  /** The Task health card: its heading's card root, which holds the per-cluster bars. */
+  const taskHealthCard = async (): Promise<HTMLElement> => {
+    const heading = await screen.findByRole('heading', { name: 'Task health' })
+    return heading.parentElement!.parentElement as HTMLElement
+  }
+
+  it('Task health lists only clusters that are not fully healthy', async () => {
+    renderApp('/')
+    const card = await taskHealthCard()
+    const expected = OVERVIEW.per_cluster
+      .filter((cluster) => cluster.unhealthy + cluster.rolling_out + cluster.missing > 0)
+      .map((cluster) => cluster.name)
+    const linkedNames = within(card)
+      .queryAllByRole('link')
+      .map((link) => link.textContent)
+    expect(linkedNames).toEqual(expected)
+    expect(linkedNames).not.toContain('staging-web')
+  })
+
+  it('says All clusters healthy when every cluster is healthy', async () => {
+    const allHealthy = OVERVIEW.per_cluster.map((cluster) => ({ ...cluster, unhealthy: 0, rolling_out: 0, missing: 0 }))
+    server.use(http.get('/api/overview', () => HttpResponse.json({ ...OVERVIEW, per_cluster: allHealthy })))
+    renderApp('/')
+    const card = await taskHealthCard()
+    expect(within(card).getByText('All clusters healthy')).toBeInTheDocument()
+    expect(within(card).queryAllByRole('link')).toHaveLength(0)
+  })
+
+  it('bar segments follow the reason', async () => {
+    renderApp('/')
+    const card = await taskHealthCard()
+    const segmentBackgrounds = (clusterName: string): string[] => {
+      const nameLink = within(card).getByRole('link', { name: clusterName })
+      const track = (nameLink.parentElement as HTMLElement).nextElementSibling as HTMLElement
+      // Read inline styles: jsdom's computed style drops var() from the background shorthand.
+      return Array.from(track.querySelectorAll<HTMLElement>('span'), (segment) => segment.style.background)
+    }
+    expect(segmentBackgrounds('background-jobs')).toContain('var(--danger)')
+    expect(segmentBackgrounds('eu-apps')).toContain('var(--warning)')
+  })
 })

@@ -87,6 +87,11 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 		return TasksListDTO{}, err
 	}
 	base.Q = strings.TrimSpace(query.Get("q"))
+	windowMinutes, err := s.Store.StoppedTasksWindowMinutes(ctx)
+	if err != nil {
+		return TasksListDTO{}, err
+	}
+	base.StoppedAfter = s.now().Add(-time.Duration(windowMinutes) * time.Minute)
 
 	page := base
 	page.Filter, page.Limit, page.Offset = filter, limit, offset

@@ -5,6 +5,7 @@ import { useServiceMetrics } from '../../api/observe'
 import { EmptyState } from '../../components/EmptyState'
 import { TaskTable } from '../../components/TaskTable'
 import { usePagedCursor } from '../../components/usePagedCursor'
+import { HiddenStoppedNote } from '../tasks/HiddenStoppedNote'
 
 /** The service's tasks, newest first, with "Load more" for further pages. */
 export function TasksTab({ serviceId }: { serviceId: string }) {
@@ -21,15 +22,18 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
 
   const next = page.data?.next ?? undefined
   return (
-    <TaskTable
-      items={[...paged.earlier, ...(page.data?.items ?? [])]}
-      withService={false}
-      utilisation={utilisation ?? undefined}
-      next={next}
-      desiredCount={desired.data?.desired ?? null}
-      onMore={() => {
-        if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
-      }}
-    />
+    <>
+      <HiddenStoppedNote />
+      <TaskTable
+        items={[...paged.earlier, ...(page.data?.items ?? [])]}
+        withService={false}
+        utilisation={utilisation ?? undefined}
+        next={next}
+        desiredCount={desired.data?.desired ?? null}
+        onMore={() => {
+          if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
+        }}
+      />
+    </>
   )
 }

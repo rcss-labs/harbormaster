@@ -4,10 +4,6 @@ import { api } from '../api/client'
 import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
-import { Accounts } from './admin/accounts/Accounts'
-import { Audit } from './admin/audit/Audit'
-import { Tags } from './admin/tags/Tags'
-import { Users } from './admin/users/Users'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
@@ -15,6 +11,7 @@ import { NetworkRegionPage } from './networks/NetworkRegionPage'
 import { NetworkVpcPage } from './networks/NetworkVpcPage'
 import { NetworksPage } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
+import { SettingsPage } from './settings/SettingsPage'
 import { ServicePage } from './services/ServicePage'
 import { Shell } from './shell/Shell'
 import { MyAccess } from './me/MyAccess'
@@ -74,10 +71,12 @@ export function AppRoutes() {
           <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="tasks/:shortId/terminal" element={<TaskTerminal />} />
-          <Route path="admin/users" element={<Users />} />
-          <Route path="admin/tags" element={<Tags />} />
-          <Route path="admin/accounts" element={<Accounts />} />
-          <Route path="admin/audit" element={<Audit />} />
+          <Route path="settings" element={<Navigate to="/settings/general" replace />} />
+          <Route path="settings/:tab" element={<SettingsPage />} />
+          <Route path="admin/users" element={<Navigate to="/settings/users" replace />} />
+          <Route path="admin/tags" element={<Navigate to="/settings/general" replace />} />
+          <Route path="admin/accounts" element={<Navigate to="/settings/accounts" replace />} />
+          <Route path="admin/audit" element={<Navigate to="/settings/audit" replace />} />
           <Route path="me/access" element={<MyAccess />} />
           {/* plan 05: networks and storage */}
           <Route path="networks" element={<NetworksPage />} />

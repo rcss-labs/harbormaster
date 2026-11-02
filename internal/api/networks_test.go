@@ -121,8 +121,10 @@ const (
 	wantEastTasks         = 14
 	wantEastClusters      = 3
 	wantCoreServicesTasks = 9
-	wantMainTasks         = 11
-	wantSharedTasks       = 3
+	// artifact-proxy is overridden to Prod in devseed: its one task is hidden from Dev-only users.
+	wantArtifactProxyTasks = 1
+	wantMainTasks          = 11
+	wantSharedTasks        = 3
 )
 
 func TestNetworks_AdminSeesAllAccountsAndDimmedRegions(t *testing.T) {
@@ -157,8 +159,8 @@ func TestNetworks_DevUserSeesOnlyDevTasks(t *testing.T) {
 	if dev.Tasks >= admin.Tasks || dev.Tasks == 0 {
 		t.Errorf("dev tasks = %d, admin = %d; want 0 < dev < admin (core-services is Prod)", dev.Tasks, admin.Tasks)
 	}
-	if dev.Tasks != admin.Tasks-wantCoreServicesTasks {
-		t.Errorf("dev tasks = %d, want %d", dev.Tasks, admin.Tasks-wantCoreServicesTasks)
+	if dev.Tasks != admin.Tasks-wantCoreServicesTasks-wantArtifactProxyTasks {
+		t.Errorf("dev tasks = %d, want %d", dev.Tasks, admin.Tasks-wantCoreServicesTasks-wantArtifactProxyTasks)
 	}
 	if dev.HiddenVPCs != admin.HiddenVPCs {
 		t.Errorf("hidden_vpcs changed: dev %d, admin %d", dev.HiddenVPCs, admin.HiddenVPCs)
@@ -264,7 +266,8 @@ func TestVPCTree_RequiresAccountAndRegion(t *testing.T) {
 func TestVPCTree_InvisibleVPCIs404(t *testing.T) {
 	fx := newNetworkFixture(t)
 	q := "?account=" + homelabAccountID + "&region=us-east-1"
-	expectError(t, fx.prodOnly, "/api/vpcs/"+vpcShared+"/tree"+q, http.StatusNotFound, "not_found")
+	// prodOnly now sees shared-services: artifact-proxy is overridden to Prod in devseed.
+	expectError(t, fx.none, "/api/vpcs/"+vpcShared+"/tree"+q, http.StatusNotFound, "not_found")
 	expectError(t, fx.none, "/api/vpcs/"+vpcMain+"/tree"+q, http.StatusNotFound, "not_found")
 	expectError(t, fx.admin, "/api/vpcs/"+vpcLegacy+"/tree"+q, http.StatusNotFound, "not_found")
 	expectError(t, fx.admin, "/api/vpcs/vpc-doesnotexist/tree"+q, http.StatusNotFound, "not_found")

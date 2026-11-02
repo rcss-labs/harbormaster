@@ -141,7 +141,15 @@ export interface OverviewDTO {
   services: { total: number; by_status: Partial<Record<Status, number>> }
   tasks: { running: number; desired: number; pending: number; unhealthy: number; history_72h: PointDTO[] }
   task_health: { healthy: number; unhealthy: number; rolling_out: number; missing: number }
-  per_cluster: { id: string; name: string; running: number; desired: number }[]
+  per_cluster: {
+    id: string
+    name: string
+    running: number
+    desired: number
+    unhealthy: number
+    rolling_out: number
+    missing: number
+  }[]
   stops_per_hour: StopsHourDTO[]
   deployments_per_day: DeploysDayDTO[]
   stop_reasons: ReasonCountDTO[]
@@ -671,4 +679,7 @@ export interface DesiredCountResponse {
   running: number
   max: number
   auto_scaling: { min: number; max: number } | null
+}
+export interface SettingsDTO {
+  stopped_tasks_window_minutes: number
 }

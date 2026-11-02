@@ -38,6 +38,7 @@ import type {
   TagsDTO,
   TargetHealthDTO,
   TaskDTO,
+  SettingsDTO,
   TasksListDTO,
   UsersDTO,
 } from '../api/types'
@@ -656,7 +657,15 @@ export const OVERVIEW: OverviewDTO = {
     history_72h: history(21, 23),
   },
   task_health: { healthy: 19, unhealthy: 1, rolling_out: 1, missing: 2 },
-  per_cluster: CLUSTERS.items.map((c) => ({ id: c.id, name: c.name, running: c.running, desired: c.desired })),
+  per_cluster: CLUSTERS.items.map((c) => ({
+    id: c.id,
+    name: c.name,
+    running: c.running,
+    desired: c.desired,
+    unhealthy: SERVICE_DEFS.filter((s) => s.cluster === c.name && s.status === 'unhealthy_task').length,
+    rolling_out: c.name === 'core-services' ? 1 : 0,
+    missing: Math.max(c.desired - c.running, 0),
+  })),
   stops_per_hour: stopsPerHour(1, [20, 21, 22]),
   deployments_per_day: deploymentsPerDay(),
   stop_reasons: stopReasons(ALL_TASKS.filter((t) => t.stopped_at && Date.parse(t.stopped_at) > NOW_MS - 3 * 86_400_000)),
@@ -1099,3 +1108,6 @@ export const TASK_DEFINITION_EDITABLE: TaskDefinitionResponse = {
     ],
   },
 }
+
+// ---- Settings (Task 13) ----
+export const SETTINGS: SettingsDTO = { stopped_tasks_window_minutes: 10 }

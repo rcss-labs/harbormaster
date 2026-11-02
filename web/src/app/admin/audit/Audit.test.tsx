@@ -5,7 +5,8 @@ import { renderApp } from '../../../test/renderApp'
 
 describe('Audit', () => {
   it('renders summaries newest first', async () => {
-    renderApp('/admin/audit')
+    renderApp('/settings/audit')
+    expect(await screen.findByRole('heading', { level: 2, name: 'Audit log' })).toBeInTheDocument()
     const rendered = await Promise.all(AUDIT.items.map(async (entry) => screen.findByText(entry.summary)))
     for (let index = 0; index < rendered.length - 1; index++) {
       const isBefore = rendered[index].compareDocumentPosition(rendered[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING

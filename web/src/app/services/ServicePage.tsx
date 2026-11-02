@@ -99,7 +99,7 @@ export function ServicePage() {
         />
       )}
       <Tabs items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
-      {body}
+      <div className={styles.tabPanel}>{body}</div>
       {editing && <ServiceTagEditor target={editing} clusterId={service.cluster.id} onClose={() => setEditing(null)} />}
     </>
   )

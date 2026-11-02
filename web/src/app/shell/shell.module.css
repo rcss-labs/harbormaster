@@ -31,6 +31,8 @@
 .searchSub { margin-left: auto; font-size: 11px; color: var(--muted); }
 .searchEmpty { padding: 14px; text-align: center; color: var(--muted); }
 .content { flex: 1; overflow: auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+/* The content area scrolls, so its children keep their natural height instead of shrinking (Tabs has overflow-x: auto, which would let it collapse). */
+.content > * { flex-shrink: 0; }
 
 .ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
