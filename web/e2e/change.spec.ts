@@ -14,7 +14,7 @@ async function openOperationsLog(page: Page, id: string) {
 
 /** Edits, reviews and registers the draft, then accepts the "Deploy it now?" prompt. */
 async function registerAndDeploy(page: Page, serviceName: string, revision: number) {
-  await page.getByRole('button', { name: 'Review and save' }).click()
+  await page.getByRole('button', { name: /^Review and register :\d+$/ }).click()
   const review = page.getByRole('dialog')
   await expect(review.getByText(`Register ${serviceName}:${revision}?`)).toBeVisible()
   await review.getByRole('button', { name: `Register revision :${revision}` }).click()

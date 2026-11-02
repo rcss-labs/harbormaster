@@ -11,6 +11,7 @@ import { isRolloutRunning } from '../rollout'
 import { DeployDialog } from './DeployDialog'
 import { JsonEditor } from './JsonEditor'
 import { QuickEdit, isTagInvalid } from './QuickEdit'
+import { Panel } from '../../../components/Panel'
 import { ReviewDialog } from './ReviewDialog'
 import { RevisionsTable } from './RevisionsTable'
 import { mainImageTag, nextFargateMemory, type Definition } from './mainContainer'
@@ -183,11 +184,7 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
         </Banner>
       )}
       <div className={styles.layout}>
-        <div>
-          <div className={styles.cardHead}>
-            <h2>Quick edit</h2>
-            <span className={styles.note}>Edits the JSON</span>
-          </div>
+        <Panel title="Quick edit" actions={<span className={styles.note}>Edits the JSON</span>}>
           {definition ? (
             <QuickEdit
               definition={definition}
@@ -201,14 +198,12 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
           ) : (
             <Banner kind="bad">{`The JSON has an error, so the form is paused: ${error}`}</Banner>
           )}
-        </div>
-        <div>
-          <div className={styles.cardHead}>
-            <h2>Task definition JSON</h2>
-            <span className={styles.note}>{`based on :${draft?.baseRevision ?? data.deployed_revision}`}</span>
-          </div>
+        </Panel>
+        <Panel title="Task definition JSON" actions={<span className={styles.note}>{`based on :${draft?.baseRevision ?? data.deployed_revision}`}</span>}>
           <JsonEditor
             text={text}
+            initialText={initialText}
+            registerRevision={predictedRevision}
             error={error}
             dirty={dirty}
             readOnly={!canEdit}
@@ -217,7 +212,7 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
             onDiscard={() => setDraft(null)}
             onReview={() => setReviewing(true)}
           />
-        </div>
+        </Panel>
       </div>
       {revisions.data && (
         <RevisionsTable

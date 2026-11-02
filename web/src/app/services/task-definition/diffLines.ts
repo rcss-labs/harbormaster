@@ -2,7 +2,7 @@ export type DiffLine = { kind: ' ' | '+' | '-' | 'gap'; text: string }
 
 // Line diff via longest common subsequence. Unchanged runs further than
 // `context` lines from any change collapse into a single 'gap' row.
-export function diffLines(before: string, after: string, context = 2): DiffLine[] {
+function fullDiff(before: string, after: string): DiffLine[] {
   const a = before.split('\n')
   const b = after.split('\n')
   const n = a.length
@@ -31,6 +31,23 @@ export function diffLines(before: string, after: string, context = 2): DiffLine[
     }
   }
 
+  return full
+}
+
+/** 1-based numbers of the lines in `after` that were added or edited; deleted lines have no line to mark. */
+export function changedLineNumbers(before: string, after: string): Set<number> {
+  const changed = new Set<number>()
+  let line = 0
+  for (const row of fullDiff(before, after)) {
+    if (row.kind === '-') continue
+    line++
+    if (row.kind === '+') changed.add(line)
+  }
+  return changed
+}
+
+export function diffLines(before: string, after: string, context = 2): DiffLine[] {
+  const full = fullDiff(before, after)
   const out: DiffLine[] = []
   let inGap = false
   full.forEach((line, index) => {
