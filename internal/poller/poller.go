@@ -41,6 +41,8 @@ type Config struct {
 	CountsHistory, Jitter, RetentionEvery, AccountsRefresh time.Duration
 	MaxInFlight                                            int
 	Retention                                              store.Retention
+	// AnalyticsUtil enables the daily CloudWatch utilisation rollup (HM_ANALYTICS_UTIL); read by the rollup runner.
+	AnalyticsUtil bool
 	// Telemetry receives loop timings, leadership and write counts (plan 06); nil means telemetry.Default.
 	Telemetry *telemetry.Registry
 	// StartStagger spaces the first cycles of the task tiers (runningTasks, stoppedTasks, fullTasks)
@@ -75,7 +77,11 @@ func ConfigFrom(c config.Config) Config {
 			DeploymentHistory: c.Retention.DeploymentHistory,
 			AuditLog:          c.Retention.AuditLog,
 			OrphanTags:        c.Retention.OrphanTags,
+			AvailabilityDaily: c.Retention.AvailabilityDaily,
+			CapacityDaily:     c.Retention.CapacityDaily,
+			UtilDaily:         c.Retention.UtilDaily,
 		},
+		AnalyticsUtil:   c.Analytics.Util,
 		StartStagger:    defaultStartStagger,
 		RetentionEvery:  defaultRetentionEvery,
 		AccountsRefresh: defaultAccountsRefresh,

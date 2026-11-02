@@ -35,6 +35,16 @@ type RetentionConfig struct {
 	DeploymentHistory time.Duration
 	AuditLog          time.Duration
 	OrphanTags        time.Duration
+	// Daily analytics rollups, keyed by day rather than timestamp.
+	AvailabilityDaily time.Duration
+	CapacityDaily     time.Duration
+	UtilDaily         time.Duration
+}
+
+// AnalyticsConfig toggles optional analytics collection.
+type AnalyticsConfig struct {
+	// Util enables the daily CloudWatch utilisation rollup (one GetMetricData batch per account and region a day).
+	Util bool
 }
 
 // Config is the complete runtime configuration for the server.
@@ -56,6 +66,7 @@ type Config struct {
 	LoginWindow             time.Duration
 	Poll                    PollConfig
 	Retention               RetentionConfig
+	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
 	MetricsCacheTTL         time.Duration
@@ -180,7 +191,11 @@ func Load(getenv func(string) string) (Config, error) {
 			DeploymentHistory: reader.duration("HM_RETENTION_DEPLOYMENT_HISTORY", 2160*time.Hour),
 			AuditLog:          reader.duration("HM_RETENTION_AUDIT_LOG", 8760*time.Hour),
 			OrphanTags:        reader.duration("HM_RETENTION_ORPHAN_TAGS", 720*time.Hour),
+			AvailabilityDaily: reader.duration("HM_RETENTION_AVAILABILITY_DAILY", 8760*time.Hour),
+			CapacityDaily:     reader.duration("HM_RETENTION_CAPACITY_DAILY", 8760*time.Hour),
+			UtilDaily:         reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
 		},
+		Analytics:       AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:     reader.integer("HM_PAGE_SIZE_MAX", 500),
 		MetricsCacheTTL: reader.duration("HM_METRICS_CACHE_TTL", 60*time.Second),
