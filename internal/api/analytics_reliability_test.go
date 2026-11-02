@@ -100,21 +100,18 @@ func TestAnalyticsReliability_ShortRangeIsNotClamped(t *testing.T) {
 	}
 }
 
-func TestAnalyticsReliability_ProposedPanelsUnavailableInPhase1(t *testing.T) {
+func TestAnalyticsReliability_DailyPanelsUnavailableBeforeFirstRollup(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	got := getReliability(t, login(t, srv, "pavel", testPassword), "")
-	for name, p := range map[string]struct {
-		available bool
-		needs     *NeedsDTO
-	}{
-		"availability_90d":  {got.Availability90d.Available, got.Availability90d.Needs},
-		"below_desired_90d": {got.BelowDesired90d.Available, got.BelowDesired90d.Needs},
-		"getting_worse":     {got.GettingWorse.Available, got.GettingWorse.Needs},
+	for name, available := range map[string]bool{
+		"availability_90d":  got.Availability90d.Available,
+		"below_desired_90d": got.BelowDesired90d.Available,
+		"getting_worse":     got.GettingWorse.Available,
 	} {
-		if p.available || p.needs == nil || p.needs.Table != "service_availability_daily" {
-			t.Errorf("%s = %+v, want unavailable and needing service_availability_daily", name, p)
+		if available {
+			t.Errorf("%s is available before the first rollup", name)
 		}
 	}
 }

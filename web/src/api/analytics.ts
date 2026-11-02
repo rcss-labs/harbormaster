@@ -59,18 +59,11 @@ export interface AnalyticsDonut {
   slices: DonutSlice[]
 }
 
-export interface Needs {
-  table: string
-  size: string
-  how: string
-}
-
-/** A panel that needs a phase 2 rollup: `data` is null until `available`. */
-export interface Proposed<T> {
+/** A panel read from a daily rollup table (or the recorded failure reasons): `data` is null until `available`. */
+export interface RollupPanel<T> {
   available: boolean
   /** Earliest day in the rollup table once it has data. */
   data_since: string | null
-  needs: Needs | null
   data: T | null
 }
 
@@ -133,8 +126,8 @@ export interface AnalyticsDelivery extends Envelope<'delivery'> {
   failure_rate: AnalyticsSeries
   duration: AnalyticsSeries
   services: TopTable<DeliveryServiceRow>
-  failure_reasons: Proposed<AnalyticsSeries>
-  recent_failures: Proposed<TopTable<FailedRolloutRow>>
+  failure_reasons: RollupPanel<AnalyticsSeries>
+  recent_failures: RollupPanel<TopTable<FailedRolloutRow>>
 }
 
 // ---- reliability ----
@@ -182,9 +175,9 @@ export interface AnalyticsReliability extends Envelope<'reliability'> {
   unexpected_by_zone: AnalyticsSeries
   exit_codes: AnalyticsSeries
   least_available: TopTable<ReliabilityServiceRow>
-  availability_90d: Proposed<AnalyticsSeries>
-  below_desired_90d: Proposed<AnalyticsSeries>
-  getting_worse: Proposed<TopTable<AvailabilityTrendRow>>
+  availability_90d: RollupPanel<AnalyticsSeries>
+  below_desired_90d: RollupPanel<AnalyticsSeries>
+  getting_worse: RollupPanel<TopTable<AvailabilityTrendRow>>
 }
 
 // ---- capacity ----
@@ -254,10 +247,10 @@ export interface AnalyticsCapacity extends Envelope<'capacity'> {
   clusters: TopTable<CapacityClusterRow>
   at_scaling_max: AtMaxRow[]
   subnets_low: SubnetRow[]
-  reserved_vs_used_90d: Proposed<AnalyticsSeries>
-  spot_share_90d: Proposed<AnalyticsSeries>
-  memory_90d: Proposed<AnalyticsSeries>
-  over_reserved: Proposed<TopTable<OverReservedRow>>
+  reserved_vs_used_90d: RollupPanel<AnalyticsSeries>
+  spot_share_90d: RollupPanel<AnalyticsSeries>
+  memory_90d: RollupPanel<AnalyticsSeries>
+  over_reserved: RollupPanel<TopTable<OverReservedRow>>
 }
 
 // ---- operations ----

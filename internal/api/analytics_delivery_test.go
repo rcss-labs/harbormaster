@@ -194,7 +194,7 @@ func TestAnalyticsDelivery_EndToEnd(t *testing.T) {
 		t.Errorf("services total/rows = %d/%d", all.Services.Total, len(all.Services.Rows))
 	}
 	if all.FailureReasons.Available || all.RecentFailures.Available {
-		t.Error("proposed panels must stay unavailable")
+		t.Error("failure panels must stay unavailable until a reason is recorded")
 	}
 	if len(all.Sources) == 0 || all.Sources[0].Table != "deployment_history" {
 		t.Errorf("sources = %+v", all.Sources)

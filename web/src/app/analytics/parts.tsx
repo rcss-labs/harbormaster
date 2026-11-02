@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import type { AnalyticsDonut, AnalyticsSeries, AnalyticsSource, AnalyticsWindow, Proposed, TopTable } from '../../api/analytics'
+import type { AnalyticsDonut, AnalyticsSeries, AnalyticsSource, AnalyticsWindow, RollupPanel, TopTable } from '../../api/analytics'
 import { Donut } from '../../charts/Donut'
 import { TimeSeriesChart } from '../../charts/TimeSeriesChart'
+import { bucketDayLabel } from '../../charts/format'
 import { DataTable, type DataTableColumn, type RowStatus } from '../../components/DataTable'
+import { EmptyState } from '../../components/EmptyState'
 import { AnalyticsPanel } from './AnalyticsPanel'
 import type { ChartLegendItem } from './ChartLegend'
 import { linesOf, xLabelsFor } from './format'
@@ -12,7 +14,6 @@ import styles from './analytics.module.css'
 export interface TabProps<D> {
   data: D
   showSources: boolean
-  showProposed: boolean
 }
 
 interface PanelBase {
@@ -20,10 +21,9 @@ interface PanelBase {
   sub?: string
   span?: 'half' | 'full'
   source?: { table: string; kept: string }
-  proposed?: Proposed<unknown>
+  rollup?: RollupPanel<unknown>
   window: Pick<AnalyticsWindow, 'from'>
   showSources: boolean
-  showProposed: boolean
 }
 
 /** Dim line under a KPI value. */
@@ -31,17 +31,22 @@ export function KpiNote({ children }: { children: ReactNode }) {
   return <small className={styles.kpiNote}>{children}</small>
 }
 
-/** A grid cell that disappears with its panel, so hidden proposals leave no gap. */
-function Cell({ span, hidden, children }: { span?: 'half' | 'full'; hidden: boolean; children: ReactNode }) {
-  if (hidden) return null
+function Cell({ span, children }: { span?: 'half' | 'full'; children: ReactNode }) {
   return <div className={span === 'full' ? styles.full : styles.cell}>{children}</div>
 }
 
-const hiddenProposal = (base: PanelBase) => base.proposed !== undefined && !base.showProposed
+/** Empty-state text of a panel read from a daily rollup table. */
+export function dailyEmpty(rollup: RollupPanel<unknown>): string {
+  return rollup.data_since ? `Collecting daily data since ${bucketDayLabel(rollup.data_since)}` : 'Daily data appears after the first rollup'
+}
+
+/** Empty-state text of the failure-reason panels. */
+export const FAILURES_EMPTY = 'No failed rollouts with a recorded reason in this range'
 
 interface SeriesPanelProps extends PanelBase {
-  /** Null while a proposal has no data yet. */
+  /** Null while the panel has no data yet; `empty` then says why. */
   series: AnalyticsSeries | null | undefined
+  empty?: string
   mode: 'line' | 'area' | 'stacked'
   colors?: Record<string, string>
   yMin?: number
@@ -53,39 +58,35 @@ interface SeriesPanelProps extends PanelBase {
   lineLabel?: (line: AnalyticsSeries['series'][number]) => string
 }
 
-/** A panel with a time series chart; proposals without data show a quiet placeholder of the same height. */
-export function SeriesPanel({ series, mode, colors = {}, yMin, yMax, yFormat, reference, legend, lineLabel, span, ...base }: SeriesPanelProps) {
+/** A panel with a time series chart. */
+export function SeriesPanel({ series, empty = 'Nothing to show.', mode, colors = {}, yMin, yMax, yFormat, reference, legend, lineLabel, span, ...base }: SeriesPanelProps) {
   const lines = series ? linesOf(series, colors, lineLabel) : []
   return (
-    <Cell span={span} hidden={hiddenProposal(base)}>
+    <Cell span={span}>
       <AnalyticsPanel
         title={base.title}
         sub={base.sub}
         source={base.source}
-        proposed={base.proposed}
+        rollup={base.rollup}
         window={base.window}
         showSources={base.showSources}
-        showProposed={base.showProposed}
         legend={legend && series ? legend(lines) : undefined}
       >
-        {(dim) =>
-          series ? (
-            <TimeSeriesChart
-              timestamps={series.timestamps}
-              series={lines}
-              mode={mode}
-              yMin={yMin}
-              yMax={yMax}
-              yFormat={yFormat}
-              reference={reference}
-              xLabels={xLabelsFor(series.timestamps)}
-              dim={dim}
-              ariaLabel={`${base.title} chart: ${lines.map((line) => line.label).join(', ')}`}
-            />
-          ) : (
-            <div className={styles.placeholder}>Not collected yet</div>
-          )
-        }
+        {series ? (
+          <TimeSeriesChart
+            timestamps={series.timestamps}
+            series={lines}
+            mode={mode}
+            yMin={yMin}
+            yMax={yMax}
+            yFormat={yFormat}
+            reference={reference}
+            xLabels={xLabelsFor(series.timestamps)}
+            ariaLabel={`${base.title} chart: ${lines.map((line) => line.label).join(', ')}`}
+          />
+        ) : (
+          <EmptyState>{empty}</EmptyState>
+        )}
       </AnalyticsPanel>
     </Cell>
   )
@@ -101,8 +102,8 @@ export function DonutPanel({ donut, centerSub, colors, span, ...base }: DonutPan
   const round = (value: number) => Math.round(value * 10) / 10
   const segments = donut.slices.map((slice, index) => ({ name: slice.label, v: round(slice.value), color: colors[index % colors.length] }))
   return (
-    <Cell span={span} hidden={hiddenProposal(base)}>
-      <AnalyticsPanel title={base.title} sub={base.sub} source={base.source} window={base.window} showSources={base.showSources} showProposed={base.showProposed}>
+    <Cell span={span}>
+      <AnalyticsPanel title={base.title} sub={base.sub} source={base.source} window={base.window} showSources={base.showSources}>
         <Donut segments={segments} label={String(round(donut.total))} sub={centerSub} size={132} ring={16} legend="pct" />
       </AnalyticsPanel>
     </Cell>
@@ -132,9 +133,9 @@ export function TablePanel<R>({ rows, total, noun = 'rows', columns, rowKey, row
   const capped = total !== undefined
   const shown = capped && !expanded ? rows.slice(0, limit) : rows
   return (
-    <Cell span={span} hidden={hiddenProposal(base)}>
-      <AnalyticsPanel title={base.title} sub={base.sub} source={base.source} proposed={base.proposed} window={base.window} showSources={base.showSources} showProposed={base.showProposed} flush>
-        <DataTable label={base.title} columns={columns} rows={shown} rowKey={rowKey} rowStatus={rowStatus} minWidth={minWidth} empty={base.proposed && !base.proposed.available ? 'Not collected yet' : empty} />
+    <Cell span={span}>
+      <AnalyticsPanel title={base.title} sub={base.sub} source={base.source} rollup={base.rollup} window={base.window} showSources={base.showSources} flush>
+        <DataTable label={base.title} columns={columns} rows={shown} rowKey={rowKey} rowStatus={rowStatus} minWidth={minWidth} empty={empty} />
         {capped && shown.length < Math.max(total, rows.length) && (
           <div className={styles.more}>
             <span>{`Showing ${shown.length} of ${Math.max(total, rows.length)} ${noun}`}</span>
@@ -150,14 +151,14 @@ export function TablePanel<R>({ rows, total, noun = 'rows', columns, rowKey, row
   )
 }
 
-/** Rows of a proposal's TopTable once it is available, otherwise none. */
-export const proposedRows = <R,>(proposed: Proposed<TopTable<R>>): { rows: R[]; total: number } => ({
-  rows: proposed.data?.rows ?? [],
-  total: proposed.data?.total ?? 0,
+/** Rows of a rollup panel's TopTable once it is available, otherwise none. */
+export const rollupRows = <R,>(panel: RollupPanel<TopTable<R>>): { rows: R[]; total: number } => ({
+  rows: panel.data?.rows ?? [],
+  total: panel.data?.total ?? 0,
 })
 
 /** "Data used on this page" from the API's source list. */
-export function SourcesPanel({ sources, window, showSources, showProposed }: { sources: AnalyticsSource[]; window: Pick<AnalyticsWindow, 'from'>; showSources: boolean; showProposed: boolean }) {
+export function SourcesPanel({ sources, window, showSources }: { sources: AnalyticsSource[]; window: Pick<AnalyticsWindow, 'from'>; showSources: boolean }) {
   if (!showSources) return null
   const columns: DataTableColumn<AnalyticsSource>[] = [
     { key: 'table', header: 'Table', width: 'minmax(150px, 1fr)', render: (source) => <span className={styles.sourceTable}>{source.table}</span> },
@@ -172,7 +173,7 @@ export function SourcesPanel({ sources, window, showSources, showProposed }: { s
   ]
   return (
     <div className={styles.full}>
-      <AnalyticsPanel title="Data used on this page" sub="existing tables only" window={window} showSources={showSources} showProposed={showProposed} flush>
+      <AnalyticsPanel title="Data used on this page" window={window} showSources={showSources} flush>
         <DataTable label="Data used on this page" columns={columns} rows={sources} rowKey={(source) => source.table} minWidth={720} />
       </AnalyticsPanel>
     </div>

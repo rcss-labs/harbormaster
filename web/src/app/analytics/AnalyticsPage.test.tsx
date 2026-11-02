@@ -128,29 +128,26 @@ describe('Analytics notices', () => {
 })
 
 describe('Analytics panels', () => {
-  it('shows proposed panels with the PROPOSED badge and the needs footer', async () => {
+  it('shows every analytics panel as a normal panel with a factual empty state', async () => {
     renderApp('/analytics/delivery')
     const panel = (await screen.findByRole('heading', { name: 'Why rollouts failed' })).closest('section') as HTMLElement
-    expect(within(panel).getByText('PROPOSED')).toBeInTheDocument()
-    expect(panel).toHaveTextContent('needs new data deployment_history.failure_reason')
+    expect(panel).not.toHaveAttribute('data-variant')
+    expect(within(panel).getByText('No failed rollouts with a recorded reason in this range')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Recent failed rollouts/ })).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(/needs new data|Not collected yet|existing tables only|dashed/)
   })
 
-  it('hides proposed panels when the preference is off and the Display toggle turns them back on', async () => {
-    localStorage.setItem('harbormaster-analytics-prefs', JSON.stringify({ showProposed: false }))
+  it('the Display menu only has the data sources toggle', async () => {
     renderApp('/analytics/delivery')
     const user = userEvent.setup()
     await screen.findByRole('heading', { name: 'Rollouts' })
-    expect(screen.queryByRole('heading', { name: 'Why rollouts failed' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /Recent failed rollouts/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Display' }))
-    await user.click(screen.getByRole('checkbox', { name: 'Show proposed panels' }))
-    expect(await screen.findByRole('heading', { name: 'Why rollouts failed' })).toBeInTheDocument()
+    expect(screen.getAllByRole('checkbox').map((box) => box.getAttribute('aria-label') ?? box.parentElement?.textContent)).toEqual(['Show data sources'])
   })
 
-  it('a proposed panel that is available renders its data without the badge', async () => {
+  it('an available daily panel renders its data like any other', async () => {
     renderApp('/analytics/reliability')
     const panel = (await screen.findByRole('heading', { name: /Time below desired, last 90 days/ })).closest('section') as HTMLElement
-    expect(within(panel).queryByText('PROPOSED')).not.toBeInTheDocument()
     expect(within(panel).getByRole('group', { name: /Minutes below desired/ })).toBeInTheDocument()
   })
 

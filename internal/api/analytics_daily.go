@@ -8,8 +8,8 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-// The Proposed panels that read the daily rollup tables (docs/analytics_design/PLAN.md section 4). They turn on
-// when their table has data: a panel is ProposedDTO{Available: true, DataSince: first day, Data: ...}. Days before
+// The panels that read the daily rollup tables (docs/analytics_design/PLAN.md section 4). They turn on
+// when their table has data: a panel is RollupPanelDTO{Available: true, DataSince: first day, Data: ...}. Days before
 // the rollup began stay null so the chart shows where the data starts.
 
 // dailyPanelDays is the length of the "last 90 days" panels. They are independent of ?range=.
@@ -49,9 +49,9 @@ func (d dailyWindow) line(key, label string) SeriesLineDTO {
 	return SeriesLineDTO{Key: key, Label: label, Values: make([]*float64, dailyPanelDays)}
 }
 
-// availablePanel wraps data of a proposed panel whose rollup has rows since the given day.
-func availablePanel[T any](since *time.Time, data T) ProposedDTO[T] {
-	return ProposedDTO[T]{Available: true, DataSince: since, Data: &data}
+// availablePanel wraps data of a panel whose rollup has rows since the given day.
+func availablePanel[T any](since *time.Time, data T) RollupPanelDTO[T] {
+	return RollupPanelDTO[T]{Available: true, DataSince: since, Data: &data}
 }
 
 // fillReliabilityDaily turns on the three availability-rollup panels.

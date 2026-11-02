@@ -7,20 +7,19 @@ import { ReliabilityTab } from './ReliabilityTab'
 const NINETY_DAY_PANELS = ['Availability, last 90 days', 'Time below desired, last 90 days', 'Services getting less available']
 
 function renderTab(data = ANALYTICS_RELIABILITY_DAILY) {
-  return renderWithProviders(<ReliabilityTab data={data} showSources showProposed />)
+  return renderWithProviders(<ReliabilityTab data={data} showSources />)
 }
 
-describe('ReliabilityTab proposed panels', () => {
-  it('renders 90-day panels without proposed styling when available', () => {
+describe('ReliabilityTab 90-day panels', () => {
+  it('renders 90-day panels as normal panels when available', () => {
     renderTab()
     for (const name of NINETY_DAY_PANELS) {
       const panel = screen.getByRole('region', { name: new RegExp(name) })
-      expect(panel).toHaveAttribute('data-variant', 'default')
-      expect(within(panel).queryByText('PROPOSED')).not.toBeInTheDocument()
-      expect(within(panel).queryByText(/needs new data/)).not.toBeInTheDocument()
+      expect(panel).not.toHaveAttribute('data-variant')
+      expect(within(panel).queryByText(/needs new data/i)).not.toBeInTheDocument()
       expect(within(panel).getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
     }
-    expect(screen.queryByText('Not collected yet')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Daily data appears after the first rollup/)).not.toBeInTheDocument()
   })
 
   it('says when the daily data started when it covers only part of the 90 days', () => {
@@ -40,12 +39,20 @@ describe('ReliabilityTab proposed panels', () => {
     expect(within(row).getByText('−1.17 pts')).toBeInTheDocument()
   })
 
-  it('keeps the dashed badge and the needs footer while the rollup is empty', () => {
-    renderTab(ANALYTICS_RELIABILITY)
-    const panel = screen.getByRole('region', { name: /Services getting less available/ })
-    expect(panel).toHaveAttribute('data-variant', 'proposed')
-    expect(within(panel).getByText('PROPOSED')).toBeInTheDocument()
-    expect(within(panel).getByText(/^needs new data service_availability_daily/)).toBeInTheDocument()
+  it('says daily data appears after the first rollup, with the normal source footer, while the rollup is empty', () => {
+    renderTab({ ...ANALYTICS_RELIABILITY, below_desired_90d: { available: false, data_since: null, data: null } })
+    for (const name of NINETY_DAY_PANELS) {
+      const panel = within(screen.getByRole('region', { name: new RegExp(name) }))
+      expect(panel.getByText('Daily data appears after the first rollup')).toBeInTheDocument()
+      expect(panel.getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
+      expect(panel.queryByText(/needs new data|Not collected yet/i)).not.toBeInTheDocument()
+    }
+  })
+
+  it('says since when daily data is being collected when the table has no rows to show yet', () => {
+    renderTab({ ...ANALYTICS_RELIABILITY_DAILY, getting_worse: { available: true, data_since: '2026-10-20T00:00:00Z', data: { rows: [], total: 0 } } })
+    const panel = within(screen.getByRole('region', { name: /Services getting less available/ }))
+    expect(panel.getByText('Collecting daily data since Oct 20')).toBeInTheDocument()
   })
 })
 

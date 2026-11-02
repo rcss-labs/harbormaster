@@ -26,8 +26,6 @@ export interface TimeSeriesChartProps {
   reference?: { value: number; label: string }
   /** Start, middle and end of the x axis. */
   xLabels: [string, string, string]
-  /** Fades the plot; used for proposed panels. */
-  dim?: boolean
   /** Accessible name of the plot. */
   ariaLabel?: string
   /** Reference time for tooltip labels; defaults to the current time. */
@@ -86,7 +84,6 @@ export function TimeSeriesChart({
   yFormat = fmtNum,
   reference,
   xLabels,
-  dim = false,
   ariaLabel = 'Chart',
   now,
 }: TimeSeriesChartProps) {
@@ -113,14 +110,13 @@ export function TimeSeriesChart({
       const lowerPoints = base.map((v, i) => ({ x: x(i), y: y(v) })).reverse()
       const area = `M${[...upperPoints, ...lowerPoints].map(pointText).join(' L')} Z`
       layers.push(
-        <path key={`area-${line.key}`} d={area} fill={colorOf(line)} fillOpacity={dim ? 0.22 : 0.42} data-area={line.key} />,
+        <path key={`area-${line.key}`} d={area} fill={colorOf(line)} fillOpacity={0.42} data-area={line.key} />,
         <path
           key={`line-${line.key}`}
           d={outline([upperPoints])}
           fill="none"
           stroke={colorOf(line)}
           strokeWidth={1.25}
-          strokeOpacity={dim ? 0.6 : 1}
           vectorEffect="non-scaling-stroke"
           data-line={line.key}
         />,
@@ -144,7 +140,6 @@ export function TimeSeriesChart({
           fill="none"
           stroke={colorOf(line)}
           strokeWidth={1.6}
-          strokeOpacity={dim ? 0.65 : 1}
           strokeDasharray={line.dashed ? '5 4' : undefined}
           strokeLinejoin="round"
           vectorEffect="non-scaling-stroke"

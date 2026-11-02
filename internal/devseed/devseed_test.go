@@ -3,6 +3,7 @@ package devseed_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -107,5 +108,61 @@ func TestDevseed_RefusesPopulatedDatabase(t *testing.T) {
 	accounts, err := st.ListAccounts(ctx)
 	if err != nil || len(accounts) != 0 {
 		t.Fatalf("accounts = %v, %v; want none seeded", accounts, err)
+	}
+}
+
+func TestApply_SeedsAnalyticsHistoryOnceAndForceApplyDoesNot(t *testing.T) {
+	ctx := t.Context()
+	count := func(st *store.Store, query string) int {
+		t.Helper()
+		var n int
+		if err := st.Pool.QueryRow(ctx, query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	forced := storetest.Open(t)
+	if err := devseed.ForceApply(ctx, forced); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(forced, `select (select count(*) from service_availability_daily) + (select count(*) from cluster_capacity_daily) + (select count(*) from service_util_daily)`); n != 0 {
+		t.Fatalf("ForceApply wrote %d daily rows, want none (tests rely on empty daily tables)", n)
+	}
+
+	st := storetest.Open(t)
+	var first [5]int
+	for run := 0; run < 2; run++ {
+		if err := devseed.Apply(ctx, st); err != nil {
+			t.Fatal(err)
+		}
+		got := [5]int{
+			count(st, `select count(*) from service_availability_daily`),
+			count(st, `select count(*) from cluster_capacity_daily`),
+			count(st, `select count(*) from service_util_daily`),
+			count(st, `select count(*) from deployment_history where outcome = 'failed' and failure_reason is not null`),
+			count(st, `select count(*) from deployment_history`),
+		}
+		if run == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("second Apply changed the counts from %v to %v", first, got)
+		}
+	}
+	if first[0] == 0 || first[1] == 0 || first[2] == 0 || first[3] < 3 {
+		t.Errorf("availability/capacity/util/failed = %v, want history in every table and at least 3 failures with a reason", first)
+	}
+	// Every table covers at least the 30 complete UTC days ending yesterday. Days are UTC like the rollups, so
+	// the check must not use current_date, which follows the database's time zone.
+	todayUTC := time.Now().UTC().Truncate(24 * time.Hour)
+	for _, table := range []string{"service_availability_daily", "cluster_capacity_daily", "service_util_daily"} {
+		var days int
+		if err := st.Pool.QueryRow(ctx, `select count(distinct day) from `+table+` where day >= $1::date and day < $2::date`,
+			todayUTC.AddDate(0, 0, -30), todayUTC).Scan(&days); err != nil {
+			t.Fatal(err)
+		}
+		if days < 30 {
+			t.Errorf("%s has %d of the last 30 days, want all 30", table, days)
+		}
 	}
 }
