@@ -1,0 +1,26 @@
+/* Field, hint and button rules follow the Users page (see app/admin/users/users.module.css). */
+.stack { display: grid; gap: 12px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rowSpread { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.form { display: grid; gap: 10px; max-width: 520px; }
+.formWide { max-width: none; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; max-width: 720px; }
+.field { display: grid; gap: 5px; }
+.field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; min-width: 0; }
+textarea.ctl { height: auto; padding: 6px 8px; font-family: var(--mono); font-size: 12px; resize: vertical; }
+.grow { flex: 1; min-width: 220px; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover { background: var(--accent); filter: brightness(1.07); }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.err { font-size: 12px; color: var(--danger); margin: 0; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.certs { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.caption { font-size: 12px; color: var(--muted); }
+.attrs { border-collapse: collapse; }
+.attrs th, .attrs td { text-align: left; padding: 3px 16px 3px 0; vertical-align: top; }
+.attrs th { color: var(--muted); font-weight: 500; }
+.verdict { font-weight: 600; }

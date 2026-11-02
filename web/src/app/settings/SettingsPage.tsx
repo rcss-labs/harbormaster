@@ -7,15 +7,17 @@ import { Tags } from '../admin/tags/Tags'
 import { Users } from '../admin/users/Users'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { SSOPage } from './sso/SSOPage'
 import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
 
-export type SettingsTab = 'general' | 'accounts' | 'users' | 'audit'
+export type SettingsTab = 'general' | 'accounts' | 'users' | 'sso' | 'audit'
 
 export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['general', 'General'],
   ['accounts', 'AWS accounts'],
   ['users', 'Users & permissions'],
+  ['sso', 'Single sign-on'],
   ['audit', 'Audit log'],
 ]
 
@@ -34,6 +36,8 @@ function TabPanel({ tab }: { tab: SettingsTab }) {
       return <Accounts />
     case 'users':
       return <Users />
+    case 'sso':
+      return <SSOPage />
     case 'audit':
       return <Audit />
   }
