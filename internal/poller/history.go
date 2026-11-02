@@ -61,7 +61,8 @@ func (l *Loop) recordCycle(ctx context.Context, tr *tier, err error) {
 	}
 }
 
-// recordCounts samples every service of this loop's target into the counts history.
+// recordCounts samples every service of this loop's target into the counts history, then folds each cluster's
+// running-task capacity into today's cluster_capacity_daily row (one row per cluster per UTC day).
 func (l *Loop) recordCounts(ctx context.Context) {
 	l.mu.Lock()
 	services := make([]model.Service, 0, len(l.latest))
@@ -69,8 +70,16 @@ func (l *Loop) recordCounts(ctx context.Context) {
 		services = append(services, s)
 	}
 	l.mu.Unlock()
-	if err := l.p.store.InsertCountsHistory(ctx, time.Now().UTC(), services); err != nil && ctx.Err() == nil {
+	now := time.Now().UTC()
+	if err := l.p.store.InsertCountsHistory(ctx, now, services); err != nil && ctx.Err() == nil {
 		l.log.Warn("poller: counts history", "err", err)
+	}
+	samples, err := l.p.store.RunningTaskCapacityByCluster(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region})
+	if err == nil {
+		err = l.p.store.UpsertClusterCapacitySample(ctx, now, samples)
+	}
+	if err != nil && ctx.Err() == nil {
+		l.log.Warn("poller: cluster capacity sample", "err", err)
 	}
 }
 

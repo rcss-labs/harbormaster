@@ -65,3 +65,26 @@ func TestHistory_InsertsDeploymentOnce(t *testing.T) {
 		t.Errorf("operation_log rows = %d, want 0", got)
 	}
 }
+
+func TestLoop_CountsTickUpdatesClusterCapacityDaily(t *testing.T) {
+	h := mockupHarness(t)
+	h.runOnce(t)
+	ctx := context.Background()
+
+	h.loop.recordCounts(ctx)
+	h.loop.recordCounts(ctx)
+
+	clusters := h.count(t, `select count(*) from clusters where account_id = $1 and region = $2`, loopTarget.AccountID, loopTarget.Region)
+	if got := h.count(t, `select count(*) from cluster_capacity_daily`); got != clusters {
+		t.Errorf("capacity rows = %d, want one per cluster (%d)", got, clusters)
+	}
+	if got := h.count(t, `select count(*) from cluster_capacity_daily where samples = 2 and day = $1::date`, time.Now().UTC().Format(time.DateOnly)); got != clusters {
+		t.Errorf("clusters with samples = 2 today = %d, want %d", got, clusters)
+	}
+	if got := h.count(t, `select count(*) from cluster_capacity_daily where vcpu_max < vcpu_sum / samples`); got != 0 {
+		t.Errorf("%d rows have vcpu_max below the average", got)
+	}
+	if got := h.count(t, `select count(*) from cluster_capacity_daily where vcpu_sum > 0 and tasks_sum > 0`); got == 0 {
+		t.Error("no cluster recorded any running tasks; the mockup estate has running tasks")
+	}
+}
