@@ -49,6 +49,16 @@ describe('Tasks hidden-stopped note', () => {
   })
 })
 
+describe('Tasks summary windows', () => {
+  it('labels By status with the stopped-tasks window and Why tasks stopped with 72 h', async () => {
+    renderApp('/tasks')
+    const byStatus = (await screen.findByRole('heading', { name: 'By status' })).parentElement!
+    expect(within(byStatus).getByText('Stopped: last 10 min')).toBeInTheDocument()
+    const reasons = screen.getByRole('heading', { name: 'Why tasks stopped' }).parentElement!
+    expect(within(reasons).getByText('Last 72 h')).toBeInTheDocument()
+  })
+})
+
 describe('Tasks Terminal link', () => {
   const serviceRunning = ALL_TASKS.find((task) => task.service && task.status === 'RUNNING')!
   const standaloneRunning = ALL_TASKS.find((task) => !task.service && task.status === 'RUNNING')!

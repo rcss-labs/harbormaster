@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { useTasks } from '../../api/hooks'
+import { useSettings, useTasks } from '../../api/hooks'
 import type { TaskDTO, TasksFilter, TasksListDTO } from '../../api/types'
 import { Donut } from '../../charts/Donut'
 import { HBars } from '../../charts/HBars'
@@ -25,6 +25,7 @@ const FARGATE_SPOT_COLOR = 'var(--series-3)'
 const parseFilter = (value: string | null): TasksFilter => FILTERS.find((filter) => filter === value) ?? DEFAULT_FILTER
 
 const TOP_CLUSTERS = 10
+const STOP_REASONS_WINDOW_LABEL = 'Last 72 h'
 
 type ClusterCapacity = TasksListDTO['summary']['by_cluster'][number]
 const totalRunning = (cluster: ClusterCapacity) => cluster.fargate + cluster.spot
@@ -74,6 +75,7 @@ export function Tasks() {
   // Earlier pages reset whenever the filter or the account/region scope changes.
   const paged = usePagedCursor<TaskDTO>(`${filter}|${filters.account ?? ''}|${filters.region ?? ''}`)
   const page = useTasks({ ...filters, filter, cursor: paged.cursor })
+  const stoppedWindowMinutes = useSettings().data?.stopped_tasks_window_minutes
   const data = page.data
   const summary = data?.summary
   const [viewingAll, setViewingAll] = useState(false)
@@ -103,7 +105,10 @@ export function Tasks() {
 
       {summary && (
         <div className={styles.grid}>
-          <Card title="By status">
+          <Card
+            title="By status"
+            right={stoppedWindowMinutes === undefined ? undefined : `Stopped: last ${stoppedWindowMinutes} min`}
+          >
             <Donut
               segments={[
                 { name: 'Running, healthy', v: summary.by_status.running_healthy, color: 'var(--success)' },
@@ -128,7 +133,7 @@ export function Tasks() {
               </div>
             )}
           </Card>
-          <Card title="Why tasks stopped">
+          <Card title="Why tasks stopped" right={STOP_REASONS_WINDOW_LABEL}>
             <HBars
               items={summary.stop_reasons.map((reason) => ({
                 name: reason.reason,

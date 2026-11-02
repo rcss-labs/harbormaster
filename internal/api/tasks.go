@@ -133,7 +133,7 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 		return TasksListDTO{}, err
 	}
 	now := s.now()
-	summary, err := s.taskSummaryDTO(ctx, sc, base, now.Add(-taskSummaryWindow))
+	summary, err := s.taskSummaryDTO(ctx, sc, base, now.Add(-taskSummaryWindow), base.StoppedAfter)
 	if err != nil {
 		return TasksListDTO{}, err
 	}
@@ -183,8 +183,8 @@ func taskDTO(sc scope, view *estateView, accountNames map[string]string, row sto
 }
 
 // taskSummaryDTO aggregates the visible estate, or only the scoped service when one is given.
-func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQuery, since time.Time) (TaskSummaryDTO, error) {
-	query := store.TaskSummaryQuery{TargetFilter: base.TargetFilter, Vis: sc.Vis, Cluster: base.Cluster, Service: base.Service, Since: since}
+func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQuery, since, statusSince time.Time) (TaskSummaryDTO, error) {
+	query := store.TaskSummaryQuery{TargetFilter: base.TargetFilter, Vis: sc.Vis, Cluster: base.Cluster, Service: base.Service, Since: since, StatusSince: statusSince}
 	summary, err := s.Store.TaskSummaryFor(ctx, query)
 	if err != nil {
 		return TaskSummaryDTO{}, err

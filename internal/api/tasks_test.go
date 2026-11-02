@@ -112,8 +112,8 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 			t.Errorf("stopped task outside the window listed: %s stopped %v", task.ShortID, task.StoppedAt)
 		}
 	}
-	if got.Summary.ByStatus.StoppedError <= got.Counts.Stopped {
-		t.Errorf("summary.by_status.stopped_error = %d must still cover all 72 h stops (> %d)", got.Summary.ByStatus.StoppedError, got.Counts.Stopped)
+	if byStatusStopped := got.Summary.ByStatus.StoppedError + got.Summary.ByStatus.StoppedNormal; byStatusStopped != got.Counts.Stopped {
+		t.Errorf("summary.by_status stopped = %d, want the %d stops inside the window", byStatusStopped, got.Counts.Stopped)
 	}
 	if got.Summary.ByStatus.StoppedError == 0 || got.Summary.ByStatus.RunningUnhealthy != 1 {
 		t.Errorf("summary.by_status = %+v", got.Summary.ByStatus)
@@ -293,6 +293,10 @@ func TestServiceTasks_SummaryValues(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	c := login(t, srv, "pavel", testPassword)
+	// by_status only counts stops inside the window; widen it so all 6 OOM stops count.
+	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status %d", resp.StatusCode)
+	}
 
 	resizer := getTasks(t, c, "/api/services/"+serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")+"/tasks?filter=all")
 	by := resizer.Summary.ByStatus
@@ -386,5 +390,28 @@ func TestTasks_WindowFollowsSetting(t *testing.T) {
 	}
 	if _, err := st.GetTask(t.Context(), account, region, arn); err != nil {
 		t.Errorf("by-id read of a task outside the window failed: %v", err)
+	}
+}
+
+func TestTasks_ByStatusFollowsWindowButStopReasonsKeep72Hours(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	c := login(t, srv, "pavel", testPassword)
+	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 10}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status %d", resp.StatusCode)
+	}
+
+	summary := getTasks(t, c, "/api/tasks?filter=running&limit=500").Summary
+	byStatusStopped := summary.ByStatus.StoppedError + summary.ByStatus.StoppedNormal
+	reasons := 0
+	for _, reason := range summary.StopReasons {
+		reasons += reason.Count
+	}
+	if want := estateStoppedWithin(fk, 10*time.Minute); want < 1 || byStatusStopped != want {
+		t.Errorf("by_status stopped = %d, want the %d stops inside 10 min", byStatusStopped, want)
+	}
+	if want := estateStoppedWithin(fk, 72*time.Hour); reasons != want || reasons <= byStatusStopped {
+		t.Errorf("stop_reasons total = %d, want all %d stops inside 72 h (by_status shows %d)", reasons, want, byStatusStopped)
 	}
 }

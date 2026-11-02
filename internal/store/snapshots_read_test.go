@@ -544,3 +544,50 @@ func TestListTasks_StoppedAfterZeroMeansNoWindow(t *testing.T) {
 		t.Error("zero StoppedAfter must not hide old stopped tasks")
 	}
 }
+
+func TestTaskSummaryFor_StatusSinceNarrowsOnlyTheStoppedCounts(t *testing.T) {
+	fx := newReadFixture(t)
+	ctx := context.Background()
+	admin := store.Visibility{Admin: true}
+	started := fx.now.Add(-2 * time.Hour)
+	recentStop := fx.now.Add(-5 * time.Minute)
+	stopped := func(id string, exitCode int) model.Task {
+		return model.Task{Cluster: clusterKey("core-services"), ARN: readTaskARN("core-services", id),
+			ServiceName: "payments-api", LastStatus: "STOPPED", Family: "payments-api-fam", AvailabilityZone: "eu-west-1a",
+			CapacityProvider: "FARGATE", CreatedAt: started, StartedAt: &started, StoppedAt: &recentStop, PolledAt: fx.now,
+			Containers: []model.Container{{Name: "app", ExitCode: intPtr(exitCode)}}}
+	}
+	if _, err := fx.s.UpsertTasks(ctx, []model.Task{stopped("p7recenterr", 1), stopped("p8recentok", 0)}); err != nil {
+		t.Fatal(err)
+	}
+	summarise := func(statusSince time.Time) store.TaskSummary {
+		t.Helper()
+		sum, err := fx.s.TaskSummaryFor(ctx, store.TaskSummaryQuery{
+			Vis: admin, Since: fx.now.Add(-72 * time.Hour), StatusSince: statusSince,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sum
+	}
+	stopReasons := func(sum store.TaskSummary) int {
+		total := 0
+		for _, n := range sum.StopReasons {
+			total += n
+		}
+		return total
+	}
+
+	// The fixture already stopped two errors and one normal task an hour ago.
+	all := summarise(time.Time{})
+	if all.StoppedError != 3 || all.StoppedNormal != 2 || stopReasons(all) != 5 {
+		t.Errorf("zero StatusSince = error %d normal %d reasons %d, want 3/2/5", all.StoppedError, all.StoppedNormal, stopReasons(all))
+	}
+	recent := summarise(fx.now.Add(-10 * time.Minute))
+	if recent.StoppedError != 1 || recent.StoppedNormal != 1 {
+		t.Errorf("StatusSince 10 min = error %d normal %d, want 1/1", recent.StoppedError, recent.StoppedNormal)
+	}
+	if stopReasons(recent) != 5 {
+		t.Errorf("StatusSince changed stop reasons: %d, want 5", stopReasons(recent))
+	}
+}
