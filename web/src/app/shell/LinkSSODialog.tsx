@@ -5,6 +5,16 @@ import { Dialog } from '../../components/Dialog'
 import { navigateExternal } from './navigateExternal'
 import styles from './shell.module.css'
 
+/** Only http(s) is a valid identity provider destination; javascript: and data: URLs must never be navigated to. */
+function isWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url, window.location.origin)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 /** Re-checks the current password, then sends the browser to the identity provider URL the server returns. */
 export function LinkSSODialog({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState('')
@@ -12,7 +22,13 @@ export function LinkSSODialog({ onClose }: { onClose: () => void }) {
 
   const start = useMutation({
     mutationFn: () => api.post<{ redirect_url: string }>('/api/auth/saml/link', { password }),
-    onSuccess: (result) => navigateExternal(result.redirect_url),
+    onSuccess: (result) => {
+      if (!isWebUrl(result.redirect_url)) {
+        setError('Could not start single sign-on. Try again or contact an administrator.')
+        return
+      }
+      navigateExternal(result.redirect_url)
+    },
     onError: (caught) => setError(caught.message),
   })
 

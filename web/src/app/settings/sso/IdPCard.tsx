@@ -5,6 +5,7 @@ import type { SSOConfigDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
 import { Card } from '../../../components/Card'
+import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { KV } from '../../../components/KV'
 import { Seg } from '../../../components/Seg'
 import { useToast } from '../../../components/Toast'
@@ -36,6 +37,7 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
   const [ssoUrl, setSsoUrl] = useState<string | null>(null)
   const [pem, setPem] = useState('')
   const [error, setError] = useState('')
+  const [replacing, setReplacing] = useState<(() => void) | null>(null)
 
   const saved = (updated: SSOConfigDTO) => {
     queryClient.setQueryData(['sso'], updated)
@@ -63,9 +65,16 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
   const entityChanged = config.idp_entity_id !== '' && entityDraft !== config.idp_entity_id
   const busy = importMetadata.isPending || saveManual.isPending
 
-  const upload = async () => {
+  /** An import can replace the stored entity ID, so with one stored the admin confirms first. */
+  const importConfirmed = (body: () => Promise<{ url: string } | { xml: string }>) => {
+    const run = () => void body().then((payload) => importMetadata.mutate(payload))
+    if (config.idp_entity_id !== '') setReplacing(() => run)
+    else run()
+  }
+
+  const upload = () => {
     if (!file) return
-    importMetadata.mutate({ xml: await file.text() })
+    importConfirmed(async () => ({ xml: await file.text() }))
   }
 
   const saveManualFields = () => {
@@ -108,7 +117,7 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
               type="button"
               className={`${styles.btn} ${styles.primary}`}
               disabled={busy || metadataUrl.trim() === ''}
-              onClick={() => importMetadata.mutate({ url: metadataUrl.trim() })}
+              onClick={() => importConfirmed(async () => ({ url: metadataUrl.trim() }))}
             >
               Fetch
             </button>
@@ -120,7 +129,7 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
               <span>Metadata file</span>
               <input type="file" accept=".xml" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
             </label>
-            <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={busy || !file} onClick={() => void upload()}>
+            <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={busy || !file} onClick={upload}>
               Upload
             </button>
           </div>
@@ -192,7 +201,7 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
                   type="button"
                   className={styles.btn}
                   disabled={busy}
-                  onClick={() => importMetadata.mutate({ url: config.metadata_url ?? '' })}
+                  onClick={() => importConfirmed(async () => ({ url: config.metadata_url ?? '' }))}
                 >
                   Refresh
                 </button>
@@ -201,6 +210,18 @@ export function IdPCard({ config }: { config: SSOConfigDTO }) {
           </>
         )}
       </div>
+      {replacing && (
+        <ConfirmDialog
+          title="Replace the identity provider configuration?"
+          sub={ENTITY_ID_CHANGE_WARNING}
+          confirmLabel="Continue"
+          onConfirm={() => {
+            replacing()
+            setReplacing(null)
+          }}
+          onCancel={() => setReplacing(null)}
+        />
+      )}
     </Card>
   )
 }

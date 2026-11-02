@@ -1,3 +1,4 @@
+import type { APIResponse } from '@playwright/test'
 import { asUser, expect, newGuardedContext, test, type Page } from './fixtures/test'
 import { SEED_PASSWORD } from './helpers'
 
@@ -230,20 +231,23 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
     } finally {
       // Idempotent cleanup through the API, so a failure halfway still leaves later specs and runs a clean database.
       const api = page.request
-      await api.put('/api/sso/enabled', { data: { enabled: false } })
+      // Every cleanup call must succeed (404 where the thing is already gone), so a failed cleanup fails loudly.
+      const expectCleaned = (response: APIResponse, what: string) => {
+        expect(response.ok() || response.status() === 404, `cleanup: ${what} returned ${response.status()}`).toBe(true)
+      }
+      expectCleaned(await api.put('/api/sso/enabled', { data: { enabled: false } }), 'disable SSO')
       const users = await api.get('/api/users')
-      if (users.ok()) {
-        const body = (await users.json()) as { items?: Array<{ id: number; username: string; sso: string; break_glass: boolean }> } | Array<{ id: number; username: string; sso: string; break_glass: boolean }>
-        const list = Array.isArray(body) ? body : (body.items ?? [])
-        for (const user of list) {
-          if (user.username === 'alex') {
-            await api.delete(`/api/users/${user.id}`)
-            continue
-          }
-          if (user.sso === 'linked') await api.post(`/api/users/${user.id}/sso-unlink`)
-          else if (user.sso === 'pending' || user.sso === 'pending_expired') await api.delete(`/api/users/${user.id}/sso-link`)
-          if (user.break_glass) await api.post(`/api/users/${user.id}/break-glass`, { data: { break_glass: false } })
+      expect(users.ok(), `cleanup: list users returned ${users.status()}`).toBe(true)
+      const body = (await users.json()) as { items?: Array<{ id: number; username: string; sso: string; break_glass: boolean }> } | Array<{ id: number; username: string; sso: string; break_glass: boolean }>
+      const list = Array.isArray(body) ? body : (body.items ?? [])
+      for (const user of list) {
+        if (user.username === 'alex') {
+          expectCleaned(await api.delete(`/api/users/${user.id}`), 'delete alex')
+          continue
         }
+        if (user.sso === 'linked') expectCleaned(await api.post(`/api/users/${user.id}/sso-unlink`), `unlink ${user.username}`)
+        else if (user.sso === 'pending' || user.sso === 'pending_expired') expectCleaned(await api.delete(`/api/users/${user.id}/sso-link`), `clear link of ${user.username}`)
+        if (user.break_glass) expectCleaned(await api.post(`/api/users/${user.id}/break-glass`, { data: { break_glass: false } }), `remove break-glass of ${user.username}`)
       }
     }
   })

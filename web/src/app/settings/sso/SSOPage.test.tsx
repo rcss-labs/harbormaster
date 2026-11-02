@@ -28,6 +28,96 @@ function serveConfig(config: SSOConfigDTO) {
   server.use(http.get('/api/sso', () => HttpResponse.json(config)))
 }
 
+const REPLACE_TITLE = 'Replace the identity provider configuration?'
+const REPLACE_WARNING =
+  'Changing the identity provider signs out every SSO user and detaches every linked and pending SSO identity. Users keep their permissions and must be linked again, or will be created again at their next sign-in.'
+
+describe('SSOPage replace-IdP confirm', () => {
+  const countMetadataPosts = () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.post('/api/sso/metadata', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json(SSO_CONFIGURED_OFF)
+      }),
+    )
+    return bodies
+  }
+  const fetchByUrl = async () => {
+    await userEvent.type(await screen.findByLabelText('Metadata URL'), 'https://idp.example.test/saml/metadata.xml')
+    await userEvent.click(screen.getByRole('button', { name: 'Fetch' }))
+  }
+  const uploadFile = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Metadata file' }))
+    await userEvent.upload(screen.getByLabelText('Metadata file'), new File(['<EntityDescriptor/>'], 'idp.xml', { type: 'text/xml' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Upload' }))
+  }
+
+  it('Fetch with a stored entity id confirms first, then posts', async () => {
+    serveConfig(SSO_CONFIGURED_OFF)
+    const bodies = countMetadataPosts()
+    renderApp('/settings/sso')
+    await fetchByUrl()
+    expect(await screen.findByText(REPLACE_TITLE)).toBeInTheDocument()
+    expect(screen.getByText(REPLACE_WARNING)).toBeInTheDocument()
+    expect(bodies).toHaveLength(0)
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(bodies).toEqual([{ url: 'https://idp.example.test/saml/metadata.xml' }]))
+  })
+
+  it('cancelling the Fetch confirm sends no request', async () => {
+    serveConfig(SSO_CONFIGURED_OFF)
+    const bodies = countMetadataPosts()
+    renderApp('/settings/sso')
+    await fetchByUrl()
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByText(REPLACE_TITLE)).not.toBeInTheDocument()
+    expect(bodies).toHaveLength(0)
+  })
+
+  it('Fetch with nothing stored posts without a confirm', async () => {
+    serveConfig(SSO_UNCONFIGURED)
+    const bodies = countMetadataPosts()
+    renderApp('/settings/sso')
+    await fetchByUrl()
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(screen.queryByText(REPLACE_TITLE)).not.toBeInTheDocument()
+  })
+
+  it('Upload with a stored entity id confirms first, then posts', async () => {
+    serveConfig(SSO_CONFIGURED_OFF)
+    const bodies = countMetadataPosts()
+    renderApp('/settings/sso')
+    await uploadFile()
+    expect(await screen.findByText(REPLACE_TITLE)).toBeInTheDocument()
+    expect(bodies).toHaveLength(0)
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(bodies).toEqual([{ xml: '<EntityDescriptor/>' }]))
+  })
+
+  it('cancelling the Upload confirm sends no request', async () => {
+    serveConfig(SSO_CONFIGURED_OFF)
+    const bodies = countMetadataPosts()
+    renderApp('/settings/sso')
+    await uploadFile()
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(bodies).toHaveLength(0)
+  })
+
+  it('Refresh confirms first, then posts the stored metadata URL; cancel sends nothing', async () => {
+    serveConfig(SSO_CONFIGURED_OFF)
+    const bodies = countMetadataPosts()
+    renderApp('/settings/sso')
+    await userEvent.click(await screen.findByRole('button', { name: 'Refresh' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(bodies).toHaveLength(0)
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(await screen.findByText(REPLACE_TITLE)).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(bodies).toEqual([{ url: SSO_CONFIGURED_OFF.metadata_url }]))
+  })
+})
+
 describe('SSOPage', () => {
   it('unconfigured state shows SP values and the three import modes', async () => {
     serveConfig({ ...SSO_UNCONFIGURED, break_glass_admins: 0 })
@@ -270,6 +360,7 @@ describe('SSOPage', () => {
     await userEvent.clear(label)
     await userEvent.type(label, 'Sign in with Acme')
     await userEvent.selectOptions(screen.getByLabelText('NameID format'), 'email')
+    expect(screen.getByLabelText('Username attribute')).toHaveAttribute('placeholder', 'Derived from email')
     await userEvent.type(screen.getByLabelText('Username attribute'), 'uid')
     const skew = screen.getByLabelText('Clock skew (seconds)')
     await userEvent.clear(skew)

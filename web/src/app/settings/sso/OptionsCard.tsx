@@ -107,7 +107,7 @@ export function OptionsCard({ config }: { config: SSOConfigDTO }) {
             <span>Username attribute</span>
             <input
               className={styles.ctl}
-              placeholder="uid"
+              placeholder="Derived from email"
               value={draft.attr_username}
               onChange={(event) => set('attr_username', event.target.value)}
             />

@@ -73,6 +73,19 @@ describe('Sidebar SSO linking', () => {
     expect(body).toEqual({ password: 'hunter2' })
   })
 
+  it('refuses to navigate to a non-http(s) redirect_url and shows a generic error', async () => {
+    ssoOn()
+    server.use(http.post('/api/auth/saml/link', () => HttpResponse.json({ redirect_url: 'javascript:alert(1)' })))
+    renderApp('/')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: LINK }))
+    const dialog = screen.getByRole('dialog', { name: 'Link your SSO account' })
+    await user.type(within(dialog).getByLabelText('Password'), 'hunter2')
+    await user.click(within(dialog).getByRole('button', { name: 'Continue to identity provider' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/.+/)
+    expect(navigateExternal).not.toHaveBeenCalled()
+  })
+
   it('dialog shows the API error for a wrong password', async () => {
     ssoOn()
     server.use(

@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { server } from '../../../test/msw'
-import { AUTH_OPTIONS_ON, ME_SSO_USER, SSO_CONFIGURED_OFF, USERS } from '../../../test/fixtures'
+import { AUTH_OPTIONS_ON, ME_ADMIN, ME_SSO_USER, SSO_CONFIGURED_OFF, USERS } from '../../../test/fixtures'
 import { renderApp } from '../../../test/renderApp'
 import { PRESETS, normalize, presetOf, toggle } from '../perms'
 
@@ -265,5 +265,51 @@ describe('change password route', () => {
     server.use(http.get('/api/me', () => HttpResponse.json(ME_SSO_USER)))
     renderApp('/password')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/))
+  })
+})
+
+describe('acting on yourself', () => {
+  const serveMe = (initial: typeof ME_ADMIN) => {
+    let current = initial
+    server.use(
+      http.get('/api/me', () => HttpResponse.json(current)),
+      http.get('/api/auth/options', () => HttpResponse.json(AUTH_OPTIONS_ON)),
+    )
+    return (next: typeof ME_ADMIN) => {
+      current = next
+    }
+  }
+
+  it('unlinking yourself refreshes /api/me so the sidebar offers Link SSO account', async () => {
+    const setMe = serveMe({ ...ME_ADMIN, sso_linked: true })
+    server.use(
+      http.post('/api/users/1/sso-unlink', () => {
+        setMe({ ...ME_ADMIN, sso_linked: false })
+        return HttpResponse.json({})
+      }),
+    )
+    renderApp('/settings/users')
+    await screen.findByRole('button', { name: 'Sign out' })
+    expect(screen.queryByRole('button', { name: 'Link SSO account' })).not.toBeInTheDocument()
+    fireEvent.click(within(await userRow('pavel')).getByRole('button', { name: 'Unlink SSO…' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unlink' }))
+    expect(await screen.findByRole('button', { name: 'Link SSO account' })).toBeInTheDocument()
+  })
+
+  it('toggling break-glass refetches the SSO configuration', async () => {
+    serveMe(ME_ADMIN)
+    let configFetches = 0
+    server.use(
+      http.get('/api/sso', () => {
+        configFetches += 1
+        return HttpResponse.json(SSO_CONFIGURED_OFF)
+      }),
+    )
+    renderApp('/settings/users')
+    fireEvent.click(within(await userRow('pavel')).getByRole('button', { name: /break-glass/ }))
+    await waitFor(() => expect(configFetches).toBeGreaterThan(0))
+    const before = configFetches
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /break-glass/ }))
+    await waitFor(() => expect(configFetches).toBeGreaterThan(before))
   })
 })

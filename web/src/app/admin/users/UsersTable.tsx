@@ -9,6 +9,7 @@ import { Pill } from '../../../components/Pill'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
+import { useAuth } from '../../auth/AuthProvider'
 import { PendingLinkDialog } from './PendingLinkDialog'
 import styles from './users.module.css'
 
@@ -19,6 +20,7 @@ type Pending = { kind: 'reset' | 'admin' | 'delete' | 'breakglass' | 'unlink'; u
 export function UsersTable({ users, meId, ssoConfigured = false }: { users: UserDTO[]; meId: number; ssoConfigured?: boolean }) {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const auth = useAuth()
   const [pending, setPending] = useState<Pending | null>(null)
   const [linking, setLinking] = useState<UserDTO | null>(null)
 
@@ -26,6 +28,11 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
     void queryClient.invalidateQueries({ queryKey: ['users'] })
     void queryClient.invalidateQueries({ queryKey: ['permissions'] })
   }
+  // Acting on yourself changes /api/me (sidebar link, hints); other users' changes do not.
+  const refreshMe = (user: UserDTO) => {
+    if (user.id === meId) void auth.refresh()
+  }
+  const refreshSSO = () => void queryClient.invalidateQueries({ queryKey: ['sso'] })
   const fail = (error: Error) => toast.show(error.message, 'bad')
 
   const showTemporaryPassword = (username: string, password: string) =>
@@ -43,12 +50,18 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
     onSuccess: ({ user, body }) => {
       showTemporaryPassword(user.username, body.temporary_password)
       refresh()
+      refreshSSO()
+      refreshMe(user)
     },
     onError: fail,
   })
   const setBreakGlass = useMutation({
     mutationFn: (user: UserDTO) => api.post(`/api/users/${user.id}/break-glass`, { break_glass: !user.break_glass }),
-    onSuccess: refresh,
+    onSuccess: (_result, user) => {
+      refresh()
+      refreshSSO()
+      refreshMe(user)
+    },
     onError: (error) => {
       fail(error)
       refresh()
@@ -56,9 +69,10 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
   })
   const clearLink = useMutation({
     mutationFn: (user: UserDTO) => api.del(`/api/users/${user.id}/sso-link`),
-    onSuccess: () => {
+    onSuccess: (_result, user) => {
       toast.show('Pending link cleared.')
       refresh()
+      refreshMe(user)
     },
     onError: (error) => {
       fail(error)
@@ -71,6 +85,8 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
     onSuccess: ({ user, body }) => {
       if (body?.temporary_password) showTemporaryPassword(user.username, body.temporary_password)
       refresh()
+      refreshSSO()
+      refreshMe(user)
     },
     onError: (error) => {
       fail(error)
