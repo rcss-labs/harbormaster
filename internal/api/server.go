@@ -58,6 +58,11 @@ type Server struct {
 	MetricsToken string
 	// Telemetry is the registry /metrics renders; New defaults it to telemetry.Default.
 	Telemetry *telemetry.Registry
+
+	// plan 07: SAML single sign-on. New fills SAML from the other fields; tests may pre-set parts of it.
+	SAML *samlService
+	// FakeIdP is the dev-only fake identity provider, mounted at /fake-idp/ when non-nil.
+	FakeIdP http.Handler
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
@@ -85,6 +90,8 @@ func New(s Server) *Server {
 	if s.Telemetry == nil {
 		s.Telemetry = telemetry.Default
 	}
+	// plan 07
+	s.SAML = newSAMLService(s.SAML, &s)
 	// plan 04: terminal
 	if s.ExecLimiter == nil {
 		s.ExecLimiter = execbridge.NewLimiter(s.Cfg.ExecMaxSessionsPerUser)
@@ -119,9 +126,15 @@ func (s *Server) Handler() http.Handler {
 }
 
 // onlyAPI applies mw to /api paths so static files and /healthz never touch the session store.
+// The SAML ACS is excluded: it must not read or touch the session cookie (it is CSRF-exempt because
+// it acts on nothing but the request row and the binding cookie).
 func onlyAPI(mw func(http.Handler) http.Handler, next http.Handler) http.Handler {
 	wrapped := mw(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == samlACSPath {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
 			wrapped.ServeHTTP(w, r)
 			return
@@ -144,6 +157,22 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "POST /api/auth/login", s.login, routeOptions{Public: true})
 	s.handle(mux, "GET /api/auth/setup", s.setupNeeded, routeOptions{Public: true})
 	s.handle(mux, "POST /api/auth/setup", s.setupComplete, routeOptions{Public: true})
+	// plan 07: SAML single sign-on. The ACS is the only new CSRF-exempt POST; it never reads the session.
+	s.handle(mux, "GET /api/auth/options", s.authOptions, routeOptions{Public: true})
+	s.handle(mux, "GET /api/auth/saml/login", s.samlLogin, routeOptions{Public: true, NoETag: true})
+	s.handle(mux, "POST "+samlACSPath, s.samlACS, routeOptions{Public: true, NoETag: true})
+	s.handle(mux, "GET /api/auth/saml/metadata", s.samlMetadata, routeOptions{Public: true})
+	s.handle(mux, "POST /api/auth/saml/link", s.samlLinkStart, routeOptions{})
+	// The catch-all below would answer a GET with 404; both are POST-only.
+	postOnly := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use POST.")
+	}
+	s.handle(mux, "GET /api/auth/saml/link", postOnly, routeOptions{Public: true, NoETag: true})
+	s.handle(mux, "GET "+samlACSPath, postOnly, routeOptions{Public: true, NoETag: true})
+	if s.FakeIdP != nil {
+		mux.Handle("/fake-idp/", s.FakeIdP)
+	}
 	s.handle(mux, "POST /api/auth/logout", s.logout, routeOptions{})
 	s.handle(mux, "POST /api/auth/password", s.changePassword, routeOptions{})
 	s.handle(mux, "GET /api/me", s.me, routeOptions{})
@@ -165,6 +194,17 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "DELETE /api/users/{id}", s.deleteUser, routeOptions{Admin: true})
 	s.handle(mux, "POST /api/users/{id}/reset-password", s.resetUserPassword, routeOptions{Admin: true})
 	s.handle(mux, "POST /api/users/{id}/admin", s.setUserAdmin, routeOptions{Admin: true})
+	// plan 07: SSO administration
+	s.handle(mux, "POST /api/users/{id}/break-glass", s.setBreakGlass, routeOptions{Admin: true})
+	s.handle(mux, "PUT /api/users/{id}/sso-link", s.setPendingLink, routeOptions{Admin: true})
+	s.handle(mux, "DELETE /api/users/{id}/sso-link", s.clearPendingLink, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/users/{id}/sso-unlink", s.unlinkSSO, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/sso", s.getSSO, routeOptions{Admin: true})
+	s.handle(mux, "PUT /api/sso", s.putSSO, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/sso/metadata", s.importSSOMetadata, routeOptions{Admin: true})
+	s.handle(mux, "PUT /api/sso/enabled", s.setSSOEnabled, routeOptions{Admin: true})
+	s.handle(mux, "POST /api/sso/key", s.rotateSSOKey, routeOptions{Admin: true})
+	s.handle(mux, "GET /api/sso/tests/{id}", s.takeSSOTest, routeOptions{Admin: true, NoETag: true})
 	s.handle(mux, "GET /api/permissions", s.getPermissions, routeOptions{Admin: true})
 	s.handle(mux, "PUT /api/permissions/{userId}/{tagId}", s.setPermission, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/tags", s.listTagItems, routeOptions{Admin: true})

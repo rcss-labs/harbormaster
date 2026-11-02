@@ -122,12 +122,18 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 		}
 	}
 
+	probe := base
+	probe.Filter, probe.Limit = "stopped_error", 1
+	if _, counts.StoppedError, err = s.Store.ListTasks(ctx, probe); err != nil {
+		return TasksListDTO{}, err
+	}
+
 	view, err := s.loadEstate(ctx, base.TargetFilter, sc.Vis, base.Cluster, nil)
 	if err != nil {
 		return TasksListDTO{}, err
 	}
 	now := s.now()
-	summary, err := s.taskSummaryDTO(ctx, sc, base, now.Add(-taskSummaryWindow))
+	summary, err := s.taskSummaryDTO(ctx, sc, base, now.Add(-taskSummaryWindow), base.StoppedAfter)
 	if err != nil {
 		return TasksListDTO{}, err
 	}
@@ -136,9 +142,13 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 		return TasksListDTO{}, err
 	}
 
+	names, err := s.accountNames(ctx)
+	if err != nil {
+		return TasksListDTO{}, err
+	}
 	items := make([]TaskDTO, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, taskDTO(sc, view, row))
+		items = append(items, taskDTO(sc, view, names, row))
 	}
 	var next *string
 	if offset+len(rows) < total {
@@ -147,7 +157,7 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 	return TasksListDTO{Items: items, Next: next, PolledAt: polledAt, Counts: counts, Summary: summary}, nil
 }
 
-func taskDTO(sc scope, view *estateView, row store.TaskRow) TaskDTO {
+func taskDTO(sc scope, view *estateView, accountNames map[string]string, row store.TaskRow) TaskDTO {
 	tag := authz.EffectiveTaskTag(sc.Tags, row.Cluster, row.ServiceName)
 	capacity := row.CapacityProvider
 	if capacity == "" {
@@ -155,8 +165,9 @@ func taskDTO(sc scope, view *estateView, row store.TaskRow) TaskDTO {
 	}
 	dto := TaskDTO{
 		ID: model.TaskID(row.Cluster.AccountID, row.Cluster.Region, row.ARN), ShortID: row.ShortID(), ARN: row.ARN,
-		Cluster: ClusterRef{ID: row.Cluster.ID(), Name: row.Cluster.Cluster},
-		Group:   row.Group, StartedBy: row.StartedBy, Status: row.LastStatus, ExitCode: row.ExitCode,
+		Cluster:     ClusterRef{ID: row.Cluster.ID(), Name: row.Cluster.Cluster},
+		AccountName: accountNames[row.Cluster.AccountID], Region: row.Cluster.Region,
+		Group: row.Group, StartedBy: row.StartedBy, Status: row.LastStatus, ExitCode: row.ExitCode,
 		Health: healthOf(row.Task), Family: row.Family, Revision: row.Revision,
 		PrivateIP: row.PrivateIP, SubnetID: row.SubnetID, AZ: row.AvailabilityZone, Capacity: capacity,
 		CPU: row.CPU, Memory: row.Memory, StartedAt: row.StartedAt, StoppedAt: row.StoppedAt,
@@ -172,8 +183,8 @@ func taskDTO(sc scope, view *estateView, row store.TaskRow) TaskDTO {
 }
 
 // taskSummaryDTO aggregates the visible estate, or only the scoped service when one is given.
-func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQuery, since time.Time) (TaskSummaryDTO, error) {
-	query := store.TaskSummaryQuery{TargetFilter: base.TargetFilter, Vis: sc.Vis, Cluster: base.Cluster, Service: base.Service, Since: since}
+func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQuery, since, statusSince time.Time) (TaskSummaryDTO, error) {
+	query := store.TaskSummaryQuery{TargetFilter: base.TargetFilter, Vis: sc.Vis, Cluster: base.Cluster, Service: base.Service, Since: since, StatusSince: statusSince}
 	summary, err := s.Store.TaskSummaryFor(ctx, query)
 	if err != nil {
 		return TaskSummaryDTO{}, err

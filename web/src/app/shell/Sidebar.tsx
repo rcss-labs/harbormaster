@@ -1,30 +1,50 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
-import { useClusters, useTasks } from '../../api/hooks'
+import { useAuthOptions, useClusters, useSettings, useTasks } from '../../api/hooks'
 import { Brand } from '../../components/Brand'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
+import { LinkSSODialog } from './LinkSSODialog'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
+
+interface NavBadge {
+  count: number
+  kind: 'warn' | 'bad'
+  /** Accessible name and tooltip. */
+  label: string
+}
 
 interface NavItemProps {
   to: string
   label: string
   count?: number
   bad?: boolean
+  /** Coloured counts after the label; they come in addition to `count`. */
+  badges?: NavBadge[]
   /** Extra path prefixes that also mark this item active. */
   alsoActiveFor?: string[]
   end?: boolean
 }
 
-function NavItem({ to, label, count, bad, alsoActiveFor = [], end }: NavItemProps) {
+function NavItem({ to, label, count, bad, badges = [], alsoActiveFor = [], end }: NavItemProps) {
   const { pathname } = useLocation()
   const extra = alsoActiveFor.some((prefix) => pathname.startsWith(prefix))
   return (
     <NavLink to={to} end={end} className={({ isActive }) => (isActive || extra ? styles.active : undefined)}>
       {label}
       {count !== undefined && <span className={`${styles.count} ${bad ? styles.countBad : ''}`}>{count}</span>}
+      {badges.map((badge) => (
+        <span
+          key={badge.kind}
+          className={`${styles.count} ${badge.kind === 'bad' ? styles.countBad : styles.countWarn}`}
+          aria-label={badge.label}
+          title={badge.label}
+        >
+          {badge.count}
+        </span>
+      ))}
     </NavLink>
   )
 }
@@ -42,8 +62,21 @@ export function Sidebar() {
   const alerts = useAlerts(filters)
   const clusters = useClusters(filters)
   const running = useTasks({ ...filters, filter: 'running' })
+  const settings = useSettings()
+  const authOptions = useAuthOptions()
+  const [linking, setLinking] = useState(false)
   if (!me) return null
 
+  const canLinkSSO = authOptions.data?.sso != null && me.has_password && !me.sso_linked
+  const unhealthy = running.data?.summary.by_status.running_unhealthy ?? 0
+  const stoppedErrors = running.data?.counts.stopped_error ?? 0
+  const windowMinutes = settings.data?.stopped_tasks_window_minutes
+  const taskBadges: NavBadge[] = []
+  if (unhealthy > 0) taskBadges.push({ count: unhealthy, kind: 'warn', label: `${unhealthy} unhealthy` })
+  if (stoppedErrors > 0) {
+    const within = windowMinutes === undefined ? '' : ` in the last ${windowMinutes} min`
+    taskBadges.push({ count: stoppedErrors, kind: 'bad', label: `${stoppedErrors} stopped with errors${within}` })
+  }
   const dangerAlerts = alerts.data?.counts.danger ?? 0
   const signOut = async () => {
     try {
@@ -62,7 +95,7 @@ export function Sidebar() {
       <nav className={styles.nav} aria-label="Main">
         <NavItem to="/" end label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
         <NavItem to="/clusters" label="Clusters" count={clusters.data?.items.length} alsoActiveFor={['/clusters', '/services']} />
-        <NavItem to="/tasks" label="Tasks" count={running.data?.counts.running} />
+        <NavItem to="/tasks" label="Tasks" badges={taskBadges} />
         <NavItem to="/networks" label="Networks" />
         <NavItem to="/storage" label="Storage" />
         {isAdmin ? (
@@ -82,9 +115,16 @@ export function Sidebar() {
           Signed in as <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
         </div>
         <div className={styles.sideActions}>
-          <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
-            Change password
-          </button>
+          {me.has_password && (
+            <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
+              Change password
+            </button>
+          )}
+          {canLinkSSO && (
+            <button type="button" className={styles.btn} onClick={() => setLinking(true)}>
+              Link SSO account
+            </button>
+          )}
           <button type="button" className={styles.btn} onClick={signOut}>
             Sign out
           </button>
@@ -93,6 +133,7 @@ export function Sidebar() {
           Running on ECS · <code>harbormaster/harbormaster-server</code>
         </div>
       </div>
+      {linking && <LinkSSODialog onClose={() => setLinking(false)} />}
     </aside>
   )
 }

@@ -44,6 +44,12 @@ type MeDTO struct {
 	Tags               []MeTagDTO     `json:"tags"`
 	Accounts           []MeAccountDTO `json:"accounts"`
 	Regions            []string       `json:"regions"`
+	// plan 07: credentials
+	HasPassword bool    `json:"has_password"`
+	SSOLinked   bool    `json:"sso_linked"`
+	BreakGlass  bool    `json:"break_glass"`
+	Email       *string `json:"email"`
+	DisplayName *string `json:"display_name"`
 }
 
 // ListResponse is the body of every paginated list endpoint. Next is null on the last page.
@@ -372,6 +378,8 @@ type TaskDTO struct {
 	ARN             string      `json:"arn"`
 	Service         *ServiceRef `json:"service"`
 	Cluster         ClusterRef  `json:"cluster"`
+	AccountName     string      `json:"account_name"`
+	Region          string      `json:"region"`
 	Group           string      `json:"group"`
 	StartedBy       string      `json:"started_by"`
 	Status          string      `json:"status"`
@@ -400,6 +408,8 @@ type TaskCountsDTO struct {
 	Running  int `json:"running"`
 	Stopped  int `json:"stopped"`
 	All      int `json:"all"`
+	// StoppedError counts failed stops inside the stopped-tasks window.
+	StoppedError int `json:"stopped_error"`
 }
 
 // TaskStatusSummaryDTO splits tasks by running health and recent stop outcome.
@@ -507,4 +517,49 @@ type TagAssignmentsResponse struct {
 // SettingsDTO is the body of GET and PUT /api/settings.
 type SettingsDTO struct {
 	StoppedTasksWindowMinutes int `json:"stopped_tasks_window_minutes"`
+}
+
+// CertDTO describes a certificate without exposing its PEM. Fingerprint is the colon-separated SHA-256.
+type CertDTO struct {
+	Fingerprint string    `json:"fingerprint"`
+	Subject     string    `json:"subject"`
+	NotAfter    time.Time `json:"not_after"`
+}
+
+// SSOConfigDTO is the body of the admin SSO endpoints.
+type SSOConfigDTO struct {
+	Configured                   bool       `json:"configured"`
+	Enabled                      bool       `json:"enabled"`
+	IdPEntityID                  string     `json:"idp_entity_id"`
+	IdPSSORedirectURL            string     `json:"idp_sso_redirect_url"`
+	IdPCerts                     []CertDTO  `json:"idp_certs"`
+	MetadataURL                  *string    `json:"metadata_url"`
+	MetadataFetchedAt            *time.Time `json:"metadata_fetched_at"`
+	SPEntityID                   string     `json:"sp_entity_id"`
+	ACSURL                       string     `json:"acs_url"`
+	MetadataPath                 string     `json:"metadata_path"`
+	SPCert                       *CertDTO   `json:"sp_cert"`
+	SPKeyState                   string     `json:"sp_key_state"` // "ok" | "missing" | "undecryptable"
+	NameIDFormat                 string     `json:"name_id_format"`
+	AttrEmail                    *string    `json:"attr_email"`
+	AttrDisplayName              *string    `json:"attr_display_name"`
+	AttrUsername                 *string    `json:"attr_username"`
+	ClockSkewSeconds             int        `json:"clock_skew_seconds"`
+	ButtonLabel                  string     `json:"button_label"`
+	BreakGlassAdmins             int        `json:"break_glass_admins"`
+	PasswordUsersBlockedOnEnable int        `json:"password_users_blocked_on_enable"`
+	Warnings                     []string   `json:"warnings"`
+}
+
+// SSOTestResultDTO is the one-time result of a Test sign-in.
+type SSOTestResultDTO struct {
+	OK           bool                `json:"ok"`
+	Reason       string              `json:"reason"`
+	Message      string              `json:"message"`
+	NameID       string              `json:"name_id"`
+	NameIDFormat string              `json:"name_id_format"`
+	Attributes   map[string][]string `json:"attributes"`
+	Username     string              `json:"username"`
+	Outcome      string              `json:"outcome"` // "would_create" | "would_sign_in" | "would_link" | "" on failure
+	ExistingUser *string             `json:"existing_user"`
 }

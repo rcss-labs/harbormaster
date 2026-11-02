@@ -7,15 +7,18 @@ import { Tags } from '../admin/tags/Tags'
 import { Users } from '../admin/users/Users'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { SSOPage } from './sso/SSOPage'
 import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
 
-export type SettingsTab = 'general' | 'accounts' | 'users' | 'audit'
+export type SettingsTab = 'general' | 'accounts' | 'users' | 'tags' | 'sso' | 'audit'
 
 export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['general', 'General'],
   ['accounts', 'AWS accounts'],
   ['users', 'Users & permissions'],
+  ['tags', 'Tags'],
+  ['sso', 'Single sign-on'],
   ['audit', 'Audit log'],
 ]
 
@@ -24,16 +27,15 @@ const isSettingsTab = (value: string | undefined): value is SettingsTab => SETTI
 function TabPanel({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case 'general':
-      return (
-        <>
-          <Tags />
-          <StoppedTasksCard />
-        </>
-      )
+      return <StoppedTasksCard />
+    case 'tags':
+      return <Tags />
     case 'accounts':
       return <Accounts />
     case 'users':
       return <Users />
+    case 'sso':
+      return <SSOPage />
     case 'audit':
       return <Audit />
   }
@@ -56,11 +58,7 @@ export function SettingsPage() {
       <div className={styles.pageHead}>
         <h1>Settings</h1>
       </div>
-      <Tabs
-        items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))}
-        active={activeTab}
-        hrefFor={(key) => `/settings/${key}`}
-      />
+      <Tabs items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
       <div className={styles.panel}>
         <TabPanel tab={activeTab} />
       </div>

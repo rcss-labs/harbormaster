@@ -3,6 +3,7 @@ import { api } from './client'
 import type {
   AccountsDTO,
   AuditDTO,
+  AuthOptionsDTO,
   ClusterCardDTO,
   ClusterDTO,
   ListDTO,
@@ -14,6 +15,8 @@ import type {
   SearchDTO,
   ServiceDTO,
   SettingsDTO,
+  SSOConfigDTO,
+  SSOTestResultDTO,
   TagAssignmentsDTO,
   TagsDTO,
   TasksFilter,
@@ -161,6 +164,37 @@ export function useAudit(cursor?: string, options: Options<AuditDTO> = {}) {
     queryKey: ['audit', cursor],
     queryFn: () => api.get<AuditDTO>(`/api/audit${queryString({ cursor })}`),
     ...options,
+  })
+}
+
+// ---- Single sign-on (plan 07) ----
+
+/** Public; the login page and the sidebar read it. A failure falls back to the password form, so no retries. */
+export function useAuthOptions() {
+  return useQuery({
+    queryKey: ['auth-options'],
+    queryFn: () => api.get<AuthOptionsDTO>('/api/auth/options'),
+    retry: false,
+    staleTime: 60_000,
+  })
+}
+
+export function useSSOConfig(options: Options<SSOConfigDTO> = {}) {
+  return useQuery({ queryKey: ['sso'], queryFn: () => api.get<SSOConfigDTO>('/api/sso'), ...options })
+}
+
+/**
+ * The server deletes a test result when it is read, so the result is cached for the page's lifetime:
+ * a refetch would answer 404.
+ */
+export function useSSOTestResult(id: string | null) {
+  return useQuery({
+    queryKey: ['sso-test', id],
+    queryFn: () => api.get<SSOTestResultDTO>(`/api/sso/tests/${encodeURIComponent(id ?? '')}`),
+    enabled: id !== null,
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   })
 }
 

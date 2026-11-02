@@ -81,6 +81,15 @@
     },
     "polled_at": "time"
   },
+  "authOptions": {
+    "password_login": "string",
+    "sso": {
+      "$null": {
+        "enabled": "boolean",
+        "label": "string"
+      }
+    }
+  },
   "cluster": {
     "account_id": "string",
     "account_name": "string",
@@ -329,6 +338,7 @@
     "temporary_password": "string",
     "user": {
       "admin": "boolean",
+      "break_glass": "boolean",
       "can_see": [
         {
           "color": "string",
@@ -337,11 +347,25 @@
           "name": "string"
         }
       ],
+      "display_name": {
+        "$null": "string"
+      },
+      "email": {
+        "$null": "string"
+      },
+      "has_password": "boolean",
       "id": "number",
       "last_sign_in_at": {
         "$null": "time"
       },
       "must_change_password": "boolean",
+      "pending_link_expires_at": {
+        "$null": "time"
+      },
+      "sso": "string",
+      "sso_name_id": {
+        "$null": "string"
+      },
       "username": "string"
     }
   },
@@ -380,7 +404,15 @@
         }
       ],
       "admin": "boolean",
+      "break_glass": "boolean",
       "csrf_token": "string",
+      "display_name": {
+        "$null": "string"
+      },
+      "email": {
+        "$null": "string"
+      },
+      "has_password": "boolean",
       "id": "number",
       "must_change_password": "boolean",
       "perms": {
@@ -389,6 +421,7 @@
       "regions": [
         "string"
       ],
+      "sso_linked": "boolean",
       "tags": [
         {
           "builtin": "boolean",
@@ -442,7 +475,15 @@
       }
     ],
     "admin": "boolean",
+    "break_glass": "boolean",
     "csrf_token": "string",
+    "display_name": {
+      "$null": "string"
+    },
+    "email": {
+      "$null": "string"
+    },
+    "has_password": "boolean",
     "id": "number",
     "must_change_password": "boolean",
     "perms": {
@@ -451,6 +492,7 @@
     "regions": [
       "string"
     ],
+    "sso_linked": "boolean",
     "tags": [
       {
         "builtin": "boolean",
@@ -1050,6 +1092,70 @@
   "setup": {
     "needed": "boolean"
   },
+  "sso": {
+    "acs_url": "string",
+    "attr_display_name": {
+      "$null": "string"
+    },
+    "attr_email": {
+      "$null": "string"
+    },
+    "attr_username": {
+      "$null": "string"
+    },
+    "break_glass_admins": "number",
+    "button_label": "string",
+    "clock_skew_seconds": "number",
+    "configured": "boolean",
+    "enabled": "boolean",
+    "idp_certs": [
+      {
+        "fingerprint": "string",
+        "not_after": "time",
+        "subject": "string"
+      }
+    ],
+    "idp_entity_id": "string",
+    "idp_sso_redirect_url": "string",
+    "metadata_fetched_at": {
+      "$null": "time"
+    },
+    "metadata_path": "string",
+    "metadata_url": {
+      "$null": "string"
+    },
+    "name_id_format": "string",
+    "password_users_blocked_on_enable": "number",
+    "sp_cert": {
+      "$null": {
+        "fingerprint": "string",
+        "not_after": "time",
+        "subject": "string"
+      }
+    },
+    "sp_entity_id": "string",
+    "sp_key_state": "string",
+    "warnings": [
+      "string"
+    ]
+  },
+  "ssoTestResult": {
+    "attributes": {
+      "$map": [
+        "string"
+      ]
+    },
+    "existing_user": {
+      "$null": "string"
+    },
+    "message": "string",
+    "name_id": "string",
+    "name_id_format": "string",
+    "ok": "boolean",
+    "outcome": "string",
+    "reason": "string",
+    "username": "string"
+  },
   "storage": {
     "items": [
       {
@@ -1248,10 +1354,12 @@
       "all": "number",
       "problems": "number",
       "running": "number",
-      "stopped": "number"
+      "stopped": "number",
+      "stopped_error": "number"
     },
     "items": [
       {
+        "account_name": "string",
         "arn": "string",
         "az": "string",
         "can": {
@@ -1274,6 +1382,7 @@
         "id": "string",
         "memory": "string",
         "private_ip": "string",
+        "region": "string",
         "revision": "number",
         "service": {
           "$null": {
@@ -1334,6 +1443,7 @@
     "items": [
       {
         "admin": "boolean",
+        "break_glass": "boolean",
         "can_see": [
           {
             "color": "string",
@@ -1342,11 +1452,25 @@
             "name": "string"
           }
         ],
+        "display_name": {
+          "$null": "string"
+        },
+        "email": {
+          "$null": "string"
+        },
+        "has_password": "boolean",
         "id": "number",
         "last_sign_in_at": {
           "$null": "time"
         },
         "must_change_password": "boolean",
+        "pending_link_expires_at": {
+          "$null": "time"
+        },
+        "sso": "string",
+        "sso_name_id": {
+          "$null": "string"
+        },
         "username": "string"
       }
     ]

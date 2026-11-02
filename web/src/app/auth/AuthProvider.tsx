@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Even if the server call failed, leave the app signed out locally; the caller decides how to report the error.
       setMe(null)
       queryClient.clear()
-      navigate('/login')
+      navigate('/login?signed_out=1')
     }
   }, [navigate, queryClient])
 

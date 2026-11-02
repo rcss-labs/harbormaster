@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"io"
 	"net"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // freeAddr returns a loopback address that was free a moment ago.
@@ -114,4 +115,83 @@ func schemaScopedURL(t *testing.T, dbURL string) string {
 	q.Set("search_path", schema)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// serveUnderTest starts runServe with env on a free port and waits until /healthz answers.
+// The returned stop cancels the server and waits for it to shut down.
+func serveUnderTest(t *testing.T, env map[string]string) (base string, stop func()) {
+	t.Helper()
+	dbURL := os.Getenv("HM_TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("HM_TEST_DATABASE_URL not set")
+	}
+	addr := freeAddr(t)
+	env["HM_DATABASE_URL"] = schemaScopedURL(t, dbURL)
+	env["HM_LISTEN"] = addr
+	env["HM_BASE_URL"] = "http://" + addr
+	env["HM_COOKIE_SECURE"] = "false"
+	env["HM_POLL_JITTER"] = "1ms"
+	env["HM_LOG_LEVEL"] = "warn"
+	getenv := func(k string) string { return env[k] }
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runServe(ctx, nil, getenv, io.Discard) }()
+	base = "http://" + addr
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if resp, err := client.Get(base + "/healthz"); err == nil {
+			resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("server did not start within 10s")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return base, func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("runServe returned %v after cancel", err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("runServe did not shut down")
+		}
+	}
+}
+
+// getFakeIdPMetadata returns the status and whether the body is SAML metadata from the fake IdP.
+func getFakeIdPMetadata(t *testing.T, base string) (int, bool) {
+	t.Helper()
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(base + "/fake-idp/metadata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, bytes.Contains(body, []byte("EntityDescriptor"))
+}
+
+func TestServe_FakeAWSMountsFakeIdP(t *testing.T) {
+	base, stop := serveUnderTest(t, map[string]string{"HM_FAKE_AWS": "1"})
+	defer stop()
+	status, isMetadata := getFakeIdPMetadata(t, base)
+	if status != http.StatusOK || !isMetadata {
+		t.Errorf("GET /fake-idp/metadata in fake mode: status %d, metadata=%v; want 200 with EntityDescriptor", status, isMetadata)
+	}
+}
+
+// Production must never serve the fake IdP. Today the SPA catch-all answers 200 with index.html for
+// this extensionless path; the assertion only forbids the fake IdP's metadata.
+func TestServe_ProductionDoesNotMountFakeIdP(t *testing.T) {
+	base, stop := serveUnderTest(t, map[string]string{})
+	defer stop()
+	status, isMetadata := getFakeIdPMetadata(t, base)
+	if isMetadata {
+		t.Errorf("GET /fake-idp/metadata without fake AWS returned fake IdP metadata (status %d)", status)
+	}
 }

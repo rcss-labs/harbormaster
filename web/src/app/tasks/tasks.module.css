@@ -8,3 +8,6 @@
 
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .legendRow { margin-top: 10px; }
+.viewAll { margin-top: 10px; }
+.btn { height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; font-family: inherit; }
+.btn:hover { background: var(--hover); }

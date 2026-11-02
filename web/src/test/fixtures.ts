@@ -4,6 +4,8 @@ import type {
   AccountsDTO,
   AlertsDTO,
   AuditDTO,
+  AuthOptionsDTO,
+  CertDTO,
   ClusterCardDTO,
   ClusterDTO,
   ClusterMetricsDTO,
@@ -39,6 +41,8 @@ import type {
   TargetHealthDTO,
   TaskDTO,
   SettingsDTO,
+  SSOConfigDTO,
+  SSOTestResultDTO,
   TasksListDTO,
   UsersDTO,
 } from '../api/types'
@@ -168,7 +172,7 @@ function taskBase(
   cluster: ClusterDef,
   seed: string,
   index: number,
-): Pick<TaskDTO, 'id' | 'short_id' | 'arn' | 'cluster' | 'az' | 'subnet_id' | 'private_ip'> {
+): Pick<TaskDTO, 'id' | 'short_id' | 'arn' | 'cluster' | 'account_name' | 'region' | 'az' | 'subnet_id' | 'private_ip'> {
   const arn = `arn:aws:ecs:${cluster.region}:${cluster.account.account_id}:task/${cluster.name}/${hex(seed, 32)}`
   const [az, subnet] = AZ_SUBNETS[cluster.region][index % 2]
   const octet = REGIONS.indexOf(cluster.region) + 1
@@ -177,6 +181,8 @@ function taskBase(
     short_id: hex(seed, 8),
     arn,
     cluster: clusterRefOf(cluster),
+    account_name: cluster.account.name,
+    region: cluster.region,
     az,
     subnet_id: subnet,
     private_ip: `10.${octet}.${index % 2}.${10 + (parseInt(hex(seed, 2), 16) % 200)}`,
@@ -364,7 +370,13 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
     items,
     next: null,
     polled_at: FIXTURE_NOW,
-    counts: { problems: items.filter(inProblemsFilter).length, running: running.length, stopped: stopped.length, all: items.length },
+    counts: {
+      problems: items.filter(inProblemsFilter).length,
+      running: running.length,
+      stopped: stopped.length,
+      all: items.length,
+      stopped_error: stopped.filter(isProblem).length,
+    },
     summary: {
       by_status: {
         running_healthy: running.filter((t) => t.health !== 'UNHEALTHY').length,
@@ -696,6 +708,11 @@ export const ME_ADMIN: MeDTO = {
   tags: ME_TAGS([TAG_DEV, TAG_STAGING, TAG_PROD]),
   accounts: ME_ACCOUNTS,
   regions: REGIONS,
+  has_password: true,
+  sso_linked: false,
+  break_glass: true,
+  email: 'pavel@example.test',
+  display_name: 'Pavel',
 }
 
 export const ME_OMER: MeDTO = {
@@ -708,16 +725,110 @@ export const ME_OMER: MeDTO = {
   tags: ME_TAGS([TAG_DEV, TAG_STAGING]),
   accounts: ME_ACCOUNTS,
   regions: REGIONS,
+  has_password: true,
+  sso_linked: false,
+  break_glass: false,
+  email: null,
+  display_name: null,
+}
+
+/** A user who signs in only through SSO: linked identity, no password. */
+export const ME_SSO_USER: MeDTO = {
+  id: 5,
+  username: 'alex',
+  admin: false,
+  must_change_password: false,
+  csrf_token: 'csrf-token-alex',
+  perms: { '1': 1 },
+  tags: ME_TAGS([TAG_DEV]),
+  accounts: ME_ACCOUNTS,
+  regions: REGIONS,
+  has_password: false,
+  sso_linked: true,
+  break_glass: false,
+  email: 'alex@example.test',
+  display_name: 'Alex',
 }
 
 const plainTag = (t: TagDTO): TagDTO => ({ ...t, inherited: false })
 
+/** Credential fields every user carries; each user below overrides what differs. */
+const NO_SSO = {
+  has_password: true,
+  break_glass: false,
+  sso: 'none' as const,
+  sso_name_id: null,
+  pending_link_expires_at: null,
+  email: null,
+  display_name: null,
+}
+
 export const USERS: UsersDTO = {
   items: [
-    { id: 1, username: 'pavel', admin: true, must_change_password: false, last_sign_in_at: minutesAgo(2), can_see: [TAG_DEV, TAG_STAGING, TAG_PROD].map(plainTag) },
-    { id: 2, username: 'dana', admin: false, must_change_password: false, last_sign_in_at: minutesAgo(50), can_see: [TAG_DEV, TAG_STAGING, TAG_PROD].map(plainTag) },
-    { id: 3, username: 'omer', admin: false, must_change_password: false, last_sign_in_at: minutesAgo(26 * 60), can_see: [TAG_DEV, TAG_STAGING].map(plainTag) },
-    { id: 4, username: 'oncall', admin: false, must_change_password: false, last_sign_in_at: minutesAgo(3 * 1440), can_see: [TAG_STAGING, TAG_PROD].map(plainTag) },
+    {
+      id: 1,
+      username: 'pavel',
+      admin: true,
+      must_change_password: false,
+      last_sign_in_at: minutesAgo(2),
+      can_see: [TAG_DEV, TAG_STAGING, TAG_PROD].map(plainTag),
+      ...NO_SSO,
+      break_glass: true,
+      sso: 'linked',
+      sso_name_id: 'pavel@example.test',
+      email: 'pavel@example.test',
+      display_name: 'Pavel',
+    },
+    {
+      id: 2,
+      username: 'dana',
+      admin: false,
+      must_change_password: false,
+      last_sign_in_at: minutesAgo(50),
+      can_see: [TAG_DEV, TAG_STAGING, TAG_PROD].map(plainTag),
+      ...NO_SSO,
+      sso: 'pending',
+      sso_name_id: 'dana@example.test',
+      pending_link_expires_at: minutesAgo(-14 * 1440),
+      email: 'dana@example.test',
+      display_name: 'Dana',
+    },
+    {
+      id: 3,
+      username: 'omer',
+      admin: false,
+      must_change_password: false,
+      last_sign_in_at: minutesAgo(26 * 60),
+      can_see: [TAG_DEV, TAG_STAGING].map(plainTag),
+      ...NO_SSO,
+    },
+    {
+      id: 4,
+      username: 'oncall',
+      admin: false,
+      must_change_password: false,
+      last_sign_in_at: minutesAgo(3 * 1440),
+      can_see: [TAG_STAGING, TAG_PROD].map(plainTag),
+      ...NO_SSO,
+      sso: 'pending_expired',
+      sso_name_id: 'oncall@example.test',
+      pending_link_expires_at: minutesAgo(2 * 1440),
+    },
+    {
+      id: 5,
+      username: 'alex',
+      admin: false,
+      must_change_password: false,
+      last_sign_in_at: minutesAgo(5 * 60),
+      can_see: [TAG_DEV].map(plainTag),
+      has_password: false,
+      break_glass: false,
+      sso: 'linked',
+      sso_name_id: 'alex@example.test',
+      pending_link_expires_at: null,
+      email: 'alex@example.test',
+      display_name: 'Alex',
+    },
   ],
 }
 
@@ -1111,3 +1222,105 @@ export const TASK_DEFINITION_EDITABLE: TaskDefinitionResponse = {
 
 // ---- Settings (Task 13) ----
 export const SETTINGS: SettingsDTO = { stopped_tasks_window_minutes: 10 }
+
+// ---- Single sign-on (plan 07, Task 12). Shapes follow internal/api/saml_public.go and dto.go. ----
+
+export const AUTH_OPTIONS_OFF: AuthOptionsDTO = { sso: null, password_login: 'all' }
+export const AUTH_OPTIONS_ON: AuthOptionsDTO = { sso: { enabled: true, label: 'Sign in with Okta' }, password_login: 'break_glass' }
+
+const SP_CERT: CertDTO = {
+  fingerprint: '1B:19:59:31:58:83:07:BF:69:10:3A:11:68:17:BC:01:5F:0E:30:B9:A8:03:04:43:12:B6:F9:16:5F:28:74:86',
+  subject: 'CN=harbormaster.example.test',
+  not_after: minutesAgo(-365 * 1440),
+}
+const IDP_CERT: CertDTO = {
+  fingerprint: '4B:D3:3B:DB:44:A7:1A:27:60:5B:8A:B5:23:AC:7B:5F:83:20:96:C4:13:F3:AC:E7:3C:5C:2E:22:83:84:DF:87',
+  subject: 'CN=idp.example.test',
+  not_after: minutesAgo(-200 * 1440),
+}
+const SP_URLS = {
+  sp_entity_id: 'https://harbormaster.example.test/api/auth/saml/metadata',
+  acs_url: 'https://harbormaster.example.test/api/auth/saml/acs',
+  metadata_path: '/api/auth/saml/metadata',
+}
+
+/** Matches the Go defaults for an installation with no configuration row (`buildSSOConfigDTO`). */
+export const SSO_UNCONFIGURED: SSOConfigDTO = {
+  configured: false,
+  enabled: false,
+  idp_entity_id: '',
+  idp_sso_redirect_url: '',
+  idp_certs: [],
+  metadata_url: null,
+  metadata_fetched_at: null,
+  ...SP_URLS,
+  sp_cert: null,
+  sp_key_state: 'missing',
+  name_id_format: 'unspecified',
+  attr_email: null,
+  attr_display_name: null,
+  attr_username: null,
+  clock_skew_seconds: 120,
+  button_label: 'Sign in with SSO',
+  break_glass_admins: 1,
+  password_users_blocked_on_enable: 2,
+  warnings: [],
+}
+
+const CONFIGURED_SSO: SSOConfigDTO = {
+  ...SSO_UNCONFIGURED,
+  configured: true,
+  idp_entity_id: 'https://idp.example.test/saml',
+  idp_sso_redirect_url: 'https://idp.example.test/saml/sso',
+  idp_certs: [IDP_CERT],
+  metadata_url: 'https://idp.example.test/saml/metadata.xml',
+  metadata_fetched_at: minutesAgo(60),
+  sp_cert: SP_CERT,
+  sp_key_state: 'ok',
+  name_id_format: 'persistent',
+  attr_email: 'email',
+  attr_display_name: 'displayName',
+  button_label: 'Sign in with Okta',
+}
+
+export const SSO_CONFIGURED_OFF: SSOConfigDTO = { ...CONFIGURED_SSO, enabled: false, password_users_blocked_on_enable: 2 }
+export const SSO_CONFIGURED_ON: SSOConfigDTO = { ...CONFIGURED_SSO, enabled: true, password_users_blocked_on_enable: 2 }
+
+/** A test sign-in that would create a new user. */
+export const SSO_TEST_OK: SSOTestResultDTO = {
+  ok: true,
+  reason: '',
+  message: '',
+  name_id: 'carol@example.test',
+  name_id_format: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+  attributes: { email: ['carol@example.test'], displayName: ['Carol'] },
+  username: 'carol',
+  outcome: 'would_create',
+  existing_user: null,
+}
+
+/** A test sign-in whose NameID matches a pending link on `dana`. */
+export const SSO_TEST_WOULD_LINK: SSOTestResultDTO = {
+  ok: true,
+  reason: '',
+  message: '',
+  name_id: 'dana@example.test',
+  name_id_format: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+  attributes: { email: ['dana@example.test'], displayName: ['Dana'] },
+  username: 'dana',
+  outcome: 'would_link',
+  existing_user: 'dana',
+}
+
+/** A failed test sign-in; the message is the admin-facing text for reason `audience`. */
+export const SSO_TEST_FAIL: SSOTestResultDTO = {
+  ok: false,
+  reason: 'audience',
+  message: "The audience does not match the SP entity ID. Check the IdP app's audience setting.",
+  name_id: '',
+  name_id_format: '',
+  attributes: {},
+  username: '',
+  outcome: '',
+  existing_user: null,
+}

@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { useTasks } from '../../api/hooks'
-import type { TaskDTO, TasksFilter } from '../../api/types'
+import { useSettings, useTasks } from '../../api/hooks'
+import type { TaskDTO, TasksFilter, TasksListDTO } from '../../api/types'
 import { Donut } from '../../charts/Donut'
 import { HBars } from '../../charts/HBars'
 import { Legend } from '../../charts/Legend'
 import { Card } from '../../components/Card'
+import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { Seg } from '../../components/Seg'
 import { REASON_COLOR } from '../../components/status'
@@ -22,6 +24,42 @@ const FARGATE_SPOT_COLOR = 'var(--series-3)'
 
 const parseFilter = (value: string | null): TasksFilter => FILTERS.find((filter) => filter === value) ?? DEFAULT_FILTER
 
+const TOP_CLUSTERS = 10
+const STOP_REASONS_WINDOW_LABEL = 'Last 72 h'
+
+type ClusterCapacity = TasksListDTO['summary']['by_cluster'][number]
+const totalRunning = (cluster: ClusterCapacity) => cluster.fargate + cluster.spot
+
+/** Busiest first; clusters with the same number of tasks fall back to name order. */
+const byBusiest = (clusters: ClusterCapacity[]) =>
+  [...clusters].sort((a, b) => totalRunning(b) - totalRunning(a) || a.name.localeCompare(b.name))
+
+function ClusterBars({ clusters }: { clusters: ClusterCapacity[] }) {
+  return (
+    <>
+      <HBars
+        items={clusters.map((cluster) => ({
+          name: cluster.name,
+          href: `/clusters/${cluster.id}`,
+          parts: [
+            { v: cluster.fargate, color: FARGATE_COLOR },
+            { v: cluster.spot, color: FARGATE_SPOT_COLOR },
+          ],
+          label: String(totalRunning(cluster)),
+        }))}
+      />
+      <div className={styles.legendRow}>
+        <Legend
+          items={[
+            { name: 'Fargate', color: FARGATE_COLOR },
+            { name: 'Fargate Spot', color: FARGATE_SPOT_COLOR },
+          ]}
+        />
+      </div>
+    </>
+  )
+}
+
 /** Seg label with its count in muted text, as in the mockup. */
 const withCount = (label: string, count: number | undefined) => (
   <>
@@ -37,8 +75,11 @@ export function Tasks() {
   // Earlier pages reset whenever the filter or the account/region scope changes.
   const paged = usePagedCursor<TaskDTO>(`${filter}|${filters.account ?? ''}|${filters.region ?? ''}`)
   const page = useTasks({ ...filters, filter, cursor: paged.cursor })
+  const stoppedWindowMinutes = useSettings().data?.stopped_tasks_window_minutes
   const data = page.data
   const summary = data?.summary
+  const [viewingAll, setViewingAll] = useState(false)
+  const busiestClusters = byBusiest(summary?.by_cluster ?? [])
 
   const setFilter = (value: TasksFilter) =>
     setSearchParams(
@@ -64,7 +105,10 @@ export function Tasks() {
 
       {summary && (
         <div className={styles.grid}>
-          <Card title="By status">
+          <Card
+            title="By status"
+            right={stoppedWindowMinutes === undefined ? undefined : `Stopped: last ${stoppedWindowMinutes} min`}
+          >
             <Donut
               segments={[
                 { name: 'Running, healthy', v: summary.by_status.running_healthy, color: 'var(--success)' },
@@ -80,27 +124,16 @@ export function Tasks() {
             <HBars items={summary.by_az.map((zone) => ({ name: zone.az, v: zone.count, color: 'var(--accent)' }))} />
           </Card>
           <Card title="Running by cluster">
-            <HBars
-              items={summary.by_cluster.map((cluster) => ({
-                name: cluster.name,
-                href: `/clusters/${cluster.id}`,
-                parts: [
-                  { v: cluster.fargate, color: FARGATE_COLOR },
-                  { v: cluster.spot, color: FARGATE_SPOT_COLOR },
-                ],
-                label: String(cluster.fargate + cluster.spot),
-              }))}
-            />
-            <div className={styles.legendRow}>
-              <Legend
-                items={[
-                  { name: 'Fargate', color: FARGATE_COLOR },
-                  { name: 'Fargate Spot', color: FARGATE_SPOT_COLOR },
-                ]}
-              />
-            </div>
+            <ClusterBars clusters={busiestClusters.slice(0, TOP_CLUSTERS)} />
+            {busiestClusters.length > TOP_CLUSTERS && (
+              <div className={styles.viewAll}>
+                <button type="button" className={styles.btn} onClick={() => setViewingAll(true)}>
+                  {`View all (${busiestClusters.length})`}
+                </button>
+              </div>
+            )}
           </Card>
-          <Card title="Why tasks stopped">
+          <Card title="Why tasks stopped" right={STOP_REASONS_WINDOW_LABEL}>
             <HBars
               items={summary.stop_reasons.map((reason) => ({
                 name: reason.reason,
@@ -133,11 +166,18 @@ export function Tasks() {
         <TaskTable
           items={[...paged.earlier, ...(data?.items ?? [])]}
           withService
+          grouped
           next={data?.next ?? undefined}
           onMore={() => {
             if (data?.next) paged.loadMore(data.items, data.next)
           }}
         />
+      )}
+
+      {viewingAll && (
+        <Dialog title="Running by cluster" actions={[{ label: 'Close', onClick: () => setViewingAll(false) }]} onClose={() => setViewingAll(false)}>
+          <ClusterBars clusters={busiestClusters} />
+        </Dialog>
       )}
     </>
   )

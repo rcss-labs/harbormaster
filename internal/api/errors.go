@@ -27,6 +27,17 @@ func invalid(message string) *APIError {
 	return &APIError{Status: http.StatusUnprocessableEntity, Code: "invalid", Message: message}
 }
 
+// errRateLimited is the 429 for the per-IP bucket on the SSO start routes. The existing "throttled"
+// code means AWS is throttling us (503), so it is not reused.
+var errRateLimited = &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "Too many requests. Try again shortly."}
+
+// Messages for the SSO lockout guards (spec D8).
+const (
+	noBreakGlassMessage   = "Flag at least one global admin as break-glass before turning on single sign-on."
+	lastBreakGlassMessage = "Keep at least one break-glass global admin while single sign-on is on."
+	needsPasswordMessage  = "Set a password for this user first."
+)
+
 // writeJSON writes v as the JSON response body with the given status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -64,6 +75,22 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "conflict", "That conflicts with existing data.")
 	case errors.As(err, &validation):
 		writeError(w, http.StatusUnprocessableEntity, "invalid", validation.Msg)
+	case errors.Is(err, store.ErrNoBreakGlassAdmin):
+		writeError(w, http.StatusUnprocessableEntity, "invalid", noBreakGlassMessage)
+	case errors.Is(err, store.ErrLastBreakGlassAdmin):
+		writeError(w, http.StatusUnprocessableEntity, "invalid", lastBreakGlassMessage)
+	case errors.Is(err, store.ErrNeedsPassword):
+		writeError(w, http.StatusUnprocessableEntity, "invalid", needsPasswordMessage)
+	case errors.Is(err, auth.ErrNoPassword):
+		writeError(w, http.StatusUnprocessableEntity, "invalid", auth.ErrNoPassword.Error())
+	case errors.Is(err, store.ErrAlreadyLinked):
+		writeError(w, http.StatusConflict, "already_linked", "This account is already linked to an SSO identity.")
+	case errors.Is(err, store.ErrSSOIdentityTaken):
+		writeError(w, http.StatusConflict, "sso_identity_taken", "That identity is already linked to, or reserved for, another user.")
+	case errors.Is(err, store.ErrNotLinked):
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+	case errors.Is(err, auth.ErrSSORequired):
+		writeError(w, http.StatusForbidden, "sso_required", auth.ErrSSORequired.Error())
 	case errors.Is(err, auth.ErrBadCredentials):
 		writeError(w, http.StatusUnauthorized, "unauthenticated", auth.ErrBadCredentials.Error())
 	case errors.Is(err, auth.ErrWrongPassword):

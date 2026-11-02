@@ -112,8 +112,8 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 			t.Errorf("stopped task outside the window listed: %s stopped %v", task.ShortID, task.StoppedAt)
 		}
 	}
-	if got.Summary.ByStatus.StoppedError <= got.Counts.Stopped {
-		t.Errorf("summary.by_status.stopped_error = %d must still cover all 72 h stops (> %d)", got.Summary.ByStatus.StoppedError, got.Counts.Stopped)
+	if byStatusStopped := got.Summary.ByStatus.StoppedError + got.Summary.ByStatus.StoppedNormal; byStatusStopped != got.Counts.Stopped {
+		t.Errorf("summary.by_status stopped = %d, want the %d stops inside the window", byStatusStopped, got.Counts.Stopped)
 	}
 	if got.Summary.ByStatus.StoppedError == 0 || got.Summary.ByStatus.RunningUnhealthy != 1 {
 		t.Errorf("summary.by_status = %+v", got.Summary.ByStatus)
@@ -223,11 +223,80 @@ func TestTasks_CanAndExecFlags(t *testing.T) {
 	}
 }
 
+func TestTasks_CarryAccountNameAndRegion(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	got := getTasks(t, login(t, srv, "pavel", testPassword), "/api/tasks?filter=running&limit=500")
+	if len(got.Items) == 0 {
+		t.Fatal("no running tasks")
+	}
+	for _, task := range got.Items {
+		key, err := model.ParseClusterID(task.Cluster.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.Region != key.Region || task.AccountName == "" {
+			t.Errorf("task %s: account_name %q region %q, want a name and %q", task.ShortID, task.AccountName, task.Region, key.Region)
+		}
+	}
+	if core := tasksByCluster(got.Items, "core-services"); len(core) == 0 || core[0].AccountName != "homelab-admin" || core[0].Region != "us-east-1" {
+		t.Errorf("core-services tasks = %+v, want account homelab-admin in us-east-1", core)
+	}
+}
+
+func TestTasks_StoppedErrorCountFollowsWindowAndScope(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	c := login(t, srv, "pavel", testPassword)
+	resizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
+
+	// errorStops counts the listed stopped tasks that failed, the definition the count must match.
+	errorStops := func(items []TaskDTO) int {
+		n := 0
+		for _, task := range items {
+			if task.Status == "STOPPED" && ((task.ExitCode != nil && *task.ExitCode != 0) || task.StopCode == "TaskFailedToStart") {
+				n++
+			}
+		}
+		return n
+	}
+
+	counts := map[int]int{}
+	for _, minutes := range []int{10, 90} {
+		if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": minutes}); resp.StatusCode != http.StatusOK {
+			t.Fatalf("PUT status %d", resp.StatusCode)
+		}
+		got := getTasks(t, c, "/api/tasks?filter=running&limit=500")
+		stopped := getTasks(t, c, "/api/tasks?filter=stopped&limit=500")
+		if want := errorStops(stopped.Items); got.Counts.StoppedError != want {
+			t.Errorf("window %d min: stopped_error = %d, want %d", minutes, got.Counts.StoppedError, want)
+		}
+		counts[minutes] = got.Counts.StoppedError
+
+		scoped := getTasks(t, c, "/api/services/"+resizer+"/tasks?filter=running&limit=500")
+		if minutes == 90 && scoped.Counts.StoppedError != 6 {
+			t.Errorf("image-resizer stopped_error = %d, want its 6 OOM stops", scoped.Counts.StoppedError)
+		}
+		if scoped.Counts.StoppedError > got.Counts.StoppedError {
+			t.Errorf("scoped count %d exceeds the estate count %d", scoped.Counts.StoppedError, got.Counts.StoppedError)
+		}
+	}
+	if counts[10] < 1 || counts[90] <= counts[10] {
+		t.Errorf("stopped_error by window = %v, want at least one inside 10 min and more inside 90", counts)
+	}
+}
+
 func TestServiceTasks_SummaryValues(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	c := login(t, srv, "pavel", testPassword)
+	// by_status only counts stops inside the window; widen it so all 6 OOM stops count.
+	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status %d", resp.StatusCode)
+	}
 
 	resizer := getTasks(t, c, "/api/services/"+serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")+"/tasks?filter=all")
 	by := resizer.Summary.ByStatus
@@ -321,5 +390,28 @@ func TestTasks_WindowFollowsSetting(t *testing.T) {
 	}
 	if _, err := st.GetTask(t.Context(), account, region, arn); err != nil {
 		t.Errorf("by-id read of a task outside the window failed: %v", err)
+	}
+}
+
+func TestTasks_ByStatusFollowsWindowButStopReasonsKeep72Hours(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	c := login(t, srv, "pavel", testPassword)
+	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 10}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status %d", resp.StatusCode)
+	}
+
+	summary := getTasks(t, c, "/api/tasks?filter=running&limit=500").Summary
+	byStatusStopped := summary.ByStatus.StoppedError + summary.ByStatus.StoppedNormal
+	reasons := 0
+	for _, reason := range summary.StopReasons {
+		reasons += reason.Count
+	}
+	if want := estateStoppedWithin(fk, 10*time.Minute); want < 1 || byStatusStopped != want {
+		t.Errorf("by_status stopped = %d, want the %d stops inside 10 min", byStatusStopped, want)
+	}
+	if want := estateStoppedWithin(fk, 72*time.Hour); reasons != want || reasons <= byStatusStopped {
+		t.Errorf("stop_reasons total = %d, want all %d stops inside 72 h (by_status shows %d)", reasons, want, byStatusStopped)
 	}
 }

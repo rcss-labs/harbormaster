@@ -41,6 +41,8 @@ function RequireAuth() {
   const location = useLocation()
   if (loading) return <Loading />
   if (!me) return <RedirectToSignIn />
+  // Change password needs a current password; SSO-only accounts have none.
+  if (!me.has_password && location.pathname === '/password') return <Navigate to="/" replace />
   if (me.must_change_password && location.pathname !== '/password') return <Navigate to="/password" replace />
   return <Outlet />
 }
@@ -74,7 +76,7 @@ export function AppRoutes() {
           <Route path="settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="settings/:tab" element={<SettingsPage />} />
           <Route path="admin/users" element={<Navigate to="/settings/users" replace />} />
-          <Route path="admin/tags" element={<Navigate to="/settings/general" replace />} />
+          <Route path="admin/tags" element={<Navigate to="/settings/tags" replace />} />
           <Route path="admin/accounts" element={<Navigate to="/settings/accounts" replace />} />
           <Route path="admin/audit" element={<Navigate to="/settings/audit" replace />} />
           <Route path="me/access" element={<MyAccess />} />

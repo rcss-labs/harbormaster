@@ -11,17 +11,43 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
+const SETTINGS_LABELS = ['General', 'AWS accounts', 'Users & permissions', 'Tags', 'Single sign-on', 'Audit log']
 const location = () => screen.getByTestId('location')
 
 describe('SettingsPage', () => {
-  it('renders the four tabs and the General tab by default', async () => {
+  it('renders the six tabs in order and the General tab by default', async () => {
     renderApp('/settings')
     expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument()
     expect(location()).toHaveTextContent('/settings/general')
-    for (const label of ['General', 'AWS accounts', 'Users & permissions', 'Audit log']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
-    }
+    expect(
+      screen
+        .getAllByRole('link')
+        .map((link) => link.textContent)
+        .filter((text) => SETTINGS_LABELS.includes(text ?? '')),
+    ).toEqual(SETTINGS_LABELS)
+    expect(await screen.findByRole('heading', { level: 2, name: 'Stopped tasks' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Tags' })).not.toBeInTheDocument()
+  })
+
+  it('Tags tab renders the tags and assignments', async () => {
+    renderApp('/settings/tags')
     expect(await screen.findByRole('heading', { level: 2, name: 'Tags' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Assignments' })).toBeInTheDocument()
+    expect(location()).toHaveTextContent('/settings/tags')
+  })
+
+  it('non-admins get the tags copy on the Tags tab', async () => {
+    server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
+    renderApp('/settings/tags')
+    expect(await screen.findByText('Only global admins create tags and assign them.')).toBeInTheDocument()
+  })
+
+  it('has a Single sign-on tab after Tags', async () => {
+    renderApp('/settings/sso')
+    expect(await screen.findByRole('link', { name: 'Single sign-on' })).toBeInTheDocument()
+    expect(location()).toHaveTextContent('/settings/sso')
+    const labels = screen.getAllByRole('link').map((link) => link.textContent)
+    expect(labels.indexOf('Single sign-on')).toBe(labels.indexOf('Tags') + 1)
   })
 
   it('tabs switch content', async () => {
@@ -32,7 +58,7 @@ describe('SettingsPage', () => {
   })
 
   it.each([
-    ['/admin/tags', '/settings/general'],
+    ['/admin/tags', '/settings/tags'],
     ['/admin/users', '/settings/users'],
     ['/admin/accounts', '/settings/accounts'],
     ['/admin/audit', '/settings/audit'],
@@ -66,7 +92,9 @@ describe('SettingsPage', () => {
 
   it('crumbs read Settings / tab label', async () => {
     renderApp('/settings/audit')
-    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' })
+    const crumbs = await screen.findByRole('navigation', {
+      name: 'Breadcrumb',
+    })
     await within(crumbs).findByText('Audit log')
     expect(crumbs).toHaveTextContent('Settings/Audit log')
   })

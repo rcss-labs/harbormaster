@@ -141,3 +141,42 @@ func TestRunRetention_ZeroDurationSkipsTable(t *testing.T) {
 		t.Fatalf("tasks = %d, %v; want 1", n, err)
 	}
 }
+
+func TestRunRetention_SAMLTables(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	for _, r := range []store.SAMLRequest{
+		{ID: "_old", Purpose: "login", ReturnTo: "/", BindingHash: "h", ExpiresAt: now.Add(-time.Minute)},
+		{ID: "_live", Purpose: "login", ReturnTo: "/", BindingHash: "h", ExpiresAt: now.Add(time.Hour)},
+	} {
+		if err := s.CreateSAMLRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RememberAssertionID(ctx, "_a_old", now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RememberAssertionID(ctx, "_a_live", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"now() - interval '8 days'", "now() - interval '1 day'", "null"} {
+		if _, err := s.Pool.Exec(ctx, `insert into saml_sp_keys (cert_pem, key_pem_enc, retired_at) values ('c', '\x01', `+retired+`)`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := s.RunRetention(ctx, now, store.Retention{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["saml_requests"] != 1 || res["saml_assertion_ids"] != 1 || res["saml_sp_keys"] != 1 {
+		t.Fatalf("result = %v, want one row deleted from each saml table", res)
+	}
+	if _, err := s.ConsumeSAMLRequest(ctx, "_live", now); err != nil {
+		t.Fatalf("live request was deleted: %v", err)
+	}
+	keys, _ := s.ListSPKeys(ctx)
+	if len(keys) != 2 {
+		t.Fatalf("keys left = %d, want 2", len(keys))
+	}
+}

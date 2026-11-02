@@ -27,6 +27,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/poller"
+	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -169,6 +170,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 	fakeAWS := *fakeFlag || cfg.FakeAWS
+	// The API's SSRF filter relaxes http loopback URLs only when cfg.FakeAWS is set, so the --fake-aws
+	// flag must set it too or the demo IdP's metadata cannot be imported.
+	cfg.FakeAWS = fakeAWS
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
 
 	var base aws.Config
@@ -198,6 +202,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		prober  awsx.Prober
 		// plan 04: terminal
 		execInsecureStream bool
+		// plan 07: the fake IdP exists only in fake AWS mode; nil leaves /fake-idp/ unrouted.
+		fakeIdP http.Handler
 	)
 	if fakeAWS {
 		estate := fake.MockupEstate(time.Now)
@@ -213,7 +219,13 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		if err := devseed.Apply(ctx, st); err != nil {
 			return fmt.Errorf("seed demo data: %w", err)
 		}
-		log.Info("fake AWS mode: demo data loaded; sign in as pavel / " + devseed.Password)
+		idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
+		if err != nil {
+			return fmt.Errorf("start fake IdP: %w", err)
+		}
+		fakeIdP = idp.Handler()
+		log.Info("fake AWS mode: demo data loaded; sign in as pavel / " + devseed.Password +
+			"; fake IdP at " + strings.TrimRight(cfg.BaseURL, "/") + "/fake-idp/metadata")
 	} else {
 		real := awsx.NewReal(base, storeRoles{st})
 		clients, prober = real, real
@@ -232,6 +244,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
 		Deploy:                  &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
 		ExecAllowInsecureStream: execInsecureStream,
+		FakeIdP:                 fakeIdP,
 		MetricsToken:            cfg.MetricsToken, // plan 06
 		Telemetry:               telemetry.Default,
 	})

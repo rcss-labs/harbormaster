@@ -6,13 +6,15 @@ interface AuthCardProps {
   title: string
   sub?: string
   error?: string
-  submitLabel: string
+  /** Omit to render the card without a submit button (SSO-only view, loading frame). */
+  submitLabel?: string
+  info?: string
   busy: boolean
   onSubmit: () => void
   children: ReactNode
 }
 
-export function AuthCard({ title, sub, error, submitLabel, busy, onSubmit, children }: AuthCardProps) {
+export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit, children }: AuthCardProps) {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
     onSubmit()
@@ -26,15 +28,18 @@ export function AuthCard({ title, sub, error, submitLabel, busy, onSubmit, child
         </div>
         <h1 className={styles.title}>{title}</h1>
         {sub && <p className={styles.sub}>{sub}</p>}
+        {info && <p className={styles.sub}>{info}</p>}
         {children}
         {error && (
           <div className={styles.err} role="alert">
             {error}
           </div>
         )}
-        <button className={`btn primary ${styles.submit}`} type="submit" disabled={busy}>
-          {submitLabel}
-        </button>
+        {submitLabel && (
+          <button className={`btn primary ${styles.submit}`} type="submit" disabled={busy}>
+            {submitLabel}
+          </button>
+        )}
       </form>
     </div>
   )
