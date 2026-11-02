@@ -8,10 +8,11 @@ test('wide screens fill the content width', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 1440 })
   await page.goto('/')
   const main = page.getByRole('main')
-  await expect(main.getByText('Tasks', { exact: true })).toBeVisible()
+  await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
+  // Grid is sidebar | main | docked activity rail (>= 1280px): 2560 - 212 - 300 = 2048.
   const mainBox = await main.boundingBox()
-  expect(mainBox!.width).toBeGreaterThan(2200)
+  expect(mainBox!.width).toBeGreaterThan(1900)
 
   // The six KPI cells share one strip that spans the content width.
   const strip = main.getByRole('list', { name: 'Estate key figures' })
@@ -54,7 +55,7 @@ test('narrow viewport has no horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 800 })
   await page.goto('/')
   const main = page.getByRole('main')
-  await expect(main.getByText('Tasks', { exact: true })).toBeVisible()
+  await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
   // <main> is the scroll container (overflow: auto), so overflow shows up on it, never on the document.
   const overflow = await main.evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(overflow).toBeLessThanOrEqual(0)

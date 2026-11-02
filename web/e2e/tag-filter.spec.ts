@@ -2,7 +2,7 @@ import { asUser, expect, test } from './fixtures/test'
 import type { Page } from '@playwright/test'
 
 // Read-only: runs in the observe project. Tag ids on a fresh DB: Dev 1, Staging 2, Prod 3.
-// Always target the top bar control by its exact name: the Clusters filter bar has a second control labelled "Tags".
+// Always target the top bar control by its exact name so other controls with "Tag" in their label never match.
 const tagButton = (page: Page) => page.getByRole('button', { name: 'Tag filter', exact: true })
 const tagOptions = (page: Page) => page.getByRole('group', { name: 'Tag filter options' })
 const main = (page: Page) => page.getByRole('main')
@@ -66,7 +66,7 @@ test.describe('tag filter as pavel', () => {
     await toggleTag(page, 'Dev')
     await toggleTag(page, 'Prod')
     await expect(clustersTile).toContainText(/^Clusters2\d+ healthy$/)
-    await expect(main(page).getByText('Needs attention', { exact: true })).toBeVisible()
+    await expect(main(page).getByRole('heading', { name: 'Needs attention' })).toBeVisible()
     await expect(resizerAlerts).toHaveCount(0)
 
     await page.goto('/tasks?filter=running')

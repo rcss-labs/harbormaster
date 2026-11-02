@@ -28,8 +28,10 @@ test.describe('clusters filter bar as pavel', () => {
     await expect(rows).toHaveCount(7)
 
     await page.getByRole('searchbox', { name: 'Filter clusters' }).fill('eu')
-    await expect(rows).toHaveCount(2)
+    // Header row + eu-apps (name, eu-west-1) + edge-proxy (eu-central-1): the filter also matches the region.
+    await expect(rows).toHaveCount(3)
     await expect(page.getByRole('row', { name: /eu-apps/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /edge-proxy/ })).toBeVisible()
 
     await page.goto('/clusters?env=staging&q=web')
     await expect(rows).toHaveCount(2)
