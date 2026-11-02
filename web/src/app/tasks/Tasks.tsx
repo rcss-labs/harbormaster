@@ -11,7 +11,7 @@ import { useFilters } from '../shell/useFilters'
 import { HiddenStoppedNote } from './HiddenStoppedNote'
 import { buildRows, inSegment, matchesQuery } from './taskRows'
 import styles from './tasks.module.css'
-import { MAX_PAGES, useAllTasks } from './useAllTasks'
+import { useAllTasks } from './useAllTasks'
 import { TasksTable } from './TasksTable'
 
 const FILTERS: TasksFilter[] = ['problems', 'running', 'stopped', 'all']
@@ -161,7 +161,7 @@ export function Tasks() {
           <TasksTable rows={rows} page={page} onPageChange={setPage} onToggleGroup={toggleGroup} empty="No tasks match." />
           {all.truncated && (
             <div className={styles.note}>
-              {`Showing the first ${MAX_PAGES * 500} tasks. Filter by service, cluster or account to see the rest.`}
+              {`Showing the first ${all.items.length} tasks. Filter by service, cluster or account to see the rest.`}
             </div>
           )}
         </>

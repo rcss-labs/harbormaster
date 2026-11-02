@@ -246,6 +246,19 @@ describe('Tasks paging', () => {
     renderApp('/tasks?filter=running')
     await waitFor(() => expect(taskRows()).toHaveLength(7))
   })
+
+  it('states the number of tasks actually loaded when the page cap truncates the list', async () => {
+    const all = many(30)
+    server.use(
+      http.get('/api/tasks', ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        const start = cursor ? Number(cursor) : 0
+        return HttpResponse.json({ ...tasksList(all), items: all.slice(start, start + 3), next: String(start + 3) })
+      }),
+    )
+    renderApp('/tasks?filter=running')
+    expect(await screen.findByText(/Showing the first 12 tasks\./)).toBeInTheDocument()
+  })
 })
 
 describe('Tasks URL round trip', () => {

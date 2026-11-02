@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { api } from '../../api/client'
 import { queryString, type Filters } from '../../api/hooks'
 import type { TaskDTO, TasksListDTO } from '../../api/types'
@@ -34,7 +34,8 @@ export function useAllTasks(filters: Filters): AllTasks {
     refetchInterval: 5000,
     refetchIntervalInBackground: false,
   })
-  const pages = query.data?.pages ?? []
+  const pages = useMemo(() => query.data?.pages ?? [], [query.data])
+  const items = useMemo(() => pages.flatMap((page) => page.items), [pages])
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = query
   const loadedPages = pages.length
   const canLoadMore = hasNextPage && pages.length < MAX_PAGES
@@ -44,7 +45,7 @@ export function useAllTasks(filters: Filters): AllTasks {
   }, [canLoadMore, isFetchingNextPage, fetchNextPage, loadedPages])
 
   return {
-    items: pages.flatMap((page) => page.items),
+    items,
     summary: pages[0]?.summary,
     loading: query.isPending || canLoadMore,
     truncated: hasNextPage && pages.length >= MAX_PAGES,
