@@ -31,7 +31,7 @@ export function useOverviewLayout(): [OverviewLayout, (layout: OverviewLayout) =
 }
 
 /** Writes one query parameter (or removes it for `null`) without touching the account/region/tag filters. */
-function useParamSetter() {
+export function useParamSetter() {
   const [, setSearchParams] = useSearchParams()
   return useCallback(
     (updates: Record<string, string | null>) =>

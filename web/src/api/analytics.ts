@@ -1,6 +1,13 @@
-// Wire types for GET /api/analytics/{delivery,reliability,capacity,operations}. They mirror
-// internal/api/analytics_dto.go; the hook that fetches them comes with the page.
+// Wire types for GET /api/analytics/{delivery,reliability,capacity,operations} and the hook that fetches them.
+// The types mirror internal/api/analytics_dto.go.
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useFilters } from '../app/shell/useFilters'
+import { api } from './client'
+import { queryString } from './hooks'
 import type { TagDTO } from './types'
+
+const METRICS_REFETCH_MS = 60_000
+const metricsPolling = { refetchInterval: METRICS_REFETCH_MS, refetchIntervalInBackground: false } as const
 
 export type AnalyticsTab = 'delivery' | 'reliability' | 'capacity' | 'operations'
 export type AnalyticsRange = '24h' | '7d' | '30d' | '90d'
@@ -292,3 +299,25 @@ export interface AnalyticsOperations extends Envelope<'operations'> {
 }
 
 export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations
+
+export interface AnalyticsByTab {
+  delivery: AnalyticsDelivery
+  reliability: AnalyticsReliability
+  capacity: AnalyticsCapacity
+  operations: AnalyticsOperations
+}
+
+/**
+ * One analytics tab for the current account/region/tag filters. Refreshes once a minute (the data moves at the
+ * 5-minute poll cadence) and keeps the previous tab or range on screen while the next one loads.
+ */
+export function useAnalytics<Tab extends AnalyticsTab>(tab: Tab, range: AnalyticsRange) {
+  const { filters } = useFilters()
+  return useQuery({
+    queryKey: ['analytics', tab, range, filters],
+    queryFn: () => api.get<AnalyticsByTab[Tab]>(`/api/analytics/${tab}${queryString({ ...filters, range })}`),
+    // Only carry data over within the same tab, so a tab never renders another tab's shape.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === tab ? keepPreviousData(previous) : undefined),
+    ...metricsPolling,
+  })
+}
