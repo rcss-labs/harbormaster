@@ -3,6 +3,8 @@ import styles from './Panel.module.css'
 
 interface PanelProps {
   title: ReactNode
+  /** Dim text after the title; kept outside the heading so the panel's accessible name is just the title. */
+  sub?: ReactNode
   /** Controls (filters, segments) shown beside the title; makes the header taller. */
   toolbar?: ReactNode
   /** Right-aligned header content such as a "Show all" link. */
@@ -20,7 +22,7 @@ interface PanelProps {
   variant?: 'default' | 'proposed'
 }
 
-export function Panel({ title, toolbar, actions, children, flush = false, badge, legend, footer, variant = 'default' }: PanelProps) {
+export function Panel({ title, sub, toolbar, actions, children, flush = false, badge, legend, footer, variant = 'default' }: PanelProps) {
   const titleId = useId()
   const hasToolbar = toolbar !== undefined
   const headClass = hasToolbar ? styles.tall : badge !== undefined || legend !== undefined ? styles.mid : ''
@@ -35,6 +37,7 @@ export function Panel({ title, toolbar, actions, children, flush = false, badge,
         <h2 id={titleId} className={styles.title}>
           {title}
         </h2>
+        {sub !== undefined && sub}
         {hasToolbar && <div className={styles.toolbar}>{toolbar}</div>}
         {legend !== undefined && <div className={styles.legend}>{legend}</div>}
         {actions !== undefined && <div className={styles.actions}>{actions}</div>}

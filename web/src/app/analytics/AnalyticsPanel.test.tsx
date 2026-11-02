@@ -23,6 +23,13 @@ function panel(props: Partial<Parameters<typeof AnalyticsPanel>[0]> = {}) {
 }
 
 describe('AnalyticsPanel', () => {
+  it('keeps the sub-title out of the heading and region names', () => {
+    panel({ sub: 'running ≥ desired' })
+    expect(screen.getByRole('heading', { level: 2, name: 'Availability' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Availability' })).toBeInTheDocument()
+    expect(screen.getByText('running ≥ desired')).toBeInTheDocument()
+  })
+
   it('source footer text', () => {
     panel({ source: { table: 'service_counts_history', kept: '7 days' } })
     expect(screen.getByText('source service_counts_history · kept 7 days')).toBeInTheDocument()

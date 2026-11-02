@@ -54,12 +54,8 @@ export function AnalyticsPanel({
 
   return (
     <Panel
-      title={
-        <>
-          {title}
-          {sub !== undefined && <span className={styles.sub}>{sub}</span>}
-        </>
-      }
+      title={title}
+      sub={sub !== undefined ? <span className={styles.sub}>{sub}</span> : undefined}
       badge={isProposal ? 'PROPOSED' : undefined}
       legend={legend && legend.length > 0 ? <ChartLegend items={legend} /> : undefined}
       footer={footer}
