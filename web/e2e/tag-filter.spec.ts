@@ -25,7 +25,7 @@ test.describe('tag filter as pavel', () => {
     const ciTools = page.getByRole('article', { name: 'ci-tools' })
     await expect(ciTools).toContainText('artifact-proxy')
     await expect(ciTools).not.toContainText('jenkins-controller')
-    await expect(nav(page).getByRole('link', { name: /^Clusters/ })).toHaveText('Clusters2')
+    await expect(nav(page).getByRole('link', { name: /^Clusters/ })).toHaveText(/Clusters2$/)
   })
 
   test('Prod + Staging is OR', async ({ page }) => {

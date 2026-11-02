@@ -30,7 +30,7 @@ test('overview shows cluster usage and needs attention', async ({ page }) => {
 
   // The badge counts danger alerts: the seed has exactly one (image-resizer), account alerts are warnings.
   await expect(rows.filter({ hasText: 'Failing' })).toHaveCount(1)
-  await expect(nav(page).getByRole('link', { name: /^Overview/ })).toHaveText('Overview1')
+  await expect(nav(page).getByRole('link', { name: /^Overview/ })).toHaveText(/Overview1$/)
 })
 
 test('cluster page draws the usage chart and service ALB stats', async ({ page }) => {

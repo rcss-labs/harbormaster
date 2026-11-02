@@ -57,10 +57,12 @@ test('user sees only permitted clusters', async ({ page }) => {
 
 test('search jumps to a service', async ({ page }) => {
   await login(page, 'pavel')
-  const search = page.getByPlaceholder('Jump to cluster, service, task')
+  await page.getByRole('button', { name: /Search or run a command/ }).click()
+  const palette = page.getByRole('dialog', { name: 'Command palette' })
+  const search = palette.getByRole('combobox')
   await search.fill('catal')
-  await expect(page.getByRole('link', { name: /catalog-api/ }).first()).toBeVisible()
-  // Roughly 1 run in 8 the first Enter is ignored by the search box (cause not found); retrying the key is harmless.
+  await expect(palette.getByRole('option', { name: /catalog-api/ }).first()).toBeVisible()
+  // Enter opens the highlighted result; the first service match is catalog-api.
   await expect(async () => {
     await search.press('Enter')
     await expect(page.getByRole('heading', { level: 1, name: 'catalog-api' })).toBeVisible({ timeout: 2_000 })

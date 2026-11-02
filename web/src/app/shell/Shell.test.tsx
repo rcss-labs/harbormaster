@@ -202,15 +202,15 @@ describe('Search', () => {
     const cluster = CLUSTERS.items[0]
     renderApp('/')
     const user = userEvent.setup()
-    const searchInput = await screen.findByPlaceholderText('Jump to cluster, service, task')
-    // Scope to the search box: the Overview page also links to clusters by name.
-    const searchResults = within(searchInput.parentElement as HTMLElement)
-    await user.type(searchInput, cluster.name)
-    const option = await searchResults.findByRole('link', { name: new RegExp(cluster.name) })
-    expect(option).toHaveTextContent('cluster')
+    await user.click(await screen.findByRole('button', { name: /Search or run a command/ }))
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' })
+    await user.type(within(palette).getByRole('combobox'), cluster.name)
+    const option = await within(palette).findByRole('option', { name: new RegExp(cluster.name) })
+    expect(option).toBeInTheDocument()
+    await waitFor(() => expect(within(palette).getAllByRole('option')[0]).toHaveTextContent(cluster.name))
     await user.keyboard('{Enter}')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/clusters/${cluster.id}`))
-    expect(searchResults.queryByRole('link', { name: new RegExp(cluster.name) })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
   })
 })
 
@@ -229,7 +229,8 @@ describe('Search filters', () => {
     await user.click(screen.getByRole('button', { name: 'Tag filter' }))
     await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
     await user.keyboard('{Escape}')
-    await user.type(screen.getByPlaceholderText('Jump to cluster, service, task'), 'pa')
+    await user.click(screen.getByRole('button', { name: /Search or run a command/ }))
+    await user.type(within(await screen.findByRole('dialog', { name: 'Command palette' })).getByRole('combobox'), 'pa')
     await waitFor(() => expect(urls.length).toBeGreaterThan(0))
     const last = urls[urls.length - 1]
     expect(last.searchParams.get('account')).toBe(ACCOUNT_STAGING.account_id)
@@ -250,7 +251,7 @@ describe('Sidebar', () => {
     server.use(alerts(0))
     renderApp('/')
     const link = await within(await nav()).findByRole('link', { name: /Overview/ })
-    await waitFor(() => expect(link).toHaveTextContent(/^Overview$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^OVOverview$/))
   })
 
   it('Networks link is enabled and points to /networks', async () => {

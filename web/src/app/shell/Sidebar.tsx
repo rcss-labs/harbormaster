@@ -1,11 +1,13 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
-import { useAuthOptions, useClusters, useSettings, useTasks } from '../../api/hooks'
+import { useAuthOptions, useClusters, usePollerStatus, useSettings, useTasks } from '../../api/hooks'
 import { Brand } from '../../components/Brand'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
 import { LinkSSODialog } from './LinkSSODialog'
+import { usePinnedServices } from './pins'
+import { useShellState } from './ShellState'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
 
@@ -19,6 +21,8 @@ interface NavBadge {
 interface NavItemProps {
   to: string
   label: string
+  /** Two-letter mono glyph shown in the box before the label. */
+  glyph: string
   count?: number
   bad?: boolean
   /** Coloured counts after the label; they come in addition to `count`. */
@@ -28,35 +32,43 @@ interface NavItemProps {
   end?: boolean
 }
 
-function NavItem({ to, label, count, bad, badges = [], alsoActiveFor = [], end }: NavItemProps) {
+function NavItem({ to, label, glyph, count, bad, badges = [], alsoActiveFor = [], end }: NavItemProps) {
   const { pathname } = useLocation()
   const extra = alsoActiveFor.some((prefix) => pathname.startsWith(prefix))
+  const hasCounts = count !== undefined || badges.length > 0
+  const tooltip = [label, ...(count !== undefined ? [String(count)] : []), ...badges.map((b) => b.label)].join(' · ')
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => (isActive || extra ? styles.active : undefined)}>
-      {label}
-      {count !== undefined && <span className={`${styles.count} ${bad ? styles.countBad : ''}`}>{count}</span>}
-      {badges.map((badge) => (
-        <span
-          key={badge.kind}
-          className={`${styles.count} ${badge.kind === 'bad' ? styles.countBad : styles.countWarn}`}
-          aria-label={badge.label}
-          title={badge.label}
-        >
-          {badge.count}
+    <NavLink to={to} end={end} title={tooltip} className={({ isActive }) => (isActive || extra ? styles.active : undefined)}>
+      <span className={styles.glyph} aria-hidden="true">
+        {glyph}
+      </span>
+      <span className={styles.navLabel}>{label}</span>
+      {hasCounts && (
+        <span className={styles.counts}>
+          {count !== undefined && <span className={`${styles.count} ${bad ? styles.countBad : ''}`}>{count}</span>}
+          {badges.map((badge) => (
+            <span
+              key={badge.kind}
+              className={`${styles.count} ${badge.kind === 'bad' ? styles.countBad : styles.countWarn}`}
+              aria-label={badge.label}
+              title={badge.label}
+            >
+              {badge.count}
+            </span>
+          ))}
         </span>
-      ))}
+      )}
     </NavLink>
   )
 }
 
-function Section({ children }: { children: ReactNode }) {
-  return <div className={styles.navSection}>{children}</div>
-}
+const initials = (name: string) => name.slice(0, 2).toUpperCase()
 
 export function Sidebar() {
   const { me, logout } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
+  const { sidebarCollapsed, toggleSidebar } = useShellState()
   const { filters } = useFilters()
   const isAdmin = me?.admin ?? false
   const alerts = useAlerts(filters)
@@ -64,6 +76,8 @@ export function Sidebar() {
   const running = useTasks({ ...filters, filter: 'running' })
   const settings = useSettings()
   const authOptions = useAuthOptions()
+  const poller = usePollerStatus()
+  const { pinned } = usePinnedServices()
   const [linking, setLinking] = useState(false)
   if (!me) return null
 
@@ -77,6 +91,8 @@ export function Sidebar() {
     const within = windowMinutes === undefined ? '' : ` in the last ${windowMinutes} min`
     taskBadges.push({ count: stoppedErrors, kind: 'bad', label: `${stoppedErrors} stopped with errors${within}` })
   }
+  const accountIssues = (poller.data?.items ?? []).filter((entry) => entry.failing || entry.throttled).length
+  const settingsBadges: NavBadge[] = accountIssues > 0 ? [{ count: accountIssues, kind: 'warn', label: `${accountIssues} account issues` }] : []
   const dangerAlerts = alerts.data?.counts.danger ?? 0
   const signOut = async () => {
     try {
@@ -87,32 +103,47 @@ export function Sidebar() {
   }
 
   return (
-    <aside className={styles.sidebar}>
-      <div className={styles.brand}>
+    <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`} aria-label="Sidebar">
+      <div className={styles.brand} title="Running on ECS · harbormaster/harbormaster-server">
         <Brand variant="sidebar" />
         <div className={styles.brandSub}>ECS control center</div>
       </div>
       <nav className={styles.nav} aria-label="Main">
-        <NavItem to="/" end label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
-        <NavItem to="/clusters" label="Clusters" count={clusters.data?.items.length} alsoActiveFor={['/clusters', '/services']} />
-        <NavItem to="/tasks" label="Tasks" badges={taskBadges} />
-        <NavItem to="/networks" label="Networks" />
-        <NavItem to="/storage" label="Storage" />
+        <NavItem to="/" end glyph="OV" label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
+        <NavItem to="/clusters" glyph="CL" label="Clusters" count={clusters.data?.items.length} alsoActiveFor={['/clusters', '/services']} />
+        <NavItem to="/tasks" glyph="TK" label="Tasks" badges={taskBadges} />
+        <NavItem to="/networks" glyph="NW" label="Networks" />
+        <NavItem to="/storage" glyph="ST" label="Storage" />
         {isAdmin ? (
           <>
-            <Section>Admin</Section>
-            <NavItem to="/settings/general" label="Settings" alsoActiveFor={['/settings']} />
+            <div className={styles.navSection}>Admin</div>
+            <NavItem to="/settings/general" glyph="SE" label="Settings" badges={settingsBadges} alsoActiveFor={['/settings']} />
           </>
         ) : (
           <>
-            <Section>Account</Section>
-            <NavItem to="/me/access" label="My access" />
+            <div className={styles.navSection}>Account</div>
+            <NavItem to="/me/access" glyph="MA" label="My access" />
           </>
         )}
       </nav>
+      <nav className={styles.pinned} aria-label="Pinned services">
+        <div className={styles.navSection}>Pinned</div>
+        {pinned.length === 0 && <div className={styles.pinnedEmpty}>Pin a service from its page.</div>}
+        {pinned.map((service) => (
+          <NavLink key={service.id} to={`/services/${service.id}/overview`} title={`${service.name} · ${service.cluster}`}>
+            <span className={styles.pinName}>{service.name}</span>
+            <span className={styles.pinCluster}>{service.cluster}</span>
+          </NavLink>
+        ))}
+      </nav>
       <div className={styles.sideFoot}>
-        <div>
-          Signed in as <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
+        <div className={styles.user}>
+          <span className={styles.avatar} aria-hidden="true" title={me.username}>
+            {initials(me.username)}
+          </span>
+          <div className={styles.userText}>
+            Signed in as <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
+          </div>
         </div>
         <div className={styles.sideActions}>
           {me.has_password && (
@@ -129,9 +160,21 @@ export function Sidebar() {
             Sign out
           </button>
         </div>
-        <div>
-          Running on ECS · <code>harbormaster/harbormaster-server</code>
-        </div>
+        <button
+          type="button"
+          className={styles.collapseBtn}
+          aria-expanded={!sidebarCollapsed}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar ([)`}
+          onClick={toggleSidebar}
+        >
+          <span className={styles.collapseGlyph} aria-hidden="true">
+            {sidebarCollapsed ? '»' : '«'}
+          </span>
+          <span className={styles.collapseText} aria-hidden="true">
+            Collapse [
+          </span>
+        </button>
       </div>
       {linking && <LinkSSODialog onClose={() => setLinking(false)} />}
     </aside>

@@ -4,6 +4,7 @@ import { Pill } from '../../components/Pill'
 import { statusKind, statusLabel } from '../../components/status'
 import { TagChip } from '../../components/TagChip'
 import type { TagClickHandler } from '../clusters/tagTarget'
+import { usePinnedServices } from '../shell/pins'
 import { HeaderActions } from './HeaderActions'
 import styles from './service.module.css'
 
@@ -14,6 +15,8 @@ interface ServiceHeaderProps {
 }
 
 export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
+  const { isPinned, toggle } = usePinnedServices()
+  const pinned = isPinned(service.id)
   const launchType = service.launch_type === 'FARGATE' ? 'Fargate' : service.launch_type
   return (
     <div className={styles.pageHead}>
@@ -27,6 +30,16 @@ export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
             onClick={onTagClick && (() => onTagClick({ kind: 'service', id: service.id, name: service.name, tag: service.tag }))}
           />
           <Pill kind={statusKind(service.status)}>{statusLabel(service.status)}</Pill>
+          <button
+            type="button"
+            className={styles.pinBtn}
+            aria-pressed={pinned}
+            aria-label={`${pinned ? 'Unpin' : 'Pin'} ${service.name}`}
+            title={pinned ? 'Remove from the sidebar' : 'Pin to the sidebar'}
+            onClick={() => toggle({ id: service.id, name: service.name, cluster: service.cluster.name })}
+          >
+            {pinned ? 'Pinned' : 'Pin'}
+          </button>
         </div>
         <div className={styles.meta}>
           <Link className={styles.accentLink} to={`/clusters/${service.cluster.id}`}>
