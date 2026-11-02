@@ -46,6 +46,22 @@ describe('ScalingTab', () => {
     expect(definitionFor('Scheduled actions')).toHaveTextContent('business-hours: cron(0 7 * * ? *) → min 3')
   })
 
+  it('draws the auto scaling range with the desired count marked', async () => {
+    mockDesiredCount()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    const bar = await screen.findByRole('img', { name: `Auto scaling range ${SCALING_PAYMENTS.min} to ${SCALING_PAYMENTS.max} tasks, desired 3` })
+    expect(bar).toBeInTheDocument()
+  })
+
+  it('omits the range bar without a scalable target', async () => {
+    mockDesiredCount(desiredInfo({ auto_scaling: null }), SCALING_NONE)
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    await screen.findByText('This service has no scalable target registered.')
+    expect(screen.queryByRole('img', { name: /Auto scaling range/ })).not.toBeInTheDocument()
+  })
+
   it('stepper posts the new count and toasts', async () => {
     mockDesiredCount()
     const posted: unknown[] = []
@@ -64,7 +80,7 @@ describe('ScalingTab', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
 
     const input = await screen.findByRole('spinbutton', {
-      name: 'Desired count',
+      name: 'Scale to',
     })
     expect(input).toHaveValue(3)
     await user.click(screen.getByRole('button', { name: 'More tasks' }))
@@ -81,7 +97,7 @@ describe('ScalingTab', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
 
     const input = await screen.findByRole('spinbutton', {
-      name: 'Desired count',
+      name: 'Scale to',
     })
     expect(screen.queryByText(/Outside the auto scaling range/)).not.toBeInTheDocument()
     await user.clear(input)

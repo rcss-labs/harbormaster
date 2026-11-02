@@ -1,14 +1,20 @@
 /* Ported from the mockup's .toolbar, .field, .term and button rules (docs/design/mockup/index.html). */
 /* Root of the tab and of the standalone task page: a flex column so the terminal takes the remaining height. */
-.root { display: flex; flex-direction: column; flex: 1 0 auto; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px; align-items: start; flex: 1 0 auto; }
+@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.session { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; margin: 0; font-size: 12px; }
+.session dt { color: var(--muted); }
+.session dd { margin: 0; text-align: right; font-family: var(--mono); }
+.sessionNote { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
+.root { display: flex; flex-direction: column; min-width: 0; align-self: stretch; }
 .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-.field select { height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.field { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.field select { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); font: 12px var(--mono); text-transform: none; letter-spacing: 0; }
 .field select:disabled { opacity: 0.6; }
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; white-space: nowrap; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.danger { background: transparent; border-color: var(--danger-border); color: var(--danger); }
 .note { margin-left: auto; color: var(--muted); font-size: 12px; }
-.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border-radius: 8px; flex: 1 1 0; min-height: 320px; overflow: hidden; padding: 12px 14px; width: 100%; box-sizing: border-box; }
+.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); flex: 1 1 0; min-height: 320px; overflow: hidden; padding: 12px 14px; width: 100%; box-sizing: border-box; }
 .term :global(.xterm) { height: 100%; }

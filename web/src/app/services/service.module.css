@@ -1,15 +1,21 @@
 /* Ported from the mockup's page-head, grid, tile sub, bar, task-meter, tabs and no-access rules (docs/design/mockup/index.html). */
-.pageHead { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+/* Sticky header + tabs. The shell content area has 16px 20px padding, so bleed out to its edges and stick at its top. */
+.stickyHead { position: sticky; top: -16px; z-index: 5; margin: -16px -20px 0; padding: 12px 20px 0; background: var(--bg); border-bottom: 1px solid var(--border); }
+.stickyHead nav { margin: 0 -6px; border-bottom: 0; }
+.pageHead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
+.titleRow h1 { font: 600 18px var(--mono); letter-spacing: -0.02em; margin: 0; }
+.meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+.meta > span { color: var(--muted); }
+.meta > span::before { content: "·"; margin-right: 8px; color: var(--dim); }
 .titles { display: grid; gap: 6px; min-width: 0; }
 .titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 12px; }
-.actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; color: inherit; }
+.actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; color: inherit; }
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .accentLink { color: var(--accent); }
 
-.grid { display: grid; gap: 12px; }
+.grid { display: grid; gap: 14px; }
 .g2 { grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); }
 .g4 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
 .gWide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
@@ -28,7 +34,7 @@
 .empty { color: var(--muted); text-align: center; padding: 16px; }
 
 /* Wraps the active tab so long panels (logs, terminal) can fill the remaining viewport height. */
-.tabPanel { flex: 1 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.tabPanel { flex: 1 0 auto; display: flex; flex-direction: column; gap: 14px; }
 
 .deployCard { display: grid; gap: 10px; }
 .bar { height: 10px; border-radius: 5px; background: var(--muted-soft); overflow: hidden; display: flex; }
@@ -59,3 +65,5 @@
 .pinBtn { height: 22px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: 11.5px; cursor: pointer; }
 .pinBtn:hover { background: var(--hover); color: var(--text); }
 .pinBtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-soft-border); color: var(--accent); }
+.metricsGrid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .metricsGrid { grid-template-columns: minmax(0, 1fr); } }

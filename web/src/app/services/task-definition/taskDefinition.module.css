@@ -18,7 +18,7 @@
 .iconBtn { border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); border-radius: var(--radius); width: 30px; cursor: pointer; }
 .btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .editor { width: 100%; min-height: 420px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); box-sizing: border-box; }
 .invalid { border-color: var(--danger); }
 .toolbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
@@ -27,3 +27,12 @@
 .err { color: var(--danger); font-size: 12px; }
 .cardHead { display: flex; align-items: baseline; justify-content: space-between; }
 .note { color: var(--muted); font-size: 12px; }
+
+/* JSON editor with a gutter that marks lines changed against the deployed definition. */
+.editorWrap { display: grid; grid-template-columns: 22px minmax(0, 1fr); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); overflow: hidden; }
+.editorWrap.invalidWrap { border-color: var(--danger); }
+.gutter { overflow: hidden; padding: 10px 0; font: 12px/1.5 var(--mono); color: var(--dim); background: var(--chrome); border-right: 1px solid var(--row-border); text-align: center; user-select: none; }
+.gutter div { height: 18px; }
+.gutter div[data-changed] { background: var(--success-soft); color: var(--success); }
+.gutter div[data-changed]::before { content: "+"; }
+.editorWrap .editor { border: 0; border-radius: 0; background: transparent; white-space: pre; overflow: auto; min-height: 420px; max-height: max(420px, 70dvh); resize: vertical; }

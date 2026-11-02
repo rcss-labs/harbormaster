@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLogHistory } from '../../../api/observe'
 import type { LogLine, LogsHistoryDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
+import { Seg, SegmentedFilter } from '../../../components/Seg'
 import { useAuth } from '../../auth/AuthProvider'
 import { level } from './level'
 import { useLogTail } from './useLogTail'
@@ -17,13 +18,36 @@ const clock = (iso: string): string => {
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
 }
 
+type LevelFilter = 'all' | 'warn' | 'error'
+
+const LEVEL_OPTIONS: { value: LevelFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'warn', label: 'Warn+' },
+  { value: 'error', label: 'Errors' },
+]
+
+/** A line passes when its detected severity is at least the chosen level; errors outrank warnings. */
+function passesLevel(message: string, filter: LevelFilter): boolean {
+  if (filter === 'all') return true
+  const severity = level(message)
+  return filter === 'warn' ? severity !== '' : severity === 'error'
+}
+
+/** One line per row. Time and stream never wrap; a long message is cut with an ellipsis and kept whole in its title. */
 function LogRow({ line }: { line: LogLine }) {
   const severity = level(line.message)
+  const stream = `${line.container}/${line.task_id.slice(0, 8)}`
   return (
-    <div className={styles.ln}>
-      <span className={styles.ts}>{clock(line.t)}</span>
-      <span className={styles.ct}>{`${line.container}/${line.task_id.slice(0, 8)}`}</span>
-      <span className={severity ? styles[`lvl-${severity}`] : undefined}>{line.message}</span>
+    <div className={styles.ln} role="row" data-level={severity || undefined}>
+      <span className={styles.ts} role="cell">
+        {clock(line.t)}
+      </span>
+      <span className={styles.ct} role="cell" title={`${line.container}/${line.task_id}`}>
+        {stream}
+      </span>
+      <span className={styles.msg} role="cell" title={line.message}>
+        {line.message}
+      </span>
     </div>
   )
 }
@@ -38,7 +62,7 @@ interface OlderState {
 export function LogsTab({ serviceId }: { serviceId: string }) {
   const { me } = useAuth()
   const [container, setContainer] = useState('all')
-  const [levelFilter, setLevelFilter] = useState<'all' | 'problems'>('all')
+  const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [searchInput, setSearchInput] = useState('')
   const [q, setQ] = useState('')
   const [follow, setFollow] = useState(true)
@@ -82,7 +106,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
 
   const historyLines = [...(older.before ? (olderPage.data?.lines ?? []) : (newest.data?.lines ?? [])), ...older.lines]
   const allLines = [...historyLines, ...tail.lines]
-  const visible = levelFilter === 'problems' ? allLines.filter((line) => level(line.message) !== '') : allLines
+  const visible = levelFilter === 'all' ? allLines : allLines.filter((line) => passesLevel(line.message, levelFilter))
   const olderBefore = currentPage.data?.older_before
 
   useLayoutEffect(() => {
@@ -136,10 +160,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
             </option>
           ))}
         </select>
-        <select className={styles.ctl} aria-label="Level" value={levelFilter} onChange={(event) => setLevelFilter(event.target.value as 'all' | 'problems')}>
-          <option value="all">All lines</option>
-          <option value="problems">Warnings and errors</option>
-        </select>
+        <SegmentedFilter label="Level" options={LEVEL_OPTIONS} value={levelFilter} onChange={setLevelFilter} />
         <input
           className={`${styles.ctl} ${styles.search}`}
           aria-label="Search logs"
@@ -150,9 +171,15 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
             tail.keepalive()
           }}
         />
-        <button type="button" className={styles.btn} onClick={() => setFollow((on) => !on)}>
-          {follow ? 'Pause' : 'Follow'}
-        </button>
+        <Seg
+          label="Tail"
+          options={[
+            { value: 'live', label: 'Live' },
+            { value: 'paused', label: 'Paused' },
+          ]}
+          value={follow ? 'live' : 'paused'}
+          onChange={(next) => setFollow(next === 'live')}
+        />
         <span className={styles.status}>
           CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {statusText}
         </span>

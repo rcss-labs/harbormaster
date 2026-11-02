@@ -10,6 +10,7 @@ import { Banner } from '../../../components/Banner'
 import { EmptyState } from '../../../components/EmptyState'
 import { LockPanel } from '../../../components/LockPanel'
 import { useExecSocket, type ExecError, type ExecStatus } from './useExecSocket'
+import { Panel } from '../../../components/Panel'
 import styles from './terminal.module.css'
 
 const SYS = '\x1b[38;2;124;196;228m'
@@ -129,42 +130,56 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   }
 
   return (
-    <div className={styles.root}>
-      <div className={styles.toolbar}>
-        <label className={styles.field}>
-          <span>Task</span>
-          <select value={task.id} disabled={active} onChange={(e) => { setPickedTask(e.target.value); setPickedContainer(undefined) }}>
-            {running.map((t) => (
-              <option key={t.id} value={t.id}>{`${t.short_id.slice(0, 12)} · ${t.private_ip} · ${t.az}`}</option>
-            ))}
-          </select>
-        </label>
-        <label className={styles.field}>
-          <span>Container</span>
-          <select value={container?.name ?? ''} disabled={active} onChange={(e) => setPickedContainer(e.target.value)}>
-            {(targets?.containers ?? []).map((c) => (
-              <option key={c.name} value={c.name} disabled={c.exec_agent !== 'RUNNING'}>
-                {c.exec_agent === 'RUNNING' ? c.name : `${c.name} · agent ${c.exec_agent.toLowerCase()}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={styles.field}>
-          <span>Command</span>
-          <select value={command} disabled={active} onChange={(e) => setPickedCommand(e.target.value)}>
-            {commands.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </label>
-        {socket.state === 'connected' ? (
-          <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={disconnect}>Disconnect</button>
-        ) : (
-          <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canConnect} onClick={connect}>Connect</button>
-        )}
-        <span className={styles.note}>ECS Exec through SSM Session Manager · sessions are recorded in the operations log</span>
+    <div className={styles.layout}>
+      <div className={styles.root}>
+        <div className={styles.toolbar}>
+          <label className={styles.field}>
+            <span>Task</span>
+            <select value={task.id} disabled={active} onChange={(e) => { setPickedTask(e.target.value); setPickedContainer(undefined) }}>
+              {running.map((t) => (
+                <option key={t.id} value={t.id}>{`${t.short_id.slice(0, 12)} · ${t.private_ip} · ${t.az}`}</option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            <span>Container</span>
+            <select value={container?.name ?? ''} disabled={active} onChange={(e) => setPickedContainer(e.target.value)}>
+              {(targets?.containers ?? []).map((c) => (
+                <option key={c.name} value={c.name} disabled={c.exec_agent !== 'RUNNING'}>
+                  {c.exec_agent === 'RUNNING' ? c.name : `${c.name} · agent ${c.exec_agent.toLowerCase()}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            <span>Command</span>
+            <select value={command} disabled={active} onChange={(e) => setPickedCommand(e.target.value)}>
+              {commands.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+          {socket.state === 'connected' ? (
+            <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={disconnect}>Disconnect</button>
+          ) : (
+            <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canConnect} onClick={connect}>Connect</button>
+          )}
+        </div>
+        <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
       </div>
-      <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
+      <Panel title="Session">
+        <dl className={styles.session}>
+          <dt>Via</dt>
+          <dd>ECS Exec</dd>
+          <dt>Idle timeout</dt>
+          <dd>20 minutes</dd>
+          <dt>Max duration</dt>
+          <dd>4 hours</dd>
+        </dl>
+        <p className={styles.sessionNote}>
+          Keystrokes and output are not recorded. The operations log records who opened the session, the task, container and command.
+        </p>
+      </Panel>
     </div>
   )
 }

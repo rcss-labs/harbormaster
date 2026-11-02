@@ -7,12 +7,10 @@ import { LineChart } from '../../charts/LineChart'
 import { Timeline, type TimelineEvent } from '../../charts/Timeline'
 import { XL72 } from '../../charts/format'
 import { useNow } from '../../components/Ago'
-import { Card } from '../../components/Card'
+import { Panel } from '../../components/Panel'
 import { FeedRow, Feed } from '../../components/Feed'
 import { KV } from '../../components/KV'
-import { Slots } from '../../components/Slots'
-import { Tile } from '../../components/Tile'
-import { ALBPanels, HealthCard, RunningTasksMeters, UsageChart, UsageTiles } from './overview/MetricPanels'
+import { ALBPanels, HealthCard, RunningTasksMeters, ServiceKpis, UsageChart } from './overview/MetricPanels'
 import { RolloutCard } from './overview/RolloutCard'
 import styles from './service.module.css'
 
@@ -63,27 +61,14 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
 
   return (
     <>
-      <div className={`${styles.grid} ${styles.g4}`}>
-        <Tile k="Tasks" v={service.running} small={`running of ${service.desired} · ${pending} pending`}>
-          <Slots slots={service.slots} desired={service.desired} />
-        </Tile>
-        <Tile k="Deployed revision" v={<span className={styles.mono}>:{service.revision}</span>}>
-          <div className={styles.tileSub}>
-            <span className={styles.mono}>{service.image_tag}</span>
-            <Link className={styles.accentLink} to={`${base}/task-definition`}>
-              View →
-            </Link>
-          </div>
-        </Tile>
-        <UsageTiles service={service} metrics={metrics} />
-      </div>
+      <ServiceKpis service={service} metrics={metrics} />
 
       <div className={`${styles.grid} ${styles.gWide}`}>
         <UsageChart service={service} metrics={metrics} />
         {loadBalancer ? (
           <HealthCard service={service}>{rollout}</HealthCard>
         ) : (
-          <Card title="Task health">
+          <Panel title="Task health">
             <Donut
               segments={[
                 { name: 'Running', v: service.running, color: 'var(--success)' },
@@ -93,7 +78,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
               sub="running"
             />
             <div className={styles.afterDonut}>{rollout}</div>
-          </Card>
+          </Panel>
         )}
       </div>
 
@@ -101,7 +86,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
 
       <div className={`${styles.grid} ${styles.gWide}`}>
         <RunningTasksMeters service={service} metrics={metrics} />
-        <Card title="Running task count, 72 h" right={`desired ${service.desired}`}>
+        <Panel title="Running task count, 72 h" actions={`desired ${service.desired}`}>
           <LineChart
             series={[
               { name: 'running', color: 'var(--accent)', values: service.counts_history_72h.map((point) => point.running) },
@@ -112,10 +97,10 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
             xLabels={XL72}
             height={110}
           />
-        </Card>
+        </Panel>
       </div>
 
-      <Card title="Deployments, 14 days">
+      <Panel title="Deployments, 14 days">
         <Legend
           items={[
             { name: 'Deploy', color: DEPLOY_COLOR },
@@ -124,12 +109,12 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
           ]}
         />
         <Timeline events={service.deployments_14d.map(timelineEvent)} start={now - FOURTEEN_DAYS_MS} end={now} />
-      </Card>
+      </Panel>
 
       <div className={`${styles.grid} ${styles.g2}`}>
-        <Card
+        <Panel
           title="Networking"
-          right={
+          actions={
             vpc ? (
               <Link className={styles.accentLink} to={`/networks/${service.account_id}/${service.region}/${vpc.vpc_id}`}>
                 Network tree →
@@ -169,8 +154,8 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
               ['Service Connect', <span className={styles.muted}>Off</span>],
             ]}
           />
-        </Card>
-        <Card title="Task definition">
+        </Panel>
+        <Panel title="Task definition">
           <KV
             rows={[
               [
@@ -205,12 +190,13 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
               ],
             ]}
           />
-        </Card>
+        </Panel>
       </div>
 
-      <Card
+      <Panel
         title="Recent events"
-        right={
+        flush
+        actions={
           <Link className={styles.accentLink} to={`${base}/operations`}>
             Operations log →
           </Link>
@@ -223,7 +209,7 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
             </FeedRow>
           ))}
         </Feed>
-      </Card>
+      </Panel>
     </>
   )
 }

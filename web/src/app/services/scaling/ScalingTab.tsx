@@ -3,7 +3,7 @@ import { useDesiredCountInfo, useSetDesiredCount, type DesiredCountInfo, type De
 import { useScaling } from '../../../api/observe'
 import { useService } from '../../../api/hooks'
 import type { ScalingDTO, ScalingPolicyDTO } from '../../../api/types'
-import { Card } from '../../../components/Card'
+import { Panel } from '../../../components/Panel'
 import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { KV } from '../../../components/KV'
@@ -73,7 +73,7 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
         <AutoScalingCard scaling={scaling.data} />
       </div>
       <div className={styles.activity}>
-        <Card title="Scaling activity">
+        <Panel title="Scaling activity" flush>
           {scaling.data.activities.length === 0 ? (
             <EmptyState>No scaling activity in the last 7 days.</EmptyState>
           ) : (
@@ -87,7 +87,7 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
                 ))}
             </Feed>
           )}
-        </Card>
+        </Panel>
       </div>
     </>
   )
@@ -117,7 +117,8 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
     : 'No auto scaling: the count stays where you set it.'
 
   return (
-    <Card title="Desired count">
+    <Panel title="Desired count">
+      {scaling.has_target && <RangeBar scaling={scaling} desired={draftCount ?? info.desired} />}
       <div className={styles.toolbar}>
         <button type="button" className={styles.icon} aria-label="Fewer tasks" onClick={() => step(-1)}>
           −
@@ -128,7 +129,7 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
           min={0}
           max={info.max}
           value={draft}
-          aria-label="Desired count"
+          aria-label="Scale to"
           onChange={(event) => setDraft(event.target.value)}
         />
         <button type="button" className={styles.icon} aria-label="More tasks" onClick={() => step(1)}>
@@ -150,16 +151,37 @@ function DesiredCountCard({ info, scaling, canOperate, tagName, saving, onSave }
       <p className={styles.hint}>
         {`Running ${info.running} of ${info.desired}. ${autoScalingNote} Setting 0 stops every task without deleting the service.`}
       </p>
-    </Card>
+    </Panel>
+  )
+}
+
+/** Track from 0 to the larger of max and desired, with the auto scaling min-max span shaded and the desired count marked. */
+function RangeBar({ scaling, desired }: { scaling: ScalingDTO; desired: number }) {
+  const top = Math.max(scaling.max, desired, 1)
+  const pct = (count: number) => `${(count / top) * 100}%`
+  return (
+    <div
+      className={styles.rangeBar}
+      role="img"
+      aria-label={`Auto scaling range ${scaling.min} to ${scaling.max} tasks, desired ${desired}`}
+    >
+      <span className={styles.rangeSpan} style={{ left: pct(scaling.min), width: `calc(${pct(scaling.max)} - ${pct(scaling.min)})` }} />
+      <span className={styles.rangeMark} style={{ left: pct(desired) }} />
+      <span className={styles.rangeScale}>
+        <span>0</span>
+        <span>{`min ${scaling.min}`}</span>
+        <span>{`max ${scaling.max}`}</span>
+      </span>
+    </div>
   )
 }
 
 function AutoScalingCard({ scaling }: { scaling: ScalingDTO }) {
   if (!scaling.has_target) {
     return (
-      <Card title="Auto scaling" right="Application Auto Scaling · set in Terraform">
+      <Panel title="Auto scaling" actions="Application Auto Scaling · set in Terraform">
         <EmptyState>This service has no scalable target registered.</EmptyState>
-      </Card>
+      </Panel>
     )
   }
   const rows: [ReactNode, ReactNode][] = [
@@ -173,8 +195,8 @@ function AutoScalingCard({ scaling }: { scaling: ScalingDTO }) {
     ['Scheduled actions', describeScheduled(scaling)],
   ]
   return (
-    <Card title="Auto scaling" right="Application Auto Scaling · set in Terraform">
+    <Panel title="Auto scaling" actions="Application Auto Scaling · set in Terraform">
       <KV rows={rows} />
-    </Card>
+    </Panel>
   )
 }

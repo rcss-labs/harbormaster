@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { StaleInfo } from '../../api/types'
-import { Card } from '../../components/Card'
+import { Panel } from '../../components/Panel'
 import { EmptyState } from '../../components/EmptyState'
 import { StaleNote } from '../../components/StaleNote'
 
@@ -16,13 +16,13 @@ interface MetricPanelProps {
   children: ReactNode
 }
 
-/** A Card for one metric: stale-data note under the title, and an empty state in place of the chart. */
+/** A Panel for one metric: stale-data note under the title, and an empty state in place of the chart. */
 export function MetricPanel({ title, right, stale, notice, empty = false, emptyText = 'No data yet', children }: MetricPanelProps) {
   return (
-    <Card title={title} right={right}>
+    <Panel title={title} actions={right}>
       {stale && <StaleNote stale={stale} />}
       {notice}
       {empty ? <EmptyState>{emptyText}</EmptyState> : children}
-    </Card>
+    </Panel>
   )
 }

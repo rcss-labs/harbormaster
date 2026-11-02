@@ -1,7 +1,6 @@
 import { Link } from 'react-router'
 import type { ServiceDTO } from '../../api/types'
-import { Pill } from '../../components/Pill'
-import { statusKind, statusLabel } from '../../components/status'
+import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import type { TagClickHandler } from '../clusters/tagTarget'
 import { usePinnedServices } from '../shell/pins'
@@ -29,7 +28,7 @@ export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
             inheritedFrom={service.tag.inherited ? service.cluster.name : undefined}
             onClick={onTagClick && (() => onTagClick({ kind: 'service', id: service.id, name: service.name, tag: service.tag }))}
           />
-          <Pill kind={statusKind(service.status)}>{statusLabel(service.status)}</Pill>
+          <StatusDot status={service.status} />
           <button
             type="button"
             className={styles.pinBtn}

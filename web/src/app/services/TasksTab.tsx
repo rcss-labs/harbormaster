@@ -1,13 +1,18 @@
+import { useState } from 'react'
 import type { TaskDTO } from '../../api/types'
 import { useDesiredCountInfo } from '../../api/change'
 import { useServiceTasks } from '../../api/hooks'
 import { useServiceMetrics } from '../../api/observe'
 import { EmptyState } from '../../components/EmptyState'
+import { Panel } from '../../components/Panel'
+import { SegmentedFilter } from '../../components/Seg'
 import { TaskTable } from '../../components/TaskTable'
 import { usePagedCursor } from '../../components/usePagedCursor'
 import { HiddenStoppedNote } from '../tasks/HiddenStoppedNote'
 
-/** The service's tasks, newest first, with "Load more" for further pages. */
+type TaskSegment = 'running' | 'stopped' | 'all'
+
+/** The service's tasks, newest first, with "Load more" for further pages. The segments filter the pages loaded so far. */
 export function TasksTab({ serviceId }: { serviceId: string }) {
   const paged = usePagedCursor<TaskDTO>(serviceId)
   const page = useServiceTasks(serviceId, paged.cursor)
@@ -15,25 +20,47 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
   // CloudWatch reports the ECS task id, which is the task's short_id.
   const utilisation = taskUsage && Object.fromEntries(taskUsage.map((usage) => [usage.task_id, { cpu: usage.cpu, mem: usage.mem }]))
   const desired = useDesiredCountInfo(serviceId)
+  const [segment, setSegment] = useState<TaskSegment>('all')
 
   if (page.isError) {
     return <EmptyState>{page.error instanceof Error ? page.error.message : 'The tasks could not be loaded.'}</EmptyState>
   }
 
+  const loaded = [...paged.earlier, ...(page.data?.items ?? [])]
+  const runningCount = loaded.filter((task) => task.status === 'RUNNING').length
+  const stoppedCount = loaded.filter((task) => task.status === 'STOPPED').length
+  const items = segment === 'all' ? loaded : loaded.filter((task) => task.status === (segment === 'running' ? 'RUNNING' : 'STOPPED'))
   const next = page.data?.next ?? undefined
   return (
     <>
       <HiddenStoppedNote />
-      <TaskTable
-        items={[...paged.earlier, ...(page.data?.items ?? [])]}
-        withService={false}
-        utilisation={utilisation ?? undefined}
-        next={next}
-        desiredCount={desired.data?.desired ?? null}
-        onMore={() => {
-          if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
-        }}
-      />
+      <Panel
+        title="Tasks"
+        toolbar={
+          <SegmentedFilter
+            label="Task state"
+            value={segment}
+            onChange={setSegment}
+            options={[
+              { value: 'running', label: 'Running', count: runningCount },
+              { value: 'stopped', label: 'Stopped', count: stoppedCount },
+              { value: 'all', label: 'All', count: loaded.length },
+            ]}
+          />
+        }
+        flush
+      >
+        <TaskTable
+          items={items}
+          withService={false}
+          utilisation={utilisation ?? undefined}
+          next={next}
+          desiredCount={desired.data?.desired ?? null}
+          onMore={() => {
+            if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
+          }}
+        />
+      </Panel>
     </>
   )
 }

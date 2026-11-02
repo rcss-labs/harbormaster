@@ -135,40 +135,72 @@ describe('HeaderActions restart', () => {
   })
 })
 
-describe('HeaderActions desired count', () => {
-  it('shows the warning from a desired count response as a toast', async () => {
-    server.use(
-      desiredCountInfo(),
-      http.post(`/api/services/${SERVICE_PAYMENTS.id}/desired-count`, () =>
-        HttpResponse.json({ desired: 0, previous: 3, changed: true, warning: 'Auto scaling may change it back.' }),
-      ),
-    )
+describe('HeaderActions desired count stepper', () => {
+  const countField = () => screen.findByRole('spinbutton', { name: 'Desired count' })
+
+  it('shows the current count and no Apply until the draft changes', async () => {
+    server.use(desiredCountInfo())
     renderActions()
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
-    const input = await screen.findByRole('spinbutton')
-    await user.clear(input)
-    await user.type(input, '0')
-    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
-    expect(await screen.findByText('Auto scaling may change it back.')).toBeInTheDocument()
+    expect(await countField()).toHaveValue(SERVICE_PAYMENTS.desired)
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
   })
 
-  it('shows the zero sentence and posts nothing until confirmed', async () => {
+  it('steps the draft with + and -, revealing Apply only while it differs', async () => {
+    server.use(desiredCountInfo())
+    renderActions()
+    const user = userEvent.setup()
+    const field = await countField()
+
+    await user.click(screen.getByRole('button', { name: 'Increase desired count' }))
+    expect(field).toHaveValue(SERVICE_PAYMENTS.desired + 1)
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Decrease desired count' }))
+    expect(field).toHaveValue(SERVICE_PAYMENTS.desired)
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+  })
+
+  it('stops at zero and at the server maximum', async () => {
+    server.use(desiredCountInfo({ max: SERVICE_PAYMENTS.desired + 1 }))
+    renderActions()
+    const user = userEvent.setup()
+    const field = await countField()
+    await waitFor(() => expect(field).toHaveAttribute('max', String(SERVICE_PAYMENTS.desired + 1)))
+
+    await user.click(screen.getByRole('button', { name: 'Increase desired count' }))
+    expect(screen.getByRole('button', { name: 'Increase desired count' })).toBeDisabled()
+
+    await user.clear(field)
+    await user.type(field, '0')
+    expect(screen.getByRole('button', { name: 'Decrease desired count' })).toBeDisabled()
+  })
+
+  it('does not offer Apply for a value above the maximum', async () => {
+    server.use(desiredCountInfo({ max: 5 }))
+    renderActions()
+    const user = userEvent.setup()
+    const field = await countField()
+    await waitFor(() => expect(field).toHaveAttribute('max', '5'))
+    await user.clear(field)
+    await user.type(field, '9')
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+  })
+
+  it('confirms before posting, then sends the request and toasts', async () => {
     const countRequests = vi.fn()
     server.use(
       desiredCountInfo(),
       http.post(`/api/services/${SERVICE_PAYMENTS.id}/desired-count`, async ({ request }) => {
         countRequests(await request.json())
-        return HttpResponse.json({ desired: 0, previous: 3, changed: true, warning: null })
+        return HttpResponse.json({ desired: 0, previous: 3, changed: true, warning: 'Auto scaling may change it back.' })
       }),
     )
     renderActions()
     const user = userEvent.setup()
-
-    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
-    const input = await screen.findByRole('spinbutton')
-    await user.clear(input)
-    await user.type(input, '0')
+    const field = await countField()
+    await user.clear(field)
+    await user.type(field, '0')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
 
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent(`Set ${SERVICE_PAYMENTS.name} to 0 tasks?`)
@@ -177,53 +209,49 @@ describe('HeaderActions desired count', () => {
 
     await user.click(screen.getByRole('button', { name: 'Update desired count' }))
     await waitFor(() => expect(countRequests).toHaveBeenCalledWith({ desired: 0 }))
+    expect(await screen.findByText('Desired count set to 0.')).toBeInTheDocument()
+    expect(await screen.findByText('Auto scaling may change it back.')).toBeInTheDocument()
+  })
+
+  it('cancelling the confirm dialog posts nothing and keeps the draft', async () => {
+    const countRequests = vi.fn()
+    server.use(
+      desiredCountInfo(),
+      http.post(`/api/services/${SERVICE_PAYMENTS.id}/desired-count`, () => {
+        countRequests()
+        return HttpResponse.json({ desired: 4, previous: 3, changed: true, warning: null })
+      }),
+    )
+    renderActions()
+    const user = userEvent.setup()
+    const field = await countField()
+    await user.click(screen.getByRole('button', { name: 'Increase desired count' }))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(countRequests).not.toHaveBeenCalled()
+    expect(field).toHaveValue(SERVICE_PAYMENTS.desired + 1)
   })
 
   it('warns when auto scaling would move the value back into its range', async () => {
     server.use(desiredCountInfo({ auto_scaling: { min: 2, max: 6 } }))
     renderActions()
     const user = userEvent.setup()
-
-    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
-    const input = await screen.findByRole('spinbutton')
-    await user.clear(input)
-    await user.type(input, '8')
+    const field = await countField()
+    await user.clear(field)
+    await user.type(field, '8')
 
     expect(
       await screen.findByText('Auto scaling keeps this service between 2 and 6. It will move 8 back into that range.'),
     ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Auto scaling settings →' })).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/scaling`)
   })
 
-  it('links to the Scaling tab and closes the dialog when followed', async () => {
-    server.use(desiredCountInfo({ auto_scaling: { min: 2, max: 6 } }))
-    renderActions()
-    const user = userEvent.setup()
-
-    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
-    const link = await screen.findByRole('link', { name: 'Auto scaling settings →' })
-    expect(link).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/scaling`)
-
-    await user.click(link)
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-
-  it('shows a toast and posts nothing when the value is unchanged', async () => {
-    const countRequests = vi.fn()
-    server.use(
-      desiredCountInfo(),
-      http.post(`/api/services/${SERVICE_PAYMENTS.id}/desired-count`, () => {
-        countRequests()
-        return HttpResponse.json({ desired: 0, previous: 0, changed: false, warning: null })
-      }),
-    )
-    renderActions()
-    const user = userEvent.setup()
-
-    await user.click(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` }))
-    await screen.findByRole('spinbutton')
-    await user.click(screen.getByRole('button', { name: 'Update desired count' }))
-
-    expect(await screen.findByText(`Desired count is already ${SERVICE_PAYMENTS.desired}.`)).toBeInTheDocument()
-    expect(countRequests).not.toHaveBeenCalled()
+  it('disables the stepper without Operate and names the tag', async () => {
+    server.use(desiredCountInfo())
+    renderActions(withoutOperate)
+    const field = await countField()
+    expect(field).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Increase desired count' })).toBeDisabled()
+    expect(screen.getByRole('group', { name: 'Desired count' })).toHaveAttribute('title', `You need Operate on ${SERVICE_PAYMENTS.tag.name}`)
   })
 })
