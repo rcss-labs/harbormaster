@@ -1,6 +1,6 @@
 // Shared fixture for the network tree tests (Tree.test.tsx, useTreeState.test.ts) and the VPC page tests.
 // Shape: 2 AZs, 3 subnets (one empty), a standalone-tasks node and one unhealthy task.
-import type { TreeNode } from '../../../api/networks'
+import type { TreeNode } from '../../api/networks'
 
 export const KEYS = {
   vpc: 'vpc:vpc-0a1',

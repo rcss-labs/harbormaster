@@ -33,7 +33,7 @@ test('overview shows cluster usage and needs attention', async ({ page }) => {
   await expect(nav(page).getByRole('link', { name: /^Overview/ })).toHaveText(/Overview1$/)
 })
 
-test('cluster page draws the usage chart and service ALB stats', async ({ page }) => {
+test('cluster page draws the usage chart', async ({ page }) => {
   await login(page, 'pavel')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   await page.getByRole('link', { name: /core-services/ }).first().click()
@@ -41,9 +41,6 @@ test('cluster page draws the usage chart and service ALB stats', async ({ page }
 
   const chart = card(page, 'Cluster CPU and memory, 24 h')
   await expect(chart).toBeVisible({ timeout: POLL_TIMEOUT })
-
-  const payments = page.getByRole('article', { name: 'payments-api' })
-  await expect(payments.getByText('req/min')).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
 // The grid ends before now, so the fresh rollout's marker sits at the right edge (see deployMarks).
@@ -58,8 +55,8 @@ test('cluster chart shows a deployment marker label', async ({ page }) => {
 test('edge-proxy says Container Insights is off', async ({ page }) => {
   await login(page, 'pavel')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
-  const card = page.getByRole('article', { name: 'edge-proxy' })
-  await expect(card.getByText(/Container Insights is off/)).toBeVisible({ timeout: POLL_TIMEOUT })
+  const row = page.getByRole('row', { name: /edge-proxy/ })
+  await expect(row.getByTitle('Container Insights is off').first()).toBeVisible({ timeout: POLL_TIMEOUT })
 
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'edge-nginx')}/metrics`)
   await expect(page.getByText(/Container Insights is off for edge-proxy/)).toBeVisible({ timeout: POLL_TIMEOUT })

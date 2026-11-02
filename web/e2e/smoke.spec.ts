@@ -44,9 +44,10 @@ test('user sees only permitted clusters', async ({ page }) => {
   await expect(nav.getByText('Admin', { exact: true })).toHaveCount(0)
 
   await nav.getByRole('link', { name: 'Clusters' }).click()
-  await expect(page.getByRole('article')).toHaveCount(5)
-  await expect(page.getByRole('article', { name: 'ci-tools' })).toBeVisible()
-  await expect(page.getByRole('article', { name: 'core-services' })).toHaveCount(0)
+  // Header row plus five clusters.
+  await expect(page.getByRole('table', { name: 'Clusters' }).getByRole('row')).toHaveCount(6)
+  await expect(page.getByRole('row', { name: /ci-tools/ })).toBeVisible()
+  await expect(page.getByRole('row', { name: /core-services/ })).toHaveCount(0)
 
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}`)
   await expect(page.getByText('No access')).toBeVisible()
