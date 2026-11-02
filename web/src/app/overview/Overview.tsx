@@ -1,224 +1,182 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router'
 import { useOverview } from '../../api/hooks'
+import type { OverviewDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
-import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
-import { Feed, FeedRow } from '../../components/Feed'
-import { Split } from '../../components/Split'
-import { Tile } from '../../components/Tile'
-import { STATUS_COLOR, REASON_COLOR, clusterStatusKind } from '../../components/status'
+import { KpiStrip, type KpiItem } from '../../components/KpiStrip'
+import { Panel } from '../../components/Panel'
+import { SegmentedFilter } from '../../components/Seg'
+import { REASON_COLOR } from '../../components/status'
 import { BarChart } from '../../charts/BarChart'
-import { Donut } from '../../charts/Donut'
 import { HBars } from '../../charts/HBars'
 import { Legend } from '../../charts/Legend'
-import { Sparkline } from '../../charts/Sparkline'
-import { bucketDayLabel } from '../../charts/format'
-import { AverageUseTile, CpuByClusterCard, MemoryByClusterCard } from './ClusterUsagePanels'
+import { BusiestClusters, useUsageKpis } from './ClusterUsagePanels'
+import { EstateMap } from './EstateMap'
+import { EstateView } from './EstateView'
 import { NeedsAttention } from './NeedsAttention'
+import { useOverviewLayout, type OverviewLayout } from './useOverviewState'
 import { useCrumbs } from '../shell/crumbs'
 import { useFilters } from '../shell/useFilters'
 import styles from './overview.module.css'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
 const STOP_ERROR_COLOR = 'var(--danger)'
-const DEPLOY_COLOR = 'var(--accent)'
-const RESTART_COLOR = 'var(--series-3)'
-const FAILED_COLOR = 'var(--danger)'
-const MISSING_COLOR = 'var(--danger)'
 
 const accountsText = (count: number) => `${count} ${count === 1 ? 'account' : 'accounts'}`
+const percentText = (value: number | null) => (value === null ? '–' : `${Math.round(value)}%`)
 
-export function Overview() {
-  useCrumbs([['Overview']])
-  const { filters } = useFilters()
-  const overview = useOverview(filters)
-  const data = overview.data
-
-  if (overview.isError) {
-    const message = overview.error instanceof Error ? overview.error.message : 'The overview could not be loaded.'
-    return (
-      <>
-        <PageHead />
-        <EmptyState>{message}</EmptyState>
-      </>
-    )
-  }
-  if (!data) return <PageHead />
-
-  const healthyClusters = data.clusters.filter((cluster) => cluster.status === 'healthy').length
-  const statusCount = (status: keyof typeof data.services.by_status) => data.services.by_status[status] ?? 0
-  const servicesNeedingAttention = statusCount('failing') + statusCount('degraded') + statusCount('unhealthy_task')
-  const serviceSplitParts = [
-    { n: statusCount('steady'), color: STATUS_COLOR.ok },
-    { n: statusCount('deploying'), color: STATUS_COLOR.info },
-    { n: statusCount('degraded') + statusCount('unhealthy_task'), color: STATUS_COLOR.warn },
-    { n: statusCount('failing'), color: STATUS_COLOR.bad },
-    { n: statusCount('scaled_to_zero'), color: STATUS_COLOR.mute },
-  ]
-
-  const clustersNeedingAttention = data.per_cluster.filter(
-    (cluster) => cluster.unhealthy + cluster.rolling_out + cluster.missing > 0,
+function withNote(value: ReactNode, note: ReactNode, color?: string) {
+  return (
+    <>
+      {value}
+      <small className={styles.kpiNote} style={color ? { color } : undefined}>
+        {note}
+      </small>
+    </>
   )
+}
 
-  const { task_health: health, tasks } = data
-  const donutSegments = [
-    { name: 'Running, healthy', v: health.healthy, color: 'var(--success)' },
-    { name: 'Running, unhealthy', v: health.unhealthy, color: 'var(--warning)' },
-    { name: 'Rolling out', v: health.rolling_out, color: 'var(--info)' },
-    { name: 'Missing (desired − running)', v: health.missing, color: MISSING_COLOR },
+/** Six cells; a sparkline appears only where the API provides history for that figure. */
+function buildKpis(data: OverviewDTO, usage: ReturnType<typeof useUsageKpis>): KpiItem[] {
+  const statusCount = (status: keyof typeof data.services.by_status) => data.services.by_status[status] ?? 0
+  const healthyClusters = data.clusters.filter((cluster) => cluster.status === 'healthy').length
+  const needAttention = statusCount('failing') + statusCount('degraded') + statusCount('unhealthy_task')
+  const errorStops = data.stops_per_hour.reduce((total, hour) => total + hour.error, 0)
+  const { tasks } = data
+  return [
+    { label: 'Clusters', value: withNote(data.clusters.length, `${healthyClusters} healthy`) },
+    {
+      label: 'Services',
+      value: withNote(data.services.total, needAttention > 0 ? `${needAttention} need attention` : 'all steady', needAttention > 0 ? 'var(--danger)' : undefined),
+    },
+    {
+      label: 'Tasks',
+      value: withNote(tasks.running, `of ${tasks.desired} · ${tasks.unhealthy} unhealthy`, tasks.unhealthy > 0 ? 'var(--warning)' : undefined),
+      spark: tasks.history_72h.map((point) => point.running),
+    },
+    { label: 'Avg CPU', value: percentText(usage.cpu), spark: usage.cpuSpark },
+    { label: 'Avg memory', value: percentText(usage.mem), spark: usage.memSpark },
+    {
+      label: 'Error stops, 24 h',
+      value: errorStops,
+      valueColor: errorStops > 0 ? 'var(--danger)' : undefined,
+      spark: data.stops_per_hour.map((hour) => hour.error),
+      sparkColor: 'var(--danger)',
+    },
   ]
+}
 
-  const stopColumns = data.stops_per_hour.map((hour) => ({
+function StopsPerHour({ data }: { data: OverviewDTO }) {
+  const columns = data.stops_per_hour.map((hour) => ({
     parts: [
       { v: hour.normal, color: STOP_NORMAL_COLOR },
       { v: hour.error, color: STOP_ERROR_COLOR },
     ],
     title: `${new Date(hour.hour).toLocaleString()}: ${hour.normal} normal, ${hour.error} with an error`,
   }))
-
-  const deployColumns = data.deployments_per_day.map((day) => ({
-    parts: [
-      { v: day.deploy, color: DEPLOY_COLOR },
-      { v: day.restart, color: RESTART_COLOR },
-      { v: day.failed, color: FAILED_COLOR },
-    ],
-    title: `${bucketDayLabel(day.day)}: ${day.deploy} deploys, ${day.restart} restarts, ${day.failed} failed`,
-  }))
-  const firstDay = data.deployments_per_day[0]
-
   return (
-    <>
-      <PageHead>
-        {`${accountsText(data.accounts)} · ${data.regions} regions · polled from AWS every 5 s · last poll `}
-        <Ago ts={data.polled_at} />
-      </PageHead>
-
-      <div className={`${styles.grid} ${styles.g4}`}>
-        <Tile k="Clusters" v={data.clusters.length} small={`${healthyClusters} healthy`}>
-          <div className={styles.dots}>
-            {data.clusters.map((cluster) => (
-              <Link
-                key={cluster.id}
-                to={`/clusters/${cluster.id}`}
-                title={cluster.name}
-                className={styles.dot}
-                style={{ background: STATUS_COLOR[clusterStatusKind(cluster.status)] }}
-              />
-            ))}
-          </div>
-        </Tile>
-        <Tile
-          k="Services"
-          v={data.services.total}
-          small={servicesNeedingAttention > 0 ? <span className={styles.danger}>{servicesNeedingAttention} need attention</span> : 'all steady'}
-        >
-          <Split parts={serviceSplitParts} />
-        </Tile>
-        <Tile k="Tasks running" v={tasks.running} small={`of ${tasks.desired} desired · ${tasks.unhealthy} unhealthy`}>
-          <Sparkline values={tasks.history_72h.map((point) => point.running)} color="var(--accent)" height={24} fluid />
-        </Tile>
-        <AverageUseTile />
-      </div>
-
-      <div className={`${styles.grid} ${styles.gWide}`}>
-        <CpuByClusterCard />
-        <Card title="Task health" right="bars to desired · colour = reason">
-        <Donut segments={donutSegments} label={`${tasks.running}/${tasks.desired}`} sub="tasks running" />
-        <div className={styles.afterDonut}>
-          {clustersNeedingAttention.length === 0 ? (
-            <div className={styles.allHealthy}>All clusters healthy</div>
-          ) : (
-            <HBars
-              items={clustersNeedingAttention.map((cluster) => {
-                const healthy = Math.max(0, cluster.running - cluster.unhealthy - cluster.rolling_out)
-                return {
-                  name: cluster.name,
-                  href: `/clusters/${cluster.id}`,
-                  parts: [
-                    { v: healthy, color: 'var(--success)' },
-                    { v: cluster.unhealthy, color: 'var(--warning)' },
-                    { v: cluster.rolling_out, color: 'var(--info)' },
-                    { v: cluster.missing, color: MISSING_COLOR },
-                  ],
-                  ghost: cluster.desired,
-                  label: `${cluster.running} / ${cluster.desired}`,
-                }
-              })}
-            />
-          )}
-        </div>
-        </Card>
-      </div>
-
-      <div className={`${styles.grid} ${styles.g3}`}>
-        <MemoryByClusterCard />
-        <Card title="Task stops per hour, 24 h">
-          <div className={styles.legend}>
-            <Legend
-              items={[
-                { name: 'Normal (deploy, scale)', color: STOP_NORMAL_COLOR },
-                { name: 'Error exit', color: STOP_ERROR_COLOR },
-              ]}
-            />
-          </div>
-          <BarChart cols={stopColumns} height={110} xLabels={[[0, '24 h ago'], [12, '12 h'], [23, 'now']]} />
-        </Card>
-        <Card title="Deployments per day, 14 days">
-          <div className={styles.legend}>
-            <Legend
-              items={[
-                { name: 'Deploy', color: DEPLOY_COLOR },
-                { name: 'Restart', color: RESTART_COLOR },
-                { name: 'Failed', color: FAILED_COLOR },
-              ]}
-            />
-          </div>
-          <BarChart
-            cols={deployColumns}
-            height={110}
-            xLabels={firstDay ? [[0, bucketDayLabel(firstDay.day)], [13, 'today']] : [[13, 'today']]}
-          />
-        </Card>
-      </div>
-
-      <div className={`${styles.grid} ${styles.gWide}`}>
-        <NeedsAttention />
-        <Card title="Why tasks stopped, 3 days">
-          <HBars items={data.stop_reasons.map((reason) => ({ name: reason.reason, v: reason.count, color: REASON_COLOR[reason.reason] }))} />
-        </Card>
-      </div>
-
-      <Card title="Live events" right="ECS service events and actions taken in Harbormaster">
-        <Feed>
-          {data.events.map((event, index) => (
-            <FeedRow key={index} ts={event.ts} source={event.source} actor={event.actor}>
-              {event.service.id === '' ? (
-                <Link to={`/clusters/${event.cluster.id}`}>
-                  <strong>{event.cluster.name}</strong>
-                </Link>
-              ) : (
-                <Link to={`/services/${event.service.id}/operations`}>
-                  <strong>{event.service.name}</strong>
-                </Link>
-              )}{' '}
-              <span className={styles.muted}>{event.text}</span>
-            </FeedRow>
-          ))}
-        </Feed>
-      </Card>
-    </>
+    <Panel
+      title="Task stops per hour, 24 h"
+      actions={
+        <Legend
+          items={[
+            { name: 'Normal', color: STOP_NORMAL_COLOR },
+            { name: 'Error exit', color: STOP_ERROR_COLOR },
+          ]}
+        />
+      }
+    >
+      <BarChart cols={columns} height={90} xLabels={[[0, '24 h ago'], [12, '12 h'], [23, 'now']]} />
+    </Panel>
   )
 }
 
-/** Title block; the meta line is passed as children once the overview data has loaded. */
-function PageHead({ children }: { children?: ReactNode }) {
+function StopReasons({ data }: { data: OverviewDTO }) {
   return (
-    <div className={styles.pageHead}>
-      <div className={styles.titles}>
+    <Panel title="Why tasks stopped, 3 days">
+      <HBars items={data.stop_reasons.map((reason) => ({ name: reason.reason, v: reason.count, color: REASON_COLOR[reason.reason] }))} />
+    </Panel>
+  )
+}
+
+export function Overview() {
+  useCrumbs([['Overview']])
+  const { filters } = useFilters()
+  const overview = useOverview(filters)
+  const usage = useUsageKpis()
+  const [layout, setLayout] = useOverviewLayout()
+  const data = overview.data
+
+  if (overview.isError) {
+    const message = overview.error instanceof Error ? overview.error.message : 'The overview could not be loaded.'
+    return (
+      <PageHead>
+        <EmptyState>{message}</EmptyState>
+      </PageHead>
+    )
+  }
+  if (!data) return <PageHead />
+
+  return (
+    <PageHead
+      meta={
+        <>
+          {`${accountsText(data.accounts)} · ${data.regions} regions · polled from AWS every 5 s · last poll `}
+          <Ago ts={data.polled_at} />
+        </>
+      }
+      layout={layout}
+      onLayout={setLayout}
+    >
+      <KpiStrip label="Estate key figures" items={buildKpis(data, usage)} />
+      {layout === 'triage' ? (
+        <>
+          <NeedsAttention />
+          <div className={styles.twoCol}>
+            <EstateMap />
+            <div className={styles.stack}>
+              <BusiestClusters />
+              <StopsPerHour data={data} />
+              <StopReasons data={data} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <EstateView />
+      )}
+    </PageHead>
+  )
+}
+
+interface PageHeadProps {
+  meta?: ReactNode
+  layout?: OverviewLayout
+  onLayout?: (layout: OverviewLayout) => void
+  children?: ReactNode
+}
+
+/** Title block with the layout toggle; the page body is passed as children once the overview data has loaded. */
+function PageHead({ meta, layout, onLayout, children }: PageHeadProps) {
+  return (
+    <div className={styles.page}>
+      <div className={styles.pageHead}>
         <h1>Overview</h1>
-        {children !== undefined && <div className={styles.meta}>{children}</div>}
+        {meta !== undefined && <div className={styles.meta}>{meta}</div>}
+        {layout !== undefined && onLayout !== undefined && (
+          <div className={styles.layoutToggle}>
+            <SegmentedFilter
+              label="Layout"
+              value={layout}
+              onChange={onLayout}
+              options={[
+                { value: 'triage', label: 'Triage' },
+                { value: 'estate', label: 'Estate' },
+              ]}
+            />
+          </div>
+        )}
       </div>
+      {children}
     </div>
   )
 }

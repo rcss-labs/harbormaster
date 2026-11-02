@@ -18,7 +18,7 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' })
 
 test('overview shows cluster usage and needs attention', async ({ page }) => {
   await login(page, 'pavel')
-  const cpuCard = card(page, 'CPU by cluster, 24 h')
+  const cpuCard = card(page, 'Busiest clusters, CPU')
   await expect(cpuCard.getByText('core-services', { exact: true })).toBeVisible({ timeout: POLL_TIMEOUT })
 
   const attention = card(page, 'Needs attention')
