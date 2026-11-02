@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
 import { api } from '../api/client'
+import { AnalyticsPage, AnalyticsRedirect } from './analytics/AnalyticsPage'
 import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
 import { Setup } from './auth/Setup'
@@ -83,6 +84,8 @@ export function AppRoutes() {
           <Route path="networks/:accountId/:region" element={<NetworkRegionRedirect />} />
           <Route path="networks/:accountId/:region/:vpcId" element={<NetworkVpcRedirect />} />
           <Route path="storage" element={<StoragePage />} />
+          <Route path="analytics" element={<AnalyticsRedirect />} />
+          <Route path="analytics/:tab" element={<AnalyticsPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>
