@@ -4,7 +4,7 @@ import type { DataTableColumn } from '../../components/DataTable'
 import { KpiStrip } from '../../components/KpiStrip'
 import { BarCell, MonoCell, ServiceLink, TagCell } from './cells'
 import { averageOf, COLOR, daysBefore, minutesText, percent, sourceFor, sumOf, whole, windowDays } from './format'
-import { KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
+import { dailyEmpty, KpiNote, rollupRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
 /** Keyed by the API's stop_reason_group strings (internal/status/stopreason.go); the expected groups are drawn grey by linesOf. */
@@ -19,9 +19,9 @@ const EXIT_COLORS = { '1': COLOR.bad, '137': COLOR.orange, '143': COLOR.warn, '2
 const availabilityColor = (availability: number) => (availability < 0.98 ? COLOR.bad : availability < 0.995 ? COLOR.warn : COLOR.ok)
 const exitLabel = (line: { key: string; label: string }) => (line.key === 'other' ? 'Other' : `Exit ${line.label}`)
 
-export function ReliabilityTab({ data, showSources, showProposed }: TabProps<AnalyticsReliability>) {
+export function ReliabilityTab({ data, showSources }: TabProps<AnalyticsReliability>) {
   const { kpis, window } = data
-  const common = { window, showSources, showProposed }
+  const common = { window, showSources }
   const counts = sourceFor(data.sources, 'service_counts_history')
   const daily = sourceFor(data.sources, 'service_availability_daily')
   // The rollup panels look back 90 days (60 for the comparison of two 30-day periods), whatever the tab's range.
@@ -65,7 +65,7 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
     },
   ]
 
-  const worse = proposedRows(data.getting_worse)
+  const worse = rollupRows(data.getting_worse)
 
   return (
     <>
@@ -147,7 +147,8 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
           sub="daily"
           span="half"
           series={data.availability_90d.data}
-          proposed={data.availability_90d}
+          rollup={data.availability_90d}
+          empty={dailyEmpty(data.availability_90d)}
           source={daily}
           mode="area"
           colors={{ availability: COLOR.ok }}
@@ -162,7 +163,8 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
           sub="summed across services"
           span="half"
           series={data.below_desired_90d.data}
-          proposed={data.below_desired_90d}
+          rollup={data.below_desired_90d}
+          empty={dailyEmpty(data.below_desired_90d)}
           source={daily}
           mode="area"
           colors={{ minutes_below: COLOR.warn }}
@@ -172,7 +174,8 @@ export function ReliabilityTab({ data, showSources, showProposed }: TabProps<Ana
           {...sixtyDays}
           title="Services getting less available"
           sub="last 30 days vs the 30 before"
-          proposed={data.getting_worse}
+          rollup={data.getting_worse}
+          empty={dailyEmpty(data.getting_worse)}
           source={daily}
           rows={worse.rows}
           columns={worseColumns}

@@ -3,21 +3,18 @@ import { useCallback, useState } from 'react'
 export interface AnalyticsPrefs {
   /** Source footers on panels and the "Data used on this page" table. */
   showSources: boolean
-  /** Panels that need new data (dashed, "PROPOSED"). */
-  showProposed: boolean
 }
 
 const KEY = 'harbormaster-analytics-prefs'
-const DEFAULTS: AnalyticsPrefs = { showSources: true, showProposed: true }
+const DEFAULTS: AnalyticsPrefs = { showSources: true }
 
 function read(): AnalyticsPrefs {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(KEY) ?? '{}')
     if (parsed && typeof parsed === 'object') {
-      const { showSources, showProposed } = parsed as Record<string, unknown>
+      const { showSources } = parsed as Record<string, unknown>
       return {
         showSources: typeof showSources === 'boolean' ? showSources : DEFAULTS.showSources,
-        showProposed: typeof showProposed === 'boolean' ? showProposed : DEFAULTS.showProposed,
       }
     }
   } catch {

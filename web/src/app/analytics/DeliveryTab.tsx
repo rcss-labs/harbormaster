@@ -5,7 +5,7 @@ import type { DataTableColumn } from '../../components/DataTable'
 import { KpiStrip } from '../../components/KpiStrip'
 import { BarCell, MonoCell, ServiceLink, TagCell } from './cells'
 import { averageOf, COLOR, durationText, minutesText, percent, sourceFor, sumOf, whole } from './format'
-import { KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
+import { FAILURES_EMPTY, KpiNote, rollupRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
 const OUTCOME_COLORS = { completed: COLOR.accent, failed: COLOR.bad, superseded: COLOR.gray }
@@ -27,10 +27,10 @@ const reasonLabel = (reason: string) => {
 const rateColor = (rate: number) => (rate > 0.2 ? COLOR.bad : rate > 0.1 ? COLOR.warn : COLOR.accent)
 const rateStatus = (rate: number) => (rate > 0.2 ? 'bad' : rate > 0.1 ? 'warn' : undefined)
 
-export function DeliveryTab({ data, showSources, showProposed }: TabProps<AnalyticsDelivery>) {
+export function DeliveryTab({ data, showSources }: TabProps<AnalyticsDelivery>) {
   const { kpis, window } = data
   const now = useNow(60_000)
-  const common = { window, showSources, showProposed }
+  const common = { window, showSources }
   const source = sourceFor(data.sources, 'deployment_history')
   const failedRate = kpis.change_failure_rate
 
@@ -73,7 +73,7 @@ export function DeliveryTab({ data, showSources, showProposed }: TabProps<Analyt
     { key: 'ran', header: 'Ran for', width: '90px', align: 'right', render: (row) => <MonoCell>{row.ran_for_s === null ? '—' : durationText(row.ran_for_s)}</MonoCell> },
   ]
 
-  const failures = proposedRows(data.recent_failures)
+  const failures = rollupRows(data.recent_failures)
   const rollouts = data.rollouts.series
   const averageFailure = averageOf(data.failure_rate.series[0]?.values ?? [])
 
@@ -139,7 +139,8 @@ export function DeliveryTab({ data, showSources, showProposed }: TabProps<Analyt
           title="Why rollouts failed"
           span="full"
           series={data.failure_reasons.data}
-          proposed={data.failure_reasons}
+          rollup={data.failure_reasons}
+          empty={FAILURES_EMPTY}
           source={source}
           mode="stacked"
           colors={REASON_COLORS}
@@ -148,7 +149,8 @@ export function DeliveryTab({ data, showSources, showProposed }: TabProps<Analyt
         <TablePanel
           {...common}
           title="Recent failed rollouts, with reason"
-          proposed={data.recent_failures}
+          rollup={data.recent_failures}
+          empty={FAILURES_EMPTY}
           source={source}
           rows={failures.rows}
           columns={failureColumns}

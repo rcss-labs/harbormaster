@@ -20,14 +20,13 @@ async function renderTab(data: AnalyticsCapacity) {
 
 const DAILY_PANELS = ['Reserved vs used vCPU, last 90 days', 'Spot share, last 90 days', 'Memory reserved vs used p95', 'Most over-reserved services']
 
-describe('CapacityTab proposed panels', () => {
-  it('renders the rollup panels without proposed styling when available', async () => {
+describe('CapacityTab daily panels', () => {
+  it('renders the rollup panels as normal panels when available', async () => {
     await renderTab(ANALYTICS_CAPACITY_DAILY)
     for (const name of DAILY_PANELS) {
       const panel = screen.getByRole('region', { name: new RegExp(name) })
-      expect(panel).toHaveAttribute('data-variant', 'default')
-      expect(within(panel).queryByText('PROPOSED')).not.toBeInTheDocument()
-      expect(within(panel).queryByText(/needs new data/)).not.toBeInTheDocument()
+      expect(panel).not.toHaveAttribute('data-variant')
+      expect(within(panel).queryByText(/needs new data/i)).not.toBeInTheDocument()
       expect(within(panel).getByText(/^Daily data started on /)).toBeInTheDocument()
     }
     expect(within(screen.getByRole('region', { name: /Reserved vs used vCPU/ })).getByText('source cluster_capacity_daily · kept 8760h')).toBeInTheDocument()
@@ -41,12 +40,19 @@ describe('CapacityTab proposed panels', () => {
     expect(within(row).getByText('25%')).toBeInTheDocument()
   })
 
-  it('stays dashed with the needs footer while the rollups are empty', async () => {
+  it('says daily data appears after the first rollup, with the normal source footer, while the rollups are empty', async () => {
     await renderTab(ANALYTICS_CAPACITY)
+    const tables: Record<string, string> = {
+      'Reserved vs used vCPU, last 90 days': 'cluster_capacity_daily',
+      'Spot share, last 90 days': 'cluster_capacity_daily',
+      'Memory reserved vs used p95': 'service_util_daily',
+      'Most over-reserved services': 'service_util_daily',
+    }
     for (const name of DAILY_PANELS) {
-      const panel = screen.getByRole('region', { name: new RegExp(name) })
-      expect(panel).toHaveAttribute('data-variant', 'proposed')
-      expect(within(panel).getByText('PROPOSED')).toBeInTheDocument()
+      const panel = within(screen.getByRole('region', { name: new RegExp(name) }))
+      expect(panel.getByText('Daily data appears after the first rollup')).toBeInTheDocument()
+      expect(panel.getByText(new RegExp(`^source ${tables[name]} · kept `))).toBeInTheDocument()
+      expect(panel.queryByText(/needs new data|Not collected yet/i)).not.toBeInTheDocument()
     }
   })
 })

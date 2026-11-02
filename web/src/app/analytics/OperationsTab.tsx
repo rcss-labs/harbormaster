@@ -18,9 +18,9 @@ const TYPE_COLORS = {
   terminal: COLOR.orange,
 }
 
-export function OperationsTab({ data, showSources, showProposed }: TabProps<AnalyticsOperations>) {
+export function OperationsTab({ data, showSources }: TabProps<AnalyticsOperations>) {
   const { kpis, window } = data
-  const common = { window, showSources, showProposed }
+  const common = { window, showSources }
   const now = useNow(60_000)
   const log = sourceFor(data.sources, 'operation_log')
   const averageRestarts = averageOf(data.restarts_per_100_deploys.series[0]?.values ?? [])
