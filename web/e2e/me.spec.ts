@@ -43,7 +43,7 @@ test('sign-out as dana ends the session and returns to the login page', async ({
   await expect(page.getByText('Signed in as')).toContainText('dana')
   await expect(page.getByText('Signed in as')).toContainText('User')
   await page.getByRole('button', { name: 'Sign out' }).click()
-  await expect(page).toHaveURL(/\/login$/)
+  await expect(page).toHaveURL(/\/login(\?signed_out=1)?$/)
   expect((await page.request.get('/api/me')).status()).toBe(401)
 
   // The shared dana session from setup is a different session and stays valid.

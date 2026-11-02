@@ -35,6 +35,20 @@ test.describe('security', () => {
     await page.waitForLoadState('networkidle')
   })
 
+  test('SP metadata is 404 before SSO is configured', async ({ request }) => {
+    expect((await request.get('/api/auth/saml/metadata')).status()).toBe(404)
+  })
+
+  test('ACS refuses GET', async ({ request }) => {
+    expect((await request.get('/api/auth/saml/acs')).status()).toBe(405)
+  })
+
+  test('ACS without a request row redirects to the login error', async ({ request }) => {
+    const res = await request.post('/api/auth/saml/acs', { form: { SAMLResponse: 'AAAA' }, maxRedirects: 0 })
+    expect(res.status()).toBe(303)
+    expect(res.headers()['location']).toContain('error=sso_failed')
+  })
+
   test('favicon is served as SVG', async ({ request }) => {
     const res = await request.get('/brand/favicon.svg')
     expect(res.status()).toBe(200)
