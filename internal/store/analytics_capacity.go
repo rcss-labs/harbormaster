@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
@@ -169,41 +171,60 @@ type TrendPoint struct {
 }
 
 // AnalyticsReservedTrend estimates reserved vCPU per bucket and effective tag as counts history times each
-// service's current task definition CPU, averaged over the bucket's samples. The history is read once and joined
-// to a small per-service map (grouping by service and bucket over the window is the shape to avoid).
+// service's current task definition CPU, averaged over the bucket's samples. The database sums per sample
+// timestamp and tag (about 2,000 timestamps x a few tags, a hash aggregate); averaging into buckets happens in Go
+// because a DISTINCT sample count would force a sorted aggregate over the whole window.
 func (s *Store) AnalyticsReservedTrend(ctx context.Context, f TargetFilter, vis Visibility, from, to time.Time, bucket time.Duration) ([]TrendPoint, error) {
 	var q queryArgs
-	fromArg, toArg, bucketArg := q.add(from), q.add(to), q.add(seconds(bucket))
+	fromArg, toArg := q.add(from), q.add(to)
 	historyTarget := q.target("h", f)
 	serviceTarget := q.target("s", f)
 	v := q.visibility("s", vis)
-	rows, err := s.Pool.Query(ctx,
-		`select date_bin(make_interval(secs => `+bucketArg+`::float8), h.ts, `+fromArg+`::timestamptz) as b, m.tag_id,
-		   sum(coalesce(h.running, 0)::float8 * m.cpu_units) / 1024.0 / count(distinct h.ts)
+	sql := `select h.ts, m.tag_id, sum(coalesce(h.running, 0)::float8 * m.cpu_units) / 1024.0
 		 from service_counts_history h
 		 join (
-		   select s.account_id, s.region, s.cluster_name, s.service_name, `+v.Effective+` as tag_id,
+		   select s.account_id, s.region, s.cluster_name, s.service_name, ` + v.Effective + ` as tag_id,
 		     case when td.cpu ~ '^[0-9]+$' then td.cpu::int else 0 end as cpu_units
-		   from services s`+v.Joins+`
+		   from services s` + v.Joins + `
 		   left join task_definitions td on td.account_id = s.account_id and td.region = s.region and td.arn = s.task_definition_arn
-		   where `+serviceTarget+` and `+v.Predicate+`) m
+		   where ` + serviceTarget + ` and ` + v.Predicate + `) m
 		   on m.account_id = h.account_id and m.region = h.region and m.cluster_name = h.cluster_name and m.service_name = h.service_name
-		 where h.ts >= `+fromArg+` and h.ts < `+toArg+` and `+historyTarget+`
-		 group by 1, 2 order by 1, 2`, q.values...)
+		 where h.ts >= ` + fromArg + ` and h.ts < ` + toArg + ` and ` + historyTarget + `
+		 group by 1, 2`
+
+	type bucketKey struct {
+		start time.Time
+		tag   authz.TagID
+	}
+	sums := map[bucketKey]float64{}
+	samples := map[time.Time]map[time.Time]bool{} // bucket start -> distinct sample timestamps
+	err := s.scanHistory(ctx, sql, q.values, func(rows pgx.Rows) error {
+		var ts time.Time
+		var tag authz.TagID
+		var vcpu float64
+		if err := rows.Scan(&ts, &tag, &vcpu); err != nil {
+			return err
+		}
+		start := from.Add(ts.Sub(from) / bucket * bucket)
+		sums[bucketKey{start, tag}] += vcpu
+		if samples[start] == nil {
+			samples[start] = map[time.Time]bool{}
+		}
+		samples[start][ts] = true
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("analytics reserved trend: %w", err)
 	}
-	defer rows.Close()
-	out := []TrendPoint{}
-	for rows.Next() {
-		var p TrendPoint
-		if err := rows.Scan(&p.Bucket, &p.TagID, &p.VCPU); err != nil {
-			return nil, fmt.Errorf("scan reserved trend: %w", err)
+	out := make([]TrendPoint, 0, len(sums))
+	for key, total := range sums {
+		out = append(out, TrendPoint{Bucket: key.start, TagID: key.tag, VCPU: total / float64(len(samples[key.start]))})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Bucket.Equal(out[j].Bucket) {
+			return out[i].Bucket.Before(out[j].Bucket)
 		}
-		out = append(out, p)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("analytics reserved trend: %w", err)
-	}
+		return out[i].TagID < out[j].TagID
+	})
 	return out, nil
 }

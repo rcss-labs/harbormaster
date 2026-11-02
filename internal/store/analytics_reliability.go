@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
@@ -40,39 +43,84 @@ type AvailBucket struct {
 }
 
 // AnalyticsAvailabilitySeries tallies counts-history samples per bucket over [from, to) for the visible services.
+// It reads the history twice, concurrently: DISTINCT aggregates force a sorted aggregate (1.2M rows spilled to disk,
+// about 1 s), so the sample tally is a plain hash aggregate and the services-below count is a second, small query
+// over only the below-desired rows.
 func (s *Store) AnalyticsAvailabilitySeries(ctx context.Context, f TargetFilter, vis Visibility, from, to time.Time, bucket time.Duration) ([]AvailBucket, error) {
 	var q queryArgs
 	fromArg, toArg, bucketArg := q.add(from), q.add(to), q.add(seconds(bucket))
 	historyTarget := q.target("h", f)
 	serviceTarget := q.target("s", f)
 	v := q.visibility("s", vis)
-	sql := `select date_bin(make_interval(secs => ` + bucketArg + `::float8), h.ts, ` + fromArg + `::timestamptz) as b,
-	    count(*),
-	    count(*) filter (where coalesce(h.running, 0) >= coalesce(h.desired, 0)),
-	    count(distinct (h.cluster_name, h.service_name)) filter (where coalesce(h.running, 0) < coalesce(h.desired, 0))
-	  from service_counts_history h
+	binned := `date_bin(make_interval(secs => ` + bucketArg + `::float8), h.ts, ` + fromArg + `::timestamptz)`
+	visible := `from service_counts_history h
 	  where h.ts >= ` + fromArg + ` and h.ts < ` + toArg + ` and ` + historyTarget + `
 	    and (h.account_id, h.region, h.cluster_name, h.service_name) in (
 	      select s.account_id, s.region, s.cluster_name, s.service_name from services s` + v.Joins + `
-	      where ` + serviceTarget + ` and ` + v.Predicate + `)
-	  group by 1 order by 1`
-	rows, err := s.Pool.Query(ctx, sql, q.values...)
-	if err != nil {
+	      where ` + serviceTarget + ` and ` + v.Predicate + `)`
+	tally := `select ` + binned + ` as b, count(*), count(*) filter (where coalesce(h.running, 0) >= coalesce(h.desired, 0)) ` +
+		visible + ` group by 1 order by 1`
+	below := `select b, count(*) from (select ` + binned + ` as b, h.cluster_name, h.service_name ` + visible +
+		` and coalesce(h.running, 0) < coalesce(h.desired, 0) group by 1, 2, 3) x group by 1`
+
+	var out []AvailBucket
+	belowByBucket := map[int64]int{}
+	group, gctx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		return s.scanHistory(gctx, tally, q.values, func(rows pgx.Rows) error {
+			var b AvailBucket
+			if err := rows.Scan(&b.Bucket, &b.Samples, &b.OK); err != nil {
+				return err
+			}
+			out = append(out, b)
+			return nil
+		})
+	})
+	group.Go(func() error {
+		return s.scanHistory(gctx, below, q.values, func(rows pgx.Rows) error {
+			var at time.Time
+			var n int
+			if err := rows.Scan(&at, &n); err != nil {
+				return err
+			}
+			belowByBucket[at.Unix()] = n
+			return nil
+		})
+	})
+	if err := group.Wait(); err != nil {
 		return nil, fmt.Errorf("analytics availability series: %w", err)
 	}
-	defer rows.Close()
-	out := []AvailBucket{}
-	for rows.Next() {
-		var b AvailBucket
-		if err := rows.Scan(&b.Bucket, &b.Samples, &b.OK, &b.BelowServices); err != nil {
-			return nil, fmt.Errorf("scan availability bucket: %w", err)
-		}
-		out = append(out, b)
+	if out == nil {
+		out = []AvailBucket{}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("analytics availability series: %w", err)
+	for i := range out {
+		out[i].BelowServices = belowByBucket[out[i].Bucket.Unix()]
 	}
 	return out, nil
+}
+
+// scanHistory runs a counts-history query with nested loops disabled and custom plans forced for its
+// transaction. With the whole 7-day table inside the window the planner otherwise walks the primary key once per
+// visible service (600 index scans), about 2x slower than a parallel sequential scan hash-joined to the visible
+// service keys. After five executions Postgres also switches a cached statement to a generic plan, which cannot
+// fold the visibility parameters and measured 3x slower again.
+func (s *Store) scanHistory(ctx context.Context, sql string, args []any, scan func(pgx.Rows) error) error {
+	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "set local enable_nestloop = off; set local plan_cache_mode = force_custom_plan"); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, sql, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			if err := scan(rows); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	})
 }
 
 // ServiceAvail is one service's counts-history tally over the window.
@@ -108,21 +156,17 @@ func (s *Store) AnalyticsAvailabilityByService(ctx context.Context, f TargetFilt
 	    and s.service_name = a.service_name` + v.Joins + `
 	  where ` + v.Predicate + `
 	  order by s.account_id, s.region, s.cluster_name, s.service_name`
-	rows, err := s.Pool.Query(ctx, sql, q.values...)
-	if err != nil {
-		return nil, fmt.Errorf("analytics availability by service: %w", err)
-	}
-	defer rows.Close()
 	out := []ServiceAvail{}
-	for rows.Next() {
+	err := s.scanHistory(ctx, sql, q.values, func(rows pgx.Rows) error {
 		var a ServiceAvail
 		if err := rows.Scan(&a.Key.AccountID, &a.Key.Region, &a.Key.Cluster, &a.Key.Service, &a.EffectiveTagID,
 			&a.TagInherited, &a.Samples, &a.OK, &a.Below); err != nil {
-			return nil, fmt.Errorf("scan service availability: %w", err)
+			return err
 		}
 		out = append(out, a)
-	}
-	if err := rows.Err(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, fmt.Errorf("analytics availability by service: %w", err)
 	}
 	return out, nil
