@@ -19,6 +19,7 @@ type DeploymentFact struct {
 	StartedAt       time.Time
 	FinishedAt      *time.Time
 	Outcome         string
+	FailureReason   string // empty unless the rollout failed after reasons were recorded
 	StartedByUserID *int64
 	TagID           int64
 	TagInherited    bool
@@ -33,7 +34,7 @@ func (s *Store) AnalyticsDeployments(ctx context.Context, f TargetFilter, vis Vi
 	v := q.visibility("d", vis)
 	fromParam, toParam := q.add(from), q.add(to)
 	sql := `select d.account_id, d.region, d.cluster_name, d.service_name, d.deployment_id, d.kind,
-	    coalesce(d.revision, 0), d.started_at, d.finished_at, coalesce(d.outcome, ''), d.started_by_user_id,
+	    coalesce(d.revision, 0), d.started_at, d.finished_at, coalesce(d.outcome, ''), coalesce(d.failure_reason, ''), d.started_by_user_id,
 	    ` + v.Effective + `, ` + v.Inherited + `
 	  from deployment_history d` + v.Joins + `
 	  where ` + target + ` and ` + v.Predicate + `
@@ -50,7 +51,7 @@ func (s *Store) AnalyticsDeployments(ctx context.Context, f TargetFilter, vis Vi
 		var fact DeploymentFact
 		key := &fact.Key
 		if err := rows.Scan(&key.AccountID, &key.Region, &key.Cluster, &key.Service, &fact.DeploymentID, &fact.Kind,
-			&fact.Revision, &fact.StartedAt, &fact.FinishedAt, &fact.Outcome, &fact.StartedByUserID,
+			&fact.Revision, &fact.StartedAt, &fact.FinishedAt, &fact.Outcome, &fact.FailureReason, &fact.StartedByUserID,
 			&fact.TagID, &fact.TagInherited); err != nil {
 			return nil, fmt.Errorf("scan analytics deployment: %w", err)
 		}
