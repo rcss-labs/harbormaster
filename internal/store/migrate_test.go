@@ -16,8 +16,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if !reflect.DeepEqual(applied, []int{1, 2, 20, 30, 40, 50, 60, 70}) {
-		t.Fatalf("first Migrate applied %v, want [1 2 20 30 40 50 60 70]", applied)
+	if !reflect.DeepEqual(applied, []int{1, 2, 20, 30, 40, 50, 60, 70, 80}) {
+		t.Fatalf("first Migrate applied %v, want [1 2 20 30 40 50 60 70 80]", applied)
 	}
 	applied, err = s.Migrate(ctx)
 	if err != nil {
@@ -30,8 +30,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, `select count(*) from schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 8 {
-		t.Fatalf("schema_migrations rows = %d, want 8", n)
+	if n != 9 {
+		t.Fatalf("schema_migrations rows = %d, want 9", n)
 	}
 	var versions []int
 	rows, err := s.Pool.Query(ctx, `select version from schema_migrations order by version`)
@@ -46,8 +46,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 		}
 		versions = append(versions, v)
 	}
-	if !reflect.DeepEqual(versions, []int{1, 2, 20, 30, 40, 50, 60, 70}) {
-		t.Fatalf("versions = %v, want [1 2 20 30 40 50 60 70]", versions)
+	if !reflect.DeepEqual(versions, []int{1, 2, 20, 30, 40, 50, 60, 70, 80}) {
+		t.Fatalf("versions = %v, want [1 2 20 30 40 50 60 70 80]", versions)
 	}
 }
 
@@ -74,5 +74,18 @@ func TestStoretest_IsolatedSchema(t *testing.T) {
 	}
 	if sa == sb {
 		t.Fatalf("both stores use schema %q", sa)
+	}
+}
+
+func TestMigrate_AnalyticsTablesAndColumns(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	for _, table := range []string{"service_availability_daily", "cluster_capacity_daily", "service_util_daily"} {
+		if _, err := s.Pool.Exec(ctx, `select day from `+table+` limit 1`); err != nil {
+			t.Errorf("%s: %v", table, err)
+		}
+	}
+	if _, err := s.Pool.Exec(ctx, `select failure_reason, failure_detail from deployment_history limit 1`); err != nil {
+		t.Errorf("deployment_history failure columns: %v", err)
 	}
 }
