@@ -114,7 +114,8 @@ func (s *Service) SetDesiredCount(ctx context.Context, subj authz.Subject, key m
 	logged := store.Operation{
 		AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Service: &key.Service,
 		ActorUserID: &subj.UserID, Source: "harbormaster",
-		Text: fmt.Sprintf("Changed desired count from %d to %d.", previous, n),
+		Text:    fmt.Sprintf("Changed desired count from %d to %d.", previous, n),
+		Details: map[string]any{"op": "scale"},
 	}
 	if warning := s.logAfterAWS(ctx, logged, "desired count change"); warning != "" {
 		result.Warning = strings.TrimSpace(result.Warning + " " + warning)
@@ -154,12 +155,13 @@ func (s *Service) StopTask(ctx context.Context, subj authz.Subject, accountID, r
 	logged := store.Operation{
 		AccountID: accountID, Region: region, Cluster: task.Cluster.Cluster,
 		ActorUserID: &subj.UserID, Source: "harbormaster",
-		Text: fmt.Sprintf("Stopped task %s.", shortTaskID(taskARN)),
+		Text:    fmt.Sprintf("Stopped task %s.", shortTaskID(taskARN)),
+		Details: map[string]any{"op": "stop_task"},
 	}
 	if task.ServiceName != "" {
 		logged.Service = &task.ServiceName
 	} else {
-		logged.Details = map[string]any{"cluster": task.Cluster.Cluster, "task_arn": taskARN}
+		logged.Details["cluster"], logged.Details["task_arn"] = task.Cluster.Cluster, taskARN
 	}
 	warning := s.logAfterAWS(ctx, logged, "stop task")
 	return Stopped{TaskARN: taskARN, Reason: reason, ServiceName: task.ServiceName, Warning: warning}, nil

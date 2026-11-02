@@ -69,6 +69,9 @@ func TestSetDesiredCount_ChangesAndLogs(t *testing.T) {
 	if text := lastOperationText(t, h, paymentsKey); text != "Changed desired count from 3 to 5." {
 		t.Fatalf("operation = %q", text)
 	}
+	if op := lastOperationOp(t, h, paymentsKey); op != "scale" {
+		t.Fatalf("details.op = %v, want scale", op)
+	}
 }
 
 func TestSetDesiredCount_SameValueIsNoop(t *testing.T) {
@@ -149,6 +152,9 @@ func TestStopTask_ReasonAndLog(t *testing.T) {
 	if text := lastOperationText(t, h, paymentsKey); text != "Stopped task "+taskID[:12]+"." {
 		t.Fatalf("operation = %q", text)
 	}
+	if op := lastOperationOp(t, h, paymentsKey); op != "stop_task" {
+		t.Fatalf("details.op = %v, want stop_task", op)
+	}
 }
 
 func TestStopTask_StandaloneTaskLogsWithoutService(t *testing.T) {
@@ -159,16 +165,19 @@ func TestStopTask_StandaloneTaskLogsWithoutService(t *testing.T) {
 		t.Fatal(err)
 	}
 	var serviceIsNull bool
-	var cluster, loggedARN, text string
+	var cluster, loggedARN, text, op string
 	err := h.store.Pool.QueryRow(t.Context(),
-		`select service_name is null, details->>'cluster', details->>'task_arn', text
+		`select service_name is null, details->>'cluster', details->>'task_arn', text, details->>'op'
 		 from operation_log where account_id = $1 and region = $2 and cluster_name = 'ci-tools'
 		 order by id desc limit 1`,
-		homelabAccountID, homelabRegion).Scan(&serviceIsNull, &cluster, &loggedARN, &text)
+		homelabAccountID, homelabRegion).Scan(&serviceIsNull, &cluster, &loggedARN, &text, &op)
 	if err != nil {
 		t.Fatal(err)
 	}
 	taskID := arn[strings.LastIndex(arn, "/")+1:]
+	if op != "stop_task" {
+		t.Fatalf("details.op = %q, want stop_task", op)
+	}
 	if !serviceIsNull || cluster != "ci-tools" || loggedARN != arn || text != "Stopped task "+taskID[:12]+"." {
 		t.Fatalf("operation row: service null %v, cluster %q, task_arn %q, text %q", serviceIsNull, cluster, loggedARN, text)
 	}

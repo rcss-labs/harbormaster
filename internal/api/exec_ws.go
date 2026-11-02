@@ -427,7 +427,7 @@ type execOperations struct {
 // append writes one row and reports whether it was stored.
 func (o execOperations) append(ctx context.Context, text string, extra map[string]any) bool {
 	details := map[string]any{
-		"task_arn": o.task.ARN, "container": o.container, "command": o.command, "session_id": o.sessionID,
+		"op": "terminal", "task_arn": o.task.ARN, "container": o.container, "command": o.command, "session_id": o.sessionID,
 	}
 	for k, v := range extra {
 		details[k] = v
@@ -452,5 +452,5 @@ func (o execOperations) logClosed(sess *execbridge.Session, reason execbridge.Cl
 	defer cancel()
 	duration := sess.Duration()
 	o.append(ctx, "Closed terminal session on task "+shortTaskID(o.task.ARN)+" ("+o.container+") after "+durationText(duration)+".",
-		map[string]any{"duration_ms": duration.Milliseconds(), "reason": string(reason)})
+		map[string]any{"op": "terminal_close", "duration_ms": duration.Milliseconds(), "reason": string(reason)})
 }

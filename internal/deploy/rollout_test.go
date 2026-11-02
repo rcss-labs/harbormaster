@@ -21,6 +21,16 @@ func lastOperationText(t *testing.T, h *harness, key model.ServiceKey) string {
 	return ops[0].Text
 }
 
+// lastOperationOp is the details.op kind of the service's newest operation row.
+func lastOperationOp(t *testing.T, h *harness, key model.ServiceKey) any {
+	t.Helper()
+	ops, err := h.store.ListOperations(t.Context(), key, false, nil, 1)
+	if err != nil || len(ops) != 1 {
+		t.Fatalf("operations = %v, err %v", ops, err)
+	}
+	return ops[0].Details["op"]
+}
+
 func deploymentKind(t *testing.T, h *harness, key model.ServiceKey, id string) (kind string, userID int64) {
 	t.Helper()
 	err := h.store.Pool.QueryRow(t.Context(),
@@ -58,6 +68,9 @@ func TestDeploy_StartsRolloutAndAttributes(t *testing.T) {
 	if text := lastOperationText(t, h, paymentsKey); text != "Deployed payments-api:43." {
 		t.Fatalf("operation = %q", text)
 	}
+	if op := lastOperationOp(t, h, paymentsKey); op != "deploy" {
+		t.Fatalf("details.op = %v, want deploy", op)
+	}
 }
 
 func TestDeploy_OlderRevisionIsRollback(t *testing.T) {
@@ -74,6 +87,9 @@ func TestDeploy_OlderRevisionIsRollback(t *testing.T) {
 	}
 	if text := lastOperationText(t, h, paymentsKey); text != "Rolled back payments-api:41." {
 		t.Fatalf("operation = %q", text)
+	}
+	if op := lastOperationOp(t, h, paymentsKey); op != "rollback" {
+		t.Fatalf("details.op = %v, want rollback", op)
 	}
 }
 
@@ -137,6 +153,9 @@ func TestRestart_ForceNewDeployment(t *testing.T) {
 	}
 	if text := lastOperationText(t, h, paymentsKey); text != "Restarted service (force new deployment) on revision 42." {
 		t.Fatalf("operation = %q", text)
+	}
+	if op := lastOperationOp(t, h, paymentsKey); op != "restart" {
+		t.Fatalf("details.op = %v, want restart", op)
 	}
 }
 
