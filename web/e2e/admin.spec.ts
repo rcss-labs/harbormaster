@@ -122,7 +122,7 @@ test.describe('admin pages as pavel', () => {
     await page.goto('/settings/tags')
     await expect(page.getByRole('heading', { level: 2, name: 'Tags' })).toBeVisible()
 
-    // Assignments list one row per cluster; services appear when the clusters are expanded.
+    // Assignments list clusters under account and region headers; services appear when the clusters are expanded.
     await expect(page.getByLabel(/^Tag for /).first()).toBeVisible()
     const collapsed = await page.getByLabel(/^Tag for /).count()
     await page.getByRole('button', { name: 'Expand all' }).click()

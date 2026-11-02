@@ -15,6 +15,12 @@ async function expandPath(...names: string[]) {
   for (const name of names) open(await screen.findByRole('button', { name }).then(() => name))
 }
 
+/** Group header cells (account / region names) in the assignments table; the name can also appear in filters elsewhere. */
+const groupHeaders = (name: string) =>
+  screen.queryAllByText(name).filter((element) => element.closest('tr')?.querySelector('select') === null && element.closest('tr') !== null)
+
+const groupRowOf = (name: string) => groupHeaders(name)[0].closest('tr') as HTMLElement
+
 /** The fixture's first cluster, repeated so the assignments need several pages. */
 function manyClusters(count: number): TagAssignmentsDTO {
   const template = ASSIGNMENTS.clusters[0]
@@ -191,10 +197,38 @@ describe('Assignments list', () => {
     expect(screen.getByText('Dashed tags are inherited from the cluster')).toBeInTheDocument()
   })
 
-  it('shows each cluster account and region beside its name', async () => {
+  it('groups clusters under their account, then region, with group headers above them in that order', async () => {
     renderApp('/settings/tags')
-    const row = (await screen.findByRole('button', { name: 'core-services' })).closest('tr') as HTMLElement
-    expect(within(row).getByText(/homelab-admin · us-east-1/)).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'core-services' })
+    const rows = screen.getAllByRole('row')
+    const indexOfRow = (element: HTMLElement) => rows.indexOf(element.closest('tr') as HTMLElement)
+    const account = indexOfRow(groupHeaders('homelab-admin')[0])
+    const usEast = indexOfRow(groupHeaders('us-east-1')[0])
+    const core = indexOfRow(screen.getByRole('button', { name: 'core-services' }))
+    const euWest = indexOfRow(groupHeaders('eu-west-1')[0])
+    const euApps = indexOfRow(screen.getByRole('button', { name: 'eu-apps' }))
+    const stagingAccount = indexOfRow(groupHeaders('staging-example')[0])
+    const stagingWeb = indexOfRow(screen.getByRole('button', { name: 'staging-web' }))
+    expect(account).toBeLessThan(usEast)
+    expect(usEast).toBeLessThan(core)
+    expect(core).toBeLessThan(euWest)
+    expect(euWest).toBeLessThan(euApps)
+    expect(euApps).toBeLessThan(stagingAccount)
+    expect(stagingAccount).toBeLessThan(stagingWeb)
+  })
+
+  it('summarises each group with its cluster and service counts and the distinct tags inside it', async () => {
+    renderApp('/settings/tags')
+    await screen.findByRole('button', { name: 'core-services' })
+    const accountRow = groupRowOf('homelab-admin')
+    expect(within(accountRow).getByText(/^5 clusters · \d+ services$/)).toBeInTheDocument()
+    expect(within(accountRow).getByText('Prod')).toBeInTheDocument()
+    expect(within(accountRow).getAllByText('Dev')).toHaveLength(1)
+    expect(within(accountRow).queryByText('Staging')).not.toBeInTheDocument()
+    const regionRow = groupRowOf('eu-west-1')
+    expect(within(regionRow).getByText(/^1 cluster · \d+ services?$/)).toBeInTheDocument()
+    expect(within(regionRow).getByText('Dev')).toBeInTheDocument()
+    expect(within(regionRow).queryByText('Prod')).not.toBeInTheDocument()
   })
 
   it('expanding a cluster shows its services', async () => {
@@ -225,6 +259,28 @@ describe('Assignments list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
     expect(screen.getByRole('button', { name: 'cluster-01' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByLabelText('Tag for service-01')).toBeInTheDocument()
+  })
+
+  it('repeats the account and region headers at the top of a page when a group continues from the previous one', async () => {
+    const base = manyClusters(20)
+    const split: TagAssignmentsDTO = {
+      ...base,
+      clusters: base.clusters.map((cluster, index) => (index < 18 ? cluster : { ...cluster, region: 'eu-west-1' })),
+    }
+    server.use(http.get('/api/tag-assignments', () => HttpResponse.json(split)))
+    renderApp('/settings/tags')
+    await screen.findByRole('button', { name: 'cluster-01' })
+    expect(groupHeaders('homelab-admin')).toHaveLength(1)
+    expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(15)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    const table = screen.getByRole('button', { name: 'cluster-16' }).closest('table') as HTMLElement
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent(/^homelab-admin/)
+    expect(rows[1]).toHaveTextContent(/^us-east-1/)
+    expect(within(rows[2]).getByRole('button', { name: 'cluster-16' })).toBeInTheDocument()
+    expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(5)
+    expect(groupHeaders('eu-west-1')).toHaveLength(1)
   })
 
   it('shows no pager when the clusters fit one page', async () => {
