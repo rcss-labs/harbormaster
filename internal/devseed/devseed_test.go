@@ -109,3 +109,56 @@ func TestDevseed_RefusesPopulatedDatabase(t *testing.T) {
 		t.Fatalf("accounts = %v, %v; want none seeded", accounts, err)
 	}
 }
+
+func TestApply_SeedsAnalyticsHistoryOnceAndForceApplyDoesNot(t *testing.T) {
+	ctx := t.Context()
+	count := func(st *store.Store, query string) int {
+		t.Helper()
+		var n int
+		if err := st.Pool.QueryRow(ctx, query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	forced := storetest.Open(t)
+	if err := devseed.ForceApply(ctx, forced); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(forced, `select (select count(*) from service_availability_daily) + (select count(*) from cluster_capacity_daily) + (select count(*) from service_util_daily)`); n != 0 {
+		t.Fatalf("ForceApply wrote %d daily rows, want none (tests rely on empty daily tables)", n)
+	}
+
+	st := storetest.Open(t)
+	var first [5]int
+	for run := 0; run < 2; run++ {
+		if err := devseed.Apply(ctx, st); err != nil {
+			t.Fatal(err)
+		}
+		got := [5]int{
+			count(st, `select count(*) from service_availability_daily`),
+			count(st, `select count(*) from cluster_capacity_daily`),
+			count(st, `select count(*) from service_util_daily`),
+			count(st, `select count(*) from deployment_history where outcome = 'failed' and failure_reason is not null`),
+			count(st, `select count(*) from deployment_history`),
+		}
+		if run == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("second Apply changed the counts from %v to %v", first, got)
+		}
+	}
+	if first[0] == 0 || first[1] == 0 || first[2] == 0 || first[3] < 3 {
+		t.Errorf("availability/capacity/util/failed = %v, want history in every table and at least 3 failures with a reason", first)
+	}
+	// Every table covers at least 30 complete days ending yesterday (util ends the day before, for the real rollup).
+	for table, want := range map[string]int{"service_availability_daily": 1, "cluster_capacity_daily": 1, "service_util_daily": 2} {
+		var days int
+		if err := st.Pool.QueryRow(ctx, `select count(distinct day) from `+table+` where day >= current_date - 30 and day <= current_date - $1::int`, want).Scan(&days); err != nil {
+			t.Fatal(err)
+		}
+		if days < 30-want+1 {
+			t.Errorf("%s has %d of the last 30 days, want every day up to %d day(s) ago", table, days, want)
+		}
+	}
+}

@@ -30,13 +30,16 @@ const (
 // demo data (which includes an admin with a publicly known password) is refused.
 var ErrDatabaseNotEmpty = errors.New("database already has users or accounts; refusing to seed demo data (unset HM_FAKE_AWS)")
 
-// Apply seeds the database. It is idempotent: existing tags, users, accounts and audit
-// history are left alone, so applying twice changes nothing.
+// Apply seeds the database, including recent analytics history (see SeedAnalyticsHistory). It is idempotent:
+// existing tags, users, accounts, audit history and daily rows are left alone, so applying twice changes nothing.
 func Apply(ctx context.Context, st *store.Store) error {
 	if err := requireSeedable(ctx, st); err != nil {
 		return err
 	}
-	return ForceApply(ctx, st)
+	if err := ForceApply(ctx, st); err != nil {
+		return err
+	}
+	return SeedAnalyticsHistory(ctx, st, time.Now())
 }
 
 // ForceApply seeds without the empty-database guard. It exists for tests that pre-create users

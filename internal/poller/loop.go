@@ -130,6 +130,15 @@ func PollOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Co
 	return newLoop(New(st, clients, cfg, slog.Default()), t).runOnce(ctx)
 }
 
+// PollCountsOnce is PollOnce followed by one counts-history tick: the sample the counts loop takes every few
+// minutes, which also folds the cluster's running capacity into today's cluster_capacity_daily row.
+func PollCountsOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Config, t awsx.Target) error {
+	l := newLoop(New(st, clients, cfg, slog.Default()), t)
+	err := l.runOnce(ctx)
+	l.recordCounts(ctx)
+	return err
+}
+
 // runOnce runs every tier once, synchronously: clusters, serviceList, services,
 // runningTasks, stoppedTasks, fullTasks. It returns the joined tier errors.
 func (l *Loop) runOnce(ctx context.Context) error {
