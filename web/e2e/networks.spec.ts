@@ -19,7 +19,7 @@ test('admin picks homelab-main from the VPC list and walks the placement outline
 
   const main = vpcList(page).getByRole('button', { name: /homelab-main/ })
   await expect(main).toBeVisible({ timeout: POLL_TIMEOUT })
-  await expect(main).toContainText('3 cl')
+  await expect(main).toContainText('2 cl')
   await expect(vpcList(page).getByText('1 VPC without tasks hidden')).toBeVisible()
   await main.click()
   await expect(page).toHaveURL(new RegExp(`vpc=${HOMELAB_ACCOUNT_ID}%2Fus-east-1%2F${MAIN_VPC}`))

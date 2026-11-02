@@ -20,7 +20,7 @@ const stagingWeb = (tab?: string) => serviceUrl('731022849906', 'us-east-1', 'st
 
 /** Replaces the whole JSON document in the task definition editor (the textarea is controlled, so fill it). */
 async function editDefinitionJson(page: Page, change: (json: string) => string) {
-  const editor = page.getByLabel('Task definition JSON')
+  const editor = page.getByRole('textbox', { name: 'Task definition JSON' })
   await expect(editor).toBeEditable()
   const current = await editor.inputValue()
   const next = change(current)
@@ -93,7 +93,7 @@ test.describe('task definition: read-only Prod viewer', () => {
   test('payments-api (no Edit on Prod) is read only', async ({ page }) => {
     await page.goto(paymentsApi('task-definition'))
     await expect(page.getByText(/Read only\. You need\s+Edit task definition\s+on\s+Prod\s+to register a new revision\./)).toBeVisible()
-    await expect(page.getByLabel('Task definition JSON')).not.toBeEditable()
+    await expect(page.getByRole('textbox', { name: 'Task definition JSON' })).not.toBeEditable()
     await expect(page.getByLabel('Image tag')).toBeDisabled()
     await expect(page.getByRole('button', { name: /^Review and register :\d+$/ })).toBeDisabled()
   })
