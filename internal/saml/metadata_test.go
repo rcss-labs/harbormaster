@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -146,8 +149,8 @@ func TestMetadataFetcher_BlocksLinkLocalAndPrivate(t *testing.T) {
 		"https://[::1]:" + portOf(srv) + "/metadata",
 		"https://[::ffff:127.0.0.1]:" + portOf(srv) + "/metadata",
 	} {
-		if _, err := prod.Fetch(ctx, u); err == nil {
-			t.Errorf("%s was fetched in production mode", u)
+		if _, err := prod.Fetch(ctx, u); err == nil || !strings.Contains(err.Error(), "private or local address") {
+			t.Errorf("%s: want a private-or-local-address refusal, got %v", u, err)
 		}
 	}
 	if hits != 0 {
@@ -164,6 +167,31 @@ func TestMetadataFetcher_BlocksLinkLocalAndPrivate(t *testing.T) {
 	body, err := dev.Fetch(ctx, srv.URL+"/metadata")
 	if err != nil || string(body) != "<ok/>" {
 		t.Fatalf("dev mode: %q, %v", body, err)
+	}
+}
+
+func TestIsBlockedIP(t *testing.T) {
+	cases := []struct {
+		ip      string
+		blocked bool
+	}{
+		{"169.254.169.254", true}, {"169.254.170.2", true}, {"::ffff:169.254.169.254", true},
+		{"10.0.0.1", true}, {"172.16.0.1", true}, {"192.168.1.1", true}, {"127.0.0.1", true},
+		{"::1", true}, {"fd00::1", true}, {"100.64.0.1", true}, {"0.0.0.0", true},
+		{"8.8.8.8", false}, {"1.1.1.1", false}, {"2606:4700::1", false},
+	}
+	for _, c := range cases {
+		ip := netip.MustParseAddr(c.ip)
+		if got := isBlockedIP(ip); got != c.blocked {
+			t.Errorf("isBlockedIP(%s) = %v, want %v", c.ip, got, c.blocked)
+		}
+		err := blockedAddressControl("tcp", net.JoinHostPort(c.ip, "443"), nil)
+		if c.blocked && !errors.Is(err, errBlockedAddress) {
+			t.Errorf("blockedAddressControl(%s) = %v, want errBlockedAddress", c.ip, err)
+		}
+		if !c.blocked && err != nil {
+			t.Errorf("blockedAddressControl(%s) = %v, want nil", c.ip, err)
+		}
 	}
 }
 

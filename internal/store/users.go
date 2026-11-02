@@ -302,6 +302,9 @@ func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
 		return User{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockNameIDTx(ctx, tx, b.ExternalID); err != nil {
+		return User{}, err
+	}
 	var linked bool
 	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 for update`, b.UserID).Scan(&linked); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -311,6 +314,16 @@ func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
 	}
 	if linked {
 		return User{}, ErrAlreadyLinked
+	}
+	// Another user's active pre-link owns this NameID; checked here so it cannot race SetPendingLink.
+	var pendingElsewhere bool
+	if err := tx.QueryRow(ctx,
+		`select exists (select 1 from users where id <> $1 and pending_link_name_id = $2 and pending_link_expires_at > now())`,
+		b.UserID, b.ExternalID).Scan(&pendingElsewhere); err != nil {
+		return User{}, fmt.Errorf("check pending link: %w", err)
+	}
+	if pendingElsewhere {
+		return User{}, ErrSSOIdentityTaken
 	}
 	u, err := scanUser(tx.QueryRow(ctx,
 		`update users set idp_entity_id = $2, external_id = $3, external_id_format = $4,
@@ -337,6 +350,9 @@ func (s *Store) SetPendingLink(ctx context.Context, id int64, nameID string, set
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockNameIDTx(ctx, tx, nameID); err != nil {
+		return err
+	}
 	var linked bool
 	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 for update`, id).Scan(&linked); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -414,4 +430,31 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 		return false, 0, fmt.Errorf("end saml sessions: %w", err)
 	}
 	return !hasPassword, tag.RowsAffected(), tx.Commit(ctx)
+}
+
+// CreateBreakGlassAdmin inserts an administrator with break_glass and must_change_password set in a
+// single statement, so there is no window where the admin exists without the flag. Duplicates
+// (case-insensitive) return ErrConflict, like CreateUser.
+func (s *Store) CreateBreakGlassAdmin(ctx context.Context, username, passwordHash string) (User, error) {
+	row := s.Pool.QueryRow(ctx,
+		`insert into users (username, password_hash, is_admin, must_change_password, break_glass)
+		 values ($1, $2, true, true, true) returning `+userColumns,
+		username, passwordHash)
+	u, err := scanUser(row)
+	if isUniqueViolation(err) {
+		return User{}, ErrConflict
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("create break-glass admin: %w", err)
+	}
+	return u, nil
+}
+
+// lockNameIDTx serialises transactions that bind or pre-link the same NameID. Row locks cannot do it:
+// the two sides lock different users' rows, and neither sees the other's uncommitted change.
+func lockNameIDTx(ctx context.Context, tx pgx.Tx, nameID string) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "sso-nameid:"+nameID); err != nil {
+		return fmt.Errorf("lock name id: %w", err)
+	}
+	return nil
 }

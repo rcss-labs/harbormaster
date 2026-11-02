@@ -543,3 +543,44 @@ func TestUserMessageFor(t *testing.T) {
 		t.Fatal("ReasonOf nil/unknown")
 	}
 }
+
+func TestVerify_ResponseIssuerIsOptionalButMustMatchWhenPresent(t *testing.T) {
+	t.Run("absent is accepted", func(t *testing.T) {
+		h := newHarness(t)
+		if _, err := h.verify(h.respond(fakeidp.Tamper{OmitResponseIssuer: true})); err != nil {
+			t.Fatalf("response without a Response-level Issuer was refused: %v", err)
+		}
+	})
+	t.Run("wrong is refused", func(t *testing.T) {
+		h := newHarness(t)
+		h.wantReason(h.respond(fakeidp.Tamper{ResponseIssuer: "http://127.0.0.1:9999/some-other-idp"}), saml.ReasonIssuer)
+	})
+}
+
+// BuildRedirect and Verify both touch crewjam's package-level clock; run together under -race.
+func TestBuildRedirectAndVerify_NoRaceOnLibraryClock(t *testing.T) {
+	h := newHarness(t)
+	b64 := h.respond(fakeidp.Tamper{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if _, err := h.verify(b64); err != nil {
+				t.Error(err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			id, err := saml.NewRequestID()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if _, _, err := saml.BuildRedirect(h.cfg, testBaseURL, id, time.Now()); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+}

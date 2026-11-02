@@ -64,6 +64,9 @@ type Tamper struct {
 	OmitAuthnStatement bool
 	OmitNameID         bool
 
+	OmitResponseIssuer bool   // drop the Response-level Issuer (the assertion keeps its own)
+	ResponseIssuer     string // replaces the Response-level Issuer; the assertion Issuer is unchanged
+
 	Audience     string // Conditions/AudienceRestriction/Audience
 	Destination  string // Response@Destination
 	Recipient    string // SubjectConfirmationData@Recipient
@@ -404,6 +407,11 @@ func (s *Server) Response(authnRequestXML []byte, user, acsURL string, t Tamper)
 		Version:      "2.0",
 		Issuer:       &crewjam.Issuer{Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity", Value: idp.MetadataURL.String()},
 		Status:       crewjam.Status{StatusCode: crewjam.StatusCode{Value: status}},
+	}
+	if t.OmitResponseIssuer {
+		response.Issuer = nil
+	} else if t.ResponseIssuer != "" {
+		response.Issuer.Value = t.ResponseIssuer
 	}
 	build := func() *etree.Element {
 		el := response.Element()

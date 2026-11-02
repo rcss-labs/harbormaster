@@ -57,7 +57,10 @@ func BuildRedirect(cfg Config, baseURL, requestID string, now time.Time) (*url.U
 		AcsURL:            *acs,
 		AuthnNameIDFormat: nameIDFormatURN(cfg.NameIDFormat),
 	}
+	// The library reads its package-level clock, which Verify swaps under crewjamMu.
+	crewjamMu.Lock()
 	req, err := sp.MakeAuthenticationRequest(cfg.IdPSSORedirectURL, crewjam.HTTPRedirectBinding, crewjam.HTTPPostBinding)
+	crewjamMu.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}

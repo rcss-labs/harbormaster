@@ -70,15 +70,11 @@ func runCreateAdmin(ctx context.Context, args []string, getenv func(string) stri
 	if err != nil {
 		return err
 	}
-	created, err := st.CreateUser(ctx, *username, hash, true, true)
-	if err != nil {
+	if _, err := st.CreateBreakGlassAdmin(ctx, *username, hash); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return fmt.Errorf("%w: %s", errUserExists, *username)
 		}
 		return err
-	}
-	if _, err := st.SetBreakGlassChecked(ctx, created.ID, true); err != nil {
-		return fmt.Errorf("user %s was created but could not be made break-glass: %w", *username, err)
 	}
 	fmt.Fprintf(stdout, "created break-glass admin %s (must change password at first sign-in)\n", *username)
 	if generated {

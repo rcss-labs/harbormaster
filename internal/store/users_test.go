@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -424,5 +425,89 @@ func TestUsersConstraints_RejectBadShapes(t *testing.T) {
 		if _, err := s.Pool.Exec(ctx, sql); err == nil {
 			t.Errorf("%s: insert succeeded, want a constraint error", name)
 		}
+	}
+}
+
+func TestBindSSOIdentity_RefusesNameIDPendingOnAnotherUser(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	admin, _ := s.CreateUser(ctx, "root", "h", true, false)
+	a, _ := s.CreateUser(ctx, "alpha", "h", false, false)
+	b, _ := s.CreateUser(ctx, "bravo", "h", false, false)
+	if err := s.SetPendingLink(ctx, b.ID, "shared@x", admin.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.BindSSOIdentity(ctx, store.BindSSO{UserID: a.ID, IdPEntityID: "e", ExternalID: "shared@x", ExternalIDFormat: "email"})
+	if !errors.Is(err, store.ErrSSOIdentityTaken) {
+		t.Fatalf("bind err = %v, want ErrSSOIdentityTaken", err)
+	}
+	// The pending owner can still bind their own pre-link.
+	if _, err := s.BindSSOIdentity(ctx, store.BindSSO{UserID: b.ID, IdPEntityID: "e", ExternalID: "shared@x", ExternalIDFormat: "email"}); err != nil {
+		t.Fatalf("owner bind: %v", err)
+	}
+}
+
+func TestBindSSOIdentity_IgnoresExpiredPendingOnAnotherUser(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	admin, _ := s.CreateUser(ctx, "root", "h", true, false)
+	a, _ := s.CreateUser(ctx, "alpha", "h", false, false)
+	b, _ := s.CreateUser(ctx, "bravo", "h", false, false)
+	if err := s.SetPendingLink(ctx, b.ID, "old@x", admin.ID, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BindSSOIdentity(ctx, store.BindSSO{UserID: a.ID, IdPEntityID: "e", ExternalID: "old@x", ExternalIDFormat: "email"}); err != nil {
+		t.Fatalf("bind over expired pending: %v", err)
+	}
+}
+
+// Binding a NameID and pre-linking it for a different user must never both succeed.
+func TestBindVersusSetPendingLink_NeverBothSucceed(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	admin, _ := s.CreateUser(ctx, "root", "h", true, false)
+	for round := range 40 {
+		a, _ := s.CreateUser(ctx, fmt.Sprintf("a%d", round), "h", false, false)
+		b, _ := s.CreateUser(ctx, fmt.Sprintf("b%d", round), "h", false, false)
+		nameID := fmt.Sprintf("race%d@x", round)
+		var bindErr, pendErr error
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, bindErr = s.BindSSOIdentity(ctx, store.BindSSO{UserID: a.ID, IdPEntityID: "e", ExternalID: nameID, ExternalIDFormat: "email"})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			pendErr = s.SetPendingLink(ctx, b.ID, nameID, admin.ID, time.Now().Add(time.Hour))
+		}()
+		close(start)
+		wg.Wait()
+		if bindErr == nil && pendErr == nil {
+			t.Fatalf("round %d: both bind and set-pending succeeded for %s", round, nameID)
+		}
+		for _, err := range []error{bindErr, pendErr} {
+			if err != nil && !errors.Is(err, store.ErrSSOIdentityTaken) {
+				t.Fatalf("round %d: unexpected error %v", round, err)
+			}
+		}
+	}
+}
+
+func TestCreateBreakGlassAdmin(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	u, err := s.CreateBreakGlassAdmin(ctx, "Rescue", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !u.Admin || !u.BreakGlass || !u.MustChangePassword || u.PasswordHash != "hash" || u.Username != "Rescue" {
+		t.Fatalf("user = %+v", u)
+	}
+	if _, err := s.CreateBreakGlassAdmin(ctx, "rescue", "hash"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("duplicate err = %v, want ErrConflict", err)
 	}
 }

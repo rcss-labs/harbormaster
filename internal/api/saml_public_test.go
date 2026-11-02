@@ -255,6 +255,25 @@ func TestACS_UnknownRequestRedirectsWithError(t *testing.T) {
 	}
 }
 
+// The request row is keyed by RelayState, so a rewritten RelayState finds no row and no XML is parsed.
+func TestACS_RewrittenRelayStateIsUnknownRequest(t *testing.T) {
+	srv, _, st := newServerWithFakeIdP(t)
+	b := newBrowser(t, srv)
+	acs, form := b.idpResponse(b.startLogin("/api/auth/saml/login"), "alex")
+	form.Set("RelayState", "_rewritten"+form.Get("RelayState"))
+	resp := b.postForm(acs, form)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login?error=sso_failed" {
+		t.Fatalf("ACS = %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if got := lastFailureReason(t, st); got != saml.ReasonUnknownRequest {
+		t.Fatalf("reason = %q, want %q", got, saml.ReasonUnknownRequest)
+	}
+	if cookieNamed(resp, "hm_session") != nil || meUsername(t, b) != "" {
+		t.Fatal("a session was created for a response with a rewritten RelayState")
+	}
+}
+
 func TestACS_ReplayRejected(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	b := newBrowser(t, srv)

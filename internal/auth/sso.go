@@ -250,14 +250,7 @@ func (a *Service) LinkSSO(ctx context.Context, userID int64, id saml.Identity, c
 	if user.SSOLinked() {
 		return store.User{}, a.linkFailed(ctx, &user, ReasonLinkUserHasIdentity, id, ip)
 	}
-	// An identity that is another user's active pending link is theirs; the unique index only covers linked ones.
-	pending, err := a.store.GetUserByPendingLink(ctx, cfg.IdPEntityID, id.NameID, a.now())
-	if err == nil && pending.ID != userID {
-		return store.User{}, a.linkFailed(ctx, &user, ReasonSSOIdentityTaken, id, ip)
-	}
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return store.User{}, err
-	}
+	// BindSSOIdentity refuses a NameID that is another user's active pending link, inside its transaction.
 	bound, err := a.store.BindSSOIdentity(ctx, store.BindSSO{
 		UserID: userID, IdPEntityID: cfg.IdPEntityID, ExternalID: id.NameID,
 		ExternalIDFormat: id.NameIDFormat, Email: id.Email(cfg), DisplayName: id.DisplayName(cfg),
