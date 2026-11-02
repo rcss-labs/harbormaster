@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -43,6 +44,18 @@ func SeedAnalyticsHistory(ctx context.Context, st *store.Store, now time.Time) e
 	return seedRollouts(ctx, st, estate, now)
 }
 
+// sendBatch runs the queued inserts in one round trip: a day of history per service is hundreds of rows.
+func sendBatch(ctx context.Context, st *store.Store, batch *pgx.Batch, what string) error {
+	results := st.Pool.SendBatch(ctx, batch)
+	defer results.Close()
+	for range batch.Len() {
+		if _, err := results.Exec(); err != nil {
+			return fmt.Errorf("seed %s: %w", what, err)
+		}
+	}
+	return nil
+}
+
 // pick is a stable pseudo-random number in [0, n) for the given parts.
 func pick(n int, parts ...string) int {
 	h := fnv.New32a()
@@ -59,6 +72,7 @@ func wave(key string, daysAgo int) float64 {
 }
 
 func seedAvailability(ctx context.Context, st *store.Store, estate *fake.Estate, today time.Time) error {
+	batch := &pgx.Batch{}
 	for _, svc := range estate.Services {
 		name := aws.ToString(svc.Service.ServiceName)
 		key := svc.AccountID + svc.Region + svc.ClusterName + name
@@ -76,19 +90,16 @@ func seedAvailability(ctx context.Context, st *store.Store, estate *fake.Estate,
 			if belowSamples > 3 {
 				stops = 1
 			}
-			_, err := st.Pool.Exec(ctx,
+			batch.Queue(
 				`insert into service_availability_daily
 				   (account_id, region, cluster_name, service_name, day, samples, samples_ok, minutes_below, unexpected_stops)
 				 values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9)
 				 on conflict do nothing`,
 				svc.AccountID, svc.Region, svc.ClusterName, name, today.AddDate(0, 0, -daysAgo).Format(time.DateOnly),
 				samplesPerDay, samplesPerDay-belowSamples, belowSamples*5, stops)
-			if err != nil {
-				return fmt.Errorf("seed service availability: %w", err)
-			}
 		}
 	}
-	return nil
+	return sendBatch(ctx, st, batch, "service availability")
 }
 
 type clusterTotals struct {
@@ -118,6 +129,7 @@ func seedClusterCapacity(ctx context.Context, st *store.Store, estate *fake.Esta
 			t.spot++
 		}
 	}
+	batch := &pgx.Batch{}
 	for key, t := range totals {
 		id := key.AccountID + key.Region + key.Cluster
 		for daysAgo := 1; daysAgo <= analyticsHistoryDays; daysAgo++ {
@@ -126,19 +138,16 @@ func seedClusterCapacity(ctx context.Context, st *store.Store, estate *fake.Esta
 			vcpu, mem := t.vcpu*scale, t.memGiB*scale
 			tasks := int(float64(t.tasks)*scale + 0.5)
 			spot := min(int(float64(t.spot)*scale+0.5), tasks)
-			_, err := st.Pool.Exec(ctx,
+			batch.Queue(
 				`insert into cluster_capacity_daily
 				   (account_id, region, cluster_name, day, samples, vcpu_sum, vcpu_max, mem_gib_sum, mem_gib_max, tasks_sum, tasks_max, spot_sum)
 				 values ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10, $11, $12)
 				 on conflict do nothing`,
 				key.AccountID, key.Region, key.Cluster, today.AddDate(0, 0, -daysAgo).Format(time.DateOnly),
 				samplesPerDay, vcpu*samplesPerDay, vcpu*1.1, mem*samplesPerDay, mem*1.1, tasks*samplesPerDay, tasks+1, spot*samplesPerDay)
-			if err != nil {
-				return fmt.Errorf("seed cluster capacity: %w", err)
-			}
 		}
 	}
-	return nil
+	return sendBatch(ctx, st, batch, "cluster capacity")
 }
 
 // taskDefinitionSize is the CPU units and memory MiB of the task definition a service currently runs.
@@ -154,9 +163,8 @@ func taskDefinitionSize(estate *fake.Estate, svc fake.Service) (cpu, mem int, ok
 	return 0, 0, false
 }
 
-// seedUtil writes the days up to the day before yesterday: yesterday is left to the real CloudWatch rollup, which
-// the fake CloudWatch answers too, so a fresh start also shows that collector at work.
 func seedUtil(ctx context.Context, st *store.Store, estate *fake.Estate, today time.Time) error {
+	batch := &pgx.Batch{}
 	for _, svc := range estate.Services {
 		cluster := model.ClusterKey{AccountID: svc.AccountID, Region: svc.Region, Cluster: svc.ClusterName}
 		if mode, ok := estate.ContainerInsights[cluster]; !ok || mode == "disabled" {
@@ -173,22 +181,19 @@ func seedUtil(ctx context.Context, st *store.Store, estate *fake.Estate, today t
 		if pick(3, key) == 0 {
 			cpuBase, memBase = 9, 24
 		}
-		for daysAgo := 2; daysAgo <= analyticsHistoryDays; daysAgo++ {
+		for daysAgo := 1; daysAgo <= analyticsHistoryDays; daysAgo++ {
 			cpuAvg := cpuBase + 12*wave(key+"c", daysAgo)
 			memAvg := memBase + 10*wave(key+"m", daysAgo)
-			_, err := st.Pool.Exec(ctx,
+			batch.Queue(
 				`insert into service_util_daily
 				   (account_id, region, cluster_name, service_name, day, cpu_avg, cpu_p95, mem_avg, mem_p95, cpu_reserved_units, mem_reserved_mib)
 				 values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10, $11)
 				 on conflict do nothing`,
 				svc.AccountID, svc.Region, svc.ClusterName, name, today.AddDate(0, 0, -daysAgo).Format(time.DateOnly),
 				cpuAvg, min(cpuAvg*1.6, 100), memAvg, min(memAvg*1.25, 100), cpuUnits, memMiB)
-			if err != nil {
-				return fmt.Errorf("seed service utilisation: %w", err)
-			}
 		}
 	}
-	return nil
+	return sendBatch(ctx, st, batch, "service utilisation")
 }
 
 var failureSeeds = []struct{ group, detail string }{

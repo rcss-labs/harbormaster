@@ -151,14 +151,15 @@ func TestApply_SeedsAnalyticsHistoryOnceAndForceApplyDoesNot(t *testing.T) {
 	if first[0] == 0 || first[1] == 0 || first[2] == 0 || first[3] < 3 {
 		t.Errorf("availability/capacity/util/failed = %v, want history in every table and at least 3 failures with a reason", first)
 	}
-	// Every table covers at least 30 complete days ending yesterday (util ends the day before, for the real rollup).
-	for table, want := range map[string]int{"service_availability_daily": 1, "cluster_capacity_daily": 1, "service_util_daily": 2} {
+	// Every table covers at least the 30 complete days ending yesterday.
+	for _, table := range []string{"service_availability_daily", "cluster_capacity_daily", "service_util_daily"} {
+		const want = 1
 		var days int
 		if err := st.Pool.QueryRow(ctx, `select count(distinct day) from `+table+` where day >= current_date - 30 and day <= current_date - $1::int`, want).Scan(&days); err != nil {
 			t.Fatal(err)
 		}
-		if days < 30-want+1 {
-			t.Errorf("%s has %d of the last 30 days, want every day up to %d day(s) ago", table, days, want)
+		if days < 30 {
+			t.Errorf("%s has %d of the last 30 days, want all 30", table, days)
 		}
 	}
 }

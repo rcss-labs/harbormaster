@@ -1,5 +1,7 @@
 # Harbormaster Analytics — Implementation Plan
 
+> **Decision (owner): the Proposed presentation was dropped.** The panels this plan calls "Proposed" were approved and ship as ordinary panels: no PROPOSED badge, no dashed style, no "needs new data" footer, no `showProposed` preference, and no `needs` field in the API (`ProposedDTO` is now `RollupPanelDTO`: `available`, `data_since`, `data`). A panel without data yet shows the standard empty state. The text below is the original plan and still uses the old names.
+
 Read-only investigation of `/workspaces/harbormaster` (branch `feat/analytics`). Nothing was edited or committed. One throwaway schema (`hm_plan_scratch`) was created and dropped on the test DB to run EXPLAIN ANALYZE at target scale (1.2M `service_counts_history` rows, 100 clusters, 600 services).
 
 Typesafe-ai skill was unavailable; option choices below state the alternatives, the pick and the reason.
