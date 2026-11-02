@@ -19,7 +19,8 @@ const createAdminUsage = "usage: harbormaster create-admin --username <name> [--
 // errUserExists maps to exit status 3.
 var errUserExists = errors.New("user already exists")
 
-// runCreateAdmin creates an administrator who must change their password at first sign-in.
+// runCreateAdmin creates a break-glass administrator who must change their password at first sign-in.
+// Break-glass keeps a password sign-in working while SSO is enabled.
 func runCreateAdmin(ctx context.Context, args []string, getenv func(string) string, stdin io.Reader, stdout io.Writer) error {
 	flags := flag.NewFlagSet("create-admin", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -69,13 +70,17 @@ func runCreateAdmin(ctx context.Context, args []string, getenv func(string) stri
 	if err != nil {
 		return err
 	}
-	if _, err := st.CreateUser(ctx, *username, hash, true, true); err != nil {
+	created, err := st.CreateUser(ctx, *username, hash, true, true)
+	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return fmt.Errorf("%w: %s", errUserExists, *username)
 		}
 		return err
 	}
-	fmt.Fprintf(stdout, "created admin %s (must change password at first sign-in)\n", *username)
+	if _, err := st.SetBreakGlassChecked(ctx, created.ID, true); err != nil {
+		return fmt.Errorf("user %s was created but could not be made break-glass: %w", *username, err)
+	}
+	fmt.Fprintf(stdout, "created break-glass admin %s (must change password at first sign-in)\n", *username)
 	if generated {
 		fmt.Fprintf(stdout, "temporary password: %s\n", password)
 	}
