@@ -235,19 +235,23 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
       const expectCleaned = (response: APIResponse, what: string) => {
         expect(response.ok() || response.status() === 404, `cleanup: ${what} returned ${response.status()}`).toBe(true)
       }
-      expectCleaned(await api.put('/api/sso/enabled', { data: { enabled: false } }), 'disable SSO')
+      // Mutating calls need the session's CSRF token, like the SPA sends.
+      const me = await api.get('/api/me')
+      expect(me.ok(), `cleanup: /api/me returned ${me.status()}`).toBe(true)
+      const headers = { 'X-CSRF-Token': ((await me.json()) as { csrf_token: string }).csrf_token }
+      expectCleaned(await api.put('/api/sso/enabled', { headers, data: { enabled: false } }), 'disable SSO')
       const users = await api.get('/api/users')
       expect(users.ok(), `cleanup: list users returned ${users.status()}`).toBe(true)
       const body = (await users.json()) as { items?: Array<{ id: number; username: string; sso: string; break_glass: boolean }> } | Array<{ id: number; username: string; sso: string; break_glass: boolean }>
       const list = Array.isArray(body) ? body : (body.items ?? [])
       for (const user of list) {
         if (user.username === 'alex') {
-          expectCleaned(await api.delete(`/api/users/${user.id}`), 'delete alex')
+          expectCleaned(await api.delete(`/api/users/${user.id}`, { headers }), 'delete alex')
           continue
         }
-        if (user.sso === 'linked') expectCleaned(await api.post(`/api/users/${user.id}/sso-unlink`), `unlink ${user.username}`)
-        else if (user.sso === 'pending' || user.sso === 'pending_expired') expectCleaned(await api.delete(`/api/users/${user.id}/sso-link`), `clear link of ${user.username}`)
-        if (user.break_glass) expectCleaned(await api.post(`/api/users/${user.id}/break-glass`, { data: { break_glass: false } }), `remove break-glass of ${user.username}`)
+        if (user.sso === 'linked') expectCleaned(await api.post(`/api/users/${user.id}/sso-unlink`, { headers }), `unlink ${user.username}`)
+        else if (user.sso === 'pending' || user.sso === 'pending_expired') expectCleaned(await api.delete(`/api/users/${user.id}/sso-link`, { headers }), `clear link of ${user.username}`)
+        if (user.break_glass) expectCleaned(await api.post(`/api/users/${user.id}/break-glass`, { headers, data: { break_glass: false } }), `remove break-glass of ${user.username}`)
       }
     }
   })
