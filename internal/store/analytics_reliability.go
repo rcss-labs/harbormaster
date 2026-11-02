@@ -104,9 +104,13 @@ func (s *Store) AnalyticsAvailabilitySeries(ctx context.Context, f TargetFilter,
 // visible service (600 index scans), about 2x slower than a parallel sequential scan hash-joined to the visible
 // service keys. After five executions Postgres also switches a cached statement to a generic plan, which cannot
 // fold the visibility parameters and measured 3x slower again.
-func (s *Store) scanHistory(ctx context.Context, sql string, args []any, scan func(pgx.Rows) error) error {
+func (s *Store) scanHistory(ctx context.Context, sql string, args []any, scan func(pgx.Rows) error, extraSettings ...string) error {
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "set local enable_nestloop = off; set local plan_cache_mode = force_custom_plan"); err != nil {
+		settings := "set local enable_nestloop = off; set local plan_cache_mode = force_custom_plan"
+		for _, setting := range extraSettings {
+			settings += "; set local " + setting
+		}
+		if _, err := tx.Exec(ctx, settings); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, sql, args...)

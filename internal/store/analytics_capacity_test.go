@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -262,5 +263,53 @@ func TestAnalyticsVisibleServiceCount(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("%s: count %d, %v; want %d", vis, got, err, want)
 		}
+	}
+}
+
+// Each target's poll loop stamps its own timestamps, so a bucket holds samples from several targets at different
+// instants. The trend must be the sum of per-target averages, not a total divided by every distinct timestamp.
+func TestAnalyticsReservedTrend_SumsPerTargetAveragesWhenTimestampsDiffer(t *testing.T) {
+	fx := newReliabilityFixture(t)
+	ctx := context.Background()
+	otherCluster := model.ClusterKey{AccountID: "222222222222", Region: "eu-central-1", Cluster: "core"}
+	other := model.ServiceKey{ClusterKey: otherCluster, Service: "payments"}
+	if _, err := fx.s.UpsertClusters(ctx, []model.Cluster{{Key: otherCluster, Status: "ACTIVE", PolledAt: fx.to}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.s.SetClusterTag(ctx, otherCluster, authz.TagID(fx.prod)); err != nil {
+		t.Fatal(err)
+	}
+	for _, td := range []model.TaskDefinitionRef{
+		{AccountID: readAccount, Region: "eu-west-1", ARN: "arn:td/payments:9", CPU: "1024", Memory: "2048"},
+		{AccountID: "222222222222", Region: "eu-central-1", ARN: "arn:td/other:1", CPU: "1024", Memory: "2048"},
+	} {
+		if err := fx.s.UpsertTaskDefinition(ctx, td); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := fx.s.UpsertServices(ctx, []model.Service{
+		{Key: fx.payments, Desired: 2, Running: 2, TaskDefinitionARN: "arn:td/payments:9", PolledAt: fx.to},
+		{Key: other, Desired: 2, Running: 2, TaskDefinitionARN: "arn:td/other:1", PolledAt: fx.to},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Target A (eu-west-1) and target B (eu-central-1) poll at different instants: 2 samples each, 4 timestamps.
+	fx.sample(t, fx.from.Add(10*time.Minute), fx.payments, 2, 2)
+	fx.sample(t, fx.from.Add(20*time.Minute), fx.payments, 2, 2)
+	fx.sample(t, fx.from.Add(11*time.Minute), other, 3, 3)
+	fx.sample(t, fx.from.Add(21*time.Minute), other, 3, 3)
+
+	points, err := fx.s.AnalyticsReservedTrend(ctx, store.TargetFilter{}, fx.adminVis, fx.from, fx.to, 4*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prod float64
+	for _, p := range points {
+		if int64(p.TagID) == fx.prod && p.Bucket.Equal(fx.from) {
+			prod = p.VCPU
+		}
+	}
+	if prod != 5 { // 2 tasks x 1 vCPU + 3 tasks x 1 vCPU
+		t.Errorf("Prod bucket 0 = %v vCPU, want 5 (2 + 3), not divided by the number of targets", prod)
 	}
 }

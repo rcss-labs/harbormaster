@@ -172,15 +172,17 @@ type TrendPoint struct {
 
 // AnalyticsReservedTrend estimates reserved vCPU per bucket and effective tag as counts history times each
 // service's current task definition CPU, averaged over the bucket's samples. The database sums per sample
-// timestamp and tag (about 2,000 timestamps x a few tags, a hash aggregate); averaging into buckets happens in Go
-// because a DISTINCT sample count would force a sorted aggregate over the whole window.
+// timestamp, target and tag (about 2,000 timestamps x targets x a few tags, a hash aggregate); averaging into
+// buckets happens in Go because a DISTINCT sample count would force a sorted aggregate over the whole window.
+// Every target's poll loop stamps its own timestamps, so each target is averaged over its own samples and the
+// per-target averages are then summed; dividing by all distinct timestamps would understate the total N-fold.
 func (s *Store) AnalyticsReservedTrend(ctx context.Context, f TargetFilter, vis Visibility, from, to time.Time, bucket time.Duration) ([]TrendPoint, error) {
 	var q queryArgs
 	fromArg, toArg := q.add(from), q.add(to)
 	historyTarget := q.target("h", f)
 	serviceTarget := q.target("s", f)
 	v := q.visibility("s", vis)
-	sql := `select h.ts, m.tag_id, sum(coalesce(h.running, 0)::float8 * m.cpu_units) / 1024.0
+	sql := `select h.ts, h.account_id, h.region, m.tag_id, sum(coalesce(h.running, 0)::float8 * m.cpu_units) / 1024.0
 		 from service_counts_history h
 		 join (
 		   select s.account_id, s.region, s.cluster_name, s.service_name, ` + v.Effective + ` as tag_id,
@@ -190,35 +192,49 @@ func (s *Store) AnalyticsReservedTrend(ctx context.Context, f TargetFilter, vis 
 		   where ` + serviceTarget + ` and ` + v.Predicate + `) m
 		   on m.account_id = h.account_id and m.region = h.region and m.cluster_name = h.cluster_name and m.service_name = h.service_name
 		 where h.ts >= ` + fromArg + ` and h.ts < ` + toArg + ` and ` + historyTarget + `
-		 group by 1, 2`
+		 group by 1, 2, 3, 4`
 
+	type targetKey struct{ account, region string }
 	type bucketKey struct {
 		start time.Time
 		tag   authz.TagID
 	}
-	sums := map[bucketKey]float64{}
-	samples := map[time.Time]map[time.Time]bool{} // bucket start -> distinct sample timestamps
+	type targetBucket struct {
+		start  time.Time
+		target targetKey
+	}
+	type targetTag struct {
+		targetBucket
+		tag authz.TagID
+	}
+	sums := map[targetTag]float64{}
+	samples := map[targetBucket]map[time.Time]bool{} // target and bucket start -> distinct sample timestamps
 	err := s.scanHistory(ctx, sql, q.values, func(rows pgx.Rows) error {
 		var ts time.Time
+		var target targetKey
 		var tag authz.TagID
 		var vcpu float64
-		if err := rows.Scan(&ts, &tag, &vcpu); err != nil {
+		if err := rows.Scan(&ts, &target.account, &target.region, &tag, &vcpu); err != nil {
 			return err
 		}
-		start := from.Add(ts.Sub(from) / bucket * bucket)
-		sums[bucketKey{start, tag}] += vcpu
-		if samples[start] == nil {
-			samples[start] = map[time.Time]bool{}
+		tb := targetBucket{from.Add(ts.Sub(from) / bucket * bucket), target}
+		sums[targetTag{tb, tag}] += vcpu
+		if samples[tb] == nil {
+			samples[tb] = map[time.Time]bool{}
 		}
-		samples[start][ts] = true
+		samples[tb][ts] = true
 		return nil
-	})
+	}, "enable_sort = off") // the planner overestimates the groups of the wider key and would sort 600k rows to disk instead
 	if err != nil {
 		return nil, fmt.Errorf("analytics reserved trend: %w", err)
 	}
-	out := make([]TrendPoint, 0, len(sums))
+	totals := map[bucketKey]float64{}
 	for key, total := range sums {
-		out = append(out, TrendPoint{Bucket: key.start, TagID: key.tag, VCPU: total / float64(len(samples[key.start]))})
+		totals[bucketKey{key.start, key.tag}] += total / float64(len(samples[key.targetBucket]))
+	}
+	out := make([]TrendPoint, 0, len(totals))
+	for key, vcpu := range totals {
+		out = append(out, TrendPoint{Bucket: key.start, TagID: key.tag, VCPU: vcpu})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].Bucket.Equal(out[j].Bucket) {
