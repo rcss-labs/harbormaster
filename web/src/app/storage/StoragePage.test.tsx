@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { StorageItem, StorageResponse } from '../../api/storage'
 import { renderWithProviders } from '../../test/setup'
@@ -73,12 +74,12 @@ const STORAGE: StorageResponse = {
   totals: { size_bytes: 361872855366, mounted: 4, not_mounted: 1 },
 }
 
-function renderStoragePage() {
+function renderStoragePage(route = '/storage') {
   return renderWithProviders(
     <AuthProvider>
       <StoragePage />
     </AuthProvider>,
-    { route: '/storage' },
+    { route },
   )
 }
 
@@ -86,86 +87,97 @@ function serveStorage(response: StorageResponse) {
   server.use(http.get('/api/storage', () => HttpResponse.json(response)))
 }
 
-/** The card whose heading is `title`; the card's head is the heading's parent and the card its grandparent. */
-const findCardTitled = async (title: string) =>
-  (await screen.findByRole('heading', { name: title })).parentElement!.parentElement!
+/** Names of the file systems in the table body, top to bottom. */
+const tableNames = () =>
+  within(screen.getByRole('table', { name: 'File systems' }))
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getAllByRole('cell')[0].querySelector('strong')?.textContent)
 
 describe('StoragePage', () => {
-  it('lists each file system in the stored-data chart with its size and the total', async () => {
+  it('shows the KPI strip with the size of the not-mounted, still-billed file systems', async () => {
     serveStorage(STORAGE)
     renderStoragePage()
-    const bars = within(await findCardTitled('Stored data by file system'))
-    expect(bars.getByText('jenkins-home')).toBeInTheDocument()
-    for (const name of ['reports-data', 'shared-certs', 'search-index', 'uploads-archive']) {
-      expect(bars.getByText(name)).toBeInTheDocument()
-    }
-    expect(bars.getByText('337.0 GiB in total')).toBeInTheDocument()
+    const strip = within(await screen.findByRole('list', { name: 'Storage summary' }))
+    expect(strip.getByText('File systems').parentElement).toHaveTextContent('5')
+    expect(strip.getByText('Total stored').parentElement).toHaveTextContent('337.0 GiB')
+    expect(strip.getByText('Not mounted, still billed').parentElement).toHaveTextContent('211.6 GiB')
+    expect(strip.getByText('Not mounted, still billed').parentElement).toHaveTextContent('1 file system')
   })
 
-  it('counts mounted and unmounted file systems in the donut legend', async () => {
+  it('lists file systems largest first', async () => {
     serveStorage(STORAGE)
     renderStoragePage()
-    const donut = within(await findCardTitled('Mounted or not'))
-    expect(donut.getByText('Mounted by a service')).toBeInTheDocument()
-    expect(donut.getByText('Mounted by a service').parentElement).toHaveTextContent(/^Mounted by a service4$/)
-    expect(donut.getByText('Not mounted, still billed').parentElement).toHaveTextContent(/^Not mounted, still billed1$/)
+    await screen.findByRole('table', { name: 'File systems' })
+    expect(tableNames()).toEqual(['uploads-archive', 'search-index', 'jenkins-home', 'reports-data', 'shared-certs'])
   })
 
-  it('shows the mounted file system card with its client count, growth, access point and mount', async () => {
+  it('flags a not-mounted file system with the warn stripe and the label, and mounted ones without', async () => {
     serveStorage(STORAGE)
     renderStoragePage()
-    const card = within(await screen.findByRole('region', { name: 'jenkins-home' }))
-    expect(card.getByText('fs-0c91a4e7 · us-east-1 · shared-services')).toBeInTheDocument()
-    expect(card.getByText('1 client')).toBeInTheDocument()
-    expect(card.getByText('+29% in 30 days')).toBeInTheDocument()
-    expect(card.getByText('Elastic')).toBeInTheDocument()
-    expect(card.getByText('fsap-0a1b2c3d4e · /jenkins · uid 1000')).toBeInTheDocument()
-    expect(card.getByRole('link', { name: 'jenkins-controller' })).toHaveAttribute(
-      'href',
-      '/services/svc-jenkins-controller/overview',
-    )
-    expect(card.getByText('(ci-tools) →')).toBeInTheDocument()
-    expect(card.getByText('/var/jenkins_home')).toBeInTheDocument()
-    expect(card.getByRole('link', { name: 'jenkins-controller' }).parentElement).toHaveTextContent(
-      'jenkins-controller (ci-tools) → /var/jenkins_home',
-    )
+    const rows = within(await screen.findByRole('table', { name: 'File systems' })).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveAttribute('data-status', 'warn')
+    expect(within(rows[0]).getByText('Not mounted')).toBeInTheDocument()
+    expect(rows[1]).not.toHaveAttribute('data-status')
   })
 
-  it('colours the size sparkline with the same series colour as the file system bar', async () => {
+  it('shows the filter with counts and filters to Not mounted', async () => {
     serveStorage(STORAGE)
     renderStoragePage()
-    const region = await screen.findByRole('region', { name: 'jenkins-home' })
-    expect(region.querySelector('path[stroke]')).toHaveAttribute('stroke', 'var(--series-1)')
+    const filter = await screen.findByRole('radiogroup', { name: 'Mounted state' })
+    expect(within(filter).getByRole('radio', { name: 'All 5' })).toHaveAttribute('aria-checked', 'true')
+    expect(within(filter).getByRole('radio', { name: 'Mounted 4' })).toBeInTheDocument()
+    await userEvent.click(within(filter).getByRole('radio', { name: 'Not mounted 1' }))
+    expect(tableNames()).toEqual(['uploads-archive'])
+    await userEvent.click(within(filter).getByRole('radio', { name: 'Mounted 4' }))
+    expect(tableNames()).toEqual(['search-index', 'jenkins-home', 'reports-data', 'shared-certs'])
   })
 
-  it('marks an unmounted file system with no access points and no mounts', async () => {
+  it('restores the segment and query from the URL', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage('/storage?seg=mounted&q=fs-0c91')
+    await screen.findByRole('table', { name: 'File systems' })
+    expect(tableNames()).toEqual(['jenkins-home'])
+    expect(screen.getByRole('searchbox', { name: 'Search file systems' })).toHaveValue('fs-0c91')
+  })
+
+  it('filters by name, id, region or service with the query', async () => {
     serveStorage(STORAGE)
     renderStoragePage()
-    const card = within(await screen.findByRole('region', { name: 'uploads-archive' }))
-    expect(card.getByText('Not mounted')).toBeInTheDocument()
-    expect(card.getByText('None')).toBeInTheDocument()
-    expect(card.getByText('No service mounts this file system.')).toBeInTheDocument()
+    await screen.findByRole('table', { name: 'File systems' })
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search file systems' }), 'eu-central-1')
+    expect(tableNames()).toEqual(['shared-certs'])
   })
 
-  it('shows Metrics unavailable in place of the sparklines when both series are null', async () => {
+  it('shows client count, growth, throughput, access points and mounting service links', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage('/storage?q=jenkins-home')
+    const row = within((await screen.findAllByRole('row'))[1])
+    expect(row.getByText('fs-0c91a4e7 · us-east-1 · shared-services')).toBeInTheDocument()
+    expect(row.getByText('+29% in 30 days')).toBeInTheDocument()
+    expect(row.getByText('29 MiB/s')).toBeInTheDocument()
+    expect(row.getByText('1 access point')).toBeInTheDocument()
+    expect(row.getByText('1 client')).toBeInTheDocument()
+    expect(row.getByRole('link', { name: 'jenkins-controller' })).toHaveAttribute('href', '/services/svc-jenkins-controller/overview')
+    expect(row.getByText('(ci-tools)')).toBeInTheDocument()
+  })
+
+  it('shows a dash when the metrics are null or empty', async () => {
     serveStorage({
       ...STORAGE,
-      items: [{ ...JENKINS, size_30d: null, throughput_24h: null, growth_30d_pct: null }],
+      items: [{ ...JENKINS, size_30d: null, throughput_24h: [], growth_30d_pct: null }],
     })
     renderStoragePage()
-    expect(await screen.findByText('Metrics unavailable')).toBeInTheDocument()
-    expect(screen.queryByText('+29% in 30 days')).not.toBeInTheDocument()
-    expect((await screen.findByRole('region', { name: 'jenkins-home' })).querySelector('svg')).toBeNull()
+    const row = within((await screen.findAllByRole('row'))[1])
+    expect(row.queryByText(/in 30 days/)).not.toBeInTheDocument()
+    expect(row.queryByText(/MiB\/s/)).not.toBeInTheDocument()
+    expect(row.getAllByText('—').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('treats empty series like null: Metrics unavailable and no sparklines', async () => {
-    serveStorage({
-      ...STORAGE,
-      items: [{ ...JENKINS, size_30d: [], throughput_24h: [], growth_30d_pct: null }],
-    })
-    renderStoragePage()
-    expect(await screen.findByText('Metrics unavailable')).toBeInTheDocument()
-    expect((await screen.findByRole('region', { name: 'jenkins-home' })).querySelector('svg')).toBeNull()
+  it('says no service mounts an unmounted file system', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage('/storage?seg=unmounted')
+    expect(await screen.findByText('No service mounts this file system.')).toBeInTheDocument()
   })
 
   it('shows the empty state when there are no file systems', async () => {
