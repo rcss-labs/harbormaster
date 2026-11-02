@@ -231,7 +231,7 @@ export interface SubnetRow {
   region: string
   available_ips: number
   total_ips: number
-  used_pct: number
+  used_pct: number // fraction 0..1 of usable addresses in use (not a 0-100 percent)
 }
 
 export interface OverReservedRow {

@@ -117,7 +117,7 @@ func (s *Store) AnalyticsAtScalingMax(ctx context.Context, f TargetFilter, vis V
 type SubnetLow struct {
 	AccountID, Region, SubnetID, Name, AZ string
 	AvailableIPs, TotalIPs                int // total = CIDR size minus the 5 addresses AWS reserves
-	UsedPct                               float64
+	UsedPct                               float64 // fraction 0..1 of usable addresses in use
 }
 
 // lowIPShare is the free-address share below which a subnet is reported.
@@ -134,7 +134,7 @@ func (s *Store) AnalyticsSubnetsLow(ctx context.Context, f TargetFilter, vis Vis
 	threshold := q.add(lowIPShare)
 	rows, err := s.Pool.Query(ctx,
 		`select sn.account_id, sn.region, sn.subnet_id, sn.name, sn.az, sn.available_ips, sn.total_ips,
-		   100 * (1 - sn.available_ips::float8 / sn.total_ips) as used_pct
+		   (1 - sn.available_ips::float8 / sn.total_ips) as used_pct
 		 from (select x.*, case when family(x.cidr::cidr) = 4 and masklen(x.cidr::cidr) between 8 and 28
 		         then ((1::bigint << (32 - masklen(x.cidr::cidr))) - 5)::int end as total_ips
 		       from subnets x) sn

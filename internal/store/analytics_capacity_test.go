@@ -161,8 +161,8 @@ func TestAnalyticsSubnetsLow_UsesCidrSize(t *testing.T) {
 		t.Fatalf("admin low subnets (most used first) = %v", ids)
 	}
 	for _, row := range admin {
-		if row.SubnetID == "subnet-small-low" && (row.TotalIPs != 251 || row.AvailableIPs != 20 || row.UsedPct < 92 || row.UsedPct > 92.1 || row.Name != "subnet-small-low-name") {
-			t.Errorf("small subnet = %+v, want total 251, 20 free, ~92%% used", row)
+		if row.SubnetID == "subnet-small-low" && (row.TotalIPs != 251 || row.AvailableIPs != 20 || row.UsedPct < 0.92 || row.UsedPct > 0.921 || row.Name != "subnet-small-low-name") {
+			t.Errorf("small subnet = %+v, want total 251, 20 free, ~92%% used (fraction 0.92)", row)
 		}
 		if row.SubnetID == "subnet-large-low" && row.TotalIPs != 4091 {
 			t.Errorf("large subnet total = %d, want 4091", row.TotalIPs)

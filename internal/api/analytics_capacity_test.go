@@ -170,3 +170,27 @@ func TestAnalyticsCapacity_NonAdminSeesOnlyVisibleClusters(t *testing.T) {
 		t.Errorf("clusters total %d for %d rows", omer.Clusters.Total, len(omer.Clusters.Rows))
 	}
 }
+
+func TestAnalyticsCapacity_SubnetUsedPctIsAFraction(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	svc := visibleServices(t, st)[0].Service
+	lowSubnet := model.Subnet{AccountID: svc.Key.AccountID, Region: svc.Key.Region, SubnetID: "subnet-low", VPCID: "vpc-low",
+		Name: "low", CIDR: "10.9.0.0/24", AZ: svc.Key.Region + "a", AvailableIPs: 20, PolledAt: time.Now().UTC()}
+	if err := st.ReplaceNetwork(t.Context(), svc.Key.AccountID, svc.Key.Region, []model.VPC{{AccountID: svc.Key.AccountID, Region: svc.Key.Region, VPCID: "vpc-low", PolledAt: time.Now().UTC()}},
+		[]model.Subnet{lowSubnet}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := getCapacity(t, login(t, srv, "pavel", testPassword), "")
+	for _, row := range got.SubnetsLow {
+		if row.SubnetID == "subnet-low" {
+			// 20 of 251 usable addresses free: 91.99% used, reported as a 0..1 fraction like the other table fields.
+			if math.Abs(row.UsedPct-0.9203) > 0.001 {
+				t.Errorf("used_pct = %v, want about 0.92 (a fraction)", row.UsedPct)
+			}
+			return
+		}
+	}
+	t.Fatalf("subnet-low missing from subnets_low: %+v", got.SubnetsLow)
+}

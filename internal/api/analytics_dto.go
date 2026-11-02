@@ -239,7 +239,7 @@ type SubnetRowDTO struct {
 	Region       string  `json:"region"`
 	AvailableIPs int     `json:"available_ips"`
 	TotalIPs     int     `json:"total_ips"`
-	UsedPct      float64 `json:"used_pct"`
+	UsedPct      float64 `json:"used_pct"` // fraction 0..1 (despite the name), like the other table fields
 }
 
 // OverReservedRowDTO is a row of the most-over-reserved-services table (needs service_util_daily).

@@ -50,3 +50,12 @@ describe('CapacityTab proposed panels', () => {
     }
   })
 })
+
+describe('CapacityTab subnets', () => {
+  it('renders used_pct as a 0..1 fraction: 0.92 reads 92% with a 92% bar', async () => {
+    await renderTab(ANALYTICS_CAPACITY)
+    const row = screen.getByRole('row', { name: /private-a/ })
+    expect(within(row).getByText('92%')).toBeInTheDocument()
+    expect(row.querySelector('[data-bar]')).toHaveStyle({ width: '92%' })
+  })
+})
