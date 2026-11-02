@@ -227,6 +227,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.observeRoutes(mux)
 	s.networkRoutes(mux) // plan 05
 	s.storageRoutes(mux) // plan 05
+	s.analyticsDeliveryOperationsRoutes(mux)
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
