@@ -87,11 +87,13 @@ func startSAMLAPI(t *testing.T, srv *httptest.Server, st *store.Store, cfg confi
 		t.Fatal(err)
 	}
 	fk := fake.New(fake.MockupEstate(time.Now))
+	cfg.FakeAWS = true // demo mode: http loopback IdP URLs are allowed
 	server := Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: fk, Prober: fk, Cfg: cfg, Log: log, Now: time.Now,
 		Deploy:  &deploy.Service{Store: st, Clients: fk, Scaling: st, MaxDesiredCount: 50, Now: time.Now},
 		FakeIdP: idp.Handler(),
+		SAML:    &samlService{fetcher: &saml.MetadataFetcher{AllowInsecure: true}}, // the in-process IdP is on http loopback
 	}
 	if mutate != nil {
 		mutate(&server)

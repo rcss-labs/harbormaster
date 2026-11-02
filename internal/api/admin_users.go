@@ -25,6 +25,28 @@ type UserDTO struct {
 	MustChangePassword bool       `json:"must_change_password"`
 	LastSignInAt       *time.Time `json:"last_sign_in_at"`
 	CanSee             []TagDTO   `json:"can_see"`
+	// plan 07: credentials
+	HasPassword          bool       `json:"has_password"`
+	BreakGlass           bool       `json:"break_glass"`
+	SSO                  string     `json:"sso"` // "none" | "linked" | "pending" | "pending_expired"
+	SSONameID            *string    `json:"sso_name_id"`
+	PendingLinkExpiresAt *time.Time `json:"pending_link_expires_at"`
+	Email                *string    `json:"email"`
+	DisplayName          *string    `json:"display_name"`
+}
+
+// ssoState derives the UserDTO SSO fields: a linked identity wins over a pending link, and a pending
+// link past its expiry is reported as such but ignored at sign-in.
+func ssoState(u store.User, now time.Time) (state string, nameID *string, expires *time.Time) {
+	switch {
+	case u.SSOLinked():
+		return "linked", &u.ExternalID, nil
+	case u.PendingLinkNameID != "" && u.PendingLinkActive(now):
+		return "pending", &u.PendingLinkNameID, u.PendingLinkExpiresAt
+	case u.PendingLinkNameID != "":
+		return "pending_expired", &u.PendingLinkNameID, u.PendingLinkExpiresAt
+	}
+	return "none", nil, nil
 }
 
 // buildUserDTOs maps users to DTOs; CanSee lists tags the user holds View on (all tags for admins),
@@ -42,7 +64,9 @@ func (s *Server) buildUserDTOs(r *http.Request, users []store.User) ([]UserDTO, 
 	out := make([]UserDTO, 0, len(users))
 	for _, u := range users {
 		dto := UserDTO{ID: u.ID, Username: u.Username, Admin: u.Admin, MustChangePassword: u.MustChangePassword,
-			LastSignInAt: u.LastSignInAt, CanSee: []TagDTO{}}
+			LastSignInAt: u.LastSignInAt, CanSee: []TagDTO{},
+			HasPassword: u.HasPassword(), BreakGlass: u.BreakGlass, Email: u.Email, DisplayName: u.DisplayName}
+		dto.SSO, dto.SSONameID, dto.PendingLinkExpiresAt = ssoState(u, s.Now())
 		for _, t := range tags {
 			if u.Admin || perms[u.ID][t.ID].Has(authz.View) {
 				dto.CanSee = append(dto.CanSee, TagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color})

@@ -6,11 +6,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"mime"
@@ -45,6 +43,9 @@ type samlService struct {
 	cipher *saml.KeyCipher // nil when HM_SESSION_KEY is empty
 	bucket *ipBucket
 	verify func(v *saml.Verifier, in saml.VerifyInput) (saml.Identity, error)
+	// fetcher downloads IdP metadata. The default is https-only with the private/link-local address
+	// filter; only the local demo mode (HM_FAKE_AWS) relaxes it. Cookie flags never decide SSRF protection.
+	fetcher *saml.MetadataFetcher
 }
 
 func newSAMLService(svc *samlService, s *Server) *samlService {
@@ -62,6 +63,9 @@ func newSAMLService(svc *samlService, s *Server) *samlService {
 	if svc.bucket == nil {
 		svc.bucket = newIPBucket(loginBucketSize, 1, s.Now)
 	}
+	if svc.fetcher == nil {
+		svc.fetcher = &saml.MetadataFetcher{AllowInsecure: s.Cfg.FakeAWS}
+	}
 	if svc.verify == nil {
 		svc.verify = func(v *saml.Verifier, in saml.VerifyInput) (saml.Identity, error) { return v.Verify(in) }
 	}
@@ -74,22 +78,9 @@ func (s *Server) samlConfig(ctx context.Context) (saml.Config, store.SAMLConfigR
 	if err != nil {
 		return saml.Config{}, store.SAMLConfigRow{}, err
 	}
-	cfg := saml.Config{
-		Enabled: row.Enabled, IdPEntityID: row.IdPEntityID, IdPSSORedirectURL: row.IdPSSORedirectURL,
-		IdPSSOPostURL: row.IdPSSOPostURL, SPEntityID: row.SPEntityID, NameIDFormat: row.NameIDFormat,
-		AttrEmail: deref(row.AttrEmail), AttrDisplayName: deref(row.AttrDisplayName), AttrUsername: deref(row.AttrUsername),
-		ClockSkew: time.Duration(row.ClockSkewSeconds) * time.Second, ButtonLabel: row.ButtonLabel,
-	}
-	for _, certPEM := range row.IdPCertsPEM {
-		block, _ := pem.Decode([]byte(certPEM))
-		if block == nil {
-			return saml.Config{}, store.SAMLConfigRow{}, errors.New("stored IdP certificate is not valid PEM")
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return saml.Config{}, store.SAMLConfigRow{}, errors.New("stored IdP certificate cannot be parsed")
-		}
-		cfg.IdPCerts = append(cfg.IdPCerts, cert)
+	cfg, err := samlConfigFromRow(row)
+	if err != nil {
+		return saml.Config{}, store.SAMLConfigRow{}, err
 	}
 	return cfg, row, nil
 }
@@ -231,7 +222,7 @@ func (s *Server) rateLimited(w http.ResponseWriter, r *http.Request) bool {
 	if s.SAML.bucket.Allow(s.clientIP(r)) {
 		return false
 	}
-	writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests. Try again shortly.")
+	s.fail(w, errRateLimited)
 	return true
 }
 
@@ -539,10 +530,8 @@ func (s *Server) acsTest(w http.ResponseWriter, r *http.Request, st *acsState, c
 		s.acsFail(w, r, st, saml.ReasonInternal, err, false)
 		return
 	}
-	_ = s.Store.Audit(r.Context(), store.AuditEntry{
-		Action: "sso_test", Summary: "Ran an SSO sign-in test (ok).", IP: st.ip,
-		Details: map[string]any{"reason": "", "outcome": preview.Outcome},
-	})
+	// The sso_test audit entry is written when the admin reads the result (GET /api/sso/tests/{id}),
+	// because only that request knows who the admin is.
 	redirectTo(w, "/settings/sso?test="+url.QueryEscape(row.ID))
 }
 

@@ -129,6 +129,10 @@ func contractShapes() map[string]any {
 		"networkRegion": shapeOf(reflect.TypeFor[NetworkRegionVPCsDTO]()),
 		"vpcTree":       shapeOf(reflect.TypeFor[VPCTreeDTO]()),
 		"storage":       shapeOf(reflect.TypeFor[StorageDTO]()),
+		// plan 07
+		"sso":           shapeOf(reflect.TypeFor[SSOConfigDTO]()),
+		"ssoTestResult": shapeOf(reflect.TypeFor[SSOTestResultDTO]()),
+		"authOptions":   shapeOf(reflect.TypeFor[AuthOptionsDTO]()),
 	}
 }
 
