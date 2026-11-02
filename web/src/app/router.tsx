@@ -76,7 +76,7 @@ export function AppRoutes() {
           <Route path="settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="settings/:tab" element={<SettingsPage />} />
           <Route path="admin/users" element={<Navigate to="/settings/users" replace />} />
-          <Route path="admin/tags" element={<Navigate to="/settings/general" replace />} />
+          <Route path="admin/tags" element={<Navigate to="/settings/tags" replace />} />
           <Route path="admin/accounts" element={<Navigate to="/settings/accounts" replace />} />
           <Route path="admin/audit" element={<Navigate to="/settings/audit" replace />} />
           <Route path="me/access" element={<MyAccess />} />

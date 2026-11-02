@@ -119,8 +119,15 @@ test.describe('admin pages as pavel', () => {
 
   test('tags: Dev is the default, a new tag can be created, refused a duplicate name and deleted', async ({ page }) => {
     const tagName = `Canary-${unique()}`
-    await page.goto('/settings/general')
+    await page.goto('/settings/tags')
     await expect(page.getByRole('heading', { level: 2, name: 'Tags' })).toBeVisible()
+
+    // Assignments start collapsed; expanding shows the cluster selects.
+    await expect(page.getByLabel(/^Tag for /)).toHaveCount(0)
+    await page.getByRole('button', { name: 'Expand all' }).click()
+    await expect(page.getByLabel(/^Tag for /).first()).toBeVisible()
+    await page.getByRole('button', { name: 'Collapse all' }).click()
+    await expect(page.getByLabel(/^Tag for /)).toHaveCount(0)
 
     // The Dev tag is built in: neither Rename nor Delete is available.
     const dev = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Rename' }) }).filter({ hasText: /^Dev\s*default/ })
