@@ -2,12 +2,10 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { isApiError, useDesiredCountInfo, useRestart, useSetDesiredCount } from '../../api/change'
 import type { ServiceDTO } from '../../api/types'
-import { Banner } from '../../components/Banner'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
-import { Dialog } from '../../components/Dialog'
 import { showWarning, useToast } from '../../components/Toast'
 import styles from './service.module.css'
-import dialogStyles from './HeaderActions.module.css'
+import stepperStyles from './HeaderActions.module.css'
 
 const ROLLOUT_RUNNING_MESSAGE = 'A rollout is already running'
 
@@ -16,10 +14,9 @@ interface HeaderActionsProps {
   service: ServiceDTO
 }
 
-/** Restart, desired count and AWS console buttons for the service header. Each button action opens its own dialog. */
+/** Inline desired-count stepper (with Apply), Restart and AWS console for the sticky service header. Changes go through confirm dialogs. */
 export function HeaderActions({ serviceId, service }: HeaderActionsProps) {
-  const [openDialog, setOpenDialog] = useState<'restart' | 'desired' | null>(null)
-  const close = () => setOpenDialog(null)
+  const [restarting, setRestarting] = useState(false)
 
   const rolloutRunning = service.deployments.some((deployment) => deployment.rollout_state === 'IN_PROGRESS')
   const operateTitle = service.can.operate ? undefined : `You need Operate on ${service.tag.name}`
@@ -33,29 +30,21 @@ export function HeaderActions({ serviceId, service }: HeaderActionsProps) {
 
   return (
     <>
+      <DesiredStepper serviceId={serviceId} service={service} disabledTitle={operateTitle} />
       <button
         type="button"
         className={styles.btn}
+        aria-label="Restart (new deployment)"
         disabled={restartBlockedTitle !== undefined}
         title={restartBlockedTitle}
-        onClick={() => setOpenDialog('restart')}
+        onClick={() => setRestarting(true)}
       >
-        Restart (new deployment)
-      </button>
-      <button
-        type="button"
-        className={styles.btn}
-        disabled={operateTitle !== undefined}
-        title={operateTitle}
-        onClick={() => setOpenDialog('desired')}
-      >
-        Desired count: {service.desired}
+        Restart
       </button>
       <a className={styles.btn} href={service.console_url} target="_blank" rel="noopener">
         AWS console ↗
       </a>
-      {openDialog === 'restart' && <RestartDialog serviceId={serviceId} service={service} onClose={close} />}
-      {openDialog === 'desired' && <DesiredCountDialog serviceId={serviceId} service={service} onClose={close} />}
+      {restarting && <RestartDialog serviceId={serviceId} service={service} onClose={() => setRestarting(false)} />}
     </>
   )
 }
@@ -95,62 +84,62 @@ function RestartDialog({ serviceId, service, onClose }: DialogProps) {
   )
 }
 
-function DesiredCountDialog({ serviceId, service, onClose }: DialogProps) {
+interface StepperProps {
+  serviceId: string
+  service: ServiceDTO
+  /** Set when the user lacks Operate: disables the stepper and explains why. */
+  disabledTitle?: string
+}
+
+function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
   const toast = useToast()
   const info = useDesiredCountInfo(serviceId)
   const setDesiredCount = useSetDesiredCount(serviceId)
   const [draft, setDraft] = useState(String(service.desired))
+  const [confirming, setConfirming] = useState(false)
+  // Follow the service's count when it changes underneath us (a poll, or an applied change).
+  const [seenDesired, setSeenDesired] = useState(service.desired)
+  if (seenDesired !== service.desired) {
+    setSeenDesired(service.desired)
+    setDraft(String(service.desired))
+  }
 
   const max = info.data?.max
   const autoScaling = info.data?.auto_scaling ?? null
-  // An empty field parses to NaN, which fails the integer check and disables the submit button.
+  // An empty field parses to NaN, which fails the integer check and disables Apply.
   const value = draft.trim() === '' ? Number.NaN : Number(draft)
   const valid = Number.isInteger(value) && value >= 0 && (max === undefined || value <= max)
+  const dirty = draft !== String(service.desired)
   const outsideAutoScaling = valid && autoScaling !== null && (value < autoScaling.min || value > autoScaling.max)
+  // Steps start from the field's current number, or from the service's count when the field is empty or invalid.
+  const stepFrom = valid ? value : service.desired
+  const locked = disabledTitle !== undefined
   const taskWord = value === 1 ? 'task' : 'tasks'
 
-  const submit = () => {
-    if (!valid) return
-    if (value === service.desired) {
-      toast.show(`Desired count is already ${value}.`, 'info')
-      onClose()
-      return
-    }
+  const apply = () =>
     setDesiredCount.mutate(
       { desired: value },
       {
         onSuccess: (result) => {
           toast.show(`Desired count set to ${value}.`, 'ok')
           showWarning(toast, result.warning)
-          onClose()
+          setConfirming(false)
         },
         onError: (error) => {
           toast.show(errorMessage(error, 'Desired count could not be changed.'), 'bad')
-          onClose()
+          setConfirming(false)
         },
       },
     )
-  }
-
-  // Steppers start from the field's current number, or from the service's count when the field is empty or invalid.
-  const stepFrom = valid ? value : service.desired
 
   return (
-    <Dialog
-      title={`Set ${service.name} to ${valid ? `${value} ${taskWord}` : 'a valid number of tasks'}?`}
-      sub={`Now ${service.desired}.${valid && value === 0 ? ' Every task stops. The service and its definition stay.' : ''}`}
-      onClose={onClose}
-      actions={[
-        { label: 'Cancel', onClick: onClose },
-        { label: 'Update desired count', kind: 'primary', disabled: !valid || setDesiredCount.isPending, onClick: submit },
-      ]}
-    >
-      <div className={dialogStyles.stepper}>
+    <>
+      <div className={stepperStyles.stepper} role="group" aria-label="Desired count" title={disabledTitle}>
+        <span className={stepperStyles.stepperLabel}>DESIRED</span>
         <button
           type="button"
-          className={styles.btn}
           aria-label="Decrease desired count"
-          disabled={stepFrom <= 0}
+          disabled={locked || stepFrom <= 0}
           onClick={() => setDraft(String(Math.max(0, stepFrom - 1)))}
         >
           −
@@ -161,31 +150,42 @@ function DesiredCountDialog({ serviceId, service, onClose }: DialogProps) {
           min={0}
           max={max}
           value={draft}
+          disabled={locked}
           onChange={(event) => setDraft(event.target.value)}
         />
         <button
           type="button"
-          className={styles.btn}
           aria-label="Increase desired count"
-          disabled={max !== undefined && stepFrom >= max}
+          disabled={locked || (max !== undefined && stepFrom >= max)}
           onClick={() => setDraft(String(stepFrom + 1))}
         >
           +
         </button>
+        {dirty && !locked && (
+          <button type="button" className={stepperStyles.apply} disabled={!valid} onClick={() => setConfirming(true)}>
+            Apply
+          </button>
+        )}
       </div>
       {outsideAutoScaling && autoScaling && (
-        <Banner kind="warn">
-          Auto scaling keeps this service between {autoScaling.min} and {autoScaling.max}. It will move {value} back into
-          that range.
-        </Banner>
+        <p className={stepperStyles.scalingWarn} role="status">
+          Auto scaling keeps this service between {autoScaling.min} and {autoScaling.max}. It will move {value} back into that range.{' '}
+          <Link className={styles.accentLink} to={`/services/${serviceId}/scaling`}>
+            Auto scaling settings →
+          </Link>
+        </p>
       )}
-      {/* Plan 03's Scaling tab shows the auto scaling range and policies behind the warning above. */}
-      <div className={dialogStyles.scalingLink}>
-        <Link className={styles.accentLink} to={`/services/${serviceId}/scaling`} onClick={onClose}>
-          Auto scaling settings →
-        </Link>
-      </div>
-    </Dialog>
+      {confirming && (
+        <ConfirmDialog
+          title={`Set ${service.name} to ${valid ? `${value} ${taskWord}` : 'a valid number of tasks'}?`}
+          sub={`Now ${service.desired}.${valid && value === 0 ? ' Every task stops. The service and its definition stay.' : ''}`}
+          confirmLabel="Update desired count"
+          confirmDisabled={!valid || setDesiredCount.isPending}
+          onConfirm={apply}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </>
   )
 }
 

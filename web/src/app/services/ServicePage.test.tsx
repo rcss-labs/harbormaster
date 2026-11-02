@@ -25,7 +25,8 @@ describe('ServicePage', () => {
     expect(clusterHrefs).toContain(`/clusters/${SERVICE_PAYMENTS.cluster.id}`)
     expect(screen.getByText('Fargate')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Restart (new deployment)' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: `Desired count: ${SERVICE_PAYMENTS.desired}` })).toBeEnabled()
+    expect(screen.getByRole('spinbutton', { name: 'Desired count' })).toHaveValue(SERVICE_PAYMENTS.desired)
+    expect(screen.getByRole('spinbutton', { name: 'Desired count' })).toBeEnabled()
     expect(screen.getByRole('link', { name: 'AWS console ↗' })).toHaveAttribute('href', SERVICE_PAYMENTS.console_url)
 
     const terminalTab = tabLink(/Terminal/)

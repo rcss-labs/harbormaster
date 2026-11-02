@@ -42,8 +42,8 @@ test.describe('header: Prod viewer', () => {
     const restart = page.getByRole('button', { name: 'Restart (new deployment)' })
     await expect(restart).toBeDisabled()
     await expect(restart).toHaveAttribute('title', 'You need Operate on Prod')
-    const desired = page.getByRole('button', { name: 'Desired count: 3' })
-    await expect(desired).toBeDisabled()
+    const desired = page.getByRole('group', { name: 'Desired count' })
+    await expect(desired.getByRole('spinbutton')).toBeDisabled()
     await expect(desired).toHaveAttribute('title', 'You need Operate on Prod')
     await expect(page.getByRole('link', { name: /AWS console/ })).toHaveAttribute('href', /.+/)
   })
@@ -173,15 +173,15 @@ test.describe('scaling', () => {
     test('sets the desired count to 3 from the tab, without an auto scaling warning', async ({ page }) => {
       await page.goto(imageResizer('scaling'))
       await expect(page.getByText(/No auto scaling: the count stays where you set it\./)).toBeVisible()
-      await page.getByLabel('Desired count', { exact: true }).fill('3')
+      await page.getByLabel('Scale to', { exact: true }).fill('3')
       await expect(page.getByText(/Outside the auto scaling range/)).toHaveCount(0)
       await page.getByRole('button', { name: 'Update desired count' }).click()
-      await expect(page.getByRole('button', { name: 'Desired count: 3' })).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByRole('group', { name: 'Desired count' }).getByRole('spinbutton')).toHaveValue('3', { timeout: 10_000 })
 
       // Put the estate back so later specs see the seeded count.
-      await page.getByLabel('Desired count', { exact: true }).fill('2')
+      await page.getByLabel('Scale to', { exact: true }).fill('2')
       await page.getByRole('button', { name: 'Update desired count' }).click()
-      await expect(page.getByRole('button', { name: 'Desired count: 2' })).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByRole('group', { name: 'Desired count' }).getByRole('spinbutton')).toHaveValue('2', { timeout: 10_000 })
     })
   })
 
