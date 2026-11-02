@@ -44,6 +44,7 @@
   --tag-red-text: #b91c1c; --tag-red-border: #e5b4b4;
   --tag-amber-text: #9c4707; --tag-amber-border: #e3c49b;
   --tag-neutral-text: #5c6979; --tag-neutral-border: #c6d0da;
+  --proposed-border: #b9aee0; --proposed-bg: #f6f4fc;
   --tag-blue-text: #0b6a8f; --tag-blue-border: #a3cfe0;
   --tag-green-text: #047857; --tag-green-border: #a4d6c4;
   --tag-violet-text: #5b3fc4; --tag-violet-border: #c6bcee;
@@ -73,6 +74,7 @@
     --tag-red-text: #f87171; --tag-red-border: #4a2a2e;
     --tag-amber-text: #fbbf24; --tag-amber-border: #4a3a1a;
     --tag-neutral-text: #8c97a7; --tag-neutral-border: #2a333e;
+    --proposed-border: #3d3466; --proposed-bg: #100f18;
     --tag-blue-text: #45b5e3; --tag-blue-border: #1c3a48;
     --tag-green-text: #34d399; --tag-green-border: #1a3d31;
     --tag-violet-text: #a78bfa; --tag-violet-border: #33295a;
@@ -94,6 +96,7 @@
   --tag-red-text: #f87171; --tag-red-border: #4a2a2e;
   --tag-amber-text: #fbbf24; --tag-amber-border: #4a3a1a;
   --tag-neutral-text: #8c97a7; --tag-neutral-border: #2a333e;
+  --proposed-border: #3d3466; --proposed-bg: #100f18;
   --tag-blue-text: #45b5e3; --tag-blue-border: #1c3a48;
   --tag-green-text: #34d399; --tag-green-border: #1a3d31;
   --tag-violet-text: #a78bfa; --tag-violet-border: #33295a;
