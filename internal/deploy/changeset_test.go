@@ -146,14 +146,16 @@ func TestChangeSet_DesiredOutsideNewScalingRange(t *testing.T) {
 func TestChangeSet_ScheduledActionBadScheduleOrTimezone(t *testing.T) {
 	h := newHarness(t)
 	for name, action := range map[string]deploy.ScheduledActionChange{
-		"unknown form":       {Name: "a", Schedule: "daily", MinCapacity: ptr(2)},
-		"cron five fields":   {Name: "a", Schedule: "cron(0 7 ? * MON-FRI)", MinCapacity: ptr(2)},
-		"at without time":    {Name: "a", Schedule: "at(2030-01-01)", MinCapacity: ptr(2)},
-		"rate zero":          {Name: "a", Schedule: "rate(0 minutes)", MinCapacity: ptr(2)},
-		"unknown timezone":   {Name: "a", Schedule: "rate(5 minutes)", Timezone: "Mars/Phobos", MinCapacity: ptr(2)},
-		"no capacity":        {Name: "a", Schedule: "rate(5 minutes)"},
-		"capacity out range": {Name: "a", Schedule: "rate(5 minutes)", MinCapacity: ptr(9)},
-		"bad name":           {Name: "bad name!", Schedule: "rate(5 minutes)", MinCapacity: ptr(2)},
+		"unknown form":      {Name: "a", Schedule: "daily", MinCapacity: ptr(2)},
+		"cron five fields":  {Name: "a", Schedule: "cron(0 7 ? * MON-FRI)", MinCapacity: ptr(2)},
+		"at without time":   {Name: "a", Schedule: "at(2030-01-01)", MinCapacity: ptr(2)},
+		"rate zero":         {Name: "a", Schedule: "rate(0 minutes)", MinCapacity: ptr(2)},
+		"unknown timezone":  {Name: "a", Schedule: "rate(5 minutes)", Timezone: "Mars/Phobos", MinCapacity: ptr(2)},
+		"no capacity":       {Name: "a", Schedule: "rate(5 minutes)"},
+		"above max desired": {Name: "a", Schedule: "rate(5 minutes)", MaxCapacity: ptr(51)},
+		"negative capacity": {Name: "a", Schedule: "rate(5 minutes)", MinCapacity: ptr(-1)},
+		"min above max":     {Name: "a", Schedule: "rate(5 minutes)", MinCapacity: ptr(5), MaxCapacity: ptr(3)},
+		"bad name":          {Name: "bad name!", Schedule: "rate(5 minutes)", MinCapacity: ptr(2)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cs := baseChangeSet(t, h, paymentsKey)
@@ -304,6 +306,7 @@ func TestChangeSet_StaleBaseRevision409(t *testing.T) {
 	h := newHarness(t)
 	cs := baseChangeSet(t, h, paymentsKey)
 	cs.BaseRevision = 41
+	cs.TaskDefinition = &deploy.TaskDefinitionChange{Definition: draftFromDeployed(t, h, "payments-api:1.18.3")}
 	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
 	before := writeCalls(h)
 	_, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
@@ -750,5 +753,55 @@ func TestChangeSet_DeploymentConfigurationAndGraceApplied(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no rollout_settings operations line in %+v", ops)
+	}
+}
+
+// AWS allows a scheduled action to move the target outside its current range (max 20 at peak on a 1-4 target).
+func TestChangeSet_ScheduledActionMayLeaveCurrentScalingRange(t *testing.T) {
+	h := newHarness(t)
+	settings, err := h.svc.DeploySettings(t.Context(), paymentsKey)
+	if err != nil || !settings.Scaling.HasTarget {
+		t.Fatalf("settings = %+v, err %v", settings.Scaling, err)
+	}
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.Scaling = &deploy.ScalingChange{PutScheduledActions: []deploy.ScheduledActionChange{
+		{Name: "peak", Schedule: "rate(5 minutes)", Timezone: "UTC", MinCapacity: ptr(settings.Scaling.Max + 5), MaxCapacity: ptr(settings.Scaling.Max + 10)},
+		{Name: "quiet", Schedule: "rate(1 hour)", Timezone: "UTC", MinCapacity: ptr(0)},
+	}}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+		t.Fatalf("scheduled action outside the current range refused: %v", err)
+	}
+}
+
+func TestChangeSet_ScalingOnlyIgnoresStaleBaseRevision(t *testing.T) {
+	h := newHarness(t)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.BaseRevision = 41
+	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+		t.Fatalf("scaling-only change set refused for a stale base revision: %v", err)
+	}
+}
+
+func TestChangeSet_RetryAfterDeployDoneScalingFailedAppliesScalingOnly(t *testing.T) {
+	h := newHarness(t)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.TaskDefinition = &deploy.TaskDefinitionChange{Definition: draftFromDeployed(t, h, "payments-api:1.18.3")}
+	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
+	h.fake.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
+	first, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	if err != nil || first.Status != "partial" || first.RegisteredRevision != 43 {
+		t.Fatalf("first = %+v, err %v", first, err)
+	}
+
+	// What the frontend sends: no task definition (the service step is done), the scaling section, a fresh version.
+	retry := deploy.ChangeSet{BaseRevision: cs.BaseRevision, BaseVersion: first.SettingsVersion, Scaling: cs.Scaling}
+	got, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, retry)
+	if err != nil || got.Status != "applied" {
+		t.Fatalf("retry = %+v, err %v", got, err)
+	}
+	calls := h.fake.Calls()
+	if calls["RegisterTaskDefinition"] != 1 || calls["UpdateService"] != 1 {
+		t.Fatalf("calls = register %d, update %d; want 1 each", calls["RegisterTaskDefinition"], calls["UpdateService"])
 	}
 }

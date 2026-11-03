@@ -142,7 +142,8 @@ func (s *Service) ApplyChangeSet(ctx context.Context, subj authz.Subject, key mo
 	if err != nil {
 		return ChangeSetResult{}, err
 	}
-	if cs.BaseRevision != 0 && cs.BaseRevision != st.DeployedRevision {
+	// base_revision guards the task definition; scaling and service writes are guarded by base_version.
+	if cs.TaskDefinition != nil && cs.BaseRevision != 0 && cs.BaseRevision != st.DeployedRevision {
 		return ChangeSetResult{}, &StaleBaseError{BaseRevision: cs.BaseRevision, DeployedRevision: st.DeployedRevision}
 	}
 	if cs.Service != nil || cs.Scaling != nil {
