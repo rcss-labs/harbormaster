@@ -1,7 +1,11 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
 	"math"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -71,8 +75,8 @@ func TestAnalyticsReliability_NinetyDayPanelsFromDaily(t *testing.T) {
 			t.Fatalf("%s is unavailable although the rollup has data", name)
 		}
 	}
-	if admin.Availability90d.Needs != nil || admin.Availability90d.Data == nil {
-		t.Fatalf("available panel keeps needs %+v or lacks data", admin.Availability90d.Needs)
+	if admin.Availability90d.Data == nil {
+		t.Fatal("available panel lacks data")
 	}
 	today := utcToday()
 	if since := admin.Availability90d.DataSince; since == nil || !since.Equal(today.AddDate(0, 0, -60)) {
@@ -246,7 +250,7 @@ func TestAnalyticsDelivery_FailureReasonsAndRecentFailures(t *testing.T) {
 	// A failure recorded before reasons existed does not make the panels available.
 	record(payments, "legacy", 2, now.Add(-30*time.Hour), "", "")
 	before := getDelivery(admin)
-	if before.FailureReasons.Available || before.RecentFailures.Available || before.FailureReasons.Needs == nil {
+	if before.FailureReasons.Available || before.RecentFailures.Available {
 		t.Fatalf("panels available (%v, %v) with only reason-less failures", before.FailureReasons.Available, before.RecentFailures.Available)
 	}
 
@@ -256,7 +260,7 @@ func TestAnalyticsDelivery_FailureReasonsAndRecentFailures(t *testing.T) {
 	record(payments, "hc-1", 7, now.Add(-2*time.Hour), "health_check", "Task failed ELB health checks")
 
 	got := getDelivery(admin)
-	if !got.FailureReasons.Available || !got.RecentFailures.Available || got.FailureReasons.Needs != nil {
+	if !got.FailureReasons.Available || !got.RecentFailures.Available {
 		t.Fatalf("failure panels unavailable after reasons were recorded: %+v %+v", got.FailureReasons, got.RecentFailures)
 	}
 	if since := got.FailureReasons.DataSince; since == nil || since.Sub(first).Abs() > time.Second {
@@ -302,16 +306,16 @@ func TestAnalyticsDelivery_FailureReasonsAndRecentFailures(t *testing.T) {
 	}
 }
 
-func TestProposed_DataSinceReportedWhenPartial(t *testing.T) {
+func TestDailyPanels_DataSinceReportedWhenPartial(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	admin := login(t, srv, "pavel", testPassword)
 
-	// Nothing rolled up yet: everything stays proposed with its Needs.
+	// Nothing rolled up yet: every daily panel is unavailable.
 	empty := getReliability(t, admin, "")
-	if empty.Availability90d.Available || empty.Availability90d.Data != nil || empty.Availability90d.DataSince != nil || empty.Availability90d.Needs == nil {
-		t.Fatalf("empty rollup = %+v, want unavailable with needs", empty.Availability90d)
+	if empty.Availability90d.Available || empty.Availability90d.Data != nil || empty.Availability90d.DataSince != nil {
+		t.Fatalf("empty rollup = %+v, want unavailable", empty.Availability90d)
 	}
 
 	// The rollup began 10 days ago: the panel is available, reports when, and leaves the earlier days empty.
@@ -346,7 +350,7 @@ func TestProposed_DataSinceReportedWhenPartial(t *testing.T) {
 	if !capacity.ReservedVsUsed90d.Available || !capacity.SpotShare90d.Available {
 		t.Fatalf("capacity panels = %v / %v, want available from cluster_capacity_daily", capacity.ReservedVsUsed90d.Available, capacity.SpotShare90d.Available)
 	}
-	if capacity.Memory90d.Available || capacity.OverReserved.Available || capacity.Memory90d.Needs == nil {
+	if capacity.Memory90d.Available || capacity.OverReserved.Available {
 		t.Errorf("memory/over_reserved available without service_util_daily: %v / %v", capacity.Memory90d.Available, capacity.OverReserved.Available)
 	}
 	used := lineByKey(t, *capacity.ReservedVsUsed90d.Data, "used_p95")
@@ -357,5 +361,62 @@ func TestProposed_DataSinceReportedWhenPartial(t *testing.T) {
 	}
 	if v := valueAt(t, lineByKey(t, *capacity.ReservedVsUsed90d.Data, "reserved"), 86); v <= 0 {
 		t.Errorf("reserved 3 days ago = %v, want > 0", v)
+	}
+}
+
+// A daily panel is an ordinary panel on the wire: available, data_since and data, nothing else, and its table is
+// listed under "Data used on this page" whether or not it has rows yet.
+func TestDailyPanels_PlainWireShapeAndSourcesAlwaysListed(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	admin := login(t, srv, "pavel", testPassword)
+
+	for _, tc := range []struct {
+		path   string
+		panels []string
+		tables []string
+	}{
+		{"delivery", []string{"failure_reasons", "recent_failures"}, nil},
+		{"reliability", []string{"availability_90d", "below_desired_90d", "getting_worse"}, []string{"service_availability_daily"}},
+		{"capacity", []string{"reserved_vs_used_90d", "spot_share_90d", "memory_90d", "over_reserved"}, []string{"cluster_capacity_daily", "service_util_daily"}},
+	} {
+		var body struct {
+			Sources []AnalyticsSourceDTO `json:"sources"`
+		}
+		resp := admin.get("/api/analytics/" + tc.path)
+		raw, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &top); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.Unmarshal(raw, &body)
+		for _, name := range tc.panels {
+			var panel map[string]json.RawMessage
+			if err := json.Unmarshal(top[name], &panel); err != nil {
+				t.Fatalf("%s/%s: %v", tc.path, name, err)
+			}
+			keys := make([]string, 0, len(panel))
+			for k := range panel {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			if !reflect.DeepEqual(keys, []string{"available", "data", "data_since"}) {
+				t.Errorf("%s/%s keys = %v, want available, data, data_since", tc.path, name, keys)
+			}
+		}
+		for _, table := range tc.tables {
+			found := false
+			for _, src := range body.Sources {
+				found = found || src.Table == table
+			}
+			if !found {
+				t.Errorf("%s sources miss %s before its first row: %+v", tc.path, table, body.Sources)
+			}
+		}
 	}
 }

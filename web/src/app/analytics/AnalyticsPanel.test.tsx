@@ -1,22 +1,21 @@
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { Proposed } from '../../api/analytics'
+import type { RollupPanel } from '../../api/analytics'
 import { ANALYTICS_RELIABILITY } from '../../test/fixtures'
 import { renderWithProviders } from '../../test/setup'
 import { AnalyticsPanel } from './AnalyticsPanel'
 
 const WINDOW = { ...ANALYTICS_RELIABILITY.window, from: '2026-10-01T00:00:00Z' }
 
-const unavailable: Proposed<unknown> = {
+const unavailable: RollupPanel<unknown> = {
   available: false,
   data_since: null,
-  needs: { table: 'service_availability_daily', size: '~35 MB a year', how: 'A nightly rollup.' },
   data: null,
 }
 
 function panel(props: Partial<Parameters<typeof AnalyticsPanel>[0]> = {}) {
   return renderWithProviders(
-    <AnalyticsPanel title="Availability" showSources showProposed window={WINDOW} {...props}>
+    <AnalyticsPanel title="Availability" showSources window={WINDOW} {...props}>
       <div>chart body</div>
     </AnalyticsPanel>,
   )
@@ -41,38 +40,22 @@ describe('AnalyticsPanel', () => {
     expect(screen.getByText('chart body')).toBeInTheDocument()
   })
 
-  it('proposed footer text uses needs', () => {
-    panel({ proposed: unavailable })
-    expect(screen.getByText('needs new data service_availability_daily · ~35 MB a year · A nightly rollup.')).toBeInTheDocument()
-    expect(screen.getByText('PROPOSED')).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: /Availability/ })).toHaveAttribute('data-variant', 'proposed')
-  })
-
-  it('renders nothing for a proposed panel when showProposed is off', () => {
-    panel({ proposed: unavailable, showProposed: false })
-    expect(screen.queryByRole('region')).not.toBeInTheDocument()
-    expect(screen.queryByText('chart body')).not.toBeInTheDocument()
-  })
-
-  it('dims the chart for an unavailable proposed panel and passes dim to a render-prop child', () => {
-    renderWithProviders(
-      <AnalyticsPanel title="Why" showSources showProposed window={WINDOW} proposed={unavailable}>
-        {(dim) => <div>{dim ? 'dimmed' : 'bright'}</div>}
-      </AnalyticsPanel>,
-    )
-    expect(screen.getByText('dimmed')).toBeInTheDocument()
+  it('an unavailable daily panel looks like any other: source footer, no variant', () => {
+    panel({ rollup: unavailable, source: { table: 'service_availability_daily', kept: '8760h' } })
+    expect(screen.getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
+    expect(screen.queryByText(/needs new data/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /Availability/ })).not.toHaveAttribute('data-variant')
+    expect(screen.getByText('chart body')).toBeInTheDocument()
   })
 
   it("shows 'Daily data started on' empty state when available but data_since after window", () => {
-    panel({ proposed: { available: true, data_since: '2026-10-20T00:00:00Z', needs: null, data: {} } })
+    panel({ rollup: { available: true, data_since: '2026-10-20T00:00:00Z', data: {} } })
     expect(screen.getByText(/Daily data started on Oct 20/)).toBeInTheDocument()
     expect(screen.getByText('chart body')).toBeInTheDocument()
-    expect(screen.queryByText('PROPOSED')).not.toBeInTheDocument()
-    expect(screen.getByRole('region', { name: /Availability/ })).toHaveAttribute('data-variant', 'default')
   })
 
   it('has no empty state when data covers the window', () => {
-    panel({ proposed: { available: true, data_since: '2026-09-01T00:00:00Z', needs: null, data: {} } })
+    panel({ rollup: { available: true, data_since: '2026-09-01T00:00:00Z', data: {} } })
     expect(screen.queryByText(/Daily data started on/)).not.toBeInTheDocument()
   })
 

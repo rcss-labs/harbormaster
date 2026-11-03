@@ -55,7 +55,7 @@ import type {
   AnalyticsSeries,
   AnalyticsSource,
   AnalyticsWindow,
-  Proposed,
+  RollupPanel,
 } from '../api/analytics'
 
 /** Reference "now" for every fixture timestamp; tests can freeze the clock here. */
@@ -1464,13 +1464,11 @@ export const ANALYTICS_DELIVERY: AnalyticsDelivery = {
   failure_reasons: {
     available: false,
     data_since: null,
-    needs: { table: 'deployment_history.failure_reason', size: '< 1 MB', how: 'The outcome logger records the reason on each failed rollout.' },
     data: null,
   },
   recent_failures: {
     available: false,
     data_since: null,
-    needs: { table: 'deployment_history.failure_reason', size: '< 1 MB', how: 'The outcome logger records the reason on each failed rollout.' },
     data: null,
   },
 }
@@ -1482,6 +1480,7 @@ export const ANALYTICS_RELIABILITY: AnalyticsReliability = {
     source('service_counts_history', '5-minute running and desired counts', '7 days', 'HM_RETENTION_COUNTS_HISTORY'),
     source('tasks', 'Stopped tasks with stop reason and exit codes', '7 days', 'HM_RETENTION_STOPPED_TASKS'),
     source('service_events', 'Events mentioning "unable to place"', '30 days', 'HM_RETENTION_SERVICE_EVENTS', '30d'),
+    source('service_availability_daily', 'Daily availability and time below desired per service', '8760h', 'HM_RETENTION_AVAILABILITY_DAILY'),
   ],
   polled_at: FIXTURE_NOW,
   kpis: {
@@ -1541,19 +1540,16 @@ export const ANALYTICS_RELIABILITY: AnalyticsReliability = {
   availability_90d: {
     available: false,
     data_since: null,
-    needs: { table: 'service_availability_daily', size: '~35 MB a year', how: 'A nightly rollup of counts history and stopped tasks.' },
     data: null,
   },
   below_desired_90d: {
     available: true,
     data_since: minutesAgo(20 * 1440),
-    needs: null,
     data: analyticsSeries('90d', [{ key: 'minutes_below', label: 'Minutes below desired' }], (_, j) => (j < 35 ? null : (j * 5) % 40)),
   },
   getting_worse: {
     available: false,
     data_since: null,
-    needs: { table: 'service_availability_daily', size: '~35 MB a year', how: 'A nightly rollup of counts history and stopped tasks.' },
     data: null,
   },
 }
@@ -1565,6 +1561,8 @@ export const ANALYTICS_CAPACITY: AnalyticsCapacity = {
     source('tasks', 'Running tasks: cpu, memory, capacity provider', 'latest poll', null),
     source('service_counts_history', 'Running count over time, for the 7-day trend', '7 days', 'HM_RETENTION_COUNTS_HISTORY'),
     source('subnets', 'Available IP addresses per subnet', 'latest poll', null),
+    source('cluster_capacity_daily', 'Daily average reserved vCPU and memory per cluster', '8760h', 'HM_RETENTION_CAPACITY_DAILY'),
+    source('service_util_daily', 'Daily CPU and memory use as a share of reserved', '2160h', 'HM_RETENTION_UTIL_DAILY'),
   ],
   polled_at: FIXTURE_NOW,
   kpis: { reserved_vcpu: 14.5, reserved_mem_gib: 36, running_tasks: 27, services: 15, spot_share: 0.22, at_scaling_max: 1, subnets_low_ips: 1 },
@@ -1608,25 +1606,21 @@ export const ANALYTICS_CAPACITY: AnalyticsCapacity = {
   reserved_vs_used_90d: {
     available: false,
     data_since: null,
-    needs: { table: 'cluster_capacity_daily', size: '~5 MB a year', how: 'Running tasks sampled on the counts-history poll.' },
     data: null,
   },
   spot_share_90d: {
     available: false,
     data_since: null,
-    needs: { table: 'cluster_capacity_daily', size: '~5 MB a year', how: 'Running tasks sampled on the counts-history poll.' },
     data: null,
   },
   memory_90d: {
     available: false,
     data_since: null,
-    needs: { table: 'service_util_daily', size: '~8 MB for 90 days', how: 'One CloudWatch batch per account and region a day.' },
     data: null,
   },
   over_reserved: {
     available: false,
     data_since: null,
-    needs: { table: 'service_util_daily', size: '~8 MB for 90 days', how: 'One CloudWatch batch per account and region a day.' },
     data: null,
   },
 }
@@ -1691,20 +1685,15 @@ function analyticsDailySeries(lines: { key: string; label: string }[], value: (l
   }
 }
 
-const availablePanel = <T>(dataSinceDaysAgo: number, data: T): Proposed<T> => ({
+const availablePanel = <T>(dataSinceDaysAgo: number, data: T): RollupPanel<T> => ({
   available: true,
   data_since: minutesAgo(dataSinceDaysAgo * 1440),
-  needs: null,
   data,
 })
 
 /** Reliability once service_availability_daily has 45 days of rows: partial 90-day charts and a getting-worse table. */
 export const ANALYTICS_RELIABILITY_DAILY: AnalyticsReliability = {
   ...ANALYTICS_RELIABILITY,
-  sources: [
-    ...ANALYTICS_RELIABILITY.sources,
-    source('service_availability_daily', 'Daily availability and time below desired per service', '8760h', 'HM_RETENTION_AVAILABILITY_DAILY'),
-  ],
   availability_90d: availablePanel(
     45,
     analyticsDailySeries([{ key: 'availability', label: 'Availability' }], (_, daysAgo) => (daysAgo > 45 ? null : 99.2 + ((daysAgo * 7) % 8) / 10)),
@@ -1725,11 +1714,6 @@ export const ANALYTICS_RELIABILITY_DAILY: AnalyticsReliability = {
 /** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */
 export const ANALYTICS_CAPACITY_DAILY: AnalyticsCapacity = {
   ...ANALYTICS_CAPACITY,
-  sources: [
-    ...ANALYTICS_CAPACITY.sources,
-    source('cluster_capacity_daily', 'Daily average reserved vCPU and memory per cluster', '8760h', 'HM_RETENTION_CAPACITY_DAILY'),
-    source('service_util_daily', 'Daily CPU and memory use as a share of reserved', '2160h', 'HM_RETENTION_UTIL_DAILY'),
-  ],
   reserved_vs_used_90d: availablePanel(
     30,
     analyticsDailySeries(

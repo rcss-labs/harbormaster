@@ -6,7 +6,7 @@ import "time"
 // docs/analytics_design/PLAN.md section 1; web/src/api/analytics.ts mirrors these types.
 //
 // Every slice is non-nil on the wire: build responses with the new<Tab>DTO constructors and fill them in.
-// The generic wrappers (ProposedDTO, TopTableDTO) work with the contract reflection in contract_test.go,
+// The generic wrappers (RollupPanelDTO, TopTableDTO) work with the contract reflection in contract_test.go,
 // so no per-instantiation named types are needed.
 
 // AnalyticsWindowDTO reports the time window a tab actually used.
@@ -57,18 +57,11 @@ type DonutSliceDTO struct {
 	Value float64 `json:"value"`
 }
 
-// NeedsDTO says which new data a proposed panel is waiting for.
-type NeedsDTO struct {
-	Table string `json:"table"`
-	Size  string `json:"size"`
-	How   string `json:"how"`
-}
-
-// ProposedDTO wraps a panel that needs a phase 2 rollup. Data is nil until Available.
-type ProposedDTO[T any] struct {
+// RollupPanelDTO wraps a panel read from a daily rollup table (or the recorded failure reasons). Data is nil
+// until Available, which is when the table has its first row.
+type RollupPanelDTO[T any] struct {
 	Available bool       `json:"available"`
 	DataSince *time.Time `json:"data_since"` // earliest day in the rollup table once it has data
-	Needs     *NeedsDTO  `json:"needs"`      // set while unavailable
 	Data      *T         `json:"data"`
 }
 
@@ -107,7 +100,7 @@ type DeliveryServiceRowDTO struct {
 	LastFailedAt *time.Time `json:"last_failed_at"`
 }
 
-// FailedRolloutRowDTO is a row of the recent-failed-rollouts table (needs deployment_history.failure_reason).
+// FailedRolloutRowDTO is a row of the recent-failed-rollouts table (from deployment_history.failure_reason).
 type FailedRolloutRowDTO struct {
 	At           time.Time `json:"at"`
 	ServiceID    string    `json:"service_id"`
@@ -133,8 +126,8 @@ type DeliveryDTO struct {
 	Duration    SeriesDTO                          `json:"duration"`     // median|p90, seconds
 	Services    TopTableDTO[DeliveryServiceRowDTO] `json:"services"`
 
-	FailureReasons ProposedDTO[SeriesDTO]                        `json:"failure_reasons"`
-	RecentFailures ProposedDTO[TopTableDTO[FailedRolloutRowDTO]] `json:"recent_failures"`
+	FailureReasons RollupPanelDTO[SeriesDTO]                        `json:"failure_reasons"`
+	RecentFailures RollupPanelDTO[TopTableDTO[FailedRolloutRowDTO]] `json:"recent_failures"`
 }
 
 // ---- reliability -------------------------------------------------------------------------------
@@ -162,7 +155,7 @@ type ReliabilityServiceRowDTO struct {
 	TopReason       *string `json:"top_reason"`
 }
 
-// AvailabilityTrendRowDTO is a row of the services-getting-less-available table (needs service_availability_daily).
+// AvailabilityTrendRowDTO is a row of the services-getting-less-available table (from service_availability_daily).
 type AvailabilityTrendRowDTO struct {
 	ServiceID string  `json:"service_id"`
 	Service   string  `json:"service"`
@@ -188,9 +181,9 @@ type ReliabilityDTO struct {
 	ExitCodes        SeriesDTO                             `json:"exit_codes"`
 	LeastAvailable   TopTableDTO[ReliabilityServiceRowDTO] `json:"least_available"`
 
-	Availability90d ProposedDTO[SeriesDTO]                            `json:"availability_90d"`
-	BelowDesired90d ProposedDTO[SeriesDTO]                            `json:"below_desired_90d"`
-	GettingWorse    ProposedDTO[TopTableDTO[AvailabilityTrendRowDTO]] `json:"getting_worse"`
+	Availability90d RollupPanelDTO[SeriesDTO]                            `json:"availability_90d"`
+	BelowDesired90d RollupPanelDTO[SeriesDTO]                            `json:"below_desired_90d"`
+	GettingWorse    RollupPanelDTO[TopTableDTO[AvailabilityTrendRowDTO]] `json:"getting_worse"`
 }
 
 // ---- capacity ----------------------------------------------------------------------------------
@@ -242,7 +235,7 @@ type SubnetRowDTO struct {
 	UsedPct      float64 `json:"used_pct"` // fraction 0..1 (despite the name), like the other table fields
 }
 
-// OverReservedRowDTO is a row of the most-over-reserved-services table (needs service_util_daily).
+// OverReservedRowDTO is a row of the most-over-reserved-services table (from service_util_daily).
 // The plan left its fields open; these compare reservation to p95 use.
 type OverReservedRowDTO struct {
 	ServiceID      string  `json:"service_id"`
@@ -271,10 +264,10 @@ type CapacityDTO struct {
 	AtScalingMax            []AtMaxRowDTO                      `json:"at_scaling_max"`
 	SubnetsLow              []SubnetRowDTO                     `json:"subnets_low"`
 
-	ReservedVsUsed90d ProposedDTO[SeriesDTO]                       `json:"reserved_vs_used_90d"`
-	SpotShare90d      ProposedDTO[SeriesDTO]                       `json:"spot_share_90d"`
-	Memory90d         ProposedDTO[SeriesDTO]                       `json:"memory_90d"`
-	OverReserved      ProposedDTO[TopTableDTO[OverReservedRowDTO]] `json:"over_reserved"`
+	ReservedVsUsed90d RollupPanelDTO[SeriesDTO]                       `json:"reserved_vs_used_90d"`
+	SpotShare90d      RollupPanelDTO[SeriesDTO]                       `json:"spot_share_90d"`
+	Memory90d         RollupPanelDTO[SeriesDTO]                       `json:"memory_90d"`
+	OverReserved      RollupPanelDTO[TopTableDTO[OverReservedRowDTO]] `json:"over_reserved"`
 }
 
 // ---- operations --------------------------------------------------------------------------------
@@ -337,18 +330,6 @@ func newDonutDTO() DonutDTO { return DonutDTO{Slices: []DonutSliceDTO{}} }
 
 func newTopTableDTO[R any]() TopTableDTO[R] { return TopTableDTO[R]{Rows: []R{}} }
 
-// newUnavailable is a proposed panel whose rollup has no data yet.
-func newUnavailable[T any](table, size, how string) ProposedDTO[T] {
-	return ProposedDTO[T]{Needs: &NeedsDTO{Table: table, Size: size, How: how}}
-}
-
-const (
-	needsAvailabilityDaily = "service_availability_daily"
-	needsCapacityDaily     = "cluster_capacity_daily"
-	needsUtilDaily         = "service_util_daily"
-	needsFailureReason     = "deployment_history.failure_reason"
-)
-
 func newDeliveryDTO() DeliveryDTO {
 	return DeliveryDTO{
 		Sources:     []AnalyticsSourceDTO{},
@@ -356,15 +337,10 @@ func newDeliveryDTO() DeliveryDTO {
 		FailureRate: newSeriesDTO(),
 		Duration:    newSeriesDTO(),
 		Services:    newTopTableDTO[DeliveryServiceRowDTO](),
-		FailureReasons: newUnavailable[SeriesDTO](needsFailureReason, "< 1 MB",
-			"The outcome logger records the circuit-breaker event or the last stopped task's reason on each failed rollout."),
-		RecentFailures: newUnavailable[TopTableDTO[FailedRolloutRowDTO]](needsFailureReason, "< 1 MB",
-			"The outcome logger records the circuit-breaker event or the last stopped task's reason on each failed rollout."),
 	}
 }
 
 func newReliabilityDTO() ReliabilityDTO {
-	const how = "A nightly rollup of service_counts_history and stopped tasks, run before retention deletes them."
 	return ReliabilityDTO{
 		Sources:          []AnalyticsSourceDTO{},
 		Availability:     newSeriesDTO(),
@@ -373,15 +349,10 @@ func newReliabilityDTO() ReliabilityDTO {
 		UnexpectedByZone: newSeriesDTO(),
 		ExitCodes:        newSeriesDTO(),
 		LeastAvailable:   newTopTableDTO[ReliabilityServiceRowDTO](),
-		Availability90d:  newUnavailable[SeriesDTO](needsAvailabilityDaily, "~35 MB a year", how),
-		BelowDesired90d:  newUnavailable[SeriesDTO](needsAvailabilityDaily, "~35 MB a year", how),
-		GettingWorse:     newUnavailable[TopTableDTO[AvailabilityTrendRowDTO]](needsAvailabilityDaily, "~35 MB a year", how),
 	}
 }
 
 func newCapacityDTO() CapacityDTO {
-	const capacityHow = "Running tasks sampled on the counts-history poll and rolled up daily per cluster."
-	const utilHow = "One CloudWatch GetMetricData batch per account and region a day."
 	return CapacityDTO{
 		Sources:                 []AnalyticsSourceDTO{},
 		ReservedVCPU7d:          newSeriesDTO(),
@@ -390,10 +361,6 @@ func newCapacityDTO() CapacityDTO {
 		Clusters:                newTopTableDTO[CapacityClusterRowDTO](),
 		AtScalingMax:            []AtMaxRowDTO{},
 		SubnetsLow:              []SubnetRowDTO{},
-		ReservedVsUsed90d:       newUnavailable[SeriesDTO](needsCapacityDaily, "~5 MB a year", capacityHow),
-		SpotShare90d:            newUnavailable[SeriesDTO](needsCapacityDaily, "~5 MB a year", capacityHow),
-		Memory90d:               newUnavailable[SeriesDTO](needsUtilDaily, "~8 MB for 90 days", utilHow),
-		OverReserved:            newUnavailable[TopTableDTO[OverReservedRowDTO]](needsUtilDaily, "~8 MB for 90 days", utilHow),
 	}
 }
 

@@ -12,28 +12,19 @@ interface PanelProps {
   children: ReactNode
   /** Remove body padding, e.g. for tables that run edge to edge. */
   flush?: boolean
-  /** Shown before the title, e.g. a "PROPOSED" marker. */
-  badge?: ReactNode
   /** Right-aligned header content describing the chart, such as colour keys with values. */
   legend?: ReactNode
   /** Mono strip under the body, e.g. where the data comes from. */
   footer?: ReactNode
-  /** `proposed` draws a dashed violet border for panels that need data Harbormaster does not store yet. */
-  variant?: 'default' | 'proposed'
 }
 
-export function Panel({ title, sub, toolbar, actions, children, flush = false, badge, legend, footer, variant = 'default' }: PanelProps) {
+export function Panel({ title, sub, toolbar, actions, children, flush = false, legend, footer }: PanelProps) {
   const titleId = useId()
   const hasToolbar = toolbar !== undefined
-  const headClass = hasToolbar ? styles.tall : badge !== undefined || legend !== undefined ? styles.mid : ''
+  const headClass = hasToolbar ? styles.tall : legend !== undefined ? styles.mid : ''
   return (
-    <section
-      className={`${styles.panel} ${variant === 'proposed' ? styles.proposed : ''}`.trim()}
-      aria-labelledby={titleId}
-      data-variant={variant}
-    >
+    <section className={styles.panel} aria-labelledby={titleId}>
       <header className={`${styles.head} ${headClass}`.trim()}>
-        {badge !== undefined && <span className={styles.badge}>{badge}</span>}
         <h2 id={titleId} className={styles.title}>
           {title}
         </h2>

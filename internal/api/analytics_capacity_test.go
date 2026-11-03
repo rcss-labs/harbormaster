@@ -42,18 +42,14 @@ func TestAnalyticsCapacity_IgnoresRangeAndReportsIt(t *testing.T) {
 	if resp := c.get("/api/analytics/capacity?range=1y"); resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("range=1y status %d, want 422", resp.StatusCode)
 	}
-	for _, p := range []struct {
-		name      string
-		available bool
-		table     string
-	}{
-		{"reserved_vs_used_90d", got.ReservedVsUsed90d.Available, got.ReservedVsUsed90d.Needs.Table},
-		{"spot_share_90d", got.SpotShare90d.Available, got.SpotShare90d.Needs.Table},
-		{"memory_90d", got.Memory90d.Available, got.Memory90d.Needs.Table},
-		{"over_reserved", got.OverReserved.Available, got.OverReserved.Needs.Table},
+	for name, available := range map[string]bool{
+		"reserved_vs_used_90d": got.ReservedVsUsed90d.Available,
+		"spot_share_90d":       got.SpotShare90d.Available,
+		"memory_90d":           got.Memory90d.Available,
+		"over_reserved":        got.OverReserved.Available,
 	} {
-		if p.available || p.table == "" {
-			t.Errorf("%s = available %v needs %q, want unavailable with a needed table", p.name, p.available, p.table)
+		if available {
+			t.Errorf("%s is available before any daily rollup has run", name)
 		}
 	}
 }

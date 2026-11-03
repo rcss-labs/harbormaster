@@ -66,9 +66,7 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
   const notice = rangeFixed
     ? CAPACITY_NOTICE
     : data?.window.clamped
-      ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${retentionText(data.window.retention)}.${
-          tab === 'reliability' && prefs.showProposed ? ' The dashed 90-day panels show what the proposed daily rollup would keep.' : ''
-        }`
+      ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${retentionText(data.window.retention)}.`
       : null
 
   return (
@@ -76,7 +74,7 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
       <div className={styles.pageHead}>
         <div className={styles.titles}>
           <h1>Analytics</h1>
-          <div className={styles.meta}>Delivery, reliability, capacity and operations, from the data Harbormaster already stores.</div>
+          <div className={styles.meta}>Delivery, reliability, capacity and operations, across your clusters and services.</div>
         </div>
         <div className={styles.filters}>
           <SegmentedFilter
@@ -107,16 +105,13 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
               <Toggle checked={prefs.showSources} onChange={(showSources) => setPrefs({ showSources })}>
                 Show data sources
               </Toggle>
-              <Toggle checked={prefs.showProposed} onChange={(showProposed) => setPrefs({ showProposed })}>
-                Show proposed panels
-              </Toggle>
             </div>
           )}
         </div>
       </div>
       {notice !== null && <Banner kind="warn">{notice}</Banner>}
       {data ? (
-        <TabBody data={data} showSources={prefs.showSources} showProposed={prefs.showProposed} />
+        <TabBody data={data} showSources={prefs.showSources} />
       ) : analytics.isError ? (
         <EmptyState>{analytics.error instanceof Error ? analytics.error.message : 'The analytics could not be loaded.'}</EmptyState>
       ) : null}
@@ -124,8 +119,8 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
   )
 }
 
-function TabBody({ data, showSources, showProposed }: { data: AnalyticsResponse; showSources: boolean; showProposed: boolean }): ReactNode {
-  const props = { showSources, showProposed }
+function TabBody({ data, showSources }: { data: AnalyticsResponse; showSources: boolean }): ReactNode {
+  const props = { showSources }
   switch (data.tab) {
     case 'delivery':
       return <DeliveryTab data={data} {...props} />

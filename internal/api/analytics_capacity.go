@@ -121,16 +121,13 @@ func (s *Server) analyticsCapacity(w http.ResponseWriter, r *http.Request) {
 	fillCapacityTasks(&dto, facts, clusters, tags, accountMap)
 	fillCapacityTrend(&dto, win, trend, tags)
 	fillCapacityDaily(&dto, dailyWin, dailyIn, tags)
-	if dailyIn.capacitySince != nil {
-		dto.Sources = append(dto.Sources, prunedTableSource(store.TableClusterCapacityDaily,
+	dto.Sources = append(dto.Sources,
+		prunedTableSource(store.TableClusterCapacityDaily,
 			"Daily average reserved vCPU and memory and spot share per cluster, for the 90-day panels",
-			s.Cfg.Retention.CapacityDaily, "HM_RETENTION_CAPACITY_DAILY"))
-	}
-	if dailyIn.utilSince != nil {
-		dto.Sources = append(dto.Sources, prunedTableSource(store.TableServiceUtilDaily,
+			s.Cfg.Retention.CapacityDaily, "HM_RETENTION_CAPACITY_DAILY"),
+		prunedTableSource(store.TableServiceUtilDaily,
 			"Daily CPU and memory use as a share of what each service reserves, for the 90-day panels",
 			s.Cfg.Retention.UtilDaily, "HM_RETENTION_UTIL_DAILY"))
-	}
 	for _, row := range atMax {
 		dto.AtScalingMax = append(dto.AtScalingMax, AtMaxRowDTO{
 			ServiceID: row.Key.ID(), Service: row.Key.Service, Cluster: row.Key.Cluster,

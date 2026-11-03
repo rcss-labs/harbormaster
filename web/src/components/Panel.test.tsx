@@ -41,28 +41,17 @@ describe('Panel', () => {
     )
   })
 
-  it('renders the badge before the title and the legend in the header', () => {
+  it('renders the legend in the header', () => {
     render(
-      <Panel title="Why rollouts failed" badge={<span>PROPOSED</span>} legend={<span>3 legend items</span>}>
+      <Panel title="Why rollouts failed" legend={<span>3 legend items</span>}>
         x
       </Panel>,
     )
-    const heading = screen.getByRole('heading', { name: 'Why rollouts failed' })
-    expect(screen.getByText('PROPOSED').compareDocumentPosition(heading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(screen.getByText('3 legend items')).toBeInTheDocument()
   })
 
-  it('proposed variant sets data-variant', () => {
-    render(
-      <Panel title="Proposed one" variant="proposed">
-        x
-      </Panel>,
-    )
-    expect(screen.getByRole('region', { name: 'Proposed one' })).toHaveAttribute('data-variant', 'proposed')
-  })
-
-  it('defaults to the default variant', () => {
+  it('has a single look: no variant attribute', () => {
     render(<Panel title="Plain">x</Panel>)
-    expect(screen.getByRole('region', { name: 'Plain' })).toHaveAttribute('data-variant', 'default')
+    expect(screen.getByRole('region', { name: 'Plain' })).not.toHaveAttribute('data-variant')
   })
 })

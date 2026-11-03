@@ -23,6 +23,26 @@ test.describe('analytics as pavel', () => {
       await page.getByRole('link', { name: new RegExp(`^${link}`) }).click()
       await expect(page).toHaveURL(new RegExp(`/analytics/${link.toLowerCase()}`))
       await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible({ timeout: 15_000 })
+      await expect(page.getByText('PROPOSED')).toHaveCount(0)
     }
+  })
+
+  // The fake estate starts with recent daily history, so the 90-day panels are ordinary panels with data.
+  test('the 90-day panels render as normal panels with data', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/analytics/reliability')
+    const panel = page.getByRole('region', { name: 'Availability, last 90 days' })
+    await expect(panel).toBeVisible({ timeout: 15_000 })
+    await expect(panel).not.toHaveAttribute('data-variant', /.+/)
+    await expect(panel.getByText('source service_availability_daily · kept')).toBeVisible()
+    await expect(panel.getByRole('group', { name: /Availability/ })).toBeVisible()
+    await expect(panel.getByText(/Daily data appears after the first rollup|Collecting daily data/)).toHaveCount(0)
+    await expect(page.getByText('PROPOSED')).toHaveCount(0)
+
+    await page.goto('/analytics/delivery')
+    const reasons = page.getByRole('region', { name: 'Why rollouts failed' })
+    await expect(reasons).toBeVisible({ timeout: 15_000 })
+    await expect(reasons.getByText('No failed rollouts with a recorded reason in this range')).toHaveCount(0)
+    await expect(page.getByText('PROPOSED')).toHaveCount(0)
   })
 })

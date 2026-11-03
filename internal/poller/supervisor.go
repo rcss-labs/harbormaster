@@ -11,9 +11,10 @@ import (
 type runningLoop struct{ cancel context.CancelFunc }
 
 // runSupervisor keeps one polling loop per enabled account x region. It refreshes the account
-// list at start and every cfg.AccountsRefresh, and runs retention every cfg.RetentionEvery
-// (the first run happens one interval after start, not immediately); each retention tick first runs the daily rollups. It returns after ctx is
-// cancelled and every loop has exited.
+// list at start and every cfg.AccountsRefresh, and runs retention every cfg.RetentionEvery; each
+// retention pass first runs the daily rollups. The first pass runs right after the loops start, so a
+// deploy or a leader change does not leave the daily panels empty for up to an hour. It returns after
+// ctx is cancelled and every loop has exited.
 func (p *Poller) runSupervisor(ctx context.Context) {
 	loops := map[awsx.Target]runningLoop{}
 	var wg sync.WaitGroup
@@ -67,6 +68,8 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 	defer retentionTicker.Stop()
 
 	refresh()
+	p.runRollups(ctx)
+	p.runRetention(ctx)
 	for {
 		select {
 		case <-ctx.Done():

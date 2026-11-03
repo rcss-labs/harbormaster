@@ -8,7 +8,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
-// Reads of the daily rollup tables for the "Proposed" analytics panels (docs/analytics_design/PLAN.md
+// Reads of the daily rollup tables for the daily analytics panels (docs/analytics_design/PLAN.md
 // sections 2.2, 2.3 and 4). Every query is bounded by the (day) index of its table and holds at most
 // about 600 rows a day, so a year of data stays a few hundred thousand rows at most. Days are UTC dates.
 

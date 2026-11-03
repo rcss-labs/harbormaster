@@ -6,7 +6,7 @@ import { KpiStrip } from '../../components/KpiStrip'
 import { useAuth } from '../auth/AuthProvider'
 import { BarCell, MonoCell, ServiceLink, TagCell } from './cells'
 import { COLOR, daysBefore, memoryText, minutesText, oneDecimal, percent, sourceFor, TAG_COLOR, whole } from './format'
-import { DonutPanel, KpiNote, proposedRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
+import { DonutPanel, dailyEmpty, KpiNote, rollupRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
 const ACCOUNT_COLORS = [COLOR.accent, COLOR.info, COLOR.ok, COLOR.orange, COLOR.warn, COLOR.gray]
@@ -20,10 +20,10 @@ const latest = (values: (number | null)[]) => [...values].reverse().find((value)
 /** cluster_capacity_daily is per cluster, so these totals ignore service tags (owner decision). */
 const WHOLE_CLUSTER_NOTE = 'whole cluster, all tags'
 
-export function CapacityTab({ data, showSources, showProposed }: TabProps<AnalyticsCapacity>) {
+export function CapacityTab({ data, showSources }: TabProps<AnalyticsCapacity>) {
   const { me } = useAuth()
   const { kpis, window } = data
-  const common = { window, showSources, showProposed }
+  const common = { window, showSources }
   const polledAt = Date.parse(data.polled_at)
   const tasks = sourceFor(data.sources, 'tasks')
   const counts = sourceFor(data.sources, 'service_counts_history')
@@ -116,7 +116,7 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
     { key: 'wasted', header: 'Unused vCPU', width: '100px', align: 'right', render: (row) => <MonoCell>{row.wasted_vcpu.toFixed(1)}</MonoCell> },
   ]
 
-  const over = proposedRows(data.over_reserved)
+  const over = rollupRows(data.over_reserved)
 
   return (
     <>
@@ -160,7 +160,8 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
           sub={WHOLE_CLUSTER_NOTE}
           span="full"
           series={data.reserved_vs_used_90d.data}
-          proposed={data.reserved_vs_used_90d}
+          rollup={data.reserved_vs_used_90d}
+          empty={dailyEmpty(data.reserved_vs_used_90d)}
           source={capacityDaily}
           mode="line"
           colors={USAGE_COLORS}
@@ -173,7 +174,8 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
           sub={WHOLE_CLUSTER_NOTE}
           span="half"
           series={data.spot_share_90d.data}
-          proposed={data.spot_share_90d}
+          rollup={data.spot_share_90d}
+          empty={dailyEmpty(data.spot_share_90d)}
           source={capacityDaily}
           mode="area"
           colors={{ spot_share: COLOR.info }}
@@ -186,7 +188,8 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
           sub={`GiB · reserved is ${WHOLE_CLUSTER_NOTE}`}
           span="half"
           series={data.memory_90d.data}
-          proposed={data.memory_90d}
+          rollup={data.memory_90d}
+          empty={dailyEmpty(data.memory_90d)}
           source={utilDaily}
           mode="line"
           colors={USAGE_COLORS}
@@ -197,7 +200,8 @@ export function CapacityTab({ data, showSources, showProposed }: TabProps<Analyt
           {...ninetyDays}
           title="Most over-reserved services"
           sub="90-day p95 use vs what the task definition reserves"
-          proposed={data.over_reserved}
+          rollup={data.over_reserved}
+          empty={dailyEmpty(data.over_reserved)}
           source={utilDaily}
           rows={over.rows}
           columns={overColumns}
