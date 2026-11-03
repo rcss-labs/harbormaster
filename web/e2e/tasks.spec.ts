@@ -43,10 +43,10 @@ test.describe('expected stops as pavel', () => {
     const deployRow = page.getByRole('row').filter({ hasText: 'auth-service' }).filter({ hasText: 'Scaling activity initiated by (deployment' })
     await expect(deployRow.first().getByText('scaling', { exact: true })).toBeVisible()
 
-    const response = await page.request.get('/api/tasks?filter=stopped_error&limit=500')
-    const { items } = (await response.json()) as { items: { stop_kind: string; stop_cause: string }[] }
-    expect(items.length).toBeGreaterThan(0)
-    expect(items.every((task) => task.stop_kind === 'error' && task.stop_cause !== 'spot')).toBe(true)
+    const response = await page.request.get('/api/tasks?filter=problems&limit=500')
+    const { items } = (await response.json()) as { items: { status: string; stop_kind: string; stop_cause: string }[] }
+    expect(items.some((task) => task.stop_kind === 'error')).toBe(true)
+    expect(items.some((task) => task.stop_kind === 'expected' || task.stop_cause === 'spot')).toBe(false)
   })
 })
 
