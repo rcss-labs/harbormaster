@@ -100,7 +100,7 @@ export function ServicePage() {
           deployedRevision={revisions.data.deployed_revision}
           canDeploy={service.can.deploy && service.controller.supported}
           deployDisabledReason={service.can.deploy ? service.controller.banner : `You need Deploy on ${service.tag.name}`}
-          onDeploy={() => navigate(`/services/${serviceId}/task-definition?deploy=${pendingRevision}`)}
+          onDeploy={() => navigate(`/services/${serviceId}/deploy?revision=${pendingRevision}`)}
         />
       )}
       <div className={styles.tabPanel}>{body}</div>
