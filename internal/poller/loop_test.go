@@ -272,7 +272,21 @@ func TestLoop_RunTicksEveryTierAndStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { h.loop.Run(ctx); close(done) }()
-	time.Sleep(400 * time.Millisecond)
+	// Run's first pass (clusters, service list, services) is synchronous and database-bound: about 170 ms on an
+	// idle machine, 350 ms or more under load. A fixed window would count that against the repeat cycles, so wait
+	// until every tier has repeated (bounded) instead of for a fixed time.
+	repeated := func() bool {
+		calls := h.fake.Calls()
+		for _, op := range []string{"ListClusters", "ListServices", "DescribeServices", "ListTasks", "DescribeTasks"} {
+			if calls[op] < 2 {
+				return false
+			}
+		}
+		return h.count(t, `select count(*) from tasks where last_status = 'RUNNING'`) == len(h.estateTasks("RUNNING"))
+	}
+	for deadline := time.Now().Add(10 * time.Second); !repeated() && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 	select {
 	case <-done:
@@ -400,7 +414,17 @@ func TestLoop_StartIsStaggeredAcrossTiers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { h.loop.Run(ctx); close(done) }()
-	time.Sleep(6 * stagger)
+	// The synchronous first pass (database-bound, 170 ms idle, 350 ms+ under load) precedes the staggered
+	// starts, so wait until the last tier has started (bounded) rather than for a fixed window.
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		mu.Lock()
+		_, lastStarted := firstStart[tierFullTasks]
+		mu.Unlock()
+		if lastStarted {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	cancel()
 	<-done
 
