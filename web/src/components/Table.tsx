@@ -15,5 +15,5 @@ export const tableClass = {
   num: styles.num,
   name: styles.name,
   link: styles.link,
-  stripe: (kind: 'bad' | 'warn' | 'info') => `${styles.stripe} ${styles[kind]}`,
+  stripe: (kind: 'bad' | 'warn' | 'info' | 'expected') => `${styles.stripe} ${styles[kind]}`,
 }

@@ -160,6 +160,22 @@ describe('Sidebar Tasks badges', () => {
     expect(await tasksLink()).toHaveTextContent(/^TKTasks$/)
   })
 
+  it('does not count expected stops (stopped_expected) in the badge', async () => {
+    server.use(
+      http.get('/api/tasks', () =>
+        HttpResponse.json({
+          ...TASKS,
+          counts: { ...TASKS.counts, stopped_error: 0 },
+          summary: { ...TASKS.summary, by_status: { ...TASKS.summary.by_status, running_unhealthy: 0, stopped_error: 0, stopped_expected: 4 } },
+        }),
+      ),
+    )
+    renderApp('/')
+    const link = await tasksLink()
+    expect(link).toHaveTextContent(/^TKTasks$/)
+    expect(within(link).queryByLabelText(/stopped with errors/)).not.toBeInTheDocument()
+  })
+
   it('shows only the yellow unhealthy count', async () => {
     tasksWith(3, 0)
     renderApp('/')

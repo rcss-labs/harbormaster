@@ -37,7 +37,21 @@ const stoppedError = (extra: TaskOverrides = {}) =>
     stop_code: 'EssentialContainerExited',
     stopped_reason: 'OutOfMemoryError',
     stop_reason_group: 'Out of memory (exit 137)',
+    stop_kind: 'error',
     stopped_at: new Date(Date.now() - 120_000).toISOString(),
+    ...extra,
+  })
+const stoppedExpected = (extra: TaskOverrides = {}) =>
+  makeTask({
+    status: 'STOPPED',
+    exit_code: 1,
+    health: 'UNKNOWN',
+    stop_code: 'SpotInterruption',
+    stopped_reason: 'Your Spot Task was interrupted.',
+    stop_reason_group: 'Spot interruption',
+    stop_kind: 'expected',
+    stop_cause: 'spot',
+    stopped_at: new Date(Date.now() - 180_000).toISOString(),
     ...extra,
   })
 const stoppedNormal = (extra: TaskOverrides = {}) =>
@@ -278,6 +292,22 @@ describe('Tasks rows', () => {
     renderApp('/tasks')
     const [status] = await screen.findAllByText('Stopped (exit 137)')
     expect(status.closest('[role="row"]')).toHaveAttribute('data-status', 'bad')
+  })
+
+  it('expected stop with a non-zero exit has the teal stripe, the exit label and a cause chip', async () => {
+    serve([stoppedExpected()])
+    renderApp('/tasks?filter=stopped')
+    const [status] = await screen.findAllByText('Stopped (exit 1)')
+    const row = status.closest('[role="row"]') as HTMLElement
+    expect(row).toHaveAttribute('data-status', 'expected')
+    expect(within(row).getByText('spot')).toBeInTheDocument()
+  })
+
+  it('expected stops are not in the Problems segment', async () => {
+    serve([stoppedExpected(), stoppedError({ serviceName: 'svc-err' })])
+    renderApp('/tasks?filter=problems')
+    await screen.findAllByText('Stopped (exit 137)')
+    expect(screen.queryByText('Stopped (exit 1)')).not.toBeInTheDocument()
   })
 
   it('unhealthy running row has the warn stripe', async () => {

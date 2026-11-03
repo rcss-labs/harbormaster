@@ -27,7 +27,7 @@ const withCaption = (value: string | number, caption: string) => (
 )
 
 function kpiItems(summary: TasksListDTO['summary'], windowMinutes: number | undefined): KpiItem[] {
-  const { running_healthy: healthy, running_unhealthy: unhealthy, stopped_error: stoppedError, stopped_normal: stoppedNormal } = summary.by_status
+  const { running_healthy: healthy, running_unhealthy: unhealthy, stopped_error: stoppedError, stopped_normal: stoppedNormal, stopped_expected: stoppedExpected } = summary.by_status
   const running = healthy + unhealthy
   const spot = summary.by_cluster.reduce((total, cluster) => total + cluster.spot, 0)
   const stoppedCaption = windowMinutes === undefined ? 'recent' : `last ${windowMinutes} min`
@@ -36,6 +36,7 @@ function kpiItems(summary: TasksListDTO['summary'], windowMinutes: number | unde
     { label: 'Unhealthy', value: unhealthy, valueColor: unhealthy > 0 ? 'var(--warning)' : undefined },
     { label: 'Stopped, error', value: withCaption(stoppedError, stoppedCaption), valueColor: stoppedError > 0 ? 'var(--danger)' : undefined },
     { label: 'Stopped, normal', value: withCaption(stoppedNormal, stoppedCaption) },
+    { label: 'Stopped, expected', value: withCaption(stoppedExpected, stoppedCaption), valueColor: stoppedExpected > 0 ? 'var(--expected)' : undefined },
     { label: 'On spot', value: withCaption(spot, running > 0 ? `${Math.round((spot / running) * 100)}% of running` : '') },
   ]
 }

@@ -18,7 +18,7 @@ export interface SortState {
   dir: 'asc' | 'desc'
 }
 
-export type RowStatus = 'bad' | 'warn' | 'info'
+export type RowStatus = 'bad' | 'warn' | 'info' | 'expected'
 
 interface DataTableProps<R> {
   /** Accessible name of the table. */

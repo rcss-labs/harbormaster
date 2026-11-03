@@ -5,6 +5,7 @@ import { Ago } from '../../components/Ago'
 import { DataTable, type DataTableColumn, type RowStatus } from '../../components/DataTable'
 import type { PillKind } from '../../components/Pill'
 import { StatusDot } from '../../components/StatusDot'
+import { StopCauseChip, stoppedStatus } from '../../components/stopStatus'
 import { StopTaskDialog } from '../../components/StopTaskDialog'
 import { isProblem, type TaskTableRow } from './taskRows'
 import styles from './TasksTable.module.css'
@@ -20,15 +21,13 @@ const formatVcpu = (cpuUnits: string) => String(+(Number(cpuUnits) / 1024).toFix
 function statusOf(task: TaskDTO): { kind: PillKind; label: string } {
   if (task.status === 'RUNNING') return { kind: 'ok', label: 'Running' }
   if (PROGRESS_STATUSES.includes(task.status)) return { kind: 'info', label: titleCase(task.status) }
-  if (task.status === 'STOPPED') {
-    if (task.exit_code !== null && task.exit_code !== 0) return { kind: 'bad', label: `Stopped (exit ${task.exit_code})` }
-    return { kind: 'mute', label: 'Stopped' }
-  }
+  if (task.status === 'STOPPED') return stoppedStatus(task)
   return { kind: 'mute', label: titleCase(task.status) }
 }
 
-/** Row stripe: a failed stop is red; a running task failing its health check is amber. */
+/** Row stripe: a failed stop is red, an expected stop teal; a running task failing its health check is amber. */
 function stripeOf(task: TaskDTO): RowStatus | undefined {
+  if (task.status === 'STOPPED' && task.stop_kind === 'expected') return 'expected'
   if (!isProblem(task)) return undefined
   return task.status === 'STOPPED' ? 'bad' : 'warn'
 }
@@ -150,10 +149,16 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: T
     {
       key: 'status',
       header: 'Status',
-      width: '150px',
+      width: '220px',
       render: (row) => {
-        const status = statusOf(lead(row))
-        return <StatusDot kind={status.kind}>{status.label}</StatusDot>
+        const task = lead(row)
+        const status = statusOf(task)
+        return (
+          <span className={styles.statusCell}>
+            <StatusDot kind={status.kind}>{status.label}</StatusDot>
+            {task.status === 'STOPPED' && <StopCauseChip cause={task.stop_cause} />}
+          </span>
+        )
       },
     },
     { key: 'health', header: 'Health', width: '76px', render: (row) => <HealthCell task={lead(row)} /> },
@@ -260,7 +265,7 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: T
       rows={rows}
       rowKey={(row) => row.rowKey}
       rowStatus={(row) => stripeOf(lead(row))}
-      minWidth={1380}
+      minWidth={1450}
       pageSize={PAGE_SIZE}
       page={page}
       onPageChange={onPageChange}

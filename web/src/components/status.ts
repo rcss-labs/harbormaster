@@ -46,6 +46,7 @@ export const STATUS_COLOR: Record<PillKind, string> = {
   bad: 'var(--danger)',
   info: 'var(--info)',
   mute: 'var(--border-strong)',
+  expected: 'var(--expected)',
 }
 
 export const SERIES = [

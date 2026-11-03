@@ -8,6 +8,7 @@
 .body:last-child { border-bottom: 0; }
 .body.bad { border-left-color: var(--danger); }
 .body.warn { border-left-color: var(--warning); }
+.body.expected { border-left-color: var(--expected); }
 .body.info { border-left-color: var(--info); }
 .clickable { cursor: pointer; }
 .body:hover { background: var(--hover); }

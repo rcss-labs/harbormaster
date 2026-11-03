@@ -19,3 +19,4 @@
 .regionRow td { padding-left: 24px; }
 .clusterRow td { background: var(--raised); padding-left: 44px; }
 .summary { margin-left: 10px; font-size: 12px; font-weight: 400; }
+.statusCell { display: inline-flex; align-items: center; gap: 8px; }
