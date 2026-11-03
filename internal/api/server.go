@@ -232,6 +232,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/revisions", s.getRevisions, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/revisions/{revision}", s.getRevisionDefinition, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/image-tags", s.getImageTags, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/desired-count", s.getDesiredCount, routeOptions{})
 

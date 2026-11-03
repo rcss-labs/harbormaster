@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -83,6 +84,16 @@ type RevisionsResponse struct {
 	Items              []RevisionDTO `json:"items"`
 	DeployedRevision   int           `json:"deployed_revision"`
 	RollingOutRevision *int          `json:"rolling_out_revision"`
+}
+
+// RevisionDefinitionResponse is GET /api/services/{id}/revisions/{revision}.
+// Definition is the register-ready JSON object with its keys in display order.
+type RevisionDefinitionResponse struct {
+	Revision     int             `json:"revision"`
+	ARN          string          `json:"arn"`
+	Definition   json.RawMessage `json:"definition"`
+	RegisteredAt time.Time       `json:"registered_at"`
+	RegisteredBy string          `json:"registered_by"`
 }
 
 // ImageTagDTO is one tag in the service's ECR repository.
@@ -199,6 +210,32 @@ func (s *Server) getRevisions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) getRevisionDefinition(w http.ResponseWriter, r *http.Request) {
+	key, _, _, ok := s.visibleService(w, r)
+	if !ok {
+		return
+	}
+	revision, err := strconv.Atoi(r.PathValue("revision"))
+	if err != nil {
+		s.fail(w, store.ErrNotFound)
+		return
+	}
+	found, err := s.Deploy.RevisionDefinition(r.Context(), key, revision)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	definition, err := deploy.DefinitionJSON(found.Definition)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, RevisionDefinitionResponse{
+		Revision: found.Revision, ARN: found.ARN, Definition: definition,
+		RegisteredAt: found.RegisteredAt, RegisteredBy: found.RegisteredBy,
+	})
 }
 
 func (s *Server) getImageTags(w http.ResponseWriter, r *http.Request) {
