@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router'
 import { useDesiredCountInfo, useSetDesiredCount, type DesiredCountInfo, type DesiredCountResult } from '../../../api/change'
 import { useScaling } from '../../../api/observe'
 import { useService } from '../../../api/hooks'
@@ -74,7 +75,7 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
           saving={setDesired.isPending}
           onSave={saveDesired}
         />
-        <AutoScalingCard scaling={scaling.data} />
+        <AutoScalingCard scaling={scaling.data} serviceId={serviceId} canOperate={service.data.can.operate} />
       </div>
       <div className={styles.activity}>
         <Panel title="Scaling activity" flush>
@@ -200,10 +201,20 @@ function RangeBar({ scaling, desired }: { scaling: ScalingDTO; desired: number }
   )
 }
 
-function AutoScalingCard({ scaling }: { scaling: ScalingDTO }) {
+function AutoScalingCard({ scaling, serviceId, canOperate }: { scaling: ScalingDTO; serviceId: string; canOperate: boolean }) {
+  const actions = (
+    <>
+      {canOperate && (
+        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`}>
+          Edit in Deploy →
+        </Link>
+      )}
+      Application Auto Scaling · set in Terraform
+    </>
+  )
   if (!scaling.has_target) {
     return (
-      <Panel title="Auto scaling" actions="Application Auto Scaling · set in Terraform">
+      <Panel title="Auto scaling" actions={actions}>
         <EmptyState>This service has no scalable target registered.</EmptyState>
       </Panel>
     )
@@ -219,7 +230,7 @@ function AutoScalingCard({ scaling }: { scaling: ScalingDTO }) {
     ['Scheduled actions', describeScheduled(scaling)],
   ]
   return (
-    <Panel title="Auto scaling" actions="Application Auto Scaling · set in Terraform">
+    <Panel title="Auto scaling" actions={actions}>
       <KV rows={rows} />
     </Panel>
   )

@@ -1,0 +1,9 @@
+/* Deploy tab layout: Containers and Task size side by side, then Service and Auto scaling. */
+.grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+}
+.mono {
+  font-family: var(--mono);
+}
