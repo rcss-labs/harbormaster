@@ -15,6 +15,7 @@
 .btn:hover { background: var(--hover-strong); }
 
 .filterBar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tagSelect { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; font-size: 12px; max-width: 100%; }
 .nameSearch { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; width: 260px; max-width: 100%; }
 
 .tablePanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; overflow: hidden; }
