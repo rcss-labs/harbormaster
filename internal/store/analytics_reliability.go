@@ -19,9 +19,9 @@ import (
 // keys, and per-service aggregates. Never group service_counts_history by (service, bucket).
 
 // expectedStopReasons are the stop-reason groups that are a normal part of operating a service.
-var expectedStopReasons = []string{"Replaced by a deployment", "Scaled in", "Stopped by a user"}
+var expectedStopReasons = []string{"Replaced by a deployment", "Scaled in", "Stopped by a user", "Spot interruption"}
 
-// IsExpectedStopReason reports whether a stop-reason group is routine (deployments, scale-in, manual stops).
+// IsExpectedStopReason reports whether a stop-reason group is routine (deployments, scale-in, manual stops, spot interruptions).
 func IsExpectedStopReason(group string) bool {
 	for _, expected := range expectedStopReasons {
 		if group == expected {

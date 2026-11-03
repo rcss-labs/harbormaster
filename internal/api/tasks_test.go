@@ -112,7 +112,7 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 			t.Errorf("stopped task outside the window listed: %s stopped %v", task.ShortID, task.StoppedAt)
 		}
 	}
-	if byStatusStopped := got.Summary.ByStatus.StoppedError + got.Summary.ByStatus.StoppedNormal; byStatusStopped != got.Counts.Stopped {
+	if byStatusStopped := got.Summary.ByStatus.StoppedError + got.Summary.ByStatus.StoppedNormal + got.Summary.ByStatus.StoppedExpected; byStatusStopped != got.Counts.Stopped {
 		t.Errorf("summary.by_status stopped = %d, want the %d stops inside the window", byStatusStopped, got.Counts.Stopped)
 	}
 	if got.Summary.ByStatus.StoppedError == 0 || got.Summary.ByStatus.RunningUnhealthy != 1 {
@@ -403,7 +403,7 @@ func TestTasks_ByStatusFollowsWindowButStopReasonsKeep72Hours(t *testing.T) {
 	}
 
 	summary := getTasks(t, c, "/api/tasks?filter=running&limit=500").Summary
-	byStatusStopped := summary.ByStatus.StoppedError + summary.ByStatus.StoppedNormal
+	byStatusStopped := summary.ByStatus.StoppedError + summary.ByStatus.StoppedNormal + summary.ByStatus.StoppedExpected
 	reasons := 0
 	for _, reason := range summary.StopReasons {
 		reasons += reason.Count

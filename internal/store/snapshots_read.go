@@ -27,6 +27,8 @@ type TaskRow struct {
 	EffectiveTagID    authz.TagID
 	ExitCode          *int
 	StopReasonGroup   string
+	StopKind          string // "error", "expected" or "" (see status.StopKind)
+	StopCause         string // spot, maintenance, deploy, scale-in, user or ""
 	ServiceEnableExec bool
 }
 
@@ -209,7 +211,7 @@ func taskColumns(a string, lite bool) string {
 		text("capacity_provider"), text("cpu"), text("memory"), text("availability_zone"), text("subnet_id"),
 		text("private_ip"), text("public_ip"), text("eni_id"), a + ".created_at", a + ".started_at",
 		a + ".stopping_at", a + ".stopped_at", text("stop_code"), text("stopped_reason"),
-		text("stop_reason_group"), a + ".exit_code", containers, raw, a + ".polled_at", "coalesce(" + a + ".enable_execute_command, false)",
+		text("stop_reason_group"), text("stop_kind"), text("stop_cause"), a + ".exit_code", containers, raw, a + ".polled_at", "coalesce(" + a + ".enable_execute_command, false)",
 	}, ", ")
 }
 
@@ -225,7 +227,7 @@ func (s *taskScan) dest() []any {
 		&t.StartedBy, &t.TaskDefinitionARN, &t.Family, &t.Revision, &t.LastStatus, &t.DesiredStatus,
 		&t.HealthStatus, &t.LaunchType, &t.CapacityProvider, &t.CPU, &t.Memory, &t.AvailabilityZone, &t.SubnetID,
 		&t.PrivateIP, &t.PublicIP, &t.ENIID, &s.createdAt, &t.StartedAt, &t.StoppingAt, &t.StoppedAt, &t.StopCode,
-		&t.StoppedReason, &s.row.StopReasonGroup, &s.row.ExitCode, &s.containers, &t.Raw, &t.PolledAt, &t.EnableExecuteCommand}
+		&t.StoppedReason, &s.row.StopReasonGroup, &s.row.StopKind, &s.row.StopCause, &s.row.ExitCode, &s.containers, &t.Raw, &t.PolledAt, &t.EnableExecuteCommand}
 }
 
 func (s *taskScan) finish() error {
@@ -388,8 +390,10 @@ func (s *Store) GetTask(ctx context.Context, accountID, region, taskARN string) 
 }
 
 const (
-	// stoppedErrorSQL: a STOPPED task that failed (non-zero exit or never started).
-	stoppedErrorSQL = `coalesce(t.last_status = 'STOPPED' and (coalesce(t.exit_code, 0) <> 0 or t.stop_code = 'TaskFailedToStart'), false)`
+	// stoppedErrorSQL: a STOPPED task that failed (status.StopKind == "error", persisted in stop_kind).
+	stoppedErrorSQL = `coalesce(t.last_status = 'STOPPED' and t.stop_kind = 'error', false)`
+	// stoppedExpectedSQL: a STOPPED task ended by the platform or an operator that still exited non-zero.
+	stoppedExpectedSQL = `coalesce(t.last_status = 'STOPPED' and t.stop_kind = 'expected', false)`
 	// problemSQL: a failed stop or an unhealthy task; never NULL.
 	problemSQL = `(` + stoppedErrorSQL + ` or coalesce(t.health_status = 'UNHEALTHY', false))`
 	// runningSQL mirrors model.Task.IsRunning.
@@ -511,10 +515,10 @@ func (s *Store) RunningTasks(ctx context.Context, f TargetFilter, vis Visibility
 
 // TaskSummary aggregates visible tasks for the dashboard.
 type TaskSummary struct {
-	RunningHealthy, RunningUnhealthy, StoppedError, StoppedNormal int
-	ByAZ                                                          map[string]int
-	ByCluster                                                     map[model.ClusterKey]struct{ Fargate, Spot int }
-	StopReasons                                                   map[string]int // STOPPED since the cutoff, by reason group
+	RunningHealthy, RunningUnhealthy, StoppedError, StoppedNormal, StoppedExpected int
+	ByAZ                                                                           map[string]int
+	ByCluster                                                                      map[model.ClusterKey]struct{ Fargate, Spot int }
+	StopReasons                                                                    map[string]int // STOPPED since the cutoff, by reason group
 }
 
 // TaskSummaryQuery scopes a task summary; Cluster and Service narrow it when non-empty.
@@ -562,8 +566,9 @@ func (s *Store) TaskSummaryFor(ctx context.Context, tq TaskSummaryQuery) (TaskSu
 	   count(*) filter (where `+runningSQL+` and t.health_status is distinct from 'UNHEALTHY'),
 	   count(*) filter (where `+runningSQL+` and t.health_status = 'UNHEALTHY'),
 	   count(*) filter (where t.last_status = 'STOPPED' and t.stopped_at >= `+sinceParam+` and `+stoppedErrorSQL+`),
-	   count(*) filter (where t.last_status = 'STOPPED' and t.stopped_at >= `+sinceParam+` and not `+stoppedErrorSQL+`)`+
-		base, statusArgs...).Scan(&summary.RunningHealthy, &summary.RunningUnhealthy, &summary.StoppedError, &summary.StoppedNormal)
+	   count(*) filter (where t.last_status = 'STOPPED' and t.stopped_at >= `+sinceParam+` and not `+stoppedErrorSQL+` and not `+stoppedExpectedSQL+`),
+	   count(*) filter (where t.last_status = 'STOPPED' and t.stopped_at >= `+sinceParam+` and `+stoppedExpectedSQL+`)`+
+		base, statusArgs...).Scan(&summary.RunningHealthy, &summary.RunningUnhealthy, &summary.StoppedError, &summary.StoppedNormal, &summary.StoppedExpected)
 	if err != nil {
 		return TaskSummary{}, fmt.Errorf("task summary counts: %w", err)
 	}

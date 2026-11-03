@@ -398,8 +398,12 @@ type TaskDTO struct {
 	StopCode        string      `json:"stop_code"`
 	StoppedReason   string      `json:"stopped_reason"`
 	StopReasonGroup string      `json:"stop_reason_group"`
-	ExecEnabled     bool        `json:"exec_enabled"`
-	Can             TaskCanDTO  `json:"can"`
+	// StopKind is "error", "expected" (ended by the platform or an operator, not a fault) or "" (normal / running).
+	StopKind string `json:"stop_kind"`
+	// StopCause labels an expected stop: spot, maintenance, deploy, scale-in or user.
+	StopCause   string     `json:"stop_cause"`
+	ExecEnabled bool       `json:"exec_enabled"`
+	Can         TaskCanDTO `json:"can"`
 }
 
 // TaskCountsDTO counts tasks per filter, ignoring pagination.
@@ -418,6 +422,7 @@ type TaskStatusSummaryDTO struct {
 	RunningUnhealthy int `json:"running_unhealthy"`
 	StoppedError     int `json:"stopped_error"`
 	StoppedNormal    int `json:"stopped_normal"`
+	StoppedExpected  int `json:"stopped_expected"`
 }
 
 // AZCountDTO counts running tasks in one availability zone.
