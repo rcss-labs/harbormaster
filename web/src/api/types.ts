@@ -687,8 +687,16 @@ export interface RevisionsResponse {
 }
 export interface ImageTagsResponse {
   source: 'ecr' | 'none'
+  container: string
+  /** Image reference without the tag. */
+  image: string
   repository: string
   current: string
+  /** All tags of the repository. */
+  total: number
+  /** Tags matching the search; `tags` holds at most the requested limit of them. */
+  matched: number
+  truncated: boolean
   tags: { tag: string; pushed_at: string }[]
 }
 export interface DesiredCountResponse {

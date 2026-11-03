@@ -1212,8 +1212,13 @@ export const REVISIONS_PAYMENTS: RevisionsResponse = {
 }
 export const IMAGE_TAGS_PAYMENTS: ImageTagsResponse = {
   source: 'ecr',
+  container: 'payments-api',
+  image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api',
   repository: 'payments-api',
   current: '1.18.2',
+  total: 1,
+  matched: 1,
+  truncated: false,
   tags: [{ tag: '1.18.4', pushed_at: FIXTURE_NOW }],
 }
 export const DESIRED_COUNT_PAYMENTS: DesiredCountResponse = { desired: 3, running: 3, max: 50, auto_scaling: null }

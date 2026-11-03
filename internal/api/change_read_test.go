@@ -295,3 +295,47 @@ func TestGetService_IncludesControllerAndStrategyText(t *testing.T) {
 		t.Errorf("notifications controller = %+v", notifications.Controller)
 	}
 }
+
+func TestGetImageTags_QueryParams(t *testing.T) {
+	admin, _ := seededForChangeReads(t)
+	type imageTagsBody struct {
+		Source    string `json:"source"`
+		Container string `json:"container"`
+		Image     string `json:"image"`
+		Total     int    `json:"total"`
+		Matched   int    `json:"matched"`
+		Truncated bool   `json:"truncated"`
+		Tags      []struct {
+			Tag string `json:"tag"`
+		} `json:"tags"`
+	}
+	var limited imageTagsBody
+	decode(t, admin.get("/api/services/"+paymentsID()+"/image-tags?container=payments-api&limit=2"), &limited)
+	if limited.Source != "ecr" || limited.Container != "payments-api" || !strings.HasSuffix(limited.Image, ".amazonaws.com/payments-api") {
+		t.Errorf("limited = %+v", limited)
+	}
+	if len(limited.Tags) != 2 || limited.Total < 5 || limited.Matched != limited.Total || !limited.Truncated {
+		t.Errorf("limit=2 -> %d tags, total %d, matched %d, truncated %v", len(limited.Tags), limited.Total, limited.Matched, limited.Truncated)
+	}
+
+	var searched imageTagsBody
+	decode(t, admin.get("/api/services/"+paymentsID()+"/image-tags?q=1.18.0"), &searched)
+	if searched.Matched != 1 || len(searched.Tags) != 1 || searched.Tags[0].Tag != "1.18.0" || searched.Truncated || searched.Total < 5 {
+		t.Errorf("q=1.18.0 -> %+v", searched)
+	}
+
+	unknown := admin.get("/api/services/" + paymentsID() + "/image-tags?container=nope")
+	if code, _ := errorCode(t, unknown); code != "invalid" || unknown.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("unknown container -> %d %q, want 422 invalid", unknown.StatusCode, code)
+	}
+}
+
+func TestGetImageTags_BadLimit422(t *testing.T) {
+	admin, _ := seededForChangeReads(t)
+	for _, limit := range []string{"0", "-1", "201", "abc"} {
+		resp := admin.get("/api/services/" + paymentsID() + "/image-tags?limit=" + limit)
+		if code, _ := errorCode(t, resp); code != "invalid" || resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("limit=%s -> %d %q, want 422 invalid", limit, resp.StatusCode, code)
+		}
+	}
+}

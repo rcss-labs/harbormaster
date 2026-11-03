@@ -8,14 +8,19 @@ import type { Definition } from './mainContainer'
 
 const ecr: ImageTagsResponse = {
   source: 'ecr',
+  container: 'payments-api',
+  image: 'payments-api',
   repository: 'payments-api',
   current: '0.4.2',
+  total: 2,
+  matched: 2,
+  truncated: false,
   tags: [
     { tag: '0.4.4', pushed_at: '2026-10-30T10:00:00Z' },
     { tag: '0.4.2', pushed_at: '2026-10-20T10:00:00Z' },
   ],
 }
-const none: ImageTagsResponse = { source: 'none', repository: '', current: '', tags: [] }
+const none: ImageTagsResponse = { source: 'none', container: 'payments-api', image: '', repository: '', current: '', total: 0, matched: 0, truncated: false, tags: [] }
 
 const base: Definition = {
   family: 'payments-api',
