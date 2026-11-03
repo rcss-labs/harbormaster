@@ -34,6 +34,23 @@ export function nextFargateMemory(cpu: string, minimum: number): number | undefi
   return options.find((value) => value >= minimum) ?? options[options.length - 1]
 }
 
+export interface OomHint {
+  memory: string
+  suggested: string
+}
+
+/**
+ * Suggests more memory when tasks were stopped for running out of it and the draft has not raised it yet.
+ * `deployedMemory` is the live task memory (MiB); the suggestion is the next valid Fargate size at twice that.
+ */
+export function oomMemoryHint(args: { stoppedForOom: boolean; deployedMemory: unknown; draftMemory: unknown; draftCpu: unknown }): OomHint | undefined {
+  const deployedMemory = Number(args.deployedMemory)
+  const draftMemory = Number(args.draftMemory ?? deployedMemory)
+  if (!args.stoppedForOom || !Number.isFinite(deployedMemory) || draftMemory > deployedMemory) return undefined
+  const suggested = nextFargateMemory(String(args.draftCpu), deployedMemory * 2)
+  return suggested && suggested > deployedMemory ? { memory: String(deployedMemory), suggested: String(suggested) } : undefined
+}
+
 export function containersOf(def: Definition): Record<string, unknown>[] {
   const containers = def.containerDefinitions
   return Array.isArray(containers) ? (containers as Record<string, unknown>[]) : []
