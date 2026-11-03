@@ -46,8 +46,9 @@ describe('ServicePage', () => {
     await screen.findByRole('heading', { name: 'payments-api', level: 1 })
     const deploy = tabLink(/Deploy/)
     expect(deploy).toHaveTextContent('⊘')
-    expect(deploy).toHaveAttribute('title', `You need Deploy on ${SERVICE_PAYMENTS.tag.name}`)
+    expect(deploy).toHaveAttribute('title', `You need Edit, Deploy or Operate on ${SERVICE_PAYMENTS.tag.name}`)
     expect(await screen.findByText(/to use this/)).toBeInTheDocument()
+    expect(screen.getByText('Edit, Deploy or Operate')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Containers' })).not.toBeInTheDocument()
   })
 

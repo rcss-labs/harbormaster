@@ -17,7 +17,7 @@ describe('tabs', () => {
 
   it('an any-of lock opens for each listed permission and for nothing else', () => {
     const lock = TAB_LOCKS.deploy!
-    expect(lock.action).toBe('Deploy')
+    expect(lock.action).toBe('Edit, Deploy or Operate')
     expect(isUnlocked(lock, none)).toBe(false)
     expect(isUnlocked(lock, { ...none, deploy: true })).toBe(true)
     expect(isUnlocked(lock, { ...none, edit: true })).toBe(true)

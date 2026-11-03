@@ -34,7 +34,7 @@ export const isUnlocked = (lock: TabLock, can: Record<ActionKey, boolean>): bool
 
 /** Tabs that need a permission beyond View, with the permission and its display name. */
 export const TAB_LOCKS: Partial<Record<TabKey, TabLock>> = {
-  deploy: { can: ['deploy', 'edit', 'operate'], action: 'Deploy' },
+  deploy: { can: ['deploy', 'edit', 'operate'], action: 'Edit, Deploy or Operate' },
   logs: { can: 'logs', action: 'Logs' },
   terminal: { can: 'terminal', action: 'Terminal' },
 }
