@@ -7,3 +7,32 @@
 .mono {
   font-family: var(--mono);
 }
+
+/* Pending-changes bar: stays at the bottom edge while the panels scroll under it. */
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 14px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+}
+.footerInfo { display: grid; gap: 4px; min-width: 0; }
+.footerActions { display: flex; gap: 8px; }
+.count { font-weight: 600; }
+.note { display: inline-flex; gap: 10px; align-items: baseline; color: var(--muted); font-size: 12.5px; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+.problems { margin: 0; padding-left: 18px; color: var(--danger); font-size: 12.5px; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }
