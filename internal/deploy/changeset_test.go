@@ -320,9 +320,11 @@ func TestChangeSet_StaleBaseRevision409(t *testing.T) {
 func TestChangeSet_StaleVersionReturnsFreshSettings(t *testing.T) {
 	h := newHarness(t)
 	cs := baseChangeSet(t, h, paymentsKey)
-	cs.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(false)}
-	// Someone else changes the desired count after the client read the settings.
-	if _, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 5); err != nil {
+	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
+	// Someone else changes ECS Exec after the client read the settings.
+	other := baseChangeSet(t, h, paymentsKey)
+	other.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(false)}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, other); err != nil {
 		t.Fatal(err)
 	}
 	before := writeCalls(h)
@@ -331,8 +333,8 @@ func TestChangeSet_StaleVersionReturnsFreshSettings(t *testing.T) {
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want StaleVersionError", err)
 	}
-	if stale.Current.DesiredCount != 5 || stale.Current.Version == cs.BaseVersion || stale.Current.Version == "" {
-		t.Fatalf("Current = %+v, want fresh settings with desired 5", stale.Current)
+	if stale.Current.EnableExecuteCommand || stale.Current.Version == cs.BaseVersion || stale.Current.Version == "" {
+		t.Fatalf("Current = %+v, want fresh settings with ECS Exec off", stale.Current)
 	}
 	assertNoNewWrites(t, h, before)
 }
@@ -615,7 +617,7 @@ func TestChangeSet_RecordingFailureIsWarning(t *testing.T) {
 	}
 }
 
-func TestDeploySettings_VersionChangesWhenDesiredChanges(t *testing.T) {
+func TestDeploySettings_VersionIgnoresDesiredCountButTracksConfiguration(t *testing.T) {
 	h := newHarness(t)
 	first, err := h.svc.DeploySettings(t.Context(), paymentsKey)
 	if err != nil {
@@ -648,8 +650,23 @@ func TestDeploySettings_VersionChangesWhenDesiredChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Version == first.Version || second.DesiredCount != 4 {
-		t.Fatalf("version did not change with desired count: %s -> %s", first.Version, second.Version)
+	// Autoscaling moves the desired count constantly; it must not invalidate unrelated edits.
+	if second.Version != first.Version || second.DesiredCount != 4 {
+		t.Fatalf("desired count changed the version: %s -> %s (desired %d)", first.Version, second.Version, second.DesiredCount)
+	}
+
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.BaseVersion = second.Version
+	cs.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(!second.EnableExecuteCommand)}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+		t.Fatal(err)
+	}
+	third, err := h.svc.DeploySettings(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Version == second.Version {
+		t.Fatal("version did not change with ECS Exec")
 	}
 }
 
@@ -693,7 +710,7 @@ func (h *harness) primaryDesired(t *testing.T, key model.ServiceKey) int {
 func TestChangeSet_PartialReturnsFreshSettingsVersionForRetry(t *testing.T) {
 	h := newHarness(t)
 	cs := baseChangeSet(t, h, paymentsKey)
-	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
+	cs.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(false)}
 	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
 	h.fake.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
 
