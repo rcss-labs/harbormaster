@@ -391,8 +391,8 @@ Header: name, tag (dashed when inherited), status pill, cluster link, account,
 region, deployed `family:revision`, launch type; actions **Restart (new
 deployment)**, **Desired count: N**, **AWS console**. When a registered revision
 is newer than the deployed one and nothing is rolling out, a banner offers
-"Deploy :N". Tabs: Overview, Metrics, Task definition, Tasks, Scaling, Logs,
-Terminal, Operations log. Tabs the user lacks permission for show a ⊘ marker and
+"Deploy :N". Tabs: Overview, Metrics, Task definition, **Deploy**, Tasks, Scaling,
+Logs, Terminal, Operations log (only the Deploy label is bold). Tabs the user lacks permission for show a ⊘ marker and
 a lock message instead of content.
 
 #### Overview tab
@@ -459,10 +459,12 @@ Actions per running task: **Terminal** (with Terminal permission and exec on),
 ![Scaling](screens/service-scaling.png)
 
 Desired count stepper with **Update desired count** (Operate), with a warning
-when the value is outside the auto scaling min/max. Read-only auto scaling
-configuration (min, max, target-tracking policies, cooldowns, scheduled
-actions) and recent scaling activities. Auto scaling policies are Terraform's;
-Harbormaster does not edit them.
+when the value is outside the auto scaling min/max. Read-only summary of the
+auto scaling configuration (min, max, target-tracking policies, cooldowns,
+scheduled actions) and recent scaling activities, with an **Edit in Deploy**
+link. Auto scaling is edited in the service Deploy tab (§6.4): min and max,
+target tracking, scheduled actions, and step policies (read-only there, but
+removable).
 
 #### Logs tab
 
@@ -688,8 +690,14 @@ input:
   are disabled with the banner "This service is deployed by *CodeDeploy*.
   Harbormaster shows it but can't deploy it yet." Registering revisions and
   desired count still work. *(My call.)*
-- Deployment strategy, circuit breaker and alarms are whatever Terraform set;
-  Harbormaster shows them, never changes them.
+- The service Deploy tab (§6.4) edits the deployment circuit breaker and
+  rollback, the health check grace period, ECS Exec on/off, and the desired
+  count, in one change set with the revision and scaling changes. Deployment
+  strategy and alarms are whatever Terraform set; Harbormaster shows them and
+  does not change them.
+- While a rollout is running, a forward deploy is refused. A rollback to an
+  older revision may interrupt the running rollout (`interrupt`), so a bad
+  rollout can be undone from the Deploy tab (§7.4).
 
 ### 7.4 Watching a rollout
 
@@ -823,7 +831,18 @@ Permissions (write):
 `ecs:StopTask`, `ecs:ExecuteCommand`, `ssm:TerminateSession`,
 `iam:PassRole` restricted to the task and execution roles ECS uses
 (e.g. `arn:aws:iam::<acct>:role/*-task` and `.../ecs-task-execution`, with
-`iam:PassedToService = ecs-tasks.amazonaws.com`).
+`iam:PassedToService = ecs-tasks.amazonaws.com`),
+auto scaling writes (`application-autoscaling:RegisterScalableTarget`,
+`DeregisterScalableTarget`, `PutScalingPolicy`, `DeleteScalingPolicy`,
+`PutScheduledAction`, `DeleteScheduledAction`; condition
+`application-autoscaling:service-namespace = ecs`),
+target-tracking alarms (`cloudwatch:PutMetricAlarm`, `cloudwatch:DeleteAlarms` on
+`arn:aws:cloudwatch:*:<acct>:alarm:TargetTracking-service/*`, and
+`cloudwatch:DescribeAlarms`), and `iam:CreateServiceLinkedRole` for
+`AWSServiceRoleForApplicationAutoScaling_ECSService` (condition
+`iam:AWSServiceName = ecs.application-autoscaling.amazonaws.com`).
+The module README has the full table. Write permissions are omitted entirely
+in read-only mode.
 
 The repo ships a Terraform module `terraform/modules/harbormaster-access` that
 creates this role (inputs: Harbormaster task role ARN, external ID, PassRole

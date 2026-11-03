@@ -108,7 +108,7 @@ Harbormaster reads and changes resources in other accounts by assuming a role in
 
 4. Back in Harbormaster, enter the `role_arn` output of that module and press **Test and connect**.
 
-Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
+Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, change auto scaling or alarms, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
 
 ### Same account
 
@@ -351,8 +351,8 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 
 #### What the target account needs
 
-- **Service:** set `enable_execute_command = true` on the `aws_ecs_service`. The Terminal tab shows a banner when the service has ECS Exec off.
-- **Task role:** the task's own role needs `ssmmessages:CreateControlChannel`, `ssmmessages:CreateDataChannel`, `ssmmessages:OpenControlChannel` and `ssmmessages:OpenDataChannel`.
+- **Service:** set `enable_execute_command = true` on the `aws_ecs_service`, or turn ECS Exec on from the service's Deploy tab. Turning it on from the Deploy tab forces a new deployment, so running tasks are replaced. The Terminal tab shows a banner when the service has ECS Exec off.
+- **Task role:** the task's own role needs `ssmmessages:CreateControlChannel`, `ssmmessages:CreateDataChannel`, `ssmmessages:OpenControlChannel` and `ssmmessages:OpenDataChannel`. Turning exec on does not grant these; a task without them can't open a session even with exec on.
 - **`harbormaster-access` role:** needs `ecs:ExecuteCommand` and `ssm:TerminateSession` in addition to the actions in the design spec §11.2. The Terraform module `terraform/modules/harbormaster-access` grants them.
 
 #### Limits and recording
@@ -367,6 +367,7 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 
 - Harbormaster can deploy and exec into production tasks in every connected account; treat its task role, its database and global admin accounts as highly privileged.
 - External ID on every assumed role; least-privilege policy (design spec §11.2); `PassRole` restricted by name pattern and service.
+- The service Deploy tab can turn ECS Exec on or off and change desired count, scaling, and rollout settings. These use `ecs:UpdateService` and Application Auto Scaling writes, listed in the [harbormaster-access module README](terraform/modules/harbormaster-access/README.md#permissions). Exec still needs the task role's `ssmmessages` permissions (see Terminal).
 - Server-side authorization on every endpoint and every WebSocket; list endpoints filter by visibility; IDs of invisible resources return 404, not 403.
 - Secrets (DB password, signing key) only from Secrets Manager; never logged. Environment variable values from task definitions are shown to users with View (they are visible in the ECS console to the same people); values from `secrets` (SSM/Secrets Manager references) are shown as references only, never resolved.
 - Security headers: CSP (self + fonts), HSTS, `X-Frame-Options: DENY`.
