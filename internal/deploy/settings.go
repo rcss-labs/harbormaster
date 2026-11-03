@@ -246,21 +246,21 @@ func policySettingOf(policy model.ScalingPolicy) PolicySetting {
 	return setting
 }
 
-// version hashes the configuration a client edits against. The hash covers desired count, ECS Exec,
+// version hashes the configuration a client edits against. The hash covers ECS Exec,
 // deployment configuration, grace period, load balancer presence, target groups and the whole
-// scaling configuration. It leaves out what is observation or is guarded elsewhere: running count,
+// scaling configuration. It leaves out what is observation or is guarded elsewhere: desired count
+// (autoscaling moves it; last writer wins), running count,
 // max desired (server config), task role, family, controller and the deployed revision
 // (base_revision guards that one).
 func (d DeploySettings) version() string {
 	canonical, _ := json.Marshal(struct {
-		DesiredCount            int
 		EnableExecuteCommand    bool
 		DeploymentConfiguration DeploymentSettings
 		HealthCheckGrace        *int
 		HasLoadBalancer         bool
 		TargetGroups            []TargetGroupSetting
 		Scaling                 ScalingSettings
-	}{d.DesiredCount, d.EnableExecuteCommand, d.DeploymentConfiguration, d.HealthCheckGracePeriodSeconds,
+	}{d.EnableExecuteCommand, d.DeploymentConfiguration, d.HealthCheckGracePeriodSeconds,
 		d.HasLoadBalancer, d.TargetGroups, d.Scaling})
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])

@@ -262,8 +262,9 @@ func validateScalingAgainst(scaling ScalingChange, st DeploySettings, rangeMin, 
 	}
 	for _, action := range scaling.PutScheduledActions {
 		for _, capacity := range []*int{action.MinCapacity, action.MaxCapacity} {
-			if capacity != nil && (*capacity < rangeMin || *capacity > rangeMax) {
-				return invalid("Scheduled action %q: capacity %d is outside the scaling range %d–%d", action.Name, *capacity, rangeMin, rangeMax)
+			// Like AWS, a scheduled action may move the target outside its current range.
+			if capacity != nil && *capacity > st.MaxDesired {
+				return invalid("Scheduled action %q: capacity must be at most %d", action.Name, st.MaxDesired)
 			}
 		}
 	}

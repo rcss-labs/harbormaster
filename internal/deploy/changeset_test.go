@@ -146,14 +146,16 @@ func TestChangeSet_DesiredOutsideNewScalingRange(t *testing.T) {
 func TestChangeSet_ScheduledActionBadScheduleOrTimezone(t *testing.T) {
 	h := newHarness(t)
 	for name, action := range map[string]deploy.ScheduledActionChange{
-		"unknown form":       {Name: "a", Schedule: "daily", MinCapacity: ptr(2)},
-		"cron five fields":   {Name: "a", Schedule: "cron(0 7 ? * MON-FRI)", MinCapacity: ptr(2)},
-		"at without time":    {Name: "a", Schedule: "at(2030-01-01)", MinCapacity: ptr(2)},
-		"rate zero":          {Name: "a", Schedule: "rate(0 minutes)", MinCapacity: ptr(2)},
-		"unknown timezone":   {Name: "a", Schedule: "rate(5 minutes)", Timezone: "Mars/Phobos", MinCapacity: ptr(2)},
-		"no capacity":        {Name: "a", Schedule: "rate(5 minutes)"},
-		"capacity out range": {Name: "a", Schedule: "rate(5 minutes)", MinCapacity: ptr(9)},
-		"bad name":           {Name: "bad name!", Schedule: "rate(5 minutes)", MinCapacity: ptr(2)},
+		"unknown form":      {Name: "a", Schedule: "daily", MinCapacity: ptr(2)},
+		"cron five fields":  {Name: "a", Schedule: "cron(0 7 ? * MON-FRI)", MinCapacity: ptr(2)},
+		"at without time":   {Name: "a", Schedule: "at(2030-01-01)", MinCapacity: ptr(2)},
+		"rate zero":         {Name: "a", Schedule: "rate(0 minutes)", MinCapacity: ptr(2)},
+		"unknown timezone":  {Name: "a", Schedule: "rate(5 minutes)", Timezone: "Mars/Phobos", MinCapacity: ptr(2)},
+		"no capacity":       {Name: "a", Schedule: "rate(5 minutes)"},
+		"above max desired": {Name: "a", Schedule: "rate(5 minutes)", MaxCapacity: ptr(51)},
+		"negative capacity": {Name: "a", Schedule: "rate(5 minutes)", MinCapacity: ptr(-1)},
+		"min above max":     {Name: "a", Schedule: "rate(5 minutes)", MinCapacity: ptr(5), MaxCapacity: ptr(3)},
+		"bad name":          {Name: "bad name!", Schedule: "rate(5 minutes)", MinCapacity: ptr(2)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cs := baseChangeSet(t, h, paymentsKey)
@@ -304,6 +306,7 @@ func TestChangeSet_StaleBaseRevision409(t *testing.T) {
 	h := newHarness(t)
 	cs := baseChangeSet(t, h, paymentsKey)
 	cs.BaseRevision = 41
+	cs.TaskDefinition = &deploy.TaskDefinitionChange{Definition: draftFromDeployed(t, h, "payments-api:1.18.3")}
 	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
 	before := writeCalls(h)
 	_, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
@@ -317,9 +320,11 @@ func TestChangeSet_StaleBaseRevision409(t *testing.T) {
 func TestChangeSet_StaleVersionReturnsFreshSettings(t *testing.T) {
 	h := newHarness(t)
 	cs := baseChangeSet(t, h, paymentsKey)
-	cs.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(false)}
-	// Someone else changes the desired count after the client read the settings.
-	if _, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 5); err != nil {
+	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
+	// Someone else changes ECS Exec after the client read the settings.
+	other := baseChangeSet(t, h, paymentsKey)
+	other.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(false)}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, other); err != nil {
 		t.Fatal(err)
 	}
 	before := writeCalls(h)
@@ -328,8 +333,8 @@ func TestChangeSet_StaleVersionReturnsFreshSettings(t *testing.T) {
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want StaleVersionError", err)
 	}
-	if stale.Current.DesiredCount != 5 || stale.Current.Version == cs.BaseVersion || stale.Current.Version == "" {
-		t.Fatalf("Current = %+v, want fresh settings with desired 5", stale.Current)
+	if stale.Current.EnableExecuteCommand || stale.Current.Version == cs.BaseVersion || stale.Current.Version == "" {
+		t.Fatalf("Current = %+v, want fresh settings with ECS Exec off", stale.Current)
 	}
 	assertNoNewWrites(t, h, before)
 }
@@ -612,7 +617,7 @@ func TestChangeSet_RecordingFailureIsWarning(t *testing.T) {
 	}
 }
 
-func TestDeploySettings_VersionChangesWhenDesiredChanges(t *testing.T) {
+func TestDeploySettings_VersionIgnoresDesiredCountButTracksConfiguration(t *testing.T) {
 	h := newHarness(t)
 	first, err := h.svc.DeploySettings(t.Context(), paymentsKey)
 	if err != nil {
@@ -645,8 +650,23 @@ func TestDeploySettings_VersionChangesWhenDesiredChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Version == first.Version || second.DesiredCount != 4 {
-		t.Fatalf("version did not change with desired count: %s -> %s", first.Version, second.Version)
+	// Autoscaling moves the desired count constantly; it must not invalidate unrelated edits.
+	if second.Version != first.Version || second.DesiredCount != 4 {
+		t.Fatalf("desired count changed the version: %s -> %s (desired %d)", first.Version, second.Version, second.DesiredCount)
+	}
+
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.BaseVersion = second.Version
+	cs.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(!second.EnableExecuteCommand)}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+		t.Fatal(err)
+	}
+	third, err := h.svc.DeploySettings(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Version == second.Version {
+		t.Fatal("version did not change with ECS Exec")
 	}
 }
 
@@ -690,7 +710,7 @@ func (h *harness) primaryDesired(t *testing.T, key model.ServiceKey) int {
 func TestChangeSet_PartialReturnsFreshSettingsVersionForRetry(t *testing.T) {
 	h := newHarness(t)
 	cs := baseChangeSet(t, h, paymentsKey)
-	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
+	cs.Service = &deploy.ServiceChange{EnableExecuteCommand: ptr(false)}
 	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
 	h.fake.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
 
@@ -750,5 +770,55 @@ func TestChangeSet_DeploymentConfigurationAndGraceApplied(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no rollout_settings operations line in %+v", ops)
+	}
+}
+
+// AWS allows a scheduled action to move the target outside its current range (max 20 at peak on a 1-4 target).
+func TestChangeSet_ScheduledActionMayLeaveCurrentScalingRange(t *testing.T) {
+	h := newHarness(t)
+	settings, err := h.svc.DeploySettings(t.Context(), paymentsKey)
+	if err != nil || !settings.Scaling.HasTarget {
+		t.Fatalf("settings = %+v, err %v", settings.Scaling, err)
+	}
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.Scaling = &deploy.ScalingChange{PutScheduledActions: []deploy.ScheduledActionChange{
+		{Name: "peak", Schedule: "rate(5 minutes)", Timezone: "UTC", MinCapacity: ptr(settings.Scaling.Max + 5), MaxCapacity: ptr(settings.Scaling.Max + 10)},
+		{Name: "quiet", Schedule: "rate(1 hour)", Timezone: "UTC", MinCapacity: ptr(0)},
+	}}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+		t.Fatalf("scheduled action outside the current range refused: %v", err)
+	}
+}
+
+func TestChangeSet_ScalingOnlyIgnoresStaleBaseRevision(t *testing.T) {
+	h := newHarness(t)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.BaseRevision = 41
+	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+		t.Fatalf("scaling-only change set refused for a stale base revision: %v", err)
+	}
+}
+
+func TestChangeSet_RetryAfterDeployDoneScalingFailedAppliesScalingOnly(t *testing.T) {
+	h := newHarness(t)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.TaskDefinition = &deploy.TaskDefinitionChange{Definition: draftFromDeployed(t, h, "payments-api:1.18.3")}
+	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
+	h.fake.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
+	first, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	if err != nil || first.Status != "partial" || first.RegisteredRevision != 43 {
+		t.Fatalf("first = %+v, err %v", first, err)
+	}
+
+	// What the frontend sends: no task definition (the service step is done), the scaling section, a fresh version.
+	retry := deploy.ChangeSet{BaseRevision: cs.BaseRevision, BaseVersion: first.SettingsVersion, Scaling: cs.Scaling}
+	got, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, retry)
+	if err != nil || got.Status != "applied" {
+		t.Fatalf("retry = %+v, err %v", got, err)
+	}
+	calls := h.fake.Calls()
+	if calls["RegisterTaskDefinition"] != 1 || calls["UpdateService"] != 1 {
+		t.Fatalf("calls = register %d, update %d; want 1 each", calls["RegisterTaskDefinition"], calls["UpdateService"])
 	}
 }

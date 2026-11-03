@@ -112,7 +112,7 @@ func TestChangeSet_PartialIs200WithSteps(t *testing.T) {
 	env.fk.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
 	resp := admin.post(changesetPath(), map[string]any{
 		"base_revision": 42, "base_version": settings.Version,
-		"service": map[string]any{"desired_count": 4},
+		"service": map[string]any{"enable_execute_command": false},
 		"scaling": map[string]any{"put_policies": []map[string]any{{
 			"name": "cpu-extra", "metric": "cpu", "target_value": 50, "scale_in_cooldown": 300, "scale_out_cooldown": 60,
 			"disable_scale_in": false, "target_group_arn": "",

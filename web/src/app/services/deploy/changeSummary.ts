@@ -45,14 +45,20 @@ export function buildRetryRequest(request: ChangeSetRequest, response: ChangeSet
   }
   if (!response.steps.some((step) => step.status !== 'done')) return null
 
+  const registered = response.steps.find((step) => step.name === 'register')
+  const serviceStep = response.steps.find((step) => step.name === 'service')
+  const serviceDone = serviceStep?.status === 'done'
   const retry: ChangeSetRequest = {
-    base_revision: request.base_revision,
+    // base_revision guards the definition; once the service step deployed, the live revision is the new one.
+    base_revision: serviceDone ? (response.to_revision ?? response.registered_revision ?? request.base_revision) : request.base_revision,
     base_version: response.settings_version || request.base_version,
     reason: request.reason,
   }
-  const registered = response.steps.find((step) => step.name === 'register')
-  if (registered?.status === 'done' && response.registered_revision !== null) retry.task_definition = { revision: response.registered_revision }
-  else if (request.task_definition && registered) retry.task_definition = request.task_definition
+  // The definition goes again only while the rollout is still pending: a done service step already deployed it.
+  if (request.task_definition && registered && !serviceDone) {
+    if (registered.status === 'done' && response.registered_revision !== null) retry.task_definition = { revision: response.registered_revision }
+    else if (registered.status !== 'done') retry.task_definition = request.task_definition
+  }
   if (request.service && unfinished('service')) retry.service = request.service
   if (request.scaling && unfinished('scaling')) retry.scaling = request.scaling
   return retry
