@@ -1,21 +1,15 @@
+import { useState } from 'react'
 import { useTaskDefinition } from '../../../api/change'
-import { useDeploySettings, type DeploySettingsResponse } from '../../../api/deploy'
+import { useDeploySettings } from '../../../api/deploy'
+import { useService } from '../../../api/hooks'
 import { EmptyState } from '../../../components/EmptyState'
 import { KV } from '../../../components/KV'
 import { Panel } from '../../../components/Panel'
-import { plural } from './format'
+import { ScalingPanel } from './ScalingPanel'
+import { ServicePanel } from './ServicePanel'
+import { scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
+import { serviceDraftFromSettings, serviceDraftToChange, type ServiceDraft } from './serviceDraft'
 import styles from './DeployTab.module.css'
-
-function describeRollout(settings: DeploySettingsResponse): string {
-  const { circuit_breaker: breaker, minimum_healthy_percent: minimum, maximum_percent: maximum } = settings.deployment_configuration
-  const safety = !breaker.enable ? 'circuit breaker off' : breaker.rollback ? 'circuit breaker with rollback' : 'circuit breaker without rollback'
-  return `min healthy ${minimum}% · max ${maximum}% · ${safety}`
-}
-
-function describeScaling(scaling: DeploySettingsResponse['scaling']): string {
-  if (!scaling.has_target) return 'No scalable target registered.'
-  return `min ${scaling.min} · max ${scaling.max} · ${plural(scaling.policies.length, 'policy', 'policies')} · ${plural(scaling.scheduled_actions.length, 'scheduled action')}`
-}
 
 /**
  * The Deploy tab. Today it shows the live settings read-only; the editors for each panel
@@ -24,6 +18,10 @@ function describeScaling(scaling: DeploySettingsResponse['scaling']): string {
 export function DeployTab({ serviceId }: { serviceId: string }) {
   const settingsQuery = useDeploySettings(serviceId)
   const taskDefinition = useTaskDefinition(serviceId)
+  const service = useService(serviceId)
+  // Null until the user edits: the draft then follows the live settings (including a refetch after a write).
+  const [editedService, setEditedService] = useState<ServiceDraft | null>(null)
+  const [editedScaling, setEditedScaling] = useState<ScalingDraft | null>(null)
 
   if (settingsQuery.isError) {
     return <EmptyState>{settingsQuery.error instanceof Error ? settingsQuery.error.message : 'The deploy settings could not be loaded.'}</EmptyState>
@@ -35,10 +33,14 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const containers = Array.isArray(definition?.containerDefinitions)
     ? (definition.containerDefinitions as { name?: string; image?: string }[])
     : []
-  const grace = settings.health_check_grace_period_seconds
+  const serviceDraft = editedService ?? serviceDraftFromSettings(settings)
+  const scalingDraft = editedScaling ?? scalingDraftFromSettings(settings)
+  const tagName = service.data?.tag.name ?? 'this service'
+  // Sections with edits, for the review footer added later.
+  const changes = [serviceDraftToChange(settings, serviceDraft), scalingDraftToChange(settings, scalingDraft)].filter(Boolean).length
 
   return (
-    <div className={styles.grid}>
+    <div className={styles.grid} data-changes={changes}>
       <Panel title="Containers">
         <KV
           rows={[
@@ -58,20 +60,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           ]}
         />
       </Panel>
-      <Panel title="Service">
-        <KV
-          rows={[
-            ['Desired count', `${settings.desired_count}`],
-            ['Running', `${settings.running_count}`],
-            ['ECS Exec', settings.enable_execute_command ? 'On' : 'Off'],
-            ['Deployment', describeRollout(settings)],
-            ...(settings.has_load_balancer ? [['Health check grace period', grace === null ? 'Not set' : `${grace} s`] as [string, string]] : []),
-          ]}
-        />
-      </Panel>
-      <Panel title="Auto scaling">
-        <p>{describeScaling(settings.scaling)}</p>
-      </Panel>
+      <ServicePanel settings={settings} draft={serviceDraft} onChange={setEditedService} tagName={tagName} />
+      <ScalingPanel settings={settings} draft={scalingDraft} onChange={setEditedScaling} desiredCount={serviceDraft.desiredCount} tagName={tagName} />
     </div>
   )
 }
