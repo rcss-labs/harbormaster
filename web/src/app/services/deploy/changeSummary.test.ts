@@ -74,6 +74,26 @@ describe('buildRetryRequest', () => {
     expect(buildRetryRequest(original, response)?.task_definition).toEqual({ definition })
   })
 
+  it('re-sends only the registered revision when register is done and the service step failed', () => {
+    const retry = buildRetryRequest(original, { ...CHANGESET_PARTIAL, registered_revision: 43, to_revision: null, steps: [
+      { name: 'register', status: 'done', message: '' },
+      { name: 'service', status: 'failed', message: 'x' },
+      { name: 'scaling', status: 'skipped', message: '' },
+    ] })
+    expect(retry).toMatchObject({ base_revision: 42, task_definition: { revision: 43 }, service: { desired_count: 5 }, scaling: { target: { min: 1, max: 4 } } })
+  })
+
+  it('drops the definition and rebases onto the deployed revision when register and service are done', () => {
+    const retry = buildRetryRequest(original, { ...CHANGESET_PARTIAL, registered_revision: 43, to_revision: 43, steps: [
+      { name: 'register', status: 'done', message: '' },
+      { name: 'service', status: 'done', message: '' },
+      { name: 'scaling', status: 'failed', message: 'x' },
+    ] })
+    expect(retry?.task_definition).toBeUndefined()
+    expect(retry?.base_revision).toBe(43)
+    expect(retry?.scaling).toEqual({ target: { min: 1, max: 4 } })
+  })
+
   it('has nothing to retry when every step is done', () => {
     expect(buildRetryRequest(original, CHANGESET_APPLIED)).toBeNull()
   })
