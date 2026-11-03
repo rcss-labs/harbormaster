@@ -21,6 +21,25 @@ describe('TaskTable', () => {
     expect(within(row).getByText('34% of 512 MiB')).toBeInTheDocument()
   })
 
+  it('marks an expected stop teal with a cause chip, and an error stop red without one', () => {
+    const base = { ...runningTask, status: 'STOPPED', exit_code: 1, stopped_at: '2026-01-01T00:00:00Z' } as const
+    renderWithProviders(
+      <TaskTable
+        items={[
+          { ...base, id: 'a', stop_kind: 'expected', stop_cause: 'spot' },
+          { ...base, id: 'b', stop_kind: 'error', stop_cause: '' },
+        ]}
+        withService={false}
+        onMore={() => {}}
+      />,
+    )
+    const [, expectedRow, errorRow] = screen.getAllByRole('row')
+    expect(expectedRow.className).toMatch(/expected/)
+    expect(within(expectedRow).getByText('spot')).toBeInTheDocument()
+    expect(errorRow.className).toMatch(/bad/)
+    expect(within(errorRow).queryByText('spot')).not.toBeInTheDocument()
+  })
+
   it('shows reserved size otherwise', () => {
     renderWithProviders(<TaskTable items={[runningTask]} withService={false} onMore={() => {}} utilisation={{ other: { cpu: 1, mem: 1 } }} />)
     const row = screen.getAllByRole('row')[1]

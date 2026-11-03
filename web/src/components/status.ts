@@ -46,6 +46,7 @@ export const STATUS_COLOR: Record<PillKind, string> = {
   bad: 'var(--danger)',
   info: 'var(--info)',
   mute: 'var(--border-strong)',
+  expected: 'var(--expected)',
 }
 
 export const SERIES = [
@@ -63,6 +64,7 @@ export const REASON_COLOR: Record<string, string> = {
   'Stopped by a user': 'var(--series-3)',
   'Scaled in': 'var(--series-4)',
   'Replaced by a deployment': 'var(--border-strong)',
+  'Spot interruption': 'var(--expected)',
   'Failed to start': 'var(--danger)',
   'Container exited with an error': 'var(--danger)',
 }

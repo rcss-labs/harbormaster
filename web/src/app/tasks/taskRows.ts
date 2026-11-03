@@ -1,8 +1,7 @@
 import type { TaskDTO, TasksFilter } from '../../api/types'
 
-/** A failed stop (non-zero exit, or never started) or an unhealthy task. Mirrors the API's `problems` rule. */
-export const isProblem = (task: TaskDTO) =>
-  (task.status === 'STOPPED' && ((task.exit_code ?? 0) !== 0 || task.stop_code === 'TaskFailedToStart')) || task.health === 'UNHEALTHY'
+/** A failed stop (the API's stop_kind is "error"; expected stops are not) or an unhealthy task. Mirrors the API's `problems` rule. */
+export const isProblem = (task: TaskDTO) => (task.status === 'STOPPED' && task.stop_kind === 'error') || task.health === 'UNHEALTHY'
 
 export const isStopped = (task: TaskDTO) => task.status === 'STOPPED'
 

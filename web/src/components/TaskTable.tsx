@@ -4,6 +4,7 @@ import type { TaskDTO } from '../api/types'
 import { Ago } from './Ago'
 import { Disclosure } from './Disclosure'
 import { Pill, type PillKind } from './Pill'
+import { StopCauseChip, stoppedStatus } from './stopStatus'
 import { StopTaskDialog } from './StopTaskDialog'
 import { Table, tableClass } from './Table'
 import styles from './TaskTable.module.css'
@@ -32,10 +33,7 @@ const formatVcpu = (cpuUnits: string) => String(+(Number(cpuUnits) / 1024).toFix
 function statusPill(task: TaskDTO): { kind: PillKind; label: string } {
   if (task.status === 'RUNNING') return { kind: 'ok', label: 'Running' }
   if (PROGRESS_STATUSES.includes(task.status)) return { kind: 'info', label: titleCase(task.status) }
-  if (task.status === 'STOPPED') {
-    if (task.exit_code !== null && task.exit_code !== 0) return { kind: 'bad', label: `Stopped (exit ${task.exit_code})` }
-    return { kind: 'mute', label: 'Stopped' }
-  }
+  if (task.status === 'STOPPED') return stoppedStatus(task)
   // DEACTIVATING, STOPPING, DEPROVISIONING and anything new.
   return { kind: 'mute', label: titleCase(task.status) }
 }
@@ -47,9 +45,10 @@ function HealthCell({ task }: { task: TaskDTO }) {
   return <span className={styles.muted}>No check</span>
 }
 
-/** Row stripe: a stopped task with an error exit is red; a running task failing its health check is amber. */
+/** Row stripe: a failed stop is red, an expected stop teal; a running task failing its health check is amber. */
 function stripeFor(task: TaskDTO): string | undefined {
-  if (task.status === 'STOPPED' && task.exit_code !== null && task.exit_code !== 0) return tableClass.stripe('bad')
+  if (task.status === 'STOPPED' && task.stop_kind === 'error') return tableClass.stripe('bad')
+  if (task.status === 'STOPPED' && task.stop_kind === 'expected') return tableClass.stripe('expected')
   if (task.status === 'RUNNING' && task.health === 'UNHEALTHY') return tableClass.stripe('warn')
   return undefined
 }
@@ -102,7 +101,10 @@ function TaskRow({
         </td>
       )}
       <td>
-        <Pill kind={pill.kind}>{pill.label}</Pill>
+        <span className={styles.statusCell}>
+          <Pill kind={pill.kind}>{pill.label}</Pill>
+          {task.status === 'STOPPED' && <StopCauseChip cause={task.stop_cause} />}
+        </span>
       </td>
       <td>
         <HealthCell task={task} />

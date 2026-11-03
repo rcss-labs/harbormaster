@@ -332,6 +332,10 @@ export interface TaskDTO {
   stop_code: string
   stopped_reason: string
   stop_reason_group: string
+  /** error: a real failure; expected: ended by the platform or an operator (not a fault); empty: normal or running. */
+  stop_kind: 'error' | 'expected' | ''
+  /** Why an expected stop happened: spot, maintenance, scaling, deploy, scale-in, user. */
+  stop_cause: string
   exec_enabled: boolean
   can: { operate: boolean; terminal: boolean }
 }
@@ -344,7 +348,7 @@ export interface TasksListDTO {
   polled_at: string
   counts: { problems: number; running: number; stopped: number; all: number; stopped_error: number }
   summary: {
-    by_status: { running_healthy: number; running_unhealthy: number; stopped_error: number; stopped_normal: number }
+    by_status: { running_healthy: number; running_unhealthy: number; stopped_error: number; stopped_normal: number; stopped_expected: number }
     by_az: { az: string; count: number }[]
     by_cluster: { id: string; name: string; fargate: number; spot: number }[]
     stop_reasons: ReasonCountDTO[]

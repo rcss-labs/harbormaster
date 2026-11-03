@@ -236,6 +236,8 @@ function serviceTasks(def: ServiceDef): TaskDTO[] {
       stop_code: '',
       stopped_reason: '',
       stop_reason_group: '',
+      stop_kind: '',
+      stop_cause: '',
     })
   }
 
@@ -252,6 +254,8 @@ function serviceTasks(def: ServiceDef): TaskDTO[] {
     stop_code: 'ServiceSchedulerInitiated',
     stopped_reason: '',
     stop_reason_group: '',
+    stop_kind: '',
+    stop_cause: '',
     ...fields,
   })
 
@@ -267,6 +271,7 @@ function serviceTasks(def: ServiceDef): TaskDTO[] {
           stop_code: 'EssentialContainerExited',
           stopped_reason: 'OutOfMemoryError: Container killed due to memory usage',
           stop_reason_group: 'Out of memory (exit 137)',
+          stop_kind: 'error',
         }),
       )
     }
@@ -281,6 +286,7 @@ function serviceTasks(def: ServiceDef): TaskDTO[] {
           stopped_at: minutesAgo(stoppedMinutes),
           stopped_reason: 'Task failed ELB health checks in (target-group catalog-api-tg)',
           stop_reason_group: 'Failed load balancer health checks',
+          stop_kind: 'error',
         }),
       )
     }
@@ -292,6 +298,7 @@ function serviceTasks(def: ServiceDef): TaskDTO[] {
         stopped_at: minutesAgo(60 * 26),
         stopped_reason: `Scaling activity initiated by (deployment ecs-svc/${startedBy(`${def.name}-old`).slice(8)})`,
         stop_reason_group: 'Scaled in',
+        stop_cause: 'scaling',
       }),
     )
   }
@@ -320,6 +327,8 @@ function standaloneTasks(): TaskDTO[] {
       stop_code: '',
       stopped_reason: '',
       stop_reason_group: '',
+      stop_kind: '',
+      stop_cause: '',
     },
     {
       ...none,
@@ -338,13 +347,14 @@ function standaloneTasks(): TaskDTO[] {
       stop_code: 'EssentialContainerExited',
       stopped_reason: 'Essential container in task exited',
       stop_reason_group: '',
+      stop_kind: '',
+      stop_cause: '',
     },
   ]
 }
 
 /** A failed stop (non-zero exit, or never started) or an unhealthy task: what the API sorts first. */
-const isProblem = (task: TaskDTO) =>
-  (task.status === 'STOPPED' && ((task.exit_code ?? 0) !== 0 || task.stop_code === 'TaskFailedToStart')) || task.health === 'UNHEALTHY'
+const isProblem = (task: TaskDTO) => (task.status === 'STOPPED' && task.stop_kind === 'error') || task.health === 'UNHEALTHY'
 
 /** The API's `problems` filter: everything not STOPPED, plus problems. `running` is also "not STOPPED". */
 const inProblemsFilter = (task: TaskDTO) => task.status !== 'STOPPED' || isProblem(task)
@@ -398,7 +408,8 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
         running_healthy: running.filter((t) => t.health !== 'UNHEALTHY').length,
         running_unhealthy: running.filter((t) => t.health === 'UNHEALTHY').length,
         stopped_error: stopped.filter(isProblem).length,
-        stopped_normal: stopped.filter((t) => !isProblem(t)).length,
+        stopped_normal: stopped.filter((t) => !isProblem(t) && t.stop_kind !== 'expected').length,
+        stopped_expected: stopped.filter((t) => t.stop_kind === 'expected').length,
       },
       by_az: [...azCounts].map(([az, count]) => ({ az, count })).sort((a, b) => a.az.localeCompare(b.az)),
       by_cluster: [...clusters.values()],
