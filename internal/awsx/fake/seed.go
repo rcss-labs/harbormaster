@@ -633,12 +633,12 @@ func (s *seeder) addService(sp serviceSpec) {
 		// Stops that exit non-zero without a fault: shown as expected, not as errors.
 		switch sp.name {
 		case "web-frontend":
-			sat := now.Add(-95 * time.Minute)
+			sat := now.Add(-5 * time.Minute)
 			s.addTask(sp, taskOptions{taskDefinitionARN: currentARN, slot: 1, startedAt: sat.Add(-6 * time.Hour), stoppedAt: sat,
 				reason: "Your Spot Task was interrupted.", exitCode: 1,
 				stopCode: ecstypes.TaskStopCodeSpotInterruption, deploymentID: primaryID})
 		case "auth-service":
-			dat := now.Add(-3 * time.Hour)
+			dat := now.Add(-6 * time.Minute)
 			s.addTask(sp, taskOptions{taskDefinitionARN: previousARN, slot: 1, startedAt: dat.Add(-30 * time.Hour), stoppedAt: dat,
 				reason: "Scaling activity initiated by (deployment ecs-svc/" + s.digits(19) + ")", exitCode: 1,
 				stopCode: ecstypes.TaskStopCodeServiceSchedulerInitiated, deploymentID: oldDeployment})

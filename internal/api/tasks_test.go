@@ -256,7 +256,7 @@ func TestTasks_StoppedErrorCountFollowsWindowAndScope(t *testing.T) {
 	errorStops := func(items []TaskDTO) int {
 		n := 0
 		for _, task := range items {
-			if task.Status == "STOPPED" && ((task.ExitCode != nil && *task.ExitCode != 0) || task.StopCode == "TaskFailedToStart") {
+			if task.Status == "STOPPED" && task.StopKind == "error" {
 				n++
 			}
 		}

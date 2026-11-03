@@ -30,6 +30,26 @@ test.describe('tasks as pavel', () => {
   })
 })
 
+test.describe('expected stops as pavel', () => {
+  test.use(asUser('pavel'))
+
+  test('a Spot-interrupted task that exited 1 shows the "spot" chip, a teal stripe and is not an error', async ({ page }) => {
+    await page.goto('/tasks?filter=stopped&group=0')
+    const spotRow = page.getByRole('row').filter({ hasText: 'web-frontend' }).filter({ hasText: 'Your Spot Task was interrupted.' })
+    await expect(spotRow.first()).toBeVisible()
+    await expect(spotRow.first()).toContainText('Stopped (exit 1)')
+    await expect(spotRow.first().getByText('spot', { exact: true })).toBeVisible()
+    await expect(spotRow.first()).toHaveAttribute('data-status', 'expected')
+    const deployRow = page.getByRole('row').filter({ hasText: 'auth-service' }).filter({ hasText: 'Scaling activity initiated by (deployment' })
+    await expect(deployRow.first().getByText('scaling', { exact: true })).toBeVisible()
+
+    const response = await page.request.get('/api/tasks?filter=stopped_error&limit=500')
+    const { items } = (await response.json()) as { items: { stop_kind: string; stop_cause: string }[] }
+    expect(items.length).toBeGreaterThan(0)
+    expect(items.every((task) => task.stop_kind === 'error' && task.stop_cause !== 'spot')).toBe(true)
+  })
+})
+
 test.describe('tasks as omer', () => {
   test.use(asUser('omer'))
 
