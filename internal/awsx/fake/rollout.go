@@ -28,8 +28,11 @@ const (
 	failedDeploymentLingerSteps = 6
 )
 
-// UpdateService supports TaskDefinition, ForceNewDeployment and DesiredCount.
-// A task definition or force-new-deployment starts a deployment even while
+// UpdateService supports TaskDefinition, ForceNewDeployment, DesiredCount,
+// EnableExecuteCommand, DeploymentConfiguration and HealthCheckGracePeriodSeconds
+// (the last only for services behind a load balancer). Settings changes alone
+// start no deployment; tasks started later follow the new exec flag, running
+// ones keep theirs until replaced. A task definition or force-new-deployment starts a deployment even while
 // another is in progress, as ECS does.
 func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
 	done, err := c.f.begin(c.target, "ecs", "UpdateService")
@@ -64,18 +67,31 @@ func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput,
 		targetARN = aws.ToString(td.TaskDefinitionArn)
 	}
 	svc := &e.Services[si].Service
+	if in.DesiredCount != nil && *in.DesiredCount < 0 {
+		return nil, invalidParameter("desiredCount must be zero or greater.")
+	}
+	if in.HealthCheckGracePeriodSeconds != nil && len(svc.LoadBalancers) == 0 {
+		return nil, invalidParameter("Health check grace period is only valid for services configured to use load balancers.")
+	}
+	var deploymentConfig *ecstypes.DeploymentConfiguration
+	if in.DeploymentConfiguration != nil {
+		merged, err := mergeDeploymentConfiguration(svc.DeploymentConfiguration, *in.DeploymentConfiguration)
+		if err != nil {
+			return nil, err
+		}
+		deploymentConfig = &merged
+	}
 	if in.DesiredCount != nil {
-		if *in.DesiredCount < 0 {
-			return nil, invalidParameter("desiredCount must be zero or greater.")
-		}
-		svc.DesiredCount = *in.DesiredCount
-		deployments := append([]ecstypes.Deployment(nil), svc.Deployments...)
-		for i := range deployments {
-			if aws.ToString(deployments[i].Status) == "PRIMARY" {
-				deployments[i].DesiredCount = *in.DesiredCount
-			}
-		}
-		svc.Deployments = deployments
+		e.setDesiredCount(si, *in.DesiredCount)
+	}
+	if in.EnableExecuteCommand != nil {
+		svc.EnableExecuteCommand = *in.EnableExecuteCommand
+	}
+	if in.HealthCheckGracePeriodSeconds != nil {
+		svc.HealthCheckGracePeriodSeconds = aws.Int32(*in.HealthCheckGracePeriodSeconds)
+	}
+	if deploymentConfig != nil {
+		svc.DeploymentConfiguration = deploymentConfig
 	}
 	if targetARN != "" || in.ForceNewDeployment {
 		if targetARN == "" {
@@ -84,6 +100,59 @@ func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput,
 		e.startDeployment(si, targetARN)
 	}
 	return &ecs.UpdateServiceOutput{Service: ptrTo(deepCopy(*svc))}, nil
+}
+
+// mergeDeploymentConfiguration overlays the fields the caller set onto the
+// current configuration; the circuit breaker is replaced as a whole.
+func mergeDeploymentConfiguration(current *ecstypes.DeploymentConfiguration, update ecstypes.DeploymentConfiguration) (ecstypes.DeploymentConfiguration, error) {
+	merged := ecstypes.DeploymentConfiguration{}
+	if current != nil {
+		merged = deepCopy(*current)
+	}
+	if update.MinimumHealthyPercent != nil {
+		merged.MinimumHealthyPercent = aws.Int32(*update.MinimumHealthyPercent)
+	}
+	if update.MaximumPercent != nil {
+		merged.MaximumPercent = aws.Int32(*update.MaximumPercent)
+	}
+	if update.DeploymentCircuitBreaker != nil {
+		breaker := *update.DeploymentCircuitBreaker
+		if breaker.Rollback && !breaker.Enable {
+			return merged, invalidParameter("Deployment circuit breaker rollback requires the circuit breaker to be enabled.")
+		}
+		merged.DeploymentCircuitBreaker = &breaker
+	}
+	return merged, nil
+}
+
+// setDesiredCount sets the service's and its PRIMARY deployment's desired
+// count. Caller holds Mu.
+func (e *Estate) setDesiredCount(si int, desired int32) {
+	svc := &e.Services[si].Service
+	svc.DesiredCount = desired
+	deployments := append([]ecstypes.Deployment(nil), svc.Deployments...)
+	for i := range deployments {
+		if aws.ToString(deployments[i].Status) == "PRIMARY" {
+			deployments[i].DesiredCount = desired
+		}
+	}
+	svc.Deployments = deployments
+}
+
+// clampToScalingRange moves every service's desired count into the range of
+// its registered scalable target, as Application Auto Scaling does after a
+// range change. Caller holds Mu.
+func (e *Estate) clampToScalingRange() {
+	for si, s := range e.Services {
+		cfg := e.ScalingConfig[serviceKeyOf(s.AccountID, s.Region, s.ClusterName, aws.ToString(s.Service.ServiceName))]
+		if cfg == nil {
+			continue
+		}
+		desired := min(max(int(s.Service.DesiredCount), cfg.Min), cfg.Max)
+		if int32(desired) != s.Service.DesiredCount {
+			e.setDesiredCount(si, int32(desired))
+		}
+	}
 }
 
 // resolveTaskDefinition accepts an ARN, family:revision, or a bare family
@@ -173,6 +242,7 @@ func (e *Estate) Advance() {
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
 	e.expireFailedDeployments()
+	e.clampToScalingRange()
 	for si := range e.Services {
 		if pi := primaryIndex(e.Services[si].Service); pi >= 0 &&
 			e.Services[si].Service.Deployments[pi].RolloutState == ecstypes.DeploymentRolloutStateInProgress {
@@ -234,6 +304,7 @@ func (e *Estate) newTask(si int, definitionARN, deploymentID string, failure boo
 	if !ok {
 		return ""
 	}
+	spec.exec = s.Service.EnableExecuteCommand // tasks follow the service's current setting
 	now := e.now()
 	options := taskOptions{taskDefinitionARN: definitionARN, slot: len(e.Tasks), startedAt: now, deploymentID: deploymentID}
 	if failure {

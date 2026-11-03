@@ -102,6 +102,9 @@ func (f *Fake) begin(t awsx.Target, service, op string) (func(), error) {
 // beginThrottled counts the call and applies a per-service throttle knob.
 func (f *Fake) beginThrottled(t awsx.Target, service, op string, knob *int32) (func(), error) {
 	done := f.enter(t, service, op)
+	if err := f.takeFailure(op); err != nil {
+		return done, err
+	}
 	if err := f.takeRateToken(t); err != nil {
 		return done, err
 	}

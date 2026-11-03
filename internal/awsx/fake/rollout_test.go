@@ -230,8 +230,17 @@ func TestRollout_OOMFailsAndCircuitBreakerRollsBack(t *testing.T) {
 	}
 }
 
+// dropPaymentsScaling removes payments-api's scalable target so tests can move
+// its desired count outside the seeded 2..6 range without Advance clamping it.
+func dropPaymentsScaling(f *Fake) {
+	f.Estate.Mu.Lock()
+	defer f.Estate.Mu.Unlock()
+	delete(f.Estate.ScalingConfig, serviceKeyOf(homelabID, "us-east-1", "core-services", "payments-api"))
+}
+
 func TestRollout_LoweringDesiredMidRolloutStillCompletes(t *testing.T) {
 	f := newFake()
+	dropPaymentsScaling(f)
 	api := ecsFor(t, f, homelabID, "us-east-1")
 	ctx := context.Background()
 	registerRevision(t, f, homelabID, "us-east-1", "payments-api", "1024")
@@ -269,6 +278,7 @@ func TestRollout_DeploymentIDsAreUniqueWithinOneInstant(t *testing.T) {
 
 func TestRollout_DesiredCountReconciles(t *testing.T) {
 	f := newFake()
+	dropPaymentsScaling(f)
 	api := ecsFor(t, f, homelabID, "us-east-1")
 	update := func(n int32) {
 		t.Helper()
