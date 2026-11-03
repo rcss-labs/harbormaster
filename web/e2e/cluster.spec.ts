@@ -22,6 +22,23 @@ test.describe('cluster as oncall', () => {
   })
 })
 
+test.describe('pinned clusters as oncall', () => {
+  test.use(asUser('oncall'))
+
+  test('pins a cluster from its page, shows account name and id in the sidebar, and unpins it', async ({ page }) => {
+    await page.goto(CORE_SERVICES)
+    await page.getByRole('button', { name: 'Pin core-services' }).click()
+    const pinned = page.getByRole('navigation', { name: 'Pinned' })
+    const link = pinned.getByRole('link', { name: /core-services/ })
+    await expect(link).toContainText('homelab-admin · 482109375512')
+    await expect(link).toHaveAttribute('href', /\/clusters\//)
+
+    await page.getByRole('button', { name: 'Unpin core-services' }).click()
+    await expect(pinned.getByRole('link')).toHaveCount(0)
+    await expect(pinned).toContainText('Pin a service or cluster from its page.')
+  })
+})
+
 test.describe('cluster as omer', () => {
   test.use(asUser('omer'))
 

@@ -37,7 +37,8 @@ describe('ScalingTab', () => {
   it('links to the Deploy tab when the user can operate', async () => {
     mockDesiredCount()
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
-    const link = await screen.findByRole('link', { name: 'Edit in Deploy →' })
+    // First render in this file pays for loading the whole app; the default 1 s wait flakes under load.
+    const link = await screen.findByRole('link', { name: 'Edit in Deploy →' }, { timeout: 5000 })
     expect(link).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/deploy`)
   })
 
