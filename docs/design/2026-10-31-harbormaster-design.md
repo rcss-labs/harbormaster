@@ -392,8 +392,8 @@ region, deployed `family:revision`, launch type; actions **Restart (new
 deployment)**, **Desired count: N**, **AWS console**. When a registered revision
 is newer than the deployed one and nothing is rolling out, a banner offers
 "Deploy :N". Tabs: Overview, Metrics, Task definition, **Deploy**, Tasks, Scaling,
-Logs, Terminal, Operations log (only the Deploy label is bold). Tabs the user lacks permission for show a ⊘ marker and
-a lock message instead of content.
+Logs, Terminal, Operations log. Only the Deploy label is bold. Tabs the user lacks
+permission for show a ⊘ marker and a lock message instead of content.
 
 #### Overview tab
 
@@ -430,20 +430,84 @@ in Terraform, no empty charts.
 
 - **Main container** = the container whose name equals the service name; if
   none matches, the first essential container. *(My call.)*
-- **Quick edit** form for the most common changes: image tag (from ECR, newest
-  marked, deployed marked), task CPU, task memory, environment variables of the
-  main container. The form edits the JSON.
 - **JSON editor** with the full task definition in register-ready form (§7.1).
-  Invalid JSON pauses the form and shows the parse error.
+  Invalid JSON shows the parse error and blocks saving.
 - **Review and save** opens a diff against the deployed revision, then registers
-  the revision (§7). Then "Revision :N is registered. Deploy it now?" for users
-  with Deploy.
+  the revision only (§7). A toast confirms it. Deploying is a separate step on the
+  Deploy tab.
+- Container and task size edits (image tag, environment, secrets, CPU, memory) are
+  on the Deploy tab (§6.4), not here.
 - **Revisions** table: revision, status (Deployed / Rolling out / Not deployed /
   Previous), image tag, CPU/memory, registered when and by whom ("terraform" when
   registered outside Harbormaster, determined by the absence of a Harbormaster
-  record), with **Deploy** or **Roll back to this** buttons.
+  record), with **Deploy** or **Roll back to this** buttons. Both open the Deploy
+  tab at `?revision=N`.
+- The pending-revision banner ("Revision :N is registered") also opens the Deploy
+  tab at `?revision=N`.
 - A permanent notice: saving creates a revision Terraform will see as drift (§7.5).
-- Without Edit: read-only JSON, disabled form, lock banner.
+- Without Edit: read-only JSON, disabled editor, lock banner.
+
+#### Deploy tab
+
+The **Deploy** tab is where a service is changed: containers, task size, service
+settings, auto scaling and deploys. It opens with any of Edit, Deploy or Operate.
+Each control is locked by its own permission and names the one it needs:
+
+| Control | Permission |
+|---|---|
+| Task definition: containers, environment, secrets, command, entry point, health check, task size | Edit |
+| Deploy a revision, roll back | Deploy |
+| ECS Exec on/off, circuit breaker and rollback, min/max healthy %, health check grace period | Deploy |
+| Desired count, force new deployment | Operate |
+| Auto scaling: min and max, target tracking, scheduled actions | Operate |
+
+Turning ECS Exec on or off always forces a new deployment, so running tasks are
+replaced.
+
+- **Containers:** a container selector (the main container by default) and, per
+  container:
+  - **Image tag** picker: the last 10 ECR tags with their push time, newest and
+    deployed marked. Search covers every tag in the repository. An image outside
+    the service account's ECR (cross-account or public) takes a free-text tag.
+  - **Environment variables** and **secrets**. Secrets are Secrets Manager or SSM
+    references only; values are never read or shown. The task's execution role
+    needs `secretsmanager:GetSecretValue`, `ssm:GetParameters` and `kms:Decrypt`
+    for them.
+  - **Command** and **entry point** as argument lists, and the **container health
+    check** (removable).
+- **Task size:** Fargate CPU and memory, limited to valid combinations.
+- **Service:** desired count, force new deployment, ECS Exec, circuit breaker with
+  rollback, min and max healthy percent, and health check grace period (only with
+  a load balancer). Rollback needs the circuit breaker on. A warning shows when
+  the task definition has no task role, since exec needs one.
+- **Auto scaling:** min and max; target-tracking policies on CPU %, memory %, or
+  ALB requests per target (needs the service's own target group); cooldowns and
+  scale-in disable; scheduled actions with cron, at, or rate schedules and a
+  timezone. Removing the target removes its policies and scheduled actions.
+  Step-scaling policies are shown read-only and can be removed.
+- **Review:** one review for every change. It shows the task definition JSON diff
+  against the deployed revision, service settings before → after, and the scaling
+  changes. An optional reason (up to 500 characters) is recorded on the deployment
+  history and on every operations log line of the change, which share one
+  change-set id.
+- **Submit:** one request, `POST /api/services/{id}/changeset` (§13), applies the
+  steps in a fixed order: register the revision, then `UpdateService` (one call),
+  then Application Auto Scaling. The result reports each step as done, failed or
+  skipped. A retry sends only the steps that did not finish and never registers
+  the revision again.
+- **Stale data is refused before any write:** a changed base revision answers 409
+  with the deployed revision; a changed settings version answers 409 with the
+  fresh settings, and the review reopens with them.
+- **Edit only:** the review registers the revision and deploys nothing.
+- **Progress:** after a deploy, the tab shows the rollout from → to, new and old
+  running counts, failed tasks and rollout state. While a rollout runs, each older
+  revision offers **Roll back to :N**. It deploys with `interrupt`, after a
+  confirmation. It is the only deploy outside the review, and it needs Deploy.
+- **Live settings:** read when the tab opens and after each write. The tab does
+  not poll.
+- While a rollout runs, the review can save only desired count and auto scaling
+  changes. A forward deploy, ECS Exec or rollout settings change waits for the
+  rollout to finish.
 
 #### Tasks tab
 
@@ -458,13 +522,11 @@ Actions per running task: **Terminal** (with Terminal permission and exec on),
 
 ![Scaling](screens/service-scaling.png)
 
-Desired count stepper with **Update desired count** (Operate), with a warning
-when the value is outside the auto scaling min/max. Read-only summary of the
-auto scaling configuration (min, max, target-tracking policies, cooldowns,
-scheduled actions) and recent scaling activities, with an **Edit in Deploy**
-link. Auto scaling is edited in the service Deploy tab (§6.4): min and max,
-target tracking, scheduled actions, and step policies (read-only there, but
-removable).
+Read-only. Desired count, with a warning when it is outside the auto scaling
+min/max; the auto scaling configuration (min, max, target-tracking policies,
+cooldowns, scheduled actions); and recent scaling activities. An **Edit in
+Deploy** link opens the Deploy tab (§6.4), where desired count and auto scaling
+are changed.
 
 #### Logs tab
 
@@ -490,7 +552,9 @@ Opening and closing a session is written to the operations log (§9).
 ![Operations log](screens/service-operations-log.png)
 
 One feed per service, newest first: Harbormaster actions (who, what) and ECS
-service events (toggle). Retained 90 days. Out-of-band changes (Terraform, the
+service events (toggle). A Deploy tab change set writes one line per change class
+(deploy, desired count, ECS Exec, rollout settings, scaling), each with the
+change-set id and the reason. Retained 90 days. Out-of-band changes (Terraform, the
 console) appear as ECS events and as revisions registered by "terraform".
 
 ### 6.5 Tasks
@@ -668,11 +732,10 @@ input:
 5. Operations log: "Registered task definition payments-api:43 (image 1.18.3,
    512 CPU / 1024 MiB)." Stored in `revision_records` so the Revisions table can
    say who registered it.
-6. With Deploy permission: dialog "Revision :43 is registered. Deploy it now?"
-   showing image, size, strategy and the effective tag (Prod gets a warning
-   banner). **Deploy :43** → §7.3. **Not now** → a banner on the service page offers
-   it later. Without Deploy: toast "Registered. Someone with Deploy on Prod can
-   roll it out."
+6. Toast: "Revision :43 is registered." The service page's pending-revision banner
+   offers **Deploy :43**, which opens the Deploy tab at `?revision=43` (§6.4). The
+   review there shows the deployed → :43 diff, and Prod gets a warning banner.
+   Without Deploy: toast "Registered. Someone with Deploy on Prod can roll it out."
 
 ### 7.3 Deploy, restart, roll back
 
@@ -690,14 +753,15 @@ input:
   are disabled with the banner "This service is deployed by *CodeDeploy*.
   Harbormaster shows it but can't deploy it yet." Registering revisions and
   desired count still work. *(My call.)*
-- The service Deploy tab (§6.4) edits the deployment circuit breaker and
-  rollback, the health check grace period, ECS Exec on/off, and the desired
-  count, in one change set with the revision and scaling changes. Deployment
+- The Deploy tab (§6.4) edits the deployment circuit breaker and rollback, min and
+  max healthy percent, the health check grace period, ECS Exec on/off, desired
+  count and auto scaling, in one change set with the revision. Deployment
   strategy and alarms are whatever Terraform set; Harbormaster shows them and
   does not change them.
-- While a rollout is running, a forward deploy is refused. A rollback to an
-  older revision may interrupt the running rollout (`interrupt`), so a bad
-  rollout can be undone from the Deploy tab (§7.4).
+- While a rollout is running, the change set can save only desired count and auto
+  scaling changes. A forward deploy, ECS Exec or rollout settings change is
+  refused. A rollback to an older revision may interrupt the running rollout
+  (`interrupt`), so a bad rollout can be undone from the Deploy tab (§7.4).
 
 ### 7.4 Watching a rollout
 
@@ -931,10 +995,13 @@ GET    /api/services/{serviceId}/metrics?range=1h|6h|24h|72h
 GET    /api/services/{serviceId}/tasks
 GET    /api/services/{serviceId}/scaling
 GET    /api/services/{serviceId}/task-definition    deployed, register-ready
+GET    /api/services/{serviceId}/revisions/{revision}  one revision's definition
+GET    /api/services/{serviceId}/deploy-settings    live settings and version
 GET    /api/services/{serviceId}/revisions
-GET    /api/services/{serviceId}/image-tags
+GET    /api/services/{serviceId}/image-tags?container=&q=&limit=
 POST   /api/services/{serviceId}/revisions          register     (E)
-POST   /api/services/{serviceId}/deploy {revision}  deploy/rollback (D)
+POST   /api/services/{serviceId}/changeset          Deploy tab change set (E, D, O per section)
+POST   /api/services/{serviceId}/deploy {revision, interrupt}  deploy/rollback (D)
 POST   /api/services/{serviceId}/restart                          (O)
 POST   /api/services/{serviceId}/desired-count {n}                (O)
 POST   /api/tasks/{taskId}/stop                                   (O)
@@ -949,6 +1016,15 @@ GET    /api/search?q=
 admin: /api/users, /api/users/{id}, /api/permissions, /api/tags, /api/tag-assignments,
        /api/accounts, /api/accounts/test, /api/audit
 ```
+
+The changeset body has `base_revision`, `base_version`, `reason` (up to 500
+characters), and optional `task_definition` (`definition`, or `revision` to retry
+without registering again), `service` and `scaling` sections. The response has
+`status` (`applied`, `partial` or `registered_only`) and per-step results
+(`register`, `service`, `scaling`; `done`, `failed` or `skipped`). Validation
+and permission failures return 422 or 403 before any AWS write; stale
+`base_revision` or `base_version` returns 409. `deploy` accepts `interrupt`, which
+is honoured only for an older revision during a rollout.
 
 `serviceId`/`clusterId`/`taskId` are opaque IDs derived from ARNs (URL-safe
 encoding), so URLs are stable and bookmarkable.
