@@ -1,12 +1,24 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useAuth } from '../auth/AuthProvider'
 
-/** A pinned service. Harbormaster has no server-side favourites, so pins live in this browser, per user. */
+/** Harbormaster has no server-side favourites, so pins live in this browser, per user. */
 export interface PinnedService {
+  kind: 'service'
   id: string
   name: string
   cluster: string
 }
+
+export interface PinnedCluster {
+  kind: 'cluster'
+  id: string
+  name: string
+  account_name: string
+  account_id: string
+}
+
+export type Pin = PinnedService | PinnedCluster
+export type PinKind = Pin['kind']
 
 const storageKey = (username: string) => `harbormaster-pinned:${username}`
 
@@ -27,26 +39,39 @@ function readRaw(username: string): string {
   }
 }
 
-function parse(raw: string): PinnedService[] {
+const isText = (value: unknown): value is string => typeof value === 'string'
+
+/** Entries saved before clusters could be pinned have no `kind`; they are services. */
+function toPin(item: unknown): Pin | null {
+  if (typeof item !== 'object' || item === null) return null
+  const entry = item as Record<string, unknown>
+  if (!isText(entry.id) || !isText(entry.name)) return null
+  if (entry.kind === 'cluster') {
+    return isText(entry.account_name) && isText(entry.account_id)
+      ? { kind: 'cluster', id: entry.id, name: entry.name, account_name: entry.account_name, account_id: entry.account_id }
+      : null
+  }
+  if (entry.kind !== undefined && entry.kind !== 'service') return null
+  return isText(entry.cluster) ? { kind: 'service', id: entry.id, name: entry.name, cluster: entry.cluster } : null
+}
+
+function parse(raw: string): Pin[] {
   try {
     const value: unknown = JSON.parse(raw)
     if (!Array.isArray(value)) return []
-    return value.filter(
-      (item): item is PinnedService =>
-        typeof item?.id === 'string' && typeof item.name === 'string' && typeof item.cluster === 'string',
-    )
+    return value.map(toPin).filter((pin): pin is Pin => pin !== null)
   } catch {
     return []
   }
 }
 
-export function usePinnedServices() {
+export function usePins() {
   const username = useAuth().me?.username ?? ''
   const raw = useSyncExternalStore(subscribe, () => readRaw(username))
   const pinned = useMemo(() => parse(raw), [raw])
 
   const write = useCallback(
-    (next: PinnedService[]) => {
+    (next: Pin[]) => {
       if (!username) return
       try {
         localStorage.setItem(storageKey(username), JSON.stringify(next))
@@ -58,10 +83,11 @@ export function usePinnedServices() {
     },
     [username],
   )
-  const isPinned = useCallback((id: string) => pinned.some((p) => p.id === id), [pinned])
+  const isPinned = useCallback((kind: PinKind, id: string) => pinned.some((p) => p.kind === kind && p.id === id), [pinned])
   const toggle = useCallback(
-    (service: PinnedService) => write(isPinned(service.id) ? pinned.filter((p) => p.id !== service.id) : [...pinned, service]),
+    (pin: Pin) =>
+      write(isPinned(pin.kind, pin.id) ? pinned.filter((p) => !(p.kind === pin.kind && p.id === pin.id)) : [...pinned, pin]),
     [pinned, isPinned, write],
   )
-  return { pinned, isPinned, toggle }
+  return { pins: pinned, isPinned, toggle }
 }

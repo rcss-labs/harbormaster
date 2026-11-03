@@ -62,8 +62,5 @@
 .pendingBanner > span { flex: 1; }
 .pendingDeploy { height: 26px; padding: 0 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: #fff; font: inherit; font-size: 12.5px; cursor: pointer; }
 .pendingDeploy:disabled { opacity: 0.5; cursor: not-allowed; }
-.pinBtn { height: 22px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: 11.5px; cursor: pointer; }
-.pinBtn:hover { background: var(--hover); color: var(--text); }
-.pinBtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-soft-border); color: var(--accent); }
 .metricsGrid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .metricsGrid { grid-template-columns: minmax(0, 1fr); } }

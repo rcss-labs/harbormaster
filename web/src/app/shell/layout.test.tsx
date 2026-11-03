@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ALERTS, SERVICE_PAYMENTS } from '../../test/fixtures'
+import { ALERTS, CLUSTER_CORE, SERVICE_PAYMENTS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
@@ -134,24 +134,82 @@ describe('collapsible sidebar', () => {
   })
 })
 
-describe('pinned services', () => {
+describe('pinned services and clusters', () => {
   it('pins from the service header, lists it under Pinned and unpins', async () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/overview`)
     const user = userEvent.setup()
     await user.click(await screen.findByRole('button', { name: 'Pin payments-api' }))
-    const pinned = await screen.findByRole('navigation', { name: 'Pinned services' })
+    const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
     expect(within(pinned).getByRole('link', { name: /payments-api/ })).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/overview`)
     expect(JSON.parse(localStorage.getItem('harbormaster-pinned:pavel')!)).toHaveLength(1)
 
     await user.click(screen.getByRole('button', { name: 'Unpin payments-api' }))
-    expect(within(screen.getByRole('navigation', { name: 'Pinned services' })).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Pinned' })).queryByRole('link')).not.toBeInTheDocument()
   })
 
-  it('shows services pinned earlier', async () => {
-    localStorage.setItem('harbormaster-pinned:pavel', JSON.stringify([{ id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' }]))
+  it('pins from the cluster header, lists it under Pinned and unpins', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const user = userEvent.setup()
+    const pin = await screen.findByRole('button', { name: 'Pin core-services' })
+    expect(pin).toHaveAttribute('aria-pressed', 'false')
+    await user.click(pin)
+    const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
+    const link = within(pinned).getByRole('link', { name: /core-services/ })
+    expect(link).toHaveAttribute('href', `/clusters/${CLUSTER_CORE.id}`)
+    expect(link).toHaveTextContent('homelab-admin · 482109375512')
+    expect(screen.getByRole('button', { name: 'Unpin core-services' })).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Unpin core-services' }))
+    expect(within(screen.getByRole('navigation', { name: 'Pinned' })).queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('shows a service on two lines: name, then its cluster, with a live status dot', async () => {
+    localStorage.setItem(
+      'harbormaster-pinned:pavel',
+      JSON.stringify([{ kind: 'service', id: SERVICE_PAYMENTS.id, name: 'payments-api', cluster: 'core-services' }]),
+    )
     renderApp('/')
-    const pinned = await screen.findByRole('navigation', { name: 'Pinned services' })
-    expect(within(pinned).getByRole('link', { name: /edge-nginx/ })).toHaveAttribute('href', '/services/abc/overview')
+    const link = await within(await screen.findByRole('navigation', { name: 'Pinned' })).findByRole('link', { name: /payments-api/ })
+    expect(within(link).getByText('payments-api')).toBeInTheDocument()
+    expect(within(link).getByText('core-services')).toBeInTheDocument()
+    await waitFor(() => expect(link.querySelector('[data-kind]')).toHaveAttribute('data-kind', 'ok'))
+    expect(link).toHaveAttribute('aria-label', 'payments-api · Steady · core-services')
+    expect(link).toHaveAttribute('title', 'payments-api · Steady · core-services')
+  })
+
+  it('shows a cluster on two lines: name, then account name and id, with its status colour', async () => {
+    localStorage.setItem(
+      'harbormaster-pinned:pavel',
+      JSON.stringify([{ kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'homelab-admin', account_id: '482109375512' }]),
+    )
+    renderApp('/')
+    const link = await within(await screen.findByRole('navigation', { name: 'Pinned' })).findByRole('link', { name: /core-services/ })
+    expect(link).toHaveAttribute('href', `/clusters/${CLUSTER_CORE.id}`)
+    expect(within(link).getByText('homelab-admin · 482109375512')).toBeInTheDocument()
+    await waitFor(() => expect(link.querySelector('[data-kind]')).toHaveAttribute('data-kind', 'info'))
+    expect(link).toHaveAttribute('aria-label', 'core-services · Deploying · homelab-admin · 482109375512')
+  })
+
+  it('uses a muted dot when the pinned item is not visible', async () => {
+    localStorage.setItem(
+      'harbormaster-pinned:pavel',
+      JSON.stringify([
+        { id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' },
+        { kind: 'cluster', id: 'gone', name: 'old-cluster', account_name: 'homelab-admin', account_id: '1' },
+      ]),
+    )
+    renderApp('/')
+    const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
+    const service = await within(pinned).findByRole('link', { name: /edge-nginx/ })
+    expect(service).toHaveAttribute('href', '/services/abc/overview')
+    await waitFor(() => expect(service.querySelector('[data-kind]')).toHaveAttribute('data-kind', 'mute'))
+    expect(service).toHaveAttribute('aria-label', 'edge-nginx · Status unknown · edge-proxy')
+    expect(within(pinned).getByRole('link', { name: /old-cluster/ }).querySelector('[data-kind]')).toHaveAttribute('data-kind', 'mute')
+  })
+
+  it('offers the empty hint when nothing is pinned', async () => {
+    renderApp('/')
+    expect(await screen.findByText('Pin a service or cluster from its page.')).toBeInTheDocument()
   })
 })
 

@@ -1,9 +1,10 @@
 import { Link } from 'react-router'
 import type { ServiceDTO } from '../../api/types'
+import { PinButton } from '../../components/PinButton'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import type { TagClickHandler } from '../clusters/tagTarget'
-import { usePinnedServices } from '../shell/pins'
+import { usePins } from '../shell/pins'
 import { HeaderActions } from './HeaderActions'
 import styles from './service.module.css'
 
@@ -14,8 +15,8 @@ interface ServiceHeaderProps {
 }
 
 export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
-  const { isPinned, toggle } = usePinnedServices()
-  const pinned = isPinned(service.id)
+  const { isPinned, toggle } = usePins()
+  const pinned = isPinned('service', service.id)
   const launchType = service.launch_type === 'FARGATE' ? 'Fargate' : service.launch_type
   return (
     <div className={styles.pageHead}>
@@ -29,16 +30,11 @@ export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
             onClick={onTagClick && (() => onTagClick({ kind: 'service', id: service.id, name: service.name, tag: service.tag }))}
           />
           <StatusDot status={service.status} />
-          <button
-            type="button"
-            className={styles.pinBtn}
-            aria-pressed={pinned}
-            aria-label={`${pinned ? 'Unpin' : 'Pin'} ${service.name}`}
-            title={pinned ? 'Remove from the sidebar' : 'Pin to the sidebar'}
-            onClick={() => toggle({ id: service.id, name: service.name, cluster: service.cluster.name })}
-          >
-            {pinned ? 'Pinned' : 'Pin'}
-          </button>
+          <PinButton
+            name={service.name}
+            pinned={pinned}
+            onToggle={() => toggle({ kind: 'service', id: service.id, name: service.name, cluster: service.cluster.name })}
+          />
         </div>
         <div className={styles.meta}>
           <Link className={styles.accentLink} to={`/clusters/${service.cluster.id}`}>

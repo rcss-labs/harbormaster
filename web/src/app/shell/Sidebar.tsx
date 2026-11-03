@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
 import { useAuthOptions, useClusters, usePollerStatus, useSettings, useTasks } from '../../api/hooks'
+import type { ClusterCardDTO } from '../../api/types'
 import { Brand } from '../../components/Brand'
+import type { PillKind } from '../../components/Pill'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
 import { LinkSSODialog } from './LinkSSODialog'
-import { usePinnedServices } from './pins'
+import { clusterStatusKind, clusterStatusLabel, statusKind, statusLabel } from '../../components/status'
+import type { Pin } from './pins'
+import { usePins } from './pins'
 import { useShellState } from './ShellState'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
@@ -62,6 +66,42 @@ function NavItem({ to, label, glyph, count, bad, badges = [], alsoActiveFor = []
   )
 }
 
+interface PinnedItemProps {
+  pin: Pin
+  clusters: ClusterCardDTO[] | undefined
+}
+
+/** Two lines: status dot and full name, then the cluster (service) or account (cluster). The dot follows the live status. */
+function PinnedItem({ pin, clusters }: PinnedItemProps) {
+  let kind: PillKind = 'mute'
+  let statusText = 'Status unknown'
+  if (pin.kind === 'cluster') {
+    const cluster = clusters?.find((c) => c.id === pin.id)
+    if (cluster) {
+      kind = clusterStatusKind(cluster.status)
+      statusText = clusterStatusLabel(cluster.status)
+    }
+  } else {
+    const service = clusters?.flatMap((c) => c.services).find((s) => s.id === pin.id)
+    if (service) {
+      kind = statusKind(service.status)
+      statusText = statusLabel(service.status)
+    }
+  }
+  const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
+  const description = `${pin.name} · ${statusText} · ${detail}`
+  const to = pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`
+  return (
+    <NavLink to={to} title={description} aria-label={description}>
+      <span className={styles.pinTop}>
+        <span className={`${styles.pinDot} ${styles[`pin_${kind}`]}`} data-kind={kind} aria-hidden="true" />
+        <span className={styles.pinName}>{pin.name}</span>
+      </span>
+      <span className={styles.pinDetail}>{detail}</span>
+    </NavLink>
+  )
+}
+
 const initials = (name: string) => name.slice(0, 2).toUpperCase()
 
 export function Sidebar() {
@@ -77,7 +117,9 @@ export function Sidebar() {
   const settings = useSettings()
   const authOptions = useAuthOptions()
   const poller = usePollerStatus()
-  const { pinned } = usePinnedServices()
+  const { pins } = usePins()
+  // Unfiltered, so a pin outside the current scope filter still shows its status.
+  const allClusters = useClusters()
   const [linking, setLinking] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuShown = menuOpen && sidebarCollapsed
@@ -153,14 +195,11 @@ export function Sidebar() {
           </>
         )}
       </nav>
-      <nav className={styles.pinned} aria-label="Pinned services">
+      <nav className={styles.pinned} aria-label="Pinned">
         <div className={styles.navSection}>Pinned</div>
-        {pinned.length === 0 && <div className={styles.pinnedEmpty}>Pin a service from its page.</div>}
-        {pinned.map((service) => (
-          <NavLink key={service.id} to={`/services/${service.id}/overview`} title={`${service.name} · ${service.cluster}`}>
-            <span className={styles.pinName}>{service.name}</span>
-            <span className={styles.pinCluster}>{service.cluster}</span>
-          </NavLink>
+        {pins.length === 0 && <div className={styles.pinnedEmpty}>Pin a service or cluster from its page.</div>}
+        {pins.map((pin) => (
+          <PinnedItem key={`${pin.kind}:${pin.id}`} pin={pin} clusters={allClusters.data?.items} />
         ))}
       </nav>
       <div className={styles.sideFoot}>

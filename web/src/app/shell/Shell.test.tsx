@@ -140,8 +140,10 @@ describe('Shell', () => {
     )
     renderApp('/clusters')
     expect(await screen.findByRole('button', { name: 'Tag filter' })).toHaveTextContent('Staging')
-    await waitFor(() => expect(tagParams.length).toBeGreaterThan(0))
-    expect(tagParams.every((tags) => tags.length === 1 && tags[0] === '2')).toBe(true)
+    // The sidebar also fetches the unfiltered list for pinned statuses; only the filtered requests carry tags.
+    const filteredParams = () => tagParams.filter((tags) => tags.length > 0)
+    await waitFor(() => expect(filteredParams().length).toBeGreaterThan(0))
+    expect(filteredParams().every((tags) => tags.length === 1 && tags[0] === '2')).toBe(true)
   })
 
   it('restores stored tags sorted ascending into the URL', async () => {
