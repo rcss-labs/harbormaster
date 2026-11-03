@@ -346,6 +346,9 @@ func (e *Estate) advanceRollout(si, pi int) {
 	primary := svc.Deployments[pi]
 	id, target := aws.ToString(primary.Id), aws.ToString(primary.TaskDefinition)
 	rollback := e.rollbackDeployments[id]
+	// A revision that already completed on this service (a manual rollback to it) ran fine: only one that never did
+	// can be OOM-killed.
+	knownGood := hasCompletedDeployment(svc.Deployments, target)
 	now := e.now()
 
 	setPrimary := func(change func(*ecstypes.Deployment)) {
@@ -355,7 +358,7 @@ func (e *Estate) advanceRollout(si, pi int) {
 		svc.Deployments = deployments
 	}
 
-	if !rollback && e.failsWithOOM(si, target) {
+	if !rollback && !knownGood && e.failsWithOOM(si, target) {
 		taskID := e.newTask(si, target, id, true)
 		setPrimary(func(d *ecstypes.Deployment) { d.FailedTasks++ })
 		e.addEvent(si, fmt.Sprintf("(service %s) has stopped 1 running tasks: (task %s). Reason: OutOfMemoryError.", name, taskID))
@@ -413,6 +416,16 @@ func (e *Estate) advanceRollout(si, pi int) {
 		delete(e.rollbackDeployments, id)
 		e.addEvent(si, fmt.Sprintf("(service %s) has reached a steady state.", name))
 	}
+}
+
+// hasCompletedDeployment reports whether the service still lists a COMPLETED deployment of the task definition.
+func hasCompletedDeployment(deployments []ecstypes.Deployment, targetARN string) bool {
+	for _, d := range deployments {
+		if aws.ToString(d.TaskDefinition) == targetARN && d.RolloutState == ecstypes.DeploymentRolloutStateCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 // failDeployment trips the circuit breaker: the PRIMARY at pi becomes an

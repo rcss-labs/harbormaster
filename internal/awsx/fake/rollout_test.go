@@ -230,6 +230,38 @@ func TestRollout_OOMFailsAndCircuitBreakerRollsBack(t *testing.T) {
 	}
 }
 
+// A manual rollback (UpdateService back to the revision that last completed) must not hit the OOM path: that
+// revision ran fine, only the new one does not. Without this the rollback itself fails and ECS ends up on the bad one.
+func TestRollout_ManualRollbackToCompletedRevisionDuringOOMRolloutSucceeds(t *testing.T) {
+	f := newFake()
+	lowMemory := registerRevision(t, f, homelabID, "us-east-1", "image-resizer", "512")
+	api := ecsFor(t, f, homelabID, "us-east-1")
+	update := func(target string) {
+		t.Helper()
+		if _, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
+			Cluster: aws.String("background-jobs"), Service: aws.String("image-resizer"), TaskDefinition: aws.String(target)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	update(lowMemory)
+	advance(f, 1) // one OOM stop: the breaker has not tripped yet
+	if got := primaryOf(describe(t, f, "background-jobs", "image-resizer")); got.RolloutState != ecstypes.DeploymentRolloutStateInProgress {
+		t.Fatalf("bad rollout = %+v, want still in progress", got)
+	}
+
+	update(resizerRev6)
+	advance(f, 6)
+
+	svc := describe(t, f, "background-jobs", "image-resizer")
+	p := primaryOf(svc)
+	if aws.ToString(p.TaskDefinition) != resizerRev6 || p.RolloutState != ecstypes.DeploymentRolloutStateCompleted || svc.RunningCount != 2 {
+		t.Fatalf("after manual rollback: running=%d deployments=%+v", svc.RunningCount, svc.Deployments)
+	}
+	if aws.ToString(svc.TaskDefinition) != resizerRev6 {
+		t.Fatalf("service taskDefinition = %s, want :6", aws.ToString(svc.TaskDefinition))
+	}
+}
+
 // dropPaymentsScaling removes payments-api's scalable target so tests can move
 // its desired count outside the seeded 2..6 range without Advance clamping it.
 func dropPaymentsScaling(f *Fake) {
