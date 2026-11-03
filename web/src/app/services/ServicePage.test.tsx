@@ -1,4 +1,5 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS } from '../../test/fixtures'
@@ -141,5 +142,12 @@ describe('ServicePage', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)
     expect(await screen.findByRole('heading', { name: 'No access' })).toBeInTheDocument()
     expect(screen.getByText("You need View on this service's tag to open this service.")).toBeInTheDocument()
+  })
+
+  it('pending banner navigates to the Deploy tab', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/overview`)
+    await userEvent.click(await screen.findByRole('button', { name: 'Deploy :43' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/services/${SERVICE_PAYMENTS.id}/deploy`))
+    expect(screen.getByTestId('search')).toHaveTextContent('revision=43')
   })
 })

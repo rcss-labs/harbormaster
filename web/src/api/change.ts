@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type {
-  ImageTagsResponse,
   RevisionsResponse,
   TagDTO,
   TaskDefinitionResponse,
@@ -100,16 +99,6 @@ export function useRevisions(serviceId: string) {
     queryKey: ['service', serviceId, 'revisions'],
     queryFn: () => api.get<RevisionsResponse>(`/api/services/${serviceId}/revisions`),
     ...live,
-  })
-}
-
-/** Image tags are only needed when the picker is open, so the caller decides when to fetch. */
-export function useImageTags(serviceId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: ['service', serviceId, 'image-tags'],
-    queryFn: () => api.get<ImageTagsResponse>(`/api/services/${serviceId}/image-tags?limit=50`),
-    staleTime: 60_000,
-    enabled,
   })
 }
 
