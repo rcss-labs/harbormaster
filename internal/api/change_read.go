@@ -103,10 +103,18 @@ type ImageTagDTO struct {
 }
 
 // ImageTagsResponse is GET /api/services/{id}/image-tags. Source is "ecr" or "none" (free-text tag field).
+// Container is the container the tags belong to, Image its reference without the tag.
+// Total counts all tags of the repository, Matched those that fit q, Tags holds at most limit
+// of them, and Truncated says Matched exceeds what Tags holds.
 type ImageTagsResponse struct {
 	Source     string        `json:"source"`
+	Container  string        `json:"container"`
+	Image      string        `json:"image"`
 	Repository string        `json:"repository"`
 	Current    string        `json:"current"`
+	Total      int           `json:"total"`
+	Matched    int           `json:"matched"`
+	Truncated  bool          `json:"truncated"`
 	Tags       []ImageTagDTO `json:"tags"`
 }
 
@@ -243,12 +251,24 @@ func (s *Server) getImageTags(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	info, err := s.Deploy.ImageTags(r.Context(), key)
+	query := deploy.ImageTagQuery{Container: r.URL.Query().Get("container"), Search: r.URL.Query().Get("q")}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 200 {
+			s.fail(w, invalid("limit must be a number between 1 and 200"))
+			return
+		}
+		query.Limit = limit
+	}
+	info, err := s.Deploy.ImageTags(r.Context(), key, query)
 	if err != nil {
-		s.fail(w, err)
+		s.failChange(w, err)
 		return
 	}
-	out := ImageTagsResponse{Source: info.Source, Repository: info.Repository, Current: info.Current, Tags: make([]ImageTagDTO, 0, len(info.Tags))}
+	out := ImageTagsResponse{
+		Source: info.Source, Container: info.Container, Image: info.Image, Repository: info.Repository, Current: info.Current,
+		Total: info.Total, Matched: info.Matched, Truncated: info.Truncated, Tags: make([]ImageTagDTO, 0, len(info.Tags)),
+	}
 	for _, t := range info.Tags {
 		out.Tags = append(out.Tags, ImageTagDTO{Tag: t.Tag, PushedAt: t.PushedAt})
 	}

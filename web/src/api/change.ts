@@ -107,7 +107,7 @@ export function useRevisions(serviceId: string) {
 export function useImageTags(serviceId: string, enabled: boolean) {
   return useQuery({
     queryKey: ['service', serviceId, 'image-tags'],
-    queryFn: () => api.get<ImageTagsResponse>(`/api/services/${serviceId}/image-tags`),
+    queryFn: () => api.get<ImageTagsResponse>(`/api/services/${serviceId}/image-tags?limit=50`),
     staleTime: 60_000,
     enabled,
   })

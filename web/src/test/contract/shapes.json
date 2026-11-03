@@ -1126,7 +1126,10 @@
     "running": "number"
   },
   "imageTags": {
+    "container": "string",
     "current": "string",
+    "image": "string",
+    "matched": "number",
     "repository": "string",
     "source": "string",
     "tags": [
@@ -1134,7 +1137,9 @@
         "pushed_at": "time",
         "tag": "string"
       }
-    ]
+    ],
+    "total": "number",
+    "truncated": "boolean"
   },
   "login": {
     "user": {
