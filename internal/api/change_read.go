@@ -8,7 +8,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
-	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -188,12 +187,9 @@ func (s *Server) getTaskDefinition(w http.ResponseWriter, r *http.Request) {
 		MainContainer: deployed.MainContainer, Definition: definition, Tags: resourceTags,
 		Controller: ControllerRefDTO{Type: deployed.Controller.Type, Supported: deployed.Controller.Supported, Name: deployed.Controller.Name},
 		Strategy:   deployed.Strategy,
-		Can: ChangeCanDTO{
-			Edit: authz.Can(sc.Subject, authz.Edit, tagID), Deploy: authz.Can(sc.Subject, authz.Deploy, tagID),
-			Operate: authz.Can(sc.Subject, authz.Operate, tagID), Admin: sc.Subject.Admin,
-		},
-		Tag:      inheritedTag(tags, tagID, row.TagInherited),
-		PolledAt: polledAt,
+		Can:        changeCan(sc.Subject, tagID),
+		Tag:        inheritedTag(tags, tagID, row.TagInherited),
+		PolledAt:   polledAt,
 	})
 }
 

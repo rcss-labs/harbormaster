@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import shapes from './shapes.json'
 import {
   ALERTS,
+  CHANGESET_APPLIED,
+  CHANGESET_PARTIAL,
   ANALYTICS_CAPACITY,
   ANALYTICS_CAPACITY_DAILY,
   ANALYTICS_DELIVERY,
@@ -17,6 +19,7 @@ import {
   CLUSTERS_METRICS,
   CLUSTER_CORE,
   CLUSTER_METRICS_CORE,
+  DEPLOY_SETTINGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
   IMAGE_TAGS_PAYMENTS,
   LOGS_HISTORY_PAYMENTS,
@@ -41,6 +44,7 @@ import {
   TARGET_HEALTH_EDGE,
   TASK_DEFINITION_PAYMENTS,
 } from '../fixtures'
+import { DEPLOY_SETTINGS_BARE } from '../deployVariants'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
 
@@ -139,6 +143,10 @@ describe('API contract', () => {
     ['revisions', () => REVISIONS_PAYMENTS],
     ['imageTags', () => IMAGE_TAGS_PAYMENTS],
     ['desiredCount', () => DESIRED_COUNT_PAYMENTS],
+    ['deploySettings', () => DEPLOY_SETTINGS_PAYMENTS],
+    ['deploySettings', () => DEPLOY_SETTINGS_BARE],
+    ['changeset', () => CHANGESET_APPLIED],
+    ['changeset', () => CHANGESET_PARTIAL],
     ['settings', () => body('/api/settings')],
     ['authOptions', () => AUTH_OPTIONS_OFF],
     ['authOptions', () => AUTH_OPTIONS_ON],
