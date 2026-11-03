@@ -64,26 +64,32 @@ type EFSAPI interface {
 	DescribeMountTargets(ctx context.Context, in *efs.DescribeMountTargetsInput, opts ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error)
 }
 
-// CloudWatchAPI lists the CloudWatch calls Harbormaster makes (plan 03).
+// CloudWatchAPI lists the CloudWatch calls Harbormaster makes (plan 03; the writes are the Deploy tab's scaling edits).
 type CloudWatchAPI interface {
 	GetMetricData(ctx context.Context, in *cloudwatch.GetMetricDataInput, opts ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricDataOutput, error)
 }
 
-// ELBAPI lists the ELBv2 calls Harbormaster makes (plan 03).
+// ELBAPI lists the ELBv2 calls Harbormaster makes (plan 03; the writes are the Deploy tab's scaling edits).
 type ELBAPI interface {
 	DescribeTargetGroups(ctx context.Context, in *elasticloadbalancingv2.DescribeTargetGroupsInput, opts ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error)
 	DescribeTargetHealth(ctx context.Context, in *elasticloadbalancingv2.DescribeTargetHealthInput, opts ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error)
 }
 
-// AutoScalingAPI lists the Application Auto Scaling calls Harbormaster makes (plan 03).
+// AutoScalingAPI lists the Application Auto Scaling calls Harbormaster makes (plan 03; the writes are the Deploy tab's scaling edits).
 type AutoScalingAPI interface {
 	DescribeScalableTargets(ctx context.Context, in *applicationautoscaling.DescribeScalableTargetsInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalableTargetsOutput, error)
 	DescribeScalingPolicies(ctx context.Context, in *applicationautoscaling.DescribeScalingPoliciesInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingPoliciesOutput, error)
 	DescribeScheduledActions(ctx context.Context, in *applicationautoscaling.DescribeScheduledActionsInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScheduledActionsOutput, error)
 	DescribeScalingActivities(ctx context.Context, in *applicationautoscaling.DescribeScalingActivitiesInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingActivitiesOutput, error)
+	RegisterScalableTarget(ctx context.Context, in *applicationautoscaling.RegisterScalableTargetInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.RegisterScalableTargetOutput, error)
+	DeregisterScalableTarget(ctx context.Context, in *applicationautoscaling.DeregisterScalableTargetInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeregisterScalableTargetOutput, error)
+	PutScalingPolicy(ctx context.Context, in *applicationautoscaling.PutScalingPolicyInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScalingPolicyOutput, error)
+	DeleteScalingPolicy(ctx context.Context, in *applicationautoscaling.DeleteScalingPolicyInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeleteScalingPolicyOutput, error)
+	PutScheduledAction(ctx context.Context, in *applicationautoscaling.PutScheduledActionInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScheduledActionOutput, error)
+	DeleteScheduledAction(ctx context.Context, in *applicationautoscaling.DeleteScheduledActionInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeleteScheduledActionOutput, error)
 }
 
-// LogsAPI lists the CloudWatch Logs calls Harbormaster makes (plan 03).
+// LogsAPI lists the CloudWatch Logs calls Harbormaster makes (plan 03; the writes are the Deploy tab's scaling edits).
 type LogsAPI interface {
 	FilterLogEvents(ctx context.Context, in *cloudwatchlogs.FilterLogEventsInput, opts ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.FilterLogEventsOutput, error)
 	// LiveTail departs from the SDK signature: the SDK's
