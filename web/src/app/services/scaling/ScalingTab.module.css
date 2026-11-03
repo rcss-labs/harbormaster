@@ -78,3 +78,11 @@
 .rangeSpan { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent-soft); border: 1px solid var(--accent-soft-border); box-sizing: border-box; }
 .rangeMark { position: absolute; top: -4px; width: 3px; height: 16px; margin-left: -1px; border-radius: 2px; background: var(--accent); }
 .rangeScale { position: absolute; top: 14px; left: 0; right: 0; display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--dim); }
+.editLink {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+.editLink:hover {
+  text-decoration: underline;
+}

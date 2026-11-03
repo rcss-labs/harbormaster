@@ -36,6 +36,9 @@ import {
   IMAGE_TAGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
   SETTINGS,
+  DEPLOY_SETTINGS_PAYMENTS,
+  REVISION_DEFINITION_PAYMENTS_41,
+  CHANGESET_APPLIED,
   AUTH_OPTIONS_OFF,
   SSO_CONFIGURED_OFF,
   SSO_TEST_OK,
@@ -144,6 +147,12 @@ export const handlers = [
   http.get('/api/services/:id/revisions', () => HttpResponse.json(REVISIONS_PAYMENTS)),
   http.get('/api/services/:id/image-tags', () => HttpResponse.json(IMAGE_TAGS_PAYMENTS)),
   http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
+  // Deploy tab (docs/deploy_tab/PLAN.md section 2)
+  http.get('/api/services/:id/deploy-settings', () => HttpResponse.json(DEPLOY_SETTINGS_PAYMENTS)),
+  http.get('/api/services/:id/revisions/:revision', ({ params }) =>
+    Number(params.revision) === REVISION_DEFINITION_PAYMENTS_41.revision ? HttpResponse.json(REVISION_DEFINITION_PAYMENTS_41) : notFound(),
+  ),
+  http.post('/api/services/:id/changeset', () => HttpResponse.json(CHANGESET_APPLIED)),
   http.get('/api/settings', () => HttpResponse.json(SETTINGS)),
   http.put('/api/settings', async ({ request }) => HttpResponse.json(await request.json())),
   // Single sign-on (plan 07). Admin routes answer with SSOConfigDTO; override per test to change the state.

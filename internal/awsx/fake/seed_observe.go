@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	astypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -32,12 +33,37 @@ type TargetGroup struct {
 	Healthy, Unhealthy   int
 }
 
-// ScalingSeed describes the Application Auto Scaling setup of a service.
-// Scheduled entries read "<schedule expression>=<min capacity>", for example
-// "cron(0 7 ? * MON-FRI *)=3".
+// ScalingSeed describes the Application Auto Scaling setup of a service: the
+// scalable target's range plus its policies and scheduled actions. The write
+// calls of the fake AutoScalingAPI mutate it in place.
 type ScalingSeed struct {
-	Min, Max, TargetCPU int
-	Scheduled           []string
+	Min, Max  int
+	Policies  []PolicySeed
+	Scheduled []ScheduledSeed
+}
+
+// PolicySeed is one scaling policy. Step policies carry no further settings
+// (the fake only keeps their name and type); target tracking policies use a
+// predefined metric.
+type PolicySeed struct {
+	Name              string
+	Step              bool
+	Metric            astypes.MetricType
+	Target            float64
+	ScaleOut, ScaleIn int32
+	DisableScaleIn    bool
+	ResourceLabel     string // ALBRequestCountPerTarget only
+}
+
+// ScheduledSeed is one scheduled action. A nil Min or Max leaves that bound alone.
+type ScheduledSeed struct {
+	Name, Schedule, Timezone string
+	Min, Max                 *int32
+}
+
+func cpuTargetPolicy(target float64) PolicySeed {
+	return PolicySeed{Name: "cpu-target", Metric: astypes.MetricTypeECSServiceAverageCPUUtilization, Target: target,
+		ScaleOut: scaleOutCooldownSeconds, ScaleIn: scaleInCooldownSeconds}
 }
 
 // LogLine is one explicit log event in a log group (see Estate.SetLogLines).
@@ -71,9 +97,11 @@ var mockupLogPools = map[string][][2]string{
 var mockupRPM = map[string]float64{"payments-api": 367, "web-frontend": 731, "auth-service": 760}
 
 var mockupScaling = map[string]ScalingSeed{
-	"payments-api": {Min: 2, Max: 6, TargetCPU: 60, Scheduled: []string{"cron(0 7 ? * MON-FRI *)=3", "cron(0 20 ? * MON-FRI *)=2"}},
-	"web-frontend": {Min: 2, Max: 8, TargetCPU: 55},
-	"catalog-api":  {Min: 2, Max: 4, TargetCPU: 65},
+	"payments-api": {Min: 2, Max: 6, Policies: []PolicySeed{cpuTargetPolicy(60)}, Scheduled: []ScheduledSeed{
+		{Name: "scheduled-1", Schedule: "cron(0 7 ? * MON-FRI *)", Min: aws.Int32(3)},
+		{Name: "scheduled-2", Schedule: "cron(0 20 ? * MON-FRI *)", Min: aws.Int32(2)}}},
+	"web-frontend": {Min: 2, Max: 8, Policies: []PolicySeed{cpuTargetPolicy(55)}},
+	"catalog-api":  {Min: 2, Max: 4, Policies: []PolicySeed{cpuTargetPolicy(65)}},
 }
 
 func serviceKeyOf(accountID, region, cluster, service string) model.ServiceKey {
@@ -142,7 +170,8 @@ func seedObserve(e *Estate) {
 		e.MetricProfiles[key] = profile
 
 		if cfg, ok := mockupScaling[sp.name]; ok {
-			cfg.Scheduled = append([]string(nil), cfg.Scheduled...)
+			cfg.Policies = append([]PolicySeed(nil), cfg.Policies...)
+			cfg.Scheduled = append([]ScheduledSeed(nil), cfg.Scheduled...)
 			e.ScalingConfig[key] = &cfg
 		}
 

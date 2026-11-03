@@ -34,6 +34,9 @@ type RegisterResponse struct {
 // DeployRequest is the body of POST /api/services/{id}/deploy.
 type DeployRequest struct {
 	Revision *int `json:"revision"`
+	// Interrupt lets a rollback replace a rollout in progress. Only the progress panel's
+	// one-click rollback sends it.
+	Interrupt bool `json:"interrupt"`
 }
 
 // RolloutResponse is the answer to deploy and restart. FromRevision is omitted for restarts.
@@ -185,7 +188,7 @@ func (s *Server) deployRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("revision is required."))
 		return
 	}
-	rollout, err := s.Deploy.Deploy(r.Context(), subject, key, *body.Revision)
+	rollout, err := s.Deploy.Deploy(r.Context(), subject, key, *body.Revision, body.Interrupt)
 	if err != nil {
 		s.failChange(w, err)
 		return

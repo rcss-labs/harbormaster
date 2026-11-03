@@ -36,6 +36,26 @@ module "harbormaster_access" {
 | `role_arn` | ARN to enter in Harbormaster |
 | `role_name` | Name of the role |
 
+## Permissions
+
+Every statement is in `main.tf`; this table lists the same actions and conditions.
+
+| Policy | Statement | Actions | Resource | Condition |
+|---|---|---|---|---|
+| `harbormaster-access-read` | `ReadOnlyInspection` | `ecs:List*`, `ecs:Describe*`, `ecs:ListTagsForResource`, `ec2:Describe{Vpcs,Subnets,SecurityGroups,NatGateways,InternetGateways,VpcEndpoints,NetworkInterfaces}`, `elasticfilesystem:Describe{FileSystems,AccessPoints,MountTargets}`, `elasticloadbalancing:Describe{TargetGroups,TargetHealth}`, `application-autoscaling:Describe*`, `cloudwatch:GetMetricData`, `logs:{FilterLogEvents,GetLogEvents,StartLiveTail,StopLiveTail}`, `ecr:Describe{Images,Repositories}` | `*` | none |
+| `harbormaster-access-write` (omitted when `read_only`) | `EcsOperations` | `ecs:RegisterTaskDefinition`, `ecs:TagResource`, `ecs:UpdateService`, `ecs:StopTask`, `ecs:ExecuteCommand`, `ssm:TerminateSession` | `*` | none |
+| | `PassTaskRolesToEcs` | `iam:PassRole` | `pass_role_arns` | `iam:PassedToService` = `ecs-tasks.amazonaws.com` |
+| | `AutoScalingWrites` | `application-autoscaling:RegisterScalableTarget`, `DeregisterScalableTarget`, `PutScalingPolicy`, `DeleteScalingPolicy`, `PutScheduledAction`, `DeleteScheduledAction` | `*` | `application-autoscaling:service-namespace` = `ecs` |
+| | `TargetTrackingAlarms` | `cloudwatch:PutMetricAlarm`, `cloudwatch:DeleteAlarms` | `arn:aws:cloudwatch:*:<this account>:alarm:TargetTracking-service/*` | none |
+| | `TargetTrackingAlarmsDescribe` | `cloudwatch:DescribeAlarms` | `*` | none |
+| | `AutoScalingServiceLinkedRole` | `iam:CreateServiceLinkedRole` | `arn:aws:iam::<this account>:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService` | `iam:AWSServiceName` = `ecs.application-autoscaling.amazonaws.com` |
+
+Notes:
+
+- `ecs:UpdateService` covers ECS Exec on/off, deployment configuration and health check grace period. No extra permission is needed for those.
+- `iam:PassRole` is checked at `RegisterTaskDefinition`, when the task and execution roles are attached. Registering a revision with a role outside `pass_role_arns` fails with AccessDenied. A global admin who changes a task or execution role to one outside `pass_role_arns` gets that AccessDenied at register, so widen `pass_role_arns` first.
+- `cloudwatch:DescribeAlarms` is in the write policy, so a `read_only` role cannot list alarms.
+
 ## Read-only mode
 
-With `read_only = true` only `harbormaster-access-read` is created. Harbormaster can inspect services, networking, logs and metrics, but cannot register task definitions, update services, stop tasks, open exec sessions or pass roles. `pass_role_arns` is then unused.
+With `read_only = true` only `harbormaster-access-read` is created. Harbormaster can inspect services, networking, logs and metrics, but cannot register task definitions, update services (desired count, deployment, ECS Exec, rollout settings), stop tasks, open exec sessions, change auto scaling or alarms, or pass roles. `pass_role_arns` is then unused.

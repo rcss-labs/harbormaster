@@ -44,6 +44,82 @@ func TestAttributeDeployment_InsertsThenUpdatesOnlyAttribution(t *testing.T) {
 	assertAttribution(t, s, key, "restart", 8)
 }
 
+func TestAttributeDeployment_StoresReasonAndChangeSetID(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	key := serviceKey("core-services", "notifications")
+	startedAt := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+
+	if err := s.AttributeDeployment(ctx, store.AttributedDeployment{
+		Key: key, DeploymentID: "ecs-svc/1", TaskDefinitionARN: "arn:aws:ecs:eu-west-1:111111111111:task-definition/notifications:7",
+		Revision: 7, Kind: "deploy", StartedByUserID: 7, StartedAt: startedAt,
+		Reason: "raise memory", ChangeSetID: "6f1c2e0a-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+	}); err != nil {
+		t.Fatalf("attribute with reason: %v", err)
+	}
+	if err := s.AttributeDeployment(ctx, store.AttributedDeployment{
+		Key: key, DeploymentID: "ecs-svc/2", Revision: 8, Kind: "restart", StartedByUserID: 7, StartedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("attribute without reason: %v", err)
+	}
+
+	assertReasonAndChangeSet(t, s, "ecs-svc/1", "raise memory", "6f1c2e0a-3b4d-4e5f-8a9b-0c1d2e3f4a5b")
+	if reason, changeSet := readReasonAndChangeSet(t, s, "ecs-svc/2"); reason != nil || changeSet != nil {
+		t.Fatalf("empty reason and changeset = (%v, %v), want both NULL", reason, changeSet)
+	}
+
+	records, err := s.ListDeployments(ctx, key, startedAt.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("list deployments: %v", err)
+	}
+	byID := map[string]string{}
+	for _, r := range records {
+		byID[r.DeploymentID] = r.Reason
+	}
+	if byID["ecs-svc/1"] != "raise memory" || byID["ecs-svc/2"] != "" {
+		t.Fatalf("listed reasons = %v, want ecs-svc/1 'raise memory' and ecs-svc/2 empty", byID)
+	}
+}
+
+func TestAttributeDeployment_ConflictUpdatesReason(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	key := serviceKey("core-services", "notifications")
+	startedAt := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
+	attribution := store.AttributedDeployment{
+		Key: key, DeploymentID: "ecs-svc/1", TaskDefinitionARN: "arn:aws:ecs:eu-west-1:111111111111:task-definition/notifications:7",
+		Revision: 7, Kind: "deploy", StartedByUserID: 7, StartedAt: startedAt,
+		Reason: "first reason", ChangeSetID: "changeset-a",
+	}
+	if err := s.AttributeDeployment(ctx, attribution); err != nil {
+		t.Fatalf("first attribute: %v", err)
+	}
+
+	attribution.Reason, attribution.ChangeSetID = "second reason", "changeset-b"
+	if err := s.AttributeDeployment(ctx, attribution); err != nil {
+		t.Fatalf("second attribute: %v", err)
+	}
+	assertReasonAndChangeSet(t, s, "ecs-svc/1", "second reason", "changeset-b")
+}
+
+func assertReasonAndChangeSet(t *testing.T, s *store.Store, deploymentID, wantReason, wantChangeSet string) {
+	t.Helper()
+	reason, changeSet := readReasonAndChangeSet(t, s, deploymentID)
+	if reason == nil || *reason != wantReason || changeSet == nil || *changeSet != wantChangeSet {
+		t.Fatalf("%s = (%v, %v), want (%s, %s)", deploymentID, reason, changeSet, wantReason, wantChangeSet)
+	}
+}
+
+func readReasonAndChangeSet(t *testing.T, s *store.Store, deploymentID string) (reason, changeSet *string) {
+	t.Helper()
+	if err := s.Pool.QueryRow(context.Background(),
+		`select reason, changeset_id from deployment_history where deployment_id = $1`, deploymentID).
+		Scan(&reason, &changeSet); err != nil {
+		t.Fatalf("read reason for %s: %v", deploymentID, err)
+	}
+	return reason, changeSet
+}
+
 func TestOpenDeployments_JoinsServiceRaw(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

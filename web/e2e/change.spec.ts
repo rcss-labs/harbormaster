@@ -1,5 +1,5 @@
 import { expect, test, type Page } from './fixtures/test'
-import { login, serviceId } from './helpers'
+import { login, pickImageTag, reviewAndApply, serviceId } from './helpers'
 
 // Ids come from the fake estate (internal/awsx/fake/seed.go): both clusters live in the homelab account, us-east-1.
 const HOMELAB_ACCOUNT_ID = '482109375512'
@@ -12,16 +12,10 @@ async function openOperationsLog(page: Page, id: string) {
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 }
 
-/** Edits, reviews and registers the draft, then accepts the "Deploy it now?" prompt. */
+/** Reviews the Deploy tab's pending edits and applies them as one change set (register plus deploy). */
 async function registerAndDeploy(page: Page, serviceName: string, revision: number) {
-  await page.getByRole('button', { name: /^Review and register :\d+$/ }).click()
-  const review = page.getByRole('dialog')
-  await expect(review.getByText(`Register ${serviceName}:${revision}?`)).toBeVisible()
-  await review.getByRole('button', { name: `Register revision :${revision}` }).click()
-  const prompt = page.getByRole('dialog')
-  await expect(prompt.getByText(`Revision :${revision} is registered. Deploy it now?`)).toBeVisible()
-  // The pending-revision banner behind the dialog has its own "Deploy :N" button, so scope to the dialog.
-  await prompt.getByRole('button', { name: `Deploy :${revision}` }).click()
+  await reviewAndApply(page, serviceName, `Register and deploy :${revision}`)
+  await expect(page.getByText(`Deploying ${serviceName} to :${revision}.`)).toBeVisible()
 }
 
 // The flows share one seeded estate and run in this order: register/deploy moves payments-api to :43 (the
@@ -31,9 +25,9 @@ test.describe.configure({ mode: 'serial' })
 
 test('register and deploy a new image tag', async ({ page }) => {
   await login(page, 'pavel')
-  await page.goto(`/services/${paymentsApi}/task-definition`)
+  await page.goto(`/services/${paymentsApi}/deploy`)
 
-  await page.getByLabel('Image tag').selectOption({ label: '1.18.4 · newest' })
+  await pickImageTag(page, '1.18.4')
   await registerAndDeploy(page, 'payments-api', 43)
 
   // The deploy is accepted at once but the service view only changes on the next 5 s poll, so allow
@@ -67,12 +61,12 @@ test('operator cannot register', async ({ page }) => {
 
 test('OOM revision fails and rolls back', async ({ page }) => {
   await login(page, 'pavel')
-  await page.goto(`/services/${imageResizer}/task-definition`)
+  await page.goto(`/services/${imageResizer}/deploy`)
 
   // Same 512 MiB memory: the fake estate OOM-kills image-resizer's new revision.
   await page.getByRole('button', { name: 'Add variable' }).click()
-  await page.getByLabel('Name').last().fill('X')
-  await page.getByLabel('Value').last().fill('1')
+  await page.getByRole('textbox', { name: 'Variable name 2' }).fill('X')
+  await page.getByRole('textbox', { name: 'Variable value 2' }).fill('1')
   await registerAndDeploy(page, 'image-resizer', 7)
 
   await expect(page.getByText('image-resizer: revision :7 failed to start. Rolled back to :6.')).toBeVisible({ timeout: 20_000 })

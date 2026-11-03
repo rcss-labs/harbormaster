@@ -81,10 +81,16 @@ type serviceSpec struct {
 	deployingTag          string // a newer revision is rolling out
 	oom                   bool   // tasks are OOM-killed (image-resizer)
 	unhealthy             int
+	// ecrTagCount, when above 5, gives the repository that many tags.
+	ecrTagCount int
+	// ecrSidecar adds a non-essential container pulled from this repository of
+	// the service's own account (tagged ecrSidecarTag, with ecrSidecarTags tags).
+	ecrSidecar, ecrSidecarTag string
+	ecrSidecarTags            int
 }
 
 var seedServices = []serviceSpec{
-	{cluster: "core-services", name: "payments-api", desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true,
+	{cluster: "core-services", name: "payments-api", desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
 		env: []envVar{{"NODE_ENV", "production"}, {"PAYMENTS_PROVIDER", "stripe"}, {"DB_POOL_SIZE", "20"}}},
 	{cluster: "core-services", name: "web-frontend", desired: 2, running: 2, rev: 87, repo: "web-frontend", tag: "3.4.0", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://payments-api.core.local:8080"}}},
@@ -115,6 +121,7 @@ var seedServices = []serviceSpec{
 	{cluster: "staging-web", name: "web", desired: 1, running: 1, rev: 33, repo: "web", tag: "3.5.0-rc.1", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://api.staging.local:8080"}}},
 	{cluster: "staging-web", name: "api", desired: 1, running: 1, rev: 21, repo: "api", tag: "1.19.0-rc.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true,
+		ecrSidecar: "migrator", ecrSidecarTag: "1.4.2", ecrSidecarTags: 6,
 		env: []envVar{{"NODE_ENV", "staging"}}},
 }
 
@@ -130,7 +137,32 @@ var seedTaskDefinitionTags = []ecstypes.Tag{{Key: aws.String("managed-by"), Valu
 // current, -1, -2 on the patch number, with the deploying tag first when a
 // rollout is in flight. Duplicates are dropped, as the mockup's Set does.
 func ecrTagsFor(sp serviceSpec) []string {
-	tags := []string{bumpTag(sp.tag, 2), bumpTag(sp.tag, 1), sp.tag, bumpTag(sp.tag, -1), bumpTag(sp.tag, -2)}
+	return repositoryTags(sp.tag, sp.deployingTag, sp.ecrTagCount)
+}
+
+// repositoryTags lists a repository's tags newest first. With count above the
+// standard five, older patch releases are appended, rolling over to the
+// previous minor version (x.y.0 is followed by x.(y-1).9).
+func repositoryTags(tag, deployingTag string, count int) []string {
+	tags := []string{bumpTag(tag, 2), bumpTag(tag, 1), tag, bumpTag(tag, -1), bumpTag(tag, -2)}
+	if m := tagPattern.FindStringSubmatch(tag); m != nil && count > len(tags) {
+		var major, minor, patch int
+		fmt.Sscanf(m[1]+" "+m[2]+" "+m[3], "%d %d %d", &major, &minor, &patch)
+		tags = nil
+		patch += 2
+		for len(tags) < count {
+			tags = append(tags, fmt.Sprintf("%d.%d.%d%s", major, minor, patch, m[4]))
+			switch {
+			case patch > 0:
+				patch--
+			case minor > 0:
+				minor, patch = minor-1, 9
+			default:
+				count = len(tags)
+			}
+		}
+	}
+	sp := serviceSpec{deployingTag: deployingTag}
 	if sp.deployingTag != "" {
 		tags = append([]string{sp.deployingTag}, tags...)
 	}
@@ -334,6 +366,12 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 			Name: aws.String("otel-collector"), Image: aws.String("public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"),
 			Essential: aws.Bool(false), LogConfiguration: &ecstypes.LogConfiguration{LogDriver: ecstypes.LogDriverAwsfirelens}})
 	}
+	if sp.ecrSidecar != "" {
+		td.ContainerDefinitions = append(td.ContainerDefinitions, ecstypes.ContainerDefinition{
+			Name:      aws.String(sp.ecrSidecar),
+			Image:     aws.String(c.accountID + ".dkr.ecr." + c.region + ".amazonaws.com/" + sp.ecrSidecar + ":" + sp.ecrSidecarTag),
+			Essential: aws.Bool(false), LogConfiguration: logCfg})
+	}
 	return TaskDefinition{AccountID: c.accountID, Region: c.region, Definition: td, Tags: deepCopy(seedTaskDefinitionTags)}
 }
 
@@ -466,6 +504,16 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 	s.e.Tasks = append(s.e.Tasks, Task{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Task: task})
 }
 
+// addRepository seeds a repository unless an earlier service already did.
+func (s *seeder) addRepository(name string, tags []string) {
+	if s.e.Repositories == nil {
+		s.e.Repositories = map[string][]string{}
+	}
+	if _, ok := s.e.Repositories[name]; !ok {
+		s.e.Repositories[name] = tags
+	}
+}
+
 func (s *seeder) addService(sp serviceSpec) {
 	c := clusterSeed(sp.cluster)
 	now := s.e.now()
@@ -544,7 +592,11 @@ func (s *seeder) addService(sp serviceSpec) {
 			ContainerName:  aws.String(sp.name), ContainerPort: aws.Int32(int32(sp.port))}}
 	}
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
-		ECRTags: ecrTagsFor(sp), OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
+		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
+	s.addRepository(sp.repo, ecrTagsFor(sp))
+	if sp.ecrSidecar != "" {
+		s.addRepository(sp.ecrSidecar, repositoryTags(sp.ecrSidecarTag, "", sp.ecrSidecarTags))
+	}
 
 	// Running tasks. With a rollout in flight, the first task is on the new revision.
 	for i := 0; i < sp.running; i++ {

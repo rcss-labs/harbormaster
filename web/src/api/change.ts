@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
 import type {
-  ImageTagsResponse,
   RevisionsResponse,
   TagDTO,
   TaskDefinitionResponse,
@@ -43,6 +42,8 @@ export interface RegisterResult {
 
 export interface DeployBody {
   revision: number
+  /** Skips the rollout-running gate for a rollback (the progress panel's one-click rollback). */
+  interrupt?: boolean
 }
 
 /** 202 from POST /api/services/{id}/deploy. */
@@ -101,16 +102,6 @@ export function useRevisions(serviceId: string) {
   })
 }
 
-/** Image tags are only needed when the picker is open, so the caller decides when to fetch. */
-export function useImageTags(serviceId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: ['service', serviceId, 'image-tags'],
-    queryFn: () => api.get<ImageTagsResponse>(`/api/services/${serviceId}/image-tags`),
-    staleTime: 60_000,
-    enabled,
-  })
-}
-
 export function useDesiredCountInfo(serviceId: string) {
   return useQuery({
     queryKey: ['service', serviceId, 'desired-count'],
@@ -132,7 +123,7 @@ const SETTLE_STEP_MS = 2_000
 const SETTLE_WINDOW_MS = 10_000
 
 /** Runs refetch now and then every SETTLE_STEP_MS until SETTLE_WINDOW_MS has passed. Returns the immediate refetch. */
-function refetchWhileSettling(refetch: () => Promise<void>): Promise<void> {
+export function refetchWhileSettling(refetch: () => Promise<void>): Promise<void> {
   for (let elapsed = SETTLE_STEP_MS; elapsed <= SETTLE_WINDOW_MS; elapsed += SETTLE_STEP_MS) {
     setTimeout(() => void refetch(), elapsed)
   }

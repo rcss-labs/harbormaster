@@ -29,8 +29,6 @@ type Cluster struct {
 type Service struct {
 	AccountID, Region, ClusterName string
 	Service                        ecstypes.Service
-	// ECRTags are the tags in the service's ECR repository, newest first.
-	ECRTags []string
 	// OOMBelowMiB makes tasks of a task definition with less memory than this
 	// fail with OutOfMemoryError (0: never). Mirrors the mockup's oomBelow.
 	OOMBelowMiB int
@@ -64,6 +62,10 @@ type Estate struct {
 	TaskDefinitions []TaskDefinition
 	// Events holds service events newest first, keyed by service ARN.
 	Events map[string][]ecstypes.ServiceEvent
+	// Repositories holds each ECR repository's tags, newest first, keyed by
+	// repository name. A repository is visible to a target that has a task
+	// definition with a container image from it (see ecrClient.DescribeImages).
+	Repositories map[string][]string
 
 	// Plan 03 (observe) state; see seed_observe.go. All guarded by Mu.
 	MetricProfiles    map[model.ServiceKey]MetricProfile

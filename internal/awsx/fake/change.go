@@ -223,7 +223,7 @@ type ecrClient struct {
 var _ awsx.ECRAPI = (*ecrClient)(nil)
 
 // DescribeImages returns one image per seeded tag of the repository, newest
-// first. A repository is one that a service in this target pulls from.
+// first. A repository is one that a task definition in this target pulls from.
 func (c *ecrClient) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
 	done, err := c.f.begin(c.target, "ecr", "DescribeImages")
 	defer done()
@@ -235,12 +235,9 @@ func (c *ecrClient) DescribeImages(_ context.Context, in *ecr.DescribeImagesInpu
 	defer e.Mu.Unlock()
 	repository := aws.ToString(in.RepositoryName)
 	now := e.now()
-	for _, svc := range e.Services {
-		if !c.inScope(svc.AccountID, svc.Region) || c.repositoryOf(svc) != repository {
-			continue
-		}
+	if tags, ok := e.Repositories[repository]; ok && c.pullsFrom(repository) {
 		out := &ecr.DescribeImagesOutput{}
-		for i, tag := range svc.ECRTags {
+		for i, tag := range tags {
 			out.ImageDetails = append(out.ImageDetails, ecrtypes.ImageDetail{
 				RegistryId:     aws.String(c.target.AccountID),
 				RepositoryName: aws.String(repository),
@@ -255,22 +252,25 @@ func (c *ecrClient) DescribeImages(_ context.Context, in *ecr.DescribeImagesInpu
 		"The repository with name '" + repository + "' does not exist in the registry with id '" + c.target.AccountID + "'")}
 }
 
-// repositoryOf is the ECR repository the service's primary task definition
-// pulls its image from. Caller holds Mu.
-func (c *ecrClient) repositoryOf(svc Service) string {
-	primary := aws.ToString(svc.Service.TaskDefinition)
+// pullsFrom reports whether a task definition in this target has a container
+// image from the repository. Caller holds Mu.
+func (c *ecrClient) pullsFrom(repository string) bool {
 	for _, td := range c.f.Estate.TaskDefinitions {
-		if aws.ToString(td.Definition.TaskDefinitionArn) != primary || len(td.Definition.ContainerDefinitions) == 0 {
+		if !c.inScope(td.AccountID, td.Region) {
 			continue
 		}
-		image := aws.ToString(td.Definition.ContainerDefinitions[0].Image)
-		image = image[strings.LastIndex(image, "/")+1:]
-		if i := strings.Index(image, ":"); i >= 0 {
-			image = image[:i]
+		for _, container := range td.Definition.ContainerDefinitions {
+			image := aws.ToString(container.Image)
+			image = image[strings.LastIndex(image, "/")+1:]
+			if i := strings.Index(image, ":"); i >= 0 {
+				image = image[:i]
+			}
+			if image == repository {
+				return true
+			}
 		}
-		return image
 	}
-	return ""
+	return false
 }
 
 func (c *ecrClient) inScope(accountID, region string) bool {

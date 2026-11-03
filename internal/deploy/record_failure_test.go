@@ -80,7 +80,7 @@ func TestDeploy_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T) 
 	h.svc.InTx = failAtCommit(h.store)
 	opsBefore := operationCount(t, h)
 
-	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41)
+	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41, false)
 	if err != nil {
 		t.Fatalf("Deploy() error = %v, want success with a warning", err)
 	}

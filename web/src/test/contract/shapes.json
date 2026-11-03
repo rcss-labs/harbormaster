@@ -835,6 +835,32 @@
       }
     }
   },
+  "changeset": {
+    "changeset_id": "string",
+    "deployment_id": "string",
+    "from_revision": {
+      "$null": "number"
+    },
+    "kind": "string",
+    "registered_revision": {
+      "$null": "number"
+    },
+    "settings_version": "string",
+    "status": "string",
+    "steps": [
+      {
+        "message": "string",
+        "name": "string",
+        "status": "string"
+      }
+    ],
+    "to_revision": {
+      "$null": "number"
+    },
+    "warning": {
+      "$null": "string"
+    }
+  },
   "cluster": {
     "account_id": "string",
     "account_name": "string",
@@ -1114,6 +1140,78 @@
       "username": "string"
     }
   },
+  "deploySettings": {
+    "can": {
+      "admin": "boolean",
+      "deploy": "boolean",
+      "edit": "boolean",
+      "operate": "boolean"
+    },
+    "controller": {
+      "name": "string",
+      "supported": "boolean",
+      "type": "string"
+    },
+    "deployed_revision": "number",
+    "deployment_configuration": {
+      "circuit_breaker": {
+        "enable": "boolean",
+        "rollback": "boolean"
+      },
+      "maximum_percent": "number",
+      "minimum_healthy_percent": "number"
+    },
+    "desired_count": "number",
+    "enable_execute_command": "boolean",
+    "family": "string",
+    "has_load_balancer": "boolean",
+    "health_check_grace_period_seconds": {
+      "$null": "number"
+    },
+    "max_desired": "number",
+    "running_count": "number",
+    "scaling": {
+      "has_target": "boolean",
+      "max": "number",
+      "min": "number",
+      "policies": [
+        {
+          "disable_scale_in": "boolean",
+          "editable": "boolean",
+          "metric": "string",
+          "metric_raw": "string",
+          "name": "string",
+          "resource_label": "string",
+          "scale_in_cooldown": "number",
+          "scale_out_cooldown": "number",
+          "target_value": "number",
+          "type": "string"
+        }
+      ],
+      "scheduled_actions": [
+        {
+          "max_capacity": {
+            "$null": "number"
+          },
+          "min_capacity": {
+            "$null": "number"
+          },
+          "name": "string",
+          "schedule": "string",
+          "timezone": "string"
+        }
+      ]
+    },
+    "target_groups": [
+      {
+        "arn": "string",
+        "name": "string",
+        "resource_label": "string"
+      }
+    ],
+    "task_role_arn": "string",
+    "version": "string"
+  },
   "desiredCount": {
     "auto_scaling": {
       "$null": {
@@ -1126,7 +1224,10 @@
     "running": "number"
   },
   "imageTags": {
+    "container": "string",
     "current": "string",
+    "image": "string",
+    "matched": "number",
     "repository": "string",
     "source": "string",
     "tags": [
@@ -1134,7 +1235,9 @@
         "pushed_at": "time",
         "tag": "string"
       }
-    ]
+    ],
+    "total": "number",
+    "truncated": "boolean"
   },
   "login": {
     "user": {
@@ -1475,6 +1578,13 @@
         "throttled": "boolean"
       }
     ]
+  },
+  "revisionDefinition": {
+    "arn": "string",
+    "definition": "any",
+    "registered_at": "time",
+    "registered_by": "string",
+    "revision": "number"
   },
   "revisions": {
     "deployed_revision": "number",

@@ -94,7 +94,6 @@ test.describe('task definition: read-only Prod viewer', () => {
     await page.goto(paymentsApi('task-definition'))
     await expect(page.getByText(/Read only\. You need\s+Edit task definition\s+on\s+Prod\s+to register a new revision\./)).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Task definition JSON' })).not.toBeEditable()
-    await expect(page.getByLabel('Image tag')).toBeDisabled()
     await expect(page.getByRole('button', { name: /^Review and register :\d+$/ })).toBeDisabled()
   })
 })
@@ -103,32 +102,35 @@ test.describe('task definition: registering', () => {
   test.describe('dana on staging api (Deployer)', () => {
     test.use(asUser('dana'))
 
-    test('registers :22 from quick edit, declines the deploy prompt and sees the pending banner', async ({ page }) => {
+    test('registers a revision from the JSON editor only, then the pending banner opens it in the Deploy tab', async ({ page }) => {
       await page.goto(stagingApi('task-definition'))
       const revisionsBefore = await revisionRowCount(page)
 
-      // The seeded ECR repository for staging `api` has tags, so quick edit renders a select (not a free-text input).
-      const imageTag = page.getByRole('combobox', { name: 'Image tag' })
-      const labels = await imageTag.getByRole('option').allTextContents()
-      const other = labels.find((label) => !label.includes('deployed'))
-      expect(other, 'a tag other than the deployed one').toBeDefined()
-      await imageTag.selectOption({ label: other })
-      await expect(imageTag).not.toHaveValue('1.19.0-rc.2')
+      // Change the main container's environment (deploy.spec may have moved the image tags, so do not depend on them).
+      await editDefinitionJson(page, (json) => json.replace('"NODE_ENV"', '"NODE_ENV_REGISTERED"'))
       await page.getByRole('button', { name: /^Review and register :\d+$/ }).click()
       const review = page.getByRole('dialog')
-      await expect(review.getByText('Register api:22?')).toBeVisible()
-      await review.getByRole('button', { name: 'Register revision :22' }).click()
-      const prompt = page.getByRole('dialog')
-      await expect(prompt.getByText('Revision :22 is registered. Deploy it now?')).toBeVisible()
-      await prompt.getByRole('button', { name: 'Not now' }).click()
+      const register = review.getByRole('button', { name: /^Register revision :\d+$/ })
+      const revision = Number(/:(\d+)$/.exec((await register.textContent()) ?? '')?.[1])
+      expect(revision).toBeGreaterThan(21)
+      await register.click()
+
+      // Registering only registers: the JSON editor never offers a deploy, it points to the Deploy tab.
+      await expect(page.getByText(`api:${revision} is registered. Deploy it from the Deploy tab when you are ready.`)).toBeVisible()
       await expect(page.getByRole('dialog')).toHaveCount(0)
 
-      // The service header offers to deploy the registered revision.
-      await expect(page.getByRole('button', { name: 'Deploy :22' })).toBeVisible()
-      const row = page.getByRole('row').filter({ hasText: ':22' })
+      // The service header offers to deploy the registered revision, and the revisions table lists it as not deployed.
+      await expect(page.getByRole('button', { name: `Deploy :${revision}` }).first()).toBeVisible()
+      const row = page.getByRole('row').filter({ hasText: `:${revision}` })
       await expect(row).toContainText('Not deployed')
       await expect(row).toContainText('dana')
       await expect(page.getByRole('row')).toHaveCount(revisionsBefore + 1)
+
+      // The banner's button opens the Deploy tab with that revision loaded and a deployed→N review.
+      await page.getByRole('button', { name: `Deploy :${revision}` }).first().click()
+      await expect(page).toHaveURL(new RegExp(`/deploy\\?revision=${revision}$`))
+      await expect(page.getByText(`:${revision} is loaded from the revisions list`)).toBeVisible()
+      await expect(page.getByRole('region', { name: 'Pending changes' }).getByText('1 change')).toBeVisible()
     })
   })
 
