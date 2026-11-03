@@ -1,4 +1,5 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { renderApp } from '../../../test/renderApp'
@@ -23,5 +24,18 @@ describe('DeployTab', () => {
     expect(scaling.getByText('cpu-target-60')).toBeInTheDocument()
     expect(scaling.getByText('business-hours')).toBeInTheDocument()
     expect(screen.queryByText(/coming soon|later phase/i)).not.toBeInTheDocument()
+  })
+
+  it('editing the containers marks the definition changed; reverting the edit clears it', async () => {
+    const user = userEvent.setup()
+    const { container } = renderApp(`/services/${SERVICE_PAYMENTS.id}/deploy`)
+    const grid = () => container.querySelector('[data-definition-changed]')!
+
+    const containers = within(await screen.findByRole('region', { name: 'Containers' }))
+    await waitFor(() => expect(grid()).toHaveAttribute('data-definition-changed', 'false'))
+    await user.click(await containers.findByRole('button', { name: 'Add variable' }))
+    expect(grid()).toHaveAttribute('data-definition-changed', 'true')
+    await user.click(containers.getByRole('button', { name: 'Remove variable 2' }))
+    expect(grid()).toHaveAttribute('data-definition-changed', 'false')
   })
 })

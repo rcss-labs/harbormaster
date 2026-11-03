@@ -1,13 +1,12 @@
 // Deploy tab: live service settings, a registered revision's definition, and the change-set write.
 // Types mirror docs/deploy_tab/PLAN.md section 2 field for field; the Go DTOs arrive in T8.
 //
-// Note for T2: image-tags search (container/q/limit params and the new response fields) lives with the
-// ImageTagsResponse type in types.ts and useImageTags in change.ts. It is deliberately not changed here.
+// The image-tags response type lives in types.ts; useContainerImageTags below is the picker's per-container, searchable read.
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import { refetchWhileSettling } from './change'
-import type { ControllerRefDTO } from './types'
+import type { ControllerRefDTO, ImageTagsResponse } from './types'
 
 export interface ChangeCanDTO {
   edit: boolean
@@ -166,5 +165,29 @@ export function useChangeSet(serviceId: string) {
         void queryClient.invalidateQueries({ queryKey: ['service', serviceId, 'scaling'] })
         await queryClient.invalidateQueries({ queryKey: ['service', serviceId] })
       }),
+  })
+}
+
+/** Tags shown when the search box is empty: the newest ones. */
+export const IMAGE_TAG_PAGE = 10
+/** Tags listed while searching; `matched` in the response still counts all of them. */
+export const IMAGE_TAG_SEARCH_PAGE = 30
+
+/**
+ * Image tags of one container, newest first; `q` searches all tags of the repository on the server.
+ * The previous result stays on screen while the next search loads, so the list does not flash empty.
+ */
+export function useContainerImageTags(serviceId: string, container: string, q: string) {
+  const search = q.trim()
+  return useQuery({
+    queryKey: ['service', serviceId, 'image-tags', container, search],
+    queryFn: () => {
+      const params = new URLSearchParams({ container, limit: String(search ? IMAGE_TAG_SEARCH_PAGE : IMAGE_TAG_PAGE) })
+      if (search) params.set('q', search)
+      return api.get<ImageTagsResponse>(`/api/services/${serviceId}/image-tags?${params.toString()}`)
+    },
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    enabled: container !== '',
   })
 }

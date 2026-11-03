@@ -14,7 +14,7 @@ import { QuickEdit, isTagInvalid } from './QuickEdit'
 import { Panel } from '../../../components/Panel'
 import { ReviewDialog } from './ReviewDialog'
 import { RevisionsTable } from './RevisionsTable'
-import { mainImageTag, nextFargateMemory, type Definition } from './mainContainer'
+import { mainImageTag, oomMemoryHint, type Definition } from './mainContainer'
 import styles from './taskDefinition.module.css'
 
 interface Draft {
@@ -99,14 +99,12 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
     setDraft(trimEnd(next) === initialText ? null : { text: next, baseRevision: draft?.baseRevision ?? data.deployed_revision })
   const predictedRevision = Math.max(data.deployed_revision, ...(revisions.data?.items.map((item) => item.revision) ?? [])) + 1
 
-  const oomHint = (() => {
-    const deployedMemory = Number(data.definition.memory)
-    const draftMemory = Number(definition?.memory ?? deployedMemory)
-    const hit = tasks.data?.items.some((task) => task.status === 'STOPPED' && task.stopped_reason.includes('OutOfMemoryError'))
-    if (!hit || !Number.isFinite(deployedMemory) || draftMemory > deployedMemory) return undefined
-    const suggested = nextFargateMemory(String(definition?.cpu ?? data.definition.cpu), deployedMemory * 2)
-    return suggested && suggested > deployedMemory ? { memory: String(deployedMemory), suggested: String(suggested) } : undefined
-  })()
+  const oomHint = oomMemoryHint({
+    stoppedForOom: tasks.data?.items.some((task) => task.status === 'STOPPED' && task.stopped_reason.includes('OutOfMemoryError')) ?? false,
+    deployedMemory: data.definition.memory,
+    draftMemory: definition?.memory,
+    draftCpu: definition?.cpu ?? data.definition.cpu,
+  })
 
   const closeReview = () => {
     setReviewing(false)
