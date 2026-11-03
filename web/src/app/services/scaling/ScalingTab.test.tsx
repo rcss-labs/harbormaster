@@ -34,6 +34,23 @@ const definitionFor = (label: string) =>
   screen.getByText((_, element) => element?.tagName === 'DT' && element.textContent === label).nextElementSibling as HTMLElement
 
 describe('ScalingTab', () => {
+  it('links to the Deploy tab when the user can operate', async () => {
+    mockDesiredCount()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+    const link = await screen.findByRole('link', { name: 'Edit in Deploy →' })
+    expect(link).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/deploy`)
+  })
+
+  it('hides the Edit in Deploy link without Operate', async () => {
+    mockDesiredCount()
+    server.use(
+      http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, can: { ...SERVICE_PAYMENTS.can, operate: false } })),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+    await screen.findByText('Auto scaling')
+    expect(screen.queryByRole('link', { name: 'Edit in Deploy →' })).not.toBeInTheDocument()
+  })
+
   it('renders min, max, policy and scheduled actions', async () => {
     mockDesiredCount()
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)

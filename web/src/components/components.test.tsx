@@ -56,6 +56,21 @@ describe('shared components', () => {
     expect(screen.getByRole('link', { name: 'Operations' })).toHaveClass('active')
   })
 
+  it('Tabs renders a bold label only for items marked bold', () => {
+    renderWithProviders(
+      <Tabs
+        active="ops"
+        hrefFor={(key) => `/x/${key}`}
+        items={[
+          { key: 'ops', label: 'Operations' },
+          { key: 'deploy', label: 'Deploy', bold: true },
+        ]}
+      />,
+    )
+    expect(screen.getByRole('link', { name: 'Deploy' }).querySelector('strong')).toHaveTextContent('Deploy')
+    expect(screen.getByRole('link', { name: 'Operations' }).querySelector('strong')).toBeNull()
+  })
+
   it('Dialog closes on Escape and calls action', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()

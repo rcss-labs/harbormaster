@@ -47,6 +47,11 @@ import type {
   UsersDTO,
 } from '../api/types'
 import type {
+  ChangeSetResponse,
+  DeploySettingsResponse,
+  RevisionDefinitionResponse,
+} from '../api/deploy'
+import type {
   AnalyticsCapacity,
   AnalyticsDelivery,
   AnalyticsOperations,
@@ -1229,6 +1234,94 @@ export const TASK_DEFINITION_EDITABLE: TaskDefinitionResponse = {
       { name: 'payments-api', image: 'payments-api:1.18.2', essential: true, environment: [{ name: 'LOG_LEVEL', value: 'info' }] },
     ],
   },
+}
+
+// ---- Deploy tab (docs/deploy_tab/PLAN.md section 2) ----
+export const DEPLOY_SETTINGS_PAYMENTS: DeploySettingsResponse = {
+  version: 'v-3f9a1c',
+  deployed_revision: 42,
+  family: 'payments-api',
+  controller: { type: 'ECS', supported: true, name: '' },
+  desired_count: 3,
+  running_count: 3,
+  max_desired: 50,
+  enable_execute_command: true,
+  task_role_arn: `arn:aws:iam::${ACCOUNT_HOMELAB.account_id}:role/payments-api-task`,
+  deployment_configuration: { circuit_breaker: { enable: true, rollback: true }, minimum_healthy_percent: 100, maximum_percent: 200 },
+  health_check_grace_period_seconds: 60,
+  has_load_balancer: true,
+  target_groups: [
+    {
+      arn: `arn:aws:elasticloadbalancing:us-east-1:${ACCOUNT_HOMELAB.account_id}:targetgroup/payments-api/0123456789abcdef`,
+      name: 'payments-api',
+      resource_label: 'app/edge/50dc6c495c0c9188/targetgroup/payments-api/0123456789abcdef',
+    },
+  ],
+  scaling: {
+    has_target: true,
+    min: 2,
+    max: 8,
+    policies: [
+      {
+        name: 'cpu-target-60',
+        type: 'TargetTrackingScaling',
+        metric: 'cpu',
+        metric_raw: 'ECSServiceAverageCPUUtilization',
+        target_value: 60,
+        scale_in_cooldown: 300,
+        scale_out_cooldown: 60,
+        disable_scale_in: false,
+        resource_label: '',
+        editable: true,
+      },
+    ],
+    scheduled_actions: [{ name: 'business-hours', schedule: 'cron(0 7 * * ? *)', timezone: 'Asia/Jerusalem', min_capacity: 3, max_capacity: null }],
+  },
+  can: { edit: true, deploy: true, operate: true, admin: false },
+}
+
+export const REVISION_DEFINITION_PAYMENTS_41: RevisionDefinitionResponse = {
+  revision: 41,
+  arn: `arn:aws:ecs:us-east-1:${ACCOUNT_HOMELAB.account_id}:task-definition/payments-api:41`,
+  definition: {
+    family: 'payments-api',
+    cpu: '512',
+    memory: '1024',
+    containerDefinitions: [{ name: 'payments-api', image: 'payments-api:1.18.1', essential: true }],
+  },
+  registered_at: FIXTURE_NOW,
+  registered_by: 'terraform',
+}
+
+export const CHANGESET_APPLIED: ChangeSetResponse = {
+  status: 'applied',
+  steps: [
+    { name: 'register', status: 'done', message: 'Registered payments-api:43.' },
+    { name: 'service', status: 'done', message: 'Service updated.' },
+    { name: 'scaling', status: 'done', message: 'Scaling updated.' },
+  ],
+  registered_revision: 43,
+  deployment_id: 'ecs-svc/1234567890123456789',
+  from_revision: 42,
+  to_revision: 43,
+  kind: 'deploy',
+  warning: null,
+}
+
+/** The service step failed after the revision was registered: a retry sends `{revision: 43}`, not a definition. */
+export const CHANGESET_PARTIAL: ChangeSetResponse = {
+  status: 'partial',
+  steps: [
+    { name: 'register', status: 'done', message: 'Registered payments-api:43.' },
+    { name: 'service', status: 'failed', message: 'ECS rejected the update: InvalidParameterException.' },
+    { name: 'scaling', status: 'skipped', message: 'Skipped because the service step failed.' },
+  ],
+  registered_revision: 43,
+  deployment_id: '',
+  from_revision: null,
+  to_revision: null,
+  kind: 'deploy',
+  warning: null,
 }
 
 // ---- Settings (Task 13) ----

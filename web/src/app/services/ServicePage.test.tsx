@@ -14,7 +14,42 @@ const withoutTerminal = () =>
 const tabLink = (name: string | RegExp) =>
   screen.getAllByRole('link', { name }).find((link) => link.getAttribute('href')?.startsWith('/services/')) as HTMLElement
 
+const withCan = (can: Partial<typeof SERVICE_PAYMENTS.can>) =>
+  http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, can: { ...SERVICE_PAYMENTS.can, ...can } }))
+const viewerOnly = { logs: false, operate: false, deploy: false, edit: false, terminal: false }
+
 describe('ServicePage', () => {
+  it('Deploy tab is bold and unlocked for Operate-only', async () => {
+    server.use(withCan({ ...viewerOnly, operate: true }))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    const deploy = tabLink(/Deploy/)
+    expect(deploy.querySelector('strong')).toHaveTextContent('Deploy')
+    expect(deploy).not.toHaveAttribute('title')
+    expect(deploy).not.toHaveTextContent('⊘')
+    expect(tabLink('Overview').querySelector('strong')).toBeNull()
+    expect(tabLink(/Task definition/).querySelector('strong')).toBeNull()
+  })
+
+  it('Deploy tab unlocked for Edit-only', async () => {
+    server.use(withCan({ ...viewerOnly, edit: true }))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    expect(tabLink(/Deploy/)).not.toHaveAttribute('title')
+    expect(tabLink(/Deploy/)).not.toHaveTextContent('⊘')
+  })
+
+  it('Deploy tab locked for Viewer', async () => {
+    server.use(withCan(viewerOnly))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/deploy`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    const deploy = tabLink(/Deploy/)
+    expect(deploy).toHaveTextContent('⊘')
+    expect(deploy).toHaveAttribute('title', `You need Deploy on ${SERVICE_PAYMENTS.tag.name}`)
+    expect(await screen.findByText(/to use this/)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Containers' })).not.toBeInTheDocument()
+  })
+
   it('renders header, tabs and locked Terminal tab for oncall-less user', async () => {
     server.use(withoutTerminal())
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)

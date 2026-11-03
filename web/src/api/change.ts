@@ -43,6 +43,8 @@ export interface RegisterResult {
 
 export interface DeployBody {
   revision: number
+  /** Skips the rollout-running gate for a rollback (the progress panel's one-click rollback). */
+  interrupt?: boolean
 }
 
 /** 202 from POST /api/services/{id}/deploy. */
@@ -132,7 +134,7 @@ const SETTLE_STEP_MS = 2_000
 const SETTLE_WINDOW_MS = 10_000
 
 /** Runs refetch now and then every SETTLE_STEP_MS until SETTLE_WINDOW_MS has passed. Returns the immediate refetch. */
-function refetchWhileSettling(refetch: () => Promise<void>): Promise<void> {
+export function refetchWhileSettling(refetch: () => Promise<void>): Promise<void> {
   for (let elapsed = SETTLE_STEP_MS; elapsed <= SETTLE_WINDOW_MS; elapsed += SETTLE_STEP_MS) {
     setTimeout(() => void refetch(), elapsed)
   }

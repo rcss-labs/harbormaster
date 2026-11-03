@@ -8,6 +8,8 @@ export interface TabItem {
   /** Set when the user lacks the permission: shows a lock and explains why. */
   locked?: { action: string; tag: string }
   badge?: ReactNode
+  /** Renders the label in <strong>. */
+  bold?: boolean
 }
 
 interface TabsProps {
@@ -28,7 +30,7 @@ export function Tabs({ items, active, hrefFor }: TabsProps) {
             className={className}
             title={item.locked ? `You need ${item.locked.action} on ${item.locked.tag}` : undefined}
           >
-            {item.label}
+            {item.bold ? <strong>{item.label}</strong> : item.label}
             {item.locked && ' ⊘'}
             {item.badge !== undefined && <span className={styles.badge}>{item.badge}</span>}
           </Link>
