@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ACCOUNT_STAGING, CLUSTERS, TAG_STAGING } from '../../test/fixtures'
+import { ACCOUNT_STAGING, CLUSTERS, ME_ADMIN, TAG_STAGING } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
@@ -41,14 +41,12 @@ describe('Clusters', () => {
     expect(screen.queryByRole('button', { name: 'Cards' })).not.toBeInTheDocument()
   })
 
-  it('shows environment and status filters with counts', async () => {
+  it('shows tag and status filters with counts', async () => {
     renderApp('/clusters')
     await screen.findByRole('radio', { name: 'All 6' })
-    const env = screen.getByRole('radiogroup', { name: 'Environment' })
+    const env = screen.getByRole('radiogroup', { name: 'Tag' })
     expect(within(env).getByRole('radio', { name: 'All 6' })).toBeChecked()
-    expect(within(env).getByRole('radio', { name: 'Prod 1' })).toBeInTheDocument()
-    expect(within(env).getByRole('radio', { name: 'Staging 1' })).toBeInTheDocument()
-    expect(within(env).getByRole('radio', { name: 'Dev 4' })).toBeInTheDocument()
+    expect(within(env).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All 6', 'Dev 4', 'Staging 1', 'Prod 1'])
     const status = screen.getByRole('radiogroup', { name: 'Status' })
     expect(within(status).getByRole('radio', { name: 'Any status 6' })).toBeChecked()
     expect(within(status).getByRole('radio', { name: 'Problems 2' })).toBeInTheDocument()
@@ -56,14 +54,14 @@ describe('Clusters', () => {
     expect(within(status).getByRole('radio', { name: 'Healthy 3' })).toBeInTheDocument()
   })
 
-  it('environment and status segments narrow the table and live in the URL', async () => {
+  it('tag and status segments narrow the table and live in the URL', async () => {
     const user = userEvent.setup()
     renderApp('/clusters')
     await screen.findByRole('radio', { name: 'Dev 4' })
 
     await user.click(screen.getByRole('radio', { name: 'Dev 4' }))
     await waitFor(() => expect(shownNames()).toHaveLength(4))
-    expect(screen.getByTestId('search').textContent).toContain('env=dev')
+    expect(screen.getByTestId('search').textContent).toContain('env=1')
 
     await user.click(screen.getByRole('radio', { name: 'Problems 2' }))
     await waitFor(() => expect(shownNames()).toEqual(['background-jobs', 'eu-apps']))
@@ -85,12 +83,50 @@ describe('Clusters', () => {
   })
 
   it('restores every filter, the sort and the page from the URL', async () => {
-    renderApp('/clusters?env=dev&status=healthy&q=c&sort=name:desc')
+    renderApp('/clusters?env=1&status=healthy&q=c&sort=name:desc')
     await waitFor(() => expect(shownNames()).toEqual(['edge-proxy', 'ci-tools']))
     expect(screen.getByRole('radio', { name: /^Dev/ })).toBeChecked()
     expect(screen.getByRole('radio', { name: /^Healthy/ })).toBeChecked()
     expect(screen.getByRole('searchbox', { name: 'Filter clusters' })).toHaveValue('c')
     expect(screen.getByRole('columnheader', { name: /Cluster/ })).toHaveAttribute('aria-sort', 'descending')
+  })
+
+  it('accepts the legacy ?env=prod name and ignores one that is not a visible tag', async () => {
+    renderApp('/clusters?env=prod')
+    await waitFor(() => expect(shownNames()).toEqual(['core-services']))
+    expect(screen.getByRole('radio', { name: /^Prod/ })).toBeChecked()
+  })
+
+  it('offers a custom tag, filters by it, and shows no Prod, Staging or Dev when they are not configured', async () => {
+    const user = userEvent.setup()
+    const qa = { id: 9, name: 'QA', color: 'neutral' as const, inherited: false }
+    const items = CLUSTERS.items.map((c, i) => (i < 2 ? { ...c, tag: qa } : c))
+    server.use(
+      http.get('/api/clusters', () => HttpResponse.json({ ...CLUSTERS, items })),
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, tags: [{ id: 9, name: 'QA', color: 'neutral', builtin: false, services_in_effect: 0 }] })),
+    )
+    renderApp('/clusters?env=prod')
+    await screen.findByRole('radio', { name: 'QA 2' })
+    const group = screen.getByRole('radiogroup', { name: 'Tag' })
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['All 6', 'QA 2'])
+    expect(within(group).getByRole('radio', { name: 'All 6' })).toBeChecked()
+    expect(screen.queryByRole('radio', { name: /^(Prod|Staging|Dev)/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('radio', { name: 'QA 2' }))
+    await waitFor(() => expect(shownNames()).toHaveLength(2))
+    expect(screen.getByTestId('search').textContent).toContain('env=9')
+  })
+
+  it('uses a select instead of segments when there are many tags', async () => {
+    const user = userEvent.setup()
+    const tags = Array.from({ length: 7 }, (_, i) => ({ id: i + 1, name: `T${i + 1}`, color: 'neutral' as const, builtin: false, services_in_effect: 0 }))
+    server.use(http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, tags })))
+    renderApp('/clusters')
+    const select = await screen.findByRole('combobox', { name: 'Tag' })
+    expect(within(select).getAllByRole('option')).toHaveLength(8)
+    await within(select).findByRole('option', { name: 'T1 4' })
+    await user.selectOptions(select, 'T1 4')
+    await waitFor(() => expect(shownNames()).toHaveLength(4))
   })
 
   it('accepts the old status values from earlier links', async () => {

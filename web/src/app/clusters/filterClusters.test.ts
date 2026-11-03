@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { CLUSTERS } from '../../test/fixtures'
-import { clusterCounts, clusterEnv, clusterSeverity, filterClusters, type ClusterPageFilters } from './filterClusters'
+import { TAG_DEV, TAG_PROD, TAG_STAGING } from '../../test/fixtures'
+import { clusterCounts, clusterSeverity, filterClusters, resolveTagFilter, type ClusterPageFilters } from './filterClusters'
 
-const base: ClusterPageFilters = { env: 'all', status: 'any', q: '' }
+const QA = { id: 9, name: 'QA' }
+const VISIBLE = [TAG_DEV, TAG_STAGING, TAG_PROD, QA]
+
+const base: ClusterPageFilters = { tag: 'all', status: 'any', q: '' }
 const names = (f: Partial<ClusterPageFilters>) => filterClusters(CLUSTERS.items, { ...base, ...f }).map((c) => c.name)
 
 describe('filterClusters', () => {
-  it('derives the environment from the cluster tag name', () => {
-    expect(names({ env: 'prod' })).toEqual(['core-services'])
-    expect(names({ env: 'staging' })).toEqual(['staging-web'])
-    expect(names({ env: 'dev' })).toHaveLength(4)
+  it('filters by the cluster tag id', () => {
+    expect(names({ tag: String(TAG_PROD.id) })).toEqual(['core-services'])
+    expect(names({ tag: String(TAG_STAGING.id) })).toEqual(['staging-web'])
+    expect(names({ tag: String(TAG_DEV.id) })).toHaveLength(4)
+    expect(names({ tag: String(QA.id) })).toEqual([])
   })
   it('groups degraded and needs-attention clusters as problems', () => {
     expect(names({ status: 'problems' }).sort()).toEqual(['background-jobs', 'eu-apps'])
@@ -22,7 +27,7 @@ describe('filterClusters', () => {
     expect(names({ q: 'eu-west-1' })).toEqual(['eu-apps'])
   })
   it('combines facets and treats a blank query as no filter', () => {
-    expect(names({ env: 'dev', status: 'problems' }).sort()).toEqual(['background-jobs', 'eu-apps'])
+    expect(names({ tag: String(TAG_DEV.id), status: 'problems' }).sort()).toEqual(['background-jobs', 'eu-apps'])
     expect(names({ q: '  ' })).toHaveLength(6)
   })
   it('ranks needs attention worst', () => {
@@ -30,13 +35,32 @@ describe('filterClusters', () => {
     expect(clusterSeverity('degraded')).toBeGreaterThan(clusterSeverity('deploying'))
     expect(clusterSeverity('deploying')).toBeGreaterThan(clusterSeverity('healthy'))
   })
-  it('returns no environment for custom tags', () => {
-    expect(clusterEnv({ ...CLUSTERS.items[0], tag: { ...CLUSTERS.items[0].tag, name: 'payments' } })).toBeNull()
-  })
-  it('counts every environment and status over the given clusters', () => {
-    expect(clusterCounts(CLUSTERS.items)).toEqual({
-      env: { all: 6, prod: 1, staging: 1, dev: 4 },
+  it('counts every visible tag, including empty and custom ones, and every status', () => {
+    expect(clusterCounts(CLUSTERS.items, VISIBLE)).toEqual({
+      tag: { all: 6, '1': 4, '2': 1, '3': 1, '9': 0 },
       status: { any: 6, problems: 2, deploying: 1, healthy: 3 },
     })
+  })
+  it('counts nothing for a tag the user cannot see', () => {
+    expect(clusterCounts(CLUSTERS.items, [QA]).tag).toEqual({ all: 6, '9': 0 })
+  })
+})
+
+describe('resolveTagFilter', () => {
+  it('accepts the id of a visible tag, including a custom one', () => {
+    expect(resolveTagFilter('2', VISIBLE)).toBe('2')
+    expect(resolveTagFilter('9', VISIBLE)).toBe('9')
+  })
+  it('maps the legacy prod/staging/dev values to the visible tag with that name, ignoring case', () => {
+    expect(resolveTagFilter('prod', VISIBLE)).toBe('3')
+    expect(resolveTagFilter('staging', VISIBLE)).toBe('2')
+    expect(resolveTagFilter('dev', VISIBLE)).toBe('1')
+  })
+  it('falls back to all for a legacy name that is not visible, an unknown id, or nothing', () => {
+    expect(resolveTagFilter('prod', [TAG_DEV, QA])).toBe('all')
+    expect(resolveTagFilter('77', VISIBLE)).toBe('all')
+    expect(resolveTagFilter('bogus', VISIBLE)).toBe('all')
+    expect(resolveTagFilter(null, VISIBLE)).toBe('all')
+    expect(resolveTagFilter('all', VISIBLE)).toBe('all')
   })
 })

@@ -161,6 +161,21 @@ func TestStopReasonGroup_Table(t *testing.T) {
 			want: "Container exited with an error",
 		},
 		{
+			name: "spot interruption",
+			task: model.Task{StopCode: "SpotInterruption", StoppedReason: "Your Spot Task was interrupted."},
+			want: "Spot interruption",
+		},
+		{
+			name: "termination notice",
+			task: model.Task{StopCode: "TerminationNotice"},
+			want: "Spot interruption",
+		},
+		{
+			name: "oom wins over spot",
+			task: model.Task{StopCode: "SpotInterruption", Containers: []model.Container{{Name: "app", ExitCode: exitCode(137)}}},
+			want: "Out of memory (exit 137)",
+		},
+		{
 			name: "replaced by a deployment",
 			task: model.Task{StoppedReason: "Scaling activity initiated by (deployment ecs-svc/1234)"},
 			want: "Replaced by a deployment",
@@ -184,6 +199,7 @@ func TestStopReasonGroups_StableOrder(t *testing.T) {
 		"Scaled in",
 		"Failed to start",
 		"Container exited with an error",
+		"Spot interruption",
 		"Replaced by a deployment",
 	}
 	if len(StopReasonGroups) != len(want) {

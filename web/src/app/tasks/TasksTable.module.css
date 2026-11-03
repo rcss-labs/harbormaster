@@ -19,3 +19,4 @@
 .btn:hover { background: var(--hover-strong); color: var(--text); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .danger { color: var(--danger); }
+.statusCell { display: inline-flex; align-items: center; gap: 8px; }

@@ -4,6 +4,7 @@
 .warn { color: var(--warning); background: var(--warning-soft); }
 .bad { color: var(--danger); background: var(--danger-soft); }
 .info { color: var(--info); background: var(--info-soft); }
+.expected { color: var(--expected); background: var(--expected-soft); }
 .mute { color: var(--muted); background: var(--muted-soft); }
 .info::before { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.25; } }

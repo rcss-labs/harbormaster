@@ -157,8 +157,8 @@ func TestAnalyticsReliability_KPIsSeriesAndTable(t *testing.T) {
 		t.Errorf("row = %+v, want availability 0, 5 minutes below and a tag", row)
 	}
 	// Quiet stop-reason buckets are zero, never null; every group has a line and expected ones are flagged.
-	if len(got.StopsByReason.Series) != 7 {
-		t.Fatalf("stops_by_reason has %d lines, want the 7 groups", len(got.StopsByReason.Series))
+	if len(got.StopsByReason.Series) != 8 {
+		t.Fatalf("stops_by_reason has %d lines, want the 8 groups", len(got.StopsByReason.Series))
 	}
 	for _, line := range got.StopsByReason.Series {
 		for _, v := range line.Values {

@@ -14,6 +14,7 @@ const (
 	StopReasonScaledIn           = "Scaled in"
 	StopReasonFailedToStart      = "Failed to start"
 	StopReasonContainerExited    = "Container exited with an error"
+	StopReasonSpotInterruption   = "Spot interruption"
 	StopReasonDeploymentReplaced = "Replaced by a deployment"
 )
 
@@ -25,6 +26,7 @@ var StopReasonGroups = []string{
 	StopReasonScaledIn,
 	StopReasonFailedToStart,
 	StopReasonContainerExited,
+	StopReasonSpotInterruption,
 	StopReasonDeploymentReplaced,
 }
 
@@ -44,6 +46,8 @@ func StopReasonGroup(task model.Task) string {
 		return StopReasonFailedToStart
 	case task.StopCode == "EssentialContainerExited" && hasNonZeroExit(task):
 		return StopReasonContainerExited
+	case task.StopCode == "SpotInterruption" || task.StopCode == "TerminationNotice":
+		return StopReasonSpotInterruption
 	default:
 		return StopReasonDeploymentReplaced
 	}

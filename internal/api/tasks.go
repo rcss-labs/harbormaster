@@ -172,6 +172,7 @@ func taskDTO(sc scope, view *estateView, accountNames map[string]string, row sto
 		PrivateIP: row.PrivateIP, SubnetID: row.SubnetID, AZ: row.AvailabilityZone, Capacity: capacity,
 		CPU: row.CPU, Memory: row.Memory, StartedAt: row.StartedAt, StoppedAt: row.StoppedAt,
 		StopCode: row.StopCode, StoppedReason: row.StoppedReason, StopReasonGroup: row.StopReasonGroup,
+		StopKind: row.StopKind, StopCause: row.StopCause,
 		ExecEnabled: taskExecEnabled(row) && execAgentRunning(row.Task),
 		Can:         TaskCanDTO{Operate: authz.Can(sc.Subject, authz.Operate, tag), Terminal: authz.Can(sc.Subject, authz.Terminal, tag)},
 	}
@@ -193,7 +194,7 @@ func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQu
 	out := TaskSummaryDTO{
 		ByStatus: TaskStatusSummaryDTO{
 			RunningHealthy: summary.RunningHealthy, RunningUnhealthy: summary.RunningUnhealthy,
-			StoppedError: summary.StoppedError, StoppedNormal: summary.StoppedNormal,
+			StoppedError: summary.StoppedError, StoppedNormal: summary.StoppedNormal, StoppedExpected: summary.StoppedExpected,
 		},
 		ByAZ: []AZCountDTO{}, ByCluster: []ClusterCapacityDTO{}, StopReasons: []StopReasonDTO{},
 	}

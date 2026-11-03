@@ -10,4 +10,5 @@
 .stripe { border-left: 3px solid transparent; }
 .stripe.bad { border-left-color: var(--danger); }
 .stripe.warn { border-left-color: var(--warning); }
+.stripe.expected { border-left-color: var(--expected); }
 .stripe.info { border-left-color: var(--info); }
