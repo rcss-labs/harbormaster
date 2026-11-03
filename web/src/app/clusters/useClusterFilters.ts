@@ -2,9 +2,10 @@ import { useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import type { SortState } from '../../components/DataTable'
 import { useFilters } from '../shell/useFilters'
-import type { ClusterEnv, ClusterPageFilters, ClusterStatusFilter } from './filterClusters'
+import { useAuth } from '../auth/AuthProvider'
+import { visibleTagIds } from '../shell/useFilters'
+import { ALL_TAGS, resolveTagFilter, type ClusterPageFilters, type ClusterStatusFilter, type ClusterTagFilter } from './filterClusters'
 
-export const CLUSTER_ENVS: ClusterEnv[] = ['all', 'prod', 'staging', 'dev']
 export const CLUSTER_STATUS_FILTERS: ClusterStatusFilter[] = ['any', 'problems', 'deploying', 'healthy']
 export const SORT_KEYS = ['name', 'status', 'services', 'tasks', 'cpu', 'mem'] as const
 
@@ -24,19 +25,24 @@ function parseSort(value: string | null): SortState {
   return (SORT_KEYS as readonly string[]).includes(key) && (dir === 'asc' || dir === 'desc') ? { key, dir } : DEFAULT_SORT
 }
 
-/** Environment, status, text, sort and page of the Clusters list, kept in the URL (?env=&status=&q=&sort=key:dir&page=). */
+/** Tag (by id; the param keeps its old name env), status, text, sort and page of the Clusters list, kept in the URL (?env=&status=&q=&sort=key:dir&page=). */
 export function useClusterFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { setAccount, setRegion, setTags } = useFilters()
+  const { me } = useAuth()
   const envParam = searchParams.get('env')
-  const env: ClusterEnv = (CLUSTER_ENVS as string[]).includes(envParam ?? '') ? (envParam as ClusterEnv) : 'all'
+  const tag: ClusterTagFilter = useMemo(() => {
+    if (!me) return ALL_TAGS
+    const visible = new Set(visibleTagIds(me))
+    return resolveTagFilter(envParam, me.tags.filter((t) => visible.has(t.id)))
+  }, [me, envParam])
   const status = parseStatus(searchParams.get('status'))
   const q = searchParams.get('q') ?? ''
   const sortParam = searchParams.get('sort')
   const sort = useMemo(() => parseSort(sortParam), [sortParam])
   const pageNumber = Number(searchParams.get('page'))
   const page = Number.isInteger(pageNumber) && pageNumber > 1 ? pageNumber : 1
-  const filters = useMemo<ClusterPageFilters>(() => ({ env, status, q }), [env, status, q])
+  const filters = useMemo<ClusterPageFilters>(() => ({ tag, status, q }), [tag, status, q])
 
   const update = useCallback(
     (changes: Record<string, string | null>) =>
@@ -55,7 +61,7 @@ export function useClusterFilters() {
   )
 
   // Any change to what is listed returns to the first page.
-  const setEnv = useCallback((value: ClusterEnv) => update({ env: value === 'all' ? null : value, page: null }), [update])
+  const setTag = useCallback((value: ClusterTagFilter) => update({ env: value === ALL_TAGS ? null : value, page: null }), [update])
   const setStatus = useCallback((value: ClusterStatusFilter) => update({ status: value === 'any' ? null : value, page: null }), [update])
   const setQ = useCallback((value: string) => update({ q: value, page: null }), [update])
   const setSort = useCallback(
@@ -78,5 +84,5 @@ export function useClusterFilters() {
     )
   }, [setSearchParams, setAccount, setRegion, setTags])
 
-  return { filters, sort, page, setEnv, setStatus, setQ, setSort, setPage, clearAll }
+  return { filters, sort, page, setTag, setStatus, setQ, setSort, setPage, clearAll }
 }
