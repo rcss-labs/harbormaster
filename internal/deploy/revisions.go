@@ -2,7 +2,10 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -10,6 +13,7 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 const (
@@ -109,6 +113,64 @@ func (s *Service) Revisions(ctx context.Context, key model.ServiceKey) (Revision
 	}
 	sortRevisionsNewestFirst(list.Items)
 	return list, nil
+}
+
+// RevisionDefinition is one revision's register-ready definition with its registration details.
+type RevisionDefinition struct {
+	Revision     int
+	ARN          string
+	Definition   Definition
+	RegisteredAt time.Time
+	RegisteredBy string
+}
+
+// RevisionDefinition returns revision of the service's family. The revision is read from the
+// store, or described when the poller has not stored it. A revision that does not exist, or
+// that belongs to no revision of this family, is store.ErrNotFound.
+func (s *Service) RevisionDefinition(ctx context.Context, key model.ServiceKey, revision int) (RevisionDefinition, error) {
+	if revision <= 0 {
+		return RevisionDefinition{}, store.ErrNotFound
+	}
+	svc, _, err := s.primaryDefinition(ctx, key)
+	if err != nil {
+		return RevisionDefinition{}, err
+	}
+	primary, _ := PrimaryDeployment(svc)
+	primaryARN := aws.ToString(primary.TaskDefinition)
+	if _, _, err := ParseRevisionARN(primaryARN); err != nil {
+		return RevisionDefinition{}, err
+	}
+	// The ARN is built from the PRIMARY family, so a revision of another family cannot be named.
+	arn := fmt.Sprintf("%s:%d", primaryARN[:strings.LastIndex(primaryARN, ":")], revision)
+	ref, err := s.loadTaskDefinition(ctx, key, arn)
+	if err != nil {
+		var awsErr *AWSError
+		if errors.As(err, &awsErr) && awsErr.Code == "ClientException" {
+			// DescribeTaskDefinition answers ClientException for a revision that does not exist.
+			return RevisionDefinition{}, store.ErrNotFound
+		}
+		return RevisionDefinition{}, err
+	}
+	var described ecstypes.TaskDefinition
+	if err := json.Unmarshal(ref.Raw, &described); err != nil {
+		return RevisionDefinition{}, fmt.Errorf("decode task definition %s: %w", arn, err)
+	}
+	definition, err := ToRegisterReady(described)
+	if err != nil {
+		return RevisionDefinition{}, err
+	}
+	registrars, err := s.Store.RevisionRegistrars(ctx, []string{arn})
+	if err != nil {
+		return RevisionDefinition{}, err
+	}
+	registeredBy := registrars[arn]
+	if registeredBy == "" {
+		registeredBy = registrarFallback
+	}
+	return RevisionDefinition{
+		Revision: ref.Revision, ARN: arn, Definition: definition,
+		RegisteredAt: ref.RegisteredAt, RegisteredBy: registeredBy,
+	}, nil
 }
 
 func revisionStatus(revision, primaryRevision, rollingOut int, deployed map[int]bool) string {

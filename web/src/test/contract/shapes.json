@@ -1476,6 +1476,13 @@
       }
     ]
   },
+  "revisionDefinition": {
+    "arn": "string",
+    "definition": "any",
+    "registered_at": "time",
+    "registered_by": "string",
+    "revision": "number"
+  },
   "revisions": {
     "deployed_revision": "number",
     "items": [

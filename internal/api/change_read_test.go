@@ -174,6 +174,41 @@ func TestGetRevisions_Shape(t *testing.T) {
 	}
 }
 
+func TestGetRevisionDefinition_ViewRequired(t *testing.T) {
+	c := viewerOnProd(t)
+	resp := c.get("/api/services/" + paymentsID() + "/revisions/42")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("viewer status %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Revision     int            `json:"revision"`
+		ARN          string         `json:"arn"`
+		Definition   map[string]any `json:"definition"`
+		RegisteredBy string         `json:"registered_by"`
+	}
+	decode(t, resp, &out)
+	if out.Revision != 42 || !strings.HasSuffix(out.ARN, "payments-api:42") || out.Definition["family"] != "payments-api" || out.RegisteredBy == "" {
+		t.Fatalf("revision definition = %+v", out)
+	}
+	if _, has := out.Definition["taskDefinitionArn"]; has {
+		t.Error("definition must be register-ready (no taskDefinitionArn)")
+	}
+
+	missing := c.get("/api/services/" + paymentsID() + "/revisions/999")
+	if missing.StatusCode != http.StatusNotFound {
+		t.Errorf("missing revision status %d, want 404", missing.StatusCode)
+	}
+	missing.Body.Close()
+
+	// omer has no grants on Prod, so the service is invisible to him and the revision with it.
+	_, as := seededForChangeReads(t)
+	hidden := as("omer").get("/api/services/" + paymentsID() + "/revisions/42")
+	if hidden.StatusCode != http.StatusNotFound {
+		t.Errorf("invisible service status %d, want 404", hidden.StatusCode)
+	}
+	hidden.Body.Close()
+}
+
 func TestGetTaskDefinition_ThrottledIs503(t *testing.T) {
 	admin, fk := adminWithFake(t)
 	fk.FailNext("ListTagsForResource", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded"})

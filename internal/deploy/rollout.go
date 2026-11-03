@@ -34,7 +34,9 @@ type Rollout struct {
 
 // gatedService re-reads the service from AWS and refuses controllers Harbormaster cannot
 // deploy and services that are mid-rollout. It returns the PRIMARY revision and ARN.
-func (s *Service) gatedService(ctx context.Context, key model.ServiceKey) (api ECSClient, family string, revision int, arn string, err error) {
+// interruptible reports whether a rollout running on the PRIMARY revision may be replaced;
+// nil refuses every rollout in progress.
+func (s *Service) gatedService(ctx context.Context, key model.ServiceKey, interruptible func(current int) bool) (api ECSClient, family string, revision int, arn string, err error) {
 	api, live, err := s.liveService(ctx, key)
 	if err != nil {
 		return nil, "", 0, "", err
@@ -42,24 +44,31 @@ func (s *Service) gatedService(ctx context.Context, key model.ServiceKey) (api E
 	if controller := Controller(live); !controller.Supported {
 		return nil, "", 0, "", &UnsupportedControllerError{Name: controller.Name}
 	}
-	if RolloutRunning(live) {
-		return nil, "", 0, "", ErrRolloutRunning
-	}
 	primary, ok := PrimaryDeployment(live)
 	if !ok {
 		return nil, "", 0, "", errors.New("service has no primary deployment")
 	}
 	arn = aws.ToString(primary.TaskDefinition)
 	family, revision, err = ParseRevisionARN(arn)
-	return api, family, revision, arn, err
+	if err != nil {
+		return nil, "", 0, "", err
+	}
+	if RolloutRunning(live) && (interruptible == nil || !interruptible(revision)) {
+		return nil, "", 0, "", ErrRolloutRunning
+	}
+	return api, family, revision, arn, nil
 }
 
 // Deploy points the service at revision of its family. An older revision is a rollback.
-func (s *Service) Deploy(ctx context.Context, subj authz.Subject, key model.ServiceKey, revision int) (Rollout, error) {
+// interrupt lets a rollback replace a rollout that is still in progress; a forward deploy
+// is refused while any rollout runs.
+func (s *Service) Deploy(ctx context.Context, subj authz.Subject, key model.ServiceKey, revision int, interrupt bool) (Rollout, error) {
 	if revision <= 0 {
 		return Rollout{}, &ValidationError{Message: "Revision must be a positive number"}
 	}
-	api, family, current, _, err := s.gatedService(ctx, key)
+	api, family, current, _, err := s.gatedService(ctx, key, func(current int) bool {
+		return interrupt && revision < current
+	})
 	if err != nil {
 		return Rollout{}, err
 	}
@@ -82,7 +91,7 @@ func (s *Service) Deploy(ctx context.Context, subj authz.Subject, key model.Serv
 
 // Restart replaces the service's tasks on its current revision (force new deployment).
 func (s *Service) Restart(ctx context.Context, subj authz.Subject, key model.ServiceKey) (Rollout, error) {
-	api, _, current, _, err := s.gatedService(ctx, key)
+	api, _, current, _, err := s.gatedService(ctx, key, nil)
 	if err != nil {
 		return Rollout{}, err
 	}
