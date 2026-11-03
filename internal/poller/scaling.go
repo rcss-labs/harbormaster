@@ -39,15 +39,15 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
-	targets, err := describeScalableTargets(ctx, api)
+	targets, err := describeScalableTargets(ctx, api, "")
 	if err != nil {
 		return err
 	}
-	policies, err := describeScalingPolicies(ctx, api)
+	policies, err := describeScalingPolicies(ctx, api, "")
 	if err != nil {
 		return err
 	}
-	scheduled, err := describeScheduledActions(ctx, api)
+	scheduled, err := describeScheduledActions(ctx, api, "")
 	if err != nil {
 		return err
 	}
@@ -77,9 +77,13 @@ func scalingResourceID(key model.ServiceKey) string {
 	return "service/" + key.Cluster + "/" + key.Service
 }
 
-func describeScalableTargets(ctx context.Context, api awsx.AutoScalingAPI) (map[string]astypes.ScalableTarget, error) {
+// The describe helpers list every service of the account and region, or only resourceID when it is not empty.
+func describeScalableTargets(ctx context.Context, api awsx.AutoScalingAPI, resourceID string) (map[string]astypes.ScalableTarget, error) {
 	targets := map[string]astypes.ScalableTarget{}
 	in := &applicationautoscaling.DescribeScalableTargetsInput{ServiceNamespace: astypes.ServiceNamespaceEcs}
+	if resourceID != "" {
+		in.ResourceIds = []string{resourceID}
+	}
 	for {
 		out, err := api.DescribeScalableTargets(ctx, in)
 		if err != nil {
@@ -95,9 +99,12 @@ func describeScalableTargets(ctx context.Context, api awsx.AutoScalingAPI) (map[
 	}
 }
 
-func describeScalingPolicies(ctx context.Context, api awsx.AutoScalingAPI) (map[string][]model.ScalingPolicy, error) {
+func describeScalingPolicies(ctx context.Context, api awsx.AutoScalingAPI, resourceID string) (map[string][]model.ScalingPolicy, error) {
 	policies := map[string][]model.ScalingPolicy{}
 	in := &applicationautoscaling.DescribeScalingPoliciesInput{ServiceNamespace: astypes.ServiceNamespaceEcs}
+	if resourceID != "" {
+		in.ResourceId = aws.String(resourceID)
+	}
 	for {
 		out, err := api.DescribeScalingPolicies(ctx, in)
 		if err != nil {
@@ -135,9 +142,12 @@ func normalizeScalingPolicy(policy astypes.ScalingPolicy) model.ScalingPolicy {
 	return row
 }
 
-func describeScheduledActions(ctx context.Context, api awsx.AutoScalingAPI) (map[string][]model.ScheduledAction, error) {
+func describeScheduledActions(ctx context.Context, api awsx.AutoScalingAPI, resourceID string) (map[string][]model.ScheduledAction, error) {
 	actions := map[string][]model.ScheduledAction{}
 	in := &applicationautoscaling.DescribeScheduledActionsInput{ServiceNamespace: astypes.ServiceNamespaceEcs}
+	if resourceID != "" {
+		in.ResourceId = aws.String(resourceID)
+	}
 	for {
 		out, err := api.DescribeScheduledActions(ctx, in)
 		if err != nil {
@@ -201,4 +211,40 @@ func describeScalingActivities(ctx context.Context, api awsx.AutoScalingAPI, res
 		activities = append(activities, row)
 	}
 	return activities, nil
+}
+
+// CollectServiceScalingConfig reads one service's scalable target, policies and scheduled actions
+// live, without the activities call.
+func CollectServiceScalingConfig(ctx context.Context, api awsx.AutoScalingAPI, key model.ServiceKey) (model.Scaling, error) {
+	resourceID := scalingResourceID(key)
+	targets, err := describeScalableTargets(ctx, api, resourceID)
+	if err != nil {
+		return model.Scaling{}, err
+	}
+	policies, err := describeScalingPolicies(ctx, api, resourceID)
+	if err != nil {
+		return model.Scaling{}, err
+	}
+	scheduled, err := describeScheduledActions(ctx, api, resourceID)
+	if err != nil {
+		return model.Scaling{}, err
+	}
+	row := model.Scaling{Key: key, Policies: policies[resourceID], Scheduled: scheduled[resourceID], PolledAt: time.Now().UTC()}
+	if target, ok := targets[resourceID]; ok {
+		row.HasTarget = true
+		row.Min = int(aws.ToInt32(target.MinCapacity))
+		row.Max = int(aws.ToInt32(target.MaxCapacity))
+	}
+	return row, nil
+}
+
+// CollectServiceScaling is CollectServiceScalingConfig plus the recent activities of a scaled
+// service: the row the poller would store, for writers that store it right after a change.
+func CollectServiceScaling(ctx context.Context, api awsx.AutoScalingAPI, key model.ServiceKey) (model.Scaling, error) {
+	row, err := CollectServiceScalingConfig(ctx, api, key)
+	if err != nil || !row.HasTarget {
+		return row, err
+	}
+	row.Activities, err = describeScalingActivities(ctx, api, scalingResourceID(key))
+	return row, err
 }

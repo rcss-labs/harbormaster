@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -58,6 +59,14 @@ func (s *Service) Register(ctx context.Context, subj authz.Subject, key model.Se
 	if err != nil {
 		return Registered{}, err
 	}
+	return s.registerPrepared(ctx, subj, key, ecsAPI, input, nil)
+}
+
+// registerPrepared sends a validated register input to AWS and records the result. This is the only
+// place a revision is registered, for both Register and change sets. extraDetails are added to the
+// operation's details (a change set adds its id and reason).
+func (s *Service) registerPrepared(ctx context.Context, subj authz.Subject, key model.ServiceKey, ecsAPI ECSClient,
+	input *ecs.RegisterTaskDefinitionInput, extraDetails map[string]any) (Registered, error) {
 	out, err := ecsAPI.RegisterTaskDefinition(ctx, input)
 	if err != nil {
 		return Registered{}, wrapAWS(err)
@@ -71,7 +80,7 @@ func (s *Service) Register(ctx context.Context, subj authz.Subject, key model.Se
 	td := *out.TaskDefinition
 	s.revisionCache().delete(revisionCacheKey(key, aws.ToString(td.Family)))
 	registered, summaryErr := summarizeRegistered(key, td)
-	recordErr := s.recordRegistered(context.WithoutCancel(ctx), subj, key, td, registered)
+	recordErr := s.recordRegistered(context.WithoutCancel(ctx), subj, key, td, registered, extraDetails)
 	if err := errors.Join(summaryErr, recordErr); err != nil {
 		slog.ErrorContext(ctx, "registered task definition but recording it failed",
 			"task_definition_arn", registered.ARN, "error", err)
@@ -107,9 +116,13 @@ func (s *Service) deployedForRegister(ctx context.Context, key model.ServiceKey,
 }
 
 // recordRegistered stores the new definition, who registered it, and the operation log entry, atomically.
-func (s *Service) recordRegistered(ctx context.Context, subj authz.Subject, key model.ServiceKey, td ecstypes.TaskDefinition, registered Registered) error {
+func (s *Service) recordRegistered(ctx context.Context, subj authz.Subject, key model.ServiceKey, td ecstypes.TaskDefinition, registered Registered, extraDetails map[string]any) error {
 	now := s.now()
 	family := aws.ToString(td.Family)
+	details := map[string]any{"op": "task_definition", "revision": registered.Revision, "task_definition_arn": registered.ARN}
+	for name, value := range extraDetails {
+		details[name] = value
+	}
 	return s.inTx(ctx, func(tx store.Tx) error {
 		if err := tx.UpsertTaskDefinition(ctx, taskDefinitionRef(key, td, now)); err != nil {
 			return err
@@ -122,7 +135,7 @@ func (s *Service) recordRegistered(ctx context.Context, subj authz.Subject, key 
 			ActorUserID: &subj.UserID, Source: "harbormaster",
 			Text: fmt.Sprintf("Registered task definition %s:%d (image %s, %s CPU / %s MiB).",
 				family, registered.Revision, registered.ImageTag, registered.CPU, registered.Memory),
-			Details: map[string]any{"op": "task_definition", "revision": registered.Revision, "task_definition_arn": registered.ARN},
+			Details: details,
 		})
 	})
 }
