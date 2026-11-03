@@ -450,7 +450,7 @@ in Terraform, no empty charts.
 #### Deploy tab
 
 The **Deploy** tab is where a service is changed: containers, task size, service
-settings, auto scaling and deploys. It opens with any of Edit, Deploy or Operate.
+settings, auto scaling and deploys. It opens with any of Edit, Deploy or Operate; otherwise it shows "You need Edit, Deploy or Operate on <tag>".
 Each control is locked by its own permission and names the one it needs:
 
 | Control | Permission |
@@ -483,7 +483,9 @@ replaced.
 - **Auto scaling:** min and max; target-tracking policies on CPU %, memory %, or
   ALB requests per target (needs the service's own target group); cooldowns and
   scale-in disable; scheduled actions with cron, at, or rate schedules and a
-  timezone. Removing the target removes its policies and scheduled actions.
+  timezone. A scheduled action's min and max may lie outside the target's
+  current range, as in AWS (for example max 20 at peak on a 1–4 target).
+  Removing the target removes its policies and scheduled actions.
   Step-scaling policies are shown read-only and can be removed.
 - **Review:** one review for every change. It shows the task definition JSON diff
   against the deployed revision, service settings before → after, and the scaling
@@ -495,9 +497,12 @@ replaced.
   then Application Auto Scaling. The result reports each step as done, failed or
   skipped. A retry sends only the steps that did not finish and never registers
   the revision again.
-- **Stale data is refused before any write:** a changed base revision answers 409
-  with the deployed revision; a changed settings version answers 409 with the
-  fresh settings, and the review reopens with them.
+- **Stale data is refused before any write:** when the change includes a task
+  definition, a changed base revision answers 409 with the deployed revision; a
+  changed settings version answers 409 with the fresh settings, and the review
+  reopens with them. The settings version leaves out the desired count, which
+  auto scaling moves on its own; desired count is last-writer-wins, as in the
+  header's desired-count dialog.
 - **Edit only:** the review registers the revision and deploys nothing.
 - **Progress:** after a deploy, the tab shows the rollout from → to, new and old
   running counts, failed tasks and rollout state. While a rollout runs, each older
@@ -736,7 +741,8 @@ input:
    are ready." The service page's pending-revision banner offers **Deploy :43**,
    which opens the Deploy tab at `?revision=43` (§6.4). The
    review there shows the deployed → :43 diff, and Prod gets a warning banner.
-   Without Deploy: toast "Registered. Someone with Deploy on Prod can roll it out."
+   Registering from the Deploy tab without Deploy permission toasts "Registered
+   :43. Someone with Deploy on Prod can roll it out."
 
 ### 7.3 Deploy, restart, roll back
 
