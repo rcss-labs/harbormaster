@@ -686,3 +686,69 @@ func (h *harness) primaryDesired(t *testing.T, key model.ServiceKey) int {
 	t.Fatalf("no service %v", key)
 	return 0
 }
+
+func TestChangeSet_PartialReturnsFreshSettingsVersionForRetry(t *testing.T) {
+	h := newHarness(t)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(4)}
+	cs.Scaling = &deploy.ScalingChange{PutPolicies: []deploy.PolicyChange{cpuPolicy("cpu-extra")}}
+	h.fake.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
+
+	first, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	if err != nil || first.Status != "partial" {
+		t.Fatalf("first = %+v, err %v", first, err)
+	}
+	if first.SettingsVersion == "" || first.SettingsVersion == cs.BaseVersion {
+		t.Fatalf("SettingsVersion = %q, want the fresh version (old %q)", first.SettingsVersion, cs.BaseVersion)
+	}
+
+	// Retry only the scaling section with the version the partial result handed back.
+	retry := deploy.ChangeSet{BaseRevision: cs.BaseRevision, BaseVersion: first.SettingsVersion, Scaling: cs.Scaling}
+	got, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, retry)
+	if err != nil {
+		t.Fatalf("retry err = %v", err)
+	}
+	if got.Status != "applied" || got.SettingsVersion == "" {
+		t.Fatalf("retry = %+v", got)
+	}
+}
+
+func TestChangeSet_DeploymentConfigurationAndGraceApplied(t *testing.T) {
+	h := newHarness(t)
+	before := h.primary(t, paymentsKey)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.Service = &deploy.ServiceChange{
+		DeploymentConfiguration:       &deploy.DeploymentConfigChange{CircuitBreakerEnable: true, CircuitBreakerRollback: true, MinimumHealthyPercent: 50, MaximumPercent: 150},
+		HealthCheckGracePeriodSeconds: ptr(90),
+	}
+	got, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "applied" || got.Rollout != nil || got.Kind != "" {
+		t.Fatalf("result = %+v rollout %+v", got, got.Rollout)
+	}
+	settings, err := h.svc.DeploySettings(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := settings.DeploymentConfiguration
+	if !config.CircuitBreakerEnable || !config.CircuitBreakerRollback || config.MinimumHealthyPercent != 50 || config.MaximumPercent != 150 ||
+		settings.HealthCheckGracePeriodSeconds == nil || *settings.HealthCheckGracePeriodSeconds != 90 {
+		t.Fatalf("settings = %+v grace %v", config, settings.HealthCheckGracePeriodSeconds)
+	}
+	if after := h.primary(t, paymentsKey); aws.ToString(after.Id) != aws.ToString(before.Id) {
+		t.Fatalf("a new deployment %s started", aws.ToString(after.Id))
+	}
+	ops, err := h.store.ListOperations(t.Context(), paymentsKey, false, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, op := range ops {
+		found = found || op.Details["op"] == "rollout_settings"
+	}
+	if !found {
+		t.Fatalf("no rollout_settings operations line in %+v", ops)
+	}
+}

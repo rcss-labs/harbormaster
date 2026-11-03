@@ -284,6 +284,15 @@ func (r *changeSetRun) execute(ctx context.Context) (ChangeSetResult, error) {
 		r.result.Kind = r.result.Rollout.Kind
 	}
 	r.result.Warning = strings.Join(r.warns, " ")
+	// Applied and partial runs may have changed the settings version; hand back the fresh one so a
+	// retry does not 409 on the old base_version. Best effort: a failed read leaves it empty.
+	if r.wrote {
+		if fresh, err := r.s.DeploySettings(context.WithoutCancel(ctx), r.key); err == nil {
+			r.result.SettingsVersion = fresh.Version
+		} else {
+			slog.WarnContext(ctx, "could not read settings after change set", "service", r.key.Service, "error", err)
+		}
+	}
 	return r.result, nil
 }
 
