@@ -2252,7 +2252,9 @@
         },
         "started_by": "string",
         "status": "string",
+        "stop_cause": "string",
         "stop_code": "string",
+        "stop_kind": "string",
         "stop_reason_group": "string",
         "stopped_at": {
           "$null": "time"
@@ -2284,6 +2286,7 @@
         "running_healthy": "number",
         "running_unhealthy": "number",
         "stopped_error": "number",
+        "stopped_expected": "number",
         "stopped_normal": "number"
       },
       "stop_reasons": [

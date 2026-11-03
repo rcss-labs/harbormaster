@@ -80,8 +80,8 @@ func TestExpectedStops_NotErrors(t *testing.T) {
 	if row := found[spotARN]; row.StopKind != "expected" || row.StopCause != "spot" {
 		t.Errorf("spot row kind/cause = %q/%q, want expected/spot", row.StopKind, row.StopCause)
 	}
-	if row := found[deployARN]; row.StopKind != "expected" || row.StopCause != "deploy" {
-		t.Errorf("deploy row kind/cause = %q/%q, want expected/deploy", row.StopKind, row.StopCause)
+	if row := found[deployARN]; row.StopKind != "expected" || row.StopCause != "scaling" {
+		t.Errorf("deploy row kind/cause = %q/%q, want expected/scaling", row.StopKind, row.StopCause)
 	}
 	sum, err := fx.s.TaskSummary(ctx, store.TargetFilter{}, admin, fx.now.Add(-72*time.Hour))
 	if err != nil {

@@ -18,6 +18,7 @@ const (
 	StopCauseSpot        = "spot"
 	StopCauseMaintenance = "maintenance"
 	StopCauseDeploy      = "deploy"
+	StopCauseScaling     = "scaling" // "Scaling activity initiated by (deployment <id>)"
 	StopCauseScaleIn     = "scale-in"
 	StopCauseUser        = "user"
 )
@@ -58,16 +59,10 @@ func classifyStop(task model.Task) (kind, cause string) {
 		cause = StopCauseMaintenance
 	case strings.Contains(reason, "via harbormaster") || task.StopCode == "UserInitiated":
 		cause = StopCauseUser
-	case strings.Contains(reason, "scaling activity initiated by"):
-		// "Scaling activity initiated by (X)" is always the scheduler acting: a deployment, or anything else
-		// (an auto scaling policy, the service itself) which is a scale-in.
-		if strings.Contains(reason, "deployment") {
-			cause = StopCauseDeploy
-		} else {
-			cause = StopCauseScaleIn
-		}
 	case strings.Contains(reason, "desired count"):
 		cause = StopCauseScaleIn
+	case strings.Contains(reason, "scaling activity initiated by (deployment "): // the id varies per deployment
+		cause = StopCauseScaling
 	case task.StopCode == "ServiceSchedulerInitiated" && (strings.Contains(reason, "deployment") || strings.Contains(reason, "replaced")):
 		cause = StopCauseDeploy
 	}

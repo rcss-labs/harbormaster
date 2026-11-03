@@ -630,6 +630,19 @@ func (s *seeder) addService(sp serviceSpec) {
 		s.addTask(sp, taskOptions{taskDefinitionARN: previousARN, slot: 0, startedAt: at.Add(-24 * time.Hour), stoppedAt: at,
 			reason: "Scaling activity initiated by (deployment " + oldDeployment + ")", exitCode: 0,
 			stopCode: ecstypes.TaskStopCodeServiceSchedulerInitiated, deploymentID: oldDeployment})
+		// Stops that exit non-zero without a fault: shown as expected, not as errors.
+		switch sp.name {
+		case "web-frontend":
+			sat := now.Add(-95 * time.Minute)
+			s.addTask(sp, taskOptions{taskDefinitionARN: currentARN, slot: 1, startedAt: sat.Add(-6 * time.Hour), stoppedAt: sat,
+				reason: "Your Spot Task was interrupted.", exitCode: 1,
+				stopCode: ecstypes.TaskStopCodeSpotInterruption, deploymentID: primaryID})
+		case "auth-service":
+			dat := now.Add(-3 * time.Hour)
+			s.addTask(sp, taskOptions{taskDefinitionARN: previousARN, slot: 1, startedAt: dat.Add(-30 * time.Hour), stoppedAt: dat,
+				reason: "Scaling activity initiated by (deployment ecs-svc/" + s.digits(19) + ")", exitCode: 1,
+				stopCode: ecstypes.TaskStopCodeServiceSchedulerInitiated, deploymentID: oldDeployment})
+		}
 		for i := 0; i < 3 && sp.unhealthy > 0; i++ {
 			hat := now.Add(-time.Duration((1 + float64(i)*2.5) * float64(time.Hour)))
 			s.addTask(sp, taskOptions{taskDefinitionARN: currentARN, slot: i, startedAt: hat.Add(-3 * time.Hour), stoppedAt: hat,

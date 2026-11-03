@@ -29,9 +29,8 @@ with flags as (
            when stop_code = 'SpotInterruption' then 'spot'
            when stop_code = 'TerminationNotice' then 'maintenance'
            when reason like '%via harbormaster%' or stop_code = 'UserInitiated' then 'user'
-           when reason like '%scaling activity initiated by%' then
-             case when reason like '%deployment%' then 'deploy' else 'scale-in' end
            when reason like '%desired count%' then 'scale-in'
+           when reason like '%scaling activity initiated by (deployment %' then 'scaling'
            when stop_code = 'ServiceSchedulerInitiated' and (reason like '%deployment%' or reason like '%replaced%') then 'deploy'
          end as cause
   from classified
