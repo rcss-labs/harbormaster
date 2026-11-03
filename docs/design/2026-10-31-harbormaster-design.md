@@ -442,7 +442,7 @@ in Terraform, no empty charts.
   registered outside Harbormaster, determined by the absence of a Harbormaster
   record), with **Deploy** or **Roll back to this** buttons. Both open the Deploy
   tab at `?revision=N`.
-- The pending-revision banner ("Revision :N is registered") also opens the Deploy
+- The pending-revision banner ("Revision payments-api:N is registered but not deployed") also opens the Deploy
   tab at `?revision=N`.
 - A permanent notice: saving creates a revision Terraform will see as drift (§7.5).
 - Without Edit: read-only JSON, disabled editor, lock banner.
@@ -522,11 +522,11 @@ Actions per running task: **Terminal** (with Terminal permission and exec on),
 
 ![Scaling](screens/service-scaling.png)
 
-Read-only. Desired count, with a warning when it is outside the auto scaling
-min/max; the auto scaling configuration (min, max, target-tracking policies,
-cooldowns, scheduled actions); and recent scaling activities. An **Edit in
-Deploy** link opens the Deploy tab (§6.4), where desired count and auto scaling
-are changed.
+Desired count can be changed here (**Update desired count**, Operate), with a
+warning when it is outside the auto scaling min/max. The auto scaling
+configuration (min, max, target-tracking policies, cooldowns, scheduled actions)
+is a read-only summary, along with recent scaling activities. An **Edit in
+Deploy** link opens the Deploy tab (§6.4), where auto scaling is edited.
 
 #### Logs tab
 
@@ -732,8 +732,9 @@ input:
 5. Operations log: "Registered task definition payments-api:43 (image 1.18.3,
    512 CPU / 1024 MiB)." Stored in `revision_records` so the Revisions table can
    say who registered it.
-6. Toast: "Revision :43 is registered." The service page's pending-revision banner
-   offers **Deploy :43**, which opens the Deploy tab at `?revision=43` (§6.4). The
+6. Toast: "payments-api:43 is registered. Deploy it from the Deploy tab when you
+   are ready." The service page's pending-revision banner offers **Deploy :43**,
+   which opens the Deploy tab at `?revision=43` (§6.4). The
    review there shows the deployed → :43 diff, and Prod gets a warning banner.
    Without Deploy: toast "Registered. Someone with Deploy on Prod can roll it out."
 
