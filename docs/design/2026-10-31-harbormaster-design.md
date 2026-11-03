@@ -782,10 +782,23 @@ Harbormaster is:
 resource "aws_ecs_service" "payments_api" {
   # ...
   lifecycle {
-    ignore_changes = [task_definition, desired_count]
+    ignore_changes = [
+      task_definition,
+      desired_count,
+      enable_execute_command,
+      deployment_circuit_breaker,
+      deployment_minimum_healthy_percent,
+      deployment_maximum_percent,
+      health_check_grace_period_seconds,
+    ]
   }
 }
 ```
+
+Auto scaling edited from the Deploy tab (`aws_appautoscaling_target`,
+`aws_appautoscaling_policy`, `aws_appautoscaling_scheduled_action`) should be
+managed in one place: either Terraform keeps those resources and nobody edits
+scaling here, or Terraform drops them.
 
 This goes in the README and on the Task definition tab's notice. Harbormaster
 does not check or enforce it.
