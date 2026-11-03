@@ -2,8 +2,6 @@ package fake
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -91,23 +89,9 @@ func (c *autoScalingClient) DescribeScalingPolicies(_ context.Context, in *appli
 	defer e.Mu.Unlock()
 	out := &applicationautoscaling.DescribeScalingPoliciesOutput{}
 	for _, key := range c.scaledServices(in.ServiceNamespace, singleton(in.ResourceId)) {
-		cfg := e.ScalingConfig[key]
-		out.ScalingPolicies = append(out.ScalingPolicies, astypes.ScalingPolicy{
-			PolicyName:        aws.String("cpu-target"),
-			PolicyARN:         aws.String("arn:aws:autoscaling:" + key.Region + ":" + key.AccountID + ":scalingPolicy:" + hexOf(hashSeed(key.Service, 5)) + ":resource/ecs/" + resourceID(key) + ":policyName/cpu-target"),
-			PolicyType:        astypes.PolicyTypeTargetTrackingScaling,
-			ServiceNamespace:  astypes.ServiceNamespaceEcs,
-			ResourceId:        aws.String(resourceID(key)),
-			ScalableDimension: scalableDimension,
-			TargetTrackingScalingPolicyConfiguration: &astypes.TargetTrackingScalingPolicyConfiguration{
-				TargetValue: aws.Float64(float64(cfg.TargetCPU)),
-				PredefinedMetricSpecification: &astypes.PredefinedMetricSpecification{
-					PredefinedMetricType: astypes.MetricTypeECSServiceAverageCPUUtilization,
-				},
-				ScaleOutCooldown: aws.Int32(scaleOutCooldownSeconds),
-				ScaleInCooldown:  aws.Int32(scaleInCooldownSeconds),
-			},
-		})
+		for _, policy := range e.ScalingConfig[key].Policies {
+			out.ScalingPolicies = append(out.ScalingPolicies, describePolicy(key, policy))
+		}
 	}
 	return out, nil
 }
@@ -123,17 +107,16 @@ func (c *autoScalingClient) DescribeScheduledActions(_ context.Context, in *appl
 	defer e.Mu.Unlock()
 	out := &applicationautoscaling.DescribeScheduledActionsOutput{}
 	for _, key := range c.scaledServices(in.ServiceNamespace, singleton(in.ResourceId)) {
-		for i, entry := range e.ScalingConfig[key].Scheduled {
-			schedule, minCapacity, _ := strings.Cut(entry, "=")
-			minValue, _ := strconv.Atoi(minCapacity)
+		for _, action := range e.ScalingConfig[key].Scheduled {
 			out.ScheduledActions = append(out.ScheduledActions, astypes.ScheduledAction{
-				ScheduledActionName:  aws.String("scheduled-" + itoa(i+1)),
-				ScheduledActionARN:   aws.String("arn:aws:autoscaling:" + key.Region + ":" + key.AccountID + ":scheduledAction:" + resourceID(key) + ":scheduledActionName/scheduled-" + itoa(i+1)),
+				ScheduledActionName:  aws.String(action.Name),
+				ScheduledActionARN:   aws.String("arn:aws:autoscaling:" + key.Region + ":" + key.AccountID + ":scheduledAction:" + resourceID(key) + ":scheduledActionName/" + action.Name),
 				ServiceNamespace:     astypes.ServiceNamespaceEcs,
-				Schedule:             aws.String(schedule),
+				Schedule:             aws.String(action.Schedule),
+				Timezone:             nonEmptyPtr(action.Timezone),
 				ResourceId:           aws.String(resourceID(key)),
 				ScalableDimension:    scalableDimension,
-				ScalableTargetAction: &astypes.ScalableTargetAction{MinCapacity: aws.Int32(int32(minValue))},
+				ScalableTargetAction: &astypes.ScalableTargetAction{MinCapacity: action.Min, MaxCapacity: action.Max},
 			})
 		}
 	}

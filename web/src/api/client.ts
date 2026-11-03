@@ -9,12 +9,15 @@ export function setCsrfToken(token: string): void {
 export class ApiError extends Error {
   code: string
   status: number
+  /** The parsed error response, for errors that carry more than a message (a 409 returns the fresh state). */
+  body: unknown
 
-  constructor(code: string, message: string, status: number) {
+  constructor(code: string, message: string, status: number, body?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.status = status
+    this.body = body
   }
 }
 
@@ -33,8 +36,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (!response.ok) {
     let code = 'unknown'
     let message = response.statusText || 'Request failed.'
+    let parsed: unknown
     try {
       const body = (await response.json()) as { error?: { code?: string; message?: string } }
+      parsed = body
       if (body.error?.code) code = body.error.code
       if (body.error?.message) message = body.error.message
     } catch {
@@ -43,7 +48,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     if (response.status === 401 && !path.startsWith('/api/auth/')) {
       window.dispatchEvent(new Event('hm:unauthenticated'))
     }
-    throw new ApiError(code, message, response.status)
+    throw new ApiError(code, message, response.status, parsed)
   }
 
   if (response.status === 204) return undefined as T

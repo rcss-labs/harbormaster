@@ -20,6 +20,7 @@ type DeploymentRecord struct {
 	FinishedAt        *time.Time
 	Outcome           string
 	StartedByUserID   *int64
+	Reason            string
 }
 
 // InsertDeploymentIfNew records a deployment unless its ID is already known.
@@ -42,7 +43,7 @@ func (s *Store) InsertDeploymentIfNew(ctx context.Context, r DeploymentRecord) (
 func (s *Store) ListDeployments(ctx context.Context, k model.ServiceKey, since time.Time) ([]DeploymentRecord, error) {
 	rows, err := s.Pool.Query(ctx,
 		`select d.deployment_id, coalesce(d.task_definition_arn, ''), coalesce(d.revision, 0), d.kind,
-		   d.started_at, d.finished_at, coalesce(d.outcome, ''), d.started_by_user_id
+		   d.started_at, d.finished_at, coalesce(d.outcome, ''), d.started_by_user_id, coalesce(d.reason, '')
 		 from deployment_history d
 		 where d.account_id = $1 and d.region = $2 and d.cluster_name = $3 and d.service_name = $4
 		   and d.started_at >= $5
@@ -56,7 +57,7 @@ func (s *Store) ListDeployments(ctx context.Context, k model.ServiceKey, since t
 	for rows.Next() {
 		r := DeploymentRecord{Key: k}
 		if err := rows.Scan(&r.DeploymentID, &r.TaskDefinitionARN, &r.Revision, &r.Kind,
-			&r.StartedAt, &r.FinishedAt, &r.Outcome, &r.StartedByUserID); err != nil {
+			&r.StartedAt, &r.FinishedAt, &r.Outcome, &r.StartedByUserID, &r.Reason); err != nil {
 			return nil, fmt.Errorf("scan deployment: %w", err)
 		}
 		deployments = append(deployments, r)
@@ -72,7 +73,7 @@ func (s *Store) ListDeployments(ctx context.Context, k model.ServiceKey, since t
 func (s *Store) ListDeploymentsForCluster(ctx context.Context, k model.ClusterKey, since time.Time) (map[model.ServiceKey][]DeploymentRecord, error) {
 	rows, err := s.Pool.Query(ctx,
 		`select d.service_name, d.deployment_id, coalesce(d.task_definition_arn, ''), coalesce(d.revision, 0), d.kind,
-		   d.started_at, d.finished_at, coalesce(d.outcome, ''), d.started_by_user_id
+		   d.started_at, d.finished_at, coalesce(d.outcome, ''), d.started_by_user_id, coalesce(d.reason, '')
 		 from deployment_history d
 		 where d.account_id = $1 and d.region = $2 and d.cluster_name = $3 and d.started_at >= $4
 		 order by d.started_at desc`,
@@ -85,7 +86,7 @@ func (s *Store) ListDeploymentsForCluster(ctx context.Context, k model.ClusterKe
 	for rows.Next() {
 		r := DeploymentRecord{Key: model.ServiceKey{ClusterKey: k}}
 		if err := rows.Scan(&r.Key.Service, &r.DeploymentID, &r.TaskDefinitionARN, &r.Revision, &r.Kind,
-			&r.StartedAt, &r.FinishedAt, &r.Outcome, &r.StartedByUserID); err != nil {
+			&r.StartedAt, &r.FinishedAt, &r.Outcome, &r.StartedByUserID, &r.Reason); err != nil {
 			return nil, fmt.Errorf("scan deployment: %w", err)
 		}
 		byService[r.Key] = append(byService[r.Key], r)

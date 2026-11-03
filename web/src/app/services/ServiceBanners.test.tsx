@@ -1,5 +1,4 @@
 import { screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { REVISIONS_PAYMENTS, SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS } from '../../test/fixtures'
@@ -11,13 +10,6 @@ describe('ServicePage banners', () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/overview`)
     expect(await screen.findByText(/is registered but not deployed/)).toHaveTextContent('payments-api:43')
     expect(screen.getByRole('link', { name: /Task definition/ })).toHaveTextContent(':43 ready')
-  })
-
-  it('Deploy on the banner opens the deploy dialog on the Task definition tab', async () => {
-    renderApp(`/services/${SERVICE_PAYMENTS.id}/overview`)
-    await userEvent.click(await screen.findByRole('button', { name: 'Deploy :43' }))
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/services/${SERVICE_PAYMENTS.id}/task-definition`))
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Deploy payments-api to :43?')
   })
 
   it('hides the pending banner while the revisions response reports a rollout', async () => {

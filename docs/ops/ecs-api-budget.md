@@ -91,6 +91,47 @@ Requirement: the poller start-up must stagger the first cycles of the task tiers
 | EFS (plan 05) | `DescribeFileSystems`, `DescribeAccessPoints`, `DescribeMountTargets` | 5 min per account x region (`internal/poller/storage.go`) | request rates not published in the fetched docs | 2 + N_fs calls per 300 s per target (`DescribeMountTargets` is called once per file system); a few calls per 5 min at the expected estate. Unverified against a documented limit |
 | CloudWatch (plan 05) | EFS `GetMetricData` (size 30 d, throughput 24 h, connections) | on demand while a Storage page is open; 60 s Postgres cache, 60 s page refetch | 500 requests/s | 3 `GetMetricData` per account x region per minute while a Storage page is open, fetched concurrently (at most 6 targets at once): about 1/s at 20 targets against 500/s; under 1 % |
 
+## Deploy tab (service page, on demand)
+
+The Deploy tab makes no polling calls. Its calls happen when a user opens the tab, opens the image picker, or submits a change set, so they are not in the steady-state figures above. The settings query has a 30 s client `staleTime`, so reopening the tab within 30 s makes no new describes.
+
+Tab open (`GET deploy-settings`, also re-read after each write):
+
+| Operation | Bucket | Calls |
+|---|---|---|
+| `DescribeServices` | Service read actions (20/s refill) | 1 |
+| `DescribeScalableTargets`, `DescribeScalingPolicies`, `DescribeScheduledActions` (namespace `ecs`) | Application Auto Scaling (no published limit) | 3 |
+| `DescribeTargetGroups` (only when the service has target groups) | ELB v2 | 0 or 1 |
+
+That is 4 to 5 describes per tab open. The deployed definition comes from the existing task-definition read, which is cached after the first load (see the task definition row above).
+
+Change set submit (`POST changeset`): before any write, the server re-reads the settings to check `base_version` (`liveService` and `settingsFrom` in `internal/deploy`). This runs on every submit, including register-only ones, and costs 4 + G describes, where G is 1 when the service has target groups and 0 otherwise. A retry that names an existing `revision` also calls `DescribeTaskDefinition` (1, not cached). Writes:
+
+| Step | Calls |
+|---|---|
+| Register revision (`RegisterTaskDefinition`) | 1, or 0 when the change set does not register (retry with `revision`, or no definition) |
+| `UpdateService` | 1, or 0 when the change set has no service section |
+| Auto scaling target (`RegisterScalableTarget` or `DeregisterScalableTarget`) | 1 per target change |
+| Policy or scheduled action (`PutScalingPolicy`, `DeleteScalingPolicy`, `PutScheduledAction`, `DeleteScheduledAction`) | 1 per item put or deleted |
+
+A typical change set makes 1 to 8 writes; each scaling item adds one call, so a change set with many policies or actions can exceed 8. A retry sends only the unfinished steps, so it repeats no completed write.
+
+After any run that wrote (including partial runs), the server re-reads the settings with `DeploySettings` to return the fresh `settings_version`. That is the same 4 + G describes as the pre-check. The task-definition lookup it needs comes from the store, because the register step records the new revision first. When a scaling step wrote, the server also refreshes the stored scaling (`refreshStoredScaling`): the three Application Auto Scaling reads plus `DescribeScalingActivities`, which is skipped when the scalable target was removed. That is 3 or 4 describes, not 3.
+
+Client refetch after a successful submit (`useChangeSet`, `refetchWhileSettling` in `web/src/api/change.ts`): the browser refetches `deploy-settings` immediately and again at 2, 4, 6, 8 and 10 s, six rounds in all while the Deploy tab is mounted. The `['service', serviceId]` invalidation also matches the `deploy-settings` key, so a round can fetch it twice; the range is 6 to 12 GETs per submit. Each GET costs 4 + G describes.
+
+Per submit, the AWS calls are:
+
+- describes = (4 + G) pre-check + (4 + G) post-write + 3 + A when scaling wrote, + 1 for a revision retry;
+- writes = R + U + T + I, where R and U are the register and `UpdateService` calls (0 or 1 each), T is the scalable target register or deregister count, and I is the policy and scheduled action put or delete count;
+- G is 1 when the service has target groups, A is 1 when a scalable target remains after the change.
+
+Examples: a register plus deploy on a service with no load balancer is 4 + 4 + 2 = 10 calls; the same with a load balancer is 12. A register, deploy and one policy put with a target and no load balancer is 4 + 4 + (3 + 1) + 3 = 15 calls. Add the client refetch: 6 rounds of 4 + G describes is 24 to 30 describes, and up to 12 rounds is 48 to 60.
+
+Image picker (`GET image-tags`): an ECR `DescribeImages` call per 1000-tag page, up to 10 pages (the existing cap) on a cache miss. The full tag list is cached 60 s per account, region and repository, and `container`, `q` and `limit` are applied to the cache, so a search costs no AWS call. ECR limits are not in the fetched docs; unverified.
+
+Per user action, on demand: opening the tab is 4 to 5 describes; a submit is the formula above (10 to 15 calls in the examples), plus the client settle refetches for about 10 s after a successful submit; an image cache miss is up to 10 ECR pages. Nothing here repeats without a user action other than that settle window.
+
 ## Changes made
 
 - Config defaults: none. All `HM_POLL_*` defaults stay as they are.

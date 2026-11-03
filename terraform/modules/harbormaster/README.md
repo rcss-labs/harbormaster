@@ -86,4 +86,4 @@ Two fixed names make a destroy followed by a re-create collide:
 
 ## Do not manage Harbormaster with itself
 
-Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count] }` on the `aws_ecs_service`) in the managing configuration. See design spec section 7.5 (`docs/design/2026-10-31-harbormaster-design.md`).
+Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count, ...] }` on the `aws_ecs_service`, with the full list in section 7.5) in the managing configuration. See design spec section 7.5 (`docs/design/2026-10-31-harbormaster-design.md`).

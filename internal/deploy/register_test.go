@@ -101,7 +101,7 @@ func TestRegister_StaleBase(t *testing.T) {
 	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 43); err != nil {
+	if _, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 43, false); err != nil {
 		t.Fatal(err)
 	}
 	before := countRevisions(h, "payments-api")

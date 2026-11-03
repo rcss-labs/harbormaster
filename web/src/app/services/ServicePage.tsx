@@ -24,7 +24,8 @@ import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
 import { TaskDefinitionTab } from './task-definition/TaskDefinitionTab'
 import { TerminalTab } from './terminal/TerminalTab'
-import { DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey } from './tabs'
+import { DeployTab } from './deploy/DeployTab'
+import { BOLD_TABS, DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey, isUnlocked } from './tabs'
 import styles from './service.module.css'
 
 function NoAccess() {
@@ -66,11 +67,11 @@ export function ServicePage() {
 
   const items: TabItem[] = TABS.map(([key, label]) => {
     const lock = TAB_LOCKS[key]
-    const locked = lock && !service.can[lock.can] ? { action: lock.action, tag: service.tag.name } : undefined
-    return { key, label, locked, badge: key === 'tasks' ? service.running : key === 'task-definition' && pendingRevision ? `:${pendingRevision} ready` : undefined }
+    const locked = lock && !isUnlocked(lock, service.can) ? { action: lock.action, tag: service.tag.name } : undefined
+    return { key, label, locked, bold: BOLD_TABS.has(key), badge: key === 'tasks' ? service.running : key === 'task-definition' && pendingRevision ? `:${pendingRevision} ready` : undefined }
   })
   const activeLock = TAB_LOCKS[tab]
-  const lockedOut = activeLock !== undefined && !service.can[activeLock.can]
+  const lockedOut = activeLock !== undefined && !isUnlocked(activeLock, service.can)
 
   let body
   if (lockedOut) body = <LockPanel action={activeLock.action} tag={service.tag} />
@@ -81,6 +82,7 @@ export function ServicePage() {
   else if (tab === 'logs') body = <LogsTab serviceId={serviceId} />
   else if (tab === 'scaling') body = <ScalingTab serviceId={serviceId} />
   else if (tab === 'task-definition') body = <TaskDefinitionTab key={serviceId} serviceId={serviceId} service={service} />
+  else if (tab === 'deploy') body = <DeployTab key={serviceId} serviceId={serviceId} />
   else if (tab === 'terminal') body = <TerminalTab serviceId={serviceId} />
   else body = <PlaceholderTab owner="02" />
 
@@ -98,7 +100,7 @@ export function ServicePage() {
           deployedRevision={revisions.data.deployed_revision}
           canDeploy={service.can.deploy && service.controller.supported}
           deployDisabledReason={service.can.deploy ? service.controller.banner : `You need Deploy on ${service.tag.name}`}
-          onDeploy={() => navigate(`/services/${serviceId}/task-definition?deploy=${pendingRevision}`)}
+          onDeploy={() => navigate(`/services/${serviceId}/deploy?revision=${pendingRevision}`)}
         />
       )}
       <div className={styles.tabPanel}>{body}</div>

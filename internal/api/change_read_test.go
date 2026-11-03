@@ -174,6 +174,41 @@ func TestGetRevisions_Shape(t *testing.T) {
 	}
 }
 
+func TestGetRevisionDefinition_ViewRequired(t *testing.T) {
+	c := viewerOnProd(t)
+	resp := c.get("/api/services/" + paymentsID() + "/revisions/42")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("viewer status %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Revision     int            `json:"revision"`
+		ARN          string         `json:"arn"`
+		Definition   map[string]any `json:"definition"`
+		RegisteredBy string         `json:"registered_by"`
+	}
+	decode(t, resp, &out)
+	if out.Revision != 42 || !strings.HasSuffix(out.ARN, "payments-api:42") || out.Definition["family"] != "payments-api" || out.RegisteredBy == "" {
+		t.Fatalf("revision definition = %+v", out)
+	}
+	if _, has := out.Definition["taskDefinitionArn"]; has {
+		t.Error("definition must be register-ready (no taskDefinitionArn)")
+	}
+
+	missing := c.get("/api/services/" + paymentsID() + "/revisions/999")
+	if missing.StatusCode != http.StatusNotFound {
+		t.Errorf("missing revision status %d, want 404", missing.StatusCode)
+	}
+	missing.Body.Close()
+
+	// omer has no grants on Prod, so the service is invisible to him and the revision with it.
+	_, as := seededForChangeReads(t)
+	hidden := as("omer").get("/api/services/" + paymentsID() + "/revisions/42")
+	if hidden.StatusCode != http.StatusNotFound {
+		t.Errorf("invisible service status %d, want 404", hidden.StatusCode)
+	}
+	hidden.Body.Close()
+}
+
 func TestGetTaskDefinition_ThrottledIs503(t *testing.T) {
 	admin, fk := adminWithFake(t)
 	fk.FailNext("ListTagsForResource", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded"})
@@ -293,5 +328,49 @@ func TestGetService_IncludesControllerAndStrategyText(t *testing.T) {
 	notifications := getService(t, admin, serviceID(homelabAccountID, "us-east-1", "core-services", "notifications"))
 	if notifications.Controller.Supported || notifications.Controller.Banner != "This service is deployed by CodeDeploy. Harbormaster shows it but can't deploy it yet." {
 		t.Errorf("notifications controller = %+v", notifications.Controller)
+	}
+}
+
+func TestGetImageTags_QueryParams(t *testing.T) {
+	admin, _ := seededForChangeReads(t)
+	type imageTagsBody struct {
+		Source    string `json:"source"`
+		Container string `json:"container"`
+		Image     string `json:"image"`
+		Total     int    `json:"total"`
+		Matched   int    `json:"matched"`
+		Truncated bool   `json:"truncated"`
+		Tags      []struct {
+			Tag string `json:"tag"`
+		} `json:"tags"`
+	}
+	var limited imageTagsBody
+	decode(t, admin.get("/api/services/"+paymentsID()+"/image-tags?container=payments-api&limit=2"), &limited)
+	if limited.Source != "ecr" || limited.Container != "payments-api" || !strings.HasSuffix(limited.Image, ".amazonaws.com/payments-api") {
+		t.Errorf("limited = %+v", limited)
+	}
+	if len(limited.Tags) != 2 || limited.Total < 5 || limited.Matched != limited.Total || !limited.Truncated {
+		t.Errorf("limit=2 -> %d tags, total %d, matched %d, truncated %v", len(limited.Tags), limited.Total, limited.Matched, limited.Truncated)
+	}
+
+	var searched imageTagsBody
+	decode(t, admin.get("/api/services/"+paymentsID()+"/image-tags?q=1.18.0"), &searched)
+	if searched.Matched != 1 || len(searched.Tags) != 1 || searched.Tags[0].Tag != "1.18.0" || searched.Truncated || searched.Total < 5 {
+		t.Errorf("q=1.18.0 -> %+v", searched)
+	}
+
+	unknown := admin.get("/api/services/" + paymentsID() + "/image-tags?container=nope")
+	if code, _ := errorCode(t, unknown); code != "invalid" || unknown.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("unknown container -> %d %q, want 422 invalid", unknown.StatusCode, code)
+	}
+}
+
+func TestGetImageTags_BadLimit422(t *testing.T) {
+	admin, _ := seededForChangeReads(t)
+	for _, limit := range []string{"0", "-1", "201", "abc"} {
+		resp := admin.get("/api/services/" + paymentsID() + "/image-tags?limit=" + limit)
+		if code, _ := errorCode(t, resp); code != "invalid" || resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("limit=%s -> %d %q, want 422 invalid", limit, resp.StatusCode, code)
+		}
 	}
 }

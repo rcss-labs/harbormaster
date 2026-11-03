@@ -2,7 +2,7 @@ import type { TagDTO } from '../api/types'
 import { Banner } from './Banner'
 import { TagChip } from './TagChip'
 
-export type LockAction = 'View' | 'Logs' | 'Operate' | 'Deploy' | 'Edit task definition' | 'Terminal'
+export type LockAction = 'View' | 'Logs' | 'Operate' | 'Deploy' | 'Edit task definition' | 'Terminal' | 'Edit, Deploy or Operate'
 
 export function LockPanel({ action, tag }: { action: LockAction; tag: TagDTO }) {
   return (

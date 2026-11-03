@@ -22,10 +22,12 @@ type AttributedDeployment struct {
 	Kind              string
 	StartedByUserID   int64
 	StartedAt         time.Time
+	Reason            string
+	ChangeSetID       string
 }
 
-// AttributeDeployment records a deployment's kind and actor. If the poller has
-// already stored the deployment, only kind and actor are overwritten.
+// AttributeDeployment records a deployment's kind, actor, reason and change set. If the poller has
+// already stored the deployment, those fields are overwritten and the poller's row is kept otherwise.
 func (s *Store) AttributeDeployment(ctx context.Context, d AttributedDeployment) error {
 	return attributeDeployment(ctx, s.Pool, d)
 }
@@ -33,12 +35,13 @@ func (s *Store) AttributeDeployment(ctx context.Context, d AttributedDeployment)
 func attributeDeployment(ctx context.Context, db execer, d AttributedDeployment) error {
 	_, err := db.Exec(ctx,
 		`insert into deployment_history (account_id, region, cluster_name, service_name, deployment_id,
-		   task_definition_arn, revision, kind, started_at, started_by_user_id)
-		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		   task_definition_arn, revision, kind, started_at, started_by_user_id, reason, changeset_id)
+		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, nullif($11, ''), nullif($12, ''))
 		 on conflict (account_id, region, cluster_name, service_name, deployment_id)
-		 do update set kind = excluded.kind, started_by_user_id = excluded.started_by_user_id`,
+		 do update set kind = excluded.kind, started_by_user_id = excluded.started_by_user_id,
+		   reason = excluded.reason, changeset_id = excluded.changeset_id`,
 		d.Key.AccountID, d.Key.Region, d.Key.Cluster, d.Key.Service, d.DeploymentID,
-		d.TaskDefinitionARN, d.Revision, d.Kind, d.StartedAt, d.StartedByUserID)
+		d.TaskDefinitionARN, d.Revision, d.Kind, d.StartedAt, d.StartedByUserID, d.Reason, d.ChangeSetID)
 	if err != nil {
 		return fmt.Errorf("attribute deployment: %w", err)
 	}

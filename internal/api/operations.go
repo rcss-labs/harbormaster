@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,8 +13,13 @@ import (
 
 // operationEvent maps a history row of one service to the shared activity-feed shape.
 func operationEvent(service ServiceRef, op store.OperationRow) EventDTO {
+	text := op.Text
+	// A change set's reason lives in the details; the feed shows only text, so it would otherwise never be seen.
+	if reason, _ := op.Details["reason"].(string); reason != "" {
+		text += fmt.Sprintf(" Reason: %q.", reason)
+	}
 	return EventDTO{
-		TS: op.TS, Source: op.Source, Actor: op.Actor, Text: op.Text, Service: service,
+		TS: op.TS, Source: op.Source, Actor: op.Actor, Text: text, Service: service,
 		Cluster: ClusterRef{ID: op.Key.ClusterKey.ID(), Name: op.Key.Cluster},
 	}
 }

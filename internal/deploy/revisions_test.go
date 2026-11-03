@@ -1,7 +1,10 @@
 package deploy_test
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // summary renders items as "rev status by" for compact comparison.
@@ -180,5 +184,90 @@ func TestRevisions_ThrottleSurfaces(t *testing.T) {
 	_, err := h.svc.Revisions(t.Context(), paymentsKey)
 	if !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want a throttle error", err)
+	}
+}
+
+// addTaskDefinitionCopy adds a copy of payments-api:42 as family:revision to the fake estate,
+// after the poller has run, so the store does not know about it.
+func addTaskDefinitionCopy(t *testing.T, h *harness, family string, revision int) {
+	t.Helper()
+	h.fake.Estate.Mu.Lock()
+	defer h.fake.Estate.Mu.Unlock()
+	var template ecstypes.TaskDefinition
+	for _, td := range h.fake.Estate.TaskDefinitions {
+		if aws.ToString(td.Definition.Family) == "payments-api" && td.Definition.Revision == 42 {
+			template = td.Definition
+		}
+	}
+	copied := template
+	copied.Family = aws.String(family)
+	copied.Revision = int32(revision)
+	copied.TaskDefinitionArn = aws.String(strings.Replace(aws.ToString(template.TaskDefinitionArn), "payments-api:42", fmt.Sprintf("%s:%d", family, revision), 1))
+	h.fake.Estate.TaskDefinitions = append(h.fake.Estate.TaskDefinitions, fake.TaskDefinition{AccountID: homelabAccountID, Region: homelabRegion, Definition: copied})
+}
+
+func TestRevisionDefinition_FromStore(t *testing.T) {
+	h := newHarness(t)
+	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
+	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+		t.Fatal(err)
+	}
+	newest, err := h.svc.RevisionDefinition(t.Context(), paymentsKey, 43)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest.Revision != 43 || !strings.HasSuffix(newest.ARN, "task-definition/payments-api:43") ||
+		newest.RegisteredBy != "pavel" || newest.RegisteredAt.IsZero() {
+		t.Fatalf("revision 43 = %+v", newest)
+	}
+	encoded, err := json.Marshal(newest.Definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "payments-api:1.18.3") {
+		t.Fatalf("definition does not carry the registered image: %s", encoded)
+	}
+	if _, has := newest.Definition["taskDefinitionArn"]; has {
+		t.Fatal("definition is not register-ready: taskDefinitionArn present")
+	}
+
+	deployed, err := h.svc.DeployedDefinition(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older, err := h.svc.RevisionDefinition(t.Context(), paymentsKey, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(older.Definition, deployed.Definition) || older.RegisteredBy != "terraform" {
+		t.Fatalf("revision 42 = %+v, want the deployed definition registered by terraform", older)
+	}
+}
+
+func TestRevisionDefinition_DescribesWhenMissing(t *testing.T) {
+	h := newHarness(t)
+	addTaskDefinitionCopy(t, h, "payments-api", 44)
+	before := h.fake.Calls()["DescribeTaskDefinition"]
+
+	got, err := h.svc.RevisionDefinition(t.Context(), paymentsKey, 44)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 44 || !strings.HasSuffix(got.ARN, "payments-api:44") || got.Definition["family"] != "payments-api" {
+		t.Fatalf("revision 44 = %+v", got)
+	}
+	if calls := h.fake.Calls()["DescribeTaskDefinition"] - before; calls != 1 {
+		t.Fatalf("DescribeTaskDefinition calls = %d, want 1 for a revision the store does not hold", calls)
+	}
+}
+
+func TestRevisionDefinition_OtherFamily404(t *testing.T) {
+	h := newHarness(t)
+	addTaskDefinitionCopy(t, h, "payments-api-worker", 1)
+	for _, revision := range []int{0, 1, 99} {
+		got, err := h.svc.RevisionDefinition(t.Context(), paymentsKey, revision)
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("revision %d: err = %v with %+v, want store.ErrNotFound", revision, err, got)
+		}
 	}
 }

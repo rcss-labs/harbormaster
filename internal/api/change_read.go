@@ -3,11 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
-	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -85,6 +85,16 @@ type RevisionsResponse struct {
 	RollingOutRevision *int          `json:"rolling_out_revision"`
 }
 
+// RevisionDefinitionResponse is GET /api/services/{id}/revisions/{revision}.
+// Definition is the register-ready JSON object with its keys in display order.
+type RevisionDefinitionResponse struct {
+	Revision     int             `json:"revision"`
+	ARN          string          `json:"arn"`
+	Definition   json.RawMessage `json:"definition"`
+	RegisteredAt time.Time       `json:"registered_at"`
+	RegisteredBy string          `json:"registered_by"`
+}
+
 // ImageTagDTO is one tag in the service's ECR repository.
 type ImageTagDTO struct {
 	Tag      string    `json:"tag"`
@@ -92,10 +102,18 @@ type ImageTagDTO struct {
 }
 
 // ImageTagsResponse is GET /api/services/{id}/image-tags. Source is "ecr" or "none" (free-text tag field).
+// Container is the container the tags belong to, Image its reference without the tag.
+// Total counts all tags of the repository, Matched those that fit q, Tags holds at most limit
+// of them, and Truncated says Matched exceeds what Tags holds.
 type ImageTagsResponse struct {
 	Source     string        `json:"source"`
+	Container  string        `json:"container"`
+	Image      string        `json:"image"`
 	Repository string        `json:"repository"`
 	Current    string        `json:"current"`
+	Total      int           `json:"total"`
+	Matched    int           `json:"matched"`
+	Truncated  bool          `json:"truncated"`
 	Tags       []ImageTagDTO `json:"tags"`
 }
 
@@ -169,12 +187,9 @@ func (s *Server) getTaskDefinition(w http.ResponseWriter, r *http.Request) {
 		MainContainer: deployed.MainContainer, Definition: definition, Tags: resourceTags,
 		Controller: ControllerRefDTO{Type: deployed.Controller.Type, Supported: deployed.Controller.Supported, Name: deployed.Controller.Name},
 		Strategy:   deployed.Strategy,
-		Can: ChangeCanDTO{
-			Edit: authz.Can(sc.Subject, authz.Edit, tagID), Deploy: authz.Can(sc.Subject, authz.Deploy, tagID),
-			Operate: authz.Can(sc.Subject, authz.Operate, tagID), Admin: sc.Subject.Admin,
-		},
-		Tag:      inheritedTag(tags, tagID, row.TagInherited),
-		PolledAt: polledAt,
+		Can:        changeCan(sc.Subject, tagID),
+		Tag:        inheritedTag(tags, tagID, row.TagInherited),
+		PolledAt:   polledAt,
 	})
 }
 
@@ -201,17 +216,55 @@ func (s *Server) getRevisions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) getRevisionDefinition(w http.ResponseWriter, r *http.Request) {
+	key, _, _, ok := s.visibleService(w, r)
+	if !ok {
+		return
+	}
+	revision, err := strconv.Atoi(r.PathValue("revision"))
+	if err != nil {
+		s.fail(w, store.ErrNotFound)
+		return
+	}
+	found, err := s.Deploy.RevisionDefinition(r.Context(), key, revision)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	definition, err := deploy.DefinitionJSON(found.Definition)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, RevisionDefinitionResponse{
+		Revision: found.Revision, ARN: found.ARN, Definition: definition,
+		RegisteredAt: found.RegisteredAt, RegisteredBy: found.RegisteredBy,
+	})
+}
+
 func (s *Server) getImageTags(w http.ResponseWriter, r *http.Request) {
 	key, _, _, ok := s.visibleService(w, r)
 	if !ok {
 		return
 	}
-	info, err := s.Deploy.ImageTags(r.Context(), key)
+	query := deploy.ImageTagQuery{Container: r.URL.Query().Get("container"), Search: r.URL.Query().Get("q")}
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 200 {
+			s.fail(w, invalid("limit must be a number between 1 and 200"))
+			return
+		}
+		query.Limit = limit
+	}
+	info, err := s.Deploy.ImageTags(r.Context(), key, query)
 	if err != nil {
-		s.fail(w, err)
+		s.failChange(w, err)
 		return
 	}
-	out := ImageTagsResponse{Source: info.Source, Repository: info.Repository, Current: info.Current, Tags: make([]ImageTagDTO, 0, len(info.Tags))}
+	out := ImageTagsResponse{
+		Source: info.Source, Container: info.Container, Image: info.Image, Repository: info.Repository, Current: info.Current,
+		Total: info.Total, Matched: info.Matched, Truncated: info.Truncated, Tags: make([]ImageTagDTO, 0, len(info.Tags)),
+	}
 	for _, t := range info.Tags {
 		out.Tags = append(out.Tags, ImageTagDTO{Tag: t.Tag, PushedAt: t.PushedAt})
 	}
