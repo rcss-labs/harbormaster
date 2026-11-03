@@ -127,6 +127,9 @@ export interface ChangeSetStep {
 export interface ChangeSetResponse {
   status: 'applied' | 'partial' | 'registered_only'
   steps: ChangeSetStep[]
+  /** Settings version after the run (partial or applied); a retry sends it as `base_version`. "" if unavailable. */
+  settings_version: string
+  changeset_id: string
   registered_revision: number | null
   deployment_id: string
   from_revision: number | null

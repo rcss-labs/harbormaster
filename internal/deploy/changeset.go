@@ -71,11 +71,13 @@ type Step struct{ Name, Status, Message string }
 // ChangeSetResult reports what a change set did. Status is "applied", "partial" or "registered_only".
 // Steps lists only the phases the change set needed. Rollout is set when a new deployment started
 // (Kind is then its kind: "deploy", "rollback" or "restart"). Warning is set when AWS accepted a
-// change but Harbormaster could not record it.
+// change but Harbormaster could not record it. SettingsVersion is the settings version after the run
+// (best effort, "" when it could not be read); a retry sends it as BaseVersion.
 type ChangeSetResult struct {
 	Status             string
 	Steps              []Step
 	ChangeSetID        string
+	SettingsVersion    string
 	RegisteredRevision int
 	Rollout            *Rollout
 	Kind               string

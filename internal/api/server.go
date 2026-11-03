@@ -235,10 +235,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/services/{serviceId}/revisions/{revision}", s.getRevisionDefinition, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/image-tags", s.getImageTags, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/desired-count", s.getDesiredCount, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/deploy-settings", s.getDeploySettings, routeOptions{})
 
 	// Change-path writes (plan 02).
 	s.handle(mux, "POST /api/services/{serviceId}/revisions", s.registerRevision, routeOptions{})
 	s.handle(mux, "POST /api/services/{serviceId}/deploy", s.deployRevision, routeOptions{})
+	s.handle(mux, "POST /api/services/{serviceId}/changeset", s.applyChangeSet, routeOptions{})
 	s.handle(mux, "POST /api/services/{serviceId}/restart", s.restartService, routeOptions{})
 	s.handle(mux, "POST /api/services/{serviceId}/desired-count", s.setDesiredCount, routeOptions{})
 	s.handle(mux, "POST /api/tasks/{taskId}/stop", s.stopTask, routeOptions{})
