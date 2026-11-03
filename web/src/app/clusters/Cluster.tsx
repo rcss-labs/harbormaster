@@ -8,6 +8,7 @@ import { HBars } from '../../charts/HBars'
 import { fmtNum } from '../../charts/format'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip } from '../../components/KpiStrip'
+import { PinButton } from '../../components/PinButton'
 import { Panel } from '../../components/Panel'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
@@ -15,6 +16,7 @@ import { STATUS_COLOR, statusKind } from '../../components/status'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { usePins } from '../shell/pins'
 import { ClusterUsageChart } from './ClusterUsageChart'
 import { formatPercent } from './clusterMetrics'
 import { ServicesTable } from './ServicesTable'
@@ -50,6 +52,7 @@ export function Cluster() {
   const clusterQuery = useCluster(clusterId)
   const clusterMetricsQuery = useClusterMetrics(clusterId, '24h')
   const { me } = useAuth()
+  const { isPinned, toggle } = usePins()
   const [editing, setEditing] = useState<TagTarget | null>(null)
   const cluster = clusterQuery.data
   const clusterMetrics = clusterMetricsQuery.data
@@ -92,6 +95,13 @@ export function Cluster() {
               onClick={handleTagClick && (() => handleTagClick({ kind: 'cluster', id: cluster.id, name: cluster.name, tag: cluster.tag }))}
             />
             <StatusDot clusterStatus={cluster.status} />
+            <PinButton
+              name={cluster.name}
+              pinned={isPinned('cluster', cluster.id)}
+              onToggle={() =>
+                toggle({ kind: 'cluster', id: cluster.id, name: cluster.name, account_name: cluster.account_name, account_id: cluster.account_id })
+              }
+            />
           </div>
           <div className={styles.metaLine}>
             <span>

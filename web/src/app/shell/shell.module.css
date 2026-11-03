@@ -23,10 +23,17 @@
 .navSection { padding: 10px 6px 4px; font: 500 10px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; }
 .nav .navSection { padding-left: 6px; }
 .pinned { padding-top: 0; min-height: 0; overflow: auto; }
-.pinned a { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--radius); color: var(--text-2); }
+.pinned a { display: flex; flex-direction: column; align-items: stretch; gap: 1px; min-height: 28px; padding: 4px 8px; border-radius: var(--radius); color: var(--text-2); }
 .pinned a.active { background: var(--accent-soft); color: var(--accent); }
-.pinName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pinCluster { font: 10.5px var(--mono); color: var(--dim); }
+.pinTop { display: flex; align-items: flex-start; gap: 8px; }
+.pinDot { width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; flex: none; background: var(--border-strong); }
+.pin_ok { background: var(--success); }
+.pin_warn { background: var(--warning); }
+.pin_bad { background: var(--danger); }
+.pin_info { background: var(--info); }
+.pin_mute { background: var(--border-strong); }
+.pinName { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+.pinDetail { padding-left: 14px; font: 10.5px var(--mono); color: var(--dim); overflow-wrap: anywhere; }
 .pinnedEmpty { padding: 2px 8px; font-size: 11.5px; color: var(--dim); }
 .sideFoot { margin-top: auto; border-top: 1px solid var(--border); padding: 8px 6px; display: grid; gap: 6px; font-size: 11.5px; color: var(--muted); }
 .sideFoot strong { color: var(--text); font-weight: 500; }
