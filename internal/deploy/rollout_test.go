@@ -50,7 +50,7 @@ func TestDeploy_StartsRolloutAndAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 43)
+	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 43, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestDeploy_StartsRolloutAndAttributes(t *testing.T) {
 
 func TestDeploy_OlderRevisionIsRollback(t *testing.T) {
 	h := newHarness(t)
-	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41)
+	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDeploy_OlderRevisionIsRollback(t *testing.T) {
 func TestDeploy_RefusedWhileRolloutRunning(t *testing.T) {
 	h := newHarness(t)
 	before := h.fake.Calls()["UpdateService"]
-	_, err := h.svc.Deploy(t.Context(), h.pavel, notificationsKey, 9)
+	_, err := h.svc.Deploy(t.Context(), h.pavel, notificationsKey, 9, false)
 	if !errors.Is(err, deploy.ErrRolloutRunning) {
 		t.Fatalf("err = %v, want ErrRolloutRunning", err)
 	}
@@ -110,7 +110,7 @@ func TestDeploy_RefusedWhileRolloutRunning(t *testing.T) {
 
 func TestDeploy_AlreadyDeployedRevision(t *testing.T) {
 	h := newHarness(t)
-	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 42)
+	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 42, false)
 	var validation *deploy.ValidationError
 	if !errors.As(err, &validation) || validation.Message != "Revision :42 is already deployed. Use Restart to replace its tasks." {
 		t.Fatalf("err = %v", err)
@@ -128,7 +128,7 @@ func TestDeploy_UnsupportedController(t *testing.T) {
 	}
 	h.fake.Estate.Mu.Unlock()
 
-	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41)
+	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41, false)
 	var unsupported *deploy.UnsupportedControllerError
 	if !errors.As(err, &unsupported) || unsupported.Name != "CodeDeploy" {
 		t.Fatalf("err = %v, want UnsupportedControllerError{CodeDeploy}", err)
@@ -161,9 +161,32 @@ func TestRestart_ForceNewDeployment(t *testing.T) {
 
 func TestDeploy_RejectsNonPositiveRevision(t *testing.T) {
 	h := newHarness(t)
-	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 0)
+	_, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 0, false)
 	var validation *deploy.ValidationError
 	if !errors.As(err, &validation) || validation.Message != "Revision must be a positive number" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDeploy_InterruptAllowsRollbackDuringRollout(t *testing.T) {
+	h := newHarness(t)
+	got, err := h.svc.Deploy(t.Context(), h.pavel, notificationsKey, 9, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "rollback" || got.FromRevision != 10 || got.ToRevision != 9 || got.DeploymentID == "" {
+		t.Fatalf("Rollout = %+v", got)
+	}
+}
+
+func TestDeploy_InterruptDoesNotAllowForwardDeployDuringRollout(t *testing.T) {
+	h := newHarness(t)
+	before := h.fake.Calls()["UpdateService"]
+	_, err := h.svc.Deploy(t.Context(), h.pavel, notificationsKey, 11, true)
+	if !errors.Is(err, deploy.ErrRolloutRunning) {
+		t.Fatalf("err = %v, want ErrRolloutRunning", err)
+	}
+	if h.fake.Calls()["UpdateService"] != before {
+		t.Fatal("UpdateService was called")
 	}
 }
