@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { isApiError, useRevisions, useTaskDefinition } from '../../../api/change'
 import {
@@ -16,6 +16,7 @@ import { Panel } from '../../../components/Panel'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
+import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
 import { ScalingPanel } from './ScalingPanel'
 import { ServicePanel } from './ServicePanel'
@@ -78,6 +79,12 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
   const [settingsChanged, setSettingsChanged] = useState(false)
   const [partial, setPartial] = useState<PartialRun | null>(null)
+  // Ticks so a finished rollout stays visible for a minute and then disappears.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(timer)
+  }, [])
 
   if (settingsQuery.isError) {
     return <EmptyState>{settingsQuery.error instanceof Error ? settingsQuery.error.message : 'The deploy settings could not be loaded.'}</EmptyState>
@@ -160,7 +167,6 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     } else {
       toast.show(response.to_revision === null ? `Applied the changes to ${serviceName}.` : `Deploying ${serviceName} to :${response.to_revision}.`, 'ok')
     }
-    // Mount point for <RolloutProgress>: `response` carries deployment_id, from_revision and to_revision.
     resetDrafts()
   }
 
@@ -201,6 +207,9 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
 
   return (
     <>
+      {service.data && shouldShowProgress(service.data, now) && (
+        <RolloutProgress serviceId={serviceId} service={service.data} canDeploy={service.data.can.deploy} tagName={tagName} />
+      )}
       <div className={styles.grid} data-changes={changes} data-definition-changed={definitionChanged} data-definition-problems={definitionProblems.length}>
         {definitionDraft && liveDefinition ? (
           <>

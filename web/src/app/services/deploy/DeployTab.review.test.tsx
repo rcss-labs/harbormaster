@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { ChangeSetRequest, ChangeSetResponse } from '../../../api/deploy'
-import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE } from '../../../test/fixtures'
+import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS, SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE } from '../../../test/fixtures'
 import { withCan } from '../../../test/deployVariants'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -253,5 +253,20 @@ describe('Review', () => {
     expect(within(footer()).getByText('0 changes')).toBeInTheDocument()
     expect(desiredCount()).toHaveValue(3)
     expect(within(screen.getByRole('region', { name: 'Containers' })).getByLabelText('Variable value 1')).toHaveValue('info')
+  })
+})
+
+describe('DeployTab: rollout progress', () => {
+  it('shows the running rollout with a rollback above the editors', async () => {
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, deployments: SERVICE_NOTIFICATIONS.deployments })))
+    await openDeployTab()
+    const progress = await screen.findByRole('region', { name: 'Rollout progress' })
+    expect(within(progress).getByText('Rollout in progress')).toBeInTheDocument()
+    expect(within(progress).getByRole('button', { name: 'Roll back to :9' })).toBeInTheDocument()
+  })
+
+  it('is absent when no rollout is running or just finished', async () => {
+    await openDeployTab()
+    expect(screen.queryByRole('region', { name: 'Rollout progress' })).not.toBeInTheDocument()
   })
 })
