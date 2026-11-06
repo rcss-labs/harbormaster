@@ -1,13 +1,14 @@
-/* Base element styles. Body is 12.5px/1.45 with tabular numerals (redesign README, Type). */
+/* Base element styles. Body is 13px/1.5 with tabular numerals (redesign v4 README, Type). */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 12.5px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
-h1, h2, h3, p { margin: 0; }
-h1 { font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, p { margin: 0; }
+h1 { font-size: 20px; line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
 h2 { font-size: 14px; font-weight: 600; text-wrap: balance; }
-h3 { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+h3 { font-size: 13px; font-weight: 600; color: var(--muted); }
 a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; color: inherit; }
 code, pre, .mono { font-family: var(--mono); font-size: 12px; }
+svg { flex: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

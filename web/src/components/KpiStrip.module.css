@@ -1,7 +1,13 @@
-.strip { list-style: none; margin: 0; padding: 0; display: grid; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.cell { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; min-width: 0; }
+.strip { list-style: none; margin: 0; padding: 0; display: grid; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.cell { min-width: 0; }
 .cell + .cell { border-left: 1px solid var(--border); }
-.label { font: 500 10px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
-.value { font: 600 20px/1.2 var(--mono); letter-spacing: -0.03em; }
+.inner { display: flex; flex-direction: column; gap: 2px; padding: 10px var(--pad); min-width: 0; height: 100%; color: inherit; }
+.link:hover { background: var(--hover); }
+.label { font-size: 12px; font-weight: 500; color: var(--muted); }
+.value { font: 600 20px/1.25 var(--mono); letter-spacing: -0.02em; }
 .spark { display: block; margin-top: 2px; }
+.tone-ok .value { color: var(--ok); }
+.tone-warn .value { color: var(--warn); }
+.tone-bad .value { color: var(--bad); }
+.tone-exp .value { color: var(--exp); }
 @media (max-width: 760px) { .strip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .cell:nth-child(odd) { border-left: 0; } }

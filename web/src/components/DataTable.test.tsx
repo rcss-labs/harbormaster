@@ -114,4 +114,52 @@ describe('DataTable', () => {
     expect(bodyRows[1]).toHaveAttribute('data-status', 'bad')
     expect(bodyRows[2]).toHaveAttribute('data-status', 'warn')
   })
+
+  describe('v4 layout options', () => {
+    const rowActionProps = { ...props, rowAction: (r: Row) => <button type="button">Restart {r.name}</button> }
+
+    it('sticky actions column keeps position: sticky and the name column stays first', () => {
+      render(<DataTable {...rowActionProps} stickyActions />)
+      const header = screen.getAllByRole('columnheader')
+      expect(header[0]).toHaveTextContent('Service')
+      const firstRow = screen.getAllByRole('row')[1]
+      const cells = within(firstRow).getAllByRole('cell')
+      expect(cells[0]).toHaveTextContent('checkout')
+      expect(cells[0]).not.toHaveStyle({ position: 'sticky' })
+      const last = cells[cells.length - 1]
+      expect(last).toHaveStyle({ position: 'sticky', right: '0px' })
+      expect(within(last).getByRole('button', { name: 'Restart checkout' })).toBeInTheDocument()
+      expect(header[header.length - 1]).toHaveStyle({ position: 'sticky', right: '0px' })
+    })
+
+    it('rowAction adds an Actions column even without stickyActions, and it is not sticky then', () => {
+      render(<DataTable {...rowActionProps} />)
+      expect(screen.getByRole('columnheader', { name: 'Actions' })).not.toHaveStyle({ position: 'sticky' })
+      expect(screen.getAllByRole('button', { name: /^Restart/ })).toHaveLength(3)
+    })
+
+    it('stickyActions without rowAction pins the last declared column', () => {
+      render(<DataTable {...props} stickyActions />)
+      const cells = within(screen.getAllByRole('row')[1]).getAllByRole('cell')
+      expect(cells[cells.length - 1]).toHaveStyle({ position: 'sticky' })
+    })
+
+    it('visibleColumns hides the columns that are not listed', () => {
+      render(<DataTable {...props} visibleColumns={['name', 'tasks']} />)
+      expect(screen.getAllByRole('columnheader')).toHaveLength(2)
+      expect(screen.queryByRole('columnheader', { name: 'Note' })).not.toBeInTheDocument()
+      expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')).toHaveLength(2)
+    })
+
+    it('row height follows the density token', () => {
+      document.documentElement.dataset.density = 'comfortable'
+      try {
+        render(<DataTable {...props} />)
+        const row = screen.getAllByRole('row')[1] as HTMLElement
+        expect(row.style.minHeight).toBe('var(--row)')
+      } finally {
+        delete document.documentElement.dataset.density
+      }
+    })
+  })
 })
