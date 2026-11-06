@@ -38,4 +38,9 @@ describe('TaskSizePanel', () => {
     expect(screen.getByRole('combobox', { name: 'Task CPU' })).toBeDisabled()
     expect(screen.getByTitle('You need Edit on prod')).toBeInTheDocument()
   })
+
+  it('no OOM hint without an OOM stop', () => {
+    render(<Harness />)
+    expect(screen.queryByText(/OutOfMemoryError/)).not.toBeInTheDocument()
+  })
 })

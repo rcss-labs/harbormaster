@@ -11,17 +11,17 @@ import {
   type DeploySettingsResponse,
 } from '../../../api/deploy'
 import { useService, useServiceTasks } from '../../../api/hooks'
-import { EmptyState } from '../../../components/EmptyState'
 import { Panel } from '../../../components/Panel'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
+import { PendingChangesAside } from './PendingChangesAside'
 import { ScalingPanel } from './ScalingPanel'
 import { ServicePanel } from './ServicePanel'
 import { TaskSizePanel } from './TaskSizePanel'
-import { buildChangeSetRequest, buildRetryRequest, changesLabel, countSections, scalingLines, serviceRows, type ChangeSections } from './changeSummary'
+import { buildChangeSetRequest, buildRetryRequest, countSections, pendingRows, scalingLines, serviceRows, type ChangeSections } from './changeSummary'
 import { definitionErrors, isDefinitionChanged } from './draft'
 import { rebaseScalingDraft, rebaseServiceDraft } from './rebase'
 import { scalingDraftErrors, scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
@@ -53,8 +53,8 @@ function parseRevisionParam(value: string | null): number | null {
 }
 
 /**
- * The Deploy tab: editors for the task definition, service settings and auto scaling, and a sticky footer that reviews
- * every pending edit as one change set.
+ * The Deploy tab: editors for the task definition, service settings and auto scaling, and a sticky Pending changes aside
+ * that lists each edited field before and after and reviews every pending edit as one change set.
  */
 export function DeployTab({ serviceId }: { serviceId: string }) {
   const settingsQuery = useDeploySettings(serviceId)
@@ -86,24 +86,22 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     return () => clearInterval(timer)
   }, [])
 
-  if (settingsQuery.isError) {
-    return <EmptyState>{settingsQuery.error instanceof Error ? settingsQuery.error.message : 'The deploy settings could not be loaded.'}</EmptyState>
-  }
+  // Each part renders on its own: a settings problem degrades Service and Auto scaling, never the whole tab.
   const settings = settingsQuery.data
-  if (!settings) return null
+  const settingsError = settingsQuery.isError && !settings ? { message: settingsQuery.error instanceof Error ? settingsQuery.error.message : 'The deploy settings could not be loaded.', onRetry: () => void settingsQuery.refetch() } : undefined
 
   const liveDefinition = taskDefinition.data?.definition
-  const deployedRevision = taskDefinition.data?.deployed_revision ?? settings.deployed_revision
+  const deployedRevision = taskDefinition.data?.deployed_revision ?? settings?.deployed_revision
   // A revision from ?revision=N is the starting point of the definition draft until the user edits it.
-  const revisionPending = revisionParam !== null && revisionParam !== deployedRevision
+  const revisionPending = revisionParam !== null && deployedRevision !== undefined && revisionParam !== deployedRevision
   const preloaded = revisionPending ? (revisionTarget.data?.definition as Definition | undefined) : undefined
   // Null until the user edits: the draft then follows the current task definition (including a refetch after a write).
   const definitionDraft = editedDefinition ?? preloaded ?? liveDefinition
-  const serviceDraft = editedService ?? serviceDraftFromSettings(settings)
-  const scalingDraft = editedScaling ?? scalingDraftFromSettings(settings)
+  const serviceDraft = settings ? (editedService ?? serviceDraftFromSettings(settings)) : null
+  const scalingDraft = settings ? (editedScaling ?? scalingDraftFromSettings(settings)) : null
   const tagName = service.data?.tag.name ?? 'this service'
   const serviceName = service.data?.name ?? 'this service'
-  const canEditDefinition = (taskDefinition.data?.can ?? settings.can).edit
+  const canEditDefinition = (taskDefinition.data?.can ?? settings?.can)?.edit ?? false
   const definitionChanged = definitionDraft !== undefined && liveDefinition !== undefined && isDefinitionChanged(definitionDraft, liveDefinition)
   const definitionProblems = definitionDraft ? definitionErrors(definitionDraft) : []
   const oomHint = definitionDraft
@@ -117,13 +115,19 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
 
   const sections: ChangeSections = {
     target: !definitionChanged || !definitionDraft ? null : editedDefinition ? { kind: 'definition', definition: editedDefinition } : preloaded ? { kind: 'revision', revision: revisionParam as number } : null,
-    service: serviceDraftToChange(settings, serviceDraft),
-    scaling: scalingDraftToChange(settings, scalingDraft),
+    service: settings && serviceDraft ? serviceDraftToChange(settings, serviceDraft) : null,
+    scaling: settings && scalingDraft ? scalingDraftToChange(settings, scalingDraft) : null,
   }
   const changes = countSections(sections)
-  const problems = [...definitionProblems, ...serviceDraftErrors(settings, serviceDraft), ...scalingDraftErrors(settings, scalingDraft)]
-  const predictedRevision = Math.max(deployedRevision, ...(revisions.data?.items.map((item) => item.revision) ?? [])) + 1
-  const baseline: EditBase = { revision: deployedRevision, version: settings.version }
+  const problems = [
+    ...definitionProblems,
+    ...(settings && serviceDraft ? serviceDraftErrors(settings, serviceDraft) : []),
+    ...(settings && scalingDraft ? scalingDraftErrors(settings, scalingDraft) : []),
+  ]
+  const predictedRevision = Math.max(deployedRevision ?? 0, ...(revisions.data?.items.map((item) => item.revision) ?? [])) + 1
+  const baseline: EditBase = { revision: deployedRevision ?? 0, version: settings?.version ?? '' }
+  const rows = pendingRows({ sections, liveDefinition, definitionAfter: definitionChanged ? definitionDraft : undefined }, settings)
+  const canDeploy = settings?.can.deploy ?? service.data?.can.deploy ?? false
   const base = editBase ?? baseline
 
   // Remember what the first edit was based on, so a change made by someone else in the meantime is caught on submit.
@@ -155,8 +159,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   // Takes fresh settings as the new baseline; the user's edits stay where they still differ from what is live now.
   const adoptSettings = (fresh: DeploySettingsResponse) => {
     queryClient.setQueryData(['service', serviceId, 'deploy-settings'], fresh)
-    if (editedService) setEditedService(rebaseServiceDraft(editedService, settings, fresh))
-    if (editedScaling) setEditedScaling(rebaseScalingDraft(editedScaling, settings))
+    if (settings && editedService) setEditedService(rebaseServiceDraft(editedService, settings, fresh))
+    if (settings && editedScaling) setEditedScaling(rebaseScalingDraft(editedScaling, settings))
     setEditBase((current) => ({ revision: current?.revision ?? baseline.revision, version: fresh.version }))
   }
 
@@ -203,88 +207,101 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     const next = partial && buildRetryRequest(partial.request, partial.response)
     if (next) void submit(next)
   }
-  const reviewable = (changes > 0 || partial !== null) && problems.length === 0
+  // Without the deployed revision there is nothing to guard the change set with, so Review waits for it.
+  const reviewable = (changes > 0 || partial !== null) && problems.length === 0 && deployedRevision !== undefined
 
   return (
     <>
       {service.data && shouldShowProgress(service.data, now) && (
         <RolloutProgress serviceId={serviceId} service={service.data} canDeploy={service.data.can.deploy} tagName={tagName} />
       )}
-      <div className={styles.grid} data-changes={changes} data-definition-changed={definitionChanged} data-definition-problems={definitionProblems.length}>
-        {definitionDraft && liveDefinition ? (
-          <>
-            <ContainersPanel
-              serviceId={serviceId}
-              definition={definitionDraft}
-              deployed={liveDefinition}
-              onChange={edit(setEditedDefinition)}
-              canEdit={canEditDefinition}
-              isAdmin={settings.can.admin}
-              tagName={tagName}
-            />
-            <TaskSizePanel definition={definitionDraft} onChange={edit(setEditedDefinition)} canEdit={canEditDefinition} tagName={tagName} oomHint={oomHint} />
-          </>
-        ) : (
-          <>
-            <Panel title="Containers">
-              <p className={styles.mono}>{taskDefinition.isError ? 'The task definition could not be loaded.' : 'Loading…'}</p>
-            </Panel>
-            <Panel title="Task size">
-              <p className={styles.mono}>{taskDefinition.isError ? 'The task definition could not be loaded.' : 'Loading…'}</p>
-            </Panel>
-          </>
-        )}
-        <ServicePanel settings={settings} draft={serviceDraft} onChange={edit(setEditedService)} tagName={tagName} />
-        <ScalingPanel settings={settings} draft={scalingDraft} onChange={edit(setEditedScaling)} desiredCount={serviceDraft.desiredCount} tagName={tagName} />
-      </div>
-
-      <section className={styles.footer} aria-label="Pending changes">
-        <div className={styles.footerInfo}>
-          <span className={styles.count}>{changesLabel(changes)}</span>
-          {revisionPending && (
-            <span className={styles.note}>
-              <span>{revisionTarget.isError ? `Revision :${revisionParam} could not be loaded` : revisionTarget.data ? `:${revisionParam} is loaded from the revisions list` : `Loading :${revisionParam}…`}</span>
-              <button type="button" className={styles.link} onClick={clearRevisionParam}>{`Dismiss :${revisionParam}`}</button>
-            </span>
-          )}
-          {problems.length > 0 && (
-            <ul className={styles.problems} aria-label="Problems">
-              {problems.map((problem) => (
-                <li key={problem}>{problem}</li>
+      <div className="hm-split-sticky">
+        <div className={`hm-wide-form ${styles.form}`} data-changes={changes} data-definition-changed={definitionChanged} data-definition-problems={definitionProblems.length}>
+          {definitionDraft && liveDefinition ? (
+            <>
+              <ContainersPanel
+                serviceId={serviceId}
+                definition={definitionDraft}
+                deployed={liveDefinition}
+                onChange={edit(setEditedDefinition)}
+                canEdit={canEditDefinition}
+                isAdmin={settings?.can.admin ?? false}
+                tagName={tagName}
+              />
+              <TaskSizePanel definition={definitionDraft} onChange={edit(setEditedDefinition)} canEdit={canEditDefinition} tagName={tagName} oomHint={oomHint} />
+            </>
+          ) : (
+            <>
+              {(['Containers', 'Task size'] as const).map((title) => (
+                <Panel
+                  key={title}
+                  title={title}
+                  loading={!taskDefinition.isError}
+                  error={taskDefinition.isError ? { message: 'The task definition could not be loaded.', onRetry: () => void taskDefinition.refetch() } : undefined}
+                >
+                  {null}
+                </Panel>
               ))}
-            </ul>
+            </>
+          )}
+          {settings && serviceDraft && scalingDraft ? (
+            <>
+              <ServicePanel settings={settings} draft={serviceDraft} onChange={edit(setEditedService)} tagName={tagName} />
+              <ScalingPanel
+                settings={settings}
+                draft={scalingDraft}
+                onChange={edit(setEditedScaling)}
+                desiredCount={serviceDraft.desiredCount}
+                tagName={tagName}
+                onRetry={() => void settingsQuery.refetch()}
+              />
+            </>
+          ) : (
+            <>
+              {(['Service', 'Auto scaling'] as const).map((title) => (
+                <Panel key={title} title={title} loading={settingsError === undefined} error={settingsError}>
+                  {null}
+                </Panel>
+              ))}
+            </>
           )}
         </div>
-        <div className={styles.footerActions}>
-          <button type="button" className={styles.btn} disabled={changes === 0 && partial === null} onClick={resetDrafts}>
-            Discard
-          </button>
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.primary}`}
-            disabled={!reviewable}
-            onClick={() => {
-              setEditBase((current) => current ?? baseline)
-              setReviewing(true)
-            }}
-          >
-            Review…
-          </button>
-        </div>
-      </section>
+
+        <PendingChangesAside
+          count={changes}
+          rows={rows}
+          problems={problems}
+          loadedRevision={
+            revisionPending
+              ? {
+                  text: revisionTarget.isError ? `Revision :${revisionParam} could not be loaded` : revisionTarget.data ? `:${revisionParam} is loaded from the revisions list` : `Loading :${revisionParam}…`,
+                  dismissLabel: `Dismiss :${revisionParam}`,
+                  onDismiss: clearRevisionParam,
+                }
+              : undefined
+          }
+          discardDisabled={changes === 0 && partial === null}
+          reviewDisabled={!reviewable}
+          onDiscard={resetDrafts}
+          onReview={() => {
+            setEditBase((current) => current ?? baseline)
+            setReviewing(true)
+          }}
+        />
+      </div>
 
       {reviewing && (
         <ReviewChangesDialog
           serviceName={serviceName}
           tagName={tagName}
-          deployedRevision={deployedRevision}
+          deployedRevision={deployedRevision ?? 0}
           predictedRevision={predictedRevision}
           sections={sections}
           definitionBefore={liveDefinition ? pretty(liveDefinition) : ''}
           definitionAfter={definitionDraft ? pretty(definitionDraft) : ''}
-          serviceRows={sections.service ? serviceRows(settings, sections.service) : []}
-          scalingLines={sections.scaling ? scalingLines(settings, sections.scaling) : []}
-          canDeploy={settings.can.deploy}
+          serviceRows={settings && sections.service ? serviceRows(settings, sections.service) : []}
+          scalingLines={settings && sections.scaling ? scalingLines(settings, sections.scaling) : []}
+          canDeploy={canDeploy}
           reason={reason}
           busy={changeSet.isPending}
           error={submitError}
