@@ -85,10 +85,17 @@ test('crumbs never overlap the search button at 1024', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 800 })
   await page.goto('/clusters')
   const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' })
-  await expect(crumbs).toBeVisible()
-  const search = page.getByRole('button', { name: /Search or run a command/ })
-  const [crumbBox, searchBox] = [await crumbs.boundingBox(), await search.boundingBox()]
-  expect(crumbBox!.x + crumbBox!.width).toBeLessThanOrEqual(searchBox!.x + 0.5)
+  // The nav is visible while still empty; the crumb text and the freshness control arrive later and reflow the top bar.
+  // Wait for both, then measure the two boxes in one evaluate so a reflow cannot fall between the reads.
+  await expect(crumbs).toHaveText('Clusters')
+  await expect(page.getByRole('button', { name: /regions current$/ })).toBeVisible()
+  const gapBeforeSearch = () =>
+    page.evaluate(() => {
+      const crumbBox = document.querySelector('nav[aria-label="Breadcrumb"]')!.getBoundingClientRect()
+      const searchBox = [...document.querySelectorAll('button')].find((button) => /Search or run a command/.test(button.textContent ?? ''))!.getBoundingClientRect()
+      return searchBox.left - crumbBox.right
+    })
+  await expect.poll(gapBeforeSearch).toBeGreaterThanOrEqual(-0.5)
   // The top bar itself never scrolls sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 })

@@ -1,15 +1,11 @@
 import { expect, test } from '../e2e/fixtures/test'
 import { resolveTargets } from './targets'
 
-// Checks that need floci's real estate. At wave 0 the old UI fails the four that depend on v4 behaviour; each is
-// marked test.fixme with the owning lane, and the owning wave-2 lane (2A) removes the marker. HM_FLOCI_UNFIXME=1
-// runs them anyway, which is how the lead verifies them locally once the lanes are merged.
-const fixmeUntil = (lane: string, what: string) => test.fixme(!process.env.HM_FLOCI_UNFIXME, `${what} (owner: ${lane}; removed by lane 2A)`)
+// Checks that need floci's real estate (a real ECS/Application Auto Scaling code path, not the fake).
 
 const BOTTOM_TOLERANCE_PX = 24
 
 test('terminal fills to the window bottom', async ({ page, request }) => {
-  fixmeUntil('lane 1H', 'service Terminal tab does not yet fill the window height')
   const { serviceId } = await resolveTargets(request)
   for (const [width, height] of [
     [1440, 900],
@@ -26,7 +22,6 @@ test('terminal fills to the window bottom', async ({ page, request }) => {
 })
 
 test('logs fill to the window bottom', async ({ page, request }) => {
-  fixmeUntil('lane 1H', 'service Logs tab does not yet fill the window height')
   const { serviceId } = await resolveTargets(request)
   for (const [width, height] of [
     [1440, 900],
@@ -43,7 +38,6 @@ test('logs fill to the window bottom', async ({ page, request }) => {
 })
 
 test('only the scheduled actions panel degrades on Deploy', async ({ page, request }) => {
-  fixmeUntil('lane 1B (API) and lane 1I (UI)', 'deploy settings are one request that fails whole until the partial response lands')
   const { serviceId } = await resolveTargets(request)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(`/services/${serviceId}/deploy`)
@@ -51,7 +45,7 @@ test('only the scheduled actions panel degrades on Deploy', async ({ page, reque
   for (const heading of ['Containers', 'Task size', 'Service']) {
     await expect(main.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible()
   }
-  await expect(main.getByRole('table', { name: /Policies/ })).toBeVisible()
+  await expect(main.getByRole('table', { name: 'Scaling policies' })).toBeVisible()
   const autoScaling = main.getByRole('heading', { name: 'Auto scaling' }).locator('xpath=ancestor::*[self::section or @role="region"][1]')
   const alerts = autoScaling.getByRole('alert')
   await expect(alerts).toHaveCount(1)
@@ -74,20 +68,27 @@ test('freshness control counts core data', async ({ page }) => {
   await expect(page.locator('main [data-hm-banner]')).toHaveCount(0)
 })
 
-test('overview and deploy use two columns at 2560', async ({ page, request }) => {
-  fixmeUntil('lane 1G (Overview) and lane 1I (Deploy)', 'the .hm-wide-split two-column layout is not built yet')
+test('overview and deploy use two columns at 2560 and 3840', async ({ page, request }) => {
   const { serviceId } = await resolveTargets(request)
-  await page.setViewportSize({ width: 2560, height: 1440 })
-  for (const path of ['/', `/services/${serviceId}/deploy`]) {
-    await page.goto(path)
-    const split = page.locator('.hm-wide-split').first()
-    await expect(split).toBeVisible()
-    const children = split.locator('> *')
-    expect(await children.count(), `${path}: columns`).toBeGreaterThanOrEqual(2)
-    const first = (await children.nth(0).boundingBox())!
-    const second = (await children.nth(1).boundingBox())!
-    expect(second.x, `${path}: second column sits right of the first`).toBeGreaterThanOrEqual(first.x + first.width - 1)
-    expect(Math.abs(second.y - first.y), `${path}: columns start at the same height`).toBeLessThanOrEqual(2)
+  // Overview's Triage layout is .hm-wide-split; Deploy's form is CSS columns in .hm-wide-form (the sticky aside is separate).
+  const pages = [
+    { path: '/', columns: '.hm-wide-split' },
+    { path: `/services/${serviceId}/deploy`, columns: '.hm-wide-form' },
+  ]
+  for (const width of [2560, 3840]) {
+    await page.setViewportSize({ width, height: 1440 })
+    for (const { path, columns } of pages) {
+      await page.goto(path)
+      const split = page.locator(columns).first()
+      await expect(split).toBeVisible()
+      const children = split.locator('> *')
+      await expect(children.nth(1)).toBeVisible()
+      expect(await children.count(), `${path} at ${width}: columns`).toBeGreaterThanOrEqual(2)
+      const first = (await children.nth(0).boundingBox())!
+      const second = (await children.nth(1).boundingBox())!
+      expect(second.x, `${path} at ${width}: second column sits right of the first`).toBeGreaterThanOrEqual(first.x + first.width - 1)
+      expect(Math.abs(second.y - first.y), `${path} at ${width}: columns start at the same height`).toBeLessThanOrEqual(2)
+    }
   }
 })
 

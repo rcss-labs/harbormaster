@@ -64,8 +64,8 @@
 .pendingDeploy:disabled { opacity: 0.5; cursor: not-allowed; }
 .metricsGrid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .metricsGrid { grid-template-columns: minmax(0, 1fr); } }
-/* Logs and terminal run to the bottom of the window: cancel most of the content area's bottom padding so the panel ends within 24px of the edge. */
-.tabPanelFill { margin-bottom: -16px; }
+/* Logs and terminal run to the bottom of the window: cancel the content area's whole bottom padding (32px) so the panel ends at the window edge and its inner log/terminal area sits within one panel padding of it. */
+.tabPanelFill { margin-bottom: -32px; }
 
 /* The shell's content padding drops to 12px at 900px and below; keep the sticky header flush with it so nothing spills sideways. */
 @media (max-width: 900px) {
