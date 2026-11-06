@@ -1,5 +1,5 @@
-import { screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import type { RollupPanel } from '../../api/analytics'
 import { ANALYTICS_RELIABILITY } from '../../test/fixtures'
 import { renderWithProviders } from '../../test/setup'
@@ -57,6 +57,15 @@ describe('AnalyticsPanel', () => {
   it('has no empty state when data covers the window', () => {
     panel({ rollup: { available: true, data_since: '2026-09-01T00:00:00Z', data: {} } })
     expect(screen.queryByText(/Daily data started on/)).not.toBeInTheDocument()
+  })
+
+  it('shows its own error in place of the body, with a retry', () => {
+    const onRetry = vi.fn()
+    panel({ error: { message: 'Availability could not be read.', onRetry } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Availability could not be read.')
+    expect(screen.queryByText('chart body')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
   it('renders legend items as label and value', () => {

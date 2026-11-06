@@ -57,6 +57,14 @@ describe('CapacityTab daily panels', () => {
   })
 })
 
+describe('CapacityTab breakdown bars', () => {
+  it('draws the vCPU by account and tasks by capacity provider breakdowns as stacked bars named with their totals', async () => {
+    await renderTab(ANALYTICS_CAPACITY)
+    expect(within(screen.getByRole('region', { name: 'Reserved vCPU by account' })).getByRole('img', { name: /of 14\.5$/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Tasks by capacity provider' })).getByRole('img', { name: /FARGATE 21, FARGATE_SPOT 6 of 27$/ })).toBeInTheDocument()
+  })
+})
+
 describe('CapacityTab subnets', () => {
   it('renders used_pct as a 0..1 fraction: 0.92 reads 92% with a 92% bar', async () => {
     await renderTab(ANALYTICS_CAPACITY)

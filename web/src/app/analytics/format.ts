@@ -73,8 +73,8 @@ export function retentionText(retention: string): string {
   if (!retention) return 'forever'
   const hours = Number.parseInt(retention, 10)
   if (!Number.isFinite(hours) || !retention.endsWith('h')) return retention
-  if (hours % 24 !== 0) return `${hours} hours`
-  const days = hours / 24
+  const days = Math.round(hours / 24)
+  if (days === 365) return '1 year'
   return days === 1 ? '1 day' : `${days} days`
 }
 
