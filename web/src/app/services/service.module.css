@@ -78,4 +78,5 @@
 }
 
 .btnPrimary { height: 30px; padding: 0 14px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
-.btnPrimary:hover { filter: brightness(1.1); }
+.btnPrimary:hover:not(:disabled) { filter: brightness(1.1); }
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
