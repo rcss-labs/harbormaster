@@ -1,0 +1,40 @@
+/* Services page: a flat list of every visible service. The page fills the main column; no max-width. */
+.page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.pageHead { display: grid; gap: 2px; }
+.pageHead h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
+.sub { color: var(--muted); font-size: 13px; }
+
+.views { padding: 8px var(--pad) 0; border-bottom: 1px solid var(--border); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px var(--pad); border-bottom: 1px solid var(--border); }
+.search { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; flex: 1 1 240px; min-width: 160px; }
+.pushRight { margin-left: auto; }
+
+.nameCell { display: grid; line-height: 1.3; min-width: 0; }
+.nameLink { font: 600 13px var(--mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nameLink:hover { color: var(--accent); }
+.why { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.mono.bad { color: var(--bad); }
+.link { color: var(--accent); }
+.two { display: grid; line-height: 1.3; }
+.two small { font: 12px var(--mono); color: var(--muted); }
+.nowrap { white-space: nowrap; }
+
+.actions { display: flex; align-items: center; gap: 6px; }
+.btn { height: 26px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; }
+.btn:hover { background: var(--hover-strong); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btnPrimary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btnPrimary:hover { background: var(--accent); filter: brightness(1.08); }
+.btnPrimary:disabled { filter: none; }
+
+.empty { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.note { color: var(--muted); font-size: 12px; }
+
+.drawerBody { display: grid; gap: 14px; }
+.openGroup { display: grid; gap: 6px; }
+.openLabel { font-size: 12px; font-weight: 600; color: var(--muted); }
+.openLinks { display: flex; flex-wrap: wrap; gap: 6px; }
+.tagNote { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.footBtns { display: flex; gap: 8px; justify-content: flex-end; }
