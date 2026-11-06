@@ -1,10 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ANALYTICS_CAPACITY, ANALYTICS_DELIVERY, ANALYTICS_OPERATIONS, ANALYTICS_RELIABILITY } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
+import { installPhoneMedia } from '../../test/phone'
 
 beforeEach(() => {
   localStorage.clear()
@@ -266,5 +267,35 @@ describe('Analytics tables', () => {
     expect(within(clusters).getByText('staging-web')).toBeInTheDocument()
     expect(within(screen.getByRole('table', { name: 'Services at auto-scaling max' })).getByText('6 / 6')).toBeInTheDocument()
     expect(within(screen.getByRole('table', { name: 'Subnets running low on IPs' })).getByText('private-a')).toBeInTheDocument()
+  })
+})
+
+describe('Analytics filters on phones', () => {
+  let restoreMedia: () => void
+  beforeEach(() => {
+    restoreMedia = installPhoneMedia(true)
+  })
+  afterEach(() => restoreMedia())
+
+  it('the tag filter is a chips row: tapping Prod sets the tag and All clears it', async () => {
+    renderApp('/analytics/delivery')
+    const user = userEvent.setup()
+    const chips = await screen.findByRole('group', { name: 'Tag' })
+    expect(within(chips).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(chips).getByRole('button', { name: 'Prod' }))
+    await waitFor(() => expect(search()).toHaveTextContent('tag=3'))
+    expect(within(chips).getByRole('button', { name: 'Prod' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(chips).getByRole('button', { name: 'All' }))
+    await waitFor(() => expect(search()).not.toHaveTextContent('tag='))
+  })
+
+  it('capacity keeps the range filter disabled and explains a click with the toast', async () => {
+    renderApp('/analytics/capacity?range=24h')
+    const user = userEvent.setup()
+    const group = await screen.findByRole('radiogroup', { name: 'Range' })
+    for (const radio of within(group).getAllByRole('radio')) expect(radio).toHaveAttribute('aria-disabled', 'true')
+    await user.click(within(group).getByRole('radio', { name: '90d' }))
+    expect(await screen.findByText('This page does not use the range filter')).toBeInTheDocument()
+    expect(search()).toHaveTextContent('range=24h')
   })
 })

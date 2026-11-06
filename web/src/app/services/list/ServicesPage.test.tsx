@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SERVICES_LIST } from '../../../test/fixtures'
@@ -91,7 +92,8 @@ describe('Services page', () => {
     const first = renderApp('/services')
     await table()
     expect(screen.getByRole('columnheader', { name: /Image tag/ })).toBeInTheDocument()
-    expect(screen.queryByRole('columnheader', { name: /CPU|Memory/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'CPU' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Memory' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Columns' }))
     await user.click(screen.getByRole('checkbox', { name: 'Image tag' }))
     expect(screen.queryByRole('columnheader', { name: /Image tag/ })).not.toBeInTheDocument()
@@ -117,6 +119,52 @@ describe('Services page', () => {
     await user.click(screen.getByRole('button', { name: 'Next page' }))
     await waitFor(() => expect(shownNames()[0]).toBe('gen-25'))
     expect(screen.getByTestId('search').textContent).toContain('page=2')
+  })
+
+  describe('with 60 services', () => {
+    const items = Array.from({ length: 60 }, (_, i) => ({
+      ...SERVICES_LIST.items[i % 15],
+      id: `gen-${i}`,
+      name: `gen-${String(i).padStart(2, '0')}`,
+    }))
+    const metricRequests: string[][] = []
+    beforeEach(() => {
+      metricRequests.length = 0
+      server.use(
+        http.get('/api/services', () => HttpResponse.json({ ...SERVICES_LIST, items, total: 60 })),
+        http.get('/api/services/metrics', ({ request }) => {
+          metricRequests.push(new URL(request.url).searchParams.getAll('id'))
+          return HttpResponse.json({ items: {}, errors: [], stale: null, polled_at: '2026-11-06T10:00:05Z' })
+        }),
+      )
+    })
+
+    it('requests metrics only for the page ids', async () => {
+      const user = userEvent.setup()
+      renderApp('/services?sort=name&dir=asc')
+      await waitFor(() => expect(metricRequests.length).toBeGreaterThan(0))
+      expect(metricRequests[0]).toHaveLength(25)
+      expect(metricRequests[0]).toContain('gen-0')
+      expect(metricRequests[0]).not.toContain('gen-25')
+      await user.click(screen.getByRole('button', { name: 'Next page' }))
+      await waitFor(() => expect(metricRequests.at(-1)).toContain('gen-25'))
+      expect(metricRequests.at(-1)).not.toContain('gen-0')
+      expect(metricRequests.every((ids) => ids.length <= 25)).toBe(true)
+    })
+
+    it('metrics refetch does not reset the page', async () => {
+      const user = userEvent.setup()
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      renderApp('/services?sort=name&dir=asc', queryClient)
+      await table()
+      await user.click(await screen.findByRole('button', { name: 'Next page' }))
+      await waitFor(() => expect(shownNames()[0]).toBe('gen-25'))
+      const before = metricRequests.length
+      await queryClient.refetchQueries({ queryKey: ['services', 'metrics'] })
+      await waitFor(() => expect(metricRequests.length).toBeGreaterThan(before))
+      expect(shownNames()[0]).toBe('gen-25')
+      expect(screen.getByTestId('search').textContent).toContain('page=2')
+    })
   })
 
   it('clicking a column header sorts and writes sort and dir to the URL', async () => {

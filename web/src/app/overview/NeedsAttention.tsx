@@ -4,6 +4,9 @@ import { useServicesList } from '../../api/hooks'
 import { useAlerts } from '../../api/observe'
 import type { AlertDTO, ServiceListItemDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
+import { Chips } from '../../components/Chips'
+import { Icon } from '../../components/Icon'
+import { usePhone } from '../../components/useNarrow'
 import { EmptyState } from '../../components/EmptyState'
 import { Panel } from '../../components/Panel'
 import { SegmentedFilter } from '../../components/Seg'
@@ -12,6 +15,7 @@ import { StatusDot } from '../../components/StatusDot'
 import { needsAttention } from '../services/list/filterServices'
 import { useAuth } from '../auth/AuthProvider'
 import { useFilters } from '../shell/useFilters'
+import { ActionsSheet, type ActionsTarget } from './ActionsSheet'
 import { RestartButton } from './RestartButton'
 import { useSeverityFilter, type SeverityFilter } from './useOverviewState'
 import styles from './overview.module.css'
@@ -85,6 +89,8 @@ export function NeedsAttention() {
   const services = useServicesList(filters).data
   const [severity, setSeverity] = useSeverityFilter()
   const [showAll, setShowAll] = useState(false)
+  const phone = usePhone()
+  const [sheet, setSheet] = useState<ActionsTarget | null>(null)
 
   const rows = useMemo(() => {
     const alerted = onePerService(alerts?.items ?? [])
@@ -101,22 +107,27 @@ export function NeedsAttention() {
   const matching = severity === 'all' ? rows : rows.filter((alert) => SEVERITY[alert.severity].key === severity)
   const visible = showAll ? matching : matching.slice(0, ROW_CAP)
 
+  const severityOptions = [
+    { value: 'all' as const, label: 'All', count: rows.length },
+    { value: 'failing' as const, label: 'Failing', count: count('failing') },
+    { value: 'warning' as const, label: 'Warning', count: count('warning') },
+    {
+      value: 'progress' as const,
+      label: 'In progress',
+      count: count('progress'),
+    },
+  ]
+  const changeSeverity = (next: SeverityFilter) => {
+    setSeverity(next)
+    setShowAll(false)
+  }
   const toolbar = (
     <div className={styles.severity}>
-      <SegmentedFilter
-        label="Severity"
-        value={severity}
-        onChange={(next) => {
-          setSeverity(next)
-          setShowAll(false)
-        }}
-        options={[
-          { value: 'all', label: 'All', count: rows.length },
-          { value: 'failing', label: 'Failing', count: count('failing') },
-          { value: 'warning', label: 'Warning', count: count('warning') },
-          { value: 'progress', label: 'In progress', count: count('progress') },
-        ]}
-      />
+      {phone ? (
+        <Chips label="Severity" value={severity} onChange={changeSeverity} options={severityOptions} />
+      ) : (
+        <SegmentedFilter label="Severity" value={severity} onChange={changeSeverity} options={severityOptions} />
+      )}
     </div>
   )
 
@@ -142,12 +153,59 @@ export function NeedsAttention() {
             const hasService = alert.service_id !== ''
             // The next step comes only from the API; account rows have their own Open accounts action.
             const hasNextStep = hasService && alert.next_step.href !== ''
+            const rowKey = `${alert.kind}-${alert.service_id}-${alert.at}`
+            if (phone) {
+              const subject = alert.service || alert.title
+              return (
+                <div key={rowKey} className="hm-lr" data-hm-row data-status={level.kind} data-testid="alert-row">
+                  <div className={`hm-lr-main ${styles.phoneRow}`}>
+                    <div className="hm-l1">
+                      <StatusDot kind={level.kind}>{level.label}</StatusDot>
+                      <span className="hm-l2" style={{ margin: 0 }}>
+                        <Ago ts={alert.at} />
+                      </span>
+                    </div>
+                    {target === null ? (
+                      <strong className={styles.whatTitle}>{alert.title}</strong>
+                    ) : (
+                      <Link to={target} className={styles.whatTitle} data-hm-rl>
+                        {alert.title}
+                      </Link>
+                    )}
+                    {alert.cluster !== '' && <span className={styles.where}>{alert.cluster}</span>}
+                    <span className={styles.cause}>{alert.cause || alert.text}</span>
+                    {hasNextStep && (
+                      <span className={styles.context}>
+                        Next step:{' '}
+                        <Link to={alert.next_step.href} className={styles.contextLink}>
+                          {alert.next_step.label}
+                        </Link>
+                      </span>
+                    )}
+                    {alert.just_before && <span className={styles.context}>{`Just before: ${alert.just_before.text}`}</span>}
+                  </div>
+                  {(hasService || me?.admin) && (
+                    <button
+                      type="button"
+                      className={styles.moreBtn}
+                      aria-label={`Actions for ${subject}`}
+                      aria-haspopup="dialog"
+                      onClick={() =>
+                        setSheet({
+                          label: subject,
+                          sub: alert.cluster || undefined,
+                          serviceId: alert.service_id,
+                        })
+                      }
+                    >
+                      <Icon name="more" size={18} />
+                    </button>
+                  )}
+                </div>
+              )
+            }
             return (
-              <div
-                key={`${alert.kind}-${alert.service_id}-${alert.at}`}
-                className={`${styles.alertRow} ${styles[`stripe_${level.kind}`]}`}
-                data-testid="alert-row"
-              >
+              <div key={rowKey} className={`${styles.alertRow} ${styles[`stripe_${level.kind}`]}`} data-testid="alert-row">
                 <span className={styles.status}>
                   <StatusDot kind={level.kind}>{level.label}</StatusDot>
                 </span>
@@ -205,6 +263,7 @@ export function NeedsAttention() {
           </button>
         )}
       </div>
+      {sheet && <ActionsSheet target={sheet} isAdmin={me?.admin ?? false} onClose={() => setSheet(null)} />}
     </Panel>
   )
 }

@@ -143,7 +143,9 @@ function collectViolations(options: { allowClip: string[] }): string[] {
 
   // Row titles: inside the screen, and not covered by anything else.
   const savedScroll = { x: window.scrollX, y: window.scrollY, main: main ? main.scrollTop : 0 }
-  for (const row of Array.from(document.querySelectorAll('[data-hm-row]')).slice(0, 40)) {
+  // With a sheet open its scrim rightly covers the page, so only rows inside the sheet are judged.
+  const openSheet = document.querySelector('[aria-modal="true"]')
+  for (const row of Array.from((openSheet ?? document).querySelectorAll('[data-hm-row]')).slice(0, 40)) {
     if (!isVisible(row)) continue
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT, { acceptNode: (n) => ((n.textContent ?? '').trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) })
     const title = walker.nextNode()?.parentElement
