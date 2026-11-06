@@ -12,12 +12,13 @@ import {
 } from '../../../api/deploy'
 import { useService, useServiceTasks } from '../../../api/hooks'
 import { Panel } from '../../../components/Panel'
+import { usePhone } from '../../../components/useNarrow'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
-import { PendingChangesAside } from './PendingChangesAside'
+import { PendingChangesAside, PendingChangesBar } from './PendingChangesAside'
 import { ScalingPanel } from './ScalingPanel'
 import { ServicePanel } from './ServicePanel'
 import { TaskSizePanel } from './TaskSizePanel'
@@ -74,6 +75,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const revisionTarget = useRevisionDefinition(serviceId, revisionParam)
   const [editBase, setEditBase] = useState<EditBase | null>(null)
   const [reviewing, setReviewing] = useState(false)
+  const phone = usePhone()
+  const [pendingSheetOpen, setPendingSheetOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [submitError, setSubmitError] = useState<string | undefined>()
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
@@ -150,6 +153,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     setPartial(null)
     setReason('')
     setReviewing(false)
+    setPendingSheetOpen(false)
     setSubmitError(undefined)
     setMovedFrom(null)
     setSettingsChanged(false)
@@ -210,6 +214,26 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   // Without the deployed revision there is nothing to guard the change set with, so Review waits for it.
   const reviewable = (changes > 0 || partial !== null) && problems.length === 0 && deployedRevision !== undefined
 
+  const asideProps = {
+    count: changes,
+    rows,
+    problems,
+    loadedRevision: revisionPending
+      ? {
+          text: revisionTarget.isError ? `Revision :${revisionParam} could not be loaded` : revisionTarget.data ? `:${revisionParam} is loaded from the revisions list` : `Loading :${revisionParam}…`,
+          dismissLabel: `Dismiss :${revisionParam}`,
+          onDismiss: clearRevisionParam,
+        }
+      : undefined,
+    discardDisabled: changes === 0 && partial === null,
+    reviewDisabled: !reviewable,
+    onDiscard: resetDrafts,
+    onReview: () => {
+      setEditBase((current) => current ?? baseline)
+      setReviewing(true)
+    },
+  }
+
   return (
     <>
       {service.data && shouldShowProgress(service.data, now) && (
@@ -267,28 +291,16 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           )}
         </div>
 
-        <PendingChangesAside
-          count={changes}
-          rows={rows}
-          problems={problems}
-          loadedRevision={
-            revisionPending
-              ? {
-                  text: revisionTarget.isError ? `Revision :${revisionParam} could not be loaded` : revisionTarget.data ? `:${revisionParam} is loaded from the revisions list` : `Loading :${revisionParam}…`,
-                  dismissLabel: `Dismiss :${revisionParam}`,
-                  onDismiss: clearRevisionParam,
-                }
-              : undefined
-          }
-          discardDisabled={changes === 0 && partial === null}
-          reviewDisabled={!reviewable}
-          onDiscard={resetDrafts}
-          onReview={() => {
-            setEditBase((current) => current ?? baseline)
-            setReviewing(true)
-          }}
-        />
+        {!phone && <PendingChangesAside {...asideProps} />}
       </div>
+
+      {phone && (changes > 0 || partial !== null || problems.length > 0) && (
+        <PendingChangesBar
+          {...asideProps}
+          sheetOpen={pendingSheetOpen}
+          onSheetOpenChange={setPendingSheetOpen}
+        />
+      )}
 
       {reviewing && (
         <ReviewChangesDialog
