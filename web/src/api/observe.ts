@@ -2,13 +2,15 @@
 // snapshot hooks (target health, scaling, alerts) refresh every 5 s like the other live data. Neither runs in a background tab.
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, api } from './client'
-import { queryString, type Filters } from './hooks'
+import { queryString, usePollerStatus, type Filters } from './hooks'
 import type {
   AlertsDTO,
   ClusterMetricsDTO,
   ClustersMetricsDTO,
   LogsHistoryDTO,
   OverviewMetricsDTO,
+  PollerEntryDTO,
+  PollerTierDTO,
   Range,
   ScalingDTO,
   Series,
@@ -92,6 +94,55 @@ export function useLogHistory(id: string, { container, q, before }: LogHistoryPa
     queryFn: () => api.get<LogsHistoryDTO>(`/api/services/${id}/logs${queryString({ container, q, before })}`),
     staleTime: Infinity,
   })
+}
+
+export interface TaskLogsOptions {
+  /** Pass false until the drawer is open; nothing is requested while false. */
+  enabled?: boolean
+  limit?: number
+  container?: string
+}
+
+/** The newest log lines of one task (`task` is the short id, 8+ chars). Standalone tasks have no service, so callers pass enabled=false. */
+export function useTaskLogs(serviceId: string, taskShortId: string, { enabled = true, limit = 20, container }: TaskLogsOptions = {}) {
+  return useQuery({
+    queryKey: ['service', serviceId, 'logs', 'task', taskShortId, container, limit],
+    queryFn: () => api.get<LogsHistoryDTO>(`/api/services/${serviceId}/logs${queryString({ task: taskShortId, limit, container })}`),
+    enabled,
+    refetchInterval: SNAPSHOT_REFETCH_MS,
+    refetchIntervalInBackground: false,
+  })
+}
+
+/** A region (account x region) with at least one failing or throttled data type the page depends on. */
+export interface AffectedRegion extends PollerEntryDTO {
+  failingTiers: PollerTierDTO[]
+}
+
+export interface DataProblems {
+  /** Regions where a tier named in `labels` fails or is throttled. */
+  affected: AffectedRegion[]
+  /** Regions with no failing or throttled tier at all. */
+  current: number
+  total: number
+  isLoading: boolean
+}
+
+/**
+ * Which regions have a data problem a page cares about. `labels` are `PollerTierDTO.label` values the page depends on
+ * (for example `['Auto scaling']`); omit it to consider every tier. `current`/`total` always count every tier, so the
+ * freshness control agrees with what the pages report.
+ */
+export function useDataProblems(labels?: readonly string[]): DataProblems {
+  const poller = usePollerStatus()
+  const items = poller.data?.items ?? []
+  const isProblem = (tier: PollerTierDTO) => tier.failing || tier.throttled
+  const affected = items.flatMap((item) => {
+    const failingTiers = item.tiers.filter((tier) => isProblem(tier) && (!labels || labels.includes(tier.label)))
+    return failingTiers.length > 0 ? [{ ...item, failingTiers }] : []
+  })
+  const current = items.filter((item) => !item.tiers.some(isProblem)).length
+  return { affected, current, total: items.length, isLoading: poller.isLoading }
 }
 
 /** True when every point of every series is null (or there are no points): nothing to draw. */

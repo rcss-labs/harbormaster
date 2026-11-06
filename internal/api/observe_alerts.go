@@ -29,6 +29,10 @@ type AlertDTO struct {
 	Cluster   string    `json:"cluster"`
 	ClusterID string    `json:"cluster_id"`
 	Tab       string    `json:"tab"`
+	// Cause repeats Text; NextStep and JustBefore are filled from wave 1 (JustBefore stays nil when unknown).
+	Cause      string          `json:"cause"`
+	NextStep   AlertStepDTO    `json:"next_step"`
+	JustBefore *AlertChangeDTO `json:"just_before"`
 }
 
 type AlertCountDTO struct {
@@ -121,7 +125,7 @@ func newestAlertsPoll(loops []store.PollLoop, targetVisible func(pollTarget) boo
 
 func alertDTO(alert model.Alert) AlertDTO {
 	out := AlertDTO{
-		Kind: alert.Kind, Severity: string(alert.Severity), Title: alert.Title, Text: alert.Text,
+		Kind: alert.Kind, Severity: string(alert.Severity), Title: alert.Title, Text: alert.Text, Cause: alert.Text,
 		At: alert.At, Service: alert.Key.Service, Cluster: alert.Key.Cluster, Tab: alert.Tab,
 	}
 	if alert.Key.Service != "" {

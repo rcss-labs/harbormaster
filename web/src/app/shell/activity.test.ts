@@ -25,6 +25,9 @@ const alert = (minutesAgo: number, overrides: Partial<AlertDTO> = {}): AlertDTO 
   cluster: 'background-jobs',
   cluster_id: 'cl-9',
   tab: 'tasks',
+  cause: 'No task is running.',
+  next_step: { label: 'Open tasks', href: '/services/svc-9/tasks' },
+  just_before: null,
   ...overrides,
 })
 

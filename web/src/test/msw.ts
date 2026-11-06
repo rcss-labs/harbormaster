@@ -17,6 +17,8 @@ import {
   OVERVIEW,
   PERMISSIONS,
   POLLER,
+  LOGS_HISTORY_PAYMENTS,
+  SERVICES_LIST,
   SERVICE_DETAILS,
   SERVICE_METRICS_CATALOG_NO_INSIGHTS,
   SERVICE_METRICS_PAYMENTS,
@@ -82,6 +84,22 @@ export const handlers = [
   http.get('/api/clusters/:id', ({ params }) => {
     const cluster = CLUSTER_DETAILS[params.id as string]
     return cluster ? HttpResponse.json(cluster) : notFound()
+  }),
+  // Services list: same account/region/tag narrowing as clusters.
+  http.get('/api/services', ({ request }) => {
+    const url = new URL(request.url)
+    const account = url.searchParams.get('account')
+    const region = url.searchParams.get('region')
+    const tags = url.searchParams.getAll('tag').map(Number)
+    const items = SERVICES_LIST.items.filter(
+      (s) => (!account || s.account_id === account) && (!region || s.region === region) && (tags.length === 0 || tags.includes(s.tag.id)),
+    )
+    return HttpResponse.json({ ...SERVICES_LIST, items, total: items.length })
+  }),
+  // Log history; with `task` every line belongs to that task, as the server restricts reads to its streams.
+  http.get('/api/services/:id/logs', ({ request }) => {
+    const task = new URL(request.url).searchParams.get('task')
+    return HttpResponse.json(task ? { ...LOGS_HISTORY_PAYMENTS, lines: LOGS_HISTORY_PAYMENTS.lines.map((line) => ({ ...line, task_id: task })) } : LOGS_HISTORY_PAYMENTS)
   }),
   http.get('/api/services/:id/tasks', ({ params, request }) => {
     const id = params.id as string

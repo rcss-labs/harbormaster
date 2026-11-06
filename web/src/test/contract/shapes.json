@@ -46,9 +46,21 @@
     "items": [
       {
         "at": "time",
+        "cause": "string",
         "cluster": "string",
         "cluster_id": "string",
+        "just_before": {
+          "$null": {
+            "at": "time",
+            "source": "string",
+            "text": "string"
+          }
+        },
         "kind": "string",
+        "next_step": {
+          "href": "string",
+          "label": "string"
+        },
         "service": "string",
         "service_id": "string",
         "severity": "string",
@@ -1169,6 +1181,13 @@
       "$null": "number"
     },
     "max_desired": "number",
+    "partial": [
+      {
+        "code": "string",
+        "message": "string",
+        "part": "string"
+      }
+    ],
     "running_count": "number",
     "scaling": {
       "has_target": "boolean",
@@ -1575,7 +1594,21 @@
           "$null": "time"
         },
         "region": "string",
-        "throttled": "boolean"
+        "throttled": "boolean",
+        "tiers": [
+          {
+            "core": "boolean",
+            "failing": "boolean",
+            "interval_ms": "number",
+            "label": "string",
+            "last_error": "string",
+            "last_ok_at": {
+              "$null": "time"
+            },
+            "throttled": "boolean",
+            "tier": "string"
+          }
+        ]
       }
     ]
   },
@@ -1940,6 +1973,54 @@
     "timestamps": [
       "time"
     ]
+  },
+  "servicesList": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "attention": "string",
+        "can": {
+          "logs": "boolean",
+          "operate": "boolean",
+          "terminal": "boolean"
+        },
+        "cluster": {
+          "id": "string",
+          "name": "string"
+        },
+        "cpu": "string",
+        "desired": "number",
+        "family": "string",
+        "id": "string",
+        "image_tag": "string",
+        "last_change_at": {
+          "$null": "time"
+        },
+        "latest_registered_revision": {
+          "$null": "number"
+        },
+        "memory": "string",
+        "name": "string",
+        "region": "string",
+        "revision": "number",
+        "rollout": {
+          "$null": "string"
+        },
+        "running": "number",
+        "status": "string",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "tag_inherited": "boolean"
+      }
+    ],
+    "polled_at": "time",
+    "total": "number",
+    "truncated": "boolean"
   },
   "settings": {
     "stopped_tasks_window_minutes": "number"

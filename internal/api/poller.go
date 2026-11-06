@@ -50,7 +50,7 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		item, ok := byTarget[target]
 		if !ok {
-			item = &PollerItemDTO{AccountID: target.accountID, AccountName: names[target.accountID], Region: target.region}
+			item = &PollerItemDTO{AccountID: target.accountID, AccountName: names[target.accountID], Region: target.region, Tiers: []PollerTierDTO{}}
 			byTarget[target] = item
 			order = append(order, target)
 		}

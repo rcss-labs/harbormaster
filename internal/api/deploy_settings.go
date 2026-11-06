@@ -70,6 +70,7 @@ type DeploySettingsResponse struct {
 	TargetGroups                  []DeployTargetGroupDTO     `json:"target_groups"`
 	Scaling                       DeployScalingDTO           `json:"scaling"`
 	Can                           ChangeCanDTO               `json:"can"`
+	Partial                       []PartialErrorDTO          `json:"partial"`
 }
 
 // changeCan is what subject may do to a service with the given effective tag.
@@ -93,6 +94,7 @@ func deploySettingsDTO(st deploy.DeploySettings, can ChangeCanDTO) DeploySetting
 		HealthCheckGracePeriodSeconds: st.HealthCheckGracePeriodSeconds,
 		HasLoadBalancer:               st.HasLoadBalancer,
 		TargetGroups:                  make([]DeployTargetGroupDTO, 0, len(st.TargetGroups)),
+		Partial:                       make([]PartialErrorDTO, 0),
 		Scaling: DeployScalingDTO{
 			HasTarget: st.Scaling.HasTarget, Min: st.Scaling.Min, Max: st.Scaling.Max,
 			Policies:         make([]DeployPolicyDTO, 0, len(st.Scaling.Policies)),

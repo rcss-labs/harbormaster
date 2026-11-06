@@ -6,7 +6,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import { refetchWhileSettling } from './change'
-import type { ControllerRefDTO, ImageTagsResponse } from './types'
+import type { ControllerRefDTO, ImageTagsResponse, PartialErrorDTO } from './types'
 
 export interface ChangeCanDTO {
   edit: boolean
@@ -66,6 +66,8 @@ export interface DeploySettingsResponse {
     scheduled_actions: DeployScheduledActionDTO[]
   }
   can: ChangeCanDTO
+  /** Parts that could not be read (task_role, target_groups, scaling_target, scaling_policies, scheduled_actions); empty when complete. */
+  partial: PartialErrorDTO[]
 }
 
 export interface RevisionDefinitionResponse {
