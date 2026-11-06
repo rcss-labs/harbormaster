@@ -136,3 +136,21 @@ for (const target of tableTargets) {
     })
   }
 }
+
+test.describe('row action menu at 390', () => {
+  test.use(asUser('pavel'))
+
+  test('every action of the last row stays clickable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/services')
+    const lastRowActions = page.getByRole('button', { name: /actions/i }).last()
+    await lastRowActions.scrollIntoViewIfNeeded()
+    await lastRowActions.click()
+    const items = page.getByRole('menu').getByRole('menuitem')
+    expect(await items.count()).toBeGreaterThan(0)
+    // A trial click runs Playwright's hit-target check without acting, so a clipped or covered item fails here.
+    for (const item of await items.all()) {
+      if (await item.isEnabled()) await item.click({ trial: true, timeout: 5_000 })
+    }
+  })
+})
