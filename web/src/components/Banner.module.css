@@ -10,3 +10,7 @@
 .warn > svg { color: var(--warn); }
 .bad { background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
 .bad > svg { color: var(--bad); }
+@media (max-width: 700px) {
+  .banner { padding: 10px 12px; flex-wrap: wrap; }
+  .text { flex-basis: 0; flex-grow: 1; overflow-wrap: anywhere; }
+}

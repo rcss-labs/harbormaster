@@ -1,0 +1,9 @@
+/* Scrolling and the edge fade for phones live in the global `.hm-chips` rules (mobile.css); desktop just wraps. */
+@media (min-width: 701px) {
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+}
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--border-strong); background: var(--raised); color: var(--text-2); font: 500 13px var(--sans); white-space: nowrap; cursor: pointer; position: relative; }
+.chip:hover { background: var(--hover); }
+.chip[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.count { font: 500 12px var(--mono); color: var(--muted); }
+.chip[aria-pressed='true'] .count { color: var(--accent); }

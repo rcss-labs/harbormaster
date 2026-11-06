@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import styles from './Drawer.module.css'
+import { BottomSheet } from './BottomSheet'
 import { Icon } from './Icon'
+import { usePhone } from './useNarrow'
 import { trapTab, useFocusReturn } from './useFocusReturn'
 
 interface DrawerProps {
@@ -19,7 +21,15 @@ interface DrawerProps {
 
 /** Right-hand modal panel over a scrim. Esc, the scrim and the close button close it; focus returns to the opener. */
 export function Drawer({ open, onClose, title, sub, wide = false, footer, closeLabel, children }: DrawerProps) {
+  const phone = usePhone()
   if (!open) return null
+  if (phone) {
+    return (
+      <BottomSheet open onClose={onClose} label={typeof title === 'string' ? title : ''} labelledByTitle title={title} sub={sub} tall footer={footer} closeLabel={closeLabel ?? 'Close panel'}>
+        {children}
+      </BottomSheet>
+    )
+  }
   return createPortal(
     <DrawerBody onClose={onClose} title={title} sub={sub} wide={wide} footer={footer} closeLabel={closeLabel}>
       {children}

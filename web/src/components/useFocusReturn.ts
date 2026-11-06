@@ -6,16 +6,21 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
  * Moves focus into `containerRef` when the component mounts and puts it back on the element that had it
  * (the opener) when it unmounts. Returns the opener so callers can treat clicks on it as "not outside".
  */
-export function useFocusReturn(containerRef: RefObject<HTMLElement | null>): RefObject<HTMLElement | null> {
+export function useFocusReturn(containerRef: RefObject<HTMLElement | null>, preferredSelector?: string): RefObject<HTMLElement | null> {
   const openerRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const container = containerRef.current
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    if (container) (container.querySelector<HTMLElement>(FOCUSABLE) ?? container).focus()
+    if (container) {
+      const target = (preferredSelector ? container.querySelector<HTMLElement>(preferredSelector) : null) ?? container.querySelector<HTMLElement>(FOCUSABLE) ?? container
+      target.focus()
+    }
     return () => {
       const opener = openerRef.current
       if (opener?.isConnected) opener.focus()
     }
+    // The preferred selector is read once, when the container opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [containerRef])
   return openerRef
 }

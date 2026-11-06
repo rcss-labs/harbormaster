@@ -1,0 +1,17 @@
+.button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text-2); cursor: pointer; }
+.button:hover { background: var(--hover); color: var(--text); }
+.stack { display: flex; flex-direction: column; gap: 6px; }
+.spread { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lab { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.count { font-size: 12px; color: var(--muted); }
+.fields { display: flex; flex-direction: column; }
+.field { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0; border: 0; background: none; color: var(--text); font: 400 14px var(--sans); text-align: left; cursor: pointer; }
+.field:disabled { color: var(--muted); cursor: not-allowed; }
+.field i { position: relative; flex: none; width: 36px; height: 22px; border-radius: 11px; background: var(--border-strong); }
+.field i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); transition: transform 0.15s; }
+.field[aria-pressed='true'] i { background: var(--accent); }
+.field[aria-pressed='true'] i::after { transform: translateX(14px); }
+.action { border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: 500 14px var(--sans); cursor: pointer; }
+.action:hover { background: var(--hover); }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover { background: var(--accent); filter: brightness(1.07); }

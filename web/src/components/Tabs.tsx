@@ -1,6 +1,9 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
+import { BottomSheet, SheetAction } from './BottomSheet'
+import { Icon } from './Icon'
 import styles from './Tabs.module.css'
+import { usePhone } from './useNarrow'
 
 export interface TabItem {
   key: string
@@ -23,7 +26,9 @@ interface TabsProps {
 }
 
 export function Tabs({ items, active, hrefFor, ariaLabel }: TabsProps) {
-  return (
+  const phone = usePhone()
+  const [allOpen, setAllOpen] = useState(false)
+  const strip = (
     <nav className={styles.tabs} aria-label={ariaLabel}>
       {items.map((item, index) => {
         const previousGroup = index > 0 ? items[index - 1].group : undefined
@@ -46,5 +51,28 @@ export function Tabs({ items, active, hrefFor, ariaLabel }: TabsProps) {
         )
       })}
     </nav>
+  )
+  if (!phone) return strip
+  return (
+    <div className={styles.phoneWrap}>
+      {strip}
+      <button type="button" className={styles.all} aria-label="All sections" aria-haspopup="menu" aria-expanded={allOpen} onClick={() => setAllOpen(true)}>
+        <Icon name="chevd" size={18} />
+      </button>
+      <BottomSheet open={allOpen} onClose={() => setAllOpen(false)} label="All sections" title="All sections" role="menu">
+        {items.map((item) => (
+          <SheetAction
+            key={item.key}
+            label={item.label}
+            href={hrefFor(item.key)}
+            current={item.key === active}
+            disabled={item.locked !== undefined}
+            why={item.locked ? `You need ${item.locked.action} on ${item.locked.tag}` : undefined}
+            right={item.badge}
+            onClick={() => setAllOpen(false)}
+          />
+        ))}
+      </BottomSheet>
+    </div>
   )
 }

@@ -10,3 +10,8 @@
 .actions { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .body { padding: var(--pad); }
 .flush { padding: 0; }
+@media (max-width: 700px) {
+  .head { min-height: 44px; }
+  .title { font-size: 14px; }
+  .foot { font-size: 12px; }
+}
