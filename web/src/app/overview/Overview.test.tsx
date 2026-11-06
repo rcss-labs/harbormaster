@@ -18,7 +18,7 @@ describe('Overview KPI strip', () => {
   it('has six cells: clusters, services, tasks, average CPU, average memory and error stops', async () => {
     renderApp('/')
     const items = within(await strip()).getAllByRole('listitem')
-    expect(items.map((item) => item.firstElementChild?.textContent)).toEqual([
+    expect(items.map((item) => item.querySelector('span')?.textContent)).toEqual([
       'Clusters',
       'Services',
       'Tasks',
@@ -137,5 +137,35 @@ describe('Overview layouts', () => {
     const reasons = await screen.findByRole('region', { name: 'Why tasks stopped, 3 days' })
     for (const reason of OVERVIEW.stop_reasons) expect(within(reasons).getByText(reason.reason)).toBeInTheDocument()
   })
-})
 
+  it('KPI tiles link and agree with the lists', async () => {
+    renderApp('/')
+    const hrefOf = async (label: string) => (await cell(label)).querySelector('a')?.getAttribute('href')
+    expect(await hrefOf('Clusters')).toBe('/clusters')
+    expect(await hrefOf('Services')).toBe('/services?view=problems')
+    expect(await hrefOf('Tasks')).toBe('/tasks')
+    expect(await hrefOf('Error stops, 24 h')).toBe('/analytics/reliability')
+    expect((await cell('Avg CPU')).querySelector('a')).toBeNull()
+
+    const map = await screen.findByRole('region', { name: 'Estate map' })
+    await waitFor(() => expect(within(map).getAllByRole('link')).toHaveLength(OVERVIEW.clusters.length))
+    expect(await cell('Clusters')).toHaveTextContent(String(OVERVIEW.clusters.length))
+    expect(await cell('Services')).toHaveTextContent(String(OVERVIEW.services.total))
+    const reasons = await screen.findByRole('region', { name: 'Why tasks stopped, 3 days' })
+    for (const reason of OVERVIEW.stop_reasons) expect(within(reasons).getByText(String(reason.count))).toBeInTheDocument()
+  })
+
+  it('two columns class present', async () => {
+    renderApp('/')
+    const attention = await screen.findByRole('region', { name: 'Needs attention' })
+    expect(attention.closest('.hm-wide-split')).not.toBeNull()
+    expect((await screen.findByRole('region', { name: 'Estate map' })).closest('.hm-wide-split')).not.toBeNull()
+  })
+
+  it('warns when a tier the page depends on is stale', async () => {
+    renderApp('/')
+    // The fixture poller reports the non-core tiers as healthy, so no notice is shown.
+    await screen.findByRole('region', { name: 'Needs attention' })
+    expect(screen.queryByText(/Some data on this page is stale/)).not.toBeInTheDocument()
+  })
+})

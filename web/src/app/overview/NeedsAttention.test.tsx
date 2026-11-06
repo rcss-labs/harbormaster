@@ -72,6 +72,39 @@ describe('NeedsAttention', () => {
     expect(within(row).getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', `/services/${resizer.service_id}/tasks`)
   })
 
+  it('shows cause, next step and just before', async () => {
+    renderApp('/')
+    const row = rowsOf(await panel())[0]
+    expect(within(row).getByText(resizer.cause)).toBeInTheDocument()
+    expect(within(row).getByRole('link', { name: resizer.next_step.label })).toHaveAttribute('href', resizer.next_step.href)
+    expect(within(row).getByText(`Just before: ${resizer.just_before?.text}`)).toBeInTheDocument()
+  })
+
+  it('shows no Just before line when the API omits it', async () => {
+    renderApp('/')
+    const rows = rowsOf(await panel())
+    expect(rows[3]).toHaveTextContent(ALERTS.items[3].cause)
+    expect(rows[3]).not.toHaveTextContent('Just before')
+    expect(rows[1]).not.toHaveTextContent('Just before')
+  })
+
+  it('shows no Next step link when the API has no href', async () => {
+    server.use(
+      http.get('/api/alerts', () =>
+        HttpResponse.json({ ...ALERTS, items: [{ ...resizer, next_step: { label: '', href: '' } }], counts: { danger: 1, warning: 0, info: 0 } }),
+      ),
+    )
+    renderApp('/')
+    const row = rowsOf(await panel())[0]
+    expect(within(row).queryByText(/Next step/)).not.toBeInTheDocument()
+  })
+
+  it('account problem row links to settings', async () => {
+    renderApp('/')
+    const row = rowsOf(await panel())[1]
+    expect(within(row).getByRole('link', { name: 'Open accounts' })).toHaveAttribute('href', '/settings/accounts')
+  })
+
   it('filters by severity and shows the counts on the chips', async () => {
     const user = userEvent.setup()
     renderApp('/')
@@ -187,5 +220,6 @@ describe('NeedsAttention for non-admins', () => {
     const rows = rowsOf(await panel())
     expect(within(rows[1]).queryByRole('link', { name: ALERTS.items[1].title })).not.toBeInTheDocument()
     expect(rows[1]).toHaveTextContent(ALERTS.items[1].title)
+    expect(within(rows[1]).queryByRole('link', { name: 'Open accounts' })).not.toBeInTheDocument()
   })
 })

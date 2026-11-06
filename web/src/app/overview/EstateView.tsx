@@ -22,7 +22,7 @@ const GROUP_PAGE = 25
 
 /** 0 steady, 1 deploying, 2 degraded or unhealthy, 3 failing. */
 const SEVERITY_RANK: Record<Status, number> = { steady: 0, scaled_to_zero: 0, deploying: 1, degraded: 2, unhealthy_task: 2, failing: 3 }
-const GROUP_DOT = ['var(--healthy-cell)', 'var(--info)', 'var(--warning)', 'var(--danger)']
+const GROUP_DOT = ['var(--healthy-cell)', 'var(--info)', 'var(--warn)', 'var(--bad)']
 
 interface EstateService extends ServiceRef {
   status: Status
@@ -151,8 +151,8 @@ export function EstateView() {
           {group.tag && <TagChip tag={group.tag} kind="cluster" />}
           <span className={styles.groupWhere}>{group.where}</span>
           <span className={styles.groupCounts}>
-            {failing > 0 && <span style={{ color: 'var(--danger)' }}>{failing} failing</span>}
-            {unhealthy > 0 && <span style={{ color: 'var(--warning)' }}>{unhealthy} unhealthy</span>}
+            {failing > 0 && <span style={{ color: 'var(--bad)' }}>{failing} failing</span>}
+            {unhealthy > 0 && <span style={{ color: 'var(--warn)' }}>{unhealthy} unhealthy</span>}
             {deploying > 0 && <span style={{ color: 'var(--info)' }}>{deploying} deploying</span>}
             <span>{plural(matching.length, 'svc', 'svc')}</span>
           </span>
@@ -215,6 +215,7 @@ export function EstateView() {
       <input
         type="text"
         className={styles.estateFilter}
+        data-hm-filter
         aria-label="Filter services or clusters"
         placeholder="Filter services or clusters"
         value={query}

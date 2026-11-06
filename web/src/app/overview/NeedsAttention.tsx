@@ -79,13 +79,17 @@ export function NeedsAttention() {
             const level = SEVERITY[alert.severity]
             const target = alertTarget(alert, me?.admin ?? false)
             const hasService = alert.service_id !== ''
+            // The next step comes only from the API; account rows have their own Open accounts action.
+            const hasNextStep = hasService && alert.next_step.href !== ''
             return (
               <div
                 key={`${alert.kind}-${alert.service_id}-${alert.at}`}
                 className={`${styles.alertRow} ${styles[`stripe_${level.kind}`]}`}
                 data-testid="alert-row"
               >
-                <StatusDot kind={level.kind}>{level.label}</StatusDot>
+                <span className={styles.status}>
+                  <StatusDot kind={level.kind}>{level.label}</StatusDot>
+                </span>
                 <div className={styles.what}>
                   {target === null ? (
                     <strong className={styles.whatTitle}>{alert.title}</strong>
@@ -96,14 +100,23 @@ export function NeedsAttention() {
                   )}
                   {alert.cluster !== '' && <span className={styles.where}>{alert.cluster}</span>}
                 </div>
-                <span className={styles.detail} title={alert.text}>
-                  {alert.text}
-                </span>
+                <div className={styles.detail}>
+                  <span className={styles.cause}>{alert.cause || alert.text}</span>
+                  {hasNextStep && (
+                    <span className={styles.context}>
+                      Next step:{' '}
+                      <Link to={alert.next_step.href} className={styles.contextLink}>
+                        {alert.next_step.label}
+                      </Link>
+                    </span>
+                  )}
+                  {alert.just_before && <span className={styles.context}>{`Just before: ${alert.just_before.text}`}</span>}
+                </div>
                 <span className={styles.when}>
                   <Ago ts={alert.at} />
                 </span>
                 <div className={styles.rowActions}>
-                  {hasService && (
+                  {hasService ? (
                     <>
                       <Link to={`/services/${alert.service_id}/logs`} className={styles.rowAction}>
                         Logs
@@ -113,6 +126,12 @@ export function NeedsAttention() {
                       </Link>
                       <RestartButton serviceId={alert.service_id} />
                     </>
+                  ) : (
+                    me?.admin && (
+                      <Link to="/settings/accounts" className={styles.rowAction}>
+                        Open accounts
+                      </Link>
+                    )
                   )}
                 </div>
               </div>

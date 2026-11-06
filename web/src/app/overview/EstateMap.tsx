@@ -9,10 +9,10 @@ import { useFilters } from '../shell/useFilters'
 import styles from './overview.module.css'
 
 export const CLUSTER_CELL_COLOR: Record<ClusterStatus, string> = {
-  healthy: 'var(--healthy-cell)',
+  healthy: 'var(--cell-ok)',
   deploying: 'var(--info)',
-  degraded: 'var(--warning)',
-  needs_attention: 'var(--danger)',
+  degraded: 'var(--warn)',
+  needs_attention: 'var(--bad)',
 }
 
 const LEGEND: ClusterStatus[] = ['healthy', 'deploying', 'degraded', 'needs_attention']
@@ -35,7 +35,7 @@ function byAccount(clusters: ClusterCardDTO[]): AccountRow[] {
   return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** One row per account, one 14px cell per cluster coloured by status. */
+/** One row per account, one 16px cell per cluster coloured by status. */
 export function EstateMap() {
   const { filters } = useFilters()
   const clusters = useClusters(filters).data?.items
@@ -45,7 +45,7 @@ export function EstateMap() {
     <span className={styles.legend}>
       {LEGEND.map((status) => (
         <span key={status} className={styles.legendItem}>
-          <i style={{ background: CLUSTER_CELL_COLOR[status] }} />
+          <i className={status === 'healthy' ? styles.cellOk : undefined} style={{ background: CLUSTER_CELL_COLOR[status] }} />
           {clusterStatusLabel(status)}
         </span>
       ))}
@@ -66,7 +66,7 @@ export function EstateMap() {
                   <span className={styles.mapAccount}>{row.name}</span>
                   <span className={styles.mapSub}>
                     {row.regions.join(' ')} · {row.clusters.length}
-                    {failing > 0 ? ` · ${failing} ✕` : ''}
+                    {failing > 0 ? ` · ${failing} need attention` : ''}
                   </span>
                 </div>
                 <div className={styles.cells}>
@@ -76,7 +76,7 @@ export function EstateMap() {
                       <Link
                         key={cluster.id}
                         to={`/clusters/${cluster.id}`}
-                        className={styles.cell}
+                        className={`${styles.cell} ${cluster.status === 'healthy' ? styles.cellOk : ''}`.trim()}
                         style={{ background: CLUSTER_CELL_COLOR[cluster.status] }}
                         aria-label={label}
                         title={label}
