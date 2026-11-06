@@ -56,3 +56,4 @@
   .openLinks .btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
   .drawerBody .why { white-space: normal; overflow: visible; font-size: 12px; }
 }
+.dashNote { margin: 0; padding: 8px var(--pad); color: var(--muted); font-size: 12px; }

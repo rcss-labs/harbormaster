@@ -94,9 +94,9 @@ function PhoneTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
         </span>
       ),
     },
-    { key: 'clusters', header: 'Clusters', render: (tag) => `${tag.clusters} clusters` },
-    { key: 'direct', header: 'Services tagged directly', render: (tag) => `${tag.services_direct} services tagged directly` },
-    { key: 'effective', header: 'Services in effect', render: (tag) => `${tag.services_effective} services in effect` },
+    { key: 'clusters', header: 'Clusters', phoneLabel: false, render: (tag) => `${tag.clusters} clusters` },
+    { key: 'direct', header: 'Services tagged directly', phoneLabel: false, render: (tag) => `${tag.services_direct} services tagged directly` },
+    { key: 'effective', header: 'Services in effect', phoneLabel: false, render: (tag) => `${tag.services_effective} services in effect` },
     { key: 'users', header: 'Users with access', render: usersWithAccess },
   ]
   return (

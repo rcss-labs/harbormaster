@@ -298,13 +298,14 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
       },
       { key: 'role', header: 'Role', phone: 'status', render: (user) => (user.admin ? <Pill kind="info">Global admin</Pill> : <Pill kind="mute">User</Pill>) },
       { key: 'signin', header: 'Sign-in', render: signInPills },
-      { key: 'email', header: 'Email', render: (user) => (user.email ? <span className={styles.mono}>{user.email}</span> : null) },
+      { key: 'email', header: 'Email', phoneLabel: false, render: (user) => (user.email ? <span className={styles.mono}>{user.email}</span> : null) },
       {
         key: 'seen',
         header: 'Last sign-in',
+        phoneLabel: false,
         render: (user) => <span>Last sign-in {user.last_sign_in_at ? <Ago ts={user.last_sign_in_at} /> : 'never'}</span>,
       },
-      { key: 'cansee', header: 'Can see', render: (user) => <span className={styles.canSee}>Can see {canSee(user)}</span> },
+      { key: 'cansee', header: 'Can see', phoneLabel: false, render: (user) => <span className={styles.canSee}>Can see {canSee(user)}</span> },
     ]
     const menuUser = users.find((user) => user.id === menuFor)
     return (
@@ -338,7 +339,16 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
             onClose={() => setMenuFor(null)}
             label={`Actions for ${menuUser.username}`}
             title={menuUser.username}
-            sub={menuUser.email ?? undefined}
+            sub={
+              menuUser.sso === 'pending' ? (
+                <>
+                  {menuUser.email && <span className={styles.subLine}>{menuUser.email}</span>}
+                  <span className={styles.subLine}>{`Pending link to ${menuUser.sso_name_id}, expires ${expiry(menuUser.pending_link_expires_at)}`}</span>
+                </>
+              ) : (
+                (menuUser.email ?? undefined)
+              )
+            }
             role="menu"
           >
             {entriesFor(menuUser).map((entry) => (

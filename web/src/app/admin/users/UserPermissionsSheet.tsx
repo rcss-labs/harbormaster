@@ -32,6 +32,7 @@ export function UserPermissionsSheet({ user, permissions, onClose }: UserPermiss
                 tagId={tag.id}
                 tagName={tag.name}
                 tagColor={tag.color}
+                servicesInEffect={tag.services_in_effect}
                 actions={row.perms[String(tag.id)] ?? 0}
               />
             ))}

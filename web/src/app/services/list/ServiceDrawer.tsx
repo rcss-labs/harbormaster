@@ -38,6 +38,7 @@ export function ServiceDrawer({ service, onClose, onRestart, metrics, metricsFai
     return (
       <span className={`${styles.mono} ${tone === 'warn' ? styles.warnText : ''}`.trim()} title={title}>
         {text}
+        {phone && title && <>{' '}<span className={styles.tagNote}>{title}</span></>}
       </span>
     )
   }

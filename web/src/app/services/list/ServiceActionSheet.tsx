@@ -46,7 +46,7 @@ export function ServiceActionSheet({ service, pinned, onTogglePin, onDetails, on
         <SheetAction icon="tasks" label="Tasks" href={`/services/${service.id}/tasks`} onClick={close} />
         <SheetAction icon="restart" label="Restart" disabled={blocked !== undefined} why={blocked} onClick={then(onRestart)} />
         <SheetAction icon="deploy" label="Deploy" href={`/services/${service.id}/deploy`} onClick={close} />
-        <SheetAction icon="pin" label={pinned ? 'Unpin' : 'Pin'} why={pinned ? 'Remove from the sidebar' : 'Pin to the sidebar'} onClick={then(onTogglePin)} />
+        <SheetAction icon="pin" label={pinned ? 'Unpin' : 'Pin'} why={pinned ? 'Unpin from Overview and Services' : 'Pin to Overview and Services'} onClick={then(onTogglePin)} />
       </BottomSheet>
     </>
   )

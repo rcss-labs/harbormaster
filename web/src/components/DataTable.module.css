@@ -25,3 +25,5 @@
 .sortButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arrow { font-size: 12px; min-width: 10px; }
 .empty { grid-column: 1 / -1; padding: 24px 12px; text-align: center; color: var(--muted); }
+/* Phone: the sort button sits at the right above the rows; a meta value's label reads before it. */
+.phoneTools { display: flex; justify-content: flex-end; padding: 4px var(--pad) 0; }

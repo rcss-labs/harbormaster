@@ -18,10 +18,12 @@ interface PermCellProps {
   actions: number
   /** Draws the tag as a coloured chip on the phone row. */
   tagColor?: TagColor
+  /** Phone row only: how many services the tag covers, as the matrix header says. */
+  servicesInEffect?: number
 }
 
 /** One button per user and tag; its popover holds a preset select and six action toggles. Edits apply optimistically and roll back on error. */
-export function PermCell({ userId, username, tagId, tagName, tagColor, actions }: PermCellProps) {
+export function PermCell({ userId, username, tagId, tagName, tagColor, servicesInEffect, actions }: PermCellProps) {
   const phone = usePhone()
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -67,6 +69,7 @@ export function PermCell({ userId, username, tagId, tagName, tagColor, actions }
         onClick={() => setOpen((current) => !current)}
       >
         {phone && tagColor && <TagChip tag={{ id: tagId, name: tagName, color: tagColor, inherited: false }} />}
+        {phone && servicesInEffect !== undefined && <span className={`${styles.muted} ${styles.small}`}>{`${servicesInEffect} services`}</span>}
         <span>{preset}</span>
         {letters && <span className={styles.mono}>{letters}</span>}
       </button>

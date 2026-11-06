@@ -83,6 +83,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
     {
       key: 'revision',
       header: 'Task definition',
+      phoneLabel: 'Task def',
       width: 'minmax(0,1fr)',
       render: (service) => (
         <span className={styles.mono}>
@@ -113,6 +114,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
     {
       key: 'cpu',
       header: 'CPU, 24 h',
+      phoneLabel: false,
       width: '110px',
       render: (service) => {
         if (phone) return <span className={styles.mono}>{`CPU ${insights && metrics?.[service.id] ? percentText(metrics[service.id].cpu_now) : '–'}`}</span>
@@ -123,6 +125,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
     {
       key: 'mem',
       header: 'Memory',
+      phoneLabel: false,
       width: '70px',
       align: 'right',
       render: (service) => (
@@ -148,6 +151,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
       minWidth={960}
       rowStatus={(service) => serviceRowStatus(service.status)}
       defaultSort={{ key: 'status', dir: 'desc' }}
+      phoneSort
       pageSize={SERVICES_PAGE_SIZE}
       rowAction={phone ? (service) => <RowMoreButton name={service.name} onClick={() => setActingOn(service)} /> : undefined}
     />

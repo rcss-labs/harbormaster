@@ -51,7 +51,7 @@ export function RevisionsTable({ serviceName, revisions, canDeploy, deployDisabl
     { key: 'image_tag', header: 'Image tag', render: (item) => <span className="mono">{item.image_tag}</span> },
     { key: 'size', header: 'CPU / memory', render: (item) => `${item.cpu} / ${item.memory}` },
     { key: 'registered', header: 'Registered', render: (item) => <Ago ts={item.registered_at} /> },
-    { key: 'by', header: 'By', render: (item) => (phone ? `by ${item.registered_by}` : item.registered_by) },
+    { key: 'by', header: 'By', phoneLabel: false, render: (item) => (phone ? `by ${item.registered_by}` : item.registered_by) },
     {
       key: 'actions',
       header: '',

@@ -54,4 +54,13 @@ describe('Cluster detail on phones', () => {
       expect.arrayContaining([expect.stringContaining('Edit tag'), expect.stringContaining('Tasks in this cluster'), expect.stringContaining('Open in AWS console')]),
     )
   })
+
+  it('a service row sheet says where its tag comes from, in text', async () => {
+    const user = userEvent.setup()
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const [opener] = await screen.findAllByRole('button', { name: /^Actions for / })
+    await user.click(opener)
+    const menu = screen.getByRole('menu', { name: opener.getAttribute('aria-label') ?? '' })
+    expect(within(menu).getByText(new RegExp(`^Tag .+, inherited from cluster ${CLUSTER_CORE.name}$`))).toBeInTheDocument()
+  })
 })

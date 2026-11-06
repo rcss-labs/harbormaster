@@ -166,6 +166,7 @@ export function Accounts() {
     {
       key: 'clusters',
       header: 'Clusters',
+      phoneLabel: false,
       width: '80px',
       align: 'right',
       render: (account) => (phone ? `${account.clusters} ${account.clusters === 1 ? 'cluster' : 'clusters'}` : account.clusters),
@@ -181,6 +182,7 @@ export function Accounts() {
     {
       key: 'last',
       header: 'Last check',
+      phoneLabel: false,
       width: '100px',
       render: (account) => (
         <span className={styles.muted}>
