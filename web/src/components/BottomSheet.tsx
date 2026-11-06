@@ -19,6 +19,10 @@ export interface BottomSheetProps {
   role?: 'dialog' | 'menu'
   /** Accessible name of the close button; defaults to "Close". */
   closeLabel?: string
+  /** Name the sheet by its title instead of `label` (for titles that are not plain strings). */
+  labelledByTitle?: boolean
+  /** Element to focus on open instead of the first focusable one (the close button). */
+  initialFocus?: string
   children: ReactNode
 }
 
@@ -36,10 +40,10 @@ export function BottomSheet({ open, ...rest }: BottomSheetProps) {
   return createPortal(<SheetBody {...rest} />, document.body)
 }
 
-function SheetBody({ onClose, label, title, sub, tall = false, footer, role = 'dialog', closeLabel = 'Close', children }: Omit<BottomSheetProps, 'open'>) {
+function SheetBody({ onClose, label, title, sub, tall = false, footer, role = 'dialog', closeLabel = 'Close', labelledByTitle = false, initialFocus, children }: Omit<BottomSheetProps, 'open'>) {
   const id = useId()
   const ref = useRef<HTMLDivElement>(null)
-  useFocusReturn(ref)
+  useFocusReturn(ref, initialFocus)
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
@@ -87,7 +91,7 @@ function SheetBody({ onClose, label, title, sub, tall = false, footer, role = 'd
         ref={ref}
         role={role}
         aria-modal="true"
-        aria-label={label}
+        {...(labelledByTitle && title !== undefined ? { 'aria-labelledby': titleId } : { 'aria-label': label })}
         tabIndex={-1}
         className={`${styles.sheet} ${tall ? styles.tall : ''}`.trim()}
         data-hm-sheet=""

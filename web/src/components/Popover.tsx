@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { BottomSheet } from './BottomSheet'
 import styles from './Popover.module.css'
+import { usePhone } from './useNarrow'
 import { useFocusReturn } from './useFocusReturn'
 
 interface PopoverProps {
@@ -12,14 +14,24 @@ interface PopoverProps {
   width?: number
   children: ReactNode
   role?: 'dialog' | 'menu' | 'group'
+  /** Keep the anchored popover on phones instead of turning it into a bottom sheet. */
+  inline?: boolean
 }
 
 /**
  * Anchored panel below its opener. Render it inside a `position: relative` wrapper next to the opener.
  * Esc and a click outside close it; focus moves in, and returns to the opener on close.
  */
-export function Popover({ open, onClose, label, align = 'left', width = 340, children, role = 'dialog' }: PopoverProps) {
+export function Popover({ open, onClose, label, align = 'left', width = 340, children, role = 'dialog', inline = false }: PopoverProps) {
+  const phone = usePhone()
   if (!open) return null
+  if (phone && !inline) {
+    return (
+      <BottomSheet open onClose={onClose} label={label} title={label} role={role === 'menu' ? 'menu' : 'dialog'}>
+        {children}
+      </BottomSheet>
+    )
+  }
   return (
     <PopoverBody onClose={onClose} label={label} align={align} width={width} role={role}>
       {children}
@@ -27,7 +39,7 @@ export function Popover({ open, onClose, label, align = 'left', width = 340, chi
   )
 }
 
-function PopoverBody({ onClose, label, align, width, children, role }: Required<Omit<PopoverProps, 'open'>>) {
+function PopoverBody({ onClose, label, align, width, children, role }: Required<Omit<PopoverProps, 'open' | 'inline'>>) {
   const ref = useRef<HTMLDivElement>(null)
   const openerRef = useFocusReturn(ref)
   const onCloseRef = useRef(onClose)
