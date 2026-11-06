@@ -134,6 +134,16 @@ test.describe('phone harness self-test', () => {
     expect(kinds(await violationsOf(page, html(`<main>${oneline}</main>`)))).toContain('wrap')
   })
 
+  test('an open sheet covering the page is not reported, but a covered row inside the sheet is', async ({ page }) => {
+    const row = (name: string, cover: string) =>
+      `<div data-hm-row style="position:relative;height:60px"><span style="position:absolute;left:8px;top:20px">${name}</span>${cover}</div>`
+    const scrim = '<div style="position:fixed;inset:0;background:#000"></div>'
+    const sheet = (inner: string) => `<div role="dialog" aria-modal="true" style="position:fixed;left:0;right:0;bottom:0;height:200px;background:#fff">${inner}</div>`
+    const covering = '<div style="position:absolute;left:0;top:0;width:200px;height:60px;background:#fff">covering column</div>'
+    expect(kinds(await violationsOf(page, html(`<main>${row('payments-api', '')}</main>${scrim}${sheet('<p>Actions</p>')}`)))).not.toContain('covered')
+    expect(kinds(await violationsOf(page, html(`<main><p>Page</p></main>${scrim}${sheet(row('payments-api', covering))}`)))).toContain('covered')
+  })
+
   test('the helper reports a sticky column covering a row name', async ({ page }) => {
     const covering = `<div data-hm-row style="position:relative;height:60px"><span style="position:absolute;left:8px;top:20px">payments-api-long-name</span>
       <div style="position:absolute;left:0;top:0;width:200px;height:60px;background:#fff">covering column</div></div>`

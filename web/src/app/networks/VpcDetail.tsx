@@ -192,13 +192,16 @@ const withSub = (value: string | number, sub: string) => (
   </>
 )
 
-/** The right-hand column of the Networks page: summary, subnets, placement outline, gateways. */
-export function VpcDetail({ entry }: { entry: VpcEntry }) {
+/**
+ * The right-hand column of the Networks page: summary, subnets, placement outline, gateways. `headerless` leaves out the
+ * name and address line for a caller that already shows them (the phone sheet's title).
+ */
+export function VpcDetail({ entry, headerless = false }: { entry: VpcEntry; headerless?: boolean }) {
   const tree = useVpcTree(entry.accountId, entry.region, entry.vpcId)
   const data = tree.data
   const notFound = tree.error instanceof ApiError && tree.error.status === 404
 
-  const header = (
+  const header = headerless ? null : (
     <div className={styles.vpcHead}>
       <h2>{entry.name}</h2>
       <span className={styles.mono}>
@@ -211,7 +214,7 @@ export function VpcDetail({ entry }: { entry: VpcEntry }) {
   if (tree.isError) {
     return <>{header}<EmptyState>{tree.error instanceof Error ? tree.error.message : 'The VPC could not be loaded.'}</EmptyState></>
   }
-  if (!data) return header
+  if (!data) return header ?? null
 
   const subnets = subnetRows(data.root)
   const privateCount = subnets.filter((subnet) => !subnet.isPublic).length

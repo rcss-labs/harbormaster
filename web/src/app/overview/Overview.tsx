@@ -196,7 +196,7 @@ function PageHead({ meta, layout, onLayout, children }: PageHeadProps) {
   return (
     <div className={styles.page}>
       <div className={styles.pageHead}>
-        <h1>Overview</h1>
+        <h1 className="hm-phone-title-sr">Overview</h1>
         {meta !== undefined && <div className={styles.meta}>{meta}</div>}
         {layout !== undefined && onLayout !== undefined && (
           <div className={styles.layoutToggle}>

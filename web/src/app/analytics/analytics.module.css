@@ -34,3 +34,12 @@
 .clusterLink { color: var(--accent); font-weight: 600; text-decoration: none; }
 .clusterLink:hover { text-decoration: underline; }
 .subnetName { color: var(--accent); }
+
+@media (max-width: 700px) {
+  .filters { margin-left: 0; width: 100%; flex-direction: column; align-items: stretch; }
+  .tabRow { flex-wrap: wrap; }
+}
+
+@media (max-width: 700px) {
+  .mono, .dimMono, .sourceTable { font-size: 12px; }
+}

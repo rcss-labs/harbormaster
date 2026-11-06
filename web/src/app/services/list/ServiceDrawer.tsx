@@ -1,12 +1,14 @@
 import { Link } from 'react-router'
-import type { ServiceListItemDTO } from '../../../api/types'
+import type { ServiceListItemDTO, ServicesMetricsDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
 import { Drawer } from '../../../components/Drawer'
 import { KV } from '../../../components/KV'
 import { StatusDot } from '../../../components/StatusDot'
 import { TagChip } from '../../../components/TagChip'
+import { useNarrow } from '../../../components/useNarrow'
 import { restartBlockedReason } from './filterServices'
+import { metricFigure, type MetricKind } from './serviceMetrics'
 import styles from './services.module.css'
 
 /** The six places a service can be opened at; History is the `operations` tab. */
@@ -23,11 +25,22 @@ interface ServiceDrawerProps {
   service: ServiceListItemDTO | undefined
   onClose: () => void
   onRestart: (service: ServiceListItemDTO) => void
+  metrics: ServicesMetricsDTO | undefined
+  metricsFailed: boolean
 }
 
 /** Side panel with one service's facts; opening it changes nothing on the page behind it. */
-export function ServiceDrawer({ service, onClose, onRestart }: ServiceDrawerProps) {
+export function ServiceDrawer({ service, onClose, onRestart, metrics, metricsFailed }: ServiceDrawerProps) {
+  const phone = useNarrow()
   if (!service) return null
+  const figure = (kind: MetricKind) => {
+    const { text, title, tone } = metricFigure(service, metrics, metricsFailed, kind)
+    return (
+      <span className={`${styles.mono} ${tone === 'warn' ? styles.warnText : ''}`.trim()} title={title}>
+        {text}
+      </span>
+    )
+  }
   const blocked = restartBlockedReason(service)
   return (
     <Drawer
@@ -54,6 +67,7 @@ export function ServiceDrawer({ service, onClose, onRestart }: ServiceDrawerProp
     >
       <div className={styles.drawerBody}>
         {service.attention && <Banner kind="warn">{service.attention}</Banner>}
+        {phone && blocked && <p className={styles.why}>{`Restart: ${blocked}`}</p>}
         <KV
           rows={[
             ['Cluster', <Link key="cluster" to={`/clusters/${service.cluster.id}`} className={`${styles.mono} ${styles.link}`}>{service.cluster.name}</Link>],
@@ -68,6 +82,8 @@ export function ServiceDrawer({ service, onClose, onRestart }: ServiceDrawerProp
             ['Tasks', <span key="tasks" className={styles.mono}>{service.running} running of {service.desired} desired</span>],
             ['Revision', <span key="rev" className={styles.mono}>:{service.revision}</span>],
             ['Image tag', <span key="image" className={styles.mono}>{service.image_tag}</span>],
+            ['CPU', figure('cpu')],
+            ['Memory', figure('mem')],
             ['Last change', service.last_change_at ? <Ago key="last" ts={service.last_change_at} /> : '–'],
           ]}
         />
