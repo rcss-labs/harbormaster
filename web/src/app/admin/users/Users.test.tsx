@@ -50,8 +50,8 @@ describe('matrix', () => {
     renderApp('/settings/users')
     expect(await screen.findByRole('heading', { level: 2, name: 'Users & permissions' })).toBeInTheDocument()
     const row = await omerRow()
-    // Columns are Dev, Staging, Prod: Prod is the third cell.
-    fireEvent.click(within(row).getAllByTitle('Logs')[2])
+    fireEvent.click(within(row).getByRole('button', { name: 'omer on Prod: None' }))
+    fireEvent.click(screen.getByLabelText('Logs'))
     await waitFor(() => expect(bodies).toEqual([{ actions: 3 }]))
   })
 
@@ -64,7 +64,8 @@ describe('matrix', () => {
       }),
     )
     renderApp('/settings/users')
-    await omerRow()
+    const row = await omerRow()
+    fireEvent.click(within(row).getByRole('button', { name: 'omer on Prod: None' }))
     fireEvent.change(screen.getByLabelText('Preset for omer on Prod'), { target: { value: 'Operator' } })
     await waitFor(() => expect(bodies).toEqual([{ actions: 7 }]))
   })
@@ -73,12 +74,24 @@ describe('matrix', () => {
 describe('users', () => {
   it('Delete disabled for current user', async () => {
     renderApp('/settings/users')
-    const you = await screen.findByText('(you)')
-    const row = you.closest('tr') as HTMLElement
-    expect(within(row).getByRole('button', { name: 'Delete' })).toBeDisabled()
-    expect(within(row).getByRole('button', { name: 'Delete' })).toHaveAttribute('title', 'You cannot delete yourself')
-    const other = screen.getAllByText('dana', { selector: 'td' })[0].closest('tr') as HTMLElement
-    expect(within(other).getByRole('button', { name: 'Delete' })).toBeEnabled()
+    await screen.findByText('(you)')
+    const own = await menuItem('pavel', 'Delete')
+    expect(own).toBeDisabled()
+    expect(own).toHaveAttribute('title', 'You cannot delete yourself')
+    expect(await menuItem('dana', 'Delete')).toBeEnabled()
+  })
+
+  it('opens an Actions menu with the row buttons and closes it on Esc', async () => {
+    renderApp('/settings/users')
+    const omer = await userRow('omer')
+    const opener = within(omer).getByRole('button', { name: 'Actions for omer' })
+    expect(opener).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(opener)
+    const menu = screen.getByRole('menu', { name: 'Actions for omer' })
+    expect(within(menu).getByRole('menuitem', { name: 'Reset password' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: 'Make global admin' })).toBeInTheDocument()
+    fireEvent.keyDown(menu, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 })
 
@@ -106,6 +119,15 @@ const userRow = async (name: string) => {
   const cell = (await screen.findAllByText(name, { selector: 'td' }))[0]
   return cell.closest('tr') as HTMLElement
 }
+/** Opens the row's Actions menu and returns the named item. */
+const menuItem = async (username: string, name: string | RegExp) => {
+  const row = await userRow(username)
+  const opener = within(row).getByRole('button', { name: `Actions for ${username}` })
+  if (opener.getAttribute('aria-expanded') !== 'true') fireEvent.click(opener)
+  const menu = screen.getByRole('menu', { name: `Actions for ${username}` })
+  // Items such as Link SSO appear once the SSO configuration has loaded.
+  return waitFor(() => within(menu).getByRole('menuitem', { name }))
+}
 const capture = (method: 'post' | 'put' | 'delete', path: string, bodies: unknown[], status = 204) =>
   http[method](path, async ({ request }) => {
     bodies.push(method === 'delete' ? null : await request.json())
@@ -129,20 +151,19 @@ describe('sign-in credentials', () => {
 
   it('labels Reset password as Set password for password-less users', async () => {
     renderApp('/settings/users')
-    const alex = await userRow('alex')
-    fireEvent.click(within(alex).getByRole('button', { name: 'Set password' }))
+    fireEvent.click(await menuItem('alex', 'Set password'))
     expect(
       screen.getByText('They get a temporary password and must choose their own at next sign-in. While single sign-on is on, only break-glass accounts can use it.'),
     ).toBeInTheDocument()
-    expect(within(await userRow('omer')).getByRole('button', { name: 'Reset password' })).toBeInTheDocument()
+    expect((await menuItem('omer', 'Reset password'))).toBeInTheDocument()
   })
 
   it('disables Make break-glass for password-less users with the title', async () => {
     renderApp('/settings/users')
-    const button = within(await userRow('alex')).getByRole('button', { name: 'Make break-glass' })
+    const button = (await menuItem('alex', 'Make break-glass'))
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', 'Set a password for alex first.')
-    expect(within(await userRow('omer')).getByRole('button', { name: 'Make break-glass' })).toBeEnabled()
+    expect((await menuItem('omer', 'Make break-glass'))).toBeEnabled()
   })
 
   it('break-glass confirm posts {break_glass:true} and refreshes', async () => {
@@ -156,7 +177,7 @@ describe('sign-in credentials', () => {
       }),
     )
     renderApp('/settings/users')
-    fireEvent.click(within(await userRow('omer')).getByRole('button', { name: 'Make break-glass' }))
+    fireEvent.click((await menuItem('omer', 'Make break-glass')))
     expect(screen.getByText('Make omer a break-glass account?')).toBeInTheDocument()
     expect(
       screen.getByText('Break-glass accounts can sign in with a password even when single sign-on is on. Keep this to a few global admins.'),
@@ -174,7 +195,7 @@ describe('sign-in credentials', () => {
       ),
     )
     renderApp('/settings/users')
-    fireEvent.click(within(await userRow('pavel')).getByRole('button', { name: 'Remove break-glass' }))
+    fireEvent.click((await menuItem('pavel', 'Remove break-glass')))
     expect(screen.getByText('Remove break-glass from pavel?')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove break-glass' }))
     expect(await screen.findByText('Keep at least one break-glass global admin while single sign-on is on.')).toBeInTheDocument()
@@ -184,7 +205,7 @@ describe('sign-in credentials', () => {
     const bodies: unknown[] = []
     server.use(ssoConfigured(), capture('put', '/api/users/3/sso-link', bodies))
     renderApp('/settings/users')
-    fireEvent.click(await within(await userRow('omer')).findByRole('button', { name: 'Link SSO…' }))
+    fireEvent.click(await (await menuItem('omer', 'Link SSO…')))
     expect(screen.getByText('Link omer to an SSO identity')).toBeInTheDocument()
     expect(screen.getByText('Copy it exactly as the identity provider issues it. Test sign-in shows it.')).toBeInTheDocument()
     expect(
@@ -211,7 +232,7 @@ describe('sign-in credentials', () => {
       ),
     )
     renderApp('/settings/users')
-    fireEvent.click(await within(await userRow('omer')).findByRole('button', { name: 'Link SSO…' }))
+    fireEvent.click(await (await menuItem('omer', 'Link SSO…')))
     fireEvent.change(screen.getByLabelText('NameID'), { target: { value: 'x' } })
     fireEvent.click(screen.getByRole('button', { name: 'Set pending link' }))
     expect(await within(screen.getByRole('dialog')).findByText('That NameID is already linked to another user.')).toBeInTheDocument()
@@ -221,21 +242,20 @@ describe('sign-in credentials', () => {
     const bodies: unknown[] = []
     server.use(ssoConfigured(), capture('delete', '/api/users/2/sso-link', bodies))
     renderApp('/settings/users')
-    const dana = await userRow('dana')
-    expect(await within(dana).findByRole('button', { name: 'Change pending link…' })).toBeInTheDocument()
-    fireEvent.click(within(dana).getByRole('button', { name: 'Clear pending link' }))
+    expect(await menuItem('dana', 'Change pending link…')).toBeInTheDocument()
+    fireEvent.click(await menuItem('dana', 'Clear pending link'))
     expect(await screen.findByText('Pending link cleared.')).toBeInTheDocument()
     expect(bodies).toHaveLength(1)
   })
 
   it('unlink confirm differs by has_password and shows the temporary password', async () => {
     renderApp('/settings/users')
-    fireEvent.click(within(await userRow('pavel')).getByRole('button', { name: 'Unlink SSO…' }))
+    fireEvent.click((await menuItem('pavel', 'Unlink SSO…')))
     expect(screen.getByText('Unlink pavel from SSO?')).toBeInTheDocument()
     expect(screen.getByText('Their SSO sessions end now. They keep their password.')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
 
-    fireEvent.click(within(await userRow('alex')).getByRole('button', { name: 'Unlink SSO…' }))
+    fireEvent.click((await menuItem('alex', 'Unlink SSO…')))
     expect(
       screen.getByText('Their SSO sessions end now. They get a temporary password and must choose their own at next sign-in.'),
     ).toBeInTheDocument()
@@ -300,7 +320,7 @@ describe('acting on yourself', () => {
     renderApp('/settings/users')
     await screen.findByRole('button', { name: 'Sign out' })
     expect(screen.queryByRole('button', { name: 'Link SSO account' })).not.toBeInTheDocument()
-    fireEvent.click(within(await userRow('pavel')).getByRole('button', { name: 'Unlink SSO…' }))
+    fireEvent.click((await menuItem('pavel', 'Unlink SSO…')))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unlink' }))
     expect(await screen.findByRole('button', { name: 'Link SSO account' })).toBeInTheDocument()
   })
@@ -315,7 +335,7 @@ describe('acting on yourself', () => {
       }),
     )
     renderApp('/settings/users')
-    fireEvent.click(within(await userRow('pavel')).getByRole('button', { name: /break-glass/ }))
+    fireEvent.click((await menuItem('pavel', /break-glass/)))
     await waitFor(() => expect(configFetches).toBeGreaterThan(0))
     const before = configFetches
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /break-glass/ }))

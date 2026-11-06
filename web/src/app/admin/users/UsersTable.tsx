@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { api } from '../../../api/client'
 import type { UserDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
 import { Panel } from '../../../components/Panel'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
+import { Popover } from '../../../components/Popover'
 import { Pill } from '../../../components/Pill'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
@@ -17,12 +18,26 @@ const expiry = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString()
 
 type Pending = { kind: 'reset' | 'admin' | 'delete' | 'breakglass' | 'unlink'; user: UserDTO }
 
+function MenuItem({ children, danger = false, disabled = false, title, onClick }: { children: ReactNode; danger?: boolean; disabled?: boolean; title?: string; onClick: () => void }) {
+  return (
+    <button type="button" role="menuitem" className={`${styles.menuItem} ${danger ? styles.menuDanger : ''}`.trim()} disabled={disabled} title={title} onClick={onClick}>
+      {children}
+    </button>
+  )
+}
+
 export function UsersTable({ users, meId, ssoConfigured = false }: { users: UserDTO[]; meId: number; ssoConfigured?: boolean }) {
   const queryClient = useQueryClient()
   const toast = useToast()
   const auth = useAuth()
   const [pending, setPending] = useState<Pending | null>(null)
   const [linking, setLinking] = useState<UserDTO | null>(null)
+  const [menuFor, setMenuFor] = useState<number | null>(null)
+  /** Runs a menu choice and closes the menu first. */
+  const choose = (action: () => void) => {
+    setMenuFor(null)
+    action()
+  }
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -128,7 +143,7 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
             <th>Role</th>
             <th>Can see</th>
             <th>Last sign-in</th>
-            <th></th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -168,54 +183,63 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
               </td>
               <td className={styles.muted}>{user.last_sign_in_at ? <Ago ts={user.last_sign_in_at} /> : 'never'}</td>
               <td className={tableClass.num}>
-                <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => setPending({ kind: 'reset', user })}>
-                  {user.has_password ? 'Reset password' : 'Set password'}
-                </button>{' '}
-                <button
-                  type="button"
-                  className={`${styles.btn} ${styles.sm}`}
-                  disabled={!user.has_password}
-                  title={user.has_password ? undefined : `Set a password for ${user.username} first.`}
-                  onClick={() => setPending({ kind: 'breakglass', user })}
-                >
-                  {user.break_glass ? 'Remove break-glass' : 'Make break-glass'}
-                </button>{' '}
-                {ssoConfigured && (user.sso === 'none' || user.sso === 'pending_expired' || user.sso === 'pending') && (
-                  <>
-                    <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => setLinking(user)}>
-                      {user.sso === 'pending' ? 'Change pending link…' : 'Link SSO…'}
-                    </button>{' '}
-                  </>
-                )}
-                {user.sso === 'pending' && (
-                  <>
-                    <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => clearLink.mutate(user)}>
-                      Clear pending link
-                    </button>{' '}
-                  </>
-                )}
-                {user.sso === 'linked' && (
-                  <>
-                    <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => setPending({ kind: 'unlink', user })}>
-                      Unlink SSO…
-                    </button>{' '}
-                  </>
-                )}
-                <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => setPending({ kind: 'admin', user })}>
-                  {user.admin ? 'Remove global admin' : 'Make global admin'}
-                </button>{' '}
-                <button
-                  type="button"
-                  className={`${styles.btn} ${styles.sm} ${styles.danger}`}
-                  disabled={user.id === meId}
-                  title={user.id === meId ? 'You cannot delete yourself' : undefined}
-                  onClick={() => setPending({ kind: 'delete', user })}
-                >
-                  Delete
-                </button>
+                <div className={styles.menuWrap}>
+                  <button
+                    type="button"
+                    className={`${styles.btn} ${styles.sm}`}
+                    aria-label={`Actions for ${user.username}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === user.id}
+                    onClick={() => setMenuFor((current) => (current === user.id ? null : user.id))}
+                  >
+                    Actions
+                  </button>
+                  <Popover open={menuFor === user.id} onClose={() => setMenuFor(null)} label={`Actions for ${user.username}`} role="menu" align="right" width={220}>
+                    <div className={styles.menu}>
+                      <MenuItem onClick={() => choose(() => setPending({ kind: 'reset', user }))}>
+                        {user.has_password ? 'Reset password' : 'Set password'}
+                      </MenuItem>
+                      <MenuItem
+                        disabled={!user.has_password}
+                        title={user.has_password ? undefined : `Set a password for ${user.username} first.`}
+                        onClick={() => choose(() => setPending({ kind: 'breakglass', user }))}
+                      >
+                        {user.break_glass ? 'Remove break-glass' : 'Make break-glass'}
+                      </MenuItem>
+                      {ssoConfigured && (user.sso === 'none' || user.sso === 'pending_expired' || user.sso === 'pending') && (
+                        <MenuItem onClick={() => choose(() => setLinking(user))}>
+                          {user.sso === 'pending' ? 'Change pending link…' : 'Link SSO…'}
+                        </MenuItem>
+                      )}
+                      {user.sso === 'pending' && (
+                        <MenuItem onClick={() => choose(() => clearLink.mutate(user))}>Clear pending link</MenuItem>
+                      )}
+                      {user.sso === 'linked' && (
+                        <MenuItem onClick={() => choose(() => setPending({ kind: 'unlink', user }))}>Unlink SSO…</MenuItem>
+                      )}
+                      <MenuItem onClick={() => choose(() => setPending({ kind: 'admin', user }))}>
+                        {user.admin ? 'Remove global admin' : 'Make global admin'}
+                      </MenuItem>
+                      <MenuItem
+                        danger
+                        disabled={user.id === meId}
+                        title={user.id === meId ? 'You cannot delete yourself' : undefined}
+                        onClick={() => choose(() => setPending({ kind: 'delete', user }))}
+                      >
+                        Delete
+                      </MenuItem>
+                    </div>
+                  </Popover>
+                </div>
               </td>
             </tr>
           ))}
+          {/* Room for the last rows' menus, which the scrolling table wrapper would otherwise clip. */}
+          {menuFor !== null && (
+            <tr aria-hidden="true">
+              <td colSpan={6} className={styles.menuRoom} />
+            </tr>
+          )}
         </tbody>
       </Table>
       {pending?.kind === 'reset' && (
