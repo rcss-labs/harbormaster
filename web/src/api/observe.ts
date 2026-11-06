@@ -1,6 +1,6 @@
 // TanStack hooks for the observe endpoints. Metrics refresh once a minute (CloudWatch is slow and billed per call);
 // snapshot hooks (target health, scaling, alerts) refresh every 5 s like the other live data. Neither runs in a background tab.
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ApiError, api } from './client'
 import { queryString, usePollerStatus, type Filters } from './hooks'
 import type {
@@ -15,6 +15,7 @@ import type {
   ScalingDTO,
   Series,
   ServiceMetricsDTO,
+  ServicesMetricsDTO,
   TargetHealthDTO,
 } from './types'
 
@@ -28,6 +29,22 @@ export function useServiceMetrics(id: string, range: Range) {
   return useQuery({
     queryKey: ['service', id, 'metrics', range],
     queryFn: () => api.get<ServiceMetricsDTO>(`/api/services/${id}/metrics${queryString({ range })}`),
+    ...metricsPolling,
+  })
+}
+
+/**
+ * Latest CPU and memory for the services of one page of the Services list (ids are the scope; the
+ * server drops any it may not show). Ids are de-duplicated and sorted so the request, and so its
+ * ETag, is the same for the same page.
+ */
+export function useServicesMetrics(ids: string[]) {
+  const sorted = [...new Set(ids)].sort()
+  return useQuery({
+    queryKey: ['services', 'metrics', sorted],
+    queryFn: () => api.get<ServicesMetricsDTO>(`/api/services/metrics${queryString({ id: sorted })}`),
+    enabled: sorted.length > 0,
+    placeholderData: keepPreviousData,
     ...metricsPolling,
   })
 }
