@@ -57,7 +57,8 @@
   .hm-chips.in::after { right: 0; }
 
   /* Sticky bars above the tab bar (Deploy, Settings General) and the terminal keys row that replaces the tab bar. */
-  .hm-bar { position: fixed; left: 0; right: 0; bottom: calc(var(--hm-tabbar) + var(--hm-sab)); z-index: 29; display: flex; align-items: center; gap: 8px; min-height: var(--hm-bar); padding: 8px 12px; background: var(--raised); border-top: 1px solid var(--border-strong); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18); }
+  /* Above the tab bar; with the iOS keyboard up the tab bar is under it, so the bar sits on the visible bottom (the keys row's offset) instead. */
+  .hm-bar { position: fixed; left: 0; right: 0; bottom: max(calc(var(--hm-tabbar) + var(--hm-sab)), calc(100dvh - var(--hm-vvh, 100dvh) - var(--hm-vvt, 0px))); z-index: 29; display: flex; align-items: center; gap: 8px; min-height: var(--hm-bar); padding: 8px 12px; background: var(--raised); border-top: 1px solid var(--border-strong); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18); }
   .hm-keys { position: fixed; left: 0; right: 0; bottom: calc(100dvh - var(--hm-vvh, 100dvh) - var(--hm-vvt, 0px)); z-index: 31; display: flex; gap: 8px; min-height: var(--hm-keys); padding: 6px 12px calc(6px + var(--hm-sab)); background: var(--chrome); border-top: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
   .hm-keys::-webkit-scrollbar { display: none; }
   .hm-keys > button { flex: 1 1 0; min-width: 44px; min-height: 44px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 13px var(--mono); cursor: pointer; }

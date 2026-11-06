@@ -116,6 +116,27 @@ function collectViolations(options: { allowClip: string[] }): string[] {
       report('clip', el, `cuts content off (scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth})`)
     }
 
+    // clip (outside): text that sticks out of an ancestor that hides its overflow (a chart label cut by its frame). Scroll metrics miss this
+    // when the text sticks out above or to the left, so the rects are compared.
+    if (hasOwnText(el) && !(el instanceof HTMLInputElement) && !clipOk(el)) {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const textRect = range.getBoundingClientRect()
+      for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+        const ancestor = getComputedStyle(node)
+        // A scroller (main, a sideways chip row) owns whatever lies beyond its edge: the text is reachable by scrolling it.
+        if (['auto', 'scroll'].includes(ancestor.overflowX) || ['auto', 'scroll'].includes(ancestor.overflowY)) break
+        if (!['hidden', 'clip'].includes(ancestor.overflowX) && !['hidden', 'clip'].includes(ancestor.overflowY)) continue
+        const box = node.getBoundingClientRect()
+        const cutX = ['hidden', 'clip'].includes(ancestor.overflowX) && (textRect.left < box.left - 1 || textRect.right > box.right + 1)
+        const cutY = ['hidden', 'clip'].includes(ancestor.overflowY) && (textRect.top < box.top - 1 || textRect.bottom > box.bottom + 1)
+        if (textRect.width > 0 && (cutX || cutY)) {
+          report('clip', el, `text sticks out of ${describe(node)} (text ${px(textRect.left)},${px(textRect.top)}..${px(textRect.right)},${px(textRect.bottom)}, box ${px(box.left)},${px(box.top)}..${px(box.right)},${px(box.bottom)})`)
+          break
+        }
+      }
+    }
+
     // target: 44 px controls; 36 px chips extend their hit area with ::before.
     if (el.matches(targetSelector)) {
       // A checkbox, radio or range input is judged by its label (a 22 px Toggle sits in a 44 px label); without one it is skipped.

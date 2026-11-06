@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLogHistory } from '../../../api/observe'
 import type { LogLine, LogsHistoryDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
+import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { BottomSheet } from '../../../components/BottomSheet'
 import { Seg, SegmentedFilter } from '../../../components/Seg'
@@ -228,6 +229,9 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
             {containerSelect}
             {tailSeg}
           </div>
+          {unsupported.map((c) => (
+            <LockNote key={c.name} kind="why">{`${c.name}: ${c.driver}: Harbormaster cannot show these logs`}</LockNote>
+          ))}
           {searchInputEl}
           {levelSeg}
           {statusLine}

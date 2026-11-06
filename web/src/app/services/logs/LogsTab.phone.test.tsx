@@ -58,6 +58,14 @@ describe('LogsTab on a phone', () => {
     })
   })
 
+  it('shows why an unsupported container cannot be picked, as text', async () => {
+    serve(LOGS_HISTORY_PAYMENTS)
+    renderApp(route)
+    await screen.findByLabelText('Container')
+    const notes = (await screen.findAllByRole('note')).map((note) => note.textContent)
+    expect(notes).toContain('log-router: awsfirelens: Harbormaster cannot show these logs')
+  })
+
   it('shows every Tail and Level option', async () => {
     serve()
     renderApp(route)

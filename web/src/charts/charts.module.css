@@ -66,7 +66,9 @@
    for a marker label with no room sits below the two label rows, so it never lands on the label of a neighbouring marker. Bar chart x labels
    slide from left-aligned to right-aligned with --at, like the timeline, so the first one does not reach into the y labels. */
 @media (max-width: 700px) {
-  .legend { margin-bottom: 12px; }
+  /* The 8 px the top label needs sits inside the chart (margin-top), so a frame that hides overflow around it does not cut "100%" in half. */
+  .legend { margin-bottom: 4px; }
+  .pchart { margin-top: 8px; grid-template-rows: minmax(0, 1fr) auto; }
   .pchart .mkdot { top: 35px; }
   .pchart .pxBar { transform: translateX(calc(var(--at, 50) * -1%)); }
 }

@@ -27,6 +27,7 @@ test('terminal: the host ends above the keys row and the keys row sits on the vi
   await page.goto(serviceUrl(...SVC.paymentsApi, 'terminal'))
   await connectThroughSheet(page)
   await simulateKeyboard(page, VISIBLE)
+  await page.getByRole('main').evaluate((main) => (main.scrollTop = main.scrollHeight))
   const keys = page.getByRole('toolbar', { name: 'Terminal keys' })
   const host = page.getByTestId('terminal-host')
   await expect
@@ -43,13 +44,13 @@ test('terminal: the host ends above the keys row and the keys row sits on the vi
 test('logs: the newest lines are above the visible bottom with the keyboard up', async ({ page }) => {
   await page.goto(serviceUrl(...SVC.paymentsApi, 'logs'))
   const box = page.getByRole('log')
-  await expect(box.getByRole('row').first()).toBeVisible()
+  await expect(box.locator('button').first()).toBeVisible()
   await simulateKeyboard(page, VISIBLE)
   await page.getByRole('main').evaluate((main) => (main.scrollTop = main.scrollHeight))
   await box.evaluate((el) => (el.scrollTop = el.scrollHeight))
   await expect
     .poll(async () => {
-      const last = await measureBox(box.getByRole('row').last())
+      const last = await measureBox(box.locator('button').last())
       return Math.round(last.y + last.height)
     })
     .toBeLessThanOrEqual(VISIBLE)
