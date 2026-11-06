@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 import { SVC, serviceUrl } from './fixtures/ids'
 import { expectPhoneLayoutClean, expectSheetWithinViewport, watchPage } from './fixtures/phone'
 import { asUser, expect, test } from './fixtures/test'
-import { login, serviceId } from './helpers'
+import { login, measureBox, serviceId } from './helpers'
 
 // Cross-screen phone flows: what an on-call engineer does, end to end, at 390 x 844. These change data (restart, stop, deploy), so they run
 // after the flow specs (chromium-mobile-flows). Every step also runs the generic layout assertion, because single-screen checks let
@@ -196,16 +196,22 @@ test('rotation keeps the layout clean', async ({ page }) => {
   await page.waitForLoadState('networkidle')
   expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth + 1), 'landscape document scrolls sideways').toBe(true)
 
-  // Rotate with a sheet open: it survives inside the viewport or closes cleanly, never stranded half off-screen.
+  // Rotate with a sheet open. 844 is above the phone query, so the sheet stops being a phone sheet: it must not be stranded.
+  // Either it is still open and inside the viewport, or it is closed completely (no scrim, no history entry left behind) on the same page.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/services?q=payments-api')
+  const sheetUrl = page.url()
   await page.getByRole('button', { name: 'Actions for payments-api' }).click()
   await expect(page.getByRole('menu', { name: 'Actions for payments-api' })).toBeVisible()
   await page.setViewportSize({ width: 844, height: 390 })
-  await page.waitForTimeout(300)
-  const open = page.locator('[role=menu], [role=dialog][aria-modal="true"]')
-  if ((await open.count()) > 0 && (await open.last().isVisible())) {
-    const rect = await open.last().evaluate((el) => {
+  await expect(page.getByRole('main')).toBeVisible()
+  const sheet = page.locator('[role=menu], [role=dialog][aria-modal="true"]')
+  await expect
+    .poll(async () => (await sheet.count()) === 0 || (await sheet.last().isVisible()), { message: 'the sheet settles after the rotation' })
+    .toBe(true)
+  expect(page.url()).toBe(sheetUrl)
+  if ((await sheet.count()) > 0) {
+    const rect = await sheet.last().evaluate((el) => {
       const r = el.getBoundingClientRect()
       return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: window.innerWidth, height: window.innerHeight }
     })
@@ -213,6 +219,9 @@ test('rotation keeps the layout clean', async ({ page }) => {
     expect(rect.top).toBeGreaterThanOrEqual(-1)
     expect(rect.right).toBeLessThanOrEqual(rect.width + 1)
     expect(rect.bottom).toBeLessThanOrEqual(rect.height + 1)
+  } else {
+    await expect(page.getByTestId('sheet-scrim')).toHaveCount(0)
+    expect(await page.evaluate(() => history.state?.hmSheet ?? null), 'a closed sheet leaves no history entry').toBeNull()
   }
   await page.keyboard.press('Escape')
 
@@ -256,10 +265,9 @@ test('on-screen keyboard: the focused log search stays visible and the layout st
   const search = page.getByLabel('Search logs')
   await search.tap()
   await search.fill('error')
-  const box = await search.boundingBox()
-  expect(box).not.toBeNull()
-  expect(box!.y + box!.height).toBeLessThanOrEqual(500)
-  expect(box!.y).toBeGreaterThanOrEqual(0)
+  const box = await measureBox(search)
+  expect(box.y + box.height).toBeLessThanOrEqual(500)
+  expect(box.y).toBeGreaterThanOrEqual(0)
   await expectPhoneLayoutClean(page)
 })
 
@@ -389,6 +397,42 @@ test.describe('Back and deep links', () => {
     await page.goBack()
     await expect(details).toBeHidden()
     expect(page.url()).toBe(url)
+  })
+
+  test('Open service from the actions sheet: one Back returns to the list, the next leaves it', async ({ page }) => {
+    watchPage(page)
+    await page.goto('/')
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Services/ }).click()
+    const table = page.getByRole('table', { name: 'Services' })
+    await expect(table.getByRole('row').first()).toBeVisible()
+    const listUrl = page.url()
+    await page.getByRole('button', { name: 'Actions for payments-api' }).click()
+    await page.getByRole('menuitem', { name: 'Open service' }).click()
+    await expect(page).toHaveURL(/\/services\/[^/]+\/overview/)
+    await page.goBack()
+    await expect(page).toHaveURL(listUrl)
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await expect(table).toBeVisible()
+    // The sheet left no dead entry behind: the next Back is the page before the list.
+    await page.goBack()
+    await expect(page).toHaveURL(new URL('/', listUrl).toString())
+  })
+
+  test('All sections then Logs: the sheet adds no history entry of its own', async ({ page }) => {
+    watchPage(page)
+    await page.goto(serviceUrl(...SVC.paymentsApi, 'overview'))
+    await page.getByRole('button', { name: 'All sections' }).click()
+    const menu = page.getByRole('menu', { name: 'All sections' })
+    await expect(menu).toBeVisible()
+    const before = await page.evaluate(() => history.length)
+    await menu.getByRole('menuitem', { name: 'Logs' }).click()
+    await expect(page).toHaveURL(/\/logs$/)
+    await expect(menu).toHaveCount(0)
+    // One entry for Logs, none for the sheet (the sheet's own entry was replaced, not left behind).
+    expect(await page.evaluate(() => history.length)).toBe(before)
+    await page.goBack()
+    await expect(page).toHaveURL(serviceUrl(...SVC.paymentsApi, 'overview'))
+    await expect(menu).toHaveCount(0)
   })
 
   test('terminal deep link selects the task', async ({ page }) => {

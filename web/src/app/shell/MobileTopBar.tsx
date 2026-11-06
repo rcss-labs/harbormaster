@@ -58,6 +58,7 @@ export function MobileTopBar() {
           type="button"
           className={styles.mScope}
           data-hm-hit="36"
+          data-hm-clip-ok=""
           aria-label={`Scope: ${scopeLabel(me, filters)}`}
           aria-haspopup="dialog"
           aria-expanded={scopeOpen}

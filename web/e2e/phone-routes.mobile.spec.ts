@@ -1,12 +1,12 @@
 import type { APIRequestContext, Page } from '@playwright/test'
-import { PHONE_FIXME_REASON, PHONE_ROUTES, expectPhoneLayoutClean, phoneFixme, phoneViolations, runPhonePass, watchPage } from './fixtures/phone'
+import { PHONE_ROUTES, expectPhoneLayoutClean, phoneViolations, runPhonePass, watchPage } from './fixtures/phone'
 import { SVC, clusterUrl } from './fixtures/ids'
 import { asUser, expect, test } from './fixtures/test'
 import { serviceId } from './helpers'
 import type { Targets } from '../e2e-floci/targets'
 
 // The generic phone pass over every route of the fake estate, at 390 x 844 (chromium-mobile). Mutating phone specs run
-// after chromium-flows, so this one only reads. Routes in PHONE_FIXME are skipped until the phone layer is merged.
+// after chromium-flows, so this one only reads.
 
 const SEARCH_INDEXER = ['482109375512', 'eu-west-1', 'eu-apps', 'search-indexer'] as const
 const ADMIN_ROUTE = /^settings-/
@@ -31,7 +31,6 @@ for (const user of ['sam', 'omer'] as const) {
     for (const route of PHONE_ROUTES().filter((r) => r.name !== 'login')) {
       for (const theme of THEMES) {
         test(`${route.name} ${theme}`, async ({ page, request }) => {
-          test.fixme(phoneFixme(route.name), PHONE_FIXME_REASON)
           test.skip(user === 'omer' && ADMIN_ROUTE.test(route.name), 'admin pages are not for omer')
           const path = route.path(await fakeTargets(request, user))
           test.skip(path === null, `${route.name} is not available on this estate`)
@@ -46,7 +45,6 @@ test.describe('phone pass signed out', () => {
   test.use({ storageState: { cookies: [], origins: [] } })
   for (const theme of THEMES) {
     test(`login ${theme}`, async ({ page }) => {
-      test.fixme(phoneFixme('login'), PHONE_FIXME_REASON)
       await runPhonePass(page, { routeName: 'login', path: '/login', theme, ready: page.getByRole('button', { name: /Sign in/ }).first() })
     })
   }

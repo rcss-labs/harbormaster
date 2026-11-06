@@ -18,7 +18,7 @@ import { ROUTES, type RouteSpec } from '../../e2e-floci/routes'
  *   covered      something else (a sticky column, a bar) sits on top of a row's title
  *   bottom       the last element in main ends below the top of the tab bar, sticky bar or terminal keys row
  *   section-empty  a section[aria-label] in main with no text
- *   text-overlap   text drawn on top of other text inside a chart panel (a section in main that holds a plot, an svg of 100 x 40 px or more): a legend over an axis label,
+ *   text-overlap   text (HTML or SVG) drawn on top of other text inside a chart panel (a section in main that holds a plot, an svg of 100 x 40 px or more): a legend over an axis label,
  *                  a marker label over a marker label
  * Page errors, console errors and failing responses are collected from `watchPage` onwards.
  */
@@ -105,8 +105,36 @@ function collectViolations(options: { allowClip: string[] }): string[] {
 
     // clip: an overflow:hidden|clip box cutting its content off.
     // A single-line input is exempt: its own text scrolls with the caret, so a long value (a secret ARN) is not cut off for good.
-    if ((style.overflowX === 'hidden' || style.overflowX === 'clip') && !(el instanceof HTMLInputElement) && el.scrollWidth > el.clientWidth + 1 && !clipOk(el)) {
+    // A box that shows an ellipsis is a clip at any overflow (a 1 px overshoot still prints "unhealt…"); other hidden boxes get 1 px of rounding slack.
+    const clipsWithEllipsis = style.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth
+    if (
+      (style.overflowX === 'hidden' || style.overflowX === 'clip') &&
+      !(el instanceof HTMLInputElement) &&
+      (clipsWithEllipsis || el.scrollWidth > el.clientWidth + 1) &&
+      !clipOk(el)
+    ) {
       report('clip', el, `cuts content off (scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth})`)
+    }
+
+    // clip (outside): text that sticks out of an ancestor that hides its overflow (a chart label cut by its frame). Scroll metrics miss this
+    // when the text sticks out above or to the left, so the rects are compared.
+    if (hasOwnText(el) && !(el instanceof HTMLInputElement) && !clipOk(el)) {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const textRect = range.getBoundingClientRect()
+      for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+        const ancestor = getComputedStyle(node)
+        // A scroller (main, a sideways chip row) owns whatever lies beyond its edge: the text is reachable by scrolling it.
+        if (['auto', 'scroll'].includes(ancestor.overflowX) || ['auto', 'scroll'].includes(ancestor.overflowY)) break
+        if (!['hidden', 'clip'].includes(ancestor.overflowX) && !['hidden', 'clip'].includes(ancestor.overflowY)) continue
+        const box = node.getBoundingClientRect()
+        const cutX = ['hidden', 'clip'].includes(ancestor.overflowX) && (textRect.left < box.left - 1 || textRect.right > box.right + 1)
+        const cutY = ['hidden', 'clip'].includes(ancestor.overflowY) && (textRect.top < box.top - 1 || textRect.bottom > box.bottom + 1)
+        if (textRect.width > 0 && (cutX || cutY)) {
+          report('clip', el, `text sticks out of ${describe(node)} (text ${px(textRect.left)},${px(textRect.top)}..${px(textRect.right)},${px(textRect.bottom)}, box ${px(box.left)},${px(box.top)}..${px(box.right)},${px(box.bottom)})`)
+          break
+        }
+      }
     }
 
     // target: 44 px controls; 36 px chips extend their hit area with ::before.
@@ -193,6 +221,16 @@ function collectViolations(options: { allowClip: string[] }): string[] {
     }
     return boxes
   }
+  // SVG <text> elements are boxes of their own (one per label), compared with each other and with the HTML text.
+  const svgTextBoxesOf = (panel: Element) => {
+    const boxes: { node: Element; rect: DOMRect }[] = []
+    for (const text of Array.from(panel.querySelectorAll('svg text'))) {
+      if ((text.textContent ?? '').trim() === '' || !isVisible(text) || getComputedStyle(text).opacity === '0') continue
+      const rect = text.getBoundingClientRect()
+      if (rect.width > 1 && rect.height > 1) boxes.push({ node: text, rect })
+    }
+    return boxes
+  }
   // A chart panel holds a plot, an svg at least 100 x 40 px; the 16 px icons in buttons and rows do not make a section a chart.
   const hasPlot = (section: Element) =>
     Array.from(section.querySelectorAll('svg')).some((svg) => {
@@ -200,7 +238,7 @@ function collectViolations(options: { allowClip: string[] }): string[] {
       return box.width >= 100 && box.height >= 40
     })
   for (const panel of Array.from(document.querySelectorAll('main section')).filter((section) => isVisible(section) && hasPlot(section))) {
-    const boxes = textBoxesOf(panel)
+    const boxes: { node: Node; rect: DOMRect }[] = [...textBoxesOf(panel), ...svgTextBoxesOf(panel)]
     for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) {
         if (boxes[i].node === boxes[j].node) continue
@@ -211,8 +249,10 @@ function collectViolations(options: { allowClip: string[] }): string[] {
         if (overlapX <= 2 || overlapY <= 3) continue
         const smaller = Math.min(a.width * a.height, b.width * b.height)
         if (overlapX * overlapY < smaller * 0.2) continue
-        const nameOf = (node: Text) => `"${(node.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`
-        report('text-overlap', boxes[i].node.parentElement!, `text ${nameOf(boxes[i].node)} overlaps ${nameOf(boxes[j].node)} by ${px(overlapX)} x ${px(overlapY)}`)
+        const nameOf = (node: Node) => `"${(node.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`
+        const first = boxes[i].node
+        const owner = first instanceof Element ? first : first.parentElement!
+        report('text-overlap', owner, `text ${nameOf(boxes[i].node)} overlaps ${nameOf(boxes[j].node)} by ${px(overlapX)} x ${px(overlapY)}`)
       }
     }
   }
@@ -253,6 +293,8 @@ function collectViolations(options: { allowClip: string[] }): string[] {
 
 /** The layout violations on the current page, one line each (empty when clean). */
 export async function phoneViolations(page: Page, options: PhoneOptions = {}): Promise<string[]> {
+  // Web fonts change text widths: measure only once they have loaded.
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
   return page.evaluate(collectViolations, { allowClip: options.allowClip ?? [] })
 }
 
@@ -292,6 +334,20 @@ export function watchPage(page: Page, isExpectedFailure: ExpectedFailure = signe
 export async function expectPhoneLayoutClean(page: Page, options: PhoneOptions = {}) {
   expect(problemsByPage.get(page) ?? [], 'page errors, console errors and failing responses').toEqual([])
   expect(await phoneViolations(page, options), 'phone layout violations').toEqual([])
+}
+
+/**
+ * Simulates the iOS keyboard: the layout viewport keeps its height and only the visual viewport shrinks. Sets the variables that
+ * `useVisualViewport` writes there (--hm-vvh, --hm-vvt) without relying on Chromium resizing the layout, which hides the iOS path.
+ */
+export async function simulateKeyboard(page: Page, visibleHeight: number, offsetTop = 0) {
+  await page.evaluate(
+    ({ height, top }) => {
+      document.documentElement.style.setProperty('--hm-vvh', `${height}px`)
+      document.documentElement.style.setProperty('--hm-vvt', `${top}px`)
+    },
+    { height: visibleHeight, top: offsetTop },
+  )
 }
 
 const SHEET_SELECTOR = '[role=dialog][aria-modal="true"], [role=menu]'
@@ -353,15 +409,6 @@ export function PHONE_ROUTES(): RouteSpec[] {
     { name: 'password', path: () => '/password' },
     { name: 'login', path: () => '/login' },
   ]
-}
-
-export const PHONE_FIXME_REASON = 'wave 0: phone layer not merged'
-
-/** Route names whose phone pass is marked fixme. Empty: every phone route is enforced. */
-export const PHONE_FIXME: string[] = []
-
-export function phoneFixme(routeName: string): boolean {
-  return !process.env.HM_PHONE_UNFIXME && PHONE_FIXME.includes(routeName)
 }
 
 export interface PhonePassOptions {
