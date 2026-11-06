@@ -71,3 +71,8 @@
 }
 
 @keyframes hm-chipfade { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }
+
+/* A page's h1 duplicates the phone top bar's title, so on phones it stays for screen readers only. */
+@media (max-width: 700px) {
+  .hm-phone-title-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+}

@@ -308,10 +308,11 @@ export function PHONE_ROUTES(): RouteSpec[] {
 export const PHONE_FIXME_REASON = 'wave 0: phone layer not merged'
 
 /**
- * Route names whose phone pass is marked fixme until the phone layer lands. The lead empties this list at the wave 0b
- * gate. Set HM_PHONE_UNFIXME=1 to run every route anyway (how the baseline was recorded).
+ * Route names whose phone pass is marked fixme until the page's lane lands. Lanes don't edit this list: they run their
+ * routes with HM_PHONE_UNFIXME=1, and the lead empties it at the wave 1 gate.
  */
-export const PHONE_FIXME: string[] = PHONE_ROUTES().map((route) => route.name)
+const PHONE_READY = new Set(['more', 'login'])
+export const PHONE_FIXME: string[] = PHONE_ROUTES().map((route) => route.name).filter((name) => !PHONE_READY.has(name))
 
 export function phoneFixme(routeName: string): boolean {
   return !process.env.HM_PHONE_UNFIXME && PHONE_FIXME.includes(routeName)
