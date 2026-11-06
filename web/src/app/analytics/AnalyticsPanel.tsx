@@ -5,6 +5,7 @@ import { Panel } from '../../components/Panel'
 import type { PanelErrorProps } from '../../components/PanelError'
 import styles from './AnalyticsPanel.module.css'
 import { ChartLegend, type ChartLegendItem } from './ChartLegend'
+import { retentionText } from './format'
 
 interface AnalyticsPanelProps {
   title: string
@@ -44,7 +45,7 @@ export function AnalyticsPanel({
     window !== undefined &&
     Date.parse(rollup.data_since) > Date.parse(window.from)
 
-  const footer = showSources && source ? `source ${source.table} · kept ${source.kept}` : undefined
+  const footer = showSources && source ? `source ${source.table} · kept ${retentionText(source.kept)}` : undefined
 
   return (
     <Panel

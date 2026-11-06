@@ -7,7 +7,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { StackBar, type StackBarPart } from '../../components/StackBar'
 import { AnalyticsPanel } from './AnalyticsPanel'
 import type { ChartLegendItem } from './ChartLegend'
-import { linesOf, xLabelsFor } from './format'
+import { linesOf, retentionText, xLabelsFor } from './format'
 import styles from './analytics.module.css'
 
 /** What every tab body needs besides its data. */
@@ -169,7 +169,7 @@ export function SourcesPanel({ sources, window, showSources }: { sources: Analyt
       key: 'kept',
       header: 'Kept',
       width: '170px',
-      render: (source) => <span className={styles.mono}>{source.window_used ? `${source.kept} · reads ${source.window_used}` : source.kept}</span>,
+      render: (source) => <span className={styles.mono}>{source.window_used ? `${retentionText(source.kept)} · reads ${source.window_used}` : retentionText(source.kept)}</span>,
     },
     { key: 'setting', header: 'Setting', width: 'minmax(220px, 1.3fr)', render: (source) => <span className={styles.dimMono}>{source.setting ?? '—'}</span> },
   ]

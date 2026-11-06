@@ -34,6 +34,12 @@ describe('AnalyticsPanel', () => {
     expect(screen.getByText('source service_counts_history · kept 7 days')).toBeInTheDocument()
   })
 
+  it('the footer says the retention in words, not hours', () => {
+    panel({ source: { table: 'service_availability_daily', kept: '2160h' } })
+    expect(screen.getByText('source service_availability_daily · kept 90 days')).toBeInTheDocument()
+    expect(screen.queryByText(/2160h/)).not.toBeInTheDocument()
+  })
+
   it('hides footer when showSources is false', () => {
     panel({ source: { table: 'service_counts_history', kept: '7 days' }, showSources: false })
     expect(screen.queryByText(/source service_counts_history/)).not.toBeInTheDocument()
@@ -42,7 +48,7 @@ describe('AnalyticsPanel', () => {
 
   it('an unavailable daily panel looks like any other: source footer, no variant', () => {
     panel({ rollup: unavailable, source: { table: 'service_availability_daily', kept: '8760h' } })
-    expect(screen.getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
+    expect(screen.getByText('source service_availability_daily · kept 1 year')).toBeInTheDocument()
     expect(screen.queryByText(/needs new data/i)).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: /Availability/ })).not.toHaveAttribute('data-variant')
     expect(screen.getByText('chart body')).toBeInTheDocument()

@@ -29,8 +29,8 @@ describe('CapacityTab daily panels', () => {
       expect(within(panel).queryByText(/needs new data/i)).not.toBeInTheDocument()
       expect(within(panel).getByText(/^Daily data started on /)).toBeInTheDocument()
     }
-    expect(within(screen.getByRole('region', { name: /Reserved vs used vCPU/ })).getByText('source cluster_capacity_daily · kept 8760h')).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: /Most over-reserved/ })).getByText('source service_util_daily · kept 2160h')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: /Reserved vs used vCPU/ })).getByText('source cluster_capacity_daily · kept 1 year')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: /Most over-reserved/ })).getByText('source service_util_daily · kept 90 days')).toBeInTheDocument()
   })
 
   it('shows the over-reserved row with per-task sizes and unused vCPU', async () => {
