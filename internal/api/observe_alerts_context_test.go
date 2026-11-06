@@ -167,6 +167,34 @@ func TestAlerts_JustBeforeOmittedWithoutChange(t *testing.T) {
 	}
 }
 
+// A rollout alert is stamped with the ECS deployment's createdAt, which precedes Harbormaster's own record of
+// the deploy that started it; the nearest earlier change would be the previous deploy, which is misleading.
+func TestAlerts_RolloutInProgressHasNoJustBefore(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	alertAt := time.Now().UTC().Add(-time.Minute)
+	replaceAlerts(t, st, fk,
+		alertOfKind("rollout_in_progress", homelabAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt),
+		alertOfKind("service_failing", homelabAccountID, "us-east-1", "core-services", "web-frontend", alertAt),
+	)
+	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Deployed :88", alertAt.Add(-time.Hour))
+	appendOperationAt(t, st, "core-services", "web-frontend", "harbormaster", "Deployed :12", alertAt.Add(-time.Hour))
+
+	for _, alert := range getContextAlerts(t, login(t, srv, "pavel", testPassword)) {
+		switch alert.Kind {
+		case "rollout_in_progress":
+			if alert.JustBefore != nil {
+				t.Errorf("rollout alert just_before = %+v; want null", alert.JustBefore)
+			}
+		case "service_failing":
+			if alert.JustBefore == nil {
+				t.Error("service_failing alert lost its just_before")
+			}
+		}
+	}
+}
+
 func TestAlerts_JustBeforeNeverLeaksInvisibleServiceChanges(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
