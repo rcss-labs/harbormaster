@@ -201,7 +201,7 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
         </svg>
         {placedMarks.map((mark) =>
           mark.row === null ? (
-            <span key={mark.at} className={styles.mkdot} style={{ left: `${mark.at * 100}%` }} title={mark.label} aria-label={mark.label} />
+            <span key={mark.at} className={styles.mkdot} style={{ left: `clamp(4px, ${mark.at * 100}%, calc(100% - 5px))` }} title={mark.label} aria-label={mark.label} />
           ) : (
             <span key={mark.at} className={styles.mkl} style={{ ...markLabelStyle(mark.at, mark.label, measuredWidth ?? ASSUMED_PLOT_PX), top: mark.row === 0 ? -1 : 17 }} title={mark.label}>
               {mark.label}
