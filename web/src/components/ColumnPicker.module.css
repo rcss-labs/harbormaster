@@ -1,0 +1,8 @@
+.wrap { position: relative; display: inline-block; }
+.button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 13px var(--sans); cursor: pointer; }
+.button:hover { background: var(--active); }
+.list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.item { display: flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
+.item:has(input:disabled) { color: var(--muted); cursor: default; }
+.reset { width: 100%; min-height: 28px; border: 1px solid var(--border-strong); border-radius: var(--r); background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.reset:hover { background: var(--hover); }

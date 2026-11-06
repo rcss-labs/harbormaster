@@ -1,0 +1,7 @@
+.error { display: flex; gap: 10px; align-items: flex-start; color: var(--text); }
+.error > svg { margin-top: 2px; color: var(--bad); }
+.text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.detail summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.detail pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--mono); color: var(--text-2); }
+.retry { min-height: 26px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; }
+.retry:hover { background: var(--active); }
