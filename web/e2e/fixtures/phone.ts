@@ -217,7 +217,10 @@ const problemsByPage = new WeakMap<Page, string[]>()
  * Starts collecting page errors, console errors and failing responses (call before `goto`). They are asserted by
  * every later `expectPhoneLayoutClean` on this page. `isExpectedFailure` is the allowlist for HTTP failures.
  */
-export function watchPage(page: Page, isExpectedFailure: ExpectedFailure = () => false): string[] {
+// The app asks who is signed in on every load, so a signed-out page always sees this 401.
+const signedOutProbe: ExpectedFailure = (method, url, status) => method === 'GET' && status === 401 && new URL(url).pathname === '/api/me'
+
+export function watchPage(page: Page, isExpectedFailure: ExpectedFailure = signedOutProbe): string[] {
   const problems: string[] = []
   problemsByPage.set(page, problems)
   page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`))
