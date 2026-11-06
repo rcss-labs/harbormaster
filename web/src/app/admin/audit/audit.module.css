@@ -1,3 +1,8 @@
+.rows { display: flex; flex-direction: column; }
+.row { display: grid; gap: 2px; padding: 8px var(--pad); border-bottom: 1px solid var(--row-border); min-width: 0; }
+.row:last-child { border-bottom: 0; }
+.when { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.summary { overflow-wrap: anywhere; }
 .more { display: flex; justify-content: center; margin-top: 12px; }
 .ctl { height: 26px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-family: inherit; }
 .search { min-width: 0; flex: 1 1 140px; max-width: 260px; }

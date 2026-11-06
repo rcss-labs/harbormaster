@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useSettings, useUpdateSettings } from '../../api/hooks'
 import { Panel } from '../../components/Panel'
 import { useToast } from '../../components/Toast'
+import { usePhone } from '../../components/useNarrow'
+import { useStickyBar } from './useStickyBar'
 import { HeaderAction } from './HeaderAction'
 import styles from './settings.module.css'
 
@@ -29,6 +31,8 @@ export function StoppedTasksCard() {
   const settings = useSettings()
   const update = useUpdateSettings()
   const toast = useToast()
+  const phone = usePhone()
+  useStickyBar(phone)
   const loadedMinutes = settings.data?.stopped_tasks_window_minutes
   // Null until the admin edits; until then the input shows the loaded server value.
   const [edited, setEdited] = useState<string | null>(null)
@@ -52,18 +56,22 @@ export function StoppedTasksCard() {
     })
   }
 
+  const saveButton = (
+    <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={loadedMinutes === undefined || update.isPending} onClick={save}>
+      Save
+    </button>
+  )
+
   return (
     <Panel title="Stopped tasks">
-      <HeaderAction>
-        <button
-          type="button"
-          className={`${styles.btn} ${styles.primary}`}
-          disabled={loadedMinutes === undefined || update.isPending}
-          onClick={save}
-        >
-          Save
-        </button>
-      </HeaderAction>
+      {phone ? (
+        <div className={`hm-bar ${styles.saveBar}`} data-hm-bar="">
+          {edited !== null ? <span className={styles.barNote}>Unsaved change</span> : <span className={styles.barNote}>Saved value: {loadedMinutes ?? '–'} minutes</span>}
+          {saveButton}
+        </div>
+      ) : (
+        <HeaderAction>{saveButton}</HeaderAction>
+      )}
       <div className={styles.windowRow}>
         <span>Show stopped tasks from the last</span>
         <input

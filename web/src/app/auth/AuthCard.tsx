@@ -1,5 +1,6 @@
 import { useId, type FormEvent, ReactNode } from 'react'
 import { Brand } from '../../components/Brand'
+import { usePhone } from '../../components/useNarrow'
 import styles from './auth.module.css'
 
 interface AuthCardProps {
@@ -56,10 +57,13 @@ interface FieldProps {
 
 export function Field({ label, value, onChange, type = 'text', autoComplete, hint }: FieldProps) {
   const id = useId()
+  const phone = usePhone()
+  // A phone keyboard must not capitalise or "correct" usernames, tokens and passwords.
+  const keyboard = phone ? { autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false } : {}
   return (
     <div className={styles.field}>
       <label htmlFor={id}>{label}</label>
-      <input id={id} className={styles.ctl} type={type} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required />
+      <input id={id} className={styles.ctl} type={type} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required {...keyboard} />
       {hint && <span className={styles.hint}>{hint}</span>}
     </div>
   )
