@@ -1,0 +1,74 @@
+<!--meta title="Services" nav="services" crumbs="Services" h="1000"-->
+<div class="ph"><div><h1>Services</h1><div class="sub">Every ECS service you can see, across accounts and regions. Click a name to open it.</div></div></div>
+<section class="panel" aria-label="Services">
+ <nav class="tabs" aria-label="Saved views" style="padding:0 var(--pad)"><sc-for list="{{views}}" as="v" hint-placeholder-count="4"><button class="tab" type="button" aria-pressed="{{v.pressed}}" onClick="{{v.pick}}">{{v.label}}<span class="n">{{v.n}}</span></button></sc-for></nav>
+ <div class="panel-b"><div class="toolbar">
+  <input id="sv-q" class="input" style="max-width:320px" placeholder="Filter by service, cluster, account, region or image" aria-label="Filter services" value="{{q}}" onChange="{{onQ}}">
+  <div class="seg" role="group" aria-label="Status"><sc-for list="{{statusSeg}}" as="o" hint-placeholder-count="5"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}<span class="n">{{o.n}}</span></button></sc-for></div>
+  <div style="position:relative;margin-left:auto">
+   <button class="btn" type="button" aria-expanded="{{colsOpen}}" aria-haspopup="true" onClick="{{toggleCols}}">[[i:columns]]Columns<span class="mut">{{colsN}} of {{colsTotal}}</span></button>
+   <sc-if value="{{colsOpen}}" hint-placeholder-val="{{false}}"><div class="pop" role="group" aria-label="Choose columns" style="right:0">
+    <div class="b" style="margin-bottom:6px">Columns</div>
+    <div class="stack-s"><sc-for list="{{colOpts}}" as="o" hint-placeholder-count="10"><button class="tog" type="button" aria-pressed="{{o.on}}" onClick="{{o.pick}}"><i></i>{{o.label}}</button></sc-for></div>
+    <div class="row spread" style="margin-top:10px"><button class="btn btn-s" type="button" onClick="{{resetCols}}">Reset to default</button><button class="btn btn-s btn-p" type="button" onClick="{{toggleCols}}">Done</button></div>
+   </div></sc-if>
+  </div>
+ </div></div>
+ <div class="tw"><table class="tbl" style="min-width:{{minW}}px"><thead><tr>
+  <th><button class="thbtn" type="button" onClick="{{svcSort.pick}}">Service<span aria-hidden="true">{{svcSort.arrow}}</span></button></th>
+  <sc-for list="{{heads}}" as="h" hint-placeholder-count="10"><th class="{{h.cls}}" aria-sort="{{h.aria}}"><button class="thbtn" type="button" onClick="{{h.pick}}">{{h.label}}<span aria-hidden="true">{{h.arrow}}</span></button></th></sc-for>
+  <th class="num" style="position:sticky;right:0;background:var(--surface)">Actions</th></tr></thead>
+ <tbody><sc-for list="{{rows}}" as="r" hint-placeholder-count="8"><tr class="{{r.stripe}}">
+  <td class="two"><a class="b mono" href="SvcOverview.dc.html">{{r.name}}</a><small>{{r.why}}</small></td>
+  <sc-for list="{{r.cells}}" as="k" hint-placeholder-count="8"><td class="{{k.cls}}">
+   <sc-if value="{{k.kStatus}}" hint-placeholder-val="{{false}}"><span class="st st-{{k.status}}">{{k.text}}</span></sc-if>
+   <sc-if value="{{k.kTag}}" hint-placeholder-val="{{false}}"><span class="{{k.tagCls}}" title="{{k.tagTip}}">{{k.text}}</span></sc-if>
+   <sc-if value="{{k.kLink}}" hint-placeholder-val="{{false}}"><a class="mono" href="ClusterDetail.dc.html">{{k.text}}</a></sc-if>
+   <sc-if value="{{k.kTwo}}" hint-placeholder-val="{{false}}">{{k.text}}<small class="mono">{{k.sub}}</small></sc-if>
+   <sc-if value="{{k.kMono}}" hint-placeholder-val="{{false}}"><span class="mono {{k.tone}}">{{k.text}}</span></sc-if>
+   <sc-if value="{{k.kText}}" hint-placeholder-val="{{false}}"><span class="nw">{{k.text}}</span></sc-if>
+  </td></sc-for>
+  <td style="position:sticky;right:0;background:var(--surface)"><div class="acts">
+   <button class="btn btn-s" type="button" aria-label="Details for {{r.name}}" onClick="{{r.open}}">[[i:panel]]Details</button>
+   <a class="btn btn-s" href="SvcLogs.dc.html">Logs</a><a class="btn btn-s" href="SvcTasks.dc.html">Tasks</a>
+   <sc-if value="{{r.canRestart}}" hint-placeholder-val="{{true}}"><button class="btn btn-s" type="button" title="Restart {{r.name}}" onClick="{{r.restart}}">Restart</button></sc-if>
+   <sc-if value="{{r.noRestart}}" hint-placeholder-val="{{false}}"><button class="btn btn-s" type="button" disabled title="A rollout is already running" onClick="{{r.restart}}">Restart</button></sc-if>
+  </div></td>
+ </tr></sc-for></tbody></table></div>
+ <sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div class="empty">No services match these filters.<button class="btn btn-s" type="button" onClick="{{clear}}">Clear filters</button></div></sc-if>
+ <div class="panel-f"><span>{{rows.length}} of {{total}} services</span><span>Sorted by {{sortL}}. Dashed tags are inherited from the cluster.</span></div>
+</section>
+
+<sc-if value="{{drawerOpen}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close details" onClick="{{closeAll}}"></button>
+<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="sv-dr-t">
+ <div class="drawer-h"><div class="stack-s" style="gap:2px"><h2 id="sv-dr-t" class="mono" style="font-size:15px">{{d.name}}</h2><span class="st st-{{d.status}}">{{d.statusL}}</span></div><button class="btn btn-g btn-i" type="button" aria-label="Close details" onClick="{{closeAll}}">[[i:x]]</button></div>
+ <div class="panel-b stack">
+  <sc-if value="{{d.hasWhy}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn">[[i:warn]]<div class="grow">{{d.why}}</div></div></sc-if>
+  <dl class="kv">
+   <dt>Cluster</dt><dd><a class="mono" href="ClusterDetail.dc.html">{{d.cluster}}</a></dd>
+   <dt>Account / region</dt><dd>{{d.acct}} · {{d.region}}</dd>
+   <dt>Tag</dt><dd><span class="{{d.tagCls}}">{{d.tag}}</span> <span class="mut sm">{{d.tagNote}}</span></dd>
+   <dt>Tasks</dt><dd class="mono">{{d.running}} running of {{d.desired}} desired</dd>
+   <dt>Revision</dt><dd class="mono">:{{d.rev}}</dd>
+   <dt>Image tag</dt><dd class="mono">{{d.image}}</dd>
+   <dt>CPU</dt><dd class="mono">{{d.cpu}}</dd>
+   <dt>Memory</dt><dd class="mono">{{d.mem}}</dd>
+   <dt>Last change</dt><dd>{{d.last}}</dd>
+  </dl>
+  <div class="stack-s"><span class="lab">Open</span>
+   <div class="row"><a class="btn btn-s" href="SvcOverview.dc.html">Overview</a><a class="btn btn-s" href="SvcTasks.dc.html">Tasks</a><a class="btn btn-s" href="SvcLogs.dc.html">Logs</a><a class="btn btn-s" href="SvcMetrics.dc.html">Metrics</a><a class="btn btn-s" href="SvcDeploy.dc.html">Deploy</a><a class="btn btn-s" href="SvcHistory.dc.html">History</a></div></div>
+ </div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeAll}}">Close</button><button class="btn btn-p" type="button" onClick="{{d.restart}}">Restart</button></div>
+</aside>
+</sc-if>
+
+<sc-if value="{{dlgRestart}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" style="z-index:55" onClick="{{closeDlg}}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="sv-rs-title" style="z-index:60">
+ <div class="modal-h"><h2 id="sv-rs-title">Restart {{rs.name}}?</h2></div>
+ <div class="modal-b"><p class="c2">Starts a new deployment of :{{rs.rev}}. Each task is replaced, new ones first.</p>
+  <dl class="kv"><dt>Cluster</dt><dd class="mono">{{rs.cluster}}</dd><dt>Tasks</dt><dd class="mono">{{rs.tasks}}</dd></dl></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{confirmRestart}}">Restart</button></div>
+</div>
+</sc-if>

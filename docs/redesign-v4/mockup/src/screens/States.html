@@ -1,0 +1,52 @@
+<!--meta title="System states" crumbs="System states" nav="" h="1500"-->
+<div class="ph"><div><h1>System states</h1><div class="sub">Reference for each state a page can show. Every state uses the shared classes and the inventory wording.</div></div></div>
+<div class="g2">
+ <section class="panel" aria-label="No access state"><div class="panel-h"><span class="panel-t">No access</span><span class="sm mut">Signed-in user with no permissions</span></div>
+  <div class="panel-b"><div class="empty">[[i:shield]]<span>You don't have access to anything yet. Ask a global admin.</span><span class="sm">My access still works. <a href="MyAccess.dc.html">Open My access</a></span></div></div></section>
+
+ <section class="panel" aria-label="Page not found state"><div class="panel-h"><span class="panel-t">Page not found</span><span class="sm mut">Unknown route, shown in the page area</span></div>
+  <div class="panel-b"><div class="empty"><span class="b">Page not found.</span><span class="mono mut">/clusterz/core-services/tasks</span><a class="btn btn-s" href="Overview.dc.html">Go to Overview</a></div></div></section>
+
+ <section class="panel" aria-label="Locked tab state"><div class="panel-h"><span class="panel-t">Locked tab</span><span class="sm mut">Tab body when the user lacks a permission</span></div>
+  <div class="panel-b"><div class="ban ban-warn">[[i:lock]]<div class="grow">You need <span class="b">Deploy</span> on <span class="tag tag-Prod">Prod</span> to use this. Ask a global admin to change your permissions.</div></div></div></section>
+
+ <section class="panel" aria-label="Loading state"><div class="panel-h"><span class="panel-t">Loading</span><span class="sm mut">Skeleton rows while a table loads</span></div>
+  <div class="tw"><table class="tbl" style="min-width:420px"><thead><tr><th>Service</th><th>Cluster</th><th>Status</th></tr></thead><tbody>
+   <tr><td><span class="sk" style="display:block;width:70%"></span></td><td><span class="sk" style="display:block;width:55%"></span></td><td><span class="sk" style="display:block;width:40%"></span></td></tr>
+   <tr><td><span class="sk" style="display:block;width:60%"></span></td><td><span class="sk" style="display:block;width:70%"></span></td><td><span class="sk" style="display:block;width:40%"></span></td></tr>
+   <tr><td><span class="sk" style="display:block;width:75%"></span></td><td><span class="sk" style="display:block;width:50%"></span></td><td><span class="sk" style="display:block;width:40%"></span></td></tr>
+  </tbody></table></div>
+  <div class="panel-f">Loading services.</div></section>
+
+ <section class="panel" aria-label="Failed panel state"><div class="panel-h"><span class="panel-t">Failed panel</span><span class="sm mut">One panel fails, the rest of the page works</span></div>
+  <div class="panel-b"><div class="ban ban-bad" role="alert">[[i:warn]]<div class="grow">The clusters could not be loaded. <span class="sm mut">Other panels on this page still work.</span></div><button class="btn btn-s" type="button" onClick="{{retry}}">Retry</button></div></div></section>
+
+ <section class="panel" aria-label="Empty table state"><div class="panel-h"><span class="panel-t">Empty table</span><span class="sm mut">Filters match no rows</span></div>
+  <div class="tw"><table class="tbl" style="min-width:420px"><thead><tr><th>Cluster</th><th>Account</th><th>Region</th></tr></thead><tbody>
+   <tr><td colspan="3"><div class="empty"><span>No clusters match these filters.</span><button class="btn btn-s" type="button" onClick="{{clear}}">Clear filters</button></div></td></tr>
+  </tbody></table></div></section>
+
+ <section class="panel" aria-label="Data health banners"><div class="panel-h"><span class="panel-t">Data health, compact</span><span class="sm mut">Shown only when this page's own data is affected</span></div>
+  <div class="panel-b stack-s" style="gap:10px">
+   <div class="ban ban-warn">[[i:warn]]<div class="grow">Updates are slowed by AWS throttling. Data is 40 s old.</div></div>
+   <div class="ban ban-bad" role="alert">[[i:warn]]<div class="grow"><div>Service data is 4 min old. Other data is current.</div><div class="mono sm mut">ecs:DescribeServices returned AccessDenied. Check the harbormaster-access role.</div><a class="sm" href="SetAccounts.dc.html">Open AWS accounts</a></div></div>
+  </div></section>
+
+ <section class="panel" aria-label="Toast kinds"><div class="panel-h"><span class="panel-t">Toasts</span><span class="sm mut">Kinds: ok, warn, bad, info. Bad toasts are sticky.</span></div>
+  <div class="panel-b stack-s" style="gap:10px;align-items:flex-start">
+   <div class="toast" role="status" style="position:static;transform:none;max-width:100%;flex-wrap:wrap"><span class="st st-ok">Desired count set to 4.</span></div>
+   <div class="toast" role="status" style="position:static;transform:none;max-width:100%;flex-wrap:wrap"><span class="st st-warn">The service changed meanwhile; check the rollout and try again.</span></div>
+   <div class="toast" role="alert" style="position:static;transform:none;max-width:100%;flex-wrap:wrap"><span class="st st-bad">Linking failed. Ask a global admin to check the audit log.</span><button class="btn btn-g btn-s btn-i" type="button" aria-label="Dismiss" onClick="{{dismissNote}}">[[i:x]]</button></div>
+   <div class="toast" role="status" style="position:static;transform:none;max-width:100%;flex-wrap:wrap"><span class="st st-info">This page does not use the range filter.</span></div>
+  </div></section>
+
+ <section class="panel" aria-label="Status shapes"><div class="panel-h"><span class="panel-t">Status shapes</span><span class="sm mut">Shape, colour and text together</span></div>
+  <div class="panel-b stack-s" style="gap:10px">
+   <div class="row spread"><span class="st st-ok">Steady</span><span class="mono mut">ok</span></div>
+   <div class="row spread"><span class="st st-warn">Degraded</span><span class="mono mut">warn</span></div>
+   <div class="row spread"><span class="st st-bad">Failing</span><span class="mono mut">bad</span></div>
+   <div class="row spread"><span class="st st-info">Rolling out</span><span class="mono mut">info</span></div>
+   <div class="row spread"><span class="st st-exp">Expected stop</span><span class="mono mut">exp</span></div>
+   <div class="row spread"><span class="st st-mute">Inactive</span><span class="mono mut">mute</span></div>
+  </div></section>
+</div>

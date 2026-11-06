@@ -1,0 +1,68 @@
+<aside class="{{sh.sideCls}}" aria-label="Sidebar">
+ <a class="hm-brand" href="Main.dc.html" style="color:var(--text);text-decoration:none" title="Back to the proposal">[[logo]]<span class="lbl">Harbormaster</span></a>
+ <nav class="hm-nav" aria-label="Main">
+  <sc-for list="{{sh.nav}}" as="n" hint-placeholder-count="9">
+   <sc-if value="{{n.h}}" hint-placeholder-val="{{false}}"><div class="hm-navh">{{n.h}}</div></sc-if>
+   <a class="hm-navi" href="{{n.href}}" aria-current="{{n.cur}}" title="{{n.label}}"><span style="display:contents" data-ic="{{n.icon}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{n.path}}"></path></svg></span><span class="lbl">{{n.label}}</span><sc-if value="{{n.count}}" hint-placeholder-val="{{false}}"><span class="{{n.cntCls}}">{{n.count}}</span></sc-if></a>
+  </sc-for>
+ </nav>
+ <div class="hm-navh">Pinned</div>
+ <div class="hm-pins">
+  <sc-for list="{{sh.pins}}" as="p" hint-placeholder-count="2"><a class="hm-pin" href="SvcOverview.dc.html"><span class="st st-{{p.status}} bare"></span><span>{{p.name}}</span><small>{{p.cluster}}</small></a></sc-for>
+ </div>
+ <div class="hm-acc" style="position:relative">
+  <button class="hm-navi" type="button" style="width:100%;background:none;border:0;font:inherit;cursor:pointer" onClick="{{sh.toggleAcc}}" aria-expanded="{{sh.accOpen}}">[[i:user]]<span class="lbl acc-t">pavel<span class="mut"> · Global admin</span></span></button>
+  <sc-if value="{{sh.accOpen}}" hint-placeholder-val="{{false}}"><div class="pop" style="top:auto;bottom:calc(100% + 4px);left:8px;width:232px;display:flex;flex-direction:column;gap:2px">
+   <a class="hm-navi" href="MyAccess.dc.html">My access</a><a class="hm-navi" href="ChangePassword.dc.html">Change password</a>
+   <button class="hm-navi" type="button" style="background:none;border:0;font:inherit;cursor:pointer" onClick="{{sh.linkSso}}">Link SSO account</button>
+   <div style="border-top:1px solid var(--border);margin:4px 0"></div><a class="hm-navi" href="Login.dc.html" style="color:var(--bad)!important">Sign out</a></div></sc-if>
+ </div>
+ <button class="btn btn-g" type="button" style="margin:0 8px 8px;justify-content:flex-start" onClick="{{sh.toggleSide}}" aria-label="Toggle sidebar">[[i:panel]]<span class="lbl">Collapse</span><span class="kbd lbl" style="margin-left:auto">[</span></button>
+</aside>
+<div class="hm-mainwrap">
+ <header class="hm-top">
+  <div style="position:relative"><button class="scope" type="button" onClick="{{sh.toggleScope}}" aria-expanded="{{sh.scopeOpen}}">[[i:filter]]<span>{{sh.scopeLabel}}</span>[[i:chevd]]</button>
+  <sc-if value="{{sh.scopeOpen}}" hint-placeholder-val="{{false}}"><div class="pop stack-s" style="left:0;gap:10px"><div class="field"><label for="sc-a">Account</label><select id="sc-a" class="select" value="{{sh.sA}}" onChange="{{sh.onA}}"><option>All accounts</option><option>homelab-admin</option><option>staging-example</option></select></div><div class="field"><label for="sc-r">Region</label><select id="sc-r" class="select" value="{{sh.sR}}" onChange="{{sh.onR}}"><option>All regions (3)</option><option>us-east-1</option><option>eu-west-1</option><option>eu-central-1</option></select></div><div class="field"><label for="sc-t">Tags</label><select id="sc-t" class="select" value="{{sh.sT}}" onChange="{{sh.onT}}"><option>All tags</option><option>Prod</option><option>Staging</option><option>Dev</option></select></div><div><div class="lab" style="margin-bottom:4px">Saved scopes</div><div class="row"><button class="chip" type="button" onClick="{{sh.scopeProd}}">Prod only</button><button class="chip" type="button" onClick="{{sh.scopeEu}}">EU regions</button><button class="chip" type="button" onClick="{{sh.scopeSave}}">+ Save current</button></div></div></div></sc-if></div>
+  <nav class="crumbs" aria-label="Breadcrumb">[[crumbs]]</nav>
+  <button class="search" type="button" onClick="{{sh.openPal}}">[[i:search]]<span>Search or run a command</span><span class="kbd">⌘K</span></button>
+  <div style="position:relative"><button class="scope" type="button" onClick="{{sh.toggleHealth}}" aria-expanded="{{sh.healthOpen}}" title="Data freshness"><span class="st st-warn">2 of 4 regions current</span><span class="mono mut">polled 6s ago</span></button>
+  <sc-if value="{{sh.healthOpen}}" hint-placeholder-val="{{false}}"><div class="pop stack-s" style="right:0;width:min(400px,calc(100vw - 24px))"><div class="b">Data freshness</div><sc-for list="{{sh.health}}" as="h" hint-placeholder-count="2"><div class="stack-s" style="padding:8px 0;border-top:1px solid var(--row-border);gap:2px"><span class="st st-{{h.sev}}">{{h.where}}</span><span>{{h.text}}</span><span class="mono mut wrap">{{h.detail}}</span></div></sc-for><a href="SetAccounts.dc.html" class="sm">Open AWS accounts</a></div></sc-if></div>
+  <button class="btn btn-i" type="button" onClick="{{sh.openAct}}" aria-label="Activity, 3 problems" title="Activity">[[i:activity]]</button>
+  <button class="btn btn-i" type="button" onClick="{{sh.toggleDensity}}" aria-label="Toggle row density" title="Row density: {{sh.density}}">[[i:density]]</button>
+  <button class="btn btn-i" type="button" onClick="{{sh.toggleTheme}}" aria-label="Toggle light or dark theme" title="Theme">[[i:sun]]</button>
+  <button class="btn btn-i" type="button" onClick="{{sh.openKeys}}" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">[[i:help]]</button>
+ </header>
+ <main class="hm-page">[[body]]</main>
+</div>
+<sc-if value="{{sh.palOpen}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close" onClick="{{sh.closeAll}}"></button>
+ <div class="modal wide" role="dialog" aria-label="Command palette" style="width:min(620px,calc(100vw - 24px))">
+  <div class="row" style="padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:nowrap">[[i:search]]<input class="input" id="pal-q" style="border:0;background:none" placeholder="Jump to a service, cluster or task, or type an action" aria-label="Search" value="{{sh.q}}" onChange="{{sh.onQ}}"><span class="kbd">esc</span></div>
+  <sc-for list="{{sh.palGroups}}" as="g" hint-placeholder-count="3"><div><div class="hm-navh" style="padding-left:14px">{{g.name}}</div><sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3"><a class="pal-row" href="{{r.href}}"><span class="st st-{{r.st}} bare"></span><span>{{r.label}} <span class="mut sm">{{r.sub}}</span></span><span class="kbd" style="visibility:{{r.vis}}">{{r.key}}</span></a></sc-for></div></sc-for>
+  <div class="panel-f"><span>↑↓ select · ↵ open · esc close</span><span>Actions respect your permissions</span></div>
+ </div>
+</sc-if>
+<sc-if value="{{sh.actOpen}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close" onClick="{{sh.closeAll}}"></button>
+ <aside class="drawer" aria-label="Activity">
+  <div class="drawer-h"><span class="b">Activity</span><button class="btn btn-g btn-i btn-s" type="button" onClick="{{sh.closeAll}}" aria-label="Close activity">[[i:x]]</button></div>
+  <div style="padding:10px 14px"><div class="seg"><sc-for list="{{sh.actSeg}}" as="o" hint-placeholder-count="3"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}<span class="n">{{o.n}}</span></button></sc-for></div></div>
+  <div class="feed"><sc-for list="{{sh.actRows}}" as="a" hint-placeholder-count="4"><div style="grid-template-columns:14px 1fr"><span class="st st-{{a.sev}} bare" style="margin-top:4px"></span><div><div class="row spread"><a href="SvcOverview.dc.html" class="b">{{a.subj}}</a><span class="sm mut">{{a.age}}</span></div><div>{{a.text}} <span class="chip" style="visibility:{{a.nVis}}">×{{a.n}}</span></div><div class="sm mut">{{a.actor}}</div></div></div></sc-for></div>
+ </aside>
+</sc-if>
+<sc-if value="{{sh.keysOpen}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close" onClick="{{sh.closeAll}}"></button>
+ <div class="modal" role="dialog" aria-label="Keyboard shortcuts"><div class="modal-h"><h2>Keyboard shortcuts</h2></div><div class="modal-b"><dl class="kv"><sc-for list="{{sh.keys}}" as="k" hint-placeholder-count="6"><dt><span class="kbd">{{k.k}}</span></dt><dd>{{k.d}}</dd></sc-for></dl></div><div class="modal-f"><button class="btn" type="button" onClick="{{sh.closeAll}}">Close</button></div></div>
+</sc-if>
+<sc-if value="{{sh.ssoOpen}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close" onClick="{{sh.closeAll}}"></button>
+ <div class="modal" role="dialog" aria-label="Link your SSO account"><div class="modal-h"><h2>Link your SSO account</h2><p class="mut">You will sign in at your identity provider; the account you sign in with there is attached to this Harbormaster user. Enter your password to continue.</p></div><div class="modal-b"><div class="field"><label for="sso-pw">Password</label><input id="sso-pw" class="input" type="password" autocomplete="current-password"></div></div><div class="modal-f"><button class="btn" type="button" onClick="{{sh.closeAll}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{sh.closeAll}}">Continue to identity provider</button></div></div>
+</sc-if>
+<sc-if value="{{sh.restartOpen}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close" onClick="{{sh.closeAll}}"></button>
+ <div class="modal" role="dialog" aria-label="Restart payments-api"><div class="modal-h"><h2>Restart payments-api?</h2><p class="mut">Starts a new deployment of :42. Each task is replaced, new ones first.</p></div><div class="modal-f"><button class="btn" type="button" onClick="{{sh.closeAll}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{sh.doRestart}}">Restart</button></div></div>
+</sc-if>
+<sc-if value="{{sh.desiredOpen}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close" onClick="{{sh.closeAll}}"></button>
+ <div class="modal" role="dialog" aria-label="Set desired count"><div class="modal-h"><h2>Set payments-api to {{sh.desired}} tasks?</h2><p class="mut">Now 3.</p></div><div class="modal-f"><button class="btn" type="button" onClick="{{sh.cancelDesired}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{sh.doDesired}}">Update desired count</button></div></div>
+</sc-if>

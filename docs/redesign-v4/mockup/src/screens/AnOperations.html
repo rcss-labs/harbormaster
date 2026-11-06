@@ -1,0 +1,47 @@
+<!--meta title="Analytics: Operations" nav="analytics" crumbs="Analytics" h="1700"-->
+<!--@analyticshead tab="operations"-->
+<div class="row">
+ <button class="btn btn-s btn-g" type="button" aria-expanded="{{disp}}" aria-controls="an-display" onClick="{{toggleDisp}}">Display[[i:chevd]]</button>
+ <sc-if value="{{disp}}" hint-placeholder-val="{{true}}"><span id="an-display" class="row"><button class="tog" type="button" aria-pressed="{{src}}" onClick="{{toggleSrc}}"><i></i>Show data sources</button></span></sc-if>
+</div>
+<div class="kpis" role="group" aria-label="Operations summary">
+ <sc-for list="{{kpis}}" as="k" hint-placeholder-count="6"><div class="kpi"><span class="k">{{k.k}}</span><span class="v">{{k.v}}</span><span class="d">{{k.d}}</span></div></sc-for>
+</div>
+<section class="panel" aria-label="Operations through Harbormaster">
+ <div class="panel-h"><span class="panel-t">Operations through Harbormaster</span><!--@legend k="ops"--></div>
+ <div class="panel-b stack-s"><!--@bars k="ops" label="Operations per week for 13 weeks, stacked by type"-->
+  <div class="leg" aria-label="Totals by type"><sc-for list="{{opsTotals}}" as="w" hint-placeholder-count="7"><span><i style="{{w.sty}}"></i><span class="mono">{{w.name}}</span> <span class="mono">{{w.n}}</span></span></sc-for></div></div>
+ <sc-if value="{{src}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>source <span class="mono">audit_log</span> · kept 90 days</span></div></sc-if>
+</section>
+<div class="g2">
+ <section class="panel" aria-label="Hands-on operations">
+  <div class="panel-h"><div class="row"><span class="panel-t">Hands-on operations</span><span class="mut sm">restarts, stops and terminal sessions</span></div><!--@legend k="hands"--></div>
+  <div class="panel-b"><!--@bars k="hands" label="Restarts, task stops and terminal sessions per week"--></div>
+  <sc-if value="{{src}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>source <span class="mono">audit_log</span> · kept 90 days</span></div></sc-if>
+ </section>
+ <section class="panel" aria-label="Restarts per 100 deploys">
+  <div class="panel-h"><span class="panel-t">Restarts per 100 deploys</span><!--@legend k="ratio"--></div>
+  <div class="panel-b"><!--@line k="ratio" label="Restarts per 100 deploys, weekly"--></div>
+  <sc-if value="{{src}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>source <span class="mono">audit_log</span> · kept 90 days</span></div></sc-if>
+ </section>
+</div>
+<section class="panel" aria-label="Who operates">
+ <div class="panel-h"><span class="panel-t">Who operates</span></div>
+ <div class="tw"><table class="tbl" style="min-width:760px"><thead><tr><th>User</th><th class="num">Total</th><th class="num">Deploy</th><th class="num">Restart</th><th class="num">Scale</th><th class="num">Terminal</th><th>Last</th></tr></thead>
+ <tbody><sc-for list="{{people}}" as="r" hint-placeholder-count="4"><tr>
+  <td class="b">{{r.name}}</td><td class="num mono">{{r.total}}</td><td class="num mono">{{r.deploy}}</td><td class="num mono">{{r.restart}}</td><td class="num mono">{{r.scale}}</td><td class="num mono">{{r.terminal}}</td><td>{{r.last}}</td></tr></sc-for></tbody></table></div>
+ <sc-if value="{{noPeople}}" hint-placeholder-val="{{false}}"><div class="empty">No operations in this range.</div></sc-if>
+ <sc-if value="{{src}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>source <span class="mono">audit_log</span> · kept 90 days</span></div></sc-if>
+</section>
+<section class="panel" aria-label="Most restarted services">
+ <div class="panel-h"><span class="panel-t">Most restarted services</span></div>
+ <div class="tw"><table class="tbl" style="min-width:560px"><thead><tr><th>Service</th><th class="num">Restarts</th><th class="num">People</th><th>Last</th></tr></thead>
+ <tbody><sc-for list="{{restarted}}" as="r" hint-placeholder-count="6"><tr><td><a href="SvcOverview.dc.html" class="b">{{r.svc}}</a></td><td class="num mono">{{r.n}}</td><td class="num mono">{{r.people}}</td><td>{{r.last}}</td></tr></sc-for></tbody></table></div>
+ <sc-if value="{{noRestarted}}" hint-placeholder-val="{{false}}"><div class="empty">No restarts in this range.</div></sc-if>
+ <sc-if value="{{src}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>source <span class="mono">audit_log</span> · kept 90 days</span></div></sc-if>
+</section>
+<section class="panel" aria-label="Data used on this page">
+ <div class="panel-h"><span class="panel-t">Data used on this page</span></div>
+ <div class="tw"><table class="tbl" style="min-width:720px"><thead><tr><th>Table</th><th>What this page reads</th><th>Kept</th><th>Setting</th></tr></thead>
+ <tbody><sc-for list="{{used}}" as="u" hint-placeholder-count="2"><tr><td class="mono">{{u.t}}</td><td>{{u.what}}</td><td>{{u.kept}}</td><td><a href="SetAudit.dc.html">{{u.setting}}</a></td></tr></sc-for></tbody></table></div>
+</section>

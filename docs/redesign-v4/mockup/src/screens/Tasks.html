@@ -1,0 +1,101 @@
+<!--meta title="Tasks" nav="tasks" crumbs="Tasks" h="980"-->
+<div class="ph"><div><h1>Tasks</h1><div class="sub">Every task in every cluster you can see. ECS keeps stopped tasks for about an hour; Harbormaster keeps them for 7 days.</div></div></div>
+<div class="kpis">
+ <div class="kpi"><span class="k">Running</span><span class="v">{{kpi.running}}</span><span class="d">22 in services, 2 standalone</span></div>
+ <div class="kpi"><span class="k">Unhealthy</span><span class="v c-warn">{{kpi.unhealthy}}</span></div>
+ <div class="kpi"><span class="k">Stopped, error</span><span class="v c-bad">{{kpi.err}}</span><span class="d">last 60 min</span></div>
+ <div class="kpi"><span class="k">Stopped, normal</span><span class="v">{{kpi.normal}}</span></div>
+ <div class="kpi"><span class="k">Stopped, expected</span><span class="v c-exp">{{kpi.exp}}</span></div>
+ <div class="kpi"><span class="k">On spot</span><span class="v">{{kpi.spot}}</span><span class="d">{{kpi.spotPct}}% of running</span></div>
+</div>
+<section class="panel" aria-label="Tasks">
+ <div class="panel-h">
+  <div class="row"><span class="panel-t">Tasks</span>
+   <div class="seg" role="group" aria-label="Task state"><sc-for list="{{seg}}" as="o" hint-placeholder-count="4"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}<span class="n">{{o.n}}</span></button></sc-for></div></div>
+  <div class="toolbar">
+   <input id="tk-q" class="input" style="width:260px" placeholder="Filter by task ID, service, cluster, IP" aria-label="Filter tasks" value="{{q}}" onChange="{{onQ}}">
+   <label class="sr" for="tk-view" style="position:absolute;left:-9999px">Saved view</label>
+   <select id="tk-view" class="select" style="width:auto" aria-label="Saved view" value="{{view}}" onChange="{{onView}}"><option value="default">Saved view: Problems</option><option value="prod">Saved view: Core services, running</option><option value="spot">Saved view: Spot stops</option></select>
+   <button class="tog" type="button" aria-pressed="{{groupOn}}" onClick="{{toggleGroup}}"><i></i>Group repeats</button>
+   <div style="position:relative">
+    <button class="btn" type="button" aria-expanded="{{colsOpen}}" onClick="{{toggleCols}}">[[i:columns]]Columns</button>
+    <sc-if value="{{colsOpen}}" hint-placeholder-val="{{false}}"><div class="pop" style="right:0;width:240px"><div class="stack-s">
+     <div class="lab">Show columns</div>
+     <div class="b sm mut">Task, Service and Status always show.</div>
+     <sc-for list="{{colOpts}}" as="o" hint-placeholder-count="8"><button class="tog" type="button" aria-pressed="{{o.on}}" onClick="{{o.toggle}}"><i></i>{{o.label}}</button></sc-for>
+     <button class="btn btn-s" type="button" onClick="{{resetCols}}">Show all columns</button></div></div></sc-if>
+   </div>
+  </div>
+ </div>
+ <sc-if value="{{hiddenNote}}" hint-placeholder-val="{{true}}"><div class="panel-f"><span>Stopped tasks older than 60 min are hidden. <a href="SetGeneral.dc.html">Change</a></span><button class="btn btn-s btn-g" type="button" onClick="{{hideNote}}">Dismiss</button></div></sc-if>
+ <sc-if value="{{isTrunc}}" hint-placeholder-val="{{false}}"><div class="ban ban-info" style="margin:8px 12px">[[i:info]]<div class="grow">Showing the first 500 tasks. Filter by service, cluster or account to see the rest.</div></div></sc-if>
+ <sc-if value="{{isError}}" hint-placeholder-val="{{false}}"><div class="ban ban-bad" style="margin:12px">[[i:warn]]<div class="grow"><b>The tasks could not be loaded.</b> The ECS request timed out. Retry; other pages still work.</div><button class="btn btn-s" type="button" onClick="{{retry}}">Retry</button></div></sc-if>
+ <sc-if value="{{isLoading}}" hint-placeholder-val="{{false}}"><div class="panel-b stack-s" role="status"><div class="mut">Loading tasks…</div><div class="sk" style="height:28px"></div><div class="sk" style="height:28px"></div><div class="sk" style="height:28px"></div><div class="sk" style="height:28px"></div></div></sc-if>
+ <sc-if value="{{showTable}}" hint-placeholder-val="{{true}}">
+ <div class="tw"><table class="tbl" style="min-width:1280px"><thead><tr>
+  <th>Task</th><th>Service</th><th>Status</th>
+  <sc-if value="{{col.health}}" hint-placeholder-val="{{true}}"><th>Health</th></sc-if>
+  <sc-if value="{{col.rev}}" hint-placeholder-val="{{true}}"><th>Rev</th></sc-if>
+  <sc-if value="{{col.ip}}" hint-placeholder-val="{{true}}"><th>IP · Subnet</th></sc-if>
+  <sc-if value="{{col.cap}}" hint-placeholder-val="{{true}}"><th>Capacity</th></sc-if>
+  <sc-if value="{{col.cpu}}" hint-placeholder-val="{{true}}"><th class="num">CPU</th></sc-if>
+  <sc-if value="{{col.mem}}" hint-placeholder-val="{{true}}"><th class="num">Memory</th></sc-if>
+  <sc-if value="{{col.started}}" hint-placeholder-val="{{true}}"><th>Started</th></sc-if>
+  <sc-if value="{{col.reason}}" hint-placeholder-val="{{true}}"><th>Stopped reason</th></sc-if>
+  <th class="sticky-r"><span class="acts">Actions</span></th></tr></thead>
+ <tbody><sc-for list="{{rows}}" as="r" hint-placeholder-count="8"><tr class="{{r.stripe}}">
+  <td style="{{r.cellStyle}}"><sc-if value="{{r.isTask}}" hint-placeholder-val="{{true}}"><button class="btn btn-s btn-g mono" style="margin-left:-8px" type="button" aria-label="{{r.ariaOpen}}" onClick="{{r.open}}">{{r.id}}</button></sc-if>
+   <sc-if value="{{r.isGroup}}" hint-placeholder-val="{{false}}"><button class="btn btn-s" type="button" aria-expanded="{{r.gOpen}}" aria-label="{{r.gAria}}" onClick="{{r.gToggle}}">{{r.gn}}</button></sc-if></td>
+  <td class="two"><sc-if value="{{r.isSvc}}" hint-placeholder-val="{{true}}"><a class="b" href="SvcOverview.dc.html">{{r.svcName}}</a></sc-if><sc-if value="{{r.notSvc}}" hint-placeholder-val="{{false}}"><span class="b">{{r.svcName}}</span></sc-if><small>{{r.sub}}</small></td>
+  <td><span class="st st-{{r.status}}">{{r.statusL}}</span> <sc-if value="{{r.hasCause}}" hint-placeholder-val="{{false}}"><span class="chip" title="{{r.causeTip}}">{{r.cause}}</span></sc-if></td>
+  <sc-if value="{{col.health}}" hint-placeholder-val="{{true}}"><td><span class="{{r.healthCls}}">{{r.health}}</span></td></sc-if>
+  <sc-if value="{{col.rev}}" hint-placeholder-val="{{true}}"><td class="mono">{{r.rev}}</td></sc-if>
+  <sc-if value="{{col.ip}}" hint-placeholder-val="{{true}}"><td class="two"><span class="mono">{{r.ip}}</span><small>{{r.subnet}}</small></td></sc-if>
+  <sc-if value="{{col.cap}}" hint-placeholder-val="{{true}}"><td><span class="{{r.capCls}}">{{r.cap}}</span></td></sc-if>
+  <sc-if value="{{col.cpu}}" hint-placeholder-val="{{true}}"><td class="num mono">{{r.cpu}}</td></sc-if>
+  <sc-if value="{{col.mem}}" hint-placeholder-val="{{true}}"><td class="num mono">{{r.mem}}</td></sc-if>
+  <sc-if value="{{col.started}}" hint-placeholder-val="{{true}}"><td class="nw">{{r.started}}</td></sc-if>
+  <sc-if value="{{col.reason}}" hint-placeholder-val="{{true}}"><td>{{r.reason}}</td></sc-if>
+  <td class="sticky-r"><div class="acts"><a class="btn btn-s" href="SvcLogs.dc.html">[[i:logs]]Logs</a>
+   <sc-if value="{{r.canTerm}}" hint-placeholder-val="{{false}}"><a class="btn btn-s" href="{{r.termHref}}">[[i:term]]Terminal</a></sc-if>
+   <sc-if value="{{r.noTerm}}" hint-placeholder-val="{{false}}"><span class="btn btn-s" aria-disabled="true" title="ECS Exec is off for this task">[[i:term]]Terminal</span></sc-if>
+   <sc-if value="{{r.canStop}}" hint-placeholder-val="{{false}}"><button class="btn btn-s btn-d" type="button" onClick="{{r.stop}}">[[i:stop]]Stop</button></sc-if></div></td>
+ </tr></sc-for></tbody></table></div>
+ <sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div class="empty">No tasks match.<button class="btn btn-s" type="button" onClick="{{clear}}">Show all tasks</button></div></sc-if>
+ <div class="panel-f"><span class="mut">Preview state</span>
+  <div class="row"><select id="tk-pv" class="select" style="width:auto;min-height:26px" aria-label="Preview state" value="{{pv}}" onChange="{{onPv}}"><sc-for list="{{pvOpts}}" as="o" hint-placeholder-count="4"><option value="{{o.id}}">{{o.label}}</option></sc-for></select>
+  <div class="pager"><button class="btn btn-s" type="button" disabled onClick="{{noop}}">Previous</button><span class="mono">Page 1</span><button class="btn btn-s" type="button" disabled onClick="{{noop}}">Next</button></div></div></div>
+ </sc-if>
+ <sc-if value="{{isLoading}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span class="mut">Preview state</span><select id="tk-pv2" class="select" style="width:auto;min-height:26px" aria-label="Preview state" value="{{pv}}" onChange="{{onPv}}"><sc-for list="{{pvOpts}}" as="o" hint-placeholder-count="4"><option value="{{o.id}}">{{o.label}}</option></sc-for></select></div></sc-if>
+ <sc-if value="{{isError}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span class="mut">Preview state</span><select id="tk-pv3" class="select" style="width:auto;min-height:26px" aria-label="Preview state" value="{{pv}}" onChange="{{onPv}}"><sc-for list="{{pvOpts}}" as="o" hint-placeholder-count="4"><option value="{{o.id}}">{{o.label}}</option></sc-for></select></div></sc-if>
+</section>
+
+<sc-if value="{{hasDrawer}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close task details" onClick="{{closeDrawer}}"></button>
+ <aside class="drawer wide" role="dialog" aria-label="Task details">
+  <div class="drawer-h"><div class="stack-s" style="gap:0"><div class="row"><h2 class="mono" style="font-size:15px">{{drawer.id}}</h2><span class="st st-{{drawer.status}}">{{drawer.statusL}}</span><sc-if value="{{drawer.hasCause}}" hint-placeholder-val="{{false}}"><span class="chip" title="{{drawer.causeTip}}">{{drawer.cause}}</span></sc-if></div><span class="mut sm">{{drawer.svcName}} · {{drawer.sub}}</span></div>
+   <button class="btn btn-i btn-g" type="button" aria-label="Close" onClick="{{closeDrawer}}">[[i:x]]</button></div>
+  <div class="panel-b stack">
+   <div class="row"><a class="btn" href="SvcLogs.dc.html">[[i:logs]]Logs</a>
+    <sc-if value="{{drawer.canTerm}}" hint-placeholder-val="{{false}}"><a class="btn" href="{{drawer.termHref}}">[[i:term]]Terminal</a></sc-if>
+    <sc-if value="{{drawer.noTerm}}" hint-placeholder-val="{{false}}"><span class="btn" aria-disabled="true" title="ECS Exec is off for this task">[[i:term]]Terminal</span></sc-if>
+    <sc-if value="{{drawer.canStop}}" hint-placeholder-val="{{false}}"><button class="btn btn-d" type="button" onClick="{{drawer.stop}}">[[i:stop]]Stop task</button></sc-if></div>
+   <sc-if value="{{drawer.hasReason}}" hint-placeholder-val="{{false}}"><div class="ban"><div class="grow"><div class="b">{{drawer.reason}}</div><div class="mut sm">Reported by ECS</div><div class="code" style="margin-top:6px;white-space:pre-wrap">{{drawer.raw}}</div></div></div></sc-if>
+   <div class="stack-s"><div class="b">Identity</div>
+   <dl class="kv" style="margin:0"><dt>Task ID</dt><dd class="mono">{{drawer.id}}</dd><dt>ARN</dt><dd class="mono">{{drawer.arn}}</dd><dt>Service</dt><dd>{{drawer.svcName}}</dd><dt>Cluster</dt><dd>{{drawer.cluster}} · {{drawer.region}}</dd><dt>Definition</dt><dd class="mono">{{drawer.family}}</dd><dt>Capacity</dt><dd class="mono">{{drawer.cap}}</dd><dt>Size</dt><dd>{{drawer.size}}</dd><dt>Zone</dt><dd class="mono">{{drawer.az}}</dd><dt>IP · Subnet</dt><dd class="mono">{{drawer.ip}} · {{drawer.subnet}}</dd><dt>Health</dt><dd>{{drawer.health}}</dd><dt>CPU · Memory</dt><dd class="mono">{{drawer.cpu}} · {{drawer.mem}}</dd><dt>Started</dt><dd>{{drawer.started}}</dd><dt>Stopped</dt><dd>{{drawer.stopped}}</dd></dl></div>
+   <div class="stack-s"><div class="b">Containers</div>
+    <div class="tw"><table class="tbl" style="min-width:520px"><thead><tr><th>Name</th><th>Status</th><th>Exit</th><th>Exec agent</th></tr></thead><tbody>
+    <sc-for list="{{drawer.containers}}" as="k" hint-placeholder-count="2"><tr><td class="two"><span class="b">{{k.name}}</span><small class="mono">{{k.image}}</small></td><td><span class="{{k.cls}}">{{k.state}}</span></td><td class="mono">{{k.exit}}</td><td>{{k.agent}}</td></tr></sc-for></tbody></table></div></div>
+   <div class="stack-s"><div class="row spread"><span class="b">Recent log lines</span><a href="SvcLogs.dc.html">Open all logs</a></div>
+    <div class="code" style="white-space:pre-wrap"><sc-for list="{{drawer.logs}}" as="l" hint-placeholder-count="5"><div><span class="mut">{{l.t}}</span> <b>{{l.mk}}</b> {{l.msg}}</div></sc-for></div></div>
+  </div>
+ </aside>
+</sc-if>
+<sc-if value="{{hasStop}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Cancel" onClick="{{closeStop}}" style="z-index:55"></button>
+ <div class="modal" style="z-index:56" role="alertdialog" aria-label="Stop task">
+  <div class="modal-h"><h2>Stop task <span class="mono">{{stopD.id}}</span>?</h2></div>
+  <div class="modal-b"><div>{{stopD.sub}}</div></div>
+  <div class="modal-f"><button class="btn" type="button" onClick="{{closeStop}}">Cancel</button><button class="btn btn-dp" type="button" onClick="{{confirmStop}}">Stop task</button></div>
+ </div>
+</sc-if>

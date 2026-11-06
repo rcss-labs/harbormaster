@@ -1,0 +1,16 @@
+<!--meta title="Set up Harbormaster" shell="none" h="760"-->
+<div style="min-height:100vh;display:flex;flex-direction:column">
+ <main style="flex:1;display:flex;align-items:center;justify-content:center;padding:24px 16px">
+  <section class="panel" aria-label="Create the first global admin" style="width:min(400px,100%)">
+   <div class="stack" style="padding:24px;gap:16px">
+    <div class="row" style="gap:10px;flex-wrap:nowrap">[[logo]]<div><div class="b" style="font-size:14px">Harbormaster</div><div class="sm mut">ECS control center</div></div></div>
+    <h1 style="font-size:18px;font-weight:600">Create the first global admin</h1>
+    <div class="field"><label for="setup-token">Setup token</label><input id="setup-token" class="input mono {{tokenCls}}" autocomplete="off" placeholder="HM-XXXX-XXXX" aria-describedby="setup-token-hint" value="{{token}}" onChange="{{setToken}}"><span id="setup-token-hint" class="hint">Printed in the server log at start</span><sc-if value="{{tokenErrOn}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">That setup token is wrong.</span></sc-if></div>
+    <div class="field"><label for="setup-user">Username</label><input id="setup-user" class="input" autocomplete="username" value="{{username}}" onChange="{{setUsername}}"></div>
+    <div class="field"><label for="setup-pw">Password</label><input id="setup-pw" type="password" class="input" autocomplete="new-password" value="{{password}}" onChange="{{setPassword}}"></div>
+    <div class="field"><label for="setup-confirm">Confirm</label><input id="setup-confirm" type="password" class="input {{confirmCls}}" autocomplete="new-password" value="{{confirm}}" onChange="{{setConfirm}}"><sc-if value="{{confirmErrOn}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Passwords do not match.</span></sc-if></div>
+    <a class="btn btn-p" href="Overview.dc.html" onClick="{{submit}}" style="width:100%;min-height:36px">Create admin</a>
+   </div>
+  </section>
+ </main>
+</div>

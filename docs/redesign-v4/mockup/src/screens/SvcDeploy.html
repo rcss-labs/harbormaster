@@ -1,0 +1,265 @@
+<!--meta title="Service deploy" nav="services" crumbs="Clusters|Clusters > core-services|ClusterDetail > payments-api|SvcOverview > Deploy" h="2300"-->
+<!--@svcheader tab="deploy"-->
+<div class="toolbar" style="justify-content:space-between">
+ <div class="sub mut sm">Edit the service, then review everything as one change set before anything reaches AWS.</div>
+ <div class="row">
+  <span class="lab">View as</span><div class="seg" role="group" aria-label="View as"><sc-for list="{{viewSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+  <span class="lab">Rollout state</span><div class="seg" role="group" aria-label="Rollout state"><sc-for list="{{roSeg}}" as="o" hint-placeholder-count="4"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+ </div>
+</div>
+<sc-if value="{{locked}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn" role="status">[[i:lock]]<div class="grow">You need <b>Edit, Deploy or Operate</b> on <span class="tag tag-Prod inh">Prod</span> to use this. Ask a global admin to change your permissions.</div></div></sc-if>
+
+<sc-if value="{{roOn}}" hint-placeholder-val="{{true}}">
+<section class="panel" aria-label="Rollout progress"><div class="panel-b stack">
+ <div class="row spread">
+  <div class="row"><span class="{{roPill}}">{{roName}}</span><span class="mono">:42 → :43</span><span class="mono mut">payments-api:43</span><span class="mut sm">{{roAge}}</span></div>
+  <button class="btn btn-d" type="button" onClick="{{openRb}}" disabled="{{locked}}" title="{{lockTip}}">[[i:history]]Roll back to :42</button>
+ </div>
+ <div class="meter" style="max-width:520px"><i><b style="{{roBar}}"></b></i><span class="mono">{{roCount}}</span></div>
+ <sc-if value="{{roFailed}}" hint-placeholder-val="{{false}}"><div class="ban ban-bad" role="alert">[[i:warn]]<div class="grow"><b>{{roFailTxt}}</b><div class="sm">{{roReason}}</div></div></div></sc-if>
+ <sc-if value="{{roRunning}}" hint-placeholder-val="{{true}}"><div class="sm mut">Circuit breaker is on. ECS rolls back by itself if new tasks keep failing.</div></sc-if>
+</div></section>
+</sc-if>
+
+<div class="g21" style="align-items:start">
+<div class="stack wide-form">
+
+<section class="panel" aria-label="Containers" title="{{lockTip}}">
+ <div class="panel-h"><div class="row"><span class="panel-t">Containers</span><span class="mut sm mono">{{repo}}</span></div>
+  <div class="seg" role="group" aria-label="Container"><sc-for list="{{contSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div></div>
+ <div class="panel-b stack" style="gap:20px">
+
+  <div class="stack-s"><h3>Image tag</h3>
+   <div class="field" style="position:relative;max-width:440px">
+    <label for="sd-tag">Image tag</label>
+    <div class="row" style="flex-wrap:nowrap;gap:6px">
+     <input id="sd-tag" class="{{tagBad}}" role="combobox" aria-expanded="{{tagOpen}}" aria-controls="sd-tag-list" autocomplete="off" value="{{tag}}" onChange="{{fn.tag}}" disabled="{{locked}}">
+     <sc-if value="{{ecr}}" hint-placeholder-val="{{true}}"><button class="btn btn-i" type="button" aria-label="Show tags" onClick="{{fn.tagToggle}}" disabled="{{locked}}">[[i:chevd]]</button></sc-if>
+    </div>
+    <sc-if value="{{tagOpen}}" hint-placeholder-val="{{false}}">
+     <div class="pop" id="sd-tag-list" role="listbox" aria-label="Image tags" style="left:0;top:58px;padding:4px;width:min(440px,100%)">
+      <sc-for list="{{tagOpts}}" as="o" hint-placeholder-count="4"><button type="button" role="option" aria-selected="{{o.sel}}" class="btn btn-g" style="width:100%;justify-content:space-between;height:auto;min-height:30px" onClick="{{o.pick}}"><span class="row" style="gap:6px"><span class="mono">{{o.t}}</span><sc-if value="{{o.newest}}" hint-placeholder-val="{{false}}"><span class="pill pill-info">newest</span></sc-if><sc-if value="{{o.deployed}}" hint-placeholder-val="{{false}}"><span class="pill pill-ok">deployed</span></sc-if></span><span class="mut sm">{{o.age}}</span></button></sc-for>
+      <sc-if value="{{tagNone}}" hint-placeholder-val="{{false}}"><div class="empty" style="padding:12px">No tags match.</div></sc-if>
+      <div class="hint" style="padding:6px 10px;border-top:1px solid var(--border)">{{tagFoot}}</div>
+     </div>
+    </sc-if>
+    <sc-if value="{{notEcr}}" hint-placeholder-val="{{false}}"><span class="hint">These images are not in ECR, so their tags cannot be listed. Type the tag to deploy.</span></sc-if>
+    <sc-if value="{{tagErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{tagErr}}</span></sc-if>
+   </div>
+  </div>
+
+  <div class="stack-s"><h3>Environment</h3>
+   <sc-if value="{{envEmpty}}" hint-placeholder-val="{{false}}"><div class="mut sm">No environment variables.</div></sc-if>
+   <sc-for list="{{env}}" as="r" hint-placeholder-count="3"><div class="row" style="flex-wrap:nowrap"><input id="{{r.ik}}" class="input mono" style="flex:1 1 30%" placeholder="Name" aria-label="Variable name" value="{{r.k}}" onChange="{{r.onK}}" disabled="{{locked}}"><input id="{{r.iv}}" class="input mono" style="flex:1 1 55%" placeholder="Value" aria-label="Variable value" value="{{r.v}}" onChange="{{r.onV}}" disabled="{{locked}}"><button class="btn btn-g btn-i" type="button" aria-label="{{r.aria}}" onClick="{{r.rm}}" disabled="{{locked}}">[[i:x]]</button></div></sc-for>
+   <sc-if value="{{envErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{envErr}}</span></sc-if>
+   <div><button class="btn btn-s" type="button" onClick="{{fn.addEnv}}" disabled="{{locked}}">[[i:plus]]Add variable</button></div>
+  </div>
+
+  <div class="stack-s"><h3>Secrets</h3>
+   <sc-if value="{{secEmpty}}" hint-placeholder-val="{{false}}"><div class="mut sm">No secrets.</div></sc-if>
+   <sc-for list="{{sec}}" as="r" hint-placeholder-count="2"><div class="row" style="flex-wrap:nowrap"><input id="{{r.ik}}" class="input mono" style="flex:1 1 28%" placeholder="Secret name" aria-label="Secret name" value="{{r.n}}" onChange="{{r.onN}}" disabled="{{locked}}"><input id="{{r.iv}}" class="input mono" style="flex:1 1 58%" placeholder="Value from (ARN)" aria-label="Value from" value="{{r.a}}" onChange="{{r.onA}}" disabled="{{locked}}"><button class="btn btn-g btn-i" type="button" aria-label="{{r.aria}}" onClick="{{r.rm}}" disabled="{{locked}}">[[i:x]]</button></div></sc-for>
+   <sc-if value="{{secErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{secErr}}</span></sc-if>
+   <div><button class="btn btn-s" type="button" onClick="{{fn.addSec}}" disabled="{{locked}}">[[i:plus]]Add secret</button></div>
+   <div class="hint">ECS reads these when a task starts, using the task execution role. The role needs secretsmanager:GetSecretValue, ssm:GetParameters and kms:Decrypt. Non-admins may only add secrets from the same account under an existing prefix.</div>
+  </div>
+
+  <div class="fields" style="grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));align-items:start">
+   <div class="stack-s"><h3>Command</h3>
+    <sc-if value="{{cmdEmpty}}" hint-placeholder-val="{{false}}"><div class="hint">Uses the image default.</div></sc-if>
+    <sc-for list="{{cmd}}" as="r" hint-placeholder-count="1"><div class="row" style="flex-wrap:nowrap"><input id="{{r.idk}}" class="input mono" aria-label="Command argument" value="{{r.val}}" onChange="{{r.on}}" disabled="{{locked}}"><button class="btn btn-g btn-i" type="button" aria-label="{{r.aria}}" onClick="{{r.rm}}" disabled="{{locked}}">[[i:x]]</button></div></sc-for>
+    <sc-if value="{{cmdErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{cmdErr}}</span></sc-if>
+    <div><button class="btn btn-s" type="button" onClick="{{fn.addCmd}}" disabled="{{locked}}">[[i:plus]]Add argument</button></div></div>
+   <div class="stack-s"><h3>Entry point</h3>
+    <sc-if value="{{epEmpty}}" hint-placeholder-val="{{true}}"><div class="hint">Uses the image default.</div></sc-if>
+    <sc-for list="{{ep}}" as="r" hint-placeholder-count="1"><div class="row" style="flex-wrap:nowrap"><input id="{{r.idk}}" class="input mono" aria-label="Entry point argument" value="{{r.val}}" onChange="{{r.on}}" disabled="{{locked}}"><button class="btn btn-g btn-i" type="button" aria-label="{{r.aria}}" onClick="{{r.rm}}" disabled="{{locked}}">[[i:x]]</button></div></sc-for>
+    <sc-if value="{{epErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{epErr}}</span></sc-if>
+    <div><button class="btn btn-s" type="button" onClick="{{fn.addEp}}" disabled="{{locked}}">[[i:plus]]Add argument</button></div></div>
+  </div>
+
+  <div class="stack-s"><h3>Health check</h3>
+   <sc-if value="{{hcOff}}" hint-placeholder-val="{{false}}"><div class="mut sm">No container health check.</div><div><button class="btn btn-s" type="button" onClick="{{fn.addHc}}" disabled="{{locked}}">[[i:plus]]Add health check</button></div></sc-if>
+   <sc-if value="{{hcOn}}" hint-placeholder-val="{{true}}">
+    <div class="row"><div class="seg" role="group" aria-label="Health check type"><button type="button" aria-pressed="{{hcShellP}}" onClick="{{fn.hcShell}}" disabled="{{locked}}">CMD-SHELL</button><button type="button" aria-pressed="{{hcCmdP}}" onClick="{{fn.hcCmd}}" disabled="{{locked}}">CMD</button></div></div>
+    <div class="field"><label for="sd-hc-cmd">Command</label><input id="sd-hc-cmd" class="input mono" value="{{hc.cmd}}" onChange="{{fn.hcCmdIn}}" disabled="{{locked}}"></div>
+    <div class="fields"><sc-for list="{{hcf}}" as="f" hint-placeholder-count="4"><div class="field"><label for="{{f.id}}">{{f.label}}</label><input id="{{f.id}}" class="{{f.bad}}" inputmode="numeric" value="{{f.v}}" onChange="{{f.on}}" disabled="{{locked}}"><span class="hint">{{f.hint}}</span></div></sc-for></div>
+    <sc-if value="{{hcErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{hcErr}}</span></sc-if>
+    <div><button class="btn btn-d btn-s" type="button" onClick="{{fn.rmHc}}" disabled="{{locked}}">Remove health check</button></div>
+   </sc-if>
+  </div>
+ </div>
+</section>
+
+<section class="panel" aria-label="Task size" title="{{lockTip}}">
+ <div class="panel-h"><div class="row"><span class="panel-t">Task size</span><span class="mut sm">CPU units, memory MiB</span></div></div>
+ <div class="panel-b stack">
+  <div class="fields" style="max-width:560px">
+   <div class="field"><label for="sd-cpu">Task CPU (units)</label><select id="sd-cpu" class="select mono" value="{{v.cpu}}" onChange="{{fn.cpu}}" disabled="{{locked}}"><sc-for list="{{cpuOpts}}" as="o" hint-placeholder-count="5"><option value="{{o.v}}">{{o.v}}</option></sc-for></select></div>
+   <div class="field"><label for="sd-mem">Task memory (MiB)</label><select id="sd-mem" class="select mono" value="{{v.mem}}" onChange="{{fn.mem}}" disabled="{{locked}}"><sc-for list="{{memOpts}}" as="o" hint-placeholder-count="8"><option value="{{o.v}}">{{o.v}}</option></sc-for></select></div>
+  </div>
+  <sc-if value="{{sizeErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{sizeErr}}</span></sc-if>
+  <sc-if value="{{oom}}" hint-placeholder-val="{{true}}"><div class="ban ban-warn">[[i:warn]]<div class="grow">{{oomText}}</div></div></sc-if>
+ </div>
+</section>
+
+<section class="panel" aria-label="Service" title="{{lockTip}}">
+ <div class="panel-h"><div class="row"><span class="panel-t">Service</span><span class="mut sm">3 running</span></div></div>
+ <div class="panel-b stack" style="gap:18px">
+  <div class="stack-s"><h3>Desired count</h3>
+   <div class="row"><div class="stepper"><button type="button" aria-label="Decrease desired count" onClick="{{fn.dDec}}" disabled="{{locked}}">−</button><input id="sd-desired" class="input mono" style="width:64px;border:0;text-align:center;border-radius:0" inputmode="numeric" aria-label="Desired count" value="{{v.desired}}" onChange="{{fn.desired}}" disabled="{{locked}}"><button type="button" aria-label="Increase desired count" onClick="{{fn.dInc}}" disabled="{{locked}}">+</button></div><span class="hint">Needs Operate on Prod</span></div>
+   <sc-if value="{{desiredErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{desiredErr}}</span></sc-if>
+   <sc-if value="{{outside}}" hint-placeholder-val="{{false}}"><div class="sm c-warn">{{outsideText}} <a href="SvcScaling.dc.html">Auto scaling settings →</a></div></sc-if>
+  </div>
+  <div class="stack-s"><h3>ECS Exec</h3>
+   <button type="button" class="tog" aria-pressed="{{v.exec}}" onClick="{{fn.exec}}" disabled="{{locked}}"><i></i>ECS Exec</button>
+   <div class="hint">Applies to new tasks only: turning it on or off restarts the service's tasks.</div>
+   <sc-if value="{{execWarn}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn">[[i:warn]]<div class="grow">This service has no task role. ECS Exec needs ssmmessages:CreateControlChannel, ssmmessages:CreateDataChannel, ssmmessages:OpenControlChannel and ssmmessages:OpenDataChannel.</div></div></sc-if>
+  </div>
+  <div class="stack-s"><h3>Rollout safety</h3>
+   <div class="row" style="gap:20px">
+    <button type="button" class="tog" aria-pressed="{{v.cb}}" onClick="{{fn.cb}}" disabled="{{locked}}"><i></i>Circuit breaker</button>
+    <button type="button" class="tog" aria-pressed="{{v.rb}}" onClick="{{fn.rb}}" disabled="{{v.rbOff}}" title="Turn on the circuit breaker to roll back automatically"><i></i>Roll back on failure</button>
+   </div>
+   <div class="fields">
+    <div class="field"><label for="sd-minh">Minimum healthy percent</label><input id="sd-minh" class="input mono" inputmode="numeric" value="{{v.minH}}" onChange="{{fn.minH}}" disabled="{{locked}}"><span class="hint">0 to 100</span><sc-if value="{{minHErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{minHErr}}</span></sc-if></div>
+    <div class="field"><label for="sd-maxp">Maximum percent</label><input id="sd-maxp" class="input mono" inputmode="numeric" value="{{v.maxP}}" onChange="{{fn.maxP}}" disabled="{{locked}}"><span class="hint">100 to 200</span><sc-if value="{{maxPErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{maxPErr}}</span></sc-if></div>
+    <div class="field"><label for="sd-grace">Health check grace period (seconds)</label><input id="sd-grace" class="input mono" inputmode="numeric" value="{{v.grace}}" onChange="{{fn.grace}}" disabled="{{locked}}" title="Only services behind a load balancer have a health check grace period"><span class="hint">Behind a load balancer: payments-api-alb</span><sc-if value="{{graceErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{graceErr}}</span></sc-if></div>
+   </div>
+  </div>
+  <div class="stack-s"><h3>Force new deployment</h3>
+   <button type="button" class="tog" aria-pressed="{{v.force}}" onClick="{{fn.force}}" disabled="{{locked}}"><i></i>Force new deployment</button>
+   <div class="hint">Replaces every running task with a fresh one from the same task definition.</div>
+  </div>
+ </div>
+</section>
+
+<section class="panel" aria-label="Auto scaling" title="{{lockTip}}">
+ <div class="panel-h"><div class="row"><span class="panel-t">Auto scaling</span><span class="mut sm">Application Auto Scaling</span></div></div>
+ <div class="panel-b stack" style="gap:18px">
+  <sc-if value="{{asOff}}" hint-placeholder-val="{{false}}"><div class="empty" style="padding:14px">No auto scaling<div class="row"><button class="btn btn-s" type="button" onClick="{{fn.asAdd}}" disabled="{{locked}}">[[i:plus]]Add auto scaling target</button><sc-if value="{{keepable}}" hint-placeholder-val="{{true}}"><button class="btn btn-s" type="button" onClick="{{fn.asKeep}}">Keep target</button></sc-if></div></div></sc-if>
+  <sc-if value="{{asOn}}" hint-placeholder-val="{{true}}">
+   <div class="fields" style="max-width:520px">
+    <div class="field"><label for="sd-asmin">Minimum tasks</label><input id="sd-asmin" class="input mono" inputmode="numeric" value="{{v.asMin}}" onChange="{{fn.asMin}}" disabled="{{locked}}"></div>
+    <div class="field"><label for="sd-asmax">Maximum tasks</label><input id="sd-asmax" class="input mono" inputmode="numeric" value="{{v.asMax}}" onChange="{{fn.asMax}}" disabled="{{locked}}"></div>
+   </div>
+   <sc-if value="{{asErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{asErr}}</span></sc-if>
+   <sc-if value="{{asMove}}" hint-placeholder-val="{{false}}"><div class="sm c-warn">{{asMoveText}}</div></sc-if>
+   <div class="row"><button class="btn btn-d btn-s" type="button" onClick="{{fn.asRm}}" disabled="{{locked}}">Remove target</button><button class="btn btn-s" type="button" onClick="{{fn.asKeep}}" disabled="{{locked}}">Keep target</button></div>
+
+   <div class="stack-s"><div class="row spread"><h3>Policies</h3><button class="btn btn-s" type="button" onClick="{{fn.newPol}}" disabled="{{locked}}">[[i:plus]]Add policy</button></div>
+    <div class="tw" style="border:1px solid var(--border);border-radius:var(--r)"><table class="tbl" style="min-width:680px"><thead><tr><th>Name</th><th>Metric</th><th>Target</th><th>Cooldowns</th><th>Scale-in</th><th></th></tr></thead>
+     <tbody><sc-for list="{{pol}}" as="p" hint-placeholder-count="3"><tr><td class="mono">{{p.name}}</td><td>{{p.metric}}</td><td class="mono">{{p.target}}</td><td class="mono">{{p.cool}}</td><td>{{p.sin}}</td>
+      <td><div class="acts"><sc-if value="{{p.edit}}" hint-placeholder-val="{{true}}"><button class="btn btn-s" type="button" onClick="{{p.ed}}" disabled="{{locked}}">Edit</button></sc-if><button class="btn btn-s btn-d" type="button" aria-label="Remove policy {{p.aria}}" onClick="{{p.rm}}" disabled="{{locked}}">Remove</button></div></td></tr></sc-for></tbody></table></div>
+    <sc-if value="{{peOpen}}" hint-placeholder-val="{{false}}">
+     <div class="stack-s" style="border:1px solid var(--accent-line);border-radius:var(--r);padding:12px;background:var(--raised)" role="group" aria-label="Policy editor">
+      <h3>{{peTitle}}</h3>
+      <div class="fields">
+       <div class="field"><label for="sd-pe-name">Policy name</label><input id="sd-pe-name" class="input mono" value="{{pe.name}}" onChange="{{peNm}}"></div>
+       <div class="field"><label for="sd-pe-metric">Metric</label><select id="sd-pe-metric" class="select" value="{{pe.metric}}" onChange="{{peMetric}}"><option value="CPU">CPU</option><option value="Memory">Memory</option><option value="ALB">ALB</option></select></div>
+       <div class="field"><label for="sd-pe-target">Target value</label><input id="sd-pe-target" class="input mono" inputmode="numeric" value="{{pe.target}}" onChange="{{peTarget}}"></div>
+       <sc-if value="{{peAlb}}" hint-placeholder-val="{{false}}"><div class="field"><label for="sd-pe-tg">Target group</label><select id="sd-pe-tg" class="select" value="{{pe.tg}}" onChange="{{peTg}}"><option value="">Choose a target group</option><option value="payments-api-tg">payments-api-tg</option><option value="payments-api-canary-tg">payments-api-canary-tg</option></select></div></sc-if>
+       <div class="field"><label for="sd-pe-sin">Scale-in cooldown (seconds)</label><input id="sd-pe-sin" class="input mono" inputmode="numeric" value="{{pe.sin}}" onChange="{{peSin}}"></div>
+       <div class="field"><label for="sd-pe-sout">Scale-out cooldown (seconds)</label><input id="sd-pe-sout" class="input mono" inputmode="numeric" value="{{pe.sout}}" onChange="{{peSout}}"></div>
+      </div>
+      <div class="row"><input id="sd-pe-dis" type="checkbox" checked="{{pe.dis}}" onChange="{{peDis}}"><label for="sd-pe-dis">Disable scale-in</label></div>
+      <sc-if value="{{peErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{peErr}}</span></sc-if>
+      <div class="row"><button class="btn btn-p btn-s" type="button" onClick="{{fn.savePol}}" disabled="{{peNo}}">Save policy</button><button class="btn btn-s" type="button" onClick="{{fn.cancelPol}}">Cancel</button></div>
+     </div>
+    </sc-if>
+   </div>
+
+   <div class="stack-s"><div class="row spread"><h3>Scheduled actions</h3><button class="btn btn-s" type="button" onClick="{{fn.newAct}}" disabled="{{locked}}">[[i:plus]]Add scheduled action</button></div>
+    <div class="tw" style="border:1px solid var(--border);border-radius:var(--r)"><table class="tbl" style="min-width:680px"><thead><tr><th>Name</th><th>Schedule</th><th>Timezone</th><th class="num">Min</th><th class="num">Max</th><th></th></tr></thead>
+     <tbody><sc-for list="{{sch}}" as="a" hint-placeholder-count="2"><tr><td class="mono">{{a.name}}</td><td class="mono">{{a.sched}}</td><td>{{a.tz}}</td><td class="num mono">{{a.min}}</td><td class="num mono">{{a.max}}</td>
+      <td><div class="acts"><button class="btn btn-s" type="button" onClick="{{a.ed}}" disabled="{{locked}}">Edit</button><button class="btn btn-s btn-d" type="button" aria-label="Remove scheduled action {{a.name}}" onClick="{{a.rm}}" disabled="{{locked}}">Remove</button></div></td></tr></sc-for></tbody></table></div>
+    <sc-if value="{{aeOpen}}" hint-placeholder-val="{{false}}">
+     <div class="stack-s" style="border:1px solid var(--accent-line);border-radius:var(--r);padding:12px;background:var(--raised)" role="group" aria-label="Scheduled action editor">
+      <h3>{{aeTitle}}</h3>
+      <div class="fields">
+       <div class="field"><label for="sd-ae-name">Name</label><input id="sd-ae-name" class="input mono" value="{{ae.name}}" onChange="{{aeNm}}"></div>
+       <div class="field"><label for="sd-ae-tz">Timezone</label><select id="sd-ae-tz" class="select" value="{{ae.tz}}" onChange="{{aeTz}}"><sc-for list="{{tz}}" as="z" hint-placeholder-count="4"><option value="{{z.v}}">{{z.v}}</option></sc-for></select></div>
+       <sc-if value="{{aeOther}}" hint-placeholder-val="{{false}}"><div class="field"><label for="sd-ae-tzc">Region/City</label><input id="sd-ae-tzc" class="input" placeholder="Region/City" value="{{ae.tzc}}" onChange="{{aeTzc}}"></div></sc-if>
+      </div>
+      <div class="seg" role="group" aria-label="Schedule type" style="align-self:flex-start"><sc-for list="{{aeKind}}" as="k" hint-placeholder-count="3"><button type="button" aria-pressed="{{k.pressed}}" onClick="{{k.pick}}">{{k.label}}</button></sc-for></div>
+      <sc-if value="{{aeCron}}" hint-placeholder-val="{{true}}"><div class="field"><label for="sd-ae-cron">Cron fields</label><input id="sd-ae-cron" class="input mono" placeholder="0 7 * * ? *" value="{{ae.cron}}" onChange="{{aeCronIn}}"><span class="hint">Minutes, hours, day of month, month, day of week, year: for example 0 7 * * ? *</span></div></sc-if>
+      <sc-if value="{{aeAt}}" hint-placeholder-val="{{false}}"><div class="field"><label for="sd-ae-at">Date and time</label><input id="sd-ae-at" class="input mono" placeholder="2026-12-01T07:00:00" value="{{ae.at}}" onChange="{{aeAtIn}}"></div></sc-if>
+      <sc-if value="{{aeRate}}" hint-placeholder-val="{{false}}"><div class="fields"><div class="field"><label for="sd-ae-every">Every</label><input id="sd-ae-every" class="input mono" inputmode="numeric" value="{{ae.every}}" onChange="{{aeEvery}}"></div><div class="field"><label for="sd-ae-unit">Unit</label><select id="sd-ae-unit" class="select" value="{{ae.unit}}" onChange="{{aeUnit}}"><option value="minutes">minutes</option><option value="hours">hours</option><option value="days">days</option></select></div></div></sc-if>
+      <div class="fields">
+       <div class="field"><label for="sd-ae-min">Minimum capacity</label><input id="sd-ae-min" class="input mono" inputmode="numeric" value="{{ae.min}}" onChange="{{aeMin}}"></div>
+       <div class="field"><label for="sd-ae-max">Maximum capacity</label><input id="sd-ae-max" class="input mono" inputmode="numeric" value="{{ae.max}}" onChange="{{aeMax}}"></div>
+      </div>
+      <span class="hint">Set at least one. The other stays as it is when the action runs.</span>
+      <sc-if value="{{aeErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">{{aeErr}}</span></sc-if>
+      <div class="row"><button class="btn btn-p btn-s" type="button" onClick="{{fn.saveAct}}" disabled="{{aeNo}}">Save action</button><button class="btn btn-s" type="button" onClick="{{fn.cancelAct}}">Cancel</button></div>
+     </div>
+    </sc-if>
+   </div>
+  </sc-if>
+ </div>
+</section>
+</div>
+
+<aside class="panel" aria-label="Pending changes" style="position:sticky;top:72px;align-self:start;max-height:calc(100vh - 90px);overflow:auto">
+ <div class="panel-h"><div class="row"><span class="panel-t">Pending changes</span><span class="chip">{{nLabel}}</span></div></div>
+ <div class="panel-b stack">
+  <button class="btn btn-g btn-s" type="button" style="align-self:flex-start" onClick="{{loadRev}}">Load an earlier revision</button><sc-if value="{{chipOn}}" hint-placeholder-val="{{true}}"><div class="row" style="gap:6px"><span class="chip mono">:41 is loaded from the revisions list</span><button class="btn btn-g btn-s" type="button" onClick="{{chipDismiss}}">Dismiss :41</button></div></sc-if>
+  <sc-if value="{{none}}" hint-placeholder-val="{{true}}"><div class="mut sm">No changes yet. Edit a field on the left and it appears here with its before and after values.</div></sc-if>
+  <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column">
+   <sc-for list="{{items}}" as="x" hint-placeholder-count="3"><li style="display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:8px 0;border-bottom:1px solid var(--row-border)">
+    <div><div class="sm mut">{{x.grp}}</div><div class="b">{{x.label}}</div><div class="mono wrap"><span class="c2">{{x.before}}</span> → <span class="b">{{x.after}}</span></div></div>
+    <button class="btn btn-g btn-s" type="button" aria-label="{{x.aria}}" onClick="{{x.rv}}">Discard</button></li></sc-for>
+  </ul>
+  <sc-if value="{{hasProb}}" hint-placeholder-val="{{false}}"><div class="ban ban-bad" role="alert">[[i:warn]]<div class="grow"><b>Fix before review</b><ul style="margin:4px 0 0;padding-left:16px"><sc-for list="{{problems}}" as="p" hint-placeholder-count="1"><li>{{p.m}}</li></sc-for></ul></div></div></sc-if>
+  <div class="row spread"><button class="btn" type="button" onClick="{{discard}}" disabled="{{none}}">Discard</button><button class="btn btn-p" type="button" onClick="{{openRev}}" disabled="{{cantReview}}" title="{{lockTip}}">Review…</button></div>
+  <div class="hint">Nothing reaches AWS until you confirm in the review step.</div>
+ </div>
+</aside>
+</div>
+
+<sc-if value="{{rbOpen}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close" onClick="{{closeRb}}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-label="Roll back payments-api to :42">
+ <div class="modal-h"><h2>Roll back payments-api to :42?</h2></div>
+ <div class="modal-b"><div>Stops the rollout of :43 and returns the service to :42.</div></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeRb}}">Cancel</button><button class="btn btn-dp" type="button" onClick="{{doRb}}">Roll back to :42</button></div>
+</div>
+</sc-if>
+
+<sc-if value="{{revOpen}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close" onClick="{{closeRev}}"></button>
+<div class="modal wide" role="dialog" aria-modal="true" aria-label="Review changes to payments-api">
+ <div class="modal-h"><h2>Review changes to payments-api</h2><div class="sm c2">{{sum}}</div></div>
+ <div class="modal-b">
+  <div class="row"><span class="lab">Show state</span><div class="seg" role="group" aria-label="Show state"><sc-for list="{{dstSeg}}" as="o" hint-placeholder-count="3"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div></div>
+  <div class="ban ban-warn">[[i:warn]]<div class="grow"><b>This is a Prod service.</b> Changes reach live traffic as soon as the rollout starts.</div></div>
+  <sc-if value="{{dMoved}}" hint-placeholder-val="{{false}}">
+   <div class="ban ban-warn">[[i:warn]]<div class="grow">The service moved from :41 to :42 while you were editing. Check the diff before applying.</div></div>
+   <div class="ban ban-warn">[[i:warn]]<div class="grow"><b>Settings changed while you were editing</b><div class="sm">The left-hand values are the current ones; check them before applying.</div></div></div>
+  </sc-if>
+  <sc-if value="{{dPartial}}" hint-placeholder-val="{{false}}">
+   <div class="stack-s"><h3>What happened</h3>
+    <div class="feed" style="border:1px solid var(--border);border-radius:var(--r)">
+     <div><span class="st st-ok">Done</span><span><b>Register revision</b> Registered payments-api:43.</span></div>
+     <div><span class="st st-bad">Failed</span><span><b>Update service</b> ECS rejected the update: the service has a deployment in progress. Wait for it to finish, then retry.</span></div>
+     <div><span class="st st-mute">Skipped</span><span><b>Update auto scaling</b> Skipped because the service update failed.</span></div>
+    </div>
+    <div class="ban ban-bad" role="alert">[[i:warn]]<div class="grow">Revision :43 is registered but not deployed. Retry the remaining steps, or close this dialog and deploy it later.</div></div>
+   </div>
+  </sc-if>
+  <sc-if value="{{tdChanged}}" hint-placeholder-val="{{true}}">
+   <div class="stack-s"><h3>Task definition: new revision :43 <span class="mono mut">:42 → :43</span></h3>
+    <div class="code" role="region" aria-label="Task definition line diff" tabindex="0" style="max-height:300px"><sc-for list="{{tdRows}}" as="r" hint-placeholder-count="12"><div style="{{r.st}}">{{r.line}}</div></sc-for></div></div>
+  </sc-if>
+  <sc-if value="{{hasSvc}}" hint-placeholder-val="{{false}}">
+   <div class="stack-s"><h3>Service</h3><dl class="kv"><sc-for list="{{svcRows}}" as="r" hint-placeholder-count="2"><dt>{{r.label}}</dt><dd class="mono"><span class="c2">{{r.before}}</span> → <b>{{r.after}}</b></dd></sc-for></dl></div>
+  </sc-if>
+  <sc-if value="{{hasAs}}" hint-placeholder-val="{{false}}">
+   <div class="stack-s"><h3>Auto scaling</h3><ul style="margin:0;padding-left:16px"><sc-for list="{{asRows}}" as="r" hint-placeholder-count="2"><li><span class="b">{{r.label}}</span>: <span class="mono"><span class="c2">{{r.before}}</span> → {{r.after}}</span></li></sc-for></ul></div>
+  </sc-if>
+  <div class="field"><label for="sd-reason">Reason</label><textarea id="sd-reason" class="textarea" placeholder="Optional. Shown in the operations log." value="{{reason}}" onChange="{{onReason}}"></textarea><span class="hint mono" style="text-align:right">{{reasonN}}</span></div>
+ </div>
+ <div class="modal-f">
+  <sc-if value="{{dNotPartial}}" hint-placeholder-val="{{true}}"><button class="btn" type="button" onClick="{{closeRev}}">Keep editing</button><button class="btn btn-p" type="button" onClick="{{doDeploy}}">{{primary}}</button></sc-if>
+  <sc-if value="{{dPartial}}" hint-placeholder-val="{{false}}"><button class="btn" type="button" onClick="{{closeRev}}">Close</button><button class="btn btn-p" type="button" onClick="{{retry}}">Retry remaining steps</button></sc-if>
+ </div>
+</div>
+</sc-if>

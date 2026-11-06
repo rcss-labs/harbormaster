@@ -1,0 +1,39 @@
+<!--meta title="Service logs" nav="services" crumbs="Clusters|Clusters > core-services|ClusterDetail > payments-api" h="1000"-->
+<!--@svcheader tab="logs"-->
+<section class="panel fill-col fill-page" aria-label="Logs">
+ <div class="panel-h">
+  <div class="toolbar">
+   <label class="lab" for="lg-c">Container</label>
+   <select id="lg-c" class="select" style="width:auto" value="{{container}}" onChange="{{onContainer}}"><sc-for list="{{conts}}" as="o" hint-placeholder-count="5"><option value="{{o.id}}" disabled="{{o.dis}}">{{o.label}}</option></sc-for></select>
+   <div class="seg" role="group" aria-label="Level"><sc-for list="{{level}}" as="o" hint-placeholder-count="3"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+   <input id="lg-q" class="input" style="min-width:220px" placeholder="Search logs" aria-label="Search logs" value="{{q}}" onChange="{{onQ}}">
+   <div class="seg" role="group" aria-label="Tail"><sc-for list="{{tail}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+  </div>
+  <div class="row"><span class="mut sm" role="status">{{status}}</span>
+   <label class="lab" for="lg-st">Show states</label>
+   <select id="lg-st" class="select" style="width:auto;min-height:26px" value="{{st}}" onChange="{{onSt}}"><sc-for list="{{states}}" as="o" hint-placeholder-count="8"><option value="{{o.id}}">{{o.label}}</option></sc-for></select></div>
+ </div>
+ <div class="stack-s" style="padding:0 var(--pad)">
+  <sc-if value="{{bUnsup}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn" style="margin-top:10px">[[i:warn]]<div class="grow">datadog-agent logs go to a different log group. Harbormaster cannot show those logs.</div></div><div class="ban ban-warn">[[i:warn]]<div class="grow">log-router logs go to the awsfirelens driver. Harbormaster cannot show those logs.</div></div></sc-if>
+  <sc-if value="{{bIdle}}" hint-placeholder-val="{{false}}"><div class="ban ban-info" style="margin-top:10px">[[i:info]]<div class="grow">Live tail stopped after 30 minutes idle.</div><button class="btn btn-s" type="button" onClick="{{resume}}">Resume</button></div></sc-if>
+  <sc-if value="{{bSession}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn" style="margin-top:10px">[[i:warn]]<div class="grow">Your session changed. Reload the page to follow logs again.</div></div></sc-if>
+  <sc-if value="{{bDisc}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn" style="margin-top:10px">[[i:warn]]<div class="grow">Live tail disconnected.</div><button class="btn btn-s" type="button" onClick="{{resume}}">Resume</button></div></sc-if>
+  <sc-if value="{{bErr}}" hint-placeholder-val="{{false}}"><div class="ban ban-bad" style="margin:10px 0">[[i:warn]]<div class="grow"><b>The logs could not be loaded.</b> CloudWatch Logs did not answer. Retry; the rest of this service still works.</div><button class="btn btn-s" type="button" onClick="{{retry}}">Retry</button></div></sc-if>
+ </div>
+ <sc-if value="{{showLog}}" hint-placeholder-val="{{true}}">
+ <div class="panel-b" style="border-bottom:1px solid var(--border)">
+  <div class="row spread" style="margin-bottom:6px"><span class="b">Volume by level, per minute</span>
+   <span class="leg"><span><i style="background:var(--muted);opacity:.55"></i>Info {{sumInfo}}</span><span><i style="background:var(--warn)"></i>Warnings {{sumWarn}}</span><span><i style="background:var(--bad)"></i>Errors {{sumErr}}</span></span></div>
+  <sc-if value="{{hasHist}}" hint-placeholder-val="{{true}}"><div role="img" aria-label="Log lines per minute stacked by level" style="display:flex;gap:3px;align-items:flex-end;height:60px"><sc-for list="{{hist}}" as="b" hint-placeholder-count="12"><div title="{{b.tip}}" style="flex:1 1 0;display:flex;flex-direction:column-reverse;gap:1px;min-width:6px"><sc-for list="{{b.segs}}" as="g" hint-placeholder-count="2"><i style="{{g.style}}" title="{{g.title}}"></i></sc-for></div></sc-for></div></sc-if>
+ </div>
+ <div class="fill-scroll" style="font:400 12px/1.5 var(--mono)">
+  <sc-if value="{{noOlder}}" hint-placeholder-val="{{true}}"><div style="padding:8px var(--pad);text-align:center"><button class="btn btn-s" type="button" onClick="{{loadOlder}}">Load older</button></div></sc-if>
+  <sc-if value="{{older}}" hint-placeholder-val="{{false}}"><div class="mut" style="padding:8px var(--pad);text-align:center">Showing from the start of the retained window.</div></sc-if>
+  <sc-for list="{{rows}}" as="r" hint-placeholder-count="14"><div>
+   <button type="button" style="{{r.sty}}" aria-expanded="{{r.exp}}" aria-label="{{r.aria}}" onClick="{{r.pick}}"><span class="mut">{{r.t}}</span><b style="{{r.mkSty}}">{{r.mk}}</b><span class="mut">{{r.stream}}</span><span class="wrap">{{r.msg}}</span></button>
+   <sc-if value="{{r.open}}" hint-placeholder-val="{{false}}"><div class="panel-b" style="background:var(--raised);border-bottom:1px solid var(--row-border)"><dl class="kv" style="margin:0 0 8px"><dt>Level</dt><dd>{{r.d.level}}</dd><dt>Time</dt><dd class="mono">{{r.d.time}}</dd><dt>Log group</dt><dd class="mono">{{r.d.group}}</dd><dt>Log stream</dt><dd class="mono">{{r.d.stream}}</dd><dt>Task</dt><dd class="mono">{{r.d.task}}</dd><dt>Container</dt><dd>{{r.d.container}}</dd><dt>Ingested</dt><dd class="mono">{{r.d.ingested}}</dd></dl><div class="code" style="white-space:pre-wrap">{{r.d.full}}</div></div></sc-if></div></sc-for>
+  <sc-if value="{{none}}" hint-placeholder-val="{{false}}"><div class="empty">No log lines.<button class="btn btn-s" type="button" onClick="{{clear}}">Clear filters</button></div></sc-if>
+ </div>
+ <div class="panel-f"><span>{{count}} lines shown. Click a line for details.</span><span class="mut">Times are UTC.</span></div>
+ </sc-if>
+</section>

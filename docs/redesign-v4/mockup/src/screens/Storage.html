@@ -1,0 +1,23 @@
+<!--meta title="Storage" nav="storage" crumbs="Storage" h="760"-->
+<div class="ph"><div><h1>Storage</h1><div class="sub">EFS file systems and the services that mount them. File systems are created by Terraform.</div></div></div>
+<div class="kpis">
+ <div class="kpi"><span class="k">File systems</span><span class="v">{{total}}</span></div>
+ <div class="kpi"><span class="k">Total stored</span><span class="v">{{stored}} GB</span></div>
+ <div class="kpi"><span class="k">Mounted</span><span class="v">{{mountedN}}</span></div>
+ <div class="kpi"><span class="k">Not mounted, still billed</span><span class="v c-warn">{{unmountedGb}} GB</span><span class="d">{{unmountedN}} file system</span></div>
+</div>
+<section class="panel" aria-label="File systems">
+ <div class="panel-h"><div class="row"><span class="panel-t">File systems</span>
+  <div class="seg" role="group" aria-label="Mount state"><sc-for list="{{seg}}" as="o" hint-placeholder-count="3"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}<span class="n">{{o.n}}</span></button></sc-for></div></div>
+  <input id="st-q" class="input" style="width:280px" placeholder="Search name, id, region or service" aria-label="Search file systems" value="{{q}}" onChange="{{onQ}}">
+ </div>
+ <div class="tw"><table class="tbl" style="min-width:960px"><thead><tr><th>File system</th><th class="num">Size</th><th>Growth, 30 d</th><th>Throughput</th><th>Access points</th><th>Mounted by</th></tr></thead>
+ <tbody><sc-for list="{{rows}}" as="r" hint-placeholder-count="5"><tr class="{{r.stripe}}">
+  <td class="two"><span class="b">{{r.name}}</span><small class="mono">{{r.id}} · {{r.region}} · {{r.vpc}}</small></td>
+  <td class="num mono">{{r.gb}} GB</td><td class="mono">{{r.growth}}</td><td><span class="mono">{{r.mibs}} MiB/s</span> <span class="mut sm">{{r.mode}}</span></td><td class="mono">{{r.ap}}</td>
+  <td class="two"><sc-if value="{{r.isMounted}}" hint-placeholder-val="{{true}}"><sc-for list="{{r.mounted}}" as="m" hint-placeholder-count="1"><div><a href="SvcOverview.dc.html">{{m.svc}}</a> <span class="mono mut">{{m.path}}</span></div></sc-for></sc-if>
+   <sc-if value="{{r.notMounted}}" hint-placeholder-val="{{false}}"><span class="st st-warn">Not mounted</span><small>No service mounts this file system.</small></sc-if></td>
+ </tr></sc-for></tbody></table></div>
+ <sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div class="empty">No file systems match.<button class="btn btn-s" type="button" onClick="{{clear}}">Clear filters</button></div></sc-if>
+</section>
+<section class="panel" aria-label="Storage use"><div class="panel-h"><span class="panel-t">Stored data, 30 days</span><!--@legend k="trend"--></div><div class="panel-b"><!--@line k="trend" label="Stored data grew from 322 to 337 GB over 30 days"--></div></section>

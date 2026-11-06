@@ -1,0 +1,32 @@
+<!--meta title="Service metrics" nav="services" crumbs="Clusters|Clusters > core-services|ClusterDetail > payments-api" h="1100"-->
+<!--@svcheader tab="metrics"-->
+<div class="toolbar">
+ <div class="seg" role="group" aria-label="Range"><sc-for list="{{rangeSeg}}" as="o" hint-placeholder-count="4"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+ <span class="mut sm grow">Container Insights via CloudWatch · 5-minute resolution, averaged across 3 tasks</span>
+ <span class="mut sm">Show state</span>
+ <div class="seg" role="group" aria-label="Metrics state"><sc-for list="{{stateSeg}}" as="o" hint-placeholder-count="4"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+</div>
+<sc-if value="{{insightsOff}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn" role="status">[[i:warn]]<div class="grow">Container Insights is off for core-services, so per-service metrics are not available. Turn it on in the cluster's Terraform: <span class="mono">setting { name = "containerInsights" value = "enhanced" }</span></div></div></sc-if>
+<sc-if value="{{hasError}}" hint-placeholder-val="{{false}}"><div class="ban ban-bad" role="alert">[[i:warn]]<div class="grow"><b>The metrics could not be loaded.</b> CloudWatch did not answer within 10 seconds. Retry, or check the harbormaster-access role allows cloudwatch:GetMetricData.</div><button class="btn btn-s" type="button" onClick="{{retry}}">Retry</button></div></sc-if>
+<sc-if value="{{showGrid}}" hint-placeholder-val="{{true}}">
+<div class="g2">
+ <section class="panel" aria-label="CPU utilization"><div class="panel-h"><span class="panel-t">CPU utilization</span><div class="row"><span class="mut sm">{{stale}}</span><span class="b mono">{{nowCpu}}</span></div></div>
+  <sc-if value="{{showCharts}}" hint-placeholder-val="{{true}}"><div class="panel-b"><!--@line k="cpu" label="CPU utilization over the selected range"--></div></sc-if>
+  <sc-if value="{{noData}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if></section>
+ <section class="panel" aria-label="Memory utilization"><div class="panel-h"><span class="panel-t">Memory utilization</span><div class="row"><span class="mut sm">{{stale}}</span><span class="b mono">{{nowMem}}</span></div></div>
+  <sc-if value="{{showCharts}}" hint-placeholder-val="{{true}}"><div class="panel-b"><!--@line k="mem" label="Memory utilization over the selected range"--></div></sc-if>
+  <sc-if value="{{noData}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if></section>
+ <section class="panel" aria-label="Requests per minute"><div class="panel-h"><span class="panel-t">Requests per minute</span><div class="row"><span class="mut sm">{{stale}}</span><span class="b mono">{{nowRpm}}</span></div></div>
+  <sc-if value="{{showCharts}}" hint-placeholder-val="{{true}}"><div class="panel-b"><!--@line k="rpm" label="Requests per minute over the selected range"--></div></sc-if>
+  <sc-if value="{{noData}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if></section>
+ <section class="panel" aria-label="Response time p95"><div class="panel-h"><span class="panel-t">Response time p95</span><div class="row"><span class="mut sm">{{stale}}</span><span class="b mono">{{nowP95}}</span></div></div>
+  <sc-if value="{{showCharts}}" hint-placeholder-val="{{true}}"><div class="panel-b"><!--@line k="p95" label="Response time p95 over the selected range"--></div></sc-if>
+  <sc-if value="{{noData}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if></section>
+ <section class="panel" aria-label="Network"><div class="panel-h"><span class="panel-t">Network</span><div class="row"><!--@legend k="net"--><span class="mut sm">{{stale}}</span><span class="b mono">{{nowNet}}</span></div></div>
+  <sc-if value="{{showCharts}}" hint-placeholder-val="{{true}}"><div class="panel-b"><!--@line k="net" label="Network received and sent over the selected range"--></div></sc-if>
+  <sc-if value="{{noData}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if></section>
+ <section class="panel" aria-label="Running task count"><div class="panel-h"><span class="panel-t">Running task count</span><div class="row"><span class="mut sm">{{stale}}</span><span class="b mono">{{nowCnt}}</span></div></div>
+  <sc-if value="{{showCharts}}" hint-placeholder-val="{{true}}"><div class="panel-b"><!--@line k="cnt" label="Running task count over the selected range"--></div></sc-if>
+  <sc-if value="{{noData}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if></section>
+</div>
+</sc-if>

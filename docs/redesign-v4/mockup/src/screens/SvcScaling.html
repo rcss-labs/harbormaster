@@ -1,0 +1,55 @@
+<!--meta title="Service scaling" nav="services" crumbs="Clusters|Clusters > core-services|ClusterDetail > payments-api" h="1000"-->
+<!--@svcheader tab="scaling"-->
+<div class="toolbar"><span class="mut sm">Show state</span>
+ <div class="seg" role="group" aria-label="Auto scaling state"><sc-for list="{{asSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div></div>
+<div class="g2">
+ <section class="panel" aria-label="Desired count">
+  <div class="panel-h"><span class="panel-t">Desired count</span><span class="mono b">{{desired}} now</span></div>
+  <div class="panel-b stack">
+   <sc-if value="{{hasAs}}" hint-placeholder-val="{{true}}">
+    <div class="stack-s"><div class="row spread sm mut"><span>0</span><span>Auto scaling range {{min}} to {{max}}</span><span>10</span></div>
+     <div style="position:relative;height:22px" role="img" aria-label="{{barAria}}">
+      <div style="position:absolute;left:0;right:0;top:9px;height:4px;border-radius:2px;background:var(--active)"></div>
+      <div style="{{rangeStyle}}"></div>
+      <div style="{{markStyle}}"></div>
+     </div>
+     <div class="row sm c2"><span class="row" style="gap:5px"><i style="display:inline-block;width:18px;height:6px;border-radius:3px;background:var(--accent)"></i>Allowed range</span><span class="row" style="gap:5px"><i style="display:inline-block;width:3px;height:14px;background:var(--text)"></i>Desired {{desired}}</span></div></div>
+   </sc-if>
+   <div class="row">
+    <span class="lab">Scale to</span>
+    <div class="stepper"><button type="button" aria-label="Decrease" onClick="{{dec}}">-</button><input id="sc-draft" class="input mono" style="width:72px;border:0;text-align:center" type="number" min="0" max="10" aria-label="Scale to" value="{{draft}}" onChange="{{onDraft}}"><button type="button" aria-label="Increase" onClick="{{inc}}">+</button></div>
+    <button class="btn btn-p" type="button" title="Needs Operate on Prod" onClick="{{update}}">Update desired count</button>
+   </div>
+   <sc-if value="{{invalid}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Enter a whole number from 0 to 10.</span></sc-if>
+   <sc-if value="{{outside}}" hint-placeholder-val="{{false}}"><span class="st st-warn">Outside the auto scaling range {{min}} to {{max}}. Auto scaling moves it back.</span></sc-if>
+   <sc-if value="{{atCap}}" hint-placeholder-val="{{false}}"><span class="st st-warn">The most this service can run is 10 tasks.</span></sc-if>
+   <p class="c2">{{note}}</p>
+  </div>
+ </section>
+ <section class="panel" aria-label="Auto scaling">
+  <div class="panel-h"><span class="panel-t">Auto scaling</span><span class="row"><span class="mut sm">Application Auto Scaling · set in Terraform</span><a href="SvcDeploy.dc.html">Edit in Deploy</a></span></div>
+  <sc-if value="{{hasAs}}" hint-placeholder-val="{{true}}">
+   <dl class="kv panel-b" style="margin:0">
+    <dt>Minimum tasks</dt><dd class="mono">2</dd><dt>Maximum tasks</dt><dd class="mono">6</dd>
+    <dt>Policy</dt><dd>Target tracking · <span class="mono">ECSServiceAverageCPUUtilization</span> at <span class="mono">60%</span></dd>
+    <dt>Scale-out cooldown</dt><dd class="mono">60 s</dd><dt>Scale-in cooldown</dt><dd class="mono">300 s</dd>
+    <dt>Scheduled actions</dt><dd><span class="mono">weekday-peak: cron(0 8 ? * MON-FRI *) to min 3</span></dd>
+   </dl>
+  </sc-if>
+  <sc-if value="{{noAs}}" hint-placeholder-val="{{false}}"><div class="empty">This service has no scalable target registered.</div></sc-if>
+ </section>
+</div>
+<section class="panel" aria-label="Scaling activity">
+ <div class="panel-h"><span class="panel-t">Scaling activity</span><span class="mut sm">Newest first, last 7 days</span></div>
+ <sc-if value="{{hasAs}}" hint-placeholder-val="{{true}}"><div class="feed"><sc-for list="{{acts}}" as="a" hint-placeholder-count="5"><div><span class="mut sm">{{a.when}}</span><div class="stack-s" style="gap:0"><span><span class="st st-{{a.status}}">{{a.statusL}}</span> {{a.text}}</span><span class="mut sm">{{a.cause}}</span></div></div></sc-for></div></sc-if>
+ <sc-if value="{{noAs}}" hint-placeholder-val="{{false}}"><div class="empty">No scaling activity in the last 7 days.</div></sc-if>
+</section>
+<sc-if value="{{dlg}}" hint-placeholder-val="{{false}}">
+ <button class="scrim" type="button" aria-label="Close dialog" onClick="{{close}}"></button>
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sc-dlg-t">
+  <div class="modal-h"><h2 id="sc-dlg-t">{{title}}</h2><div class="mut">Now {{desired}}.</div></div>
+  <div class="modal-b"><sc-if value="{{zero}}" hint-placeholder-val="{{false}}"><p class="c-warn">Every task stops. The service and its definition stay.</p></sc-if>
+   <sc-if value="{{outside}}" hint-placeholder-val="{{false}}"><p class="c-warn">Auto scaling keeps this service between {{min}} and {{max}}. It will move {{draft}} back into that range.</p></sc-if></div>
+  <div class="modal-f"><button class="btn" type="button" onClick="{{close}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{confirm}}">Update desired count</button></div>
+ </div>
+</sc-if>

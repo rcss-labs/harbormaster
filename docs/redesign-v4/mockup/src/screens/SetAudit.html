@@ -1,0 +1,20 @@
+<!--meta title="Settings: Audit log" nav="settings" crumbs="Settings|SetGeneral > Audit log" h="900"-->
+<!--@settingsnav tab="audit"-->
+<div class="row" style="justify-content:flex-end"><span class="mut sm">Preview as</span>
+ <div class="seg" role="group" aria-label="Preview as"><sc-for list="{{viewSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div></div>
+<sc-if value="{{isAdmin}}" hint-placeholder-val="{{true}}">
+<section class="panel" aria-label="Audit log">
+ <div class="panel-h"><div class="row"><span class="panel-t">Audit log</span><span class="mut sm">Sign-ins and changes to users, permissions and tags</span>
+   <button class="btn btn-g btn-s btn-i" type="button" aria-label="About this log: Service actions are in each service's operations log." title="Service actions are in each service's operations log." onClick="{{about}}">[[i:info]]</button></div>
+  <span class="mut sm">{{countL}}</span></div>
+ <div class="panel-b"><div class="toolbar">
+  <label class="sr" for="au-type" style="position:absolute;left:-9999px">Type</label>
+  <select id="au-type" class="select" style="width:180px;flex:0 0 auto" aria-label="Type" onChange="{{onType}}"><sc-for list="{{types}}" as="t" hint-placeholder-count="5"><option value="{{t.v}}" selected="{{t.sel}}">{{t.label}}</option></sc-for></select>
+  <input id="au-q" class="input" placeholder="Filter by text" aria-label="Filter by text" value="{{q}}" onChange="{{onQ}}">
+  <sc-if value="{{filtered}}" hint-placeholder-val="{{false}}"><button class="btn btn-s" type="button" onClick="{{clear}}">Clear filters</button></sc-if></div></div>
+ <sc-if value="{{hasRows}}" hint-placeholder-val="{{true}}"><div class="feed" role="list"><sc-for list="{{rows}}" as="r" hint-placeholder-count="8"><div role="listitem"><span class="mono mut" title="{{r.abs}}">{{r.when}}</span><div><span class="b">{{r.actor}}</span> <span>{{r.text}}</span> <span class="chip">{{r.type}}</span></div></div></sc-for></div></sc-if>
+ <sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div class="empty">No entries match.<button class="btn btn-s" type="button" onClick="{{clear}}">Clear filters</button></div></sc-if>
+ <sc-if value="{{more}}" hint-placeholder-val="{{true}}"><div class="panel-f" style="justify-content:center"><button class="btn" type="button" onClick="{{loadMore}}">Load more</button></div></sc-if>
+</section>
+</sc-if>
+<sc-if value="{{noAccess}}" hint-placeholder-val="{{false}}"><section class="panel" aria-label="No access"><div class="panel-h"><span class="panel-t">No access</span></div><div class="panel-b">Only global admins can read the audit log.</div></section></sc-if>

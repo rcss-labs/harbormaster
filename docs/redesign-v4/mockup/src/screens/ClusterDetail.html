@@ -1,0 +1,68 @@
+<!--meta title="Cluster detail" nav="clusters" crumbs="Clusters|Clusters > core-services" h="1300"-->
+<div class="ph"><div class="stack-s" style="gap:4px">
+  <div class="row"><h1 class="mono">{{name}}</h1>
+   <button class="{{tagCls}}" type="button" style="background:none;font-family:inherit;cursor:pointer" title="Edit tag for {{name}}" aria-label="Edit tag for {{name}}, now {{tag}}" onClick="{{editClusterTag}}">{{tag}}</button>
+   <span class="st st-{{status}}">{{statusL}}</span>
+   <button class="btn btn-s" type="button" aria-pressed="{{pinned}}" onClick="{{togglePin}}">[[i:pin]]{{pinL}}</button></div>
+  <div class="sub">{{acct}} ({{acctId}}) · {{region}} · VPC <a href="Networks.dc.html">{{vpc}}</a> · {{fargate}} Fargate · {{spot}} Spot</div></div>
+ <div class="row"><a class="btn" href="Tasks.dc.html">Tasks in this cluster</a><a class="btn" href="ClusterDetail.dc.html" title="Opens the AWS console in a new tab">Open in AWS console &#8599;</a></div>
+</div>
+<div class="kpis">
+ <div class="kpi"><span class="k">Services</span><span class="v">{{nSvc}}</span><span class="d">{{nSteady}} steady</span></div>
+ <div class="kpi"><span class="k">Tasks</span><span class="v">{{running}}/{{desired}}</span><span class="d {{missCls}}">{{missL}}</span><!--@spark k="sTasks" color="var(--s1)"--></div>
+ <div class="kpi"><span class="k">Reserved</span><span class="v">{{vcpu}} vCPU</span><span class="d">{{gib}} GiB memory</span></div>
+ <div class="kpi"><span class="k">CPU now</span><span class="v">{{cpuNow}}</span><span class="d">{{cpuNote}}</span></div>
+ <div class="kpi"><span class="k">Memory now</span><span class="v">{{memNow}}</span><span class="d">{{memNote}}</span></div>
+</div>
+<div class="g2">
+ <section class="panel" aria-label="Cluster CPU and memory">
+  <div class="panel-h"><span class="panel-t">Cluster CPU and memory, 24 h</span>
+   <div class="row"><div class="leg"><span><i style="background:var(--s1)"></i>CPU</span><span><i style="background:var(--s2)"></i>Memory</span><span><i style="background:none;border-top:2px dashed var(--text-2);height:0;width:12px"></i>Deployment</span></div>
+   <button class="btn btn-s" type="button" onClick="{{openInsights}}">Container Insights</button></div></div>
+  <div class="panel-b stack-s">
+   <sc-if value="{{insightsOff}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn">[[i:warn]]<div class="grow">Container Insights is off for this cluster.</div></div></sc-if>
+   <sc-if value="{{chartError}}" hint-placeholder-val="{{false}}"><div class="ban ban-bad">[[i:warn]]<div class="grow">The CPU and memory history could not be read from CloudWatch.</div><button class="btn btn-s" type="button" onClick="{{openInsights}}">Retry</button></div></sc-if>
+   <sc-if value="{{chartEmpty}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if>
+   <!--@line k="cpuChart" label="Cluster CPU near 41 percent and memory near 58 percent over 24 hours, with a deployment of revision 10 three minutes ago"-->
+  </div>
+ </section>
+ <section class="panel" aria-label="Tasks by service">
+  <div class="panel-h"><span class="panel-t">Tasks by service</span><span class="mut sm">bar = running · tick = desired</span></div>
+  <div class="panel-b stack">
+   <div class="stack-s">
+    <sc-for list="{{byService}}" as="r" hint-placeholder-count="3"><div class="row" style="flex-wrap:nowrap;gap:12px"><a class="mono" style="flex:0 0 130px" href="SvcOverview.dc.html">{{r.name}}</a>
+     <div class="meter" style="flex:1 1 auto"><i><b class="{{r.cls}}" style="{{r.bar}}"></b><s style="{{r.tick}}"></s></i><span style="min-width:48px">{{r.running}} / {{r.desired}}</span></div></div></sc-for>
+    <sc-if value="{{hasMoreSvc}}" hint-placeholder-val="{{true}}"><div class="mut sm">{{moreSvc}} more in the table below</div></sc-if>
+   </div>
+   <div class="stack-s"><div class="row spread"><span class="b">Task stops per hour</span><!--@legend k="stops"--></div>
+    <!--@bars k="stops" label="Task stops per hour in core-services over 24 hours: one error exit and a few replaced tasks"--></div>
+  </div>
+ </section>
+</div>
+<section class="panel" aria-label="Services">
+ <div class="panel-h"><span class="panel-t">Services</span><span class="mut sm">{{nSvc}} services · problems first</span></div>
+ <div class="tw"><table class="tbl" style="min-width:1200px"><thead><tr>
+  <sc-for list="{{heads}}" as="h" hint-placeholder-count="10"><th class="{{h.cls}}" aria-sort="{{h.aria}}"><sc-if value="{{h.sortable}}" hint-placeholder-val="{{true}}"><button class="thbtn" type="button" onClick="{{h.pick}}">{{h.label}}<span aria-hidden="true">{{h.arrow}}</span></button></sc-if><sc-if value="{{h.plain}}" hint-placeholder-val="{{false}}">{{h.label}}</sc-if></th></sc-for>
+ </tr></thead>
+ <tbody><sc-for list="{{rows}}" as="r" hint-placeholder-count="4"><tr class="{{r.stripe}}">
+  <td><a class="b mono" href="SvcOverview.dc.html">{{r.name}}</a></td>
+  <td><button class="{{r.tagCls}}" type="button" style="background:none;font-family:inherit;cursor:pointer" title="{{r.tagTip}}" aria-label="Edit tag for {{r.name}}, now {{r.tag}}" onClick="{{r.editTag}}">{{r.tag}}</button></td>
+  <td><span class="st st-{{r.status}}">{{r.statusL}}</span></td>
+  <td class="mono">{{r.taskdef}}</td><td class="mono">{{r.image}}</td><td class="mono {{r.taskTone}}">{{r.tasks}}</td>
+  <td class="mono num">{{r.cpu}}</td><td><div style="width:64px"><!--@spark k="r.spark" color="var(--s1)"--></div></td>
+  <td class="mono num">{{r.mem}}</td><td class="nw">{{r.last}}</td>
+ </tr></sc-for></tbody></table></div>
+ <div class="panel-f"><span>Dashed tags are inherited from the cluster.</span><div class="pager"><span>1&ndash;{{nSvc}} of {{nSvc}}</span><button class="btn btn-s" type="button" disabled onClick="{{togglePin}}">Previous</button><button class="btn btn-s" type="button" disabled onClick="{{togglePin}}">Next</button></div></div>
+</section>
+
+<sc-if value="{{tagOpen}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeTag}}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="cd-tag-t">
+ <div class="modal-h"><h2 id="cd-tag-t">Tag for {{tagFor}}</h2></div>
+ <div class="modal-b"><p class="c2">Permissions follow the tag. Stored in Harbormaster only; AWS tags are not changed.</p>
+  <div class="stack-s" role="group" aria-label="Tag"><sc-for list="{{tagOpts}}" as="o" hint-placeholder-count="4"><button class="btn" type="button" style="justify-content:flex-start" aria-pressed="{{o.on}}" onClick="{{o.pick}}"><span class="st st-{{o.mark}} bare"></span><span class="{{o.cls}}">{{o.name}}</span><span class="mut sm">{{o.note}}</span></button></sc-for></div>
+  <sc-if value="{{tagSame}}" hint-placeholder-val="{{false}}"><div class="hint">This is the current tag. Pick a different one to save.</div></sc-if>
+  <div class="hint">Global admins create tags on the <a href="SetTags.dc.html">Tags page</a>.</div></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeTag}}">Cancel</button><sc-if value="{{tagDiff}}" hint-placeholder-val="{{true}}"><button class="btn btn-p" type="button" onClick="{{saveTag}}">Save tag</button></sc-if><sc-if value="{{tagSame}}" hint-placeholder-val="{{false}}"><button class="btn btn-p" type="button" disabled onClick="{{closeTag}}">Save tag</button></sc-if></div>
+</div>
+</sc-if>

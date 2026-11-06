@@ -1,0 +1,98 @@
+<!--meta title="Settings: Users and permissions" nav="settings" crumbs="Settings|SetGeneral > Users &amp; permissions" h="1000"-->
+<!--@settingsnav tab="users"-->
+<div class="row" style="justify-content:flex-end">
+ <span class="mut sm">Show state</span>
+ <div class="seg" role="group" aria-label="Sign-in mode"><sc-for list="{{modeSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+ <div class="seg" role="group" aria-label="Preview as"><sc-for list="{{viewSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+ <button class="btn btn-p" type="button" onClick="{{openAdd}}">[[i:plus]] Add user</button>
+</div>
+<sc-if value="{{isAdmin}}" hint-placeholder-val="{{true}}">
+<p class="c2" style="margin:0">{{intro}}</p>
+
+<section class="panel" aria-label="Users and permissions">
+ <div class="panel-h"><span class="panel-t">Users &amp; permissions</span><span class="mut sm">Select a preset button to edit what a user can do on a tag</span></div>
+ <div class="tw-pop"><table class="tbl" style="min-width:560px"><thead><tr><th>User</th><sc-for list="{{tagCols}}" as="t" hint-placeholder-count="3"><th><span class="row" style="gap:6px"><span class="tag tag-{{t.name}}">{{t.name}}</span><span class="mut" style="font-weight:400">{{t.effect}} services</span></span></th></sc-for></tr></thead>
+ <tbody><sc-for list="{{matrix}}" as="u" hint-placeholder-count="4"><tr>
+  <td class="two"><span class="b">{{u.name}}</span><small>{{u.role}}</small></td>
+  <sc-if value="{{u.admin}}" hint-placeholder-val="{{false}}"><td colspan="{{tagN}}"><span class="pill pill-info">Everything, on every tag</span></td></sc-if>
+  <sc-if value="{{u.notAdmin}}" hint-placeholder-val="{{true}}"><sc-for list="{{u.cells}}" as="x" hint-placeholder-count="3"><td style="position:relative">
+   <button class="btn btn-s" type="button" aria-haspopup="dialog" aria-expanded="{{x.open}}" aria-label="{{x.aria}}" onClick="{{x.toggle}}">{{x.preset}}<span class="mono mut">{{x.letters}}</span></button>
+   <sc-if value="{{x.open}}" hint-placeholder-val="{{false}}">
+    <button class="scrim" type="button" aria-label="Close permission editor" style="background:transparent;z-index:44" onClick="{{x.close}}"></button>
+    <div class="pop" role="dialog" aria-label="{{x.aria}}" style="{{x.popStyle}}">
+     <div class="stack-s" style="gap:10px">
+      <div class="row spread"><span class="b">{{x.user}} on <span class="tag tag-{{x.tag}}">{{x.tag}}</span></span><button class="btn btn-g btn-s btn-i" type="button" aria-label="Close" onClick="{{x.close}}">[[i:x]]</button></div>
+      <div class="field"><label for="{{x.selId}}">Preset</label><select id="{{x.selId}}" class="select" onChange="{{x.onPreset}}"><sc-for list="{{x.presets}}" as="p" hint-placeholder-count="5"><option value="{{p.v}}" selected="{{p.sel}}" disabled="{{p.dis}}">{{p.label}}</option></sc-for></select></div>
+      <div class="stack-s" style="gap:2px"><sc-for list="{{x.acts}}" as="a" hint-placeholder-count="6"><button class="tog" type="button" aria-pressed="{{a.on}}" onClick="{{a.toggle}}"><i></i><span class="mono b" style="width:14px">{{a.k}}</span><span>{{a.name}}</span></button></sc-for></div>
+      <span class="hint">{{x.hint}}</span>
+     </div>
+    </div>
+   </sc-if></td></sc-for></sc-if>
+ </tr></sc-for></tbody></table></div>
+ <div class="panel-f" style="display:block">
+  <div class="row" style="gap:4px 16px" aria-label="Legend"><sc-for list="{{legend}}" as="l" hint-placeholder-count="6"><span class="row" style="gap:6px"><span class="kbd">{{l.k}}</span><span class="c2">{{l.name}}</span></span></sc-for></div>
+  <div style="margin-top:6px">Turning on any action also turns on View. Turning off View removes everything on that tag. A user sees a cluster when they can view at least one of its services.</div>
+ </div>
+</section>
+
+<section class="panel" aria-label="Users">
+ <div class="panel-h"><span class="panel-t">Users</span><span class="mut sm">{{userCount}}</span></div>
+ <div class="tw-pop"><table class="tbl" style="min-width:880px"><thead><tr><th>Username</th><th>Sign-in</th><th>Role</th><th>Can see</th><th>Last sign-in</th><th class="num">Actions</th></tr></thead>
+ <tbody><sc-for list="{{userRows}}" as="u" hint-placeholder-count="4"><tr class="{{u.stripe}}">
+  <td class="two"><span class="b">{{u.name}}</span> <span class="mut">{{u.youL}}</span><small class="mono">{{u.email}}</small></td>
+  <td><div class="row" style="gap:4px"><sc-for list="{{u.pills}}" as="p" hint-placeholder-count="2"><span class="pill pill-{{p.cls}}">{{p.label}}</span></sc-for></div></td>
+  <td><span class="pill pill-{{u.roleCls}}">{{u.roleL}}</span></td>
+  <td><sc-if value="{{u.seeText}}" hint-placeholder-val="{{true}}"><span class="{{u.seeCls}}">{{u.seeText}}</span></sc-if><div class="row" style="gap:4px"><sc-for list="{{u.see}}" as="t" hint-placeholder-count="2"><span class="tag tag-{{t}}">{{t}}</span></sc-for></div></td>
+  <td>{{u.last}}</td>
+  <td style="position:relative"><div class="acts"><button class="btn btn-s" type="button" aria-haspopup="menu" aria-expanded="{{u.menuOpen}}" aria-label="Actions for {{u.name}}" onClick="{{u.toggleMenu}}">Actions [[i:chevd]]</button></div>
+   <sc-if value="{{u.menuOpen}}" hint-placeholder-val="{{false}}">
+    <button class="scrim" type="button" aria-label="Close menu" style="background:transparent;z-index:44" onClick="{{u.closeMenu}}"></button>
+    <div class="pop" role="menu" aria-label="Actions for {{u.name}}" style="right:8px;padding:6px;width:min(300px,calc(100vw - 24px))">
+     <sc-for list="{{u.items}}" as="m" hint-placeholder-count="6"><div><button class="btn btn-g {{m.cls}}" type="button" role="menuitem" style="width:100%;justify-content:flex-start" title="{{m.reason}}" disabled="{{m.dis}}" onClick="{{m.click}}">{{m.label}}</button><small class="mut" style="display:block;padding:0 12px 4px">{{m.reason}}</small></div></sc-for>
+    </div>
+   </sc-if></td>
+ </tr></sc-for></tbody></table></div>
+</section>
+</sc-if>
+<sc-if value="{{noAccess}}" hint-placeholder-val="{{false}}"><section class="panel" aria-label="No access"><div class="panel-h"><span class="panel-t">No access</span></div><div class="panel-b">Only global admins manage users and permissions.</div></section></sc-if>
+
+<sc-if value="{{hasTemp}}" hint-placeholder-val="{{false}}"><div class="toast" role="status" style="bottom:64px"><span class="st st-info">New temporary password for {{tempUser}}: <code class="mono">{{tempCode}}</code></span><button class="btn btn-s" type="button" onClick="{{copyTemp}}">Copy</button><button class="btn btn-s btn-g" type="button" onClick="{{dismissTemp}}">Dismiss</button></div></sc-if>
+
+<sc-if value="{{showAdd}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="au-title">
+ <sc-if value="{{auStep1}}" hint-placeholder-val="{{true}}">
+  <div class="modal-h"><h2 id="au-title">Add user</h2><div class="mut">They sign in with this username and password. Give permissions in the matrix afterwards.</div></div>
+  <div class="modal-b">
+   <div class="field"><label for="au-name">Username</label><input id="au-name" class="input {{auErrCls}}" placeholder="alex" autocomplete="off" value="{{auName}}" onChange="{{onAuName}}"><sc-if value="{{auErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Use 2–32 lowercase letters, digits, dots, hyphens or underscores.</span></sc-if></div>
+   <span class="row" style="gap:6px"><input id="au-admin" type="checkbox" checked="{{auAdmin}}" onChange="{{onAuAdmin}}"><label for="au-admin">Global admin (can do everything)</label></span>
+   <p class="c2" style="margin:0">They are asked to choose a new password at first sign-in.</p>
+   <sc-if value="{{sso}}" hint-placeholder-val="{{true}}"><div class="ban ban-info">[[i:info]]<div class="grow">New local users can only sign in with a password if you make them break-glass. SSO users are created automatically at their first sign-in, or set a pending link to attach one to an existing account.</div></div></sc-if>
+  </div>
+  <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{addUser}}">Add user</button></div>
+ </sc-if>
+ <sc-if value="{{auStep2}}" hint-placeholder-val="{{false}}">
+  <div class="modal-h"><h2 id="au-title">Temporary password for {{auCreated}}</h2><div class="mut">Shown once. Copy it now.</div></div>
+  <div class="modal-b"><div class="row" style="flex-wrap:nowrap"><div class="code grow" aria-label="Temporary password">{{tempCode}}</div><button class="btn" type="button" onClick="{{copyTemp}}">[[i:copy]] Copy</button></div></div>
+  <div class="modal-f"><button class="btn btn-p" type="button" onClick="{{closeDlg}}">Done</button></div>
+ </sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{showConfirm}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
+ <div class="modal-h"><h2 id="cf-title">{{cf.title}}</h2></div>
+ <div class="modal-b"><p class="c2" style="margin:0">{{cf.sub}}</p></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn {{cf.cls}}" type="button" onClick="{{cf.go}}">{{cf.label}}</button></div>
+</div>
+</sc-if>
+
+<sc-if value="{{showLink}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="lk-title">
+ <div class="modal-h"><h2 id="lk-title">Link {{lkUser}} to an SSO identity</h2><div class="mut">At their next SSO sign-in with this NameID, {{lkUser}} keeps this account and its permissions instead of getting a new one. The link expires in 14 days.</div></div>
+ <div class="modal-b"><div class="field"><label for="lk-nameid">NameID</label><input id="lk-nameid" class="input mono {{lkErrCls}}" maxlength="256" placeholder="{{lkUser}}@example.test" value="{{lkValue}}" onChange="{{onLk}}"><sc-if value="{{lkErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Enter the NameID exactly as the identity provider issues it.</span></sc-if><span class="hint">Copy it exactly as the identity provider issues it. Test sign-in shows it.</span></div></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{setLink}}">Set pending link</button></div>
+</div>
+</sc-if>

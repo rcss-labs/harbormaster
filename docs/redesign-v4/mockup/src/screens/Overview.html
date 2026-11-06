@@ -1,0 +1,111 @@
+<!--meta title="Overview" nav="overview" crumbs="Overview" h="1700"-->
+<div class="ph"><div><h1>Overview</h1><div class="sub">{{meta}}</div></div>
+ <div class="row"><span class="lab" id="ov-layout-l">Layout</span><div class="seg" role="group" aria-labelledby="ov-layout-l"><sc-for list="{{layoutSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div></div>
+</div>
+<div class="kpis">
+ <a class="kpi" href="Clusters.dc.html"><span class="k">Clusters</span><span class="v">{{kClusters}}</span><span class="d">{{kClustersHealthy}} healthy</span></a>
+ <a class="kpi" href="Services.dc.html"><span class="k">Services</span><span class="v">{{kServices}}</span><span class="d {{kSvcCls}}">{{kSvcNote}}</span></a>
+ <a class="kpi" href="Tasks.dc.html"><span class="k">Tasks running</span><span class="v">{{kRunning}}</span><span class="d">of {{kDesired}} desired · {{kUnhealthy}} unhealthy</span><!--@spark k="sTasks" color="var(--s1)"--></a>
+ <div class="kpi"><span class="k">Avg CPU</span><span class="v">{{kCpu}}%</span><span class="d">72 h trend</span><!--@spark k="sCpu" color="var(--s1)"--></div>
+ <div class="kpi"><span class="k">Avg memory</span><span class="v">{{kMem}}%</span><span class="d">72 h trend</span><!--@spark k="sMem" color="var(--s2)"--></div>
+ <a class="kpi" href="AnReliability.dc.html"><span class="k">Error stops, 24 h</span><span class="v c-bad">{{kErr}}</span><span class="d">task exits with an error</span><!--@spark k="sErr" color="var(--bad)"--></a>
+</div>
+
+<sc-if value="{{isTriage}}" hint-placeholder-val="{{true}}">
+<div class="wide-split">
+<section class="panel" aria-label="Needs attention">
+ <div class="panel-h"><div class="row"><span class="panel-t">Needs attention</span><span class="pill pill-bad">{{openN}} open</span>
+  <div class="seg" role="group" aria-label="Severity"><sc-for list="{{sevSeg}}" as="o" hint-placeholder-count="4"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}<span class="n">{{o.n}}</span></button></sc-for></div></div>
+  <span class="mut sm">Each row shows the cause, what to do next and what changed just before.</span>
+ </div>
+ <div>
+ <sc-for list="{{attRows}}" as="r" hint-placeholder-count="4"><div class="{{r.stripe}}" style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 20px;padding:10px var(--pad);border-bottom:1px solid var(--row-border)">
+  <div class="stack-s" style="flex:1 1 440px">
+   <div class="row"><span class="st st-{{r.sev}}">{{r.sevL}}</span>
+    <sc-if value="{{r.isSvc}}" hint-placeholder-val="{{true}}"><a class="b mono" href="SvcOverview.dc.html">{{r.svc}}</a><a class="mono sm" href="ClusterDetail.dc.html">{{r.cluster}}</a></sc-if>
+    <sc-if value="{{r.isAcct}}" hint-placeholder-val="{{false}}"><a class="b" href="SetAccounts.dc.html">{{r.svc}}</a></sc-if>
+    <span class="mut sm">{{r.age}}</span></div>
+   <div><span class="b">{{r.title}}</span> <span class="c2">{{r.why}}</span></div>
+   <div class="row" style="gap:4px 16px"><span><span class="mut">Next step</span> <a href="{{r.nextHref}}">{{r.next}}</a></span><span class="mut">Just before: {{r.related}}</span></div>
+  </div>
+  <div class="acts" style="align-items:flex-start">
+   <sc-if value="{{r.isSvc}}" hint-placeholder-val="{{true}}"><a class="btn btn-s" href="SvcLogs.dc.html">Logs</a><a class="btn btn-s" href="SvcTasks.dc.html">Tasks</a><sc-if value="{{r.canRestart}}" hint-placeholder-val="{{true}}"><button class="btn btn-s" type="button" title="{{r.restartTitle}}" onClick="{{r.restart}}">Restart</button></sc-if><sc-if value="{{r.restartDisabled}}" hint-placeholder-val="{{false}}"><button class="btn btn-s" type="button" disabled title="{{r.restartTitle}}" onClick="{{r.restart}}">Restart</button></sc-if></sc-if>
+   <sc-if value="{{r.isAcct}}" hint-placeholder-val="{{false}}"><a class="btn btn-s" href="SetAccounts.dc.html">Open accounts</a></sc-if>
+  </div>
+ </div></sc-for>
+ </div>
+ <sc-if value="{{attEmpty}}" hint-placeholder-val="{{false}}"><div class="empty">Nothing needs attention.</div></sc-if>
+ <sc-if value="{{attMore}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>Showing {{attShown}} of {{attTotal}}</span><button class="btn btn-s" type="button" onClick="{{toggleAll}}">{{toggleAllL}}</button></div></sc-if>
+</section>
+
+<div class="g21">
+ <div class="stack">
+  <section class="panel" aria-label="Estate map">
+   <div class="panel-h"><span class="panel-t">Estate map</span>
+    <div class="leg"><span class="st st-ok">Healthy</span><span class="st st-info">Deploying</span><span class="st st-warn">Degraded</span><span class="st st-bad">Needs attention</span></div></div>
+   <div class="panel-b stack">
+    <sc-for list="{{mapRows}}" as="a" hint-placeholder-count="2"><div class="stack-s">
+     <div class="row"><a class="b" href="SetAccounts.dc.html">{{a.name}}</a><span class="mut sm">{{a.meta}}</span><sc-if value="{{a.hasFail}}" hint-placeholder-val="{{false}}"><span class="st st-bad">{{a.failL}}</span></sc-if></div>
+     <div class="row"><sc-for list="{{a.cells}}" as="k" hint-placeholder-count="4"><a class="btn btn-s" href="ClusterDetail.dc.html" title="{{k.title}}" aria-label="{{k.title}}" style="{{k.style}}"><span class="st st-{{k.status}} bare"></span>{{k.name}}</a></sc-for></div>
+    </div></sc-for>
+    <sc-if value="{{mapEmpty}}" hint-placeholder-val="{{false}}"><div class="empty">No clusters.</div></sc-if>
+    <sc-if value="{{mapLoading}}" hint-placeholder-val="{{false}}"><div class="empty">Loading clusters.</div></sc-if>
+   </div>
+  </section>
+  <section class="panel" aria-label="Task stops per hour">
+   <div class="panel-h"><span class="panel-t">Task stops per hour, 24 h</span><!--@legend k="stops"--></div>
+   <div class="panel-b"><!--@bars k="stops" label="Task stops per hour over 24 hours: mostly normal, 6 error exits in the last 4 hours"--></div>
+  </section>
+ </div>
+ <div class="stack">
+  <section class="panel" aria-label="Busiest clusters">
+   <div class="panel-h"><span class="panel-t">Busiest clusters, CPU</span><a class="sm" href="Clusters.dc.html">All clusters &rarr;</a></div>
+   <div class="panel-b stack-s">
+    <div class="ban ban-warn">[[i:warn]]<div class="grow">CloudWatch could not be read for eu-central-1; those clusters are missing from this list.</div></div>
+    <sc-for list="{{busy}}" as="r" hint-placeholder-count="5"><div class="row" style="flex-wrap:nowrap;justify-content:space-between;gap:12px"><div style="min-width:0;flex:1 1 130px"><a class="b mono" href="ClusterDetail.dc.html">{{r.name}}</a><div class="mut sm">{{r.sub}}</div></div><div class="meter" style="flex:1 1 130px"><i><b class="{{r.barCls}}" style="{{r.bar}}"></b></i><span>{{r.cpu}}%</span></div></div></sc-for>
+    <sc-if value="{{busyEmptyOff}}" hint-placeholder-val="{{false}}"><div class="empty">Container Insights is off for every cluster you can see.</div></sc-if>
+    <sc-if value="{{busyEmptyNone}}" hint-placeholder-val="{{false}}"><div class="empty">No data yet</div></sc-if>
+    <div class="mut sm">Updated 5 s ago. edge-proxy is not listed because Container Insights is off.</div>
+   </div>
+  </section>
+  <section class="panel" aria-label="Why tasks stopped">
+   <div class="panel-h"><span class="panel-t">Why tasks stopped, 3 days</span><a class="sm" href="Tasks.dc.html">Stopped tasks &rarr;</a></div>
+   <div class="panel-b stack-s">
+    <sc-for list="{{reasons}}" as="r" hint-placeholder-count="6"><div class="stack-s" style="gap:3px"><div class="row spread"><span>{{r.label}}</span><span class="mono">{{r.n}}</span></div><div class="meter" style="grid-template-columns:1fr"><i><b style="{{r.bar}}"></b></i></div></div></sc-for>
+   </div>
+  </section>
+ </div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isEstate}}" hint-placeholder-val="{{false}}">
+<section class="panel" aria-label="Services">
+ <div class="panel-h"><span class="panel-t">Services</span><span class="mut sm">{{shownN}} of {{totalN}} services shown</span></div>
+ <div class="panel-b"><div class="toolbar">
+  <span class="lab" id="ov-group-l">Group by</span><div class="seg" role="group" aria-labelledby="ov-group-l"><sc-for list="{{groupSeg}}" as="o" hint-placeholder-count="2"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+  <button class="tog" type="button" aria-pressed="{{problems}}" onClick="{{toggleProblems}}"><i></i>Problems only</button>
+  <input id="ov-q" class="input" placeholder="Filter services or clusters" aria-label="Filter services or clusters" value="{{q}}" onChange="{{onQ}}">
+ </div></div>
+ <div class="tw"><table class="tbl" style="min-width:560px"><thead><tr><th>Service</th><th>Status</th><th class="num">Links</th></tr></thead>
+ <tbody><sc-for list="{{estRows}}" as="r" hint-placeholder-count="8"><tr class="{{r.stripe}}">
+  <sc-if value="{{r.isGroup}}" hint-placeholder-val="{{false}}"><td colspan="3" style="background:var(--raised)"><div class="row spread"><div class="row"><button class="btn btn-g btn-s" type="button" aria-expanded="{{r.expanded}}" aria-label="{{r.toggleLabel}}" onClick="{{r.toggle}}">{{r.caret}}</button><span class="st st-{{r.sev}} bare"></span><span class="b mono">{{r.title}}</span><sc-if value="{{r.hasTag}}" hint-placeholder-val="{{false}}"><span class="tag tag-{{r.tag}}">{{r.tag}}</span></sc-if><span class="mut sm">{{r.sub}}</span></div><span class="sm c2">{{r.counts}}</span></div></td></sc-if>
+  <sc-if value="{{r.isSvc}}" hint-placeholder-val="{{true}}"><td class="two"><a class="b mono" href="SvcOverview.dc.html">{{r.name}}</a><small>{{r.cluster}} · {{r.tasks}} tasks</small></td><td><span class="st st-{{r.status}}">{{r.statusL}}</span></td><td><div class="acts"><a class="btn btn-s" href="SvcLogs.dc.html">Logs</a><a class="btn btn-s" href="SvcTasks.dc.html">Tasks</a></div></td></sc-if>
+  <sc-if value="{{r.isNote}}" hint-placeholder-val="{{false}}"><td colspan="3" class="mut sm">{{r.text}}</td></sc-if>
+ </tr></sc-for></tbody></table></div>
+ <sc-if value="{{estEmpty}}" hint-placeholder-val="{{false}}"><div class="empty">{{emptyText}}<button class="btn btn-s" type="button" onClick="{{showAllSvcs}}">Show all services</button></div></sc-if>
+ <sc-if value="{{estLoading}}" hint-placeholder-val="{{false}}"><div class="empty">Loading services.</div></sc-if>
+ <sc-if value="{{moreGroups}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>Showing 25 of {{groupN}}</span><button class="btn btn-s" type="button" onClick="{{showMoreGroups}}">Show 25 more {{groupWord}}</button></div></sc-if>
+ <sc-if value="{{hiddenClusters}}" hint-placeholder-val="{{false}}"><div class="panel-f"><span>{{hiddenClustersN}} healthy {{groupWord}} hidden</span><button class="btn btn-s" type="button" onClick="{{showAllSvcs}}">Show all</button></div></sc-if>
+</section>
+</sc-if>
+
+<sc-if value="{{dlgRestart}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="ov-rs-title">
+ <div class="modal-h"><h2 id="ov-rs-title">Restart {{rs.name}}?</h2></div>
+ <div class="modal-b"><p class="c2">Starts a new deployment of :{{rs.rev}}. Each task is replaced, new ones first.</p>
+  <dl class="kv"><dt>Cluster</dt><dd class="mono">{{rs.cluster}}</dd><dt>Reason it is flagged</dt><dd>{{rs.title}}</dd></dl></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{confirmRestart}}">Restart</button></div>
+</div>
+</sc-if>

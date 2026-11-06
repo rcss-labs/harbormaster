@@ -1,0 +1,14 @@
+<!--meta title="Service history" nav="services" crumbs="Clusters|Clusters > core-services|ClusterDetail > payments-api" h="1100"-->
+<!--@svcheader tab="history"-->
+<section class="panel" aria-label="Operations log">
+ <div class="panel-h"><div class="row"><span class="panel-t">Operations log</span>
+  <div class="seg" role="group" aria-label="Source"><sc-for list="{{srcSeg}}" as="o" hint-placeholder-count="4"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}<span class="n">{{o.n}}</span></button></sc-for></div>
+  <button type="button" class="tog" aria-pressed="{{showEcs}}" onClick="{{toggleEcs}}"><i></i>Show ECS service events</button></div>
+  <span class="mut sm">Actions taken in Harbormaster are kept for 90 days. Changes made outside Harbormaster come from CloudTrail.</span></div>
+ <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+  <div class="b" style="padding:8px var(--pad) 4px;background:var(--raised);border-bottom:1px solid var(--row-border)">{{g.day}}</div>
+  <div class="feed"><sc-for list="{{g.rows}}" as="r" hint-placeholder-count="4"><div><span class="mono mut">{{r.time}}</span><div class="row" style="gap:6px 10px"><span class="chip">{{r.srcL}}</span><span class="b">{{r.actor}}</span><span>{{r.text}}</span></div></div></sc-for></div>
+ </sc-for>
+ <sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div class="empty">No entries.<button class="btn btn-s" type="button" onClick="{{reset}}">Show all sources</button></div></sc-if>
+ <sc-if value="{{more}}" hint-placeholder-val="{{true}}"><div class="panel-f" style="justify-content:center"><button class="btn" type="button" onClick="{{loadMore}}">Load more</button></div></sc-if>
+</section>

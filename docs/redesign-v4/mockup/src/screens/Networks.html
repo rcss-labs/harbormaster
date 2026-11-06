@@ -1,0 +1,73 @@
+<!--meta title="Networks" nav="networks" crumbs="Networks" h="1100"-->
+<div class="ph"><div><h1>Networks</h1><div class="sub">{{summary}}</div></div></div>
+<div class="g12">
+ <section class="panel" aria-label="VPCs" style="align-self:start">
+  <div class="panel-h"><span class="panel-t">VPCs</span></div>
+  <div class="panel-b stack-s">
+   <input id="net-q" class="input" placeholder="Filter VPCs, accounts, regions" aria-label="Filter VPCs, accounts, regions" value="{{q}}" onChange="{{onQ}}">
+   <sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+    <div class="stack-s">
+     <div class="row spread" style="padding:6px 2px 0"><span class="lab">{{g.name}}</span><span class="mono mut sm">{{g.count}}</span></div>
+     <sc-for list="{{g.vpcs}}" as="v" hint-placeholder-count="3">
+      <button type="button" aria-pressed="{{v.pressed}}" style="{{v.sty}}" onClick="{{v.pick}}">
+       <span class="st st-{{v.status}}" aria-label="{{v.statusL}}"><span class="mut sm" style="display:none">{{v.statusL}}</span></span>
+       <span style="display:flex;flex-direction:column;gap:0;min-width:0;flex:1"><span class="b">{{v.name}}</span><span class="mono mut sm">{{v.region}} · {{v.cidr}}</span></span>
+       <span class="mono mut sm">{{v.counts}}</span>
+      </button>
+     </sc-for>
+    </div>
+   </sc-for>
+   <sc-if value="{{noMatch}}" hint-placeholder-val="{{false}}"><div class="empty">No VPCs match this filter.<button class="btn btn-s" type="button" onClick="{{clearQ}}">Clear filter</button></div></sc-if>
+   <div class="hint">{{hiddenNote}}</div>
+  </div>
+ </section>
+ <div class="stack">
+  <sc-if value="{{hasSel}}" hint-placeholder-val="{{true}}">
+  <div class="stack-s">
+   <div class="row"><h2 style="font-size:16px;font-weight:600">{{sel.name}}</h2><span class="tag">{{sel.region}}</span></div>
+   <div class="mono mut sm">{{sel.id}} · {{sel.cidr}} · {{sel.acct}} · {{sel.region}}</div>
+   <sc-if value="{{sel.hasNote}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn">[[i:warn]]<div class="grow">{{sel.note}}</div></div></sc-if>
+  </div>
+  <div class="kpis" role="group" aria-label="VPC summary">
+   <sc-for list="{{kpis}}" as="k" hint-placeholder-count="5"><div class="kpi"><span class="k">{{k.k}}</span><span class="v">{{k.v}}</span><span class="d">{{k.d}}</span></div></sc-for>
+  </div>
+  <section class="panel" aria-label="Subnets">
+   <div class="panel-h"><span class="panel-t">Subnets</span><span class="mut sm">Bars turn amber above 80% of addresses used.</span></div>
+   <div class="tw"><table class="tbl" style="min-width:860px"><thead><tr><th>Subnet</th><th>Type</th><th>Zone</th><th>CIDR</th><th>IPs used</th><th class="num">Clusters</th><th class="num">Tasks</th></tr></thead>
+   <tbody><sc-for list="{{subnets}}" as="s" hint-placeholder-count="3"><tr class="{{s.stripe}}">
+    <td class="two"><span class="b">{{s.name}}</span><small class="mono">{{s.id}}</small></td>
+    <td>{{s.type}}</td><td class="mono">{{s.zone}}</td><td class="mono">{{s.cidr}}</td>
+    <td><div class="meter"><i><b class="{{s.cls}}" style="{{s.bar}}"></b></i><span style="min-width:90px">{{s.usedL}}</span></div></td>
+    <td class="num mono">{{s.clusters}}</td><td class="num mono">{{s.tasks}}</td></tr></sc-for></tbody></table></div>
+  </section>
+  <section class="panel" aria-label="Placement">
+   <div class="panel-h"><div class="row"><span class="panel-t">Placement</span><span class="mut sm">zone ▸ subnet ▸ cluster ▸ service</span></div>
+    <button class="btn btn-s" type="button" onClick="{{toggleAll}}">{{allLabel}}</button></div>
+   <div role="tree" aria-label="Placement of tasks by zone, subnet, cluster and service">
+    <sc-for list="{{tree}}" as="r" hint-placeholder-count="10">
+     <div role="treeitem" aria-level="{{r.level}}" style="{{r.sty}}">
+      <sc-if value="{{r.isZone}}" hint-placeholder-val="{{false}}"><span class="b">{{r.label}}</span><span class="mut sm">{{r.meta}}</span></sc-if>
+      <sc-if value="{{r.isSubnet}}" hint-placeholder-val="{{false}}"><span class="b">{{r.label}}</span><span class="mono mut sm">{{r.cidr}}</span><span class="mut sm">{{r.meta}}</span></sc-if>
+      <sc-if value="{{r.isCluster}}" hint-placeholder-val="{{true}}">
+       <button class="btn btn-g btn-s btn-i" type="button" aria-expanded="{{r.expanded}}" aria-label="{{r.toggleLabel}}" onClick="{{r.toggle}}">[[i:chevd]]</button>
+       <span class="st st-{{r.status}}">{{r.statusL}}</span><span class="b">{{r.label}}</span><span class="mut sm">{{r.meta}}</span>
+       <a class="btn btn-g btn-s" href="ClusterDetail.dc.html" aria-label="Open cluster {{r.label}}">Open[[i:ext]]</a>
+      </sc-if>
+      <sc-if value="{{r.isService}}" hint-placeholder-val="{{false}}"><span class="st st-{{r.status}}">{{r.statusL}}</span><a href="SvcOverview.dc.html" class="b">{{r.label}}</a><span class="mut sm">{{r.meta}}</span></sc-if>
+      <sc-if value="{{r.isNote}}" hint-placeholder-val="{{false}}"><span class="b">{{r.label}}</span><span class="mut sm">{{r.meta}}</span></sc-if>
+     </div>
+    </sc-for>
+   </div>
+  </section>
+  <section class="panel" aria-label="Gateways and endpoints">
+   <div class="panel-h"><span class="panel-t">Gateways and endpoints</span></div>
+   <div class="panel-b"><dl class="kv" style="margin:0">
+    <dt>Internet gateway</dt><dd class="mono">{{gw.igw}}</dd>
+    <dt>NAT gateways</dt><dd class="mono">{{gw.nat}}</dd>
+    <dt>VPC endpoints</dt><dd class="mono">{{gw.vpce}}</dd>
+   </dl></div>
+  </section>
+  </sc-if>
+  <sc-if value="{{noSel}}" hint-placeholder-val="{{false}}"><section class="panel"><div class="empty">No running tasks you can see in this VPC.</div></section></sc-if>
+ </div>
+</div>

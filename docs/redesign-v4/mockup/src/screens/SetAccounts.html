@@ -1,0 +1,91 @@
+<!--meta title="Settings: AWS accounts" nav="settings" crumbs="Settings|SetGeneral > AWS accounts" h="980"-->
+<!--@settingsnav tab="accounts"-->
+<div class="row" style="justify-content:flex-end">
+ <span class="mut sm">Preview as</span>
+ <div class="seg" role="group" aria-label="Preview as"><sc-for list="{{viewSeg}}" as="o" hint-placeholder-count="3"><button type="button" aria-pressed="{{o.pressed}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+ <button class="btn btn-p" type="button" onClick="{{openConnect}}">[[i:plus]] Connect account</button>
+</div>
+<sc-if value="{{isAdmin}}" hint-placeholder-val="{{true}}">
+<section class="panel" aria-label="AWS accounts">
+ <div class="panel-h"><div class="row"><span class="panel-t">AWS accounts</span><span class="mut sm">Reached by assuming an IAM role</span></div><span class="mut sm">{{countL}}</span></div>
+ <sc-if value="{{hasRows}}" hint-placeholder-val="{{true}}">
+ <div class="tw"><table class="tbl" style="min-width:1080px"><thead><tr><th>Account</th><th>Role Harbormaster assumes</th><th>Regions scanned</th><th class="num">Clusters</th><th>Status</th><th>Last check</th><th class="num">Actions</th></tr></thead>
+ <tbody><sc-for list="{{rows}}" as="a" hint-placeholder-count="3"><tr class="{{a.stripe}}">
+  <td class="two"><span class="b">{{a.name}}</span><small class="mono">{{a.id}}</small></td>
+  <td class="mono wrap" style="max-width:300px">{{a.role}}</td>
+  <td class="two"><div class="row" style="gap:4px"><sc-for list="{{a.regions}}" as="g" hint-placeholder-count="3"><span class="chip mono">{{g}}</span></sc-for></div></td>
+  <td class="num mono">{{a.clusters}}</td>
+  <td class="two" style="min-width:260px"><span class="st st-{{a.status}}">{{a.statusL}}</span><small>{{a.note}}</small>
+   <sc-if value="{{a.hasErr}}" hint-placeholder-val="{{false}}"><details><summary class="sm" style="cursor:pointer;color:var(--accent)">Show AWS error</summary><div class="code" style="margin-top:4px;white-space:pre-wrap">{{a.err}}</div></details></sc-if>
+   <sc-if value="{{a.tested}}" hint-placeholder-val="{{false}}"><ul style="margin:6px 0 4px;padding:0;list-style:none" aria-label="Test results by region"><sc-for list="{{a.results}}" as="t" hint-placeholder-count="3"><li class="sm"><span class="st st-{{t.cls}}">{{t.region}}</span> <span class="mut">{{t.text}}</span></li></sc-for></ul></sc-if></td>
+  <td class="two"><span>{{a.last}}</span></td>
+  <td><div class="acts"><button class="btn btn-s" type="button" onClick="{{a.test}}">Test now</button><button class="btn btn-s" type="button" onClick="{{a.edit}}">Edit</button><button class="btn btn-s btn-d" type="button" onClick="{{a.disc}}">Disconnect</button></div></td>
+ </tr></sc-for></tbody></table></div>
+ </sc-if>
+ <sc-if value="{{noRows}}" hint-placeholder-val="{{false}}"><div class="empty">No accounts connected.<button class="btn btn-s btn-p" type="button" onClick="{{openConnect}}">Connect account</button></div></sc-if>
+</section>
+<div class="g2">
+ <section class="panel" aria-label="Where Harbormaster runs"><div class="panel-h"><span class="panel-t">Where Harbormaster runs</span></div>
+  <div class="panel-b"><dl class="kv" style="margin:0">
+   <dt>Cluster / service</dt><dd class="mono">harbormaster / harbormaster-server</dd>
+   <dt>Updates</dt><dd>Polls ECS every {{poll}} s per account and region; metrics every 60 s; VPCs and EFS every 5 min.</dd>
+   <dt>Own data</dt><dd>PostgreSQL on RDS: users, sessions, tags, permissions, audit and operations logs. No AWS definitions are stored.</dd>
+  </dl></div></section>
+ <section class="panel" aria-label="Tags"><div class="panel-h"><span class="panel-t">Tags</span><a href="SetTags.dc.html">Manage tags</a></div>
+  <div class="panel-b stack-s">
+   <p class="c2">Tags are kept in Harbormaster only and never written to AWS. An untagged cluster is Dev; an untagged service inherits its cluster's tag.</p>
+   <div class="row"><sc-for list="{{tags}}" as="t" hint-placeholder-count="3"><span class="row" style="gap:6px"><span class="tag tag-{{t.name}}">{{t.name}}</span><span class="mut sm">{{t.effect}} services</span></span></sc-for></div>
+  </div></section>
+</div>
+</sc-if>
+<sc-if value="{{noAccess}}" hint-placeholder-val="{{false}}"><section class="panel" aria-label="No access"><div class="panel-h"><span class="panel-t">No access</span></div><div class="panel-b">Only global admins manage AWS accounts.</div></section></sc-if>
+
+<sc-if value="{{showConnect}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="cn-title">
+ <div class="modal-h"><h2 id="cn-title">Connect an AWS account</h2><div class="mut">Harbormaster assumes this role from its own task role.</div></div>
+ <div class="modal-b">
+  <div class="fields">
+   <div class="field"><label for="cn-name">Display name</label><input id="cn-name" class="input {{cnNameErrCls}}" placeholder="production" value="{{cnName}}" onChange="{{onCnName}}"><sc-if value="{{cnNameErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Enter a display name, for example production.</span></sc-if></div>
+   <div class="field"><label for="cn-arn">Role ARN</label><input id="cn-arn" class="input mono {{cnArnErrCls}}" placeholder="arn:aws:iam::123456789012:role/harbormaster-access" value="{{cnArn}}" onChange="{{onCnArn}}"><sc-if value="{{cnArnErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Enter a role ARN like arn:aws:iam::123456789012:role/harbormaster-access.</span></sc-if></div>
+  </div>
+  <div class="field"><label for="cn-ext">External ID</label>
+   <div class="row" style="flex-wrap:nowrap"><input id="cn-ext" class="input mono" readonly value="harbormaster-mock-external-id"><button class="btn" type="button" onClick="{{copyExt}}">[[i:copy]] Copy</button></div>
+   <span class="hint">Put this in the role's trust policy as sts:ExternalId.</span></div>
+  <fieldset class="field" style="border:0;padding:0;margin:0"><legend class="lab">Regions to scan</legend>
+   <div class="row" style="gap:6px 16px"><sc-for list="{{cnRegions}}" as="r" hint-placeholder-count="6"><span class="row" style="gap:6px"><input id="{{r.cid}}" type="checkbox" checked="{{r.on}}" onChange="{{r.toggle}}"><label for="{{r.cid}}" class="mono">{{r.id}}</label></span></sc-for></div>
+   <sc-if value="{{cnRegErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Pick at least one region to scan.</span></sc-if>
+  </fieldset>
+  <sc-if value="{{hasCnResults}}" hint-placeholder-val="{{false}}"><div class="stack-s" aria-live="polite"><span class="lab">Test results</span>
+   <ul style="margin:0;padding:0;list-style:none;display:grid;gap:4px;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))"><sc-for list="{{cnResults}}" as="t" hint-placeholder-count="3"><li class="st st-{{t.cls}}"><span class="mono">{{t.mark}} {{t.region}}</span> <span class="mut" style="font-weight:400">{{t.text}}</span></li></sc-for></ul>
+   <sc-if value="{{cnHasFail}}" hint-placeholder-val="{{false}}"><div class="ban ban-warn">[[i:warn]]<div class="grow">Some regions failed. Untick them and test again, or fix the role and retry. Nothing is saved until every ticked region passes.</div></div></sc-if></div></sc-if>
+  <details><summary style="cursor:pointer;color:var(--accent)">IAM permissions the role needs</summary>
+   <div class="stack-s" style="margin-top:6px"><p class="c2">Attach a policy that allows Harbormaster to read your estate and run the actions it offers.</p>
+   <ul class="c2" style="margin:0;padding-left:18px"><li>Read: ECS, EC2, EFS, CloudWatch and CloudWatch Logs.</li><li class="mono">ecs:RegisterTaskDefinition</li><li class="mono">ecs:UpdateService</li><li class="mono">ecs:StopTask</li><li class="mono">ecs:ExecuteCommand</li><li class="mono">iam:PassRole</li></ul></div></details>
+ </div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{testConnect}}">Test and connect</button></div>
+</div>
+</sc-if>
+
+<sc-if value="{{showEdit}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="ed-title">
+ <div class="modal-h"><h2 id="ed-title">Edit {{target}}</h2></div>
+ <div class="modal-b">
+  <div class="field" style="max-width:360px"><label for="ed-name">Display name</label><input id="ed-name" class="input {{edNameErrCls}}" value="{{edName}}" onChange="{{onEdName}}"><sc-if value="{{edNameErr}}" hint-placeholder-val="{{false}}"><span class="ferr" role="alert">Enter a display name.</span></sc-if></div>
+  <fieldset class="field" style="border:0;padding:0;margin:0"><legend class="lab">Regions to scan</legend>
+   <div class="row" style="gap:6px 16px"><sc-for list="{{edRegions}}" as="r" hint-placeholder-count="6"><span class="row" style="gap:6px"><input id="{{r.eid}}" type="checkbox" checked="{{r.on}}" onChange="{{r.toggle}}"><label for="{{r.eid}}" class="mono">{{r.id}}</label></span></sc-for></div>
+  </fieldset>
+ </div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-p" type="button" onClick="{{saveEdit}}">Save</button></div>
+</div>
+</sc-if>
+
+<sc-if value="{{showDisc}}" hint-placeholder-val="{{false}}">
+<button class="scrim" type="button" aria-label="Close dialog" onClick="{{closeDlg}}"></button>
+<div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dc-title">
+ <div class="modal-h"><h2 id="dc-title">Disconnect account</h2></div>
+ <div class="modal-b"><p class="c2">Disconnect {{target}}? Its clusters, services and tasks disappear from Harbormaster; tags and permissions are kept for 30 days.</p></div>
+ <div class="modal-f"><button class="btn" type="button" onClick="{{closeDlg}}">Cancel</button><button class="btn btn-dp" type="button" onClick="{{doDisc}}">Disconnect</button></div>
+</div>
+</sc-if>
