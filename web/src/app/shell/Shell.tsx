@@ -73,32 +73,23 @@ function ShellFrame() {
   const { sidebarCollapsed, paletteOpen, helpOpen, openHelp, closeHelp } = useShellState()
   useShortcuts(navigate, { paletteOpen, openHelp })
   const guarded = noAccess ? <EmptyState>You don't have access to anything yet. Ask a global admin.</EmptyState> : <Outlet />
-  if (phone) {
-    // The sidebar, the density and help buttons and the shortcut help are desktop-only; More carries what they held.
-    return (
-      <div className={styles.appPhone}>
-        <PhoneEnvironment />
-        <MobileTopBar />
-        <main className={`${styles.content} ${styles.contentPhone}`} data-hm-phone="">
-          {guarded}
-        </main>
-        <BottomTabBar />
-        <ActivityRail />
-        {paletteOpen && <CommandPalette />}
-      </div>
-    )
-  }
-  const classes = [styles.app, sidebarCollapsed ? styles.appCollapsed : ''].join(' ')
+  // One tree for both layouts: the page's <main> keeps its place when a phone rotates across the breakpoint, so a terminal session,
+  // an unsaved deploy change or a scroll position survive (two different trees would remount the whole page).
+  // On phones the sidebar, the density and help buttons and the shortcut help are desktop-only; More carries what they held.
+  const classes = phone ? styles.appPhone : [styles.app, sidebarCollapsed ? styles.appCollapsed : ''].join(' ')
   return (
     <div className={classes}>
-      <Sidebar />
-      <div className={styles.main}>
-        <TopBar />
-        <main className={styles.content}>{guarded}</main>
+      {phone ? <PhoneEnvironment /> : <Sidebar />}
+      <div className={phone ? styles.stagePhone : styles.main}>
+        {phone ? <MobileTopBar /> : <TopBar />}
+        <main className={phone ? `${styles.content} ${styles.contentPhone}` : styles.content} data-hm-phone={phone ? '' : undefined}>
+          {guarded}
+        </main>
+        {phone && <BottomTabBar />}
       </div>
       <ActivityRail />
       {paletteOpen && <CommandPalette />}
-      {helpOpen && <KeyboardHelp onClose={closeHelp} />}
+      {!phone && helpOpen && <KeyboardHelp onClose={closeHelp} />}
     </div>
   )
 }
