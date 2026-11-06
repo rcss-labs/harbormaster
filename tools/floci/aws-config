@@ -1,0 +1,4 @@
+[profile floci]
+region = eu-west-1
+endpoint_url = http://127.0.0.1:4566
+output = json
