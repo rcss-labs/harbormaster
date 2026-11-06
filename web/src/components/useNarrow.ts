@@ -15,3 +15,9 @@ const snapshot = () => typeof window.matchMedia === 'function' && window.matchMe
 export function useNarrow(): boolean {
   return useSyncExternalStore(subscribe, snapshot, () => false)
 }
+
+/** The phone breakpoint: the same query as `NARROW_QUERY`, so "narrow" and "phone" mean one thing. */
+export const PHONE_QUERY = NARROW_QUERY
+
+/** True on a phone-width viewport. */
+export const usePhone = useNarrow

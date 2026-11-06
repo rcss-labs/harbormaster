@@ -1,0 +1,64 @@
+/* Phone layer. Everything that changes the look below 700px lives here or in a component's own module under the same query,
+   so desktop rendering cannot change. The variables are the contract the phone shell, sticky bars and the terminal share. */
+:root {
+  --hm-tabbar: 56px;
+  --hm-sab: env(safe-area-inset-bottom, 0px);
+  --hm-keys: 56px;
+  --hm-bar: 60px;
+}
+/* Space the page keeps clear at the bottom: tab bar by default, the terminal keys row instead of it, or a sticky bar above it. */
+:root[data-hm-phone] { --hm-bottom-inset: calc(var(--hm-tabbar) + var(--hm-sab)); }
+:root[data-hm-phone][data-hm-keys] { --hm-bottom-inset: calc(var(--hm-keys) + var(--hm-sab)); }
+:root[data-hm-phone][data-hm-bar] { --hm-bottom-inset: calc(var(--hm-tabbar) + var(--hm-bar) + var(--hm-sab)); }
+
+@media (max-width: 700px) {
+  /* `html` raises specificity: base.css is imported after this file and would otherwise reset the size. */
+  html body { font-size: 14px; line-height: 1.45; -webkit-text-size-adjust: 100%; touch-action: manipulation; overflow-x: clip; }
+  html code, html pre, html .mono { font-size: 13px; }
+
+  /* Touch-size controls. Checkboxes and radios keep their native size; their labels carry the target. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea { font-size: 16px; min-height: 44px; }
+  button { min-height: 44px; }
+  /* 36 px chips and small buttons extend their hit area to 44 px with a pseudo-element. */
+  [data-hm-hit='36'] { min-height: 36px; position: relative; }
+  [data-hm-hit='36']::before { content: ''; position: absolute; inset: -4px; border-radius: inherit; }
+  /* Inline name links inside rows and panels: 44 px tall hit area, same text size. */
+  .hm-rl, a[data-hm-rl] { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; }
+
+  /* List rows replace tables: name and status first, key values second, one 44 px action at the right. */
+  .hm-lst { display: flex; flex-direction: column; }
+  .hm-lr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 4px; min-height: 56px; padding: 8px 4px 8px var(--pad); border-bottom: 1px solid var(--row-border); color: inherit; text-decoration: none; position: relative; }
+  .hm-lr:last-child { border-bottom: 0; }
+  .hm-lr-main { min-width: 0; }
+  .hm-l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+  .hm-l2 { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 3px; min-width: 0; font-size: 12px; color: var(--muted); }
+  .hm-l2 .mono { font-size: 12px; }
+  .hm-nm { font: 600 13px var(--mono); overflow-wrap: anywhere; min-width: 0; }
+  .hm-nm.sans { font-family: var(--sans); font-size: 14px; }
+
+  /* Chips: one row that scrolls sideways; the fade shows only while there is more to the right (scroll-driven; without
+     support the cut-off chip is the affordance). `.wrap` wraps a short set instead. */
+  .hm-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 4px 12px; scroll-padding-inline: 12px; scroll-snap-type: x proximity; position: relative; min-width: 0; }
+  .hm-chips::-webkit-scrollbar { display: none; }
+  .hm-chips > * { flex: none; scroll-snap-align: start; }
+  .hm-chips::after { content: ''; position: sticky; right: -12px; flex: none; width: 40px; margin-left: -40px; align-self: stretch; pointer-events: none; background: linear-gradient(90deg, transparent, var(--bg) 70%); opacity: 0; animation: hm-chipfade linear both; animation-timeline: scroll(nearest inline); }
+  .hm-chips.wrap { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; }
+  .hm-chips.wrap::after { display: none; }
+  .hm-chips.in { margin: 0; padding: 4px 0; }
+  .hm-chips.in::after { right: 0; }
+
+  /* Sticky bars above the tab bar (Deploy, Settings General) and the terminal keys row that replaces the tab bar. */
+  .hm-bar { position: fixed; left: 0; right: 0; bottom: calc(var(--hm-tabbar) + var(--hm-sab)); z-index: 29; display: flex; align-items: center; gap: 8px; min-height: var(--hm-bar); padding: 8px 12px; background: var(--raised); border-top: 1px solid var(--border-strong); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18); }
+  .hm-keys { position: fixed; left: 0; right: 0; bottom: calc(100dvh - var(--hm-vvh, 100dvh) - var(--hm-vvt, 0px)); z-index: 31; display: flex; gap: 8px; min-height: var(--hm-keys); padding: 6px 12px calc(6px + var(--hm-sab)); background: var(--chrome); border-top: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+  .hm-keys::-webkit-scrollbar { display: none; }
+  .hm-keys > button { flex: 1 1 0; min-width: 44px; min-height: 44px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 13px var(--mono); cursor: pointer; }
+
+  /* KPI strips are three across on a phone; captions wrap. */
+  .hm-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  /* Sheet content helpers for pages that fill a BottomSheet body. */
+  .hm-sheet-list { display: flex; flex-direction: column; margin: 0 -16px; }
+  .hm-sheet-stack { display: flex; flex-direction: column; gap: 12px; }
+}
+
+@keyframes hm-chipfade { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }
