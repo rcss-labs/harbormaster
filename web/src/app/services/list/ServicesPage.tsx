@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useService, useServicesList } from '../../../api/hooks'
+import { useServicesMetrics } from '../../../api/observe'
 import type { ServiceListItemDTO } from '../../../api/types'
 import { ColumnPicker, useColumnPrefs } from '../../../components/ColumnPicker'
+import { Chips } from '../../../components/Chips'
 import { DataBanner } from '../../../components/DataBanner'
 import { Panel } from '../../../components/Panel'
 import { Seg, SegmentedFilter } from '../../../components/Seg'
+import { SortFieldsButton } from '../../../components/SortFieldsButton'
+import { useNarrow } from '../../../components/useNarrow'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
 import { useCrumbs } from '../../shell/crumbs'
@@ -12,6 +16,7 @@ import { usePins } from '../../shell/pins'
 import { useFilters, visibleTagIds } from '../../shell/useFilters'
 import { RestartDialog, restartBlockedTitle } from '../RestartDialog'
 import {
+  SERVICE_SORT_KEYS,
   VIEW_ALL,
   VIEW_PINS,
   VIEW_PROBLEMS,
@@ -25,9 +30,9 @@ import {
   type ServiceStatusFilter,
 } from './filterServices'
 import { ServiceDrawer } from './ServiceDrawer'
-import { COLUMN_KEYS, COLUMN_LABELS, DEFAULT_COLUMNS, ServicesTable } from './ServicesTable'
+import { COLUMN_KEYS, COLUMN_LABELS, DEFAULT_COLUMNS, SERVICES_PAGE_SIZE, ServicesTable } from './ServicesTable'
 import styles from './services.module.css'
-import { useServicesState } from './useServicesState'
+import { DEFAULT_SORT, useServicesState } from './useServicesState'
 
 /** The server caps the list at this many services. */
 const LIST_CAP = 2000
@@ -58,6 +63,7 @@ function RestartFlow({ service, onClose }: { service: ServiceListItemDTO; onClos
 
 export function ServicesPage() {
   useCrumbs([['Services']])
+  const phone = useNarrow()
   const { filters: scope } = useFilters()
   const list = useServicesList(scope)
   const { me } = useAuth()
@@ -86,6 +92,12 @@ export function ServicesPage() {
   const sortLabel = state.sort.key === 'name' ? 'service' : COLUMN_LABELS[state.sort.key].toLowerCase()
   const detail = items.find((service) => service.id === detailId)
 
+  // CPU and Memory are fetched for the rows of the page on screen only (up to 25), never for the whole list.
+  const lastPage = Math.max(1, Math.ceil(shown.length / SERVICES_PAGE_SIZE))
+  const currentPage = Math.min(state.page, lastPage)
+  const pageIds = shown.slice((currentPage - 1) * SERVICES_PAGE_SIZE, currentPage * SERVICES_PAGE_SIZE).map((service) => service.id)
+  const metrics = useServicesMetrics(pageIds)
+
   const statusOptions: { value: ServiceStatusFilter; label: string }[] = [
     { value: 'any', label: 'All' },
     { value: 'bad', label: 'Failing' },
@@ -94,6 +106,10 @@ export function ServicesPage() {
     { value: 'ok', label: 'Steady' },
     { value: 'mute', label: 'Scaled to 0' },
   ]
+
+  const sortOptions = SERVICE_SORT_KEYS.map((key) => ({ key, label: COLUMN_LABELS[key] }))
+  const fieldChoices = COLUMN_CHOICES.map((choice) => ({ ...choice, locked: choice.locked || choice.key === 'status' }))
+  const statusChips = statusOptions.map((option) => ({ ...option, count: counts[option.value] }))
 
   const empty = (
     <span className={styles.empty}>
@@ -112,10 +128,36 @@ export function ServicesPage() {
   return (
     <div className={styles.page}>
       <div className={styles.pageHead}>
-        <h1>Services</h1>
+        <h1 className="hm-phone-title-sr">Services</h1>
         <p className={styles.sub}>Every ECS service you can see, across accounts and regions. Click a name to open it.</p>
       </div>
       <DataBanner tiers={['Clusters and services']} />
+      {phone && (
+        <div className={styles.phoneFilters}>
+          <Chips label="Saved views" options={views} value={view} onChange={state.setView} />
+          <div className={styles.phoneSearchRow}>
+            <input
+              type="search"
+              className={styles.search}
+              data-hm-filter
+              aria-label="Filter services"
+              placeholder="Filter services"
+              value={state.q}
+              onChange={(event) => state.setQ(event.target.value)}
+            />
+            <SortFieldsButton
+              sortOptions={sortOptions}
+              sort={state.sort}
+              onSortChange={(next) => state.setSort({ key: next.key as ServiceSortKey, dir: next.dir })}
+              columns={fieldChoices}
+              visible={columns}
+              onVisibleChange={setColumns}
+              defaults={{ sort: DEFAULT_SORT, visible: DEFAULT_COLUMNS }}
+            />
+          </div>
+          <Chips label="Status" options={statusChips} value={state.status} onChange={state.setStatus} />
+        </div>
+      )}
       <Panel
         title="Services"
         label="Services"
@@ -132,32 +174,37 @@ export function ServicesPage() {
               {shown.length} of {items.length} services
             </span>
             <span>Sorted by {sortLabel}. Dashed tags are inherited from the cluster.</span>
+            <span>CPU and memory are shown for the rows on this page.</span>
           </div>
         }
       >
-        <div className={styles.views}>
-          <Seg label="Saved views" options={views} value={view} onChange={state.setView} />
-        </div>
-        <div className={styles.toolbar}>
-          <input
-            type="search"
-            className={styles.search}
-            data-hm-filter
-            aria-label="Filter services"
-            placeholder="Filter by service, cluster, account, region or image"
-            value={state.q}
-            onChange={(event) => state.setQ(event.target.value)}
-          />
-          <SegmentedFilter
-            label="Status"
-            value={state.status}
-            onChange={state.setStatus}
-            options={statusOptions.map((option) => ({ ...option, count: counts[option.value] }))}
-          />
-          <span className={styles.pushRight}>
-            <ColumnPicker columns={COLUMN_CHOICES} visible={columns} onChange={setColumns} defaults={DEFAULT_COLUMNS} />
-          </span>
-        </div>
+        {!phone && (
+          <>
+            <div className={styles.views}>
+              <Seg label="Saved views" options={views} value={view} onChange={state.setView} />
+            </div>
+            <div className={styles.toolbar}>
+              <input
+                type="search"
+                className={styles.search}
+                data-hm-filter
+                aria-label="Filter services"
+                placeholder="Filter by service, cluster, account, region or image"
+                value={state.q}
+                onChange={(event) => state.setQ(event.target.value)}
+              />
+              <SegmentedFilter
+                label="Status"
+                value={state.status}
+                onChange={state.setStatus}
+                options={statusOptions.map((option) => ({ ...option, count: counts[option.value] }))}
+              />
+              <span className={styles.pushRight}>
+                <ColumnPicker columns={COLUMN_CHOICES} visible={columns} onChange={setColumns} defaults={DEFAULT_COLUMNS} />
+              </span>
+            </div>
+          </>
+        )}
         <ServicesTable
           services={shown}
           visibleColumns={columns}
@@ -169,13 +216,15 @@ export function ServicesPage() {
           onTogglePin={(service) => toggle({ kind: 'service', id: service.id, name: service.name, cluster: service.cluster.name })}
           onDetails={(service) => setDetailId(service.id)}
           onRestart={startRestart}
+          metrics={metrics.data}
+          metricsFailed={metrics.isError}
           empty={empty}
         />
       </Panel>
       {list.data?.truncated && (
         <p className={styles.note}>Only the first {LIST_CAP} services are listed. Narrow the scope at the top to see the rest.</p>
       )}
-      <ServiceDrawer service={detail} onClose={() => setDetailId(undefined)} onRestart={startRestart} />
+      <ServiceDrawer service={detail} metrics={metrics.data} metricsFailed={metrics.isError} onClose={() => setDetailId(undefined)} onRestart={startRestart} />
       {restarting && <RestartFlow service={restarting} onClose={() => setRestarting(undefined)} />}
     </div>
   )

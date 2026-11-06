@@ -1,0 +1,4 @@
+/* UI scale (desktop only; scale.ts never sets data-scale on a phone). --hm-zoom lets a viewport-unit rule divide by the zoom. */
+:root[data-scale="125"] { zoom: 1.25; --hm-zoom: 1.25; }
+:root[data-scale="150"] { zoom: 1.5; --hm-zoom: 1.5; }
+:root[data-scale="200"] { zoom: 2; --hm-zoom: 2; }

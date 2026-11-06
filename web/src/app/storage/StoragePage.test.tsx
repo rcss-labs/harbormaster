@@ -1,10 +1,11 @@
 import { http, HttpResponse } from 'msw'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { StorageItem, StorageResponse } from '../../api/storage'
 import { renderWithProviders } from '../../test/setup'
 import { server } from '../../test/msw'
+import { installPhoneMedia } from '../../test/phone'
 import { AuthProvider } from '../auth/AuthProvider'
 import { StoragePage } from './StoragePage'
 
@@ -91,7 +92,7 @@ function serveStorage(response: StorageResponse) {
 const tableNames = () =>
   within(screen.getByRole('table', { name: 'File systems' }))
     .getAllByRole('row')
-    .slice(1)
+    .filter((row) => within(row).queryAllByRole('cell').length > 0)
     .map((row) => within(row).getAllByRole('cell')[0].querySelector('strong')?.textContent)
 
 describe('StoragePage', () => {
@@ -219,5 +220,53 @@ describe('StoragePage', () => {
     )
     renderStoragePage()
     expect(await screen.findByText('Some data on this page is stale: Storage')).toBeInTheDocument()
+  })
+})
+
+describe('StoragePage on phones', () => {
+  let restoreMedia: () => void
+  beforeEach(() => {
+    restoreMedia = installPhoneMedia(true)
+  })
+  afterEach(() => restoreMedia())
+
+  it('renders file systems as rows with the status pill and the meta line, without column headers', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage('/storage?q=jenkins-home')
+    const table = await screen.findByRole('table', { name: 'File systems' })
+    expect(within(table).queryAllByRole('columnheader')).toHaveLength(0)
+    const row = within(table).getAllByRole('row')[0]
+    expect(row.querySelector('[data-hm-cell="name"]')).toHaveTextContent('jenkins-home')
+    expect(row.querySelector('[data-hm-cell="mounted"]')).toHaveTextContent('1 client')
+    expect(row.querySelector('[data-hm-cell="size"]')).toHaveTextContent('38.4 GiB')
+  })
+
+  it('shows the not-mounted status on the row of a file system no service mounts', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage('/storage?seg=unmounted')
+    const row = within(await screen.findByRole('table', { name: 'File systems' })).getAllByRole('row')[0]
+    expect(row.querySelector('[data-hm-cell="mounted"]')).toHaveTextContent('Not mounted')
+  })
+
+  it('opens the details sheet with the mounting service link and the not-mounted reason', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage('/storage?seg=unmounted')
+    await userEvent.click(await screen.findByRole('button', { name: 'Details for uploads-archive' }))
+    const sheet = await screen.findByRole('dialog', { name: 'uploads-archive' })
+    expect(within(sheet).getByText('No service mounts this file system.')).toBeInTheDocument()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close panel' }))
+    expect(screen.queryByRole('dialog', { name: 'uploads-archive' })).not.toBeInTheDocument()
+  })
+
+  it('sorts by the chosen field from the sort and fields sheet, and Reset restores size, largest first', async () => {
+    serveStorage(STORAGE)
+    renderStoragePage()
+    await screen.findByRole('table', { name: 'File systems' })
+    await userEvent.click(screen.getByRole('button', { name: 'Sort and fields' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Sort and fields' })
+    await userEvent.click(within(sheet).getByRole('button', { name: 'File system' }))
+    expect(tableNames()).toEqual(['uploads-archive', 'shared-certs', 'search-index', 'reports-data', 'jenkins-home'])
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Reset to default' }))
+    expect(tableNames()).toEqual(['uploads-archive', 'search-index', 'jenkins-home', 'reports-data', 'shared-certs'])
   })
 })
