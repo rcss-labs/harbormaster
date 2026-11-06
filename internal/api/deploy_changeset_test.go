@@ -223,6 +223,24 @@ func TestChangeSet_RefusesScheduledActionEditWhenUnreadable(t *testing.T) {
 	assertNoChangesetWrites(t, env)
 }
 
+// Deregistering the target deletes its policies and scheduled actions too, so it cannot proceed while
+// the user could not see them.
+func TestChangeSet_RefusesRemoveTargetWhenScheduledActionsUnreadable(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	settings := liveSettings(t, admin)
+	resp := admin.post(changesetPath(), map[string]any{
+		"base_revision": 42, "base_version": settings.Version,
+		"scaling": map[string]any{"remove_target": true},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Scheduled actions could not be read; retry before changing them." {
+		t.Fatalf("error = %s: %s", code, msg)
+	}
+	assertNoChangesetWrites(t, env)
+}
+
 func TestDeploySettings_CanFlags(t *testing.T) {
 	env := newWriteEnv(t)
 	for user, want := range map[string]ChangeCanDTO{
