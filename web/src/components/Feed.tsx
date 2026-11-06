@@ -21,7 +21,7 @@ export function FeedRow({ ts, source, actor, children }: FeedRowProps) {
         <Ago ts={ts} />
       </span>
       <span className={`${styles.src} ${fromEcs ? styles.e : styles.q}`}>{fromEcs ? 'ECS event' : actor}</span>
-      <span>{children}</span>
+      <span className={styles.text}>{children}</span>
     </div>
   )
 }
