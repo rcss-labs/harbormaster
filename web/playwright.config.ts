@@ -53,11 +53,11 @@ export default defineConfig({
     { name: 'setup', testMatch: /auth\.setup\.ts/, use: { ...devices['Desktop Chrome'] } }, // plan 06: signs in each role, writes e2e/.auth/*.json
     { name: 'chromium', testMatch: /smoke\.spec\.ts/, dependencies: ['setup'], use: { ...devices['Desktop Chrome'] } }, // plan 06: dependencies
     // retries: 1 because a failed dependency skips every flow spec; the observe specs only read, so a retry is safe.
-    // v4: services, shell, attention and services-live read the unmutated seed, so they run here. freshness, task-drawer and
-    // deploy-partial mutate or degrade the server, so they fall through to chromium-flows (everything not matched below).
-    { name: 'chromium-observe', testMatch: /((observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|attention|services-live)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06: plan 06 (task 17) added overview, clusters, cluster, tasks; task 19 added me (anchored): read-only networks/storage specs read the unmutated seed
+    // v4: services, shell and services-live read the unmutated seed, so they run here. attention and task-drawer mutate the server,
+    // so they fall through to chromium-flows (everything not matched below). freshness and deploy-partial run in chromium-degraded.
+    { name: 'chromium-observe', testMatch: /((observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|services-live)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06: plan 06 (task 17) added overview, clusters, cluster, tasks; task 19 added me (anchored): read-only networks/storage specs read the unmutated seed
       dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-flows', testIgnore: /((smoke|observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|attention|services-live|freshness|deploy-partial)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06, plan 06 task 17/19
+    { name: 'chromium-flows', testIgnore: /((smoke|observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|services-live|freshness|deploy-partial)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06, plan 06 task 17/19
       dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
     // v4 plan Decision 17: scheduled actions and the scaling tier fail on a second server, so the specs see stale data and a
     // partial Deploy tab. It has its own database schema, so the specs sign in themselves instead of using e2e/.auth.
