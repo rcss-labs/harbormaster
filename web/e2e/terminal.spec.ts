@@ -32,3 +32,17 @@ test('exec-off service shows the Terraform banner', async ({ page }) => {
   await expect(page.getByText('enable_execute_command = true')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Connect' })).toHaveCount(0)
 })
+
+test('at 390px the terminal and the Session panel do not overlap', async ({ page }) => {
+  await login(page, 'pavel')
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.goto(`/services/${paymentsApi}/terminal`)
+  const host = page.getByTestId('terminal-host')
+  await expect(host).toBeVisible()
+  const sessionTitle = page.getByText('Session', { exact: true }).first()
+  await expect(sessionTitle).toBeVisible()
+  const h = (await host.boundingBox())!
+  const s = (await sessionTitle.boundingBox())!
+  const intersects = h.x < s.x + s.width && s.x < h.x + h.width && h.y < s.y + s.height && s.y < h.y + h.height
+  expect(intersects, `host ${JSON.stringify(h)} vs session ${JSON.stringify(s)}`).toBe(false)
+})
