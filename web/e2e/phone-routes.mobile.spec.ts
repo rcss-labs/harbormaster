@@ -159,6 +159,26 @@ test.describe('phone harness self-test', () => {
     expect(kinds(await violationsOf(page, html(content(72))))).not.toContain('bottom')
   })
 
+  test('the helper reports text printed over text in a chart panel, and stays quiet on a tidy one', async ({ page }) => {
+    const svg = '<svg width="300" height="60" aria-hidden="true"><line x1="0" y1="30" x2="300" y2="30" stroke="#888"/></svg>'
+    const panel = (legendGap: number) =>
+      `<main><section aria-label="CPU">
+        <div style="font-size:12px;line-height:16px;margin-bottom:${legendGap}px"><span>CPU</span> <span>Memory</span></div>
+        <div style="position:relative;height:60px;margin-left:40px">${svg}
+          <span style="position:absolute;left:-40px;top:-8px;font-size:12px;line-height:16px">100%</span>
+          <span style="position:absolute;left:0;bottom:0;font-size:12px;line-height:16px">24 h ago</span>
+          <span style="position:absolute;right:0;bottom:0;font-size:12px;line-height:16px">now</span>
+        </div></section></main>`
+    // The 100% axis label sticks 8 px above the plot: a legend that touches the plot prints over it.
+    const planted = await violationsOf(page, html(panel(0)))
+    expect(planted.some((line) => line.startsWith('text-overlap:') && line.includes('100%'))).toBe(true)
+    // With the legend cleared, and with a paragraph that wraps onto several lines (tight line boxes), nothing is reported.
+    const wrapped = '<p style="width:120px;font-size:12px;line-height:12px;margin:8px 0 0">a wrapped caption that takes several lines of the panel</p>'
+    expect(kinds(await violationsOf(page, html(panel(12).replace('</section>', `${wrapped}</section>`))))).not.toContain('text-overlap')
+    // Panels without a chart are not examined.
+    expect(kinds(await violationsOf(page, html('<main><section aria-label="Notes"><span style="position:absolute">a</span><span style="position:absolute">b</span><p>x</p></section></main>')))).not.toContain('text-overlap')
+  })
+
   test('the helper reports an empty labelled section', async ({ page }) => {
     expect(kinds(await violationsOf(page, html('<main><section aria-label="Pinned"></section></main>')))).toContain('section-empty')
   })

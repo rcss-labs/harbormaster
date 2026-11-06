@@ -18,6 +18,8 @@ import { ROUTES, type RouteSpec } from '../../e2e-floci/routes'
  *   covered      something else (a sticky column, a bar) sits on top of a row's title
  *   bottom       the last element in main ends below the top of the tab bar, sticky bar or terminal keys row
  *   section-empty  a section[aria-label] in main with no text
+ *   text-overlap   text drawn on top of other text inside a chart panel (a section in main that holds a plot, an svg of 100 x 40 px or more): a legend over an axis label,
+ *                  a marker label over a marker label
  * Page errors, console errors and failing responses are collected from `watchPage` onwards.
  */
 
@@ -171,6 +173,48 @@ function collectViolations(options: { allowClip: string[] }): string[] {
   // Sections with a label must say something.
   for (const section of Array.from(document.querySelectorAll('main section[aria-label]'))) {
     if ((section.textContent ?? '').trim() === '') report('section-empty', section, `section "${section.getAttribute('aria-label')}" has no text`)
+  }
+
+  // Text on text inside chart panels. Every other check looks at one box at a time, so a legend printed over an axis label passes them all.
+  // Boxes are the rendered lines of each text node (Range rects), compared across different text nodes only. Lines that merely touch or
+  // share a line-height gap do not count: the overlap must be more than 2 px wide and 3 px tall, and cover a fifth of the smaller box.
+  const textBoxesOf = (panel: Element) => {
+    const boxes: { node: Text; rect: DOMRect }[] = []
+    const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+      if ((node.textContent ?? '').trim() === '') continue
+      const owner = node.parentElement
+      if (!owner || owner.closest('svg') || !isVisible(owner) || getComputedStyle(owner).opacity === '0') continue
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      for (const rect of Array.from(range.getClientRects())) {
+        if (rect.width > 1 && rect.height > 1) boxes.push({ node, rect })
+      }
+    }
+    return boxes
+  }
+  // A chart panel holds a plot, an svg at least 100 x 40 px; the 16 px icons in buttons and rows do not make a section a chart.
+  const hasPlot = (section: Element) =>
+    Array.from(section.querySelectorAll('svg')).some((svg) => {
+      const box = svg.getBoundingClientRect()
+      return box.width >= 100 && box.height >= 40
+    })
+  for (const panel of Array.from(document.querySelectorAll('main section')).filter((section) => isVisible(section) && hasPlot(section))) {
+    const boxes = textBoxesOf(panel)
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (boxes[i].node === boxes[j].node) continue
+        const a = boxes[i].rect
+        const b = boxes[j].rect
+        const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+        const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+        if (overlapX <= 2 || overlapY <= 3) continue
+        const smaller = Math.min(a.width * a.height, b.width * b.height)
+        if (overlapX * overlapY < smaller * 0.2) continue
+        const nameOf = (node: Text) => `"${(node.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`
+        report('text-overlap', boxes[i].node.parentElement!, `text ${nameOf(boxes[i].node)} overlaps ${nameOf(boxes[j].node)} by ${px(overlapX)} x ${px(overlapY)}`)
+      }
+    }
   }
 
   // Bottom: scrolled to the end, nothing in main may sit under the tab bar, sticky bar or terminal keys row.

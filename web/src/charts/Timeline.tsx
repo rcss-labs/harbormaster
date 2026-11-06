@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import styles from './charts.module.css'
 import { dayLabel } from './format'
 
@@ -35,7 +36,7 @@ export function Timeline({ events, start, end }: TimelineProps) {
         <div
           key={`${event.ts}-${i}`}
           className={i % 2 ? `${styles.ev} ${styles.alt}` : styles.ev}
-          style={{ left: `${percentOf(event.ts)}%` }}
+          style={{ left: `${percentOf(event.ts)}%`, '--at': percentOf(event.ts) } as CSSProperties}
           title={new Date(event.ts).toLocaleString()}
         >
           <span>{event.label}</span>
