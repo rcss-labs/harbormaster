@@ -127,4 +127,31 @@ describe('TimeSeriesChart', () => {
     fireEvent.keyDown(plot, { key: 'Escape' })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
+
+  it('touch shows the tooltip at the touched point', () => {
+    chart()
+    const plot = screen.getByRole('group', { name: 'Chart' })
+    plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 150, right: 1000, bottom: 150, x: 0, y: 0, toJSON: () => ({}) })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.touchStart(plot, { touches: [{ clientX: 0 }] })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('2 h ago')
+    fireEvent.touchMove(plot, { touches: [{ clientX: 1000 }] })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('now')
+  })
+
+  it('tooltip never exceeds the plot on a narrow plot', () => {
+    chart()
+    const plot = screen.getByRole('group', { name: 'Chart' })
+    plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 150, right: 200, bottom: 150, x: 0, y: 0, toJSON: () => ({}) })
+    for (const clientX of [0, 100, 150, 200]) {
+      fireEvent.mouseMove(plot, { clientX })
+      const tip = screen.getByRole('tooltip')
+      // Offsets are bounded so the 190 px tooltip (170 px minimum plus its margins) stays inside 200 px.
+      const offset = parseFloat(tip.style.left || tip.style.right)
+      const unit = (tip.style.left || tip.style.right).endsWith('px') ? 'px' : '%'
+      const px = unit === 'px' ? offset : (offset / 100) * 200
+      expect(px).toBeGreaterThanOrEqual(0)
+      expect(px).toBeLessThanOrEqual(10)
+    }
+  })
 })

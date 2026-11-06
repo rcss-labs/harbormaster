@@ -89,7 +89,7 @@ export function TimeSeriesChart({
 }: TimeSeriesChartProps) {
   const count = timestamps.length
   const stacked = mode === 'stacked'
-  const { index: hovered, bind } = useChartHover(count)
+  const { index: hovered, plotWidth, bind } = useChartHover(count)
   const liveNow = useNow(60_000)
 
   const totals = Array.from({ length: count }, (_, i) => series.reduce((sum, line) => sum + (line.values[i] ?? 0), 0))
@@ -212,6 +212,7 @@ export function TimeSeriesChart({
               })}
             <ChartTooltip
               leftPercent={leftPercent}
+              plotWidth={plotWidth}
               title={relativeLabel(timestamps, hovered, now ?? liveNow)}
               rows={series.map((line) => {
                 const value = line.values[hovered]
