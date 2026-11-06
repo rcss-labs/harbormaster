@@ -45,6 +45,7 @@
 .assignTag { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .assignTag select { flex: 1 1 140px; min-width: 0; }
 @media (max-width: 700px) {
+  .ctl, .ctlLg { font-size: 16px; }
   .radioList label, .toolbar label { min-height: 44px; }
   .btn { white-space: normal; }
 }

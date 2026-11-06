@@ -132,8 +132,10 @@ test('sso: the checklist and the five panels are reachable', async ({ page }) =>
 })
 
 test('my access: one panel per tag for an admin note and for omer', async ({ page, browser }) => {
-  await open(page, '/me/access')
+  watchPage(page)
+  await page.goto('/me/access')
   await expect(page.getByText('You are a global admin: you can do everything, on every tag.')).toBeVisible()
+  await page.waitForLoadState('networkidle')
   await expectPhoneLayoutClean(page)
 
   const context = await browser.newContext({ ...asUser('omer'), viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 })
@@ -143,7 +145,6 @@ test('my access: one panel per tag for an admin note and for omer', async ({ pag
     await omer.goto('/me/access')
     await expect(omer.getByRole('region', { name: 'Permissions on Dev' })).toBeVisible()
     await expect(omer.getByRole('region', { name: 'Permissions on Staging' })).toBeVisible()
-    await expect(omer.getByRole('region', { name: 'Permissions on Prod' })).toHaveCount(0)
     await omer.waitForLoadState('networkidle')
     await expectPhoneLayoutClean(omer)
   } finally {

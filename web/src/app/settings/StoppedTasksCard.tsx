@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSettings, useUpdateSettings } from '../../api/hooks'
 import { Panel } from '../../components/Panel'
 import { useToast } from '../../components/Toast'
@@ -65,10 +66,13 @@ export function StoppedTasksCard() {
   return (
     <Panel title="Stopped tasks">
       {phone ? (
-        <div className={`hm-bar ${styles.saveBar}`} data-hm-bar="">
-          {edited !== null ? <span className={styles.barNote}>Unsaved change</span> : <span className={styles.barNote}>Saved value: {loadedMinutes ?? '–'} minutes</span>}
-          {saveButton}
-        </div>
+        createPortal(
+          <div className={`hm-bar ${styles.saveBar}`} data-hm-bar="">
+            {edited !== null ? <span className={styles.barNote}>Unsaved change</span> : <span className={styles.barNote}>Saved value: {loadedMinutes ?? '–'} minutes</span>}
+            {saveButton}
+          </div>,
+          document.body,
+        )
       ) : (
         <HeaderAction>{saveButton}</HeaderAction>
       )}

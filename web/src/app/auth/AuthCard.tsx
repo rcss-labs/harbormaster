@@ -21,7 +21,7 @@ export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit,
     onSubmit()
   }
   return (
-    <div className={styles.wrap}>
+    <main className={styles.wrap}>
       <form className={`card ${styles.card}`} onSubmit={handleSubmit} noValidate>
         <div className={styles.brand}>
           <Brand variant="signin" />
@@ -42,7 +42,7 @@ export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit,
           </button>
         )}
       </form>
-    </div>
+    </main>
   )
 }
 

@@ -1,3 +1,4 @@
+@media (max-width: 700px) { .ctl { font-size: 16px; } .search { max-width: none; flex-basis: 100%; } }
 .rows { display: flex; flex-direction: column; }
 .row { display: grid; gap: 2px; padding: 8px var(--pad); border-bottom: 1px solid var(--row-border); min-width: 0; }
 .row:last-child { border-bottom: 0; }
