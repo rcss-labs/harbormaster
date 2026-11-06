@@ -136,6 +136,8 @@
 @media (max-width: 700px) {
   .fieldRow { grid-template-columns: minmax(0, 1fr); }
   .field { font-size: 13px; }
+  /* The base rule sets font: inherit, which outranks the global 16px floor for form controls. */
+  .input, .select { font-size: 16px; }
   .editor { padding: 0; border: 0; background: none; }
   .actions .btn, .rowActions .btn { padding: 0 14px; }
 }

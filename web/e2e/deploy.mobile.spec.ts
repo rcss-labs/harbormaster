@@ -5,6 +5,9 @@ import { SVC, serviceUrl } from './fixtures/ids'
 import { measureBox } from './helpers'
 
 // Read-only phone checks of the Deploy tab: nothing here applies a change (that is deploy.mobile-flows.spec.ts).
+// A long value in a text field scrolls inside the field, which is how inputs behave.
+const LONG_VALUES_SCROLL = { allowClip: ['input'] }
+
 test.use({ ...asUser('sam'), viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 })
 
 const deployUrl = serviceUrl(...SVC.paymentsApi, 'deploy')
@@ -20,7 +23,7 @@ async function openDeploy(page: Page) {
 test('Deploy lays out cleanly at 390 with no bar until something changes', async ({ page }) => {
   await openDeploy(page)
   await expect(bar(page)).toHaveCount(0)
-  await expectPhoneLayoutClean(page)
+  await expectPhoneLayoutClean(page, LONG_VALUES_SCROLL)
 })
 
 test('the sticky bar shows the count, never covers the last field, and its sheet fits the screen', async ({ page }) => {
@@ -28,11 +31,11 @@ test('the sticky bar shows the count, never covers the last field, and its sheet
   await page.getByRole('region', { name: 'Service' }).getByRole('spinbutton', { name: 'Desired count' }).fill('4')
   await expect(bar(page).getByText('1 change')).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-hm-bar', '')
-  await expectPhoneLayoutClean(page)
+  await expectPhoneLayoutClean(page, LONG_VALUES_SCROLL)
 
   // Scrolled to the end, the last control of the page sits above the bar.
   await page.locator('main').evaluate((main) => (main.scrollTop = main.scrollHeight))
-  const lastControl = page.locator('main').locator('button, input, select, textarea').last()
+  const lastControl = page.getByRole('button', { name: 'Add scheduled action' })
   await lastControl.scrollIntoViewIfNeeded()
   const [barBox, lastBox] = await Promise.all([measureBox(bar(page)), measureBox(lastControl)])
   expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(barBox.y + 1)
@@ -71,5 +74,5 @@ test('the image tag search opens in a sheet and a policy row opens its Edit/Remo
   await expect(page.getByRole('button', { name: 'Save policy' })).toBeVisible()
   await expectSheetWithinViewport(page)
   await page.getByRole('button', { name: 'Cancel' }).click()
-  await expectPhoneLayoutClean(page)
+  await expectPhoneLayoutClean(page, LONG_VALUES_SCROLL)
 })
