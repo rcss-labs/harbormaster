@@ -12,18 +12,10 @@ test.beforeEach(({ page }) => {
   problems = watchPage(page)
 })
 
-/**
- * The generic phone assertions, minus two header links (Deploy, AWS console) that belong to the service page frame
- * and stay 30 px tall until its phone header lands.
- */
 async function expectOwnLayoutClean(page: Page) {
   expect(problems, 'page errors, console errors and failing responses').toEqual([])
-  const violations = (await phoneViolations(page)).filter((line) => !/^target: .*"(Deploy|AWS console)/.test(line))
-  expect(violations, 'phone layout violations').toEqual([])
+  expect(await phoneViolations(page), 'phone layout violations').toEqual([])
 }
-
-/** The service header is taller than a short phone; scroll the page content to its end so its bottom edge is what is measured. */
-const scrollMainToEnd = (page: Page) => page.evaluate(() => { const main = document.querySelector('main'); if (main) main.scrollTop = main.scrollHeight })
 
 const paymentsTerminal = serviceUrl(...SVC.paymentsApi, 'terminal')
 const execOffTerminal = serviceUrl('482109375512', 'eu-central-1', 'edge-proxy', 'cert-renewer', 'terminal')
@@ -102,7 +94,6 @@ test.describe('with the keyboard up (a 500 px tall viewport stands in for it)', 
     await connectThroughSheet(page)
     const keys = page.getByRole('toolbar', { name: 'Terminal keys' })
     const host = page.getByTestId('terminal-host')
-    await scrollMainToEnd(page)
     const [hostBox, keysBox] = await measureBoxes(host, keys)
     expect(hostBox.y + hostBox.height, `host ${JSON.stringify(hostBox)} vs keys ${JSON.stringify(keysBox)}`).toBeLessThanOrEqual(keysBox.y + 1)
     expect(keysBox.y + keysBox.height).toBeLessThanOrEqual(500 + 1)
@@ -121,7 +112,6 @@ test.describe('with the keyboard up (a 500 px tall viewport stands in for it)', 
     const bigRows = await page.locator('.xterm-screen').evaluate((el) => el.getBoundingClientRect().height)
     await page.setViewportSize({ width: 390, height: 500 })
     await expect.poll(() => page.locator('.xterm-screen').evaluate((el) => el.getBoundingClientRect().height)).toBeLessThan(bigRows)
-    await scrollMainToEnd(page)
     const [hostBox, keysBox] = await measureBoxes(page.getByTestId('terminal-host'), page.getByRole('toolbar', { name: 'Terminal keys' }))
     expect(hostBox.y + hostBox.height).toBeLessThanOrEqual(keysBox.y + 1)
   })
