@@ -2,3 +2,7 @@
 .toggle input { accent-color: var(--accent); margin: 0; width: 13px; height: 13px; cursor: inherit; }
 .toggle:hover { color: var(--text); }
 .disabled { opacity: 0.55; cursor: not-allowed; }
+@media (max-width: 700px) {
+  .toggle { min-height: 44px; font-size: 14px; gap: 10px; }
+  .toggle input { width: 22px; height: 22px; }
+}
