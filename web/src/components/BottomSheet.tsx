@@ -147,7 +147,9 @@ export function SheetAction({ icon, label, why, danger = false, right, disabled 
   )
   if (href !== undefined && !disabled) {
     return (
-      <Link to={href} role={role} className={className} aria-current={current ? 'page' : undefined} onClick={onClick}>
+      // `replace`: the sheet owns the newest history entry, and navigating from it must reuse that entry. Pushing would leave
+      // a dead entry (the page with the sheet closed) between the new page and the old one, so one Back would seem to do nothing.
+      <Link to={href} replace role={role} className={className} aria-current={current ? 'page' : undefined} onClick={onClick}>
         {content}
       </Link>
     )

@@ -15,9 +15,3 @@ const snapshot = () => typeof window.matchMedia === 'function' && window.matchMe
 export function usePhone(): boolean {
   return useSyncExternalStore(subscribe, snapshot, () => false)
 }
-
-/** @deprecated Use `PHONE_QUERY`. Kept as an alias for one release. */
-export const NARROW_QUERY = PHONE_QUERY
-
-/** @deprecated Use `usePhone`. Kept as an alias for one release. */
-export const useNarrow = usePhone

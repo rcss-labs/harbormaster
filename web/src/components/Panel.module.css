@@ -13,5 +13,7 @@
 @media (max-width: 700px) {
   .head { min-height: 44px; }
   .title { font-size: 14px; }
+  /* Title, sub and actions share the first row; the toolbar gets its own full-width row below them. */
+  .toolbar { order: 10; flex: 1 0 100%; }
   .foot { font-size: 12px; }
 }
