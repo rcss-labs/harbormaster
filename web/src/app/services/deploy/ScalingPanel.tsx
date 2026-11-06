@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { DeploySettingsResponse } from '../../../api/deploy'
 import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
+import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { PanelError } from '../../../components/PanelError'
 import { RowMenu } from '../../../components/RowMenu'
@@ -207,6 +208,8 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
   return (
     <Panel title="Auto scaling" error={targetUnreadable ? { message: targetUnreadable.message, onRetry } : undefined}>
       <div className={styles.stack}>
+        {/* Phones have no hover: a whole-panel lock is one note; a part that could not be read gets its reason under its own button. */}
+        <LockNote>{lock}</LockNote>
         {draft.hasTarget ? (
           <div className={styles.group}>
             <div className={styles.fieldRow}>
@@ -245,6 +248,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
                 Remove target
               </button>
             </div>
+            <LockNote kind="why">{removeLock === lock ? undefined : removeLock}</LockNote>
           </div>
         ) : removing ? (
           <div className={styles.group}>
@@ -290,11 +294,14 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
               )}
               {editingPolicy && policyEditor && (phone ? <EditorSheet label={policyEditorLabel} onClose={() => setEditingPolicy(null)}>{policyEditor}</EditorSheet> : policyEditor)}
               {!(editingPolicy && !phone) && (
-                <div className={styles.actions}>
-                  <button type="button" className={styles.btn} disabled={policiesLock !== undefined} title={policiesLock} onClick={() => setEditingPolicy({ kind: 'new' })}>
-                    Add policy
-                  </button>
-                </div>
+                <>
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.btn} disabled={policiesLock !== undefined} title={policiesLock} onClick={() => setEditingPolicy({ kind: 'new' })}>
+                      Add policy
+                    </button>
+                  </div>
+                  <LockNote kind="why">{policiesLock === lock ? undefined : policiesLock}</LockNote>
+                </>
               )}
             </div>
 
@@ -315,11 +322,14 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
               )}
               {editingAction && actionEditor && (phone ? <EditorSheet label={actionEditorLabel} onClose={() => setEditingAction(null)}>{actionEditor}</EditorSheet> : actionEditor)}
               {!(editingAction && !phone) && (
-                <div className={styles.actions}>
-                  <button type="button" className={styles.btn} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'new' })}>
-                    Add scheduled action
-                  </button>
-                </div>
+                <>
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.btn} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'new' })}>
+                      Add scheduled action
+                    </button>
+                  </div>
+                  <LockNote kind="why">{scheduledLock === lock ? undefined : scheduledLock}</LockNote>
+                </>
               )}
             </div>
           </>

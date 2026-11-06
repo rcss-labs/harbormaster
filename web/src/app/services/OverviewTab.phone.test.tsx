@@ -28,7 +28,9 @@ describe('OverviewTab on phones', () => {
     renderWithProviders(<OverviewTab service={service} />)
     const restart = within(screen.getByRole('region', { name: 'Rollout' })).getByRole('button', { name: 'Restart' })
     expect(restart).toBeDisabled()
-    expect(restart).toHaveAttribute('title', `You need Operate on ${service.tag.name}`)
+    // Hover does not exist on a phone: the reason is text in the panel, once for both locked buttons.
+    expect(within(screen.getByRole('region', { name: 'Rollout' })).getAllByText(`You need Operate on ${service.tag.name}`)).toHaveLength(1)
+    expect(within(screen.getByRole('region', { name: 'Rollout' })).getByRole('button', { name: 'Desired count' })).toBeDisabled()
   })
 
   it('running tasks get an actions sheet with Logs and Stop task', async () => {

@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { SCALING_NONE, SCALING_PAYMENTS, SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
+import { installPhoneMedia } from '../../../test/phone'
 import { renderApp } from '../../../test/renderApp'
 
 const desiredInfo = (
@@ -199,6 +200,19 @@ describe('ScalingTab', () => {
     await user.type(input, String(SCALING_PAYMENTS.max + 1))
 
     expect(screen.getByText(`Outside the auto scaling range ${SCALING_PAYMENTS.min}–${SCALING_PAYMENTS.max}.`)).toBeInTheDocument()
+  })
+
+  it('on a phone the Operate lock is visible text under the button', async () => {
+    const restore = installPhoneMedia(true)
+    try {
+      mockDesiredCount()
+      server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, can: { ...SERVICE_PAYMENTS.can, operate: false } })))
+      renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+      expect(await screen.findByRole('button', { name: 'Update desired count' })).toBeDisabled()
+      expect(screen.getByText(`You need Operate on ${SERVICE_PAYMENTS.tag.name}`)).toBeVisible()
+    } finally {
+      restore()
+    }
   })
 
   it('button disabled without Operate with the title', async () => {

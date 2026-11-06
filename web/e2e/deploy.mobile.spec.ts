@@ -76,3 +76,24 @@ test('the image tag search opens in a sheet and a policy row opens its Edit/Remo
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expectPhoneLayoutClean(page, LONG_VALUES_SCROLL)
 })
+
+// omer has Operate on Dev only: on a phone the locked panels must say why in text, since hover does not exist on touch.
+test.describe('lock reasons as omer', () => {
+  test.use(asUser('omer'))
+
+  test('the locked Containers, Task size and Service panels state their reason as visible text', async ({ page }) => {
+    watchPage(page)
+    await page.goto(serviceUrl(...SVC.imageResizer, 'deploy'))
+    const region = (name: string) => page.getByRole('region', { name })
+    await expect(region('Task size')).toBeVisible()
+
+    await expect(region('Containers').getByText('You need Edit on Dev')).toBeVisible()
+    await expect(region('Task size').getByText('You need Edit on Dev')).toBeVisible()
+    await expect(region('Service').getByText('You need Deploy on Dev')).toBeVisible()
+    // Operate is allowed, so the Service panel carries no Operate note and the stepper is live.
+    await expect(region('Service').getByText('You need Operate on Dev')).toHaveCount(0)
+    await expect(region('Service').getByRole('spinbutton', { name: 'Desired count' })).toBeEnabled()
+    await expect(region('Auto scaling').getByText('You need Operate on Dev')).toHaveCount(0)
+    await expectPhoneLayoutClean(page, LONG_VALUES_SCROLL)
+  })
+})

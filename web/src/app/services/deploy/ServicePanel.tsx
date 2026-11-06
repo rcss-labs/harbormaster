@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { DeploySettingsResponse } from '../../../api/deploy'
+import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { Toggle } from '../../../components/Toggle'
 import stepperStyles from '../HeaderActions.module.css'
@@ -45,6 +46,9 @@ export function ServicePanel({ settings, draft, onChange, tagName }: ServicePane
   return (
     <Panel title="Service" sub={<span> · {settings.running_count} running</span>}>
       <div className={styles.stack}>
+        {/* Phones have no hover: each lock is stated once at the top instead of in tooltips. */}
+        <LockNote>{operateLock}</LockNote>
+        <LockNote>{deployLock}</LockNote>
         <div className={styles.group}>
           <div className={stepperStyles.stepper} role="group" aria-label="Desired count" title={operateLock} style={{ alignSelf: 'flex-start' }}>
             <span className={stepperStyles.stepperLabel}>DESIRED</span>
@@ -110,6 +114,7 @@ export function ServicePanel({ settings, draft, onChange, tagName }: ServicePane
               Roll back on failure
             </Toggle>
           </span>
+          <LockNote kind="why">{deployLock === undefined && !breakerOn ? 'Turn on the circuit breaker to roll back automatically' : undefined}</LockNote>
           <div className={styles.fieldRow}>
             <label className={styles.field} title={deployLock}>
               Minimum healthy percent
@@ -147,6 +152,7 @@ export function ServicePanel({ settings, draft, onChange, tagName }: ServicePane
               />
             </label>
           </div>
+          <LockNote kind="why">{deployLock === undefined ? graceLock : undefined}</LockNote>
           {draft.minimumHealthyPercent !== null && (draft.minimumHealthyPercent < 0 || draft.minimumHealthyPercent > 100) && (
             <p className={styles.error}>Minimum healthy percent must be between 0 and 100.</p>
           )}
