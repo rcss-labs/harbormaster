@@ -12,6 +12,7 @@ import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './netwo
 import { Overview } from './overview/Overview'
 import { SettingsPage } from './settings/SettingsPage'
 import { ServicePage } from './services/ServicePage'
+import { ServicesPage } from './services/list/ServicesPage'
 import { Shell } from './shell/Shell'
 import { MyAccess } from './me/MyAccess'
 import { StoragePage } from './storage/StoragePage'
@@ -69,6 +70,7 @@ export function AppRoutes() {
           <Route index element={<Overview />} />
           <Route path="clusters" element={<Clusters />} />
           <Route path="clusters/:clusterId" element={<Cluster />} />
+          <Route path="services" element={<ServicesPage />} />
           <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="tasks/:shortId/terminal" element={<TaskTerminal />} />
