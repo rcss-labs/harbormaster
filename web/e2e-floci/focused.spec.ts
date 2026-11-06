@@ -85,11 +85,16 @@ test('overview and deploy use two columns at 2560 and 3840', async ({ page, requ
       await expect(split).toBeVisible()
       const children = split.locator('> *')
       await expect(children.nth(1)).toBeVisible()
-      expect(await children.count(), `${path} at ${width}: columns`).toBeGreaterThanOrEqual(2)
-      const first = (await children.nth(0).boundingBox())!
-      const second = (await children.nth(1).boundingBox())!
-      expect(second.x, `${path} at ${width}: second column sits right of the first`).toBeGreaterThanOrEqual(first.x + first.width - 1)
-      expect(Math.abs(second.y - first.y), `${path} at ${width}: columns start at the same height`).toBeLessThanOrEqual(2)
+      // The columns re-render as data arrives, so read both boxes in one step and poll until they are side by side.
+      const layout = () =>
+        split.evaluate((element) => {
+          const [first, second] = [...element.children].map((child) => child.getBoundingClientRect())
+          return { columns: element.children.length, rightOfFirst: second.x >= first.right - 1, topOffset: Math.abs(second.y - first.y) }
+        })
+      await expect.poll(layout, { message: `${path} at ${width}: two columns side by side` }).toMatchObject({ rightOfFirst: true })
+      const settled = await layout()
+      expect(settled.columns, `${path} at ${width}: columns`).toBeGreaterThanOrEqual(2)
+      expect(settled.topOffset, `${path} at ${width}: columns start at the same height`).toBeLessThanOrEqual(2)
     }
   }
 })
