@@ -1,7 +1,7 @@
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Link, type LinkProps } from 'react-router'
 import { Popover } from './Popover'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 import styles from './RowMenu.module.css'
 
 interface RowMenuProps {

@@ -25,11 +25,6 @@
   .page .termWrap { flex: none; height: 300px; }
 }
 
-@media (max-width: 600px) {
-  .field { flex: 1 1 100%; }
-  .field select { flex: 1 1 auto; }
-}
-
 /* Phone: the panel fills the page down to the keys row (or the tab bar); the target and the session facts open in sheets. */
 @media (max-width: 700px) {
   div.page.pagePhone { flex: 1 1 0; min-height: 220px; display: flex; flex-direction: column; }

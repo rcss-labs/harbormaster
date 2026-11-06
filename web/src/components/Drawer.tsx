@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import styles from './Drawer.module.css'
 import { BottomSheet } from './BottomSheet'
 import { Icon } from './Icon'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 import { trapTab, useFocusReturn } from './useFocusReturn'
 
 interface DrawerProps {

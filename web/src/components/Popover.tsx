@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { BottomSheet } from './BottomSheet'
 import styles from './Popover.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 import { useFocusReturn } from './useFocusReturn'
 
 interface PopoverProps {

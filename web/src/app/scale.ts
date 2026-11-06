@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { PHONE_QUERY } from '../components/useNarrow'
+import { PHONE_QUERY } from '../components/usePhone'
 
 export const SCALE_STORAGE_KEY = 'harbormaster-scale'
 

@@ -13,7 +13,7 @@ import { useExecSocket, type ExecError, type ExecStatus } from './useExecSocket'
 import { Panel } from '../../../components/Panel'
 import { BottomSheet } from '../../../components/BottomSheet'
 import { Icon } from '../../../components/Icon'
-import { usePhone } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { TerminalKeys } from './TerminalKeys'
 import styles from './terminal.module.css'
 

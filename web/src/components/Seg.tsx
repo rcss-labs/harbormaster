@@ -1,6 +1,6 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import styles from './Seg.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 interface SegOption<T extends string> {
   value: T

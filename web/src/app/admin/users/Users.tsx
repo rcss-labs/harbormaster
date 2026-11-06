@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuthOptions, usePermissions, useSSOConfig, useUsers } from '../../../api/hooks'
-import { usePhone } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { useAuth } from '../../auth/AuthProvider'
 import { HeaderAction } from '../../settings/HeaderAction'
 import { AddUserDialog } from './AddUserDialog'

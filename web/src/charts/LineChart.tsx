@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { usePhone } from '../components/useNarrow'
+import { usePhone } from '../components/usePhone'
 import styles from './charts.module.css'
 import { fmtNum } from './format'
 

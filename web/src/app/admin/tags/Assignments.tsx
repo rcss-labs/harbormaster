@@ -7,7 +7,7 @@ import { Panel } from '../../../components/Panel'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
-import { usePhone } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import styles from './tags.module.css'
 import { type AssignmentKind, assignedTagId, chosenTag, invalidateTagQueries, saveAssignment } from './tagApi'
 

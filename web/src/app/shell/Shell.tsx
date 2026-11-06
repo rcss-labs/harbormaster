@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { EmptyState } from '../../components/EmptyState'
-import { usePhone } from '../../components/useNarrow'
+import { usePhone } from '../../components/usePhone'
 import { useVisualViewport } from '../../components/useVisualViewport'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'

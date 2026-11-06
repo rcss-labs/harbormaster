@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn, type RowStatus, type SortState } from 
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import { STATUS_COLOR, clusterStatusKind, statusKind } from '../../components/status'
-import { usePhone } from '../../components/useNarrow'
+import { usePhone } from '../../components/usePhone'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { type ClusterMetricsItem, formatPercent, presentPoints } from './clusterMetrics'
 import { ClusterRowSheet, RowMoreButton } from './ClusterSheets'

@@ -6,7 +6,7 @@ import { Drawer } from '../../../components/Drawer'
 import { KV } from '../../../components/KV'
 import { StatusDot } from '../../../components/StatusDot'
 import { TagChip } from '../../../components/TagChip'
-import { useNarrow } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { restartBlockedReason } from './filterServices'
 import { metricFigure, type MetricKind } from './serviceMetrics'
 import styles from './services.module.css'
@@ -31,7 +31,7 @@ interface ServiceDrawerProps {
 
 /** Side panel with one service's facts; opening it changes nothing on the page behind it. */
 export function ServiceDrawer({ service, onClose, onRestart, metrics, metricsFailed }: ServiceDrawerProps) {
-  const phone = useNarrow()
+  const phone = usePhone()
   if (!service) return null
   const figure = (kind: MetricKind) => {
     const { text, title, tone } = metricFigure(service, metrics, metricsFailed, kind)

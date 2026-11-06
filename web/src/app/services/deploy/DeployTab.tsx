@@ -12,7 +12,7 @@ import {
 } from '../../../api/deploy'
 import { useService, useServiceTasks } from '../../../api/hooks'
 import { Panel } from '../../../components/Panel'
-import { usePhone } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
