@@ -6,3 +6,6 @@
 .item:has(input:disabled) { color: var(--muted); cursor: default; }
 .reset { width: 100%; min-height: 28px; border: 1px solid var(--border-strong); border-radius: var(--r); background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
 .reset:hover { background: var(--hover); }
+@media (max-width: 700px) {
+  .button, .item, .reset { min-height: 44px; }
+}
