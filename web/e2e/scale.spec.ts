@@ -252,8 +252,11 @@ test.describe('at 200 %', () => {
   test('the palette top is about 12 % of the window height at 200 %', async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 })
     await page.goto('/')
+    await expect(page.getByRole('main')).toBeVisible()
     await page.keyboard.press('Control+k')
-    const box = await measureBox(page.getByRole('dialog', { name: /command|search/i }))
+    const palette = page.getByRole('dialog', { name: /command|search/i })
+    await expect(palette).toBeVisible()
+    const box = await measureBox(palette)
     expect(box.y).toBeLessThanOrEqual(1440 * 0.16)
   })
 
