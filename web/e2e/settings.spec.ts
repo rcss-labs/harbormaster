@@ -65,6 +65,37 @@ test.describe('settings as pavel', () => {
   })
 })
 
+test.describe('settings at phone width as pavel', () => {
+  test.use(asUser('pavel'))
+  test.use({ viewport: { width: 390, height: 800 } })
+
+  for (const tab of ['general', 'accounts', 'users', 'tags', 'sso', 'audit']) {
+    test(`/settings/${tab} does not scroll sideways at 390`, async ({ page }) => {
+      await page.goto(`/settings/${tab}`)
+      await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('heading', { level: 2 }).first()).toBeVisible()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+      // A clipped ancestor (the app shell) can hide a page that is too wide, so also look for elements poking past the
+      // viewport that are not inside their own scroll container.
+      const poking = await page.evaluate(() => {
+        const clipped = (el: Element) => {
+          for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+            const style = getComputedStyle(node)
+            if (style.overflowX !== 'visible' && node.getBoundingClientRect().right <= window.innerWidth + 1) return true
+          }
+          return false
+        }
+        return [...document.querySelectorAll('main *')]
+          .filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().right > window.innerWidth + 1 && !clipped(el))
+          .slice(0, 5)
+          .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 40)} right=${Math.round(el.getBoundingClientRect().right)}`)
+      })
+      expect(poking).toEqual([])
+    })
+  }
+})
+
 test.describe('settings as omer', () => {
   test.use(asUser('omer'))
 

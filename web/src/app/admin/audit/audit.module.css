@@ -1,6 +1,6 @@
 .more { display: flex; justify-content: center; margin-top: 12px; }
 .ctl { height: 26px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-family: inherit; }
-.search { min-width: 180px; flex: 0 1 260px; }
+.search { min-width: 0; flex: 1 1 140px; max-width: 260px; }
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; }
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }

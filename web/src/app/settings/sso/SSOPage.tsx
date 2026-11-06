@@ -3,6 +3,7 @@ import styles from './sso.module.css'
 import { IdPCard } from './IdPCard'
 import { OptionsCard } from './OptionsCard'
 import { SPCard } from './SPCard'
+import { SetupChecklist } from './SetupChecklist'
 import { StatusCard } from './StatusCard'
 import { TestCard } from './TestCard'
 
@@ -19,11 +20,22 @@ export function SSOPage() {
   }
   return (
     <div className={styles.stack}>
-      <StatusCard config={config.data} />
-      <IdPCard config={config.data} />
-      <SPCard config={config.data} />
-      <OptionsCard config={config.data} />
-      <TestCard config={config.data} />
+      <SetupChecklist config={config.data} />
+      <div id="sso-on" className={styles.anchor}>
+        <StatusCard config={config.data} />
+      </div>
+      <div id="sso-idp" className={styles.anchor}>
+        <IdPCard config={config.data} />
+      </div>
+      <div id="sso-sp" className={styles.anchor}>
+        <SPCard config={config.data} />
+      </div>
+      <div id="sso-options" className={styles.anchor}>
+        <OptionsCard config={config.data} />
+      </div>
+      <div id="sso-test" className={styles.anchor}>
+        <TestCard config={config.data} />
+      </div>
     </div>
   )
 }

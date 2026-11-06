@@ -27,6 +27,20 @@ describe('StoppedTasksCard', () => {
     await waitFor(() => expect(input).toHaveValue(10))
   })
 
+  it('spells the window out in hours and minutes', async () => {
+    renderApp('/settings/general')
+    const input = await screen.findByLabelText(WINDOW_LABEL)
+    await waitFor(() => expect(input).toHaveValue(10))
+    expect(screen.getByText('10 min')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.clear(input)
+    await user.type(input, '90')
+    expect(screen.getByText('1 h 30 min')).toBeInTheDocument()
+    await user.clear(input)
+    await user.type(input, '120')
+    expect(screen.getByText('2 h')).toBeInTheDocument()
+  })
+
   it('rejects 0 and 1441 without a request', async () => {
     const bodies = captureSettingsPuts()
     renderApp('/settings/general')

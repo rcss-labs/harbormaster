@@ -23,16 +23,15 @@ type DialogState = { kind: 'connect' } | { kind: 'edit' | 'disconnect'; account:
 
 const minutesSince = (iso: string) => Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 60_000))
 
-/** Status of one account: its own state, then what the poller reports for its regions. */
-function AccountStatus({ account, polled }: { account: AccountDTO; polled: PollerEntryDTO[] }) {
+/** Status of one account: its own state, then what the poller reports for its regions. Raw AWS errors stay behind a disclosure. */
+function AccountStatus({ account, polled, tested }: { account: AccountDTO; polled: PollerEntryDTO[]; tested: RegionResult[] | undefined }) {
   const failing = polled.filter((entry) => entry.failing)
   const throttled = polled.some((entry) => entry.throttled)
+  const hasDetail = (account.status === 'error' && account.last_error !== '') || failing.length > 0 || (tested?.length ?? 0) > 0
   return (
     <>
       {account.status === 'error' ? (
-        <StatusDot kind="bad" title={account.last_error}>
-          Error
-        </StatusDot>
+        <StatusDot kind="bad">Error</StatusDot>
       ) : account.status === 'disabled' ? (
         <StatusDot kind="mute">Disabled</StatusDot>
       ) : (
@@ -40,10 +39,32 @@ function AccountStatus({ account, polled }: { account: AccountDTO; polled: Polle
       )}
       {failing.map((entry) => (
         <div key={entry.region} className={styles.statusNote} title={entry.region}>
-          {`Data is ${entry.last_ok_at ? `${minutesSince(entry.last_ok_at)} min old` : 'unavailable'}: ${entry.last_error}`}
+          {`Data is ${entry.last_ok_at ? `${minutesSince(entry.last_ok_at)} min old` : 'unavailable'}`}
         </div>
       ))}
       {throttled && <div className={`${styles.statusNote} ${styles.throttled}`}>Slowed by AWS throttling</div>}
+      {hasDetail && (
+        <details className={styles.errorDetails}>
+          <summary>Show AWS error</summary>
+          <div className={styles.errorBody}>
+            {account.status === 'error' && account.last_error !== '' && <div className={styles.mono}>{account.last_error}</div>}
+            {failing.map((entry) => (
+              <div key={entry.region} className={styles.mono}>
+                {entry.last_error}
+              </div>
+            ))}
+            {tested && tested.length > 0 && (
+              <ul className={styles.testResults} aria-label="Last test">
+                {tested.map((result) => (
+                  <li key={result.region} className={result.ok ? styles.resultOk : styles.resultBad}>
+                    {result.ok ? `${result.region} · ${result.clusters} ${result.clusters === 1 ? 'cluster' : 'clusters'}` : `${result.region} · ${result.error}`}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+      )}
     </>
   )
 }
@@ -61,6 +82,7 @@ export function Accounts() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const [dialog, setDialog] = useState<DialogState>(null)
+  const [testResults, setTestResults] = useState<Record<number, RegionResult[]>>({})
 
   const disconnect = useMutation({
     mutationFn: (account: AccountDTO) => api.del(`/api/accounts/${account.id}`),
@@ -87,6 +109,7 @@ export function Accounts() {
         })
         .then((body) => ({ account, regions: body.regions })),
     onSuccess: ({ account, regions }) => {
+      setTestResults((current) => ({ ...current, [account.id]: regions }))
       const allOk = regions.every((region) => region.ok)
       toast.show(`${account.name}: ${regions.map(describeRegion).join('; ')}`, allOk ? 'ok' : 'bad')
       void queryClient.invalidateQueries({ queryKey: ['poller'] })
@@ -124,7 +147,7 @@ export function Accounts() {
       key: 'status',
       header: 'Status',
       width: 'minmax(200px, 1.5fr)',
-      render: (account) => <AccountStatus account={account} polled={polledFor(account)} />,
+      render: (account) => <AccountStatus account={account} polled={polledFor(account)} tested={testResults[account.id]} />,
     },
     {
       key: 'last',

@@ -13,7 +13,13 @@ const userRow = (page: Page, username: string) =>
   page
     .getByRole('row')
     .filter({ hasText: new RegExp(`^${username}(?:\\s|${username}@|(?![a-z0-9.-]))`) })
-    .filter({ has: page.getByRole('button', { name: 'Delete' }) })
+    .filter({ has: page.getByRole('button', { name: /^Actions for / }) })
+
+/** Opens the user's Actions menu and clicks the named item. */
+async function rowAction(page: Page, username: string, item: string) {
+  await userRow(page, username).getByRole('button', { name: `Actions for ${username}` }).click()
+  await page.getByRole('menuitem', { name: item }).click()
+}
 
 /** Completes the fake IdP form: it auto-posts the signed response back to Harbormaster. */
 async function signInAtFakeIdP(page: Page, user: string) {
@@ -52,7 +58,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // (2) Test sign-in opens a popup that ends on the settings page with the result.
       const popupPromise = page.waitForEvent('popup')
-      await page.getByRole('link', { name: 'Test sign-in' }).click()
+      await page.getByRole('region', { name: 'Test sign-in' }).getByRole('link', { name: 'Test sign-in' }).click()
       const popup = await popupPromise
       await signInAtFakeIdP(popup, 'alex')
       await popup.waitForURL(/\/settings\/sso\?test=/)
@@ -74,14 +80,14 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
       await expect(userRow(page, 'pavel')).toContainText('SSO linked')
 
       // (4) Pending link for dana.
-      await userRow(page, 'dana').getByRole('button', { name: 'Link SSO…' }).click()
+      await rowAction(page, 'dana', 'Link SSO…')
       const pendingDialog = page.getByRole('dialog')
       await pendingDialog.getByLabel('NameID').fill('dana@example.test')
       await pendingDialog.getByRole('button', { name: 'Set pending link' }).click()
       await expect(userRow(page, 'dana')).toContainText('Link pending')
 
       // (5) Break-glass for pavel, so turning SSO on cannot lock the admins out.
-      await userRow(page, 'pavel').getByRole('button', { name: 'Make break-glass' }).click()
+      await rowAction(page, 'pavel', 'Make break-glass')
       await page.getByRole('dialog').getByRole('button', { name: 'Make break-glass' }).click()
       await expect(userRow(page, 'pavel')).toContainText('Break-glass')
 
@@ -117,6 +123,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         await expect(alex.page.getByText(NO_ACCESS)).toBeVisible()
 
         await page.goto('/settings/users')
+        await page.getByRole('button', { name: /^alex on Dev: / }).click()
         const preset = page.getByLabel('Preset for alex on Dev')
         await Promise.all([savedPermission(page), preset.selectOption('Viewer')])
         await expect(preset).toHaveValue('Viewer')
@@ -187,13 +194,13 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // (12) Unlink: alex has no password, dana keeps hers.
       await page.goto('/settings/users')
-      await userRow(page, 'alex').getByRole('button', { name: 'Unlink SSO…' }).click()
+      await rowAction(page, 'alex', 'Unlink SSO…')
       let confirm = page.getByRole('dialog')
       await expect(confirm.getByText('They get a temporary password and must choose their own at next sign-in.')).toBeVisible()
       await confirm.getByRole('button', { name: 'Unlink' }).click()
       await expect(page.getByText(/New temporary password for alex: /)).toBeVisible()
 
-      await userRow(page, 'dana').getByRole('button', { name: 'Unlink SSO…' }).click()
+      await rowAction(page, 'dana', 'Unlink SSO…')
       confirm = page.getByRole('dialog')
       await expect(confirm.getByText('They keep their password.')).toBeVisible()
       await confirm.getByRole('button', { name: 'Unlink' }).click()
@@ -218,14 +225,14 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // Leave pavel as the seed left him: unlinked, no break-glass flag. (alex is deleted below.)
       await page.goto('/settings/users')
-      await userRow(page, 'pavel').getByRole('button', { name: 'Unlink SSO…' }).click()
+      await rowAction(page, 'pavel', 'Unlink SSO…')
       await expect(page.getByRole('dialog').getByText('They keep their password.')).toBeVisible()
       await page.getByRole('dialog').getByRole('button', { name: 'Unlink' }).click()
       await expect(userRow(page, 'pavel')).not.toContainText('SSO linked')
-      await userRow(page, 'pavel').getByRole('button', { name: 'Remove break-glass' }).click()
+      await rowAction(page, 'pavel', 'Remove break-glass')
       await page.getByRole('dialog').getByRole('button', { name: 'Remove break-glass' }).click()
       await expect(userRow(page, 'pavel')).not.toContainText('Break-glass')
-      await userRow(page, 'alex').getByRole('button', { name: 'Delete' }).click()
+      await rowAction(page, 'alex', 'Delete')
       await page.getByRole('dialog').getByRole('button', { name: 'Delete user' }).click()
       await expect(userRow(page, 'alex')).toHaveCount(0)
     } finally {

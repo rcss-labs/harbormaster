@@ -53,7 +53,7 @@ describe('SettingsPage', () => {
   it('tabs switch content', async () => {
     renderApp('/settings/general')
     await userEvent.click(await screen.findByRole('link', { name: 'Users & permissions' }))
-    expect(await screen.findByLabelText('Preset for omer on Dev')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'omer on Dev: Operator' })).toBeInTheDocument()
     expect(location()).toHaveTextContent('/settings/users')
   })
 
