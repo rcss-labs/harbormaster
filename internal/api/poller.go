@@ -7,6 +7,62 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
+// nonCoreTiers are the poll tiers that do not feed clusters, services or tasks. Their failure
+// is reported only in PollerItemDTO.Tiers, so it never marks core data stale. Unknown tiers count as core.
+var nonCoreTiers = map[string]bool{"target_health": true, "scaling": true, "alerts": true, "network": true, "storage": true}
+
+// tierLabels are the user-facing names; tiers sharing a label are merged into one entry.
+var tierLabels = map[string]string{
+	"clusters": "Clusters and services", "serviceList": "Clusters and services", "services": "Clusters and services",
+	"runningTasks": "Tasks", "stoppedTasks": "Tasks", "fullTasks": "Tasks",
+	"target_health": "Target health", "scaling": "Auto scaling", "alerts": "Alerts",
+	"network": "Networks", "storage": "Storage",
+}
+
+func tierIsCore(tier string) bool { return !nonCoreTiers[tier] }
+
+func tierLabel(tier string) string {
+	if label, ok := tierLabels[tier]; ok {
+		return label
+	}
+	return tier
+}
+
+// addTier folds one loop into the item's tier list: loops with the same label merge, the worst
+// state wins and last_ok_at is the oldest one (a label is only as fresh as its stalest loop).
+func addTier(item *PollerItemDTO, loop store.PollLoop) {
+	label := tierLabel(loop.Tier)
+	entry := PollerTierDTO{
+		Tier: loop.Tier, Label: label, Core: tierIsCore(loop.Tier),
+		Failing: loop.Failing(), Throttled: loop.Throttled(), LastError: loop.LastError,
+		IntervalMs: loop.Interval.Milliseconds(),
+	}
+	if loop.LastOKAt != nil {
+		at := *loop.LastOKAt
+		entry.LastOKAt = &at
+	}
+	for i := range item.Tiers {
+		have := &item.Tiers[i]
+		if have.Label != label {
+			continue
+		}
+		if entry.Failing && !have.Failing {
+			have.Failing, have.LastError = true, entry.LastError
+		} else if have.LastError == "" && entry.Failing == have.Failing {
+			have.LastError = entry.LastError
+		}
+		have.Throttled = have.Throttled || entry.Throttled
+		if entry.LastOKAt == nil || (have.LastOKAt != nil && entry.LastOKAt.Before(*have.LastOKAt)) {
+			have.LastOKAt = entry.LastOKAt
+		}
+		if entry.IntervalMs > have.IntervalMs {
+			have.IntervalMs = entry.IntervalMs
+		}
+		return
+	}
+	item.Tiers = append(item.Tiers, entry)
+}
+
 type pollTarget struct{ accountID, region string }
 
 // pollerStatus answers GET /api/poller: one aggregated item per account x region the caller can see.
@@ -54,14 +110,17 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 			byTarget[target] = item
 			order = append(order, target)
 		}
-		item.Throttled = item.Throttled || loop.Throttled()
-		item.Failing = item.Failing || loop.Failing()
-		if item.LastError == "" {
-			item.LastError = loop.LastError
-		}
-		if loop.LastOKAt != nil && (item.LastOKAt == nil || loop.LastOKAt.Before(*item.LastOKAt)) {
-			at := *loop.LastOKAt
-			item.LastOKAt = &at
+		addTier(item, loop)
+		if tierIsCore(loop.Tier) {
+			item.Throttled = item.Throttled || loop.Throttled()
+			item.Failing = item.Failing || loop.Failing()
+			if item.LastError == "" {
+				item.LastError = loop.LastError
+			}
+			if loop.LastOKAt != nil && (item.LastOKAt == nil || loop.LastOKAt.Before(*item.LastOKAt)) {
+				at := *loop.LastOKAt
+				item.LastOKAt = &at
+			}
 		}
 	}
 	sort.SliceStable(order, func(i, j int) bool {
@@ -76,6 +135,13 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 		// AWS error text can name resources the caller cannot see; only admins, or anyone once the target fails, get it.
 		if !sc.Vis.Admin && !item.Failing {
 			item.LastError = ""
+		}
+		if !sc.Vis.Admin {
+			for i := range item.Tiers {
+				if !item.Tiers[i].Failing {
+					item.Tiers[i].LastError = ""
+				}
+			}
 		}
 		items = append(items, item)
 	}

@@ -238,6 +238,46 @@ func CollectServiceScalingConfig(ctx context.Context, api awsx.AutoScalingAPI, k
 	return row, nil
 }
 
+// Names of the parts of a service's scaling configuration that can fail independently.
+const (
+	PartScalingTarget    = "scaling_target"
+	PartScalingPolicies  = "scaling_policies"
+	PartScheduledActions = "scheduled_actions"
+)
+
+// PartError is a part of a composite read that failed while the others succeeded.
+type PartError struct {
+	Part string
+	Err  error
+}
+
+// CollectServiceScalingConfigPartial is CollectServiceScalingConfig that keeps going when one read
+// fails: the part that failed stays at its zero value and is listed in the returned errors. A
+// cancelled context is not a part failure; callers check ctx.Err() themselves.
+func CollectServiceScalingConfigPartial(ctx context.Context, api awsx.AutoScalingAPI, key model.ServiceKey) (model.Scaling, []PartError) {
+	resourceID := scalingResourceID(key)
+	row := model.Scaling{Key: key, PolledAt: time.Now().UTC()}
+	var failed []PartError
+	if targets, err := describeScalableTargets(ctx, api, resourceID); err != nil {
+		failed = append(failed, PartError{PartScalingTarget, err})
+	} else if target, ok := targets[resourceID]; ok {
+		row.HasTarget = true
+		row.Min = int(aws.ToInt32(target.MinCapacity))
+		row.Max = int(aws.ToInt32(target.MaxCapacity))
+	}
+	if policies, err := describeScalingPolicies(ctx, api, resourceID); err != nil {
+		failed = append(failed, PartError{PartScalingPolicies, err})
+	} else {
+		row.Policies = policies[resourceID]
+	}
+	if scheduled, err := describeScheduledActions(ctx, api, resourceID); err != nil {
+		failed = append(failed, PartError{PartScheduledActions, err})
+	} else {
+		row.Scheduled = scheduled[resourceID]
+	}
+	return row, failed
+}
+
 // CollectServiceScaling is CollectServiceScalingConfig plus the recent activities of a scaled
 // service: the row the poller would store, for writers that store it right after a change.
 func CollectServiceScaling(ctx context.Context, api awsx.AutoScalingAPI, key model.ServiceKey) (model.Scaling, error) {

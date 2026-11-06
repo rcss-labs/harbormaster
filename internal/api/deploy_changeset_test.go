@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	astypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
+	"github.com/aws/smithy-go"
 )
 
 var changesetWrites = []string{"RegisterTaskDefinition", "UpdateService", "RegisterScalableTarget", "PutScalingPolicy", "PutScheduledAction",
@@ -164,6 +166,61 @@ func TestDeploySettings_ViewOnly404ForInvisible(t *testing.T) {
 	env := newWriteEnv(t)
 	wantStatus(t, env.login("nobody").get("/api/services/"+paymentsID()+"/deploy-settings"), http.StatusNotFound)
 	wantStatus(t, env.login("viewer").get("/api/services/"+paymentsID()+"/deploy-settings"), http.StatusOK)
+}
+
+var errScheduledActionsUnsupported = &smithy.GenericAPIError{Code: "UnsupportedOperation", Message: "DescribeScheduledActions is not supported", Fault: smithy.FaultClient}
+
+func TestDeploySettings_PartialScheduledActions(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	if got := liveSettings(t, admin); got.Partial == nil || len(got.Partial) != 0 {
+		t.Fatalf("complete settings: partial = %#v, want an empty array", got.Partial)
+	}
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	got := liveSettings(t, admin)
+	if len(got.Partial) != 1 || got.Partial[0].Part != "scheduled_actions" || got.Partial[0].Code != "aws_error" ||
+		!strings.HasPrefix(got.Partial[0].Message, "Scheduled actions could not be read: ") {
+		t.Fatalf("partial = %+v", got.Partial)
+	}
+	if got.DeployedRevision != 42 || len(got.Scaling.Policies) != 1 || !got.Scaling.HasTarget ||
+		got.Scaling.ScheduledActions == nil || len(got.Scaling.ScheduledActions) != 0 {
+		t.Fatalf("every other part must still be returned: %+v", got)
+	}
+}
+
+func TestChangeSet_AppliesWhenScheduledActionsUnreadable(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	settings := liveSettings(t, admin)
+	resp := admin.post(changesetPath(), map[string]any{
+		"base_revision": 42, "base_version": settings.Version,
+		"service": map[string]any{"enable_execute_command": !settings.EnableExecuteCommand},
+	})
+	wantStatus(t, resp, http.StatusOK)
+	var out ChangeSetResponse
+	decode(t, resp, &out)
+	if out.Status != "applied" {
+		t.Fatalf("response = %+v", out)
+	}
+}
+
+func TestChangeSet_RefusesScheduledActionEditWhenUnreadable(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("pavel")
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	settings := liveSettings(t, admin)
+	resp := admin.post(changesetPath(), map[string]any{
+		"base_revision": 42, "base_version": settings.Version,
+		"scaling": map[string]any{"put_scheduled_actions": []map[string]any{{
+			"name": "night", "schedule": "cron(0 2 * * ? *)", "timezone": "", "min_capacity": 1, "max_capacity": nil,
+		}}},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Scheduled actions could not be read; retry before changing them." {
+		t.Fatalf("error = %s: %s", code, msg)
+	}
+	assertNoChangesetWrites(t, env)
 }
 
 func TestDeploySettings_CanFlags(t *testing.T) {

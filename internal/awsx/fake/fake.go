@@ -60,8 +60,10 @@ type Fake struct {
 
 // New wraps an estate.
 func New(e *Estate) *Fake {
-	return &Fake{Estate: e, calls: map[string]int{}, callCounts: map[string]uint64{},
+	f := &Fake{Estate: e, calls: map[string]int{}, callCounts: map[string]uint64{},
 		inFlight: map[awsx.Target]*flight{}, limits: map[awsx.Target]*tokenBucket{}}
+	f.failFromEnv()
+	return f
 }
 
 // Calls returns a copy of the per-operation call counters (throttled calls count).

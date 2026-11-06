@@ -116,6 +116,78 @@ func TestLogsHistory_ContainerFilter(t *testing.T) {
 	}
 }
 
+// paymentsTaskIDs are the ids (last ARN segment) of the stored payments-api tasks.
+func paymentsTaskIDs(t *testing.T, st *store.Store) []string {
+	t.Helper()
+	rows, _, err := st.ListTasks(t.Context(), store.TaskQuery{
+		TargetFilter: store.TargetFilter{AccountID: homelabAccountID, Region: "us-east-1"},
+		Vis:          store.Visibility{Admin: true}, Cluster: "core-services", Service: "payments-api",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, row := range rows {
+		ids = append(ids, row.ARN[strings.LastIndex(row.ARN, "/")+1:])
+	}
+	if len(ids) < 2 {
+		t.Fatalf("need at least two payments-api tasks to tell them apart, have %v", ids)
+	}
+	return ids
+}
+
+func TestLogs_TaskParamRestrictsStreams(t *testing.T) {
+	srv, _, st := logsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+	ids := paymentsTaskIDs(t, st)
+
+	_, all := getLogs(t, c, paymentsID(), "")
+	seen := map[string]bool{}
+	for _, l := range all.Lines {
+		seen[l.TaskID] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("unfiltered logs come from %d task(s); the filter would prove nothing", len(seen))
+	}
+
+	for _, id := range ids {
+		// the drawer sends the 8 character short id; a full id works too
+		for _, param := range []string{id[:8], id} {
+			status, body := getLogs(t, c, paymentsID(), "?task="+param)
+			if status != http.StatusOK {
+				t.Fatalf("task=%s: status %d", param, status)
+			}
+			for _, l := range body.Lines {
+				if l.TaskID != id {
+					t.Fatalf("task=%s returned a line of task %s", param, l.TaskID)
+				}
+			}
+		}
+	}
+
+	// the container filter still applies inside the task
+	status, body := getLogs(t, c, paymentsID(), "?task="+ids[0][:8]+"&container=payments-api")
+	if status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+	for _, l := range body.Lines {
+		if l.TaskID != ids[0] || l.Container != "payments-api" {
+			t.Fatalf("line %+v outside task %s / payments-api", l, ids[0])
+		}
+	}
+}
+
+func TestLogs_TaskParamUnknownIs404(t *testing.T) {
+	srv, _, _ := logsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+	if status, _ := getLogs(t, c, paymentsID(), "?task=deadbeefdeadbeef"); status != http.StatusNotFound {
+		t.Errorf("unknown task: status %d, want 404", status)
+	}
+	if status, _ := getLogs(t, c, paymentsID(), "?task=abc"); status != http.StatusUnprocessableEntity {
+		t.Errorf("short task id: status %d, want 422", status)
+	}
+}
+
 func TestLogsHistory_ViewOnlyIs403WithMessage(t *testing.T) {
 	srv, _, _ := logsFixture(t)
 	resp := login(t, srv, "omer", testPassword).get("/api/services/" + stagingWebID() + "/logs")

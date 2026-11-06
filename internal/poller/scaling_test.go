@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -74,5 +75,35 @@ func TestCollectServiceScaling_ReadsOneServiceLive(t *testing.T) {
 	}
 	if none.HasTarget || len(none.Policies) != 0 || len(none.Scheduled) != 0 {
 		t.Fatalf("email-sender = %+v, want no target", none)
+	}
+}
+
+func TestCollectServiceScalingConfigPartial(t *testing.T) {
+	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	h := newObserveHarness(t, target)
+	api, err := h.fake.AutoScaling(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := serviceKey(target, "core-services", "payments-api")
+
+	got, parts := CollectServiceScalingConfigPartial(context.Background(), api, key)
+	if len(parts) != 0 || !got.HasTarget || len(got.Policies) != 1 || len(got.Scheduled) != 2 {
+		t.Fatalf("healthy read: parts %+v scaling %+v", parts, got)
+	}
+
+	scheduledErr := errors.New("DescribeScheduledActions: UnsupportedOperation")
+	h.fake.FailAlways("DescribeScheduledActions", scheduledErr)
+	got, parts = CollectServiceScalingConfigPartial(context.Background(), api, key)
+	if len(parts) != 1 || parts[0].Part != "scheduled_actions" || !errors.Is(parts[0].Err, scheduledErr) {
+		t.Fatalf("parts = %+v, want one scheduled_actions error", parts)
+	}
+	if !got.HasTarget || got.Min != 2 || got.Max != 6 || len(got.Policies) != 1 || len(got.Scheduled) != 0 {
+		t.Fatalf("readable parts must survive: %+v", got)
+	}
+
+	// the strict reader still fails as a whole, which is what the scaling poll tier reports
+	if _, err := CollectServiceScalingConfig(context.Background(), api, key); err == nil {
+		t.Fatal("CollectServiceScalingConfig must keep failing when a part fails")
 	}
 }
