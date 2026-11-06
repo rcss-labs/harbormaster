@@ -27,7 +27,7 @@ func TestChangeSet_AppliesWhenScheduledActionsUnreadable(t *testing.T) {
 	h := newHarness(t)
 	h.fake.FailAlways("DescribeScheduledActions", errScheduledUnsupported)
 	cs := toggleExec(t, h, baseChangeSet(t, h, paymentsKey))
-	got, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	got, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs)
 	if err != nil {
 		t.Fatalf("a change set that leaves scheduled actions alone must apply: %v", err)
 	}
@@ -44,14 +44,14 @@ func TestChangeSet_AppliesWhenReadabilityChangesBetweenReadAndApply(t *testing.T
 	cs := baseChangeSet(t, h, paymentsKey)
 	cs.Service = &deploy.ServiceChange{DesiredCount: aws.Int(4)}
 	h.fake.FailAlways("DescribeScheduledActions", nil)
-	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs); err != nil {
 		t.Fatalf("read while unreadable, apply while readable: %v", err)
 	}
 
 	cs = baseChangeSet(t, h, paymentsKey)
 	cs.Service = &deploy.ServiceChange{DesiredCount: aws.Int(5)}
 	h.fake.FailAlways("DescribeScheduledActions", errScheduledUnsupported)
-	if _, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs); err != nil {
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs); err != nil {
 		t.Fatalf("read while readable, apply while unreadable: %v", err)
 	}
 }
@@ -70,7 +70,7 @@ func TestChangeSet_DetectsConcurrentEditToReadablePartWhileScheduledUnreadable(t
 		t.Fatal(err)
 	}
 	before := writeCalls(h)
-	_, err = h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	_, err = h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs)
 	var stale *deploy.StaleVersionError
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want StaleVersionError for the concurrent policy edit", err)
@@ -99,7 +99,7 @@ func TestChangeSet_RefusesBlindScheduledActionEditAfterRecovery(t *testing.T) {
 	cs.Scaling = &deploy.ScalingChange{PutScheduledActions: []deploy.ScheduledActionChange{
 		{Name: "night", Schedule: "cron(0 2 * * ? *)", MinCapacity: aws.Int(1)}}}
 	before := writeCalls(h)
-	_, err := h.svc.ApplyChangeSet(t.Context(), h.pavel, paymentsKey, cs)
+	_, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs)
 	var stale *deploy.StaleVersionError
 	if !errors.As(err, &stale) {
 		t.Fatalf("err = %v, want StaleVersionError", err)

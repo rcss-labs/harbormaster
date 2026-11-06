@@ -69,7 +69,7 @@ func TestAnalyticsReliability_NinetyDayPanelsFromDaily(t *testing.T) {
 	seedAvailabilityDays(t, st, 1, 60)
 	services := len(visibleServices(t, st))
 
-	admin := getReliability(t, login(t, srv, "pavel", testPassword), "?range=7d")
+	admin := getReliability(t, login(t, srv, "sam", testPassword), "?range=7d")
 	for name, available := range map[string]bool{"availability_90d": admin.Availability90d.Available, "below_desired_90d": admin.BelowDesired90d.Available, "getting_worse": admin.GettingWorse.Available} {
 		if !available {
 			t.Fatalf("%s is unavailable although the rollup has data", name)
@@ -157,7 +157,7 @@ func TestAnalyticsCapacity_ReservedVsUsedFromDaily(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := getCapacity(t, login(t, srv, "pavel", testPassword), "")
+	got := getCapacity(t, login(t, srv, "sam", testPassword), "")
 	for name, p := range map[string]bool{"reserved_vs_used_90d": got.ReservedVsUsed90d.Available, "spot_share_90d": got.SpotShare90d.Available, "memory_90d": got.Memory90d.Available, "over_reserved": got.OverReserved.Available} {
 		if !p {
 			t.Fatalf("%s is unavailable although its rollup has data", name)
@@ -240,7 +240,7 @@ func TestAnalyticsDelivery_FailureReasonsAndRecentFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	getDelivery := func(c *apiClient) DeliveryDTO {
 		var out DeliveryDTO
 		decode(t, c.get("/api/analytics/delivery?range=7d"), &out)
@@ -310,7 +310,7 @@ func TestDailyPanels_DataSinceReportedWhenPartial(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 
 	// Nothing rolled up yet: every daily panel is unavailable.
 	empty := getReliability(t, admin, "")
@@ -370,7 +370,7 @@ func TestDailyPanels_PlainWireShapeAndSourcesAlwaysListed(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 
 	for _, tc := range []struct {
 		path   string

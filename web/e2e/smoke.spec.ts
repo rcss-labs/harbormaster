@@ -4,7 +4,7 @@ import { login, serviceId } from './helpers'
 const HOMELAB_ACCOUNT_ID = '482109375512'
 
 test('admin walks the read-only product', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
   const clustersTile = page.getByRole('main').getByText('Clusters', { exact: true }).locator('..')
   await expect(clustersTile).toHaveText(/^Clusters\s*6/)
@@ -58,7 +58,7 @@ test('user sees only permitted clusters', async ({ page }) => {
 })
 
 test('search jumps to a service', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.getByRole('button', { name: /Search or run a command/ }).click()
   const palette = page.getByRole('dialog', { name: 'Command palette' })
   const search = palette.getByRole('combobox')
@@ -75,7 +75,7 @@ test('search jumps to a service', async ({ page }) => {
 test('freshness control reads all current on a healthy estate', async ({ page }) => {
   // Wait for the poller status to load first, so an empty page cannot pass vacuously.
   const pollerLoaded = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/poller' && response.ok())
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await pollerLoaded
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
   await expect(page.getByRole('button', { name: /^\d+ of \d+ regions current$/ })).toHaveText(/^(\d+) of \1 regions current$/)

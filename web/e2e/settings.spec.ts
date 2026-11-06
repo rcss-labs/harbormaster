@@ -3,8 +3,8 @@ import { asUser, expect, test } from './fixtures/test'
 // Mutating (it changes the global stopped-tasks window and restores it): runs in the flows project.
 const windowInput = (page: import('@playwright/test').Page) => page.getByLabel('Show stopped tasks from the last X minutes')
 
-test.describe('settings as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('settings as sam', () => {
+  test.use(asUser('sam'))
 
   test('sidebar Settings opens General with the window card', async ({ page }) => {
     await page.goto('/')
@@ -65,8 +65,8 @@ test.describe('settings as pavel', () => {
   })
 })
 
-test.describe('settings at phone width as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('settings at phone width as sam', () => {
+  test.use(asUser('sam'))
   test.use({ viewport: { width: 390, height: 800 } })
 
   for (const tab of ['general', 'accounts', 'users', 'tags', 'sso', 'audit']) {

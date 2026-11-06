@@ -49,7 +49,7 @@ func TestServiceStatus_TargetUnhealthyWithoutTaskHealth(t *testing.T) {
 		}
 	}
 
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	// The seed leaves one target unhealthy; clear it so the baseline is steady.
 	fk.Estate.SetTargetHealth(key, 2, 0)
 	pollTargetHealth()
@@ -117,7 +117,7 @@ func TestPollerStatus_TiersListed(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	var got pollerBody
-	decode(t, login(t, srv, "pavel", testPassword).get("/api/poller"), &got)
+	decode(t, login(t, srv, "sam", testPassword).get("/api/poller"), &got)
 	item := pollerItemFor(t, got, awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"})
 	if len(item.Tiers) == 0 {
 		t.Fatalf("tiers empty: %+v", item)
@@ -141,7 +141,7 @@ func TestPollerStatus_NonCoreTierFailureKeepsCoreCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got pollerBody
-	decode(t, login(t, srv, "pavel", testPassword).get("/api/poller"), &got)
+	decode(t, login(t, srv, "sam", testPassword).get("/api/poller"), &got)
 	item := pollerItemFor(t, got, target)
 	if item.Failing || item.Throttled || item.LastError != "" || item.LastOKAt == nil {
 		t.Errorf("item = %+v, want core data current", item)
@@ -166,7 +166,7 @@ func TestPollerStatus_TierLabelsMerge(t *testing.T) {
 		}
 	}
 	var got pollerBody
-	decode(t, login(t, srv, "pavel", testPassword).get("/api/poller"), &got)
+	decode(t, login(t, srv, "sam", testPassword).get("/api/poller"), &got)
 	item := pollerItemFor(t, got, target)
 	var merged []PollerTierDTO
 	for _, tier := range item.Tiers {
@@ -199,7 +199,7 @@ func TestPollerStatus_NonAdminTierErrorHidden(t *testing.T) {
 		t.Fatal(err)
 	}
 	var admin, omer pollerBody
-	decode(t, login(t, srv, "pavel", testPassword).get("/api/poller"), &admin)
+	decode(t, login(t, srv, "sam", testPassword).get("/api/poller"), &admin)
 	decode(t, login(t, srv, "omer", testPassword).get("/api/poller"), &omer)
 	if tier := tierByLabel(t, pollerItemFor(t, admin, target), "Networks"); tier.LastError == "" {
 		t.Errorf("admin should see the network error, got %+v", tier)

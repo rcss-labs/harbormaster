@@ -32,14 +32,14 @@ func summary(list deploy.RevisionList) []string {
 func TestRevisions_StatusesAndRegisteredBy(t *testing.T) {
 	h := newHarness(t)
 	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
-	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+	if _, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := h.svc.Revisions(t.Context(), paymentsKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"43 not_deployed pavel", "42 deployed terraform", "41 previous terraform", "40 previous terraform"}
+	want := []string{"43 not_deployed sam", "42 deployed terraform", "41 previous terraform", "40 previous terraform"}
 	if got := summary(list); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("revisions = %v, want %v", got, want)
 	}
@@ -146,14 +146,14 @@ func TestRevisions_RegisterEvictsCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
-	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+	if _, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := h.svc.Revisions(t.Context(), paymentsKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := summary(list); len(got) == 0 || got[0] != "43 not_deployed pavel" {
+	if got := summary(list); len(got) == 0 || got[0] != "43 not_deployed sam" {
 		t.Fatalf("revisions right after Register = %v, want :43 first", got)
 	}
 }
@@ -209,7 +209,7 @@ func addTaskDefinitionCopy(t *testing.T, h *harness, family string, revision int
 func TestRevisionDefinition_FromStore(t *testing.T) {
 	h := newHarness(t)
 	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
-	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+	if _, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
 		t.Fatal(err)
 	}
 	newest, err := h.svc.RevisionDefinition(t.Context(), paymentsKey, 43)
@@ -217,7 +217,7 @@ func TestRevisionDefinition_FromStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if newest.Revision != 43 || !strings.HasSuffix(newest.ARN, "task-definition/payments-api:43") ||
-		newest.RegisteredBy != "pavel" || newest.RegisteredAt.IsZero() {
+		newest.RegisteredBy != "sam" || newest.RegisteredAt.IsZero() {
 		t.Fatalf("revision 43 = %+v", newest)
 	}
 	encoded, err := json.Marshal(newest.Definition)

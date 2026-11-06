@@ -61,7 +61,7 @@ func newNetworkFixtureWith(t *testing.T, mutate func(*Server)) networkFixture {
 	view := authz.Presets["Viewer"]
 	return networkFixture{
 		store:    st,
-		admin:    login(t, srv, "pavel", testPassword),
+		admin:    login(t, srv, "sam", testPassword),
 		devOnly:  addUser("devonly", map[authz.TagID]authz.ActionSet{tagID["Dev"]: view}),
 		prodOnly: addUser("prodonly", map[authz.TagID]authz.ActionSet{tagID["Prod"]: view}),
 		none:     addUser("nobody", nil),
@@ -242,7 +242,7 @@ func TestNetworkRegion_DisabledAccountIs404(t *testing.T) {
 	if _, err := st.Pool.Exec(t.Context(), `update aws_accounts set enabled = false where account_id = $1`, stagingAccountID); err != nil {
 		t.Fatal(err)
 	}
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	expectError(t, admin, "/api/networks/"+stagingAccountID+"/us-east-1", http.StatusNotFound, "not_found")
 	expectError(t, admin, "/api/vpcs/vpc-0b18e6cd2a91/tree?account="+stagingAccountID+"&region=us-east-1", http.StatusNotFound, "not_found")
 }

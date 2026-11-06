@@ -20,7 +20,7 @@ func TestOverview_AdminTotals(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getOverview(t, login(t, srv, "pavel", testPassword), "")
+	got := getOverview(t, login(t, srv, "sam", testPassword), "")
 
 	if len(got.Clusters) != 6 || got.Services.Total != 15 {
 		t.Fatalf("clusters %d services %d, want 6 and 15", len(got.Clusters), got.Services.Total)
@@ -60,7 +60,7 @@ func TestOverview_FilteredByAccount(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getOverview(t, login(t, srv, "pavel", testPassword), "?account="+stagingAccountID)
+	got := getOverview(t, login(t, srv, "sam", testPassword), "?account="+stagingAccountID)
 	if len(got.Clusters) != 1 || got.Clusters[0].Name != "staging-web" || got.Accounts != 1 || got.Regions != 1 {
 		t.Fatalf("filtered overview = %+v", got.Clusters)
 	}
@@ -88,7 +88,7 @@ func TestOverview_UserSeesOnlyVisible(t *testing.T) {
 
 func TestOverview_JSONNeverNull(t *testing.T) {
 	srv, _, _ := newTestServer(t) // nothing polled
-	resp := login(t, srv, "pavel", testPassword).get("/api/overview")
+	resp := login(t, srv, "sam", testPassword).get("/api/overview")
 	var raw map[string]any
 	decode(t, resp, &raw)
 	for _, key := range []string{"clusters", "per_cluster", "stops_per_hour", "deployments_per_day", "stop_reasons", "events"} {
@@ -105,7 +105,7 @@ func TestOverview_PerClusterHealth(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getOverview(t, login(t, srv, "pavel", testPassword), "")
+	got := getOverview(t, login(t, srv, "sam", testPassword), "")
 
 	byName := map[string]PerClusterDTO{}
 	var unhealthy, rollingOut, missing int

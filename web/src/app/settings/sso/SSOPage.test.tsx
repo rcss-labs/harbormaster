@@ -413,11 +413,11 @@ describe('SSOPage', () => {
     serveConfig(SSO_CONFIGURED_OFF)
     server.use(
       http.get('/api/sso/tests/:id', () =>
-        HttpResponse.json({ ...SSO_TEST_OK, outcome: 'would_sign_in', username: 'pavel', existing_user: 'pavel' }),
+        HttpResponse.json({ ...SSO_TEST_OK, outcome: 'would_sign_in', username: 'sam', existing_user: 'sam' }),
       ),
     )
     renderApp('/settings/sso?test=abc')
-    expect(await screen.findByText('Would sign in pavel')).toBeInTheDocument()
+    expect(await screen.findByText('Would sign in sam')).toBeInTheDocument()
   })
 
   it('test result would_link renders Would link dana (pending link)', async () => {

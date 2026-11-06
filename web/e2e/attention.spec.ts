@@ -8,7 +8,7 @@ import { SVC, serviceUrl } from './fixtures/ids'
 // of image-resizer, which change.spec registers and counts revisions of, so the positive case (a failure alert naming its
 // deploy) is covered by the Go test TestAlerts_JustBeforeFromOperationLog and not repeated here. What stays checkable
 // without a race is the negative side: an alert with no change before it, and a rollout alert after a change, name nothing.
-test.use(asUser('pavel'))
+test.use(asUser('sam'))
 
 const imageResizer = (tab?: string) => serviceUrl(...SVC.imageResizer, tab)
 

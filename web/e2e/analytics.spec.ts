@@ -9,8 +9,8 @@ const TABS = [
   { link: 'Operations', heading: 'Operations through Harbormaster' },
 ]
 
-test.describe('analytics as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('analytics as sam', () => {
+  test.use(asUser('sam'))
 
   test('sidebar leads to Analytics and the four tabs render', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })

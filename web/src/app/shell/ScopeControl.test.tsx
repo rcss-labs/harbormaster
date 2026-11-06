@@ -53,7 +53,7 @@ describe('ScopeControl', () => {
     await user.click(within(popover).getByRole('button', { name: 'Save current' }))
     await user.type(within(popover).getByLabelText('Scope name'), 'Prod staging')
     await user.click(within(popover).getByRole('button', { name: 'Save' }))
-    expect(JSON.parse(localStorage.getItem('harbormaster-scopes:pavel')!)).toEqual([
+    expect(JSON.parse(localStorage.getItem('harbormaster-scopes:sam')!)).toEqual([
       { name: 'Prod staging', account: ACCOUNT_STAGING.account_id, tag: [3] },
     ])
 
@@ -75,14 +75,14 @@ describe('ScopeControl', () => {
   })
 
   it('removes a saved scope', async () => {
-    localStorage.setItem('harbormaster-scopes:pavel', JSON.stringify([{ name: 'Prod', tag: [3] }]))
+    localStorage.setItem('harbormaster-scopes:sam', JSON.stringify([{ name: 'Prod', tag: [3] }]))
     renderApp('/clusters')
     const user = userEvent.setup()
     await user.click(await scopeButton())
     const popover = await screen.findByRole('dialog', { name: 'Scope' })
     await user.click(within(popover).getByRole('button', { name: 'Remove scope Prod' }))
     expect(within(popover).queryByRole('button', { name: 'Prod' })).not.toBeInTheDocument()
-    expect(JSON.parse(localStorage.getItem('harbormaster-scopes:pavel')!)).toEqual([])
+    expect(JSON.parse(localStorage.getItem('harbormaster-scopes:sam')!)).toEqual([])
   })
 
   it('applying a saved scope does not show tags the user cannot view', async () => {

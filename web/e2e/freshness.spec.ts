@@ -5,7 +5,7 @@ import { login } from './helpers'
 // Runs in chromium-degraded: a second server whose scheduled-actions call and scaling tier always fail (HM_FAKE_FAIL),
 // against its own database schema, so each test signs in here instead of using e2e/.auth.
 test.beforeEach(async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
 })
 
 const REGIONS = 4

@@ -260,7 +260,7 @@ describe('Sidebar groups', () => {
 
   it('names the account button after the user and reports its state', async () => {
     renderApp('/')
-    const button = await screen.findByRole('button', { name: 'Account menu for pavel' })
+    const button = await screen.findByRole('button', { name: 'Account menu for sam' })
     expect(button).toHaveAttribute('aria-expanded', 'false')
     await userEvent.setup().click(button)
     expect(button).toHaveAttribute('aria-expanded', 'true')

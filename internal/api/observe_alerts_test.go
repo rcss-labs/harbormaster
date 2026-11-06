@@ -105,7 +105,7 @@ func TestAlerts_AdminSeesAllSorted(t *testing.T) {
 		serviceAlert(homelabAccountID, "us-east-1", "core-services", "web-frontend", model.AlertWarning, "web-frontend warning"),
 	)
 
-	body := getAlertsBody(t, login(t, srv, "pavel", testPassword), "")
+	body := getAlertsBody(t, login(t, srv, "sam", testPassword), "")
 
 	wantTitles := []string{"image-resizer danger", "web-frontend warning", "payments-api info"}
 	if got := itemTitles(body); len(got) != len(wantTitles) || got[0] != wantTitles[0] || got[1] != wantTitles[1] || got[2] != wantTitles[2] {
@@ -143,9 +143,9 @@ func TestAlerts_FiltersInvisibleServices(t *testing.T) {
 		t.Errorf("omer counts = %+v; want danger 0 and warning 1 after filtering", omer.Counts)
 	}
 
-	pavel := getAlertsBody(t, login(t, srv, "pavel", testPassword), "")
-	if len(pavel.Items) != 2 || pavel.Counts.Danger != 1 {
-		t.Errorf("pavel sees %d items, danger %d; want 2 items and danger 1", len(pavel.Items), pavel.Counts.Danger)
+	sam := getAlertsBody(t, login(t, srv, "sam", testPassword), "")
+	if len(sam.Items) != 2 || sam.Counts.Danger != 1 {
+		t.Errorf("sam sees %d items, danger %d; want 2 items and danger 1", len(sam.Items), sam.Counts.Danger)
 	}
 }
 
@@ -157,9 +157,9 @@ func TestAlerts_AccountRegionFilter(t *testing.T) {
 		serviceAlert(homelabAccountID, "us-east-1", "core-services", "web-frontend", model.AlertWarning, "homelab warning"),
 		serviceAlert(stagingAccountID, "us-east-1", "staging-web", "web", model.AlertDanger, "staging danger"),
 	)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
-	homelab := getAlertsBody(t, pavel, "?account="+homelabAccountID)
+	homelab := getAlertsBody(t, sam, "?account="+homelabAccountID)
 	if got := itemTitles(homelab); len(got) != 1 || got[0] != "homelab warning" {
 		t.Fatalf("account filter item titles = %v; want only the homelab alert", got)
 	}
@@ -167,7 +167,7 @@ func TestAlerts_AccountRegionFilter(t *testing.T) {
 		t.Errorf("account filter counts = %+v; want counts recomputed over the homelab alert only", homelab.Counts)
 	}
 
-	empty := getAlertsBody(t, pavel, "?account="+homelabAccountID+"&region=eu-west-1")
+	empty := getAlertsBody(t, sam, "?account="+homelabAccountID+"&region=eu-west-1")
 	if empty.Items == nil || len(empty.Items) != 0 {
 		t.Errorf("region with no alerts: items = %#v; want an empty non-nil list", empty.Items)
 	}
@@ -221,8 +221,8 @@ func TestAlerts_AccountUnreachableVisibleWhenAnyClusterVisible(t *testing.T) {
 		t.Errorf("oncall counts.danger = %d; want 1 after excluding the invisible account", oncall.Counts.Danger)
 	}
 
-	pavel := getAlertsBody(t, login(t, srv, "pavel", testPassword), "")
-	if len(pavel.Items) != 3 || pavel.Counts.Danger != 3 {
-		t.Errorf("pavel sees %d items, danger %d; want all three account alerts", len(pavel.Items), pavel.Counts.Danger)
+	sam := getAlertsBody(t, login(t, srv, "sam", testPassword), "")
+	if len(sam.Items) != 3 || sam.Counts.Danger != 3 {
+		t.Errorf("sam sees %d items, danger %d; want all three account alerts", len(sam.Items), sam.Counts.Danger)
 	}
 }

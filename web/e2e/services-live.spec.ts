@@ -24,8 +24,8 @@ async function readServices(page: Page): Promise<ServiceItem[]> {
   return ((await response.json()) as { items: ServiceItem[] }).items
 }
 
-test.describe('services page as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('services page as sam', () => {
+  test.use(asUser('sam'))
 
   test('the view counts, footer and rows agree with /api/services', async ({ page }) => {
     await page.goto('/services')
@@ -96,16 +96,16 @@ test.describe('services page as omer', () => {
     ).toBeVisible()
     for (const item of items) await expect(page.getByRole('link', { name: item.name, exact: true })).toBeVisible()
 
-    // Pavel sees more services than omer, so omer's scope really narrows the list.
-    const pavel = await browser.newContext({ storageState: authFile('pavel') })
-    const pavelItems = (
-      (await (await pavel.request.get('/api/services')).json()) as {
+    // Sam sees more services than omer, so omer's scope really narrows the list.
+    const sam = await browser.newContext({ storageState: authFile('sam') })
+    const samItems = (
+      (await (await sam.request.get('/api/services')).json()) as {
         items: ServiceItem[]
       }
     ).items
-    await pavel.close()
-    expect(pavelItems.length).toBeGreaterThan(items.length)
-    for (const hidden of pavelItems.filter((item) => !items.some((own) => own.id === item.id))) {
+    await sam.close()
+    expect(samItems.length).toBeGreaterThan(items.length)
+    for (const hidden of samItems.filter((item) => !items.some((own) => own.id === item.id))) {
       await expect(page.getByRole('link', { name: hidden.name, exact: true })).toHaveCount(0)
     }
   })

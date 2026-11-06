@@ -60,7 +60,7 @@ func TestAnalyticsReliability_ClampsNinetyDaysToRetention(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getReliability(t, login(t, srv, "pavel", testPassword), "?range=90d")
+	got := getReliability(t, login(t, srv, "sam", testPassword), "?range=90d")
 
 	w := got.Window
 	if w.Requested != "90d" || w.Used != "7d" || !w.Clamped || w.Bucket != "4h" || w.Retention != "168h" || !w.RangeApplies {
@@ -86,7 +86,7 @@ func TestAnalyticsReliability_ShortRangeIsNotClamped(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getReliability(t, login(t, srv, "pavel", testPassword), "?range=24h")
+	got := getReliability(t, login(t, srv, "sam", testPassword), "?range=24h")
 	if got.Window.Used != "24h" || got.Window.Clamped || len(got.Availability.Timestamps) != 24 {
 		t.Fatalf("window = %+v with %d timestamps, want 24h unclamped and 24", got.Window, len(got.Availability.Timestamps))
 	}
@@ -95,7 +95,7 @@ func TestAnalyticsReliability_ShortRangeIsNotClamped(t *testing.T) {
 			t.Errorf("service_events window_used = %q, want nil when the window matches the tab", *src.WindowUsed)
 		}
 	}
-	if resp := login(t, srv, "pavel", testPassword).get("/api/analytics/reliability?range=1y"); resp.StatusCode != http.StatusUnprocessableEntity {
+	if resp := login(t, srv, "sam", testPassword).get("/api/analytics/reliability?range=1y"); resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("range=1y status %d, want 422", resp.StatusCode)
 	}
 }
@@ -104,7 +104,7 @@ func TestAnalyticsReliability_DailyPanelsUnavailableBeforeFirstRollup(t *testing
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getReliability(t, login(t, srv, "pavel", testPassword), "")
+	got := getReliability(t, login(t, srv, "sam", testPassword), "")
 	for name, available := range map[string]bool{
 		"availability_90d":  got.Availability90d.Available,
 		"below_desired_90d": got.BelowDesired90d.Available,
@@ -138,7 +138,7 @@ func TestAnalyticsReliability_KPIsSeriesAndTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := getReliability(t, login(t, srv, "pavel", testPassword), "?range=7d")
+	got := getReliability(t, login(t, srv, "sam", testPassword), "?range=7d")
 	k := got.KPIs
 	if k.Availability == nil || *k.Availability >= 1 || *k.Availability <= 0 {
 		t.Errorf("availability = %v, want between 0 and 1", k.Availability)
@@ -214,7 +214,7 @@ func TestAnalyticsReliability_NonAdminSeesOnlyVisible(t *testing.T) {
 	}
 	seedBelowDesired(t, st, map[model.ServiceKey]bool{prodSvc.Key: true, devSvc.Key: true})
 
-	admin := getReliability(t, login(t, srv, "pavel", testPassword), "")
+	admin := getReliability(t, login(t, srv, "sam", testPassword), "")
 	if admin.KPIs.ServicesBelow != 2 || len(admin.LeastAvailable.Rows) != 2 {
 		t.Fatalf("admin sees %d services below, %d rows; want 2 and 2", admin.KPIs.ServicesBelow, len(admin.LeastAvailable.Rows))
 	}

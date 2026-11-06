@@ -63,8 +63,8 @@ test.describe('overview as oncall', () => {
   })
 })
 
-test.describe('metrics as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('metrics as sam', () => {
+  test.use(asUser('sam'))
 
   test('edge-nginx (Container Insights off) shows the Terraform banner and no charts', async ({ page }) => {
     await page.goto(edgeNginx('metrics'))
@@ -153,8 +153,8 @@ test.describe('task definition: registering', () => {
     })
   })
 
-  test.describe('pavel on payments-api (global admin)', () => {
-    test.use(asUser('pavel'))
+  test.describe('sam on payments-api (global admin)', () => {
+    test.use(asUser('sam'))
 
     test('changing the family is refused: Use Terraform to create a new family', async ({ page }) => {
       await page.goto(paymentsApi('task-definition'))
@@ -293,8 +293,8 @@ test.describe('terminal', () => {
   })
 })
 
-test.describe('operations log as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('operations log as sam', () => {
+  test.use(asUser('sam'))
 
   test('is newest first, and the toggle hides ECS service events', async ({ page }) => {
     const response = await page.request.get(`/api/services/${serviceId(...SVC.paymentsApi)}/operations?include_ecs=true`)
@@ -353,7 +353,7 @@ test.describe('header: Dev operator', () => {
 })
 
 test.describe('full-height tabs and narrow windows', () => {
-  test.use(asUser('pavel'))
+  test.use(asUser('sam'))
 
   // The logs and terminal panels run to the bottom of the window at any height, scrolling inside themselves.
   for (const [tab, region] of [['logs', 'Logs'], ['terminal', 'Terminal']] as const) {

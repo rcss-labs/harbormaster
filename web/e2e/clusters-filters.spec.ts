@@ -2,8 +2,8 @@ import { asUser, expect, test } from './fixtures/test'
 
 // Read-only: runs in the observe project. Status, name and the shared account scope on the Clusters page.
 
-test.describe('clusters filter bar as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('clusters filter bar as sam', () => {
+  test.use(asUser('sam'))
 
   // The table has a header row, so N clusters are N + 1 rows.
   test('environment, status and name filters', async ({ page }) => {

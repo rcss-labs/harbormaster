@@ -4,8 +4,8 @@ import { asUser, expect, test } from './fixtures/test'
 
 const serviceRows = (page: import('@playwright/test').Page) => page.getByRole('table', { name: 'Services' }).getByRole('row')
 
-test.describe('services page as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('services page as sam', () => {
+  test.use(asUser('sam'))
 
   test('lists all 15 services and the Problems view leads with image-resizer', async ({ page }) => {
     await page.goto('/services')

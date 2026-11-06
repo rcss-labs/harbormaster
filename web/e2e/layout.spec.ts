@@ -2,7 +2,7 @@ import { asUser, expect, test } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
 
 // Read-only: runs in the observe project against the unmutated seed.
-test.use(asUser('pavel'))
+test.use(asUser('sam'))
 
 test('wide screens fill the content width', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 1440 })
@@ -138,7 +138,7 @@ for (const target of tableTargets) {
 }
 
 test.describe('row action menu at 390', () => {
-  test.use(asUser('pavel'))
+  test.use(asUser('sam'))
 
   test('every action of the last row stays clickable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })

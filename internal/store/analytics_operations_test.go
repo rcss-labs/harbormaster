@@ -51,7 +51,7 @@ func kindTotals(t *testing.T, s *store.Store, vis store.Visibility) map[string]i
 
 func TestOpKindSQL_ClassifiesLegacyRows(t *testing.T) {
 	s := storetest.Open(t)
-	user := mustUser(t, s, "pavel")
+	user := mustUser(t, s, "sam")
 	u := &user
 	web := strp("web")
 	// The historical shapes: no details.op, kind derived from text and detail keys.
@@ -81,7 +81,7 @@ func TestOpKindSQL_ClassifiesLegacyRows(t *testing.T) {
 
 func TestOpKindSQL_PrefersDetailsOp(t *testing.T) {
 	s := storetest.Open(t)
-	user := mustUser(t, s, "pavel")
+	user := mustUser(t, s, "sam")
 	// The text says "Deployed" but details.op wins; "outcome" and "terminal_close" are excluded.
 	appendOp(t, s, "c1", strp("web"), &user, "Deployed web:5.", map[string]any{"op": "restart", "deployment_id": "d1"})
 	appendOp(t, s, "c1", strp("web"), &user, "whatever", map[string]any{"op": "outcome"})
@@ -96,7 +96,7 @@ func TestOpKindSQL_PrefersDetailsOp(t *testing.T) {
 func TestAnalyticsOperations_VisibilityAndWindow(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	user := mustUser(t, s, "pavel")
+	user := mustUser(t, s, "sam")
 	prod, _ := s.CreateTag(ctx, "Prod", "red")
 	if err := s.SetClusterTag(ctx, clusterKey("prod-cluster"), prod.ID); err != nil {
 		t.Fatal(err)
@@ -124,10 +124,10 @@ func TestAnalyticsOperations_VisibilityAndWindow(t *testing.T) {
 func TestAnalyticsOperators_CountsPerKindAndLast(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	pavel, omer := mustUser(t, s, "pavel"), mustUser(t, s, "omer")
-	appendOp(t, s, "c1", strp("web"), &pavel, "x", map[string]any{"op": "deploy"})
-	appendOp(t, s, "c1", strp("web"), &pavel, "x", map[string]any{"op": "deploy"})
-	appendOp(t, s, "c1", strp("web"), &pavel, "x", map[string]any{"op": "restart"})
+	sam, omer := mustUser(t, s, "sam"), mustUser(t, s, "omer")
+	appendOp(t, s, "c1", strp("web"), &sam, "x", map[string]any{"op": "deploy"})
+	appendOp(t, s, "c1", strp("web"), &sam, "x", map[string]any{"op": "deploy"})
+	appendOp(t, s, "c1", strp("web"), &sam, "x", map[string]any{"op": "restart"})
 	appendOp(t, s, "c1", strp("web"), &omer, "x", map[string]any{"op": "scale"})
 	appendOp(t, s, "c1", strp("web"), &omer, "x", map[string]any{"op": "outcome"})
 
@@ -136,8 +136,8 @@ func TestAnalyticsOperators_CountsPerKindAndLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Username != "pavel" {
-		t.Fatalf("operators = %+v, want pavel first then omer", got)
+	if len(got) != 2 || got[0].Username != "sam" {
+		t.Fatalf("operators = %+v, want sam first then omer", got)
 	}
 	if got[0].Counts["deploy"] != 2 || got[0].Counts["restart"] != 1 || got[1].Counts["scale"] != 1 || len(got[1].Counts) != 1 {
 		t.Fatalf("counts = %v / %v", got[0].Counts, got[1].Counts)
@@ -150,13 +150,13 @@ func TestAnalyticsOperators_CountsPerKindAndLast(t *testing.T) {
 func TestAnalyticsRestartedServices_DistinctPeople(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	pavel, omer := mustUser(t, s, "pavel"), mustUser(t, s, "omer")
-	for _, actor := range []int64{pavel, pavel, omer} {
+	sam, omer := mustUser(t, s, "sam"), mustUser(t, s, "omer")
+	for _, actor := range []int64{sam, sam, omer} {
 		a := actor
 		appendOp(t, s, "c1", strp("flaky"), &a, "Restarted", map[string]any{"op": "restart"})
 	}
-	appendOp(t, s, "c1", strp("steady"), &pavel, "Restarted", map[string]any{"op": "restart"})
-	appendOp(t, s, "c1", strp("steady"), &pavel, "Deployed", map[string]any{"op": "deploy"})
+	appendOp(t, s, "c1", strp("steady"), &sam, "Restarted", map[string]any{"op": "restart"})
+	appendOp(t, s, "c1", strp("steady"), &sam, "Deployed", map[string]any{"op": "deploy"})
 
 	from, to := opsWindow()
 	got, err := s.AnalyticsRestartedServices(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, from, to)

@@ -2,8 +2,8 @@ import { asUser, expect, test } from './fixtures/test'
 
 // Read-only: runs in the observe project.
 
-test.describe('clusters as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('clusters as sam', () => {
+  test.use(asUser('sam'))
 
   test('table rows and the Insights-off dash', async ({ page }) => {
     await page.goto('/clusters')

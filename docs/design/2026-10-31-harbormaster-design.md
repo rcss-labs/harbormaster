@@ -1,6 +1,6 @@
 # Harbormaster design
 
-**Status:** draft for review · **Date:** 2026-10-31 · **Owner:** pavel
+**Status:** draft for review · **Date:** 2026-10-31 · **Owner:** sam
 
 Harbormaster is a web control center for AWS ECS. It gives a DevOps team the
 experience Stackstead gives for a Docker host (one place to see what runs, how it

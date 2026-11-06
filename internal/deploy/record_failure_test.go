@@ -46,7 +46,7 @@ func TestRegister_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T
 	opsBefore := operationCount(t, h)
 	draft := draftFromDeployed(t, h, "payments-api:1.18.3")
 
-	got, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
+	got, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
 	if err != nil {
 		t.Fatalf("Register() error = %v, want success with a warning (a 5xx invites a duplicate-registering retry)", err)
 	}
@@ -80,7 +80,7 @@ func TestDeploy_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T) 
 	h.svc.InTx = failAtCommit(h.store)
 	opsBefore := operationCount(t, h)
 
-	got, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 41, false)
+	got, err := h.svc.Deploy(t.Context(), h.sam, paymentsKey, 41, false)
 	if err != nil {
 		t.Fatalf("Deploy() error = %v, want success with a warning", err)
 	}
@@ -98,7 +98,7 @@ func TestDeploy_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T) 
 func TestRestart_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T) {
 	h := newHarness(t)
 	h.svc.InTx = failAtCommit(h.store)
-	got, err := h.svc.Restart(t.Context(), h.pavel, paymentsKey)
+	got, err := h.svc.Restart(t.Context(), h.sam, paymentsKey)
 	if err != nil || got.DeploymentID == "" || !strings.Contains(got.Warning, "could not record") {
 		t.Fatalf("Restart() = %+v, %v; want success with a warning", got, err)
 	}
@@ -107,7 +107,7 @@ func TestRestart_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T)
 func TestSetDesiredCount_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T) {
 	h := newHarness(t)
 	h.svc.InTx = failAtCommit(h.store)
-	got, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 4)
+	got, err := h.svc.SetDesiredCount(t.Context(), h.sam, paymentsKey, 4)
 	if err != nil || !got.Changed || got.Desired != 4 || !strings.Contains(got.Warning, "could not record") {
 		t.Fatalf("SetDesiredCount() = %+v, %v; want success with a warning", got, err)
 	}
@@ -121,7 +121,7 @@ func TestStopTask_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T
 	h.svc.InTx = failAtCommit(h.store)
 	service := paymentsKey.Service
 	arn := runningTaskARN(t, h, paymentsKey.Cluster, &service)
-	got, err := h.svc.StopTask(t.Context(), h.pavel, homelabAccountID, homelabRegion, arn)
+	got, err := h.svc.StopTask(t.Context(), h.sam, homelabAccountID, homelabRegion, arn)
 	if err != nil || !strings.Contains(got.Warning, "could not record") {
 		t.Fatalf("StopTask() = %+v, %v; want success with a warning", got, err)
 	}
@@ -200,7 +200,7 @@ func TestRegister_ReusesTheDeployedDefinitionTheCallerAlreadyRead(t *testing.T) 
 	draft := draftFromDeployed(t, h, "payments-api:1.18.3")
 	now = now.Add(5 * time.Minute) // the tag cache has expired: only reuse avoids another read
 	before := h.fake.Calls()["ListTagsForResource"]
-	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft, Deployed: &deployed}); err != nil {
+	if _, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft, Deployed: &deployed}); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.fake.Calls()["ListTagsForResource"] - before; got != 0 {
@@ -212,7 +212,7 @@ func TestRegister_IgnoresAProvidedDeployedThatIsNotTheLivePrimary(t *testing.T) 
 	h := newHarness(t)
 	stale := deploy.Deployed{Family: "payments-api", Revision: 41, ARN: "arn:aws:ecs:us-east-1:482109375512:task-definition/payments-api:41"}
 	draft := draftFromDeployed(t, h, "payments-api:1.18.3")
-	_, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 41, Definition: draft, Deployed: &stale})
+	_, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 41, Definition: draft, Deployed: &stale})
 	var staleBase *deploy.StaleBaseError
 	if !errors.As(err, &staleBase) || staleBase.DeployedRevision != 42 {
 		t.Fatalf("Register() = %v, want StaleBaseError against the live revision 42", err)

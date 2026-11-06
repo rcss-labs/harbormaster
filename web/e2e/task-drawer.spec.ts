@@ -3,7 +3,7 @@ import { asUser, expect, test } from './fixtures/test'
 
 // Runs in chromium-flows because it stops a task. It stops a `notifications` task, a service that only read-only specs in
 // the observe project use, and the fake ECS starts a replacement, so later specs see a steady estate.
-test.use(asUser('pavel'))
+test.use(asUser('sam'))
 
 /** Opens /tasks with repeats off (one row per task) and opens the drawer of the first running task of `serviceName`. */
 async function openRunningTaskDrawer(page: Page, serviceName: string) {

@@ -36,10 +36,10 @@ func changesetPath() string { return "/api/services/" + paymentsID() + "/changes
 
 func TestChangeSet_403NamesFirstMissingAction(t *testing.T) {
 	env := newWriteEnv(t)
-	settings := liveSettings(t, env.login("pavel"))
+	settings := liveSettings(t, env.login("sam"))
 	body := map[string]any{
 		"base_revision": 42, "base_version": settings.Version,
-		"task_definition": map[string]any{"definition": draftFor(t, env.login("pavel"))},
+		"task_definition": map[string]any{"definition": draftFor(t, env.login("sam"))},
 		"service":         map[string]any{"desired_count": 4},
 	}
 	resp := env.login("operator").post(changesetPath(), body)
@@ -86,7 +86,7 @@ func TestChangeSet_EditOnlyRegistersOnly(t *testing.T) {
 
 func TestChangeSet_InvalidBodyStrictJSON(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	settings := liveSettings(t, admin)
 	for name, body := range map[string]any{
 		"unknown field":         map[string]any{"base_version": settings.Version, "service": map[string]any{"desired_count": 4, "bogus": true}},
@@ -109,7 +109,7 @@ func TestChangeSet_InvalidBodyStrictJSON(t *testing.T) {
 
 func TestChangeSet_PartialIs200WithSteps(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	settings := liveSettings(t, admin)
 	env.fk.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
 	resp := admin.post(changesetPath(), map[string]any{
@@ -144,7 +144,7 @@ func TestChangeSet_PartialIs200WithSteps(t *testing.T) {
 
 func TestChangeSet_StaleVersion409CarriesSettings(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	settings := liveSettings(t, admin)
 	resp := admin.post(changesetPath(), map[string]any{
 		"base_revision": 42, "base_version": "not-the-live-version", "service": map[string]any{"desired_count": 4},
@@ -172,7 +172,7 @@ var errScheduledActionsUnsupported = &smithy.GenericAPIError{Code: "UnsupportedO
 
 func TestDeploySettings_PartialScheduledActions(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	if got := liveSettings(t, admin); got.Partial == nil || len(got.Partial) != 0 {
 		t.Fatalf("complete settings: partial = %#v, want an empty array", got.Partial)
 	}
@@ -190,7 +190,7 @@ func TestDeploySettings_PartialScheduledActions(t *testing.T) {
 
 func TestChangeSet_AppliesWhenScheduledActionsUnreadable(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
 	settings := liveSettings(t, admin)
 	resp := admin.post(changesetPath(), map[string]any{
@@ -207,7 +207,7 @@ func TestChangeSet_AppliesWhenScheduledActionsUnreadable(t *testing.T) {
 
 func TestChangeSet_RefusesScheduledActionEditWhenUnreadable(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
 	settings := liveSettings(t, admin)
 	resp := admin.post(changesetPath(), map[string]any{
@@ -227,7 +227,7 @@ func TestChangeSet_RefusesScheduledActionEditWhenUnreadable(t *testing.T) {
 // the user could not see them.
 func TestChangeSet_RefusesRemoveTargetWhenScheduledActionsUnreadable(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
 	settings := liveSettings(t, admin)
 	resp := admin.post(changesetPath(), map[string]any{
@@ -244,7 +244,7 @@ func TestChangeSet_RefusesRemoveTargetWhenScheduledActionsUnreadable(t *testing.
 func TestDeploySettings_CanFlags(t *testing.T) {
 	env := newWriteEnv(t)
 	for user, want := range map[string]ChangeCanDTO{
-		"pavel":    {Edit: true, Deploy: true, Operate: true, Admin: true},
+		"sam":      {Edit: true, Deploy: true, Operate: true, Admin: true},
 		"deployer": {Edit: true, Deploy: true, Operate: true},
 		"operator": {Operate: true},
 		"editor":   {Edit: true},

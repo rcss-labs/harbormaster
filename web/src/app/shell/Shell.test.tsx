@@ -80,11 +80,11 @@ describe('Shell', () => {
     await user.selectOptions(account, ACCOUNT_STAGING.account_id)
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`account=${ACCOUNT_STAGING.account_id}`))
     expect(screen.getByTestId('search')).toHaveTextContent('keep=1')
-    expect(JSON.parse(localStorage.getItem('harbormaster-filters:pavel')!)).toEqual({ account: ACCOUNT_STAGING.account_id })
+    expect(JSON.parse(localStorage.getItem('harbormaster-filters:sam')!)).toEqual({ account: ACCOUNT_STAGING.account_id })
   })
 
   it('falls back to All when the stored account no longer exists', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ account: '999999999999', region: 'us-east-1' }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ account: '999999999999', region: 'us-east-1' }))
     renderApp('/clusters')
     const scope = within(await openScope(userEvent.setup()))
     const account = scope.getByLabelText('Account filter')
@@ -95,7 +95,7 @@ describe('Shell', () => {
   })
 
   it('clearing a restored filter to All stays All', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ account: ACCOUNT_STAGING.account_id }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ account: ACCOUNT_STAGING.account_id }))
     renderApp('/clusters')
     const user = userEvent.setup()
     const account = within(await openScope(user)).getByLabelText('Account filter')
@@ -125,11 +125,11 @@ describe('Shell', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Staging' }))
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('tag=2'))
     expect(screen.getByTestId('search')).toHaveTextContent('tag=3')
-    expect(JSON.parse(localStorage.getItem('harbormaster-filters:pavel')!)).toEqual({ tag: [2, 3] })
+    expect(JSON.parse(localStorage.getItem('harbormaster-filters:sam')!)).toEqual({ tag: [2, 3] })
   })
 
   it('URL tag= wins over the stored tags', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [2] }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ tag: [2] }))
     renderApp('/clusters?tag=3')
     expect(await screen.findByRole('button', { name: /^Scope:/ })).toHaveTextContent('Prod')
     expect(screen.getByRole('button', { name: /^Scope:/ })).not.toHaveTextContent('Staging')
@@ -154,7 +154,7 @@ describe('Shell', () => {
   })
 
   it('restores stored tags sorted ascending into the URL', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [3, 2] }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ tag: [3, 2] }))
     renderApp('/clusters')
     await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('tag=2&tag=3'))
   })

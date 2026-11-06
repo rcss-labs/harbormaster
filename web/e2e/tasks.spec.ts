@@ -2,8 +2,8 @@ import { asUser, expect, test } from './fixtures/test'
 
 // Read-only: runs in the observe project, before change.spec touches image-resizer.
 
-test.describe('tasks as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('tasks as sam', () => {
+  test.use(asUser('sam'))
 
   test('Problems first lists the image-resizer task stopped 4 min ago and hides the older ones', async ({ page }) => {
     await page.goto('/tasks')
@@ -30,8 +30,8 @@ test.describe('tasks as pavel', () => {
   })
 })
 
-test.describe('task drawer and layout as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('task drawer and layout as sam', () => {
+  test.use(asUser('sam'))
 
   test('a task id opens the drawer with the stop reason; Esc closes it', async ({ page }) => {
     // Repeats off, so the row is a task and not a "×N tasks" group.
@@ -88,8 +88,8 @@ test.describe('task drawer and layout as pavel', () => {
   })
 })
 
-test.describe('expected stops as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('expected stops as sam', () => {
+  test.use(asUser('sam'))
 
   test('a Spot-interrupted task that exited 1 shows the "spot" chip, a teal stripe and is not an error', async ({ page }) => {
     await page.goto('/tasks?filter=stopped&group=0')

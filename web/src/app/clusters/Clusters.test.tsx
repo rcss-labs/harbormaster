@@ -252,7 +252,7 @@ describe('Clusters', () => {
   it('Clear filters also clears the remembered account, region and tag scope', async () => {
     const user = userEvent.setup()
     localStorage.setItem(
-      'harbormaster-filters:pavel',
+      'harbormaster-filters:sam',
       JSON.stringify({ account: ACCOUNT_STAGING.account_id, region: 'us-east-1', tag: [TAG_STAGING.id] }),
     )
     renderApp(`/clusters?status=healthy&q=web&account=${ACCOUNT_STAGING.account_id}&region=us-east-1&tag=${TAG_STAGING.id}`)
@@ -262,7 +262,7 @@ describe('Clusters', () => {
 
     await waitFor(() => expect(shownNames()).toHaveLength(6))
     await waitFor(() => expect(screen.getByTestId('search').textContent).toBe(''))
-    const stored = JSON.parse(localStorage.getItem('harbormaster-filters:pavel') ?? '{}')
+    const stored = JSON.parse(localStorage.getItem('harbormaster-filters:sam') ?? '{}')
     expect(stored.account).toBeUndefined()
     expect(stored.region).toBeUndefined()
     expect(stored.tag).toBeUndefined()

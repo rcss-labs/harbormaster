@@ -57,8 +57,8 @@ async function waitForRolloutDone(page: Page) {
   await expect(progress.getByText('Completed')).toBeVisible({ timeout: 40_000 })
 }
 
-test.describe('pavel on payments-api', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on payments-api', () => {
+  test.use(asUser('sam'))
 
   test('deploys an older tag found by search plus a new env var; progress shows from→to and the operations log carries the reason', async ({ page }) => {
     const id = serviceId(...SVC.paymentsApi)
@@ -120,8 +120,8 @@ test.describe('pavel on payments-api', () => {
   })
 })
 
-test.describe('pavel on a phone', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on a phone', () => {
+  test.use(asUser('sam'))
 
   test('Deploy never scrolls sideways at 390px and the pending aside stacks below the form', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 })
@@ -145,8 +145,8 @@ test.describe('pavel on a phone', () => {
   })
 })
 
-test.describe('pavel on staging api', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on staging api', () => {
+  test.use(asUser('sam'))
 
   test('edits the migrator sidecar image and the task size in one change set', async ({ page }) => {
     await page.goto(stagingApi)
@@ -212,8 +212,8 @@ test.describe('omer on search-indexer (Operate on Dev)', () => {
   })
 })
 
-test.describe('pavel on email-sender', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on email-sender', () => {
+  test.use(asUser('sam'))
 
   test('turning ECS Exec off restarts the service with a new deployment, without a new revision', async ({ page }) => {
     const id = serviceId(...emailSender)
@@ -244,8 +244,8 @@ test.describe('pavel on email-sender', () => {
   })
 })
 
-test.describe('pavel on auth-service', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on auth-service', () => {
+  test.use(asUser('sam'))
 
   test('changes only rollout settings (circuit breaker, percentages, grace period) and registers no revision', async ({ page }) => {
     const id = serviceId(...authService)
@@ -284,8 +284,8 @@ test.describe('pavel on auth-service', () => {
 // RetryWithRevisionDoesNotRegisterAgain), the API test _PartialIs200WithSteps and DeployTab.review.test.tsx.
 test.skip('partial failure shows the steps and retries without registering again', () => {})
 
-test.describe('pavel on image-resizer (failing OOM rollout)', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on image-resizer (failing OOM rollout)', () => {
+  test.use(asUser('sam'))
 
   test('one-click rollback during the failing rollout returns the service to the earlier revision', async ({ page }) => {
     const id = serviceId(...SVC.imageResizer)

@@ -7,8 +7,8 @@ const main = (page: import('@playwright/test').Page) => page.getByRole('main')
 /** The cells of the Estate map: one link per cluster, named "cluster, status, tasks, region". */
 const clusterSquares = (page: import('@playwright/test').Page) => main(page).getByRole('region', { name: 'Estate map' }).getByRole('link')
 
-test.describe('overview as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('overview as sam', () => {
+  test.use(asUser('sam'))
 
   test('tiles, needs attention and the poll age', async ({ page }) => {
     await page.goto('/')
@@ -56,7 +56,7 @@ test.describe('overview as pavel', () => {
 })
 
 test.describe('overview at 390 px', () => {
-  test.use({ ...asUser('pavel'), viewport: { width: 390, height: 844 } })
+  test.use({ ...asUser('sam'), viewport: { width: 390, height: 844 } })
 
   test('neither layout scrolls sideways', async ({ page }) => {
     // <main> is the scroll container, so sideways overflow shows up on it.
@@ -72,7 +72,7 @@ test.describe('overview at 390 px', () => {
 })
 
 test.describe('needs attention at 390 px', () => {
-  test.use({ ...asUser('pavel'), viewport: { width: 390, height: 844 } })
+  test.use({ ...asUser('sam'), viewport: { width: 390, height: 844 } })
 
   test('every severity chip is fully inside the window and the page does not scroll sideways', async ({ page }) => {
     await page.goto('/')

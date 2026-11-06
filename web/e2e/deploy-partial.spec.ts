@@ -7,7 +7,7 @@ import { login, reviewAndApply, serviceId } from './helpers'
 test.describe.configure({ mode: 'serial' })
 
 test.beforeEach(async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
 })
 
 const service = SVC.paymentsApi

@@ -41,7 +41,7 @@ type meBody struct {
 func TestLogin_SetsCookieAndCSRF(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	c := newAPIClient(t, srv)
-	resp := c.post("/api/auth/login", map[string]string{"username": "pavel", "password": testPassword})
+	resp := c.post("/api/auth/login", map[string]string{"username": "sam", "password": testPassword})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -58,14 +58,14 @@ func TestLogin_SetsCookieAndCSRF(t *testing.T) {
 		User meBody `json:"user"`
 	}
 	decode(t, resp, &out)
-	if out.User.Username != "pavel" || !out.User.Admin || out.User.CSRFToken == "" {
-		t.Fatalf("user = %+v, want pavel admin with csrf token", out.User)
+	if out.User.Username != "sam" || !out.User.Admin || out.User.CSRFToken == "" {
+		t.Fatalf("user = %+v, want sam admin with csrf token", out.User)
 	}
 }
 
 func TestLogin_WrongPasswordIsGeneric(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	for _, tc := range []struct{ user, pw string }{{"pavel", "wrong-password-xx"}, {"ghost", "wrong-password-xx"}} {
+	for _, tc := range []struct{ user, pw string }{{"sam", "wrong-password-xx"}, {"ghost", "wrong-password-xx"}} {
 		resp := newAPIClient(t, srv).post("/api/auth/login", map[string]string{"username": tc.user, "password": tc.pw})
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s: status = %d, want 401", tc.user, resp.StatusCode)
@@ -93,10 +93,10 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	var a meBody
 	decode(t, admin.get("/api/me"), &a)
-	if !a.Admin || a.Username != "pavel" || a.CSRFToken != admin.csrf {
+	if !a.Admin || a.Username != "sam" || a.CSRFToken != admin.csrf {
 		t.Fatalf("admin me = %+v", a)
 	}
 	if len(a.Accounts) != 2 {
@@ -161,7 +161,7 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 
 func TestLogout_ClearsSession(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	out := c.post("/api/auth/logout", nil)
 	out.Body.Close()
 	if out.StatusCode != http.StatusNoContent {
@@ -251,7 +251,7 @@ func TestSetup_FlowWhenNoUsers(t *testing.T) {
 
 func TestLogin_RejectsNonJSONContentType(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	body := `{"username":"pavel","password":"` + testPassword + `"}`
+	body := `{"username":"sam","password":"` + testPassword + `"}`
 	resp, err := http.Post(srv.URL+"/api/auth/login", "text/plain", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func TestLogin_RejectsNonJSONContentType(t *testing.T) {
 
 func TestLogin_RevokesSessionPresentedWithTheRequest(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	u, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestLogin_RevokesSessionPresentedWithTheRequest(t *testing.T) {
 	}
 
 	// Sign in again while still carrying the first session cookie.
-	resp := c.post("/api/auth/login", map[string]string{"username": "pavel", "password": testPassword})
+	resp := c.post("/api/auth/login", map[string]string{"username": "sam", "password": testPassword})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("second login: %d", resp.StatusCode)

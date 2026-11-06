@@ -145,7 +145,7 @@ describe('pinned services and clusters', () => {
     await user.click(await screen.findByRole('button', { name: 'Pin payments-api' }))
     const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
     expect(within(pinned).getByRole('link', { name: /payments-api/ })).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/overview`)
-    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:pavel')!)).toHaveLength(1)
+    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)).toHaveLength(1)
 
     await user.click(screen.getByRole('button', { name: 'Unpin payments-api' }))
     expect(within(screen.getByRole('navigation', { name: 'Pinned' })).queryByRole('link')).not.toBeInTheDocument()
@@ -169,7 +169,7 @@ describe('pinned services and clusters', () => {
 
   it('shows a service on two lines: name, then its cluster, with a live status dot', async () => {
     localStorage.setItem(
-      'harbormaster-pinned:pavel',
+      'harbormaster-pinned:sam',
       JSON.stringify([{ kind: 'service', id: SERVICE_PAYMENTS.id, name: 'payments-api', cluster: 'core-services' }]),
     )
     renderApp('/')
@@ -183,7 +183,7 @@ describe('pinned services and clusters', () => {
 
   it('shows a cluster on two lines: name, then account name and id, with its status colour', async () => {
     localStorage.setItem(
-      'harbormaster-pinned:pavel',
+      'harbormaster-pinned:sam',
       JSON.stringify([{ kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'homelab-admin', account_id: '482109375512' }]),
     )
     renderApp('/')
@@ -196,7 +196,7 @@ describe('pinned services and clusters', () => {
 
   it('uses a muted dot when the pinned item is not visible', async () => {
     localStorage.setItem(
-      'harbormaster-pinned:pavel',
+      'harbormaster-pinned:sam',
       JSON.stringify([
         { id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' },
         { kind: 'cluster', id: 'gone', name: 'old-cluster', account_name: 'homelab-admin', account_id: '1' },
@@ -289,7 +289,7 @@ describe('activity drawer', () => {
         return HttpResponse.json({
           ...OVERVIEW,
           events: [
-            { ...base, source: 'harbormaster', actor: 'pavel', text: 'Restarted service.' },
+            { ...base, source: 'harbormaster', actor: 'sam', text: 'Restarted service.' },
             { ...base, source: 'ecs', actor: 'ECS', text: 'has reached a steady state.' },
           ],
         })
@@ -305,7 +305,7 @@ describe('activity drawer', () => {
     expect(within(rail).queryByText('edge-nginx')).not.toBeInTheDocument()
     await user.click(within(rail).getByRole('radio', { name: /^Changes/ }))
     expect(within(rail).queryByText('image-resizer')).not.toBeInTheDocument()
-    expect(await within(rail).findByText('pavel')).toBeInTheDocument()
+    expect(await within(rail).findByText('sam')).toBeInTheDocument()
     expect(within(rail).queryByText('has reached a steady state.')).not.toBeInTheDocument()
     await user.click(within(rail).getByRole('radio', { name: /^All/ }))
     expect(within(rail).getByText('edge-nginx')).toBeInTheDocument()

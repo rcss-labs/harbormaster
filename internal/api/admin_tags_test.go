@@ -76,11 +76,11 @@ func TestTags_AdminOnlyAndList(t *testing.T) {
 		}
 		resp.Body.Close()
 	}
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	var out struct {
 		Items []testTagItem `json:"items"`
 	}
-	decode(t, pavel.get("/api/tags"), &out)
+	decode(t, sam.get("/api/tags"), &out)
 	if len(out.Items) != 3 || out.Items[0].Name != "Dev" || out.Items[1].Name != "Prod" || out.Items[2].Name != "Staging" {
 		t.Fatalf("items = %+v, want Dev, Prod, Staging", out.Items)
 	}
@@ -99,9 +99,9 @@ func TestTags_AdminOnlyAndList(t *testing.T) {
 
 func TestTags_CreateValidateConflict(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	for _, name := range []string{"", "1abc", "has!bang", "abcdefghijklmnopqrstuvwxy"} {
-		resp := pavel.post("/api/tags", map[string]any{"name": name, "color": "red"})
+		resp := sam.post("/api/tags", map[string]any{"name": name, "color": "red"})
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("%q: status %d", name, resp.StatusCode)
 		}
@@ -109,14 +109,14 @@ func TestTags_CreateValidateConflict(t *testing.T) {
 			t.Fatalf("%q: message %q", name, msg)
 		}
 	}
-	resp := pavel.post("/api/tags", map[string]any{"name": "QA", "color": "pink"})
+	resp := sam.post("/api/tags", map[string]any{"name": "QA", "color": "pink"})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("bad colour status %d", resp.StatusCode)
 	}
 	if _, msg := errorCode(t, resp); msg != "Pick one of the tag colours." {
 		t.Fatalf("colour message %q", msg)
 	}
-	resp = pavel.post("/api/tags", map[string]any{"name": "  QA  ", "color": "violet"})
+	resp = sam.post("/api/tags", map[string]any{"name": "  QA  ", "color": "violet"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create status %d", resp.StatusCode)
 	}
@@ -128,7 +128,7 @@ func TestTags_CreateValidateConflict(t *testing.T) {
 	if a := lastAudit(t, st); a.Action != "tag_create" || a.Summary != "Created tag QA." {
 		t.Fatalf("audit = %+v", a)
 	}
-	resp = pavel.post("/api/tags", map[string]any{"name": "qa", "color": "red"})
+	resp = sam.post("/api/tags", map[string]any{"name": "qa", "color": "red"})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("duplicate status %d", resp.StatusCode)
 	}
@@ -139,12 +139,12 @@ func TestTags_CreateValidateConflict(t *testing.T) {
 
 func TestTags_UpdateRenameAndRecolour(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	var qa testTagItem
-	decode(t, pavel.post("/api/tags", map[string]any{"name": "QA", "color": "violet"}), &qa)
+	decode(t, sam.post("/api/tags", map[string]any{"name": "QA", "color": "violet"}), &qa)
 	tagPath := "/api/tags/" + itoa(qa.ID)
 
-	resp := pavel.do("PATCH", tagPath, map[string]any{"name": "QA2", "color": "violet"}, nil)
+	resp := sam.do("PATCH", tagPath, map[string]any{"name": "QA2", "color": "violet"}, nil)
 	var renamed testTagItem
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("rename status %d", resp.StatusCode)
@@ -156,18 +156,18 @@ func TestTags_UpdateRenameAndRecolour(t *testing.T) {
 	if a := lastAudit(t, st); a.Action != "tag_update" || a.Summary != "Renamed tag QA to QA2." {
 		t.Fatalf("audit = %+v", a)
 	}
-	pavel.do("PATCH", tagPath, map[string]any{"name": "QA2", "color": "green"}, nil).Body.Close()
+	sam.do("PATCH", tagPath, map[string]any{"name": "QA2", "color": "green"}, nil).Body.Close()
 	if a := lastAudit(t, st); a.Summary != "Changed the colour of tag QA2." {
 		t.Fatalf("audit = %+v", a)
 	}
-	resp = pavel.do("PATCH", tagPath, map[string]any{"name": "dev", "color": "green"}, nil)
+	resp = sam.do("PATCH", tagPath, map[string]any{"name": "dev", "color": "green"}, nil)
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("rename onto Dev status %d", resp.StatusCode)
 	}
 	if _, msg := errorCode(t, resp); msg != "A tag called dev already exists." {
 		t.Fatalf("message %q", msg)
 	}
-	resp = pavel.do("PATCH", "/api/tags/9999", map[string]any{"name": "Zed", "color": "green"}, nil)
+	resp = sam.do("PATCH", "/api/tags/9999", map[string]any{"name": "Zed", "color": "green"}, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown tag status %d", resp.StatusCode)
 	}
@@ -176,33 +176,33 @@ func TestTags_UpdateRenameAndRecolour(t *testing.T) {
 
 func TestTags_DevCannotBeRenamedOrDeleted(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
-	dev := tagByName(t, pavel, "Dev")
+	sam := login(t, srv, "sam", testPassword)
+	dev := tagByName(t, sam, "Dev")
 	path := "/api/tags/" + itoa(dev.ID)
 
-	resp := pavel.do("PATCH", path, map[string]any{"name": "Development", "color": "neutral"}, nil)
+	resp := sam.do("PATCH", path, map[string]any{"name": "Development", "color": "neutral"}, nil)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("rename status %d", resp.StatusCode)
 	}
 	if _, msg := errorCode(t, resp); msg != "Dev is the default tag." {
 		t.Fatalf("rename message %q", msg)
 	}
-	resp = pavel.do("PATCH", path, map[string]any{"name": "Dev", "color": "blue"}, nil)
+	resp = sam.do("PATCH", path, map[string]any{"name": "Dev", "color": "blue"}, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("recolour status %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	if got := tagByName(t, pavel, "Dev").Color; got != "blue" {
+	if got := tagByName(t, sam, "Dev").Color; got != "blue" {
 		t.Fatalf("Dev colour = %q", got)
 	}
-	resp = pavel.do("DELETE", path, nil, nil)
+	resp = sam.do("DELETE", path, nil, nil)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("delete status %d", resp.StatusCode)
 	}
 	if _, msg := errorCode(t, resp); msg != "Dev is the default tag." {
 		t.Fatalf("delete message %q", msg)
 	}
-	resp = pavel.do("DELETE", "/api/tags/9999", nil, nil)
+	resp = sam.do("DELETE", "/api/tags/9999", nil, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("delete unknown status %d", resp.StatusCode)
 	}
@@ -213,8 +213,8 @@ func TestTags_ImpactLists(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	pavel := login(t, srv, "pavel", testPassword)
-	prod := tagByName(t, pavel, "Prod")
+	sam := login(t, srv, "sam", testPassword)
+	prod := tagByName(t, sam, "Prod")
 	web := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "web-frontend"}
 	tagID := authzTag(prod.ID)
 	if err := st.SetServiceTag(t.Context(), web, &tagID); err != nil {
@@ -225,7 +225,7 @@ func TestTags_ImpactLists(t *testing.T) {
 		Services []struct{ ID, Name string } `json:"services"`
 		Users    []string                    `json:"users"`
 	}
-	decode(t, pavel.get("/api/tags/"+itoa(prod.ID)+"/impact"), &impact)
+	decode(t, sam.get("/api/tags/"+itoa(prod.ID)+"/impact"), &impact)
 	if len(impact.Clusters) != 1 || impact.Clusters[0].Name != "core-services" || impact.Clusters[0].ID != web.ClusterKey.ID() {
 		t.Fatalf("clusters = %+v", impact.Clusters)
 	}
@@ -236,7 +236,7 @@ func TestTags_ImpactLists(t *testing.T) {
 	if !reflect.DeepEqual(impact.Users, []string{"dana", "oncall"}) {
 		t.Fatalf("users = %v", impact.Users)
 	}
-	resp := pavel.get("/api/tags/9999/impact")
+	resp := sam.get("/api/tags/9999/impact")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown impact status %d", resp.StatusCode)
 	}
@@ -247,11 +247,11 @@ func TestTags_DeleteCascadesVisibility(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	omer := login(t, srv, "omer", testPassword)
-	staging := tagByName(t, pavel, "Staging")
+	staging := tagByName(t, sam, "Staging")
 
-	resp := pavel.do("DELETE", "/api/tags/"+itoa(staging.ID), nil, nil)
+	resp := sam.do("DELETE", "/api/tags/"+itoa(staging.ID), nil, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete status %d", resp.StatusCode)
 	}
@@ -285,11 +285,11 @@ func TestAssignments_ClusterChangeWritesOplogForEachService(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	pavel := login(t, srv, "pavel", testPassword)
-	staging := tagByName(t, pavel, "Staging")
+	sam := login(t, srv, "sam", testPassword)
+	staging := tagByName(t, sam, "Staging")
 
 	var as testAssignments
-	decode(t, pavel.get("/api/tag-assignments?account="+homelabAccountID+"&region=us-east-1"), &as)
+	decode(t, sam.get("/api/tag-assignments?account="+homelabAccountID+"&region=us-east-1"), &as)
 	var core int = -1
 	for i, c := range as.Clusters {
 		if c.Name == "core-services" {
@@ -312,7 +312,7 @@ func TestAssignments_ClusterChangeWritesOplogForEachService(t *testing.T) {
 		}
 	}
 
-	resp := pavel.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": staging.ID}, nil)
+	resp := sam.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": staging.ID}, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("assign status %d", resp.StatusCode)
 	}
@@ -329,14 +329,14 @@ func TestAssignments_ClusterChangeWritesOplogForEachService(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(ops) == 0 || ops[0].Text != "Changed tag of cluster core-services from Prod to Staging." || ops[0].Actor != "pavel" || ops[0].Source != "harbormaster" {
+		if len(ops) == 0 || ops[0].Text != "Changed tag of cluster core-services from Prod to Staging." || ops[0].Actor != "sam" || ops[0].Source != "harbormaster" {
 			t.Fatalf("ops for %s = %+v", s.Name, ops)
 		}
 	}
 
 	// Same tag again: no-op, no new audit row.
 	before := lastAudit(t, st).ID
-	resp = pavel.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": staging.ID}, nil)
+	resp = sam.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": staging.ID}, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("repeat status %d", resp.StatusCode)
 	}
@@ -346,7 +346,7 @@ func TestAssignments_ClusterChangeWritesOplogForEachService(t *testing.T) {
 	}
 
 	// null = untag, falls back to Dev.
-	resp = pavel.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": nil}, nil)
+	resp = sam.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": nil}, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("untag status %d", resp.StatusCode)
 	}
@@ -359,19 +359,19 @@ func TestAssignments_ClusterChangeWritesOplogForEachService(t *testing.T) {
 	}
 
 	// Validation.
-	resp = pavel.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{}, nil)
+	resp = sam.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{}, nil)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("missing tag_id status %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	resp = pavel.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": 9999}, nil)
+	resp = sam.do("PUT", "/api/tag-assignments/clusters/"+cs.ID, map[string]any{"tag_id": 9999}, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown tag status %d", resp.StatusCode)
 	}
 	if _, msg := errorCode(t, resp); msg != "Tag not found." {
 		t.Fatalf("unknown tag message %q", msg)
 	}
-	resp = pavel.do("PUT", "/api/tag-assignments/clusters/"+model.ClusterKey{AccountID: "1", Region: "r", Cluster: "nope"}.ID(), map[string]any{"tag_id": staging.ID}, nil)
+	resp = sam.do("PUT", "/api/tag-assignments/clusters/"+model.ClusterKey{AccountID: "1", Region: "r", Cluster: "nope"}.ID(), map[string]any{"tag_id": staging.ID}, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown cluster status %d", resp.StatusCode)
 	}
@@ -383,12 +383,12 @@ func TestAssignments_ServiceInheritIsNull(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	pavel := login(t, srv, "pavel", testPassword)
-	staging := tagByName(t, pavel, "Staging")
+	sam := login(t, srv, "sam", testPassword)
+	staging := tagByName(t, sam, "Staging")
 	web := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "web-frontend"}
 	path := "/api/tag-assignments/services/" + web.ID()
 
-	resp := pavel.do("PUT", path, map[string]any{"tag_id": staging.ID}, nil)
+	resp := sam.do("PUT", path, map[string]any{"tag_id": staging.ID}, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("assign status %d", resp.StatusCode)
 	}
@@ -397,11 +397,11 @@ func TestAssignments_ServiceInheritIsNull(t *testing.T) {
 		t.Fatalf("audit = %+v", a)
 	}
 	ops, err := st.ListOperations(t.Context(), web, false, nil, 10)
-	if err != nil || len(ops) == 0 || ops[0].Text != "Tagged service web-frontend as Staging (was inherit (Prod))." || ops[0].Actor != "pavel" {
+	if err != nil || len(ops) == 0 || ops[0].Text != "Tagged service web-frontend as Staging (was inherit (Prod))." || ops[0].Actor != "sam" {
 		t.Fatalf("ops = %+v err %v", ops, err)
 	}
 	var as testAssignments
-	decode(t, pavel.get("/api/tag-assignments"), &as)
+	decode(t, sam.get("/api/tag-assignments"), &as)
 	for _, c := range as.Clusters {
 		for _, s := range c.Services {
 			if s.ID == web.ID() && (s.TagID == nil || *s.TagID != staging.ID || s.Effective.Name != "Staging" || s.Effective.Inherited) {
@@ -410,7 +410,7 @@ func TestAssignments_ServiceInheritIsNull(t *testing.T) {
 		}
 	}
 
-	resp = pavel.do("PUT", path, map[string]any{"tag_id": nil}, nil)
+	resp = sam.do("PUT", path, map[string]any{"tag_id": nil}, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("inherit status %d", resp.StatusCode)
 	}
@@ -422,16 +422,16 @@ func TestAssignments_ServiceInheritIsNull(t *testing.T) {
 		t.Fatal("service still has a direct tag")
 	}
 	before := lastAudit(t, st).ID
-	pavel.do("PUT", path, map[string]any{"tag_id": nil}, nil).Body.Close()
+	sam.do("PUT", path, map[string]any{"tag_id": nil}, nil).Body.Close()
 	if lastAudit(t, st).ID != before {
 		t.Fatal("no-change inherit wrote an audit row")
 	}
-	resp = pavel.do("PUT", path, map[string]any{}, nil)
+	resp = sam.do("PUT", path, map[string]any{}, nil)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("missing tag_id status %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	resp = pavel.do("PUT", "/api/tag-assignments/services/"+model.ServiceKey{ClusterKey: web.ClusterKey, Service: "nope"}.ID(), map[string]any{"tag_id": nil}, nil)
+	resp = sam.do("PUT", "/api/tag-assignments/services/"+model.ServiceKey{ClusterKey: web.ClusterKey, Service: "nope"}.ID(), map[string]any{"tag_id": nil}, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown service status %d", resp.StatusCode)
 	}

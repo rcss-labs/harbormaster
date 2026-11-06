@@ -75,7 +75,7 @@ describe('users', () => {
   it('Delete disabled for current user', async () => {
     renderApp('/settings/users')
     await screen.findByText('(you)')
-    const own = await menuItem('pavel', 'Delete')
+    const own = await menuItem('sam', 'Delete')
     expect(own).toBeDisabled()
     expect(own).toHaveAttribute('title', 'You cannot delete yourself')
     expect(await menuItem('dana', 'Delete')).toBeEnabled()
@@ -138,11 +138,11 @@ const ssoConfigured = () => http.get('/api/sso', () => HttpResponse.json(SSO_CON
 describe('sign-in credentials', () => {
   it('shows Password, SSO linked, Link pending, Link expired and Break-glass pills and the email', async () => {
     renderApp('/settings/users')
-    const pavel = await userRow('pavel')
-    expect(within(pavel).getByText('Password')).toBeInTheDocument()
-    expect(within(pavel).getByText('SSO linked')).toBeInTheDocument()
-    expect(within(pavel).getByText('Break-glass')).toBeInTheDocument()
-    expect(within(pavel).getByText('pavel@example.test')).toBeInTheDocument()
+    const sam = await userRow('sam')
+    expect(within(sam).getByText('Password')).toBeInTheDocument()
+    expect(within(sam).getByText('SSO linked')).toBeInTheDocument()
+    expect(within(sam).getByText('Break-glass')).toBeInTheDocument()
+    expect(within(sam).getByText('sam@example.test')).toBeInTheDocument()
     const dana = await userRow('dana')
     expect(within(dana).getByText('Link pending')).toHaveAttribute('title', expect.stringContaining('Pending link to dana@example.test, expires '))
     expect(within(await userRow('oncall')).getByText('Link expired')).toBeInTheDocument()
@@ -195,8 +195,8 @@ describe('sign-in credentials', () => {
       ),
     )
     renderApp('/settings/users')
-    fireEvent.click((await menuItem('pavel', 'Remove break-glass')))
-    expect(screen.getByText('Remove break-glass from pavel?')).toBeInTheDocument()
+    fireEvent.click((await menuItem('sam', 'Remove break-glass')))
+    expect(screen.getByText('Remove break-glass from sam?')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove break-glass' }))
     expect(await screen.findByText('Keep at least one break-glass global admin while single sign-on is on.')).toBeInTheDocument()
   })
@@ -250,8 +250,8 @@ describe('sign-in credentials', () => {
 
   it('unlink confirm differs by has_password and shows the temporary password', async () => {
     renderApp('/settings/users')
-    fireEvent.click((await menuItem('pavel', 'Unlink SSO…')))
-    expect(screen.getByText('Unlink pavel from SSO?')).toBeInTheDocument()
+    fireEvent.click((await menuItem('sam', 'Unlink SSO…')))
+    expect(screen.getByText('Unlink sam from SSO?')).toBeInTheDocument()
     expect(screen.getByText('Their SSO sessions end now. They keep their password.')).toBeInTheDocument()
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
 
@@ -318,13 +318,13 @@ describe('acting on yourself', () => {
       }),
     )
     renderApp('/settings/users')
-    const accountMenu = await screen.findByRole('button', { name: 'Account menu for pavel' })
+    const accountMenu = await screen.findByRole('button', { name: 'Account menu for sam' })
     fireEvent.click(accountMenu)
     expect(screen.queryByRole('button', { name: 'Link SSO account' })).not.toBeInTheDocument()
     fireEvent.click(accountMenu)
-    fireEvent.click((await menuItem('pavel', 'Unlink SSO…')))
+    fireEvent.click((await menuItem('sam', 'Unlink SSO…')))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unlink' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Account menu for pavel' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Account menu for sam' }))
     expect(await screen.findByRole('button', { name: 'Link SSO account' })).toBeInTheDocument()
   })
 
@@ -338,7 +338,7 @@ describe('acting on yourself', () => {
       }),
     )
     renderApp('/settings/users')
-    fireEvent.click((await menuItem('pavel', /break-glass/)))
+    fireEvent.click((await menuItem('sam', /break-glass/)))
     await waitFor(() => expect(configFetches).toBeGreaterThan(0))
     const before = configFetches
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /break-glass/ }))

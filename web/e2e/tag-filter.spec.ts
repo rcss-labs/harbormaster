@@ -26,8 +26,8 @@ async function toggleTag(page: Page, name: string) {
 /** Header row plus one row per listed cluster. */
 const clusterRows = (page: Page) => page.getByRole('table', { name: 'Clusters' }).getByRole('row')
 
-test.describe('tag filter as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('tag filter as sam', () => {
+  test.use(asUser('sam'))
 
   test('Prod shows core-services and the overridden artifact-proxy in ci-tools', async ({ page }) => {
     await page.goto('/clusters')

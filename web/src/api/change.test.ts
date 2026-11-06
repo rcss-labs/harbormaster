@@ -46,7 +46,7 @@ describe('useDeploy', () => {
 
 describe('useStopTask', () => {
   it('posts to /api/tasks/{id}/stop and invalidates the task lists', async () => {
-    const post = vi.spyOn(api, 'post').mockResolvedValue({ task_arn: 'arn:task', reason: 'Stopped by pavel via Harbormaster' })
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ task_arn: 'arn:task', reason: 'Stopped by sam via Harbormaster' })
     const { result, invalidate } = renderWithClient(() => useStopTask('svc-1'))
 
     await result.current.mutateAsync('task-9')
@@ -88,7 +88,7 @@ describe('refetching while a write settles', () => {
 
   it('useStopTask refetches the task lists the same way', async () => {
     vi.useFakeTimers()
-    vi.spyOn(api, 'post').mockResolvedValue({ task_arn: 'arn:task', reason: 'Stopped by pavel via Harbormaster' })
+    vi.spyOn(api, 'post').mockResolvedValue({ task_arn: 'arn:task', reason: 'Stopped by sam via Harbormaster' })
     const { result, invalidate } = renderWithClient(() => useStopTask('svc-1'))
 
     await result.current.mutateAsync('task-9')

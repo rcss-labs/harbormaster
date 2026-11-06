@@ -23,24 +23,24 @@ describe('scopes', () => {
   })
 
   it('scopes are stored per user', () => {
-    saveScope('pavel', { name: 'Prod', tag: [3] })
-    expect(loadScopes('pavel')).toEqual([{ name: 'Prod', tag: [3] }])
+    saveScope('sam', { name: 'Prod', tag: [3] })
+    expect(loadScopes('sam')).toEqual([{ name: 'Prod', tag: [3] }])
     expect(loadScopes('omer')).toEqual([])
-    expect(localStorage.getItem('harbormaster-scopes:pavel')).not.toBeNull()
+    expect(localStorage.getItem('harbormaster-scopes:sam')).not.toBeNull()
   })
 
   it('saving under an existing name replaces it, and removing deletes it', () => {
-    saveScope('pavel', { name: 'Prod', tag: [3] })
-    saveScope('pavel', { name: 'Prod', region: 'eu-west-1' })
-    expect(loadScopes('pavel')).toEqual([{ name: 'Prod', region: 'eu-west-1' }])
-    expect(removeScope('pavel', 'Prod')).toEqual([])
-    expect(loadScopes('pavel')).toEqual([])
+    saveScope('sam', { name: 'Prod', tag: [3] })
+    saveScope('sam', { name: 'Prod', region: 'eu-west-1' })
+    expect(loadScopes('sam')).toEqual([{ name: 'Prod', region: 'eu-west-1' }])
+    expect(removeScope('sam', 'Prod')).toEqual([])
+    expect(loadScopes('sam')).toEqual([])
   })
 
   it('ignores corrupt storage', () => {
-    localStorage.setItem('harbormaster-scopes:pavel', '{nope')
-    expect(loadScopes('pavel')).toEqual([])
-    localStorage.setItem('harbormaster-scopes:pavel', JSON.stringify([{ name: 5 }, { name: 'ok', tag: ['x', 2] }]))
-    expect(loadScopes('pavel')).toEqual([{ name: 'ok', tag: [2] }])
+    localStorage.setItem('harbormaster-scopes:sam', '{nope')
+    expect(loadScopes('sam')).toEqual([])
+    localStorage.setItem('harbormaster-scopes:sam', JSON.stringify([{ name: 5 }, { name: 'ok', tag: ['x', 2] }]))
+    expect(loadScopes('sam')).toEqual([{ name: 'ok', tag: [2] }])
   })
 })

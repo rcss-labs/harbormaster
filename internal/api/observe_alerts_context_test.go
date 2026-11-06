@@ -82,7 +82,7 @@ func TestAlerts_NextStepPerKind(t *testing.T) {
 	wantLabel := map[string]string{
 		"logs": "Open logs", "tasks": "Open tasks", "deploy": "Open deploy", "overview": "Open service",
 	}
-	got := getContextAlerts(t, login(t, srv, "pavel", testPassword))
+	got := getContextAlerts(t, login(t, srv, "sam", testPassword))
 	if len(got) != len(services) {
 		t.Fatalf("got %d alerts, want %d", len(got), len(services))
 	}
@@ -113,7 +113,7 @@ func TestAlerts_AccountProblemNextStepIsAccounts(t *testing.T) {
 	}
 	replaceAlerts(t, st, fk, accountAlert)
 
-	got := getContextAlerts(t, login(t, srv, "pavel", testPassword))
+	got := getContextAlerts(t, login(t, srv, "sam", testPassword))
 	if len(got) != 1 || got[0].NextStep.Href != "/settings/accounts" || got[0].NextStep.Label != "Open AWS accounts" {
 		t.Fatalf("alerts = %+v; want one account alert linking /settings/accounts", got)
 	}
@@ -141,7 +141,7 @@ func TestAlerts_JustBeforeFromOperationLog(t *testing.T) {
 	replaceAlerts(t, st, fk, alertOfKind("service_failing", homelabAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt))
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Changed image-resizer desired count to 0.", alertAt.Add(-10*time.Minute))
 
-	got := getContextAlerts(t, login(t, srv, "pavel", testPassword))
+	got := getContextAlerts(t, login(t, srv, "sam", testPassword))
 	if len(got) != 1 || got[0].JustBefore == nil {
 		t.Fatalf("alerts = %+v; want one alert with just_before", got)
 	}
@@ -161,7 +161,7 @@ func TestAlerts_JustBeforeOmittedWithoutChange(t *testing.T) {
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Too old", alertAt.Add(-25*time.Hour))
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Later", alertAt.Add(time.Minute))
 
-	got := getContextAlerts(t, login(t, srv, "pavel", testPassword))
+	got := getContextAlerts(t, login(t, srv, "sam", testPassword))
 	if len(got) != 1 || got[0].JustBefore != nil {
 		t.Fatalf("alerts = %+v; want one alert with just_before null", got)
 	}
@@ -181,7 +181,7 @@ func TestAlerts_RolloutInProgressHasNoJustBefore(t *testing.T) {
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Deployed :88", alertAt.Add(-time.Hour))
 	appendOperationAt(t, st, "core-services", "web-frontend", "harbormaster", "Deployed :12", alertAt.Add(-time.Hour))
 
-	for _, alert := range getContextAlerts(t, login(t, srv, "pavel", testPassword)) {
+	for _, alert := range getContextAlerts(t, login(t, srv, "sam", testPassword)) {
 		switch alert.Kind {
 		case "rollout_in_progress":
 			if alert.JustBefore != nil {

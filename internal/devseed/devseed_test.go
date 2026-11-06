@@ -102,8 +102,8 @@ func TestDevseed_RefusesPopulatedDatabase(t *testing.T) {
 	if !errors.Is(err, devseed.ErrDatabaseNotEmpty) {
 		t.Fatalf("Apply error = %v, want ErrDatabaseNotEmpty", err)
 	}
-	if _, err := st.GetUserByUsername(ctx, "pavel"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("pavel must not be created in a populated database, got err %v", err)
+	if _, err := st.GetUserByUsername(ctx, "sam"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("sam must not be created in a populated database, got err %v", err)
 	}
 	accounts, err := st.ListAccounts(ctx)
 	if err != nil || len(accounts) != 0 {

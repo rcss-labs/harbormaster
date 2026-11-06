@@ -28,12 +28,12 @@ test.describe('admin pages as omer', () => {
     expect(response.status()).toBe(403)
     const body = await response.json()
     expect(body).toEqual({ error: { code: 'forbidden', message: expect.any(String) } })
-    expect(JSON.stringify(body)).not.toMatch(/pavel|dana|oncall/)
+    expect(JSON.stringify(body)).not.toMatch(/sam|dana|oncall/)
   })
 })
 
-test.describe('admin pages as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('admin pages as sam', () => {
+  test.use(asUser('sam'))
 
   test('the permission matrix shows the seeded users and their presets', async ({ page }) => {
     // The old admin path still works: it redirects into Settings.
@@ -45,7 +45,7 @@ test.describe('admin pages as pavel', () => {
       await expect(page.getByRole('columnheader', { name: new RegExp(`^${tag}\\b`) })).toBeVisible()
     }
     // Users from earlier specs stay in the database, so check for these rows rather than the exact set.
-    await expect(page.getByRole('row').filter({ hasText: 'Everything, on every tag' })).toContainText('pavel')
+    await expect(page.getByRole('row').filter({ hasText: 'Everything, on every tag' })).toContainText('sam')
     for (const user of ['dana', 'omer', 'oncall']) {
       await expect(page.getByRole('button', { name: new RegExp(`^${user} on Dev: `) })).toBeVisible()
     }
@@ -93,7 +93,7 @@ test.describe('admin pages as pavel', () => {
     await dialog.getByRole('button', { name: 'Done' }).click()
     await expect(page.getByRole('row').filter({ hasText: username })).not.toHaveCount(0)
 
-    // browser.newContext inherits the describe's storageState (pavel), so start from an empty one.
+    // browser.newContext inherits the describe's storageState (sam), so start from an empty one.
     const { context, assertClean } = await newGuardedContext(browser, { baseURL: baseURL, storageState: { cookies: [], origins: [] } })
     const other = await context.newPage()
     await other.goto('/login')

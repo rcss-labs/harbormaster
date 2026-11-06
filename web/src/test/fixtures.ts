@@ -338,7 +338,7 @@ function standaloneTasks(): TaskDTO[] {
       ...none,
       ...taskBase(background, 'db-migrate-0', 0),
       group: `family:${STANDALONE_DB_MIGRATE}`,
-      started_by: 'pavel',
+      started_by: 'sam',
       status: 'STOPPED',
       exit_code: 0,
       family: STANDALONE_DB_MIGRATE,
@@ -477,7 +477,7 @@ function serviceEvents(def: ServiceDef): EventDTO[] {
   const ecs = (minutes: number, text: string): EventDTO => ({ ts: minutesAgo(minutes), source: 'ecs', actor: 'ECS', ...base, text })
   const events: EventDTO[] = [
     ecs(60 * 30, `(service ${def.name}) has reached a steady state.`),
-    { ts: minutesAgo(60 * 26), source: 'harbormaster', actor: 'pavel', ...base, text: `Restarted service (force new deployment) on revision ${def.revision}.` },
+    { ts: minutesAgo(60 * 26), source: 'harbormaster', actor: 'sam', ...base, text: `Restarted service (force new deployment) on revision ${def.revision}.` },
     ecs(60 * 26 - 6, `(service ${def.name}) has reached a steady state.`),
   ]
   if (def.lb) events.push(ecs(60 * 26 - 3, `(service ${def.name}) registered 1 targets in (target-group ${def.name}-tg).`))
@@ -774,10 +774,10 @@ const ME_ACCOUNTS = [
 
 export const ME_ADMIN: MeDTO = {
   id: 1,
-  username: 'pavel',
+  username: 'sam',
   admin: true,
   must_change_password: false,
-  csrf_token: 'csrf-token-pavel',
+  csrf_token: 'csrf-token-sam',
   perms: {},
   tags: ME_TAGS([TAG_DEV, TAG_STAGING, TAG_PROD]),
   accounts: ME_ACCOUNTS,
@@ -785,8 +785,8 @@ export const ME_ADMIN: MeDTO = {
   has_password: true,
   sso_linked: false,
   break_glass: true,
-  email: 'pavel@example.test',
-  display_name: 'Pavel',
+  email: 'sam@example.test',
+  display_name: 'Sam',
 }
 
 export const ME_OMER: MeDTO = {
@@ -841,7 +841,7 @@ export const USERS: UsersDTO = {
   items: [
     {
       id: 1,
-      username: 'pavel',
+      username: 'sam',
       admin: true,
       must_change_password: false,
       last_sign_in_at: minutesAgo(2),
@@ -849,9 +849,9 @@ export const USERS: UsersDTO = {
       ...NO_SSO,
       break_glass: true,
       sso: 'linked',
-      sso_name_id: 'pavel@example.test',
-      email: 'pavel@example.test',
-      display_name: 'Pavel',
+      sso_name_id: 'sam@example.test',
+      email: 'sam@example.test',
+      display_name: 'Sam',
     },
     {
       id: 2,
@@ -909,7 +909,7 @@ export const USERS: UsersDTO = {
 export const PERMISSIONS: PermissionsDTO = {
   tags: [TAG_DEV, TAG_STAGING, TAG_PROD].map((t) => ({ id: t.id, name: t.name, color: t.color, services_in_effect: servicesInEffect(t.id) })),
   users: [
-    { id: 1, username: 'pavel', admin: true, perms: {} },
+    { id: 1, username: 'sam', admin: true, perms: {} },
     { id: 2, username: 'dana', admin: false, perms: { '1': 63, '2': 31, '3': 3 } },
     { id: 3, username: 'omer', admin: false, perms: { '1': 7, '2': 1 } },
     { id: 4, username: 'oncall', admin: false, perms: { '2': 39, '3': 39 } },
@@ -966,11 +966,11 @@ export const ACCOUNTS: AccountsDTO = {
 
 export const AUDIT: AuditDTO = {
   items: [
-    { id: 5, ts: minutesAgo(2), actor: 'pavel', action: 'auth.login', target: 'pavel', summary: 'Signed in.', details: null, ip: '10.0.4.17' },
-    { id: 4, ts: minutesAgo(180), actor: 'pavel', action: 'permission.set', target: 'oncall', summary: 'Gave oncall Terminal on Prod.', details: { tag: 'Prod', actions: 39 }, ip: '10.0.4.17' },
-    { id: 3, ts: minutesAgo(300), actor: 'pavel', action: 'cluster.tag', target: 'staging-web', summary: 'Tagged cluster staging-web as Staging (was Dev).', details: { from: 'Dev', to: 'Staging' }, ip: '10.0.4.17' },
-    { id: 2, ts: minutesAgo(2 * 1440), actor: 'pavel', action: 'user.create', target: 'omer', summary: 'Created user omer with Operator on Dev.', details: null, ip: '10.0.4.17' },
-    { id: 1, ts: minutesAgo(6 * 1440), actor: 'pavel', action: 'tag.create', target: 'Prod', summary: 'Created tag Prod.', details: null, ip: '10.0.4.17' },
+    { id: 5, ts: minutesAgo(2), actor: 'sam', action: 'auth.login', target: 'sam', summary: 'Signed in.', details: null, ip: '10.0.4.17' },
+    { id: 4, ts: minutesAgo(180), actor: 'sam', action: 'permission.set', target: 'oncall', summary: 'Gave oncall Terminal on Prod.', details: { tag: 'Prod', actions: 39 }, ip: '10.0.4.17' },
+    { id: 3, ts: minutesAgo(300), actor: 'sam', action: 'cluster.tag', target: 'staging-web', summary: 'Tagged cluster staging-web as Staging (was Dev).', details: { from: 'Dev', to: 'Staging' }, ip: '10.0.4.17' },
+    { id: 2, ts: minutesAgo(2 * 1440), actor: 'sam', action: 'user.create', target: 'omer', summary: 'Created user omer with Operator on Dev.', details: null, ip: '10.0.4.17' },
+    { id: 1, ts: minutesAgo(6 * 1440), actor: 'sam', action: 'tag.create', target: 'Prod', summary: 'Created tag Prod.', details: null, ip: '10.0.4.17' },
   ],
   next: null,
   polled_at: FIXTURE_NOW,
@@ -1323,7 +1323,7 @@ export const TASK_DEFINITION_PAYMENTS: TaskDefinitionResponse = {
 }
 export const REVISIONS_PAYMENTS: RevisionsResponse = {
   items: [
-    { revision: 43, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:43', status: 'not_deployed', image_tag: '1.18.3', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'pavel' },
+    { revision: 43, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:43', status: 'not_deployed', image_tag: '1.18.3', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'sam' },
     { revision: 42, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:42', status: 'deployed', image_tag: '1.18.2', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'terraform' },
   ],
   deployed_revision: 42,
@@ -1889,7 +1889,7 @@ export const ANALYTICS_OPERATIONS: AnalyticsOperations = {
   restarts_per_100_deploys: analyticsSeries('30d', [{ key: 'restarts_per_100_deploys', label: 'Restarts per 100 deploys' }], (_, j) => (j % 5 === 4 ? null : 10 + (j % 4) * 5)),
   who: {
     rows: [
-      { username: 'pavel', total: 70, deploy: 40, restart: 5, scale: 15, terminal: 4, last_at: minutesAgo(25) },
+      { username: 'sam', total: 70, deploy: 40, restart: 5, scale: 15, terminal: 4, last_at: minutesAgo(25) },
       { username: 'omer', total: 30, deploy: 10, restart: 4, scale: 7, terminal: 3, last_at: minutesAgo(600) },
     ],
     total: 2,

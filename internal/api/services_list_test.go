@@ -31,7 +31,7 @@ func TestServicesList_AdminSeesEstate(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	list := getServicesList(t, login(t, srv, "pavel", testPassword), "")
+	list := getServicesList(t, login(t, srv, "sam", testPassword), "")
 
 	if len(list.Items) != 15 || list.Total != 15 || list.Truncated {
 		t.Fatalf("items %d total %d truncated %v, want 15, 15, false", len(list.Items), list.Total, list.Truncated)
@@ -56,15 +56,15 @@ func TestServicesList_ScopeAndTag(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	ids := lookupTagIDs(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
-	if got := getServicesList(t, pavel, "?"+ids.Prod); len(got.Items) != 5 {
+	if got := getServicesList(t, sam, "?"+ids.Prod); len(got.Items) != 5 {
 		t.Errorf("Prod services = %d, want 5", len(got.Items))
 	}
-	if got := getServicesList(t, pavel, "?account="+stagingAccountID); len(got.Items) != 2 {
+	if got := getServicesList(t, sam, "?account="+stagingAccountID); len(got.Items) != 2 {
 		t.Errorf("staging account services = %d, want 2", len(got.Items))
 	}
-	resp := pavel.get("/api/services?tag=abc")
+	resp := sam.get("/api/services?tag=abc")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("tag=abc status %d, want 422", resp.StatusCode)
 	}
@@ -106,7 +106,7 @@ func TestServicesList_AttentionText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list := getServicesList(t, login(t, srv, "pavel", testPassword), "")
+	list := getServicesList(t, login(t, srv, "sam", testPassword), "")
 
 	resizer := serviceListItem(t, list, "image-resizer")
 	if resizer.Attention == "" {
@@ -125,7 +125,7 @@ func TestServicesList_Truncated(t *testing.T) {
 	servicesListCap = 3
 	t.Cleanup(func() { servicesListCap = previous })
 
-	list := getServicesList(t, login(t, srv, "pavel", testPassword), "")
+	list := getServicesList(t, login(t, srv, "sam", testPassword), "")
 	if len(list.Items) != 3 || list.Total != 15 || !list.Truncated {
 		t.Errorf("items %d total %d truncated %v, want 3, 15, true", len(list.Items), list.Total, list.Truncated)
 	}

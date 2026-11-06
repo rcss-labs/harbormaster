@@ -52,7 +52,7 @@ func fakeTaskStatus(t *testing.T, h *harness, arn string) (lastStatus, stoppedRe
 
 func TestSetDesiredCount_ChangesAndLogs(t *testing.T) {
 	h := newHarness(t)
-	got, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 5)
+	got, err := h.svc.SetDesiredCount(t.Context(), h.sam, paymentsKey, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestSetDesiredCount_ChangesAndLogs(t *testing.T) {
 func TestSetDesiredCount_SameValueIsNoop(t *testing.T) {
 	h := newHarness(t)
 	before := h.fake.Calls()["UpdateService"]
-	got, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 3)
+	got, err := h.svc.SetDesiredCount(t.Context(), h.sam, paymentsKey, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSetDesiredCount_OutOfRange(t *testing.T) {
 	h := newHarness(t)
 	before := h.fake.Calls()["UpdateService"]
 	for _, n := range []int{-1, 51} {
-		_, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, n)
+		_, err := h.svc.SetDesiredCount(t.Context(), h.sam, paymentsKey, n)
 		var validation *deploy.ValidationError
 		if !errors.As(err, &validation) || validation.Message != "Desired count must be between 0 and 50" {
 			t.Fatalf("n=%d err = %v", n, err)
@@ -115,7 +115,7 @@ func TestSetDesiredCount_WarningOutsideAutoScaling(t *testing.T) {
 	h := newHarness(t)
 	h.svc.Scaling = fixedScaling{min: 2, max: 6}
 
-	got, err := h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 7)
+	got, err := h.svc.SetDesiredCount(t.Context(), h.sam, paymentsKey, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestSetDesiredCount_WarningOutsideAutoScaling(t *testing.T) {
 		t.Fatalf("warning = %q, want %q", got.Warning, want)
 	}
 
-	got, err = h.svc.SetDesiredCount(t.Context(), h.pavel, paymentsKey, 4)
+	got, err = h.svc.SetDesiredCount(t.Context(), h.sam, paymentsKey, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,15 +137,15 @@ func TestStopTask_ReasonAndLog(t *testing.T) {
 	payments := "payments-api"
 	arn := runningTaskARN(t, h, "core-services", &payments)
 
-	stopped, err := h.svc.StopTask(t.Context(), h.pavel, homelabAccountID, homelabRegion, arn)
+	stopped, err := h.svc.StopTask(t.Context(), h.sam, homelabAccountID, homelabRegion, arn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopped.TaskARN != arn || stopped.ServiceName != payments || stopped.Reason != "Stopped by pavel via Harbormaster" {
+	if stopped.TaskARN != arn || stopped.ServiceName != payments || stopped.Reason != "Stopped by sam via Harbormaster" {
 		t.Fatalf("Stopped = %+v", stopped)
 	}
 	lastStatus, reason := fakeTaskStatus(t, h, arn)
-	if lastStatus != "STOPPED" || reason != "Stopped by pavel via Harbormaster" {
+	if lastStatus != "STOPPED" || reason != "Stopped by sam via Harbormaster" {
 		t.Fatalf("fake task status = %s, reason %q", lastStatus, reason)
 	}
 	taskID := arn[strings.LastIndex(arn, "/")+1:]
@@ -161,7 +161,7 @@ func TestStopTask_StandaloneTaskLogsWithoutService(t *testing.T) {
 	h := newHarness(t)
 	arn := runningTaskARN(t, h, "ci-tools", nil)
 
-	if _, err := h.svc.StopTask(t.Context(), h.pavel, homelabAccountID, homelabRegion, arn); err != nil {
+	if _, err := h.svc.StopTask(t.Context(), h.sam, homelabAccountID, homelabRegion, arn); err != nil {
 		t.Fatal(err)
 	}
 	var serviceIsNull bool

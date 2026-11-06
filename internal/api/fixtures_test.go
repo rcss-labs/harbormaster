@@ -20,7 +20,7 @@ const (
 )
 
 // seedMockupTags loads the shared dev seed (tags, users, permissions, cluster tags). Existing
-// users such as pavel and omer keep their testPassword; dana and oncall get the dev-seed password.
+// users such as sam and omer keep their testPassword; dana and oncall get the dev-seed password.
 func seedMockupTags(t *testing.T, st *store.Store) {
 	t.Helper()
 	if err := devseed.ForceApply(t.Context(), st); err != nil {

@@ -2,7 +2,7 @@ import { asUser, expect, test } from './fixtures/test'
 import type { Page } from '@playwright/test'
 
 // Read-only: runs in the observe project against the unmutated seed. localStorage lasts inside one test only.
-test.use(asUser('pavel'))
+test.use(asUser('sam'))
 
 const scopeButton = (page: Page) => page.getByRole('button', { name: /^Scope:/ })
 const freshness = (page: Page) => page.getByRole('button', { name: /^\d+ of \d+ regions current$/ })
@@ -103,7 +103,7 @@ test('crumbs never overlap the search button at 1024', async ({ page }) => {
 test('collapsed sidebar keeps the account menu reachable', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 800 })
   await page.goto('/')
-  await page.getByRole('button', { name: /^Account menu for pavel/ }).click()
+  await page.getByRole('button', { name: /^Account menu for sam/ }).click()
   const menu = page.getByRole('group', { name: 'Account' })
   await expect(menu.getByRole('button', { name: 'Sign out' })).toBeVisible()
   await expect(menu.getByRole('link', { name: 'My access' })).toBeVisible()

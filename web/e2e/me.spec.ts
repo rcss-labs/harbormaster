@@ -24,7 +24,7 @@ test.describe('my access as omer', () => {
 
     // Exactly one data row per tag (plus the header row), none for other users, and nothing editable.
     await expect(table.getByRole('row')).toHaveCount(4)
-    await expect(table.getByRole('row').filter({ hasText: /pavel|dana|oncall|omer/ })).toHaveCount(0)
+    await expect(table.getByRole('row').filter({ hasText: /sam|dana|oncall|omer/ })).toHaveCount(0)
     await expect(table.getByRole('combobox')).toHaveCount(0)
   })
 })

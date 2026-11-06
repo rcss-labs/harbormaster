@@ -152,7 +152,7 @@ func clientFromBrowser(t *testing.T, srv *httptest.Server, b *browser) *apiClien
 
 func TestSSO_GetUnconfigured_ShowsSPValues(t *testing.T) {
 	srv, _, _, _ := newServerCustom(t, true, withBaseURL)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	got := ssoGetConfig(t, c)
 	if got.Configured || got.Enabled {
 		t.Fatalf("configured/enabled = %v/%v", got.Configured, got.Enabled)
@@ -168,7 +168,7 @@ func TestSSO_GetUnconfigured_ShowsSPValues(t *testing.T) {
 
 func TestSSO_ImportMetadataFromXML_ThenGet(t *testing.T) {
 	srv, _, st, _ := newServerCustom(t, true, withBaseURL)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	idp := importFakeIdPMetadata(t, c)
 
 	got := ssoGetConfig(t, c)
@@ -191,7 +191,7 @@ func TestSSO_ImportMetadataFromXML_ThenGet(t *testing.T) {
 
 func TestSSO_ImportMetadataFromURL_FakeIdP(t *testing.T) {
 	srv, idp, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.post("/api/sso/metadata", map[string]any{"url": srv.URL + "/fake-idp/metadata"})
 	expectStatus(t, resp, http.StatusOK)
 	var got ssoCfgView
@@ -210,7 +210,7 @@ func TestSSO_ImportMetadataFromURL_FakeIdP(t *testing.T) {
 
 func TestSSO_ImportRejectsBadMetadata_422Messages(t *testing.T) {
 	srv, _, _, _ := newServerCustom(t, true, func(s *Server) { s.Cfg.CookieSecure = true })
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	const ns = `xmlns="urn:oasis:names:tc:SAML:2.0:metadata"`
 	cases := []struct {
 		name string
@@ -232,7 +232,7 @@ func TestSSO_ImportRejectsBadMetadata_422Messages(t *testing.T) {
 
 func TestSSO_Put_RequiresSessionKey(t *testing.T) {
 	srv, _, _, _ := newServerCustom(t, true, func(s *Server) { s.Cfg.SessionKey = "" })
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	body := map[string]any{"idp_entity_id": "https://idp.example.test", "idp_sso_redirect_url": "http://idp.example.test/sso"}
 	expectInvalid(t, c.do(http.MethodPut, "/api/sso", body, nil), "Set HM_SESSION_KEY before configuring single sign-on.")
 }
@@ -247,7 +247,7 @@ func putBody(entityID string) map[string]any {
 func TestSSO_Put_ChangingEntityIDEndsSAMLSessions_AuditsCount(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	alex := ssoSignInAs(t, srv, "alex")
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 
 	// Label-only change keeps SSO sessions and the stored certificates.
 	same := ssoGetConfig(t, c).IdPEntityID
@@ -278,13 +278,13 @@ func TestSSO_Put_ChangingEntityIDEndsSAMLSessions_AuditsCount(t *testing.T) {
 		t.Fatalf("audit leaks certificate: %s", raw)
 	}
 	if n := countRows(t, st, `select count(*) from sessions where auth_source = 'password'`); n != 1 {
-		t.Fatalf("password sessions = %d, want pavel's", n)
+		t.Fatalf("password sessions = %d, want sam's", n)
 	}
 }
 
 func TestSSO_Enable_RequiresBreakGlassAdmin_Message(t *testing.T) {
 	srv, _, _, _ := newServerCustom(t, true, withBaseURL)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	importFakeIdPMetadata(t, c)
 	resp := c.do(http.MethodPut, "/api/sso/enabled", map[string]bool{"enabled": true}, nil)
 	expectInvalid(t, resp, "Flag at least one global admin as break-glass before turning on single sign-on.")
@@ -293,7 +293,7 @@ func TestSSO_Enable_RequiresBreakGlassAdmin_Message(t *testing.T) {
 func TestSSO_Disable_ConfirmsSessionsEnded(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	alex := ssoSignInAs(t, srv, "alex")
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.do(http.MethodPut, "/api/sso/enabled", map[string]bool{"enabled": false}, nil)
 	expectStatus(t, resp, http.StatusOK)
 	var got ssoCfgView
@@ -304,7 +304,7 @@ func TestSSO_Disable_ConfirmsSessionsEnded(t *testing.T) {
 	if meUsername(t, alex) != "" {
 		t.Fatal("SAML session survived disabling")
 	}
-	if meUsername(t, newBrowserWithClient(t, srv, c)) != "pavel" {
+	if meUsername(t, newBrowserWithClient(t, srv, c)) != "sam" {
 		t.Fatal("the admin who disabled SSO was signed out")
 	}
 	entries := auditByAction(t, st, "sso_disabled")
@@ -319,7 +319,7 @@ func newBrowserWithClient(t *testing.T, srv *httptest.Server, c *apiClient) *bro
 
 func TestSSO_RotateKey_MetadataListsBothCerts(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	before := ssoGetConfig(t, c)
 	resp := c.post("/api/sso/key", nil)
 	expectStatus(t, resp, http.StatusOK)
@@ -345,7 +345,7 @@ func TestSSO_RotateKey_MetadataListsBothCerts(t *testing.T) {
 
 func TestSSO_TakeTest_OnceThen404(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	b := browserWithJar(t, srv, c.http.Jar)
 	acsResp := b.signIn("/api/auth/saml/login?test=1", "alex")
 	acsResp.Body.Close()
@@ -373,14 +373,14 @@ func TestSSO_TakeTest_OnceThen404(t *testing.T) {
 		t.Fatalf("second read = %d %q", second.StatusCode, code)
 	}
 	entries := auditByAction(t, st, "sso_test")
-	if len(entries) != 1 || entries[0].ActorUsername != "pavel" || entries[0].ActorUserID == nil {
+	if len(entries) != 1 || entries[0].ActorUsername != "sam" || entries[0].ActorUserID == nil {
 		t.Fatalf("sso_test audit = %+v: want exactly one, attributed to the admin who read the result", entries)
 	}
 }
 
 func TestSSO_TestResult_WouldLink(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.do(http.MethodPut, ssoUserPath(t, st, "omer", "/sso-link"), map[string]string{"name_id": "alex" + fakeIdPUserEmailDomain}, nil)
 	expectStatus(t, resp, http.StatusNoContent)
 	b := browserWithJar(t, srv, c.http.Jar)
@@ -399,13 +399,13 @@ func TestSSO_TestResult_WouldLink(t *testing.T) {
 
 func TestSSO_Get_CountsPasswordUsersBlockedOnEnable(t *testing.T) {
 	srv, _, st, _ := newServerCustom(t, true, withBaseURL)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	importFakeIdPMetadata(t, c)
 	hash, _ := st.GetUserByUsername(t.Context(), "omer")
 	if _, err := st.CreateUser(t.Context(), "alex", hash.PasswordHash, false, false); err != nil {
 		t.Fatal(err)
 	}
-	expectStatus(t, c.post(ssoUserPath(t, st, "pavel", "/break-glass"), map[string]bool{"break_glass": true}), http.StatusNoContent)
+	expectStatus(t, c.post(ssoUserPath(t, st, "sam", "/break-glass"), map[string]bool{"break_glass": true}), http.StatusNoContent)
 	got := ssoGetConfig(t, c)
 	if got.BreakGlassAdmins != 1 || got.PasswordUsersBlockedOnEnable != 2 {
 		t.Fatalf("break_glass_admins=%d blocked=%d, want 1 and 2 (omer, alex)", got.BreakGlassAdmins, got.PasswordUsersBlockedOnEnable)
@@ -414,9 +414,9 @@ func TestSSO_Get_CountsPasswordUsersBlockedOnEnable(t *testing.T) {
 
 func TestSSO_Enable_LeavesPasswordsIntact(t *testing.T) {
 	srv, _, st, _ := newServerCustom(t, true, withBaseURL)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	importFakeIdPMetadata(t, c)
-	expectStatus(t, c.post(ssoUserPath(t, st, "pavel", "/break-glass"), map[string]bool{"break_glass": true}), http.StatusNoContent)
+	expectStatus(t, c.post(ssoUserPath(t, st, "sam", "/break-glass"), map[string]bool{"break_glass": true}), http.StatusNoContent)
 	hashes := func() string {
 		rows, err := st.Pool.Query(t.Context(), `select coalesce(string_agg(username || ':' || coalesce(password_hash, '-'), ',' order by username), '') from users`)
 		if err != nil {
@@ -447,12 +447,12 @@ func TestSSO_Enable_LeavesPasswordsIntact(t *testing.T) {
 func TestSSO_NonAdmin403(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	c := login(t, srv, "omer", testPassword)
-	pavelPath := ssoUserPath(t, st, "pavel", "")
+	samPath := ssoUserPath(t, st, "sam", "")
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/sso"}, {http.MethodPut, "/api/sso"}, {http.MethodPost, "/api/sso/metadata"},
 		{http.MethodPut, "/api/sso/enabled"}, {http.MethodPost, "/api/sso/key"}, {http.MethodGet, "/api/sso/tests/_x"},
-		{http.MethodPost, pavelPath + "/break-glass"}, {http.MethodPut, pavelPath + "/sso-link"},
-		{http.MethodDelete, pavelPath + "/sso-link"}, {http.MethodPost, pavelPath + "/sso-unlink"},
+		{http.MethodPost, samPath + "/break-glass"}, {http.MethodPut, samPath + "/sso-link"},
+		{http.MethodDelete, samPath + "/sso-link"}, {http.MethodPost, samPath + "/sso-unlink"},
 	} {
 		resp := c.do(tc.method, tc.path, map[string]any{}, nil)
 		if code, _ := errorCode(t, resp); resp.StatusCode != http.StatusForbidden || code != "forbidden" {
@@ -463,7 +463,7 @@ func TestSSO_NonAdmin403(t *testing.T) {
 
 func TestBreakGlass_GrantRevoke_Audited(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	path := ssoUserPath(t, st, "omer", "/break-glass")
 	expectStatus(t, c.post(path, map[string]bool{"break_glass": true}), http.StatusNoContent)
 	if !ssoUsers(t, c)["omer"].BreakGlass {
@@ -483,24 +483,24 @@ func TestBreakGlass_GrantRevoke_Audited(t *testing.T) {
 func TestBreakGlass_PasswordlessUser422Message(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	ssoSignInAs(t, srv, "alex")
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.post(ssoUserPath(t, st, "alex", "/break-glass"), map[string]bool{"break_glass": true})
 	expectInvalid(t, resp, "Set a password for alex first.")
 }
 
 func TestBreakGlass_LastWhileEnabled422(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
-	resp := c.post(ssoUserPath(t, st, "pavel", "/break-glass"), map[string]bool{"break_glass": false})
+	c := login(t, srv, "sam", testPassword)
+	resp := c.post(ssoUserPath(t, st, "sam", "/break-glass"), map[string]bool{"break_glass": false})
 	expectInvalid(t, resp, "Keep at least one break-glass global admin while single sign-on is on.")
-	if !ssoUsers(t, c)["pavel"].BreakGlass {
+	if !ssoUsers(t, c)["sam"].BreakGlass {
 		t.Fatal("the last break-glass admin lost the flag")
 	}
 }
 
 func TestPendingLink_SetClear_Audited(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	path := ssoUserPath(t, st, "omer", "/sso-link")
 	expectStatus(t, c.do(http.MethodPut, path, map[string]string{"name_id": "  omer@idp.example  "}, nil), http.StatusNoContent)
 	omer := ssoUsers(t, c)["omer"]
@@ -535,7 +535,7 @@ func TestPendingLink_SetClear_Audited(t *testing.T) {
 func TestPendingLink_Conflicts409(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	ssoSignInAs(t, srv, "alex") // alex@example.test is now linked
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 
 	linkedUser := c.do(http.MethodPut, ssoUserPath(t, st, "alex", "/sso-link"), map[string]string{"name_id": "x@idp.example"}, nil)
 	if code, _ := errorCode(t, linkedUser); linkedUser.StatusCode != http.StatusConflict || code != "already_linked" {
@@ -546,7 +546,7 @@ func TestPendingLink_Conflicts409(t *testing.T) {
 		t.Fatalf("linked elsewhere = %d %q", taken.StatusCode, code)
 	}
 	expectStatus(t, c.do(http.MethodPut, ssoUserPath(t, st, "omer", "/sso-link"), map[string]string{"name_id": "shared@idp.example"}, nil), http.StatusNoContent)
-	pending := c.do(http.MethodPut, ssoUserPath(t, st, "pavel", "/sso-link"), map[string]string{"name_id": "shared@idp.example"}, nil)
+	pending := c.do(http.MethodPut, ssoUserPath(t, st, "sam", "/sso-link"), map[string]string{"name_id": "shared@idp.example"}, nil)
 	if code, _ := errorCode(t, pending); pending.StatusCode != http.StatusConflict || code != "sso_identity_taken" {
 		t.Fatalf("pending elsewhere = %d %q", pending.StatusCode, code)
 	}
@@ -557,7 +557,7 @@ func TestPendingLink_ExpiredShowsInDTO(t *testing.T) {
 	srv, _, st, _ := newServerCustom(t, true, func(s *Server) {
 		s.Now = func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
 	})
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	expectStatus(t, c.do(http.MethodPut, ssoUserPath(t, st, "omer", "/sso-link"), map[string]string{"name_id": "omer@idp.example"}, nil), http.StatusNoContent)
 	offset.Store(int64(15 * 24 * time.Hour))
 	omer := ssoUsers(t, c)["omer"]
@@ -569,7 +569,7 @@ func TestPendingLink_ExpiredShowsInDTO(t *testing.T) {
 func TestUnlink_SetsTemporaryPasswordWhenNone(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	alex := ssoSignInAs(t, srv, "alex")
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 
 	resp := c.post(ssoUserPath(t, st, "alex", "/sso-unlink"), nil)
 	expectStatus(t, resp, http.StatusOK)
@@ -614,7 +614,7 @@ func TestUnlink_SetsTemporaryPasswordWhenNone(t *testing.T) {
 
 func TestUnlink_404WhenNotLinked(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	if resp := c.post(ssoUserPath(t, st, "omer", "/sso-unlink"), nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unlink unlinked = %d", resp.StatusCode)
 	}
@@ -623,7 +623,7 @@ func TestUnlink_404WhenNotLinked(t *testing.T) {
 func TestResetPassword_PasswordlessUserWorks(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
 	ssoSignInAs(t, srv, "alex")
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.post(ssoUserPath(t, st, "alex", "/reset-password"), nil)
 	expectStatus(t, resp, http.StatusOK)
 	var out map[string]string
@@ -655,19 +655,19 @@ func TestMe_AndUsers_CarryCredentialFields(t *testing.T) {
 		me.DisplayName == nil || *me.DisplayName != "Alex" {
 		t.Fatalf("alex me = %+v (email=%v)", me, me.Email)
 	}
-	pavel := login(t, srv, "pavel", testPassword)
-	decode(t, pavel.get("/api/me"), &me)
+	sam := login(t, srv, "sam", testPassword)
+	decode(t, sam.get("/api/me"), &me)
 	if !me.HasPassword || me.SSOLinked || !me.BreakGlass {
-		t.Fatalf("pavel me = %+v", me)
+		t.Fatalf("sam me = %+v", me)
 	}
-	users := ssoUsers(t, pavel)
-	a, p := users["alex"], users["pavel"]
+	users := ssoUsers(t, sam)
+	a, p := users["alex"], users["sam"]
 	if a.HasPassword || a.BreakGlass || a.SSO != "linked" || a.SSONameID == nil || *a.SSONameID != "alex"+fakeIdPUserEmailDomain ||
 		a.Email == nil || a.DisplayName == nil || a.PendingLinkExpiresAt != nil {
 		t.Fatalf("alex user = %+v", a)
 	}
 	if !p.HasPassword || !p.BreakGlass || p.SSO != "none" || p.SSONameID != nil {
-		t.Fatalf("pavel user = %+v", p)
+		t.Fatalf("sam user = %+v", p)
 	}
 }
 
@@ -693,7 +693,7 @@ func TestSSO_ImportMetadataFromURL_BlocksLinkLocalWhenCookieInsecure(t *testing.
 	t.Cleanup(target.Close)
 	// CookieSecure=false and FakeAWS=false: a plain-http install must still get the filtered, https-only fetcher.
 	srv, _, _, _ := newServerCustom(t, true, func(s *Server) { s.Cfg.CookieSecure, s.Cfg.FakeAWS = false, false })
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	for _, target := range []string{"http://169.254.169.254/latest/meta-data/", "https://169.254.170.2/v2/credentials", target.URL} {
 		resp := c.post("/api/sso/metadata", map[string]any{"url": target})
 		code, msg := errorCode(t, resp)
@@ -708,7 +708,7 @@ func TestSSO_ImportMetadataFromURL_BlocksLinkLocalWhenCookieInsecure(t *testing.
 
 func TestSSO_Put_HTTPSignInURLOnlyInFakeAWSMode(t *testing.T) {
 	srv, _, _, _ := newServerCustom(t, true, func(s *Server) { s.Cfg.CookieSecure, s.Cfg.FakeAWS = false, false })
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	body := putBody("https://idp.example.test")
 	expectInvalid(t, c.do(http.MethodPut, "/api/sso", body, nil), "The sign-in URL must be an https URL.")
 }

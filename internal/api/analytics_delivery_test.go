@@ -179,7 +179,7 @@ func TestAnalyticsDelivery_EndToEnd(t *testing.T) {
 	if err != nil || len(stored) < len(services) {
 		t.Fatalf("stored rollouts = %d, %v; want at least %d", len(stored), err, len(services))
 	}
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	var all DeliveryDTO
 	resp := admin.get("/api/analytics/delivery?range=7d")
 	if resp.StatusCode != http.StatusOK {

@@ -255,7 +255,7 @@ describe('Analytics tables', () => {
   it('operations lists who operates and the most restarted services', async () => {
     renderApp('/analytics/operations')
     const who = await screen.findByRole('table', { name: 'Who operates' })
-    expect(within(who).getByText('pavel')).toBeInTheDocument()
+    expect(within(who).getByText('sam')).toBeInTheDocument()
     const restarted = screen.getByRole('table', { name: 'Most restarted services' })
     expect(within(restarted).getByRole('link', { name: 'payments-api' })).toHaveAttribute('href', expect.stringContaining('/services/'))
   })
