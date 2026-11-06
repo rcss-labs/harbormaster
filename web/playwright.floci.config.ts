@@ -8,7 +8,7 @@ const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './e2e-floci',
-  testMatch: /(floci\.setup|routes\.spec|focused\.spec)\.ts/,
+  testMatch: /(floci\.setup|routes\.spec|routes-phone\.spec|focused\.spec)\.ts/,
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -22,6 +22,20 @@ export default defineConfig({
       testMatch: /routes\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: '.auth-floci/admin.json' },
+    },
+    {
+      // Phone pass (mobile-v4 Decision 21): the same routes at 390 x 844 with touch, checked by the generic phone assertions.
+      name: 'routes-phone',
+      testMatch: /routes-phone\.spec\.ts/,
+      dependencies: ['setup'],
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 3,
+        storageState: '.auth-floci/admin.json',
+      },
     },
     {
       name: 'focused',

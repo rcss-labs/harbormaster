@@ -1,5 +1,6 @@
 import { asUser, expect, test } from './fixtures/test'
 import type { Page } from '@playwright/test'
+import { measureBox } from './helpers'
 
 // Read-only: runs in the observe project against the unmutated seed. localStorage lasts inside one test only.
 test.use(asUser('sam'))
@@ -74,7 +75,7 @@ test('the activity drawer is closed until asked for and closes on Escape', async
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Activity' })).toHaveCount(0)
   // main fills everything beside the sidebar: 2560 - 212.
-  expect((await page.getByRole('main').boundingBox())!.width).toBeGreaterThan(2300)
+  expect((await measureBox(page.getByRole('main'))).width).toBeGreaterThan(2300)
   await page.getByRole('button', { name: /^Activity/ }).click()
   await expect(page.getByRole('dialog', { name: 'Activity' })).toBeVisible()
   await page.keyboard.press('Escape')
@@ -126,7 +127,7 @@ test('the top bar keeps every control reachable at 390', async ({ page }) => {
   ]
   for (const control of controls) {
     await expect(control).toBeVisible()
-    const box = (await control.boundingBox())!
+    const box = await measureBox(control)
     expect(box.x).toBeGreaterThanOrEqual(0)
     expect(box.x + box.width).toBeLessThanOrEqual(390)
     expect(box.height).toBeGreaterThanOrEqual(32)
@@ -136,7 +137,7 @@ test('the top bar keeps every control reachable at 390', async ({ page }) => {
   await freshness(page).click()
   const popover = page.getByRole('dialog', { name: 'Data freshness' })
   await expect(popover).toBeVisible()
-  const popBox = (await popover.boundingBox())!
+  const popBox = await measureBox(popover)
   expect(popBox.x).toBeGreaterThanOrEqual(0)
   expect(popBox.x + popBox.width).toBeLessThanOrEqual(390)
 })

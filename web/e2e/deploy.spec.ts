@@ -1,6 +1,6 @@
 import { asUser, expect, test, type Page } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
-import { pickImageTag, reviewAndApply, serviceId } from './helpers'
+import { measureBoxes, pickImageTag, reviewAndApply, serviceId } from './helpers'
 
 // The Deploy tab: containers, task size, service settings and auto scaling reviewed as one change set. Every test
 // here mutates the shared estate, so the file runs in chromium-flows (after change.spec, which moves payments-api
@@ -130,7 +130,8 @@ test.describe('sam on a phone', () => {
     await expect(aside).toBeVisible()
     const service = page.getByRole('region', { name: 'Service' })
     await expect(service.getByRole('spinbutton', { name: 'Desired count' })).toBeVisible()
-    expect((await aside.boundingBox())!.y).toBeGreaterThan((await service.boundingBox())!.y)
+    const [asideBox, serviceBox] = await measureBoxes(aside, service)
+    expect(asideBox.y).toBeGreaterThan(serviceBox.y)
     await expect(page.getByRole('button', { name: 'Add variable' })).toBeVisible()
     await expect(page.getByRole('table', { name: 'Scaling policies' }).or(page.getByRole('grid', { name: 'Scaling policies' }))).toBeVisible()
     // Every Deploy panel, the aside and the page itself stay inside the window. (The header's tab strip is the page

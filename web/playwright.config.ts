@@ -57,12 +57,16 @@ export default defineConfig({
     // so they fall through to chromium-flows (everything not matched below). freshness and deploy-partial run in chromium-degraded.
     { name: 'chromium-observe', testMatch: /((observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|services-live)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06: plan 06 (task 17) added overview, clusters, cluster, tasks; task 19 added me (anchored): read-only networks/storage specs read the unmutated seed
       dependencies: ['chromium'], retries: 1, use: { ...devices['Desktop Chrome'] } },
-    { name: 'chromium-flows', testIgnore: /((smoke|observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|services-live|freshness|deploy-partial)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06, plan 06 task 17/19
+    { name: 'chromium-flows', testIgnore: /(\.mobile\.spec\.ts$|(smoke|observe|networks|storage|security|overview|clusters|cluster|tasks|layout|services|shell|services-live|freshness|deploy-partial)\.spec\.ts|(^|\/)me\.spec\.ts$|clusters-filters\.spec\.ts$|tag-filter\.spec\.ts$)/, // plan 05/06, plan 06 task 17/19; phone specs have their own project
       dependencies: ['chromium-observe'], use: { ...devices['Desktop Chrome'] } },
+    // mobile-v4 Decision 21: every `*.mobile.spec.ts` runs here at 390 x 844 and nowhere else. It follows chromium-flows because
+    // some phone flows mutate the estate; chromium-degraded then waits for it.
+    { name: 'chromium-mobile', testMatch: /\.mobile\.spec\.ts$/, dependencies: ['chromium-flows'],
+      use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 } },
     // v4 plan Decision 17: scheduled actions and the scaling tier fail on a second server, so the specs see stale data and a
     // partial Deploy tab. It has its own database schema, so the specs sign in themselves instead of using e2e/.auth.
     { name: 'chromium-degraded', testMatch: /(freshness|deploy-partial)\.spec\.ts/,
-      dependencies: ['chromium-flows'], use: { ...devices['Desktop Chrome'], baseURL: degradedBaseURL } },
+      dependencies: ['chromium-mobile'], use: { ...devices['Desktop Chrome'], baseURL: degradedBaseURL } },
   ],
   webServer: [
     {

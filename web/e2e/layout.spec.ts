@@ -1,5 +1,6 @@
 import { asUser, expect, test } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
+import { measureBox, measureBoxes } from './helpers'
 
 // Read-only: runs in the observe project against the unmutated seed.
 test.use(asUser('sam'))
@@ -11,17 +12,17 @@ test('wide screens fill the content width', async ({ page }) => {
   await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
   // Grid is sidebar | main; the activity rail is a drawer and no longer docks: 2560 - 212 = 2348.
-  const mainBox = await main.boundingBox()
-  expect(mainBox!.width).toBeGreaterThan(2300)
+  const mainBox = await measureBox(main)
+  expect(mainBox.width).toBeGreaterThan(2300)
 
   // The six KPI cells share one strip that spans the content width.
   const strip = main.getByRole('list', { name: 'Estate key figures' })
-  const stripBox = (await strip.boundingBox())!
+  const stripBox = await measureBox(strip)
   const cells = strip.getByRole('listitem')
   await expect(cells).toHaveCount(6)
-  const boxes = await Promise.all([0, 1, 2, 3, 4, 5].map((index) => cells.nth(index).boundingBox()))
-  for (const box of boxes) expect(Math.abs(box!.width - boxes[0]!.width)).toBeLessThan(2)
-  const last = boxes[5]!
+  const boxes = await measureBoxes(...[0, 1, 2, 3, 4, 5].map((index) => cells.nth(index)))
+  for (const box of boxes) expect(Math.abs(box.width - boxes[0].width)).toBeLessThan(2)
+  const last = boxes[5]
   expect(Math.abs(last.x + last.width - (stripBox.x + stripBox.width))).toBeLessThanOrEqual(2)
 })
 
@@ -33,7 +34,7 @@ test('the clusters table scrolls inside its panel at 920px without widening the 
   const main = page.getByRole('main')
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
   // The table keeps its minimum width, so it is wider than the panel that scrolls it.
-  expect((await table.boundingBox())!.width).toBeGreaterThanOrEqual(1120)
+  expect((await measureBox(table)).width).toBeGreaterThanOrEqual(1120)
 })
 
 test('logs and terminal fill the viewport height', async ({ page }) => {
@@ -41,14 +42,14 @@ test('logs and terminal fill the viewport height', async ({ page }) => {
   await page.goto(serviceUrl(...SVC.paymentsApi, 'logs'))
   const logs = page.getByRole('log')
   await expect(logs).toBeVisible()
-  const logBox = (await logs.boundingBox())!
+  const logBox = await measureBox(logs)
   expect(logBox.height).toBeGreaterThan(520)
   expect(1440 - (logBox.y + logBox.height)).toBeLessThan(60)
 
   await page.goto(serviceUrl(...SVC.paymentsApi, 'terminal'))
   const host = page.getByTestId('terminal-host')
   await expect(host).toBeVisible()
-  expect((await host.boundingBox())!.height).toBeGreaterThan(480)
+  expect((await measureBox(host)).height).toBeGreaterThan(480)
 })
 
 test('narrow viewport has no horizontal overflow', async ({ page }) => {
@@ -117,8 +118,7 @@ for (const target of tableTargets) {
       const count = await headerCells.count()
       expect(await bodyCells.count()).toBe(count)
       for (let index = 0; index < count; index++) {
-        const header = (await headerCells.nth(index).boundingBox())!
-        const cell = (await bodyCells.nth(index).boundingBox())!
+        const [header, cell] = await measureBoxes(headerCells.nth(index), bodyCells.nth(index))
         expect(Math.abs(header.x - cell.x), `column ${index} header x ${header.x} vs cell x ${cell.x}`).toBeLessThanOrEqual(2)
       }
 
@@ -166,7 +166,7 @@ test.describe('segmented filters', () => {
     for (const name of ['My pins', 'In progress', 'Steady', 'Scaled to 0']) {
       await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toBeVisible()
     }
-    const shortHeight = (await groups.locator('button', { hasText: /^All/ }).first().boundingBox())!.height
+    const shortHeight = (await measureBox(groups.locator('button', { hasText: /^All/ }).first())).height
 
     const results = await groups.evaluateAll((elements) =>
       elements.map((group) => {

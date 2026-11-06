@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures/test'
-import { login, serviceId } from './helpers'
+import { login, measureBoxes, serviceId } from './helpers'
 
 // Ids come from the fake estate (internal/awsx/fake/seed.go): all clusters live in the homelab account.
 const HOMELAB_ACCOUNT_ID = '482109375512'
@@ -41,8 +41,7 @@ test('at 390px the terminal and the Session panel do not overlap', async ({ page
   await expect(host).toBeVisible()
   const sessionTitle = page.getByText('Session', { exact: true }).first()
   await expect(sessionTitle).toBeVisible()
-  const h = (await host.boundingBox())!
-  const s = (await sessionTitle.boundingBox())!
+  const [h, s] = await measureBoxes(host, sessionTitle)
   const intersects = h.x < s.x + s.width && s.x < h.x + h.width && h.y < s.y + s.height && s.y < h.y + h.height
   expect(intersects, `host ${JSON.stringify(h)} vs session ${JSON.stringify(s)}`).toBe(false)
 })

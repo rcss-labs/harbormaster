@@ -2,38 +2,16 @@ import { expect, test } from '../e2e/fixtures/test'
 import { saveScreenshot } from '../e2e/helpers'
 import { isExpectedFailure } from './allowlist'
 import { waivers } from './known-wave0'
-import { resolveTargets, type Targets } from './targets'
+import { ROUTES } from './routes'
+import { resolveTargets } from './targets'
 
-/** Every route is loaded at each width in each theme; ids are resolved from the live API when a test runs. */
-interface RouteSpec {
-  name: string
-  path: (targets: Targets) => string | null
-}
-
-const SERVICE_TABS = ['overview', 'tasks', 'logs', 'metrics', 'terminal', 'deploy', 'task-definition', 'scaling', 'operations']
-const ANALYTICS_TABS = ['delivery', 'reliability', 'capacity', 'operations']
-const SETTINGS_TABS = ['general', 'accounts', 'users', 'tags', 'sso', 'audit']
-
-const ROUTES: RouteSpec[] = [
-  { name: 'overview', path: () => '/' },
-  { name: 'services', path: (t) => (t.hasServicesApi ? '/services' : null) },
-  { name: 'clusters', path: () => '/clusters' },
-  { name: 'cluster', path: (t) => `/clusters/${t.clusterId}` },
-  ...SERVICE_TABS.map((tab) => ({ name: `service-${tab}`, path: (t: Targets) => `/services/${t.serviceId}/${tab}` })),
-  { name: 'tasks', path: () => '/tasks' },
-  { name: 'task-terminal', path: (t) => (t.standaloneTaskShortId ? `/tasks/${t.standaloneTaskShortId}/terminal` : null) },
-  { name: 'networks', path: () => '/networks' },
-  { name: 'storage', path: () => '/storage' },
-  ...ANALYTICS_TABS.map((tab) => ({ name: `analytics-${tab}`, path: () => `/analytics/${tab}` })),
-  ...SETTINGS_TABS.map((tab) => ({ name: `settings-${tab}`, path: () => `/settings/${tab}` })),
-  { name: 'my-access', path: () => '/me/access' },
-]
+// Every route (see routes.ts) is loaded at each width in each theme; ids are resolved from the live API when a test runs.
 
 const WIDTHS: [number, number][] = [
   [1440, 900],
   [2560, 1440],
   [3840, 2160],
-  [390, 844],
+  // 390 is the phone pass (routes-phone.spec.ts).
 ]
 const THEMES = ['dark', 'light'] as const
 
