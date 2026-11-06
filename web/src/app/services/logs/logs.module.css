@@ -36,6 +36,9 @@
 @media (max-width: 700px) {
   /* Takes the height left under the tabs; when the toolbar, banners and a usable log box need more, the page scrolls instead of the box spilling out. */
   .rootPhone { flex: 1 0 auto; min-height: 0; }
+  /* The panel around it must grow to that content too. Sized from zero it would let the log panel overflow it, and an overflow does not
+     carry main's bottom padding: with the keyboard up the last lines would stay under the tab bar. (Doubled class to outrank the panel's own rule.) */
+  div:has(> .rootPhone.rootPhone) { flex: 1 0 auto; }
   .toolbarPhone { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 8px; padding: 8px; }
   .toolRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .toolRow .ctl { flex: 1 1 0; min-width: 0; }

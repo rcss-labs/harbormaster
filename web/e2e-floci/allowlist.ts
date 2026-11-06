@@ -12,9 +12,11 @@ export interface ExpectedFailure {
 }
 
 export const EXPECTED_FAILURES: ExpectedFailure[] = [
-  // Floci has no StartLiveTail, so the Logs tab live-tail WebSocket upgrade fails ("Live tail disconnected." + Resume).
+  // Floci has no StartLiveTail, so the Logs tab live-tail WebSocket upgrade fails ("Live tail disconnected." + Resume). The phone pass
+  // sees the same failure and the same banner at 390 px.
   { method: 'GET', path: /^\/api\/services\/[^/]+\/logs\/tail$/ },
-  // Floci has no SSM sessions, so the ECS Exec WebSocket (Terminal) cannot connect; only the layout is checked.
+  // Floci has no SSM sessions, so the ECS Exec WebSocket (Terminal) cannot connect; only the layout is checked (the keys row and the
+  // on-screen keyboard behaviour are covered on the fake backend by terminal.mobile.spec.ts).
   { method: 'GET', path: /^\/api\/tasks\/[^/]+\/exec$/ },
 ]
 

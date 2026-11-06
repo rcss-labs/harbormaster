@@ -167,6 +167,8 @@
 /* Phone shell: a top bar on one row, the page in the middle, five tabs fixed to the bottom edge. */
 @media (max-width: 700px) {
   .appPhone { display: flex; flex-direction: column; height: var(--hm-vvh, 100dvh); overflow: hidden; }
+  /* Wraps the top bar, the page and the tab bar so the page keeps its tree position across the breakpoint; it adds no box of its own. */
+  .stagePhone { display: contents; }
   /* The page scrolls inside main and keeps clear of the tab bar, the terminal keys row or a sticky bar. */
   .content.contentPhone { padding: 12px 12px calc(var(--hm-bottom-inset, 0px) + 16px); min-width: 0; }
 

@@ -63,6 +63,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<{ fit(): void } | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
 
   const [pickedTask, setPickedTask] = useState<string>()
   const [pickedContainer, setPickedContainer] = useState<string>()
@@ -100,9 +101,9 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   const command = commands.find((c) => c === pickedCommand) ?? (commands.includes('/bin/sh') ? '/bin/sh' : commands[0])
   const canConnect = !active && container?.exec_agent === 'RUNNING' && csrf !== ''
 
+  // The terminal and its session live as long as the tab does. Rotating a phone across the breakpoint moves the same xterm
+  // into the other layout's host instead of starting a fresh terminal, which would drop the shell in the middle of a command.
   useEffect(() => {
-    const host = hostRef.current
-    if (!host) return
     const term = new Terminal({
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace',
       fontSize: 12.5,
@@ -113,8 +114,30 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.open(host)
     termRef.current = term
+    fitAddonRef.current = fit
+    term.write(`${SYS}Pick a task and a container, then Connect.${RESET}\r\n`)
+    const dataSub = term.onData((data) => send(data))
+    const resizeSub = term.onResize(({ cols, rows }) => resize(cols, rows))
+    return () => {
+      dataSub.dispose()
+      resizeSub.dispose()
+      disconnect()
+      term.dispose()
+      termRef.current = null
+      fitAddonRef.current = null
+      fitRef.current = null
+    }
+  }, [send, resize, disconnect])
+
+  // Attach the terminal to the current layout's host and keep it fitted to that host.
+  useEffect(() => {
+    const host = hostRef.current
+    const term = termRef.current
+    const fit = fitAddonRef.current
+    if (!host || !term || !fit) return
+    if (term.element) host.appendChild(term.element)
+    else term.open(host)
     // Fit, then (on phones) drop rows until the screen ends inside the host: the fit addon sizes rows by a cell height that
     // can differ from the rendered one while the mono font is still loading, which would paint the last rows below the host.
     const refit = () => {
@@ -129,9 +152,6 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
     }
     fitRef.current = { fit: refit }
     refit()
-    term.write(`${SYS}Pick a task and a container, then Connect.${RESET}\r\n`)
-    const dataSub = term.onData((data) => send(data))
-    const resizeSub = term.onResize(({ cols, rows }) => resize(cols, rows))
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(refit)
     observer?.observe(host)
     // The page settles after the first paint; fit once more so the rows match the final host height.
@@ -142,14 +162,9 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
       document.fonts?.removeEventListener?.('loadingdone', refit)
       if (settled) cancelAnimationFrame(settled)
       observer?.disconnect()
-      dataSub.dispose()
-      resizeSub.dispose()
-      disconnect()
-      term.dispose()
-      termRef.current = null
       fitRef.current = null
     }
-  }, [send, resize, disconnect, phone]) // the host element is a different node on phones, so crossing the breakpoint starts a fresh terminal
+  }, [phone])
 
   // While a phone session is connected the keys row replaces the tab bar (data-hm-keys) and the page ends above it.
   const keysShown = phone && socket.state === 'connected'
