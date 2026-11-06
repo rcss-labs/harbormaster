@@ -34,3 +34,16 @@ textarea.ctl { height: auto; padding: 6px 8px; font-family: var(--mono); font-si
 .stepLink { color: var(--text); font-weight: 500; text-decoration: none; }
 .stepLink:hover { color: var(--accent); text-decoration: underline; }
 .stack > * { min-width: 0; }
+/* Phone: five stacked panels, each keeping its own Save; 44 px rows and full-width actions. */
+@media (max-width: 700px) {
+  .ctl { font-size: 16px; }
+  textarea.ctl { font-size: 16px; }
+  a.btn { min-height: 44px; justify-content: center; }
+  .step { min-height: 56px; }
+  .stepLink { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; }
+  .btn { white-space: normal; justify-content: center; }
+  .row > .btn, .form .btn { width: 100%; }
+  .row { align-items: stretch; }
+  .grow { flex-basis: 100%; }
+  .scroll { overflow-x: auto; }
+}

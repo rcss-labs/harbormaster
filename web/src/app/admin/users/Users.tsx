@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuthOptions, usePermissions, useSSOConfig, useUsers } from '../../../api/hooks'
+import { usePhone } from '../../../components/useNarrow'
 import { useAuth } from '../../auth/AuthProvider'
 import { HeaderAction } from '../../settings/HeaderAction'
 import { AddUserDialog } from './AddUserDialog'
@@ -9,6 +10,7 @@ import styles from './users.module.css'
 
 export function Users() {
   const { me } = useAuth()
+  const phone = usePhone()
   const isAdmin = me?.admin ?? false
   // Non-admins would get 403s, so the admin queries stay disabled for them.
   const users = useUsers({ enabled: isAdmin })
@@ -31,8 +33,8 @@ export function Users() {
         {ssoOn ? 'Sign-in is single sign-on; break-glass accounts can also use a password.' : 'Sign-in is username and password.'}
       </p>
       <div className={styles.stack}>
-        {permissions.data && <PermissionMatrix data={permissions.data} />}
-        {users.data && <UsersTable users={users.data.items} meId={me.id} ssoConfigured={ssoConfigured} />}
+        {permissions.data && !phone && <PermissionMatrix data={permissions.data} />}
+        {users.data && <UsersTable users={users.data.items} meId={me.id} ssoConfigured={ssoConfigured} permissions={permissions.data} />}
       </div>
       {adding && <AddUserDialog ssoOn={ssoOn} onClose={() => setAdding(false)} />}
     </>

@@ -12,3 +12,15 @@
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .primary:hover { background: var(--accent); filter: brightness(1.07); }
+.saveBar { justify-content: space-between; }
+.barNote { color: var(--muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+/* Phone: the title lives in the top bar, so the header row only carries the tab's action (hidden while empty). */
+@media (max-width: 700px) {
+  .sticky { padding-top: 0; margin: -12px -12px 0; padding-inline: 12px; padding-top: 12px; }
+  .pageHead { margin-bottom: 0; min-height: 0; }
+  .actions { margin-left: 0; width: 100%; }
+  .actions:not(:empty) { padding-bottom: 8px; }
+  .actions:empty { display: none; }
+  .panel { margin-top: 12px; }
+  .windowInput { width: 120px; }
+}

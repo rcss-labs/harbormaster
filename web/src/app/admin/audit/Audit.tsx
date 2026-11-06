@@ -1,6 +1,9 @@
 import { useSearchParams } from 'react-router'
 import { useAudit } from '../../../api/hooks'
 import type { AuditEntryDTO } from '../../../api/types'
+import { Ago } from '../../../components/Ago'
+import { Chips } from '../../../components/Chips'
+import { usePhone } from '../../../components/useNarrow'
 import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { Panel } from '../../../components/Panel'
@@ -24,6 +27,7 @@ export function Audit() {
   const paged = usePagedCursor<AuditEntryDTO>('audit')
   const page = useAudit(paged.cursor, { enabled: isAdmin })
   const [params, setParams] = useSearchParams()
+  const phone = usePhone()
 
   if (!me || !isAdmin) return null
 
@@ -53,14 +57,23 @@ export function Audit() {
         flush
         toolbar={
           <>
-            <select className={styles.ctl} aria-label="Type" value={type} onChange={(event) => update('type', event.target.value)}>
-              <option value={ALL_TYPES}>All types</option>
-              {types.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            {phone ? (
+              <Chips
+                label="Type"
+                options={[{ value: ALL_TYPES, label: 'All types' }, ...types.map((name) => ({ value: name, label: name }))]}
+                value={type}
+                onChange={(value) => update('type', value)}
+              />
+            ) : (
+              <select className={styles.ctl} aria-label="Type" value={type} onChange={(event) => update('type', event.target.value)}>
+                <option value={ALL_TYPES}>All types</option>
+                {types.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            )}
             <input
               type="search"
               className={`${styles.ctl} ${styles.search}`}
@@ -74,7 +87,27 @@ export function Audit() {
         actions={<span title="Service actions are in each service's operations log.">Sign-ins and changes to users, permissions and tags</span>}
       >
         {visible.length === 0 ? (
-          <EmptyState>No entries match.</EmptyState>
+          <EmptyState>
+            No entries match.
+            {phone && (
+              <div>
+                <button type="button" className={styles.btn} onClick={() => setParams(new URLSearchParams(), { replace: true })}>
+                  Clear filters
+                </button>
+              </div>
+            )}
+          </EmptyState>
+        ) : phone ? (
+          <div className={styles.rows} role="list">
+            {visible.map((entry) => (
+              <div key={entry.id} role="listitem" className={styles.row}>
+                <span className={styles.when}>
+                  <Ago ts={entry.ts} /> · {entry.actor}
+                </span>
+                <span className={styles.summary}>{entry.summary}</span>
+              </div>
+            ))}
+          </div>
         ) : (
           <Feed>
             {visible.map((entry) => (

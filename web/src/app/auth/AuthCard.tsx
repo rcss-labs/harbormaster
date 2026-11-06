@@ -1,5 +1,6 @@
 import { useId, type FormEvent, ReactNode } from 'react'
 import { Brand } from '../../components/Brand'
+import { usePhone } from '../../components/useNarrow'
 import styles from './auth.module.css'
 
 interface AuthCardProps {
@@ -20,7 +21,7 @@ export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit,
     onSubmit()
   }
   return (
-    <div className={styles.wrap}>
+    <main className={styles.wrap}>
       <form className={`card ${styles.card}`} onSubmit={handleSubmit} noValidate>
         <div className={styles.brand}>
           <Brand variant="signin" />
@@ -41,7 +42,7 @@ export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit,
           </button>
         )}
       </form>
-    </div>
+    </main>
   )
 }
 
@@ -56,10 +57,13 @@ interface FieldProps {
 
 export function Field({ label, value, onChange, type = 'text', autoComplete, hint }: FieldProps) {
   const id = useId()
+  const phone = usePhone()
+  // A phone keyboard must not capitalise or "correct" usernames, tokens and passwords.
+  const keyboard = phone ? { autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false } : {}
   return (
     <div className={styles.field}>
       <label htmlFor={id}>{label}</label>
-      <input id={id} className={styles.ctl} type={type} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required />
+      <input id={id} className={styles.ctl} type={type} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required {...keyboard} />
       {hint && <span className={styles.hint}>{hint}</span>}
     </div>
   )

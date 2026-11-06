@@ -33,6 +33,23 @@
 .err { font-size: 12px; color: var(--danger); }
 .impact { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; }
 
+/* Phone: tag rows, assignment rows and 44 px colour choices. */
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-2); cursor: pointer; }
+.tagTitle { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.assignList { display: flex; flex-direction: column; }
+.assignGroup { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 8px var(--pad); background: var(--chrome); border-bottom: 1px solid var(--row-border); }
+.assignRow { display: grid; gap: 6px; padding: 8px var(--pad); border-bottom: 1px solid var(--row-border); min-width: 0; }
+.assignHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.assignService { padding-left: calc(var(--pad) + 16px); }
+.serviceName { overflow-wrap: anywhere; font-weight: 500; }
+.assignTag { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.assignTag select { flex: 1 1 140px; min-width: 0; }
+@media (max-width: 700px) {
+  .ctl, .ctlLg { font-size: 16px; }
+  .radioList label, .toolbar label { min-height: 44px; }
+  .btn { white-space: normal; }
+}
+
 .chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--raised); font-size: 12px; color: var(--text); }
 

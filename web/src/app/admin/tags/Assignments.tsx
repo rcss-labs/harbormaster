@@ -7,6 +7,7 @@ import { Panel } from '../../../components/Panel'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
+import { usePhone } from '../../../components/useNarrow'
 import styles from './tags.module.css'
 import { type AssignmentKind, assignedTagId, chosenTag, invalidateTagQueries, saveAssignment } from './tagApi'
 
@@ -58,6 +59,7 @@ const groupKey = (account: string, region?: string) => (region === undefined ? a
 export function Assignments({ clusters, tags }: { clusters: ClusterAssignment[]; tags: TagItemDTO[] }) {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const phone = usePhone()
   // Open rows are keyed by cluster id so they survive refetches and page changes.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const [requestedPage, setPage] = useState(1)
@@ -126,6 +128,65 @@ export function Assignments({ clusters, tags }: { clusters: ClusterAssignment[];
         </>
       }
     >
+      {phone ? (
+        <div className={styles.assignList} role="list" aria-label="Assignments">
+          {visible.map((cluster, index) => {
+            const open = expanded.has(cluster.id)
+            const previous = visible[index - 1]
+            const newAccount = previous?.account_name !== cluster.account_name
+            const newRegion = newAccount || previous?.region !== cluster.region
+            return (
+              <Fragment key={cluster.id}>
+                {newAccount && <PhoneGroup label={cluster.account_name} members={groups.get(groupKey(cluster.account_name)) ?? []} />}
+                {newRegion && <PhoneGroup label={cluster.region} members={groups.get(groupKey(cluster.account_name, cluster.region)) ?? []} />}
+                <div role="listitem" className={styles.assignRow}>
+                  <div className={styles.assignHead}>
+                    <Disclosure label={cluster.name} expanded={open} onToggle={() => toggle(cluster.id)} />
+                    <span className={`${styles.muted} ${styles.small}`}>{plural(cluster.services.length, 'service')}</span>
+                  </div>
+                  <div className={styles.assignTag}>
+                    <select
+                      className={styles.ctl}
+                      aria-label={`Tag for ${cluster.name}`}
+                      value={String(cluster.effective.id)}
+                      onChange={(event) => choose('cluster', cluster.id, cluster.name, event.target.value)}
+                    >
+                      {tags.map((tag) => (
+                        <option key={tag.id} value={tag.id}>
+                          {tag.name}
+                        </option>
+                      ))}
+                    </select>
+                    <TagChip tag={{ ...cluster.effective, inherited: false }} kind="cluster" />
+                  </div>
+                </div>
+                {open &&
+                  cluster.services.map((service) => (
+                    <div role="listitem" key={service.id} className={`${styles.assignRow} ${styles.assignService}`}>
+                      <div className={styles.serviceName}>{service.name}</div>
+                      <div className={styles.assignTag}>
+                        <select
+                          className={styles.ctl}
+                          aria-label={`Tag for ${service.name}`}
+                          value={service.tag_id === null ? '' : String(service.tag_id)}
+                          onChange={(event) => choose('service', service.id, service.name, event.target.value, cluster.effective)}
+                        >
+                          <option value="">{`Inherit (${cluster.effective.name})`}</option>
+                          {tags.map((tag) => (
+                            <option key={tag.id} value={tag.id}>
+                              {tag.name}
+                            </option>
+                          ))}
+                        </select>
+                        <TagChip tag={{ ...service.effective, inherited: service.tag_id === null }} />
+                      </div>
+                    </div>
+                  ))}
+              </Fragment>
+            )
+          })}
+        </div>
+      ) : (
       <Table>
         <thead>
           <tr>
@@ -204,8 +265,26 @@ export function Assignments({ clusters, tags }: { clusters: ClusterAssignment[];
           })}
         </tbody>
       </Table>
+      )}
       <Pager page={page} pageSize={ASSIGNMENTS_PAGE_SIZE} total={ordered.length} onPageChange={setPage} />
     </Panel>
+  )
+}
+
+/** Phone version of the group header: name and totals, then the distinct tags. */
+function PhoneGroup({ label, members }: { label: string; members: ClusterAssignment[] }) {
+  return (
+    <div role="listitem" className={styles.assignGroup}>
+      <div>
+        <span className={styles.groupName}>{label}</span>
+        <div className={`${styles.muted} ${styles.small}`}>{summarize(members)}</div>
+      </div>
+      <span className={styles.chips}>
+        {distinctTags(members).map((tag) => (
+          <TagChip key={tag.id} tag={tag} />
+        ))}
+      </span>
+    </div>
   )
 }
 

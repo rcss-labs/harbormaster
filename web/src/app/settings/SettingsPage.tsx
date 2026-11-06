@@ -60,7 +60,7 @@ export function SettingsPage() {
     <HeaderActionSlot.Provider value={actionSlot}>
       <div className={styles.sticky}>
         <div className={styles.pageHead}>
-          <h1>Settings</h1>
+          <h1 className="hm-phone-title-sr">Settings</h1>
           <div role="group" aria-label="Tab actions" className={styles.actions} ref={setActionSlot} />
         </div>
         <Tabs items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
