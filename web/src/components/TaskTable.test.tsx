@@ -1,5 +1,6 @@
 import { screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
 import { ALL_TASKS } from '../test/fixtures'
 import { renderWithProviders } from '../test/setup'
 import { TaskTable } from './TaskTable'
@@ -12,7 +13,7 @@ describe('TaskTable', () => {
       <TaskTable
         items={[runningTask]}
         withService={false}
-        onMore={() => {}}
+        onMore={() => {}} onOpen={() => {}} onStop={() => {}}
         utilisation={{ [runningTask.short_id]: { cpu: 12.4, mem: 34.2 } }}
       />,
     )
@@ -30,7 +31,7 @@ describe('TaskTable', () => {
           { ...base, id: 'b', stop_kind: 'error', stop_cause: '' },
         ]}
         withService={false}
-        onMore={() => {}}
+        onMore={() => {}} onOpen={() => {}} onStop={() => {}}
       />,
     )
     const [, expectedRow, errorRow] = screen.getAllByRole('row')
@@ -41,7 +42,7 @@ describe('TaskTable', () => {
   })
 
   it('shows reserved size otherwise', () => {
-    renderWithProviders(<TaskTable items={[runningTask]} withService={false} onMore={() => {}} utilisation={{ other: { cpu: 1, mem: 1 } }} />)
+    renderWithProviders(<TaskTable items={[runningTask]} withService={false} onMore={() => {}} onOpen={() => {}} onStop={() => {}} utilisation={{ other: { cpu: 1, mem: 1 } }} />)
     const row = screen.getAllByRole('row')[1]
     expect(within(row).getByText('0.25 vCPU')).toBeInTheDocument()
     expect(within(row).getByText('512 MiB')).toBeInTheDocument()
@@ -52,10 +53,29 @@ describe('TaskTable', () => {
       <TaskTable
         items={[runningTask]}
         withService={false}
-        onMore={() => {}}
+        onMore={() => {}} onOpen={() => {}} onStop={() => {}}
         utilisation={{ [runningTask.short_id]: { cpu: null, mem: null } }}
       />,
     )
     expect(within(screen.getAllByRole('row')[1]).getByText('512 MiB')).toBeInTheDocument()
+  })
+
+  it('the task id opens the drawer and Stop asks the host', async () => {
+    const onOpen = vi.fn()
+    const onStop = vi.fn()
+    const operable = { ...runningTask, can: { operate: true, terminal: false } }
+    renderWithProviders(<TaskTable items={[operable]} withService={false} onMore={() => {}} onOpen={onOpen} onStop={onStop} />)
+    await userEvent.click(screen.getByRole('button', { name: `Open details for task ${operable.short_id.slice(0, 12)}` }))
+    expect(onOpen).toHaveBeenCalledWith(operable)
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(onStop).toHaveBeenCalledWith(operable)
+  })
+
+  it('keeps the actions column last and shows only the chosen columns', () => {
+    renderWithProviders(
+      <TaskTable items={[runningTask]} withService={false} onMore={() => {}} onOpen={() => {}} onStop={() => {}} visibleColumns={['task', 'status']} />,
+    )
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent)
+    expect(headers).toEqual(['Task', 'Status', ''])
   })
 })

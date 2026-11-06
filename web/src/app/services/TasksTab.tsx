@@ -9,6 +9,7 @@ import { SegmentedFilter } from '../../components/Seg'
 import { TaskTable } from '../../components/TaskTable'
 import { usePagedCursor } from '../../components/usePagedCursor'
 import { HiddenStoppedNote } from '../tasks/HiddenStoppedNote'
+import { useTaskPanel } from '../tasks/useTaskPanel'
 
 type TaskSegment = 'running' | 'stopped' | 'all'
 
@@ -21,15 +22,16 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
   const utilisation = taskUsage && Object.fromEntries(taskUsage.map((usage) => [usage.task_id, { cpu: usage.cpu, mem: usage.mem }]))
   const desired = useDesiredCountInfo(serviceId)
   const [segment, setSegment] = useState<TaskSegment>('all')
+  const loadedTasks = [...paged.earlier, ...(page.data?.items ?? [])]
+  const { onOpen, onStop, panel } = useTaskPanel(loadedTasks, desired.data?.desired ?? null)
 
   if (page.isError) {
-    return <EmptyState>{page.error instanceof Error ? page.error.message : 'The tasks could not be loaded.'}</EmptyState>
+    return <EmptyState>{page.error instanceof Error ? page.error.message : 'The tasks could not be loadedTasks.'}</EmptyState>
   }
 
-  const loaded = [...paged.earlier, ...(page.data?.items ?? [])]
-  const runningCount = loaded.filter((task) => task.status === 'RUNNING').length
-  const stoppedCount = loaded.filter((task) => task.status === 'STOPPED').length
-  const items = segment === 'all' ? loaded : loaded.filter((task) => task.status === (segment === 'running' ? 'RUNNING' : 'STOPPED'))
+  const runningCount = loadedTasks.filter((task) => task.status === 'RUNNING').length
+  const stoppedCount = loadedTasks.filter((task) => task.status === 'STOPPED').length
+  const items = segment === 'all' ? loadedTasks : loadedTasks.filter((task) => task.status === (segment === 'running' ? 'RUNNING' : 'STOPPED'))
   const next = page.data?.next ?? undefined
   return (
     <>
@@ -44,7 +46,7 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
             options={[
               { value: 'running', label: 'Running', count: runningCount },
               { value: 'stopped', label: 'Stopped', count: stoppedCount },
-              { value: 'all', label: 'All', count: loaded.length },
+              { value: 'all', label: 'All', count: loadedTasks.length },
             ]}
           />
         }
@@ -55,12 +57,14 @@ export function TasksTab({ serviceId }: { serviceId: string }) {
           withService={false}
           utilisation={utilisation ?? undefined}
           next={next}
-          desiredCount={desired.data?.desired ?? null}
+          onOpen={onOpen}
+          onStop={onStop}
           onMore={() => {
             if (page.data?.next) paged.loadMore(page.data.items, page.data.next)
           }}
         />
       </Panel>
+      {panel}
     </>
   )
 }

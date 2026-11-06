@@ -30,6 +30,42 @@ test.describe('tasks as pavel', () => {
   })
 })
 
+test.describe('task drawer and layout as pavel', () => {
+  test.use(asUser('pavel'))
+
+  test('a task id opens the drawer with the stop reason; Esc closes it', async ({ page }) => {
+    // Repeats off, so the row is a task and not a "×N tasks" group.
+    await page.goto('/tasks?group=0')
+    const stoppedResizer = page.getByRole('row').filter({ hasText: 'image-resizer' }).filter({ hasText: 'Stopped (exit 137)' }).first()
+    await expect(stoppedResizer).toBeVisible()
+    await stoppedResizer.getByRole('button', { name: /^Open details for task / }).click()
+    const drawer = page.getByRole('dialog')
+    await expect(drawer.getByText('Reported by ECS')).toBeVisible()
+    await expect(drawer.getByText('Identity')).toBeVisible()
+    await expect(drawer.getByRole('link', { name: 'Open logs' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(drawer).toHaveCount(0)
+  })
+
+  test('at 1440 the KPI strip and the pinned row actions stay visible, with no clipped KPI text', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/tasks?filter=running&group=0')
+    const kpis = page.getByRole('list', { name: 'Task summary' })
+    await expect(kpis).toBeVisible()
+    const clipped = await kpis.locator('li').evaluateAll((cells) => cells.filter((cell) => cell.scrollWidth > cell.clientWidth).length)
+    expect(clipped).toBe(0)
+
+    const stop = page.getByRole('button', { name: 'Stop', exact: true }).first()
+    await expect(stop).toBeVisible()
+    const box = await stop.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x + box!.width).toBeLessThanOrEqual(1440)
+    // The page itself never scrolls sideways; only the table does.
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+})
+
 test.describe('expected stops as pavel', () => {
   test.use(asUser('pavel'))
 
