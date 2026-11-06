@@ -663,6 +663,8 @@ export interface ScalingDTO {
   policies: ScalingPolicyDTO[]
   scheduled_actions: ScheduledActionDTO[]
   activities: ScalingActivityDTO[]
+  /** Parts the last poll could not read: scaling_target, scaling_policies or scheduled_actions. Their values are the last known ones. */
+  unreadable_parts: string[]
   polled_at: string | null
 }
 export interface AlertDTO {

@@ -143,11 +143,18 @@ const justBeforeWindow = 24 * time.Hour
 func changeQueries(alerts []model.Alert) []store.ChangeQuery {
 	queries := make([]store.ChangeQuery, 0, len(alerts))
 	for _, alert := range alerts {
-		if alert.Key.Service != "" {
+		if alert.Key.Service != "" && hasJustBefore(alert) {
 			queries = append(queries, store.ChangeQuery{Key: alert.Key, Before: alert.At})
 		}
 	}
 	return queries
+}
+
+// hasJustBefore is false for a rollout alert: it is stamped with the ECS deployment's createdAt, which
+// precedes Harbormaster's record of the deploy that started it, so the newest earlier change would be
+// the previous deploy. Other kinds are stamped after the change that caused them.
+func hasJustBefore(alert model.Alert) bool {
+	return alert.Kind != "rollout_in_progress"
 }
 
 // alertNextStep builds the link that most directly helps with this kind of alert.

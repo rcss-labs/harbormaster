@@ -52,6 +52,26 @@ describe('ScalingTab', () => {
     expect(screen.queryByRole('link', { name: 'Edit in Deploy →' })).not.toBeInTheDocument()
   })
 
+  it('renders the readable parts and flags the unreadable scheduled actions, never "no scalable target"', async () => {
+    mockDesiredCount(desiredInfo(), { ...SCALING_PAYMENTS, scheduled_actions: [], unreadable_parts: ['scheduled_actions'] })
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    expect(await screen.findByText('Auto scaling')).toBeInTheDocument()
+    expect(definitionFor('Minimum tasks')).toHaveTextContent(String(SCALING_PAYMENTS.min))
+    expect(definitionFor('Maximum tasks')).toHaveTextContent(String(SCALING_PAYMENTS.max))
+    expect(definitionFor('Policy')).toHaveTextContent('ECSServiceAverageCPUUtilization')
+    expect(definitionFor('Scheduled actions')).toHaveTextContent('Scheduled actions could not be read')
+    expect(screen.queryByText('This service has no scalable target registered.')).not.toBeInTheDocument()
+  })
+
+  it('says the scalable target could not be read instead of claiming there is none', async () => {
+    mockDesiredCount(desiredInfo({ auto_scaling: null }), { ...SCALING_NONE, unreadable_parts: ['scaling_target'] })
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    expect(await screen.findByText('The scalable target could not be read.')).toBeInTheDocument()
+    expect(screen.queryByText('This service has no scalable target registered.')).not.toBeInTheDocument()
+  })
+
   it('renders min, max, policy and scheduled actions', async () => {
     mockDesiredCount()
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)

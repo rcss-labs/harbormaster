@@ -1207,6 +1207,7 @@ export const SCALING_PAYMENTS: ScalingDTO = {
       ended_at: null,
     },
   ],
+  unreadable_parts: [],
   polled_at: FIXTURE_NOW,
 }
 
@@ -1218,6 +1219,7 @@ export const SCALING_NONE: ScalingDTO = {
   policies: [],
   scheduled_actions: [],
   activities: [],
+  unreadable_parts: [],
   polled_at: FIXTURE_NOW,
 }
 

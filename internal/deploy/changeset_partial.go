@@ -15,10 +15,11 @@ func partsEdited(cs ChangeSet) []string {
 	if scaling.Target != nil || scaling.RemoveTarget || puts {
 		parts = append(parts, poller.PartScalingTarget)
 	}
-	if len(scaling.PutPolicies) > 0 || len(scaling.DeletePolicies) > 0 {
+	// Deregistering the target deletes its policies and scheduled actions with it, so removing it edits them too.
+	if scaling.RemoveTarget || len(scaling.PutPolicies) > 0 || len(scaling.DeletePolicies) > 0 {
 		parts = append(parts, poller.PartScalingPolicies)
 	}
-	if len(scaling.PutScheduledActions) > 0 || len(scaling.DeleteScheduledActions) > 0 {
+	if scaling.RemoveTarget || len(scaling.PutScheduledActions) > 0 || len(scaling.DeleteScheduledActions) > 0 {
 		parts = append(parts, poller.PartScheduledActions)
 	}
 	for _, policy := range scaling.PutPolicies {

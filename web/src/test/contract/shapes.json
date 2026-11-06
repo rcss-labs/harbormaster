@@ -1679,6 +1679,9 @@
         "schedule": "string",
         "timezone": "string"
       }
+    ],
+    "unreadable_parts": [
+      "string"
     ]
   },
   "search": {
