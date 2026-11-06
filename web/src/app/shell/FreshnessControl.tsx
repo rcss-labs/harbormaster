@@ -54,7 +54,7 @@ function problemText(type: DataType): string {
 }
 
 /** The worst state across regions: a failing core data type is bad, anything else that is not current is a warning. */
-function worstKind(items: PollerEntryDTO[]): 'ok' | 'warn' | 'bad' {
+export function worstKind(items: PollerEntryDTO[]): 'ok' | 'warn' | 'bad' {
   let worst: 'ok' | 'warn' | 'bad' = 'ok'
   for (const item of items) {
     for (const type of mergeTiers(item.tiers)) {
@@ -95,7 +95,7 @@ function RegionRow({ item, canSeeError }: { item: PollerEntryDTO; canSeeError: b
 }
 
 /** "auto scaling stale in 3 regions": non-core data types that fail or are throttled, counted by regions. */
-function nonCoreNote(items: PollerEntryDTO[]): string {
+export function nonCoreNote(items: PollerEntryDTO[]): string {
   const regionsByLabel = new Map<string, number>()
   for (const item of items) {
     for (const type of mergeTiers(item.tiers)) {
@@ -103,6 +103,26 @@ function nonCoreNote(items: PollerEntryDTO[]): string {
     }
   }
   return [...regionsByLabel].map(([label, regions]) => `${label.toLowerCase()} stale in ${regions} ${regions === 1 ? 'region' : 'regions'}`).join('; ')
+}
+
+/** True when any data type of any region fails or is throttled. */
+export const anyStale = (items: PollerEntryDTO[]) => items.some((item) => item.tiers.some((tier) => tier.failing || tier.throttled))
+
+/** The region rows and the "Open AWS accounts" link of the freshness panel; shared by the popover and the phone sheet. */
+export function FreshnessRegions({ items, admin, stale, onNavigate }: { items: PollerEntryDTO[]; admin: boolean; stale: boolean; onNavigate: () => void }) {
+  return (
+    <>
+      {items.length === 0 && <span className={styles.freshCurrent}>No regions are polled yet.</span>}
+      {items.map((item) => (
+        <RegionRow key={`${item.account_id}/${item.region}`} item={item} canSeeError={admin} />
+      ))}
+      {admin && stale && (
+        <Link to="/settings/accounts" onClick={onNavigate}>
+          Open AWS accounts
+        </Link>
+      )}
+    </>
+  )
 }
 
 /** "N of M regions current": a region is current when none of its core data types fails or is throttled. */
@@ -115,7 +135,7 @@ export function FreshnessControl() {
   if (!poller.data) return null
   const admin = me?.admin ?? false
   const note = nonCoreNote(items)
-  const stale = items.some((item) => item.tiers.some((tier) => tier.failing || tier.throttled))
+  const stale = anyStale(items)
   return (
     <div className={styles.popAnchor}>
       <button type="button" className={styles.freshBtn} aria-haspopup="dialog" aria-expanded={open} title="Data freshness" onClick={() => setOpen((shown) => !shown)}>
@@ -125,15 +145,7 @@ export function FreshnessControl() {
       <Popover open={open} onClose={() => setOpen(false)} label="Data freshness" align="right" width={400}>
         <div className={styles.freshPop}>
           <strong>Data freshness</strong>
-          {items.length === 0 && <span className={styles.freshCurrent}>No regions are polled yet.</span>}
-          {items.map((item) => (
-            <RegionRow key={`${item.account_id}/${item.region}`} item={item} canSeeError={admin} />
-          ))}
-          {admin && stale && (
-            <Link to="/settings/accounts" onClick={() => setOpen(false)}>
-              Open AWS accounts
-            </Link>
-          )}
+          <FreshnessRegions items={items} admin={admin} stale={stale} onNavigate={() => setOpen(false)} />
         </div>
       </Popover>
     </div>
