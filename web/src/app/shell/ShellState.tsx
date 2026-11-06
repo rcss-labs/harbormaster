@@ -1,3 +1,4 @@
+import { useScale } from '../scale'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 export const SIDEBAR_STORAGE_KEY = 'harbormaster-sidebar'
@@ -19,6 +20,11 @@ function readSidebarChoice(): SidebarChoice {
 }
 
 interface ShellStateValue {
+  /** The window width in device-independent px, before the UI scale. */
+  windowWidth: number
+  /** The width the layout sees: the window width divided by the effective UI scale. */
+  layoutWidth: number
+  /** Same as `layoutWidth`. */
   width: number
   sidebarCollapsed: boolean
   toggleSidebar: () => void
@@ -46,19 +52,21 @@ export function isEditable(target: EventTarget | null): boolean {
 export const modalDialogOpen = () => document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') !== null
 
 export function ShellStateProvider({ children }: { children: ReactNode }) {
-  const [width, setWidth] = useState(() => window.innerWidth)
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
+  const { effective } = useScale()
+  const layoutWidth = windowWidth / (effective / 100)
   const [sidebarChoice, setSidebarChoice] = useState<SidebarChoice>(readSidebarChoice)
   const [railOpen, setRailOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth)
+    const onResize = () => setWindowWidth(window.innerWidth)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const sidebarCollapsed = sidebarChoice ? sidebarChoice === 'collapsed' : width < SIDEBAR_AUTO_COLLAPSE_BELOW
+  const sidebarCollapsed = sidebarChoice ? sidebarChoice === 'collapsed' : layoutWidth < SIDEBAR_AUTO_COLLAPSE_BELOW
 
   const toggleSidebar = useCallback(() => {
     const next: SidebarChoice = sidebarCollapsed ? 'expanded' : 'collapsed'
@@ -95,7 +103,9 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ShellStateValue>(
     () => ({
-      width,
+      windowWidth,
+      layoutWidth,
+      width: layoutWidth,
       sidebarCollapsed,
       toggleSidebar,
       railOpen,
@@ -108,7 +118,7 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
       openHelp,
       closeHelp,
     }),
-    [width, sidebarCollapsed, toggleSidebar, railOpen, toggleRail, closeRail, paletteOpen, openPalette, closePalette, helpOpen, openHelp, closeHelp],
+    [windowWidth, layoutWidth, sidebarCollapsed, toggleSidebar, railOpen, toggleRail, closeRail, paletteOpen, openPalette, closePalette, helpOpen, openHelp, closeHelp],
   )
   return <ShellStateContext.Provider value={value}>{children}</ShellStateContext.Provider>
 }
