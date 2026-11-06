@@ -33,6 +33,12 @@ describe('CapacityTab daily panels', () => {
     expect(within(screen.getByRole('region', { name: /Most over-reserved/ })).getByText('source service_util_daily · kept 90 days')).toBeInTheDocument()
   })
 
+  it('states the at-max panel\'s history retention in words', async () => {
+    await renderTab(ANALYTICS_CAPACITY_DAILY)
+    const panel = within(screen.getByRole('region', { name: /Services at auto-scaling max/ }))
+    expect(panel.getByText(/^source scaling \+ service_counts_history · kept \d+ (days?|year)$/)).toBeInTheDocument()
+  })
+
   it('shows the over-reserved row with per-task sizes and unused vCPU', async () => {
     await renderTab(ANALYTICS_CAPACITY_DAILY)
     const row = within(screen.getByRole('region', { name: /Most over-reserved/ })).getByRole('row', { name: /payments-api/ })

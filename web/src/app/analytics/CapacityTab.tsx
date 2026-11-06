@@ -224,7 +224,7 @@ export function CapacityTab({ data, showSources }: TabProps<AnalyticsCapacity>) 
           {...common}
           title="Services at auto-scaling max"
           span="half"
-          source={counts ? { table: 'scaling + service_counts_history', kept: `history kept ${counts.kept}` } : undefined}
+          source={counts ? { table: 'scaling + service_counts_history', kept: counts.kept } : undefined}
           rows={data.at_scaling_max}
           columns={atMaxColumns}
           rowKey={(row) => row.service_id}
