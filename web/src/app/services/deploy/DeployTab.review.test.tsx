@@ -257,6 +257,27 @@ describe('Review', () => {
   })
 })
 
+describe('DeployTab: after an apply, until ECS reports the rollout', () => {
+  it('says the rollout is starting while the fields still show the old revision, and drops the note once the new revision is live', async () => {
+    const user = userEvent.setup()
+    captureChangeSets(() => HttpResponse.json(CHANGESET_APPLIED))
+    await openDeployTab()
+    await setEnvValue(user, 'debug')
+    await user.click(reviewButton())
+    await user.click(within(dialog()).getByRole('button', { name: 'Register and deploy :44' }))
+    expect(await screen.findByText('Deploying payments-api to :43.')).toBeInTheDocument()
+
+    // The stored snapshot still says :42 and shows no rollout: the editors fall back to the old image, so the tab must not look idle.
+    const note = await screen.findByRole('status', { name: 'Rollout starting' })
+    expect(note).toHaveTextContent('Rolling out :43')
+
+    server.use(
+      http.get('/api/services/:id/task-definition', () => HttpResponse.json({ ...TASK_DEFINITION_EDITABLE, deployed_revision: 43 })),
+    )
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Rollout starting' })).not.toBeInTheDocument(), { timeout: 8000 })
+  }, 15000)
+})
+
 describe('DeployTab: rollout progress', () => {
   it('shows the running rollout with a rollback above the editors', async () => {
     server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, deployments: SERVICE_NOTIFICATIONS.deployments })))

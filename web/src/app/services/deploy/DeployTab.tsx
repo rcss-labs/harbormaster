@@ -11,6 +11,7 @@ import {
   type DeploySettingsResponse,
 } from '../../../api/deploy'
 import { useService, useServiceTasks } from '../../../api/hooks'
+import { Banner } from '../../../components/Banner'
 import { Panel } from '../../../components/Panel'
 import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
@@ -53,6 +54,8 @@ function parseRevisionParam(value: string | null): number | null {
   return Number(value)
 }
 
+const ROLLOUT_NOTE_MAX_MS = 60_000
+
 /**
  * The Deploy tab: editors for the task definition, service settings and auto scaling, and a sticky Pending changes aside
  * that lists each edited field before and after and reviews every pending edit as one change set.
@@ -82,6 +85,9 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
   const [settingsChanged, setSettingsChanged] = useState(false)
   const [partial, setPartial] = useState<PartialRun | null>(null)
+  // The revision an apply just started rolling out. The stored snapshot lags ECS by a poll, so for a few seconds the editors fall back to
+  // the old image and no rollout shows; this note says a rollout is under way until the snapshot catches up.
+  const [startedRollout, setStartedRollout] = useState<number | null>(null)
   // Ticks so a finished rollout stays visible for a minute and then disappears.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -174,6 +180,12 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
       toast.show(`Registered${registered}. Someone with Deploy on ${tagName} can roll it out.`, 'ok')
     } else {
       toast.show(response.to_revision === null ? `Applied the changes to ${serviceName}.` : `Deploying ${serviceName} to :${response.to_revision}.`, 'ok')
+      if (response.to_revision !== null) {
+        const revision = response.to_revision
+        setStartedRollout(revision)
+        // Gives up after a minute so a rollout that never started does not leave the note on screen for good.
+        setTimeout(() => setStartedRollout((current) => (current === revision ? null : current)), ROLLOUT_NOTE_MAX_MS)
+      }
     }
     resetDrafts()
   }
@@ -234,8 +246,16 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     },
   }
 
+  const showingProgress = service.data !== undefined && shouldShowProgress(service.data, now)
+  const awaitingRollout = startedRollout !== null && !showingProgress && (deployedRevision ?? 0) < startedRollout
+
   return (
     <>
+      {awaitingRollout && (
+        <div role="status" aria-label="Rollout starting">
+          <Banner kind="info">Rolling out :{startedRollout}. The fields below show the new image once ECS reports it.</Banner>
+        </div>
+      )}
       {service.data && shouldShowProgress(service.data, now) && (
         <RolloutProgress serviceId={serviceId} service={service.data} canDeploy={service.data.can.deploy} tagName={tagName} />
       )}

@@ -153,7 +153,9 @@ test('deploy an image tag with review: pick, review in the sheet, apply, and the
   await review.getByRole('button', { name: /^(Register and deploy :\d+|Apply)/ }).click()
   await expect(page.getByText(/^(Deploying catalog-api to :\d+\.|Applied the changes to catalog-api\.)$/)).toBeVisible()
   await expect(bar).toHaveCount(0)
-  await expect(combobox).toHaveValue(next!)
+  // The server's snapshot follows ECS by one 5 s poll (more on a loaded machine); until then the field shows the old tag and the tab says
+  // "Rolling out :N", so the new tag is awaited for longer than the 5 s default.
+  await expect(combobox).toHaveValue(next!, { timeout: 30_000 })
 })
 
 test('deploy: changing an env var on the phone', async ({ page }) => {
