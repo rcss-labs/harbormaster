@@ -183,7 +183,14 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
                   </div>
                 )),
               ],
-              ['Task role', <span className={`${styles.mono} ${styles.small}`}>{imageTail(taskDefinition.task_role_arn)}</span>],
+              [
+                'Task role',
+                taskDefinition.task_role_arn ? (
+                  <span className={`${styles.mono} ${styles.small}`}>{imageTail(taskDefinition.task_role_arn)}</span>
+                ) : (
+                  <span className={styles.muted}>None</span>
+                ),
+              ],
               [
                 'ECS Exec',
                 service.enable_execute_command ? 'On' : <span className={styles.warning}>Off</span>,
