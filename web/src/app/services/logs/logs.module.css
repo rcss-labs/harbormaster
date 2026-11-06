@@ -26,12 +26,6 @@
 .ln[data-level="error"] .msg { color: var(--danger); }
 .empty { color: var(--dim); padding: 0 12px; }
 
-@media (max-width: 600px) {
-  /* Narrow: a shorter stream track so the message keeps room; the full stream stays in the cell's title. */
-  .ln { grid-template-columns: 64px 88px minmax(0, 1fr); gap: 8px; }
-  .search { flex: 1 1 100%; width: auto; }
-}
-
 /* Phone: the toolbar stacks (container + Tail, search, Level, status), the box runs to the bottom inset, rows wrap their message. */
 @media (max-width: 700px) {
   /* Takes the height left under the tabs; when the toolbar, banners and a usable log box need more, the page scrolls instead of the box spilling out. */

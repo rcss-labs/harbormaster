@@ -8,7 +8,7 @@ import { DataBanner } from '../../../components/DataBanner'
 import { Panel } from '../../../components/Panel'
 import { Seg, SegmentedFilter } from '../../../components/Seg'
 import { SortFieldsButton } from '../../../components/SortFieldsButton'
-import { useNarrow } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { useToast } from '../../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
 import { useCrumbs } from '../../shell/crumbs'
@@ -65,7 +65,7 @@ function RestartFlow({ service, onClose }: { service: ServiceListItemDTO; onClos
 
 export function ServicesPage() {
   useCrumbs([['Services']])
-  const phone = useNarrow()
+  const phone = usePhone()
   const { filters: scope } = useFilters()
   const list = useServicesList(scope)
   const { me } = useAuth()

@@ -9,7 +9,7 @@ import type { PillKind } from './Pill'
 import { Icon } from './Icon'
 import { StatusDot } from './StatusDot'
 import { StopCauseChip, stoppedStatus } from './stopStatus'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 import styles from './TaskTable.module.css'
 
 /** Utilisation in percent of the reserved size, keyed by the task's short id (the id CloudWatch reports). */

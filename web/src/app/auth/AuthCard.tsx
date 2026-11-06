@@ -1,6 +1,6 @@
 import { useId, type FormEvent, ReactNode } from 'react'
 import { Brand } from '../../components/Brand'
-import { usePhone } from '../../components/useNarrow'
+import { usePhone } from '../../components/usePhone'
 import styles from './auth.module.css'
 
 interface AuthCardProps {

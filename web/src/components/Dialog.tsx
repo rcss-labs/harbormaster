@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { BottomSheet } from './BottomSheet'
 import styles from './Dialog.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 export interface DialogAction {
   label: string

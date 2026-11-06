@@ -4,7 +4,7 @@ import { Ago } from '../../../components/Ago'
 import { DataTable, type DataTableColumn, type SortState } from '../../../components/DataTable'
 import { Icon } from '../../../components/Icon'
 import { PinButton } from '../../../components/PinButton'
-import { useNarrow } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { StatusDot } from '../../../components/StatusDot'
 import { TagChip } from '../../../components/TagChip'
 import { serviceRowStatus } from '../../clusters/serviceSeverity'
@@ -66,8 +66,7 @@ export function ServicesTable({
   metricsFailed,
   empty,
 }: ServicesTableProps) {
-  const narrow = useNarrow()
-  const phone = narrow
+  const phone = usePhone()
   const sortBy = (key: ServiceSortKey) => (service: ServiceListItemDTO) => sortValue(service, key)
   // CPU and Memory are measured for the rows of this page only, so they are not sortable.
   const metricColumn = (key: 'cpu_pct' | 'mem_pct', kind: MetricKind, phoneLabel: string): DataTableColumn<ServiceListItemDTO> => ({

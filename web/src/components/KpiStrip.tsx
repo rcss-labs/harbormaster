@@ -2,7 +2,7 @@ import { useInRouterContext, Link } from 'react-router'
 import type { ReactNode } from 'react'
 import { Sparkline } from '../charts/Sparkline'
 import styles from './KpiStrip.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 export interface KpiItem {
   label: string

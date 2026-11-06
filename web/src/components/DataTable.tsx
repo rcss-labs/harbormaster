@@ -1,7 +1,7 @@
 import { useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import styles from './DataTable.module.css'
 import { Pager } from './Pager'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 export interface DataTableColumn<R> {
   key: string

@@ -6,7 +6,7 @@ import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { Icon } from '../../../components/Icon'
 import { Panel } from '../../../components/Panel'
 import { Pill, type PillKind } from '../../../components/Pill'
-import { usePhone } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import styles from './taskDefinition.module.css'
 
 interface RevisionsTableProps {

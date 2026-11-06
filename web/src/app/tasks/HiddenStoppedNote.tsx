@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { useSettings } from '../../api/hooks'
-import { usePhone } from '../../components/useNarrow'
+import { usePhone } from '../../components/usePhone'
 import { useAuth } from '../auth/AuthProvider'
 import styles from './HiddenStoppedNote.module.css'
 

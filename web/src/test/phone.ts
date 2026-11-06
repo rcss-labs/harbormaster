@@ -1,4 +1,4 @@
-import { PHONE_QUERY } from '../components/useNarrow'
+import { PHONE_QUERY } from '../components/usePhone'
 
 /**
  * Stubs `window.matchMedia` so the phone query reports `matches` and every other query reports false.

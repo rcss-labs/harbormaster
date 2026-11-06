@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { usePhone } from '../../../components/useNarrow'
+import { usePhone } from '../../../components/usePhone'
 import { changedLineNumbers } from './diffLines'
 import styles from './taskDefinition.module.css'
 

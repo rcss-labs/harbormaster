@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { BottomSheet, SheetAction } from './BottomSheet'
 import { Icon } from './Icon'
 import styles from './Tabs.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 export interface TabItem {
   key: string

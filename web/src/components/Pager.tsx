@@ -1,5 +1,5 @@
 import styles from './Pager.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 interface PagerProps {
   /** 1-based current page. */

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import styles from './Toast.module.css'
-import { usePhone } from './useNarrow'
+import { usePhone } from './usePhone'
 
 export const TOAST_DURATION_MS = 5200
 
