@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useDesiredCountInfo, useSetDesiredCount } from '../../api/change'
 import type { ServiceDTO } from '../../api/types'
+import { BottomSheet } from '../../components/BottomSheet'
 import { showWarning, useToast } from '../../components/Toast'
 import styles from './service.module.css'
 import { DesiredCountDialog } from './DesiredCountDialog'
@@ -48,7 +49,8 @@ interface StepperProps {
   disabledTitle?: string
 }
 
-function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
+/** State of a desired-count edit: the draft, whether it is valid, the auto scaling range it may leave, and the confirmed apply. */
+export function useDesiredCountEditor(serviceId: string, service: ServiceDTO) {
   const toast = useToast()
   const info = useDesiredCountInfo(serviceId)
   const setDesiredCount = useSetDesiredCount(serviceId)
@@ -71,7 +73,6 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
   const outsideAutoScaling = valid && autoScaling !== null && (value < autoScaling.min || value > autoScaling.max)
   // Steps start from the field's current number, or from the service's count when the field is empty or invalid.
   const stepFrom = valid ? value : service.desired
-  const locked = disabledTitle !== undefined
 
   const apply = () =>
     setDesiredCount.mutate(
@@ -88,6 +89,16 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
         },
       },
     )
+
+  return { draft, setDraft, confirming, setConfirming, max, autoScaling, value, valid, dirty, outsideAutoScaling, stepFrom, apply, pending: setDesiredCount.isPending }
+}
+
+function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
+  const { draft, setDraft, confirming, setConfirming, max, autoScaling, value, valid, dirty, outsideAutoScaling, stepFrom, apply, pending } = useDesiredCountEditor(
+    serviceId,
+    service,
+  )
+  const locked = disabledTitle !== undefined
 
   return (
     <>
@@ -136,7 +147,7 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
         <DesiredCountDialog
           service={service}
           count={valid ? value : null}
-          pending={setDesiredCount.isPending}
+          pending={pending}
           onConfirm={apply}
           onCancel={() => setConfirming(false)}
         />
@@ -147,4 +158,47 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+interface DesiredCountSheetProps {
+  serviceId: string
+  service: ServiceDTO
+  onClose: () => void
+}
+
+/** Phone form of the header stepper: a sheet with a 44 px stepper; applying opens the same confirmation as the desktop Apply. */
+export function DesiredCountSheet({ serviceId, service, onClose }: DesiredCountSheetProps) {
+  const { draft, setDraft, confirming, setConfirming, max, autoScaling, value, valid, dirty, outsideAutoScaling, stepFrom, apply, pending } = useDesiredCountEditor(
+    serviceId,
+    service,
+  )
+  return (
+    <>
+      <BottomSheet open onClose={onClose} label="Change desired count" title="Change desired count" sub={`Now ${service.desired}.`}>
+        <div className={stepperStyles.sheetStepper} role="group" aria-label="Desired count">
+          <button type="button" aria-label="Decrease desired count" disabled={stepFrom <= 0} onClick={() => setDraft(String(Math.max(0, stepFrom - 1)))}>
+            −
+          </button>
+          <input type="number" inputMode="numeric" aria-label="Desired count" min={0} max={max} value={draft} onChange={(event) => setDraft(event.target.value)} />
+          <button type="button" aria-label="Increase desired count" disabled={max !== undefined && stepFrom >= max} onClick={() => setDraft(String(stepFrom + 1))}>
+            +
+          </button>
+        </div>
+        {outsideAutoScaling && autoScaling && (
+          <p className={stepperStyles.sheetWarn} role="status">
+            Auto scaling keeps this service between {autoScaling.min} and {autoScaling.max}. It will move {value} back into that range.{' '}
+            <Link className={styles.accentLink} to={`/services/${serviceId}/scaling`} onClick={onClose}>
+              Auto scaling settings →
+            </Link>
+          </p>
+        )}
+        <button type="button" className={stepperStyles.sheetApply} disabled={!dirty || !valid} onClick={() => setConfirming(true)}>
+          Update desired count
+        </button>
+      </BottomSheet>
+      {confirming && (
+        <DesiredCountDialog service={service} count={valid ? value : null} pending={pending} onConfirm={() => apply()} onCancel={() => setConfirming(false)} />
+      )}
+    </>
+  )
 }
