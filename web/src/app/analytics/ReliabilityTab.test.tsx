@@ -17,7 +17,7 @@ describe('ReliabilityTab 90-day panels', () => {
       const panel = screen.getByRole('region', { name: new RegExp(name) })
       expect(panel).not.toHaveAttribute('data-variant')
       expect(within(panel).queryByText(/needs new data/i)).not.toBeInTheDocument()
-      expect(within(panel).getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
+      expect(within(panel).getByText('source service_availability_daily · kept 1 year')).toBeInTheDocument()
     }
     expect(screen.queryByText(/Daily data appears after the first rollup/)).not.toBeInTheDocument()
   })
@@ -44,7 +44,7 @@ describe('ReliabilityTab 90-day panels', () => {
     for (const name of NINETY_DAY_PANELS) {
       const panel = within(screen.getByRole('region', { name: new RegExp(name) }))
       expect(panel.getByText('Daily data appears after the first rollup')).toBeInTheDocument()
-      expect(panel.getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
+      expect(panel.getByText('source service_availability_daily · kept 1 year')).toBeInTheDocument()
       expect(panel.queryByText(/needs new data|Not collected yet/i)).not.toBeInTheDocument()
     }
   })
