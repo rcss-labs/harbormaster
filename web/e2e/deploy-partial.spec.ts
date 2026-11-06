@@ -45,9 +45,8 @@ test('an environment change applies although scheduled actions are unreadable', 
   await names.nth(row - 1).fill('PARTIAL_DEPLOY_CHECK')
   await page.getByRole('textbox', { name: `Variable value ${row}` }).fill('on')
   await reviewAndApply(page, serviceName, /^Register and deploy :\d+$/, 'Env edit while scheduled actions are unreadable')
-  // An env edit registers a revision and starts a deployment, so the toast names the revision; "Applied the changes to …"
-  // is what the same toast says when the response carries no target revision.
-  await expect(page.getByText(new RegExp(`^(Deploying ${serviceName} to :\\d+|Applied the changes to ${serviceName})\\.$`))).toBeVisible()
+  // An env edit registers a revision and starts a deployment, so the toast names the revision.
+  await expect(page.getByText(new RegExp(`^Deploying ${serviceName} to :\\d+\\.$`))).toBeVisible()
 })
 
 test('adding a scheduled action is refused with the unreadable-part message', async ({ page }) => {
