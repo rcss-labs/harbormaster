@@ -138,6 +138,9 @@
 
 /* Phone: the tag search lists in a sheet; env, secret and argument rows stack instead of squeezing three columns into 390px. */
 @media (max-width: 700px) {
+  /* The inline tag list (a short list, shown without the sheet) keeps 44px rows and 12px marks as well. */
+  .option { min-height: 44px; }
+  .mark { font-size: 12px; }
   .sheetList { margin: 8px 0 0; padding: 0; list-style: none; }
   .sheetOption { min-height: 48px; padding: 8px 4px; font-size: 14px; border-bottom: 1px solid var(--row-border); }
   .envRow, .secretRow { grid-template-columns: minmax(0, 1fr) auto; }
