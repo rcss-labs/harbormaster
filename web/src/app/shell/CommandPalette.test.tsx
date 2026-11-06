@@ -78,6 +78,17 @@ describe('command palette', () => {
     expect(options[options.length - 1]).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('Go to lists Services and Analytics', async () => {
+    const { user, dialog } = await openPalette()
+    await user.type(within(dialog).getByRole('combobox'), 'ser')
+    const goTo = await waitFor(() => groupOf(dialog, 'Go to'))
+    expect(within(goTo).getByRole('option', { name: /Services/ })).toBeInTheDocument()
+    await user.clear(within(dialog).getByRole('combobox'))
+    await user.type(within(dialog).getByRole('combobox'), 'analy')
+    const analytics = await waitFor(() => groupOf(dialog, 'Go to'))
+    expect(within(analytics).getByRole('option', { name: /Analytics/ })).toBeInTheDocument()
+  })
+
   it('opens the highlighted item with Enter and closes', async () => {
     const { user, dialog } = await openPalette()
     await user.type(within(dialog).getByRole('combobox'), 'Tasks')

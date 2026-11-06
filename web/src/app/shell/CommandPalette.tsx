@@ -6,7 +6,7 @@ import type { SearchResultDTO } from '../../api/types'
 import { useAuth } from '../auth/AuthProvider'
 import { toggleTheme } from '../theme'
 import { useShellState } from './ShellState'
-import { shortcutLabel } from './TopBar'
+import { shortcutLabel } from './platform'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
 
@@ -102,10 +102,12 @@ export function CommandPalette() {
 
     const pages: [string, string][] = [
       ['Overview', '/'],
+      ['Services', '/services'],
       ['Clusters', '/clusters'],
       ['Tasks', '/tasks'],
       ['Networks', '/networks'],
       ['Storage', '/storage'],
+      ['Analytics', '/analytics/delivery'],
       me?.admin ? ['Settings', '/settings/general'] : ['My access', '/me/access'],
     ]
     const goTo: PaletteItem[] = pages.map(([label, href]) => ({ key: `nav:${href}`, tag: 'NAV', label, sub: href, run: go(href) })).filter((p) => matches(query, p.label))

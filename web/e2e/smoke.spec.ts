@@ -33,6 +33,7 @@ test('admin walks the read-only product', async ({ page }) => {
   await page.getByRole('link', { name: /AWS accounts/ }).click()
   await expect(page.getByRole('main').getByText('homelab-admin').first()).toBeVisible()
 
+  await page.getByRole('button', { name: /^Account menu for/ }).click()
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page).toHaveURL(/\/login(\?signed_out=1)?$/)
 })
@@ -71,13 +72,13 @@ test('search jumps to a service', async ({ page }) => {
   await expect(page.getByText('Unhealthy task').first()).toBeVisible()
 })
 
-test('throttle and stale banners absent on healthy estate', async ({ page }) => {
+test('freshness control reads all current on a healthy estate', async ({ page }) => {
   // Wait for the poller status to load first, so an empty page cannot pass vacuously.
   const pollerLoaded = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/poller' && response.ok())
   await login(page, 'pavel')
   await pollerLoaded
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
-  // CSS-module class names are hashed in the production build, so match on the stable prefix.
-  await expect(page.locator('[class*="_banner_"]')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^\d+ of \d+ regions current$/ })).toHaveText(/^(\d+) of \1 regions current$/)
+  // The per-region poller banners are gone from the page.
   await expect(page.getByText(/slowed by AWS throttling|Data for .* is/)).toHaveCount(0)
 })
