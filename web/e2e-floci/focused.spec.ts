@@ -61,7 +61,6 @@ test('only the scheduled actions panel degrades on Deploy', async ({ page, reque
 })
 
 test('freshness control counts core data', async ({ page }) => {
-  fixmeUntil('lane 1A', 'the shell has no freshness control yet')
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
   const control = page.getByRole('button', { name: /^\d+ of \d+ regions current$/ })
