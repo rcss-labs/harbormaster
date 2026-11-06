@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { EmptyState } from '../../components/EmptyState'
 import { usePhone } from '../../components/useNarrow'
@@ -20,7 +20,9 @@ import styles from './shell.module.css'
 /** Marks the document as phone-sized for global CSS and tracks the visual viewport so the keyboard never hides the bottom bars. */
 function PhoneEnvironment() {
   useVisualViewport()
-  useEffect(() => {
+  // A layout effect: the attribute drives the bottom inset in CSS, so it must be set in the commit that first paints the
+  // phone shell (a passive effect left a frame with the desktop inset, and could still be pending when a test read it).
+  useLayoutEffect(() => {
     document.documentElement.dataset.hmPhone = '1'
     return () => {
       delete document.documentElement.dataset.hmPhone

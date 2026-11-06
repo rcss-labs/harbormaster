@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, render, type RenderResult } from '@testing-library/react'
+import { cleanup, configure, render, type RenderResult } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { createElement, type ReactElement } from 'react'
@@ -8,6 +8,11 @@ import { afterAll, afterEach, beforeAll } from 'vitest'
 import type { MeDTO } from '../api/types'
 import { ToastProvider } from '../components/Toast'
 import { server } from './msw'
+
+// findBy*/waitFor give up after 1 s by default. The first render of a big page in a file (DeployTab, MetricsTab, the whole Shell)
+// takes longer than that when the machine is busy, and the assertions then fail on timing, not on behaviour. A passing wait
+// still returns as soon as its condition holds, so only a genuine failure takes longer to report.
+configure({ asyncUtilTimeout: 5000 })
 
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => {
