@@ -93,7 +93,7 @@ export function BusiestClusters() {
             <span className={styles.busyTrack} aria-hidden="true">
               <span
                 className={styles.busyFill}
-                style={{ width: `${Math.min(100, Math.max(0, cpu))}%`, background: cpu > HOT_CPU_PERCENT ? 'var(--warning)' : 'var(--accent)' }}
+                style={{ width: `${Math.min(100, Math.max(0, cpu))}%`, background: cpu > HOT_CPU_PERCENT ? 'var(--warn)' : 'var(--accent)' }}
               />
             </span>
             <span className={styles.busyValue}>{Math.round(cpu)}%</span>

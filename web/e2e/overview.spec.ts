@@ -38,6 +38,22 @@ test.describe('overview as pavel', () => {
   })
 })
 
+test.describe('overview at 390 px', () => {
+  test.use({ ...asUser('pavel'), viewport: { width: 390, height: 844 } })
+
+  test('neither layout scrolls sideways', async ({ page }) => {
+    // <main> is the scroll container, so sideways overflow shows up on it.
+    const overflow = () => main(page).evaluate((el) => el.scrollWidth - el.clientWidth)
+    await page.goto('/')
+    await expect(main(page).getByRole('region', { name: 'Needs attention' }).getByTestId('alert-row').first()).toBeVisible()
+    await expect(clusterSquares(page)).toHaveCount(6)
+    expect(await overflow()).toBeLessThanOrEqual(0)
+    await main(page).getByRole('radio', { name: 'Estate' }).click()
+    await expect(main(page).getByRole('region', { name: 'Services' })).toBeVisible()
+    expect(await overflow()).toBeLessThanOrEqual(0)
+  })
+})
+
 test.describe('overview as omer', () => {
   test.use(asUser('omer'))
 

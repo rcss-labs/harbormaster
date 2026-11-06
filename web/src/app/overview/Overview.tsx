@@ -4,6 +4,7 @@ import type { OverviewDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip, type KpiItem } from '../../components/KpiStrip'
+import { DataBanner } from '../../components/DataBanner'
 import { Panel } from '../../components/Panel'
 import { SegmentedFilter } from '../../components/Seg'
 import { REASON_COLOR } from '../../components/status'
@@ -20,7 +21,7 @@ import { useFilters } from '../shell/useFilters'
 import styles from './overview.module.css'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
-const STOP_ERROR_COLOR = 'var(--danger)'
+const STOP_ERROR_COLOR = 'var(--bad)'
 
 const accountsText = (count: number) => `${count} ${count === 1 ? 'account' : 'accounts'}`
 const percentText = (value: number | null) => (value === null ? '–' : `${Math.round(value)}%`)
@@ -44,24 +45,27 @@ function buildKpis(data: OverviewDTO, usage: ReturnType<typeof useUsageKpis>): K
   const errorStops = data.stops_per_hour.reduce((total, hour) => total + hour.error, 0)
   const { tasks } = data
   return [
-    { label: 'Clusters', value: withNote(data.clusters.length, `${healthyClusters} healthy`) },
+    { label: 'Clusters', href: '/clusters', value: withNote(data.clusters.length, `${healthyClusters} healthy`) },
     {
       label: 'Services',
-      value: withNote(data.services.total, needAttention > 0 ? `${needAttention} need attention` : 'all steady', needAttention > 0 ? 'var(--danger)' : undefined),
+      href: '/services?view=problems',
+      value: withNote(data.services.total, needAttention > 0 ? `${needAttention} need attention` : 'all steady', needAttention > 0 ? 'var(--bad)' : undefined),
     },
     {
       label: 'Tasks',
-      value: withNote(tasks.running, `of ${tasks.desired} · ${tasks.unhealthy} unhealthy`, tasks.unhealthy > 0 ? 'var(--warning)' : undefined),
+      href: '/tasks',
+      value: withNote(tasks.running, `of ${tasks.desired} · ${tasks.unhealthy} unhealthy`, tasks.unhealthy > 0 ? 'var(--warn)' : undefined),
       spark: tasks.history_72h.map((point) => point.running),
     },
     { label: 'Avg CPU', value: percentText(usage.cpu), spark: usage.cpuSpark },
     { label: 'Avg memory', value: percentText(usage.mem), spark: usage.memSpark },
     {
       label: 'Error stops, 24 h',
+      href: '/analytics/reliability',
       value: errorStops,
-      valueColor: errorStops > 0 ? 'var(--danger)' : undefined,
+      valueColor: errorStops > 0 ? 'var(--bad)' : undefined,
       spark: data.stops_per_hour.map((hour) => hour.error),
-      sparkColor: 'var(--danger)',
+      sparkColor: 'var(--bad)',
     },
   ]
 }
@@ -128,9 +132,10 @@ export function Overview() {
       layout={layout}
       onLayout={setLayout}
     >
+      <DataBanner tiers={['Clusters and services', 'Tasks', 'Alerts']} />
       <KpiStrip label="Estate key figures" items={buildKpis(data, usage)} />
       {layout === 'triage' ? (
-        <>
+        <div className="hm-wide-split">
           <NeedsAttention />
           <div className={styles.twoCol}>
             <EstateMap />
@@ -140,7 +145,7 @@ export function Overview() {
               <StopReasons data={data} />
             </div>
           </div>
-        </>
+        </div>
       ) : (
         <EstateView />
       )}
