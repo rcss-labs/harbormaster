@@ -79,11 +79,52 @@ function markLabelStyle(at: number): CSSProperties {
   return { left }
 }
 
+/** Rough plot width and glyph width used to estimate where labels collide; jsdom and SSR have no layout to measure. */
+const ASSUMED_PLOT_PX = 640
+const LABEL_CHAR_PX = 7.4
+const LABEL_PAD_PX = 8
+const LABEL_ROWS = 2
+
+export interface PlacedMark {
+  at: number
+  label: string
+  /** Row 0 is the top line, row 1 sits below it; `null` means no room, so only a hover target is drawn. */
+  row: number | null
+}
+
+/** Spans [start, end] in px that a label covers given its anchoring (centred, or inward at the edges). */
+function labelSpan(at: number, label: string): [number, number] {
+  const width = label.length * LABEL_CHAR_PX + LABEL_PAD_PX
+  const x = at * ASSUMED_PLOT_PX
+  if (at >= 1 - EDGE_ZONE) return [x - width, x]
+  if (at <= EDGE_ZONE) return [x, x + width]
+  return [x - width / 2, x + width / 2]
+}
+
+/** Assigns each label a row left to right: the first free row, else none. Overlap is estimated, not measured. */
+export function placeMarkLabels(marks: { at: number; label: string }[]): PlacedMark[] {
+  const rowEnds: number[] = Array(LABEL_ROWS).fill(-Infinity)
+  const placed = new Map<{ at: number; label: string }, number | null>()
+  const ordered = [...marks].sort((a, b) => a.at - b.at)
+  for (const mark of ordered) {
+    const [start, end] = labelSpan(mark.at, mark.label)
+    const row = rowEnds.findIndex((rowEnd) => start >= rowEnd)
+    if (row === -1) {
+      placed.set(mark, null)
+      continue
+    }
+    rowEnds[row] = end
+    placed.set(mark, row)
+  }
+  return marks.map((mark) => ({ ...mark, row: placed.get(mark) ?? null }))
+}
+
 /** Hand-written SVG line chart in a fixed-height panel; labels are HTML so text never stretches (mockup chart()). */
 export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130, marks = [] }: LineChartProps) {
   const panelHeight = Math.min(220, Math.max(80, height))
   const shown = collapseSeries(series)
   const fillOpacity = shown.length > 2 ? 0.03 : 0.08
+  const placedMarks = placeMarkLabels(marks)
   const yLabels = [0, 2, 4].map((step) => ({ top: `${100 - (step / 4) * 100}%`, text: `${fmtNum((max * step) / 4)}${unit}` }))
 
   return (
@@ -120,11 +161,15 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
             )
           })}
         </svg>
-        {marks.map((mark) => (
-          <span key={mark.at} className={styles.mkl} style={markLabelStyle(mark.at)}>
-            {mark.label}
-          </span>
-        ))}
+        {placedMarks.map((mark) =>
+          mark.row === null ? (
+            <span key={mark.at} className={styles.mkdot} style={{ left: `${mark.at * 100}%` }} title={mark.label} aria-label={mark.label} />
+          ) : (
+            <span key={mark.at} className={styles.mkl} style={{ ...markLabelStyle(mark.at), top: mark.row === 0 ? -1 : 17 }} title={mark.label}>
+              {mark.label}
+            </span>
+          ),
+        )}
       </div>
       <div />
       <div className={styles.px}>

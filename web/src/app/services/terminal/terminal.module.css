@@ -19,6 +19,12 @@
 .term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 12px 14px; box-sizing: border-box; }
 .term :global(.xterm) { height: 100%; }
 
+/* Below 1180px the layout is one column in normal flow: the fixed-height grid would squeeze the rows and paint the terminal over the Session panel. */
+@media (max-width: 1179px) {
+  div.page { flex: none; min-height: 0; }
+  .page .termWrap { flex: none; height: 300px; }
+}
+
 @media (max-width: 600px) {
   .field { flex: 1 1 100%; }
   .field select { flex: 1 1 auto; }

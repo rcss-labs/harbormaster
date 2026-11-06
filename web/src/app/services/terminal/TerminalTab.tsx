@@ -134,7 +134,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   }
 
   return (
-    <div className="hm-fill hm-with-side">
+    <div className={`hm-fill hm-with-side ${styles.page}`}>
       <section className={`${styles.root} hm-fill-col`} aria-label="Terminal">
         <div className={styles.toolbar}>
           <label className={styles.field}>
