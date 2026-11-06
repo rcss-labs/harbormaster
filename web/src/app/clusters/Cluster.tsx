@@ -10,15 +10,19 @@ import { DataBanner } from '../../components/DataBanner'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip } from '../../components/KpiStrip'
 import { PinButton } from '../../components/PinButton'
+import { Chips } from '../../components/Chips'
 import { Panel } from '../../components/Panel'
 import { StackBar } from '../../components/StackBar'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
+import { usePhone } from '../../components/useNarrow'
+import { Icon } from '../../components/Icon'
 import { STATUS_COLOR, statusKind } from '../../components/status'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { usePins } from '../shell/pins'
+import { ClusterHeadSheet } from './ClusterSheets'
 import { ClusterUsageChart } from './ClusterUsageChart'
 import { formatPercent } from './clusterMetrics'
 import { SERVICE_COLUMN_OPTIONS, ServicesTable } from './ServicesTable'
@@ -56,6 +60,8 @@ export function Cluster() {
   const { me } = useAuth()
   const { isPinned, toggle } = usePins()
   const [editing, setEditing] = useState<TagTarget | null>(null)
+  const [headSheetOpen, setHeadSheetOpen] = useState(false)
+  const phone = usePhone()
   const [visibleColumns, setVisibleColumns] = useColumnPrefs(
     'harbormaster-columns:cluster-services',
     SERVICE_COLUMN_OPTIONS.map((column) => column.key),
@@ -91,10 +97,10 @@ export function Cluster() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.pageHead}>
+      <header className={phone ? `${styles.pageHead} ${styles.stickyHead}` : styles.pageHead}>
         <div className={styles.titles}>
           <div className={styles.titleRow}>
-            <h1 className={styles.monoTitle}>{cluster.name}</h1>
+            <h1 className={`${styles.monoTitle} hm-phone-title-sr`}>{cluster.name}</h1>
             <TagChip
               tag={cluster.tag}
               kind="cluster"
@@ -108,6 +114,11 @@ export function Cluster() {
                 toggle({ kind: 'cluster', id: cluster.id, name: cluster.name, account_name: cluster.account_name, account_id: cluster.account_id })
               }
             />
+            {phone && (
+              <button type="button" className={styles.moreButton} aria-label={`More actions for ${cluster.name}`} aria-haspopup="dialog" onClick={() => setHeadSheetOpen(true)}>
+                <Icon name="more" size={18} />
+              </button>
+            )}
           </div>
           <div className={styles.metaLine}>
             <span>
@@ -132,15 +143,28 @@ export function Cluster() {
             </span>
           </div>
         </div>
-        <div className={styles.actions}>
-          <Link className={styles.btn} to={`/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`}>
-            Tasks in this cluster
-          </Link>
-          <a className={styles.btn} href={cluster.console_url} target="_blank" rel="noopener">
-            Open in AWS console ↗
-          </a>
-        </div>
+        {!phone && (
+          <div className={styles.actions}>
+            <Link className={styles.btn} to={`/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`}>
+              Tasks in this cluster
+            </Link>
+            <a className={styles.btn} href={cluster.console_url} target="_blank" rel="noopener">
+              Open in AWS console ↗
+            </a>
+          </div>
+        )}
       </header>
+      {phone && (
+        <ClusterHeadSheet
+          open={headSheetOpen}
+          cluster={cluster}
+          onClose={() => setHeadSheetOpen(false)}
+          onEditTag={() => {
+            setHeadSheetOpen(false)
+            setEditing({ kind: 'cluster', id: cluster.id, name: cluster.name, tag: cluster.tag })
+          }}
+        />
+      )}
       <DataBanner tiers={['Clusters and services', 'Tasks']} />
 
       <KpiStrip
@@ -175,8 +199,24 @@ export function Cluster() {
         ]}
       />
 
+      {phone && (
+        <Chips
+          label="Section"
+          value=""
+          options={[
+            { value: 'services', label: 'Services' },
+            { value: 'tasks', label: 'Tasks' },
+            { value: 'capacity', label: 'Capacity' },
+          ]}
+          onChange={(section) => document.getElementById(`cluster-${section}`)?.scrollIntoView({ block: 'start' })}
+        />
+      )}
+
       <div className={styles.twoCol}>
-        <ClusterUsageChart metrics={clusterMetrics} insights={insights} error={clusterMetricsQuery.error} />
+        <div id="cluster-capacity" className={styles.contents}>
+          <ClusterUsageChart metrics={clusterMetrics} insights={insights} error={clusterMetricsQuery.error} />
+        </div>
+        <div id="cluster-tasks" className={styles.contents}>
         <Panel title="Tasks by service" actions={<span>bar = running · tick = desired</span>}>
           <div className={styles.barList}>
             {bySeverity.slice(0, BARS_SHOWN).map((service) => {
@@ -200,12 +240,25 @@ export function Cluster() {
             <div className={styles.note}>{`${bySeverity.length - BARS_SHOWN} more in the table below`}</div>
           )}
           <div className={styles.stopsBlock}>
+            <h3 className={styles.stopsTitle}>Capacity providers</h3>
+            <StackBar
+              parts={[
+                { n: cluster.fargate_tasks, color: 'var(--series-1)', label: 'Fargate' },
+                { n: cluster.spot_tasks, color: 'var(--series-2)', label: 'Spot' },
+              ]}
+              label="Fargate and Spot tasks"
+              legend
+            />
+          </div>
+          <div className={styles.stopsBlock}>
             <h3 className={styles.stopsTitle}>Task stops per hour</h3>
             <BarChart cols={stopColumns} height={80} xLabels={[[0, '24 h ago'], [23, 'now']]} />
           </div>
         </Panel>
+        </div>
       </div>
 
+      <div id="cluster-services" className={styles.contents}>
       <Panel
         title="Services"
         flush
@@ -225,6 +278,7 @@ export function Cluster() {
           visibleColumns={visibleColumns}
         />
       </Panel>
+      </div>
 
       {editing?.kind === 'cluster' && (
         <EditTagDialog kind="cluster" id={editing.id} name={editing.name} current={editing.tag.id} onClose={() => setEditing(null)} />

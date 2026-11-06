@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
 import type { ClusterServiceDTO } from '../../api/types'
 import { Sparkline } from '../../charts/Sparkline'
@@ -7,9 +8,12 @@ import { DataTable, type DataTableColumn } from '../../components/DataTable'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import { STATUS_COLOR, statusKind } from '../../components/status'
+import { usePhone } from '../../components/useNarrow'
+import { RowMoreButton } from './ClusterSheets'
 import styles from './clusters.module.css'
 import { serviceRowStatus, serviceSeverity } from './serviceSeverity'
 import { type ClusterServiceMetrics, percentText, presentValues } from './ServiceCardMetrics'
+import { ServiceRowSheet } from './ServiceRowSheet'
 import type { TagClickHandler } from './tagTarget'
 
 export const SERVICES_PAGE_SIZE = 25
@@ -41,6 +45,8 @@ interface ServicesTableProps {
 
 /** Services of one cluster, problems first, 25 to a page. */
 export function ServicesTable({ services, clusterName, onTagClick, metrics, insights = false, visibleColumns }: ServicesTableProps) {
+  const phone = usePhone()
+  const [actingOn, setActingOn] = useState<ClusterServiceDTO | null>(null)
   const columns: DataTableColumn<ClusterServiceDTO>[] = [
     {
       key: 'name',
@@ -57,6 +63,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
       key: 'tag',
       header: 'Label',
       width: '96px',
+      phone: 'status',
       render: (service) => (
         <TagChip
           tag={service.tag}
@@ -108,6 +115,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
       header: 'CPU, 24 h',
       width: '110px',
       render: (service) => {
+        if (phone) return <span className={styles.mono}>{`CPU ${insights && metrics?.[service.id] ? percentText(metrics[service.id].cpu_now) : '–'}`}</span>
         const history = insights && metrics?.[service.id] ? presentValues(metrics[service.id].cpu) : []
         return history.length > 0 ? <Sparkline values={history} height={24} /> : <span className={styles.dim}>–</span>
       },
@@ -118,7 +126,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
       width: '70px',
       align: 'right',
       render: (service) => (
-        <span className={styles.mono}>{insights && metrics?.[service.id] ? percentText(metrics[service.id].mem_now) : '–'}</span>
+        <span className={styles.mono}>{`${phone ? 'Mem ' : ''}${insights && metrics?.[service.id] ? percentText(metrics[service.id].mem_now) : '–'}`}</span>
       ),
     },
     {
@@ -130,6 +138,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
   ]
 
   return (
+    <>
     <DataTable
       label="Services"
       columns={columns}
@@ -140,6 +149,9 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
       rowStatus={(service) => serviceRowStatus(service.status)}
       defaultSort={{ key: 'status', dir: 'desc' }}
       pageSize={SERVICES_PAGE_SIZE}
+      rowAction={phone ? (service) => <RowMoreButton name={service.name} onClick={() => setActingOn(service)} /> : undefined}
     />
+    {phone && <ServiceRowSheet service={actingOn} clusterName={clusterName} onClose={() => setActingOn(null)} onTagClick={onTagClick} />}
+    </>
   )
 }
