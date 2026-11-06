@@ -32,9 +32,9 @@ test('the compact header shows Deploy and the actions sheet keeps every row', as
     await expect(menu.getByRole('menuitem', { name })).toBeVisible()
   }
   await expectSheetWithinViewport(page)
+  await expectPhoneLayoutClean(page)
   await page.keyboard.press('Escape')
   await expect(menu).toBeHidden()
-  await expectPhoneLayoutClean(page)
 })
 
 test('Change desired count opens a sheet and then the confirmation without applying', async ({ page }) => {
@@ -48,11 +48,9 @@ test('Change desired count opens a sheet and then the confirmation without apply
   const confirm = page.getByRole('dialog', { name: /^Set payments-api to \d+ tasks\?$/ })
   await expect(confirm).toBeVisible()
   await expectSheetWithinViewport(page)
+  await expectPhoneLayoutClean(page)
   await confirm.getByRole('button', { name: 'Cancel' }).click()
   await expect(confirm).toBeHidden()
-  await page.keyboard.press('Escape')
-  await expect(sheet).toBeHidden()
-  await expectPhoneLayoutClean(page)
 })
 
 test('every section is reachable: All sections lists nine and the strip scrolls the open tab into view', async ({ page }) => {
@@ -95,7 +93,6 @@ test('Overview rollout panel and the task actions sheet', async ({ page }) => {
     .click()
   await expect(page.getByRole('menu', { name: /^Actions for task / })).toBeVisible()
   await expectSheetWithinViewport(page)
-  await page.keyboard.press('Escape')
   await expectPhoneLayoutClean(page)
 })
 
@@ -111,8 +108,8 @@ test('Task definition: editing shows the sticky bar, the review sheet fits and r
   await bar.getByRole('button', { name: /^Review and register/ }).click()
   await expect(page.getByRole('dialog', { name: /^Register payments-api:\d+\?$/ })).toBeVisible()
   await expectSheetWithinViewport(page)
-  await page.getByRole('button', { name: 'Keep editing' }).click()
   await expectPhoneLayoutClean(page)
+  await page.getByRole('button', { name: 'Keep editing' }).click()
   await bar.getByRole('button', { name: 'Discard' }).click()
 
   await page

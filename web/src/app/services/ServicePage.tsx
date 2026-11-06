@@ -57,11 +57,12 @@ export function ServicePage() {
   )
 
   // On a phone the tab strip scrolls: bring the open tab into view so it is never the clipped one.
+  const loaded = service !== undefined
   useEffect(() => {
     const nav = headRef.current?.querySelector('nav')
     const current = nav?.querySelector<HTMLElement>('a[class*="active"]')
     if (nav && current) nav.scrollLeft = Math.max(0, current.offsetLeft - (nav.clientWidth - current.offsetWidth) / 2)
-  }, [tab, service !== undefined])
+  }, [tab, loaded])
 
   if (!isTabKey(tab)) return <Navigate to={`/services/${serviceId}/${DEFAULT_TAB}`} replace />
   if (serviceQuery.error instanceof ApiError && serviceQuery.error.status === 404) return <NoAccess />
