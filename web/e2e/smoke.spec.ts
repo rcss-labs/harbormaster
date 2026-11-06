@@ -24,12 +24,12 @@ test('admin walks the read-only product', async ({ page }) => {
   await tasksTab.click()
   await expect(page.getByText('Running', { exact: true })).toHaveCount(3)
 
-  await page.getByRole('link', { name: /^Operations log/ }).click()
+  await page.getByRole('link', { name: /^History/ }).click()
   await expect(page.getByText('has reached a steady state.').first()).toBeVisible()
 
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click()
   await page.getByRole('link', { name: 'Users & permissions' }).click()
-  await expect(page.getByRole('row', { name: /^omer User V L O D E T/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'omer on Dev: Operator' })).toBeVisible()
   await page.getByRole('link', { name: /AWS accounts/ }).click()
   await expect(page.getByRole('main').getByText('homelab-admin').first()).toBeVisible()
 

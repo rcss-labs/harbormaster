@@ -47,7 +47,7 @@ export function ActivityRail() {
   )
 
   return (
-    <Drawer open={railOpen} onClose={closeRail} title="Activity">
+    <Drawer open={railOpen} onClose={closeRail} title="Activity" closeLabel="Close activity">
       <div className={styles.railFilters}>
         <SegmentedFilter
           label="Activity filter"

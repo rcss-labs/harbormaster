@@ -1,8 +1,8 @@
 /* Field, hint and button rules follow the Users page (see app/admin/users/users.module.css). */
-.stack { display: grid; gap: 12px; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rowSpread { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.form { display: grid; gap: 10px; max-width: 520px; }
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-width: 520px; }
 .formWide { max-width: none; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px 16px; max-width: 720px; }
 .field { display: grid; gap: 5px; }

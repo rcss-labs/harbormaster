@@ -5,7 +5,8 @@
 .pageHead h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
 .headMeta { color: var(--muted); font-size: 12px; }
 
-.page .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: start; }
+/* flex: none overrides hm-fill's flex-basis 0: the detail is taller than the window, so the grid must size to its content or the detail pane overlaps the VPC list. */
+.page .layout { flex: none; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: start; }
 .detail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .twoCol { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 @container (max-width: 1100px) {

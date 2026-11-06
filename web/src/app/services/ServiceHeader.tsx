@@ -50,10 +50,14 @@ export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
         </div>
       </div>
       <div className={styles.actions}>
-        {isUnlocked(TAB_LOCKS.deploy!, service.can) && (
+        {isUnlocked(TAB_LOCKS.deploy!, service.can) ? (
           <Link className={styles.btnPrimary} to={`/services/${service.id}/deploy`}>
             Deploy
           </Link>
+        ) : (
+          <button type="button" className={styles.btnPrimary} disabled title={`You need ${TAB_LOCKS.deploy!.action} on ${service.tag.name}`}>
+            Deploy
+          </button>
         )}
         <HeaderActions serviceId={service.id} service={service} />
       </div>

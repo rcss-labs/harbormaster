@@ -2,7 +2,7 @@ import type { TreeNode } from '../../api/networks'
 import type { Status } from '../../api/types'
 import { serviceSeverity } from '../clusters/serviceSeverity'
 
-export type PlacementKind = 'ZONE' | 'SUBNET' | 'CLUSTER' | 'SERVICE'
+export type PlacementKind = 'Zone' | 'Subnet' | 'Cluster' | 'Service'
 
 export interface PlacementRow {
   key: string
@@ -39,16 +39,16 @@ export function placementRows(root: TreeNode, isOpen: (clusterKey: string) => bo
   const walk = (node: TreeNode, depth: number) => {
     switch (node.kind) {
       case 'az':
-        rows.push({ key: node.key, depth, kind: 'ZONE', name: node.label, meta: `${plural(node.az.subnets, 'subnet')} · ${plural(node.tasks, 'task')}`, toggles: false, open: true })
+        rows.push({ key: node.key, depth, kind: 'Zone', name: node.label, meta: `${plural(node.az.subnets, 'subnet')} · ${plural(node.tasks, 'task')}`, toggles: false, open: true })
         break
       case 'nosubnet':
-        rows.push({ key: node.key, depth, kind: 'ZONE', name: 'No subnet', meta: plural(node.tasks, 'task'), toggles: false, open: true })
+        rows.push({ key: node.key, depth, kind: 'Zone', name: 'No subnet', meta: plural(node.tasks, 'task'), toggles: false, open: true })
         break
       case 'subnet':
         rows.push({
           key: node.key,
           depth,
-          kind: 'SUBNET',
+          kind: 'Subnet',
           name: node.label,
           meta: `${node.subnet.cidr} · ${node.subnet.ips_used} of ${node.subnet.ips_total} IPs${node.tasks === 0 ? ' · no running tasks' : ''}`,
           toggles: false,
@@ -61,7 +61,7 @@ export function placementRows(root: TreeNode, isOpen: (clusterKey: string) => bo
         rows.push({
           key: node.key,
           depth,
-          kind: 'CLUSTER',
+          kind: 'Cluster',
           name: node.label,
           meta: `${plural(services, 'service')} · ${plural(node.tasks, 'task')} here`,
           status: worstStatus(node),
@@ -77,7 +77,7 @@ export function placementRows(root: TreeNode, isOpen: (clusterKey: string) => bo
         rows.push({
           key: node.key,
           depth,
-          kind: 'SERVICE',
+          kind: 'Service',
           name: node.label,
           meta: `${plural(node.tasks, 'task')} here · :${node.service.revision}${unhealthy > 0 ? ` · ${unhealthy} unhealthy` : ''}`,
           status: node.service.status,
@@ -88,7 +88,7 @@ export function placementRows(root: TreeNode, isOpen: (clusterKey: string) => bo
         return
       }
       case 'standalone':
-        rows.push({ key: node.key, depth, kind: 'SERVICE', name: 'Standalone tasks', meta: plural(node.tasks, 'task'), toggles: false, open: true })
+        rows.push({ key: node.key, depth, kind: 'Service', name: 'Standalone tasks', meta: plural(node.tasks, 'task'), toggles: false, open: true })
         return
       case 'task':
         return

@@ -42,6 +42,7 @@ test.describe('clusters filter bar as pavel', () => {
     await page.goto('/clusters')
     const rows = page.getByRole('table', { name: 'Clusters' }).getByRole('row')
     await expect(rows).toHaveCount(7)
+    await page.getByRole('button', { name: /^Scope:/ }).click()
     await page.getByRole('combobox', { name: 'Account filter' }).selectOption({ label: 'staging-example' })
     await expect(rows).toHaveCount(2)
   })

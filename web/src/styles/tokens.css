@@ -14,7 +14,7 @@
   --ok-soft: rgba(4, 120, 87, 0.1); --warn-soft: rgba(156, 71, 7, 0.1); --bad-soft: rgba(185, 28, 28, 0.09);
   --info-soft: rgba(91, 63, 196, 0.1); --exp-soft: rgba(15, 118, 110, 0.1); --mute-soft: rgba(85, 98, 111, 0.1);
   --s1: #0a6f9c; --s2: #c96a12; --s3: #0f8f6c; --s4: #7c3aed; --s5: #d6336c; --s6: #8a6d00;
-  --grid: #e6ebf0; --cell-ok: #5fb596; --term: #0d1217; --term-text: #d7e3ec;
+  --grid: #e6ebf0; --cell-ok: #3d9a7c; --term: #0d1217; --term-text: #d7e3ec;
   --scrim: rgba(16, 24, 40, 0.42); --pop: 0 18px 50px rgba(16, 24, 40, 0.2);
 }
 @media (prefers-color-scheme: dark) {

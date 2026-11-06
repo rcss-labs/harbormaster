@@ -12,21 +12,23 @@ interface DrawerProps {
   /** 620px instead of 440px. */
   wide?: boolean
   footer?: ReactNode
+  /** Accessible name of the close button; defaults to "Close panel". */
+  closeLabel?: string
   children: ReactNode
 }
 
 /** Right-hand modal panel over a scrim. Esc, the scrim and the close button close it; focus returns to the opener. */
-export function Drawer({ open, onClose, title, sub, wide = false, footer, children }: DrawerProps) {
+export function Drawer({ open, onClose, title, sub, wide = false, footer, closeLabel, children }: DrawerProps) {
   if (!open) return null
   return createPortal(
-    <DrawerBody onClose={onClose} title={title} sub={sub} wide={wide} footer={footer}>
+    <DrawerBody onClose={onClose} title={title} sub={sub} wide={wide} footer={footer} closeLabel={closeLabel}>
       {children}
     </DrawerBody>,
     document.body,
   )
 }
 
-function DrawerBody({ onClose, title, sub, wide, footer, children }: Omit<DrawerProps, 'open'>) {
+function DrawerBody({ onClose, title, sub, wide, footer, closeLabel = 'Close panel', children }: Omit<DrawerProps, 'open'>) {
   const titleId = useId()
   const ref = useRef<HTMLDivElement>(null)
   useFocusReturn(ref)
@@ -53,7 +55,7 @@ function DrawerBody({ onClose, title, sub, wide, footer, children }: Omit<Drawer
             <h2 id={titleId}>{title}</h2>
             {sub !== undefined && <p className={styles.sub}>{sub}</p>}
           </div>
-          <button type="button" className={styles.close} aria-label="Close panel" onClick={onClose}>
+          <button type="button" className={styles.close} aria-label={closeLabel} onClick={onClose}>
             <Icon name="x" />
           </button>
         </header>

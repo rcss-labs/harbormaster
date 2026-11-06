@@ -29,11 +29,15 @@ describe('ServicePage', () => {
     expect(headerLink).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/deploy`)
   })
 
-  it('Deploy link hidden when locked', async () => {
+  it('header shows a disabled Deploy button with the lock tooltip when locked', async () => {
     server.use(withCan(viewerOnly))
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)
     await screen.findByRole('heading', { name: 'payments-api', level: 1 })
-    expect(screen.queryByRole('link', { name: 'Deploy' })).not.toBeInTheDocument()
+    const tabs = screen.getByRole('navigation', { name: 'Service tabs' })
+    expect(screen.getAllByRole('link', { name: /^Deploy/ }).filter((link) => !tabs.contains(link))).toHaveLength(0)
+    const button = screen.getByRole('button', { name: 'Deploy' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', `You need Edit, Deploy or Operate on ${SERVICE_PAYMENTS.tag.name}`)
   })
 
   it('tab bar labels the Configure group and names the last tab History', async () => {

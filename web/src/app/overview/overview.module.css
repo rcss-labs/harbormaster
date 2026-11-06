@@ -58,8 +58,6 @@ a.whatTitle:hover { color: var(--accent); }
 .mapSub { font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cells { display: flex; flex-wrap: wrap; gap: 3px; }
 .cell { width: 16px; height: 16px; border-radius: 3px; display: block; }
-/* --cell-ok alone is under 3:1 on the light surface, so healthy cells carry a ring in --ok to keep their edge visible. */
-.cellOk { box-shadow: inset 0 0 0 1px var(--ok); }
 .cell:hover, .cell:focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
 
 /* Busiest clusters */

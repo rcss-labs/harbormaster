@@ -56,6 +56,16 @@ describe('Drawer', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('labels the close button with closeLabel when given', async () => {
+    render(
+      <Drawer open onClose={() => {}} title="Activity" closeLabel="Close activity">
+        <p>body</p>
+      </Drawer>,
+    )
+    expect(screen.getByRole('button', { name: 'Close activity' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument()
+  })
+
   it('keeps Tab inside the drawer', async () => {
     const user = userEvent.setup()
     render(<Host />)

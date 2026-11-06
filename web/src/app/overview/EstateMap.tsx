@@ -45,7 +45,7 @@ export function EstateMap() {
     <span className={styles.legend}>
       {LEGEND.map((status) => (
         <span key={status} className={styles.legendItem}>
-          <i className={status === 'healthy' ? styles.cellOk : undefined} style={{ background: CLUSTER_CELL_COLOR[status] }} />
+          <i style={{ background: CLUSTER_CELL_COLOR[status] }} />
           {clusterStatusLabel(status)}
         </span>
       ))}
@@ -76,7 +76,7 @@ export function EstateMap() {
                       <Link
                         key={cluster.id}
                         to={`/clusters/${cluster.id}`}
-                        className={`${styles.cell} ${cluster.status === 'healthy' ? styles.cellOk : ''}`.trim()}
+                        className={styles.cell}
                         style={{ background: CLUSTER_CELL_COLOR[cluster.status] }}
                         aria-label={label}
                         title={label}

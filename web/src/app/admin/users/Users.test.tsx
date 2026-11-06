@@ -318,10 +318,13 @@ describe('acting on yourself', () => {
       }),
     )
     renderApp('/settings/users')
-    await screen.findByRole('button', { name: 'Sign out' })
+    const accountMenu = await screen.findByRole('button', { name: 'Account menu for pavel' })
+    fireEvent.click(accountMenu)
     expect(screen.queryByRole('button', { name: 'Link SSO account' })).not.toBeInTheDocument()
+    fireEvent.click(accountMenu)
     fireEvent.click((await menuItem('pavel', 'Unlink SSO…')))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Unlink' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Account menu for pavel' }))
     expect(await screen.findByRole('button', { name: 'Link SSO account' })).toBeInTheDocument()
   })
 
