@@ -2,16 +2,25 @@ import { asUser, expect, test } from './fixtures/test'
 import type { Page } from '@playwright/test'
 
 // Read-only: runs in the observe project. Tag ids on a fresh DB: Dev 1, Staging 2, Prod 3.
-// Always target the top bar control by its exact name so other controls with "Tag" in their label never match.
-const tagButton = (page: Page) => page.getByRole('button', { name: 'Tag filter', exact: true })
+// The tag control lives in the Scope popover; open it on demand. Target it by its exact name so other controls with "Tag" in their label never match.
+const scopeButton = (page: Page) => page.getByRole('button', { name: /^Scope:/ })
+const scopePopover = (page: Page) => page.getByRole('dialog', { name: 'Scope' })
+async function openScope(page: Page) {
+  if (!(await scopePopover(page).isVisible())) await scopeButton(page).click()
+  return scopePopover(page)
+}
+const tagButton = async (page: Page) => (await openScope(page)).getByRole('button', { name: 'Tag filter', exact: true })
 const tagOptions = (page: Page) => page.getByRole('group', { name: 'Tag filter options' })
 const main = (page: Page) => page.getByRole('main')
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' })
 
 async function toggleTag(page: Page, name: string) {
-  await tagButton(page).click()
+  await (await tagButton(page)).click()
   await tagOptions(page).getByRole('checkbox', { name }).click()
+  // First Escape closes the checkbox list, the second the Scope popover.
   await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(scopePopover(page)).toHaveCount(0)
 }
 
 /** Header row plus one row per listed cluster. */
@@ -83,7 +92,7 @@ test.describe('tag filter as pavel', () => {
     // localStorage lasts inside this test only, so set and reload in the same test.
     await page.goto('/clusters')
     await expect(page).toHaveURL(/tag=3/)
-    await expect(tagButton(page)).toHaveText('Prod')
+    await expect(scopeButton(page)).toContainText('Prod')
   })
 })
 
@@ -94,7 +103,7 @@ test.describe('tag filter as omer', () => {
     await page.goto('/clusters?tag=3')
     await expect(page.getByRole('row', { name: /core-services/ })).toHaveCount(0)
     await expect(page.getByText(/No clusters match/)).toBeVisible()
-    await tagButton(page).click()
+    await (await tagButton(page)).click()
     await expect(tagOptions(page).getByRole('checkbox', { name: 'Dev' })).toHaveCount(1)
     await expect(tagOptions(page).getByRole('checkbox', { name: 'Prod' })).toHaveCount(0)
   })

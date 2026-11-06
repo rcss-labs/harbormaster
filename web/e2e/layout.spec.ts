@@ -10,9 +10,9 @@ test('wide screens fill the content width', async ({ page }) => {
   const main = page.getByRole('main')
   await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
-  // Grid is sidebar | main | docked activity rail (>= 1280px): 2560 - 212 - 300 = 2048.
+  // Grid is sidebar | main; the activity rail is a drawer and no longer docks: 2560 - 212 = 2348.
   const mainBox = await main.boundingBox()
-  expect(mainBox!.width).toBeGreaterThan(1900)
+  expect(mainBox!.width).toBeGreaterThan(2300)
 
   // The six KPI cells share one strip that spans the content width.
   const strip = main.getByRole('list', { name: 'Estate key figures' })

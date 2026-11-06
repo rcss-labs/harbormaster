@@ -6,13 +6,14 @@ import { useAuth } from '../auth/AuthProvider'
 import { ActivityRail } from './ActivityRail'
 import { CommandPalette } from './CommandPalette'
 import { CrumbsProvider } from './crumbs'
-import { PollerBanners } from './PollerBanners'
+import { KeyboardHelp } from './KeyboardHelp'
 import { ShellStateProvider, useShellState } from './ShellState'
+import { useShortcuts } from './shortcuts'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import styles from './shell.module.css'
 
-/** Layout for every signed-in screen except /password: sidebar, top bar, activity rail, command palette, poller banners and the no-access guard. */
+/** Layout for every signed-in screen except /password: sidebar, top bar, activity drawer, command palette, shortcut help and the no-access guard. */
 export function Shell() {
   return (
     <ShellStateProvider>
@@ -50,20 +51,19 @@ function ShellFrame() {
     navigate({ pathname, search: rest ? `?${rest}` : '', hash }, { replace: true })
   }, [search, hash, pathname, navigate, refresh, toast])
   const noAccess = !!me && !me.admin && Object.keys(me.perms).length === 0 && pathname !== '/me/access'
-  const { sidebarCollapsed, railOpen, railDocked, paletteOpen } = useShellState()
-  const classes = [styles.app, sidebarCollapsed ? styles.appCollapsed : '', railOpen && railDocked ? styles.appDocked : ''].join(' ')
+  const { sidebarCollapsed, paletteOpen, helpOpen, openHelp, closeHelp } = useShellState()
+  useShortcuts(navigate, { paletteOpen, openHelp })
+  const classes = [styles.app, sidebarCollapsed ? styles.appCollapsed : ''].join(' ')
   return (
     <div className={classes}>
       <Sidebar />
       <div className={styles.main}>
         <TopBar />
-        <main className={styles.content}>
-          <PollerBanners />
-          {noAccess ? <EmptyState>You don't have access to anything yet. Ask a global admin.</EmptyState> : <Outlet />}
-        </main>
+        <main className={styles.content}>{noAccess ? <EmptyState>You don't have access to anything yet. Ask a global admin.</EmptyState> : <Outlet />}</main>
       </div>
       <ActivityRail />
       {paletteOpen && <CommandPalette />}
+      {helpOpen && <KeyboardHelp onClose={closeHelp} />}
     </div>
   )
 }
