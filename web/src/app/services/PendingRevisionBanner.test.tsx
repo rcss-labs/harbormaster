@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { installPhoneMedia } from '../../test/phone'
 import { ControllerBanner } from './ControllerBanner'
 import { PendingRevisionBanner } from './PendingRevisionBanner'
 
@@ -22,6 +23,23 @@ describe('PendingRevisionBanner', () => {
     const button = screen.getByRole('button', { name: 'Deploy :43' })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', 'You need Deploy on Prod')
+  })
+})
+
+describe('PendingRevisionBanner on a phone', () => {
+  it('shows the Deploy lock reason as text', () => {
+    const restore = installPhoneMedia(true)
+    try {
+      render(<PendingRevisionBanner {...props} canDeploy={false} deployDisabledReason="You need Deploy on Prod" />)
+      expect(screen.getByText('You need Deploy on Prod')).toBeVisible()
+    } finally {
+      restore()
+    }
+  })
+
+  it('shows nothing extra on desktop', () => {
+    render(<PendingRevisionBanner {...props} canDeploy={false} deployDisabledReason="You need Deploy on Prod" />)
+    expect(screen.queryByText('You need Deploy on Prod')).not.toBeInTheDocument()
   })
 })
 

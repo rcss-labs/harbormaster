@@ -1,0 +1,20 @@
+/* Phone-only visible lock reason: hover does not exist on touch, so a title alone hides why a control is disabled. */
+.note {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  background: var(--warning-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+/* A reason under one locked button reads as a hint, not a banner. */
+.why {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

@@ -13,6 +13,7 @@ import {
   SSO_UNCONFIGURED,
 } from '../../../test/fixtures'
 import type { SSOConfigDTO } from '../../../api/types'
+import { installPhoneMedia } from '../../../test/phone'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
 
@@ -309,6 +310,19 @@ describe('SSOPage', () => {
     expect(
       await screen.findByText('Link your own account first so you can sign in with SSO: use Link SSO account in the sidebar.'),
     ).toBeInTheDocument()
+  })
+
+  it('on a phone the hint points to More, and the guard reason is visible text', async () => {
+    const restore = installPhoneMedia(true)
+    try {
+      serveConfig({ ...SSO_UNCONFIGURED, break_glass_admins: 0 })
+      renderApp('/settings/sso')
+      expect(await screen.findByText('Link your own account first so you can sign in with SSO: use Link SSO account in More.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Turn on single sign-on' })).toBeDisabled()
+      expect(screen.getByText(GUARD_TITLE)).toBeVisible()
+    } finally {
+      restore()
+    }
   })
 
   it('hides the hint when the admin is already linked', async () => {
