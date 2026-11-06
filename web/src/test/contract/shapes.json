@@ -2025,6 +2025,34 @@
     "total": "number",
     "truncated": "boolean"
   },
+  "servicesMetrics": {
+    "errors": [
+      {
+        "account_id": "string",
+        "code": "string",
+        "message": "string",
+        "region": "string"
+      }
+    ],
+    "items": {
+      "$map": {
+        "cpu": {
+          "$null": "number"
+        },
+        "insights": "string",
+        "mem": {
+          "$null": "number"
+        }
+      }
+    },
+    "polled_at": "time",
+    "stale": {
+      "$null": {
+        "fetched_at": "time",
+        "reason": "string"
+      }
+    }
+  },
   "settings": {
     "stopped_tasks_window_minutes": "number"
   },

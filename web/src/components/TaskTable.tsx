@@ -262,6 +262,7 @@ export function taskColumns({
     {
       key: 'actions',
       header: '',
+      phone: 'action',
       width: ACTIONS_WIDTH,
       align: 'right',
       render: (task) => <TaskActions task={task} withLogs={withLogs} onStop={onStop} />,

@@ -1,3 +1,4 @@
+@import './mobile.css';
 /* Base element styles. Body is 13px/1.5 with tabular numerals (redesign v4 README, Type). */
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }

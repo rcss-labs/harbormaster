@@ -95,7 +95,27 @@ const tableTargets = [
 ]
 
 for (const target of tableTargets) {
-  for (const width of [390, 1440, 3840]) {
+  // At 390 the table becomes a list of rows: the action button is the last child of each row and stays inside the screen.
+  test(`${target.name} rows keep their action button last and inside the viewport at 390px`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(target.path())
+    const table = page.getByRole('table', { name: target.table })
+    const firstRow = table.getByRole('row').first()
+    await expect(firstRow).toBeVisible()
+    await expect(table.getByRole('columnheader')).toHaveCount(0)
+    const action = firstRow.locator('[data-hm-cell="__actions"]')
+    await expect(action).toBeVisible()
+    expect(await firstRow.evaluate((row) => row.lastElementChild?.getAttribute('data-hm-cell'))).toBe('__actions')
+    const box = (await action.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    // The row's own text stays on screen too.
+    const rowBox = (await firstRow.boundingBox())!
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(390)
+  })
+
+  for (const width of [1440, 3840]) {
     test(`${target.name} table keeps columns aligned and uncovered at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.goto(target.path())

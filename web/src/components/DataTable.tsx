@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import styles from './DataTable.module.css'
 import { Pager } from './Pager'
+import { usePhone } from './useNarrow'
 
 export interface DataTableColumn<R> {
   key: string
@@ -11,7 +12,16 @@ export interface DataTableColumn<R> {
   render: (row: R, index: number) => ReactNode
   /** Makes the column sortable. Null/undefined values sort last. */
   sortValue?: (row: R) => string | number | null | undefined
+  /**
+   * Role of the column in the phone row list. `title` is the row's name (line 1), `status` sits beside it,
+   * `meta` fills line 2, `action` renders in the 44 px action column at the right (for tables that carry their actions
+   * as an ordinary last column instead of `rowAction`), `hidden` is left out. Default: the first shown column is the title, a column keyed `status`
+   * is the status, everything else is meta.
+   */
+  phone?: PhoneRole
 }
+
+export type PhoneRole = 'title' | 'status' | 'meta' | 'action' | 'hidden'
 
 export interface SortState {
   key: string
@@ -50,6 +60,12 @@ interface DataTableProps<R> {
   visibleColumns?: string[]
   /** Appends an "Actions" column rendering the returned controls for each row. */
   rowAction?: (row: R) => ReactNode
+}
+
+const INTERACTIVE = 'a, button, input, select, textarea, [role="menuitem"]'
+
+function isEmptyCell(node: ReactNode): boolean {
+  return node === null || node === undefined || node === false || node === ''
 }
 
 const ACTIONS_KEY = '__actions'
@@ -96,6 +112,7 @@ export function DataTable<R>({
     }
     return [...shown, actions]
   }, [allColumns, visibleColumns, rowAction])
+  const phone = usePhone()
   const stickyKey = stickyActions ? columns[columns.length - 1]?.key : undefined
   const [innerSort, setInnerSort] = useState<SortState | null>(defaultSort)
   const [innerPage, setInnerPage] = useState(1)
@@ -138,6 +155,72 @@ export function DataTable<R>({
 
   const onRowKeyDown = (event: KeyboardEvent<HTMLDivElement>, row: R) => {
     if (event.key === 'Enter' && event.target === event.currentTarget) onRowClick?.(row)
+  }
+
+  if (phone) {
+    const shown = columns.filter((column) => column.key !== ACTIONS_KEY)
+    const explicit = (column: DataTableColumn<R>): PhoneRole | undefined => column.phone
+    const titleColumn = shown.find((column) => explicit(column) === 'title') ?? shown.find((column) => explicit(column) === undefined && column.key !== 'status') ?? shown[0]
+    const roleOf = (column: DataTableColumn<R>): PhoneRole => {
+      if (column === titleColumn) return 'title'
+      return explicit(column) ?? (column.key === 'status' ? 'status' : 'meta')
+    }
+    const statusColumns = shown.filter((column) => roleOf(column) === 'status')
+    const metaColumns = shown.filter((column) => roleOf(column) === 'meta')
+    const actionColumn = columns.find((column) => column.key === ACTIONS_KEY) ?? shown.find((column) => explicit(column) === 'action')
+    return (
+      <div className={styles.wrap}>
+        <div role="table" aria-label={label} className="hm-lst">
+          {visible.length === 0 && empty !== undefined && <div className={styles.empty}>{empty}</div>}
+          {visible.map((row, index) => {
+            const status = rowStatus?.(row)
+            const meta = metaColumns.map((column) => ({ column, content: column.render(row, index) })).filter(({ content }) => !isEmptyCell(content))
+            return (
+              <div
+                key={rowKey(row)}
+                role="row"
+                className={`hm-lr ${onRowClick ? 'hm-lr-click' : ''}`.trim()}
+                data-hm-row=""
+                data-status={status}
+                tabIndex={onRowClick ? 0 : undefined}
+                onClick={onRowClick ? (event) => { if (!(event.target as HTMLElement).closest(INTERACTIVE)) onRowClick(row) } : undefined}
+                onKeyDown={onRowClick ? (event) => onRowKeyDown(event, row) : undefined}
+              >
+                <div className="hm-lr-main">
+                  <div className="hm-l1">
+                    {titleColumn && (
+                      <span role="cell" className="hm-nm" data-hm-cell={titleColumn.key}>
+                        {titleColumn.render(row, index)}
+                      </span>
+                    )}
+                    {statusColumns.map((column) => (
+                      <span key={column.key} role="cell" data-hm-cell={column.key}>
+                        {column.render(row, index)}
+                      </span>
+                    ))}
+                  </div>
+                  {meta.length > 0 && (
+                    <div className="hm-l2">
+                      {meta.map(({ column, content }) => (
+                        <span key={column.key} role="cell" data-hm-cell={column.key}>
+                          {content}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {actionColumn && (
+                  <div role="cell" className="hm-lr-act" data-hm-cell={ACTIONS_KEY}>
+                    {actionColumn.render(row, index)}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {pageSize !== undefined && <Pager page={safePage} pageSize={pageSize} total={sorted.length} onPageChange={changePage} />}
+      </div>
+    )
   }
 
   return (

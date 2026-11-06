@@ -6,3 +6,12 @@
 .badge { font-size: 12px; margin-left: 4px; color: var(--muted); }
 .gap { width: 1px; align-self: stretch; background: var(--border); margin: 8px 6px; flex: none; }
 .groupLabel { align-self: center; color: var(--muted); font-size: 12px; white-space: nowrap; margin-right: 2px; }
+/* Phone: the strip scrolls with a fade while there is more to the right, and a 44 px button opens every section. */
+.phoneWrap { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); min-width: 0; }
+.phoneWrap .tabs { flex: 1 1 auto; min-width: 0; border-bottom: 0; scrollbar-width: none; scroll-padding-inline: 12px; position: relative; }
+.phoneWrap .tabs::-webkit-scrollbar { display: none; }
+.phoneWrap .tabs a { min-height: 44px; display: inline-flex; align-items: center; font-size: 14px; }
+.phoneWrap .tabs::after { content: ''; position: sticky; right: 0; flex: none; width: 40px; margin-left: -40px; align-self: stretch; pointer-events: none; background: linear-gradient(90deg, transparent, var(--bg) 70%); opacity: 0; animation: tabfade linear both; animation-timeline: scroll(nearest inline); }
+.all { flex: none; width: 44px; min-height: 44px; border: 0; border-left: 1px solid var(--border); background: var(--chrome); color: var(--text-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.all:hover { background: var(--hover); color: var(--text); }
+@keyframes tabfade { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }

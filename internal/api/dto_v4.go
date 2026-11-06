@@ -78,3 +78,21 @@ type AlertChangeDTO struct {
 	Text   string    `json:"text"`
 	Source string    `json:"source"`
 }
+
+// ServiceNowMetricsDTO is one service's latest CPU and memory use (percent of reserved).
+// Insights is the cluster's Container Insights mode ("enabled", "enhanced" or "disabled"); when it is
+// "disabled" cpu and mem are null because nothing was measured, which is not the same as 0.
+type ServiceNowMetricsDTO struct {
+	Insights string   `json:"insights"`
+	CPU      *float64 `json:"cpu"`
+	Mem      *float64 `json:"mem"`
+}
+
+// ServicesMetricsDTO is the body of GET /api/services/metrics?id=&id=. Items holds only the ids the
+// caller may see and whose account x region could be read; every target that failed is in Errors.
+type ServicesMetricsDTO struct {
+	Items    map[string]ServiceNowMetricsDTO `json:"items"`
+	Errors   []TargetErrorDTO                `json:"errors"`
+	Stale    *StaleDTO                       `json:"stale"`
+	PolledAt time.Time                       `json:"polled_at"`
+}

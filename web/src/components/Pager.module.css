@@ -4,3 +4,8 @@
 .pager button { height: 24px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--raised); color: var(--text-2); cursor: pointer; font-size: 12px; }
 .pager button:hover:not(:disabled) { background: var(--hover-strong); color: var(--text); }
 .pager button:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 700px) {
+  .phone { display: grid; grid-template-columns: 1fr auto 1fr; justify-content: stretch; padding: 4px 12px; font-size: 13px; }
+  .phone button { height: auto; min-height: 44px; padding: 0 14px; font-size: 14px; }
+  .phone .count { font-size: 13px; min-width: 64px; }
+}
