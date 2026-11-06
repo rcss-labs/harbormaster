@@ -565,3 +565,31 @@ func TestLogsTail_BaseURLOrigin_Accepted(t *testing.T) {
 	}
 	conn.CloseNow()
 }
+
+// The task drawer asks for the newest 20 lines of one task with ?limit=20; the server must return no more than that
+// (it used to ignore the parameter and answer with the full history page every 5 s).
+func TestLogs_LimitParamCapsLines(t *testing.T) {
+	srv, _, _ := logsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+
+	_, all := getLogs(t, c, paymentsID(), "")
+	if len(all.Lines) <= 20 {
+		t.Fatalf("the unlimited read has only %d lines; the cap would prove nothing", len(all.Lines))
+	}
+	status, body := getLogs(t, c, paymentsID(), "?limit=20")
+	if status != http.StatusOK {
+		t.Fatalf("limit=20: status %d", status)
+	}
+	if len(body.Lines) != 20 {
+		t.Fatalf("limit=20 returned %d lines", len(body.Lines))
+	}
+	// the newest lines are kept, so the capped page ends with the newest line of the full one
+	if got, want := body.Lines[19].Message, all.Lines[len(all.Lines)-1].Message; got != want {
+		t.Fatalf("newest line = %q, want %q", got, want)
+	}
+	for _, bad := range []string{"0", "-1", "abc"} {
+		if status, _ := getLogs(t, c, paymentsID(), "?limit="+bad); status != http.StatusUnprocessableEntity {
+			t.Fatalf("limit=%s: status %d, want 422", bad, status)
+		}
+	}
+}

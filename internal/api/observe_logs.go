@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -223,6 +224,16 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// limit narrows the page (the task drawer wants the newest 20 lines); it never exceeds the configured history size.
+	limit := cmp.Or(s.Cfg.LogHistoryLimit, defaultHistoryRows)
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			s.fail(w, invalid("limit must be a positive whole number."))
+			return
+		}
+		limit = min(limit, n)
+	}
 	key, _ := serviceKeyFrom(r)
 	if short := q.Get("task"); short != "" {
 		if err := s.restrictToTask(r.Context(), &sel, key, short); err != nil {
@@ -237,7 +248,7 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := s.Logs.History(r.Context(), awsx.Target{AccountID: key.AccountID, Region: key.Region}, logs.HistoryRequest{
 		Group: sel.group, Region: sel.region, Prefixes: sel.prefixes, Before: before, Query: q.Get("q"),
-		Limit: cmp.Or(s.Cfg.LogHistoryLimit, defaultHistoryRows),
+		Limit: limit,
 	})
 	if err != nil {
 		s.fail(w, err)
