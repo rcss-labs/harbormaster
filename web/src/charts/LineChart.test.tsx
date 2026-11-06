@@ -41,3 +41,35 @@ describe('LineChart marker labels', () => {
     expect(getByText('deploy').style.transform).toBe('')
   })
 })
+
+describe('LineChart marker label collisions', () => {
+  const series = [{ name: 'cpu', color: 'red', values: [1, 2] }]
+
+  it('moves a label that would overlap its neighbour onto the second row', () => {
+    const { getByText } = renderWithProviders(
+      <LineChart series={series} xLabels={['a']} marks={[{ at: 0.5, label: 'notifications' }, { at: 0.52, label: 'auth:1' }]} />,
+    )
+    expect(getByText('notifications').style.top).toBe('-1px')
+    expect(getByText('auth:1').style.top).toBe('17px')
+  })
+
+  it('keeps distant labels on the same row', () => {
+    const { getByText } = renderWithProviders(
+      <LineChart series={series} xLabels={['a']} marks={[{ at: 0.3, label: 'deploy' }, { at: 0.7, label: 'scale' }]} />,
+    )
+    expect(getByText('deploy').style.top).toBe('-1px')
+    expect(getByText('scale').style.top).toBe('-1px')
+  })
+
+  it('drops a third overlapping label to a hover-only target with the full text', () => {
+    const { queryByText, getByTitle } = renderWithProviders(
+      <LineChart
+        series={series}
+        xLabels={['a']}
+        marks={[{ at: 0.5, label: 'notifications' }, { at: 0.51, label: 'auth:1' }, { at: 0.52, label: 'billing:3' }]}
+      />,
+    )
+    expect(queryByText('billing:3')).toBeNull()
+    expect(getByTitle('billing:3')).toBeTruthy()
+  })
+})
