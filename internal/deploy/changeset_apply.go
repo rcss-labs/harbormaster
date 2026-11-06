@@ -150,7 +150,11 @@ func (s *Service) ApplyChangeSet(ctx context.Context, subj authz.Subject, key mo
 		if cs.BaseVersion == "" {
 			return ChangeSetResult{}, invalid("base_version is required with a service or scaling change")
 		}
-		if cs.BaseVersion != st.Version {
+		edited := partsEdited(cs)
+		if err := refuseUnreadableEdits(st, edited); err != nil {
+			return ChangeSetResult{}, err
+		}
+		if versionConflict(cs.BaseVersion, st.Version, edited) {
 			return ChangeSetResult{}, &StaleVersionError{Current: st}
 		}
 	}
