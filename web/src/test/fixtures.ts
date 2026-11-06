@@ -3,6 +3,10 @@
 import type {
   AccountsDTO,
   AlertsDTO,
+  PartialErrorDTO,
+  ServiceListDTO,
+  ServiceListItemDTO,
+  PollerTierDTO,
   AuditDTO,
   AuthOptionsDTO,
   CertDTO,
@@ -675,6 +679,49 @@ export const SERVICE_NOTIFICATIONS: ServiceDTO = SERVICE_DETAILS[serviceIdOf(ser
 
 export const CLUSTERS: ListDTO<ClusterCardDTO> = { items: CLUSTER_DEFS.map(clusterCard), next: null, polled_at: FIXTURE_NOW }
 
+const SERVICE_ATTENTION: Record<string, string> = {
+  'image-resizer': 'No task is running; ECS keeps failing to start one.',
+  'catalog-api': 'One task is failing its health check.',
+  notifications: 'Deploying revision 10, 1 of 2 tasks replaced.',
+}
+
+function serviceListItem(def: ServiceDef): ServiceListItemDTO {
+  const cluster = clusterDef(def.cluster)
+  // artifact-proxy carries its own Prod tag; every other service inherits its cluster's tag.
+  const ownTag = def.name === 'artifact-proxy'
+  return {
+    id: serviceIdOf(def),
+    name: def.name,
+    cluster: clusterRefOf(cluster),
+    account_id: cluster.account.account_id,
+    account_name: cluster.account.name,
+    region: cluster.region,
+    tag: ownTag ? TAG_PROD : clusterTag(cluster),
+    tag_inherited: !ownTag,
+    status: def.status,
+    attention: SERVICE_ATTENTION[def.name] ?? '',
+    family: def.name,
+    revision: def.revision,
+    image_tag: def.imageTag,
+    running: def.running,
+    desired: def.desired,
+    cpu: String(def.cpu),
+    memory: String(def.memory),
+    latest_registered_revision: def.name === 'web-frontend' ? def.revision + 1 : null,
+    last_change_at: minutesAgo(def.status === 'steady' ? 60 * 26 : 3),
+    rollout: def.name === 'notifications' ? 'in_progress' : def.name === 'image-resizer' ? 'failed' : null,
+    can: { operate: true, logs: true, terminal: def.exec },
+  }
+}
+
+/** GET /api/services for an admin: all fifteen services of the fake estate. */
+export const SERVICES_LIST: ServiceListDTO = {
+  items: SERVICE_DEFS.map(serviceListItem),
+  total: SERVICE_DEFS.length,
+  truncated: false,
+  polled_at: FIXTURE_NOW,
+}
+
 export const OPERATIONS_FOR = (serviceIdValue: string): EventDTO[] =>
   ALL_EVENTS.filter((e) => e.service.id === serviceIdValue)
 
@@ -929,11 +976,53 @@ export const AUDIT: AuditDTO = {
   polled_at: FIXTURE_NOW,
 }
 
+/** The tiers the poller reports per region (labels merge tiers; see Decision 4 of the v4 plan). */
+function pollerTiers(overrides: Partial<Record<string, Partial<PollerTierDTO>>> = {}): PollerTierDTO[] {
+  const tier = (name: string, label: string, core: boolean, intervalMs: number): PollerTierDTO => ({
+    tier: name,
+    label,
+    core,
+    failing: false,
+    throttled: false,
+    last_ok_at: minutesAgo(0),
+    last_error: '',
+    interval_ms: intervalMs,
+    ...overrides[name],
+  })
+  return [
+    tier('services', 'Clusters and services', true, 5000),
+    tier('runningTasks', 'Tasks', true, 5000),
+    tier('target_health', 'Target health', false, 30000),
+    tier('scaling', 'Auto scaling', false, 60000),
+    tier('alerts', 'Alerts', false, 15000),
+    tier('network', 'Networks', false, 300000),
+    tier('storage', 'Storage', false, 300000),
+  ]
+}
+
 export const POLLER: PollerDTO = {
   items: [
     ...REGIONS.map((region) => ({ account_id: ACCOUNT_HOMELAB.account_id, account_name: ACCOUNT_HOMELAB.name, region })),
     { account_id: ACCOUNT_STAGING.account_id, account_name: ACCOUNT_STAGING.name, region: 'us-east-1' },
-  ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0) })),
+  ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0), tiers: pollerTiers() })),
+}
+
+/** One region whose Auto scaling tier fails while every core tier is current: failing/throttled stay false. */
+export const POLLER_TIERS: PollerDTO = {
+  items: [
+    {
+      account_id: ACCOUNT_HOMELAB.account_id,
+      account_name: ACCOUNT_HOMELAB.name,
+      region: 'eu-west-1',
+      throttled: false,
+      failing: false,
+      last_error: '',
+      last_ok_at: minutesAgo(0),
+      tiers: pollerTiers({
+        scaling: { failing: true, last_ok_at: null, last_error: 'DescribeScheduledActions: UnsupportedOperation: not supported by this endpoint' },
+      }),
+    },
+  ],
 }
 
 // ---- observe (plan 03): metrics, target health, scaling, alerts, log history ----
@@ -1145,6 +1234,9 @@ export const ALERTS: AlertsDTO = {
       cluster: 'background-jobs',
       cluster_id: backgroundJobsClusterId,
       tab: 'tasks',
+      cause: 'No task is running; ECS keeps failing to start one.',
+      next_step: { label: 'Open logs', href: `/services/${imageResizerId}/logs` },
+      just_before: { at: minutesAgo(18), text: 'Deployed :6 (dana)', source: 'harbormaster' },
     },
     {
       kind: 'account_unreachable',
@@ -1157,6 +1249,9 @@ export const ALERTS: AlertsDTO = {
       cluster: '',
       cluster_id: '',
       tab: '',
+      cause: 'AccessDenied: the role could not be assumed.',
+      next_step: { label: 'Open AWS accounts', href: '/settings/accounts' },
+      just_before: null,
     },
     {
       kind: 'unhealthy_task',
@@ -1169,6 +1264,9 @@ export const ALERTS: AlertsDTO = {
       cluster: 'eu-apps',
       cluster_id: euAppsClusterId,
       tab: 'tasks',
+      cause: 'One task is failing its health check.',
+      next_step: { label: 'Open tasks', href: `/services/${catalogId}/tasks` },
+      just_before: { at: minutesAgo(70), text: 'Deployed :23', source: 'deployment' },
     },
     {
       kind: 'rollout_in_progress',
@@ -1181,6 +1279,9 @@ export const ALERTS: AlertsDTO = {
       cluster: 'edge-proxy',
       cluster_id: edgeProxyClusterId,
       tab: 'overview',
+      cause: 'Deploying revision 15, 1 of 2 tasks replaced.',
+      next_step: { label: 'Open service', href: `/services/${edgeNginxId}/overview` },
+      just_before: null,
     },
   ],
   counts: { danger: 2, warning: 1, info: 1 },
@@ -1294,6 +1395,20 @@ export const DEPLOY_SETTINGS_PAYMENTS: DeploySettingsResponse = {
     scheduled_actions: [{ name: 'business-hours', schedule: 'cron(0 7 * * ? *)', timezone: 'Asia/Jerusalem', min_capacity: 3, max_capacity: null }],
   },
   can: { edit: true, deploy: true, operate: true, admin: false },
+  partial: [],
+}
+
+/** Scheduled actions could not be read (floci lacks DescribeScheduledActions); every other part is intact. */
+export const DEPLOY_SETTINGS_PARTIAL: DeploySettingsResponse = {
+  ...DEPLOY_SETTINGS_PAYMENTS,
+  scaling: { ...DEPLOY_SETTINGS_PAYMENTS.scaling, scheduled_actions: [] },
+  partial: [
+    {
+      part: 'scheduled_actions',
+      code: 'aws_error',
+      message: 'Scheduled actions could not be read: UnsupportedOperation: not supported by this endpoint',
+    } satisfies PartialErrorDTO,
+  ],
 }
 
 export const REVISION_DEFINITION_PAYMENTS_41: RevisionDefinitionResponse = {

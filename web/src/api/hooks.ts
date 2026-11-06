@@ -14,6 +14,7 @@ import type {
   PollerDTO,
   SearchDTO,
   ServiceDTO,
+  ServiceListDTO,
   SettingsDTO,
   SSOConfigDTO,
   SSOTestResultDTO,
@@ -75,6 +76,15 @@ export function useClusters(filters: Filters = {}) {
   return useQuery({
     queryKey: ['clusters', filters],
     queryFn: () => api.get<ListDTO<ClusterCardDTO>>(`/api/clusters${queryString({ ...filters })}`),
+    ...live,
+  })
+}
+
+/** Every visible service in one list; scope params are the same as for clusters. */
+export function useServicesList(filters: Filters = {}) {
+  return useQuery({
+    queryKey: ['services', filters],
+    queryFn: () => api.get<ServiceListDTO>(`/api/services${queryString({ ...filters })}`),
     ...live,
   })
 }

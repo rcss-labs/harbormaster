@@ -179,6 +179,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/overview", s.overview, routeOptions{})
 	s.handle(mux, "GET /api/clusters", s.listClusters, routeOptions{})
 	s.handle(mux, "GET /api/clusters/{clusterId}", s.getCluster, routeOptions{})
+	s.handle(mux, "GET /api/services", s.listServicesFlat, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}", s.getService, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/tasks", s.listServiceTasks, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/operations", s.serviceOperations, routeOptions{})
