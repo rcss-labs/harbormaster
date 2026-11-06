@@ -53,6 +53,7 @@ interface DataTableProps<R> {
 }
 
 const ACTIONS_KEY = '__actions'
+const BODY_ROW_STYLE: CSSProperties = { minHeight: 'var(--row)' }
 const STICKY_STYLE: CSSProperties = { position: 'sticky', right: 0 }
 
 function compare(a: string | number | null | undefined, b: string | number | null | undefined): number {
@@ -132,8 +133,8 @@ export function DataTable<R>({
   }
 
   const template = columns.map((c) => c.width ?? '1fr').join(' ')
-  const gridStyle = { gridTemplateColumns: template }
-  const bodyRowStyle = { ...gridStyle, minHeight: 'var(--row)' }
+  // One grid for the whole table: head and body rows are subgrids, so every row shares the same column tracks.
+  const tableStyle: CSSProperties = { gridTemplateColumns: template, ...(minWidth ? { minWidth } : null) }
 
   const onRowKeyDown = (event: KeyboardEvent<HTMLDivElement>, row: R) => {
     if (event.key === 'Enter' && event.target === event.currentTarget) onRowClick?.(row)
@@ -142,9 +143,9 @@ export function DataTable<R>({
   return (
     <div className={styles.wrap}>
       <div className={styles.scroll} style={maxHeight !== undefined ? { maxHeight } : undefined}>
-        <div role="table" aria-label={label} className={styles.table} style={minWidth ? { minWidth } : undefined}>
-          <div role="rowgroup" className={styles.head}>
-            <div role="row" className={styles.row} style={gridStyle}>
+        <div role="table" aria-label={label} className={styles.table} style={tableStyle}>
+          <div role="rowgroup" className={`${styles.group} ${styles.head}`}>
+            <div role="row" className={styles.row}>
               {columns.map((column) => {
                 const sortable = column.sortValue !== undefined
                 const dir = activeSort?.key === column.key ? activeSort.dir : undefined
@@ -171,7 +172,7 @@ export function DataTable<R>({
               })}
             </div>
           </div>
-          <div role="rowgroup">
+          <div role="rowgroup" className={styles.group}>
             {visible.length === 0 && empty !== undefined && <div className={styles.empty}>{empty}</div>}
             {visible.map((row, index) => {
               const status = rowStatus?.(row)
@@ -180,7 +181,7 @@ export function DataTable<R>({
                   key={rowKey(row)}
                   role="row"
                   className={`${styles.row} ${styles.body} ${status ? styles[status] : ''} ${onRowClick ? styles.clickable : ''}`.trim()}
-                  style={bodyRowStyle}
+                  style={BODY_ROW_STYLE}
                   data-status={status}
                   tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}

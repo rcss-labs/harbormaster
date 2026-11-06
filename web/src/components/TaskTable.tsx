@@ -4,8 +4,10 @@ import type { TaskDTO } from '../api/types'
 import { Ago } from './Ago'
 import { DataTable, type DataTableColumn, type RowStatus } from './DataTable'
 import type { PillKind } from './Pill'
+import { RowMenu, RowMenuButton, RowMenuLink } from './RowMenu'
 import { StatusDot } from './StatusDot'
 import { StopCauseChip, stoppedStatus } from './stopStatus'
+import { useNarrow } from './useNarrow'
 import styles from './TaskTable.module.css'
 
 /** Utilisation in percent of the reserved size, keyed by the task's short id (the id CloudWatch reports). */
@@ -48,8 +50,8 @@ export const TASK_COLUMNS: TaskColumnOption[] = [
   { key: 'reason', label: 'Stopped reason' },
 ]
 
-/** Wide enough for Logs, Terminal and Stop together, so the pinned column never clips a button. */
-export const ACTIONS_WIDTH = '200px'
+/** Sized to the widest row's buttons, which the table's shared grid tracks make the same for the header. */
+export const ACTIONS_WIDTH = 'max-content'
 
 const PROGRESS_STATUSES = ['PROVISIONING', 'PENDING', 'ACTIVATING']
 const titleCase = (status: string) => status.charAt(0) + status.slice(1).toLowerCase()
@@ -172,7 +174,25 @@ export const memoryText = (task: TaskDTO, usage?: { mem: number | null }) => usa
 
 /** Row actions: Logs (when asked for and the task has a service), Terminal and Stop under the existing permission rules. */
 export function TaskActions({ task, withLogs = false, onStop }: { task: TaskDTO; withLogs?: boolean; onStop(task: TaskDTO): void }) {
+  const narrow = useNarrow()
   const isRunning = task.status === 'RUNNING'
+  if (narrow) {
+    const showTerminal = isRunning && task.can.terminal && task.exec_enabled
+    const showStop = isRunning && task.can.operate
+    const showLogs = withLogs && task.service
+    if (!showLogs && !showTerminal && !showStop) return null
+    return (
+      <RowMenu label={`Actions for task ${task.short_id.slice(0, 12)}`}>
+        {showLogs && task.service && <RowMenuLink to={`/services/${task.service.id}/logs`}>Logs</RowMenuLink>}
+        {showTerminal && <RowMenuLink to={terminalPath(task)}>Terminal</RowMenuLink>}
+        {showStop && (
+          <RowMenuButton danger onClick={() => onStop(task)}>
+            Stop
+          </RowMenuButton>
+        )}
+      </RowMenu>
+    )
+  }
   return (
     <span className={styles.actions}>
       {withLogs && task.service && (

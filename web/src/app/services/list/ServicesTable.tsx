@@ -4,6 +4,8 @@ import { Ago } from '../../../components/Ago'
 import { DataTable, type DataTableColumn, type SortState } from '../../../components/DataTable'
 import { Icon } from '../../../components/Icon'
 import { PinButton } from '../../../components/PinButton'
+import { RowMenu, RowMenuButton, RowMenuLink } from '../../../components/RowMenu'
+import { useNarrow } from '../../../components/useNarrow'
 import { StatusDot } from '../../../components/StatusDot'
 import { TagChip } from '../../../components/TagChip'
 import { serviceRowStatus } from '../../clusters/serviceSeverity'
@@ -55,6 +57,7 @@ export function ServicesTable({
   onRestart,
   empty,
 }: ServicesTableProps) {
+  const narrow = useNarrow()
   const sortBy = (key: ServiceSortKey) => (service: ServiceListItemDTO) => sortValue(service, key)
   const columns: DataTableColumn<ServiceListItemDTO>[] = [
     {
@@ -150,9 +153,36 @@ export function ServicesTable({
       empty={empty}
       rowAction={(service) => {
         const blocked = restartBlockedReason(service)
+        const pinned = isPinned(service.id)
+        if (narrow) {
+          return (
+            <RowMenu label={`Actions for ${service.name}`}>
+              <RowMenuButton
+                aria-label={`${pinned ? 'Unpin' : 'Pin'} ${service.name}`}
+                title={pinned ? 'Remove from the sidebar' : 'Pin to the sidebar'}
+                onClick={() => onTogglePin(service)}
+              >
+                {pinned ? 'Pinned' : 'Pin'}
+              </RowMenuButton>
+              <RowMenuButton aria-label={`Details for ${service.name}`} onClick={() => onDetails(service)}>
+                Details
+              </RowMenuButton>
+              <RowMenuLink to={`/services/${service.id}/logs`}>Logs</RowMenuLink>
+              <RowMenuLink to={`/services/${service.id}/tasks`}>Tasks</RowMenuLink>
+              <RowMenuButton
+                aria-label={`Restart ${service.name}`}
+                title={blocked ?? `Restart ${service.name}`}
+                disabled={blocked !== undefined}
+                onClick={() => onRestart(service)}
+              >
+                Restart
+              </RowMenuButton>
+            </RowMenu>
+          )
+        }
         return (
           <span className={styles.actions}>
-            <PinButton name={service.name} pinned={isPinned(service.id)} onToggle={() => onTogglePin(service)} />
+            <PinButton name={service.name} pinned={pinned} onToggle={() => onTogglePin(service)} />
             <button type="button" className={styles.btn} aria-label={`Details for ${service.name}`} onClick={() => onDetails(service)}>
               <Icon name="panel" />
               Details
