@@ -1,4 +1,4 @@
-/* Design tokens, v4 "Pilot house". Dark and light values are copied from docs/redesign-v4/mockup/src/hm.css.
+/* Design tokens, v4 "Pilot house". Dark and light values for both themes.
    The names the app used before v4 (--success, --danger, --radius, ...) stay as aliases at the bottom so
    untouched CSS modules keep working; new code uses the short names (--ok, --bad, --r, ...). */
 

@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-// Checks the real UI against the floci estate (see tools/floci and docs/redesign-v4/floci-review/README.md).
+// Checks the real UI against the floci estate (see tools/floci).
 // `make floci-check` builds the binary, prepares the database and runs this config; the webServer below starts
 // tools/floci/serve.sh, which sources the isolated AWS environment and refuses any non-local endpoint.
 const port = process.env.HM_FLOCI_PORT ?? '8482'

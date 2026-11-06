@@ -1,4 +1,4 @@
-/* Icon paths copied from docs/redesign-v4/mockup/src/icons.json (24x24 viewBox, stroke only). No icons beyond this set. */
+/* Icon paths (24x24 viewBox, stroke only). No icons beyond this set. */
 export const ICONS = {
   overview: 'M3 3h7v7H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 14h7v7H3z',
   services: 'M12 2 3 7l9 5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5',
