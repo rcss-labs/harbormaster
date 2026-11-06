@@ -201,6 +201,17 @@ describe('Networks VPC detail', () => {
     expect(outline.getByRole('button', { name: 'Expand all' })).toBeInTheDocument()
   })
 
+  it('labels placement kinds in sentence case, not uppercase', async () => {
+    serveEstate()
+    renderApp('/networks')
+    await screen.findByRole('region', { name: 'Placement' })
+    const outline = within(placement())
+    expect(outline.getAllByText('Zone').length).toBeGreaterThan(0)
+    expect(outline.getAllByText('Subnet').length).toBeGreaterThan(0)
+    expect(outline.getAllByText('Cluster').length).toBeGreaterThan(0)
+    expect(outline.queryByText('ZONE')).not.toBeInTheDocument()
+  })
+
   it('clicking a cluster opens its services, linked to the service page', async () => {
     const user = userEvent.setup()
     serveEstate()
