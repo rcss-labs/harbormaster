@@ -102,7 +102,8 @@ function collectViolations(options: { allowClip: string[] }): string[] {
     }
 
     // clip: an overflow:hidden|clip box cutting its content off.
-    if ((style.overflowX === 'hidden' || style.overflowX === 'clip') && el.scrollWidth > el.clientWidth + 1 && !clipOk(el)) {
+    // A single-line input is exempt: its own text scrolls with the caret, so a long value (a secret ARN) is not cut off for good.
+    if ((style.overflowX === 'hidden' || style.overflowX === 'clip') && !(el instanceof HTMLInputElement) && el.scrollWidth > el.clientWidth + 1 && !clipOk(el)) {
       report('clip', el, `cuts content off (scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth})`)
     }
 
