@@ -10,6 +10,9 @@ test.beforeEach(async ({ page }) => {
 
 const REGIONS = 4
 
+// The non-core note only shows where the top bar has room for it.
+test.use({ viewport: { width: 1920, height: 1080 } })
+
 test('the freshness control keeps regions current while a failing scaling tier is named stale in every region', async ({ page }) => {
   await page.goto('/')
   // Core data stays current; the note appears once the first scaling poll fails (a few seconds).
@@ -37,7 +40,24 @@ test('only the Scaling tab shows a page banner; Overview and Clusters show none'
   await expect(page.locator('main [data-hm-banner]')).toHaveCount(0)
 
   await page.goto(serviceUrl(...SVC.paymentsApi, 'scaling'))
-  const banner = page.locator('main [data-hm-banner]')
-  await expect(banner).toHaveCount(1)
-  await expect(banner).toHaveText(/Some data on this page is stale: Auto scaling/)
+  // Exactly one stale-data banner. Action banners, such as a registered revision waiting to deploy, are separate.
+  const staleBanner = page.locator('main [data-hm-banner]').filter({ hasText: 'is stale' })
+  await expect(staleBanner).toHaveCount(1)
+  await expect(staleBanner).toHaveText(/Some data on this page is stale: Auto scaling/)
+})
+
+test('the stale note never squeezes the breadcrumb or grows the top bar at 1280', async ({ page }) => {
+  await page.goto(serviceUrl(...SVC.paymentsApi, 'scaling'))
+  const note = page.getByText(`auto scaling stale in ${REGIONS} regions`)
+  await expect(note).toBeVisible({ timeout: 30_000 })
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('payments-api')
+  const topBarHeight = await page.evaluate(() => document.querySelector('nav[aria-label="Breadcrumb"]')!.parentElement!.getBoundingClientRect().height)
+  expect(topBarHeight).toBeLessThanOrEqual(64)
+
+  // The details stay one click away.
+  await expect(note).toBeHidden()
+  await page.getByRole('button', { name: /regions current$/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Data freshness' }).getByText(/^Auto scaling is /).first()).toBeVisible()
 })

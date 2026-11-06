@@ -86,6 +86,8 @@
 .freshBtn { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); cursor: pointer; font: inherit; white-space: nowrap; }
 .freshBtn:hover { background: var(--hover); }
 .freshNote { margin-left: 6px; color: var(--muted); white-space: nowrap; }
+/* Only where the top bar has room: below this it would squeeze the breadcrumb. The popover always has the detail. */
+@media (max-width: 1599px) { .freshNote { display: none; } }
 .freshPop { display: grid; gap: 4px; }
 .freshRegion { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--row-border); }
 .freshCurrent { color: var(--muted); }
@@ -147,14 +149,13 @@
 }
 
 /* Narrow phones: the bar wraps onto rows (scope, then search across the width, then freshness and the icon buttons) so
-   every control stays on screen, and each target is at least 36px. The non-core note is in the popover instead. */
+   every control stays on screen, and each target is at least 36px. */
 @media (max-width: 600px) {
   .topbar { flex-wrap: wrap; row-gap: 6px; }
   .searchBtn { flex: 1 1 100%; min-width: 0; }
   .kbd { display: none; }
   .scopeBtn, .searchBtn, .freshBtn, .iconBtn { min-height: 36px; }
   .iconBtn { min-width: 36px; }
-  .freshNote { display: none; }
   .popAnchor:has(.freshBtn) { position: static; margin-right: auto; } /* the popover anchors to the bar, so it stays inside the screen */
 }
 
