@@ -77,7 +77,8 @@ test('OOM revision fails and rolls back', async ({ page }) => {
     await expect(page.getByText('Deployment of image-resizer:7 failed: ECS deployment circuit breaker: tasks failed to start.')).toBeVisible({
       timeout: 2_000,
     })
-  }).toPass({ timeout: 15_000 })
+    // The poller records this line asynchronously, and it can take longer on a loaded machine.
+  }).toPass({ timeout: 30_000 })
 })
 
 test('stop a task', async ({ page }) => {

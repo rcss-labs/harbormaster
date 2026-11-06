@@ -363,9 +363,13 @@ test.describe('full-height tabs and narrow windows', () => {
         await page.goto(paymentsApi(tab))
         const panel = page.getByRole('region', { name: region, exact: true })
         await expect(panel).toBeVisible()
-        const box = (await panel.boundingBox())!
-        expect(height - (box.y + box.height)).toBeLessThanOrEqual(24)
-        expect(height - (box.y + box.height)).toBeGreaterThanOrEqual(0)
+        // The panel can re-render between the checks, so measure in one poll: a detached panel has no box yet.
+        const bottomGap = async () => {
+          const box = await panel.boundingBox()
+          return box ? height - (box.y + box.height) : Number.POSITIVE_INFINITY
+        }
+        await expect.poll(bottomGap).toBeLessThanOrEqual(24)
+        expect(await bottomGap()).toBeGreaterThanOrEqual(0)
       })
     }
   }
