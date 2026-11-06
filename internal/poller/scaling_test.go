@@ -107,3 +107,62 @@ func TestCollectServiceScalingConfigPartial(t *testing.T) {
 		t.Fatal("CollectServiceScalingConfig must keep failing when a part fails")
 	}
 }
+
+func TestScalingLoop_StoresReadablePartsWhenScheduledActionsFail(t *testing.T) {
+	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	key := serviceKey(target, "core-services", "payments-api")
+	scheduledErr := errors.New("DescribeScheduledActions: UnsupportedOperation")
+	ctx := context.Background()
+
+	t.Run("never read before: target and policies stored, scheduled actions flagged unreadable", func(t *testing.T) {
+		h := newObserveHarness(t, target)
+		loop := &ScalingLoop{Store: h.store, Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
+		if _, err := h.store.Pool.Exec(ctx, "delete from scaling"); err != nil {
+			t.Fatal(err)
+		}
+		h.fake.FailAlways("DescribeScheduledActions", scheduledErr)
+
+		err := loop.Run(ctx, target)
+		if !errors.Is(err, scheduledErr) {
+			t.Fatalf("Run error = %v, want the scheduled actions failure", err)
+		}
+		got, err := h.store.ScalingForService(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.HasTarget || got.Min != 2 || got.Max != 6 || len(got.Policies) != 1 || len(got.Scheduled) != 0 {
+			t.Fatalf("scaling = %+v, want target 2-6, 1 policy, no scheduled actions", got)
+		}
+		if len(got.Unreadable) != 1 || got.Unreadable[0] != PartScheduledActions {
+			t.Fatalf("unreadable = %v, want only %s", got.Unreadable, PartScheduledActions)
+		}
+	})
+
+	t.Run("known scheduled actions are kept, not wiped", func(t *testing.T) {
+		h := newObserveHarness(t, target)
+		loop := &ScalingLoop{Store: h.store, Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
+		if err := loop.Run(ctx, target); err != nil {
+			t.Fatal(err)
+		}
+		h.fake.FailAlways("DescribeScheduledActions", scheduledErr)
+		if err := loop.Run(ctx, target); err == nil {
+			t.Fatal("Run must report the failed part")
+		}
+		got, err := h.store.ScalingForService(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Scheduled) != 2 || len(got.Unreadable) != 1 {
+			t.Fatalf("scheduled %d unreadable %v, want the 2 known actions kept and flagged", len(got.Scheduled), got.Unreadable)
+		}
+
+		h.fake.FailAlways("DescribeScheduledActions", nil)
+		if err := loop.Run(ctx, target); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = h.store.ScalingForService(ctx, key)
+		if len(got.Unreadable) != 0 {
+			t.Fatalf("unreadable = %v after recovery, want none", got.Unreadable)
+		}
+	})
+}

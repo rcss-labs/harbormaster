@@ -17,7 +17,10 @@ type ScalingDTO struct {
 	Policies         []ScalingPolicyDTO   `json:"policies"`
 	ScheduledActions []ScheduledActionDTO `json:"scheduled_actions"`
 	Activities       []ScalingActivityDTO `json:"activities"`
-	PolledAt         *time.Time           `json:"polled_at"`
+	// UnreadableParts lists what the last poll could not read (scaling_target, scaling_policies,
+	// scheduled_actions); those fields hold the last known values, or are empty when never read.
+	UnreadableParts []string   `json:"unreadable_parts"`
+	PolledAt        *time.Time `json:"polled_at"`
 }
 
 type ScalingPolicyDTO struct {
@@ -78,14 +81,14 @@ func (s *Server) getScaling(w http.ResponseWriter, r *http.Request) {
 }
 
 func emptyScalingDTO() ScalingDTO {
-	return ScalingDTO{Policies: []ScalingPolicyDTO{}, ScheduledActions: []ScheduledActionDTO{}, Activities: []ScalingActivityDTO{}}
+	return ScalingDTO{Policies: []ScalingPolicyDTO{}, ScheduledActions: []ScheduledActionDTO{}, Activities: []ScalingActivityDTO{}, UnreadableParts: []string{}}
 }
 
 func scalingDTO(scaling model.Scaling) ScalingDTO {
 	out := ScalingDTO{
 		HasTarget: scaling.HasTarget, Min: scaling.Min, Max: scaling.Max,
 		Policies: make([]ScalingPolicyDTO, 0, len(scaling.Policies)), ScheduledActions: make([]ScheduledActionDTO, 0, len(scaling.Scheduled)),
-		Activities: make([]ScalingActivityDTO, 0, len(scaling.Activities)),
+		Activities: make([]ScalingActivityDTO, 0, len(scaling.Activities)), UnreadableParts: append([]string{}, scaling.Unreadable...),
 	}
 	if !scaling.PolledAt.IsZero() {
 		polled := scaling.PolledAt

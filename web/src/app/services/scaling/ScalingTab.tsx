@@ -34,9 +34,14 @@ function describePolicy(policy: ScalingPolicyDTO): ReactNode {
   return `Step scaling · ${policy.name}`
 }
 
+const isUnreadable = (scaling: ScalingDTO, part: string) => scaling.unreadable_parts.includes(part)
+
 function describeScheduled(scaling: ScalingDTO): string {
-  if (scaling.scheduled_actions.length === 0) return 'None'
-  return scaling.scheduled_actions.map((action) => `${action.name}: ${action.schedule} → min ${action.min_capacity ?? '–'}`).join('; ')
+  const known = scaling.scheduled_actions.map((action) => `${action.name}: ${action.schedule} → min ${action.min_capacity ?? '–'}`).join('; ')
+  if (isUnreadable(scaling, 'scheduled_actions')) {
+    return known ? `Scheduled actions could not be read. Last known: ${known}` : 'Scheduled actions could not be read'
+  }
+  return known || 'None'
 }
 
 /** The service's Scaling tab: the desired-count stepper and the read-only auto scaling set in Terraform. */
@@ -230,6 +235,13 @@ function AutoScalingCard({ scaling, error, loading, serviceId, canOperate }: Aut
     </>
   )
   if (!scaling) return <Panel title="Auto scaling" actions={actions} error={error} loading={loading}>{null}</Panel>
+  if (!scaling.has_target && isUnreadable(scaling, 'scaling_target')) {
+    return (
+      <Panel title="Auto scaling" actions={actions}>
+        <EmptyState>The scalable target could not be read.</EmptyState>
+      </Panel>
+    )
+  }
   if (!scaling.has_target) {
     return (
       <Panel title="Auto scaling" actions={actions}>
@@ -240,6 +252,7 @@ function AutoScalingCard({ scaling, error, loading, serviceId, canOperate }: Aut
   const rows: [ReactNode, ReactNode][] = [
     ['Minimum tasks', scaling.min],
     ['Maximum tasks', scaling.max],
+    ...(isUnreadable(scaling, 'scaling_policies') ? [['Policy', 'Scaling policies could not be read'] as [ReactNode, ReactNode]] : []),
     ...scaling.policies.map((policy): [ReactNode, ReactNode] => ['Policy', describePolicy(policy)]),
     ...scaling.policies.flatMap((policy): [ReactNode, ReactNode][] => [
       ['Scale-out cooldown', `${policy.scale_out_cooldown} s`],

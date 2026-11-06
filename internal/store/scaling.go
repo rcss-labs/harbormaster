@@ -19,20 +19,20 @@ func (s *Store) UpsertScaling(ctx context.Context, rows []model.Scaling) error {
 	for _, row := range rows {
 		batch.Queue(
 			`insert into scaling (account_id, region, cluster_name, service_name, has_target, min_capacity,
-			   max_capacity, policies, scheduled_actions, activities, polled_at)
-			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			   max_capacity, policies, scheduled_actions, activities, unreadable_parts, polled_at)
+			 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			 on conflict (account_id, region, cluster_name, service_name) do update set
 			   has_target = excluded.has_target, min_capacity = excluded.min_capacity,
 			   max_capacity = excluded.max_capacity, policies = excluded.policies,
 			   scheduled_actions = excluded.scheduled_actions, activities = excluded.activities,
-			   polled_at = excluded.polled_at
+			   unreadable_parts = excluded.unreadable_parts, polled_at = excluded.polled_at
 			 where (scaling.has_target, scaling.min_capacity, scaling.max_capacity, scaling.policies,
-			   scaling.scheduled_actions, scaling.activities) is distinct from
+			   scaling.scheduled_actions, scaling.activities, scaling.unreadable_parts) is distinct from
 			   (excluded.has_target, excluded.min_capacity, excluded.max_capacity, excluded.policies,
-			   excluded.scheduled_actions, excluded.activities)`,
+			   excluded.scheduled_actions, excluded.activities, excluded.unreadable_parts)`,
 			row.Key.AccountID, row.Key.Region, row.Key.Cluster, row.Key.Service, row.HasTarget,
 			row.Min, row.Max, jsonArray(row.Policies), jsonArray(row.Scheduled), jsonArray(row.Activities),
-			row.PolledAt)
+			jsonArray(row.Unreadable), row.PolledAt)
 	}
 	if err := s.execBatch(ctx, batch); err != nil {
 		return fmt.Errorf("upsert scaling: %w", err)
@@ -43,15 +43,15 @@ func (s *Store) UpsertScaling(ctx context.Context, rows []model.Scaling) error {
 // ScalingForService returns a service's scaling state, or ErrNotFound when it has never been polled.
 func (s *Store) ScalingForService(ctx context.Context, k model.ServiceKey) (model.Scaling, error) {
 	scaling := model.Scaling{Key: k}
-	var policiesJSON, scheduledJSON, activitiesJSON []byte
+	var policiesJSON, scheduledJSON, activitiesJSON, unreadableJSON []byte
 	err := s.Pool.QueryRow(ctx,
 		`select has_target, coalesce(min_capacity, 0), coalesce(max_capacity, 0), policies,
-		   scheduled_actions, activities, polled_at
+		   scheduled_actions, activities, unreadable_parts, polled_at
 		 from scaling
 		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4`,
 		k.AccountID, k.Region, k.Cluster, k.Service).
 		Scan(&scaling.HasTarget, &scaling.Min, &scaling.Max, &policiesJSON, &scheduledJSON,
-			&activitiesJSON, &scaling.PolledAt)
+			&activitiesJSON, &unreadableJSON, &scaling.PolledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Scaling{}, ErrNotFound
 	}
@@ -66,6 +66,9 @@ func (s *Store) ScalingForService(ctx context.Context, k model.ServiceKey) (mode
 	}
 	if err := json.Unmarshal(activitiesJSON, &scaling.Activities); err != nil {
 		return model.Scaling{}, fmt.Errorf("decode scaling activities: %w", err)
+	}
+	if err := json.Unmarshal(unreadableJSON, &scaling.Unreadable); err != nil {
+		return model.Scaling{}, fmt.Errorf("decode unreadable scaling parts: %w", err)
 	}
 	return scaling, nil
 }

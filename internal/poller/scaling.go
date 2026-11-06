@@ -2,7 +2,9 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -39,16 +41,23 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
+	// Each part is read on its own: a part that fails keeps its last stored value and is flagged
+	// unreadable, so the other parts still refresh. The failures are returned after the store write.
+	var failed []error
+	var unreadable []string
 	targets, err := describeScalableTargets(ctx, api, "")
 	if err != nil {
-		return err
+		failed, unreadable = append(failed, err), append(unreadable, PartScalingTarget)
 	}
 	policies, err := describeScalingPolicies(ctx, api, "")
 	if err != nil {
-		return err
+		failed, unreadable = append(failed, err), append(unreadable, PartScalingPolicies)
 	}
 	scheduled, err := describeScheduledActions(ctx, api, "")
 	if err != nil {
+		failed, unreadable = append(failed, err), append(unreadable, PartScheduledActions)
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -56,8 +65,18 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 	rows := make([]model.Scaling, 0, len(services))
 	for _, svc := range services {
 		resourceID := scalingResourceID(svc.Key)
-		row := model.Scaling{Key: svc.Key, Policies: policies[resourceID], Scheduled: scheduled[resourceID], PolledAt: now}
-		if target, ok := targets[resourceID]; ok {
+		row := model.Scaling{Key: svc.Key, PolledAt: now}
+		var previous model.Scaling
+		if len(unreadable) > 0 {
+			previous, err = l.Store.ScalingForService(ctx, svc.Key)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+		}
+		row.Unreadable = unreadable
+		if slices.Contains(unreadable, PartScalingTarget) {
+			row.HasTarget, row.Min, row.Max, row.Activities = previous.HasTarget, previous.Min, previous.Max, previous.Activities
+		} else if target, ok := targets[resourceID]; ok {
 			row.HasTarget = true
 			row.Min = int(aws.ToInt32(target.MinCapacity))
 			row.Max = int(aws.ToInt32(target.MaxCapacity))
@@ -67,9 +86,22 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 			}
 			row.Activities = activities
 		}
+		if slices.Contains(unreadable, PartScalingPolicies) {
+			row.Policies = previous.Policies
+		} else {
+			row.Policies = policies[resourceID]
+		}
+		if slices.Contains(unreadable, PartScheduledActions) {
+			row.Scheduled = previous.Scheduled
+		} else {
+			row.Scheduled = scheduled[resourceID]
+		}
 		rows = append(rows, row)
 	}
-	return l.Store.UpsertScaling(ctx, rows)
+	if err := l.Store.UpsertScaling(ctx, rows); err != nil {
+		return err
+	}
+	return errors.Join(failed...)
 }
 
 // scalingResourceID is the Application Auto Scaling resource id of an ECS service.

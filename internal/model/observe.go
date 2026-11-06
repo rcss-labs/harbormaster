@@ -68,6 +68,8 @@ type Scaling struct {
 	Policies   []ScalingPolicy
 	Scheduled  []ScheduledAction
 	Activities []ScalingActivity
+	// Unreadable names the parts the last poll could not read; their values are the last known ones.
+	Unreadable []string
 	PolledAt   time.Time
 }
 
