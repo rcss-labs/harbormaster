@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import type { AnalyticsDonut, AnalyticsSeries, AnalyticsSource, AnalyticsWindow, RollupPanel, TopTable } from '../../api/analytics'
-import { Donut } from '../../charts/Donut'
 import { TimeSeriesChart } from '../../charts/TimeSeriesChart'
 import { bucketDayLabel } from '../../charts/format'
 import { DataTable, type DataTableColumn, type RowStatus } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
+import { StackBar, type StackBarPart } from '../../components/StackBar'
 import { AnalyticsPanel } from './AnalyticsPanel'
 import type { ChartLegendItem } from './ChartLegend'
 import { linesOf, xLabelsFor } from './format'
@@ -92,19 +92,21 @@ export function SeriesPanel({ series, empty = 'Nothing to show.', mode, colors =
   )
 }
 
-interface DonutPanelProps extends PanelBase {
+interface StackPanelProps extends PanelBase {
   donut: AnalyticsDonut
-  centerSub: string
+  /** Unit after the total in the panel header, e.g. "vCPU". */
+  unit: string
   colors: string[]
 }
 
-export function DonutPanel({ donut, centerSub, colors, span, ...base }: DonutPanelProps) {
+/** A breakdown drawn as one stacked bar with its counts listed under it. */
+export function StackPanel({ donut, unit, colors, span, ...base }: StackPanelProps) {
   const round = (value: number) => Math.round(value * 10) / 10
-  const segments = donut.slices.map((slice, index) => ({ name: slice.label, v: round(slice.value), color: colors[index % colors.length] }))
+  const parts: StackBarPart[] = donut.slices.map((slice, index) => ({ n: round(slice.value), color: colors[index % colors.length], label: slice.label }))
   return (
     <Cell span={span}>
-      <AnalyticsPanel title={base.title} sub={base.sub} source={base.source} window={base.window} showSources={base.showSources}>
-        <Donut segments={segments} label={String(round(donut.total))} sub={centerSub} size={132} ring={16} legend="pct" />
+      <AnalyticsPanel title={base.title} sub={`${round(donut.total)} ${unit}`} source={base.source} window={base.window} showSources={base.showSources}>
+        <StackBar parts={parts} label={base.title} legend />
       </AnalyticsPanel>
     </Cell>
   )
