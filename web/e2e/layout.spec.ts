@@ -154,3 +154,47 @@ test.describe('row action menu at 390', () => {
     }
   })
 })
+
+// A segment label must never wrap inside its box: segments grow to fit and the group wraps onto more rows instead.
+test.describe('segmented filters', () => {
+  test('at 390 labels stay on one line, inside the panel, with every option visible', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/services')
+    // Every segmented control: the radiogroup filters and the toggle group of saved views share one component.
+    const groups = page.locator('[class*="seg"]:has(> button)')
+    await expect(groups.first()).toBeVisible()
+    for (const name of ['My pins', 'In progress', 'Steady', 'Scaled to 0']) {
+      await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toBeVisible()
+    }
+    const shortHeight = (await groups.locator('button', { hasText: /^All/ }).first().boundingBox())!.height
+
+    const results = await groups.evaluateAll((elements) =>
+      elements.map((group) => {
+        const panel = group.closest('[class*="panel"]') ?? document.body
+        const panelRight = panel.getBoundingClientRect().right
+        const radios = [...group.querySelectorAll('button')].map((radio) => {
+          const box = radio.getBoundingClientRect()
+          return { text: radio.textContent ?? '', height: box.height, right: box.right }
+        })
+        return { name: group.getAttribute('aria-label'), radios, panelRight, scrolls: group.scrollWidth - group.clientWidth }
+      }),
+    )
+    expect(results.length).toBeGreaterThan(0)
+    for (const group of results) {
+      expect(group.scrolls, `${group.name} scrolls horizontally`).toBeLessThanOrEqual(0)
+      for (const radio of group.radios) {
+        expect(Math.abs(radio.height - shortHeight), `"${radio.text}" wraps (h=${radio.height})`).toBeLessThanOrEqual(1)
+        expect(radio.right, `"${radio.text}" leaves the panel`).toBeLessThanOrEqual(group.panelRight + 0.5)
+      }
+    }
+  })
+
+  test('at 1440 the status filter keeps one row', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/services')
+    const radios = page.getByRole('radiogroup', { name: 'Status' }).getByRole('radio')
+    await expect(radios.first()).toBeVisible()
+    const tops = await radios.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)))
+    expect(new Set(tops).size).toBe(1)
+  })
+})
