@@ -10,11 +10,12 @@ test.beforeEach(async ({ page }) => {
 
 const REGIONS = 4
 
-test('the freshness control counts a failing scaling tier as stale in every region', async ({ page }) => {
+test('the freshness control keeps regions current while a failing scaling tier is named stale in every region', async ({ page }) => {
   await page.goto('/')
-  // Until the first scaling poll fails (a few seconds) the control still reads current.
-  const control = page.getByRole('button', { name: `0 of ${REGIONS} regions current` })
-  await expect(control).toBeVisible({ timeout: 30_000 })
+  // Core data stays current; the note appears once the first scaling poll fails (a few seconds).
+  await expect(page.getByText(`auto scaling stale in ${REGIONS} regions`)).toBeVisible({ timeout: 30_000 })
+  const control = page.getByRole('button', { name: `${REGIONS} of ${REGIONS} regions current` })
+  await expect(control).toBeVisible()
   await control.click()
   const popover = page.getByRole('dialog', { name: 'Data freshness' })
   await expect(popover).toBeVisible()
@@ -26,7 +27,7 @@ test('the freshness control counts a failing scaling tier as stale in every regi
 
 test('only the Scaling tab shows a page banner; Overview and Clusters show none', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('button', { name: `0 of ${REGIONS} regions current` })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(`auto scaling stale in ${REGIONS} regions`)).toBeVisible({ timeout: 30_000 })
 
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
   await expect(page.locator('main [data-hm-banner]')).toHaveCount(0)

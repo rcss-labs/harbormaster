@@ -108,3 +108,35 @@ test('collapsed sidebar keeps the account menu reachable', async ({ page }) => {
   await expect(menu.getByRole('button', { name: 'Sign out' })).toBeVisible()
   await expect(menu.getByRole('link', { name: 'My access' })).toBeVisible()
 })
+
+test('the top bar keeps every control reachable at 390', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  const controls = [
+    scopeButton(page),
+    page.getByRole('button', { name: /^Search/ }),
+    freshness(page),
+    page.getByRole('button', { name: /^Activity/ }),
+    page.getByRole('button', { name: 'Toggle row density' }),
+    page.getByRole('button', { name: 'Toggle theme' }),
+    page.getByRole('button', { name: 'Keyboard shortcuts' }),
+  ]
+  for (const control of controls) {
+    await expect(control).toBeVisible()
+    const box = (await control.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+    expect(box.height).toBeGreaterThanOrEqual(32)
+    expect(box.width).toBeGreaterThanOrEqual(32)
+  }
+
+  await freshness(page).click()
+  const popover = page.getByRole('dialog', { name: 'Data freshness' })
+  await expect(popover).toBeVisible()
+  const popBox = (await popover.boundingBox())!
+  expect(popBox.x).toBeGreaterThanOrEqual(0)
+  expect(popBox.x + popBox.width).toBeLessThanOrEqual(390)
+})

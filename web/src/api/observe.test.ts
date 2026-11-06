@@ -103,7 +103,7 @@ describe('useDataProblems', () => {
     expect(result.current.affected).toHaveLength(1)
     expect(result.current.affected[0].region).toBe('eu-west-1')
     expect(result.current.affected[0].failingTiers.map((tier) => tier.label)).toEqual(['Auto scaling'])
-    expect(result.current.current).toBe(0)
+    expect(result.current.current).toBe(1)
   })
 
   it('ignores failing tiers the page does not depend on', async () => {
