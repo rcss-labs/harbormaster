@@ -85,6 +85,7 @@
 .kbd { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 5px; flex: none; }
 .freshBtn { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); cursor: pointer; font: inherit; white-space: nowrap; }
 .freshBtn:hover { background: var(--hover); }
+.freshNote { margin-left: 6px; color: var(--muted); white-space: nowrap; }
 .freshPop { display: grid; gap: 4px; }
 .freshRegion { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--row-border); }
 .freshCurrent { color: var(--muted); }

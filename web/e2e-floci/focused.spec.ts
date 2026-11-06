@@ -62,7 +62,9 @@ test('freshness control counts core data', async ({ page }) => {
   await control.click()
   const popover = page.getByRole('dialog').or(page.getByRole('region', { name: /fresh|current/i })).first()
   await expect(popover.getByText('Clusters and services').first()).toBeVisible()
-  const total = Number((await control.innerText()).match(/of (\d+)/)![1])
+  const [, current, total] = (await control.innerText()).match(/(\d+) of (\d+)/)!.map(Number)
+  // A failing non-core tier (floci has no scheduled actions) must not label a region stale for core data.
+  expect(current).toBe(total)
   await expect(popover.getByText('Auto scaling')).toHaveCount(total)
   await page.keyboard.press('Escape')
   await expect(page.locator('main [data-hm-banner]')).toHaveCount(0)

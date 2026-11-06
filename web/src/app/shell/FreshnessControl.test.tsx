@@ -70,11 +70,23 @@ describe('FreshnessControl', () => {
 
   it('names only the failed data type', async () => {
     renderControl(POLLER_TIERS)
-    const dialog = await openControl(/0 of 1 regions? current/)
+    const dialog = await openControl(/^1 of 1 regions? current$/)
     expect(within(dialog).getByText(/Auto scaling is \d+ min old|Auto scaling is unavailable/)).toBeInTheDocument()
     expect(within(dialog).queryByText(/Clusters and services is/)).not.toBeInTheDocument()
     expect(within(dialog).queryByText(/Tasks is/)).not.toBeInTheDocument()
     expect(within(dialog).getByText(/Current: .*Clusters and services/)).toBeInTheDocument()
+  })
+
+  it('counts a region current when only a non-core tier fails, and names the failure beside the count', async () => {
+    renderControl(POLLER_TIERS)
+    expect(await screen.findByRole('button', { name: '1 of 1 regions current' })).toBeInTheDocument()
+    expect(screen.getByText('auto scaling stale in 1 region')).toBeInTheDocument()
+  })
+
+  it('counts a region as not current when a core tier fails', async () => {
+    const [first] = POLLER_TIERS.items
+    renderControl({ items: [{ ...first, tiers: first.tiers.map((tier) => (tier.core ? { ...tier, failing: true, last_error: 'boom' } : tier)) }] })
+    expect(await screen.findByRole('button', { name: '0 of 1 regions current' })).toBeInTheDocument()
   })
 
   it('states the age of the stale data type', async () => {

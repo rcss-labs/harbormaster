@@ -94,7 +94,18 @@ function RegionRow({ item, canSeeError }: { item: PollerEntryDTO; canSeeError: b
   )
 }
 
-/** "N of M regions current": a region is current when none of its data types fails or is throttled. */
+/** "auto scaling stale in 3 regions": non-core data types that fail or are throttled, counted by regions. */
+function nonCoreNote(items: PollerEntryDTO[]): string {
+  const regionsByLabel = new Map<string, number>()
+  for (const item of items) {
+    for (const type of mergeTiers(item.tiers)) {
+      if (!type.core && (type.failing || type.throttled)) regionsByLabel.set(type.label, (regionsByLabel.get(type.label) ?? 0) + 1)
+    }
+  }
+  return [...regionsByLabel].map(([label, regions]) => `${label.toLowerCase()} stale in ${regions} ${regions === 1 ? 'region' : 'regions'}`).join('; ')
+}
+
+/** "N of M regions current": a region is current when none of its core data types fails or is throttled. */
 export function FreshnessControl() {
   const { me } = useAuth()
   const poller = usePollerStatus()
@@ -103,12 +114,14 @@ export function FreshnessControl() {
   const items = poller.data?.items ?? []
   if (!poller.data) return null
   const admin = me?.admin ?? false
+  const note = nonCoreNote(items)
   const stale = items.some((item) => item.tiers.some((tier) => tier.failing || tier.throttled))
   return (
     <div className={styles.popAnchor}>
       <button type="button" className={styles.freshBtn} aria-haspopup="dialog" aria-expanded={open} title="Data freshness" onClick={() => setOpen((shown) => !shown)}>
         <StatusDot kind={worstKind(items)}>{`${current} of ${total} regions current`}</StatusDot>
       </button>
+      {note && <span className={styles.freshNote}>{note}</span>}
       <Popover open={open} onClose={() => setOpen(false)} label="Data freshness" align="right" width={400}>
         <div className={styles.freshPop}>
           <strong>Data freshness</strong>

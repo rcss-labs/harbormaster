@@ -122,7 +122,7 @@ export interface AffectedRegion extends PollerEntryDTO {
 export interface DataProblems {
   /** Regions where a tier named in `labels` fails or is throttled. */
   affected: AffectedRegion[]
-  /** Regions with no failing or throttled tier at all. */
+  /** Regions with no failing or throttled core tier; a non-core failure (e.g. auto scaling) does not count. */
   current: number
   total: number
   isLoading: boolean
@@ -130,8 +130,8 @@ export interface DataProblems {
 
 /**
  * Which regions have a data problem a page cares about. `labels` are `PollerTierDTO.label` values the page depends on
- * (for example `['Auto scaling']`); omit it to consider every tier. `current`/`total` always count every tier, so the
- * freshness control agrees with what the pages report.
+ * (for example `['Auto scaling']`); omit it to consider every tier. `current`/`total` count core tiers only, so a failing
+ * non-core tier never labels the whole region stale.
  */
 export function useDataProblems(labels?: readonly string[]): DataProblems {
   const poller = usePollerStatus()
@@ -141,7 +141,7 @@ export function useDataProblems(labels?: readonly string[]): DataProblems {
     const failingTiers = item.tiers.filter((tier) => isProblem(tier) && (!labels || labels.includes(tier.label)))
     return failingTiers.length > 0 ? [{ ...item, failingTiers }] : []
   })
-  const current = items.filter((item) => !item.tiers.some(isProblem)).length
+  const current = items.filter((item) => !item.tiers.some((tier) => tier.core && isProblem(tier))).length
   return { affected, current, total: items.length, isLoading: poller.isLoading }
 }
 
