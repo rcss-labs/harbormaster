@@ -85,3 +85,54 @@ test('long tabs keep their full height inside the scrolling content', async ({ p
     expect(overflow, `tab "${tab}" panel is squashed`).toBeLessThanOrEqual(1)
   }
 })
+
+// Header and body cells must share one set of column tracks, and the pinned actions column must never hide a cell
+// that cannot be scrolled into view.
+const tableTargets = [
+  { name: 'Services', path: () => '/services', table: 'Services' },
+  { name: 'service Tasks tab', path: () => serviceUrl(...SVC.paymentsApi, 'tasks'), table: 'Tasks' },
+]
+
+for (const target of tableTargets) {
+  for (const width of [390, 1440, 3840]) {
+    test(`${target.name} table keeps columns aligned and uncovered at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(target.path())
+      const table = page.getByRole('table', { name: target.table })
+      const firstRow = table.getByRole('row').nth(1)
+      await expect(firstRow).toBeVisible()
+
+      // The first cell (the name or task id) is what the user sees at its centre, not the sticky actions cell.
+      const firstCell = firstRow.getByRole('cell').first()
+      const covered = await firstCell.evaluate((cell) => {
+        const box = cell.getBoundingClientRect()
+        const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+        return !top || !cell.contains(top)
+      })
+      expect(covered, 'first cell is covered').toBe(false)
+
+      // Every column header sits over its cells.
+      const headerCells = table.getByRole('row').first().getByRole('columnheader')
+      const bodyCells = firstRow.getByRole('cell')
+      const count = await headerCells.count()
+      expect(await bodyCells.count()).toBe(count)
+      for (let index = 0; index < count; index++) {
+        const header = (await headerCells.nth(index).boundingBox())!
+        const cell = (await bodyCells.nth(index).boundingBox())!
+        expect(Math.abs(header.x - cell.x), `column ${index} header x ${header.x} vs cell x ${cell.x}`).toBeLessThanOrEqual(2)
+      }
+
+      // Scrolled fully right, the last data column ends where the pinned actions cell begins.
+      const clear = await firstRow.evaluate((row) => {
+        let scroller: HTMLElement | null = row.parentElement
+        while (scroller && getComputedStyle(scroller).overflowX === 'visible') scroller = scroller.parentElement
+        if (scroller) scroller.scrollLeft = scroller.scrollWidth
+        const cells = row.querySelectorAll('[role="cell"]')
+        const actions = cells[cells.length - 1].getBoundingClientRect()
+        const lastData = cells[cells.length - 2].getBoundingClientRect()
+        return actions.left - lastData.right
+      })
+      expect(clear, 'last data column is under the actions cell').toBeGreaterThanOrEqual(-1)
+    })
+  }
+}
