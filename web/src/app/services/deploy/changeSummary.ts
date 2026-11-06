@@ -1,5 +1,6 @@
 import type { ChangeSetRequest, ChangeSetResponse, DeploySettingsResponse } from '../../../api/deploy'
-import type { Definition } from '../task-definition/mainContainer'
+import { containersOf, imageTagOf, type Definition } from '../task-definition/mainContainer'
+import { containerNames, readArgv, readEnvironment, readHealthCheck, readSecrets, type HealthCheck } from './draft'
 import type { ScalingChange } from './scalingDraft'
 import type { ServiceChange } from './serviceDraft'
 import { plural } from './format'
@@ -144,6 +145,130 @@ export function summarySentence({ serviceName, sections, predictedRevision, canD
   const head = parts.slice(0, -1).join(', ')
   const text = parts.length > 1 ? `${head} and ${parts[parts.length - 1]}` : parts[0]
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`
+}
+
+/** One edited field of the Pending changes aside: where it lives, its name, the live value and the draft value. */
+export interface PendingRow {
+  group: string
+  label: string
+  before: string
+  after: string
+}
+
+/** What the aside compares: the sections that will be sent, plus the live and edited task definitions. */
+export interface PendingDraft {
+  sections: ChangeSections
+  liveDefinition?: Definition
+  definitionAfter?: Definition
+}
+
+const NOT_SET = 'Not set'
+const REMOVED = 'Removed'
+const METRIC_TEXT: Record<string, string> = { cpu: 'CPU %', memory: 'Memory %', alb: 'ALB requests per target' }
+
+const argvText = (argv: string[]) => (argv.length === 0 ? 'Image default' : argv.join(' '))
+const healthText = (check: HealthCheck | null) =>
+  check ? `${check.command.join(' ')} every ${check.interval} s, timeout ${check.timeout} s, ${check.retries} retries, start ${check.startPeriod} s` : 'None'
+
+const without = (source: Record<string, unknown>, keys: string[]) => Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
+
+/** Everything the dedicated rows already cover is removed, so what is left differing is a change the aside has no row for. */
+function uncoveredDefinition(definition: Definition): unknown {
+  return {
+    ...without(definition, ['cpu', 'memory']),
+    containerDefinitions: containersOf(definition).map((entry) => {
+      const text = typeof entry.image === 'string' ? entry.image : ''
+      return { ...without(entry, ['image', 'environment', 'secrets', 'command', 'entryPoint', 'healthCheck']), image: text.slice(0, text.length - imageTagOf(text).length) }
+    }),
+  }
+}
+
+function definitionRows(before: Definition, after: Definition): PendingRow[] {
+  const rows: PendingRow[] = []
+  const task = (label: string, was: unknown, now: unknown, unit: string) => {
+    if (String(was) !== String(now)) rows.push({ group: 'Task size', label, before: `${was}${unit}`, after: `${now}${unit}` })
+  }
+  task('Task CPU', before.cpu ?? '', after.cpu ?? '', ' units')
+  task('Task memory', before.memory ?? '', after.memory ?? '', ' MiB')
+
+  const wasNames = containerNames(before)
+  const nowNames = containerNames(after)
+  for (const name of [...wasNames.filter((candidate) => !nowNames.includes(candidate)), ...nowNames.filter((candidate) => !wasNames.includes(candidate))]) {
+    const added = nowNames.includes(name)
+    rows.push({ group: 'Containers', label: `Container ${name}`, before: added ? NOT_SET : 'Present', after: added ? 'Added' : REMOVED })
+  }
+  for (const name of nowNames.filter((candidate) => wasNames.includes(candidate))) {
+    const group = nowNames.length > 1 ? `Container ${name}` : 'Container'
+    const wasContainer = containersOf(before).find((entry) => entry?.name === name)
+    const nowContainer = containersOf(after).find((entry) => entry?.name === name)
+    const wasTag = imageTagOf(wasContainer?.image)
+    const nowTag = imageTagOf(nowContainer?.image)
+    if (wasTag !== nowTag) rows.push({ group, label: 'Image tag', before: wasTag || NOT_SET, after: nowTag || NOT_SET })
+
+    const compareByName = <T extends { name: string }>(label: string, was: T[], now: T[], show: (item: T) => string) => {
+      const wasByName = new Map(was.map((item) => [item.name, item]))
+      const nowByName = new Map(now.map((item) => [item.name, item]))
+      for (const key of new Set([...wasByName.keys(), ...nowByName.keys()])) {
+        const previous = wasByName.get(key)
+        const next = nowByName.get(key)
+        const shownBefore = previous ? show(previous) : NOT_SET
+        const shownAfter = next ? show(next) : REMOVED
+        if (shownBefore !== shownAfter || (previous === undefined) !== (next === undefined)) rows.push({ group, label: `${label} ${key}`, before: shownBefore, after: shownAfter })
+      }
+    }
+    compareByName('Environment', readEnvironment(before, name), readEnvironment(after, name), (item) => item.value)
+    compareByName('Secret', readSecrets(before, name), readSecrets(after, name), (item) => item.valueFrom)
+    for (const key of ['command', 'entryPoint'] as const) {
+      const was = argvText(readArgv(before, name, key))
+      const now = argvText(readArgv(after, name, key))
+      if (was !== now) rows.push({ group, label: key === 'command' ? 'Command' : 'Entry point', before: was, after: now })
+    }
+    const wasCheck = healthText(readHealthCheck(before, name))
+    const nowCheck = healthText(readHealthCheck(after, name))
+    if (wasCheck !== nowCheck) rows.push({ group, label: 'Health check', before: wasCheck, after: nowCheck })
+  }
+  if (JSON.stringify(uncoveredDefinition(before)) !== JSON.stringify(uncoveredDefinition(after))) {
+    rows.push({ group: 'Task definition', label: 'Other definition fields', before: 'As deployed', after: 'Edited (the review shows the diff)' })
+  }
+  return rows
+}
+
+const policyText = (policy: { metric: string; metric_raw?: string; target_value: number; scale_in_cooldown: number; scale_out_cooldown: number; disable_scale_in: boolean }) =>
+  `${METRIC_TEXT[policy.metric] ?? policy.metric_raw ?? policy.metric} at ${policy.target_value}, in ${policy.scale_in_cooldown} s, out ${policy.scale_out_cooldown} s${policy.disable_scale_in ? ', scale-in off' : ''}`
+
+const actionText = (action: { schedule: string; timezone: string; min_capacity: number | null; max_capacity: number | null }) =>
+  `${action.schedule} ${action.timezone}, min ${action.min_capacity ?? 'unchanged'}, max ${action.max_capacity ?? 'unchanged'}`
+
+function scalingRows(settings: DeploySettingsResponse, change: ScalingChange): PendingRow[] {
+  const rows: PendingRow[] = []
+  const group = 'Auto scaling'
+  const { scaling } = settings
+  if (change.target) rows.push({ group, label: 'Capacity', before: scaling.has_target ? `${scaling.min}–${scaling.max}` : 'None', after: `${change.target.min}–${change.target.max}` })
+  if (change.remove_target) rows.push({ group, label: 'Scaling target', before: 'Registered', after: REMOVED })
+  const policies = new Map(scaling.policies.map((policy) => [policy.name, policy]))
+  const touchedPolicies = new Set([...(change.put_policies ?? []).map((put) => put.name), ...(change.delete_policies ?? [])])
+  for (const name of touchedPolicies) {
+    const put = change.put_policies?.find((candidate) => candidate.name === name)
+    const previous = policies.get(name)
+    rows.push({ group, label: `Policy ${name}`, before: previous ? policyText(previous) : NOT_SET, after: put ? policyText(put) : REMOVED })
+  }
+  const actions = new Map(scaling.scheduled_actions.map((action) => [action.name, action]))
+  const touchedActions = new Set([...(change.put_scheduled_actions ?? []).map((put) => put.name), ...(change.delete_scheduled_actions ?? [])])
+  for (const name of touchedActions) {
+    const put = change.put_scheduled_actions?.find((candidate) => candidate.name === name)
+    const previous = actions.get(name)
+    rows.push({ group, label: `Scheduled action ${name}`, before: previous ? actionText(previous) : NOT_SET, after: put ? actionText(put) : REMOVED })
+  }
+  return rows
+}
+
+/** Every edited field as a row with its live value and its draft value, for the Pending changes aside. */
+export function pendingRows({ sections, liveDefinition, definitionAfter }: PendingDraft, settings: DeploySettingsResponse | undefined): PendingRow[] {
+  const rows: PendingRow[] = []
+  if (liveDefinition && definitionAfter) rows.push(...definitionRows(liveDefinition, definitionAfter))
+  if (settings && sections.service) rows.push(...serviceRows(settings, sections.service).map((row) => ({ group: 'Service', ...row })))
+  if (settings && sections.scaling) rows.push(...scalingRows(settings, sections.scaling))
+  return rows
 }
 
 export const changesLabel = (count: number) => plural(count, 'change')

@@ -75,7 +75,11 @@ test.describe('pavel on payments-api', () => {
     await page.getByRole('button', { name: 'Add variable' }).click()
     await page.getByRole('textbox', { name: 'Variable name 4' }).fill('FEATURE_NEW_LEDGER')
     await page.getByRole('textbox', { name: 'Variable value 4' }).fill('off')
-    await expect(page.getByRole('region', { name: 'Pending changes' }).getByText('1 change')).toBeVisible()
+    const pending = page.getByRole('region', { name: 'Pending changes' })
+    await expect(pending.getByText('1 change')).toBeVisible()
+    // The aside shows each edited field live, before and after.
+    await expect(pending.getByRole('listitem', { name: 'Image tag' })).toContainText('→ 1.16.4')
+    await expect(pending.getByRole('listitem', { name: 'Environment FEATURE_NEW_LEDGER' })).toContainText('Environment FEATURE_NEW_LEDGER: Not set → off')
 
     await page.getByRole('button', { name: 'Review…' }).click()
     const review = page.getByRole('dialog')
@@ -113,6 +117,31 @@ test.describe('pavel on payments-api', () => {
     await expect(deploy.locator('strong')).toHaveCSS('font-weight', /^(600|700|800|900)$/)
     await expect(tabs.getByRole('link').locator('strong')).toHaveCount(1)
     await expect(tabs.getByRole('link', { name: 'Operations log', exact: true }).locator('strong')).toHaveCount(0)
+  })
+})
+
+test.describe('pavel on a phone', () => {
+  test.use(asUser('pavel'))
+
+  test('Deploy never scrolls sideways at 390px and the pending aside stacks below the form', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 })
+    await page.goto(paymentsApi)
+    const aside = page.getByRole('region', { name: 'Pending changes' })
+    await expect(aside).toBeVisible()
+    const service = page.getByRole('region', { name: 'Service' })
+    await expect(service.getByRole('spinbutton', { name: 'Desired count' })).toBeVisible()
+    expect((await aside.boundingBox())!.y).toBeGreaterThan((await service.boundingBox())!.y)
+    await expect(page.getByRole('button', { name: 'Add variable' })).toBeVisible()
+    await expect(page.getByRole('table', { name: 'Scaling policies' }).or(page.getByRole('grid', { name: 'Scaling policies' }))).toBeVisible()
+    // Every Deploy panel, the aside and the page itself stay inside the window. (The header's tab strip is the page
+    // frame's and is checked with the service page.)
+    const overflow = await page.evaluate(() => {
+      const limit = document.documentElement.clientWidth
+      const wide = Array.from(document.querySelectorAll('main section, main aside')).filter((element) => element.getBoundingClientRect().right > limit + 0.5)
+      return { page: document.documentElement.scrollWidth - limit, wide: wide.map((element) => element.getAttribute('aria-label') ?? element.tagName) }
+    })
+    expect(overflow.page).toBeLessThanOrEqual(0)
+    expect(overflow.wide).toEqual([])
   })
 })
 
