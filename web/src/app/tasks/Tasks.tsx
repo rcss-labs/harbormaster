@@ -1,17 +1,29 @@
-import { useDeferredValue, useMemo } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useSettings } from '../../api/hooks'
 import type { TasksFilter, TasksListDTO } from '../../api/types'
+import { Chips } from '../../components/Chips'
 import { ColumnPicker, useColumnPrefs } from '../../components/ColumnPicker'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip, type KpiItem } from '../../components/KpiStrip'
 import { SegmentedFilter } from '../../components/Seg'
-import { TASK_COLUMNS } from '../../components/TaskTable'
+import { PHONE_TASK_COLUMNS, TASK_COLUMNS } from '../../components/TaskTable'
 import { Toggle } from '../../components/Toggle'
+import { usePhone } from '../../components/useNarrow'
 import { useCrumbs } from '../shell/crumbs'
 import { useFilters } from '../shell/useFilters'
 import { HiddenStoppedNote } from './HiddenStoppedNote'
 import { buildRows, inSegment, matchesQuery } from './taskRows'
+import {
+  FiltersButton,
+  SHEET_FILTERS,
+  TasksFilters,
+  matchesSheetFilters,
+  sheetFilterOptions,
+  summariseSheetFilters,
+  type SheetFilterKey,
+  type SheetFilterValues,
+} from './TasksFilters'
 import styles from './tasks.module.css'
 import { useAllTasks } from './useAllTasks'
 import { useTaskPanel } from './useTaskPanel'
@@ -57,13 +69,29 @@ export function Tasks() {
   // Group keys never contain a newline, so one string stands in for the list and keeps memoisation simple.
   const openParam = searchParams.getAll('open').join('\n')
 
+  const phone = usePhone()
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  // The sheet's filters exist on phones only; the desktop toolbar keeps its own controls.
+  const sheetValues = useMemo(
+    () => Object.fromEntries(SHEET_FILTERS.map(({ key }) => [key, phone ? (searchParams.get(key) ?? '') : ''])) as SheetFilterValues,
+    [searchParams, phone],
+  )
+  const sheetSummary = summariseSheetFilters(sheetValues)
+  const sheetActive = SHEET_FILTERS.filter(({ key }) => sheetValues[key]).length
+
   const all = useAllTasks(filters)
   const windowMinutes = useSettings().data?.stopped_tasks_window_minutes
   const deferredQuery = useDeferredValue(query)
-  const [visibleColumns, setVisibleColumns] = useColumnPrefs('harbormaster-columns:tasks', COLUMN_DEFAULTS)
+  const [desktopColumns, setDesktopColumns] = useColumnPrefs('harbormaster-columns:tasks', COLUMN_DEFAULTS)
+  const [phoneColumns, setPhoneColumns] = useColumnPrefs('harbormaster-columns:tasks-phone', PHONE_TASK_COLUMNS)
+  const visibleColumns = phone ? phoneColumns : desktopColumns
   const { onOpen, onStop, panel } = useTaskPanel(all.items)
 
-  const matching = useMemo(() => all.items.filter((task) => matchesQuery(task, deferredQuery)), [all.items, deferredQuery])
+  const sheetOptions = useMemo(() => sheetFilterOptions(all.items), [all.items])
+  const matching = useMemo(
+    () => all.items.filter((task) => matchesQuery(task, deferredQuery) && matchesSheetFilters(task, sheetValues)),
+    [all.items, deferredQuery, sheetValues],
+  )
   const counts = useMemo(
     () => Object.fromEntries(FILTERS.map((filter) => [filter, matching.filter((task) => inSegment(task, filter)).length])) as Record<TasksFilter, number>,
     [matching],
@@ -113,6 +141,23 @@ export function Tasks() {
       if (value > 1) params.set('page', String(value))
       else params.delete('page')
     })
+  const setSheetFilter = (key: SheetFilterKey, value: string) =>
+    update((params) => {
+      if (value) params.set(key, value)
+      else params.delete(key)
+      resetPage(params)
+    })
+  const clearSheetFilters = (params: URLSearchParams) => {
+    for (const { key } of SHEET_FILTERS) params.delete(key)
+    resetPage(params)
+  }
+  /** Drops the sheet's filters, the text query and the state chip, so the list shows every task in scope again. */
+  const clearAllFilters = () =>
+    update((params) => {
+      clearSheetFilters(params)
+      params.delete('q')
+      params.set('filter', 'all')
+    })
   const toggleGroup = (groupKey: string) =>
     update((params) => {
       const open = params.getAll('open')
@@ -126,7 +171,7 @@ export function Tasks() {
   return (
     <>
       <div className={styles.pageHead}>
-        <h1>Tasks</h1>
+        <h1 className="hm-phone-title-sr">Tasks</h1>
         <span className={styles.meta}>
           Every task in every cluster you can see. ECS keeps stopped tasks for about an hour; Harbormaster keeps them for 7 days.
         </span>
@@ -134,37 +179,94 @@ export function Tasks() {
 
       {all.summary && <KpiStrip label="Task summary" items={kpiItems(all.summary, windowMinutes)} />}
 
-      <div className={styles.toolbar}>
-        <SegmentedFilter
-          label="Task filter"
-          value={segment}
-          onChange={setSegment}
-          options={[
-            { value: 'problems', label: 'Problems', count: counts.problems },
-            { value: 'running', label: 'Running', count: counts.running },
-            { value: 'stopped', label: 'Stopped', count: counts.stopped },
-            { value: 'all', label: 'All', count: counts.all },
-          ]}
-        />
-        <input
-          type="search"
-          className={styles.search}
-          aria-label="Filter tasks"
-          data-hm-filter
-          placeholder="Filter by task ID, service, cluster, IP"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <Toggle checked={group} onChange={setGroup}>
-          Group repeats
-        </Toggle>
-        <HiddenStoppedNote />
-        <span className={styles.spacer} />
-        <ColumnPicker columns={TASK_COLUMNS} visible={visibleColumns} onChange={setVisibleColumns} defaults={COLUMN_DEFAULTS} />
-      </div>
+      {phone ? (
+        <>
+          <Chips
+            label="Task filter"
+            value={segment}
+            onChange={setSegment}
+            options={[
+              { value: 'problems', label: 'Problems', count: counts.problems },
+              { value: 'running', label: 'Running', count: counts.running },
+              { value: 'stopped', label: 'Stopped', count: counts.stopped },
+              { value: 'all', label: 'All', count: counts.all },
+            ]}
+          />
+          <div className={styles.phoneSearch}>
+            <input
+              type="search"
+              className={styles.phoneInput}
+              aria-label="Filter tasks"
+              data-hm-filter
+              placeholder="Filter by task ID, service, cluster, IP"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <FiltersButton active={sheetActive} onOpen={() => setFiltersOpen(true)} />
+          </div>
+          {sheetSummary && (
+            <div className={styles.summary}>
+              <span>{`Filters: ${sheetSummary}`}</span>
+              <button type="button" className={styles.summaryClear} onClick={clearAllFilters}>
+                Clear filters
+              </button>
+            </div>
+          )}
+          <HiddenStoppedNote />
+          <TasksFilters
+            open={filtersOpen}
+            onClose={() => setFiltersOpen(false)}
+            options={sheetOptions}
+            values={sheetValues}
+            onChange={setSheetFilter}
+            group={group}
+            onGroupChange={setGroup}
+            visibleColumns={phoneColumns}
+            onVisibleColumnsChange={setPhoneColumns}
+            defaultColumns={PHONE_TASK_COLUMNS}
+            onClear={clearAllFilters}
+          />
+        </>
+      ) : (
+        <div className={styles.toolbar}>
+          <SegmentedFilter
+            label="Task filter"
+            value={segment}
+            onChange={setSegment}
+            options={[
+              { value: 'problems', label: 'Problems', count: counts.problems },
+              { value: 'running', label: 'Running', count: counts.running },
+              { value: 'stopped', label: 'Stopped', count: counts.stopped },
+              { value: 'all', label: 'All', count: counts.all },
+            ]}
+          />
+          <input
+            type="search"
+            className={styles.search}
+            aria-label="Filter tasks"
+            data-hm-filter
+            placeholder="Filter by task ID, service, cluster, IP"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <Toggle checked={group} onChange={setGroup}>
+            Group repeats
+          </Toggle>
+          <HiddenStoppedNote />
+          <span className={styles.spacer} />
+          <ColumnPicker columns={TASK_COLUMNS} visible={visibleColumns} onChange={setDesktopColumns} defaults={COLUMN_DEFAULTS} />
+        </div>
+      )}
 
       {failed ? (
-        <EmptyState>{all.error instanceof Error ? all.error.message : 'The tasks could not be loaded.'}</EmptyState>
+        <EmptyState>
+          {all.error instanceof Error ? all.error.message : 'The tasks could not be loaded.'}
+          {phone && (
+            <button type="button" className={styles.emptyClear} onClick={all.retry}>
+              Retry
+            </button>
+          )}
+        </EmptyState>
       ) : all.loading && all.items.length === 0 ? (
         <EmptyState>Loading tasks…</EmptyState>
       ) : (
@@ -173,7 +275,21 @@ export function Tasks() {
             onOpen={onOpen}
             onStop={onStop}
             visibleColumns={visibleColumns}
-            empty="No tasks match." />
+            empty={
+              phone ? (
+                <>
+                  No tasks match.
+                  {!sheetSummary && (
+                    <button type="button" className={styles.emptyClear} onClick={clearAllFilters}>
+                      Clear filters
+                    </button>
+                  )}
+                </>
+              ) : (
+                'No tasks match.'
+              )
+            }
+          />
           {all.truncated && (
             <div className={styles.note}>
               {`Showing the first ${all.items.length} tasks. Filter by service, cluster or account to see the rest.`}

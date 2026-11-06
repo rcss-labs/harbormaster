@@ -18,6 +18,8 @@ export interface AllTasks {
   /** True when the cap stopped loading before the API ran out of tasks. */
   truncated: boolean
   error: unknown
+  /** Loads the first page again after a failure. */
+  retry: () => void
 }
 
 /**
@@ -50,5 +52,6 @@ export function useAllTasks(filters: Filters): AllTasks {
     loading: query.isPending || canLoadMore,
     truncated: hasNextPage && pages.length >= MAX_PAGES,
     error: query.error,
+    retry: () => void query.refetch(),
   }
 }

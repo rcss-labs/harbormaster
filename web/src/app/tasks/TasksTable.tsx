@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import type { TaskDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
@@ -15,6 +16,7 @@ import {
   memoryText,
   taskStripe,
 } from '../../components/TaskTable'
+import rowStyles from '../../components/TaskTable.module.css'
 import type { TaskTableRow } from './taskRows'
 import styles from './TasksTable.module.css'
 
@@ -44,7 +46,7 @@ interface TasksTableProps {
   onStop: (task: TaskDTO) => void
   /** Keys of the columns to show (see TASK_COLUMNS); the actions column is always shown and pinned. */
   visibleColumns: string[]
-  empty: string
+  empty: ReactNode
 }
 
 /** The redesigned Tasks list: 50 rows per page, repeat groups as expandable rows, actions pinned at the right. */
@@ -137,25 +139,27 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, onOpen, on
             </span>
           ) : null
         ) : (
-          <TaskActions task={row.task} withLogs onStop={onStop} />
+          <TaskActions task={row.task} withLogs onStop={onStop} onOpen={onOpen} />
         ),
     },
   ]
 
   return (
-    <DataTable
-      label="Tasks"
-      columns={columns}
-      rows={rows}
-      rowKey={(row) => row.rowKey}
-      rowStatus={(row) => taskStripe(lead(row))}
-      visibleColumns={[...visibleColumns, 'actions']}
-      stickyActions
-      minWidth={1500}
-      pageSize={PAGE_SIZE}
-      page={page}
-      onPageChange={onPageChange}
-      empty={empty}
-    />
+    <div className={rowStyles.rows}>
+      <DataTable
+        label="Tasks"
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.rowKey}
+        rowStatus={(row) => taskStripe(lead(row))}
+        visibleColumns={[...visibleColumns, 'actions']}
+        stickyActions
+        minWidth={1500}
+        pageSize={PAGE_SIZE}
+        page={page}
+        onPageChange={onPageChange}
+        empty={empty}
+      />
+    </div>
   )
 }
