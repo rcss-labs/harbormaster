@@ -10,6 +10,7 @@ import {
   AUDIT,
   CLUSTERS,
   CLUSTERS_METRICS,
+  SERVICES_METRICS,
   CLUSTER_DETAILS,
   CLUSTER_METRICS_CORE,
   ME_ADMIN,
@@ -81,6 +82,12 @@ export const handlers = [
     return HttpResponse.json({ ...CLUSTERS, items })
   }),
   http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
+  // Registered before /api/services/:id so "metrics" is not read as an id. Mirrors the server: only the requested ids come back.
+  http.get('/api/services/metrics', ({ request }) => {
+    const ids = new Set(new URL(request.url).searchParams.getAll('id'))
+    const items = Object.fromEntries(Object.entries(SERVICES_METRICS.items).filter(([id]) => ids.has(id)))
+    return HttpResponse.json({ ...SERVICES_METRICS, items })
+  }),
   http.get('/api/clusters/:id', ({ params }) => {
     const cluster = CLUSTER_DETAILS[params.id as string]
     return cluster ? HttpResponse.json(cluster) : notFound()
