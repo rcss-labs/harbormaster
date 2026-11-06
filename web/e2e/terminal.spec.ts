@@ -33,15 +33,16 @@ test('exec-off service shows the Terraform banner', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Connect' })).toHaveCount(0)
 })
 
-test('at 390px the terminal and the Session panel do not overlap', async ({ page }) => {
+test('at 390 the Session info button opens a sheet; the host and the toolbar do not overlap', async ({ page }) => {
   await login(page, 'sam')
   await page.setViewportSize({ width: 390, height: 800 })
   await page.goto(`/services/${paymentsApi}/terminal`)
   const host = page.getByTestId('terminal-host')
   await expect(host).toBeVisible()
-  const sessionTitle = page.getByText('Session', { exact: true }).first()
-  await expect(sessionTitle).toBeVisible()
-  const [h, s] = await measureBoxes(host, sessionTitle)
-  const intersects = h.x < s.x + s.width && s.x < h.x + h.width && h.y < s.y + s.height && s.y < h.y + h.height
-  expect(intersects, `host ${JSON.stringify(h)} vs session ${JSON.stringify(s)}`).toBe(false)
+  const info = page.getByRole('button', { name: 'Session details' })
+  const [h, i] = await measureBoxes(host, info)
+  const intersects = h.x < i.x + i.width && i.x < h.x + h.width && h.y < i.y + i.height && i.y < h.y + h.height
+  expect(intersects, `host ${JSON.stringify(h)} vs session button ${JSON.stringify(i)}`).toBe(false)
+  await info.click()
+  await expect(page.getByRole('dialog', { name: 'Session' })).toContainText('Keystrokes and output are not recorded.')
 })
