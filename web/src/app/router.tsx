@@ -8,6 +8,7 @@ import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
+import { MorePage } from './more/MorePage'
 import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
 import { SettingsPage } from './settings/SettingsPage'
@@ -81,6 +82,7 @@ export function AppRoutes() {
           <Route path="admin/accounts" element={<Navigate to="/settings/accounts" replace />} />
           <Route path="admin/audit" element={<Navigate to="/settings/audit" replace />} />
           <Route path="me/access" element={<MyAccess />} />
+          <Route path="more" element={<MorePage />} />
           {/* plan 05: networks and storage */}
           <Route path="networks" element={<NetworksPage />} />
           <Route path="networks/:accountId/:region" element={<NetworkRegionRedirect />} />

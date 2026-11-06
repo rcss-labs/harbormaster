@@ -7,14 +7,13 @@ import { Brand } from '../../components/Brand'
 import { Icon } from '../../components/Icon'
 import type { IconName } from '../../components/icons'
 import { Popover } from '../../components/Popover'
-import type { PillKind } from '../../components/Pill'
 import { StatusDot } from '../../components/StatusDot'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
 import { LinkSSODialog } from './LinkSSODialog'
-import { clusterStatusKind, clusterStatusLabel, statusKind, statusLabel } from '../../components/status'
 import type { Pin } from './pins'
 import { usePins } from './pins'
+import { pinStatus } from './pinStatus'
 import { useShellState } from './ShellState'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
@@ -74,21 +73,7 @@ interface PinnedItemProps {
 
 /** Two lines: status mark and full name, then the cluster (service) or account (cluster). The mark follows the live status. */
 function PinnedItem({ pin, clusters }: PinnedItemProps) {
-  let kind: PillKind = 'mute'
-  let statusText = 'Status unknown'
-  if (pin.kind === 'cluster') {
-    const cluster = clusters?.find((c) => c.id === pin.id)
-    if (cluster) {
-      kind = clusterStatusKind(cluster.status)
-      statusText = clusterStatusLabel(cluster.status)
-    }
-  } else {
-    const service = clusters?.flatMap((c) => c.services).find((s) => s.id === pin.id)
-    if (service) {
-      kind = statusKind(service.status)
-      statusText = statusLabel(service.status)
-    }
-  }
+  const { kind, text: statusText } = pinStatus(pin, clusters)
   const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
   const description = `${pin.name} · ${statusText} · ${detail}`
   const to = pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`

@@ -110,34 +110,53 @@ test('collapsed sidebar keeps the account menu reachable', async ({ page }) => {
   await expect(menu.getByRole('link', { name: 'My access' })).toBeVisible()
 })
 
-test('the top bar keeps every control reachable at 390', async ({ page }) => {
+test('at 390 the top bar is one row and every other control is reachable from More', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await expect(freshness(page)).toBeVisible()
 
-  const controls = [
-    scopeButton(page),
-    page.getByRole('button', { name: /^Search/ }),
-    freshness(page),
-    page.getByRole('button', { name: /^Activity/ }),
-    page.getByRole('button', { name: 'Toggle row density' }),
-    page.getByRole('button', { name: 'Toggle theme' }),
-    page.getByRole('button', { name: 'Keyboard shortcuts' }),
-  ]
-  for (const control of controls) {
-    await expect(control).toBeVisible()
-    const box = await measureBox(control)
-    expect(box.x).toBeGreaterThanOrEqual(0)
-    expect(box.x + box.width).toBeLessThanOrEqual(390)
-    expect(box.height).toBeGreaterThanOrEqual(32)
-    expect(box.width).toBeGreaterThanOrEqual(32)
+  // Read every box in one evaluate so a reflow cannot fall between the reads.
+  const bar = await page.evaluate(() => {
+    const header = document.querySelector('header')!
+    const controls = [...header.querySelectorAll('a, button')].map((el) => {
+      const r = el.getBoundingClientRect()
+      return { name: el.getAttribute('aria-label') ?? '', x: r.x, right: r.right, centreY: r.y + r.height / 2, width: r.width, height: r.height }
+    })
+    return { controls, scrollWidth: document.documentElement.scrollWidth, headerHeight: header.getBoundingClientRect().height }
+  })
+  expect(bar.scrollWidth).toBeLessThanOrEqual(390)
+  // Back or logo, scope, freshness and search: one row, nothing wrapped under another.
+  expect(bar.controls.length).toBe(4)
+  const centres = bar.controls.map((control) => control.centreY)
+  expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(2)
+  for (const control of bar.controls) {
+    expect(control.x).toBeGreaterThanOrEqual(0)
+    expect(control.right).toBeLessThanOrEqual(390)
+    expect(control.height).toBeGreaterThanOrEqual(36)
+    expect(control.width).toBeGreaterThanOrEqual(36)
   }
+  expect(bar.headerHeight).toBeLessThan(80)
 
   await freshness(page).click()
-  const popover = page.getByRole('dialog', { name: 'Data freshness' })
-  await expect(popover).toBeVisible()
-  const popBox = await measureBox(popover)
-  expect(popBox.x).toBeGreaterThanOrEqual(0)
-  expect(popBox.x + popBox.width).toBeLessThanOrEqual(390)
+  const sheet = page.getByRole('dialog', { name: 'Data freshness' })
+  await expect(sheet).toBeVisible()
+  const sheetBox = await sheet.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return { x: r.x, right: r.right, top: r.top, bottom: r.bottom, innerHeight: window.innerHeight }
+  })
+  expect(sheetBox.x).toBeGreaterThanOrEqual(0)
+  expect(sheetBox.right).toBeLessThanOrEqual(390)
+  expect(sheetBox.top).toBeGreaterThanOrEqual(0)
+  expect(sheetBox.bottom).toBeLessThanOrEqual(sheetBox.innerHeight)
+  await page.getByRole('button', { name: 'Close' }).click()
+
+  // The sidebar, activity, theme and account controls moved to the More page; density and shortcut help are desktop-only.
+  await expect(page.getByRole('button', { name: 'Toggle row density' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Keyboard shortcuts' })).toHaveCount(0)
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^More/ }).click()
+  await expect(page.getByRole('region', { name: 'Signed in' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Activity/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Theme/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
 })
