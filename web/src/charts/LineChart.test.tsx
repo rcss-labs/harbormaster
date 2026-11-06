@@ -32,6 +32,14 @@ describe('LineChart marker labels', () => {
     expect(getByText('deploy').style.transform).toBe('translateX(-100%)')
   })
 
+  it('anchors a long label inward even when its marker is outside the edge zone', () => {
+    const label = 'payments:1 notifications:2 billing:3'
+    const { getByText } = renderWithProviders(
+      <LineChart series={[{ name: 'cpu', color: 'red', values: [1, 2] }]} xLabels={['a', 'b']} marks={[{ at: 0.8, label }]} />,
+    )
+    expect(getByText(label).style.transform).toBe('translateX(-100%)')
+  })
+
   it('anchors a label near the left edge inward', () => {
     const { getByText } = render(0.02)
     expect(getByText('deploy').style.transform).toBe('translateX(0)')
