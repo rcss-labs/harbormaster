@@ -29,7 +29,7 @@ type AlertDTO struct {
 	Cluster   string    `json:"cluster"`
 	ClusterID string    `json:"cluster_id"`
 	Tab       string    `json:"tab"`
-	// Cause repeats Text; NextStep and JustBefore are filled from wave 1 (JustBefore stays nil when unknown).
+	// Cause repeats Text. JustBefore is nil unless a Harbormaster operation or deployment precedes the alert.
 	Cause      string          `json:"cause"`
 	NextStep   AlertStepDTO    `json:"next_step"`
 	JustBefore *AlertChangeDTO `json:"just_before"`
@@ -84,9 +84,21 @@ func (s *Server) getAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	status.SortAlerts(visible)
 
+	// Only alerts that passed the visibility filter above get context, so a change text is never
+	// looked up for a service the caller cannot see. One batched query serves the whole response.
+	changes, err := s.Store.LastChangesBefore(ctx, changeQueries(visible), justBeforeWindow)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
 	out := AlertsDTO{Items: make([]AlertDTO, 0, len(visible)), PolledAt: newestAlertsPoll(loops, targetVisible)}
 	for _, alert := range visible {
-		out.Items = append(out.Items, alertDTO(alert))
+		item := alertDTO(alert)
+		if change := changes[store.ChangeQuery{Key: alert.Key, Before: alert.At}]; change != nil {
+			item.JustBefore = &AlertChangeDTO{At: change.At, Text: change.Text, Source: change.Source}
+		}
+		out.Items = append(out.Items, item)
 		switch alert.Severity {
 		case model.AlertDanger:
 			out.Counts.Danger++
@@ -123,6 +135,38 @@ func newestAlertsPoll(loops []store.PollLoop, targetVisible func(pollTarget) boo
 	return newest
 }
 
+// justBeforeWindow is how far before an alert a change may be and still count as "just before".
+const justBeforeWindow = 24 * time.Hour
+
+// changeQueries asks for the change preceding each service alert; account-level alerts have no service
+// and so no change.
+func changeQueries(alerts []model.Alert) []store.ChangeQuery {
+	queries := make([]store.ChangeQuery, 0, len(alerts))
+	for _, alert := range alerts {
+		if alert.Key.Service != "" {
+			queries = append(queries, store.ChangeQuery{Key: alert.Key, Before: alert.At})
+		}
+	}
+	return queries
+}
+
+// alertNextStep builds the link that most directly helps with this kind of alert.
+func alertNextStep(alert model.Alert, serviceID string) AlertStepDTO {
+	if serviceID == "" {
+		return AlertStepDTO{Label: "Open AWS accounts", Href: "/settings/accounts"}
+	}
+	tab, label := "overview", "Open service"
+	switch alert.Kind {
+	case "service_failing":
+		tab, label = "logs", "Open logs"
+	case "restart_loop", "unhealthy_task":
+		tab, label = "tasks", "Open tasks"
+	case "deployment_failed":
+		tab, label = "deploy", "Open deploy"
+	}
+	return AlertStepDTO{Label: label, Href: "/services/" + serviceID + "/" + tab}
+}
+
 func alertDTO(alert model.Alert) AlertDTO {
 	out := AlertDTO{
 		Kind: alert.Kind, Severity: string(alert.Severity), Title: alert.Title, Text: alert.Text, Cause: alert.Text,
@@ -131,6 +175,7 @@ func alertDTO(alert model.Alert) AlertDTO {
 	if alert.Key.Service != "" {
 		out.ServiceID = alert.Key.ID()
 	}
+	out.NextStep = alertNextStep(alert, out.ServiceID)
 	if alert.Key.Cluster != "" {
 		out.ClusterID = alert.Key.ClusterKey.ID()
 	}
