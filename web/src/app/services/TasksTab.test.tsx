@@ -105,6 +105,19 @@ describe('TasksTab', () => {
   })
 })
 
+describe('TasksTab drawer', () => {
+  it('opens the same task drawer from a row, with the service desired count in the Stop dialog', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    const table = await findTaskTable()
+    const running = ALL_TASKS.find((task) => task.service?.id === SERVICE_PAYMENTS.id && task.status === 'RUNNING' && task.can.operate)!
+    await userEvent.click(within(table).getByRole('button', { name: `Open details for task ${running.short_id.slice(0, 12)}` }))
+    const drawer = await screen.findByRole('dialog')
+    expect(within(drawer).getByText(running.arn)).toBeInTheDocument()
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Stop task' }))
+    expect(await screen.findByText(`Stop task ${running.short_id.slice(0, 12)}?`)).toBeInTheDocument()
+  })
+})
+
 describe('TasksTab hidden-stopped note', () => {
   it('shows the hidden-tasks note', async () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)

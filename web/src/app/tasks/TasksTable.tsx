@@ -1,104 +1,24 @@
-import { useState } from 'react'
 import { Link } from 'react-router'
 import type { TaskDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
-import { DataTable, type DataTableColumn, type RowStatus } from '../../components/DataTable'
-import type { PillKind } from '../../components/Pill'
-import { StatusDot } from '../../components/StatusDot'
-import { StopCauseChip, stoppedStatus } from '../../components/stopStatus'
-import { StopTaskDialog } from '../../components/StopTaskDialog'
-import { isProblem, type TaskTableRow } from './taskRows'
+import { DataTable, type DataTableColumn } from '../../components/DataTable'
+import {
+  ACTIONS_WIDTH,
+  HealthCell,
+  IpCell,
+  ReasonCell,
+  ServiceCell,
+  TaskActions,
+  TaskIdButton,
+  TaskStatusCell,
+  cpuText,
+  memoryText,
+  taskStripe,
+} from '../../components/TaskTable'
+import type { TaskTableRow } from './taskRows'
 import styles from './TasksTable.module.css'
 
 export const PAGE_SIZE = 50
-
-const PROGRESS_STATUSES = ['PROVISIONING', 'PENDING', 'ACTIVATING']
-const titleCase = (status: string) => status.charAt(0) + status.slice(1).toLowerCase()
-
-/** vCPU from ECS CPU units: up to two decimals, trailing zeros dropped (256 → 0.25, 1024 → 1). */
-const formatVcpu = (cpuUnits: string) => String(+(Number(cpuUnits) / 1024).toFixed(2))
-
-function statusOf(task: TaskDTO): { kind: PillKind; label: string } {
-  if (task.status === 'RUNNING') return { kind: 'ok', label: 'Running' }
-  if (PROGRESS_STATUSES.includes(task.status)) return { kind: 'info', label: titleCase(task.status) }
-  if (task.status === 'STOPPED') return stoppedStatus(task)
-  return { kind: 'mute', label: titleCase(task.status) }
-}
-
-/** Row stripe: a failed stop is red, an expected stop teal; a running task failing its health check is amber. */
-function stripeOf(task: TaskDTO): RowStatus | undefined {
-  if (task.status === 'STOPPED' && task.stop_kind === 'expected') return 'expected'
-  if (!isProblem(task)) return undefined
-  return task.status === 'STOPPED' ? 'bad' : 'warn'
-}
-
-/** Service tasks open the service's Terminal tab; standalone tasks have no service and get their own page. */
-const terminalPath = (task: TaskDTO) =>
-  task.service
-    ? `/services/${task.service.id}/terminal?task=${encodeURIComponent(task.id)}`
-    : `/tasks/${encodeURIComponent(task.short_id)}/terminal`
-
-function HealthCell({ task }: { task: TaskDTO }) {
-  if (task.status !== 'RUNNING') return <span className={styles.dim}>–</span>
-  if (task.health === 'HEALTHY') return <span className={styles.healthy}>Healthy</span>
-  if (task.health === 'UNHEALTHY') return <span className={styles.unhealthy}>Unhealthy</span>
-  return <span className={styles.dim}>No check</span>
-}
-
-function ServiceCell({ task }: { task: TaskDTO }) {
-  if (task.service) {
-    return (
-      <span className={styles.service}>
-        <Link to={`/services/${task.service.id}/tasks`} className={styles.link}>
-          {task.service.name}
-        </Link>
-        <span className={styles.sub}>{task.cluster.name}</span>
-      </span>
-    )
-  }
-  return (
-    <span className={styles.service}>
-      <span>{task.group}</span>
-      <span className={styles.sub}>Standalone · started by {task.started_by}</span>
-    </span>
-  )
-}
-
-function TaskActions({ task }: { task: TaskDTO }) {
-  const [stopping, setStopping] = useState(false)
-  const isRunning = task.status === 'RUNNING'
-  return (
-    <span className={styles.actions}>
-      {task.service && (
-        <Link to={`/services/${task.service.id}/logs`} className={styles.btn}>
-          Logs
-        </Link>
-      )}
-      {isRunning && task.can.terminal && task.exec_enabled && (
-        <Link to={terminalPath(task)} className={styles.btn}>
-          Terminal
-        </Link>
-      )}
-      {isRunning && task.can.operate && (
-        <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={() => setStopping(true)}>
-          Stop
-        </button>
-      )}
-      {stopping && (
-        <StopTaskDialog
-          taskId={task.id}
-          shortId={task.short_id.slice(0, 12)}
-          serviceName={task.service?.name ?? null}
-          serviceId={task.service?.id ?? null}
-          desiredCount={null}
-          onClose={() => setStopping(false)}
-        />
-      )}
-    </span>
-  )
-}
-
-const usageOf = (task: TaskDTO) => ({ cpu: `${formatVcpu(task.cpu)} vCPU`, memory: `${task.memory} MiB` })
 
 /** One-line summary of a group: how many run where, or how long ago the first and last of the repeats stopped. */
 function GroupSpread({ tasks }: { tasks: TaskDTO[] }) {
@@ -120,11 +40,15 @@ interface TasksTableProps {
   page: number
   onPageChange: (page: number) => void
   onToggleGroup: (groupKey: string) => void
+  onOpen: (task: TaskDTO) => void
+  onStop: (task: TaskDTO) => void
+  /** Keys of the columns to show (see TASK_COLUMNS); the actions column is always shown and pinned. */
+  visibleColumns: string[]
   empty: string
 }
 
-/** The redesigned Tasks list: 50 rows per page, repeat groups as expandable rows. */
-export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: TasksTableProps) {
+/** The redesigned Tasks list: 50 rows per page, repeat groups as expandable rows, actions pinned at the right. */
+export function TasksTable({ rows, page, onPageChange, onToggleGroup, onOpen, onStop, visibleColumns, empty }: TasksTableProps) {
   const lead = (row: TaskTableRow) => (row.kind === 'group' ? row.tasks[0] : row.task)
   const columns: DataTableColumn<TaskTableRow>[] = [
     {
@@ -140,72 +64,43 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: T
             {`×${row.tasks.length} tasks`}
           </button>
         ) : (
-          <span className={`${styles.mono} ${row.nested ? styles.nested : ''}`} title={row.task.id}>
-            {row.task.short_id.slice(0, 12)}
-          </span>
+          <TaskIdButton task={row.task} nested={row.nested} onOpen={onOpen} />
         ),
     },
     { key: 'service', header: 'Service', width: 'minmax(0,1.1fr)', render: (row) => <ServiceCell task={lead(row)} /> },
-    {
-      key: 'status',
-      header: 'Status',
-      width: '220px',
-      render: (row) => {
-        const task = lead(row)
-        const status = statusOf(task)
-        return (
-          <span className={styles.statusCell}>
-            <StatusDot kind={status.kind}>{status.label}</StatusDot>
-            {task.status === 'STOPPED' && <StopCauseChip cause={task.stop_cause} />}
-          </span>
-        )
-      },
-    },
-    { key: 'health', header: 'Health', width: '76px', render: (row) => <HealthCell task={lead(row)} /> },
+    { key: 'status', header: 'Status', width: '230px', render: (row) => <TaskStatusCell task={lead(row)} /> },
+    { key: 'health', header: 'Health', width: '84px', render: (row) => <HealthCell task={lead(row)} /> },
     {
       key: 'revision',
       header: 'Rev',
-      width: '44px',
+      width: '56px',
       render: (row) => <span className={styles.mono}>:{lead(row).revision}</span>,
     },
-    {
-      key: 'ip',
-      header: 'IP · Subnet',
-      width: '170px',
-      render: (row) =>
-        row.kind === 'group' ? null : (
-          <span className={styles.stack}>
-            <span className={styles.mono}>{row.task.private_ip}</span>
-            <span className={styles.subMono}>
-              {row.task.subnet_id} · {row.task.az}
-            </span>
-          </span>
-        ),
-    },
+    { key: 'ip', header: 'IP · Subnet', width: 'minmax(150px,1fr)', render: (row) => (row.kind === 'group' ? null : <IpCell task={row.task} />) },
     {
       key: 'capacity',
       header: 'Capacity',
-      width: '112px',
+      width: '116px',
       render: (row) => (row.kind === 'group' ? null : <span className={styles.small}>{row.task.capacity}</span>),
     },
     {
       key: 'cpu',
       header: 'CPU',
-      width: '76px',
+      width: '100px',
       align: 'right',
-      render: (row) => (row.kind === 'group' ? null : <span className={styles.mono}>{usageOf(row.task).cpu}</span>),
+      render: (row) => (row.kind === 'group' ? null : <span className={styles.mono}>{cpuText(row.task)}</span>),
     },
     {
       key: 'memory',
       header: 'Memory',
-      width: '80px',
+      width: '100px',
       align: 'right',
-      render: (row) => (row.kind === 'group' ? null : <span className={styles.mono}>{usageOf(row.task).memory}</span>),
+      render: (row) => (row.kind === 'group' ? null : <span className={styles.mono}>{memoryText(row.task)}</span>),
     },
     {
       key: 'started',
       header: 'Started',
-      width: '76px',
+      width: '84px',
       render: (row) => {
         if (row.kind === 'group') return null
         return row.task.started_at ? <Ago ts={row.task.started_at} /> : <span className={styles.dim}>–</span>
@@ -224,24 +119,13 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: T
             </span>
           )
         }
-        const { stopped_reason: reason, stopped_at: stoppedAt } = row.task
-        return (
-          <span className={styles.reason} title={reason}>
-            {reason}
-            {stoppedAt && (
-              <span className={styles.dim}>
-                {reason ? ' · ' : ''}
-                <Ago ts={stoppedAt} />
-              </span>
-            )}
-          </span>
-        )
+        return <ReasonCell task={row.task} />
       },
     },
     {
       key: 'actions',
       header: '',
-      width: '170px',
+      width: ACTIONS_WIDTH,
       align: 'right',
       render: (row) =>
         row.kind === 'group' ? (
@@ -253,7 +137,7 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: T
             </span>
           ) : null
         ) : (
-          <TaskActions task={row.task} />
+          <TaskActions task={row.task} withLogs onStop={onStop} />
         ),
     },
   ]
@@ -264,8 +148,10 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, empty }: T
       columns={columns}
       rows={rows}
       rowKey={(row) => row.rowKey}
-      rowStatus={(row) => stripeOf(lead(row))}
-      minWidth={1450}
+      rowStatus={(row) => taskStripe(lead(row))}
+      visibleColumns={[...visibleColumns, 'actions']}
+      stickyActions
+      minWidth={1500}
       pageSize={PAGE_SIZE}
       page={page}
       onPageChange={onPageChange}

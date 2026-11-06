@@ -1,22 +1,25 @@
-/* Ported from the mockup's task row, status stripe, health colours, .btn.sm and .btn.danger rules (docs/design/mockup/index.html). */
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
-.mono { font-family: var(--mono); font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow); min-width: 0; }
+.mono { font: 12px/1.3 var(--mono); }
 .muted { color: var(--muted); }
-.small { font-size: 12px; }
-.sub { color: var(--muted); font-size: 12px; }
-.accent { color: var(--accent); }
-.healthy { color: var(--success); }
-.unhealthy { color: var(--warning); }
-.reason { font-size: 12px; overflow-wrap: anywhere; }
-.actions { text-align: right; white-space: nowrap; }
-.btn { height: 26px; padding: 0 9px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; white-space: nowrap; }
-.btn:hover { background: var(--hover); }
+.small { font-size: 12px; color: var(--text-2); }
+.sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.subMono { font: 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.accent { color: var(--accent); overflow: hidden; text-overflow: ellipsis; }
+.healthy { color: var(--muted); }
+.unhealthy { color: var(--warn); }
+.service { display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; overflow: hidden; }
+.service > :first-child { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.stack { display: grid; line-height: 1.2; min-width: 0; }
+.reason { display: block; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.idButton { all: unset; cursor: pointer; font: 12px/1.3 var(--mono); color: var(--accent); white-space: nowrap; }
+.idButton:hover { text-decoration: underline; }
+.idButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nested { padding-left: 16px; }
+.actions { display: inline-flex; gap: 4px; justify-content: flex-end; }
+.btn { height: 26px; padding: 0 9px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; white-space: nowrap; }
+.btn:hover { background: var(--hover); color: var(--text); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.danger { color: var(--danger); }
+.danger { color: var(--bad); }
 .more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }
-.treeControls { display: flex; gap: 6px; justify-content: flex-end; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.accountRow td { background: var(--raised); font-weight: 600; }
-.regionRow td { padding-left: 24px; }
-.clusterRow td { background: var(--raised); padding-left: 44px; }
-.summary { margin-left: 10px; font-size: 12px; font-weight: 400; }
 .statusCell { display: inline-flex; align-items: center; gap: 8px; }
