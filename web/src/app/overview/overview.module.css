@@ -93,3 +93,8 @@ a.whatTitle:hover { color: var(--accent); }
 .linkButton { border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
 .linkButton:hover { text-decoration: underline; }
 .panelNotes:not(:empty) { padding: 8px 12px 0; }
+
+/* The severity chips wrap onto a second line on a narrow screen instead of being clipped by the segment overflow. */
+.severity { min-width: 0; max-width: 100%; }
+.severity > [role="radiogroup"] { flex-wrap: wrap; max-width: 100%; overflow: visible; border: 0; gap: 4px; }
+.severity > [role="radiogroup"] > button { border: 1px solid var(--border-strong); border-radius: var(--radius); }

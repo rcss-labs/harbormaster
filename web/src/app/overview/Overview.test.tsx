@@ -4,9 +4,13 @@ import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { OVERVIEW } from '../../test/fixtures'
 import { server } from '../../test/msw'
+import { listMatchingAlerts } from './attentionFixtures'
 import { renderApp } from '../../test/renderApp'
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  server.use(http.get('/api/services', () => HttpResponse.json(listMatchingAlerts())))
+})
 
 const strip = () => screen.findByRole('list', { name: 'Estate key figures' })
 const cell = async (label: string): Promise<HTMLElement> => {
@@ -35,7 +39,7 @@ describe('Overview KPI strip', () => {
     expect(clusters).toHaveTextContent('3 healthy')
     const svc = await cell('Services')
     expect(svc).toHaveTextContent('15')
-    expect(svc).toHaveTextContent('2 need attention')
+    expect(svc).toHaveTextContent('3 need attention')
   })
 
   it('reads average CPU and memory from the metrics average', async () => {
@@ -62,7 +66,14 @@ describe('Overview KPI strip', () => {
   it('shows a dash for average use when Container Insights is off everywhere', async () => {
     server.use(
       http.get('/api/overview/metrics', () =>
-        HttpResponse.json({ timestamps: [], cpu_by_cluster: [], mem_by_cluster: [], avg: { cpu: null, mem: null }, stale: null, errors: [] }),
+        HttpResponse.json({
+          timestamps: [],
+          cpu_by_cluster: [],
+          mem_by_cluster: [],
+          avg: { cpu: null, mem: null },
+          stale: null,
+          errors: [],
+        }),
       ),
     )
     renderApp('/')
@@ -134,7 +145,9 @@ describe('Overview layouts', () => {
 
   it('lists every stop reason in the Why tasks stopped panel', async () => {
     renderApp('/')
-    const reasons = await screen.findByRole('region', { name: 'Why tasks stopped, 3 days' })
+    const reasons = await screen.findByRole('region', {
+      name: 'Why tasks stopped, 3 days',
+    })
     for (const reason of OVERVIEW.stop_reasons) expect(within(reasons).getByText(reason.reason)).toBeInTheDocument()
   })
 
@@ -151,13 +164,17 @@ describe('Overview layouts', () => {
     await waitFor(() => expect(within(map).getAllByRole('link')).toHaveLength(OVERVIEW.clusters.length))
     expect(await cell('Clusters')).toHaveTextContent(String(OVERVIEW.clusters.length))
     expect(await cell('Services')).toHaveTextContent(String(OVERVIEW.services.total))
-    const reasons = await screen.findByRole('region', { name: 'Why tasks stopped, 3 days' })
+    const reasons = await screen.findByRole('region', {
+      name: 'Why tasks stopped, 3 days',
+    })
     for (const reason of OVERVIEW.stop_reasons) expect(within(reasons).getByText(String(reason.count))).toBeInTheDocument()
   })
 
   it('two columns class present', async () => {
     renderApp('/')
-    const attention = await screen.findByRole('region', { name: 'Needs attention' })
+    const attention = await screen.findByRole('region', {
+      name: 'Needs attention',
+    })
     expect(attention.closest('.hm-wide-split')).not.toBeNull()
     expect((await screen.findByRole('region', { name: 'Estate map' })).closest('.hm-wide-split')).not.toBeNull()
   })
@@ -167,5 +184,35 @@ describe('Overview layouts', () => {
     // The fixture poller reports the non-core tiers as healthy, so no notice is shown.
     await screen.findByRole('region', { name: 'Needs attention' })
     expect(screen.queryByText(/Some data on this page is stale/)).not.toBeInTheDocument()
+  })
+})
+
+describe('Overview attention counts', () => {
+  // payments-api is Degraded but the 3-poll debounce has not raised its alert yet; cert-renewer is scaled to zero on purpose.
+  const statusOnly = listMatchingAlerts({
+    'payments-api': { status: 'degraded', running: 2 },
+    'cert-renewer': { status: 'scaled_to_zero', running: 0, desired: 0 },
+  })
+
+  it('the KPI, the panel and the Problems view agree when a Degraded service has no alert yet', async () => {
+    server.use(http.get('/api/services', () => HttpResponse.json(statusOnly)))
+    const first = renderApp('/')
+    // image-resizer, catalog-api, edge-nginx (alerted) + payments-api (status only); scaled to zero is not a problem.
+    await waitFor(async () => expect(await cell('Services')).toHaveTextContent('4 need attention'))
+    const panel = await screen.findByRole('region', {
+      name: 'Needs attention',
+    })
+    expect(await within(panel).findByText('4 services · 1 account alert')).toBeInTheDocument()
+    expect(
+      within(panel).getByRole('link', {
+        name: 'payments-api: 2 of 3 tasks running',
+      }),
+    ).toBeInTheDocument()
+    first.unmount()
+
+    renderApp('/services?view=problems')
+    expect(await screen.findByRole('button', { name: 'Problems 4' })).toBeInTheDocument()
+    const rows = within(await screen.findByRole('table', { name: 'Services' })).getAllByRole('row')
+    expect(rows).toHaveLength(4 + 1)
   })
 })

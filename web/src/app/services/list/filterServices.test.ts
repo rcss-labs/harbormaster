@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SERVICES_LIST } from '../../../test/fixtures'
-import { applyQuery, applyStatus, applyView, sortServices, statusCounts, taskTone } from './filterServices'
+import { applyQuery, applyStatus, applyView, needsAttention, sortServices, statusCounts, taskTone } from './filterServices'
 
 const items = SERVICES_LIST.items
 const names = (list: { name: string }[]) => list.map((s) => s.name)
@@ -15,6 +15,19 @@ describe('applyView', () => {
     expect(shown.length).toBeGreaterThan(0)
     expect(shown.every((s) => s.status !== 'steady')).toBe(true)
     expect(names(shown)).toContain('image-resizer')
+  })
+  it('problems follows status or an open alert, and leaves out a service scaled to zero on purpose', () => {
+    const base = items.find((s) => s.status === 'steady')!
+    const scaled = {
+      ...base,
+      status: 'scaled_to_zero' as const,
+      attention: '',
+    }
+    expect(needsAttention(scaled)).toBe(false)
+    expect(needsAttention({ ...base, attention: '' })).toBe(false)
+    expect(needsAttention({ ...base, attention: 'Restart loop' })).toBe(true)
+    expect(needsAttention({ ...base, status: 'degraded', attention: '' })).toBe(true)
+    expect(needsAttention({ ...base, status: 'deploying', attention: '' })).toBe(true)
   })
   it('pins keeps only pinned ids', () => {
     const pinned = new Set([items[0].id, items[3].id])
