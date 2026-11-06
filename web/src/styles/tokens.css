@@ -1,106 +1,95 @@
-/* Design tokens. Dark values follow docs/redesign/README.md (token table); the light theme keeps its
-   original palette, with the redesign-only tokens (--chrome, --text-2, --dim, --row-border, danger control
-   colours, --healthy-cell) derived from it. */
-:root {
+/* Design tokens, v4 "Pilot house". Dark and light values are copied from docs/redesign-v4/mockup/src/hm.css.
+   The names the app used before v4 (--success, --danger, --radius, ...) stay as aliases at the bottom so
+   untouched CSS modules keep working; new code uses the short names (--ok, --bad, --r, ...). */
+
+/* Light is the default; the explicit selector keeps it winning over the OS dark preference. */
+:root,
+:root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f2f5f8;
-  --surface: #ffffff;
-  --raised: #f6f8fa;
-  --hover: #ecf1f5;
-  --border: #dde3ea;
-  --border-strong: #c6d0da;
-  --text: #141a21;
-  --muted: #5c6979;
-  --chrome: #eef2f6;
-  --text-2: #3d4856;
-  --dim: #6b7889;
-  --row-border: #e8edf2;
-  --accent-soft-border: rgba(11, 106, 143, 0.45);
-  --danger-border: #e5b4b4;
-  --danger-hover: #fbeaea;
-  --healthy-cell: #7cc4a8;
-  --accent: #0b6a8f;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(11, 106, 143, 0.11);
-  --hover-strong: #e1e8ee;
-  --success: #047857;
-  --warning: #9c4707;
-  --danger: #b91c1c;
-  --info: #5b3fc4;
-  --success-soft: rgba(4, 120, 87, 0.12);
-  --warning-soft: rgba(156, 71, 7, 0.12);
-  --danger-soft: rgba(185, 28, 28, 0.11);
-  --info-soft: rgba(91, 63, 196, 0.12);
-  /* Expected stops (Spot, deployments, scale-in): not an error, not a plain stop. */
-  --expected: #0f766e;
-  --expected-soft: rgba(15, 118, 110, 0.12);
-  --muted-soft: rgba(92, 105, 121, 0.12);
-  --series-1: #0b6a8f;
-  --series-2: #e07a1f;
-  --series-3: #7c3aed;
-  --series-4: #0f9d77;
-  --series-5: #d6336c;
-  --series-6: #8a6d00;
-  --term-bg: #0d1217;
-  --term-text: #d7e3ec;
-  /* Tag chip text / border; chips have no fill. Dark values are the README's exact pairs. */
-  --tag-red-text: #b91c1c; --tag-red-border: #e5b4b4;
-  --tag-amber-text: #9c4707; --tag-amber-border: #e3c49b;
-  --tag-neutral-text: #5c6979; --tag-neutral-border: #c6d0da;
-  --tag-blue-text: #0b6a8f; --tag-blue-border: #a3cfe0;
-  --tag-green-text: #047857; --tag-green-border: #a4d6c4;
-  --tag-violet-text: #5b3fc4; --tag-violet-border: #c6bcee;
-  --shadow: none;
-  --shadow-pop: 0 18px 50px rgba(16, 24, 40, 0.2);
-  --overlay: rgba(16, 24, 40, 0.38);
-  --sans: 'IBM Plex Sans', system-ui, sans-serif;
-  --mono: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
-  --radius: 6px;
-  --radius-sm: 5px;
-  --radius-chip: 4px;
-  --sidebar-w: 232px;
+  --bg: #f3f6f9; --chrome: #fbfcfd; --surface: #fff; --raised: #f7f9fb; --hover: #eef2f6; --active: #e3e9ef;
+  --border: #dde3ea; --row-border: #e9edf2; --border-strong: #aeb9c5;
+  --text: #121922; --text-2: #36424e; --muted: #55626f;
+  --accent: #0b6a8f; --accent-ink: #fff; --accent-soft: rgba(11, 106, 143, 0.1); --accent-line: rgba(11, 106, 143, 0.45);
+  --ok: #047857; --warn: #94500a; --bad: #b91c1c; --info: #5b3fc4; --exp: #0f766e; --mute: #55626f;
+  --ok-soft: rgba(4, 120, 87, 0.1); --warn-soft: rgba(156, 71, 7, 0.1); --bad-soft: rgba(185, 28, 28, 0.09);
+  --info-soft: rgba(91, 63, 196, 0.1); --exp-soft: rgba(15, 118, 110, 0.1); --mute-soft: rgba(85, 98, 111, 0.1);
+  --s1: #0a6f9c; --s2: #c96a12; --s3: #0f8f6c; --s4: #7c3aed; --s5: #d6336c; --s6: #8a6d00;
+  --grid: #e6ebf0; --cell-ok: #5fb596; --term: #0d1217; --term-text: #d7e3ec;
+  --scrim: rgba(16, 24, 40, 0.42); --pop: 0 18px 50px rgba(16, 24, 40, 0.2);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0b0f13; --chrome: #0e1318; --surface: #11161c; --raised: #121920; --hover: #141b22; --hover-strong: #1b232c;
-    --border: #1f262e; --row-border: #1a2028; --border-strong: #2a333e;
-    --text: #e5eaf0; --text-2: #aab4c1; --muted: #8c97a7; --dim: #5f6b7a;
-    --accent: #45b5e3; --accent-ink: #04202c; --accent-soft: rgba(69, 181, 227, 0.12); --accent-soft-border: rgba(69, 181, 227, 0.45);
-    --success: #34d399; --warning: #fbbf24; --danger: #f87171; --info: #a78bfa;
-    --success-soft: rgba(52, 211, 153, 0.15); --warning-soft: rgba(251, 191, 36, 0.15);
-    --danger-soft: rgba(248, 113, 113, 0.15); --info-soft: rgba(167, 139, 250, 0.16);
-    --muted-soft: rgba(140, 151, 167, 0.14);
-    --expected: #2dd4bf; --expected-soft: rgba(45, 212, 191, 0.14);
-    --danger-border: #4a2a2e; --danger-hover: #2a1619; --healthy-cell: #1f5c48;
-    --series-1: #45b5e3; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
-    --tag-red-text: #f87171; --tag-red-border: #4a2a2e;
-    --tag-amber-text: #fbbf24; --tag-amber-border: #4a3a1a;
-    --tag-neutral-text: #8c97a7; --tag-neutral-border: #2a333e;
-    --tag-blue-text: #45b5e3; --tag-blue-border: #1c3a48;
-    --tag-green-text: #34d399; --tag-green-border: #1a3d31;
-    --tag-violet-text: #a78bfa; --tag-violet-border: #33295a;
-    --shadow: none; --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
+    --bg: #0a0e14; --chrome: #0d1219; --surface: #10161e; --raised: #161d27; --hover: #1a222d; --active: #212b38;
+    --border: #232c38; --row-border: #1b232d; --border-strong: #3a4656;
+    --text: #e8edf3; --text-2: #b9c3cf; --muted: #98a4b3;
+    --accent: #45b5e3; --accent-ink: #04202c; --accent-soft: rgba(69, 181, 227, 0.13); --accent-line: rgba(69, 181, 227, 0.5);
+    --ok: #3ecf9a; --warn: #f2b441; --bad: #f58383; --info: #b4a0fb; --exp: #2dd4bf; --mute: #98a4b3;
+    --ok-soft: rgba(62, 207, 154, 0.13); --warn-soft: rgba(242, 180, 65, 0.13); --bad-soft: rgba(245, 131, 131, 0.14);
+    --info-soft: rgba(180, 160, 251, 0.14); --exp-soft: rgba(45, 212, 191, 0.13); --mute-soft: rgba(152, 164, 179, 0.13);
+    --s1: #3a9fcb; --s2: #c97e2e; --s3: #2baa7e; --s4: #9478f0; --s5: #d9609f; --s6: #b08a25;
+    --grid: #1d2631; --cell-ok: #2f8f6f; --term: #080b10; --term-text: #d7e3ec;
+    --scrim: rgba(4, 7, 10, 0.62); --pop: 0 18px 50px rgba(0, 0, 0, 0.55);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0f13; --chrome: #0e1318; --surface: #11161c; --raised: #121920; --hover: #141b22; --hover-strong: #1b232c;
-  --border: #1f262e; --row-border: #1a2028; --border-strong: #2a333e;
-  --text: #e5eaf0; --text-2: #aab4c1; --muted: #8c97a7; --dim: #5f6b7a;
-  --accent: #45b5e3; --accent-ink: #04202c; --accent-soft: rgba(69, 181, 227, 0.12); --accent-soft-border: rgba(69, 181, 227, 0.45);
-  --success: #34d399; --warning: #fbbf24; --danger: #f87171; --info: #a78bfa;
-  --success-soft: rgba(52, 211, 153, 0.15); --warning-soft: rgba(251, 191, 36, 0.15);
-  --danger-soft: rgba(248, 113, 113, 0.15); --info-soft: rgba(167, 139, 250, 0.16);
-  --muted-soft: rgba(140, 151, 167, 0.14);
-  --expected: #2dd4bf; --expected-soft: rgba(45, 212, 191, 0.14);
-  --danger-border: #4a2a2e; --danger-hover: #2a1619; --healthy-cell: #1f5c48;
-  --series-1: #45b5e3; --series-2: #f59e4b; --series-3: #a78bfa; --series-4: #34d399; --series-5: #f472b6; --series-6: #e3b341;
-  --tag-red-text: #f87171; --tag-red-border: #4a2a2e;
-  --tag-amber-text: #fbbf24; --tag-amber-border: #4a3a1a;
-  --tag-neutral-text: #8c97a7; --tag-neutral-border: #2a333e;
-  --tag-blue-text: #45b5e3; --tag-blue-border: #1c3a48;
-  --tag-green-text: #34d399; --tag-green-border: #1a3d31;
-  --tag-violet-text: #a78bfa; --tag-violet-border: #33295a;
-  --shadow: none; --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.55); --overlay: rgba(4, 7, 10, 0.6);
+  --bg: #0a0e14; --chrome: #0d1219; --surface: #10161e; --raised: #161d27; --hover: #1a222d; --active: #212b38;
+  --border: #232c38; --row-border: #1b232d; --border-strong: #3a4656;
+  --text: #e8edf3; --text-2: #b9c3cf; --muted: #98a4b3;
+  --accent: #45b5e3; --accent-ink: #04202c; --accent-soft: rgba(69, 181, 227, 0.13); --accent-line: rgba(69, 181, 227, 0.5);
+  --ok: #3ecf9a; --warn: #f2b441; --bad: #f58383; --info: #b4a0fb; --exp: #2dd4bf; --mute: #98a4b3;
+  --ok-soft: rgba(62, 207, 154, 0.13); --warn-soft: rgba(242, 180, 65, 0.13); --bad-soft: rgba(245, 131, 131, 0.14);
+  --info-soft: rgba(180, 160, 251, 0.14); --exp-soft: rgba(45, 212, 191, 0.13); --mute-soft: rgba(152, 164, 179, 0.13);
+  --s1: #3a9fcb; --s2: #c97e2e; --s3: #2baa7e; --s4: #9478f0; --s5: #d9609f; --s6: #b08a25;
+  --grid: #1d2631; --cell-ok: #2f8f6f; --term: #080b10; --term-text: #d7e3ec;
+  --scrim: rgba(4, 7, 10, 0.62); --pop: 0 18px 50px rgba(0, 0, 0, 0.55);
 }
+
+/* Theme-independent tokens and legacy aliases. Aliases resolve against the themed value above. */
+:root {
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+  --r: 6px;
+  --r-s: 4px;
+  --row: 36px;
+  --pad: 12px;
+  --sidebar-w: 232px;
+
+  --success: var(--ok);
+  --warning: var(--warn);
+  --danger: var(--bad);
+  --expected: var(--exp);
+  --success-soft: var(--ok-soft);
+  --warning-soft: var(--warn-soft);
+  --danger-soft: var(--bad-soft);
+  --expected-soft: var(--exp-soft);
+  --series-1: var(--s1);
+  --series-2: var(--s2);
+  --series-3: var(--s3);
+  --series-4: var(--s4);
+  --series-5: var(--s5);
+  --series-6: var(--s6);
+  /* --dim failed 4.5:1 on dark surfaces; it is the muted colour now (plan flag F3). */
+  --dim: var(--muted);
+  --hover-strong: var(--active);
+  --accent-soft-border: var(--accent-line);
+  --radius: var(--r);
+  --radius-sm: var(--r-s);
+  --radius-chip: var(--r-s);
+  --shadow: none;
+  --shadow-pop: var(--pop);
+  --overlay: var(--scrim);
+  --term-bg: var(--term);
+  --healthy-cell: var(--cell-ok);
+  --danger-border: color-mix(in srgb, var(--bad) 45%, var(--border));
+  --danger-hover: var(--bad-soft);
+  /* Tag chips have no fill: text and border only, both derived from the state colours. */
+  --tag-red-text: var(--bad); --tag-red-border: color-mix(in srgb, var(--bad) 45%, var(--border));
+  --tag-amber-text: var(--warn); --tag-amber-border: color-mix(in srgb, var(--warn) 45%, var(--border));
+  --tag-blue-text: var(--accent); --tag-blue-border: var(--accent-line);
+  --tag-green-text: var(--ok); --tag-green-border: color-mix(in srgb, var(--ok) 45%, var(--border));
+  --tag-violet-text: var(--info); --tag-violet-border: color-mix(in srgb, var(--info) 45%, var(--border));
+  --tag-neutral-text: var(--muted); --tag-neutral-border: var(--border-strong);
+}
+:root[data-density="comfortable"] { --row: 44px; --pad: 16px; }
