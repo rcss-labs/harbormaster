@@ -74,12 +74,14 @@ export function ServicesTable({
     header: COLUMN_LABELS[key],
     width: '90px',
     align: 'right',
+    phoneLabel: false,
     render: (service) => {
       const figure = metricFigure(service, metrics, metricsFailed, kind)
       return (
         <span className={`${styles.mono} ${figure.tone === 'warn' ? styles.warnText : ''}`.trim()} title={figure.title}>
           {phone ? phoneLabel : ''}
           {figure.text}
+          {phone && figure.short ? ` ${figure.short}` : ''}
         </span>
       )
     },
@@ -111,6 +113,7 @@ export function ServicesTable({
             key: 'why',
             header: 'Attention',
             phone: 'meta' as const,
+            phoneLabel: false as const,
             render: (service: ServiceListItemDTO) => (service.attention ? <span className={styles.phoneWhy}>{service.attention}</span> : null),
           },
         ]
@@ -129,6 +132,7 @@ export function ServicesTable({
       header: COLUMN_LABELS.cluster,
       width: 'minmax(110px,1fr)',
       sortValue: sortBy('cluster'),
+      phoneLabel: false,
       render: (service) =>
         phone ? (
           <span className={styles.mono}>{service.cluster.name}</span>
@@ -143,6 +147,7 @@ export function ServicesTable({
       header: COLUMN_LABELS.account,
       width: 'minmax(120px,1fr)',
       sortValue: sortBy('account'),
+      phoneLabel: false,
       render: (service) =>
         phone ? (
           <span>
@@ -161,6 +166,7 @@ export function ServicesTable({
       width: '80px',
       align: 'right',
       sortValue: sortBy('tasks'),
+      phoneLabel: false,
       render: (service) => (
         <span className={`${styles.mono} ${taskTone(service) === 'bad' ? styles.bad : ''}`.trim()}>
           {service.running}/{service.desired}
@@ -188,7 +194,11 @@ export function ServicesTable({
     },
   ]
 
+  // Phones drop the tooltips, so the reason behind a dash is written under the list.
+  const pageRows = services.slice((page - 1) * SERVICES_PAGE_SIZE, page * SERVICES_PAGE_SIZE)
+  const dashReasons = phone ? dashReasonsOf(pageRows, visibleColumns, metrics, metricsFailed) : []
   return (
+    <>
     <DataTable
       label="Services"
       columns={columns}
@@ -245,5 +255,23 @@ export function ServicesTable({
         )
       }}
     />
+    {dashReasons.map((reason) => (
+      <p key={reason} className={styles.dashNote}>{`– ${reason}.`}</p>
+    ))}
+    </>
   )
+}
+
+/** The distinct reasons behind the CPU and Memory dashes of the rows on screen, so a phone can say why. */
+function dashReasonsOf(rows: ServiceListItemDTO[], visibleColumns: string[], metrics: ServicesMetricsDTO | undefined, failed: boolean): string[] {
+  const kinds: [string, MetricKind][] = [['cpu_pct', 'cpu'], ['mem_pct', 'mem']]
+  const reasons = new Set<string>()
+  for (const [column, kind] of kinds) {
+    if (!visibleColumns.includes(column)) continue
+    for (const row of rows) {
+      const { title } = metricFigure(row, metrics, failed, kind)
+      if (title) reasons.add(title.replace(/\.$/, ""))
+    }
+  }
+  return [...reasons]
 }

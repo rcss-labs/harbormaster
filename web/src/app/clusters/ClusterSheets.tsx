@@ -28,7 +28,7 @@ export function ClusterRowSheet({ cluster, onClose, onEditTag }: ClusterRowSheet
   if (!cluster) return null
   const pinned = isPinned('cluster', cluster.id)
   return (
-    <BottomSheet open onClose={onClose} label={`Actions for ${cluster.name}`} title={cluster.name} role="menu">
+    <BottomSheet open onClose={onClose} label={`Actions for ${cluster.name}`} title={cluster.name} sub={`Tag ${cluster.tag.name}, set on this cluster`} role="menu">
       <SheetAction icon="clusters" label="Open cluster" href={`/clusters/${cluster.id}`} />
       <SheetAction icon="services" label="Services" href={`/services?${new URLSearchParams({ q: cluster.name })}`} />
       <SheetAction icon="tasks" label="Tasks" href={`/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`} />

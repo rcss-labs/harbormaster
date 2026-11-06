@@ -59,6 +59,7 @@ describe('Clusters on phones', () => {
     const labels = within(menu)
       .getAllByRole('menuitem')
       .map((item) => item.textContent)
+    expect(within(menu).getByText(/^Tag .+, set on this cluster$/)).toBeInTheDocument()
     expect(labels).toEqual(expect.arrayContaining([expect.stringContaining('Open cluster'), expect.stringContaining('Services'), expect.stringContaining('Tasks'), expect.stringContaining('Pin'), expect.stringContaining('Edit tag')]))
   })
 

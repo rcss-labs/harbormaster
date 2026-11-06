@@ -77,7 +77,7 @@ describe('Services page on phones', () => {
       'Tasks',
       'RestartA rollout is already running',
       'Deploy',
-      'PinPin to the sidebar',
+      'PinPin to Overview and Services',
     ])
     const restart = within(sheet).getByRole('menuitem', { name: /^Restart/ })
     expect(restart).toBeDisabled()
@@ -112,10 +112,13 @@ describe('Services page on phones', () => {
     await waitFor(() => expect(line2).toHaveTextContent('CPU –'))
     expect(line2).toHaveTextContent('Mem –')
     expect(line2).not.toHaveTextContent(/CPU 0|Mem 0/)
-    expect(within(line2).getAllByTitle('Container Insights is off for this cluster')).toHaveLength(2)
+    // The reason is text on the page, not only a tooltip: a footer note explains the dashes.
+    expect(screen.getByText('– Container Insights is off for this cluster.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Actions for edge-nginx' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Details' }))
     const details = await screen.findByRole('dialog', { name: 'edge-nginx' })
-    expect(within(details).getByText('CPU', { selector: 'dt' }).nextElementSibling).toHaveTextContent('–')
+    // ...and the Details sheet says it beside each dash.
+    expect(within(details).getByText('CPU', { selector: 'dt' }).nextElementSibling).toHaveTextContent('– Container Insights is off for this cluster')
+    expect(within(details).getByText('Memory', { selector: 'dt' }).nextElementSibling).toHaveTextContent('– Container Insights is off for this cluster')
   })
 })

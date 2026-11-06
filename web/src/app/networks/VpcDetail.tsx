@@ -60,9 +60,9 @@ const subnetColumns: DataTableColumn<SubnetRow>[] = [
       </span>
     ),
   },
-  { key: 'type', header: 'Type', width: '70px', render: (row) => <span className={row.isPublic ? styles.publicType : undefined}>{row.isPublic ? 'Public' : 'Private'}</span> },
-  { key: 'zone', header: 'Zone', width: '110px', render: (row) => <span className={styles.mono}>{row.zone}</span> },
-  { key: 'cidr', header: 'CIDR', width: '130px', render: (row) => <span className={styles.mono}>{row.cidr}</span> },
+  { key: 'type', header: 'Type', phoneLabel: false, width: '70px', render: (row) => <span className={row.isPublic ? styles.publicType : undefined}>{row.isPublic ? 'Public' : 'Private'}</span> },
+  { key: 'zone', header: 'Zone', phoneLabel: false, width: '110px', render: (row) => <span className={styles.mono}>{row.zone}</span> },
+  { key: 'cidr', header: 'CIDR', phoneLabel: false, width: '130px', render: (row) => <span className={styles.mono}>{row.cidr}</span> },
   {
     key: 'ips',
     header: 'IPs used',

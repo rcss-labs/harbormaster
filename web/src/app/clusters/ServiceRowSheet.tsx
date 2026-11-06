@@ -18,7 +18,10 @@ export function ServiceRowSheet({ service, clusterName, onClose, onTagClick }: S
   if (!service) return null
   const pinned = isPinned('service', service.id)
   return (
-    <BottomSheet open onClose={onClose} label={`Actions for ${service.name}`} title={service.name} role="menu">
+    <BottomSheet open onClose={onClose} label={`Actions for ${service.name}`} title={service.name}
+      sub={`Tag ${service.tag.name}, ${service.tag.inherited ? `inherited from cluster ${clusterName}` : 'set on this service'}`}
+      role="menu"
+    >
       <SheetAction icon="services" label="Open service" href={`/services/${service.id}/overview`} />
       <SheetAction icon="tasks" label="Tasks" href={`/services/${service.id}/tasks`} />
       <SheetAction

@@ -7,6 +7,8 @@ export interface MetricFigure {
   text: string
   /** Why there is a dash; absent when a figure is shown. */
   title?: string
+  /** A word a phone row can carry beside the dash; only for failures, so a cluster without Insights does not shout on every row. */
+  short?: string
   tone?: 'warn'
 }
 
@@ -35,7 +37,7 @@ export function metricFigure(
     return { text: `${Math.round(value)} %`, tone: value > WARN_ABOVE[kind] ? 'warn' : undefined }
   }
   const targetError = metrics?.errors.find((error) => error.account_id === service.account_id && error.region === service.region)
-  if (targetError) return { text: '–', title: targetError.code === 'throttled' ? THROTTLED_TITLE : AWS_ERROR_TITLE }
-  if (failed && !item) return { text: '–', title: AWS_ERROR_TITLE }
+  if (targetError) return targetError.code === 'throttled' ? { text: '–', title: THROTTLED_TITLE, short: 'throttled' } : { text: '–', title: AWS_ERROR_TITLE, short: 'error' }
+  if (failed && !item) return { text: '–', title: AWS_ERROR_TITLE, short: 'error' }
   return { text: '–', title: NO_DATA_TITLE }
 }

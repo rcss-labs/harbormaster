@@ -57,3 +57,4 @@
   .ppop label { min-height: 44px; display: flex; align-items: center; }
   .btn { white-space: normal; }
 }
+.subLine { display: block; overflow-wrap: anywhere; }

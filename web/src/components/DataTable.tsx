@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import styles from './DataTable.module.css'
 import { Pager } from './Pager'
+import { SortFieldsButton } from './SortFieldsButton'
 import { usePhone } from './usePhone'
 
 export interface DataTableColumn<R> {
@@ -19,6 +20,11 @@ export interface DataTableColumn<R> {
    * is the status, everything else is meta.
    */
   phone?: PhoneRole
+  /**
+   * Phone meta only: the label shown before the value, since the header row is gone. Defaults to the header when it is
+   * text; pass a shorter word to rename it, or `false` when the value already says what it is ("4 tasks", a status).
+   */
+  phoneLabel?: string | false
 }
 
 export type PhoneRole = 'title' | 'status' | 'meta' | 'action' | 'hidden'
@@ -60,6 +66,8 @@ interface DataTableProps<R> {
   visibleColumns?: string[]
   /** Appends an "Actions" column rendering the returned controls for each row. */
   rowAction?: (row: R) => ReactNode
+  /** Phones have no sortable headers: show the "Sort and fields" button above the rows, for the sortable columns. */
+  phoneSort?: boolean
 }
 
 const INTERACTIVE = 'a, button, input, select, textarea, [role="menuitem"]'
@@ -99,6 +107,7 @@ export function DataTable<R>({
   stickyActions = false,
   visibleColumns,
   rowAction,
+  phoneSort = false,
 }: DataTableProps<R>) {
   const columns = useMemo(() => {
     const shown = visibleColumns ? allColumns.filter((column) => visibleColumns.includes(column.key)) : allColumns
@@ -142,11 +151,14 @@ export function DataTable<R>({
     onPageChange?.(next)
   }
 
-  const toggleSort = (key: string) => {
-    const next: SortState = activeSort?.key === key && activeSort.dir === 'asc' ? { key, dir: 'desc' } : { key, dir: 'asc' }
+  const applySort = (next: SortState) => {
     setInnerSort(next)
     setInnerPage(1)
     onSortChange?.(next)
+  }
+
+  const toggleSort = (key: string) => {
+    applySort(activeSort?.key === key && activeSort.dir === 'asc' ? { key, dir: 'desc' } : { key, dir: 'asc' })
   }
 
   const template = columns.map((c) => c.width ?? '1fr').join(' ')
@@ -168,8 +180,18 @@ export function DataTable<R>({
     const statusColumns = shown.filter((column) => roleOf(column) === 'status')
     const metaColumns = shown.filter((column) => roleOf(column) === 'meta')
     const actionColumn = columns.find((column) => column.key === ACTIONS_KEY) ?? shown.find((column) => explicit(column) === 'action')
+    const sortOptions = shown.flatMap((column) => (column.sortValue && typeof column.header === 'string' ? [{ key: column.key, label: column.header }] : []))
+    const labelOf = (column: DataTableColumn<R>): string | undefined => {
+      if (column.phoneLabel === false) return undefined
+      return column.phoneLabel ?? (typeof column.header === 'string' && column.header !== '' ? column.header : undefined)
+    }
     return (
       <div className={styles.wrap}>
+        {phoneSort && sortOptions.length > 0 && (
+          <div className={styles.phoneTools}>
+            <SortFieldsButton sortOptions={sortOptions} sort={activeSort} onSortChange={applySort} defaults={{ sort: defaultSort }} />
+          </div>
+        )}
         <div role="table" aria-label={label} className="hm-lst">
           {visible.length === 0 && empty !== undefined && <div className={styles.empty}>{empty}</div>}
           {visible.map((row, index) => {
@@ -201,11 +223,15 @@ export function DataTable<R>({
                   </div>
                   {meta.length > 0 && (
                     <div className="hm-l2">
-                      {meta.map(({ column, content }) => (
-                        <span key={column.key} role="cell" data-hm-cell={column.key}>
-                          {content}
-                        </span>
-                      ))}
+                      {meta.map(({ column, content }) => {
+                        const metaLabel = labelOf(column)
+                        return (
+                          <span key={column.key} role="cell" data-hm-cell={column.key}>
+                            {metaLabel !== undefined && `${metaLabel} `}
+                            {content}
+                          </span>
+                        )
+                      })}
                     </div>
                   )}
                 </div>

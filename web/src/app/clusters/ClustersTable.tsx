@@ -114,6 +114,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
   const whereColumn: DataTableColumn<ClusterRow> = {
     key: WHERE_KEY,
     header: 'Account and region',
+    phoneLabel: false,
     phone: 'meta',
     render: ({ cluster }) => (
       <span className={styles.whereLine}>
@@ -162,6 +163,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
     {
       key: 'cpu',
       header: 'CPU 24h',
+      phoneLabel: false,
       width: 'minmax(0,1fr)',
       sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.cpu_now ?? null) : null),
       render: ({ cluster, metrics }) =>
@@ -174,6 +176,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
     {
       key: 'mem',
       header: 'Memory 24h',
+      phoneLabel: false,
       width: 'minmax(0,1fr)',
       sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.mem_now ?? null) : null),
       render: ({ cluster, metrics }) =>

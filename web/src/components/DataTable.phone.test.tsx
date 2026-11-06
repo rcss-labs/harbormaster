@@ -21,8 +21,8 @@ const rows: Row[] = [
 const columns: DataTableColumn<Row>[] = [
   { key: 'name', header: 'Service', render: (r) => r.name },
   { key: 'status', header: 'Status', render: (r) => r.status },
-  { key: 'tasks', header: 'Tasks', render: (r) => `${r.tasks} tasks` },
-  { key: 'note', header: 'Note', render: (r) => r.note },
+  { key: 'tasks', header: 'Tasks', phoneLabel: false, sortValue: (r) => r.tasks, render: (r) => `${r.tasks} tasks` },
+  { key: 'note', header: 'Note', phoneLabel: false, render: (r) => r.note },
   { key: 'secret', header: 'Secret', phone: 'hidden', render: () => 'hidden-value' },
 ]
 
@@ -35,6 +35,40 @@ beforeEach(() => {
 afterEach(() => restoreMedia())
 
 describe('DataTable on phones', () => {
+  it('labels a meta value with its column header unless the column opts out or renames it', () => {
+    const labelled: DataTableColumn<Row>[] = [
+      columns[0],
+      columns[1],
+      { key: 'count', header: 'Replicas', render: (r) => r.tasks },
+      { key: 'renamed', header: 'Replica count', phoneLabel: 'Reps', render: (r) => r.tasks },
+      { key: 'plain', header: 'Plain', phoneLabel: false, render: () => 'as-is' },
+    ]
+    render(<DataTable {...props} columns={labelled} />)
+    const first = screen.getAllByRole('row')[0]
+    expect(first.querySelector('[data-hm-cell="count"]')).toHaveTextContent('Replicas 4')
+    expect(first.querySelector('[data-hm-cell="renamed"]')).toHaveTextContent('Reps 4')
+    expect(first.querySelector('[data-hm-cell="plain"]')?.textContent).toBe('as-is')
+    // Title and status stay clean.
+    expect(first.querySelector('[data-hm-cell="name"]')?.textContent).toBe('checkout')
+    expect(first.querySelector('[data-hm-cell="status"]')?.textContent).toBe('Healthy')
+  })
+
+  it('phoneSort adds a sort sheet that reorders the rows', async () => {
+    const user = userEvent.setup()
+    render(<DataTable {...props} phoneSort />)
+    expect(screen.getAllByRole('row')[0]).toHaveTextContent('checkout')
+    await user.click(screen.getByRole('button', { name: 'Sort and fields' }))
+    const sheet = screen.getByRole('dialog', { name: 'Sort and fields' })
+    await user.click(within(within(sheet).getByRole('group', { name: 'Sort by' })).getByRole('button', { name: 'Tasks' }))
+    await user.click(within(sheet).getByRole('button', { name: 'Descending' }))
+    expect(screen.getAllByRole('row')[0]).toHaveTextContent(longName)
+  })
+
+  it('shows no sort button when no column is sortable', () => {
+    render(<DataTable {...props} columns={columns.map((column) => ({ ...column, sortValue: undefined }))} phoneSort />)
+    expect(screen.queryByRole('button', { name: 'Sort and fields' })).not.toBeInTheDocument()
+  })
+
   it('renders rows with title, status and meta cells and the action button', () => {
     render(<DataTable {...props} rowAction={(r) => <button type="button">Actions for {r.name}</button>} />)
     const table = screen.getByRole('table', { name: 'Services' })
