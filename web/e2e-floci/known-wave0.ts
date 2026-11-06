@@ -14,24 +14,11 @@ export interface Wave0Fixme {
   reason: string
 }
 
-const ALL_WIDTHS = [1440, 2560, 3840, 390]
-
-export const WAVE0_FIXME: Wave0Fixme[] = [
-  // The old PollerBanners render one banner per failing region and count the failing Auto scaling tier (floci has no
-  // DescribeScheduledActions) as a stale region, so three banners stack on every page.
-  {
-    check: 'stacked-banners',
-    route: /.*/,
-    widths: ALL_WIDTHS,
-    reason: 'old PollerBanners stack one banner per region (owner: lane 1B core-only status, lane 1A freshness control, lane 0D DataBanner)',
-  },
-  // Measured on the wave-0 branch against the seeded estate: these pages overflow main sideways at 390 px.
-  { check: 'overflow', route: /^overview$/, widths: [390], reason: 'Overview overflows at 390 (owner: lane 1G)' },
-  { check: 'overflow', route: /^cluster$/, widths: [390, 1440], reason: 'cluster detail overflows (owner: lane 1F)' },
-  { check: 'overflow', route: /^service-(overview|tasks|logs|metrics|terminal|task-definition|scaling|operations)$/, widths: [390], reason: 'service page frame overflows at 390 (owner: lane 1H)' },
-  { check: 'overflow', route: /^service-deploy$/, widths: [390], reason: 'Deploy tab overflows at 390 (owner: lane 1I)' },
-  { check: 'overflow', route: /^settings-(tags|sso|audit)$/, widths: [390], reason: 'settings tab overflows at 390 (owner: lane 1L)' },
-]
+/**
+ * Every wave-0 waiver passed on the merged wave-1 branch (lane 1Z ran the routes with HM_FLOCI_UNFIXME=1), so none
+ * remain. A waiver may only be added back with a reason that names an owner and the floci limitation behind it.
+ */
+export const WAVE0_FIXME: Wave0Fixme[] = []
 
 export function waivers(check: Check, route: string, width: number): string[] {
   if (process.env.HM_FLOCI_UNFIXME) return []
