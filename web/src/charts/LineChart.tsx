@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, type CSSProperties } from 'react'
 import styles from './charts.module.css'
 import { fmtNum } from './format'
 
@@ -69,6 +69,16 @@ function collapseSeries(series: LineSeries[]): LineSeries[] {
   return [...series.filter((s) => kept.includes(s)), others]
 }
 
+const EDGE_ZONE = 0.15
+
+/** Labels centre on their marker, except near an edge, where they anchor inward so the plot never clips them. */
+function markLabelStyle(at: number): CSSProperties {
+  const left = `${at * 100}%`
+  if (at >= 1 - EDGE_ZONE) return { left, transform: 'translateX(-100%)' }
+  if (at <= EDGE_ZONE) return { left, transform: 'translateX(0)' }
+  return { left }
+}
+
 /** Hand-written SVG line chart in a fixed-height panel; labels are HTML so text never stretches (mockup chart()). */
 export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130, marks = [] }: LineChartProps) {
   const panelHeight = Math.min(220, Math.max(80, height))
@@ -111,7 +121,7 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
           })}
         </svg>
         {marks.map((mark) => (
-          <span key={mark.at} className={styles.mkl} style={{ left: `${mark.at * 100}%` }}>
+          <span key={mark.at} className={styles.mkl} style={markLabelStyle(mark.at)}>
             {mark.label}
           </span>
         ))}
