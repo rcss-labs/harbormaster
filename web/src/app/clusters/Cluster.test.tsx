@@ -81,6 +81,12 @@ describe('Cluster', () => {
     expect(within(panel).getByText(/bar = running/)).toBeInTheDocument()
   })
 
+  it('exposes each Tasks by service bar as running of desired in its accessible name', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const panel = (await screen.findByRole('heading', { name: 'Tasks by service' })).closest('section') as HTMLElement
+    expect(within(panel).getAllByRole('img', { name: 'Running 2 of 2' }).length).toBeGreaterThan(0)
+  })
+
   it('lists services in a table with problems first', async () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     await screen.findByRole('table', { name: 'Services' })

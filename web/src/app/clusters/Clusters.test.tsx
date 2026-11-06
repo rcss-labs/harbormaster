@@ -41,6 +41,16 @@ describe('Clusters', () => {
     expect(screen.queryByRole('button', { name: 'Cards' })).not.toBeInTheDocument()
   })
 
+  it('column picker hides a column and keeps the choice in storage', async () => {
+    const user = userEvent.setup()
+    renderApp('/clusters')
+    await screen.findByRole('table', { name: 'Clusters' })
+    await user.click(screen.getByRole('button', { name: 'Columns' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Spot' }))
+    expect(screen.queryByRole('columnheader', { name: /^Spot/ })).not.toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('harbormaster-columns:clusters') ?? 'null')).not.toContain('spot')
+  })
+
   it('shows tag and status filters with counts', async () => {
     renderApp('/clusters')
     await screen.findByRole('radio', { name: 'All 6' })
