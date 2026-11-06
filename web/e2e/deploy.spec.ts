@@ -111,12 +111,12 @@ test.describe('pavel on payments-api', () => {
 
   test('the Deploy label is bold and no other tab label is', async ({ page }) => {
     await page.goto(paymentsApi)
-    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'Operations log', exact: true }) })
+    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'History', exact: true }) })
     const deploy = tabs.getByRole('link', { name: /^Deploy/ })
     await expect(deploy.locator('strong')).toHaveText('Deploy')
     await expect(deploy.locator('strong')).toHaveCSS('font-weight', /^(600|700|800|900)$/)
     await expect(tabs.getByRole('link').locator('strong')).toHaveCount(1)
-    await expect(tabs.getByRole('link', { name: 'Operations log', exact: true }).locator('strong')).toHaveCount(0)
+    await expect(tabs.getByRole('link', { name: 'History', exact: true }).locator('strong')).toHaveCount(0)
   })
 })
 
@@ -325,7 +325,7 @@ test.describe('omer on staging web (Viewer only)', () => {
 
   test('the Deploy tab is locked and shows no editors', async ({ page }) => {
     await page.goto(serviceUrl(...stagingWeb, 'deploy'))
-    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'Operations log', exact: true }) })
+    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'History', exact: true }) })
     const deploy = tabs.getByRole('link', { name: /^Deploy/ })
     // Locked tabs are marked with ⊘ and keep the bold label.
     await expect(deploy).toContainText('⊘')

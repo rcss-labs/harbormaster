@@ -40,8 +40,10 @@ test('sign-out as dana ends the session and returns to the login page', async ({
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
 
-  await expect(page.getByText('Signed in as')).toContainText('dana')
-  await expect(page.getByText('Signed in as')).toContainText('User')
+  const accountMenu = page.getByRole('button', { name: 'Account menu for dana' })
+  await expect(accountMenu).toContainText('dana')
+  await expect(accountMenu).toContainText('User')
+  await accountMenu.click()
   await page.getByRole('button', { name: 'Sign out' }).click()
   await expect(page).toHaveURL(/\/login(\?signed_out=1)?$/)
   expect((await page.request.get('/api/me')).status()).toBe(401)

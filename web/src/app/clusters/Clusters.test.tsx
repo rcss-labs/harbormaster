@@ -241,7 +241,8 @@ describe('Clusters', () => {
     const user = userEvent.setup()
     renderApp('/clusters')
     await screen.findByRole('table', { name: 'Clusters' })
-    const select = screen.getByRole('combobox', { name: 'Account filter' })
+    await user.click(screen.getByRole('button', { name: /^Scope:/ }))
+    const select = within(screen.getByRole('dialog', { name: 'Scope' })).getByRole('combobox', { name: 'Account filter' })
     const staging = within(select).getByRole('option', { name: /staging/i }) as HTMLOptionElement
     await user.selectOptions(select, staging.value)
     await waitFor(() => expect(shownNames()).toEqual(['staging-web']))

@@ -68,6 +68,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // (3) Self-link while SSO is still off.
       await page.goto('/')
+      await page.getByRole('button', { name: 'Account menu for pavel' }).click()
       await page.getByRole('button', { name: 'Link SSO account' }).click()
       const linkDialog = page.getByRole('dialog', { name: 'Link your SSO account' })
       await linkDialog.getByLabel('Password').fill(SEED_PASSWORD)
@@ -102,7 +103,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         const dana = await startContext(browser, baseURL)
         await ssoSignIn(dana.page, 'dana')
         await expect(dana.page).toHaveURL(/\/(\?.*)?$/)
-        await expect(dana.page.getByText('Signed in as')).toContainText('dana')
+        await expect(dana.page.getByRole('button', { name: 'Account menu for dana' })).toContainText('dana')
         await dana.page.goto('/clusters')
         await expect(dana.page.getByRole('table', { name: 'Clusters' }).getByRole('row')).toHaveCount(7)
         await dana.assertClean()
@@ -161,7 +162,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         const pavelSso = await startContext(browser, baseURL)
         await ssoSignIn(pavelSso.page, 'pavel')
         await expect(pavelSso.page.getByRole('navigation', { name: 'Main' })).toBeVisible()
-        await expect(pavelSso.page.getByText('Signed in as')).toContainText('pavel')
+        await expect(pavelSso.page.getByRole('button', { name: 'Account menu for pavel' })).toContainText('pavel')
         await expect(pavelSso.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' })).toBeVisible()
         await pavelSso.assertClean()
         await pavelSso.context.close()
