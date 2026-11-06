@@ -3,7 +3,9 @@ import { useLogHistory } from '../../../api/observe'
 import type { LogLine, LogsHistoryDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
 import { Panel } from '../../../components/Panel'
+import { BottomSheet } from '../../../components/BottomSheet'
 import { Seg, SegmentedFilter } from '../../../components/Seg'
+import { usePhone } from '../../../components/useNarrow'
 import { queryPanelError } from '../panelError'
 import { useAuth } from '../../auth/AuthProvider'
 import { level } from './level'
@@ -54,6 +56,20 @@ function LogRow({ line }: { line: LogLine }) {
   )
 }
 
+/** Phone row: time and stream on one wrapping line, the whole message wrapped below; a tap opens the line's details. */
+function PhoneLogRow({ line, onPick }: { line: LogLine; onPick: () => void }) {
+  const severity = level(line.message)
+  return (
+    <button type="button" className={styles.pln} data-level={severity || undefined} aria-haspopup="dialog" onClick={onPick}>
+      <span className={styles.plnHead}>
+        <span className={styles.ts}>{clock(line.t)}</span>
+        <span className={styles.ct}>{`${line.container}/${line.task_id.slice(0, 8)}`}</span>
+      </span>
+      <span className={styles.plnMsg}>{line.message}</span>
+    </button>
+  )
+}
+
 interface OlderState {
   scope: string
   before?: string
@@ -63,6 +79,8 @@ interface OlderState {
 /** Logs tab: CloudWatch history (paged backwards), search, level filter and a live tail that follows the bottom. */
 export function LogsTab({ serviceId }: { serviceId: string }) {
   const { me } = useAuth()
+  const phone = usePhone()
+  const [picked, setPicked] = useState<LogLine | null>(null)
   const [container, setContainer] = useState('all')
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [searchInput, setSearchInput] = useState('')
@@ -161,41 +179,68 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
 
   if (!canTail) return <div className={styles.banners}>{driverBanners}</div>
 
+  const containerSelect = (
+    <select className={styles.ctl} aria-label="Container" value={container} onChange={(event) => setContainer(event.target.value)}>
+      <option value="all">All containers</option>
+      {containers.map((c) => (
+        <option key={c.name} value={c.name} disabled={!c.supported} title={c.supported ? undefined : `${c.driver}: Harbormaster cannot show these logs`}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  )
+  const levelSeg = <SegmentedFilter label="Level" options={LEVEL_OPTIONS} value={levelFilter} onChange={setLevelFilter} />
+  const searchInputEl = (
+    <input
+      className={`${styles.ctl} ${styles.search}`}
+      aria-label="Search logs"
+      placeholder="Search logs"
+      value={searchInput}
+      onChange={(event) => {
+        setSearchInput(event.target.value)
+        tail.keepalive()
+      }}
+    />
+  )
+  const tailSeg = (
+    <Seg
+      label="Tail"
+      fit
+      options={[
+        { value: 'live', label: 'Live' },
+        { value: 'paused', label: 'Paused' },
+      ]}
+      value={follow ? 'live' : 'paused'}
+      onChange={(next) => setFollow(next === 'live')}
+    />
+  )
+  const statusLine = (
+    <span className={styles.status}>
+      CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {statusText}
+    </span>
+  )
+
   return (
-    <section className={`${styles.root} hm-fill-col`} aria-label="Logs">
-      <div className={styles.toolbar}>
-        <select className={styles.ctl} aria-label="Container" value={container} onChange={(event) => setContainer(event.target.value)}>
-          <option value="all">All containers</option>
-          {containers.map((c) => (
-            <option key={c.name} value={c.name} disabled={!c.supported} title={c.supported ? undefined : `${c.driver}: Harbormaster cannot show these logs`}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <SegmentedFilter label="Level" options={LEVEL_OPTIONS} value={levelFilter} onChange={setLevelFilter} />
-        <input
-          className={`${styles.ctl} ${styles.search}`}
-          aria-label="Search logs"
-          placeholder="Search logs"
-          value={searchInput}
-          onChange={(event) => {
-            setSearchInput(event.target.value)
-            tail.keepalive()
-          }}
-        />
-        <Seg
-          label="Tail"
-          options={[
-            { value: 'live', label: 'Live' },
-            { value: 'paused', label: 'Paused' },
-          ]}
-          value={follow ? 'live' : 'paused'}
-          onChange={(next) => setFollow(next === 'live')}
-        />
-        <span className={styles.status}>
-          CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {statusText}
-        </span>
-      </div>
+    <section className={`${styles.root} hm-fill-col ${phone ? styles.rootPhone : ''}`.trim()} aria-label="Logs">
+      {phone ? (
+        <div className={`${styles.toolbar} ${styles.toolbarPhone}`}>
+          <div className={styles.toolRow}>
+            {containerSelect}
+            {tailSeg}
+          </div>
+          {searchInputEl}
+          {levelSeg}
+          {statusLine}
+        </div>
+      ) : (
+        <div className={styles.toolbar}>
+          {containerSelect}
+          {levelSeg}
+          {searchInputEl}
+          {tailSeg}
+          {statusLine}
+        </div>
+      )}
       <div className={styles.banners}>
         {driverBanners}
         {follow && tail.status === 'ended' && tail.endReason === 'idle' && (
@@ -228,10 +273,47 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           </button>
         )}
         {visible.length === 0 && <div className={styles.empty}>No log lines.</div>}
-        {visible.map((line, index) => (
-          <LogRow key={`${line.t}|${line.task_id}|${index}`} line={line} />
-        ))}
+        {visible.map((line, index) =>
+          phone ? (
+            <PhoneLogRow key={`${line.t}|${line.task_id}|${index}`} line={line} onPick={() => setPicked(line)} />
+          ) : (
+            <LogRow key={`${line.t}|${line.task_id}|${index}`} line={line} />
+          ),
+        )}
       </div>
+      {phone && <div className={styles.foot}>{visible.length} lines shown. Tap a line for details.</div>}
+      <BottomSheet
+        open={phone && picked !== null}
+        onClose={() => setPicked(null)}
+        label="Log line details"
+        title="Log line"
+        sub={picked ? <span className={styles.mono}>{clock(picked.t)}</span> : undefined}
+        footer={
+          <button type="button" className={styles.sheetClose} onClick={() => setPicked(null)}>
+            Close
+          </button>
+        }
+      >
+        {picked && (
+          <>
+            <dl className={styles.kv}>
+              <dt>Level</dt>
+              <dd>{level(picked.message) || 'info'}</dd>
+              <dt>Time</dt>
+              <dd className={styles.mono}>{picked.t}</dd>
+              <dt>Log group</dt>
+              <dd className={styles.mono}>{info.group}</dd>
+              <dt>Log stream</dt>
+              <dd className={styles.mono}>{`${picked.container}/${picked.task_id}`}</dd>
+              <dt>Task</dt>
+              <dd className={styles.mono}>{picked.task_id}</dd>
+              <dt>Container</dt>
+              <dd>{picked.container}</dd>
+            </dl>
+            <pre className={styles.code}>{picked.message}</pre>
+          </>
+        )}
+      </BottomSheet>
     </section>
   )
 }

@@ -11,6 +11,10 @@ import { EmptyState } from '../../../components/EmptyState'
 import { LockPanel } from '../../../components/LockPanel'
 import { useExecSocket, type ExecError, type ExecStatus } from './useExecSocket'
 import { Panel } from '../../../components/Panel'
+import { BottomSheet } from '../../../components/BottomSheet'
+import { Icon } from '../../../components/Icon'
+import { usePhone } from '../../../components/useNarrow'
+import { TerminalKeys } from './TerminalKeys'
 import styles from './terminal.module.css'
 
 const SYS = '\x1b[38;2;124;196;228m'
@@ -53,6 +57,9 @@ export function TerminalTab({ serviceId }: { serviceId: string }) {
 export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   const [params] = useSearchParams()
   const csrf = useMe().data?.csrf_token ?? ''
+  const phone = usePhone()
+  const [targetOpen, setTargetOpen] = useState(false)
+  const [sessionOpen, setSessionOpen] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -124,7 +131,25 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
       termRef.current = null
       fitRef.current = null
     }
-  }, [send, resize, disconnect])
+  }, [send, resize, disconnect, phone]) // the host element is a different node on phones, so crossing the breakpoint starts a fresh terminal
+
+  // While a phone session is connected the keys row replaces the tab bar (data-hm-keys) and the page ends above it.
+  const keysShown = phone && socket.state === 'connected'
+  useEffect(() => {
+    if (!keysShown) return
+    const root = document.documentElement
+    root.setAttribute('data-hm-keys', '')
+    return () => root.removeAttribute('data-hm-keys')
+  }, [keysShown])
+
+  // The on-screen keyboard shrinks the visual viewport; the host follows the layout, and xterm refits to it.
+  useEffect(() => {
+    const viewport = phone ? window.visualViewport : null
+    if (!viewport) return
+    const refit = () => fitRef.current?.fit()
+    viewport.addEventListener('resize', refit)
+    return () => viewport.removeEventListener('resize', refit)
+  }, [phone])
 
   const connect = () => {
     if (!container) return
@@ -133,60 +158,139 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
     socket.connect({ taskId: task.id, container: container.name, command, cols: term?.cols ?? 80, rows: term?.rows ?? 24, csrf })
   }
 
+  const taskSelect = (
+    <select value={task.id} disabled={active} onChange={(e) => { setPickedTask(e.target.value); setPickedContainer(undefined) }}>
+      {running.map((t) => (
+        <option key={t.id} value={t.id}>{`${t.short_id.slice(0, 12)} · ${t.private_ip} · ${t.az}`}</option>
+      ))}
+    </select>
+  )
+  const containerSelect = (
+    <select value={container?.name ?? ''} disabled={active} onChange={(e) => setPickedContainer(e.target.value)}>
+      {(targets?.containers ?? []).map((c) => (
+        <option key={c.name} value={c.name} disabled={c.exec_agent !== 'RUNNING'}>
+          {c.exec_agent === 'RUNNING' ? c.name : `${c.name} · agent ${c.exec_agent.toLowerCase()}`}
+        </option>
+      ))}
+    </select>
+  )
+  const commandSelect = (
+    <select value={command} disabled={active} onChange={(e) => setPickedCommand(e.target.value)}>
+      {commands.map((c) => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+    </select>
+  )
+  const connectionButton =
+    socket.state === 'connected' ? (
+      <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={disconnect}>Disconnect</button>
+    ) : (
+      <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canConnect} onClick={connect}>Connect</button>
+    )
+  const host = (
+    <div className={styles.termWrap}>
+      <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
+    </div>
+  )
+  const sessionFacts = (
+    <>
+      <dl className={styles.session}>
+        <dt>Via</dt>
+        <dd>ECS Exec</dd>
+        <dt>Idle timeout</dt>
+        <dd>20 minutes</dd>
+        <dt>Max duration</dt>
+        <dd>4 hours</dd>
+      </dl>
+      <p className={styles.sessionNote}>
+        Keystrokes and output are not recorded. The operations log records who opened the session, the task, container and command.
+      </p>
+    </>
+  )
+
+  if (phone) {
+    const targetLabel = `${task.short_id.slice(0, 12)} · ${container?.name ?? '…'} · ${command}`
+    return (
+      <div className={`${styles.page} ${styles.pagePhone}`}>
+        <section className={`${styles.root} hm-fill-col`} aria-label="Terminal">
+          <div className={styles.toolbar}>
+            <button
+              type="button"
+              className={styles.targetBtn}
+              aria-label={`Target: ${targetLabel}. Change task, container or command`}
+              aria-haspopup="dialog"
+              disabled={active}
+              onClick={() => setTargetOpen(true)}
+            >
+              <Icon name="term" size={16} />
+              <span className={styles.targetText}>{targetLabel}</span>
+              <Icon name="chevd" size={16} />
+            </button>
+            {connectionButton}
+            <button type="button" className={styles.infoBtn} aria-label="Session details" aria-haspopup="dialog" onClick={() => setSessionOpen(true)}>
+              <Icon name="info" size={18} />
+            </button>
+          </div>
+          {host}
+        </section>
+        {keysShown && <TerminalKeys send={send} />}
+        <BottomSheet
+          open={targetOpen}
+          onClose={() => setTargetOpen(false)}
+          label="Terminal target"
+          title="Task, container and command"
+          footer={
+            <>
+              <button type="button" className={styles.sheetBtn} onClick={() => setTargetOpen(false)}>Cancel</button>
+              <button
+                type="button"
+                className={`${styles.sheetBtn} ${styles.sheetPrimary}`}
+                disabled={!canConnect}
+                onClick={() => {
+                  setTargetOpen(false)
+                  connect()
+                }}
+              >
+                Connect
+              </button>
+            </>
+          }
+        >
+          <div className={styles.sheetFields}>
+            <label className={styles.sheetField}><span>Task</span>{taskSelect}</label>
+            <label className={styles.sheetField}><span>Container</span>{containerSelect}</label>
+            <label className={styles.sheetField}><span>Command</span>{commandSelect}</label>
+          </div>
+        </BottomSheet>
+        <BottomSheet open={sessionOpen} onClose={() => setSessionOpen(false)} label="Session" title="Session" sub={socket.sessionId ? `Session ID ${socket.sessionId}` : undefined}>
+          {sessionFacts}
+        </BottomSheet>
+      </div>
+    )
+  }
+
   return (
     <div className={`hm-fill hm-with-side ${styles.page}`}>
       <section className={`${styles.root} hm-fill-col`} aria-label="Terminal">
         <div className={styles.toolbar}>
           <label className={styles.field}>
             <span>Task</span>
-            <select value={task.id} disabled={active} onChange={(e) => { setPickedTask(e.target.value); setPickedContainer(undefined) }}>
-              {running.map((t) => (
-                <option key={t.id} value={t.id}>{`${t.short_id.slice(0, 12)} · ${t.private_ip} · ${t.az}`}</option>
-              ))}
-            </select>
+            {taskSelect}
           </label>
           <label className={styles.field}>
             <span>Container</span>
-            <select value={container?.name ?? ''} disabled={active} onChange={(e) => setPickedContainer(e.target.value)}>
-              {(targets?.containers ?? []).map((c) => (
-                <option key={c.name} value={c.name} disabled={c.exec_agent !== 'RUNNING'}>
-                  {c.exec_agent === 'RUNNING' ? c.name : `${c.name} · agent ${c.exec_agent.toLowerCase()}`}
-                </option>
-              ))}
-            </select>
+            {containerSelect}
           </label>
           <label className={styles.field}>
             <span>Command</span>
-            <select value={command} disabled={active} onChange={(e) => setPickedCommand(e.target.value)}>
-              {commands.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            {commandSelect}
           </label>
-          {socket.state === 'connected' ? (
-            <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={disconnect}>Disconnect</button>
-          ) : (
-            <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canConnect} onClick={connect}>Connect</button>
-          )}
+          {connectionButton}
         </div>
-        <div className={styles.termWrap}>
-          <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
-        </div>
+        {host}
       </section>
       <div className={styles.side}>
-      <Panel title="Session">
-        <dl className={styles.session}>
-          <dt>Via</dt>
-          <dd>ECS Exec</dd>
-          <dt>Idle timeout</dt>
-          <dd>20 minutes</dd>
-          <dt>Max duration</dt>
-          <dd>4 hours</dd>
-        </dl>
-        <p className={styles.sessionNote}>
-          Keystrokes and output are not recorded. The operations log records who opened the session, the task, container and command.
-        </p>
-      </Panel>
+        <Panel title="Session">{sessionFacts}</Panel>
       </div>
     </div>
   )
