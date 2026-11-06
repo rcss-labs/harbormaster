@@ -175,37 +175,28 @@ test.describe('row action menu at 390', () => {
   })
 })
 
-// A segment label must never wrap inside its box: segments grow to fit and the group wraps onto more rows instead.
+// A filter label must never wrap inside its box. On a phone the filters are chips (`.hm-chips`) that scroll sideways by
+// design with a fade, so every option has to be reachable by scrolling, on one line, at one height.
 test.describe('segmented filters', () => {
-  test('at 390 labels stay on one line, inside the panel, with every option visible', async ({ page }) => {
+  test('at 390 labels stay on one line and every chip is reachable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/services')
-    // Every segmented control: the radiogroup filters and the toggle group of saved views share one component.
-    const groups = page.locator('[class*="seg"]:has(> button)')
+    const groups = page.locator('.hm-chips')
     await expect(groups.first()).toBeVisible()
     for (const name of ['My pins', 'In progress', 'Steady', 'Scaled to 0']) {
-      await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toBeVisible()
+      await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toHaveCount(1)
     }
-    const shortHeight = (await measureBox(groups.locator('button', { hasText: /^All/ }).first())).height
+    const chipHeight = (await measureBox(groups.locator('button', { hasText: /^All/ }).first())).height
 
-    const results = await groups.evaluateAll((elements) =>
-      elements.map((group) => {
-        const panel = group.closest('[class*="panel"]') ?? document.body
-        const panelRight = panel.getBoundingClientRect().right
-        const radios = [...group.querySelectorAll('button')].map((radio) => {
-          const box = radio.getBoundingClientRect()
-          return { text: radio.textContent ?? '', height: box.height, right: box.right }
-        })
-        return { name: group.getAttribute('aria-label'), radios, panelRight, scrolls: group.scrollWidth - group.clientWidth }
-      }),
-    )
-    expect(results.length).toBeGreaterThan(0)
-    for (const group of results) {
-      expect(group.scrolls, `${group.name} scrolls horizontally`).toBeLessThanOrEqual(0)
-      for (const radio of group.radios) {
-        expect(Math.abs(radio.height - shortHeight), `"${radio.text}" wraps (h=${radio.height})`).toBeLessThanOrEqual(1)
-        expect(radio.right, `"${radio.text}" leaves the panel`).toBeLessThanOrEqual(group.panelRight + 0.5)
-      }
+    const buttons = await groups.locator('button').all()
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const button of buttons) {
+      await button.scrollIntoViewIfNeeded()
+      const box = await measureBox(button)
+      const text = (await button.textContent()) ?? ''
+      expect(Math.abs(box.height - chipHeight), `"${text}" wraps (h=${box.height})`).toBeLessThanOrEqual(1)
+      expect(box.x, `"${text}" starts off screen`).toBeGreaterThanOrEqual(-0.5)
+      expect(box.x + box.width, `"${text}" ends off screen`).toBeLessThanOrEqual(390.5)
     }
   })
 
