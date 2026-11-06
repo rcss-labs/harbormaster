@@ -1,1 +1,6 @@
 .note { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 700px) {
+  .note { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .dismiss { flex: none; min-height: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 500; cursor: pointer; }
+}

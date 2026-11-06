@@ -5,6 +5,7 @@ import type { TaskDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
 import { Drawer } from '../../components/Drawer'
 import { Icon } from '../../components/Icon'
+import { usePhone } from '../../components/useNarrow'
 import { KV } from '../../components/KV'
 import { Skeleton } from '../../components/Skeleton'
 import { TaskStatusCell, formatVcpu, terminalPath } from '../../components/TaskTable'
@@ -85,6 +86,7 @@ function StopReason({ task }: { task: TaskDTO }) {
 
 /** Right-hand details for one task: identity, why it stopped, containers, recent log lines and the row actions. */
 export function TaskDrawer({ task, onClose, onStop }: TaskDrawerProps) {
+  const phone = usePhone()
   const isRunning = task.status === 'RUNNING'
   const shortId = task.short_id.slice(0, 12)
   const owner = task.service ? task.service.name : 'Standalone'
@@ -112,6 +114,7 @@ export function TaskDrawer({ task, onClose, onStop }: TaskDrawerProps) {
               Terminal
             </span>
           )}
+          {isRunning && task.can.terminal && !task.exec_enabled && phone && <span className={styles.note}>ECS Exec is off for this task</span>}
           {isRunning && task.can.operate && (
             <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={() => onStop(task)}>
               <Icon name="stop" />

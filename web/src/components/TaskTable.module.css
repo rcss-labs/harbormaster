@@ -23,3 +23,20 @@
 .danger { color: var(--bad); }
 .more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }
 .statusCell { display: inline-flex; align-items: center; gap: 8px; }
+
+.rows { min-width: 0; }
+
+@media (max-width: 700px) {
+  /* Phone rows: id and status on line 1, the reason full width on line 2, service and times after it. */
+  .rows :global(.hm-l2) > [data-hm-cell='reason'] { order: -1; flex-basis: 100%; }
+  .rows :global(.hm-l2) > [data-hm-cell='reason'] .reason { white-space: normal; overflow: visible; overflow-wrap: anywhere; color: var(--text-2); }
+  .rows .service { flex-wrap: wrap; gap: 0 6px; white-space: normal; overflow: visible; }
+  .rows .service > :first-child { overflow-wrap: anywhere; }
+  .rows .sub { white-space: normal; overflow-wrap: anywhere; }
+  .rows .statusCell { flex-wrap: wrap; gap: 4px 8px; }
+  .idButton { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; white-space: normal; }
+  .nested { padding-left: 12px; }
+  .moreButton { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--r); background: transparent; color: var(--text-2); cursor: pointer; }
+  .moreButton:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .more .btn { height: 44px; padding: 0 18px; font-size: 14px; }
+}

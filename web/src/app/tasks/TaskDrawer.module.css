@@ -18,3 +18,9 @@
 .containers { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r); }
 .containerRow { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; padding: 6px 10px; font-size: 12px; }
 .containerRow + .containerRow { border-top: 1px solid var(--row-border); }
+
+@media (max-width: 700px) {
+  .btn { height: 44px; padding: 0 14px; font-size: 14px; }
+  .actions > .note { flex-basis: 100%; }
+  .containerRow { grid-template-columns: minmax(0, 1fr) auto; }
+}

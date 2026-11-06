@@ -8,3 +8,12 @@
 .search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .note { margin-top: 8px; color: var(--muted); font-size: 12px; }
 .spacer { flex: 1 1 0; }
+
+@media (max-width: 700px) {
+  .pageHead { margin-bottom: 8px; }
+  .phoneSearch { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .phoneInput { flex: 1 1 auto; min-width: 0; width: auto; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: 400 16px var(--sans); }
+  .summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .summaryClear, .emptyClear { flex: none; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: 500 14px var(--sans); cursor: pointer; }
+  .emptyClear { display: block; margin: 12px auto 0; }
+}
