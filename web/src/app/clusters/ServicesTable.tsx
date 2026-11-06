@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import type { ClusterServiceDTO } from '../../api/types'
 import { Sparkline } from '../../charts/Sparkline'
 import { Ago } from '../../components/Ago'
+import type { ColumnPickerColumn } from '../../components/ColumnPicker'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
@@ -13,6 +14,19 @@ import type { TagClickHandler } from './tagTarget'
 
 export const SERVICES_PAGE_SIZE = 25
 
+/** Every column of the cluster's services table for the column picker; the service name always shows. */
+export const SERVICE_COLUMN_OPTIONS: ColumnPickerColumn[] = [
+  { key: 'name', label: 'Service', locked: true },
+  { key: 'tag', label: 'Label' },
+  { key: 'status', label: 'Status' },
+  { key: 'revision', label: 'Task definition' },
+  { key: 'image', label: 'Image tag' },
+  { key: 'tasks', label: 'Tasks' },
+  { key: 'cpu', label: 'CPU, 24 h' },
+  { key: 'mem', label: 'Memory' },
+  { key: 'change', label: 'Last change' },
+]
+
 interface ServicesTableProps {
   services: ClusterServiceDTO[]
   clusterName: string
@@ -21,10 +35,12 @@ interface ServicesTableProps {
   /** Per-service cluster metrics keyed by service id; undefined while loading. */
   metrics?: Record<string, ClusterServiceMetrics>
   insights?: boolean
+  /** Keys of the visible columns, from the column picker. */
+  visibleColumns: string[]
 }
 
 /** Services of one cluster, problems first, 25 to a page. */
-export function ServicesTable({ services, clusterName, onTagClick, metrics, insights = false }: ServicesTableProps) {
+export function ServicesTable({ services, clusterName, onTagClick, metrics, insights = false, visibleColumns }: ServicesTableProps) {
   const columns: DataTableColumn<ClusterServiceDTO>[] = [
     {
       key: 'name',
@@ -118,6 +134,7 @@ export function ServicesTable({ services, clusterName, onTagClick, metrics, insi
       label="Services"
       columns={columns}
       rows={services}
+      visibleColumns={visibleColumns}
       rowKey={(service) => service.id}
       minWidth={960}
       rowStatus={(service) => serviceRowStatus(service.status)}

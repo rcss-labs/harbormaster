@@ -4,6 +4,7 @@ import type { ClusterCardDTO } from '../../api/types'
 import { fmtNum } from '../../charts/format'
 import { Sparkline } from '../../charts/Sparkline'
 import { Ago } from '../../components/Ago'
+import type { ColumnPickerColumn } from '../../components/ColumnPicker'
 import { DataTable, type DataTableColumn, type RowStatus, type SortState } from '../../components/DataTable'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
@@ -14,6 +15,20 @@ import { clusterSeverity } from './filterClusters'
 import { serviceSeverity } from './serviceSeverity'
 
 export const CLUSTERS_PAGE_SIZE = 25
+
+/** Every column of the clusters table for the column picker; the cluster name always shows. */
+export const CLUSTER_COLUMN_OPTIONS: ColumnPickerColumn[] = [
+  { key: 'name', label: 'Cluster', locked: true },
+  { key: 'env', label: 'Env' },
+  { key: 'status', label: 'Status' },
+  { key: 'services', label: 'Services' },
+  { key: 'tasks', label: 'Tasks' },
+  { key: 'cpu', label: 'CPU 24h' },
+  { key: 'mem', label: 'Memory 24h' },
+  { key: 'vcpu', label: 'vCPU' },
+  { key: 'spot', label: 'Spot' },
+  { key: 'change', label: 'Last change' },
+]
 const SERVICE_PREVIEW = 3
 const INSIGHTS_OFF = 'Container Insights is off'
 
@@ -146,9 +161,11 @@ interface ClustersTableProps {
   page: number
   onPageChange: (page: number) => void
   empty: ReactNode
+  /** Keys of the visible columns, from the column picker. */
+  visibleColumns: string[]
 }
 
-export function ClustersTable({ clusters, metricsById, sort, onSortChange, page, onPageChange, empty }: ClustersTableProps) {
+export function ClustersTable({ clusters, metricsById, sort, onSortChange, page, onPageChange, empty, visibleColumns }: ClustersTableProps) {
   // Name order first, so rows that tie on the sort key stay alphabetical.
   const rows = [...clusters].sort((a, b) => a.name.localeCompare(b.name)).map((cluster) => ({ cluster, metrics: metricsById[cluster.id] }))
   return (
@@ -156,6 +173,7 @@ export function ClustersTable({ clusters, metricsById, sort, onSortChange, page,
       <DataTable
         label="Clusters"
         columns={columns()}
+        visibleColumns={visibleColumns}
         rows={rows}
         rowKey={(row) => row.cluster.id}
         minWidth={1120}

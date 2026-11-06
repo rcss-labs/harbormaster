@@ -7,6 +7,7 @@ import { Banner } from '../../components/Banner'
 import { EmptyState } from '../../components/EmptyState'
 import { Panel } from '../../components/Panel'
 import { StaleNote } from '../../components/StaleNote'
+import styles from './clusters.module.css'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const CPU_COLOR = 'var(--series-1)'
@@ -78,15 +79,18 @@ export function ClusterUsageChart({ metrics, insights, error }: ClusterUsageChar
               { name: 'Deployment', color: DEPLOY_COLOR },
             ]}
           />
-          <LineChart
-            series={[
-              { name: 'CPU', color: CPU_COLOR, values: cpu },
-              { name: 'Memory', color: MEMORY_COLOR, values: memory },
-            ]}
-            xLabels={XL24}
-            height={150}
-            marks={metrics ? deployMarks(metrics) : []}
-          />
+          {/* The deployment label at the right edge would otherwise widen the whole page; the frame keeps it inside the panel. */}
+          <div className={styles.chartFrame}>
+            <LineChart
+              series={[
+                { name: 'CPU', color: CPU_COLOR, values: cpu },
+                { name: 'Memory', color: MEMORY_COLOR, values: memory },
+              ]}
+              xLabels={XL24}
+              height={150}
+              marks={metrics ? deployMarks(metrics) : []}
+            />
+          </div>
         </>
       )}
     </Panel>

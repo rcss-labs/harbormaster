@@ -1,11 +1,13 @@
 import { useAuth } from '../auth/AuthProvider'
 import { useClusters } from '../../api/hooks'
 import { useClustersMetrics } from '../../api/observe'
+import { ColumnPicker, useColumnPrefs } from '../../components/ColumnPicker'
+import { DataBanner } from '../../components/DataBanner'
 import { EmptyState } from '../../components/EmptyState'
 import { SegmentedFilter } from '../../components/Seg'
 import { useCrumbs } from '../shell/crumbs'
 import { useFilters, visibleTagIds } from '../shell/useFilters'
-import { ClustersTable } from './ClustersTable'
+import { CLUSTER_COLUMN_OPTIONS, ClustersTable } from './ClustersTable'
 import styles from './clusters.module.css'
 import { ALL_TAGS, clusterCounts, filterClusters } from './filterClusters'
 import { useClusterFilters } from './useClusterFilters'
@@ -20,6 +22,10 @@ export function Clusters() {
   const metrics = useClustersMetrics(scope)
   const items = clusters.data?.items ?? []
   const { filters, sort, page, setTag, setStatus, setQ, setSort, setPage, clearAll } = useClusterFilters()
+  const [visibleColumns, setVisibleColumns] = useColumnPrefs(
+    'harbormaster-columns:clusters',
+    CLUSTER_COLUMN_OPTIONS.map((column) => column.key),
+  )
   const visible = filterClusters(items, filters)
   const { me } = useAuth()
   // Same source and order as the top-bar tag filter.
@@ -45,6 +51,7 @@ export function Clusters() {
         <h1>Clusters</h1>
         <span className={styles.meta}>Created by Terraform. The tag is stored only in Harbormaster.</span>
       </div>
+      <DataBanner tiers={['Clusters and services', 'Tasks']} />
 
       <div className={styles.filterBar} role="group" aria-label="Cluster filters">
         {tagOptions.length > MAX_TAG_SEGMENTS + 1 ? (
@@ -73,6 +80,7 @@ export function Clusters() {
           className={styles.nameSearch}
           type="search"
           aria-label="Filter clusters"
+          data-hm-filter
           placeholder="Filter by cluster, account or region"
           value={filters.q}
           onChange={(event) => setQ(event.target.value)}
@@ -80,6 +88,7 @@ export function Clusters() {
         <button type="button" className={styles.btn} onClick={clearAll}>
           Clear filters
         </button>
+        <ColumnPicker columns={CLUSTER_COLUMN_OPTIONS} visible={visibleColumns} onChange={setVisibleColumns} />
       </div>
 
       {clusters.isError ? (
@@ -93,6 +102,7 @@ export function Clusters() {
           page={page}
           onPageChange={setPage}
           empty={clusters.isSuccess ? empty : undefined}
+          visibleColumns={visibleColumns}
         />
       )}
       <span className={styles.note}>A dash in CPU and memory means Container Insights is off for that cluster.</span>
