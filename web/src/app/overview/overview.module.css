@@ -105,3 +105,9 @@ a.whatTitle:hover { color: var(--accent); }
 .phoneRow .whatTitle { font-size: 14px; }
 .groupHeadPhone { min-height: 44px; }
 .estateRowPhone { grid-template-columns: minmax(0, 1fr) auto auto; padding-right: 0; min-height: 52px; }
+
+/* Estate map on a phone: the account name and its regions stack above the cells and wrap instead of clipping. */
+@media (max-width: 700px) {
+  .mapRow { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .mapAccount, .mapSub { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+}
