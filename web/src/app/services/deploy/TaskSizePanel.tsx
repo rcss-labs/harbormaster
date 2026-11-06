@@ -1,4 +1,5 @@
 import { Banner } from '../../../components/Banner'
+import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { FARGATE_CPU_VALUES, fargateMemoryOptions, type Definition, type OomHint } from '../task-definition/mainContainer'
 import { setTaskSize } from './draft'
@@ -32,6 +33,7 @@ export function TaskSizePanel({ definition, onChange, canEdit, tagName, oomHint 
     <Panel title="Task size" sub={<span className={styles.mono}> · CPU units, memory MiB</span>}>
       <fieldset className={styles.lockable} disabled={!canEdit} title={lock}>
         <div className={form.stack}>
+          <LockNote>{lock}</LockNote>
           <div className={form.fieldRow}>
             <label className={form.field}>
               Task CPU (units)
