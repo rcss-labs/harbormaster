@@ -35,6 +35,22 @@ describe('TaskDefinitionTab', () => {
     expect(screen.getByText('No changes')).toBeInTheDocument()
   })
 
+  it('a failed read shows a panel error with Retry, and Retry loads the editor', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/services/:id/task-definition', () => {
+        calls += 1
+        return calls === 1
+          ? HttpResponse.json({ error: { code: 'aws_error', message: 'ECS unavailable' } }, { status: 502 })
+          : HttpResponse.json(TASK_DEFINITION_EDITABLE)
+      }),
+    )
+    renderApp(route)
+    expect(await screen.findByRole('alert')).toHaveTextContent('The task definition could not be read.')
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('textbox', JSON_EDITOR)).toBeInTheDocument()
+  })
+
   it('disables review on invalid JSON', async () => {
     renderApp(route)
     const editor = await screen.findByRole('textbox', { name: 'Task definition JSON' })

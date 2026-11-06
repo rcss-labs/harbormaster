@@ -1,16 +1,16 @@
-/* Logs tab (mockup .toolbar, .logs and .ln rules). */
-/* Root of the tab: a flex column so the log box takes the remaining height. */
-.root { display: flex; flex-direction: column; flex: 1 0 auto; }
-.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-.ctl { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: inherit; font: inherit; }
-.search { width: 220px; }
+/* Logs tab: one panel that fills the window below the tabs (.hm-fill-col), with the log box scrolling inside it (.hm-fill-scroll). */
+.root { flex: 1 1 0; min-height: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
+.ctl { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: inherit; font: inherit; max-width: 100%; }
+.search { width: 220px; flex: 0 1 220px; min-width: 0; }
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; color: inherit; }
 .btn:hover { background: var(--hover); }
-.status { margin-left: auto; color: var(--muted); font-size: 12px; }
+.status { margin-left: auto; color: var(--muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
 .mono { font-family: var(--mono); }
-.banners { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.banners { display: flex; flex-direction: column; gap: 8px; padding: 8px var(--pad) 0; }
+.banners:empty { display: none; }
 .bannerAction { margin-left: 10px; }
-.logs { background: var(--bg); border: 1px solid var(--border); font-family: var(--mono); font-size: 12px; line-height: 22px; border-radius: var(--radius); flex: 1 1 0; min-height: 480px; overflow: auto; padding: 4px 0; }
+.logs { background: var(--bg); font-family: var(--mono); font-size: 12px; line-height: 22px; padding: 4px 0; margin: 8px var(--pad) var(--pad); border: 1px solid var(--border); border-radius: var(--radius); }
 .older { display: block; margin: 0 12px 8px; }
 /* One line per row: fixed time and stream tracks that never wrap, and a message cut with an ellipsis. */
 .ln { display: grid; grid-template-columns: 64px 176px minmax(0, 1fr); gap: 12px; padding: 0 12px; white-space: nowrap; }
@@ -18,10 +18,16 @@
 .ts { color: var(--dim); }
 .ct { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msg { overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
-.ln[data-level="warn"] { background: rgba(251, 191, 36, 0.07); }
-.ln[data-level="warn"]:hover { background: rgba(251, 191, 36, 0.14); }
+.ln[data-level="warn"] { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.ln[data-level="warn"]:hover { background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .ln[data-level="warn"] .msg { color: var(--warning); }
-.ln[data-level="error"] { background: rgba(248, 113, 113, 0.09); }
-.ln[data-level="error"]:hover { background: rgba(248, 113, 113, 0.17); }
+.ln[data-level="error"] { background: color-mix(in srgb, var(--bad) 9%, transparent); }
+.ln[data-level="error"]:hover { background: color-mix(in srgb, var(--bad) 17%, transparent); }
 .ln[data-level="error"] .msg { color: var(--danger); }
 .empty { color: var(--dim); padding: 0 12px; }
+
+@media (max-width: 600px) {
+  /* Narrow: a shorter stream track so the message keeps room; the full stream stays in the cell's title. */
+  .ln { grid-template-columns: 64px 88px minmax(0, 1fr); gap: 8px; }
+  .search { flex: 1 1 100%; width: auto; }
+}

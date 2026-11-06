@@ -86,6 +86,15 @@ describe('TerminalTab', () => {
     expect(panel).toHaveTextContent('Keystrokes and output are not recorded.')
   })
 
+  it('the terminal sits in a panel that fills the page height, beside the session panel', async () => {
+    seed()
+    open()
+    const host = await screen.findByTestId('terminal-host')
+    expect(host.closest('.hm-fill-col')).not.toBeNull()
+    expect(host.closest('.hm-fill')).toHaveClass('hm-with-side')
+    expect(screen.getByRole('region', { name: 'Session' })).toBeInTheDocument()
+  })
+
   it('shows the lock panel without Terminal permission', async () => {
     seed({ service: { can: { ...SERVICE_PAYMENTS.can, terminal: false } } })
     open()

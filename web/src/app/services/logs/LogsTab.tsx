@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLogHistory } from '../../../api/observe'
 import type { LogLine, LogsHistoryDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
+import { Panel } from '../../../components/Panel'
 import { Seg, SegmentedFilter } from '../../../components/Seg'
+import { queryPanelError } from '../panelError'
 import { useAuth } from '../../auth/AuthProvider'
 import { level } from './level'
 import { useLogTail } from './useLogTail'
@@ -135,9 +137,19 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const statusText = !follow ? 'paused' : tail.status === 'live' ? 'live tail' : tail.status === 'ended' ? 'tail stopped' : 'connecting'
 
   if (newest.isError && !info) {
-    return <Banner kind="bad">{newest.error instanceof Error ? newest.error.message : 'The logs could not be loaded.'}</Banner>
+    return (
+      <Panel title="Logs" error={queryPanelError(newest, 'The logs could not be loaded.')}>
+        {null}
+      </Panel>
+    )
   }
-  if (!info) return null
+  if (!info) {
+    return (
+      <Panel title="Logs" loading>
+        {null}
+      </Panel>
+    )
+  }
 
   const driverBanners = unsupported.map((c) => (
     <Banner key={c.name} kind="warn">
@@ -150,7 +162,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   if (!canTail) return <div className={styles.banners}>{driverBanners}</div>
 
   return (
-    <div className={styles.root}>
+    <section className={`${styles.root} hm-fill-col`} aria-label="Logs">
       <div className={styles.toolbar}>
         <select className={styles.ctl} aria-label="Container" value={container} onChange={(event) => setContainer(event.target.value)}>
           <option value="all">All containers</option>
@@ -209,7 +221,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           </Banner>
         )}
       </div>
-      <div className={styles.logs} ref={boxRef} role="log" onScroll={onScroll} onWheel={keepalive} onPointerDown={keepalive} onKeyDown={keepalive} onTouchMove={keepalive}>
+      <div className={`${styles.logs} hm-fill-scroll`} ref={boxRef} role="log" onScroll={onScroll} onWheel={keepalive} onPointerDown={keepalive} onKeyDown={keepalive} onTouchMove={keepalive}>
         {olderBefore && (
           <button type="button" className={`${styles.btn} ${styles.older}`} onClick={loadOlder}>
             Load older
@@ -220,6 +232,6 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           <LogRow key={`${line.t}|${line.task_id}|${index}`} line={line} />
         ))}
       </div>
-    </div>
+    </section>
   )
 }

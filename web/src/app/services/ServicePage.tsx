@@ -25,8 +25,11 @@ import { TasksTab } from './TasksTab'
 import { TaskDefinitionTab } from './task-definition/TaskDefinitionTab'
 import { TerminalTab } from './terminal/TerminalTab'
 import { DeployTab } from './deploy/DeployTab'
-import { BOLD_TABS, DEFAULT_TAB, TABS, TAB_LOCKS, isTabKey, isUnlocked } from './tabs'
+import { BOLD_TABS, DEFAULT_TAB, TABS, TAB_GROUP_LABELS, TAB_LOCKS, isTabKey, isUnlocked } from './tabs'
 import styles from './service.module.css'
+
+/** Tabs whose working panel fills the window to the bottom and scrolls inside. */
+const FILL_TABS: ReadonlySet<string> = new Set(['logs', 'terminal'])
 
 function NoAccess() {
   return (
@@ -65,10 +68,10 @@ export function ServicePage() {
   const rolloutRunning = isRolloutRunning(service, revisions.data)
   const pendingRevision = revisions.data && newestRevision > revisions.data.deployed_revision && !rolloutRunning ? newestRevision : null
 
-  const items: TabItem[] = TABS.map(([key, label]) => {
+  const items: TabItem[] = TABS.map(([key, label, group]) => {
     const lock = TAB_LOCKS[key]
     const locked = lock && !isUnlocked(lock, service.can) ? { action: lock.action, tag: service.tag.name } : undefined
-    return { key, label, locked, bold: BOLD_TABS.has(key), badge: key === 'tasks' ? service.running : key === 'task-definition' && pendingRevision ? `:${pendingRevision} ready` : undefined }
+    return { key, label, locked, group: group && TAB_GROUP_LABELS[group], bold: BOLD_TABS.has(key), badge: key === 'tasks' ? service.running : key === 'task-definition' && pendingRevision ? `:${pendingRevision} ready` : undefined }
   })
   const activeLock = TAB_LOCKS[tab]
   const lockedOut = activeLock !== undefined && !isUnlocked(activeLock, service.can)
@@ -90,7 +93,7 @@ export function ServicePage() {
     <>
       <div className={styles.stickyHead}>
         <ServiceHeader service={service} onTagClick={me?.admin ? setEditing : undefined} />
-        <Tabs items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
+        <Tabs ariaLabel="Service tabs" items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
       </div>
       {!service.controller.supported && <ControllerBanner banner={service.controller.banner} />}
       {pendingRevision !== null && revisions.data && (
@@ -103,7 +106,7 @@ export function ServicePage() {
           onDeploy={() => navigate(`/services/${serviceId}/deploy?revision=${pendingRevision}`)}
         />
       )}
-      <div className={styles.tabPanel}>{body}</div>
+      <div className={FILL_TABS.has(tab) ? `${styles.tabPanel} ${styles.tabPanelFill}` : styles.tabPanel}>{body}</div>
       {editing && <ServiceTagEditor target={editing} clusterId={service.cluster.id} onClose={() => setEditing(null)} />}
     </>
   )
