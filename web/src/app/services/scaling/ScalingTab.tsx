@@ -227,7 +227,7 @@ function AutoScalingCard({ scaling, error, loading, serviceId, canOperate }: Aut
   const actions = (
     <>
       {canOperate && (
-        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`}>
+        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`} data-hm-rl="">
           Edit in Deploy →
         </Link>
       )}

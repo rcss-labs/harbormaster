@@ -8,4 +8,15 @@
 .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { appearance: none; margin: 0; }
 .stepper .apply { width: auto; padding: 0 10px; border-left: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; }
 .stepper .apply:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+/* Phone: the desired-count sheet carries a 44 px stepper and a full-width apply button. */
+@media (max-width: 700px) {
+  .sheetStepper { display: flex; align-items: stretch; height: 52px; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; background: var(--raised); }
+  .sheetStepper button { flex: none; width: 56px; min-height: 52px; border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
+  .sheetStepper button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .sheetStepper input { flex: 1 1 auto; min-width: 0; min-height: 52px; border: 0; border-left: 1px solid var(--border-strong); border-right: 1px solid var(--border-strong); background: transparent; color: inherit; text-align: center; font: 600 18px var(--mono); appearance: textfield; -moz-appearance: textfield; }
+  .sheetStepper input::-webkit-outer-spin-button, .sheetStepper input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+  .sheetWarn { margin: 0; font-size: 13px; color: var(--warning); }
+  .sheetApply { width: 100%; min-height: 44px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: 600 14px var(--sans); cursor: pointer; }
+  .sheetApply:disabled { opacity: 0.5; cursor: not-allowed; }
+}
 .scalingWarn { flex-basis: 100%; margin: 0; text-align: right; font-size: 12px; color: var(--warning); }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useRevisions } from '../../api/change'
@@ -48,12 +48,21 @@ export function ServicePage() {
   const service = serviceQuery.data
   const navigate = useNavigate()
   const revisions = useRevisions(serviceId)
+  const headRef = useRef<HTMLDivElement>(null)
   useRolloutToast(service)
   useCrumbs(
     service
       ? [['Clusters', '/clusters'], [service.cluster.name, `/clusters/${service.cluster.id}`], [service.name]]
       : [['Clusters', '/clusters']],
   )
+
+  // On a phone the tab strip scrolls: bring the open tab into view so it is never the clipped one.
+  const loaded = service !== undefined
+  useEffect(() => {
+    const nav = headRef.current?.querySelector('nav')
+    const current = nav?.querySelector<HTMLElement>('a[class*="active"]')
+    if (nav && current) nav.scrollLeft = Math.max(0, current.offsetLeft - (nav.clientWidth - current.offsetWidth) / 2)
+  }, [tab, loaded])
 
   if (!isTabKey(tab)) return <Navigate to={`/services/${serviceId}/${DEFAULT_TAB}`} replace />
   if (serviceQuery.error instanceof ApiError && serviceQuery.error.status === 404) return <NoAccess />
@@ -91,8 +100,8 @@ export function ServicePage() {
 
   return (
     <>
-      <div className={styles.stickyHead}>
-        <ServiceHeader service={service} onTagClick={me?.admin ? setEditing : undefined} />
+      <div className={styles.stickyHead} ref={headRef}>
+        <ServiceHeader service={service} tab={tab} onTagClick={me?.admin ? setEditing : undefined} />
         <Tabs ariaLabel="Service tabs" items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
       </div>
       {!service.controller.supported && <ControllerBanner banner={service.controller.banner} />}
