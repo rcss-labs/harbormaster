@@ -127,7 +127,7 @@
   padding: 6px 10px;
   border-top: 1px solid var(--row-border);
   background: var(--chrome);
-  font: 10.5px var(--mono);
+  font: 12px var(--mono);
   color: var(--dim);
 }
 .noMatches {

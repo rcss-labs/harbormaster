@@ -1,6 +1,6 @@
 /* Inline desired-count stepper in the sticky service header (prototype: DESIRED - n + Apply). */
 .stepper { display: inline-flex; align-items: center; height: 30px; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; background: var(--raised); }
-.stepperLabel { padding: 0 10px; font: 10px var(--mono); color: var(--dim); letter-spacing: 0.06em; }
+.stepperLabel { padding: 0 10px; font: 12px var(--mono); color: var(--dim); letter-spacing: 0.06em; }
 .stepper button { width: 28px; height: 100%; border: 0; border-left: 1px solid var(--border-strong); background: transparent; color: inherit; cursor: pointer; font-size: 14px; }
 .stepper button:hover:not(:disabled) { background: var(--hover-strong); }
 .stepper button:disabled { opacity: 0.4; cursor: not-allowed; }

@@ -5,4 +5,4 @@
 .service { display: grid; min-width: 0; }
 .service a { color: var(--text); font-weight: 500; }
 .service a:hover { color: var(--accent); }
-.service small { color: var(--dim); font: 10.5px var(--mono); }
+.service small { color: var(--dim); font: 12px var(--mono); }
