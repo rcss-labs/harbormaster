@@ -1,5 +1,6 @@
 import { asUser, expect, test } from './fixtures/test'
 import { SVC } from './fixtures/ids'
+import { measureBox } from './helpers'
 
 // Read-only: runs in the observe project against the unmutated seed.
 const main = (page: import('@playwright/test').Page) => page.getByRole('main')
@@ -80,13 +81,16 @@ test.describe('needs attention at 390 px', () => {
       name: 'Needs attention',
     })
     await expect(attention.getByTestId('alert-row').first()).toBeVisible()
+    // On phones the severity filter is a row of chips (buttons); each one must lie inside the window.
+    const severity = attention.getByRole('group', { name: 'Severity' })
     for (const name of [/^All/, /^Failing/, /^Warning/, /^In progress/]) {
-      const chip = attention.getByRole('radio', { name })
+      const chip = severity.getByRole('button', { name })
       await expect(chip).toBeVisible()
-      const box = await chip.boundingBox()
-      expect(box).not.toBeNull()
-      expect(box!.x).toBeGreaterThanOrEqual(0)
-      expect(box!.x + box!.width).toBeLessThanOrEqual(390)
+      // The row scrolls sideways when the chips do not all fit; every chip must be reachable and then lie inside the window.
+      await chip.scrollIntoViewIfNeeded()
+      const box = await measureBox(chip)
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(390)
     }
     expect(await main(page).evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)

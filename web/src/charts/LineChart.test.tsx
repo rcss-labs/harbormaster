@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { installPhoneMedia } from '../test/phone'
 import { renderWithProviders } from '../test/setup'
 import { LineChart } from './LineChart'
 
@@ -71,5 +72,31 @@ describe('LineChart marker label collisions', () => {
     )
     expect(queryByText('billing:3')).toBeNull()
     expect(getByTitle('billing:3')).toBeTruthy()
+  })
+})
+
+describe('LineChart marker labels on a phone', () => {
+  const marks = [
+    { at: 0.3, label: 'notifications' },
+    { at: 0.7, label: 'authentication' },
+  ]
+  const series = [{ name: 'cpu', color: 'red', values: [1, 2] }]
+  let restoreMedia: () => void
+  let originalRect: typeof HTMLElement.prototype.getBoundingClientRect
+
+  beforeEach(() => {
+    restoreMedia = installPhoneMedia(true)
+    originalRect = HTMLElement.prototype.getBoundingClientRect
+    HTMLElement.prototype.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
+  })
+  afterEach(() => {
+    HTMLElement.prototype.getBoundingClientRect = originalRect
+    restoreMedia()
+  })
+
+  it('places labels by the measured plot width, so labels that collide in 200 px use the second row', () => {
+    const { getByText } = renderWithProviders(<LineChart series={series} xLabels={['a']} marks={marks} />)
+    expect(getByText('notifications').style.top).toBe('-1px')
+    expect(getByText('authentication').style.top).toBe('17px')
   })
 })
