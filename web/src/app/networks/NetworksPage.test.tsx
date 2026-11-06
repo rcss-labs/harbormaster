@@ -274,4 +274,39 @@ describe('Networks deep links', () => {
     expect(screen.getByRole('searchbox', { name: 'Filter VPCs' })).toHaveValue('eu-central-1')
     expect(within(vpcList()).queryByRole('button', { name: /homelab-main/ })).not.toBeInTheDocument()
   })
+
+  it('shows one stale-data notice naming Networks when its poll is failing', async () => {
+    serveEstate()
+    server.use(
+      http.get('/api/poller', () =>
+        HttpResponse.json({
+          items: [
+            {
+              account_id: HOMELAB,
+              account_name: 'homelab-admin',
+              region: 'us-east-1',
+              throttled: false,
+              failing: false,
+              last_error: '',
+              last_ok_at: '2026-11-01T10:00:00Z',
+              tiers: [
+                {
+                  tier: 'network',
+                  label: 'Networks',
+                  core: false,
+                  failing: true,
+                  throttled: false,
+                  last_ok_at: null,
+                  last_error: 'DescribeVpcs: AccessDenied',
+                  interval_ms: 300000,
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    )
+    renderApp('/networks')
+    expect(await screen.findByText('Some data on this page is stale: Networks')).toBeInTheDocument()
+  })
 })

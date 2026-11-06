@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from 'react-router'
 import { type StorageItem, useStorage } from '../../api/storage'
+import { DataBanner } from '../../components/DataBanner'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip } from '../../components/KpiStrip'
@@ -170,6 +171,7 @@ export function StoragePage() {
     <>
       <PageHead />
       <div className={styles.stack}>
+        <DataBanner tiers={['Storage']} />
         <KpiStrip
           label="Storage summary"
           items={[

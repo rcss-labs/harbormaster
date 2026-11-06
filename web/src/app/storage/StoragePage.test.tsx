@@ -185,4 +185,39 @@ describe('StoragePage', () => {
     renderStoragePage()
     expect(await screen.findByText('No file systems you can see.')).toBeInTheDocument()
   })
+
+  it('shows one stale-data notice naming Storage when its poll is failing', async () => {
+    serveStorage(STORAGE)
+    server.use(
+      http.get('/api/poller', () =>
+        HttpResponse.json({
+          items: [
+            {
+              account_id: JENKINS.account_id,
+              account_name: 'homelab-admin',
+              region: 'us-east-1',
+              throttled: false,
+              failing: false,
+              last_error: '',
+              last_ok_at: '2026-11-01T10:00:00Z',
+              tiers: [
+                {
+                  tier: 'storage',
+                  label: 'Storage',
+                  core: false,
+                  failing: true,
+                  throttled: false,
+                  last_ok_at: null,
+                  last_error: 'DescribeFileSystems: AccessDenied',
+                  interval_ms: 300000,
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    )
+    renderStoragePage()
+    expect(await screen.findByText('Some data on this page is stale: Storage')).toBeInTheDocument()
+  })
 })
