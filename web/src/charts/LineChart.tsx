@@ -1,4 +1,5 @@
-import { Fragment, type CSSProperties } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { usePhone } from '../components/useNarrow'
 import styles from './charts.module.css'
 import { fmtNum } from './format'
 
@@ -93,21 +94,21 @@ export interface PlacedMark {
 }
 
 /** Spans [start, end] in px that a label covers given its anchoring (centred, or inward at the edges). */
-function labelSpan(at: number, label: string): [number, number] {
+function labelSpan(at: number, label: string, plotPx: number): [number, number] {
   const width = label.length * LABEL_CHAR_PX + LABEL_PAD_PX
-  const x = at * ASSUMED_PLOT_PX
+  const x = at * plotPx
   if (at >= 1 - EDGE_ZONE) return [x - width, x]
   if (at <= EDGE_ZONE) return [x, x + width]
   return [x - width / 2, x + width / 2]
 }
 
 /** Assigns each label a row left to right: the first free row, else none. Overlap is estimated, not measured. */
-export function placeMarkLabels(marks: { at: number; label: string }[]): PlacedMark[] {
+export function placeMarkLabels(marks: { at: number; label: string }[], plotPx: number = ASSUMED_PLOT_PX): PlacedMark[] {
   const rowEnds: number[] = Array(LABEL_ROWS).fill(-Infinity)
   const placed = new Map<{ at: number; label: string }, number | null>()
   const ordered = [...marks].sort((a, b) => a.at - b.at)
   for (const mark of ordered) {
-    const [start, end] = labelSpan(mark.at, mark.label)
+    const [start, end] = labelSpan(mark.at, mark.label, plotPx)
     const row = rowEnds.findIndex((rowEnd) => start >= rowEnd)
     if (row === -1) {
       placed.set(mark, null)
@@ -119,12 +120,36 @@ export function placeMarkLabels(marks: { at: number; label: string }[]): PlacedM
   return marks.map((mark) => ({ ...mark, row: placed.get(mark) ?? null }))
 }
 
+/**
+ * Width of the plot in px, measured and kept current on phones, where the container is much narrower than the
+ * assumed 640 px. Elsewhere it is `undefined`, so label placement on wider screens keeps its fixed estimate.
+ */
+function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>, enabled: boolean): number | undefined {
+  const [width, setWidth] = useState<number>()
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!enabled || !element) return
+    const measure = () => {
+      const measured = element.getBoundingClientRect().width
+      if (measured > 0) setWidth(measured)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [ref, enabled])
+  return enabled ? width : undefined
+}
+
 /** Hand-written SVG line chart in a fixed-height panel; labels are HTML so text never stretches (mockup chart()). */
 export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130, marks = [] }: LineChartProps) {
   const panelHeight = Math.min(220, Math.max(80, height))
   const shown = collapseSeries(series)
   const fillOpacity = shown.length > 2 ? 0.03 : 0.08
-  const placedMarks = placeMarkLabels(marks)
+  const plotRef = useRef<HTMLDivElement>(null)
+  const measuredWidth = useMeasuredWidth(plotRef, usePhone())
+  const placedMarks = placeMarkLabels(marks, measuredWidth)
   const yLabels = [0, 2, 4].map((step) => ({ top: `${100 - (step / 4) * 100}%`, text: `${fmtNum((max * step) / 4)}${unit}` }))
 
   return (
@@ -136,7 +161,7 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
           </span>
         ))}
       </div>
-      <div className={styles.pplot}>
+      <div className={styles.pplot} ref={plotRef}>
         <svg className={styles.plot} viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true">
           {[0, 1, 2, 3, 4].map((step) => {
             const y = VIEW_HEIGHT - (step / 4) * VIEW_HEIGHT

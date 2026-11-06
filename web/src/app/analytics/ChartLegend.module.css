@@ -2,3 +2,7 @@
 .legend li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .legend i { width: 10px; height: 3px; border-radius: 2px; }
 .legend b { font: 500 11px var(--mono); color: var(--text); }
+
+@media (max-width: 700px) {
+  .legend b { font-size: 12px; }
+}

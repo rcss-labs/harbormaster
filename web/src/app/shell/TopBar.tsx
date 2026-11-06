@@ -7,6 +7,7 @@ import { toggleTheme } from '../theme'
 import { useCrumbsValue } from './crumbs'
 import { FreshnessControl } from './FreshnessControl'
 import { shortcutLabel } from './platform'
+import { ScaleControl } from './ScaleControl'
 import { ScopeControl } from './ScopeControl'
 import { useShellState } from './ShellState'
 import { useFilters } from './useFilters'
@@ -62,6 +63,7 @@ export function TopBar() {
       <button type="button" className={styles.iconBtn} aria-label="Toggle theme" title="Theme" onClick={toggleTheme}>
         <Icon name="sun" />
       </button>
+      <ScaleControl />
       <button type="button" className={styles.iconBtn} aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={openHelp}>
         <Icon name="help" />
       </button>
