@@ -102,7 +102,8 @@ function collectViolations(options: { allowClip: string[] }): string[] {
     }
 
     // clip: an overflow:hidden|clip box cutting its content off.
-    if ((style.overflowX === 'hidden' || style.overflowX === 'clip') && el.scrollWidth > el.clientWidth + 1 && !clipOk(el)) {
+    // A single-line input is exempt: its own text scrolls with the caret, so a long value (a secret ARN) is not cut off for good.
+    if ((style.overflowX === 'hidden' || style.overflowX === 'clip') && !(el instanceof HTMLInputElement) && el.scrollWidth > el.clientWidth + 1 && !clipOk(el)) {
       report('clip', el, `cuts content off (scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth})`)
     }
 
@@ -312,12 +313,8 @@ export function PHONE_ROUTES(): RouteSpec[] {
 
 export const PHONE_FIXME_REASON = 'wave 0: phone layer not merged'
 
-/**
- * Route names whose phone pass is marked fixme until the page's lane lands. Lanes don't edit this list: they run their
- * routes with HM_PHONE_UNFIXME=1, and the lead empties it at the wave 1 gate.
- */
-const PHONE_READY = new Set(['more', 'login'])
-export const PHONE_FIXME: string[] = PHONE_ROUTES().map((route) => route.name).filter((name) => !PHONE_READY.has(name))
+/** Route names whose phone pass is marked fixme. Empty: every phone route is enforced. */
+export const PHONE_FIXME: string[] = []
 
 export function phoneFixme(routeName: string): boolean {
   return !process.env.HM_PHONE_UNFIXME && PHONE_FIXME.includes(routeName)

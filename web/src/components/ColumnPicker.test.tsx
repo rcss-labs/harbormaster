@@ -93,4 +93,28 @@ describe('useColumnPrefs', () => {
     localStorage.setItem('harbormaster-columns:c', JSON.stringify({ a: 1 }))
     expect(renderHook(() => useColumnPrefs('harbormaster-columns:c', ['name'])).result.current[0]).toEqual(['name'])
   })
+
+  describe('columns introduced after preferences were saved', () => {
+    const key = 'harbormaster-columns:intro'
+    const introduced = ['cpu', 'mem']
+
+    it('shows them for a user whose saved preferences predate them', () => {
+      localStorage.setItem(key, JSON.stringify(['name', 'status']))
+      const { result } = renderHook(() => useColumnPrefs(key, ['name', 'status', 'cpu', 'mem'], introduced))
+      expect(result.current[0]).toEqual(['name', 'status', 'cpu', 'mem'])
+    })
+
+    it('keeps them hidden once the user has saved a choice that hides them', () => {
+      localStorage.setItem(key, JSON.stringify(['name', 'status']))
+      const first = renderHook(() => useColumnPrefs(key, ['name', 'status', 'cpu', 'mem'], introduced))
+      act(() => first.result.current[1](['name', 'status', 'mem']))
+      const reloaded = renderHook(() => useColumnPrefs(key, ['name', 'status', 'cpu', 'mem'], introduced))
+      expect(reloaded.result.current[0]).toEqual(['name', 'status', 'mem'])
+    })
+
+    it('does not add them to a fresh user, who gets the defaults', () => {
+      const { result } = renderHook(() => useColumnPrefs(key, ['name', 'status'], introduced))
+      expect(result.current[0]).toEqual(['name', 'status'])
+    })
+  })
 })

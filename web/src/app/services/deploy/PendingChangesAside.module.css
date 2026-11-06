@@ -7,7 +7,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--r);
   /* Sticky, so a long list scrolls inside instead of pushing Review off screen. */
-  max-height: calc(100vh - 24px);
+  max-height: calc(100vh / var(--hm-zoom, 1) - 24px);
 }
 .head { padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
 .count { margin: 0; font-size: 13px; font-weight: 600; }

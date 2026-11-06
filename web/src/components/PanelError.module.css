@@ -5,3 +5,6 @@
 .detail pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--mono); color: var(--text-2); }
 .retry { min-height: 26px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font-size: 12px; font-weight: 500; cursor: pointer; }
 .retry:hover { background: var(--active); }
+@media (max-width: 700px) {
+  .retry { min-height: 44px; }
+}

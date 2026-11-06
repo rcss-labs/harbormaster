@@ -248,13 +248,15 @@ test.describe('at 200 %', () => {
     expect(Math.abs(box.x + box.width / 2 - 2560 / 2)).toBeLessThanOrEqual(2)
   })
 
-  // Found by this lane: the palette backdrop's `padding-top: 12vh` (shell.module.css) is counted in zoomed px, so at 200 %
-  // the palette sits at 24 % of the window. Enable once the rule divides by var(--hm-zoom, 1).
-  test.fixme('the palette top is about 12 % of the window height at 200 %', async ({ page }) => {
+  // The palette backdrop's `padding-top: 12vh` is counted in zoomed px, so shell.module.css divides it by var(--hm-zoom, 1).
+  test('the palette top is about 12 % of the window height at 200 %', async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 })
     await page.goto('/')
+    await expect(page.getByRole('main')).toBeVisible()
     await page.keyboard.press('Control+k')
-    const box = await measureBox(page.getByRole('dialog', { name: /command|search/i }))
+    const palette = page.getByRole('dialog', { name: /command|search/i })
+    await expect(palette).toBeVisible()
+    const box = await measureBox(palette)
     expect(box.y).toBeLessThanOrEqual(1440 * 0.16)
   })
 
@@ -272,11 +274,9 @@ test.describe('at 200 %', () => {
     await expectInsideWindow(page, [aside], 'pending changes aside')
   })
 
-  // Found by this lane: viewport units are counted in zoomed px, so a cap written as 100vh or 70dvh is twice the window
-  // at 200 %. Enable once these rules use calc(... / var(--hm-zoom, 1)):
-  //   PendingChangesAside.module.css:10  max-height: calc(100vh - 24px)
-  //   taskDefinition.module.css:1 and :38  max(380px, 70dvh) and max(420px, 70dvh)
-  test.fixme('viewport-unit caps stay within the window at 200 %', async ({ page }) => {
+  // Viewport units are counted in zoomed px, so a cap written as 100vh or 70dvh is twice the window at 200 %; the rules
+  // (PendingChangesAside, taskDefinition, Drawer, Popover, palette) divide by var(--hm-zoom, 1).
+  test('viewport-unit caps stay within the window at 200 %', async ({ page }) => {
     await page.goto(serviceUrl(...SVC.paymentsApi, 'deploy'))
     const cap = await page.getByRole('region', { name: 'Pending changes' }).evaluate((element) => parseFloat(getComputedStyle(element).maxHeight) * 2)
     expect(cap).toBeLessThanOrEqual(1080)

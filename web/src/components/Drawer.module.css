@@ -1,7 +1,7 @@
 .scrim { position: fixed; inset: 0; z-index: 40; width: 100%; padding: 0; border: 0; background: var(--scrim); cursor: default; }
-.drawer { position: fixed; z-index: 50; top: 0; right: 0; bottom: 0; width: min(440px, 100vw); display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border-strong); box-shadow: var(--pop); }
+.drawer { position: fixed; z-index: 50; top: 0; right: 0; bottom: 0; width: min(440px, calc(100vw / var(--hm-zoom, 1))); display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border-strong); box-shadow: var(--pop); }
 .drawer:focus { outline: none; }
-.wide { width: min(620px, 100vw); }
+.wide { width: min(620px, calc(100vw / var(--hm-zoom, 1))); }
 .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .titles { min-width: 0; }
 .titles h2 { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }

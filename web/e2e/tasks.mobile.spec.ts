@@ -78,7 +78,7 @@ test.describe('tasks as sam on a phone', () => {
     await expectSheetWithinViewport(page)
     await page.keyboard.press('Escape')
     await expect(page.getByRole('menu')).toHaveCount(0)
-    // The page-wide layout pass is not run here: the service header's Deploy and AWS console links belong to the service page lane.
+    await expectPhoneLayoutClean(page)
   })
 })
 

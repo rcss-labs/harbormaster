@@ -72,14 +72,6 @@ function collapseSeries(series: LineSeries[]): LineSeries[] {
 
 const EDGE_ZONE = 0.15
 
-/** Labels centre on their marker, except near an edge, where they anchor inward so the plot never clips them. */
-function markLabelStyle(at: number): CSSProperties {
-  const left = `${at * 100}%`
-  if (at >= 1 - EDGE_ZONE) return { left, transform: 'translateX(-100%)' }
-  if (at <= EDGE_ZONE) return { left, transform: 'translateX(0)' }
-  return { left }
-}
-
 /** Rough plot width and glyph width used to estimate where labels collide; jsdom and SSR have no layout to measure. */
 const ASSUMED_PLOT_PX = 640
 const LABEL_CHAR_PX = 7.4
@@ -93,12 +85,33 @@ export interface PlacedMark {
   row: number | null
 }
 
-/** Spans [start, end] in px that a label covers given its anchoring (centred, or inward at the edges). */
+/**
+ * Labels centre on their marker, except where a centred label would stick out of the plot (near an edge, or a long label
+ * a little way in), where they anchor inward so the plot never clips them. The width is estimated, as in placement.
+ */
+function labelAnchor(at: number, label: string, plotPx: number): 'start' | 'end' | 'centre' {
+  const width = label.length * LABEL_CHAR_PX + LABEL_PAD_PX
+  const x = at * plotPx
+  if (at >= 1 - EDGE_ZONE || x + width / 2 > plotPx) return 'end'
+  if (at <= EDGE_ZONE || x - width / 2 < 0) return 'start'
+  return 'centre'
+}
+
+function markLabelStyle(at: number, label: string, plotPx: number): CSSProperties {
+  const left = `${at * 100}%`
+  const anchor = labelAnchor(at, label, plotPx)
+  if (anchor === 'end') return { left, transform: 'translateX(-100%)' }
+  if (anchor === 'start') return { left, transform: 'translateX(0)' }
+  return { left }
+}
+
+/** Spans [start, end] in px that a label covers given its anchoring. */
 function labelSpan(at: number, label: string, plotPx: number): [number, number] {
   const width = label.length * LABEL_CHAR_PX + LABEL_PAD_PX
   const x = at * plotPx
-  if (at >= 1 - EDGE_ZONE) return [x - width, x]
-  if (at <= EDGE_ZONE) return [x, x + width]
+  const anchor = labelAnchor(at, label, plotPx)
+  if (anchor === 'end') return [x - width, x]
+  if (anchor === 'start') return [x, x + width]
   return [x - width / 2, x + width / 2]
 }
 
@@ -188,9 +201,9 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
         </svg>
         {placedMarks.map((mark) =>
           mark.row === null ? (
-            <span key={mark.at} className={styles.mkdot} style={{ left: `${mark.at * 100}%` }} title={mark.label} aria-label={mark.label} />
+            <span key={mark.at} className={styles.mkdot} style={{ left: `clamp(4px, ${mark.at * 100}%, calc(100% - 5px))` }} title={mark.label} aria-label={mark.label} />
           ) : (
-            <span key={mark.at} className={styles.mkl} style={{ ...markLabelStyle(mark.at), top: mark.row === 0 ? -1 : 17 }} title={mark.label}>
+            <span key={mark.at} className={styles.mkl} style={{ ...markLabelStyle(mark.at, mark.label, measuredWidth ?? ASSUMED_PLOT_PX), top: mark.row === 0 ? -1 : 17 }} title={mark.label}>
               {mark.label}
             </span>
           ),

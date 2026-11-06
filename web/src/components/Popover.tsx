@@ -66,7 +66,7 @@ function PopoverBody({ onClose, label, align, width, children, role }: Required<
       aria-label={label}
       tabIndex={-1}
       className={`${styles.pop} ${align === 'right' ? styles.right : styles.left}`}
-      style={{ width: `min(${width}px, calc(100vw - 24px))` }}
+      style={{ width: `min(${width}px, calc(100vw / var(--hm-zoom, 1) - 24px))` }}
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return
         // Keep an enclosing Drawer or Dialog open: Esc closes only the innermost layer.

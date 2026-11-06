@@ -12,18 +12,10 @@ test.beforeEach(({ page }) => {
   problems = watchPage(page)
 })
 
-/**
- * The generic phone assertions, minus two header links (Deploy, AWS console) that belong to the service page frame
- * and stay 30 px tall until its phone header lands.
- */
 async function expectOwnLayoutClean(page: Page) {
   expect(problems, 'page errors, console errors and failing responses').toEqual([])
-  const violations = (await phoneViolations(page)).filter((line) => !/^target: .*"(Deploy|AWS console)/.test(line))
-  expect(violations, 'phone layout violations').toEqual([])
+  expect(await phoneViolations(page), 'phone layout violations').toEqual([])
 }
-
-/** The service header is taller than a short phone; scroll the page content to its end so its bottom edge is what is measured. */
-const scrollMainToEnd = (page: Page) => page.evaluate(() => { const main = document.querySelector('main'); if (main) main.scrollTop = main.scrollHeight })
 
 const paymentsLogs = serviceUrl(...SVC.paymentsApi, 'logs')
 
@@ -85,7 +77,6 @@ test('the log box runs to the bottom, within 24 px of the tab bar', async ({ pag
   const box = page.getByRole('log')
   await expect(box).toBeVisible()
   const tabBar = page.getByRole('navigation', { name: 'Main' })
-  await scrollMainToEnd(page)
   const [logBox, tabBox] = await measureBoxes(box, tabBar)
   const gap = tabBox.y - (logBox.y + logBox.height)
   expect(gap, `log box ${JSON.stringify(logBox)} tab bar ${JSON.stringify(tabBox)}`).toBeGreaterThanOrEqual(0)
