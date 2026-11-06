@@ -18,6 +18,6 @@ export default defineConfig({
     environmentOptions: { jsdom: { url: 'http://localhost:3000/' } },
     setupFiles: ['src/test/setup.ts'],
     css: { modules: { classNameStrategy: 'non-scoped' } },
-    exclude: ['e2e/**', 'node_modules/**'],
+    exclude: ['e2e/**', 'e2e-floci/**', 'node_modules/**'],
   },
 })
