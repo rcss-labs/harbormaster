@@ -1,4 +1,5 @@
 import { expect, test } from '../e2e/fixtures/test'
+import { measureBox } from '../e2e/helpers'
 import { resolveTargets } from './targets'
 
 // Checks that need floci's real estate (a real ECS/Application Auto Scaling code path, not the fake).
@@ -15,7 +16,7 @@ test('terminal fills to the window bottom', async ({ page, request }) => {
     await page.goto(`/services/${serviceId}/terminal`)
     const host = page.getByTestId('terminal-host')
     await expect(host).toBeVisible()
-    const box = (await host.boundingBox())!
+    const box = await measureBox(host)
     const innerHeight = await page.evaluate(() => window.innerHeight)
     expect(innerHeight - (box.y + box.height), `terminal bottom gap at ${width}x${height}`).toBeLessThanOrEqual(BOTTOM_TOLERANCE_PX)
   }
@@ -31,7 +32,7 @@ test('logs fill to the window bottom', async ({ page, request }) => {
     await page.goto(`/services/${serviceId}/logs`)
     const log = page.getByRole('log')
     await expect(log).toBeVisible()
-    const box = (await log.boundingBox())!
+    const box = await measureBox(log)
     const innerHeight = await page.evaluate(() => window.innerHeight)
     expect(innerHeight - (box.y + box.height), `log bottom gap at ${width}x${height}`).toBeLessThanOrEqual(BOTTOM_TOLERANCE_PX)
   }

@@ -1,3 +1,8 @@
+/**
+ * Used by both floci route passes: routes.spec.ts (desktop widths) and routes-phone.spec.ts (the 390 px phone pass,
+ * which feeds this list to the generic phone assertions in e2e/fixtures/phone.ts). The entries are the same for both.
+ */
+
 /** An HTTP failure that floci cannot avoid; every other response with status >= 400 fails the route check. */
 export interface ExpectedFailure {
   method: string
