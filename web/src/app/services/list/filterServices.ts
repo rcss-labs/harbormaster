@@ -18,8 +18,22 @@ export type ServiceSortKey = 'name' | 'status' | 'tag' | 'cluster' | 'account' |
 export const SERVICE_SORT_KEYS: ServiceSortKey[] = ['name', 'status', 'tag', 'cluster', 'account', 'tasks', 'revision', 'image', 'last']
 export type SortDir = 'asc' | 'desc'
 
+/**
+ * The one definition of "needs attention", shared by the Overview KPI, the Needs attention panel and the Problems view:
+ * the service's status is failing, degraded, unhealthy or deploying, or it has an open alert (`attention`). Status is
+ * included because the degraded alert is debounced (three polls) and a visibly Degraded service must never be missing
+ * from Problems; the alert is included because some alerts (restart loop, failed deployment) sit on a steady service.
+ * Scaled to zero is intentional and does not count.
+ */
+export const needsAttention = (service: Pick<ServiceListItemDTO, 'status' | 'attention'>): boolean =>
+  service.attention !== '' ||
+  service.status === 'failing' ||
+  service.status === 'degraded' ||
+  service.status === 'unhealthy_task' ||
+  service.status === 'deploying'
+
 export function applyView(items: ServiceListItemDTO[], view: ServiceView, pinnedIds: ReadonlySet<string>): ServiceListItemDTO[] {
-  if (view === VIEW_PROBLEMS) return items.filter((s) => s.status !== 'steady')
+  if (view === VIEW_PROBLEMS) return items.filter(needsAttention)
   if (view === VIEW_PINS) return items.filter((s) => pinnedIds.has(s.id))
   if (view.startsWith('tag-')) {
     const tagId = Number(view.slice('tag-'.length))
@@ -33,7 +47,14 @@ export function applyStatus(items: ServiceListItemDTO[], status: ServiceStatusFi
 }
 
 export function statusCounts(items: ServiceListItemDTO[]): Record<ServiceStatusFilter, number> {
-  const counts: Record<ServiceStatusFilter, number> = { any: items.length, bad: 0, warn: 0, info: 0, ok: 0, mute: 0 }
+  const counts: Record<ServiceStatusFilter, number> = {
+    any: items.length,
+    bad: 0,
+    warn: 0,
+    info: 0,
+    ok: 0,
+    mute: 0,
+  }
   for (const service of items) {
     const kind: PillKind = statusKind(service.status)
     if (kind in counts) counts[kind as ServiceStatusFilter] += 1
@@ -87,7 +108,12 @@ export function sortValue(service: ServiceListItemDTO, key: ServiceSortKey): str
 }
 
 const compareValues = (a: string | number, b: string | number): number =>
-  typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
+  typeof a === 'number' && typeof b === 'number'
+    ? a - b
+    : String(a).localeCompare(String(b), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
 
 /** A sorted copy; equal values fall back to the service name ascending, whatever the direction. */
 export function sortServices(items: ServiceListItemDTO[], key: ServiceSortKey, dir: SortDir): ServiceListItemDTO[] {
@@ -98,6 +124,11 @@ export function sortServices(items: ServiceListItemDTO[], key: ServiceSortKey, d
     if (av === null && bv !== null) return 1
     if (bv === null && av !== null) return -1
     const primary = av === null || bv === null ? 0 : factor * compareValues(av, bv)
-    return primary !== 0 ? primary : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    return primary !== 0
+      ? primary
+      : a.name.localeCompare(b.name, undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        })
   })
 }

@@ -8,6 +8,7 @@ interface ServiceItem {
   id: string
   name: string
   status: string
+  attention: string
   tag: { name: string }
 }
 interface AlertItem {
@@ -31,7 +32,11 @@ test.describe('services page as pavel', () => {
     const items = await readServices(page)
     expect(items.length).toBeGreaterThan(0)
 
-    await expect(views(page).getByRole('button', { name: new RegExp(`^All ${items.length}$`) })).toBeVisible()
+    await expect(
+      views(page).getByRole('button', {
+        name: new RegExp(`^All ${items.length}$`),
+      }),
+    ).toBeVisible()
     await expect(serviceRows(page)).toHaveCount(items.length + 1) // header row
     await expect(page.getByText(`${items.length} of ${items.length} services`)).toBeVisible()
     for (const item of items) await expect(page.getByRole('link', { name: item.name, exact: true })).toBeVisible()
@@ -44,23 +49,31 @@ test.describe('services page as pavel', () => {
     for (const item of failing) await expect(serviceRows(page).filter({ hasText: item.name })).toHaveCount(1)
   })
 
-  test('the Problems view lists the services that have alerts, and its count matches', async ({ page }) => {
+  test('the Problems view lists every service that needs attention, and its count matches', async ({ page }) => {
     await page.goto('/services')
-    // The alerts and services tiers poll separately, so wait until both APIs agree before comparing with the page.
-    await expect
-      .poll(async () => {
-        const items = await readServices(page)
-        const alerts = (await (await page.request.get('/api/alerts')).json()) as { items: AlertItem[] }
-        const alerted = new Set(alerts.items.filter((alert) => alert.service_id !== '').map((alert) => alert.service_id))
-        const problems = items.filter((item) => item.status !== 'steady').map((item) => item.id)
-        return problems.length > 0 && problems.length === alerted.size && problems.every((id) => alerted.has(id))
-      })
-      .toBe(true)
+    // Needs attention = status failing/degraded/unhealthy/deploying, or an open alert. Status is included because the
+    // degraded alert waits for three polls, so an alerts-only view would hide a visibly Degraded service.
+    const needsAttention = (item: ServiceItem) =>
+      item.attention !== '' || ['failing', 'degraded', 'unhealthy_task', 'deploying'].includes(item.status)
+    const problems = (await readServices(page)).filter(needsAttention)
+    expect(problems.length).toBeGreaterThan(0)
 
-    const problems = (await readServices(page)).filter((item) => item.status !== 'steady')
-    await views(page).getByRole('button', { name: /^Problems/ }).click()
+    // Every service with an open alert is in Problems, whatever its status.
+    const alerts = (await (await page.request.get('/api/alerts')).json()) as {
+      items: AlertItem[]
+    }
+    const problemIds = new Set(problems.map((item) => item.id))
+    for (const alert of alerts.items) if (alert.service_id !== '') expect(problemIds.has(alert.service_id)).toBe(true)
+
+    await views(page)
+      .getByRole('button', { name: /^Problems/ })
+      .click()
     await expect(page).toHaveURL(/view=problems/)
-    await expect(views(page).getByRole('button', { name: new RegExp(`^Problems ${problems.length}$`) })).toBeVisible()
+    await expect(
+      views(page).getByRole('button', {
+        name: new RegExp(`^Problems ${problems.length}$`),
+      }),
+    ).toBeVisible()
     await expect(serviceRows(page)).toHaveCount(problems.length + 1)
     for (const item of problems) await expect(serviceRows(page).filter({ hasText: item.name })).toHaveCount(1)
   })
@@ -76,12 +89,20 @@ test.describe('services page as omer', () => {
     expect(items.every((item) => item.tag.name !== 'Prod')).toBe(true)
 
     await expect(serviceRows(page)).toHaveCount(items.length + 1)
-    await expect(views(page).getByRole('button', { name: new RegExp(`^All ${items.length}$`) })).toBeVisible()
+    await expect(
+      views(page).getByRole('button', {
+        name: new RegExp(`^All ${items.length}$`),
+      }),
+    ).toBeVisible()
     for (const item of items) await expect(page.getByRole('link', { name: item.name, exact: true })).toBeVisible()
 
     // Pavel sees more services than omer, so omer's scope really narrows the list.
     const pavel = await browser.newContext({ storageState: authFile('pavel') })
-    const pavelItems = ((await (await pavel.request.get('/api/services')).json()) as { items: ServiceItem[] }).items
+    const pavelItems = (
+      (await (await pavel.request.get('/api/services')).json()) as {
+        items: ServiceItem[]
+      }
+    ).items
     await pavel.close()
     expect(pavelItems.length).toBeGreaterThan(items.length)
     for (const hidden of pavelItems.filter((item) => !items.some((own) => own.id === item.id))) {

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useOverview } from '../../api/hooks'
+import { useOverview, useServicesList } from '../../api/hooks'
 import type { OverviewDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
 import { EmptyState } from '../../components/EmptyState'
@@ -15,6 +15,7 @@ import { BusiestClusters, useUsageKpis } from './ClusterUsagePanels'
 import { EstateMap } from './EstateMap'
 import { EstateView } from './EstateView'
 import { NeedsAttention } from './NeedsAttention'
+import { needsAttention } from '../services/list/filterServices'
 import { useOverviewLayout, type OverviewLayout } from './useOverviewState'
 import { useCrumbs } from '../shell/crumbs'
 import { useFilters } from '../shell/useFilters'
@@ -38,18 +39,28 @@ function withNote(value: ReactNode, note: ReactNode, color?: string) {
 }
 
 /** Six cells; a sparkline appears only where the API provides history for that figure. */
-function buildKpis(data: OverviewDTO, usage: ReturnType<typeof useUsageKpis>): KpiItem[] {
-  const statusCount = (status: keyof typeof data.services.by_status) => data.services.by_status[status] ?? 0
+function buildKpis(data: OverviewDTO, usage: ReturnType<typeof useUsageKpis>, needAttention: number | undefined): KpiItem[] {
   const healthyClusters = data.clusters.filter((cluster) => cluster.status === 'healthy').length
-  const needAttention = statusCount('failing') + statusCount('degraded') + statusCount('unhealthy_task')
   const errorStops = data.stops_per_hour.reduce((total, hour) => total + hour.error, 0)
   const { tasks } = data
   return [
-    { label: 'Clusters', href: '/clusters', value: withNote(data.clusters.length, `${healthyClusters} healthy`) },
+    {
+      label: 'Clusters',
+      href: '/clusters',
+      value: withNote(data.clusters.length, `${healthyClusters} healthy`),
+    },
     {
       label: 'Services',
       href: '/services?view=problems',
-      value: withNote(data.services.total, needAttention > 0 ? `${needAttention} need attention` : 'all steady', needAttention > 0 ? 'var(--bad)' : undefined),
+      // The same list and definition as the Needs attention panel and the Problems view this tile links to.
+      value:
+        needAttention === undefined
+          ? data.services.total
+          : withNote(
+              data.services.total,
+              needAttention > 0 ? `${needAttention} need attention` : 'all steady',
+              needAttention > 0 ? 'var(--bad)' : undefined,
+            ),
     },
     {
       label: 'Tasks',
@@ -58,7 +69,11 @@ function buildKpis(data: OverviewDTO, usage: ReturnType<typeof useUsageKpis>): K
       spark: tasks.history_72h.map((point) => point.running),
     },
     { label: 'Avg CPU', value: percentText(usage.cpu), spark: usage.cpuSpark },
-    { label: 'Avg memory', value: percentText(usage.mem), spark: usage.memSpark },
+    {
+      label: 'Avg memory',
+      value: percentText(usage.mem),
+      spark: usage.memSpark,
+    },
     {
       label: 'Error stops, 24 h',
       href: '/analytics/reliability',
@@ -90,7 +105,15 @@ function StopsPerHour({ data }: { data: OverviewDTO }) {
         />
       }
     >
-      <BarChart cols={columns} height={90} xLabels={[[0, '24 h ago'], [12, '12 h'], [23, 'now']]} />
+      <BarChart
+        cols={columns}
+        height={90}
+        xLabels={[
+          [0, '24 h ago'],
+          [12, '12 h'],
+          [23, 'now'],
+        ]}
+      />
     </Panel>
   )
 }
@@ -98,7 +121,13 @@ function StopsPerHour({ data }: { data: OverviewDTO }) {
 function StopReasons({ data }: { data: OverviewDTO }) {
   return (
     <Panel title="Why tasks stopped, 3 days">
-      <HBars items={data.stop_reasons.map((reason) => ({ name: reason.reason, v: reason.count, color: REASON_COLOR[reason.reason] }))} />
+      <HBars
+        items={data.stop_reasons.map((reason) => ({
+          name: reason.reason,
+          v: reason.count,
+          color: REASON_COLOR[reason.reason],
+        }))}
+      />
     </Panel>
   )
 }
@@ -108,6 +137,8 @@ export function Overview() {
   const { filters } = useFilters()
   const overview = useOverview(filters)
   const usage = useUsageKpis()
+  const services = useServicesList(filters).data
+  const needAttention = services?.items.filter(needsAttention).length
   const [layout, setLayout] = useOverviewLayout()
   const data = overview.data
 
@@ -133,7 +164,7 @@ export function Overview() {
       onLayout={setLayout}
     >
       <DataBanner tiers={['Clusters and services', 'Tasks', 'Alerts']} />
-      <KpiStrip label="Estate key figures" items={buildKpis(data, usage)} />
+      <KpiStrip label="Estate key figures" items={buildKpis(data, usage, needAttention)} />
       {layout === 'triage' ? (
         <div className="hm-wide-split">
           <NeedsAttention />
