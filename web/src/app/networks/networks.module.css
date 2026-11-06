@@ -65,3 +65,15 @@
 .gatewayRow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; }
 .gatewayRow dt { color: var(--muted); }
 .gatewayRow dd { margin: 0; font: 12px var(--mono); overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .page .layout { grid-template-columns: minmax(0, 1fr); }
+  .twoCol { grid-template-columns: minmax(0, 1fr); }
+  .listSearch input { height: 44px; font-size: 16px; }
+  .listScroll { max-height: none; }
+  .vpcRow { height: auto; min-height: 44px; padding: 6px 12px 6px 0; }
+  .vpcName { white-space: normal; overflow-wrap: anywhere; }
+  .vpcCounts { white-space: normal; }
+  .meta { white-space: normal; overflow-wrap: anywhere; }
+  .outline { max-height: none; }
+}
