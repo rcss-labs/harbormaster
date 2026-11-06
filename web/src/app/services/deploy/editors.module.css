@@ -131,3 +131,11 @@
   color: var(--muted);
   font-size: 12.5px;
 }
+
+/* Phone: fields run one per row, controls reach 44px (mobile.css raises inputs and buttons; the 30px/28px heights here are the floor). */
+@media (max-width: 700px) {
+  .fieldRow { grid-template-columns: minmax(0, 1fr); }
+  .field { font-size: 13px; }
+  .editor { padding: 0; border: 0; background: none; }
+  .actions .btn, .rowActions .btn { padding: 0 14px; }
+}
