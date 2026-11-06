@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../../../api/client'
-import type { PermissionsDTO } from '../../../api/types'
+import type { PermissionsDTO, TagColor } from '../../../api/types'
 import { Popover } from '../../../components/Popover'
+import { TagChip } from '../../../components/TagChip'
+import { usePhone } from '../../../components/useNarrow'
 import { Toggle } from '../../../components/Toggle'
 import { useToast } from '../../../components/Toast'
 import { ACTIONS, PRESETS, bitOf, normalize, presetOf, toggle } from '../perms'
@@ -14,10 +16,13 @@ interface PermCellProps {
   tagId: number
   tagName: string
   actions: number
+  /** Draws the tag as a coloured chip on the phone row. */
+  tagColor?: TagColor
 }
 
 /** One button per user and tag; its popover holds a preset select and six action toggles. Edits apply optimistically and roll back on error. */
-export function PermCell({ userId, username, tagId, tagName, actions }: PermCellProps) {
+export function PermCell({ userId, username, tagId, tagName, tagColor, actions }: PermCellProps) {
+  const phone = usePhone()
   const queryClient = useQueryClient()
   const toast = useToast()
   const [open, setOpen] = useState(false)
@@ -55,12 +60,13 @@ export function PermCell({ userId, username, tagId, tagName, actions }: PermCell
     <div className={styles.pcell}>
       <button
         type="button"
-        className={styles.pbtn}
+        className={`${styles.pbtn} ${phone ? styles.pbtnRow : ''}`.trim()}
         aria-label={`${username} on ${tagName}: ${preset}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
+        {phone && tagColor && <TagChip tag={{ id: tagId, name: tagName, color: tagColor, inherited: false }} />}
         <span>{preset}</span>
         {letters && <span className={styles.mono}>{letters}</span>}
       </button>
