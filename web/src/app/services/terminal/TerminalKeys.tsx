@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom'
+
 const KEYS: { label: string; aria: string; bytes: string }[] = [
   { label: 'esc', aria: 'Send Escape', bytes: '\x1b' },
   { label: 'tab', aria: 'Send Tab', bytes: '\t' },
@@ -13,13 +15,15 @@ const KEYS: { label: string; aria: string; bytes: string }[] = [
  * Pressing a key never takes focus from the terminal, so the keyboard stays up.
  */
 export function TerminalKeys({ send }: { send: (bytes: string) => void }) {
-  return (
+  // Portalled to the body: a fixed bar does not belong inside the scrolling page content.
+  return createPortal(
     <div className="hm-keys" role="toolbar" aria-label="Terminal keys">
       {KEYS.map((key) => (
         <button key={key.aria} type="button" aria-label={key.aria} onMouseDown={(event) => event.preventDefault()} onClick={() => send(key.bytes)}>
           {key.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -231,6 +231,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           {searchInputEl}
           {levelSeg}
           {statusLine}
+          <span className={styles.hint}>{visible.length} lines shown. Tap a line for details.</span>
         </div>
       ) : (
         <div className={styles.toolbar}>
@@ -281,7 +282,6 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           ),
         )}
       </div>
-      {phone && <div className={styles.foot}>{visible.length} lines shown. Tap a line for details.</div>}
       <BottomSheet
         open={phone && picked !== null}
         onClose={() => setPicked(null)}

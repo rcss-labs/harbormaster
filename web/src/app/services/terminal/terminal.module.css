@@ -42,7 +42,10 @@
   .targetText { min-width: 0; flex: 1 1 auto; font: 12px/1.3 var(--mono); overflow-wrap: anywhere; }
   .infoBtn { flex: none; width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius); background: none; color: var(--text-2); cursor: pointer; }
   .pagePhone .termWrap { flex: 1 1 0; min-height: 120px; padding: 8px; }
-  .pagePhone .term { padding: 8px 10px; }
+  /* No padding, border or line-height on the host itself: xterm's fit divides the host's height by its cell height, and any
+     of those makes it count rows that do not fit. The inner padding lives on .xterm, which fit subtracts. */
+  .pagePhone .term { padding: 0; border: 0; line-height: 1; outline: 1px solid var(--border); outline-offset: -1px; }
+  .pagePhone .term :global(.xterm) { box-sizing: border-box; padding: 8px 10px; }
   /* xterm's off-screen input is a 44 px target too (it takes the tap that opens the keyboard). */
   .pagePhone .term :global(.xterm-helper-textarea) { min-width: 44px; font-size: 16px; }
   .sheetFields { display: flex; flex-direction: column; gap: 14px; }

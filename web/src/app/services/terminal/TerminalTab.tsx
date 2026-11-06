@@ -62,7 +62,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   const [sessionOpen, setSessionOpen] = useState(false)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitRef = useRef<FitAddon | null>(null)
+  const fitRef = useRef<{ fit(): void } | null>(null)
 
   const [pickedTask, setPickedTask] = useState<string>()
   const [pickedContainer, setPickedContainer] = useState<string>()
@@ -115,14 +115,32 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
     term.loadAddon(fit)
     term.open(host)
     termRef.current = term
-    fitRef.current = fit
-    fit.fit()
+    // Fit, then (on phones) drop rows until the screen ends inside the host: the fit addon sizes rows by a cell height that
+    // can differ from the rendered one while the mono font is still loading, which would paint the last rows below the host.
+    const refit = () => {
+      fit.fit()
+      if (!phone) return
+      const screen = host.querySelector<HTMLElement>('.xterm-screen')
+      const xtermEl = host.querySelector<HTMLElement>('.xterm')
+      if (!screen || !xtermEl || term.rows < 2) return
+      const room = host.getBoundingClientRect().bottom - screen.getBoundingClientRect().top - parseFloat(getComputedStyle(xtermEl).paddingBottom || '0')
+      const screenHeight = screen.getBoundingClientRect().height
+      if (room > 0 && screenHeight > room + 0.5) term.resize(term.cols, Math.max(1, Math.floor(room / (screenHeight / term.rows))))
+    }
+    fitRef.current = { fit: refit }
+    refit()
     term.write(`${SYS}Pick a task and a container, then Connect.${RESET}\r\n`)
     const dataSub = term.onData((data) => send(data))
     const resizeSub = term.onResize(({ cols, rows }) => resize(cols, rows))
-    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => fit.fit())
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(refit)
     observer?.observe(host)
+    // The page settles after the first paint; fit once more so the rows match the final host height.
+    const settled = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(refit) : 0
+    // The host does not resize when the mono font arrives, so refit on font loads too.
+    document.fonts?.addEventListener?.('loadingdone', refit)
     return () => {
+      document.fonts?.removeEventListener?.('loadingdone', refit)
+      if (settled) cancelAnimationFrame(settled)
       observer?.disconnect()
       dataSub.dispose()
       resizeSub.dispose()
