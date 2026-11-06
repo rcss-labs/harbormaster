@@ -146,6 +146,18 @@
   .crumbs { display: none; }
 }
 
+/* Narrow phones: the bar wraps onto rows (scope, then search across the width, then freshness and the icon buttons) so
+   every control stays on screen, and each target is at least 36px. The non-core note is in the popover instead. */
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; row-gap: 6px; }
+  .searchBtn { flex: 1 1 100%; min-width: 0; }
+  .kbd { display: none; }
+  .scopeBtn, .searchBtn, .freshBtn, .iconBtn { min-height: 36px; }
+  .iconBtn { min-width: 36px; }
+  .freshNote { display: none; }
+  .popAnchor:has(.freshBtn) { position: static; margin-right: auto; } /* the popover anchors to the bar, so it stays inside the screen */
+}
+
 .dialogField { display: grid; gap: 5px; }
 .dialogField > span { font-size: 12px; color: var(--muted); font-weight: 500; }
 .dialogField input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font-family: inherit; }
