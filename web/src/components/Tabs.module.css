@@ -3,4 +3,4 @@
 .tabs a:hover { color: var(--text); }
 .tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
 .tabs a.locked { opacity: 0.55; }
-.badge { font-size: 10.5px; margin-left: 4px; color: var(--muted); }
+.badge { font-size: 12px; margin-left: 4px; color: var(--muted); }
