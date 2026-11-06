@@ -47,6 +47,28 @@ test.describe('task drawer and layout as pavel', () => {
     await expect(drawer).toHaveCount(0)
   })
 
+  // Needs the seeded tasks: the fake writes one line per task every 9 s, so a replacement task started by a flow spec has too few.
+  test('the drawer of a running payments-api task shows 20 log lines of that task', async ({ page }) => {
+    const recentLogLines = 20
+    await page.goto('/tasks?group=0&filter=running')
+    const row = page.getByRole('row').filter({ hasText: 'payments-api' }).filter({ hasText: 'Running' }).first()
+    const opener = row.getByRole('button', { name: /^Open details for task / })
+    const shortId = ((await opener.getAttribute('aria-label')) ?? '').replace('Open details for task ', '')
+    await opener.click()
+    const drawer = page.getByRole('dialog')
+    await expect(drawer).toContainText('payments-api')
+
+    const logSection = drawer.locator('section').filter({ has: page.getByRole('heading', { name: 'Recent log lines' }) })
+    await expect(logSection.locator('div > div')).toHaveCount(recentLogLines)
+    await expect(drawer.getByText('No log lines.')).toHaveCount(0)
+
+    // The same lines come from the per-task logs endpoint, so the drawer is not showing a service-wide read.
+    const href = await drawer.getByRole('link', { name: 'Open logs' }).getAttribute('href')
+    const response = await page.request.get(`/api${href}?task=${shortId}&limit=${recentLogLines}`)
+    expect(response.ok()).toBe(true)
+    expect(((await response.json()) as { lines: unknown[] }).lines).toHaveLength(recentLogLines)
+  })
+
   test('at 1440 the KPI strip and the pinned row actions stay visible, with no clipped KPI text', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/tasks?filter=running&group=0')

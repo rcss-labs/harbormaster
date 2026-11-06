@@ -45,8 +45,11 @@ describe('Analytics routing', () => {
   })
 
   it('tab links keep ?account&tag&range and show the data window', async () => {
+    const urls = recordRequests()
     renderApp('/analytics/delivery?account=482109375512&tag=3&range=7d')
     const link = await screen.findByRole('link', { name: /^Reliability/ })
+    // Let this page's request land here, or it reaches the next test's recorder as a stray range=7d.
+    await waitFor(() => expect(urls.length).toBeGreaterThan(0))
     const href = new URL(link.getAttribute('href') ?? '', 'http://x')
     expect(href.pathname).toBe('/analytics/reliability')
     expect(href.searchParams.get('account')).toBe('482109375512')
