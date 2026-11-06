@@ -37,6 +37,8 @@ import { DEFAULT_SORT, useServicesState } from './useServicesState'
 /** The server caps the list at this many services. */
 const LIST_CAP = 2000
 
+/** Columns added after users first saved a choice (CPU and Memory): shown to them until they hide them. */
+const INTRODUCED_COLUMNS = ['cpu_pct', 'mem_pct']
 const COLUMN_CHOICES = COLUMN_KEYS.map((key) => ({ key, label: COLUMN_LABELS[key], locked: key === 'name' }))
 
 /** Loads the full service when a row asks for a restart, then shows the usual confirm dialog. */
@@ -69,7 +71,7 @@ export function ServicesPage() {
   const { me } = useAuth()
   const { pins, isPinned, toggle } = usePins()
   const state = useServicesState()
-  const [columns, setColumns] = useColumnPrefs('harbormaster-columns:services', DEFAULT_COLUMNS)
+  const [columns, setColumns] = useColumnPrefs('harbormaster-columns:services', DEFAULT_COLUMNS, INTRODUCED_COLUMNS)
   const [detailId, setDetailId] = useState<string>()
   const [restarting, setRestarting] = useState<ServiceListItemDTO>()
 
