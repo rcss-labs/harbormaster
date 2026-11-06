@@ -73,6 +73,15 @@ describe('Cluster', () => {
     expect(await kpi('Memory now')).toBeInTheDocument()
   })
 
+  it('KPI Services and Tasks link to the lists scoped to this cluster; the numbers stay', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const services = await kpi('Services')
+    expect(within(services).getByRole('link')).toHaveAttribute('href', `/services?${new URLSearchParams({ q: CLUSTER_CORE.name })}`)
+    const tasks = await kpi('Tasks')
+    expect(within(tasks).getByRole('link')).toHaveAttribute('href', `/tasks?${new URLSearchParams({ filter: 'all', q: CLUSTER_CORE.name })}`)
+    expect(tasks).toHaveTextContent(`${CLUSTER_CORE.running}/${CLUSTER_CORE.desired}`)
+  })
+
   it('draws a bar per service in Tasks by service, with running and desired counts', async () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     const panel = (await screen.findByRole('heading', { name: 'Tasks by service' })).closest('section') as HTMLElement

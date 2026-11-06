@@ -146,11 +146,16 @@ export function Cluster() {
       <KpiStrip
         label="Cluster summary"
         items={[
-          { label: 'Services', value: withSub(services.length, `${steadyCount} steady`) },
+          {
+            label: 'Services',
+            value: withSub(services.length, `${steadyCount} steady`),
+            href: `/services?${new URLSearchParams({ q: cluster.name })}`,
+          },
           {
             label: 'Tasks',
             value: withSub(`${cluster.running}/${cluster.desired}`, missing > 0 ? `${missing} missing` : 'all running'),
             valueColor: missing > 0 ? 'var(--warning)' : undefined,
+            href: `/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`,
             spark: cluster.tasks_history_72h.map((point) => point.running),
             sparkColor: TASK_LINE_COLOR,
           },
