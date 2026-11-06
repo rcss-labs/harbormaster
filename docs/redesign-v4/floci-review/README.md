@@ -21,7 +21,7 @@ make floci-up floci-seed floci-check floci-down
 - `make floci-serve` runs the server in the foreground on port 8482 (`HM_FLOCI_PORT`) if you want to browse it; run
   `tools/floci/connect.sh` from another shell. `HM_FLOCI_REUSE=1` lets Playwright use that running server.
 - `HM_E2E_SCREENSHOT_DIR=<dir>` keeps `<route>-<width>-<theme>.png` for every route check.
-- `HM_FLOCI_UNFIXME=1` enforces the wave-0 waivers too (what the lead sets to verify a lane locally).
+- `HM_FLOCI_UNFIXME=1` enforces the `known-wave0.ts` waivers and the `focused.spec.ts` fixmes (what the lead sets to verify a lane locally).
 
 ## Safety
 
@@ -35,18 +35,20 @@ make floci-up floci-seed floci-check floci-down
 
 | Call | Why floci cannot serve it |
 | --- | --- |
-| `GET /api/services/*/deploy-settings` 502 (until wave 2) | no `DescribeScheduledActions`; lane 1B makes it a partial response |
 | `GET /api/services/*/logs/tail` | no `StartLiveTail`; the Logs tab shows "Live tail disconnected." with Resume |
 | `GET /api/tasks/*/exec` | no SSM sessions; Terminal shows layout only |
 
-Also expected, and not HTTP failures: images are not in ECR (free-text tag), there are no CloudTrail-sourced history
-rows, and `edge-proxy` has Container Insights off on purpose.
+The `deploy-settings` read is no longer allowlisted: it returns a partial response on floci, not an HTTP failure.
 
-## Wave 0 waivers
+Also expected, and not HTTP failures:
 
-`web/e2e-floci/known-wave0.ts` lists the layout assertions the old UI fails, each with its owning lane; the route is
-marked `test.fixme` for exactly that check. `web/e2e-floci/focused.spec.ts` marks its v4-only checks `test.fixme` with
-the owning lane; lane 2A removes them.
+- Images are not in ECR. Task definitions use plain image strings, so the ECR tag listing has nothing to show.
+- There are no CloudTrail-sourced history rows; the harness seeds none.
+- `edge-proxy` has Container Insights off on purpose (`tools/floci/seed.sh`), and no metrics are written for its services.
+
+## Layout waivers
+
+`web/e2e-floci/known-wave0.ts` holds the layout-check waivers. `WAVE0_FIXME` is empty, so every route check is enforced.
 
 ## Troubleshooting
 

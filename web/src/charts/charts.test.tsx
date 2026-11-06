@@ -2,7 +2,6 @@ import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { renderWithProviders } from '../test/setup'
 import { BarChart } from './BarChart'
-import { Donut } from './Donut'
 import { HBars } from './HBars'
 import { LineChart } from './LineChart'
 import { Timeline } from './Timeline'
@@ -53,55 +52,6 @@ describe('chart primitives', () => {
       <BarChart cols={[{ title: 'Mon', parts: [{ v: 3, color: 'red' }] }]} xLabels={[[0, 'Mon']]} height={900} />,
     )
     expect((container.firstElementChild as HTMLElement).style.height).toBe('340px')
-  })
-
-  it('Donut legend shows counts', () => {
-    renderWithProviders(
-      <Donut
-        segments={[
-          { name: 'Steady', v: 5, color: 'green' },
-          { name: 'Failing', v: 3, color: 'red' },
-          { name: 'Degraded', v: 0, color: 'orange' },
-        ]}
-        label="8"
-        sub="services"
-      />,
-    )
-    expect(screen.getByText('Failing').parentElement).toHaveTextContent('Failing3')
-    expect(screen.getByText('Degraded').parentElement).toHaveTextContent('Degraded0')
-  })
-
-  it('Donut default size is unchanged', () => {
-    const { container } = renderWithProviders(<Donut segments={[{ name: 'Steady', v: 5, color: 'green' }]} label="5" sub="services" />)
-    const svg = container.querySelector('svg')!
-    expect(svg).toHaveAttribute('width', '88')
-    expect(svg.querySelector('circle')).toHaveAttribute('stroke-width', '14')
-  })
-
-  it('Donut size, ring and centerLabel are configurable', () => {
-    const { container } = renderWithProviders(
-      <Donut segments={[{ name: 'Steady', v: 5, color: 'green' }]} label="5" sub="vCPU" size={132} ring={16} centerLabel="12.5" />,
-    )
-    const svg = container.querySelector('svg')!
-    expect(svg).toHaveAttribute('width', '132')
-    expect(svg.querySelector('circle')).toHaveAttribute('stroke-width', '16')
-    expect(svg.querySelectorAll('text')[0]).toHaveTextContent('12.5')
-  })
-
-  it('Donut legend pct mode shows value and percent', () => {
-    renderWithProviders(
-      <Donut
-        segments={[
-          { name: 'Steady', v: 6, color: 'green' },
-          { name: 'Failing', v: 2, color: 'red' },
-        ]}
-        label="8"
-        sub="services"
-        legend="pct"
-      />,
-    )
-    expect(screen.getByText('Failing').parentElement).toHaveTextContent('Failing225%')
-    expect(screen.getByText('Steady').parentElement).toHaveTextContent('Steady675%')
   })
 
   it('HBars shows "Nothing to show." when empty', () => {
