@@ -200,6 +200,26 @@ describe('ScalingTab', () => {
     expect(button).toHaveAttribute('title', `You need Operate on ${SERVICE_PAYMENTS.tag.name}`)
   })
 
+  it('a failed scaling request errors only the scaling panels, keeps the stepper, and Retry refetches', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/services/:id/desired-count', () => HttpResponse.json(desiredInfo())),
+      http.get('/api/services/:id/scaling', () => {
+        calls += 1
+        return calls === 1
+          ? HttpResponse.json({ error: { code: 'aws_error', message: 'Scaling is unavailable' } }, { status: 502 })
+          : HttpResponse.json(SCALING_PAYMENTS)
+      }),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    const autoScaling = await screen.findByRole('region', { name: 'Auto scaling' })
+    expect(await within(autoScaling).findByRole('alert')).toHaveTextContent('Auto scaling could not be read.')
+    expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toBeInTheDocument()
+    await userEvent.click(within(autoScaling).getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Minimum tasks')).toBeInTheDocument()
+  })
+
   it('no target shows the empty state and the no-auto-scaling hint', async () => {
     mockDesiredCount(desiredInfo({ auto_scaling: null }), SCALING_NONE)
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)

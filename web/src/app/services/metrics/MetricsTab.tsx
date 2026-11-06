@@ -5,7 +5,9 @@ import type { Range, Series } from '../../../api/types'
 import { Legend } from '../../../charts/Legend'
 import { LineChart } from '../../../charts/LineChart'
 import { Banner } from '../../../components/Banner'
+import { Panel } from '../../../components/Panel'
 import { Seg } from '../../../components/Seg'
+import { queryPanelError } from '../panelError'
 import { fmtNum, niceMax } from '../../../charts/format'
 import { percentText } from '../../clusters/ServiceCardMetrics'
 import { MetricPanel } from '../../observe/MetricPanel'
@@ -48,8 +50,11 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
   if (!service) return null
 
   if (metricsQuery.isError && !metrics) {
-    const message = metricsQuery.error instanceof Error ? metricsQuery.error.message : 'The metrics could not be loaded.'
-    return <Banner kind="bad">{message}</Banner>
+    return (
+      <Panel title="Metrics" error={queryPanelError(metricsQuery, 'Metrics could not be read.')}>
+        {null}
+      </Panel>
+    )
   }
 
   if (metrics?.insights === 'disabled') {
@@ -92,6 +97,11 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
           </span>
         )}
       </div>
+      {!metrics && (
+        <Panel title="Metrics" loading>
+          {null}
+        </Panel>
+      )}
       {metrics && (
         <div className={styles.metricsGrid}>
           <MetricPanel

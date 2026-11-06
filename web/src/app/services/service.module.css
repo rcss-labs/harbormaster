@@ -4,7 +4,7 @@
 .stickyHead nav { margin: 0 -6px; border-bottom: 0; }
 .pageHead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
 .titleRow h1 { font: 600 18px var(--mono); letter-spacing: -0.02em; margin: 0; }
-.meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+.meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--dim); }
 .meta > span { color: var(--muted); }
 .meta > span::before { content: "·"; margin-right: 8px; color: var(--dim); }
 .titles { display: grid; gap: 6px; min-width: 0; }
@@ -30,7 +30,7 @@
 .danger { color: var(--danger); }
 .warning { color: var(--warning); }
 .pushRight { margin-left: auto; }
-.afterDonut { margin-top: 14px; }
+.afterBar { margin-top: 14px; }
 .empty { color: var(--muted); text-align: center; padding: 16px; }
 
 /* Wraps the active tab so long panels (logs, terminal) can fill the remaining viewport height. */
@@ -60,7 +60,22 @@
 /* Pending revision banner (plan 02, task 16) */
 .pendingBanner { display: flex; align-items: center; gap: 12px; width: 100%; }
 .pendingBanner > span { flex: 1; }
-.pendingDeploy { height: 26px; padding: 0 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: #fff; font: inherit; font-size: 12.5px; cursor: pointer; }
+.pendingDeploy { height: 26px; padding: 0 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 13px; cursor: pointer; }
 .pendingDeploy:disabled { opacity: 0.5; cursor: not-allowed; }
 .metricsGrid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .metricsGrid { grid-template-columns: minmax(0, 1fr); } }
+/* Logs and terminal run to the bottom of the window: cancel most of the content area's bottom padding so the panel ends within 24px of the edge. */
+.tabPanelFill { margin-bottom: -16px; }
+
+/* The shell's content padding drops to 12px at 900px and below; keep the sticky header flush with it so nothing spills sideways. */
+@media (max-width: 900px) {
+  .stickyHead { top: -12px; margin: -12px -12px 0; padding: 12px 12px 0; }
+  .stickyHead nav { margin: 0; }
+  .tabPanelFill { margin-bottom: -12px; }
+  .pageHead { min-width: 0; }
+  .actions { margin-left: 0; justify-content: flex-start; }
+  .titleRow h1 { overflow-wrap: anywhere; }
+}
+
+.btnPrimary { height: 30px; padding: 0 14px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
+.btnPrimary:hover { filter: brightness(1.1); }

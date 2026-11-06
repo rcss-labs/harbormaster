@@ -48,6 +48,13 @@ describe('chart primitives', () => {
     expect(Number(bottomPart.getAttribute('y')) + Number(bottomPart.getAttribute('height'))).toBe(100)
   })
 
+  it('BarChart never grows past 340px, however tall a caller asks', () => {
+    const { container } = renderWithProviders(
+      <BarChart cols={[{ title: 'Mon', parts: [{ v: 3, color: 'red' }] }]} xLabels={[[0, 'Mon']]} height={900} />,
+    )
+    expect((container.firstElementChild as HTMLElement).style.height).toBe('340px')
+  })
+
   it('Donut legend shows counts', () => {
     renderWithProviders(
       <Donut

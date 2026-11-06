@@ -3,7 +3,6 @@ import { Link } from 'react-router'
 import { allNull, useTargetHealth } from '../../../api/observe'
 import type { RunningTaskDTO, ServiceDTO, ServiceMetricsDTO } from '../../../api/types'
 import { BarChart } from '../../../charts/BarChart'
-import { Donut } from '../../../charts/Donut'
 import { Legend } from '../../../charts/Legend'
 import { LineChart } from '../../../charts/LineChart'
 import { XL24, fmtNum, niceMax } from '../../../charts/format'
@@ -11,6 +10,9 @@ import { useNow } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { Panel } from '../../../components/Panel'
+import type { PanelErrorProps } from '../../../components/PanelError'
+import { StackBar } from '../../../components/StackBar'
+import { queryPanelError } from '../panelError'
 import { StopTaskDialog } from '../../../components/StopTaskDialog'
 import { Meter } from '../../../components/Meter'
 import { KpiStrip, type KpiItem } from '../../../components/KpiStrip'
@@ -20,6 +22,11 @@ import styles from './MetricPanels.module.css'
 const DAY_MS = 86_400_000
 const CPU_COLOR = 'var(--series-1)'
 const MEMORY_COLOR = 'var(--series-2)'
+
+interface PanelState {
+  loading?: boolean
+  error?: PanelErrorProps
+}
 
 interface MetricsProps {
   service: ServiceDTO
@@ -107,7 +114,7 @@ export function ServiceKpis({ service, metrics }: MetricsProps) {
 }
 
 /** CPU and memory over the last 24 h with deploy and restart markers. `now` is injectable for tests. */
-export function UsageChart({ service, metrics, now: nowOverride }: MetricsProps & { now?: number }) {
+export function UsageChart({ service, metrics, now: nowOverride, loading, error }: MetricsProps & PanelState & { now?: number }) {
   const clock = useNow(60_000)
   const now = nowOverride ?? clock
   const windowStart = now - DAY_MS
@@ -128,6 +135,8 @@ export function UsageChart({ service, metrics, now: nowOverride }: MetricsProps 
         </Link>
       }
       stale={metrics?.stale}
+      loading={loading}
+      error={error}
       empty={!off && metrics !== undefined && allNull(cpu, mem)}
     >
       {off ? (
@@ -158,7 +167,8 @@ export function UsageChart({ service, metrics, now: nowOverride }: MetricsProps 
 
 /** Target health donut for a service behind a load balancer; `children` (the deployment card) sit under the donut. */
 export function HealthCard({ service, children }: { service: ServiceDTO; children?: ReactNode }) {
-  const targetHealth = useTargetHealth(service.id).data
+  const targetHealthQuery = useTargetHealth(service.id)
+  const targetHealth = targetHealthQuery.data
   const loadBalancer = service.networking.load_balancers[0]
   // Until the target-group snapshot arrives, fall back to the running tasks' own health.
   const known = targetHealth && targetHealth.groups.length > 0
@@ -168,17 +178,23 @@ export function HealthCard({ service, children }: { service: ServiceDTO; childre
   const missing = Math.max(0, service.desired - healthy - unhealthy)
 
   return (
-    <Panel title="Target health" actions={loadBalancer?.target_group_name}>
-      <Donut
-        segments={[
-          { name: 'Healthy targets', v: healthy, color: 'var(--success)' },
-          { name: 'Unhealthy targets', v: unhealthy, color: 'var(--warning)' },
-          { name: 'Missing tasks', v: missing, color: 'var(--danger)' },
+    <Panel
+      title="Target health"
+      sub={<span className={styles.mono}>{`${healthy}/${service.desired} healthy`}</span>}
+      actions={loadBalancer?.target_group_name}
+      error={queryPanelError(targetHealthQuery, 'Target health could not be read.')}
+    >
+      <StackBar
+        label="Target health"
+        total={Math.max(service.desired, healthy + unhealthy)}
+        legend
+        parts={[
+          { label: 'Healthy targets', n: healthy, color: 'var(--ok)' },
+          { label: 'Unhealthy targets', n: unhealthy, color: 'var(--warn)' },
+          { label: 'Missing tasks', n: missing, color: 'var(--bad)' },
         ]}
-        label={`${healthy}/${service.desired}`}
-        sub="healthy"
       />
-      {children && <div className={styles.afterDonut}>{children}</div>}
+      {children && <div className={styles.afterBar}>{children}</div>}
     </Panel>
   )
 }

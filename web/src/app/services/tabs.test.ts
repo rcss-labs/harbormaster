@@ -9,10 +9,16 @@ describe('tabs', () => {
     expect(isTabKey('nonsense')).toBe(false)
   })
 
-  it('places Deploy right after Task definition and bolds only it', () => {
-    const keys = TABS.map(([key]) => key)
-    expect(keys[keys.indexOf('task-definition') + 1]).toBe('deploy')
+  it('orders the tabs with Configure after Terminal, History last, and bolds only Deploy', () => {
+    expect(TABS.map(([key]) => key)).toEqual([
+      'overview', 'tasks', 'logs', 'metrics', 'terminal', 'deploy', 'task-definition', 'scaling', 'operations',
+    ])
+    expect(TABS.find(([key]) => key === 'operations')?.[1]).toBe('History')
     expect([...BOLD_TABS]).toEqual(['deploy'])
+  })
+
+  it('puts Deploy, Task definition and Scaling in the Configure group', () => {
+    expect(TABS.filter(([, , group]) => group === 'configure').map(([key]) => key)).toEqual(['deploy', 'task-definition', 'scaling'])
   })
 
   it('an any-of lock opens for each listed permission and for nothing else', () => {

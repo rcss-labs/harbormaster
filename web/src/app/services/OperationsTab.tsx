@@ -6,6 +6,7 @@ import { Feed, FeedRow } from '../../components/Feed'
 import { Panel } from '../../components/Panel'
 import { Toggle } from '../../components/Toggle'
 import { usePagedCursor } from '../../components/usePagedCursor'
+import { queryPanelError } from './panelError'
 import styles from './service.module.css'
 
 /** The service's operations log: Harbormaster actions and, optionally, ECS service events. */
@@ -13,10 +14,6 @@ export function OperationsTab({ serviceId }: { serviceId: string }) {
   const [includeEcs, setIncludeEcs] = useState(true)
   const paged = usePagedCursor<EventDTO>(`${serviceId}|${includeEcs}`)
   const page = useOperations(serviceId, includeEcs, paged.cursor)
-
-  if (page.isError) {
-    return <EmptyState>{page.error instanceof Error ? page.error.message : 'The operations log could not be loaded.'}</EmptyState>
-  }
 
   const items = [...paged.earlier, ...(page.data?.items ?? [])]
   const next = page.data?.next
@@ -31,6 +28,8 @@ export function OperationsTab({ serviceId }: { serviceId: string }) {
         </span>
       }
       flush
+      loading={page.isPending && paged.earlier.length === 0}
+      error={queryPanelError(page, 'The history could not be read.')}
     >
       {items.length === 0 ? (
         <EmptyState>No entries.</EmptyState>

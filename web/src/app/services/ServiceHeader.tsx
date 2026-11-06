@@ -5,6 +5,7 @@ import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import type { TagClickHandler } from '../clusters/tagTarget'
 import { usePins } from '../shell/pins'
+import { TAB_LOCKS, isUnlocked } from './tabs'
 import { HeaderActions } from './HeaderActions'
 import styles from './service.module.css'
 
@@ -49,6 +50,11 @@ export function ServiceHeader({ service, onTagClick }: ServiceHeaderProps) {
         </div>
       </div>
       <div className={styles.actions}>
+        {isUnlocked(TAB_LOCKS.deploy!, service.can) && (
+          <Link className={styles.btnPrimary} to={`/services/${service.id}/deploy`}>
+            Deploy
+          </Link>
+        )}
         <HeaderActions serviceId={service.id} service={service} />
       </div>
     </div>

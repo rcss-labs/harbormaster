@@ -90,7 +90,7 @@ describe('MetricsTab', () => {
     expect(await screen.findAllByText('No data yet')).toHaveLength(4)
   })
 
-  it('shows the API message in a banner when CloudWatch is throttled and nothing is cached', async () => {
+  it('shows a panel error with Retry and the API message under Show error when CloudWatch is throttled and nothing is cached', async () => {
     server.use(
       http.get('/api/services/:id/metrics', () =>
         HttpResponse.json({ error: { code: 'throttled', message: 'CloudWatch is throttling requests.' } }, { status: 429 }),
@@ -98,7 +98,9 @@ describe('MetricsTab', () => {
     )
     renderApp(metricsPath)
 
-    expect(await screen.findByText('CloudWatch is throttling requests.')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Metrics could not be read.')
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByText('CloudWatch is throttling requests.')).toBeInTheDocument()
     expect(screen.queryByText('CPU utilization')).not.toBeInTheDocument()
   })
 
