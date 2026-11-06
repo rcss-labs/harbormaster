@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router'
+import { DataBanner } from '../../components/DataBanner'
 import { EmptyState } from '../../components/EmptyState'
 import { useCrumbs } from '../shell/crumbs'
 import styles from './networks.module.css'
@@ -62,12 +63,14 @@ export function NetworksPage() {
         )}
       </div>
 
+      <DataBanner tiers={['Networks']} />
+
       {error && vpcs.length === 0 ? (
         <EmptyState>{error instanceof Error ? error.message : 'The networks could not be loaded.'}</EmptyState>
       ) : !isLoading && vpcs.length === 0 ? (
         <EmptyState>No active VPCs. A VPC is active when ECS tasks run in it.</EmptyState>
       ) : (
-        <div className={styles.layout}>
+        <div className={`hm-fill ${styles.layout}`}>
           <section className={styles.listPanel} aria-label="VPCs">
             <div className={styles.listSearch}>
               <input
