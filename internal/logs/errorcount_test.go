@@ -104,6 +104,25 @@ func TestErrorCounter_CountsOnlyErrorLevelPerBucket(t *testing.T) {
 	}
 }
 
+// CloudWatch's EndTime is inclusive, so a bucket must request end - 1 ms: the last millisecond still belongs to it
+// and the boundary millisecond belongs to the next bucket only.
+func TestErrorCounter_EachMillisecondAroundABucketBoundaryIsCountedOnce(t *testing.T) {
+	counter, f, _ := newTestErrorCounter(testNow.Add(30 * time.Minute))
+	boundary := time.Date(2026, 10, 31, 11, 5, 0, 0, time.UTC)
+	f.Estate.SetLogLines(paymentsGroup, []fake.LogLine{
+		errorLine(boundary.Add(-time.Millisecond), "ERROR last millisecond of the first bucket"),
+		errorLine(boundary, "ERROR first millisecond of the second bucket"),
+	})
+
+	got, err := counter.Count(context.Background(), baseErrorRequest(boundary.Add(-5*time.Minute), boundary.Add(5*time.Minute)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Buckets) != 2 || got.Buckets[0].Count != 1 || got.Buckets[1].Count != 1 {
+		t.Fatalf("buckets = %+v, want two buckets with one line each", got.Buckets)
+	}
+}
+
 func TestErrorCounter_CapsPagesAndMarksCapped(t *testing.T) {
 	counter, f, _ := newTestErrorCounter(testNow.Add(30 * time.Minute))
 	f.LogsPageSize = 1
