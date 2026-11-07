@@ -14,6 +14,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 - [Service task definition](docs/design/screens/service-task-definition.png): the task definition JSON, its revisions and rollback; deploys open the Deploy tab
 - [Service deploy](docs/design/2026-10-31-harbormaster-design.md#deploy-tab): containers, task size, service settings and auto scaling, reviewed as one change set with a reason and live rollout progress
 - [Service tasks](docs/design/screens/service-tasks.png): running and stopped tasks of a service
+- [Service timeline](docs/design/screens/service-timeline.png): one service's changes, task stops, active alerts, log errors and terminal sessions on one time axis, with the likely trigger of a failure and rollback from it
 - [Service scaling](docs/design/screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
 - [Service logs](docs/design/screens/service-logs.png): CloudWatch log history and live tail
 - [Service terminal](docs/design/screens/service-terminal.png): an interactive shell in a running task through ECS Exec
