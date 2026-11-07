@@ -517,6 +517,7 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 	}
 	if sp.ec2 {
 		task.CapacityProviderName = nil
+		task.PlatformVersion = nil
 	}
 	s.e.Tasks = append(s.e.Tasks, Task{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Task: task})
 }
@@ -607,6 +608,9 @@ func (s *seeder) addService(sp serviceSpec) {
 		svc.LoadBalancers = []ecstypes.LoadBalancer{{
 			TargetGroupArn: aws.String("arn:aws:elasticloadbalancing:" + c.region + ":" + c.accountID + ":targetgroup/" + sp.name + "-tg/" + s.hex(16)),
 			ContainerName:  aws.String(sp.name), ContainerPort: aws.Int32(int32(sp.port))}}
+	}
+	if sp.ec2 {
+		svc.PlatformVersion = nil
 	}
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
 		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})

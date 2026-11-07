@@ -185,7 +185,8 @@ func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 	}
 
 	estate := fake.MockupEstate(time.Now)
-	var ec2Tasks, spotTasks int
+	var ec2Tasks int
+	notificationsTasks, notificationsSpot := 0, 0
 	for _, task := range estate.Tasks {
 		if aws.ToString(task.Task.LastStatus) != "RUNNING" {
 			continue
@@ -193,15 +194,26 @@ func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 		if task.Task.LaunchType == ecstypes.LaunchTypeEc2 {
 			ec2Tasks++
 		}
-		if aws.ToString(task.Task.CapacityProviderName) == "FARGATE_SPOT" {
-			spotTasks++
+		if aws.ToString(task.Task.Group) == "service:notifications" {
+			notificationsTasks++
+			if aws.ToString(task.Task.CapacityProviderName) == "FARGATE_SPOT" {
+				notificationsSpot++
+			}
+		}
+		if task.Task.LaunchType == ecstypes.LaunchTypeEc2 && task.Task.PlatformVersion != nil {
+			t.Errorf("EC2 task has platform version %q, which AWS returns for Fargate only", aws.ToString(task.Task.PlatformVersion))
 		}
 	}
 	if ec2Tasks == 0 {
 		t.Error("no running EC2 task, so the Cost tab cannot show a service that is not priced")
 	}
-	if spotTasks == 0 {
-		t.Error("no running FARGATE_SPOT task")
+	if notificationsTasks == 0 || notificationsSpot != notificationsTasks {
+		t.Errorf("notifications runs %d of %d tasks on FARGATE_SPOT, want all", notificationsSpot, notificationsTasks)
+	}
+	for _, service := range estate.Services {
+		if service.Service.LaunchType == ecstypes.LaunchTypeEc2 && service.Service.PlatformVersion != nil {
+			t.Errorf("EC2 service has platform version %q, which AWS returns for Fargate only", aws.ToString(service.Service.PlatformVersion))
+		}
 	}
 
 	utilRows := func(service string) int {
@@ -267,21 +279,32 @@ func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 	if status != cost.StatusOK {
 		t.Fatalf("jenkins-controller status = %q, want ok", status)
 	}
-	atDefault := false
-	for _, step := range steps {
-		if step.FromHeadroomPct <= cost.DefaultHeadroomPct && step.Suggestion != nil {
-			atDefault = true
+	// A step applies from its headroom up to the next step, so the one in force at the default is the last at or below it.
+	var inForce *cost.Step
+	for i := range steps {
+		if steps[i].FromHeadroomPct <= cost.DefaultHeadroomPct {
+			inForce = &steps[i]
 		}
 	}
-	if !atDefault {
+	if inForce == nil || inForce.Suggestion == nil {
 		t.Errorf("jenkins-controller has no suggestion at %d%% headroom: %+v", cost.DefaultHeadroomPct, steps)
 	}
 
 	// The migrator sidecar of staging api reserves memory, so no suggestion may go below 1024 MiB.
-	_, steps = evaluate("api")
+	status, steps = evaluate("api")
+	if status != cost.StatusOK || len(steps) == 0 {
+		t.Fatalf("api status = %q with %d steps, want ok with a ladder", status, len(steps))
+	}
+	limited := false
 	for _, step := range steps {
+		if step.Suggestion != nil && step.Suggestion.LimitedByContainers {
+			limited = true
+		}
 		if step.Suggestion != nil && step.Suggestion.MemoryMiB < 1024 {
 			t.Errorf("api suggestion at %d%% = %d MiB, want at least 1024", step.FromHeadroomPct, step.Suggestion.MemoryMiB)
 		}
+	}
+	if !limited {
+		t.Errorf("no api suggestion is limited by its containers: %+v", steps)
 	}
 }
