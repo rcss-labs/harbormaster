@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
@@ -52,8 +53,8 @@ func TestTimelineFailures_OnlyErrorStopsAndFailedDeployments(t *testing.T) {
 	if len(marks) != 2 {
 		t.Fatalf("marks = %+v, want 2 (error stop and failed deployment)", marks)
 	}
-	if !marks[0].At.Equal(now.Add(-10*time.Minute)) || marks[0].Reason == "" {
-		t.Errorf("newest mark = %+v, want the error stop with a reason", marks[0])
+	if !marks[0].At.Equal(now.Add(-10*time.Minute)) || marks[0].Reason != status.StopReasonOutOfMemory {
+		t.Errorf("newest mark = %+v, want the error stop with reason group out of memory", marks[0])
 	}
 	if !marks[1].At.Equal(now.Add(-35*time.Minute)) || marks[1].Reason != "circuit_breaker" {
 		t.Errorf("second mark = %+v, want the failed deployment with reason circuit_breaker", marks[1])
@@ -132,10 +133,12 @@ func TestTimelineDeployments_NamesActorAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attributed := store.DeploymentRecord{Key: key, DeploymentID: "d-attr", Kind: "deploy", Revision: 9,
-		StartedAt: now.Add(-20 * time.Minute), StartedByUserID: &user.ID}
+	if err := s.AttributeDeployment(ctx, store.AttributedDeployment{Key: key, DeploymentID: "d-attr", Kind: "deploy",
+		Revision: 9, StartedAt: now.Add(-20 * time.Minute), StartedByUserID: user.ID, Reason: "Bump image"}); err != nil {
+		t.Fatal(err)
+	}
 	unattributed := store.DeploymentRecord{Key: key, DeploymentID: "d-auto", Kind: "deploy", StartedAt: now.Add(-10 * time.Minute)}
-	for _, r := range []store.DeploymentRecord{attributed, unattributed} {
+	for _, r := range []store.DeploymentRecord{unattributed} {
 		if _, err := s.InsertDeploymentIfNew(ctx, r); err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +156,7 @@ func TestTimelineDeployments_NamesActorAndFailure(t *testing.T) {
 		t.Errorf("unattributed = %+v, want StartedBy empty", got[0])
 	}
 	if got[1].StartedBy != "dana" || got[1].FailureReason != "circuit_breaker" ||
-		got[1].FailureDetail != "tasks failed to start" || got[1].Outcome != "failed" || got[1].Revision != 9 {
-		t.Errorf("attributed = %+v, want dana, circuit_breaker, failed, rev 9", got[1])
+		got[1].FailureDetail != "tasks failed to start" || got[1].Outcome != "failed" || got[1].Revision != 9 || got[1].Reason != "Bump image" {
+		t.Errorf("attributed = %+v, want dana, circuit_breaker, failed, rev 9, reason Bump image", got[1])
 	}
 }
