@@ -144,6 +144,57 @@ func TestTimeline_ReturnsLanesAndIncident(t *testing.T) {
 	}
 }
 
+// A deploy made through the API writes both an operation row and a deployment_history row. The timeline must join
+// them by deployment id; otherwise the deploy would also appear as an external deployment after the trigger and
+// withdraw the rollback offer.
+func TestTimeline_RealDeployStaysTheTriggerAndKeepsTheRollbackOffer(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("sam")
+	previous := getService(t, admin, paymentsID()).Revision
+
+	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": previous, "definition": draftFor(t, admin)})
+	wantStatus(t, resp, http.StatusCreated)
+	var registered struct {
+		Revision int `json:"revision"`
+	}
+	decode(t, resp, &registered)
+	resp = admin.post("/api/services/"+paymentsID()+"/deploy", map[string]any{"revision": registered.Revision})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	pollAll(t, env.st, env.fk)
+
+	// Move the real rows back so the error stops can follow the deploy.
+	for _, statement := range []string{
+		`update operation_log set ts = ts - interval '50 minutes' where details->>'op' = 'deploy'`,
+		`update deployment_history set started_at = started_at - interval '50 minutes',
+		   finished_at = finished_at - interval '50 minutes' where kind = 'deploy'`,
+	} {
+		if _, err := env.st.Pool.Exec(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := paymentsKey()
+	for i, ago := range []time.Duration{30 * time.Minute, 25 * time.Minute, 20 * time.Minute} {
+		seedTimelineStop(t, env.st, key, "oom"+string(rune('a'+i)), "EssentialContainerExited", "OutOfMemoryError: Container killed", 137, ago)
+	}
+
+	_, body := getTimeline(t, admin, paymentsID(), "?range=1h")
+	if body.Incident == nil || body.Incident.Trigger == nil {
+		t.Fatalf("incident = %+v, want one with a trigger", body.Incident)
+	}
+	if body.Incident.Trigger.Op != "deploy" || !strings.HasPrefix(body.Incident.Trigger.ID, "op:") {
+		t.Errorf("trigger = %+v, want the deploy operation", body.Incident.Trigger)
+	}
+	if body.Incident.RollbackRevision == nil || *body.Incident.RollbackRevision != previous {
+		t.Errorf("rollback revision = %v, want %d", body.Incident.RollbackRevision, previous)
+	}
+	for _, event := range timelineEventsOn(body, "change") {
+		if event.Op == "external_deploy" {
+			t.Errorf("event %q is an external deployment; the deploy was not joined to its deployment row", event.ID)
+		}
+	}
+}
+
 func TestTimeline_ExpectedStopsDoNotRaiseAnIncident(t *testing.T) {
 	c, st, revision := timelineFixture(t)
 	key := paymentsKey()

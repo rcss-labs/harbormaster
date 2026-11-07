@@ -163,7 +163,22 @@ func TestBuildIncident_RolledBackNamed(t *testing.T) {
 	}
 }
 
-func TestBuildIncident_NoRollbackWhenLaterRollout(t *testing.T) {
+func TestBuildIncident_NoRollbackWhenLaterRolloutOfAnotherRevision(t *testing.T) {
+	events := []timeline.Event{
+		changeEvent("op:deploy", baseTime.Add(-30*time.Minute), "deploy", true, ptr(5), ptr(6)),
+		changeEvent("op:other", baseTime.Add(-10*time.Minute), "deploy", true, ptr(6), ptr(7)),
+	}
+	burst := &timeline.Burst{First: baseTime.Add(-20 * time.Minute), Count: 1}
+	incident := timeline.BuildIncident(burst, events, 6)
+	if incident.Trigger == nil || incident.Trigger.ID != "op:deploy" {
+		t.Fatalf("trigger = %+v, want op:deploy", incident.Trigger)
+	}
+	if incident.RollbackRevision != nil {
+		t.Fatalf("rollback revision = %d, want nil while a later rollout of another revision exists", *incident.RollbackRevision)
+	}
+}
+
+func TestBuildIncident_RestartOfTheTriggerRevisionKeepsTheOffer(t *testing.T) {
 	events := []timeline.Event{
 		changeEvent("op:deploy", baseTime.Add(-30*time.Minute), "deploy", true, ptr(5), ptr(6)),
 		changeEvent("op:restart", baseTime.Add(-10*time.Minute), "restart", true, ptr(6), ptr(6)),
@@ -173,8 +188,8 @@ func TestBuildIncident_NoRollbackWhenLaterRollout(t *testing.T) {
 	if incident.Trigger == nil || incident.Trigger.ID != "op:deploy" {
 		t.Fatalf("trigger = %+v, want op:deploy", incident.Trigger)
 	}
-	if incident.RollbackRevision != nil {
-		t.Fatalf("rollback revision = %d, want nil while a later rollout exists", *incident.RollbackRevision)
+	if incident.RollbackRevision == nil || *incident.RollbackRevision != 5 {
+		t.Fatalf("rollback revision = %v, want 5 after a restart of the same revision", incident.RollbackRevision)
 	}
 }
 

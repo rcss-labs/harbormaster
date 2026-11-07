@@ -98,10 +98,11 @@ func BuildIncident(b *Burst, events []Event, deployedRevision int) *Incident {
 			}
 		}
 	}
-	// Any rollout after the trigger means deployedRevision may lag behind what the poller has seen, so no offer.
+	// A later rollout of another revision means deployedRevision may lag behind what the poller has seen, so no
+	// offer. A restart of the trigger's own revision leaves the deployed revision unchanged and keeps it.
 	if incident.RolledBack == nil && trigger.Op == "deploy" && trigger.FromRevision != nil && trigger.ToRevision != nil &&
 		*trigger.FromRevision < *trigger.ToRevision && *trigger.ToRevision == deployedRevision &&
-		!rolloutAfter(trigger.At, events) {
+		!rolloutOfAnotherRevisionAfter(*trigger, events) {
 		from := *trigger.FromRevision
 		incident.RollbackRevision = &from
 	}
@@ -119,9 +120,12 @@ func isRollout(event Event) bool {
 	return false
 }
 
-func rolloutAfter(at time.Time, events []Event) bool {
+func rolloutOfAnotherRevisionAfter(trigger Event, events []Event) bool {
 	for _, event := range events {
-		if event.At.After(at) && isRollout(event) {
+		if !event.At.After(trigger.At) || !isRollout(event) {
+			continue
+		}
+		if event.ToRevision == nil || trigger.ToRevision == nil || *event.ToRevision != *trigger.ToRevision {
 			return true
 		}
 	}
