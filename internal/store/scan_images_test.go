@@ -26,7 +26,7 @@ func seedScanImages(t *testing.T, s *store.Store, now time.Time, digests ...stri
 	}
 }
 
-func TestUpsertRequestedScanImage_NewIsQueuedExistingIsTouchedFailedIsReset(t *testing.T) {
+func TestUpsertRequestedScanImage_NewIsQueuedExistingIsOnlyTouched(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	t0 := time.Now().Add(-time.Hour).Truncate(time.Second)
@@ -36,32 +36,71 @@ func TestUpsertRequestedScanImage_NewIsQueuedExistingIsTouchedFailedIsReset(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created || img.Status != "queued" || !img.LastRequestedAt.Equal(t0) {
-		t.Fatalf("first call created=%v status=%q last_requested_at=%v, want true queued %v", created, img.Status, img.LastRequestedAt, t0)
+	if !created || img.Status != "queued" || !img.LastRequestedAt.Equal(t0) || img.QueuedAt == nil || !img.QueuedAt.Equal(t0) {
+		t.Fatalf("first call created=%v status=%q last_requested_at=%v queued_at=%v, want true queued %v %v",
+			created, img.Status, img.LastRequestedAt, img.QueuedAt, t0, t0)
 	}
 
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned', scanned_at = $1 where digest = 'sha256:a'`, t0); err != nil {
-		t.Fatal(err)
+	// A scanned or failed row is touched and nothing else: re-queueing is RequeueScanImage's job.
+	for _, status := range []string{"scanned", "failed"} {
+		if _, err := s.Pool.Exec(ctx, `update scan_images set status = $1, attempts = 3, failure_code = 'task_failed' where digest = 'sha256:a'`, status); err != nil {
+			t.Fatal(err)
+		}
+		img, created, err = s.UpsertRequestedScanImage(ctx, scanRequest("sha256:a"), t1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if created || img.Status != status || img.Attempts != 3 || img.FailureCode != "task_failed" ||
+			!img.LastRequestedAt.Equal(t1) || !img.FirstSeenAt.Equal(t0) || img.QueuedAt == nil || !img.QueuedAt.Equal(t0) {
+			t.Fatalf("%s row after request: created=%v status=%q attempts=%d code=%q last_requested_at=%v queued_at=%v",
+				status, created, img.Status, img.Attempts, img.FailureCode, img.LastRequestedAt, img.QueuedAt)
+		}
 	}
-	img, created, err = s.UpsertRequestedScanImage(ctx, scanRequest("sha256:a"), t1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created || img.Status != "scanned" || !img.LastRequestedAt.Equal(t1) || !img.FirstSeenAt.Equal(t0) {
-		t.Fatalf("second call created=%v status=%q last_requested_at=%v first_seen_at=%v, want false scanned %v %v",
-			created, img.Status, img.LastRequestedAt, img.FirstSeenAt, t1, t0)
+}
+
+func TestRequeueScanImage_ResetsFailedAndScannedRefusesActive(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour).Truncate(time.Second)
+	t1 := t0.Add(30 * time.Minute)
+	seedScanImages(t, s, t0, "sha256:a")
+
+	for _, status := range []string{"failed", "scanned"} {
+		if _, err := s.Pool.Exec(ctx, `update scan_images set status = $1, attempts = 3, defers = 2, large = true, next_attempt_at = now(),
+			failure_code = 'task_failed', failure_detail = 'x' where digest = 'sha256:a'`, status); err != nil {
+			t.Fatal(err)
+		}
+		changed, err := s.RequeueScanImage(ctx, "sha256:a", t1)
+		if err != nil || !changed {
+			t.Fatalf("%s: changed=%v err=%v, want true", status, changed, err)
+		}
+		img := mustGetScanImage(t, s, "sha256:a")
+		var defers int
+		if err := s.Pool.QueryRow(ctx, `select defers from scan_images where digest = 'sha256:a'`).Scan(&defers); err != nil {
+			t.Fatal(err)
+		}
+		if img.Status != "queued" || img.Attempts != 0 || defers != 0 || img.NextAttemptAt != nil || img.FailureCode != "" ||
+			img.FailureDetail != "" || !img.Large || img.QueuedAt == nil || !img.QueuedAt.Equal(t1) {
+			t.Fatalf("%s requeued: status=%q attempts=%d defers=%d next=%v code=%q large=%v queued_at=%v",
+				status, img.Status, img.Attempts, defers, img.NextAttemptAt, img.FailureCode, img.Large, img.QueuedAt)
+		}
 	}
 
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'failed', attempts = 3, failure_code = 'task_failed', failure_detail = 'x' where digest = 'sha256:a'`); err != nil {
-		t.Fatal(err)
+	for _, status := range []string{"queued", "scanning"} {
+		if _, err := s.Pool.Exec(ctx, `update scan_images set status = $1, attempts = 1 where digest = 'sha256:a'`, status); err != nil {
+			t.Fatal(err)
+		}
+		changed, err := s.RequeueScanImage(ctx, "sha256:a", t1.Add(time.Hour))
+		if err != nil || changed {
+			t.Fatalf("%s: changed=%v err=%v, want false", status, changed, err)
+		}
+		img := mustGetScanImage(t, s, "sha256:a")
+		if img.Status != status || img.Attempts != 1 || !img.QueuedAt.Equal(t1) {
+			t.Fatalf("%s row was changed: status=%q attempts=%d queued_at=%v", status, img.Status, img.Attempts, img.QueuedAt)
+		}
 	}
-	img, created, err = s.UpsertRequestedScanImage(ctx, scanRequest("sha256:a"), t1.Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created || img.Status != "queued" || img.Attempts != 0 || img.FailureCode != "" || img.NextAttemptAt != nil {
-		t.Fatalf("failed row after request created=%v status=%q attempts=%d code=%q next=%v, want false queued 0 empty nil",
-			created, img.Status, img.Attempts, img.FailureCode, img.NextAttemptAt)
+	if changed, err := s.RequeueScanImage(ctx, "sha256:missing", t1); err != nil || changed {
+		t.Fatalf("missing digest: changed=%v err=%v, want false", changed, err)
 	}
 }
 
@@ -121,16 +160,82 @@ func TestExpiredScanImages_IgnoresQueuedAndScanning(t *testing.T) {
 		}
 	}
 
-	got, err := s.ExpiredScanImages(ctx, now.Add(-90*24*time.Hour), 10)
+	got, err := s.ExpiredScanImages(ctx, now.Add(-90*24*time.Hour), now, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || !contains(got, "sha256:scanned") || !contains(got, "sha256:failed") {
 		t.Fatalf("expired = %v, want scanned and failed only", got)
 	}
-	limited, err := s.ExpiredScanImages(ctx, now.Add(-90*24*time.Hour), 1)
+	limited, err := s.ExpiredScanImages(ctx, now.Add(-90*24*time.Hour), now, 1)
 	if err != nil || len(limited) != 1 {
 		t.Fatalf("limit 1 = %v err %v, want one", limited, err)
+	}
+}
+
+func TestExpiredScanImages_SkipsActiveAcceptance(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	seedScanImages(t, s, now.Add(-100*day), "sha256:active", "sha256:expired", "sha256:revoked", "sha256:none")
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		digest           string
+		expires, revoked any
+	}{
+		{"sha256:active", now.Add(day), nil},
+		{"sha256:expired", now.Add(-day), nil},
+		{"sha256:revoked", now.Add(day), now.Add(-time.Hour)},
+	} {
+		if _, err := s.Pool.Exec(ctx, acceptanceInsert, row.digest, row.expires, row.revoked); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.ExpiredScanImages(ctx, now.Add(-90*day), now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || contains(got, "sha256:active") {
+		t.Fatalf("expired = %v, want everything but the image with an active acceptance", got)
+	}
+}
+
+func TestExpiredScanImages_OldestFirst(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	seedScanImages(t, s, now.Add(-100*day), "sha256:b-tie", "sha256:a-tie")
+	seedScanImages(t, s, now.Add(-120*day), "sha256:oldest")
+	seedScanImages(t, s, now.Add(-110*day), "sha256:middle")
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned'`); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ExpiredScanImages(ctx, now.Add(-90*day), now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"sha256:oldest", "sha256:middle", "sha256:a-tie", "sha256:b-tie"}
+	if len(got) != len(want) {
+		t.Fatalf("expired = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expired = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMigration_RefusesNonECRRegistryKind(t *testing.T) {
+	s := storetest.Open(t)
+	_, err := s.Pool.Exec(context.Background(), `insert into scan_images (digest, image_ref, registry_kind, status, first_seen_at, last_requested_at, updated_at)
+		values ('sha256:pub', 'public.ecr.aws/x/y', 'ecr_public', 'queued', now(), now(), now())`)
+	if err == nil {
+		t.Fatal("insert with registry_kind ecr_public succeeded, want the check to refuse it")
 	}
 }
 
@@ -237,7 +342,7 @@ func TestRequeueAndMarkScanImages_OnlyMoveRowsInTheExpectedState(t *testing.T) {
 	if a.Status != "queued" || a.Attempts != 1 {
 		t.Fatalf("requeued twice: status=%q attempts=%d, want queued 1", a.Status, a.Attempts)
 	}
-	for digest, want := range map[string]string{"sha256:scanned": "scanned", "sha256:failed": "failed"} {
+	for digest, want := range map[string]string{"sha256:other": "queued", "sha256:scanned": "scanned", "sha256:failed": "failed"} {
 		img := mustGetScanImage(t, s, digest)
 		if img.Status != want || img.Attempts != 0 {
 			t.Fatalf("%s after requeue status=%q attempts=%d, want %s 0", digest, img.Status, img.Attempts, want)

@@ -462,8 +462,21 @@ func TestParseManifest_KindAndScannedOutcomeWhitelists(t *testing.T) {
 	if m.Images[0].FailureCode != "" || m.Images[0].FailureDetail != "" {
 		t.Errorf("scanned outcome should carry no failure: %+v", m.Images[0])
 	}
-	m, _, err = ParseManifest(manifestBody(t, func(m map[string]any) { m["kind"] = "rematch" }), 42, nil)
-	if err != nil || m.Kind != ModeRematch {
-		t.Errorf("rematch kind should be kept: %q %v", m.Kind, err)
+}
+
+func TestParseManifest_RefusesRematchKind(t *testing.T) {
+	m, _, err := ParseManifest(manifestBody(t, func(m map[string]any) { m["kind"] = "rematch" }), 42, nil)
+	if err != nil || m.Kind != "" {
+		t.Errorf("rematch kind should be emptied like any unknown kind: %q %v", m.Kind, err)
+	}
+}
+
+func TestParseManifest_RetiredFailureCodeBecomesTaskFailed(t *testing.T) {
+	body := manifestBody(t, func(m map[string]any) {
+		m["images"] = []map[string]any{{"digest": digestA, "status": "failed", "failure_code": "registry_not_connected"}}
+	})
+	m, _, err := ParseManifest(body, 42, []string{digestA})
+	if err != nil || len(m.Images) != 1 || m.Images[0].FailureCode != CodeTaskFailed {
+		t.Fatalf("%+v %v, want failure code task_failed", m, err)
 	}
 }

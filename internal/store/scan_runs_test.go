@@ -113,7 +113,7 @@ func TestScanDBState_RoundTrip(t *testing.T) {
 	}
 	built := time.Now().Add(-time.Hour).Truncate(time.Second)
 	want := store.ScanDBState{BuiltAt: &built, Checksum: "sha256:abc", ArchiveKey: "grype-db/v6/x.tar.zst",
-		ImportedAt: &built, LastRefreshAt: &built, LastRefreshError: "boom", ScannerImageDigest: "sha256:img", EngineRequeueAt: &built, RefreshingSince: &built}
+		ImportedAt: &built, LastRefreshAt: &built, LastRefreshError: "boom", ScannerImageDigest: "sha256:img", RefreshingSince: &built}
 	if err := s.SetScanDBState(ctx, want); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestScanDBState_RoundTrip(t *testing.T) {
 	}
 	if got.Checksum != "sha256:def" || got.ArchiveKey != want.ArchiveKey || got.LastRefreshError != "" ||
 		got.BuiltAt == nil || !got.BuiltAt.Equal(built) || got.ScannerImageDigest != "sha256:img" ||
-		got.EngineRequeueAt == nil || got.RefreshingSince == nil || got.ImportedAt == nil || got.LastRefreshAt == nil {
+		got.RefreshingSince == nil || got.ImportedAt == nil || got.LastRefreshAt == nil {
 		t.Fatalf("state = %+v, want %+v", got, want)
 	}
 }
@@ -144,8 +144,9 @@ func TestScanUserForeignKeys_DoNotBlockUserDeletion(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `update scan_images set requested_by = $1`, user.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Pool.Exec(ctx, `insert into scan_risk_acceptances (digest, vuln_id, package_name, package_version, reason, accepted_by, expires_at, revoked_by)
-		values ('sha256:a', 'CVE-0000-0001', 'p', '1', 'r', $1, now(), $1)`, user.ID); err != nil {
+	if _, err := s.Pool.Exec(ctx, `insert into scan_risk_acceptances (digest, vuln_id, package_name, package_version, account_id, region,
+		  cluster_name, service_name, reason, accepted_by, expires_at, revoked_by)
+		values ('sha256:a', 'CVE-0000-0001', 'p', '1', '111111111111', 'eu-west-1', 'c', 's', 'r', $1, now(), $1)`, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Pool.Exec(ctx, `delete from users where id = $1`, user.ID); err != nil {

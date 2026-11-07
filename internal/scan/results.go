@@ -297,7 +297,7 @@ func ParseManifest(data []byte, wantRunID int64, wantDigests []string) (Manifest
 		Status: raw.Status,
 		Error:  SanitizeText(raw.Error),
 	}
-	if raw.Kind == ModeScan || raw.Kind == ModeRematch {
+	if raw.Kind == ModeScan {
 		m.Kind = raw.Kind
 	}
 	if digestPattern.MatchString(raw.ScannerImageDigest) {
@@ -362,7 +362,7 @@ func ParseManifest(data []byte, wantRunID int64, wantDigests []string) (Manifest
 
 func isKnownCode(code string) bool {
 	switch code {
-	case CodePullDenied, CodeRegistryNotConnected, CodeRateLimited, CodeTimeout, CodeUnsupportedRegistry,
+	case CodePullDenied, CodeRateLimited, CodeTimeout, CodeUnsupportedRegistry,
 		CodeTaskFailed, CodeImageTooLarge, CodeResultTooLarge, CodeDBStale, CodeTaskMissing:
 		return true
 	}

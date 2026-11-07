@@ -64,6 +64,13 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 			return result, fmt.Errorf("retention audit_log: %w", err)
 		}
 		result["audit_log"] = n
+
+		// Acceptances live as long as the audit entries that mention them.
+		tag, err := s.Pool.Exec(ctx, `delete from scan_risk_acceptances where coalesce(revoked_at, expires_at) < $1`, now.Add(-r.AuditLog))
+		if err != nil {
+			return result, fmt.Errorf("retention scan_acceptances_pruned: %w", err)
+		}
+		result["scan_acceptances_pruned"] = tag.RowsAffected()
 	}
 
 	n, err := s.DeleteExpiredSessions(ctx)
@@ -101,7 +108,7 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 	}
 
 	if r.ScanImages > 0 {
-		expired, err := s.deleteExpiredScanImages(ctx, now.Add(-r.ScanImages))
+		expired, err := s.deleteExpiredScanImages(ctx, now.Add(-r.ScanImages), now)
 		if err != nil {
 			return result, fmt.Errorf("retention scan_images_expired: %w", err)
 		}
@@ -119,10 +126,11 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 	return result, nil
 }
 
-// deleteExpiredScanImages deletes finished scan results not requested since cutoff, with their findings, requests
-// and risk acceptances (all cascade from the image row). It uses the same predicate as ExpiredScanImages.
-func (s *Store) deleteExpiredScanImages(ctx context.Context, cutoff time.Time) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from scan_images where `+expiredScanImagesWhere, cutoff)
+// deleteExpiredScanImages deletes finished scan results not requested since cutoff, with their findings and requests
+// (they cascade from the image row). Risk acceptances do not: they have no foreign key, so one that is still in force
+// keeps its image here and re-applies if the digest is scanned again. It uses the same predicate as ExpiredScanImages.
+func (s *Store) deleteExpiredScanImages(ctx context.Context, cutoff, now time.Time) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `delete from scan_images where `+expiredScanImagesWhere, cutoff, now)
 	if err != nil {
 		return 0, err
 	}

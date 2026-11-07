@@ -32,24 +32,21 @@ const (
 )
 
 const (
-	CodePullDenied           = "pull_denied"
-	CodeRegistryNotConnected = "registry_not_connected"
-	CodeRateLimited          = "rate_limited"
-	CodeTimeout              = "timeout"
-	CodeUnsupportedRegistry  = "unsupported_registry"
-	CodeTaskFailed           = "task_failed"
-	CodeImageTooLarge        = "image_too_large"
-	CodeResultTooLarge       = "result_too_large"
-	CodeDBStale              = "db_stale"
-	CodeTaskMissing          = "task_missing"
+	CodePullDenied          = "pull_denied"
+	CodeRateLimited         = "rate_limited"
+	CodeTimeout             = "timeout"
+	CodeUnsupportedRegistry = "unsupported_registry"
+	CodeTaskFailed          = "task_failed"
+	CodeImageTooLarge       = "image_too_large"
+	CodeResultTooLarge      = "result_too_large"
+	CodeDBStale             = "db_stale"
+	CodeTaskMissing         = "task_missing"
 )
 
 // Scanner modes (HM_SCAN_MODE, scan_runs.kind, Job.Kind, Manifest.Kind).
 // The server role refreshes the vulnerability DB; the scanner only reads it.
 const (
 	ModeScan = "scan"
-	// ModeRematch is no longer run. The manifest parser in results.go still accepts it, so it stays until that file is revised.
-	ModeRematch = "rematch"
 )
 
 // ImageOutcome.Status values.

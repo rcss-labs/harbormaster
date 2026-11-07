@@ -49,7 +49,7 @@ type ScanDBState struct {
 	Checksum, ArchiveKey                 string
 	ImportedAt, LastRefreshAt            *time.Time
 	LastRefreshError, ScannerImageDigest string
-	EngineRequeueAt, RefreshingSince     *time.Time
+	RefreshingSince                      *time.Time
 }
 
 const scanRunColumns = `id, kind, coalesce(task_arn, ''), coalesce(cluster_arn, ''), batch_size, large, status, started_at,
@@ -218,9 +218,9 @@ func (s *Store) ScanRunsSummary(ctx context.Context) (ScanRunsSummary, error) {
 func (s *Store) ScanDBState(ctx context.Context) (ScanDBState, error) {
 	var st ScanDBState
 	err := s.Pool.QueryRow(ctx, `select built_at, coalesce(checksum, ''), coalesce(archive_key, ''), imported_at, last_refresh_at,
-		  coalesce(last_refresh_error, ''), coalesce(scanner_image_digest, ''), engine_requeue_at, refreshing_since
+		  coalesce(last_refresh_error, ''), coalesce(scanner_image_digest, ''), refreshing_since
 		from scan_db_state where id = 1`).
-		Scan(&st.BuiltAt, &st.Checksum, &st.ArchiveKey, &st.ImportedAt, &st.LastRefreshAt, &st.LastRefreshError, &st.ScannerImageDigest, &st.EngineRequeueAt, &st.RefreshingSince)
+		Scan(&st.BuiltAt, &st.Checksum, &st.ArchiveKey, &st.ImportedAt, &st.LastRefreshAt, &st.LastRefreshError, &st.ScannerImageDigest, &st.RefreshingSince)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ScanDBState{}, nil
 	}
@@ -232,13 +232,13 @@ func (s *Store) ScanDBState(ctx context.Context) (ScanDBState, error) {
 
 func (s *Store) SetScanDBState(ctx context.Context, st ScanDBState) error {
 	_, err := s.Pool.Exec(ctx, `insert into scan_db_state (id, built_at, checksum, archive_key, imported_at, last_refresh_at,
-		  last_refresh_error, scanner_image_digest, engine_requeue_at, refreshing_since)
-		values (1, $1, nullif($2, ''), nullif($3, ''), $4, $5, nullif($6, ''), nullif($7, ''), $8, $9)
+		  last_refresh_error, scanner_image_digest, refreshing_since)
+		values (1, $1, nullif($2, ''), nullif($3, ''), $4, $5, nullif($6, ''), nullif($7, ''), $8)
 		on conflict (id) do update set built_at = excluded.built_at, checksum = excluded.checksum, archive_key = excluded.archive_key,
 		  imported_at = excluded.imported_at, last_refresh_at = excluded.last_refresh_at,
 		  last_refresh_error = excluded.last_refresh_error, scanner_image_digest = excluded.scanner_image_digest,
-		  engine_requeue_at = excluded.engine_requeue_at, refreshing_since = excluded.refreshing_since`,
-		st.BuiltAt, st.Checksum, st.ArchiveKey, st.ImportedAt, st.LastRefreshAt, st.LastRefreshError, st.ScannerImageDigest, st.EngineRequeueAt, st.RefreshingSince)
+		  refreshing_since = excluded.refreshing_since`,
+		st.BuiltAt, st.Checksum, st.ArchiveKey, st.ImportedAt, st.LastRefreshAt, st.LastRefreshError, st.ScannerImageDigest, st.RefreshingSince)
 	if err != nil {
 		return fmt.Errorf("set scan db state: %w", err)
 	}

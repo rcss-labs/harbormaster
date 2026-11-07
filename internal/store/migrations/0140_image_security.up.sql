@@ -7,7 +7,7 @@ create table scan_images (
   platform text,
   image_ref text not null,
   tag text,
-  registry_kind text not null check (registry_kind in ('ecr', 'ecr_public', 'other')),
+  registry_kind text not null check (registry_kind = 'ecr'),
   registry_account_id text,
   registry_region text,
   repository text,
@@ -28,6 +28,8 @@ create table scan_images (
   first_seen_at timestamptz not null,
   -- Last time anyone asked for this image; results are kept from here (HM_RETENTION_SCAN_IMAGES).
   last_requested_at timestamptz not null,
+  -- When the status last became queued; the gate's timeout reads it, since requests move last_requested_at.
+  queued_at timestamptz,
   scanned_at timestamptz,
   -- Times the scan was put off without counting an attempt.
   defers int not null default 0,
@@ -88,12 +90,19 @@ create table scan_findings (
   primary key (digest, vuln_id, package_name, package_version)
 );
 
+-- No foreign key on digest: an acceptance outlives the image row, so it applies again when the same digest is
+-- requested and scanned later. Acceptances are pruned with the audit log (retention step scan_acceptances_pruned).
 create table scan_risk_acceptances (
   id bigserial primary key,
-  digest text not null references scan_images (digest) on delete cascade,
+  digest text not null,
   vuln_id text not null,
   package_name text not null,
   package_version text not null,
+  -- The service the acceptance was made for.
+  account_id text not null,
+  region text not null,
+  cluster_name text not null,
+  service_name text not null,
   reason text not null,
   accepted_by bigint references users (id) on delete set null,
   created_at timestamptz not null default now(),
@@ -101,7 +110,8 @@ create table scan_risk_acceptances (
   revoked_at timestamptz,
   revoked_by bigint references users (id) on delete set null
 );
-create index scan_risk_acceptances_digest_vuln_idx on scan_risk_acceptances (digest, vuln_id);
+create index scan_risk_acceptances_digest_vuln_idx on scan_risk_acceptances
+  (digest, vuln_id, package_name, package_version, account_id, region, cluster_name, service_name);
 
 create table scan_db_state (
   id int primary key check (id = 1),
@@ -112,7 +122,6 @@ create table scan_db_state (
   last_refresh_at timestamptz,
   last_refresh_error text,
   scanner_image_digest text,
-  engine_requeue_at timestamptz,
   refreshing_since timestamptz
 );
 
@@ -132,6 +141,7 @@ create table scan_requests (
   requested_at timestamptz not null
 );
 create index scan_requests_digest_idx on scan_requests (digest);
+create unique index scan_requests_unique_idx on scan_requests (digest, account_id, region, cluster_name, service_name, container);
 create index scan_requests_service_idx on scan_requests (account_id, region, cluster_name, service_name);
 
 -- Keyed by the service's name, not its ARN, so a recreated service keeps its setting.
