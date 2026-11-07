@@ -48,6 +48,8 @@ type Event struct {
 	FromRevision, ToRevision *int
 	// Op is the operation behind the event: "deploy", "rollback", "external_deploy", ...
 	Op string
+	// EvidenceAt is an alert's true evidence time, set only when InRange clamped At to the start of the range.
+	EvidenceAt *time.Time
 	// Affecting marks events eligible as the likely trigger of an incident.
 	Affecting bool
 }
@@ -89,14 +91,14 @@ func BuildEvents(in Input) []Event {
 }
 
 // InRange keeps the events at or after from. Alerts are always kept: an alert's time is its latest evidence, not
-// when it started, so one older than from is clamped to from and its true time moves into the detail.
+// when it started, so one older than from is clamped to from and its true time is kept in EvidenceAt.
 func InRange(events []Event, from time.Time) []Event {
 	kept := make([]Event, 0, len(events))
 	for _, event := range events {
 		if event.Lane == LaneAlert {
 			if event.At.Before(from) {
-				note := "Evidence from " + event.At.UTC().Format(time.RFC3339) + "."
-				event.Detail = strings.TrimSpace(event.Detail + " " + note)
+				evidence := event.At
+				event.EvidenceAt = &evidence
 				event.At = from
 			}
 			kept = append(kept, event)
@@ -165,7 +167,8 @@ func changeSetEvent(id string, rows []store.OperationRow) Event {
 		if affectingOps[op] {
 			event.Affecting = true
 		}
-		if event.Op == "" || (rolloutOps[op] && !rolloutOps[event.Op]) {
+		if event.Op == "" || (rolloutOps[op] && !rolloutOps[event.Op]) ||
+			(affectingOps[op] && !affectingOps[event.Op] && !rolloutOps[event.Op]) {
 			event.Op = op
 		}
 		if rolloutOps[op] {
@@ -186,7 +189,8 @@ func changeSetEvent(id string, rows []store.OperationRow) Event {
 func deploymentEvents(deployments []store.TimelineDeployment, rows []store.OperationRow) []Event {
 	attributed := map[string]bool{}
 	for _, row := range rows {
-		if id := detailString(row.Details, "deployment_id"); id != "" {
+		// Outcome rows also carry deployment ids, including for deployments made outside Harbormaster.
+		if id := detailString(row.Details, "deployment_id"); id != "" && rolloutOps[detailString(row.Details, "op")] {
 			attributed[id] = true
 		}
 	}
@@ -201,6 +205,10 @@ func deploymentEvents(deployments []store.TimelineDeployment, rows []store.Opera
 				ID: "dep:" + deployment.DeploymentID, Lane: LaneChange, At: deployment.StartedAt, Severity: SeverityChange,
 				Title: fmt.Sprintf("Deployment to :%d started outside Harbormaster", revision), Actor: "ECS",
 				Op: "external_deploy", Affecting: true, ToRevision: &revision,
+			}
+			if deployment.StartedBy != "" {
+				// Harbormaster started it, but its operation row is missing (failed log write or past the limit).
+				event.Title, event.Actor, event.Op = fmt.Sprintf("Deployment to :%d", revision), deployment.StartedBy, "deploy"
 			}
 			if i > 0 {
 				previous := oldestFirst[i-1].Revision
@@ -317,7 +325,7 @@ func (t *terminalSessions) events() []Event {
 }
 
 func durationText(d time.Duration) string {
-	minutes := int(d.Round(time.Minute) / time.Minute)
+	minutes := int(d / time.Minute)
 	switch {
 	case minutes < 1:
 		return "under a minute"
@@ -331,7 +339,10 @@ func durationText(d time.Duration) string {
 	if hours == 1 {
 		text = "1 hour"
 	}
-	if rest > 0 {
+	switch {
+	case rest == 1:
+		text += " 1 minute"
+	case rest > 1:
 		text += fmt.Sprintf(" %d minutes", rest)
 	}
 	return text

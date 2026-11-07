@@ -255,11 +255,11 @@ func TestBuildEvents_AlertsAreActiveNotRaised(t *testing.T) {
 	from := baseTime.Add(-time.Hour)
 	inRange := timeline.InRange(events, from)
 	clamped := eventByID(t, inRange, "alert:crash-loop")
-	if !clamped.At.Equal(from) || !strings.Contains(clamped.Detail, "Tasks keep stopping.") ||
-		!strings.Contains(clamped.Detail, baseTime.Add(-2*time.Hour).Format(time.RFC3339)) {
+	if !clamped.At.Equal(from) || clamped.Detail != "Tasks keep stopping." ||
+		clamped.EvidenceAt == nil || !clamped.EvidenceAt.Equal(baseTime.Add(-2*time.Hour)) {
 		t.Fatalf("clamped alert = %+v", clamped)
 	}
-	if kept := eventByID(t, inRange, "alert:cpu"); !kept.At.Equal(baseTime) || kept.Detail != "" {
+	if kept := eventByID(t, inRange, "alert:cpu"); !kept.At.Equal(baseTime) || kept.Detail != "" || kept.EvidenceAt != nil {
 		t.Fatalf("in-range alert changed: %+v", kept)
 	}
 }
@@ -296,5 +296,53 @@ func TestBuildEvents_DesiredCountDiff(t *testing.T) {
 	}
 	if len(eventByID(t, events, "op:2").Diff) != 0 || len(eventByID(t, events, "op:3").Diff) != 0 {
 		t.Fatal("rows without usable from_desired/to_desired must have no diff")
+	}
+}
+
+func TestBuildEvents_OutcomeRowDoesNotAttributeExternalDeployment(t *testing.T) {
+	events := build(timeline.Input{
+		Deployments: []store.TimelineDeployment{{DeploymentRecord: store.DeploymentRecord{DeploymentID: "ecs-svc/2", Revision: 7, StartedAt: baseTime}}},
+		Operations: []store.OperationRow{operation(5, baseTime.Add(time.Minute), "", "Deployment finished.",
+			map[string]any{"op": "outcome", "deployment_id": "ecs-svc/2"})},
+	})
+	if event := eventByID(t, events, "dep:ecs-svc/2"); !event.Affecting {
+		t.Fatalf("event = %+v, want it to stay an affecting trigger", event)
+	}
+}
+
+func TestBuildEvents_AttributedDeploymentWithMissingOpRow(t *testing.T) {
+	events := build(timeline.Input{Deployments: []store.TimelineDeployment{{
+		DeploymentRecord: store.DeploymentRecord{DeploymentID: "ecs-svc/2", Revision: 7, StartedAt: baseTime}, StartedBy: "sam",
+	}}})
+	event := eventByID(t, events, "dep:ecs-svc/2")
+	if event.Title != "Deployment to :7" || event.Actor != "sam" || !event.Affecting {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
+func TestBuildEvents_ChangeSetOpPrefersAffectingOperation(t *testing.T) {
+	events := build(timeline.Input{Operations: []store.OperationRow{
+		operation(1, baseTime, "sam", "Registered revision 6.", map[string]any{"op": "task_definition", "changeset_id": "cs-1"}),
+		operation(2, baseTime.Add(time.Second), "sam", "Enabled ECS Exec.", map[string]any{"op": "exec", "changeset_id": "cs-1"}),
+	}})
+	if event := eventByID(t, events, "changeset:cs-1"); event.Op != "exec" {
+		t.Fatalf("Op = %q, want exec", event.Op)
+	}
+}
+
+func TestBuildEvents_TerminalDurationText(t *testing.T) {
+	tests := map[time.Duration]string{
+		45 * time.Second:  "under a minute",
+		90 * time.Second:  "1 minute",
+		61 * time.Minute:  "1 hour 1 minute",
+		121 * time.Minute: "2 hours 1 minute",
+		120 * time.Minute: "2 hours",
+	}
+	for duration, want := range tests {
+		events := build(timeline.Input{Operations: []store.OperationRow{operation(1, baseTime, "sam", "Closed.", map[string]any{
+			"op": "terminal_close", "session_id": "s1", "duration_ms": float64(duration / time.Millisecond)})}})
+		if got := eventByID(t, events, "term:s1").Detail; got != "Lasted "+want+"." {
+			t.Errorf("%v: detail = %q, want Lasted %s.", duration, got, want)
+		}
 	}
 }
