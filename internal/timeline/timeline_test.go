@@ -346,3 +346,15 @@ func TestBuildEvents_TerminalDurationText(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildEvents_ExternalDeploymentFromSkipsFailedDeployments(t *testing.T) {
+	failedAt := baseTime.Add(-30 * time.Minute)
+	events := build(timeline.Input{Deployments: []store.TimelineDeployment{
+		{DeploymentRecord: store.DeploymentRecord{DeploymentID: "d7", Revision: 7, StartedAt: baseTime}},
+		{DeploymentRecord: store.DeploymentRecord{DeploymentID: "d6", Revision: 6, StartedAt: baseTime.Add(-time.Hour), Outcome: "failed", FinishedAt: &failedAt}},
+		{DeploymentRecord: store.DeploymentRecord{DeploymentID: "d5", Revision: 5, StartedAt: baseTime.Add(-2 * time.Hour)}},
+	}})
+	if from := eventByID(t, events, "dep:d7").FromRevision; from == nil || *from != 5 {
+		t.Fatalf("FromRevision = %v, want 5 (the failed revision 6 is skipped)", from)
+	}
+}

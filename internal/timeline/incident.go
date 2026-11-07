@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"strings"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -61,8 +62,11 @@ type Incident struct {
 }
 
 // BuildIncident names the last eligible change before the burst's first failure as its likely trigger.
-// Events must be sorted by time ascending, as BuildEvents returns them.
+// Events must be sorted by time ascending, as BuildEvents returns them. It returns nil for a nil burst.
 func BuildIncident(b *Burst, events []Event, deployedRevision int) *Incident {
+	if b == nil {
+		return nil
+	}
 	incident := &Incident{Burst: *b}
 	earliest := b.First.Add(-TriggerLookback)
 	for i := range events {
@@ -79,15 +83,58 @@ func BuildIncident(b *Burst, events []Event, deployedRevision int) *Incident {
 		for i := range events {
 			event := events[i]
 			if event.Lane == LaneChange && event.Op == "rollback" && event.At.After(trigger.At) &&
-				event.ToRevision != nil && *event.ToRevision == *trigger.FromRevision {
+				event.ToRevision != nil && *event.ToRevision == *trigger.FromRevision && rollbackStands(event, events) {
 				incident.RolledBack = &events[i]
 			}
 		}
 	}
-	if incident.RolledBack == nil && trigger.Op == "deploy" && trigger.FromRevision != nil &&
-		trigger.ToRevision != nil && *trigger.ToRevision == deployedRevision {
+	// Any rollout after the trigger means deployedRevision may lag behind what the poller has seen, so no offer.
+	if incident.RolledBack == nil && trigger.Op == "deploy" && trigger.FromRevision != nil && trigger.ToRevision != nil &&
+		*trigger.FromRevision < *trigger.ToRevision && *trigger.ToRevision == deployedRevision &&
+		!rolloutAfter(trigger.At, events) {
 		from := *trigger.FromRevision
 		incident.RollbackRevision = &from
 	}
 	return incident
+}
+
+func isRollout(event Event) bool {
+	if event.Lane != LaneChange {
+		return false
+	}
+	switch event.Op {
+	case "deploy", "rollback", "restart", "external_deploy":
+		return true
+	}
+	return false
+}
+
+func rolloutAfter(at time.Time, events []Event) bool {
+	for _, event := range events {
+		if event.At.After(at) && isRollout(event) {
+			return true
+		}
+	}
+	return false
+}
+
+// rollbackStands reports whether the rollback still explains the service's state: no later rollout moved away
+// from its revision and no later deployment of that revision failed.
+func rollbackStands(rollback Event, events []Event) bool {
+	for _, event := range events {
+		if !event.At.After(rollback.At) || event.Lane != LaneChange || event.ToRevision == nil ||
+			*event.ToRevision == *rollback.ToRevision {
+			continue
+		}
+		if isRollout(event) {
+			return false
+		}
+	}
+	for _, event := range events {
+		if event.At.After(rollback.At) && event.Lane == LaneChange && strings.HasPrefix(event.ID, "depfail:") &&
+			event.ToRevision != nil && *event.ToRevision == *rollback.ToRevision {
+			return false
+		}
+	}
+	return true
 }

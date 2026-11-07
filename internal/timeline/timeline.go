@@ -210,9 +210,13 @@ func deploymentEvents(deployments []store.TimelineDeployment, rows []store.Opera
 				// Harbormaster started it, but its operation row is missing (failed log write or past the limit).
 				event.Title, event.Actor, event.Op = fmt.Sprintf("Deployment to :%d", revision), deployment.StartedBy, "deploy"
 			}
-			if i > 0 {
-				previous := oldestFirst[i-1].Revision
-				event.FromRevision = &previous
+			// A failed deployment never served traffic, so it is not a revision to roll back to.
+			for j := i - 1; j >= 0; j-- {
+				if oldestFirst[j].Outcome != "failed" {
+					previous := oldestFirst[j].Revision
+					event.FromRevision = &previous
+					break
+				}
 			}
 			events = append(events, event)
 		}

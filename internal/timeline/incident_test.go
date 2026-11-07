@@ -120,13 +120,15 @@ func TestBuildIncident_RollbackOffered(t *testing.T) {
 	}
 }
 
-func TestBuildIncident_NoRollbackWhenNotApplicable(t *testing.T) {
+func TestBuildIncident_NoRollbackWhenSuperseded(t *testing.T) {
 	burst := &timeline.Burst{First: baseTime, Count: 1}
 	at := baseTime.Add(-10 * time.Minute)
 	cases := map[string]struct {
 		event    timeline.Event
 		deployed int
 	}{
+		"from equals to":      {changeEvent("op:1", at, "deploy", true, ptr(6), ptr(6)), 6},
+		"from above to":       {changeEvent("op:1", at, "deploy", true, ptr(6), ptr(5)), 5},
 		"superseded":          {changeEvent("op:1", at, "deploy", true, ptr(5), ptr(6)), 7},
 		"no from revision":    {changeEvent("op:1", at, "deploy", true, nil, ptr(6)), 6},
 		"scale":               {changeEvent("op:1", at, "scale", true, ptr(5), ptr(6)), 6},
@@ -158,5 +160,73 @@ func TestBuildIncident_RolledBackNamed(t *testing.T) {
 	}
 	if incident.RollbackRevision != nil {
 		t.Fatalf("rollback revision = %d, want nil", *incident.RollbackRevision)
+	}
+}
+
+func TestBuildIncident_NoRollbackWhenLaterRollout(t *testing.T) {
+	events := []timeline.Event{
+		changeEvent("op:deploy", baseTime.Add(-30*time.Minute), "deploy", true, ptr(5), ptr(6)),
+		changeEvent("op:restart", baseTime.Add(-10*time.Minute), "restart", true, ptr(6), ptr(6)),
+	}
+	burst := &timeline.Burst{First: baseTime.Add(-20 * time.Minute), Count: 1}
+	incident := timeline.BuildIncident(burst, events, 6)
+	if incident.Trigger == nil || incident.Trigger.ID != "op:deploy" {
+		t.Fatalf("trigger = %+v, want op:deploy", incident.Trigger)
+	}
+	if incident.RollbackRevision != nil {
+		t.Fatalf("rollback revision = %d, want nil while a later rollout exists", *incident.RollbackRevision)
+	}
+}
+
+func TestBuildIncident_RolledBackIgnoredWhenNoLongerStanding(t *testing.T) {
+	burst := &timeline.Burst{First: baseTime.Add(-35 * time.Minute), Count: 1}
+	deploy := changeEvent("op:deploy", baseTime.Add(-40*time.Minute), "deploy", true, ptr(5), ptr(6))
+	rollback := changeEvent("op:rollback", baseTime.Add(-30*time.Minute), "rollback", true, ptr(6), ptr(5))
+	t.Run("rollback target then failed", func(t *testing.T) {
+		failed := timeline.Event{ID: "depfail:d5", Lane: timeline.LaneChange, At: baseTime.Add(-25 * time.Minute), ToRevision: ptr(5)}
+		incident := timeline.BuildIncident(burst, []timeline.Event{deploy, rollback, failed}, 6)
+		if incident.RolledBack != nil {
+			t.Fatalf("rolled back = %+v, want nil", incident.RolledBack)
+		}
+	})
+	t.Run("redeployed after rollback", func(t *testing.T) {
+		again := changeEvent("op:again", baseTime.Add(-25*time.Minute), "deploy", true, ptr(5), ptr(6))
+		incident := timeline.BuildIncident(burst, []timeline.Event{deploy, rollback, again}, 6)
+		if incident.RolledBack != nil {
+			t.Fatalf("rolled back = %+v, want nil", incident.RolledBack)
+		}
+	})
+	t.Run("just started with deployed still the old revision", func(t *testing.T) {
+		incident := timeline.BuildIncident(burst, []timeline.Event{deploy, rollback}, 6)
+		if incident.RolledBack == nil || incident.RolledBack.ID != "op:rollback" || incident.RollbackRevision != nil {
+			t.Fatalf("rolled back = %+v, rollback revision = %v", incident.RolledBack, incident.RollbackRevision)
+		}
+	})
+}
+
+func TestBuildIncident_RollbackToOtherRevisionNotNamed(t *testing.T) {
+	burst := &timeline.Burst{First: baseTime.Add(-35 * time.Minute), Count: 1}
+	events := []timeline.Event{
+		changeEvent("op:deploy", baseTime.Add(-40*time.Minute), "deploy", true, ptr(5), ptr(6)),
+		changeEvent("op:rollback", baseTime.Add(-30*time.Minute), "rollback", true, ptr(6), ptr(3)),
+	}
+	if incident := timeline.BuildIncident(burst, events, 6); incident.RolledBack != nil {
+		t.Fatalf("rolled back = %+v, want nil", incident.RolledBack)
+	}
+}
+
+func TestDetectIncident_TopReasonTieResolvesByName(t *testing.T) {
+	burst := timeline.DetectBurst([]store.FailureMark{
+		failureAt(baseTime, "Zeta"), failureAt(baseTime.Add(-time.Minute), "Alpha"),
+		failureAt(baseTime.Add(-2*time.Minute), "Zeta"), failureAt(baseTime.Add(-3*time.Minute), "Alpha"),
+	})
+	if burst.TopReason != "Alpha" || burst.TopReasonCount != 2 {
+		t.Fatalf("top reason = %q x%d, want Alpha x2", burst.TopReason, burst.TopReasonCount)
+	}
+}
+
+func TestBuildIncident_NilBurst(t *testing.T) {
+	if incident := timeline.BuildIncident(nil, nil, 6); incident != nil {
+		t.Fatalf("incident = %+v, want nil", incident)
 	}
 }
