@@ -362,3 +362,55 @@ func TestRequeueAndMarkScanImages_OnlyMoveRowsInTheExpectedState(t *testing.T) {
 		}
 	}
 }
+
+func TestBumpScanImageDefers_ReturnsOverLimit(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	seedScanImages(t, s, now, "sha256:a", "sha256:b")
+	// a has already been skipped once; b never.
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanning', defers = 1 where digest = 'sha256:a'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanning' where digest = 'sha256:b'`); err != nil {
+		t.Fatal(err)
+	}
+
+	over, err := s.BumpScanImageDefers(ctx, []string{"sha256:a", "sha256:b"}, now, "", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(over) != 1 || over[0] != "sha256:a" {
+		t.Fatalf("over the limit = %v, want only sha256:a (second defer of a limit of 2)", over)
+	}
+	a := mustGetScanImage(t, s, "sha256:a")
+	if a.Status != "queued" || a.NextAttemptAt == nil || !a.NextAttemptAt.Equal(now) || a.Attempts != 0 {
+		t.Fatalf("a after bump: status=%q next=%v attempts=%d, want queued, due now, no attempt counted", a.Status, a.NextAttemptAt, a.Attempts)
+	}
+
+	// A row that is no longer scanning is left alone, so a replayed import counts nothing twice.
+	over, err = s.BumpScanImageDefers(ctx, []string{"sha256:a"}, now, "", "", 2)
+	if err != nil || len(over) != 0 {
+		t.Fatalf("replay over=%v err=%v, want none", over, err)
+	}
+}
+
+func TestFailScanImages_FailsQueuedAndScanningOnly(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	seedScanImages(t, s, now, "sha256:a", "sha256:b")
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned' where digest = 'sha256:b'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FailScanImages(ctx, []string{"sha256:a", "sha256:b"}, "db_stale", "too old"); err != nil {
+		t.Fatal(err)
+	}
+	a, b := mustGetScanImage(t, s, "sha256:a"), mustGetScanImage(t, s, "sha256:b")
+	if a.Status != "failed" || a.FailureCode != "db_stale" || a.FailureDetail != "too old" || a.NextAttemptAt != nil {
+		t.Fatalf("a = status %q code %q detail %q next %v, want failed db_stale", a.Status, a.FailureCode, a.FailureDetail, a.NextAttemptAt)
+	}
+	if b.Status != "scanned" {
+		t.Fatalf("b status = %q, want scanned (untouched)", b.Status)
+	}
+}

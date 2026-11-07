@@ -201,3 +201,42 @@ func (s *Store) ExpiredScanImages(ctx context.Context, cutoff, now time.Time, li
 	}
 	return digests, nil
 }
+
+// BumpScanImageDefers queues scanning images again like DeferScanImages and counts the defer. It returns the digests whose
+// defers reached limit, which the caller fails. Rows not scanning are left alone, so a repeated import counts nothing twice.
+func (s *Store) BumpScanImageDefers(ctx context.Context, digests []string, nextAttempt time.Time, failureCode, detail string, limit int) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `update scan_images set status = 'queued', next_attempt_at = $2, defers = defers + 1,
+		  queued_at = now(), failure_code = nullif($3, ''), failure_detail = nullif($4, ''), updated_at = now()
+		where digest = any($1) and status = 'scanning'
+		returning digest, defers`, digests, nextAttempt, failureCode, detail)
+	if err != nil {
+		return nil, fmt.Errorf("bump scan image defers: %w", err)
+	}
+	defer rows.Close()
+	var over []string
+	for rows.Next() {
+		var digest string
+		var defers int
+		if err := rows.Scan(&digest, &defers); err != nil {
+			return nil, fmt.Errorf("bump scan image defers: %w", err)
+		}
+		if defers >= limit {
+			over = append(over, digest)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("bump scan image defers: %w", err)
+	}
+	return over, nil
+}
+
+// FailScanImages marks queued or scanning images failed at once, with no retry.
+func (s *Store) FailScanImages(ctx context.Context, digests []string, code, detail string) error {
+	_, err := s.Pool.Exec(ctx, `update scan_images set status = 'failed', next_attempt_at = null, defers = 0,
+		  failure_code = nullif($2, ''), failure_detail = nullif($3, ''), updated_at = now()
+		where digest = any($1) and status in ('queued', 'scanning')`, digests, code, detail)
+	if err != nil {
+		return fmt.Errorf("fail scan images: %w", err)
+	}
+	return nil
+}

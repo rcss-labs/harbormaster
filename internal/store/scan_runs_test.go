@@ -157,3 +157,15 @@ func TestScanUserForeignKeys_DoNotBlockUserDeletion(t *testing.T) {
 		t.Fatalf("requested_by = %v, want null", *img.RequestedBy)
 	}
 }
+
+func TestIncrementImportAttempts(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	id := newScanRun(t, s, "scan", "sha256:a")
+	for want := 1; want <= 3; want++ {
+		got, err := s.IncrementImportAttempts(ctx, id)
+		if err != nil || got != want {
+			t.Fatalf("attempt %d: got %d, err %v", want, got, err)
+		}
+	}
+}

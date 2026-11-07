@@ -244,3 +244,13 @@ func (s *Store) SetScanDBState(ctx context.Context, st ScanDBState) error {
 	}
 	return nil
 }
+
+// IncrementImportAttempts counts one more try to finish a run's import and returns the new total.
+func (s *Store) IncrementImportAttempts(ctx context.Context, runID int64) (int, error) {
+	var attempts int
+	err := s.Pool.QueryRow(ctx, `update scan_runs set import_attempts = import_attempts + 1 where id = $1 returning import_attempts`, runID).Scan(&attempts)
+	if err != nil {
+		return 0, fmt.Errorf("increment import attempts: %w", err)
+	}
+	return attempts, nil
+}
