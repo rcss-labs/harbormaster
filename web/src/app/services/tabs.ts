@@ -1,7 +1,7 @@
 import type { ActionKey } from '../../api/types'
 import type { LockAction } from '../../components/LockPanel'
 
-export type TabKey = 'overview' | 'metrics' | 'task-definition' | 'deploy' | 'tasks' | 'scaling' | 'logs' | 'terminal' | 'operations'
+export type TabKey = 'overview' | 'metrics' | 'task-definition' | 'deploy' | 'tasks' | 'timeline' | 'scaling' | 'logs' | 'terminal' | 'operations'
 
 /** `configure` tabs sit after a gap and a "Configure" label in the tab bar. */
 export type TabGroup = 'configure'
@@ -9,6 +9,7 @@ export type TabGroup = 'configure'
 export const TABS: [TabKey, string, TabGroup?][] = [
   ['overview', 'Overview'],
   ['tasks', 'Tasks'],
+  ['timeline', 'Timeline'],
   ['logs', 'Logs'],
   ['metrics', 'Metrics'],
   ['terminal', 'Terminal'],

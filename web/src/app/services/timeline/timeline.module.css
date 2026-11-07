@@ -1,0 +1,47 @@
+/* Layout values follow the mockup: 86px label column, 38px rows, 640px minimum track, 20px markers, 25% grid lines. */
+.split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.split.stack { grid-template-columns: minmax(0, 1fr); }
+.list, .detail { display: grid; gap: 14px; min-width: 0; }
+
+.toggles { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.count { color: var(--muted); font-size: 12px; }
+.hint { margin: 0; color: var(--muted); }
+
+/* The track keeps its width and scrolls inside the panel, never the page. */
+.scroll { overflow-x: auto; }
+.track { position: relative; min-width: 640px; padding-bottom: 22px; }
+.laneRow { display: grid; grid-template-columns: 86px minmax(0, 1fr); height: 38px; align-items: center; border-bottom: 1px solid var(--border); }
+.laneLabel { font-size: 12px; color: var(--muted); }
+.laneTrack {
+  position: relative; height: 100%; display: flex; align-items: center;
+  background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px);
+  background-size: 25% 100%;
+  border-right: 1px solid var(--grid);
+}
+.laneNote { position: relative; padding-left: 8px; font-size: 12px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; background: var(--surface); }
+.retry { height: 22px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--raised); color: inherit; cursor: pointer; }
+
+.marker {
+  position: absolute; top: 9px; transform: translateX(-50%);
+  height: 20px; min-width: 20px; padding: 0 5px; border-radius: 10px; border: 2px solid var(--surface);
+  font: 600 10px var(--mono); color: var(--accent-ink); cursor: pointer; line-height: 16px;
+}
+.bad { background: var(--danger); }
+.warn { background: var(--warning); }
+.acc { background: var(--accent); }
+.info { background: var(--info); }
+.sel { box-shadow: 0 0 0 2px var(--text); }
+
+.axis { position: relative; margin-left: 86px; height: 16px; }
+.tick { position: absolute; top: 4px; transform: translateX(-50%); font: 10px var(--mono); color: var(--muted); white-space: nowrap; }
+.tick:last-child { transform: translateX(-100%); }
+
+.time { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.eventTitle { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; font: inherit; }
+.eventTitle:hover { text-decoration: underline; }
+.selectedRow td { background: var(--accent-soft); }
+
+@media (max-width: 700px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .marker { min-width: 24px; }
+}

@@ -11,7 +11,7 @@ describe('tabs', () => {
 
   it('orders the tabs with Configure after Terminal, History last, and bolds only Deploy', () => {
     expect(TABS.map(([key]) => key)).toEqual([
-      'overview', 'tasks', 'logs', 'metrics', 'terminal', 'deploy', 'task-definition', 'scaling', 'operations',
+      'overview', 'tasks', 'timeline', 'logs', 'metrics', 'terminal', 'deploy', 'task-definition', 'scaling', 'operations',
     ])
     expect(TABS.find(([key]) => key === 'operations')?.[1]).toBe('History')
     expect([...BOLD_TABS]).toEqual(['deploy'])

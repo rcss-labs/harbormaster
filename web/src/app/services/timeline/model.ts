@@ -128,3 +128,10 @@ export function axisTicks(from: number, to: number): { pct: number; label: strin
     return { pct, label }
   })
 }
+
+/** Clock time in the browser's zone; ranges over a day add the date. */
+export function formatEventTime(iso: string, withDate: boolean): string {
+  const date = new Date(iso)
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return withDate ? `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time}` : time
+}
