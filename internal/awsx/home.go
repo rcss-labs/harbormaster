@@ -21,10 +21,12 @@ import (
 // assumed harbormaster-access role.
 
 var (
+	// ErrObjectNotFound means the bucket has no object under the key.
 	ErrObjectNotFound = errors.New("object not found")
 	// ErrObjectTooLarge means the object is bigger than the caller's cap.
 	ErrObjectTooLarge = errors.New("object larger than the allowed size")
-	ErrTaskNotFound   = errors.New("task not found")
+	// ErrTaskNotFound means ECS no longer knows the task.
+	ErrTaskNotFound = errors.New("task not found")
 )
 
 // ScannerContainerName is the container in the scanner task definition that
@@ -177,6 +179,12 @@ func (h *Home) DescribeTask(ctx context.Context, taskARN string) (TaskState, err
 		return TaskState{}, err
 	}
 	if len(out.Tasks) == 0 {
+		if len(out.Failures) == 0 {
+			return TaskState{}, ErrTaskNotFound
+		}
+		if reason := aws.ToString(out.Failures[0].Reason); reason != "MISSING" {
+			return TaskState{}, fmt.Errorf("describe scanner task: %s", reason)
+		}
 		return TaskState{}, ErrTaskNotFound
 	}
 	task := out.Tasks[0]
@@ -253,7 +261,9 @@ func (h *Home) PutStream(ctx context.Context, key string, body io.Reader, verify
 		// The caller's context may be what failed, so abort on a fresh one.
 		abortCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), abortTimeout)
 		defer cancel()
-		_, _ = h.s3.AbortMultipartUpload(abortCtx, &s3.AbortMultipartUploadInput{Bucket: bucket, Key: objectKey, UploadId: uploadID})
+		if _, abortErr := h.s3.AbortMultipartUpload(abortCtx, &s3.AbortMultipartUploadInput{Bucket: bucket, Key: objectKey, UploadId: uploadID}); abortErr != nil {
+			err = errors.Join(err, fmt.Errorf("abort multipart upload: %w", abortErr))
+		}
 	}()
 
 	buffer := make([]byte, uploadPartBytes)

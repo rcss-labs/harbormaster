@@ -134,6 +134,32 @@ func TestHome_RunTaskBuildsOverrides(t *testing.T) {
 	})
 }
 
+type describingECS struct {
+	recordingECS
+	out *ecs.DescribeTasksOutput
+}
+
+func (d *describingECS) DescribeTasks(context.Context, *ecs.DescribeTasksInput, ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
+	return d.out, nil
+}
+
+func TestHome_DescribeTaskTellsMissingFromOtherFailures(t *testing.T) {
+	describe := func(out *ecs.DescribeTasksOutput) error {
+		_, err := newHome(&describingECS{out: out}, nil, testHomeConfig).DescribeTask(context.Background(), "arn:task")
+		return err
+	}
+	if err := describe(&ecs.DescribeTasksOutput{Failures: []ecstypes.Failure{{Reason: aws.String("MISSING")}}}); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("MISSING gave %v, want ErrTaskNotFound", err)
+	}
+	if err := describe(&ecs.DescribeTasksOutput{}); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("empty answer gave %v, want ErrTaskNotFound", err)
+	}
+	err := describe(&ecs.DescribeTasksOutput{Failures: []ecstypes.Failure{{Reason: aws.String("ACCESS_DENIED")}}})
+	if err == nil || errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("other failure gave %v, want an error that is not ErrTaskNotFound", err)
+	}
+}
+
 type failingRunECS struct{ recordingECS }
 
 func (failingRunECS) RunTask(context.Context, *ecs.RunTaskInput, ...func(*ecs.Options)) (*ecs.RunTaskOutput, error) {
@@ -148,6 +174,7 @@ type recordingS3 struct {
 	aborted     int
 	abortCtxErr error
 	onPart      func(partNumber int32)
+	abortErr    error
 
 	getBody io.Reader
 	getErr  error
@@ -200,6 +227,9 @@ func (s *recordingS3) CompleteMultipartUpload(context.Context, *s3.CompleteMulti
 func (s *recordingS3) AbortMultipartUpload(ctx context.Context, _ *s3.AbortMultipartUploadInput, _ ...func(*s3.Options)) (*s3.AbortMultipartUploadOutput, error) {
 	s.aborted++
 	s.abortCtxErr = ctx.Err()
+	if s.abortErr != nil {
+		return nil, s.abortErr
+	}
 	return &s3.AbortMultipartUploadOutput{}, nil
 }
 
@@ -238,6 +268,16 @@ func TestHome_PutStreamAbortsWhenVerifyFails(t *testing.T) {
 			if sse != s3types.ServerSideEncryptionAes256 {
 				t.Fatalf("server-side encryption = %q, want AES256", sse)
 			}
+		}
+	})
+
+	t.Run("a failed abort is reported with the cause", func(t *testing.T) {
+		errAbort := errors.New("abort refused")
+		api := &recordingS3{abortErr: errAbort}
+		err := newHome(nil, api, testHomeConfig).PutStream(context.Background(), "grype-db/v6/x.tar.zst",
+			bytes.NewReader([]byte("x")), func() error { return errMismatch })
+		if !errors.Is(err, errMismatch) || !errors.Is(err, errAbort) {
+			t.Fatalf("err = %v, want both the verify error and the abort error", err)
 		}
 	})
 

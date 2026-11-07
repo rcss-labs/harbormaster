@@ -109,3 +109,75 @@ func TestScanner_DelayKeepsTheTaskRunningUntilItElapses(t *testing.T) {
 	}
 	t.Fatal("the task never stopped")
 }
+
+func TestScanner_FetchLatestIsSelfConsistentAcrossAClockTick(t *testing.T) {
+	now := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	e := newFake().Estate
+	e.Now = func() time.Time { return now }
+	s := NewScanner(e)
+	ctx := context.Background()
+
+	listing, err := s.FetchLatest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(3 * time.Second)
+
+	upstream, err := scan.ParseUpstreamDB(listing, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(upstream.Path, upstream.Built.Format(fakeDBPathTimeFormat)) {
+		t.Fatalf("path %q does not carry the build time %s", upstream.Path, upstream.Built)
+	}
+	archive, err := s.OpenArchive(ctx, upstream.Path)
+	if err != nil {
+		t.Fatalf("OpenArchive of the issued path after the clock moved: %v", err)
+	}
+	archive.Close()
+	again, _ := s.FetchLatest(ctx)
+	if string(again) != string(listing) {
+		t.Fatalf("listing changed with the clock: %s then %s", listing, again)
+	}
+}
+
+func TestScanner_LargeLaunchEscapesFailTimeout(t *testing.T) {
+	s := NewScanner(newFake().Estate)
+	s.FailTimeout("edge-nginx")
+	ctx := context.Background()
+	const host = homelabID + ".dkr.ecr.us-east-1.amazonaws.com/"
+	digest := s.Estate.ImageDigestFor("edge-nginx:1.27.2")
+	for _, runID := range []int64{1, 2} {
+		data, _ := json.Marshal(scan.Job{RunID: runID, Kind: scan.ModeScan, Images: []scan.JobImage{
+			{Digest: digest, ImageRef: host + "edge-nginx", Tag: "1.27.2"}}})
+		_ = s.Put(ctx, scan.JobKey(runID), data)
+	}
+	normal := awsx.LaunchSpec{RunID: 1, Mode: scan.ModeScan}
+	large := awsx.LaunchSpec{RunID: 2, Mode: scan.ModeScan, Large: true}
+	for _, spec := range []awsx.LaunchSpec{normal, large} {
+		if _, err := s.RunTask(ctx, spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status := func(runID int64) string {
+		data, err := s.Get(ctx, scan.ManifestKey(runID), scan.MaxManifestBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, _, err := scan.ParseManifest(data, runID, []string{digest})
+		if err != nil || len(m.Images) != 1 {
+			t.Fatalf("manifest %d: %+v, %v", runID, m, err)
+		}
+		return m.Images[0].Status + "/" + m.Images[0].FailureCode
+	}
+	if got := status(1); got != "failed/timeout" {
+		t.Fatalf("normal launch = %s, want failed/timeout", got)
+	}
+	if got := status(2); got != "scanned/" {
+		t.Fatalf("large launch = %s, want scanned", got)
+	}
+	if got := s.Launches(); len(got) != 2 || got[0] != normal || got[1] != large {
+		t.Fatalf("Launches() = %+v, want both specs in order", got)
+	}
+}

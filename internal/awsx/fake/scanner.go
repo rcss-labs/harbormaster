@@ -44,6 +44,15 @@ type Scanner struct {
 	failPull    map[string]bool
 	failTimeout map[string]bool
 	stale       bool
+	snapshot    *dbSnapshot
+	launches    []awsx.LaunchSpec
+}
+
+type dbSnapshot struct {
+	age     time.Duration
+	built   time.Time
+	path    string
+	archive []byte
 }
 
 type fakeTask struct {
@@ -74,7 +83,8 @@ func (s *Scanner) FailPull(repository string) {
 	s.failPull[repository] = true
 }
 
-// FailTimeout makes every image of the repository fail with timeout.
+// FailTimeout makes every image of the repository fail with timeout in a
+// normal launch; a Large launch (the retry) scans it.
 func (s *Scanner) FailTimeout(repository string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,33 +124,37 @@ func (s *Scanner) Objects() map[string][]byte {
 	return out
 }
 
-// dbBuiltAt is when the fake DB was built, as of now.
-func (s *Scanner) dbBuiltAt() time.Time {
+// dbSnapshot is the fake DB build, fixed until ForceStale or DBBuiltAgo
+// changes, so the listing, the archive path and the manifests agree even
+// while the clock runs.
+func (s *Scanner) dbSnapshot() (built time.Time, path string, archive []byte) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	age := s.DBBuiltAgo
 	if s.stale {
 		age = staleDBBuiltAgo
 	}
-	s.mu.Unlock()
-	return s.Estate.now().Add(-age).UTC().Truncate(time.Second)
-}
-
-func (s *Scanner) upstreamArchive() (path string, data []byte) {
-	built := s.dbBuiltAt()
-	return fmt.Sprintf("vulnerability-db_v6_%s.tar.zst", built.Format(fakeDBPathTimeFormat)),
-		[]byte(fakeDBArchivePrefix + built.Format(time.RFC3339))
+	if s.snapshot == nil || s.snapshot.age != age {
+		built := s.Estate.now().Add(-age).UTC().Truncate(time.Second)
+		s.snapshot = &dbSnapshot{
+			age: age, built: built,
+			path:    fmt.Sprintf("vulnerability-db_v6_%s.tar.zst", built.Format(fakeDBPathTimeFormat)),
+			archive: []byte(fakeDBArchivePrefix + built.Format(time.RFC3339)),
+		}
+	}
+	return s.snapshot.built, s.snapshot.path, s.snapshot.archive
 }
 
 // FetchLatest is Anchore's latest.json as the fake serves it.
 func (s *Scanner) FetchLatest(context.Context) ([]byte, error) {
-	path, archive := s.upstreamArchive()
+	built, path, archive := s.dbSnapshot()
 	return json.Marshal(scan.UpstreamDB{
-		Built: s.dbBuiltAt(), Path: path, Checksum: fmt.Sprintf("sha256:%x", sha256.Sum256(archive))})
+		Built: built, Path: path, Checksum: fmt.Sprintf("sha256:%x", sha256.Sum256(archive))})
 }
 
 // OpenArchive streams the archive that FetchLatest names.
 func (s *Scanner) OpenArchive(_ context.Context, path string) (io.ReadCloser, error) {
-	current, archive := s.upstreamArchive()
+	_, current, archive := s.dbSnapshot()
 	if path != current {
 		return nil, awsx.ErrObjectNotFound
 	}
@@ -154,20 +168,22 @@ func (s *Scanner) RunTask(_ context.Context, spec awsx.LaunchSpec) (string, erro
 	task := &fakeTask{state: awsx.TaskState{LastStatus: "RUNNING", StartedAt: s.Estate.now()}}
 	s.tasks[arn] = task
 	delay := s.Delay
+	s.launches = append(s.launches, spec)
 	s.mu.Unlock()
 
 	if delay <= 0 {
-		s.finish(arn, spec.RunID)
+		s.finish(arn, spec)
 		return arn, nil
 	}
 	s.mu.Lock()
-	task.timer = time.AfterFunc(delay, func() { s.finish(arn, spec.RunID) })
+	task.timer = time.AfterFunc(delay, func() { s.finish(arn, spec) })
 	s.mu.Unlock()
 	return arn, nil
 }
 
 // finish writes the run's output and stops the task, unless it was stopped already.
-func (s *Scanner) finish(arn string, runID int64) {
+func (s *Scanner) finish(arn string, spec awsx.LaunchSpec) {
+	runID := spec.RunID
 	s.mu.Lock()
 	task := s.tasks[arn]
 	if task == nil || task.state.LastStatus == "STOPPED" {
@@ -182,7 +198,7 @@ func (s *Scanner) finish(arn string, runID int64) {
 	if !haveJob || json.Unmarshal(jobData, &job) != nil {
 		exitCode = 1
 	} else {
-		s.writeRun(runID, job)
+		s.writeRun(runID, job, spec.Large)
 	}
 
 	s.mu.Lock()
@@ -197,7 +213,7 @@ func (s *Scanner) finish(arn string, runID int64) {
 }
 
 // writeRun writes one result per scanned image, then the manifest.
-func (s *Scanner) writeRun(runID int64, job scan.Job) {
+func (s *Scanner) writeRun(runID int64, job scan.Job, large bool) {
 	s.mu.Lock()
 	stale := s.stale
 	failPull, failTimeout := s.failPull, s.failTimeout
@@ -211,7 +227,7 @@ func (s *Scanner) writeRun(runID int64, job scan.Job) {
 		DBChecksum: job.DB.Checksum, DBBuiltAt: job.DB.BuiltAt,
 	}
 	if manifest.DBBuiltAt.IsZero() {
-		manifest.DBBuiltAt = s.dbBuiltAt()
+		manifest.DBBuiltAt, _, _ = s.dbSnapshot()
 	}
 	if stale {
 		manifest.Status = scan.ManifestDBStale
@@ -225,7 +241,7 @@ func (s *Scanner) writeRun(runID int64, job scan.Job) {
 			outcome.Status, outcome.FailureCode = scan.OutcomeSkipped, scan.CodeDBStale
 		case failPull[repository]:
 			outcome.Status, outcome.FailureCode, outcome.FailureDetail = scan.OutcomeFailed, scan.CodePullDenied, "fake: pull denied"
-		case failTimeout[repository]:
+		case failTimeout[repository] && !large: // a large launch has the headroom the normal one lacked
 			outcome.Status, outcome.FailureCode, outcome.FailureDetail = scan.OutcomeFailed, scan.CodeTimeout, "fake: image scan timed out"
 		}
 		manifest.Images = append(manifest.Images, outcome)
@@ -333,4 +349,11 @@ func (s *Scanner) PutStream(ctx context.Context, key string, body io.Reader, ver
 		return err
 	}
 	return s.Put(ctx, key, data)
+}
+
+// Launches lists every task started, in order.
+func (s *Scanner) Launches() []awsx.LaunchSpec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]awsx.LaunchSpec(nil), s.launches...)
 }
