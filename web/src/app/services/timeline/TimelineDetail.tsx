@@ -52,16 +52,19 @@ function EventDiff({ serviceId, event }: { serviceId: string; event: TimelineEve
   const after = useRevisionDefinition(serviceId, event.from_revision !== null && event.to_revision !== null ? event.to_revision : null)
   const compares = event.from_revision !== null && event.to_revision !== null
 
-  if (compares && (before.isError || after.isError)) {
-    return (
-      <p className={styles.hint}>
-        The diff could not be loaded. <Link to={`/services/${serviceId}/task-definition`}>Task definition</Link>
-      </p>
-    )
-  }
-  if (compares && (before.isPending || after.isPending)) return <Skeleton lines={3} label="Loading the diff" />
+  const failed = compares && (before.isError || after.isError)
+  if (compares && !failed && (before.isPending || after.isPending)) return <Skeleton lines={3} label="Loading the diff" />
   const rows = [...event.diff, ...(compares && before.data && after.data ? revisionDiff(before.data.definition, after.data.definition) : [])]
-  return rows.length > 0 ? <DiffGrid rows={rows} /> : null
+  return (
+    <>
+      {failed && (
+        <p className={styles.hint}>
+          The diff could not be loaded. <Link to={`/services/${serviceId}/task-definition`}>Task definition</Link>
+        </p>
+      )}
+      {rows.length > 0 && <DiffGrid rows={rows} />}
+    </>
+  )
 }
 
 /** A stopped task may be gone from the Tasks list, so it is fetched on its own and shown in the usual drawer. */
@@ -119,7 +122,7 @@ export function TimelineDetail({ serviceId, service, event, isTrigger }: Timelin
               Open logs at this time
             </span>
           )}
-          {event.lane === 'stop' && event.task_id && <OpenTaskButton serviceId={serviceId} taskId={event.task_id} onOpen={onOpen} />}
+          {event.lane === 'stop' && event.task_id && <OpenTaskButton key={event.task_id} serviceId={serviceId} taskId={event.task_id} onOpen={onOpen} />}
         </div>
         {!service.can.logs && <LockNote kind="why">{logsReason}</LockNote>}
       </div>

@@ -54,8 +54,9 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const [syncedSelection, setSyncedSelection] = useState<string | null>(null)
   if (data && selectedId !== syncedSelection) {
     setSyncedSelection(selectedId)
-    const target = data.events.find((event) => event.id === selectedId)
-    if (target && !lanesOn[target.lane]) setLanesOn((current) => ({ ...current, [target.lane]: true }))
+    // Log events are built from the log-errors query, which is off with the lane, so their lane comes from the id.
+    const lane: TimelineLane | undefined = selectedId?.startsWith('log:') ? (hasLogs ? 'logs' : undefined) : data.events.find((event) => event.id === selectedId)?.lane
+    if (lane && !lanesOn[lane]) setLanesOn((current) => ({ ...current, [lane]: true }))
   }
   const from = data ? Date.parse(data.from) : 0
   const to = data ? Date.parse(data.to) : 0

@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { delay, http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ALL_TASKS, SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -176,5 +176,77 @@ describe('TimelineDetail', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await user.click(within(screen.getByRole('table')).getByRole('button', { name: 'Deployed revision 6' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Open task' })).not.toBeInTheDocument())
+  })
+  it('keeps the server diff rows when a revision definition cannot be loaded', async () => {
+    server.use(http.get('/api/services/:id/revisions/:revision', () => HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })))
+    serveTimeline([{ ...TIMELINE_FAILING.events[0], diff: [{ label: 'desired count', from: '2', to: '4' }] }])
+    renderApp(`${route}?event=op%3A4102`)
+
+    const panel = await details()
+    expect(await panel.findByText('The diff could not be loaded.')).toBeInTheDocument()
+    expect(panel.getByText('desired count')).toBeInTheDocument()
+  })
+
+  it('selecting another stop fetches no task until Open task is clicked', async () => {
+    const fetched: string[] = []
+    const stopped = ALL_TASKS.find((task) => task.status === 'STOPPED')!
+    server.use(
+      http.get('/api/services/:id/timeline/tasks/:taskId', ({ params }) => {
+        fetched.push(params.taskId as string)
+        return HttpResponse.json(stopped)
+      }),
+    )
+    renderApp(`${route}?event=${encodeURIComponent(stopEvent.id)}`)
+    const user = userEvent.setup()
+    await user.click(await (await details()).findByRole('button', { name: 'Open task' }))
+    await waitFor(() => expect(fetched).toHaveLength(1))
+    await user.keyboard('{Escape}')
+
+    await user.click(within(screen.getByRole('table')).getByRole('button', { name: 'Task 7b31d2e0 stopped' }))
+    await (await details()).findByText('Task 7b31d2e0 stopped')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(fetched).toHaveLength(1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('caps the logs link at now for a very recent event', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-07T12:00:00Z'))
+      serveTimeline([{ ...TIMELINE_FAILING.events[0], id: 'op:recent', at: '2026-11-07T11:59:50Z', from_revision: null, to_revision: null }])
+      renderApp(`${route}?event=op%3Arecent`)
+
+      const link = await (await details()).findByRole('link', { name: 'Open logs at this time' })
+      expect(link.getAttribute('href')).toBe(`/services/${SERVICE_PAYMENTS.id}/logs?before=${encodeURIComponent('2026-11-07T12:00:00.000Z')}`)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the placeholder and no log text for a log event in the URL without Logs', async () => {
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, can: { ...SERVICE_PAYMENTS.can, logs: false } })))
+    renderApp(`${route}?event=${encodeURIComponent(`log:${Date.parse('2026-11-07T11:50:00Z')}`)}`)
+
+    expect(await screen.findByText('Select an event to see the details.')).toBeInTheDocument()
+    await within(await screen.findByRole('table')).findByRole('button', { name: 'Deployed revision 6' })
+    expect(screen.queryByText(/error lines in/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/OutOfMemoryError: Java heap space/)).not.toBeInTheDocument()
+  })
+
+  it('turns the Log errors lane back on for a log event in the URL when it was switched off before load', async () => {
+    server.use(
+      http.get('/api/services/:id/timeline', async () => {
+        await delay(150)
+        return HttpResponse.json(TIMELINE_FAILING)
+      }),
+    )
+    renderApp(`${route}?event=${encodeURIComponent(`log:${Date.parse('2026-11-07T11:50:00Z')}`)}`)
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Log errors' }))
+
+    expect(await (await details()).findByText('14 error lines in 5 minutes')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Log errors' })).toBeChecked()
   })
 })

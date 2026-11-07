@@ -25,6 +25,15 @@ const clock = (iso: string): string => {
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
 }
 
+// Date.parse also accepts `2026` or a zoneless date, which the API rejects, so only a full RFC 3339 timestamp counts.
+const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/
+
+function parseBefore(value: string | null): string | undefined {
+  if (value === null || !RFC3339.test(value)) return undefined
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : new Date(time).toISOString()
+}
+
 type LevelFilter = 'all' | 'warn' | 'error'
 
 const LEVEL_OPTIONS: { value: LevelFilter; label: string }[] = [
@@ -91,7 +100,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
   // Opened from the Timeline: read history up to this time instead of the latest. An unparseable value is ignored.
   const rawBefore = searchParams.get('before')
-  const beforeParam = rawBefore !== null && !Number.isNaN(Date.parse(rawBefore)) ? rawBefore : undefined
+  const beforeParam = parseBefore(rawBefore)
   const [follow, setFollow] = useState(beforeParam === undefined)
   const boxRef = useRef<HTMLDivElement>(null)
   const autoScrollTopRef = useRef<number | null>(null)
@@ -230,7 +239,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
         { value: 'paused', label: 'Paused' },
       ]}
       value={follow ? 'live' : 'paused'}
-      onChange={(next) => setFollow(next === 'live')}
+      onChange={(next) => (next === 'live' ? backToLatest() : setFollow(false))}
     />
   )
   const statusLine = (
