@@ -443,6 +443,9 @@ func TestChangeSet_RegisterDeployAndScaleHappyPath(t *testing.T) {
 			t.Errorf("operation %q reason = %v", op.Text, op.Details["reason"])
 		}
 		seen[op.Details["op"].(string)] = true
+		if op.Details["op"] == "scale" && (op.Details["from_desired"] != float64(3) || op.Details["to_desired"] != float64(4)) {
+			t.Errorf("scale details = %v, want from_desired 3 and to_desired 4", op.Details)
+		}
 	}
 	for _, op := range []string{"task_definition", "deploy", "scale", "scaling"} {
 		if !seen[op] {
