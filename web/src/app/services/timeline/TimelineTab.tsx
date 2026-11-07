@@ -12,6 +12,7 @@ import { Toggle } from '../../../components/Toggle'
 import { usePhone } from '../../../components/usePhone'
 import { queryPanelError } from '../panelError'
 import { LANES, RANGES, formatEventTime, groupMarkers, logEvents, type MarkerGroup } from './model'
+import { TimelineDetail } from './TimelineDetail'
 import { TimelineLanes, type LaneRowState } from './TimelineLanes'
 import styles from './timeline.module.css'
 
@@ -30,7 +31,6 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const phone = usePhone()
   const [searchParams, setSearchParams] = useSearchParams()
   const range = parseRange(searchParams.get('range'))
-  const selectedId = searchParams.get('event')
   const [lanesOn, setLanesOn] = useState<Record<TimelineLane, boolean>>({ change: true, stop: true, alert: true, logs: true, access: true })
 
   const hasLogs = service.can.logs
@@ -49,6 +49,14 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
     )
 
   const data = timeline.data
+  // Without ?event= the incident's trigger is shown, so the first look at a failing service lands on its likely cause.
+  const selectedId = searchParams.get('event') ?? data?.incident?.trigger?.id ?? null
+  const [syncedSelection, setSyncedSelection] = useState<string | null>(null)
+  if (data && selectedId !== syncedSelection) {
+    setSyncedSelection(selectedId)
+    const target = data.events.find((event) => event.id === selectedId)
+    if (target && !lanesOn[target.lane]) setLanesOn((current) => ({ ...current, [target.lane]: true }))
+  }
   const from = data ? Date.parse(data.from) : 0
   const to = data ? Date.parse(data.to) : 0
   const withDate = to - from > DAY_MS
@@ -194,7 +202,19 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
         )}
       </div>
       <div className={styles.detail}>
-        <Panel title="Details">{!selectedEvent && <p className={styles.hint}>Select an event to see the details.</p>}</Panel>
+        {selectedEvent ? (
+          <TimelineDetail
+            serviceId={serviceId}
+            service={service}
+            event={selectedEvent}
+            isTrigger={selectedEvent.id === data?.incident?.trigger?.id}
+            rollbackRevision={data?.incident?.rollback_revision ?? null}
+          />
+        ) : (
+          <Panel title="Details">
+            <p className={styles.hint}>Select an event to see the details.</p>
+          </Panel>
+        )}
       </div>
     </div>
   )
