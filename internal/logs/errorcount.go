@@ -264,8 +264,8 @@ func (c *ErrorCounter) scanBucket(ctx context.Context, api awsx.LogsAPI, target 
 	samples := map[string]string{}
 	for _, prefix := range prefixes {
 		in := &cloudwatchlogs.FilterLogEventsInput{
-			LogGroupName:  aws.String(group),
-			StartTime:     aws.Int64(start.UnixMilli()),
+			LogGroupName: aws.String(group),
+			StartTime:    aws.Int64(start.UnixMilli()),
 			// EndTime is inclusive; the boundary millisecond belongs to the next bucket.
 			EndTime:       aws.Int64(start.Add(size).UnixMilli() - 1),
 			FilterPattern: aws.String(ErrorTermsPattern),
