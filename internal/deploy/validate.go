@@ -188,6 +188,17 @@ func stepped(min, max, step int) []int {
 	return values
 }
 
+// FargateSizes returns every valid {cpuUnits, memoryMiB} pair as a fresh slice.
+func FargateSizes() [][2]int {
+	var sizes [][2]int
+	for cpuUnits, memories := range fargateSizes {
+		for _, memoryMiB := range memories {
+			sizes = append(sizes, [2]int{cpuUnits, memoryMiB})
+		}
+	}
+	return sizes
+}
+
 // FargateValid reports whether cpuUnits with memoryMiB is a valid Fargate task size.
 func FargateValid(cpuUnits, memoryMiB int) bool {
 	for _, allowed := range fargateSizes[cpuUnits] {
