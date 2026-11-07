@@ -29,10 +29,11 @@ import { SERVICE_COLUMN_OPTIONS, ServicesTable } from './ServicesTable'
 import { presentValues } from './ServiceCardMetrics'
 import styles from './clusters.module.css'
 
-/** Tasks that are neither Fargate nor Fargate Spot: EC2, external or a custom capacity provider. */
-const OTHER_CAPACITY_LABEL = 'EC2/other'
 import { serviceSeverity } from './serviceSeverity'
 import type { TagTarget } from './tagTarget'
+
+/** Tasks that are neither Fargate nor Fargate Spot: EC2, external or a custom capacity provider. */
+const OTHER_CAPACITY_LABEL = 'EC2/other'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
 const STOP_ERROR_COLOR = 'var(--danger)'

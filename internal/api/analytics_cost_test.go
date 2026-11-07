@@ -1,6 +1,9 @@
 package api
 
 import (
+	"errors"
+	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -535,4 +539,13 @@ func TestAnalyticsCost_AccountLabelFallsBackToTheID(t *testing.T) {
 			t.Errorf("account group %+v, want the id as its label", group)
 		}
 	}
+}
+
+func TestWarnUnreadableFloorsWithoutNewDoesNotPanic(t *testing.T) {
+	s := &Server{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	fact := store.CostServiceFact{
+		Key:                  model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "123456789012", Region: "us-east-1", Cluster: "prod"}, Service: "api"},
+		ContainerDefinitions: []byte(`[{`),
+	}
+	s.warnUnreadableFloors(fact, errors.New("unexpected end of JSON input"))
 }

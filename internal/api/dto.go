@@ -432,7 +432,7 @@ type AZCountDTO struct {
 	Count int    `json:"count"`
 }
 
-// ClusterCapacityDTO counts a cluster's running tasks by Fargate capacity.
+// ClusterCapacityDTO counts a cluster's running tasks by Fargate capacity. Other covers EC2, external and custom capacity providers.
 type ClusterCapacityDTO struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`

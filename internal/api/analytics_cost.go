@@ -320,7 +320,10 @@ func (s *Server) warnUnreadableFloors(fact store.CostServiceFact, err error) {
 	hash := fnv.New64a()
 	hash.Write(fact.ContainerDefinitions) //nolint:errcheck // hash writes never fail
 	key := fact.Key.ID() + "/" + strconv.FormatUint(hash.Sum64(), 16)
-	if _, seen := s.costWarned.LoadOrStore(key, struct{}{}); !seen {
-		s.Log.Warn("cost: cannot read container minimums", "service", fact.Key.ID(), "err", err)
+	if s.costWarned != nil {
+		if _, seen := s.costWarned.LoadOrStore(key, struct{}{}); seen {
+			return
+		}
 	}
+	s.Log.Warn("cost: cannot read container minimums", "service", fact.Key.ID(), "err", err)
 }

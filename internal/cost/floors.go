@@ -26,6 +26,9 @@ func ContainerFloors(containerDefinitions []byte) (Floors, error) {
 		return Floors{}, fmt.Errorf("parse containerDefinitions: %w", err)
 	}
 	var floors Floors
+	// Go deliberately uses max(Memory, MemoryReservation), the conservative reading for choosing a suggestion, while the
+	// Deploy tab's blocking check (web/src/app/services/deploy/draft.ts, containerFloors) uses AWS's reservation-else-memory
+	// rule, so a suggestion is never below what AWS would reject.
 	for _, container := range containers {
 		floors.CPUUnits += container.Cpu
 		floors.MemoryMiB += max(valueOrZero(container.Memory), valueOrZero(container.MemoryReservation))
