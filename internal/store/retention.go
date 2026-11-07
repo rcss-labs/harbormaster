@@ -148,7 +148,7 @@ func (s *Store) ageOutScanImages(ctx context.Context, now, cutoff time.Time) (in
 				return err
 			}
 		}
-		const unlinkedCandidates = `role = 'candidate' and not exists (
+		const unlinkedCandidates = `role = 'candidate' and status <> 'scanning' and not exists (
 			select 1 from scan_candidate_links where candidate_digest = scan_images.digest)`
 		if _, err := tx.Exec(ctx, `delete from scan_findings where digest in (
 			select digest from scan_images where `+unlinkedCandidates+`)`); err != nil {

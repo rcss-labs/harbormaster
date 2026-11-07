@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -244,11 +245,11 @@ func TestRunRetention_AgesOutImagesAndKeepsCandidateRowsForLiveOnes(t *testing.T
 		}
 		return n
 	}
-	aged, _ := s.GetScanImage(ctx, "sha256:aged")
+	aged := mustGetScanImage(t, s, "sha256:aged")
 	if aged.Status != "aged_out" {
 		t.Fatalf("aged image status = %q, want aged_out", aged.Status)
 	}
-	live, _ := s.GetScanImage(ctx, "sha256:live")
+	live := mustGetScanImage(t, s, "sha256:live")
 	if live.Status != "queued" {
 		t.Fatalf("live image status = %q, want untouched", live.Status)
 	}
@@ -306,9 +307,61 @@ func TestRunRetention_DeletesFinishedRunsWithTheirImages(t *testing.T) {
 		t.Fatalf("scan_runs deleted = %d, want 1 (%v)", res["scan_runs"], res)
 	}
 	var runs, batchRows int
-	_ = s.Pool.QueryRow(ctx, `select count(*) from scan_runs`).Scan(&runs)
-	_ = s.Pool.QueryRow(ctx, `select count(*) from scan_run_images where run_id = $1`, oldRun).Scan(&batchRows)
+	if err := s.Pool.QueryRow(ctx, `select count(*) from scan_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, `select count(*) from scan_run_images where run_id = $1`, oldRun).Scan(&batchRows); err != nil {
+		t.Fatal(err)
+	}
 	if runs != 2 || batchRows != 0 {
 		t.Fatalf("runs left = %d (want 2), batch rows of deleted run = %d (want 0)", runs, batchRows)
+	}
+}
+
+func TestRunRetention_UnlinkedCandidateWithSBOMIsDeletedInTwoPasses(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	seedScanImages(t, s, now, scanSeen("sha256:cand", "ecr", "candidate"), scanSeen("sha256:busy", "ecr", "candidate"))
+	for _, sql := range []string{
+		`update scan_images set sbom_key = 'sbom/' || digest where role = 'candidate'`,
+		`update scan_images set status = 'scanning' where digest = 'sha256:busy'`,
+		`insert into scan_findings (digest, vuln_id, package_name, package_version, severity, first_seen_at, last_seen_at, run_id)
+			select digest, 'CVE-0000-0001', 'p', '1', 'high', now(), now(), 1 from scan_images`,
+	} {
+		if _, err := s.Pool.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retention := store.Retention{ScanImages: 90 * 24 * time.Hour}
+
+	if _, err := s.RunRetention(ctx, now, retention); err != nil {
+		t.Fatal(err)
+	}
+	cand := mustGetScanImage(t, s, "sha256:cand")
+	if cand.Status != "aged_out" {
+		t.Fatalf("first pass candidate status = %q, want aged_out", cand.Status)
+	}
+	keys, err := s.AgedOutSBOMKeys(ctx, 10)
+	if err != nil || len(keys) != 1 || keys[0].Digest != "sha256:cand" {
+		t.Fatalf("aged out keys = %+v err %v, want the candidate", keys, err)
+	}
+	var findings int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from scan_findings where digest = 'sha256:cand'`).Scan(&findings); err != nil || findings != 0 {
+		t.Fatalf("candidate findings = %d err %v, want 0", findings, err)
+	}
+
+	if err := s.ClearSBOMKey(ctx, "sha256:cand"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunRetention(ctx, now, retention); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetScanImage(ctx, "sha256:cand"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second pass: GetScanImage err = %v, want ErrNotFound", err)
+	}
+	// A candidate being scanned right now is not touched, even with no link yet.
+	if busy := mustGetScanImage(t, s, "sha256:busy"); busy.Status != "scanning" {
+		t.Fatalf("scanning candidate status = %q, want untouched", busy.Status)
 	}
 }

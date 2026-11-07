@@ -71,27 +71,29 @@ func (s *Store) queryScanImages(ctx context.Context, sql string, args ...any) ([
 	return out, rows.Err()
 }
 
-// The insert carries the row's first state; the conflict branch only touches rows seen running.
+// The insert carries the row's first state (queued, or unsupported for a non-ECR registry). On conflict, an image seen
+// running is touched and promoted; an aged_out row seen in any role takes the insert's state again.
 // "xmax = 0" is true only for a row this statement inserted.
 const upsertScanImageSeenSQL = `insert into scan_images (digest, platform, image_ref, tag, registry_kind, registry_account_id,
 	  registry_region, repository, role, status, failure_code, first_seen_at, last_seen_running_at, updated_at)
 	values ($1, nullif($2, ''), $3, nullif($4, ''), $5, nullif($6, ''), nullif($7, ''), nullif($8, ''), $9,
 	  $10, $11, $12, case when $9 = 'running' then $12::timestamptz end, $12)
 	on conflict (digest) do update set
-	  role = 'running',
-	  last_seen_running_at = $12,
-	  status = case when scan_images.status = 'aged_out' then 'queued' else scan_images.status end,
+	  role = case when excluded.role = 'running' then 'running'
+	    when scan_images.status = 'aged_out' then 'candidate' else scan_images.role end,
+	  last_seen_running_at = case when excluded.role = 'running' then $12 else scan_images.last_seen_running_at end,
+	  status = case when scan_images.status = 'aged_out' then excluded.status else scan_images.status end,
 	  attempts = case when scan_images.status = 'aged_out' then 0 else scan_images.attempts end,
 	  sbom_key = case when scan_images.status = 'aged_out' then null else scan_images.sbom_key end,
 	  next_attempt_at = case when scan_images.status = 'aged_out' then null else scan_images.next_attempt_at end,
-	  failure_code = case when scan_images.status = 'aged_out' then null else scan_images.failure_code end,
+	  failure_code = case when scan_images.status = 'aged_out' then excluded.failure_code else scan_images.failure_code end,
 	  failure_detail = case when scan_images.status = 'aged_out' then null else scan_images.failure_detail end,
 	  updated_at = $12
-	where excluded.role = 'running'
+	where excluded.role = 'running' or scan_images.status = 'aged_out'
 	returning (xmax = 0)`
 
 // UpsertScanImagesSeen records images the poller saw and returns the digests that were new.
-// Only images seen running touch an existing row; a rollback to an aged-out image queues it again.
+// Only images seen running, or aged-out rows seen again, change an existing row.
 func (s *Store) UpsertScanImagesSeen(ctx context.Context, seen []ScanImageSeen, now time.Time) ([]string, error) {
 	newDigests := []string{}
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
@@ -157,17 +159,19 @@ func (s *Store) ListScanImages(ctx context.Context, digests []string) ([]ScanIma
 	return imgs, nil
 }
 
-// MarkScanImagesScanning moves the given digests of a run's batch to scanning.
+// MarkScanImagesScanning moves the given digests of a run's batch to scanning; scanned images are allowed for rematch runs.
 func (s *Store) MarkScanImagesScanning(ctx context.Context, digests []string, runID int64) error {
 	_, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanning', updated_at = now()
-		where digest = any($1) and digest in (select digest from scan_run_images where run_id = $2)`, digests, runID)
+		where digest = any($1) and status in ('queued', 'scanned')
+		  and digest in (select digest from scan_run_images where run_id = $2)`, digests, runID)
 	if err != nil {
 		return fmt.Errorf("mark scan images scanning: %w", err)
 	}
 	return nil
 }
 
-// RequeueScanImages counts a failed attempt and queues the images again; the third attempt marks them failed.
+// RequeueScanImages counts a failed attempt of images still scanning and queues them again; the third attempt marks them failed.
+// Rows in any other state are left alone, so a repeated import after failover counts nothing twice.
 func (s *Store) RequeueScanImages(ctx context.Context, digests []string, nextAttempt time.Time, large bool, failureCode, detail string) error {
 	_, err := s.Pool.Exec(ctx, `update scan_images set
 		  attempts = attempts + 1,
@@ -176,7 +180,7 @@ func (s *Store) RequeueScanImages(ctx context.Context, digests []string, nextAtt
 		  large = large or $3,
 		  failure_code = nullif($4, ''), failure_detail = nullif($5, ''),
 		  updated_at = now()
-		where digest = any($1)`, digests, nextAttempt, large, failureCode, detail, maxScanAttempts)
+		where digest = any($1) and status = 'scanning'`, digests, nextAttempt, large, failureCode, detail, maxScanAttempts)
 	if err != nil {
 		return fmt.Errorf("requeue scan images: %w", err)
 	}
@@ -225,8 +229,9 @@ func (s *Store) AgedOutSBOMKeys(ctx context.Context, limit int) ([]struct{ Diges
 	return out, rows.Err()
 }
 
+// ClearSBOMKey forgets the key of an aged-out image once its object is deleted.
 func (s *Store) ClearSBOMKey(ctx context.Context, digest string) error {
-	if _, err := s.Pool.Exec(ctx, `update scan_images set sbom_key = null, updated_at = now() where digest = $1`, digest); err != nil {
+	if _, err := s.Pool.Exec(ctx, `update scan_images set sbom_key = null, updated_at = now() where digest = $1 and status = 'aged_out'`, digest); err != nil {
 		return fmt.Errorf("clear sbom key: %w", err)
 	}
 	return nil
