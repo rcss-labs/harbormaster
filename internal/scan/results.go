@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -81,13 +83,16 @@ var (
 // maxClockSkew is how far in the future a scanner-supplied time may be.
 const maxClockSkew = 5 * time.Minute
 
+// maxWarnings caps the manifest warnings kept before they are summarised.
+const maxWarnings = 20
+
 // SanitizeText drops control characters and invalid UTF-8, then cuts to MaxStringLen bytes.
 func SanitizeText(s string) string { return sanitizeLimit(s, MaxStringLen) }
 
 func sanitizeLimit(s string, limit int) string {
 	var b strings.Builder
 	for _, r := range s {
-		if r == utf8.RuneError || unicode.IsControl(r) {
+		if r == utf8.RuneError || isInvisible(r) {
 			continue
 		}
 		if b.Len()+utf8.RuneLen(r) > limit {
@@ -98,6 +103,30 @@ func sanitizeLimit(s string, limit int) string {
 	return b.String()
 }
 
+// isInvisible covers control, format (bidi, zero-width, tag) and line or
+// paragraph separator characters, none of which belong in displayed text.
+func isInvisible(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r)
+}
+
+// safeHTTPSURL returns raw when it is a plain https URL with a host and no
+// credentials; it checks the raw value so that stripping cannot repair a bad URL.
+func safeHTTPSURL(raw string) string {
+	if raw == "" || len(raw) > MaxURLLen || !strings.HasPrefix(raw, "https://") {
+		return ""
+	}
+	for _, r := range raw {
+		if r == '\\' || r == utf8.RuneError || unicode.IsSpace(r) || isInvisible(r) {
+			return ""
+		}
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	return raw
+}
+
 func normaliseSeverity(s string) string {
 	switch v := strings.ToLower(strings.TrimSpace(s)); v {
 	case SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow, SeverityNegligible:
@@ -106,19 +135,70 @@ func normaliseSeverity(s string) string {
 	return SeverityUnknown
 }
 
+// decodeBounded decodes exactly one JSON document. Errors are fixed text:
+// decoder errors can echo attacker-controlled content.
 func decodeBounded(data []byte, limit int, what string, into any) error {
 	if len(data) > limit {
 		return fmt.Errorf("%s is larger than %d bytes", what, limit)
 	}
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(into); err != nil {
-		return fmt.Errorf("%s is not valid JSON: %w", what, err)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(into); err != nil {
+		return fmt.Errorf("%s is not valid JSON", what)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("%s has data after the JSON document", what)
 	}
 	return nil
 }
 
+// rawResult is Result with the findings left undecoded so they can be read one at a time.
+type rawResult struct {
+	Digest          string          `json:"digest"`
+	PlatformDigest  string          `json:"platform_digest"`
+	Platform        string          `json:"platform"`
+	Status          string          `json:"status"`
+	SyftVersion     string          `json:"syft_version"`
+	SBOMGeneratedAt time.Time       `json:"sbom_generated_at"`
+	Packages        int64           `json:"packages"`
+	Findings        json.RawMessage `json:"findings"`
+	Truncated       bool            `json:"truncated"`
+}
+
+// readFindings decodes the findings array element by element and stops after
+// maxRawFindings elements, so a body of many tiny elements cannot balloon memory.
+func readFindings(raw json.RawMessage, handle func(Finding) bool) (cut bool, err error) {
+	if len(raw) == 0 {
+		return false, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	token, tokenErr := dec.Token()
+	if tokenErr != nil {
+		return false, errors.New("result findings are not valid")
+	}
+	if token == nil {
+		return false, nil
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '[' {
+		return false, errors.New("result findings are not a list")
+	}
+	for read := 0; dec.More(); read++ {
+		if read >= 2*MaxFindings {
+			return true, nil
+		}
+		var f Finding
+		if err := dec.Decode(&f); err != nil {
+			return false, errors.New("result finding is not valid")
+		}
+		if !handle(f) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ParseResult validates one image's result file. The input is untrusted.
 func ParseResult(data []byte, wantDigest string) (Result, error) {
-	var raw Result
+	var raw rawResult
 	if err := decodeBounded(data, MaxResultBytes, "result", &raw); err != nil {
 		return Result{}, err
 	}
@@ -128,12 +208,18 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 	if raw.Status != StatusScanned {
 		return Result{}, errors.New("result status is not scanned")
 	}
+	if raw.Packages < 0 || raw.Packages > math.MaxInt32 {
+		return Result{}, errors.New("result package count is out of range")
+	}
+	if raw.SBOMGeneratedAt.After(time.Now().Add(maxClockSkew)) {
+		return Result{}, errors.New("result SBOM time is in the future")
+	}
 
 	res := Result{
 		Digest:          raw.Digest,
 		Status:          StatusScanned,
 		SBOMGeneratedAt: raw.SBOMGeneratedAt,
-		Packages:        max(raw.Packages, 0),
+		Packages:        int(raw.Packages),
 		Truncated:       raw.Truncated,
 	}
 	if digestPattern.MatchString(raw.PlatformDigest) {
@@ -147,11 +233,11 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 	}
 
 	type dedupeKey struct{ vuln, pkg, version string }
-	seen := make(map[dedupeKey]struct{}, len(raw.Findings))
-	for _, f := range raw.Findings {
+	seen := make(map[dedupeKey]struct{}, MaxFindings)
+	cut, err := readFindings(raw.Findings, func(f Finding) bool {
 		if !vulnIDPattern.MatchString(f.VulnID) {
 			res.Truncated = true
-			continue
+			return true
 		}
 		clean := Finding{
 			VulnID:         f.VulnID,
@@ -163,24 +249,29 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 			FixedVersion:   SanitizeText(f.FixedVersion),
 			FixState:       SanitizeText(f.FixState),
 			DataSource:     SanitizeText(f.DataSource),
+			URL:            safeHTTPSURL(f.URL),
 		}
 		if f.CVSS != nil && !math.IsNaN(*f.CVSS) {
 			score := math.Min(math.Max(*f.CVSS, 0), 10)
 			clean.CVSS = &score
 		}
-		if url := sanitizeLimit(f.URL, MaxURLLen); strings.HasPrefix(url, "https://") {
-			clean.URL = url
-		}
 		key := dedupeKey{clean.VulnID, clean.PackageName, clean.PackageVersion}
 		if _, dup := seen[key]; dup {
-			continue
+			return true
 		}
 		if len(res.Findings) >= MaxFindings {
 			res.Truncated = true
-			break
+			return false
 		}
 		seen[key] = struct{}{}
 		res.Findings = append(res.Findings, clean)
+		return true
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	if cut {
+		res.Truncated = true
 	}
 	return res, nil
 }
@@ -193,7 +284,7 @@ func ParseManifest(data []byte, wantRunID int64, wantDigests []string) (Manifest
 		return Manifest{}, nil, err
 	}
 	if raw.RunID != wantRunID {
-		return Manifest{}, nil, fmt.Errorf("manifest run id %d does not match run %d", raw.RunID, wantRunID)
+		return Manifest{}, nil, errors.New("manifest run id does not match the run")
 	}
 	switch raw.Status {
 	case ManifestSucceeded, ManifestFailed, ManifestDBStale:
@@ -203,9 +294,11 @@ func ParseManifest(data []byte, wantRunID int64, wantDigests []string) (Manifest
 
 	m := Manifest{
 		RunID:  raw.RunID,
-		Kind:   SanitizeText(raw.Kind),
 		Status: raw.Status,
 		Error:  SanitizeText(raw.Error),
+	}
+	if raw.Kind == ModeScan || raw.Kind == ModeRematch {
+		m.Kind = raw.Kind
 	}
 	if digestPattern.MatchString(raw.ScannerImageDigest) {
 		m.ScannerImageDigest = raw.ScannerImageDigest
@@ -228,10 +321,14 @@ func ParseManifest(data []byte, wantRunID int64, wantDigests []string) (Manifest
 		wanted[digest] = struct{}{}
 	}
 	var warnings []string
+	droppedImages := 0
 	listed := make(map[string]struct{}, len(raw.Images))
 	for _, image := range raw.Images {
 		if _, ok := wanted[image.Digest]; !ok {
-			warnings = append(warnings, fmt.Sprintf("manifest names image %q that is not in the job; dropped", SanitizeText(image.Digest)))
+			droppedImages++
+			if len(warnings) < maxWarnings {
+				warnings = append(warnings, fmt.Sprintf("manifest names image %q that is not in the job; dropped", SanitizeText(image.Digest)))
+			}
 			continue
 		}
 		if _, dup := listed[image.Digest]; dup {
@@ -240,17 +337,25 @@ func ParseManifest(data []byte, wantRunID int64, wantDigests []string) (Manifest
 		listed[image.Digest] = struct{}{}
 
 		outcome := ImageOutcome{Digest: image.Digest, Status: image.Status, FailureDetail: SanitizeText(image.FailureDetail)}
+		if image.Status == OutcomeScanned {
+			outcome.FailureDetail = ""
+		}
 		switch image.Status {
 		case OutcomeScanned, OutcomeFailed, OutcomeSkipped:
 		default:
 			outcome.Status = OutcomeFailed
 		}
-		if isKnownCode(image.FailureCode) {
+		if outcome.Status == OutcomeScanned {
+			// a scanned image has no failure
+		} else if isKnownCode(image.FailureCode) {
 			outcome.FailureCode = image.FailureCode
 		} else if image.FailureCode != "" || outcome.Status == OutcomeFailed {
 			outcome.FailureCode = CodeTaskFailed
 		}
 		m.Images = append(m.Images, outcome)
+	}
+	if droppedImages > maxWarnings {
+		warnings = append(warnings, fmt.Sprintf("and %d more", droppedImages-maxWarnings))
 	}
 	return m, warnings, nil
 }

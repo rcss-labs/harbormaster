@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+var (
+	repositoryPattern = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`)
+	tagPattern        = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+)
+
 var ecrHostPattern = regexp.MustCompile(`^([0-9]{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com(\.cn)?$`)
 
 // Ref is a parsed container image reference.
@@ -16,8 +21,13 @@ type Ref struct{ Kind, Host, AccountID, Region, Repository, Tag, Digest string }
 func ParseImageRef(image string) Ref {
 	var r Ref
 	rest := image
+	validParts := true
 	if i := strings.Index(rest, "@"); i >= 0 {
-		r.Digest = rest[i+1:]
+		if digestPattern.MatchString(rest[i+1:]) {
+			r.Digest = rest[i+1:]
+		} else {
+			validParts = false
+		}
 		rest = rest[:i]
 	}
 
@@ -42,6 +52,15 @@ func ParseImageRef(image string) Ref {
 		path = path[:i]
 	}
 	r.Host, r.Repository = host, path
+
+	// an unparseable repository, tag or digest is never reported as ECR
+	if !repositoryPattern.MatchString(path) || (r.Tag != "" && !tagPattern.MatchString(r.Tag)) {
+		validParts = false
+	}
+	if !validParts {
+		r.Kind = KindOther
+		return r
+	}
 
 	switch m := ecrHostPattern.FindStringSubmatch(host); {
 	case m != nil:

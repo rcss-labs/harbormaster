@@ -48,3 +48,29 @@ func TestParseImageRef(t *testing.T) {
 		})
 	}
 }
+
+func TestParseImageRef_HostileAndLookAlikeInputsAreNotECR(t *testing.T) {
+	ecr := "482109375512.dkr.ecr.us-east-1.amazonaws.com"
+	hostile := []string{
+		ecr + "/app@../../x",
+		ecr + "/app@sha256:short",
+		ecr + "/../../../etc:1\nFAKE",
+		ecr + "/app:bad tag",
+		ecr + "/App:1",
+		ecr + "/",
+		ecr + "//app:1",
+		ecr + ".evil.example/app:1",
+		ecr + "@evil.example/app",
+		"evil.example/" + ecr + "/app",
+		"public.ecr.aws/../x:1",
+	}
+	for _, image := range hostile {
+		got := ParseImageRef(image)
+		if got.Kind != KindOther {
+			t.Errorf("ParseImageRef(%q).Kind = %q, want other", image, got.Kind)
+		}
+		if got.Digest != "" && !digestPattern.MatchString(got.Digest) {
+			t.Errorf("ParseImageRef(%q) kept invalid digest %q", image, got.Digest)
+		}
+	}
+}

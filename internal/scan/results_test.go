@@ -1,9 +1,12 @@
 package scan
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -98,9 +101,6 @@ func TestParseResult_TruncatesAndSanitises(t *testing.T) {
 	if got := res.Findings[0].PackageName; len(got) != MaxStringLen || strings.ContainsRune(got, 0) {
 		t.Errorf("package name not sanitised: len %d", len(got))
 	}
-	if len(res.Findings) < 4 {
-		t.FailNow()
-	}
 	if res.Findings[1].Severity != SeverityCritical || res.Findings[2].Severity != SeverityUnknown {
 		t.Errorf("severities: %q %q", res.Findings[1].Severity, res.Findings[2].Severity)
 	}
@@ -121,11 +121,30 @@ func TestParseResult_DropsBadIDsAndURLs(t *testing.T) {
 	if len(res.Findings) != 2 || !res.Truncated {
 		t.Fatalf("bad id should be dropped with Truncated: %+v", res)
 	}
-	if len(res.Findings) < 2 {
-		t.FailNow()
-	}
 	if res.Findings[0].URL != "" || res.Findings[1].URL != "https://example.com/x" {
 		t.Errorf("urls: %q %q", res.Findings[0].URL, res.Findings[1].URL)
+	}
+
+	hostileURLs := []string{
+		"https://aws.amazon.com@evil.example/x",
+		"https://",
+		"https:///evil",
+		"https://\\evil.example",
+		"https:// evil",
+		"ht\ntps://ok.example/",
+		"https://ok.example/a\u202eb",
+		"http://ok.example/",
+	}
+	for _, raw := range hostileURLs {
+		f := sampleFinding(1)
+		f.URL = raw
+		res, err := ParseResult(resultBody(t, digestA, []Finding{f}, nil), digestA)
+		if err != nil || len(res.Findings) != 1 {
+			t.Fatalf("%q: %+v %v", raw, res, err)
+		}
+		if res.Findings[0].URL != "" {
+			t.Errorf("url %q should be emptied, got %q", raw, res.Findings[0].URL)
+		}
 	}
 }
 
@@ -300,5 +319,151 @@ func TestParseDBLatest_ValidatesKeyAndChecksum(t *testing.T) {
 func TestSeverityCounts_Total(t *testing.T) {
 	if got := (SeverityCounts{1, 2, 3, 4, 5, 6}).Total(); got != 21 {
 		t.Errorf("Total = %d, want 21", got)
+	}
+}
+
+func TestParseResult_BoundsMemoryOnManyEmptyFindings(t *testing.T) {
+	var body bytes.Buffer
+	body.WriteString(`{"digest":"` + digestA + `","status":"scanned","findings":[`)
+	for body.Len() < MaxResultBytes-10 {
+		body.WriteString("{},")
+	}
+	body.WriteString("{}]}")
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	res, err := ParseResult(body.Bytes(), digestA)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Truncated || len(res.Findings) != 0 {
+		t.Errorf("want truncated and empty, got %d findings truncated=%v", len(res.Findings), res.Truncated)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 100<<20 {
+		t.Errorf("parsing allocated %d MiB, want under 100", allocated>>20)
+	}
+}
+
+func TestParseResult_RejectsBadPackagesAndFutureSBOM(t *testing.T) {
+	for _, packages := range []any{-1, int64(math.MaxInt32) + 1, 1e30} {
+		body := resultBody(t, digestA, nil, func(m map[string]any) { m["packages"] = packages })
+		if _, err := ParseResult(body, digestA); err == nil {
+			t.Errorf("packages %v should be rejected", packages)
+		}
+	}
+	body := resultBody(t, digestA, nil, func(m map[string]any) { m["packages"] = math.MaxInt32 })
+	if _, err := ParseResult(body, digestA); err != nil {
+		t.Errorf("max int32 packages should be accepted: %v", err)
+	}
+	body = resultBody(t, digestA, nil, func(m map[string]any) {
+		m["sbom_generated_at"] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	})
+	if _, err := ParseResult(body, digestA); err == nil {
+		t.Error("future sbom_generated_at should be rejected")
+	}
+}
+
+func TestParseResult_RejectsTrailingBytes(t *testing.T) {
+	body := append(resultBody(t, digestA, nil, nil), []byte(` {"x":1}`)...)
+	if _, err := ParseResult(body, digestA); err == nil {
+		t.Error("trailing JSON should be rejected")
+	}
+	manifest := append(manifestBody(t, nil), []byte("garbage")...)
+	if _, _, err := ParseManifest(manifest, 42, []string{digestA}); err == nil {
+		t.Error("trailing bytes after manifest should be rejected")
+	}
+}
+
+func TestParsers_ErrorsDoNotCarryAttackerText(t *testing.T) {
+	huge := strings.Repeat("Z", 1<<20)
+	now := time.Now()
+	bodies := map[string]func() error{
+		"result time": func() error {
+			_, err := ParseResult([]byte(`{"digest":"`+digestA+`","status":"scanned","sbom_generated_at":"`+huge+`"}`), digestA)
+			return err
+		},
+		"result digest": func() error {
+			_, err := ParseResult([]byte(`{"digest":"`+huge+`","status":"scanned"}`), digestA)
+			return err
+		},
+		"result type": func() error {
+			_, err := ParseResult([]byte(`{"digest":"`+digestA+`","status":"scanned","findings":[{"vuln_id":5}]}`), digestA)
+			return err
+		},
+		"manifest status": func() error {
+			_, _, err := ParseManifest([]byte(`{"run_id":42,"status":"`+huge+`"}`), 42, nil)
+			return err
+		},
+		"manifest time": func() error {
+			_, _, err := ParseManifest([]byte(`{"run_id":42,"status":"failed","db_built_at":"`+huge+`"}`), 42, nil)
+			return err
+		},
+		"latest time": func() error {
+			_, err := ParseDBLatest([]byte(`{"built_at":"`+huge+`"}`), now)
+			return err
+		},
+		"upstream path": func() error {
+			_, err := ParseUpstreamDB([]byte(`{"built":"2026-01-01T00:00:00Z","path":"`+huge+`","checksum":"`+digestA+`"}`), now)
+			return err
+		},
+	}
+	for name, run := range bodies {
+		err := run()
+		if err == nil {
+			t.Errorf("%s: want an error", name)
+			continue
+		}
+		if len(err.Error()) > 200 {
+			t.Errorf("%s: error is %d bytes long", name, len(err.Error()))
+		}
+	}
+}
+
+func TestSanitizeText_DropsInvisibleAndBidiCharacters(t *testing.T) {
+	// right-to-left override, isolate, zero-width space, line and paragraph separators, a tag character
+	in := "a\u202eb\u2066c\u200bd\u2028e\u2029f\U000E0041g"
+	if got := SanitizeText(in); got != "abcdefg" {
+		t.Errorf("SanitizeText = %q, want %q", got, "abcdefg")
+	}
+}
+
+func TestParseManifest_WarningsAreCapped(t *testing.T) {
+	var images []map[string]any
+	for i := 0; i < 500; i++ {
+		images = append(images, map[string]any{"digest": fmt.Sprintf("sha256:%064x", i+1000), "status": "scanned"})
+	}
+	body := manifestBody(t, func(m map[string]any) { m["images"] = images })
+	_, warnings, err := ParseManifest(body, 42, []string{digestA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 21 {
+		t.Fatalf("want 20 warnings plus a summary, got %d", len(warnings))
+	}
+	if warnings[20] != "and 480 more" {
+		t.Errorf("summary = %q", warnings[20])
+	}
+}
+
+func TestParseManifest_KindAndScannedOutcomeWhitelists(t *testing.T) {
+	body := manifestBody(t, func(m map[string]any) {
+		m["kind"] = "db-refresh"
+		m["images"] = []map[string]any{{"digest": digestA, "status": "scanned", "failure_code": "pull_denied", "failure_detail": "stale text"}}
+	})
+	m, _, err := ParseManifest(body, 42, []string{digestA})
+	if err != nil || len(m.Images) != 1 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if m.Kind != "" {
+		t.Errorf("unknown kind should be emptied, got %q", m.Kind)
+	}
+	if m.Images[0].FailureCode != "" || m.Images[0].FailureDetail != "" {
+		t.Errorf("scanned outcome should carry no failure: %+v", m.Images[0])
+	}
+	m, _, err = ParseManifest(manifestBody(t, func(m map[string]any) { m["kind"] = "rematch" }), 42, nil)
+	if err != nil || m.Kind != ModeRematch {
+		t.Errorf("rematch kind should be kept: %q %v", m.Kind, err)
 	}
 }
