@@ -202,6 +202,8 @@ export interface ClusterDTO extends ClusterCardDTO {
   arn: string
   console_url: string
   fargate_tasks: number
+  /** Running tasks that are neither Fargate nor Fargate Spot: EC2, external or a custom capacity provider. */
+  other_tasks: number
   tasks_history_72h: PointDTO[]
   stops_per_hour: StopsHourDTO[]
   services_detail: ClusterServiceDTO[]
@@ -350,7 +352,7 @@ export interface TasksListDTO {
   summary: {
     by_status: { running_healthy: number; running_unhealthy: number; stopped_error: number; stopped_normal: number; stopped_expected: number }
     by_az: { az: string; count: number }[]
-    by_cluster: { id: string; name: string; fargate: number; spot: number }[]
+    by_cluster: { id: string; name: string; fargate: number; spot: number; other: number }[]
     stop_reasons: ReasonCountDTO[]
   }
 }

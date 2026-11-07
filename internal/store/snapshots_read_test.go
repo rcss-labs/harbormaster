@@ -591,3 +591,33 @@ func TestTaskSummaryFor_StatusSinceNarrowsOnlyTheStoppedCounts(t *testing.T) {
 		t.Errorf("StatusSince changed stop reasons: %d, want 5", stopReasons(recent))
 	}
 }
+
+func TestTaskSummary_ByClusterSeparatesFargateSpotAndOther(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err := s.UpsertClusters(ctx, []model.Cluster{{Key: clusterKey("mixed"), Status: "ACTIVE", PolledAt: now}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := func(id, launchType, capacityProvider string) model.Task {
+		return model.Task{Cluster: clusterKey("mixed"), ARN: readTaskARN("mixed", id), LastStatus: "RUNNING",
+			LaunchType: launchType, CapacityProvider: capacityProvider, CreatedAt: now, PolledAt: now}
+	}
+	if _, err := s.UpsertTasks(ctx, []model.Task{
+		task("fargate-provider", "", "FARGATE"),
+		task("fargate-launch-type", "FARGATE", ""),
+		task("spot", "", "FARGATE_SPOT"),
+		task("ec2", "EC2", ""),
+		task("custom-provider", "", "ec2-asg-provider"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := s.TaskSummary(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := sum.ByCluster[clusterKey("mixed")]; c.Fargate != 2 || c.Spot != 1 || c.Other != 2 {
+		t.Errorf("ByCluster mixed = %+v, want 2 fargate, 1 spot, 2 other (EC2 and a custom provider)", c)
+	}
+}

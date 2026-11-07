@@ -203,7 +203,7 @@ func (s *Server) taskSummaryDTO(ctx context.Context, sc scope, base store.TaskQu
 	}
 	sort.Slice(out.ByAZ, func(i, j int) bool { return out.ByAZ[i].AZ < out.ByAZ[j].AZ })
 	for k, c := range summary.ByCluster {
-		out.ByCluster = append(out.ByCluster, ClusterCapacityDTO{ID: k.ID(), Name: k.Cluster, Fargate: c.Fargate, Spot: c.Spot})
+		out.ByCluster = append(out.ByCluster, ClusterCapacityDTO{ID: k.ID(), Name: k.Cluster, Fargate: c.Fargate, Spot: c.Spot, Other: c.Other})
 	}
 	sort.Slice(out.ByCluster, func(i, j int) bool {
 		a, b := out.ByCluster[i], out.ByCluster[j]

@@ -391,11 +391,12 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
   const stopped = items.filter((t) => t.status === 'STOPPED')
   const azCounts = new Map<string, number>()
   for (const task of running) azCounts.set(task.az, (azCounts.get(task.az) ?? 0) + 1)
-  const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number }>()
+  const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number; other: number }>()
   for (const task of running) {
-    const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0 }
+    const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0, other: 0 }
     if (task.capacity === 'FARGATE_SPOT') row.spot++
-    else row.fargate++
+    else if (task.capacity === 'FARGATE') row.fargate++
+    else row.other++
     clusters.set(task.cluster.id, row)
   }
   return {
@@ -561,6 +562,7 @@ function clusterDetail(def: ClusterDef): ClusterDTO {
     arn: `arn:aws:ecs:${def.region}:${def.account.account_id}:cluster/${def.name}`,
     console_url: `https://${def.region}.console.aws.amazon.com/ecs/v2/clusters/${def.name}`,
     fargate_tasks: running.filter((t) => t.capacity === 'FARGATE').length,
+    other_tasks: running.filter((t) => t.capacity !== 'FARGATE' && t.capacity !== 'FARGATE_SPOT').length,
     tasks_history_72h: history(card.running, card.desired),
     stops_per_hour: stopsPerHour(def.name.length, def.status === 'needs_attention' || def.status === 'degraded' ? [20, 21, 22] : []),
     services_detail: services,

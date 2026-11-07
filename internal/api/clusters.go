@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/cost"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -314,8 +315,14 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto.VPC = lookup.mostCommonVPC(visibleTasks(sc, view.tasksByCluster[key]))
-	_, _, spot := reserved(view.tasksByCluster[key])
-	dto.FargateTasks = len(view.tasksByCluster[key]) - spot
+	for _, t := range view.tasksByCluster[key] {
+		switch {
+		case cost.IsFargateOnDemand(t.CapacityProvider, t.LaunchType):
+			dto.FargateTasks++
+		case t.CapacityProvider != "FARGATE_SPOT":
+			dto.OtherTasks++
+		}
+	}
 
 	definitions := map[string]model.TaskDefinitionRef{}
 	definition := func(arn string) model.TaskDefinitionRef {

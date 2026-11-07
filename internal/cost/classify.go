@@ -22,13 +22,19 @@ func Classify(capacityProvider, launchType, cpu, memory string) TaskClass {
 		return Unpriced
 	}
 	switch {
-	case capacityProvider == "FARGATE", capacityProvider == "" && launchType == "FARGATE":
+	case IsFargateOnDemand(capacityProvider, launchType):
 		return OnDemand
 	case capacityProvider == "FARGATE_SPOT":
 		return Spot
 	default:
 		return Unpriced
 	}
+}
+
+// IsFargateOnDemand reports whether a task runs on on-demand Fargate: its capacity provider is FARGATE, or it
+// has none and its launch type is FARGATE. EC2, external and custom-provider tasks are not.
+func IsFargateOnDemand(capacityProvider, launchType string) bool {
+	return capacityProvider == "FARGATE" || (capacityProvider == "" && launchType == "FARGATE")
 }
 
 // isNumeric reports whether value is a task size: an integer greater than zero.

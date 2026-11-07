@@ -1004,6 +1004,7 @@
       "$null": "time"
     },
     "name": "string",
+    "other_tasks": "number",
     "polled_at": "time",
     "region": "string",
     "reserved_gib": "number",
@@ -2509,6 +2510,7 @@
           "fargate": "number",
           "id": "string",
           "name": "string",
+          "other": "number",
           "spot": "number"
         }
       ],
