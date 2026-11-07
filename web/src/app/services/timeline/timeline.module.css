@@ -18,7 +18,8 @@
   background-size: 25% 100%;
   border-right: 1px solid var(--grid);
 }
-.laneNote { position: relative; padding-left: 8px; font-size: 12px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; background: var(--surface); }
+.laneNote { padding-left: 8px; font-size: 12px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+.laneNotes { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
 .retry { height: 22px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--raised); color: inherit; cursor: pointer; }
 
 .marker {
@@ -26,6 +27,7 @@
   height: 20px; min-width: 20px; padding: 0 5px; border-radius: 10px; border: 2px solid var(--surface);
   font: 600 10px var(--mono); color: var(--accent-ink); cursor: pointer; line-height: 16px;
 }
+.marker:focus-visible { outline-color: var(--text); }
 .bad { background: var(--danger); }
 .warn { background: var(--warning); }
 .acc { background: var(--accent); }

@@ -62,9 +62,7 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const laneStates = Object.fromEntries(
     LANE_ORDER.map((lane): [TimelineLane, LaneRowState] => {
       if (lane === 'logs') return ['logs', logLaneState()]
-      const info = data?.lanes.find((candidate) => candidate.lane === lane)
-      const message = [info?.note, info?.truncated ? TRUNCATED_NOTE : ''].filter(Boolean).join(' ')
-      return [lane, { on: lanesOn[lane], message: lanesOn[lane] && message ? message : undefined }]
+      return [lane, { on: lanesOn[lane] }]
     }),
   ) as Record<TimelineLane, LaneRowState>
 
@@ -77,13 +75,22 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
     const { state, message } = logErrors.data
     if (state === 'unavailable') return { on: true, message, onRetry: retry }
     if (state === 'no_logs') return { on: true, message }
-    if (state === 'partial') return { on: true, message: PARTIAL_LOGS_MESSAGE }
     return { on: true }
   }
+
+  // Notes sit in a list below the lanes: inside a track they would cover the markers they describe.
+  const laneNotes = LANE_ORDER.filter((lane) => lanesOn[lane]).flatMap((lane): { lane: TimelineLane; text: string }[] => {
+    if (lane === 'logs') return hasLogs && logErrors.data?.state === 'partial' ? [{ lane, text: PARTIAL_LOGS_MESSAGE }] : []
+    const info = data?.lanes.find((candidate) => candidate.lane === lane)
+    const text = [info?.note, info?.truncated ? TRUNCATED_NOTE : ''].filter(Boolean).join(' ')
+    return text ? [{ lane, text }] : []
+  })
 
   const anyLaneOn = LANE_ORDER.some((lane) => lanesOn[lane] && (lane !== 'logs' || hasLogs))
   const visibleEvents = LANE_ORDER.flatMap((lane) => (lanesOn[lane] ? laneEvents[lane] : []))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+
+  const selectedEvent = visibleEvents.find((event) => event.id === selectedId)
 
   const select = (id: string, lane: TimelineLane) => {
     if (!lanesOn[lane]) setLanesOn((current) => ({ ...current, [lane]: true }))
@@ -138,9 +145,19 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
               onSelect={(group) => select(group.items[0].id, group.items[0].lane)}
             />
           ) : (
-            <EmptyState>Turn on at least one lane.</EmptyState>
+            <>
+              <EmptyState>Turn on at least one lane.</EmptyState>
+              {!hasLogs && !phone && <p className={styles.hint}>{logsLockReason}</p>}
+            </>
           )}
         </Panel>
+        {anyLaneOn && laneNotes.length > 0 && (
+          <ul className={styles.laneNotes} aria-label="Lane notes">
+            {laneNotes.map(({ lane, text }) => (
+              <li key={lane}>{`${LANES[lane]}: ${text}`}</li>
+            ))}
+          </ul>
+        )}
         {data && anyLaneOn && (
           <Panel title="Events" sub={<span className={styles.count}>{visibleEvents.length} events in range</span>} flush>
             {visibleEvents.length === 0 ? (
@@ -177,7 +194,7 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
         )}
       </div>
       <div className={styles.detail}>
-        <Panel title="Details">{!selectedId && <p className={styles.hint}>Select an event to see the details.</p>}</Panel>
+        <Panel title="Details">{!selectedEvent && <p className={styles.hint}>Select an event to see the details.</p>}</Panel>
       </div>
     </div>
   )
