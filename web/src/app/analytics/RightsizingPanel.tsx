@@ -85,7 +85,7 @@ export function RightsizingPanel({ rightsizing, headroomPct, onHeadroomChange, e
       key: 'select',
       header: <span className="hm-sr">Select</span>,
       width: '36px',
-      phone: 'hidden',
+      phone: 'action',
       render: ({ service }) => (
         <input
           type="checkbox"
