@@ -63,7 +63,7 @@ export function TimelineBanner({ incident, triggerDiff, onShowChange }: Timeline
       >
         <strong>{`Tasks began failing ${durationText(Math.max(0, firstFailure - Date.parse(trigger.at)))} after ${change}.`}</strong>
         {sentence && ` ${sentence}`}
-        {incident.top_reason && ` ${incident.top_reason_count} of ${incident.failure_count} failures since then: ${incident.top_reason}.`}
+        {incident.top_reason && ` ${incident.top_reason_count} of ${incident.failure_count} failures since then: ${incident.top_reason}${incident.top_reason.endsWith('.') ? '' : '.'}`}
       </Banner>
     )
   } else {

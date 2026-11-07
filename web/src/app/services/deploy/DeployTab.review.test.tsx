@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { ChangeSetRequest, ChangeSetResponse } from '../../../api/deploy'
-import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS, SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE } from '../../../test/fixtures'
+import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS, REVISION_DEFINITION_PAYMENTS_41, SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE } from '../../../test/fixtures'
 import { withCan } from '../../../test/deployVariants'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -120,6 +120,59 @@ describe('DeployTab: ?review=1', () => {
     await user.click(review.getByRole('button', { name: 'Keep editing' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  /** Answers revision 41 only when `release()` is called, so a test can act while it loads. */
+  function holdRevision() {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('/api/services/:id/revisions/:revision', async () => {
+        await gate
+        return HttpResponse.json(REVISION_DEFINITION_PAYMENTS_41)
+      }),
+    )
+    return release
+  }
+
+  it('consumes review without opening when the loaded revision has a problem, and stays closed once fixed', async () => {
+    const user = userEvent.setup()
+    const release = holdRevision()
+    await openDeployTab(`${route}?revision=41&review=1`)
+    await setDesiredCount(user, '')
+
+    release()
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await setDesiredCount(user, '4')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not open review for an edit made while the revision is still loading', async () => {
+    const user = userEvent.setup()
+    const release = holdRevision()
+    await openDeployTab(`${route}?revision=41&review=1`)
+    await setDesiredCount(user, '5')
+    expect(reviewButton()).toBeEnabled()
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(searchOf()).toHaveTextContent('review=1')
+
+    release()
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('says so when the requested revision is already deployed', async () => {
+    renderApp(`${route}?revision=42&review=1`)
+
+    expect(await screen.findByText('Revision :42 is already deployed.')).toBeInTheDocument()
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

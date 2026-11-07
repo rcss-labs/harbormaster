@@ -13,7 +13,8 @@ import { usePhone } from '../../../components/usePhone'
 import { queryPanelError } from '../panelError'
 import { LANES, RANGES, formatEventTime, groupMarkers, logEvents, smallestRangeContaining, type MarkerGroup } from './model'
 import { TimelineBanner } from './TimelineBanner'
-import { TimelineDetail, useEventDiff } from './TimelineDetail'
+import { TimelineDetail } from './TimelineDetail'
+import { useEventDiff } from './useEventDiff'
 import { TimelineLanes, type LaneRowState } from './TimelineLanes'
 import styles from './timeline.module.css'
 
@@ -106,9 +107,9 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   // A trigger older than the range, or on a lane that is off, is not in the lists but still has its details.
   const triggerOutsideRange = trigger !== null && data !== undefined && !data.events.some((event) => event.id === trigger.id)
   const selectedEvent = visibleEvents.find((event) => event.id === selectedId) ?? (triggerOutsideRange && trigger.id === selectedId ? trigger : undefined)
-  const triggerDiff = useEventDiff(serviceId, trigger).rows
   // The server computes the incident over 7 days; it is only relevant when its last failure is inside the range.
   const showBanner = incident !== null && data !== undefined && Date.parse(incident.last_failure_at) >= from
+  const triggerDiff = useEventDiff(serviceId, showBanner ? trigger : null).rows
 
   const showTheChange = () => {
     if (!trigger) return

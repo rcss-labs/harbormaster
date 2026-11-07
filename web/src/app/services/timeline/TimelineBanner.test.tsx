@@ -71,6 +71,14 @@ describe('TimelineBanner', () => {
     expect(screen.queryByRole('button', { name: /Roll back/ })).not.toBeInTheDocument()
   })
 
+  it('does not double the period of a top reason that ends with one', async () => {
+    serveIncident({ top_reason: 'Out of memory.' })
+    renderApp(route)
+
+    const warning = within(await banner(/Tasks began failing/))
+    expect(warning.getByText(/3 of 3 failures since then: Out of memory\.(?!\.)/)).toBeInTheDocument()
+  })
+
   it('has no banner when the last failure is before the range', async () => {
     serveIncident({ last_failure_at: '2026-11-07T10:30:00Z' })
     renderApp(route)
@@ -168,6 +176,16 @@ describe('Roll back', () => {
 
     await screen.findByText('Likely trigger')
     expect(screen.queryByRole('button', { name: /Roll back/ })).not.toBeInTheDocument()
+  })
+
+  it('is locked with the controller banner when the controller is not supported', async () => {
+    const controller = { type: 'CODE_DEPLOY', supported: false, name: 'CodeDeploy', banner: 'CodeDeploy services are read only.' }
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, controller })))
+    renderApp(route)
+
+    const button = await rollbackButton()
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'CodeDeploy services are read only.')
   })
 
   it('is locked without Deploy and says why', async () => {

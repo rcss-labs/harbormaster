@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { useRevisionDefinition } from '../../../api/deploy'
 import { ApiError } from '../../../api/client'
 import { useTimelineTask, type TimelineEvent } from '../../../api/timeline'
 import type { ServiceDTO } from '../../../api/types'
@@ -11,7 +10,8 @@ import { Skeleton } from '../../../components/Skeleton'
 import { useToast } from '../../../components/Toast'
 import { useTaskPanel } from '../../tasks/useTaskPanel'
 import { LANES, formatEventTime } from './model'
-import { revisionDiff, type DiffRow } from './revisionDiff'
+import type { DiffRow } from './revisionDiff'
+import { useEventDiff } from './useEventDiff'
 import styles from './timeline.module.css'
 
 const LOGS_WINDOW_AFTER_EVENT_MS = 60_000
@@ -44,18 +44,6 @@ function DiffGrid({ rows }: { rows: DiffRow[] }) {
       ))}
     </div>
   )
-}
-
-/** The server's diff rows plus, for a revision change, the two definitions compared here. */
-export function useEventDiff(serviceId: string, event: TimelineEvent | null): { rows: DiffRow[]; pending: boolean; failed: boolean } {
-  const compares = event !== null && event.from_revision !== null && event.to_revision !== null
-  const before = useRevisionDefinition(serviceId, compares ? event.from_revision : null)
-  const after = useRevisionDefinition(serviceId, compares ? event.to_revision : null)
-
-  const failed = compares && (before.isError || after.isError)
-  const pending = compares && !failed && (before.isPending || after.isPending)
-  const rows = [...(event?.diff ?? []), ...(compares && before.data && after.data ? revisionDiff(before.data.definition, after.data.definition) : [])]
-  return { rows, pending, failed }
 }
 
 /** The diff under an event. */
@@ -105,7 +93,8 @@ export function TimelineDetail({ serviceId, service, event, isTrigger, rollbackR
   const { onOpen, panel } = useTaskPanel([], service.desired)
   const logsReason = `You need Logs on ${service.tag.name}`
   const deployReason = `You need Deploy on ${service.tag.name}`
-  const offersRollback = isTrigger && rollbackRevision !== null && service.controller.supported
+  const offersRollback = isTrigger && rollbackRevision !== null
+  const rollbackLock = service.controller.supported ? (service.can.deploy ? undefined : deployReason) : service.controller.banner || 'This controller does not support rollbacks'
 
   return (
     <Panel title="Details">
@@ -133,18 +122,18 @@ export function TimelineDetail({ serviceId, service, event, isTrigger, rollbackR
           )}
           {event.lane === 'stop' && event.task_id && <OpenTaskButton key={event.task_id} serviceId={serviceId} taskId={event.task_id} onOpen={onOpen} />}
           {offersRollback &&
-            (service.can.deploy ? (
+            (rollbackLock === undefined ? (
               <button type="button" className={`${styles.action} ${styles.danger}`} onClick={onRollback}>
                 Roll back to revision {rollbackRevision}
               </button>
             ) : (
-              <button type="button" className={styles.action} disabled title={deployReason}>
+              <button type="button" className={styles.action} disabled title={rollbackLock}>
                 Roll back to revision {rollbackRevision}
               </button>
             ))}
         </div>
         {!service.can.logs && <LockNote kind="why">{logsReason}</LockNote>}
-        {offersRollback && !service.can.deploy && <LockNote kind="why">{deployReason}</LockNote>}
+        {offersRollback && rollbackLock !== undefined && <LockNote kind="why">{rollbackLock}</LockNote>}
       </div>
       {panel}
     </Panel>
