@@ -24,6 +24,8 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
   const notNeededPct = kpis.monthly_total > 0 ? Math.min(100, Math.round((summary.saving / kpis.monthly_total) * 100)) : 0
   const groups: Record<Grouping, CostGroup[]> = { cluster: data.by_cluster, account: data.by_account, tag: data.by_tag }
   const rows = groups[grouping]
+  // With every task unpriced, $0 would read as free.
+  const nothingPriced = kpis.monthly_total === 0 && kpis.unpriced_tasks > 0
   const largest = Math.max(0, ...rows.map((group) => group.monthly))
 
   return (
@@ -35,8 +37,8 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
             label: 'estimated Fargate spend per month',
             value: (
               <>
-                {money(kpis.monthly_total)}
-                {kpis.spot_monthly > 0 && <KpiNote>{`includes ${money(kpis.spot_monthly)} of Spot tasks at list price`}</KpiNote>}
+                {nothingPriced ? '—' : money(kpis.monthly_total)}
+                {!nothingPriced && kpis.spot_monthly > 0 && <KpiNote>{`includes ${money(kpis.spot_monthly)} of Spot tasks at list price`}</KpiNote>}
               </>
             ),
           },
@@ -45,10 +47,10 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
             value: ready ? `${summary.upperBound ? 'up to ' : ''}${money(summary.saving)}` : '—',
           },
           { label: 'of spend is reserved but not needed', value: ready ? `${notNeededPct}%` : '—' },
-          { label: 'services can use a smaller size', value: ready ? whole(summary.services) : '—' },
+          { label: summary.services === 1 ? 'service can use a smaller size' : 'services can use a smaller size', value: ready ? whole(summary.services) : '—' },
         ]}
       />
-      {kpis.unpriced_tasks > 0 && <Banner kind="warn">{`${kpis.unpriced_tasks} tasks are not priced (EC2 or other non-Fargate capacity).`}</Banner>}
+      {kpis.unpriced_tasks > 0 && <Banner kind="warn">{`${kpis.unpriced_tasks === 1 ? '1 task is' : `${kpis.unpriced_tasks} tasks are`} not priced (EC2, other non-Fargate capacity, or a region without a price table).`}</Banner>}
       {kpis.unpriced_regions.length > 0 && <Banner kind="warn">{`No price table for region ${kpis.unpriced_regions.join(', ')}. Those tasks are not priced.`}</Banner>}
       <div className={styles.grid}>
         <div className={styles.full}>
@@ -65,21 +67,25 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
                 ]}
               />
             </div>
-            <ul className={styles.spendList}>
-              {rows.map((group) => {
-                // A group of only unpriced tasks has no spend to show, and $0 would read as free.
-                const notPriced = group.monthly === 0 && group.unpriced_tasks > 0
-                return (
-                  <li key={group.key} className={styles.spendRow}>
-                    <span className={styles.spendLabel}>{group.label}</span>
-                    <span className={styles.spendTrack} aria-hidden="true">
-                      <i style={{ width: `${largest > 0 ? (group.monthly / largest) * 100 : 0}%`, background: COLOR.accent }} />
-                    </span>
-                    <span className={styles.spendAmount}>{notPriced ? 'not priced' : money(group.monthly)}</span>
-                  </li>
-                )
-              })}
-            </ul>
+            {rows.length === 0 ? (
+              <p className={styles.kpiNote}>No services to show.</p>
+            ) : (
+              <ul className={styles.spendList}>
+                {rows.map((group) => {
+                  // A group of only unpriced tasks has no spend to show, and $0 would read as free.
+                  const notPriced = group.monthly === 0 && group.unpriced_tasks > 0
+                  return (
+                    <li key={group.key} className={styles.spendRow}>
+                      <span className={styles.spendLabel}>{group.label}</span>
+                      <span className={styles.spendTrack} aria-hidden="true">
+                        <i style={{ width: `${largest > 0 ? (group.monthly / largest) * 100 : 0}%`, background: COLOR.accent }} />
+                      </span>
+                      <span className={styles.spendAmount}>{notPriced ? 'not priced' : money(group.monthly)}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </AnalyticsPanel>
         </div>
         <div className={styles.full}>
