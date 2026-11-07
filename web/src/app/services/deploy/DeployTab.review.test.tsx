@@ -176,6 +176,21 @@ describe('DeployTab: ?review=1', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('consumes review when the live task definition fails to load, so a successful retry does not open it unprompted', async () => {
+    let failing = true
+    server.use(http.get('/api/services/:id/task-definition', () => (failing ? HttpResponse.json({ error: 'unavailable' }, { status: 500 }) : HttpResponse.json(TASK_DEFINITION_EDITABLE))))
+    renderApp(`${route}?revision=41&review=1`)
+
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    failing = false
+    await userEvent.setup().click((await screen.findAllByRole('button', { name: 'Retry' }))[0])
+    await screen.findByRole('button', { name: 'Add variable' })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('does not auto-open review while a rollout runs', async () => {
     server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_NOTIFICATIONS, id: SERVICE_PAYMENTS.id })))
     renderApp(`${route}?revision=41&review=1`)

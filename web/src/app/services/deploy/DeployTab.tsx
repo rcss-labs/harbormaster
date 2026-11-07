@@ -256,7 +256,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const revisionReady = revisionTarget.data !== undefined && liveDefinition !== undefined && deployedRevision !== undefined
   useEffect(() => {
     if (!reviewRequested || !rolloutStateKnown) return
-    const nothingToReview = revisionParam === null || revisionTarget.isError || revisionIsDeployed
+    const nothingToReview = revisionParam === null || revisionTarget.isError || taskDefinition.isError || revisionIsDeployed
     if (!rolloutRunning && !nothingToReview && !revisionReady) return
     if (!rolloutRunning && !nothingToReview && reviewable) asideProps.onReview()
     setSearchParams(
@@ -268,7 +268,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
       { replace: true },
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onReview only sets state from values already listed here
-  }, [reviewRequested, rolloutStateKnown, rolloutRunning, revisionReady, reviewable, revisionParam, revisionTarget.isError, revisionIsDeployed])
+  }, [reviewRequested, rolloutStateKnown, rolloutRunning, revisionReady, reviewable, revisionParam, revisionTarget.isError, taskDefinition.isError, revisionIsDeployed])
 
   const showingProgress = service.data !== undefined && shouldShowProgress(service.data, now)
   const awaitingRollout = startedRollout !== null && !showingProgress && (deployedRevision ?? 0) < startedRollout
