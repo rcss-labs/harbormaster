@@ -254,3 +254,18 @@ func (s *Store) IncrementImportAttempts(ctx context.Context, runID int64) (int, 
 	}
 	return attempts, nil
 }
+
+// NewerActiveRunDigests returns those digests that a later run, still active, also lists. A finished older run must leave
+// them to that run.
+func (s *Store) NewerActiveRunDigests(ctx context.Context, runID int64, digests []string) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `select distinct ri.digest from scan_run_images ri join scan_runs r on r.id = ri.run_id
+		where ri.digest = any($1) and ri.run_id > $2 and r.status in ('launching', 'running')`, digests, runID)
+	if err != nil {
+		return nil, fmt.Errorf("newer active run digests: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("newer active run digests: %w", err)
+	}
+	return out, nil
+}

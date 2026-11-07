@@ -35,6 +35,14 @@ func (r *Runner) importRun(ctx context.Context, run store.ScanRun, manifestData 
 	for _, img := range rows {
 		images[img.Digest] = img
 	}
+	// An image that a newer active run also lists belongs to that run now: this import must not touch it.
+	newer, err := r.Store.NewerActiveRunDigests(ctx, run.ID, digests)
+	if err != nil {
+		return err
+	}
+	for _, digest := range newer {
+		delete(images, digest)
+	}
 
 	patch := store.ScanRunPatch{GrypeVersion: manifest.GrypeVersion, SyftVersion: manifest.SyftVersion,
 		ScannerImageDigest: manifest.ScannerImageDigest, Error: manifest.Error}
@@ -118,8 +126,17 @@ func (r *Runner) importImages(ctx context.Context, run store.ScanRun, manifest s
 	var skipped []string
 	for _, digest := range digests {
 		img, known := images[digest]
-		// Only an image this run is still scanning is imported: a repeated import or a newer request leaves the rest alone.
-		if !known || img.Status != scan.StatusScanning {
+		if !known {
+			continue // handled by a newer run
+		}
+		// Only an image still scanning is imported. After a repeated import the others already carry their outcome, which
+		// is counted so the run's totals stay truthful.
+		if img.Status != scan.StatusScanning {
+			if img.Status == scan.StatusScanned {
+				ok++
+			} else {
+				failed++
+			}
 			continue
 		}
 		outcome, listed := outcomes[digest]
@@ -151,17 +168,25 @@ func (r *Runner) handleFailure(ctx context.Context, run store.ScanRun, img store
 	case scan.CodePullDenied, scan.CodeImageTooLarge, scan.CodeResultTooLarge:
 		r.recordFailure(ctx, run, img, outcome.FailureCode, outcome.FailureDetail)
 	case scan.CodeTimeout:
-		if img.Large {
-			r.recordFailure(ctx, run, img, scan.CodeTimeout, outcome.FailureDetail)
-			return
-		}
-		if err := r.Store.RequeueScanImages(ctx, []string{img.Digest}, r.now(), true, scan.CodeTimeout, outcome.FailureDetail); err != nil {
-			r.log().Error("scan: requeue image large", "digest", img.Digest, "err", err)
-		}
+		r.retryTimedOut(ctx, run, img, outcome.FailureDetail)
 	case scan.CodeRateLimited, scan.CodeTaskFailed, scan.CodeTaskMissing:
 		r.requeue(ctx, img, outcome.FailureCode, outcome.FailureDetail)
 	default: // unsupported_registry, db_stale on one image, anything unknown: a failed attempt
 		r.requeue(ctx, img, scan.CodeTaskFailed, outcome.FailureDetail)
+	}
+}
+
+// retryTimedOut queues an image that timed out once more, as large; one that was already large fails.
+func (r *Runner) retryTimedOut(ctx context.Context, run store.ScanRun, img store.ScanImage, detail string) {
+	if img.Status != scan.StatusScanning {
+		return
+	}
+	if img.Large {
+		r.recordFailure(ctx, run, img, scan.CodeTimeout, detail)
+		return
+	}
+	if err := r.Store.RequeueScanImages(ctx, []string{img.Digest}, r.now(), true, scan.CodeTimeout, detail); err != nil {
+		r.log().Error("scan: requeue image large", "digest", img.Digest, "err", err)
 	}
 }
 

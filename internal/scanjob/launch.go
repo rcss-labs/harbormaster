@@ -25,6 +25,13 @@ func (r *Runner) maxTasks() int {
 	return r.Cfg.MaxTasks
 }
 
+func (r *Runner) interval() time.Duration {
+	if r.Cfg.Interval <= 0 {
+		return defaultInterval
+	}
+	return r.Cfg.Interval
+}
+
 func (r *Runner) batchSize() int {
 	if r.Cfg.BatchSize < 1 {
 		return defaultBatchSize
@@ -164,7 +171,14 @@ func (r *Runner) launchBatch(ctx context.Context, state store.ScanDBState, batch
 	}
 
 	if err := r.Store.MarkScanImagesScanning(ctx, digests, runID); err != nil {
-		return fail(err)
+		// A store problem is not the images' fault: wait a little and count no attempt, so a persistent error does not
+		// create a failed run every interval.
+		detail := scan.SanitizeText(err.Error())
+		r.log().Error("scan: mark images scanning", "run", runID, "err", err)
+		if deferErr := r.Store.DeferScanImages(ctx, digests, now.Add(r.interval()), "", ""); deferErr != nil {
+			r.log().Error("scan: defer images", "err", deferErr)
+		}
+		return r.finishRun(ctx, runID, "failed", store.ScanRunPatch{Error: detail, ImagesFailed: len(batch)})
 	}
 	body, err := json.Marshal(r.buildJob(runID, state, batch, accounts, now))
 	if err != nil {
@@ -178,8 +192,11 @@ func (r *Runner) launchBatch(ctx context.Context, state store.ScanDBState, batch
 		return fail(fmt.Errorf("start the scanner task: %w", err))
 	}
 	if err := r.Store.SetScanRunTask(ctx, runID, taskARN); err != nil {
-		// The task runs; reconcile cannot find it without its ARN, so the timeout path will end this run.
-		return fmt.Errorf("record task of run %d: %w", runID, err)
+		// The task runs but no run knows its ARN, so stop it now or it could never be stopped.
+		if stopErr := r.Launcher.StopTask(ctx, taskARN, "Harbormaster could not record the scan task"); stopErr != nil {
+			r.log().Error("scan: stop unrecorded task", "run", runID, "err", stopErr)
+		}
+		return fail(fmt.Errorf("record the task: %w", err))
 	}
 	return nil
 }

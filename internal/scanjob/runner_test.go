@@ -269,10 +269,12 @@ func TestRunner_StuckTaskIsStoppedAndRequeued(t *testing.T) {
 		t.Fatalf("run status = %q, want timed_out", run.Status)
 	}
 	img := fx.image(digest)
-	if img.Status != "queued" || img.Attempts != 1 || img.FailureCode != scan.CodeTaskFailed ||
-		img.NextAttemptAt == nil || !img.NextAttemptAt.Equal(fx.clock.Now().Add(5*time.Minute)) {
-		t.Fatalf("image = %q attempts %d code %q next %v, want queued, one attempt, task_failed, in 5 min",
-			img.Status, img.Attempts, img.FailureCode, img.NextAttemptAt)
+	if img.Attempts != 1 || img.FailureCode != scan.CodeTimeout || !img.Large {
+		t.Fatalf("image = %q attempts %d code %q large %v, want one attempt as large with code timeout",
+			img.Status, img.Attempts, img.FailureCode, img.Large)
+	}
+	if launches := fx.scanner.Launches(); len(launches) != 2 || !launches[1].Large {
+		t.Fatalf("launches = %+v, want the retry launched large", launches)
 	}
 }
 
@@ -444,7 +446,6 @@ func TestRunner_UnknownFailureCodeCountsAnAttempt(t *testing.T) {
 			}})}
 	}
 	fx.cycle()
-	fx.runner.Cfg.MaxTasks = 1
 	fx.cycle()
 	for _, digest := range []string{unknownCode, noCode} {
 		if img := fx.image(digest); img.Status != "queued" || img.Attempts != 1 || img.FailureCode != scan.CodeTaskFailed {

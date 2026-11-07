@@ -91,8 +91,12 @@ type scriptedLauncher struct {
 	bucket awsx.Bucket
 	script func(job scan.Job) map[string][]byte
 
+	// running makes the task report RUNNING forever, as a scanner that keeps going after its manifest does.
+	running bool
+
 	mu       sync.Mutex
 	launches []awsx.LaunchSpec
+	stops    []string
 }
 
 func (l *scriptedLauncher) RunTask(ctx context.Context, spec awsx.LaunchSpec) (string, error) {
@@ -108,7 +112,11 @@ func (l *scriptedLauncher) RunTask(ctx context.Context, spec awsx.LaunchSpec) (s
 	if err := json.Unmarshal(data, &job); err != nil {
 		return "", err
 	}
-	for key, body := range l.script(job) {
+	var writes map[string][]byte
+	if l.script != nil {
+		writes = l.script(job)
+	}
+	for key, body := range writes {
 		if err := l.bucket.Put(ctx, key, body); err != nil {
 			return "", err
 		}
@@ -117,11 +125,25 @@ func (l *scriptedLauncher) RunTask(ctx context.Context, spec awsx.LaunchSpec) (s
 }
 
 func (l *scriptedLauncher) DescribeTask(context.Context, string) (awsx.TaskState, error) {
+	if l.running {
+		return awsx.TaskState{LastStatus: "RUNNING"}, nil
+	}
 	exit := int32(0)
 	return awsx.TaskState{LastStatus: "STOPPED", ExitCode: &exit}, nil
 }
 
-func (l *scriptedLauncher) StopTask(context.Context, string, string) error { return nil }
+func (l *scriptedLauncher) StopTask(_ context.Context, taskARN, _ string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.stops = append(l.stops, taskARN)
+	return nil
+}
+
+func (l *scriptedLauncher) Stops() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.stops...)
+}
 
 func (l *scriptedLauncher) Launches() []awsx.LaunchSpec {
 	l.mu.Lock()

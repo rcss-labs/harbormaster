@@ -169,3 +169,23 @@ func TestIncrementImportAttempts(t *testing.T) {
 		}
 	}
 }
+
+func TestNewerActiveRunDigests(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	older := newScanRun(t, s, "scan", "sha256:a", "sha256:b")
+	newer := newScanRun(t, s, "scan", "sha256:a")
+	got, err := s.NewerActiveRunDigests(ctx, older, []string{"sha256:a", "sha256:b"})
+	if err != nil || len(got) != 1 || got[0] != "sha256:a" {
+		t.Fatalf("newer digests = %v, %v, want only sha256:a", got, err)
+	}
+	if got, _ := s.NewerActiveRunDigests(ctx, newer, []string{"sha256:a"}); len(got) != 0 {
+		t.Fatalf("the newest run sees %v, want none", got)
+	}
+	if _, err := s.FinishScanRun(ctx, newer, "failed", store.ScanRunPatch{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.NewerActiveRunDigests(ctx, older, []string{"sha256:a"}); len(got) != 0 {
+		t.Fatalf("a finished newer run still counts: %v", got)
+	}
+}

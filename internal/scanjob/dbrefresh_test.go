@@ -34,7 +34,7 @@ func checksumOf(data []byte) string { return fmt.Sprintf("sha256:%x", sha256.Sum
 
 // refreshRunner is a runner that can only refresh: it needs no database.
 func refreshRunner(srv *httptest.Server, scanner *fake.Scanner) *Runner {
-	return &Runner{Bucket: scanner, DB: NewHTTPDBSource(srv.Client(), srv.URL+"/databases/v6/latest.json"), Now: time.Now, Log: quietLog()}
+	return &Runner{Bucket: scanner, DB: newHTTPDBSource(srv.Client(), srv.URL+"/databases/v6/latest.json", true), Now: time.Now, Log: quietLog()}
 }
 
 func seededScanner(t *testing.T) (*fake.Scanner, []byte) {
@@ -140,10 +140,10 @@ func TestHTTPDBSource_OnlyHTTPSAndSameHostRedirects(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("{}")) }))
 	defer plain.Close()
 
-	if _, err := NewHTTPDBSource(redirecting.Client(), redirecting.URL+"/latest.json").FetchLatest(ctx); err == nil || other != 0 {
+	if _, err := newHTTPDBSource(redirecting.Client(), redirecting.URL+"/latest.json", true).FetchLatest(ctx); err == nil || other != 0 {
 		t.Fatalf("cross-host redirect: err = %v, hits elsewhere = %d, want refused before connecting", err, other)
 	}
-	if _, err := NewHTTPDBSource(plain.Client(), plain.URL+"/latest.json").FetchLatest(ctx); err == nil {
+	if _, err := newHTTPDBSource(plain.Client(), plain.URL+"/latest.json", true).FetchLatest(ctx); err == nil {
 		t.Fatal("plain http was accepted")
 	}
 }

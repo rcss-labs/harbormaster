@@ -6,16 +6,21 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/scan"
 )
 
-const maxRedirects = 5
+const (
+	maxRedirects = 5
+	dialTimeout  = 30 * time.Second
+)
 
 // HTTPDBSource reads Anchore's DB listing and archives over https. Only https URLs are used and a redirect may not leave
 // the host it started on. Whether Anchore serves archives from the same host is unverified, so the final URL of the first
@@ -31,10 +36,28 @@ type HTTPDBSource struct {
 
 // NewHTTPDBSource reads latestURL and archives that sit beside it. A nil client means http.DefaultClient's settings.
 func NewHTTPDBSource(client *http.Client, latestURL string) *HTTPDBSource {
+	return newHTTPDBSource(client, latestURL, false)
+}
+
+// newHTTPDBSource is NewHTTPDBSource with the test-only allowance for loopback servers. Nothing outside tests passes true,
+// and no configuration reaches it.
+func newHTTPDBSource(client *http.Client, latestURL string, allowLoopback bool) *HTTPDBSource {
 	copied := http.Client{}
 	if client != nil {
 		copied = *client
 	}
+	// Whatever the hostname resolves to, internal addresses are never dialed (defence in depth against SSRF). Proxies are
+	// not used, so the address checked is the address reached.
+	var transport *http.Transport
+	if existing, ok := copied.Transport.(*http.Transport); ok {
+		transport = existing.Clone()
+	} else {
+		transport = http.DefaultTransport.(*http.Transport).Clone()
+	}
+	transport.Proxy = nil
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	transport.DialContext = safeDialContext(dialer.DialContext, lookupIPs, allowLoopback)
+	copied.Transport = transport
 	copied.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		switch {
 		case len(via) >= maxRedirects:
@@ -95,7 +118,7 @@ func (s *HTTPDBSource) FetchLatest(ctx context.Context) ([]byte, error) {
 
 // OpenArchive streams the archive with the given bare file name from beside latest.json. The caller caps the stream.
 func (s *HTTPDBSource) OpenArchive(ctx context.Context, name string) (io.ReadCloser, error) {
-	if name == "" || strings.ContainsAny(name, `/\?#`) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\?#`) {
 		return nil, errors.New("archive name must be a bare file name")
 	}
 	base, err := url.Parse(s.latestURL)
@@ -108,4 +131,44 @@ func (s *HTTPDBSource) OpenArchive(ctx context.Context, name string) (io.ReadClo
 		return nil, err
 	}
 	return resp.Body, nil
+}
+
+func lookupIPs(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
+// blockedAddress reports addresses a DB download must never reach: loopback (unless allowed for tests), link-local
+// (which includes the metadata endpoints 169.254.169.254 and 169.254.170.2), private, unspecified and multicast.
+func blockedAddress(ip net.IP, allowLoopback bool) bool {
+	if ip.IsLoopback() {
+		return !allowLoopback
+	}
+	return ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast()
+}
+
+// safeDialContext resolves the host itself, refuses the whole connection when any answer is a blocked address, and then
+// dials the checked IP so a second DNS answer cannot differ.
+func safeDialContext(dial func(context.Context, string, string) (net.Conn, error), lookup func(context.Context, string) ([]net.IP, error), allowLoopback bool) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		ips := []net.IP{net.ParseIP(host)}
+		if ips[0] == nil {
+			if ips, err = lookup(ctx, host); err != nil {
+				return nil, err
+			}
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("%s did not resolve", host)
+		}
+		for _, ip := range ips {
+			if blockedAddress(ip, allowLoopback) {
+				return nil, fmt.Errorf("refusing to connect to %s: internal address", host)
+			}
+		}
+		return dial(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	}
 }
