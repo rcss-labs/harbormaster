@@ -173,6 +173,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// The API's SSRF filter relaxes http loopback URLs only when cfg.FakeAWS is set, so the --fake-aws
 	// flag must set it too or the demo IdP's metadata cannot be imported.
 	cfg.FakeAWS = fakeAWS
+	if err := cfg.ValidateScanLaunch(); err != nil {
+		return err
+	}
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
 
 	var base aws.Config

@@ -281,7 +281,7 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
 		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")
 	}
-	if err := validateScan(cfg.Scan, cfg.FakeAWS); err != nil {
+	if err := validateScan(cfg.Scan); err != nil {
 		return Config{}, err
 	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
@@ -290,27 +290,35 @@ func Load(getenv func(string) string) (Config, error) {
 	return cfg, nil
 }
 
-// validateScan checks the scanner launch settings when the scanner is enabled
-// against real AWS (fake mode runs the fake scanner and needs none of them),
-// and the limits that apply whenever the values are set.
-func validateScan(scan ScanConfig, fakeAWS bool) error {
-	if scan.Enabled && !fakeAWS {
-		required := []struct {
-			name  string
-			value string
-		}{
-			{"HM_SCAN_CLUSTER_ARN", scan.ClusterARN},
-			{"HM_SCAN_TASK_DEFINITION", scan.TaskDefinitionARN},
-			{"HM_SCAN_SUBNETS", strings.Join(scan.Subnets, ",")},
-			{"HM_SCAN_SECURITY_GROUP", scan.SecurityGroup},
-			{"HM_SCAN_BUCKET", scan.Bucket},
-		}
-		for _, setting := range required {
-			if setting.value == "" {
-				return fmt.Errorf("%s: required when HM_SCAN_ENABLED is true", setting.name)
-			}
+// ValidateScanLaunch checks the scanner launch settings. It is separate from Load
+// because --fake-aws is applied after Load, and fake mode needs none of them.
+// Call it once the final FakeAWS value is known. Enabled against real AWS, every
+// launch setting is required and the error names the first one that is missing.
+func (c Config) ValidateScanLaunch() error {
+	if !c.Scan.Enabled || c.FakeAWS {
+		return nil
+	}
+	required := []struct {
+		name  string
+		value string
+	}{
+		{"HM_SCAN_CLUSTER_ARN", c.Scan.ClusterARN},
+		{"HM_SCAN_TASK_DEFINITION", c.Scan.TaskDefinitionARN},
+		{"HM_SCAN_SUBNETS", strings.Join(c.Scan.Subnets, ",")},
+		{"HM_SCAN_SECURITY_GROUP", c.Scan.SecurityGroup},
+		{"HM_SCAN_BUCKET", c.Scan.Bucket},
+	}
+	for _, setting := range required {
+		if setting.value == "" {
+			return fmt.Errorf("%s: required when HM_SCAN_ENABLED is true", setting.name)
 		}
 	}
+	return nil
+}
+
+// validateScan checks the limits on the scanner settings. They apply whether or
+// not the scanner is enabled, so a bad value is caught at startup either way.
+func validateScan(scan ScanConfig) error {
 	if scan.MaxTasks < 1 || scan.MaxTasks > 4 {
 		return errors.New("HM_SCAN_MAX_TASKS: must be between 1 and 4")
 	}
@@ -322,6 +330,24 @@ func validateScan(scan ScanConfig, fakeAWS bool) error {
 	}
 	if scan.TaskTimeout < 5*time.Minute {
 		return errors.New("HM_SCAN_TASK_TIMEOUT: must be at least 5m")
+	}
+	if scan.Interval < time.Second {
+		return errors.New("HM_SCAN_INTERVAL: must be at least 1s")
+	}
+	if scan.RematchBatch < 1 {
+		return errors.New("HM_SCAN_REMATCH_BATCH: must be at least 1")
+	}
+	if scan.DBRefresh < time.Hour {
+		return errors.New("HM_SCAN_DB_REFRESH: must be at least 1h")
+	}
+	if scan.MaxImageMB < 1 {
+		return errors.New("HM_SCAN_MAX_IMAGE_MB: must be at least 1")
+	}
+	if scan.DBMaxAge < time.Hour {
+		return errors.New("HM_SCAN_DB_MAX_AGE: must be at least 1h")
+	}
+	if scan.CandidateRefresh < time.Minute {
+		return errors.New("HM_SCAN_CANDIDATE_REFRESH: must be at least 1m")
 	}
 	return nil
 }
