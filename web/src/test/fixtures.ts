@@ -58,6 +58,7 @@ import type {
 } from '../api/deploy'
 import type {
   AnalyticsCapacity,
+  AnalyticsCost,
   AnalyticsDelivery,
   AnalyticsOperations,
   AnalyticsRange,
@@ -1961,6 +1962,88 @@ export const ANALYTICS_RELIABILITY_DAILY: AnalyticsReliability = {
     ],
     total: 2,
   }),
+}
+
+/** Cost with a ladder of suggestions, an unpriced service without dollars, and a cluster that is only unpriced. */
+export const ANALYTICS_COST: AnalyticsCost = {
+  tab: 'cost',
+  window: analyticsWindow('90d', { requested: '30d', rangeApplies: false, retention: '2160h' }),
+  sources: [
+    source('tasks', 'Running tasks: cpu, memory, capacity provider', 'latest poll', null),
+    source('services', 'The services you can see', 'latest poll', null),
+    source('task_definitions', 'Task definition size and container minimums', 'latest poll', null),
+    source('service_util_daily', 'Daily CPU and memory use as a share of reserved', '2160h', 'HM_RETENTION_UTIL_DAILY'),
+  ],
+  polled_at: FIXTURE_NOW,
+  prices_as_of: '2026-10-19',
+  kpis: { monthly_total: 61.4, spot_monthly: 10.36, priced_tasks: 5, spot_tasks: 1, unpriced_tasks: 2, unpriced_regions: ['ap-south-1'] },
+  by_cluster: [
+    { key: analyticsCoreClusterId, label: 'core-services', monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
+    { key: analyticsStagingClusterId, label: 'staging-web', monthly: 20.36, spot_monthly: 10.36, unpriced_tasks: 0 },
+    { key: clusterId('482109375512', 'ap-south-1', 'eu-apps'), label: 'eu-apps', monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
+  ],
+  by_account: [
+    { key: ACCOUNT_HOMELAB.account_id, label: ACCOUNT_HOMELAB.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 2 },
+    { key: ACCOUNT_STAGING.account_id, label: ACCOUNT_STAGING.name, monthly: 20.36, spot_monthly: 10.36, unpriced_tasks: 0 },
+  ],
+  by_tag: [
+    { key: String(TAG_PROD.id), label: TAG_PROD.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
+    { key: String(TAG_STAGING.id), label: TAG_STAGING.name, monthly: 20.36, spot_monthly: 10.36, unpriced_tasks: 0 },
+    { key: String(TAG_DEV.id), label: TAG_DEV.name, monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
+  ],
+  rightsizing: {
+    state: 'ok',
+    min_history_days: 14,
+    default_headroom_pct: 30,
+    services: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        region: 'us-east-1',
+        architecture: 'X86_64',
+        tag: TAG_PROD,
+        tasks: 3,
+        spot_tasks: 0,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        cpu_used_share: 0.12,
+        mem_used_share: 0.31,
+        monthly: 41.04,
+        status: 'ok',
+        history_days: 30,
+        auto_scaled: true,
+        recent_oom: false,
+        can_edit: true,
+        steps: [
+          { from_headroom_pct: 10, suggestion: { cpu_units: 256, memory_mib: 1024, saving_monthly: 24.6, limited_by_containers: false } },
+          { from_headroom_pct: 40, suggestion: { cpu_units: 512, memory_mib: 1024, saving_monthly: 18.5, limited_by_containers: true } },
+          { from_headroom_pct: 85, suggestion: null },
+        ],
+      },
+      {
+        service_id: serviceId('482109375512', 'ap-south-1', 'eu-apps', 'catalog-api'),
+        service: 'catalog-api',
+        cluster: 'eu-apps',
+        region: 'ap-south-1',
+        architecture: 'X86_64',
+        tag: TAG_DEV,
+        tasks: 2,
+        spot_tasks: 0,
+        cpu_units: 512,
+        memory_mib: 1024,
+        cpu_used_share: null,
+        mem_used_share: null,
+        monthly: 0,
+        status: 'no_price',
+        history_days: 0,
+        auto_scaled: false,
+        recent_oom: false,
+        can_edit: false,
+        steps: [],
+      },
+    ],
+  },
 }
 
 /** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */

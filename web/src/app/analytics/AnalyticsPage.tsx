@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router'
-import { useAnalytics, type AnalyticsRange, type AnalyticsResponse, type AnalyticsTab } from '../../api/analytics'
+import { useAnalytics, type AnalyticsRange, type AnalyticsResponse } from '../../api/analytics'
 import { Banner } from '../../components/Banner'
 import { Chips } from '../../components/Chips'
 import { Disclosure } from '../../components/Disclosure'
@@ -19,10 +19,10 @@ import { retentionText, windowText } from './format'
 import { OperationsTab } from './OperationsTab'
 import { ReliabilityTab } from './ReliabilityTab'
 import { useAnalyticsPrefs } from './prefs'
-import { ANALYTICS_RANGES, ANALYTICS_TABS, useAnalyticsState } from './useAnalyticsState'
+import { ANALYTICS_RANGES, ANALYTICS_TABS, useAnalyticsState, type AnalyticsPageTab } from './useAnalyticsState'
 import styles from './analytics.module.css'
 
-const TAB_META: Record<AnalyticsTab, { label: string; window: string }> = {
+const TAB_META: Record<AnalyticsPageTab, { label: string; window: string }> = {
   delivery: { label: 'Delivery', window: '90d' },
   reliability: { label: 'Reliability', window: '7d' },
   capacity: { label: 'Capacity', window: 'live + 7d' },
@@ -50,7 +50,7 @@ export function AnalyticsPage() {
   return <AnalyticsView tab={tab} />
 }
 
-function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
+function AnalyticsView({ tab }: { tab: AnalyticsPageTab }) {
   useCrumbs([['Analytics', '/analytics/delivery'], [TAB_META[tab].label]])
   const { range, setRange, tag, setTags } = useAnalyticsState()
   const { me } = useAuth()

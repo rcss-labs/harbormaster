@@ -9,4 +9,5 @@ func (s *Server) analyticsRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/analytics/reliability", s.analyticsReliability, routeOptions{})
 	s.handle(mux, "GET /api/analytics/capacity", s.analyticsCapacity, routeOptions{})
 	s.handle(mux, "GET /api/analytics/operations", s.analyticsOperations, routeOptions{})
+	s.handle(mux, "GET /api/analytics/cost", s.analyticsCost, routeOptions{})
 }

@@ -298,6 +298,124 @@
       "used": "string"
     }
   },
+  "analyticsCost": {
+    "by_account": [
+      {
+        "key": "string",
+        "label": "string",
+        "monthly": "number",
+        "spot_monthly": "number",
+        "unpriced_tasks": "number"
+      }
+    ],
+    "by_cluster": [
+      {
+        "key": "string",
+        "label": "string",
+        "monthly": "number",
+        "spot_monthly": "number",
+        "unpriced_tasks": "number"
+      }
+    ],
+    "by_tag": [
+      {
+        "key": "string",
+        "label": "string",
+        "monthly": "number",
+        "spot_monthly": "number",
+        "unpriced_tasks": "number"
+      }
+    ],
+    "kpis": {
+      "monthly_total": "number",
+      "priced_tasks": "number",
+      "spot_monthly": "number",
+      "spot_tasks": "number",
+      "unpriced_regions": [
+        "string"
+      ],
+      "unpriced_tasks": "number"
+    },
+    "polled_at": "time",
+    "prices_as_of": "string",
+    "rightsizing": {
+      "default_headroom_pct": "number",
+      "min_history_days": "number",
+      "services": [
+        {
+          "architecture": "string",
+          "auto_scaled": "boolean",
+          "can_edit": "boolean",
+          "cluster": "string",
+          "cpu_units": {
+            "$null": "number"
+          },
+          "cpu_used_share": {
+            "$null": "number"
+          },
+          "history_days": "number",
+          "mem_used_share": {
+            "$null": "number"
+          },
+          "memory_mib": {
+            "$null": "number"
+          },
+          "monthly": "number",
+          "recent_oom": "boolean",
+          "region": "string",
+          "service": "string",
+          "service_id": "string",
+          "spot_tasks": "number",
+          "status": "string",
+          "steps": [
+            {
+              "from_headroom_pct": "number",
+              "suggestion": {
+                "$null": {
+                  "cpu_units": "number",
+                  "limited_by_containers": "boolean",
+                  "memory_mib": "number",
+                  "saving_monthly": "number"
+                }
+              }
+            }
+          ],
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          },
+          "tasks": "number"
+        }
+      ],
+      "state": "string"
+    },
+    "sources": [
+      {
+        "kept": "string",
+        "reads": "string",
+        "setting": {
+          "$null": "string"
+        },
+        "table": "string",
+        "window_used": {
+          "$null": "string"
+        }
+      }
+    ],
+    "tab": "string",
+    "window": {
+      "bucket": "string",
+      "clamped": "boolean",
+      "from": "time",
+      "range_applies": "boolean",
+      "requested": "string",
+      "retention": "string",
+      "to": "time",
+      "used": "string"
+    }
+  },
   "analyticsDelivery": {
     "duration": {
       "series": [

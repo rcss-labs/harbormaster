@@ -8,6 +8,7 @@ import {
   CHANGESET_PARTIAL,
   ANALYTICS_CAPACITY,
   ANALYTICS_CAPACITY_DAILY,
+  ANALYTICS_COST,
   ANALYTICS_DELIVERY,
   ANALYTICS_DELIVERY_FAILURES,
   ANALYTICS_OPERATIONS,
@@ -173,6 +174,7 @@ describe('API contract', () => {
     ['analyticsReliability', () => ANALYTICS_RELIABILITY_DAILY],
     ['analyticsCapacity', () => ANALYTICS_CAPACITY_DAILY],
     ['analyticsOperations', () => ANALYTICS_OPERATIONS],
+    ['analyticsCost', () => ANALYTICS_COST],
     ['analyticsReliability', () => body('/api/analytics/reliability?range=30d')],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
