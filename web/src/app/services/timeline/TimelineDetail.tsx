@@ -21,7 +21,7 @@ interface TimelineDetailProps {
   service: ServiceDTO
   event: TimelineEvent
   isTrigger: boolean
-  /** Rendered by the rollback task; accepted here so the tab can pass them through. */
+  /** The revision to offer a rollback to; shown only on the trigger. */
   rollbackRevision?: number | null
   onRollback?: () => void
 }
@@ -46,15 +46,22 @@ function DiffGrid({ rows }: { rows: DiffRow[] }) {
   )
 }
 
-/** The diff under an event: the server's rows plus, for a revision change, the two definitions compared here. */
-function EventDiff({ serviceId, event }: { serviceId: string; event: TimelineEvent }) {
-  const before = useRevisionDefinition(serviceId, event.from_revision !== null && event.to_revision !== null ? event.from_revision : null)
-  const after = useRevisionDefinition(serviceId, event.from_revision !== null && event.to_revision !== null ? event.to_revision : null)
-  const compares = event.from_revision !== null && event.to_revision !== null
+/** The server's diff rows plus, for a revision change, the two definitions compared here. */
+export function useEventDiff(serviceId: string, event: TimelineEvent | null): { rows: DiffRow[]; pending: boolean; failed: boolean } {
+  const compares = event !== null && event.from_revision !== null && event.to_revision !== null
+  const before = useRevisionDefinition(serviceId, compares ? event.from_revision : null)
+  const after = useRevisionDefinition(serviceId, compares ? event.to_revision : null)
 
   const failed = compares && (before.isError || after.isError)
-  if (compares && !failed && (before.isPending || after.isPending)) return <Skeleton lines={3} label="Loading the diff" />
-  const rows = [...event.diff, ...(compares && before.data && after.data ? revisionDiff(before.data.definition, after.data.definition) : [])]
+  const pending = compares && !failed && (before.isPending || after.isPending)
+  const rows = [...(event?.diff ?? []), ...(compares && before.data && after.data ? revisionDiff(before.data.definition, after.data.definition) : [])]
+  return { rows, pending, failed }
+}
+
+/** The diff under an event. */
+function EventDiff({ serviceId, event }: { serviceId: string; event: TimelineEvent }) {
+  const { rows, pending, failed } = useEventDiff(serviceId, event)
+  if (pending) return <Skeleton lines={3} label="Loading the diff" />
   return (
     <>
       {failed && (
@@ -94,9 +101,11 @@ function OpenTaskButton({ serviceId, taskId, onOpen }: { serviceId: string; task
 }
 
 /** Everything known about one timeline event, with the links onward to logs and the task. */
-export function TimelineDetail({ serviceId, service, event, isTrigger }: TimelineDetailProps) {
+export function TimelineDetail({ serviceId, service, event, isTrigger, rollbackRevision = null, onRollback }: TimelineDetailProps) {
   const { onOpen, panel } = useTaskPanel([], service.desired)
   const logsReason = `You need Logs on ${service.tag.name}`
+  const deployReason = `You need Deploy on ${service.tag.name}`
+  const offersRollback = isTrigger && rollbackRevision !== null && service.controller.supported
 
   return (
     <Panel title="Details">
@@ -123,8 +132,19 @@ export function TimelineDetail({ serviceId, service, event, isTrigger }: Timelin
             </span>
           )}
           {event.lane === 'stop' && event.task_id && <OpenTaskButton key={event.task_id} serviceId={serviceId} taskId={event.task_id} onOpen={onOpen} />}
+          {offersRollback &&
+            (service.can.deploy ? (
+              <button type="button" className={`${styles.action} ${styles.danger}`} onClick={onRollback}>
+                Roll back to revision {rollbackRevision}
+              </button>
+            ) : (
+              <button type="button" className={styles.action} disabled title={deployReason}>
+                Roll back to revision {rollbackRevision}
+              </button>
+            ))}
         </div>
         {!service.can.logs && <LockNote kind="why">{logsReason}</LockNote>}
+        {offersRollback && !service.can.deploy && <LockNote kind="why">{deployReason}</LockNote>}
       </div>
       {panel}
     </Panel>

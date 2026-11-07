@@ -49,9 +49,11 @@ describe('triggerSentence', () => {
     const cpu = { label: 'cpu', from: '256', to: '512' }
     const image = { label: 'image', from: '0.4.1', to: '0.4.2' }
     expect(triggerSentence([image, cpu, memory])).toBe('It lowered memory from 1024 to 512 MiB.')
-    expect(triggerSentence([image, cpu])).toBe('It raised CPU from 256 to 512.')
+    expect(triggerSentence([image, cpu])).toBe('It raised CPU from 256 to 512 units.')
     expect(triggerSentence([image])).toBe('It changed the image from 0.4.1 to 0.4.2.')
     expect(triggerSentence([{ label: 'memory', from: '512', to: '1024' }])).toBe('It raised memory from 512 to 1024 MiB.')
+    expect(triggerSentence([{ label: 'cpu', from: '1 vCPU', to: '2 vCPU' }])).toBe('It changed CPU from 1 vCPU to 2 vCPU.')
+    expect(triggerSentence([{ label: 'memory', from: '1 GB', to: '2 GB' }])).toBe('It changed memory from 1 GB to 2 GB.')
     expect(triggerSentence([{ label: 'env LOG', from: 'none', to: 'debug' }])).toBeNull()
   })
 })

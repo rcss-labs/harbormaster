@@ -82,14 +82,23 @@ export function revisionDiff(before: unknown, after: unknown): DiffRow[] {
 /** One sentence naming the first memory, CPU or image change, or null when none of those changed. */
 export function triggerSentence(rows: DiffRow[]): string | null {
   const memory = rows.find((row) => row.label === 'memory')
-  if (memory) return `It ${direction(memory)} memory from ${memory.from} to ${memory.to} MiB.`
+  if (memory) return `It ${verb(memory)} memory from ${memory.from} to ${memory.to}${unit(memory, ' MiB')}.`
   const cpu = rows.find((row) => row.label === 'cpu')
-  if (cpu) return `It ${direction(cpu)} CPU from ${cpu.from} to ${cpu.to}.`
+  if (cpu) return `It ${verb(cpu)} CPU from ${cpu.from} to ${cpu.to}${unit(cpu, ' units')}.`
   const image = rows.find((row) => row.label === 'image' || row.label.startsWith('image '))
   if (image) return `It changed the image from ${image.from} to ${image.to}.`
   return null
 }
 
-function direction(row: DiffRow): 'lowered' | 'raised' {
+const isNumeric = (value: string) => value.trim() !== '' && Number.isFinite(Number(value))
+
+/** The unit is only named when both sides are plain numbers; otherwise the values carry their own. */
+function unit(row: DiffRow, name: string): string {
+  return isNumeric(row.from) && isNumeric(row.to) ? name : ''
+}
+
+/** Raised or lowered when both sides are numbers, else just changed. */
+function verb(row: DiffRow): 'changed' | 'lowered' | 'raised' {
+  if (!isNumeric(row.from) || !isNumeric(row.to)) return 'changed'
   return Number(row.to) < Number(row.from) ? 'lowered' : 'raised'
 }

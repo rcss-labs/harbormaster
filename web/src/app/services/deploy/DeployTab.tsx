@@ -17,6 +17,7 @@ import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
+import { isRolloutRunning } from '../rollout'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
 import { PendingChangesAside, PendingChangesBar } from './PendingChangesAside'
@@ -245,6 +246,26 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
       setReviewing(true)
     },
   }
+
+  // ?review=1 (from the timeline's rollback) opens Review once, after the revision is loaded and no rollout is running; the user still applies.
+  const reviewRequested = searchParams.get('review') === '1'
+  const rolloutStateKnown = service.data !== undefined && (revisions.data !== undefined || revisions.isError)
+  const rolloutRunning = service.data !== undefined && isRolloutRunning(service.data, revisions.data)
+  useEffect(() => {
+    if (!reviewRequested || !rolloutStateKnown) return
+    const nothingToReview = revisionParam === null || revisionTarget.isError || revisionParam === deployedRevision
+    if (!rolloutRunning && !nothingToReview && !reviewable) return
+    if (!rolloutRunning && !nothingToReview) asideProps.onReview()
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        next.delete('review')
+        return next
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onReview only sets state from values already listed here
+  }, [reviewRequested, rolloutStateKnown, rolloutRunning, reviewable, revisionParam, revisionTarget.isError, deployedRevision])
 
   const showingProgress = service.data !== undefined && shouldShowProgress(service.data, now)
   const awaitingRollout = startedRollout !== null && !showingProgress && (deployedRevision ?? 0) < startedRollout

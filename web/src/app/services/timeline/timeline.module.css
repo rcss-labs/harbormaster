@@ -62,3 +62,7 @@
 .action:hover { background: var(--hover); }
 .disabled, .action:disabled { opacity: 0.5; cursor: not-allowed; }
 @media (max-width: 700px) { .action { min-height: 44px; } }
+
+.bannerBlock { display: grid; gap: 6px; margin-bottom: 14px; font-size: 12px; }
+.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.danger:hover { background: var(--danger); filter: brightness(1.07); }

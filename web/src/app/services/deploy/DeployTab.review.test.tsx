@@ -103,6 +103,37 @@ describe('DeployTab: footer', () => {
   })
 })
 
+describe('DeployTab: ?review=1', () => {
+  const searchOf = () => screen.getByTestId('search')
+
+  it('opens review for ?revision and review=1 once the revision has loaded', async () => {
+    const user = userEvent.setup()
+    const bodies = captureChangeSets(() => HttpResponse.json(CHANGESET_APPLIED))
+    renderApp(`${route}?revision=41&review=1`)
+
+    const review = within(await screen.findByRole('dialog'))
+    expect(review.getByText(/\+ .*"image": "payments-api:1\.18\.1"/)).toBeInTheDocument()
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(searchOf()).toHaveTextContent('revision=41')
+    expect(bodies).toHaveLength(0)
+
+    await user.click(review.getByRole('button', { name: 'Keep editing' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not auto-open review while a rollout runs', async () => {
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_NOTIFICATIONS, id: SERVICE_PAYMENTS.id })))
+    renderApp(`${route}?revision=41&review=1`)
+
+    await screen.findByRole('region', { name: 'Rollout progress' })
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
 describe('Review', () => {
   it('lists the JSON diff, service rows and scaling rows with the reason', async () => {
     const user = userEvent.setup()

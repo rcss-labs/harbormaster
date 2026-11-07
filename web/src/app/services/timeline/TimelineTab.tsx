@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTimeline, useTimelineLogErrors, type TimelineEvent, type TimelineLane, type TimelineRange } from '../../../api/timeline'
 import type { ServiceDTO } from '../../../api/types'
 import { EmptyState } from '../../../components/EmptyState'
@@ -11,8 +11,9 @@ import { Table } from '../../../components/Table'
 import { Toggle } from '../../../components/Toggle'
 import { usePhone } from '../../../components/usePhone'
 import { queryPanelError } from '../panelError'
-import { LANES, RANGES, formatEventTime, groupMarkers, logEvents, type MarkerGroup } from './model'
-import { TimelineDetail } from './TimelineDetail'
+import { LANES, RANGES, formatEventTime, groupMarkers, logEvents, smallestRangeContaining, type MarkerGroup } from './model'
+import { TimelineBanner } from './TimelineBanner'
+import { TimelineDetail, useEventDiff } from './TimelineDetail'
 import { TimelineLanes, type LaneRowState } from './TimelineLanes'
 import styles from './timeline.module.css'
 
@@ -30,6 +31,7 @@ const parseRange = (value: string | null): TimelineRange => RANGES.find((range) 
 export function TimelineTab({ serviceId, service }: { serviceId: string; service: ServiceDTO }) {
   const phone = usePhone()
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const range = parseRange(searchParams.get('range'))
   const [lanesOn, setLanesOn] = useState<Record<TimelineLane, boolean>>({ change: true, stop: true, alert: true, logs: true, access: true })
 
@@ -99,7 +101,28 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const visibleEvents = LANE_ORDER.flatMap((lane) => (lanesOn[lane] ? laneEvents[lane] : []))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 
-  const selectedEvent = visibleEvents.find((event) => event.id === selectedId)
+  const incident = data?.incident ?? null
+  const trigger = incident?.trigger ?? null
+  // A trigger older than the range, or on a lane that is off, is not in the lists but still has its details.
+  const triggerOutsideRange = trigger !== null && data !== undefined && !data.events.some((event) => event.id === trigger.id)
+  const selectedEvent = visibleEvents.find((event) => event.id === selectedId) ?? (triggerOutsideRange && trigger.id === selectedId ? trigger : undefined)
+  const triggerDiff = useEventDiff(serviceId, trigger).rows
+  // The server computes the incident over 7 days; it is only relevant when its last failure is inside the range.
+  const showBanner = incident !== null && data !== undefined && Date.parse(incident.last_failure_at) >= from
+
+  const showTheChange = () => {
+    if (!trigger) return
+    const needed = smallestRangeContaining(Date.parse(trigger.at), to)
+    const neededIndex = needed === null ? -1 : RANGES.findIndex((candidate) => candidate.value === needed)
+    const currentIndex = RANGES.findIndex((candidate) => candidate.value === range)
+    // Never narrows the range, and leaves it alone when the trigger is older than the longest one.
+    if (!lanesOn[trigger.lane]) setLanesOn((current) => ({ ...current, [trigger.lane]: true }))
+    // One update for both: React Router's functional form does not queue, so a second call would drop the first.
+    updateParams((params) => {
+      if (neededIndex > currentIndex) params.set('range', RANGES[neededIndex].value)
+      params.set('event', trigger.id)
+    })
+  }
 
   const select = (id: string, lane: TimelineLane) => {
     if (!lanesOn[lane]) setLanesOn((current) => ({ ...current, [lane]: true }))
@@ -125,98 +148,102 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   )
 
   return (
-    <div className={`${styles.split} ${phone ? styles.stack : ''}`.trim()} data-testid="timeline-split">
-      <div className={styles.list}>
-        <Panel
-          title="Timeline"
-          toolbar={
-            <>
-              <SegmentedFilter
-                label="Range"
-                value={range}
-                onChange={(next) => updateParams((params) => params.set('range', next))}
-                options={RANGES.map(({ value, label }) => ({ value, label }))}
+    <>
+      {showBanner && <TimelineBanner incident={incident} triggerDiff={triggerDiff} onShowChange={showTheChange} />}
+      <div className={`${styles.split} ${phone ? styles.stack : ''}`.trim()} data-testid="timeline-split">
+        <div className={styles.list}>
+          <Panel
+            title="Timeline"
+            toolbar={
+              <>
+                <SegmentedFilter
+                  label="Range"
+                  value={range}
+                  onChange={(next) => updateParams((params) => params.set('range', next))}
+                  options={RANGES.map(({ value, label }) => ({ value, label }))}
+                />
+                {toggles}
+              </>
+            }
+            loading={timeline.isPending}
+            error={queryPanelError(timeline, 'The timeline could not be read.')}
+          >
+            {!hasLogs && <LockNote kind="why">{logsLockReason}</LockNote>}
+            {anyLaneOn ? (
+              <TimelineLanes
+                groups={groups}
+                from={from}
+                to={to}
+                selectedId={selectedId}
+                laneStates={laneStates}
+                onSelect={(group) => select(group.items[0].id, group.items[0].lane)}
               />
-              {toggles}
-            </>
-          }
-          loading={timeline.isPending}
-          error={queryPanelError(timeline, 'The timeline could not be read.')}
-        >
-          {!hasLogs && <LockNote kind="why">{logsLockReason}</LockNote>}
-          {anyLaneOn ? (
-            <TimelineLanes
-              groups={groups}
-              from={from}
-              to={to}
-              selectedId={selectedId}
-              laneStates={laneStates}
-              onSelect={(group) => select(group.items[0].id, group.items[0].lane)}
-            />
-          ) : (
-            <>
-              <EmptyState>Turn on at least one lane.</EmptyState>
-              {!hasLogs && !phone && <p className={styles.hint}>{logsLockReason}</p>}
-            </>
-          )}
-        </Panel>
-        {anyLaneOn && laneNotes.length > 0 && (
-          <ul className={styles.laneNotes} aria-label="Lane notes">
-            {laneNotes.map(({ lane, text }) => (
-              <li key={lane}>{`${LANES[lane]}: ${text}`}</li>
-            ))}
-          </ul>
-        )}
-        {data && anyLaneOn && (
-          <Panel title="Events" sub={<span className={styles.count}>{visibleEvents.length} events in range</span>} flush>
-            {visibleEvents.length === 0 ? (
-              <EmptyState>No events in this range.</EmptyState>
             ) : (
-              <Table>
-                <thead>
-                  <tr>
-                    <th>Time</th>
-                    <th>Lane</th>
-                    <th>Event</th>
-                    <th>Actor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleEvents.map((event) => (
-                    <tr key={event.id} className={event.id === selectedId ? styles.selectedRow : undefined}>
-                      <td className={styles.time}>{formatEventTime(event.at, withDate)}</td>
-                      <td>
-                        <Pill kind={pillKind[event.severity]}>{LANES[event.lane]}</Pill>
-                      </td>
-                      <td>
-                        <button type="button" className={styles.eventTitle} onClick={() => select(event.id, event.lane)}>
-                          {event.title}
-                        </button>
-                      </td>
-                      <td>{event.actor}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
+              <>
+                <EmptyState>Turn on at least one lane.</EmptyState>
+                {!hasLogs && !phone && <p className={styles.hint}>{logsLockReason}</p>}
+              </>
             )}
           </Panel>
-        )}
+          {anyLaneOn && laneNotes.length > 0 && (
+            <ul className={styles.laneNotes} aria-label="Lane notes">
+              {laneNotes.map(({ lane, text }) => (
+                <li key={lane}>{`${LANES[lane]}: ${text}`}</li>
+              ))}
+            </ul>
+          )}
+          {data && anyLaneOn && (
+            <Panel title="Events" sub={<span className={styles.count}>{visibleEvents.length} events in range</span>} flush>
+              {visibleEvents.length === 0 ? (
+                <EmptyState>No events in this range.</EmptyState>
+              ) : (
+                <Table>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Lane</th>
+                      <th>Event</th>
+                      <th>Actor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleEvents.map((event) => (
+                      <tr key={event.id} className={event.id === selectedId ? styles.selectedRow : undefined}>
+                        <td className={styles.time}>{formatEventTime(event.at, withDate)}</td>
+                        <td>
+                          <Pill kind={pillKind[event.severity]}>{LANES[event.lane]}</Pill>
+                        </td>
+                        <td>
+                          <button type="button" className={styles.eventTitle} onClick={() => select(event.id, event.lane)}>
+                            {event.title}
+                          </button>
+                        </td>
+                        <td>{event.actor}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              )}
+            </Panel>
+          )}
+        </div>
+        <div className={styles.detail}>
+          {selectedEvent ? (
+            <TimelineDetail
+              serviceId={serviceId}
+              service={service}
+              event={selectedEvent}
+              isTrigger={selectedEvent.id === trigger?.id}
+              rollbackRevision={incident?.trigger_unknown ? null : (incident?.rollback_revision ?? null)}
+              onRollback={() => incident?.rollback_revision != null && navigate(`/services/${serviceId}/deploy?revision=${incident.rollback_revision}&review=1`)}
+            />
+          ) : (
+            <Panel title="Details">
+              <p className={styles.hint}>Select an event to see the details.</p>
+            </Panel>
+          )}
+        </div>
       </div>
-      <div className={styles.detail}>
-        {selectedEvent ? (
-          <TimelineDetail
-            serviceId={serviceId}
-            service={service}
-            event={selectedEvent}
-            isTrigger={selectedEvent.id === data?.incident?.trigger?.id}
-            rollbackRevision={data?.incident?.rollback_revision ?? null}
-          />
-        ) : (
-          <Panel title="Details">
-            <p className={styles.hint}>Select an event to see the details.</p>
-          </Panel>
-        )}
-      </div>
-    </div>
+    </>
   )
 }
