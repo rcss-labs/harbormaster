@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -53,8 +52,8 @@ func TestFinishScanRun_ClaimsOnce(t *testing.T) {
 	if len(digests) != 1 || digests[0] != "sha256:a" {
 		t.Fatalf("run digests = %v", digests)
 	}
-	if _, err := s.LatestScanRun(ctx, "rematch"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("LatestScanRun(rematch) err = %v, want ErrNotFound", err)
+	if _, err := s.Pool.Exec(ctx, `insert into scan_runs (kind, batch_size, status, started_at) values ('rematch', 1, 'running', now())`); err == nil {
+		t.Fatal("inserting a rematch run succeeded, want the kind check to refuse it")
 	}
 }
 
@@ -70,7 +69,7 @@ func TestScanRunsSummary_FailingSinceStartsAtFirstFailureAfterSuccess(t *testing
 		}
 	}
 	insert("failed", "scan", "early failure", base)                  // before the success: not counted
-	insert("succeeded", "rematch", "", base.Add(time.Hour))          // last success
+	insert("succeeded", "scan", "", base.Add(time.Hour))             // last success
 	insert("failed", "scan", "first failure", base.Add(2*time.Hour)) // failing since here
 	insert("timed_out", "scan", "latest failure", base.Add(3*time.Hour))
 	if _, err := s.Pool.Exec(ctx, `insert into scan_runs (kind, batch_size, status, started_at) values ('scan', 3, 'running', $1)`, base.Add(4*time.Hour)); err != nil {
@@ -87,7 +86,7 @@ func TestScanRunsSummary_FailingSinceStartsAtFirstFailureAfterSuccess(t *testing
 	if sum.Running != 1 || sum.RunningImages != 1 {
 		t.Fatalf("running=%d images=%d, want 1 1", sum.Running, sum.RunningImages)
 	}
-	if sum.LastSuccessAt == nil || !sum.LastSuccessAt.Equal(base.Add(time.Hour)) || sum.LastSuccessKind != "rematch" {
+	if sum.LastSuccessAt == nil || !sum.LastSuccessAt.Equal(base.Add(time.Hour)) || sum.LastSuccessKind != "scan" {
 		t.Fatalf("last success = %v %q", sum.LastSuccessAt, sum.LastSuccessKind)
 	}
 	if sum.FailingSince == nil || !sum.FailingSince.Equal(base.Add(2*time.Hour)) {
@@ -114,7 +113,7 @@ func TestScanDBState_RoundTrip(t *testing.T) {
 	}
 	built := time.Now().Add(-time.Hour).Truncate(time.Second)
 	want := store.ScanDBState{BuiltAt: &built, Checksum: "sha256:abc", ArchiveKey: "grype-db/v6/x.tar.zst",
-		ImportedAt: &built, LastRefreshAt: &built, LastRefreshError: "boom", ScannerImageDigest: "sha256:img", EngineRequeueAt: &built}
+		ImportedAt: &built, LastRefreshAt: &built, LastRefreshError: "boom", ScannerImageDigest: "sha256:img", EngineRequeueAt: &built, RefreshingSince: &built}
 	if err := s.SetScanDBState(ctx, want); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +128,7 @@ func TestScanDBState_RoundTrip(t *testing.T) {
 	}
 	if got.Checksum != "sha256:def" || got.ArchiveKey != want.ArchiveKey || got.LastRefreshError != "" ||
 		got.BuiltAt == nil || !got.BuiltAt.Equal(built) || got.ScannerImageDigest != "sha256:img" ||
-		got.EngineRequeueAt == nil || got.ImportedAt == nil || got.LastRefreshAt == nil {
+		got.EngineRequeueAt == nil || got.RefreshingSince == nil || got.ImportedAt == nil || got.LastRefreshAt == nil {
 		t.Fatalf("state = %+v, want %+v", got, want)
 	}
 }
@@ -141,7 +140,7 @@ func TestScanUserForeignKeys_DoNotBlockUserDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedScanImages(t, s, time.Now(), scanSeen("sha256:a", "ecr", "running"))
+	seedScanImages(t, s, time.Now(), "sha256:a")
 	if _, err := s.Pool.Exec(ctx, `update scan_images set requested_by = $1`, user.ID); err != nil {
 		t.Fatal(err)
 	}

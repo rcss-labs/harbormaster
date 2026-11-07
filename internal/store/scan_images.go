@@ -9,28 +9,22 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ScanImage is one container image digest known to the image-security scanner.
+// ScanImage is one container image digest that someone asked Harbormaster to scan.
 type ScanImage struct {
-	Digest, PlatformDigest, Platform, ImageRef, Tag, RegistryKind, RegistryAccountID, RegistryRegion, Repository, Role, Status, FailureCode, FailureDetail string
-	Attempts                                                                                                                                               int
-	NextAttemptAt                                                                                                                                          *time.Time
-	Large                                                                                                                                                  bool
-	SBOMKey                                                                                                                                                string
-	SBOMGeneratedAt                                                                                                                                        *time.Time
-	SyftVersion, ScannerImageDigest                                                                                                                        string
-	LastMatchedRunID                                                                                                                                       *int64
-	MatchedAt, MatchedDBBuiltAt                                                                                                                            *time.Time
-	Packages                                                                                                                                               *int
-	Truncated                                                                                                                                              bool
-	PushedAt, CandidatesCheckedAt                                                                                                                          *time.Time
-	FirstSeenAt                                                                                                                                            time.Time
-	LastSeenRunningAt                                                                                                                                      *time.Time
-	RequestedBy                                                                                                                                            *int64
-}
-
-// ScanImageSeen is an image the poller observed, as input to UpsertScanImagesSeen.
-type ScanImageSeen struct {
-	Digest, ImageRef, Tag, RegistryKind, RegistryAccountID, RegistryRegion, Repository, Platform, Role string
+	Digest, PlatformDigest, Platform, ImageRef, Tag, RegistryKind, RegistryAccountID, RegistryRegion, Repository string
+	Status, FailureCode, FailureDetail                                                                           string
+	Attempts                                                                                                     int
+	NextAttemptAt                                                                                                *time.Time
+	Large                                                                                                        bool
+	SyftVersion, ScannerImageDigest                                                                              string
+	LastMatchedRunID                                                                                             *int64
+	MatchedAt, MatchedDBBuiltAt                                                                                  *time.Time
+	Packages                                                                                                     *int
+	Truncated                                                                                                    bool
+	PushedAt                                                                                                     *time.Time
+	FirstSeenAt, LastRequestedAt                                                                                 time.Time
+	ScannedAt                                                                                                    *time.Time
+	RequestedBy                                                                                                  *int64
 }
 
 // maxScanAttempts is the number of scan attempts after which an image is marked failed.
@@ -38,20 +32,21 @@ const maxScanAttempts = 3
 
 const scanImageColumns = `digest, coalesce(platform_digest, ''), coalesce(platform, ''), image_ref, coalesce(tag, ''),
 	registry_kind, coalesce(registry_account_id, ''), coalesce(registry_region, ''), coalesce(repository, ''),
-	role, status, coalesce(failure_code, ''), coalesce(failure_detail, ''), attempts, next_attempt_at, large,
-	coalesce(sbom_key, ''), sbom_generated_at, coalesce(syft_version, ''), coalesce(scanner_image_digest, ''),
-	last_matched_run_id, matched_at, matched_db_built_at, packages, truncated, pushed_at, candidates_checked_at,
-	first_seen_at, last_seen_running_at, requested_by`
+	status, coalesce(failure_code, ''), coalesce(failure_detail, ''), attempts, next_attempt_at, large,
+	coalesce(syft_version, ''), coalesce(scanner_image_digest, ''),
+	last_matched_run_id, matched_at, matched_db_built_at, packages, truncated, pushed_at,
+	first_seen_at, last_requested_at, scanned_at, requested_by`
 
-func scanScanImage(row pgx.Row) (ScanImage, error) {
+// scanScanImage reads a row of scanImageColumns followed by any extra columns.
+func scanScanImage(row pgx.Row, extra ...any) (ScanImage, error) {
 	var i ScanImage
-	err := row.Scan(&i.Digest, &i.PlatformDigest, &i.Platform, &i.ImageRef, &i.Tag,
+	dest := append([]any{&i.Digest, &i.PlatformDigest, &i.Platform, &i.ImageRef, &i.Tag,
 		&i.RegistryKind, &i.RegistryAccountID, &i.RegistryRegion, &i.Repository,
-		&i.Role, &i.Status, &i.FailureCode, &i.FailureDetail, &i.Attempts, &i.NextAttemptAt, &i.Large,
-		&i.SBOMKey, &i.SBOMGeneratedAt, &i.SyftVersion, &i.ScannerImageDigest,
-		&i.LastMatchedRunID, &i.MatchedAt, &i.MatchedDBBuiltAt, &i.Packages, &i.Truncated, &i.PushedAt, &i.CandidatesCheckedAt,
-		&i.FirstSeenAt, &i.LastSeenRunningAt, &i.RequestedBy)
-	return i, err
+		&i.Status, &i.FailureCode, &i.FailureDetail, &i.Attempts, &i.NextAttemptAt, &i.Large,
+		&i.SyftVersion, &i.ScannerImageDigest,
+		&i.LastMatchedRunID, &i.MatchedAt, &i.MatchedDBBuiltAt, &i.Packages, &i.Truncated, &i.PushedAt,
+		&i.FirstSeenAt, &i.LastRequestedAt, &i.ScannedAt, &i.RequestedBy}, extra...)
+	return i, row.Scan(dest...)
 }
 
 func (s *Store) queryScanImages(ctx context.Context, sql string, args ...any) ([]ScanImage, error) {
@@ -71,69 +66,39 @@ func (s *Store) queryScanImages(ctx context.Context, sql string, args ...any) ([
 	return out, rows.Err()
 }
 
-// The insert carries the row's first state (queued, or unsupported for a non-ECR registry). On conflict, an image seen
-// running is touched and promoted; an aged_out row seen in any role takes the insert's state again.
 // "xmax = 0" is true only for a row this statement inserted.
-const upsertScanImageSeenSQL = `insert into scan_images (digest, platform, image_ref, tag, registry_kind, registry_account_id,
-	  registry_region, repository, role, status, failure_code, first_seen_at, last_seen_running_at, updated_at)
-	values ($1, nullif($2, ''), $3, nullif($4, ''), $5, nullif($6, ''), nullif($7, ''), nullif($8, ''), $9,
-	  $10, $11, $12, case when $9 = 'running' then $12::timestamptz end, $12)
+// A failed row asked for again starts over: queued, no attempts, no failure.
+const upsertRequestedScanImageSQL = `insert into scan_images (digest, platform, image_ref, tag, registry_kind, registry_account_id,
+	  registry_region, repository, status, first_seen_at, last_requested_at, requested_by, updated_at)
+	values ($1, nullif($2, ''), $3, nullif($4, ''), $5, nullif($6, ''), nullif($7, ''), nullif($8, ''),
+	  'queued', $9, $9, $10, $9)
 	on conflict (digest) do update set
-	  role = case when excluded.role = 'running' then 'running'
-	    when scan_images.status = 'aged_out' then 'candidate' else scan_images.role end,
-	  last_seen_running_at = case when excluded.role = 'running' then $12 else scan_images.last_seen_running_at end,
-	  status = case when scan_images.status = 'aged_out' then excluded.status else scan_images.status end,
-	  attempts = case when scan_images.status = 'aged_out' then 0 else scan_images.attempts end,
-	  sbom_key = case when scan_images.status = 'aged_out' then null else scan_images.sbom_key end,
-	  next_attempt_at = case when scan_images.status = 'aged_out' then null else scan_images.next_attempt_at end,
-	  failure_code = case when scan_images.status = 'aged_out' then excluded.failure_code else scan_images.failure_code end,
-	  failure_detail = case when scan_images.status = 'aged_out' then null else scan_images.failure_detail end,
-	  updated_at = $12
-	where excluded.role = 'running' or scan_images.status = 'aged_out'
-	returning (xmax = 0)`
+	  last_requested_at = $9,
+	  status = case when scan_images.status = 'failed' then 'queued' else scan_images.status end,
+	  attempts = case when scan_images.status = 'failed' then 0 else scan_images.attempts end,
+	  next_attempt_at = case when scan_images.status = 'failed' then null else scan_images.next_attempt_at end,
+	  failure_code = case when scan_images.status = 'failed' then null else scan_images.failure_code end,
+	  failure_detail = case when scan_images.status = 'failed' then null else scan_images.failure_detail end,
+	  updated_at = $9
+	returning ` + scanImageColumns + `, (xmax = 0)`
 
-// UpsertScanImagesSeen records images the poller saw and returns the digests that were new.
-// Only images seen running, or aged-out rows seen again, change an existing row.
-func (s *Store) UpsertScanImagesSeen(ctx context.Context, seen []ScanImageSeen, now time.Time) ([]string, error) {
-	newDigests := []string{}
-	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		done := map[string]bool{}
-		for _, img := range seen {
-			if done[img.Digest] {
-				continue
-			}
-			done[img.Digest] = true
-			status, failureCode := "queued", (*string)(nil)
-			if img.RegistryKind != "ecr" {
-				code := "unsupported_registry"
-				status, failureCode = "unsupported", &code
-			}
-			var inserted bool
-			err := tx.QueryRow(ctx, upsertScanImageSeenSQL, img.Digest, img.Platform, img.ImageRef, img.Tag, img.RegistryKind,
-				img.RegistryAccountID, img.RegistryRegion, img.Repository, img.Role, status, failureCode, now).Scan(&inserted)
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue // an existing row seen as a candidate stays as it is
-			}
-			if err != nil {
-				return fmt.Errorf("upsert scan image %s: %w", img.Digest, err)
-			}
-			if inserted {
-				newDigests = append(newDigests, img.Digest)
-			}
-		}
-		return nil
-	})
+// UpsertRequestedScanImage records a request to scan an image: a new digest is queued, a known one has its request time
+// moved, and a failed one is queued again with its attempts reset. created is true only for a new row.
+func (s *Store) UpsertRequestedScanImage(ctx context.Context, img ScanImage, now time.Time) (ScanImage, bool, error) {
+	var created bool
+	stored, err := scanScanImage(s.Pool.QueryRow(ctx, upsertRequestedScanImageSQL, img.Digest, img.Platform, img.ImageRef, img.Tag,
+		img.RegistryKind, img.RegistryAccountID, img.RegistryRegion, img.Repository, now, img.RequestedBy), &created)
 	if err != nil {
-		return nil, err
+		return ScanImage{}, false, fmt.Errorf("upsert requested scan image %s: %w", img.Digest, err)
 	}
-	return newDigests, nil
+	return stored, created, nil
 }
 
-// DueScanImages returns queued images whose retry time has come: running images first, oldest first.
+// DueScanImages returns queued images whose retry time has come, least recently requested first.
 func (s *Store) DueScanImages(ctx context.Context, now time.Time, limit int) ([]ScanImage, error) {
 	imgs, err := s.queryScanImages(ctx, `select `+scanImageColumns+` from scan_images
 		where status = 'queued' and (next_attempt_at is null or next_attempt_at <= $1)
-		order by (role = 'running') desc, first_seen_at, digest limit $2`, now, limit)
+		order by last_requested_at, digest limit $2`, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("due scan images: %w", err)
 	}
@@ -159,7 +124,7 @@ func (s *Store) ListScanImages(ctx context.Context, digests []string) ([]ScanIma
 	return imgs, nil
 }
 
-// MarkScanImagesScanning moves the given digests of a run's batch to scanning; scanned images are allowed for rematch runs.
+// MarkScanImagesScanning moves the given digests of a run's batch to scanning; scanned images are allowed for rescans.
 func (s *Store) MarkScanImagesScanning(ctx context.Context, digests []string, runID int64) error {
 	_, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanning', updated_at = now()
 		where digest = any($1) and status in ('queued', 'scanned')
@@ -210,49 +175,27 @@ func (s *Store) RequeueScanningWithoutRun(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// AgedOutSBOMKeys lists aged-out images whose SBOM object still has to be deleted.
-func (s *Store) AgedOutSBOMKeys(ctx context.Context, limit int) ([]struct{ Digest, SBOMKey string }, error) {
-	rows, err := s.Pool.Query(ctx, `select digest, sbom_key from scan_images
-		where status = 'aged_out' and sbom_key is not null order by digest limit $1`, limit)
+// expiredScanImagesWhere is the one definition of an expired scan result: finished, and not requested since the cutoff.
+const expiredScanImagesWhere = `status in ('scanned', 'failed') and last_requested_at < $1`
+
+// ExpiredScanImages lists digests of finished scans last requested before cutoff, oldest request first.
+func (s *Store) ExpiredScanImages(ctx context.Context, cutoff time.Time, limit int) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `select digest from scan_images where `+expiredScanImagesWhere+`
+		order by last_requested_at, digest limit $2`, cutoff, limit)
 	if err != nil {
-		return nil, fmt.Errorf("aged out sbom keys: %w", err)
+		return nil, fmt.Errorf("expired scan images: %w", err)
 	}
-	defer rows.Close()
-	var out []struct{ Digest, SBOMKey string }
-	for rows.Next() {
-		var row struct{ Digest, SBOMKey string }
-		if err := rows.Scan(&row.Digest, &row.SBOMKey); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
+	digests, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("expired scan images: %w", err)
 	}
-	return out, rows.Err()
+	return digests, nil
 }
 
-// ClearSBOMKey forgets the key of an aged-out image once its object is deleted.
-func (s *Store) ClearSBOMKey(ctx context.Context, digest string) error {
-	if _, err := s.Pool.Exec(ctx, `update scan_images set sbom_key = null, updated_at = now() where digest = $1 and status = 'aged_out'`, digest); err != nil {
-		return fmt.Errorf("clear sbom key: %w", err)
+// DeleteScanImages deletes the given images; their findings, requests and risk acceptances go with them.
+func (s *Store) DeleteScanImages(ctx context.Context, digests []string) error {
+	if _, err := s.Pool.Exec(ctx, `delete from scan_images where digest = any($1)`, digests); err != nil {
+		return fmt.Errorf("delete scan images: %w", err)
 	}
 	return nil
-}
-
-// LiveSBOMDigests lists scanned images with an SBOM that were not matched against a database built at builtAt or later.
-func (s *Store) LiveSBOMDigests(ctx context.Context, builtAt time.Time, limit int) ([]string, error) {
-	rows, err := s.Pool.Query(ctx, `select digest from scan_images
-		where status = 'scanned' and sbom_key is not null and (matched_db_built_at is null or matched_db_built_at < $1)
-		order by digest limit $2`, builtAt, limit)
-	if err != nil {
-		return nil, fmt.Errorf("live sbom digests: %w", err)
-	}
-	defer rows.Close()
-	digests := []string{}
-	for rows.Next() {
-		var d string
-		if err := rows.Scan(&d); err != nil {
-			return nil, err
-		}
-		digests = append(digests, d)
-	}
-	return digests, rows.Err()
 }

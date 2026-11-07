@@ -11,15 +11,12 @@ create table scan_images (
   registry_account_id text,
   registry_region text,
   repository text,
-  role text not null check (role in ('running', 'candidate')),
-  status text not null check (status in ('queued', 'scanning', 'scanned', 'failed', 'unsupported', 'aged_out')),
+  status text not null check (status in ('queued', 'scanning', 'scanned', 'failed')),
   failure_code text,
   failure_detail text,
   attempts int not null default 0,
   next_attempt_at timestamptz,
   large bool not null default false,
-  sbom_key text,
-  sbom_generated_at timestamptz,
   syft_version text,
   scanner_image_digest text,
   last_matched_run_id bigint,
@@ -28,18 +25,20 @@ create table scan_images (
   packages int,
   truncated bool not null default false,
   pushed_at timestamptz,
-  candidates_checked_at timestamptz,
   first_seen_at timestamptz not null,
-  last_seen_running_at timestamptz,
+  -- Last time anyone asked for this image; results are kept from here (HM_RETENTION_SCAN_IMAGES).
+  last_requested_at timestamptz not null,
+  scanned_at timestamptz,
+  -- Times the scan was put off without counting an attempt.
+  defers int not null default 0,
   requested_by bigint references users (id) on delete set null,
   updated_at timestamptz not null
 );
 create index scan_images_status_next_attempt_idx on scan_images (status, next_attempt_at);
-create index scan_images_repository_idx on scan_images (repository, registry_account_id, registry_region);
 
 create table scan_runs (
   id bigserial primary key,
-  kind text not null check (kind in ('scan', 'rematch')),
+  kind text not null check (kind = 'scan'),
   task_arn text,
   cluster_arn text,
   batch_size int not null,
@@ -58,7 +57,8 @@ create table scan_runs (
   images_ok int,
   images_failed int,
   error text,
-  objects_deleted_at timestamptz
+  objects_deleted_at timestamptz,
+  import_attempts int not null default 0
 );
 create index scan_runs_status_idx on scan_runs (status);
 
@@ -69,15 +69,8 @@ create table scan_run_images (
   primary key (run_id, digest)
 );
 
--- Which candidate images belong to which running image.
-create table scan_candidate_links (
-  running_digest text not null,
-  candidate_digest text not null,
-  primary key (running_digest, candidate_digest)
-);
-
 create table scan_findings (
-  digest text not null,
+  digest text not null references scan_images (digest) on delete cascade,
   vuln_id text not null,
   package_name text not null,
   package_version text not null,
@@ -95,23 +88,9 @@ create table scan_findings (
   primary key (digest, vuln_id, package_name, package_version)
 );
 
--- Only the best candidate per running image is kept.
-create table scan_fix_candidates (
-  running_digest text primary key,
-  candidate_digest text not null,
-  repository text,
-  tag text not null,
-  pushed_at timestamptz,
-  fixes int,
-  introduces int,
-  open_total int,
-  computed_at timestamptz not null,
-  computed_against_run_id bigint
-);
-
 create table scan_risk_acceptances (
   id bigserial primary key,
-  digest text not null,
+  digest text not null references scan_images (digest) on delete cascade,
   vuln_id text not null,
   package_name text not null,
   package_version text not null,
@@ -133,5 +112,36 @@ create table scan_db_state (
   last_refresh_at timestamptz,
   last_refresh_error text,
   scanner_image_digest text,
-  engine_requeue_at timestamptz
+  engine_requeue_at timestamptz,
+  refreshing_since timestamptz
+);
+
+-- One row per request for a scan, from the Deploy tab button or the pre-deploy setting.
+create table scan_requests (
+  id bigserial primary key,
+  digest text not null references scan_images (digest) on delete cascade,
+  account_id text not null,
+  region text not null,
+  cluster_name text not null,
+  service_name text not null,
+  container text not null,
+  image text not null,
+  tag text,
+  source text not null check (source in ('manual', 'pre_deploy')),
+  requested_by bigint references users (id) on delete set null,
+  requested_at timestamptz not null
+);
+create index scan_requests_digest_idx on scan_requests (digest);
+create index scan_requests_service_idx on scan_requests (account_id, region, cluster_name, service_name);
+
+-- Keyed by the service's name, not its ARN, so a recreated service keeps its setting.
+create table service_scan_settings (
+  account_id text not null,
+  region text not null,
+  cluster_name text not null,
+  service_name text not null,
+  pre_deploy_scan bool not null default false,
+  updated_at timestamptz not null,
+  updated_by bigint references users (id) on delete set null,
+  primary key (account_id, region, cluster_name, service_name)
 );

@@ -67,17 +67,14 @@ func TestLoad_Defaults(t *testing.T) {
 			ScanRuns:          720 * time.Hour,
 		},
 		Scan: ScanConfig{
-			RoleName:         "harbormaster-scan",
-			Interval:         60 * time.Second,
-			TaskTimeout:      30 * time.Minute,
-			DBRefresh:        24 * time.Hour,
-			DBMaxAge:         120 * time.Hour,
-			CandidateRefresh: 6 * time.Hour,
-			MaxTasks:         1,
-			BatchSize:        25,
-			CandidateTags:    3,
-			MaxImageMB:       4096,
-			RematchBatch:     500,
+			RoleName:    "harbormaster-scan",
+			Interval:    15 * time.Second,
+			TaskTimeout: 30 * time.Minute,
+			DBRefresh:   24 * time.Hour,
+			DBMaxAge:    120 * time.Hour,
+			MaxTasks:    1,
+			BatchSize:   25,
+			MaxImageMB:  4096,
 		},
 		Analytics:       AnalyticsConfig{Util: true},
 		PageSizeDefault: 100,
@@ -372,11 +369,23 @@ func TestLoad_ScanDefaults(t *testing.T) {
 	if cfg.Scan.RoleName != "harbormaster-scan" {
 		t.Errorf("Scan.RoleName = %q, want harbormaster-scan", cfg.Scan.RoleName)
 	}
-	if cfg.Scan.Interval != 60*time.Second {
-		t.Errorf("Scan.Interval = %v, want 60s", cfg.Scan.Interval)
+	if cfg.Scan.Interval != 15*time.Second {
+		t.Errorf("Scan.Interval = %v, want 15s", cfg.Scan.Interval)
 	}
-	if cfg.Scan.CandidateTags != 3 {
-		t.Errorf("Scan.CandidateTags = %d, want 3", cfg.Scan.CandidateTags)
+}
+
+func TestLoad_ScanDBRefreshAcceptsZero(t *testing.T) {
+	// 0 turns the refresh off, for an operator-run mirror.
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SCAN_DB_REFRESH": "0"}))
+	if err != nil {
+		t.Fatalf("Load with HM_SCAN_DB_REFRESH=0 returned error: %v", err)
+	}
+	if cfg.Scan.DBRefresh != 0 {
+		t.Errorf("Scan.DBRefresh = %v, want 0", cfg.Scan.DBRefresh)
+	}
+	_, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SCAN_DB_REFRESH": "30m"}))
+	if err == nil || !strings.Contains(err.Error(), "HM_SCAN_DB_REFRESH") {
+		t.Fatalf("err = %v, want one naming HM_SCAN_DB_REFRESH", err)
 	}
 }
 
@@ -477,23 +486,16 @@ func TestLoad_ScanLimitBounds(t *testing.T) {
 		{name: "batch size below range", key: "HM_SCAN_BATCH_SIZE", raw: "0"},
 		{name: "batch size above range", key: "HM_SCAN_BATCH_SIZE", raw: "101"},
 		{name: "batch size upper edge", key: "HM_SCAN_BATCH_SIZE", raw: "100", valid: true},
-		{name: "candidate tags below range", key: "HM_SCAN_CANDIDATE_TAGS", raw: "-1"},
-		{name: "candidate tags above range", key: "HM_SCAN_CANDIDATE_TAGS", raw: "11"},
-		{name: "candidate tags lower edge", key: "HM_SCAN_CANDIDATE_TAGS", raw: "0", valid: true},
 		{name: "task timeout below minimum", key: "HM_SCAN_TASK_TIMEOUT", raw: "4m"},
 		{name: "task timeout minimum edge", key: "HM_SCAN_TASK_TIMEOUT", raw: "5m", valid: true},
 		{name: "interval below minimum", key: "HM_SCAN_INTERVAL", raw: "500ms"},
 		{name: "interval minimum edge", key: "HM_SCAN_INTERVAL", raw: "1s", valid: true},
-		{name: "rematch batch below minimum", key: "HM_SCAN_REMATCH_BATCH", raw: "0"},
-		{name: "rematch batch minimum edge", key: "HM_SCAN_REMATCH_BATCH", raw: "1", valid: true},
 		{name: "db refresh below minimum", key: "HM_SCAN_DB_REFRESH", raw: "30m"},
 		{name: "db refresh minimum edge", key: "HM_SCAN_DB_REFRESH", raw: "1h", valid: true},
 		{name: "max image below minimum", key: "HM_SCAN_MAX_IMAGE_MB", raw: "0"},
 		{name: "max image minimum edge", key: "HM_SCAN_MAX_IMAGE_MB", raw: "1", valid: true},
 		{name: "db max age below minimum", key: "HM_SCAN_DB_MAX_AGE", raw: "30m"},
 		{name: "db max age minimum edge", key: "HM_SCAN_DB_MAX_AGE", raw: "1h", valid: true},
-		{name: "candidate refresh below minimum", key: "HM_SCAN_CANDIDATE_REFRESH", raw: "30s"},
-		{name: "candidate refresh minimum edge", key: "HM_SCAN_CANDIDATE_REFRESH", raw: "1m", valid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

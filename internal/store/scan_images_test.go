@@ -9,105 +9,74 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
-func scanSeen(digest, kind, role string) store.ScanImageSeen {
-	return store.ScanImageSeen{
+func scanRequest(digest string) store.ScanImage {
+	return store.ScanImage{
 		Digest: digest, ImageRef: "111111111111.dkr.ecr.eu-west-1.amazonaws.com/api", Tag: "v1",
-		RegistryKind: kind, RegistryAccountID: "111111111111", RegistryRegion: "eu-west-1",
-		Repository: "api", Platform: "linux/amd64", Role: role,
+		RegistryKind: "ecr", RegistryAccountID: "111111111111", RegistryRegion: "eu-west-1",
+		Repository: "api", Platform: "linux/amd64",
 	}
 }
 
-func seedScanImages(t *testing.T, s *store.Store, now time.Time, seen ...store.ScanImageSeen) {
+func seedScanImages(t *testing.T, s *store.Store, now time.Time, digests ...string) {
 	t.Helper()
-	if _, err := s.UpsertScanImagesSeen(context.Background(), seen, now); err != nil {
-		t.Fatal(err)
+	for _, digest := range digests {
+		if _, _, err := s.UpsertRequestedScanImage(context.Background(), scanRequest(digest), now); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
-func TestUpsertScanImagesSeen_NewAreQueuedKnownOnlyTouched(t *testing.T) {
+func TestUpsertRequestedScanImage_NewIsQueuedExistingIsTouchedFailedIsReset(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	t0 := time.Now().Add(-time.Hour).Truncate(time.Second)
 	t1 := t0.Add(30 * time.Minute)
-	seen := []store.ScanImageSeen{scanSeen("sha256:ecr", "ecr", "running"), scanSeen("sha256:hub", "other", "running")}
 
-	fresh, err := s.UpsertScanImagesSeen(ctx, seen, t0)
+	img, created, err := s.UpsertRequestedScanImage(ctx, scanRequest("sha256:a"), t0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fresh) != 2 {
-		t.Fatalf("new digests = %v, want both", fresh)
-	}
-	ecr, err := s.GetScanImage(ctx, "sha256:ecr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ecr.Status != "queued" || ecr.Role != "running" {
-		t.Fatalf("ecr row status=%q role=%q, want queued running", ecr.Status, ecr.Role)
-	}
-	other, err := s.GetScanImage(ctx, "sha256:hub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if other.Status != "unsupported" || other.FailureCode != "unsupported_registry" {
-		t.Fatalf("other row status=%q code=%q, want unsupported unsupported_registry", other.Status, other.FailureCode)
+	if !created || img.Status != "queued" || !img.LastRequestedAt.Equal(t0) {
+		t.Fatalf("first call created=%v status=%q last_requested_at=%v, want true queued %v", created, img.Status, img.LastRequestedAt, t0)
 	}
 
-	fresh, err = s.UpsertScanImagesSeen(ctx, seen, t1)
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned', scanned_at = $1 where digest = 'sha256:a'`, t0); err != nil {
+		t.Fatal(err)
+	}
+	img, created, err = s.UpsertRequestedScanImage(ctx, scanRequest("sha256:a"), t1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fresh) != 0 {
-		t.Fatalf("second call new digests = %v, want none", fresh)
+	if created || img.Status != "scanned" || !img.LastRequestedAt.Equal(t1) || !img.FirstSeenAt.Equal(t0) {
+		t.Fatalf("second call created=%v status=%q last_requested_at=%v first_seen_at=%v, want false scanned %v %v",
+			created, img.Status, img.LastRequestedAt, img.FirstSeenAt, t1, t0)
 	}
-	ecr = mustGetScanImage(t, s, "sha256:ecr")
-	if ecr.LastSeenRunningAt == nil || !ecr.LastSeenRunningAt.Equal(t1) {
-		t.Fatalf("last_seen_running_at = %v, want %v", ecr.LastSeenRunningAt, t1)
+
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'failed', attempts = 3, failure_code = 'task_failed', failure_detail = 'x' where digest = 'sha256:a'`); err != nil {
+		t.Fatal(err)
 	}
-	if !ecr.FirstSeenAt.Equal(t0) {
-		t.Fatalf("first_seen_at = %v, want unchanged %v", ecr.FirstSeenAt, t0)
+	img, created, err = s.UpsertRequestedScanImage(ctx, scanRequest("sha256:a"), t1.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || img.Status != "queued" || img.Attempts != 0 || img.FailureCode != "" || img.NextAttemptAt != nil {
+		t.Fatalf("failed row after request created=%v status=%q attempts=%d code=%q next=%v, want false queued 0 empty nil",
+			created, img.Status, img.Attempts, img.FailureCode, img.NextAttemptAt)
 	}
 }
 
-func TestUpsertScanImagesSeen_PromotesCandidateAndRevivesAgedOut(t *testing.T) {
+func TestDueScanImages_OrdersByLastRequested(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
-	seedScanImages(t, s, now.Add(-time.Hour),
-		scanSeen("sha256:cand", "ecr", "candidate"), scanSeen("sha256:old", "ecr", "running"))
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'aged_out', attempts = 2, sbom_key = 'sbom/x.json' where digest = 'sha256:old'`); err != nil {
-		t.Fatal(err)
-	}
-
-	// A candidate seen as a candidate again stays untouched.
-	seedScanImages(t, s, now, scanSeen("sha256:cand", "ecr", "candidate"))
-	cand := mustGetScanImage(t, s, "sha256:cand")
-	if cand.LastSeenRunningAt != nil {
-		t.Fatalf("candidate touched, last_seen_running_at = %v", cand.LastSeenRunningAt)
-	}
-
-	seedScanImages(t, s, now, scanSeen("sha256:cand", "ecr", "running"), scanSeen("sha256:old", "ecr", "running"))
-	cand = mustGetScanImage(t, s, "sha256:cand")
-	if cand.Role != "running" {
-		t.Fatalf("candidate role = %q, want running", cand.Role)
-	}
-	old := mustGetScanImage(t, s, "sha256:old")
-	if old.Status != "queued" || old.Attempts != 0 || old.SBOMKey != "" {
-		t.Fatalf("aged_out row status=%q attempts=%d sbom=%q, want queued 0 empty", old.Status, old.Attempts, old.SBOMKey)
-	}
-}
-
-func TestDueScanImages_OrdersRunningBeforeCandidateAndHonoursNextAttempt(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now().Truncate(time.Second)
-	seedScanImages(t, s, now.Add(-3*time.Hour), scanSeen("sha256:cand", "ecr", "candidate"))
-	seedScanImages(t, s, now.Add(-2*time.Hour), scanSeen("sha256:run-new", "ecr", "running"))
-	seedScanImages(t, s, now.Add(-4*time.Hour), scanSeen("sha256:run-old", "ecr", "running"))
-	seedScanImages(t, s, now.Add(-time.Hour), scanSeen("sha256:later", "ecr", "running"), scanSeen("sha256:other", "other", "running"))
+	seedScanImages(t, s, now.Add(-2*time.Hour), "sha256:middle")
+	seedScanImages(t, s, now.Add(-4*time.Hour), "sha256:oldest")
+	seedScanImages(t, s, now.Add(-time.Hour), "sha256:later", "sha256:newest")
 	if _, err := s.Pool.Exec(ctx, `update scan_images set next_attempt_at = $1 where digest = 'sha256:later'`, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	// Requesting an old image again moves it to the back of the queue.
+	seedScanImages(t, s, now, "sha256:oldest")
 
 	due, err := s.DueScanImages(ctx, now, 10)
 	if err != nil {
@@ -117,7 +86,7 @@ func TestDueScanImages_OrdersRunningBeforeCandidateAndHonoursNextAttempt(t *test
 	for _, img := range due {
 		got = append(got, img.Digest)
 	}
-	want := []string{"sha256:run-old", "sha256:run-new", "sha256:cand"}
+	want := []string{"sha256:middle", "sha256:newest", "sha256:oldest"}
 	if len(got) != len(want) {
 		t.Fatalf("due = %v, want %v", got, want)
 	}
@@ -130,8 +99,38 @@ func TestDueScanImages_OrdersRunningBeforeCandidateAndHonoursNextAttempt(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(limited) != 1 || limited[0].Digest != "sha256:run-old" {
-		t.Fatalf("limit 1 = %v, want only run-old", limited)
+	if len(limited) != 1 || limited[0].Digest != "sha256:middle" {
+		t.Fatalf("limit 1 = %v, want only middle", limited)
+	}
+}
+
+func TestExpiredScanImages_IgnoresQueuedAndScanning(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	old := now.Add(-100 * 24 * time.Hour)
+	seedScanImages(t, s, old, "sha256:scanned", "sha256:failed", "sha256:queued", "sha256:scanning", "sha256:recent")
+	for _, sql := range []string{
+		`update scan_images set status = 'scanned' where digest = 'sha256:scanned'`,
+		`update scan_images set status = 'failed' where digest = 'sha256:failed'`,
+		`update scan_images set status = 'scanning' where digest = 'sha256:scanning'`,
+		`update scan_images set status = 'scanned', last_requested_at = now() where digest = 'sha256:recent'`,
+	} {
+		if _, err := s.Pool.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.ExpiredScanImages(ctx, now.Add(-90*24*time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !contains(got, "sha256:scanned") || !contains(got, "sha256:failed") {
+		t.Fatalf("expired = %v, want scanned and failed only", got)
+	}
+	limited, err := s.ExpiredScanImages(ctx, now.Add(-90*24*time.Hour), 1)
+	if err != nil || len(limited) != 1 {
+		t.Fatalf("limit 1 = %v err %v, want one", limited, err)
 	}
 }
 
@@ -139,7 +138,7 @@ func TestRequeueScanImages_FailsAfterThreeAttempts(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
-	seedScanImages(t, s, now, scanSeen("sha256:a", "ecr", "running"), scanSeen("sha256:b", "ecr", "running"))
+	seedScanImages(t, s, now, "sha256:a", "sha256:b")
 	if _, err := s.Pool.Exec(ctx, `update scan_images set attempts = 2, status = 'scanning' where digest = 'sha256:a'`); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +175,7 @@ func TestDeferScanImages_KeepsAttempts(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
-	seedScanImages(t, s, now, scanSeen("sha256:a", "ecr", "running"))
+	seedScanImages(t, s, now, "sha256:a")
 	if _, err := s.Pool.Exec(ctx, `update scan_images set attempts = 2, large = true, status = 'scanning' where digest = 'sha256:a'`); err != nil {
 		t.Fatal(err)
 	}
@@ -187,34 +186,6 @@ func TestDeferScanImages_KeepsAttempts(t *testing.T) {
 	a := mustGetScanImage(t, s, "sha256:a")
 	if a.Status != "queued" || a.Attempts != 2 || !a.Large || a.FailureCode != "db_stale" || a.NextAttemptAt == nil || !a.NextAttemptAt.Equal(next) {
 		t.Fatalf("deferred row status=%q attempts=%d large=%v code=%q next=%v", a.Status, a.Attempts, a.Large, a.FailureCode, a.NextAttemptAt)
-	}
-}
-
-func TestLiveSBOMDigests_OnlyThoseMatchedAgainstOlderData(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	built := time.Now().Truncate(time.Second)
-	for _, d := range []string{"sha256:never", "sha256:old", "sha256:current", "sha256:nosbom", "sha256:failed"} {
-		seedScanImages(t, s, built, scanSeen(d, "ecr", "running"))
-	}
-	exec := func(sql string, args ...any) {
-		t.Helper()
-		if _, err := s.Pool.Exec(ctx, sql, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	exec(`update scan_images set status = 'scanned', sbom_key = 'sbom/k' where digest in ('sha256:never', 'sha256:old', 'sha256:current', 'sha256:nosbom')`)
-	exec(`update scan_images set sbom_key = null where digest = 'sha256:nosbom'`)
-	exec(`update scan_images set status = 'failed', sbom_key = 'sbom/k' where digest = 'sha256:failed'`)
-	exec(`update scan_images set matched_db_built_at = $1 where digest = 'sha256:old'`, built.Add(-time.Hour))
-	exec(`update scan_images set matched_db_built_at = $1 where digest = 'sha256:current'`, built)
-
-	got, err := s.LiveSBOMDigests(ctx, built, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || !(contains(got, "sha256:never") && contains(got, "sha256:old")) {
-		t.Fatalf("live SBOM digests = %v, want never and old", got)
 	}
 }
 
@@ -236,58 +207,17 @@ func mustGetScanImage(t *testing.T, s *store.Store, digest string) store.ScanIma
 	return img
 }
 
-func TestUpsertScanImagesSeen_RevivedNonECRImageStaysUnsupported(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now().Truncate(time.Second)
-	seedScanImages(t, s, now.Add(-time.Hour), scanSeen("sha256:hub", "other", "running"))
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'aged_out' where digest = 'sha256:hub'`); err != nil {
-		t.Fatal(err)
-	}
-	seedScanImages(t, s, now, scanSeen("sha256:hub", "other", "running"))
-	img := mustGetScanImage(t, s, "sha256:hub")
-	if img.Status != "unsupported" || img.FailureCode != "unsupported_registry" {
-		t.Fatalf("revived non-ECR row status=%q code=%q, want unsupported unsupported_registry", img.Status, img.FailureCode)
-	}
-	due, err := s.DueScanImages(ctx, now, 10)
-	if err != nil || len(due) != 0 {
-		t.Fatalf("due = %v err %v, want none", due, err)
-	}
-}
-
-func TestUpsertScanImagesSeen_CandidateSightingRevivesAgedOutRow(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now().Truncate(time.Second)
-	seedScanImages(t, s, now.Add(-time.Hour),
-		scanSeen("sha256:cand", "ecr", "candidate"), scanSeen("sha256:hubcand", "other", "candidate"))
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'aged_out', attempts = 2, sbom_key = 'sbom/x' where digest in ('sha256:cand', 'sha256:hubcand')`); err != nil {
-		t.Fatal(err)
-	}
-	seedScanImages(t, s, now, scanSeen("sha256:cand", "ecr", "candidate"), scanSeen("sha256:hubcand", "other", "candidate"))
-
-	cand := mustGetScanImage(t, s, "sha256:cand")
-	if cand.Role != "candidate" || cand.Status != "queued" || cand.Attempts != 0 || cand.SBOMKey != "" || cand.LastSeenRunningAt != nil {
-		t.Fatalf("revived candidate = role %q status %q attempts %d sbom %q last_seen_running %v", cand.Role, cand.Status, cand.Attempts, cand.SBOMKey, cand.LastSeenRunningAt)
-	}
-	hub := mustGetScanImage(t, s, "sha256:hubcand")
-	if hub.Status != "unsupported" || hub.FailureCode != "unsupported_registry" || hub.Role != "candidate" {
-		t.Fatalf("revived non-ECR candidate status=%q code=%q role=%q", hub.Status, hub.FailureCode, hub.Role)
-	}
-}
-
 func TestRequeueAndMarkScanImages_OnlyMoveRowsInTheExpectedState(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
-	for _, d := range []string{"sha256:a", "sha256:aged", "sha256:scanned", "sha256:failed"} {
-		seedScanImages(t, s, now, scanSeen(d, "ecr", "running"))
-	}
-	runID := newScanRun(t, s, "scan", "sha256:a", "sha256:aged", "sha256:scanned", "sha256:failed")
+	all := []string{"sha256:a", "sha256:other", "sha256:scanned", "sha256:failed"}
+	seedScanImages(t, s, now, all...)
+	runID := newScanRun(t, s, "scan", all...)
 	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanning' where digest = 'sha256:a'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'aged_out' where digest = 'sha256:aged'`); err != nil {
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'queued' where digest = 'sha256:other'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned' where digest = 'sha256:scanned'`); err != nil {
@@ -296,7 +226,6 @@ func TestRequeueAndMarkScanImages_OnlyMoveRowsInTheExpectedState(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'failed' where digest = 'sha256:failed'`); err != nil {
 		t.Fatal(err)
 	}
-	all := []string{"sha256:a", "sha256:aged", "sha256:scanned", "sha256:failed"}
 
 	// A repeated import after failover requeues the same digests twice: only the first counts.
 	for i := 0; i < 2; i++ {
@@ -308,56 +237,23 @@ func TestRequeueAndMarkScanImages_OnlyMoveRowsInTheExpectedState(t *testing.T) {
 	if a.Status != "queued" || a.Attempts != 1 {
 		t.Fatalf("requeued twice: status=%q attempts=%d, want queued 1", a.Status, a.Attempts)
 	}
-	for digest, want := range map[string]string{"sha256:aged": "aged_out", "sha256:scanned": "scanned", "sha256:failed": "failed"} {
+	for digest, want := range map[string]string{"sha256:scanned": "scanned", "sha256:failed": "failed"} {
 		img := mustGetScanImage(t, s, digest)
 		if img.Status != want || img.Attempts != 0 {
 			t.Fatalf("%s after requeue status=%q attempts=%d, want %s 0", digest, img.Status, img.Attempts, want)
 		}
 	}
 
-	// Mark moves queued and scanned (rematch) rows, nothing else.
+	// Mark moves queued and scanned (rescan) rows, nothing else.
 	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'queued' where digest = 'sha256:a'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.MarkScanImagesScanning(ctx, all, runID); err != nil {
 		t.Fatal(err)
 	}
-	for digest, want := range map[string]string{"sha256:a": "scanning", "sha256:scanned": "scanning", "sha256:aged": "aged_out", "sha256:failed": "failed"} {
+	for digest, want := range map[string]string{"sha256:a": "scanning", "sha256:other": "scanning", "sha256:scanned": "scanning", "sha256:failed": "failed"} {
 		if got := mustGetScanImage(t, s, digest).Status; got != want {
 			t.Fatalf("%s after mark status=%q, want %s", digest, got, want)
 		}
-	}
-}
-
-func TestAgedOutSBOMKeysAndClearSBOMKey(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	now := time.Now().Truncate(time.Second)
-	for _, d := range []string{"sha256:aged", "sha256:aged-nokey", "sha256:live"} {
-		seedScanImages(t, s, now, scanSeen(d, "ecr", "running"))
-	}
-	if _, err := s.Pool.Exec(ctx, `update scan_images set sbom_key = 'sbom/' || digest where digest in ('sha256:aged', 'sha256:live')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'aged_out' where digest in ('sha256:aged', 'sha256:aged-nokey')`); err != nil {
-		t.Fatal(err)
-	}
-	keys, err := s.AgedOutSBOMKeys(ctx, 10)
-	if err != nil || len(keys) != 1 || keys[0].Digest != "sha256:aged" || keys[0].SBOMKey != "sbom/sha256:aged" {
-		t.Fatalf("aged out keys = %+v err %v, want only sha256:aged", keys, err)
-	}
-
-	// ClearSBOMKey leaves live images alone: their object is still in use.
-	if err := s.ClearSBOMKey(ctx, "sha256:live"); err != nil {
-		t.Fatal(err)
-	}
-	if got := mustGetScanImage(t, s, "sha256:live").SBOMKey; got != "sbom/sha256:live" {
-		t.Fatalf("live image sbom key = %q, want kept", got)
-	}
-	if err := s.ClearSBOMKey(ctx, "sha256:aged"); err != nil {
-		t.Fatal(err)
-	}
-	if keys, _ = s.AgedOutSBOMKeys(ctx, 10); len(keys) != 0 {
-		t.Fatalf("aged out keys after clear = %+v, want none", keys)
 	}
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // Retention sets how long each kind of row is kept; a zero duration keeps that table forever.
@@ -13,7 +11,7 @@ type Retention struct {
 	StoppedTasks, ServiceEvents, CountsHistory, OperationLog, DeploymentHistory, AuditLog, OrphanTags time.Duration
 	// Daily analytics tables are keyed by day and pruned on day < cutoff date.
 	AvailabilityDaily, CapacityDaily, UtilDaily time.Duration
-	// ScanRuns prunes finished scanner runs; ScanImages ages out running images no longer seen.
+	// ScanRuns prunes finished scanner runs; ScanImages deletes scan results not requested for that long.
 	ScanRuns, ScanImages time.Duration
 }
 
@@ -103,11 +101,11 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 	}
 
 	if r.ScanImages > 0 {
-		aged, err := s.ageOutScanImages(ctx, now, now.Add(-r.ScanImages))
+		expired, err := s.deleteExpiredScanImages(ctx, now.Add(-r.ScanImages))
 		if err != nil {
-			return result, fmt.Errorf("retention scan_images_aged: %w", err)
+			return result, fmt.Errorf("retention scan_images_expired: %w", err)
 		}
-		result["scan_images_aged"] = aged
+		result["scan_images_expired"] = expired
 	}
 
 	if r.OrphanTags > 0 {
@@ -121,45 +119,12 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 	return result, nil
 }
 
-// ageOutScanImages marks running images not seen since cutoff as aged_out and drops what only they kept alive:
-// their findings, candidate links, fix candidate, and candidate images no remaining link points to.
-// A candidate that still has an SBOM object becomes aged_out instead of being deleted, so its object key
-// stays listed for AgedOutSBOMKeys; such a row is deleted on a later run once the key is cleared.
-func (s *Store) ageOutScanImages(ctx context.Context, now, cutoff time.Time) (int64, error) {
-	var aged int64
-	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `update scan_images set status = 'aged_out', updated_at = $2
-			where status <> 'aged_out' and role = 'running' and coalesce(last_seen_running_at, first_seen_at) < $1
-			returning digest`, cutoff, now)
-		if err != nil {
-			return err
-		}
-		agedDigests, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
-			return err
-		}
-		aged = int64(len(agedDigests))
-		for _, sql := range []string{
-			`delete from scan_findings where digest = any($1)`,
-			`delete from scan_candidate_links where running_digest = any($1)`,
-			`delete from scan_fix_candidates where running_digest = any($1)`,
-		} {
-			if _, err := tx.Exec(ctx, sql, agedDigests); err != nil {
-				return err
-			}
-		}
-		const unlinkedCandidates = `role = 'candidate' and status <> 'scanning' and not exists (
-			select 1 from scan_candidate_links where candidate_digest = scan_images.digest)`
-		if _, err := tx.Exec(ctx, `delete from scan_findings where digest in (
-			select digest from scan_images where `+unlinkedCandidates+`)`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update scan_images set status = 'aged_out', updated_at = $1
-			where `+unlinkedCandidates+` and sbom_key is not null and status <> 'aged_out'`, now); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `delete from scan_images where `+unlinkedCandidates+` and sbom_key is null`)
-		return err
-	})
-	return aged, err
+// deleteExpiredScanImages deletes finished scan results not requested since cutoff, with their findings, requests
+// and risk acceptances (all cascade from the image row). It uses the same predicate as ExpiredScanImages.
+func (s *Store) deleteExpiredScanImages(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `delete from scan_images where `+expiredScanImagesWhere, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }

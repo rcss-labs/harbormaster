@@ -64,12 +64,9 @@ type ScanConfig struct {
 	TaskTimeout       time.Duration
 	DBRefresh         time.Duration
 	DBMaxAge          time.Duration
-	CandidateRefresh  time.Duration
 	MaxTasks          int
 	BatchSize         int
-	CandidateTags     int
 	MaxImageMB        int
-	RematchBatch      int
 }
 
 // Config is the complete runtime configuration for the server.
@@ -242,16 +239,13 @@ func Load(getenv func(string) string) (Config, error) {
 			SecurityGroup:     reader.text("HM_SCAN_SECURITY_GROUP", ""),
 			Bucket:            reader.text("HM_SCAN_BUCKET", ""),
 			RoleName:          reader.text("HM_SCAN_ROLE_NAME", "harbormaster-scan"),
-			Interval:          reader.duration("HM_SCAN_INTERVAL", 60*time.Second),
+			Interval:          reader.duration("HM_SCAN_INTERVAL", 15*time.Second),
 			TaskTimeout:       reader.duration("HM_SCAN_TASK_TIMEOUT", 30*time.Minute),
 			DBRefresh:         reader.duration("HM_SCAN_DB_REFRESH", 24*time.Hour),
 			DBMaxAge:          reader.duration("HM_SCAN_DB_MAX_AGE", 120*time.Hour),
-			CandidateRefresh:  reader.duration("HM_SCAN_CANDIDATE_REFRESH", 6*time.Hour),
 			MaxTasks:          reader.integer("HM_SCAN_MAX_TASKS", 1),
 			BatchSize:         reader.integer("HM_SCAN_BATCH_SIZE", 25),
-			CandidateTags:     reader.integer("HM_SCAN_CANDIDATE_TAGS", 3),
 			MaxImageMB:        reader.integer("HM_SCAN_MAX_IMAGE_MB", 4096),
-			RematchBatch:      reader.integer("HM_SCAN_REMATCH_BATCH", 500),
 		},
 		Analytics:       AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
@@ -325,29 +319,20 @@ func validateScan(scan ScanConfig) error {
 	if scan.BatchSize < 1 || scan.BatchSize > 100 {
 		return errors.New("HM_SCAN_BATCH_SIZE: must be between 1 and 100")
 	}
-	if scan.CandidateTags < 0 || scan.CandidateTags > 10 {
-		return errors.New("HM_SCAN_CANDIDATE_TAGS: must be between 0 and 10")
-	}
 	if scan.TaskTimeout < 5*time.Minute {
 		return errors.New("HM_SCAN_TASK_TIMEOUT: must be at least 5m")
 	}
 	if scan.Interval < time.Second {
 		return errors.New("HM_SCAN_INTERVAL: must be at least 1s")
 	}
-	if scan.RematchBatch < 1 {
-		return errors.New("HM_SCAN_REMATCH_BATCH: must be at least 1")
-	}
-	if scan.DBRefresh < time.Hour {
-		return errors.New("HM_SCAN_DB_REFRESH: must be at least 1h")
+	if scan.DBRefresh != 0 && scan.DBRefresh < time.Hour {
+		return errors.New("HM_SCAN_DB_REFRESH: must be 0 (never refresh) or at least 1h")
 	}
 	if scan.MaxImageMB < 1 {
 		return errors.New("HM_SCAN_MAX_IMAGE_MB: must be at least 1")
 	}
 	if scan.DBMaxAge < time.Hour {
 		return errors.New("HM_SCAN_DB_MAX_AGE: must be at least 1h")
-	}
-	if scan.CandidateRefresh < time.Minute {
-		return errors.New("HM_SCAN_CANDIDATE_REFRESH: must be at least 1m")
 	}
 	return nil
 }

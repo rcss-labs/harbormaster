@@ -1,5 +1,5 @@
 // Package scan holds the pure parts of image security: reference parsing,
-// validation of untrusted scanner output, fix diffing and freshness bands.
+// validation of untrusted scanner output and freshness bands.
 // It does no IO so the server, the scanner and the fake can all import it.
 package scan
 
@@ -25,12 +25,10 @@ const (
 )
 
 const (
-	StatusQueued      = "queued"
-	StatusScanning    = "scanning"
-	StatusScanned     = "scanned"
-	StatusFailed      = "failed"
-	StatusUnsupported = "unsupported"
-	StatusAgedOut     = "aged_out"
+	StatusQueued   = "queued"
+	StatusScanning = "scanning"
+	StatusScanned  = "scanned"
+	StatusFailed   = "failed"
 )
 
 const (
@@ -49,7 +47,8 @@ const (
 // Scanner modes (HM_SCAN_MODE, scan_runs.kind, Job.Kind, Manifest.Kind).
 // The server role refreshes the vulnerability DB; the scanner only reads it.
 const (
-	ModeScan    = "scan"
+	ModeScan = "scan"
+	// ModeRematch is no longer run. The manifest parser in results.go still accepts it, so it stays until that file is revised.
 	ModeRematch = "rematch"
 )
 
@@ -117,7 +116,6 @@ type JobImage struct {
 	Platform  string `json:"platform"`
 	AccountID string `json:"account_id"`
 	Region    string `json:"region"`
-	SBOMKey   string `json:"sbom_key"`
 	Large     bool   `json:"large"`
 }
 
@@ -133,6 +131,3 @@ func ManifestKey(runID int64) string { return fmt.Sprintf("results/%d/manifest.j
 func ResultKey(runID int64, digest string) string {
 	return fmt.Sprintf("results/%d/%s.json", runID, trimSHA(digest))
 }
-
-// SBOMKey is the bucket key of an image's SBOM.
-func SBOMKey(digest string) string { return "sbom/" + trimSHA(digest) + ".syft.json" }

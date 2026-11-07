@@ -3,8 +3,6 @@ package scan
 // FailureAction is the operator-facing copy for a failure code.
 func FailureAction(code, detail, accountID string) string {
 	switch code {
-	case CodeRegistryNotConnected:
-		return "Connect AWS account " + accountID + " to scan this image."
 	case CodePullDenied:
 		return "The harbormaster-scan role in account " + accountID + " is missing, or the repository policy denies pulls."
 	case CodeUnsupportedRegistry:
