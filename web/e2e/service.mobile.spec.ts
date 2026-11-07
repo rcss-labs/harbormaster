@@ -16,7 +16,7 @@ async function open(page: Page, tab: string) {
   await page.waitForLoadState('networkidle')
 }
 
-for (const tab of ['overview', 'metrics', 'scaling', 'task-definition', 'operations']) {
+for (const tab of ['overview', 'timeline', 'metrics', 'scaling', 'task-definition', 'operations']) {
   test(`${tab} is laid out cleanly at 390`, async ({ page }) => {
     await open(page, tab)
     await expectPhoneLayoutClean(page)
@@ -53,12 +53,12 @@ test('Change desired count opens a sheet and then the confirmation without apply
   await expect(confirm).toBeHidden()
 })
 
-test('every section is reachable: All sections lists nine and the strip scrolls the open tab into view', async ({ page }) => {
+test('every section is reachable: All sections lists ten and the strip scrolls the open tab into view', async ({ page }) => {
   await open(page, 'operations')
   await page.getByRole('button', { name: 'All sections' }).click()
   const menu = page.getByRole('menu', { name: 'All sections' })
-  await expect(menu.getByRole('menuitem')).toHaveCount(9)
-  for (const name of ['Overview', 'Tasks', 'Logs', 'Metrics', 'Terminal', 'Deploy', 'Task definition', 'Scaling', 'History']) {
+  await expect(menu.getByRole('menuitem')).toHaveCount(10)
+  for (const name of ['Overview', 'Tasks', 'Timeline', 'Logs', 'Metrics', 'Terminal', 'Deploy', 'Task definition', 'Scaling', 'History']) {
     await expect(menu.getByRole('menuitem', { name: new RegExp(`^${name}`) })).toBeVisible()
   }
   await expectSheetWithinViewport(page)
