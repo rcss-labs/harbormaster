@@ -77,6 +77,24 @@
   .titleRow h1 { overflow-wrap: anywhere; }
 }
 
+/* Phone: the sticky head sits at the top of main (which scrolls); a compact row replaces the page head; fill tabs run to the bottom inset. */
+@media (max-width: 700px) {
+  .stickyHead { top: 0; margin: -12px -12px 0; padding: 0; background: var(--chrome); }
+  .phoneHead { min-width: 0; }
+  .phoneMeta { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-height: 44px; padding: 0 4px 0 12px; }
+  .revisionLink { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); text-decoration: none; }
+  .phoneLaunch { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .phoneDeploy { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .phoneMore { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--radius); background: none; color: var(--text-2); cursor: pointer; }
+  .tabPanel.tabPanelFill { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; margin-bottom: -16px; }
+  .metricsGrid { grid-template-columns: minmax(0, 1fr); }
+  .rolloutActions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .rolloutActions > * { flex: 1 1 auto; }
+  .smallBtn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: inherit; font: 500 14px var(--sans); text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .smallBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
 .btnPrimary { height: 30px; padding: 0 14px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
 .btnPrimary:hover:not(:disabled) { filter: brightness(1.1); }
 .btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }

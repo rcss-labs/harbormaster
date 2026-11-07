@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useClusters } from '../../api/hooks'
 import type { ClusterCardDTO, ServiceRef, Status, TagDTO } from '../../api/types'
+import { Icon } from '../../components/Icon'
+import { usePhone } from '../../components/usePhone'
 import { EmptyState } from '../../components/EmptyState'
 import { Panel } from '../../components/Panel'
 import { SegmentedFilter } from '../../components/Seg'
@@ -9,6 +11,7 @@ import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import { Toggle } from '../../components/Toggle'
 import { useFilters } from '../shell/useFilters'
+import { ActionsSheet, type ActionsTarget } from './ActionsSheet'
 import { CLUSTER_CELL_COLOR } from './EstateMap'
 import { useEstateState, type EstateGrouping } from './useOverviewState'
 import styles from './overview.module.css'
@@ -21,7 +24,14 @@ const GROUP_ROW_MAX = 60
 const GROUP_PAGE = 25
 
 /** 0 steady, 1 deploying, 2 degraded or unhealthy, 3 failing. */
-const SEVERITY_RANK: Record<Status, number> = { steady: 0, scaled_to_zero: 0, deploying: 1, degraded: 2, unhealthy_task: 2, failing: 3 }
+const SEVERITY_RANK: Record<Status, number> = {
+  steady: 0,
+  scaled_to_zero: 0,
+  deploying: 1,
+  degraded: 2,
+  unhealthy_task: 2,
+  failing: 3,
+}
 const GROUP_DOT = ['var(--healthy-cell)', 'var(--info)', 'var(--warn)', 'var(--bad)']
 
 interface EstateService extends ServiceRef {
@@ -41,7 +51,11 @@ interface EstateGroup {
 function toServices(cluster: ClusterCardDTO): EstateService[] {
   return cluster.services
     .filter((service): service is ServiceRef & { status: Status } => service.status !== '')
-    .map((service) => ({ ...service, rank: SEVERITY_RANK[service.status], clusterName: cluster.name }))
+    .map((service) => ({
+      ...service,
+      rank: SEVERITY_RANK[service.status],
+      clusterName: cluster.name,
+    }))
 }
 
 function buildGroups(clusters: ClusterCardDTO[], grouping: EstateGrouping): EstateGroup[] {
@@ -56,12 +70,21 @@ function buildGroups(clusters: ClusterCardDTO[], grouping: EstateGrouping): Esta
   }
   const accounts = new Map<string, EstateGroup & { regions: string[] }>()
   for (const cluster of clusters) {
-    const group = accounts.get(cluster.account_id) ?? { key: cluster.account_id, name: cluster.account_name, where: '', services: [], regions: [] }
+    const group = accounts.get(cluster.account_id) ?? {
+      key: cluster.account_id,
+      name: cluster.account_name,
+      where: '',
+      services: [],
+      regions: [],
+    }
     if (!group.regions.includes(cluster.region)) group.regions.push(cluster.region)
     group.services.push(...toServices(cluster))
     accounts.set(cluster.account_id, group)
   }
-  return [...accounts.values()].map((group) => ({ ...group, where: group.regions.join(' · ') }))
+  return [...accounts.values()].map((group) => ({
+    ...group,
+    where: group.regions.join(' · '),
+  }))
 }
 
 const worstFirst = (a: EstateService, b: EstateService) => b.rank - a.rank || a.name.localeCompare(b.name)
@@ -70,13 +93,18 @@ const plural = (count: number, singular: string, pluralWord = `${singular}s`) =>
 
 /** State that resets when the controls that define it change. */
 function useScoped<T>(scope: string, initial: T): [T, (update: (current: T) => T) => void] {
-  const [state, setState] = useState<{ scope: string; value: T }>({ scope, value: initial })
+  const [state, setState] = useState<{ scope: string; value: T }>({
+    scope,
+    value: initial,
+  })
   const value = state.scope === scope ? state.value : initial
   return [value, (update) => setState({ scope, value: update(value) })]
 }
 
 export function EstateView() {
   const { filters } = useFilters()
+  const phone = usePhone()
+  const [sheet, setSheet] = useState<ActionsTarget | null>(null)
   const clusters = useClusters(filters).data?.items
   const { grouping, problemsOnly, query, setGrouping, setProblemsOnly, setQuery } = useEstateState()
   const [openByKey, updateOpen] = useScoped<Record<string, boolean>>(grouping, {})
@@ -86,7 +114,12 @@ export function EstateView() {
   const needle = query.trim().toLowerCase()
   const view = useMemo(() => {
     const groups = buildGroups(clusters ?? [], grouping)
-    const visible: { group: EstateGroup; matching: EstateService[]; problems: EstateService[]; severity: number }[] = []
+    const visible: {
+      group: EstateGroup
+      matching: EstateService[]
+      problems: EstateService[]
+      severity: number
+    }[] = []
     let hiddenGroups = 0
     let totalServices = 0
     for (const group of groups) {
@@ -104,7 +137,12 @@ export function EstateView() {
         hiddenGroups++
         continue
       }
-      visible.push({ group, matching, problems, severity: problems[0]?.rank ?? 0 })
+      visible.push({
+        group,
+        matching,
+        problems,
+        severity: problems[0]?.rank ?? 0,
+      })
     }
     visible.sort((a, b) => b.severity - a.severity || a.group.name.localeCompare(b.group.name))
     return { visible, hiddenGroups, totalServices }
@@ -139,7 +177,7 @@ export function EstateView() {
       <section key={group.key} className={styles.estateGroup}>
         <button
           type="button"
-          className={styles.groupHead}
+          className={`${styles.groupHead} ${phone ? styles.groupHeadPhone : ''}`.trim()}
           aria-expanded={isOpen}
           onClick={() => updateOpen((current) => ({ ...current, [group.key]: !isOpen }))}
         >
@@ -161,22 +199,43 @@ export function EstateView() {
           <>
             <ul className={styles.estateRows}>
               {rows.map((service) => (
-                <li key={service.id} className={`${styles.estateRow} ${service.rank > 0 ? styles[`stripe_${service.rank === 3 ? 'bad' : service.rank === 2 ? 'warn' : 'info'}`] : ''}`}>
+                <li
+                  key={service.id}
+                  className={`${styles.estateRow} ${phone ? styles.estateRowPhone : ''} ${service.rank > 0 ? styles[`stripe_${service.rank === 3 ? 'bad' : service.rank === 2 ? 'warn' : 'info'}`] : ''}`}
+                >
                   <span className={styles.estateService}>
-                    <Link to={`/services/${service.id}/overview`} className={styles.whatTitle}>
+                    <Link to={`/services/${service.id}/overview`} className={styles.whatTitle} data-hm-rl={phone ? '' : undefined}>
                       {service.name}
                     </Link>
                     {grouping === 'account' && <span className={styles.where}>{service.clusterName}</span>}
                   </span>
                   <StatusDot status={service.status} />
-                  <span className={styles.rowActions}>
-                    <Link to={`/services/${service.id}/logs`} className={styles.rowAction}>
-                      Logs
-                    </Link>
-                    <Link to={`/services/${service.id}/tasks`} className={styles.rowAction}>
-                      Tasks
-                    </Link>
-                  </span>
+                  {phone ? (
+                    <button
+                      type="button"
+                      className={styles.moreBtn}
+                      aria-label={`Actions for ${service.name}`}
+                      aria-haspopup="dialog"
+                      onClick={() =>
+                        setSheet({
+                          label: service.name,
+                          sub: service.clusterName,
+                          serviceId: service.id,
+                        })
+                      }
+                    >
+                      <Icon name="more" size={18} />
+                    </button>
+                  ) : (
+                    <span className={styles.rowActions}>
+                      <Link to={`/services/${service.id}/logs`} className={styles.rowAction}>
+                        Logs
+                      </Link>
+                      <Link to={`/services/${service.id}/tasks`} className={styles.rowAction}>
+                        Tasks
+                      </Link>
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -184,7 +243,16 @@ export function EstateView() {
               <div className={styles.groupNote}>
                 {moreCount > 0 && <span>{plural(moreCount, 'more service')} · filter to narrow down</span>}
                 {moreCount > 0 && !showMore[group.key] && ordered.length > GROUP_ROW_CAP && (
-                  <button type="button" className={styles.linkButton} onClick={() => updateShowMore((current) => ({ ...current, [group.key]: true }))}>
+                  <button
+                    type="button"
+                    className={styles.linkButton}
+                    onClick={() =>
+                      updateShowMore((current) => ({
+                        ...current,
+                        [group.key]: true,
+                      }))
+                    }
+                  >
                     Show more
                   </button>
                 )}
@@ -254,6 +322,7 @@ export function EstateView() {
           )}
         </div>
       </div>
+      {sheet && <ActionsSheet target={sheet} isAdmin={false} onClose={() => setSheet(null)} />}
     </Panel>
   )
 }

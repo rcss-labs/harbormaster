@@ -1,4 +1,5 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { usePhone } from '../../../components/usePhone'
 import { changedLineNumbers } from './diffLines'
 import styles from './taskDefinition.module.css'
 
@@ -22,6 +23,16 @@ export function JsonEditor({ text, initialText, registerRevision, error, dirty, 
   const status = error ?? (dirty ? 'Unsaved changes' : 'No changes')
   const gutterRef = useRef<HTMLDivElement>(null)
   const lineCount = text.split('\n').length
+  const phone = usePhone()
+  const barShown = phone && dirty
+  // The sticky bar sits above the tab bar: tell the page to keep its content clear of it.
+  useEffect(() => {
+    if (!barShown) return
+    document.documentElement.dataset.hmBar = '1'
+    return () => {
+      delete document.documentElement.dataset.hmBar
+    }
+  }, [barShown])
   const changed = useMemo(() => changedLineNumbers(initialText, text.replace(/\s+$/, '')), [initialText, text])
   return (
     <>
@@ -44,16 +55,37 @@ export function JsonEditor({ text, initialText, registerRevision, error, dirty, 
           }}
         />
       </div>
-      <div className={styles.toolbar}>
-        <span className={error ? styles.err : styles.hint}>{status}</span>
-        <span className={styles.spacer} />
-        <button type="button" className={styles.btn} disabled={!dirty} onClick={onDiscard}>
-          Discard
-        </button>
-        <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!dirty || error !== null || readOnly || blocked} onClick={onReview}>
-          {`Review and register :${registerRevision}`}
-        </button>
-      </div>
+      {phone ? (
+        <>
+          <div className={styles.toolbar}>
+            <span className={styles.lineCount}>{`${lineCount} lines`}</span>
+            <span className={styles.spacer} />
+            <span className={error ? styles.err : styles.hint}>{status}</span>
+          </div>
+          {barShown && (
+            <div className={`hm-bar ${styles.bar}`} role="region" aria-label="Pending changes">
+              <span className={styles.barNote}>{error ?? 'Unsaved changes'}</span>
+              <button type="button" className={styles.btn} onClick={onDiscard}>
+                Discard
+              </button>
+              <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={error !== null || readOnly || blocked} onClick={onReview}>
+                {`Review and register :${registerRevision}`}
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className={styles.toolbar}>
+          <span className={error ? styles.err : styles.hint}>{status}</span>
+          <span className={styles.spacer} />
+          <button type="button" className={styles.btn} disabled={!dirty} onClick={onDiscard}>
+            Discard
+          </button>
+          <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!dirty || error !== null || readOnly || blocked} onClick={onReview}>
+            {`Review and register :${registerRevision}`}
+          </button>
+        </div>
+      )}
     </>
   )
 }

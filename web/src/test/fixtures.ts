@@ -16,6 +16,7 @@ import type {
   ClusterServiceDTO,
   ClusterStatus,
   ClustersMetricsDTO,
+  ServicesMetricsDTO,
   DeploysDayDTO,
   EventDTO,
   ListDTO,
@@ -1143,6 +1144,27 @@ export const CLUSTERS_METRICS: ClustersMetricsDTO = {
   },
   stale: null,
   errors: [],
+}
+
+const notificationsId = serviceIdOf(serviceDef('notifications'))
+
+/** payments-api and notifications measured, edge-nginx has Insights off, staging api is absent because its target was throttled. */
+export const SERVICES_METRICS: ServicesMetricsDTO = {
+  items: {
+    [paymentsId]: { insights: 'enhanced', cpu: 41.2, mem: 63 },
+    [notificationsId]: { insights: 'enabled', cpu: 12, mem: 35 },
+    [edgeNginxId]: { insights: 'disabled', cpu: null, mem: null },
+  },
+  errors: [
+    {
+      account_id: ACCOUNT_STAGING.account_id,
+      region: 'us-east-1',
+      code: 'throttled',
+      message: 'CloudWatch is throttling requests. Try again shortly.',
+    },
+  ],
+  stale: null,
+  polled_at: '2026-11-06T10:00:05Z',
 }
 
 export const OVERVIEW_METRICS: OverviewMetricsDTO = {

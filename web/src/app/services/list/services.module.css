@@ -38,3 +38,22 @@
 .openLinks { display: flex; flex-wrap: wrap; gap: 6px; }
 .tagNote { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .footBtns { display: flex; gap: 8px; justify-content: flex-end; }
+
+.warnText { color: var(--warn); }
+
+/* Phone only: figures sit in the row's second line, the alert gets a line of its own, and the actions are one button. */
+.moreButton { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--r); background: none; color: var(--text-2); cursor: pointer; }
+.phoneWhy { flex: 1 1 100%; color: var(--muted); }
+.phoneFilters { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.phoneSearchRow { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+.phoneSearchRow .search { flex: 1 1 auto; min-width: 0; height: 44px; font-size: 16px; }
+@media (max-width: 700px) {
+  .nameLink { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+  .foot { flex-direction: column; gap: 4px; }
+}
+@media (max-width: 700px) {
+  .pageHead .sub { display: none; }
+  .openLinks .btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
+  .drawerBody .why { white-space: normal; overflow: visible; font-size: 12px; }
+}
+.dashNote { margin: 0; padding: 8px var(--pad); color: var(--muted); font-size: 12px; }

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { NetworksResponse, RegionVpcsResponse, VpcTreeResponse } from '../../api/networks'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
+import { installPhoneMedia } from '../../test/phone'
 import { buildTree } from './treeFixture'
 
 const HOMELAB = '482109375512'
@@ -319,5 +320,50 @@ describe('Networks deep links', () => {
     )
     renderApp('/networks')
     expect(await screen.findByText('Some data on this page is stale: Networks')).toBeInTheDocument()
+  })
+})
+
+describe('Networks on phones', () => {
+  let restoreMedia: () => void
+  beforeEach(() => {
+    restoreMedia = installPhoneMedia(true)
+  })
+  afterEach(() => restoreMedia())
+
+  it('shows the VPC id and account under each VPC row', async () => {
+    serveEstate()
+    renderApp('/networks')
+    await screen.findByRole('region', { name: 'VPCs' })
+    expect(await within(vpcList()).findByRole('button', { name: /homelab-main/ })).toHaveTextContent(`${MAIN} · homelab-admin`)
+  })
+
+  it('opens no sheet on load, and a tapped VPC opens its details in a sheet titled with its name', async () => {
+    const user = userEvent.setup()
+    serveEstate()
+    renderApp('/networks')
+    await screen.findByRole('region', { name: 'VPCs' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(await within(vpcList()).findByRole('button', { name: /shared-services/ }))
+    const sheet = await screen.findByRole('dialog', { name: 'shared-services' })
+    expect(within(sheet).getByRole('table', { name: 'Subnets' })).toBeInTheDocument()
+    expect(within(sheet).getAllByRole('heading', { name: 'shared-services' })).toHaveLength(1)
+    expect(screen.getByTestId('search').textContent).toContain(`vpc=${encodeURIComponent(SHARED_KEY)}`)
+  })
+
+  it('closing the sheet clears the selection and leaves the VPC list', async () => {
+    const user = userEvent.setup()
+    serveEstate()
+    renderApp(`/networks?vpc=${encodeURIComponent(SHARED_KEY)}`)
+    const sheet = await screen.findByRole('dialog', { name: 'shared-services' })
+    await user.click(within(sheet).getByRole('button', { name: 'Close panel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(within(vpcList()).getByRole('button', { name: /shared-services/ })).toBeInTheDocument()
+  })
+
+  it('an unknown ?vpc= key shows the no-access state on the page without a sheet', async () => {
+    serveEstate()
+    renderApp(`/networks?vpc=${encodeURIComponent(`${HOMELAB}/us-east-1/vpc-gone`)}`)
+    expect(await screen.findByText('No running tasks you can see in this VPC.')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

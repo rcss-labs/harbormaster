@@ -1,4 +1,5 @@
 import { asUser, expect, test } from './fixtures/test'
+import { measureBox } from './helpers'
 
 // Read-only: runs in the observe project, before change.spec touches image-resizer.
 
@@ -79,9 +80,8 @@ test.describe('task drawer and layout as sam', () => {
 
     const stop = page.getByRole('button', { name: 'Stop', exact: true }).first()
     await expect(stop).toBeVisible()
-    const box = await stop.boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.x + box!.width).toBeLessThanOrEqual(1440)
+    const box = await measureBox(stop)
+    expect(box.x + box.width).toBeLessThanOrEqual(1440)
     // The page itself never scrolls sideways; only the table does.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow).toBeLessThanOrEqual(0)

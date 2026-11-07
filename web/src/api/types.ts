@@ -605,6 +605,19 @@ export interface ClustersMetricsDTO {
   stale: StaleInfo | null
   errors: TargetErrorDTO[]
 }
+/** Latest CPU and memory of one service. `insights: 'disabled'` means nothing was measured (cpu and mem are null, not 0). */
+export interface ServiceNowMetricsDTO {
+  insights: string
+  cpu: number | null
+  mem: number | null
+}
+/** GET /api/services/metrics: only ids the caller may see and whose account x region could be read; failed targets are in `errors`. */
+export interface ServicesMetricsDTO {
+  items: Record<string, ServiceNowMetricsDTO>
+  errors: TargetErrorDTO[]
+  stale: StaleInfo | null
+  polled_at: string
+}
 export interface ClusterSeriesDTO {
   id: string
   label: string

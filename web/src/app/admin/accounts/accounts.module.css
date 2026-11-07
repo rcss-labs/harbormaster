@@ -24,6 +24,15 @@
 .sm { height: 26px; padding: 0 9px; font-size: 12px; }
 .danger { color: var(--danger); }
 
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-2); cursor: pointer; }
+@media (max-width: 700px) {
+  .ctl { font-size: 16px; }
+  .check { min-height: 44px; }
+  .btn { white-space: normal; }
+  a.btn { min-height: 44px; display: inline-flex; align-items: center; }
+  .regionGrid label { min-height: 44px; display: flex; align-items: center; }
+}
+
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tagCount { display: inline-flex; gap: 5px; align-items: center; }
 .field { display: grid; gap: 5px; }

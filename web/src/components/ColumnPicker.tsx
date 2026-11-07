@@ -62,27 +62,43 @@ export function ColumnPicker({ columns, visible, onChange, defaults }: ColumnPic
   )
 }
 
-/** Column visibility remembered in localStorage under `storageKey` (for example `harbormaster-columns:services`). */
-export function useColumnPrefs(storageKey: string, defaults: string[]): [string[], (keys: string[]) => void] {
+const readKeys = (storageKey: string): string[] | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null')
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) return parsed
+  } catch {
+    // unreadable or unavailable storage: the caller falls back
+  }
+  return undefined
+}
+
+/**
+ * Column visibility remembered in localStorage under `storageKey` (for example `harbormaster-columns:services`).
+ *
+ * `introduced` lists columns added after users may have saved their choice. A saved list cannot tell "never offered" from
+ * "hidden on purpose", so each save also records which introduced columns existed then (under `<storageKey>:seen`); an
+ * introduced column the saved choice has never seen is shown, and one the user saw and left out stays hidden.
+ */
+export function useColumnPrefs(storageKey: string, defaults: string[], introduced: string[] = []): [string[], (keys: string[]) => void] {
   const [keys, setKeys] = useState<string[]>(() => {
-    try {
-      const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null')
-      if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) return parsed
-    } catch {
-      // unreadable or unavailable storage: use the defaults
-    }
-    return defaults
+    const saved = readKeys(storageKey)
+    if (!saved) return defaults
+    const seen = readKeys(`${storageKey}:seen`) ?? []
+    const unseen = introduced.filter((key) => !seen.includes(key) && !saved.includes(key))
+    return [...saved, ...unseen]
   })
+  const introducedKey = introduced.join(',')
   const update = useCallback(
     (next: string[]) => {
       setKeys(next)
       try {
         localStorage.setItem(storageKey, JSON.stringify(next))
+        if (introducedKey) localStorage.setItem(`${storageKey}:seen`, JSON.stringify(introducedKey.split(',')))
       } catch {
         // storage unavailable: the choice lasts for this page view only
       }
     },
-    [storageKey],
+    [storageKey, introducedKey],
   )
   return [keys, update]
 }

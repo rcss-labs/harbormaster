@@ -13,4 +13,12 @@
 .submit { justify-content: center; }
 .loading { padding: 24px; color: var(--muted); }
 .ssoBtn { justify-content: center; text-decoration: none; }
+/* Phone: the card becomes a full-width form that follows the visible height, so the submit stays reachable above the keyboard. */
+@media (max-width: 700px) {
+  .wrap { bottom: auto; height: var(--hm-vvh, 100dvh); place-items: start stretch; padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .card { width: 100%; padding: 0; border: 0; background: transparent; box-shadow: none; gap: 16px; }
+  .submit, .ssoBtn { min-height: 44px; width: 100%; font-size: 16px; }
+  .linkBtn { min-height: 44px; font-size: 14px; }
+  .sub, .hint { font-size: 14px; }
+}
 .linkBtn { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent, inherit); font-size: 12px; cursor: pointer; text-decoration: underline; }

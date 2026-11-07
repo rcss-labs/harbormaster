@@ -26,8 +26,35 @@
 .ln[data-level="error"] .msg { color: var(--danger); }
 .empty { color: var(--dim); padding: 0 12px; }
 
-@media (max-width: 600px) {
-  /* Narrow: a shorter stream track so the message keeps room; the full stream stays in the cell's title. */
-  .ln { grid-template-columns: 64px 88px minmax(0, 1fr); gap: 8px; }
-  .search { flex: 1 1 100%; width: auto; }
+/* Phone: the toolbar stacks (container + Tail, search, Level, status), the box runs to the bottom inset, rows wrap their message. */
+@media (max-width: 700px) {
+  /* Takes the height left under the tabs; when the toolbar, banners and a usable log box need more, the page scrolls instead of the box spilling out. */
+  .rootPhone { flex: 1 0 auto; min-height: 0; }
+  /* The panel around it must grow to that content too. Sized from zero it would let the log panel overflow it, and an overflow does not
+     carry main's bottom padding: with the keyboard up the last lines would stay under the tab bar. (Doubled class to outrank the panel's own rule.) */
+  div:has(> .rootPhone.rootPhone) { flex: 1 0 auto; }
+  .toolbarPhone { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 8px; padding: 8px; }
+  .toolRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .toolRow .ctl { flex: 1 1 0; min-width: 0; }
+  .toolbarPhone .ctl { height: 44px; font-size: 16px; }
+  .toolbarPhone .search { width: auto; flex: none; }
+  .toolbarPhone .status { margin-left: 0; }
+  .rootPhone .banners { padding: 8px 8px 0; }
+  .rootPhone .logs { flex: 1 0 200px; min-height: 200px; margin: 8px; padding: 0; line-height: 1.5; }
+  .older { margin: 4px auto 8px; display: block; height: 44px; font-size: 14px; }
+  .rootPhone .btn { min-height: 44px; }
+  .pln { display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--row-border); border-radius: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .pln[data-level='warn'] { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+  .pln[data-level='error'] { background: color-mix(in srgb, var(--bad) 9%, transparent); }
+  .plnHead { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 12px; }
+  .pln .ct { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+  .plnMsg { color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+  .pln[data-level='warn'] .plnMsg { color: var(--warning); }
+  .pln[data-level='error'] .plnMsg { color: var(--danger); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; margin: 0 0 12px; font-size: 14px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .code { margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .sheetClose { flex: 1 1 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: 500 14px var(--sans); cursor: pointer; }
 }

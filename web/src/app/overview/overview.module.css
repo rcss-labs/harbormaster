@@ -7,6 +7,11 @@
 
 .kpiNote { display: block; margin: 2px 0 0; font-family: var(--sans); font-size: 12px; font-weight: 400; color: var(--muted); letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* Phone: the note under a KPI value wraps instead of ending in an ellipsis. */
+@media (max-width: 700px) {
+  .kpiNote { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+}
+
 .twoCol { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; }
 .stack { display: grid; gap: 14px; min-width: 0; align-content: start; }
 @container (max-width: 1100px) {
@@ -97,3 +102,17 @@ a.whatTitle:hover { color: var(--accent); }
 
 /* Lets the shared Seg wrap its segments instead of overflowing this flex child. */
 .severity { min-width: 0; max-width: 100%; }
+
+/* Phone rows: one 44 px actions button replaces the inline Logs, Tasks and Restart buttons. */
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--r); background: none; color: var(--text-2); cursor: pointer; }
+.moreBtn:hover { background: var(--hover); color: var(--text); }
+.phoneRow { display: grid; gap: 3px; line-height: 1.35; }
+.phoneRow .whatTitle { font-size: 14px; }
+.groupHeadPhone { min-height: 44px; }
+.estateRowPhone { grid-template-columns: minmax(0, 1fr) auto auto; padding-right: 0; min-height: 52px; }
+
+/* Estate map on a phone: the account name and its regions stack above the cells and wrap instead of clipping. */
+@media (max-width: 700px) {
+  .mapRow { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .mapAccount, .mapSub { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+}

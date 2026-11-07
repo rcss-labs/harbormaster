@@ -1,10 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskDTO } from '../../api/types'
 import { ALL_TASKS } from '../../test/fixtures'
 import { server } from '../../test/msw'
+import { installPhoneMedia } from '../../test/phone'
 import { renderWithProviders } from '../../test/setup'
 import { TaskDrawer } from './TaskDrawer'
 
@@ -133,5 +134,30 @@ describe('TaskDrawer', () => {
     const table = await screen.findByRole('table', { name: 'Containers' })
     await waitFor(() => expect(within(table).getByText('otel')).toBeInTheDocument())
     expect(within(table).getByText('STOPPED')).toBeInTheDocument()
+  })
+})
+
+describe('TaskDrawer as a phone sheet', () => {
+  let restore: () => void
+  beforeEach(() => {
+    restore = installPhoneMedia(true)
+  })
+  afterEach(() => restore())
+
+  it('keeps the no-logs line and the Stop rule', async () => {
+    const onStop = vi.fn()
+    const task = { ...standalone, can: { operate: true, terminal: false } }
+    renderDrawer(task, { onStop })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('No service, so no logs here.')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Stop task' }))
+    expect(onStop).toHaveBeenCalledWith(task)
+  })
+
+  it('says in the sheet why Terminal is off', async () => {
+    renderDrawer({ ...running, exec_enabled: false, can: { operate: false, terminal: true } })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('ECS Exec is off for this task')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Stop task' })).not.toBeInTheDocument()
   })
 })

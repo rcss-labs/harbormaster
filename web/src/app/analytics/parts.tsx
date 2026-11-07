@@ -137,7 +137,7 @@ export function TablePanel<R>({ rows, total, noun = 'rows', columns, rowKey, row
   return (
     <Cell span={span}>
       <AnalyticsPanel title={base.title} sub={base.sub} source={base.source} rollup={base.rollup} window={base.window} showSources={base.showSources} flush>
-        <DataTable label={base.title} columns={columns} rows={shown} rowKey={rowKey} rowStatus={rowStatus} minWidth={minWidth} empty={empty} />
+        <DataTable label={base.title} columns={columns} rows={shown} rowKey={rowKey} rowStatus={rowStatus} minWidth={minWidth} empty={empty} phoneSort />
         {capped && shown.length < Math.max(total, rows.length) && (
           <div className={styles.more}>
             <span>{`Showing ${shown.length} of ${Math.max(total, rows.length)} ${noun}`}</span>

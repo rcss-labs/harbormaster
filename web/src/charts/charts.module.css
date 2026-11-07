@@ -18,13 +18,15 @@
 .hbarTrack em { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); opacity: 0.55; border-radius: 1px; }
 .hbarV { text-align: right; color: var(--muted); white-space: nowrap; }
 
-.timeline { position: relative; height: 80px; margin: 4px 8px 0; }
+.timeline { position: relative; height: 80px; margin: 4px 8px 0; container-type: inline-size; }
 .timeline .axis { position: absolute; left: 0; right: 0; top: 44px; border-top: 1px solid var(--border-strong); }
 .timeline .tick { position: absolute; top: 50px; font: 12px var(--mono); color: var(--muted); transform: translateX(-50%); white-space: nowrap; }
 .timeline .tick::before { content: ""; position: absolute; left: 50%; top: -9px; height: 5px; border-left: 1px solid var(--border-strong); }
-.timeline .ev { position: absolute; top: 37px; transform: translateX(-50%); display: grid; justify-items: center; }
-.timeline .ev i { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
-.timeline .ev span { position: absolute; bottom: 18px; font: 12px var(--mono); white-space: nowrap; padding: 1px 6px; border-radius: 4px; background: var(--raised); border: 1px solid var(--border); }
+/* An event is a zero-width anchor at its time; the dot is centred on it. The label slides from left-aligned (0%) through centred (50%) to
+   right-aligned (100%) with --at, so it stays inside the strip at either edge, and a long label wraps at the strip's width instead of widening it. */
+.timeline .ev { position: absolute; top: 37px; width: 0; height: 13px; }
+.timeline .ev i { position: absolute; left: -6.5px; top: 0; width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border-strong); }
+.timeline .ev span { position: absolute; left: 0; bottom: 18px; width: max-content; max-width: 100cqw; transform: translateX(calc(var(--at, 50) * -1%)); font: 12px var(--mono); overflow-wrap: anywhere; padding: 1px 6px; border-radius: 4px; background: var(--raised); border: 1px solid var(--border); }
 .timeline .ev.alt span { bottom: 36px; }
 
 /* Panel: y labels | plot, with x labels underneath. */
@@ -41,7 +43,7 @@
 
 /* TimeSeriesChart: 150px plot with labels drawn inside; tooltip and crosshair are HTML overlays. */
 .ts { display: grid; gap: 4px; }
-.tsPlot { position: relative; height: 150px; max-height: 340px; cursor: crosshair; outline-offset: 2px; }
+.tsPlot { position: relative; height: 150px; max-height: 340px; cursor: crosshair; outline-offset: 2px; touch-action: pan-y; }
 .tsSvg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
 .tsY { position: absolute; left: 0; transform: translateY(-50%); font: 400 12px var(--mono); color: var(--dim); background: var(--surface); padding-right: 4px; pointer-events: none; }
 .tsRef { position: absolute; right: 0; transform: translateY(-110%); font: 400 12px var(--mono); color: var(--muted); pointer-events: none; }
@@ -56,3 +58,17 @@
 .tipRow b { font: 500 11px var(--mono); color: var(--text); }
 .tipTotal { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; }
 .tipTotal span { color: var(--muted); }
+
+/* Bar chart x labels are centred under their column. */
+.pchart .pxBar { transform: translateX(-50%); }
+
+/* Phones. The top y label (100%) sticks out 8 px above the plot, so a legend printed right above a chart must clear it. The dot that stands in
+   for a marker label with no room sits below the two label rows, so it never lands on the label of a neighbouring marker. Bar chart x labels
+   slide from left-aligned to right-aligned with --at, like the timeline, so the first one does not reach into the y labels. */
+@media (max-width: 700px) {
+  /* The 8 px the top label needs sits inside the chart (margin-top), so a frame that hides overflow around it does not cut "100%" in half. */
+  .legend { margin-bottom: 4px; }
+  .pchart { margin-top: 8px; grid-template-rows: minmax(0, 1fr) auto; }
+  .pchart .mkdot { top: 35px; }
+  .pchart .pxBar { transform: translateX(calc(var(--at, 50) * -1%)); }
+}

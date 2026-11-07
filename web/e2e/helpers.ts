@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 export const SEED_PASSWORD = 'harbormaster-e2e-1'
 
@@ -47,4 +47,51 @@ export async function reviewAndApply(page: Page, serviceName: string, apply: str
 export async function saveScreenshot(page: Page, name: string) {
   const dir = process.env.HM_E2E_SCREENSHOT_DIR
   if (dir) await page.screenshot({ path: `${dir}/${name}`, fullPage: true })
+}
+
+/** A box in viewport coordinates, as `getBoundingClientRect` reports it. */
+export interface Box {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Reads the boxes of several elements in one `evaluate`, retrying until every element is attached and laid out.
+ * `locator.boundingBox()` returns null when an element re-renders between the visibility check and the read, which
+ * failed three gates; here a detached or stale element just makes the poll try again. The locators must share one page.
+ */
+export async function measureBoxes<T extends readonly Locator[]>(...locators: T): Promise<{ [K in keyof T]: Box }> {
+  if (locators.length === 0) return [] as unknown as { [K in keyof T]: Box }
+  const page = locators[0]!.page()
+  let boxes: Box[] = []
+  await expect
+    .poll(
+      async () => {
+        try {
+          const handles = await Promise.all(locators.map((locator) => locator.elementHandle({ timeout: 1000 })))
+          const read = await page.evaluate((elements) => {
+            const rects = elements.map((element) => {
+              if (!element || !element.isConnected) return null
+              const rect = element.getBoundingClientRect()
+              return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+            })
+            return rects.every((rect) => rect !== null) ? rects : null
+          }, handles)
+          if (read) boxes = read as Box[]
+          return read !== null
+        } catch {
+          return false // the element went away mid-read: poll again
+        }
+      },
+      { message: 'elements to be attached and measurable', timeout: 5000 },
+    )
+    .toBe(true)
+  return boxes as unknown as { [K in keyof T]: Box }
+}
+
+/** The box of one element, read safely (see `measureBoxes`). */
+export async function measureBox(locator: Locator): Promise<Box> {
+  return (await measureBoxes(locator))[0]
 }

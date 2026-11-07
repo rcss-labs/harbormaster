@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import type { TaskDTO } from '../api/types'
 import { Ago } from './Ago'
+import { BottomSheet, SheetAction } from './BottomSheet'
 import { DataTable, type DataTableColumn, type RowStatus } from './DataTable'
 import type { PillKind } from './Pill'
-import { RowMenu, RowMenuButton, RowMenuLink } from './RowMenu'
+import { Icon } from './Icon'
 import { StatusDot } from './StatusDot'
 import { StopCauseChip, stoppedStatus } from './stopStatus'
-import { useNarrow } from './useNarrow'
+import { usePhone } from './usePhone'
 import styles from './TaskTable.module.css'
 
 /** Utilisation in percent of the reserved size, keyed by the task's short id (the id CloudWatch reports). */
@@ -49,6 +51,9 @@ export const TASK_COLUMNS: TaskColumnOption[] = [
   { key: 'started', label: 'Started' },
   { key: 'reason', label: 'Stopped reason' },
 ]
+
+/** Fields a phone row shows until the reader picks others: Task, Service and Status always, plus when it started and why it stopped. */
+export const PHONE_TASK_COLUMNS = ['task', 'service', 'status', 'started', 'reason']
 
 /** Sized to the widest row's buttons, which the table's shared grid tracks make the same for the header. */
 export const ACTIONS_WIDTH = 'max-content'
@@ -106,7 +111,7 @@ export function ServiceCell({ task }: { task: TaskDTO }) {
   if (task.service) {
     return (
       <span className={styles.service}>
-        <Link to={`/services/${task.service.id}/tasks`} className={styles.accent} title={task.service.name}>
+        <Link to={`/services/${task.service.id}/tasks`} className={styles.accent} title={task.service.name} data-hm-rl="">
           {task.service.name}
         </Link>
         <span className={styles.sub} title={task.cluster.name}>
@@ -135,6 +140,7 @@ export function TaskIdButton({ task, nested = false, onOpen }: { task: TaskDTO; 
       className={`${styles.idButton} ${nested ? styles.nested : ''}`.trim()}
       title={task.id}
       aria-label={`Open details for task ${shortId}`}
+      data-hm-rl=""
       onClick={() => onOpen(task)}
     >
       {shortId}
@@ -155,9 +161,12 @@ export function IpCell({ task }: { task: TaskDTO }) {
 }
 
 export function ReasonCell({ task }: { task: TaskDTO }) {
-  const { stopped_reason: reason, stopped_at: stoppedAt } = task
+  const phone = usePhone()
+  const { stopped_reason: raw, stopped_at: stoppedAt } = task
+  // A phone row has room for one wrapped line, so it carries the friendly reason; the raw ECS text stays in the title and the details sheet.
+  const reason = phone ? task.stop_reason_group || raw : raw
   return (
-    <span className={styles.reason} title={reason}>
+    <span className={styles.reason} title={raw}>
       {reason}
       {stoppedAt && (
         <span className={styles.muted}>
@@ -173,26 +182,21 @@ export const cpuText = (task: TaskDTO, usage?: { cpu: number | null }) => usageO
 export const memoryText = (task: TaskDTO, usage?: { mem: number | null }) => usageOrReserved(usage?.mem, `${task.memory} MiB`)
 
 /** Row actions: Logs (when asked for and the task has a service), Terminal and Stop under the existing permission rules. */
-export function TaskActions({ task, withLogs = false, onStop }: { task: TaskDTO; withLogs?: boolean; onStop(task: TaskDTO): void }) {
-  const narrow = useNarrow()
+export function TaskActions({
+  task,
+  withLogs = false,
+  onStop,
+  onOpen,
+}: {
+  task: TaskDTO
+  withLogs?: boolean
+  onStop(task: TaskDTO): void
+  /** Adds a Details row to the phone sheet; the desktop row opens details from the task id. */
+  onOpen?(task: TaskDTO): void
+}) {
+  const phone = usePhone()
+  if (phone) return <TaskActionSheet task={task} onStop={onStop} onOpen={onOpen} />
   const isRunning = task.status === 'RUNNING'
-  if (narrow) {
-    const showTerminal = isRunning && task.can.terminal && task.exec_enabled
-    const showStop = isRunning && task.can.operate
-    const showLogs = withLogs && task.service
-    if (!showLogs && !showTerminal && !showStop) return null
-    return (
-      <RowMenu label={`Actions for task ${task.short_id.slice(0, 12)}`}>
-        {showLogs && task.service && <RowMenuLink to={`/services/${task.service.id}/logs`}>Logs</RowMenuLink>}
-        {showTerminal && <RowMenuLink to={terminalPath(task)}>Terminal</RowMenuLink>}
-        {showStop && (
-          <RowMenuButton danger onClick={() => onStop(task)}>
-            Stop
-          </RowMenuButton>
-        )}
-      </RowMenu>
-    )
-  }
   return (
     <span className={styles.actions}>
       {withLogs && task.service && (
@@ -211,6 +215,63 @@ export function TaskActions({ task, withLogs = false, onStop }: { task: TaskDTO;
         </button>
       )}
     </span>
+  )
+}
+
+/** Phone form of the row actions: one "…" button and a sheet. Terminal is absent without the permission; Stop is absent without operate. */
+function TaskActionSheet({ task, onStop, onOpen }: { task: TaskDTO; onStop(task: TaskDTO): void; onOpen?(task: TaskDTO): void }) {
+  const [open, setOpen] = useState(false)
+  const isRunning = task.status === 'RUNNING'
+  const shortId = task.short_id.slice(0, 12)
+  const label = `Actions for task ${shortId}`
+  const status = taskStatus(task)
+  const close = () => setOpen(false)
+  const logsPath = task.service ? `/services/${task.service.id}/logs` : null
+  const showTerminal = isRunning && task.can.terminal
+  const showStop = isRunning && task.can.operate
+  return (
+    <>
+      <button type="button" className={styles.moreButton} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(true)}>
+        <Icon name="more" size={18} />
+      </button>
+      <BottomSheet
+        open={open}
+        onClose={close}
+        role="menu"
+        label={label}
+        title={<span className={styles.mono}>{shortId}</span>}
+        sub={`${status.label} · ${task.service ? `${task.service.name} · ${task.cluster.name}` : `Standalone · ${task.group}`}`}
+      >
+        {onOpen && (
+          <SheetAction
+            icon="panel"
+            label="Details"
+            onClick={() => {
+              close()
+              onOpen(task)
+            }}
+          />
+        )}
+        {logsPath && <SheetAction icon="logs" label="Logs" href={logsPath} onClick={close} />}
+        {showTerminal &&
+          (task.exec_enabled ? (
+            <SheetAction icon="term" label="Terminal" href={terminalPath(task)} onClick={close} />
+          ) : (
+            <SheetAction icon="term" label="Terminal" why="ECS Exec is off for this task" disabled />
+          ))}
+        {showStop && (
+          <SheetAction
+            icon="stop"
+            label="Stop task"
+            danger
+            onClick={() => {
+              close()
+              onStop(task)
+            }}
+          />
+        )}
+      </BottomSheet>
+    </>
   )
 }
 
@@ -262,9 +323,10 @@ export function taskColumns({
     {
       key: 'actions',
       header: '',
+      phone: 'action',
       width: ACTIONS_WIDTH,
       align: 'right',
-      render: (task) => <TaskActions task={task} withLogs={withLogs} onStop={onStop} />,
+      render: (task) => <TaskActions task={task} withLogs={withLogs} onStop={onStop} onOpen={onOpen} />,
     },
   )
   return columns
@@ -272,16 +334,18 @@ export function taskColumns({
 
 /** Task rows for the service Tasks tab (and any flat task list): sticky actions, column visibility, "Load more". */
 export function TaskTable({ items, withService, next, onMore, utilisation, onOpen, onStop, visibleColumns }: TaskTableProps): ReactNode {
+  const phone = usePhone()
   const columns = taskColumns({ withService, utilisation, onOpen, onStop })
+  const shown = visibleColumns ?? (phone ? PHONE_TASK_COLUMNS : undefined)
   return (
-    <div className={styles.panel}>
+    <div className={`${styles.panel} ${styles.rows}`}>
       <DataTable
         label="Tasks"
         columns={columns}
         rows={items}
         rowKey={(task) => task.id}
         rowStatus={taskStripe}
-        visibleColumns={visibleColumns ? [...visibleColumns, 'actions'] : undefined}
+        visibleColumns={shown ? [...shown, 'actions'] : undefined}
         stickyActions
         minWidth={withService ? 1500 : 1350}
         empty="No tasks match."

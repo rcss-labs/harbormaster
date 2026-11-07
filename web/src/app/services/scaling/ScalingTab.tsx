@@ -11,6 +11,7 @@ import { queryPanelError } from '../panelError'
 import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { KV } from '../../../components/KV'
+import { LockNote } from '../../../components/LockNote'
 import { useToast } from '../../../components/Toast'
 import type { ServiceDTO } from '../../../api/types'
 import { DesiredCountDialog } from '../DesiredCountDialog'
@@ -176,6 +177,7 @@ function DesiredCountCard({ info, scaling, service, saving, onSave }: DesiredCou
           Update desired count
         </button>
       </div>
+      <LockNote kind="why">{canOperate ? undefined : `You need Operate on ${tagName}`}</LockNote>
       {outsideAutoScaling && <p className={styles.warning}>{`Outside the auto scaling range ${scaling.min}–${scaling.max}.`}</p>}
       {outOfRange && <p className={styles.warning}>{`The most this service can run is ${info.max} tasks.`}</p>}
       {confirming && (
@@ -227,7 +229,7 @@ function AutoScalingCard({ scaling, error, loading, serviceId, canOperate }: Aut
   const actions = (
     <>
       {canOperate && (
-        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`}>
+        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`} data-hm-rl="">
           Edit in Deploy →
         </Link>
       )}

@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import styles from './charts.module.css'
 import { fmtNum, niceMax } from './format'
 
@@ -68,7 +69,11 @@ export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartPro
       <div />
       <div className={styles.px} style={{ position: 'relative' }}>
         {xLabels.map(([index, label]) => (
-          <span key={index} style={{ position: 'absolute', left: `${((index + 0.5) / cols.length) * 100}%`, transform: 'translateX(-50%)' }}>
+          <span
+            key={index}
+            className={styles.pxBar}
+            style={{ position: 'absolute', left: `${((index + 0.5) / cols.length) * 100}%`, '--at': ((index + 0.5) / cols.length) * 100 } as CSSProperties}
+          >
             {label}
           </span>
         ))}

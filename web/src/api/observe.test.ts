@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { createElement, type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
-import { LOGS_HISTORY_PAYMENTS, POLLER, POLLER_TIERS } from '../test/fixtures'
+import { LOGS_HISTORY_PAYMENTS, POLLER, POLLER_TIERS, SERVICES_METRICS } from '../test/fixtures'
 import { server } from '../test/msw'
 import { ApiError } from './client'
 import {
@@ -15,6 +15,7 @@ import {
   useLogHistory,
   useScaling,
   useServiceMetrics,
+  useServicesMetrics,
   useTargetHealth,
   useTaskLogs,
 } from './observe'
@@ -67,6 +68,55 @@ describe('observe hooks', () => {
     expect(params.get('q')).toBe('a&b')
     expect(params.get('before')).toBe(before)
     expect(requested).not.toContain('a&b')
+  })
+})
+
+describe('useServicesMetrics', () => {
+  it('builds sorted repeated id params', async () => {
+    let requested = ''
+    server.use(
+      http.get('/api/services/metrics', ({ request }) => {
+        requested = new URL(request.url).search
+        return HttpResponse.json(SERVICES_METRICS)
+      }),
+    )
+    const { wrapper } = setup()
+    const { result } = renderHook(() => useServicesMetrics(['b', 'a', 'b', 'c']), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(requested).toBe('?id=a&id=b&id=c')
+  })
+
+  it('is disabled with no ids', () => {
+    let called = false
+    server.use(
+      http.get('/api/services/metrics', () => {
+        called = true
+        return HttpResponse.json(SERVICES_METRICS)
+      }),
+    )
+    const { wrapper } = setup()
+    const { result } = renderHook(() => useServicesMetrics([]), { wrapper })
+    expect(result.current.fetchStatus).toBe('idle')
+    expect(called).toBe(false)
+  })
+
+  it('keeps previous data while refetching for another page', async () => {
+    const { wrapper } = setup()
+    const { result, rerender } = renderHook(({ ids }) => useServicesMetrics(ids), { wrapper, initialProps: { ids: ['a'] } })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const first = result.current.data
+    server.use(http.get('/api/services/metrics', () => new Promise(() => {})))
+    rerender({ ids: ['b'] })
+    expect(result.current.data).toBe(first)
+    expect(result.current.isPlaceholderData).toBe(true)
+  })
+
+  it('polls every 60 s and not in the background', () => {
+    const { client, wrapper } = setup()
+    renderHook(() => useServicesMetrics(['a']), { wrapper })
+    const query = client.getQueryCache().find({ queryKey: ['services', 'metrics', ['a']] })
+    expect(query?.observers[0].options.refetchInterval).toBe(60000)
+    expect(query?.observers[0].options.refetchIntervalInBackground).toBe(false)
   })
 })
 

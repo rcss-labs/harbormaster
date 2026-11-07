@@ -6,7 +6,9 @@ import { Legend } from '../../../charts/Legend'
 import { LineChart } from '../../../charts/LineChart'
 import { Banner } from '../../../components/Banner'
 import { Panel } from '../../../components/Panel'
+import { Chips } from '../../../components/Chips'
 import { Seg } from '../../../components/Seg'
+import { usePhone } from '../../../components/usePhone'
 import { queryPanelError } from '../panelError'
 import { fmtNum, niceMax } from '../../../charts/format'
 import { percentText } from '../../clusters/ServiceCardMetrics'
@@ -43,6 +45,7 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedRange = searchParams.get('range')
   const range: Range = isRange(requestedRange) ? requestedRange : DEFAULT_RANGE
+  const phone = usePhone()
   const service = useService(serviceId).data
   const metricsQuery = useServiceMetrics(serviceId, range)
   const metrics = metricsQuery.data
@@ -90,7 +93,11 @@ export function MetricsTab({ serviceId }: { serviceId: string }) {
   return (
     <>
       <div className={styles.metricsToolbar}>
-        <Seg label="Range" options={RANGES.map((value) => ({ value, label: value }))} value={range} onChange={selectRange} />
+        {phone ? (
+          <Chips label="Range" options={RANGES.map((value) => ({ value, label: value }))} value={range} onChange={selectRange} wrap />
+        ) : (
+          <Seg label="Range" options={RANGES.map((value) => ({ value, label: value }))} value={range} onChange={selectRange} />
+        )}
         {metrics && (
           <span className={`${styles.muted} ${styles.small}`}>
             {`Container Insights via CloudWatch · ${resolution} resolution, averaged across ${service.running} tasks`}

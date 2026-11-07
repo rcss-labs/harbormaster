@@ -125,8 +125,8 @@
 .keyRow dt, .keyRow dd { margin: 0; }
 
 /* Command palette */
-.paletteBackdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
-.palette { width: 620px; max-width: 92vw; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--pop); overflow: hidden; }
+.paletteBackdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: calc(12vh / var(--hm-zoom, 1)); }
+.palette { width: 620px; max-width: calc(92vw / var(--hm-zoom, 1)); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--pop); overflow: hidden; }
 .paletteInput { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 46px; border-bottom: 1px solid var(--border); }
 .paletteInput input { flex: 1; height: 100%; border: 0; background: transparent; color: var(--text); outline: none; font-size: 14px; min-width: 0; }
 .paletteInput input::placeholder { color: var(--muted); }
@@ -148,18 +148,58 @@
   .crumbs { display: none; }
 }
 
-/* Narrow phones: the bar wraps onto rows (scope, then search across the width, then freshness and the icon buttons) so
-   every control stays on screen, and each target is at least 36px. */
-@media (max-width: 600px) {
-  .topbar { flex-wrap: wrap; row-gap: 6px; }
-  .searchBtn { flex: 1 1 100%; min-width: 0; }
-  .kbd { display: none; }
-  .scopeBtn, .searchBtn, .freshBtn, .iconBtn { min-height: 36px; }
-  .iconBtn { min-width: 36px; }
-  .popAnchor:has(.freshBtn) { position: static; margin-right: auto; } /* the popover anchors to the bar, so it stays inside the screen */
-}
-
 .dialogField { display: grid; gap: 5px; }
 .dialogField > span { font-size: 12px; color: var(--muted); font-weight: 500; }
 .dialogField input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font-family: inherit; }
 .dialogError { min-height: 1.2em; margin-top: 8px; font-size: 12px; color: var(--bad); }
+
+/* Phone shell: a top bar on one row, the page in the middle, five tabs fixed to the bottom edge. */
+@media (max-width: 700px) {
+  .appPhone { display: flex; flex-direction: column; height: var(--hm-vvh, 100dvh); overflow: hidden; }
+  /* Wraps the top bar, the page and the tab bar so the page keeps its tree position across the breakpoint; it adds no box of its own. */
+  .stagePhone { display: contents; }
+  /* The page scrolls inside main and keeps clear of the tab bar, the terminal keys row or a sticky bar. */
+  .content.contentPhone { padding: 12px 12px calc(var(--hm-bottom-inset, 0px) + 16px); min-width: 0; }
+
+  .mtop { position: relative; z-index: 30; flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; min-height: 52px; padding: env(safe-area-inset-top, 0px) 4px 0 2px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+  .mIcon { display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 44px; height: 44px; flex: none; padding: 0; border: 0; border-radius: var(--r); background: none; color: var(--text-2); cursor: pointer; text-decoration: none; }
+  .mIcon:hover { background: var(--hover); color: var(--text); }
+  .mLogo { width: 26px; height: 26px; }
+  .mFresh { width: auto; min-width: 44px; padding: 0 6px; font: 500 12px var(--mono); }
+  .mTitle { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 4px; line-height: 1.2; }
+  .mTitleText { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .mSub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .mScope { display: inline-flex; align-items: center; gap: 5px; height: 36px; max-width: 112px; flex: none; margin: 0 2px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 12px var(--sans); cursor: pointer; }
+  .mScope svg { flex: none; }
+  .mScopeText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); height: calc(var(--hm-tabbar) + var(--hm-sab)); padding-bottom: var(--hm-sab); background: var(--chrome); border-top: 1px solid var(--border); }
+  :global(:root[data-hm-keys]) .tabbar { display: none; }
+  .tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 44px; color: var(--text-2); font-size: 12px; font-weight: 500; line-height: 1.2; white-space: nowrap; text-decoration: none; }
+  .tab:hover { color: var(--text); }
+  .tab[aria-current='page'] { color: var(--accent); }
+  .tab[aria-current='page']::after { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 28px; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent); }
+  .tabIcon { position: relative; display: inline-flex; width: 22px; height: 22px; }
+  .tabIcon > svg { width: 22px; height: 22px; }
+  /* The badge sits on the icon's top-right corner, clear of the label, ringed in the bar colour so it never merges with the glyph. */
+  .tabBadge { position: absolute; top: -8px; left: calc(100% - 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; box-shadow: 0 0 0 2px var(--chrome); color: var(--surface); font: 600 12px/18px var(--mono); text-align: center; pointer-events: none; }
+  .tabBadgeBad { background: var(--bad); }
+  .tabBadgeWarn { background: var(--warn); }
+
+  .sheetBtn { flex: 1 1 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 14px var(--sans); cursor: pointer; white-space: nowrap; }
+  .sheetBtnPrimary { border-color: var(--accent); background: var(--accent); color: var(--surface); }
+
+  /* Command palette: the whole visible screen, rows 48px tall, a 44px Cancel instead of the esc hint. */
+  .paletteBackdrop { top: var(--hm-vvt, 0px); bottom: auto; height: var(--hm-vvh, 100dvh); padding: 0; background: var(--bg); }
+  .palette { width: 100%; max-width: none; height: 100%; display: flex; flex-direction: column; border: 0; border-radius: 0; box-shadow: none; }
+  .paletteInput { height: auto; min-height: 52px; padding: 4px 4px 4px 12px; }
+  .paletteInput input { font-size: 16px; min-height: 44px; }
+  .paletteCancel { flex: none; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r); background: none; color: var(--text); font: 500 14px var(--sans); cursor: pointer; }
+  .paletteList { flex: 1 1 0; max-height: none; padding: 0; }
+  .paletteGroup { padding: 12px 16px 4px; }
+  .paletteOption { min-height: 48px; height: auto; padding: 4px 16px; border-radius: 0; }
+  .paletteLabel { white-space: normal; overflow-wrap: anywhere; }
+  .paletteFoot { padding-bottom: calc(8px + var(--hm-sab)); }
+  .paletteFoot > span:not(.paletteFootEnd) { display: none; }
+  .paletteFootEnd { margin-left: 0; }
+}

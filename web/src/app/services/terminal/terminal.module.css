@@ -25,7 +25,29 @@
   .page .termWrap { flex: none; height: 300px; }
 }
 
-@media (max-width: 600px) {
-  .field { flex: 1 1 100%; }
-  .field select { flex: 1 1 auto; }
+/* Phone: the panel fills the page down to the keys row (or the tab bar); the target and the session facts open in sheets. */
+@media (max-width: 700px) {
+  div.page.pagePhone { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .pagePhone .root { flex: 1 1 0; min-height: 0; }
+  .pagePhone .toolbar { flex-wrap: nowrap; gap: 6px; padding: 6px 8px; }
+  .pagePhone .toolbar .btn { height: 44px; flex: none; }
+  .targetBtn { flex: 1 1 auto; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); text-align: left; cursor: pointer; }
+  .targetBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .targetBtn svg { flex: none; }
+  .targetText { min-width: 0; flex: 1 1 auto; font: 12px/1.3 var(--mono); overflow-wrap: anywhere; }
+  .infoBtn { flex: none; width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius); background: none; color: var(--text-2); cursor: pointer; }
+  .pagePhone .termWrap { flex: 1 1 0; min-height: 120px; padding: 8px; }
+  /* No padding, border or line-height on the host itself: xterm's fit divides the host's height by its cell height, and any
+     of those makes it count rows that do not fit. The inner padding lives on .xterm, which fit subtracts. */
+  .pagePhone .term { padding: 0; border: 0; line-height: 1; outline: 1px solid var(--border); outline-offset: -1px; }
+  .pagePhone .term :global(.xterm) { box-sizing: border-box; padding: 8px 10px; }
+  /* xterm's off-screen input is a 44 px target too (it takes the tap that opens the keyboard). */
+  .pagePhone .term :global(.xterm-helper-textarea) { min-width: 44px; font-size: 16px; }
+  .sheetFields { display: flex; flex-direction: column; gap: 14px; }
+  .sheetField { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 500; }
+  .sheetField select { width: 100%; min-width: 0; height: 44px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); font: 16px var(--mono); }
+  .sheetField select:disabled { opacity: 0.6; }
+  .sheetBtn { flex: 1 1 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: 500 14px var(--sans); cursor: pointer; white-space: nowrap; }
+  .sheetBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sheetPrimary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 }

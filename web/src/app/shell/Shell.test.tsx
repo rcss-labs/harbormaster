@@ -6,6 +6,7 @@ import type { MeDTO, PollerDTO } from '../../api/types'
 import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
+import { installPhoneMedia } from '../../test/phone'
 import { openAccountMenu, openScope } from './testUtils'
 
 const originalWidth = window.innerWidth
@@ -285,5 +286,41 @@ describe('Sidebar', () => {
     const link = within(await nav()).getByRole('link', { name: 'Storage' })
     expect(link).toHaveAttribute('href', '/storage')
     expect(link).not.toHaveAttribute('aria-disabled')
+  })
+})
+
+describe('Shell on a phone', () => {
+  let restoreMedia: () => void
+  beforeEach(() => {
+    restoreMedia = installPhoneMedia(true)
+  })
+  afterEach(() => {
+    restoreMedia()
+    delete document.documentElement.dataset.hmPhone
+  })
+
+  it('renders no sidebar, no density or help button, and sets data-hm-phone', async () => {
+    renderApp('/')
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Sidebar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Toggle row density' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+    expect(document.documentElement.dataset.hmPhone).toBe('1')
+  })
+
+  it('removes data-hm-phone when the shell unmounts', async () => {
+    const { unmount } = renderApp('/')
+    await screen.findByRole('navigation', { name: 'Main' })
+    unmount()
+    expect(document.documentElement.dataset.hmPhone).toBeUndefined()
+  })
+
+  it('opens the palette full-screen from the search button and Cancel closes it', async () => {
+    renderApp('/')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Search or run a command' }))
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' })
+    await user.click(within(palette).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
   })
 })

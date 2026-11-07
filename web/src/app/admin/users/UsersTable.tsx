@@ -1,22 +1,39 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { api } from '../../../api/client'
-import type { UserDTO } from '../../../api/types'
+import type { PermissionsDTO, UserDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
-import { Panel } from '../../../components/Panel'
+import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
+import { DataTable, type DataTableColumn } from '../../../components/DataTable'
+import { Icon } from '../../../components/Icon'
+import { Panel } from '../../../components/Panel'
 import { Popover } from '../../../components/Popover'
 import { Pill } from '../../../components/Pill'
 import { Table, tableClass } from '../../../components/Table'
 import { TagChip } from '../../../components/TagChip'
 import { useToast } from '../../../components/Toast'
+import { usePhone } from '../../../components/usePhone'
 import { useAuth } from '../../auth/AuthProvider'
+import { ACTIONS } from '../perms'
 import { PendingLinkDialog } from './PendingLinkDialog'
+import { UserPermissionsSheet } from './UserPermissionsSheet'
 import styles from './users.module.css'
 
 const expiry = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : 'soon')
 
 type Pending = { kind: 'reset' | 'admin' | 'delete' | 'breakglass' | 'unlink'; user: UserDTO }
+
+/** One entry of a user's actions; the desktop popover and the phone action sheet render the same list. */
+interface MenuEntry {
+  key: string
+  label: string
+  /** Why the entry is disabled: a title on desktop, a line inside the row on phones. */
+  why?: string
+  disabled?: boolean
+  danger?: boolean
+  run: () => void
+}
 
 function MenuItem({ children, danger = false, disabled = false, title, onClick }: { children: ReactNode; danger?: boolean; disabled?: boolean; title?: string; onClick: () => void }) {
   return (
@@ -26,13 +43,23 @@ function MenuItem({ children, danger = false, disabled = false, title, onClick }
   )
 }
 
-export function UsersTable({ users, meId, ssoConfigured = false }: { users: UserDTO[]; meId: number; ssoConfigured?: boolean }) {
+interface UsersTableProps {
+  users: UserDTO[]
+  meId: number
+  ssoConfigured?: boolean
+  /** The permission matrix data; phones edit it per user in a sheet instead of a wide matrix. */
+  permissions?: PermissionsDTO
+}
+
+export function UsersTable({ users, meId, ssoConfigured = false, permissions }: UsersTableProps) {
   const queryClient = useQueryClient()
   const toast = useToast()
   const auth = useAuth()
+  const phone = usePhone()
   const [pending, setPending] = useState<Pending | null>(null)
   const [linking, setLinking] = useState<UserDTO | null>(null)
   const [menuFor, setMenuFor] = useState<number | null>(null)
+  const [editingPermissions, setEditingPermissions] = useState<number | null>(null)
   /** Runs a menu choice and closes the menu first. */
   const choose = (action: () => void) => {
     setMenuFor(null)
@@ -133,115 +160,63 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
     if (kind === 'unlink') unlink.mutate(user)
   }
 
-  return (
-    <Panel title="Users" flush actions={<span>{users.length} users</span>}>
-      <Table>
-        <thead>
-          <tr>
-            <th>Username</th>
-            <th>Sign-in</th>
-            <th>Role</th>
-            <th>Can see</th>
-            <th>Last sign-in</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((user) => (
-            <tr key={user.id}>
-              <td className={tableClass.name} title={user.display_name ?? undefined}>
-                {user.username}
-                {user.id === meId && <> <span className={`${styles.muted} ${styles.small}`}>(you)</span></>}
-                {user.email && <div className={`${styles.muted} ${styles.small}`}>{user.email}</div>}
-              </td>
-              <td>
-                <span className={styles.chips}>
-                  {user.has_password && <Pill kind="mute">Password</Pill>}
-                  {user.sso === 'linked' && <Pill kind="info">SSO linked</Pill>}
-                  {user.sso === 'pending' && (
-                    <Pill kind="warn" title={`Pending link to ${user.sso_name_id}, expires ${expiry(user.pending_link_expires_at)}`}>
-                      Link pending
-                    </Pill>
-                  )}
-                  {user.sso === 'pending_expired' && <Pill kind="mute">Link expired</Pill>}
-                  {user.break_glass && <Pill kind="warn">Break-glass</Pill>}
-                </span>
-              </td>
-              <td>{user.admin ? <Pill kind="info">Global admin</Pill> : <Pill kind="mute">User</Pill>}</td>
-              <td>
-                {user.admin ? (
-                  <span className={styles.muted}>Everything</span>
-                ) : user.can_see.length === 0 ? (
-                  <span className={styles.muted}>Nothing yet</span>
-                ) : (
-                  <span className={styles.chips}>
-                    {user.can_see.map((tag) => (
-                      <TagChip key={tag.id} tag={tag} />
-                    ))}
-                  </span>
-                )}
-              </td>
-              <td className={styles.muted}>{user.last_sign_in_at ? <Ago ts={user.last_sign_in_at} /> : 'never'}</td>
-              <td className={tableClass.num}>
-                <div className={styles.menuWrap}>
-                  <button
-                    type="button"
-                    className={`${styles.btn} ${styles.sm}`}
-                    aria-label={`Actions for ${user.username}`}
-                    aria-haspopup="menu"
-                    aria-expanded={menuFor === user.id}
-                    onClick={() => setMenuFor((current) => (current === user.id ? null : user.id))}
-                  >
-                    Actions
-                  </button>
-                  <Popover open={menuFor === user.id} onClose={() => setMenuFor(null)} label={`Actions for ${user.username}`} role="menu" align="right" width={220}>
-                    <div className={styles.menu}>
-                      <MenuItem onClick={() => choose(() => setPending({ kind: 'reset', user }))}>
-                        {user.has_password ? 'Reset password' : 'Set password'}
-                      </MenuItem>
-                      <MenuItem
-                        disabled={!user.has_password}
-                        title={user.has_password ? undefined : `Set a password for ${user.username} first.`}
-                        onClick={() => choose(() => setPending({ kind: 'breakglass', user }))}
-                      >
-                        {user.break_glass ? 'Remove break-glass' : 'Make break-glass'}
-                      </MenuItem>
-                      {ssoConfigured && (user.sso === 'none' || user.sso === 'pending_expired' || user.sso === 'pending') && (
-                        <MenuItem onClick={() => choose(() => setLinking(user))}>
-                          {user.sso === 'pending' ? 'Change pending link…' : 'Link SSO…'}
-                        </MenuItem>
-                      )}
-                      {user.sso === 'pending' && (
-                        <MenuItem onClick={() => choose(() => clearLink.mutate(user))}>Clear pending link</MenuItem>
-                      )}
-                      {user.sso === 'linked' && (
-                        <MenuItem onClick={() => choose(() => setPending({ kind: 'unlink', user }))}>Unlink SSO…</MenuItem>
-                      )}
-                      <MenuItem onClick={() => choose(() => setPending({ kind: 'admin', user }))}>
-                        {user.admin ? 'Remove global admin' : 'Make global admin'}
-                      </MenuItem>
-                      <MenuItem
-                        danger
-                        disabled={user.id === meId}
-                        title={user.id === meId ? 'You cannot delete yourself' : undefined}
-                        onClick={() => choose(() => setPending({ kind: 'delete', user }))}
-                      >
-                        Delete
-                      </MenuItem>
-                    </div>
-                  </Popover>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {/* Room for the last rows' menus, which the scrolling table wrapper would otherwise clip. */}
-          {menuFor !== null && (
-            <tr aria-hidden="true">
-              <td colSpan={6} className={styles.menuRoom} />
-            </tr>
-          )}
-        </tbody>
-      </Table>
+  /** The actions of one user, in menu order. Editing permissions is only here on phones (desktop has the matrix). */
+  const entriesFor = (user: UserDTO): MenuEntry[] => {
+    const entries: MenuEntry[] = []
+    if (phone) entries.push({ key: 'permissions', label: 'Edit permissions', run: () => setEditingPermissions(user.id) })
+    entries.push({ key: 'reset', label: user.has_password ? 'Reset password' : 'Set password', run: () => setPending({ kind: 'reset', user }) })
+    entries.push({
+      key: 'breakglass',
+      label: user.break_glass ? 'Remove break-glass' : 'Make break-glass',
+      disabled: !user.has_password,
+      why: user.has_password ? undefined : `Set a password for ${user.username} first.`,
+      run: () => setPending({ kind: 'breakglass', user }),
+    })
+    if (ssoConfigured && (user.sso === 'none' || user.sso === 'pending_expired' || user.sso === 'pending')) {
+      entries.push({ key: 'link', label: user.sso === 'pending' ? 'Change pending link…' : 'Link SSO…', run: () => setLinking(user) })
+    }
+    if (user.sso === 'pending') entries.push({ key: 'clear-link', label: 'Clear pending link', run: () => clearLink.mutate(user) })
+    if (user.sso === 'linked') entries.push({ key: 'unlink', label: 'Unlink SSO…', run: () => setPending({ kind: 'unlink', user }) })
+    entries.push({ key: 'admin', label: user.admin ? 'Remove global admin' : 'Make global admin', run: () => setPending({ kind: 'admin', user }) })
+    entries.push({
+      key: 'delete',
+      label: 'Delete',
+      danger: true,
+      disabled: user.id === meId,
+      why: user.id === meId ? 'You cannot delete yourself' : undefined,
+      run: () => setPending({ kind: 'delete', user }),
+    })
+    return entries
+  }
+
+  const signInPills = (user: UserDTO) => (
+    <span className={styles.chips}>
+      {user.has_password && <Pill kind="mute">Password</Pill>}
+      {user.sso === 'linked' && <Pill kind="info">SSO linked</Pill>}
+      {user.sso === 'pending' && (
+        <Pill kind="warn" title={`Pending link to ${user.sso_name_id}, expires ${expiry(user.pending_link_expires_at)}`}>
+          Link pending
+        </Pill>
+      )}
+      {user.sso === 'pending_expired' && <Pill kind="mute">Link expired</Pill>}
+      {user.break_glass && <Pill kind="warn">Break-glass</Pill>}
+    </span>
+  )
+  const canSee = (user: UserDTO) =>
+    user.admin ? (
+      <span className={styles.muted}>Everything</span>
+    ) : user.can_see.length === 0 ? (
+      <span className={styles.muted}>Nothing yet</span>
+    ) : (
+      <span className={styles.chips}>
+        {user.can_see.map((tag) => (
+          <TagChip key={tag.id} tag={tag} />
+        ))}
+      </span>
+    )
+
+  const dialogs = (
+    <>
       {pending?.kind === 'reset' && (
         <ConfirmDialog
           title={pending.user.has_password ? `Reset the password of ${pending.user.username}?` : `Set a password for ${pending.user.username}?`}
@@ -305,6 +280,153 @@ export function UsersTable({ users, meId, ssoConfigured = false }: { users: User
           onCancel={() => setPending(null)}
         />
       )}
+    </>
+  )
+
+  if (phone) {
+    const columns: DataTableColumn<UserDTO>[] = [
+      {
+        key: 'username',
+        header: 'Username',
+        phone: 'title',
+        render: (user) => (
+          <span title={user.display_name ?? undefined}>
+            {user.username}
+            {user.id === meId && <> <span className={`${styles.muted} ${styles.small}`}>(you)</span></>}
+          </span>
+        ),
+      },
+      { key: 'role', header: 'Role', phone: 'status', render: (user) => (user.admin ? <Pill kind="info">Global admin</Pill> : <Pill kind="mute">User</Pill>) },
+      { key: 'signin', header: 'Sign-in', render: signInPills },
+      { key: 'email', header: 'Email', phoneLabel: false, render: (user) => (user.email ? <span className={styles.mono}>{user.email}</span> : null) },
+      {
+        key: 'seen',
+        header: 'Last sign-in',
+        phoneLabel: false,
+        render: (user) => <span>Last sign-in {user.last_sign_in_at ? <Ago ts={user.last_sign_in_at} /> : 'never'}</span>,
+      },
+      { key: 'cansee', header: 'Can see', phoneLabel: false, render: (user) => <span className={styles.canSee}>Can see {canSee(user)}</span> },
+    ]
+    const menuUser = users.find((user) => user.id === menuFor)
+    return (
+      <Panel
+        title="Users & permissions"
+        flush
+        actions={<span>{users.length} users</span>}
+        footer="Turning on any action also turns on View. Turning off View removes everything on that tag. A user sees a cluster when they can view at least one of its services."
+      >
+        <div className={styles.legendRow} role="group" aria-label="Legend">
+          {ACTIONS.map(([key, name, letter]) => (
+            <span key={key}>
+              <b className={styles.mono}>{letter}</b> {name}
+            </span>
+          ))}
+        </div>
+        <DataTable
+          label="Users"
+          columns={columns}
+          rows={users}
+          rowKey={(user) => String(user.id)}
+          rowAction={(user) => (
+            <button type="button" className={styles.moreBtn} aria-label={`Actions for ${user.username}`} aria-haspopup="menu" onClick={() => setMenuFor(user.id)}>
+              <Icon name="more" size={18} />
+            </button>
+          )}
+        />
+        {menuUser && (
+          <BottomSheet
+            open
+            onClose={() => setMenuFor(null)}
+            label={`Actions for ${menuUser.username}`}
+            title={menuUser.username}
+            sub={
+              menuUser.sso === 'pending' ? (
+                <>
+                  {menuUser.email && <span className={styles.subLine}>{menuUser.email}</span>}
+                  <span className={styles.subLine}>{`Pending link to ${menuUser.sso_name_id}, expires ${expiry(menuUser.pending_link_expires_at)}`}</span>
+                </>
+              ) : (
+                (menuUser.email ?? undefined)
+              )
+            }
+            role="menu"
+          >
+            {entriesFor(menuUser).map((entry) => (
+              <SheetAction key={entry.key} label={entry.label} why={entry.why} disabled={entry.disabled} danger={entry.danger} onClick={() => choose(entry.run)} />
+            ))}
+          </BottomSheet>
+        )}
+        {editingPermissions !== null && (
+          <UserPermissionsSheet
+            user={users.find((user) => user.id === editingPermissions)}
+            permissions={permissions}
+            onClose={() => setEditingPermissions(null)}
+          />
+        )}
+        {dialogs}
+      </Panel>
+    )
+  }
+
+  return (
+    <Panel title="Users" flush actions={<span>{users.length} users</span>}>
+      <Table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Sign-in</th>
+            <th>Role</th>
+            <th>Can see</th>
+            <th>Last sign-in</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((user) => (
+            <tr key={user.id}>
+              <td className={tableClass.name} title={user.display_name ?? undefined}>
+                {user.username}
+                {user.id === meId && <> <span className={`${styles.muted} ${styles.small}`}>(you)</span></>}
+                {user.email && <div className={`${styles.muted} ${styles.small}`}>{user.email}</div>}
+              </td>
+              <td>{signInPills(user)}</td>
+              <td>{user.admin ? <Pill kind="info">Global admin</Pill> : <Pill kind="mute">User</Pill>}</td>
+              <td>{canSee(user)}</td>
+              <td className={styles.muted}>{user.last_sign_in_at ? <Ago ts={user.last_sign_in_at} /> : 'never'}</td>
+              <td className={tableClass.num}>
+                <div className={styles.menuWrap}>
+                  <button
+                    type="button"
+                    className={`${styles.btn} ${styles.sm}`}
+                    aria-label={`Actions for ${user.username}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === user.id}
+                    onClick={() => setMenuFor((current) => (current === user.id ? null : user.id))}
+                  >
+                    Actions
+                  </button>
+                  <Popover open={menuFor === user.id} onClose={() => setMenuFor(null)} label={`Actions for ${user.username}`} role="menu" align="right" width={220}>
+                    <div className={styles.menu}>
+                      {entriesFor(user).map((entry) => (
+                        <MenuItem key={entry.key} danger={entry.danger} disabled={entry.disabled} title={entry.why} onClick={() => choose(entry.run)}>
+                          {entry.label}
+                        </MenuItem>
+                      ))}
+                    </div>
+                  </Popover>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {/* Room for the last rows' menus, which the scrolling table wrapper would otherwise clip. */}
+          {menuFor !== null && (
+            <tr aria-hidden="true">
+              <td colSpan={6} className={styles.menuRoom} />
+            </tr>
+          )}
+        </tbody>
+      </Table>
+      {dialogs}
     </Panel>
   )
 }

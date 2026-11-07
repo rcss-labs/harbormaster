@@ -2,6 +2,7 @@ import { useInRouterContext, Link } from 'react-router'
 import type { ReactNode } from 'react'
 import { Sparkline } from '../charts/Sparkline'
 import styles from './KpiStrip.module.css'
+import { usePhone } from './usePhone'
 
 export interface KpiItem {
   label: string
@@ -41,8 +42,13 @@ function CellBody({ item }: { item: KpiItem }) {
 
 export function KpiStrip({ label, items }: KpiStripProps) {
   const inRouter = useInRouterContext()
+  const phone = usePhone()
   return (
-    <ul className={styles.strip} aria-label={label} style={{ gridTemplateColumns: `repeat(${items.length || 1}, minmax(0, 1fr))` }}>
+    <ul
+      className={`${styles.strip} ${phone ? styles.phone : ''}`.trim()}
+      aria-label={label}
+      style={{ gridTemplateColumns: `repeat(${phone ? 3 : items.length || 1}, minmax(0, 1fr))` }}
+    >
       {items.map((item) => {
         const toneClass = item.tone ? styles[`tone-${item.tone}`] : ''
         // Plain cells keep the label as the <li>'s first child; only linked cells need an inner anchor.

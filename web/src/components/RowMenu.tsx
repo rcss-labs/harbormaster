@@ -1,6 +1,7 @@
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Link, type LinkProps } from 'react-router'
 import { Popover } from './Popover'
+import { usePhone } from './usePhone'
 import styles from './RowMenu.module.css'
 
 interface RowMenuProps {
@@ -29,10 +30,17 @@ export function RowMenu({ label, children }: RowMenuProps) {
 
 type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'role' | 'type' | 'className'> & { danger?: boolean }
 
+/** Menu items are 52 px rows inside the phone sheet. */
+function useItemClass(extra = '') {
+  const phone = usePhone()
+  return `${styles.item} ${phone ? styles.sheetItem : ''} ${extra}`.replace(/\s+/g, ' ').trim()
+}
+
 export function RowMenuButton({ danger = false, ...props }: ButtonProps) {
-  return <button type="button" role="menuitem" className={`${styles.item} ${danger ? styles.danger : ''}`.trim()} {...props} />
+  const className = useItemClass(danger ? styles.danger : '')
+  return <button type="button" role="menuitem" className={className} {...props} />
 }
 
 export function RowMenuLink(props: Omit<LinkProps, 'role' | 'className'>) {
-  return <Link role="menuitem" className={styles.item} {...props} />
+  return <Link role="menuitem" className={useItemClass()} {...props} />
 }

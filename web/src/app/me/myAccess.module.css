@@ -3,5 +3,7 @@
 .titles { display: grid; gap: 6px; min-width: 0; }
 .meta { color: var(--muted); font-size: 12px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+.tagPanels { display: grid; gap: 12px; }
+.mono { font-family: var(--mono); }
 .yes { color: var(--success); }
 .no { color: var(--muted); }

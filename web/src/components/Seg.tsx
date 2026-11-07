@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import styles from './Seg.module.css'
+import { usePhone } from './usePhone'
 
 interface SegOption<T extends string> {
   value: T
@@ -17,9 +18,12 @@ interface SegProps<T extends string> {
   semantics?: 'toggle' | 'radio'
   /** Marks every control aria-disabled without disabling it, so it stays focusable and clicks can still explain why. */
   disabled?: boolean
+  /** On phones the group fills the row; `fit` keeps it at its content width (Tail, Level). */
+  fit?: boolean
 }
 
-export function Seg<T extends string>({ options, value, onChange, label, semantics = 'toggle', disabled }: SegProps<T>) {
+export function Seg<T extends string>({ options, value, onChange, label, semantics = 'toggle', disabled, fit = false }: SegProps<T>) {
+  const phone = usePhone()
   const radio = semantics === 'radio'
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -33,13 +37,14 @@ export function Seg<T extends string>({ options, value, onChange, label, semanti
   }
 
   return (
-    <div className={styles.seg} role={radio ? 'radiogroup' : 'group'} aria-label={label}>
+    <div className={`${styles.seg} ${phone ? styles.phone : ''} ${fit ? styles.fit : ''}`.replace(/\s+/g, ' ').trim()} role={radio ? 'radiogroup' : 'group'} aria-label={label}>
       {options.map((option, index) => {
         const on = option.value === value
         return (
           <button
             key={option.value}
             type="button"
+            data-hm-oneline=""
             className={on ? styles.on : ''}
             {...(radio ? { role: 'radio', 'aria-checked': on, tabIndex: on ? 0 : -1, onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => onKeyDown(e, index) } : { 'aria-pressed': on })}
             aria-disabled={disabled || undefined}

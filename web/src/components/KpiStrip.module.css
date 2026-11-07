@@ -11,3 +11,13 @@
 .tone-bad .value { color: var(--bad); }
 .tone-exp .value { color: var(--exp); }
 @media (max-width: 760px) { .strip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } .cell:nth-child(odd) { border-left: 0; } }
+@media (max-width: 700px) {
+  .strip { overflow: visible; }
+  .phone { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .phone .cell:nth-child(n) { border-left: 1px solid var(--border); }
+  .phone .cell:nth-child(3n + 1) { border-left: 0; }
+  .phone .cell:nth-child(n + 4) { border-top: 1px solid var(--border); }
+  .phone .inner { padding: 8px 10px; gap: 1px; }
+  .phone .value { font-size: 18px; overflow-wrap: anywhere; }
+  .phone .label { overflow-wrap: anywhere; }
+}

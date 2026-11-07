@@ -1,5 +1,6 @@
 import { asUser, expect, test } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
+import { measureBox, measureBoxes } from './helpers'
 
 // Read-only: runs in the observe project against the unmutated seed.
 test.use(asUser('sam'))
@@ -11,17 +12,17 @@ test('wide screens fill the content width', async ({ page }) => {
   await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
   // Grid is sidebar | main; the activity rail is a drawer and no longer docks: 2560 - 212 = 2348.
-  const mainBox = await main.boundingBox()
-  expect(mainBox!.width).toBeGreaterThan(2300)
+  const mainBox = await measureBox(main)
+  expect(mainBox.width).toBeGreaterThan(2300)
 
   // The six KPI cells share one strip that spans the content width.
   const strip = main.getByRole('list', { name: 'Estate key figures' })
-  const stripBox = (await strip.boundingBox())!
+  const stripBox = await measureBox(strip)
   const cells = strip.getByRole('listitem')
   await expect(cells).toHaveCount(6)
-  const boxes = await Promise.all([0, 1, 2, 3, 4, 5].map((index) => cells.nth(index).boundingBox()))
-  for (const box of boxes) expect(Math.abs(box!.width - boxes[0]!.width)).toBeLessThan(2)
-  const last = boxes[5]!
+  const boxes = await measureBoxes(...[0, 1, 2, 3, 4, 5].map((index) => cells.nth(index)))
+  for (const box of boxes) expect(Math.abs(box.width - boxes[0].width)).toBeLessThan(2)
+  const last = boxes[5]
   expect(Math.abs(last.x + last.width - (stripBox.x + stripBox.width))).toBeLessThanOrEqual(2)
 })
 
@@ -33,7 +34,7 @@ test('the clusters table scrolls inside its panel at 920px without widening the 
   const main = page.getByRole('main')
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
   // The table keeps its minimum width, so it is wider than the panel that scrolls it.
-  expect((await table.boundingBox())!.width).toBeGreaterThanOrEqual(1120)
+  expect((await measureBox(table)).width).toBeGreaterThanOrEqual(1120)
 })
 
 test('logs and terminal fill the viewport height', async ({ page }) => {
@@ -41,14 +42,14 @@ test('logs and terminal fill the viewport height', async ({ page }) => {
   await page.goto(serviceUrl(...SVC.paymentsApi, 'logs'))
   const logs = page.getByRole('log')
   await expect(logs).toBeVisible()
-  const logBox = (await logs.boundingBox())!
+  const logBox = await measureBox(logs)
   expect(logBox.height).toBeGreaterThan(520)
   expect(1440 - (logBox.y + logBox.height)).toBeLessThan(60)
 
   await page.goto(serviceUrl(...SVC.paymentsApi, 'terminal'))
   const host = page.getByTestId('terminal-host')
   await expect(host).toBeVisible()
-  expect((await host.boundingBox())!.height).toBeGreaterThan(480)
+  expect((await measureBox(host)).height).toBeGreaterThan(480)
 })
 
 test('narrow viewport has no horizontal overflow', async ({ page }) => {
@@ -94,7 +95,27 @@ const tableTargets = [
 ]
 
 for (const target of tableTargets) {
-  for (const width of [390, 1440, 3840]) {
+  // At 390 the table becomes a list of rows: the action button is the last child of each row and stays inside the screen.
+  test(`${target.name} rows keep their action button last and inside the viewport at 390px`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(target.path())
+    const table = page.getByRole('table', { name: target.table })
+    const firstRow = table.getByRole('row').first()
+    await expect(firstRow).toBeVisible()
+    await expect(table.getByRole('columnheader')).toHaveCount(0)
+    const action = firstRow.locator('[data-hm-cell="__actions"]')
+    await expect(action).toBeVisible()
+    expect(await firstRow.evaluate((row) => row.lastElementChild?.getAttribute('data-hm-cell'))).toBe('__actions')
+    const box = (await action.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    // The row's own text stays on screen too.
+    const rowBox = (await firstRow.boundingBox())!
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(390)
+  })
+
+  for (const width of [1440, 3840]) {
     test(`${target.name} table keeps columns aligned and uncovered at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.goto(target.path())
@@ -117,8 +138,7 @@ for (const target of tableTargets) {
       const count = await headerCells.count()
       expect(await bodyCells.count()).toBe(count)
       for (let index = 0; index < count; index++) {
-        const header = (await headerCells.nth(index).boundingBox())!
-        const cell = (await bodyCells.nth(index).boundingBox())!
+        const [header, cell] = await measureBoxes(headerCells.nth(index), bodyCells.nth(index))
         expect(Math.abs(header.x - cell.x), `column ${index} header x ${header.x} vs cell x ${cell.x}`).toBeLessThanOrEqual(2)
       }
 
@@ -155,37 +175,28 @@ test.describe('row action menu at 390', () => {
   })
 })
 
-// A segment label must never wrap inside its box: segments grow to fit and the group wraps onto more rows instead.
+// A filter label must never wrap inside its box. On a phone the filters are chips (`.hm-chips`) that scroll sideways by
+// design with a fade, so every option has to be reachable by scrolling, on one line, at one height.
 test.describe('segmented filters', () => {
-  test('at 390 labels stay on one line, inside the panel, with every option visible', async ({ page }) => {
+  test('at 390 labels stay on one line and every chip is reachable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/services')
-    // Every segmented control: the radiogroup filters and the toggle group of saved views share one component.
-    const groups = page.locator('[class*="seg"]:has(> button)')
+    const groups = page.locator('.hm-chips')
     await expect(groups.first()).toBeVisible()
     for (const name of ['My pins', 'In progress', 'Steady', 'Scaled to 0']) {
-      await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toBeVisible()
+      await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toHaveCount(1)
     }
-    const shortHeight = (await groups.locator('button', { hasText: /^All/ }).first().boundingBox())!.height
+    const chipHeight = (await measureBox(groups.locator('button', { hasText: /^All/ }).first())).height
 
-    const results = await groups.evaluateAll((elements) =>
-      elements.map((group) => {
-        const panel = group.closest('[class*="panel"]') ?? document.body
-        const panelRight = panel.getBoundingClientRect().right
-        const radios = [...group.querySelectorAll('button')].map((radio) => {
-          const box = radio.getBoundingClientRect()
-          return { text: radio.textContent ?? '', height: box.height, right: box.right }
-        })
-        return { name: group.getAttribute('aria-label'), radios, panelRight, scrolls: group.scrollWidth - group.clientWidth }
-      }),
-    )
-    expect(results.length).toBeGreaterThan(0)
-    for (const group of results) {
-      expect(group.scrolls, `${group.name} scrolls horizontally`).toBeLessThanOrEqual(0)
-      for (const radio of group.radios) {
-        expect(Math.abs(radio.height - shortHeight), `"${radio.text}" wraps (h=${radio.height})`).toBeLessThanOrEqual(1)
-        expect(radio.right, `"${radio.text}" leaves the panel`).toBeLessThanOrEqual(group.panelRight + 0.5)
-      }
+    const buttons = await groups.locator('button').all()
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const button of buttons) {
+      await button.scrollIntoViewIfNeeded()
+      const box = await measureBox(button)
+      const text = (await button.textContent()) ?? ''
+      expect(Math.abs(box.height - chipHeight), `"${text}" wraps (h=${box.height})`).toBeLessThanOrEqual(1)
+      expect(box.x, `"${text}" starts off screen`).toBeGreaterThanOrEqual(-0.5)
+      expect(box.x + box.width, `"${text}" ends off screen`).toBeLessThanOrEqual(390.5)
     }
   })
 

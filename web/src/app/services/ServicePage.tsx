@@ -92,7 +92,7 @@ export function ServicePage() {
   return (
     <>
       <div className={styles.stickyHead}>
-        <ServiceHeader service={service} onTagClick={me?.admin ? setEditing : undefined} />
+        <ServiceHeader service={service} tab={tab} onTagClick={me?.admin ? setEditing : undefined} />
         <Tabs ariaLabel="Service tabs" items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
       </div>
       {!service.controller.supported && <ControllerBanner banner={service.controller.banner} />}

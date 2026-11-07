@@ -2,12 +2,14 @@ import { useState, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router'
 import { useAnalytics, type AnalyticsRange, type AnalyticsResponse, type AnalyticsTab } from '../../api/analytics'
 import { Banner } from '../../components/Banner'
+import { Chips } from '../../components/Chips'
 import { Disclosure } from '../../components/Disclosure'
 import { EmptyState } from '../../components/EmptyState'
 import { SegmentedFilter } from '../../components/Seg'
 import { Tabs, type TabItem } from '../../components/Tabs'
 import { Toggle } from '../../components/Toggle'
 import { useToast } from '../../components/Toast'
+import { usePhone } from '../../components/usePhone'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { visibleTagIds } from '../shell/useFilters'
@@ -55,6 +57,7 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
   const toast = useToast()
   const { search } = useLocation()
   const [prefs, setPrefs] = useAnalyticsPrefs()
+  const phone = usePhone()
   const [displayOpen, setDisplayOpen] = useState(false)
   const analytics = useAnalytics(tab, range)
   const data = analytics.data
@@ -73,16 +76,25 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>Analytics</h1>
+          <h1 className="hm-phone-title-sr">Analytics</h1>
           <div className={styles.meta}>Delivery, reliability, capacity and operations, across your clusters and services.</div>
         </div>
         <div className={styles.filters}>
-          <SegmentedFilter
-            label="Tag"
-            value={selectedTag}
-            onChange={(value) => setTags(value === 'all' ? [] : [Number(value)])}
-            options={[{ value: 'all', label: 'All' }, ...visibleTags.map((t) => ({ value: String(t.id), label: t.name }))]}
-          />
+          {phone ? (
+            <Chips
+              label="Tag"
+              value={selectedTag}
+              onChange={(value) => setTags(value === 'all' ? [] : [Number(value)])}
+              options={[{ value: 'all', label: 'All' }, ...visibleTags.map((t) => ({ value: String(t.id), label: t.name }))]}
+            />
+          ) : (
+            <SegmentedFilter
+              label="Tag"
+              value={selectedTag}
+              onChange={(value) => setTags(value === 'all' ? [] : [Number(value)])}
+              options={[{ value: 'all', label: 'All' }, ...visibleTags.map((t) => ({ value: String(t.id), label: t.name }))]}
+            />
+          )}
           <div className={rangeFixed ? styles.dimmed : undefined}>
             <SegmentedFilter
               label="Range"

@@ -64,3 +64,22 @@
 .noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .noAccess h2 { margin: 0; font-size: 12.5px; }
 .noAccess p { margin: 0; color: var(--muted); }
+
+/* Section chips: display contents keeps each section's panel as the grid or flex item it was. */
+.contents { display: contents; }
+
+/* Phone only: the list's filters stack above the table; the detail's header stays on screen while the page scrolls. */
+.phoneFilters { display: grid; gap: 8px; min-width: 0; }
+.phoneSearchRow { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.stickyHead { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-top: 4px; }
+.moreButton { width: 44px; height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); cursor: pointer; flex: none; }
+.whereLine { font: 12px var(--mono); color: var(--dim); overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .nameSearch { width: auto; flex: 1 1 auto; min-width: 0; height: 44px; font-size: 16px; }
+}
+
+/* A long cluster name wraps inside its row instead of running past the screen edge and pushing the actions button away. */
+@media (max-width: 700px) {
+  .clusterLink { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; min-width: 0; }
+}

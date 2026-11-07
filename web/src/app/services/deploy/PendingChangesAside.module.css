@@ -7,7 +7,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--r);
   /* Sticky, so a long list scrolls inside instead of pushing Review off screen. */
-  max-height: calc(100vh - 24px);
+  max-height: calc(100vh / var(--hm-zoom, 1) - 24px);
 }
 .head { padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
 .count { margin: 0; font-size: 13px; font-weight: 600; }
@@ -29,3 +29,12 @@
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }
+
+/* Phone: the bar (.hm-bar from mobile.css) holds the count button, Discard and Review…; the list lives in a sheet. */
+@media (max-width: 700px) {
+  .bar > .btn { padding: 0 14px; }
+  .barSummary { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; justify-content: flex-start; padding: 0 4px; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; }
+  .barCount { font-weight: 600; white-space: nowrap; }
+  .barProblems { color: var(--bad); font-size: 12px; white-space: nowrap; }
+  .body { overflow: visible; padding: 0; }
+}

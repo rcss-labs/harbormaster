@@ -1,4 +1,4 @@
-.diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); max-height: max(380px, 70dvh); overflow: auto; background: var(--raised); }
+.diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); max-height: max(380px, calc(70dvh / var(--hm-zoom, 1))); overflow: auto; background: var(--raised); }
 .diff div { padding: 0 10px; white-space: pre; }
 .diff .add { background: var(--success-soft); color: var(--success); }
 .diff .del { background: var(--danger-soft); color: var(--danger); }
@@ -35,4 +35,19 @@
 .gutter div { height: 18px; }
 .gutter div[data-changed] { background: var(--success-soft); color: var(--success); }
 .gutter div[data-changed]::before { content: "+"; }
-.editorWrap .editor { border: 0; border-radius: 0; background: transparent; white-space: pre; overflow: auto; min-height: 420px; max-height: max(420px, 70dvh); resize: vertical; }
+.editorWrap .editor { border: 0; border-radius: 0; background: transparent; white-space: pre; overflow: auto; min-height: 420px; max-height: max(420px, calc(70dvh / var(--hm-zoom, 1))); resize: vertical; }
+
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; padding: 0; border: 0; background: none; color: var(--text-2); cursor: pointer; }
+
+/* Phone: 16 px editor (no zoom on focus) with a matching gutter, a sticky bar for Discard and Review, a wrapped diff. */
+@media (max-width: 700px) {
+  .editorWrap { grid-template-columns: 26px minmax(0, 1fr); }
+  .gutter { font-size: 16px; line-height: 1.4; }
+  .gutter div { height: calc(16px * 1.4); }
+  .editorWrap .editor { font-size: 16px; line-height: 1.4; min-height: 340px; max-height: none; resize: none; }
+  .diff { max-height: 340px; }
+  .diff div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lineCount { font: 12px var(--mono); color: var(--muted); }
+  .barNote { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--muted); }
+  .bar > button { min-height: 44px; }
+}

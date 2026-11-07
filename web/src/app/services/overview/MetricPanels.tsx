@@ -8,6 +8,9 @@ import { LineChart } from '../../../charts/LineChart'
 import { XL24, fmtNum, niceMax } from '../../../charts/format'
 import { useNow } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
+import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
+import { Icon } from '../../../components/Icon'
+import { usePhone } from '../../../components/usePhone'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { Panel } from '../../../components/Panel'
 import type { PanelErrorProps } from '../../../components/PanelError'
@@ -110,7 +113,11 @@ export function ServiceKpis({ service, metrics }: MetricsProps) {
       },
     )
   }
-  return <KpiStrip label="Service summary" items={items} />
+  return (
+    <div className={styles.kpiWrap}>
+      <KpiStrip label="Service summary" items={items} />
+    </div>
+  )
 }
 
 /** CPU and memory over the last 24 h with deploy and restart markers. `now` is injectable for tests. */
@@ -245,6 +252,8 @@ function UsageMeter({ value, color }: { value: number | null | undefined; color:
 export function RunningTasksMeters({ service, metrics }: MetricsProps) {
   const base = `/services/${service.id}`
   const [stopping, setStopping] = useState<RunningTaskDTO | null>(null)
+  const [actionsFor, setActionsFor] = useState<RunningTaskDTO | null>(null)
+  const phone = usePhone()
   const usageByTask = new Map((metrics?.tasks_now ?? []).map((usage) => [usage.task_id, usage]))
   const withMeters = metrics?.tasks_now != null
   const canShell = service.can.terminal && service.enable_execute_command
@@ -255,7 +264,7 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
       header: 'Task',
       width: '120px',
       render: (task) => (
-        <Link className={styles.mono} to={`${base}/tasks`} title={task.id}>
+        <Link className={styles.mono} to={`${base}/tasks`} title={task.id} data-hm-rl="">
           {task.short_id}
         </Link>
       ),
@@ -288,7 +297,13 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
       header: '',
       width: '170px',
       align: 'right',
-      render: (task) => (
+      phone: 'action',
+      render: (task) =>
+        phone ? (
+          <button type="button" className={styles.moreBtn} aria-label={`Actions for task ${task.short_id}`} aria-haspopup="menu" onClick={() => setActionsFor(task)}>
+            <Icon name="more" size={18} />
+          </button>
+        ) : (
         <span className={styles.rowActions}>
           {canShell && task.exec_agent_running && (
             <Link className={styles.rowBtn} to={`${base}/terminal?task=${encodeURIComponent(task.id)}`}>
@@ -306,7 +321,7 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
             </button>
           )}
         </span>
-      ),
+        ),
     },
   ]
 
@@ -322,6 +337,33 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
         minWidth={560}
         pageSize={25}
       />
+      {actionsFor && (
+        <BottomSheet
+          open
+          onClose={() => setActionsFor(null)}
+          role="menu"
+          label={`Actions for task ${actionsFor.short_id}`}
+          title={actionsFor.short_id}
+          sub={`${service.name} · ${actionsFor.az}`}
+        >
+          {canShell && actionsFor.exec_agent_running && (
+            <SheetAction icon="term" label="Shell" href={`${base}/terminal?task=${encodeURIComponent(actionsFor.id)}`} onClick={() => setActionsFor(null)} />
+          )}
+          {service.can.logs && <SheetAction icon="logs" label="Logs" href={`${base}/logs`} onClick={() => setActionsFor(null)} />}
+          <SheetAction icon="tasks" label="Task details" href={`${base}/tasks`} onClick={() => setActionsFor(null)} />
+          <SheetAction
+            icon="stop"
+            label="Stop task"
+            danger
+            disabled={!service.can.operate}
+            why={service.can.operate ? undefined : `Needs Operate on ${service.tag.name}`}
+            onClick={() => {
+              setStopping(actionsFor)
+              setActionsFor(null)
+            }}
+          />
+        </BottomSheet>
+      )}
       {stopping && (
         <StopTaskDialog
           taskId={stopping.id}

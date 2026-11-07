@@ -1,6 +1,6 @@
 import { asUser, expect, test, type Page } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
-import { serviceId } from './helpers'
+import { measureBox, measureBoxes, serviceId } from './helpers'
 
 // Role-based complement to change.spec (admin register/deploy/rollback, operator read-only, stop task) and
 // terminal.spec (admin terminal, exec-off banner): one describe per Service page tab, each signed in as the
@@ -310,9 +310,8 @@ test.describe('operations log as sam', () => {
     // The rendered list follows the API order: the first two entries with unique text appear top to bottom.
     const unique = items.filter((item) => items.filter((other) => other.text === item.text).length === 1).slice(0, 2)
     expect(unique).toHaveLength(2)
-    const top = await page.getByText(unique[0].text, { exact: true }).boundingBox()
-    const below = await page.getByText(unique[1].text, { exact: true }).boundingBox()
-    expect(top!.y).toBeLessThan(below!.y)
+    const [top, below] = await measureBoxes(page.getByText(unique[0].text, { exact: true }), page.getByText(unique[1].text, { exact: true }))
+    expect(top.y).toBeLessThan(below.y)
     await page.getByLabel('Show ECS service events').uncheck()
     await expect(ecsRows).toHaveCount(0)
   })
@@ -363,10 +362,10 @@ test.describe('full-height tabs and narrow windows', () => {
         await page.goto(paymentsApi(tab))
         const panel = page.getByRole('region', { name: region, exact: true })
         await expect(panel).toBeVisible()
-        // The panel can re-render between the checks, so measure in one poll: a detached panel has no box yet.
+        // measureBox re-reads until the panel is attached: it can re-render between the visibility check and the read.
         const bottomGap = async () => {
-          const box = await panel.boundingBox()
-          return box ? height - (box.y + box.height) : Number.POSITIVE_INFINITY
+          const box = await measureBox(panel)
+          return height - (box.y + box.height)
         }
         await expect.poll(bottomGap).toBeLessThanOrEqual(24)
         expect(await bottomGap()).toBeGreaterThanOrEqual(0)

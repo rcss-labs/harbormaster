@@ -9,3 +9,10 @@
 .btn { height: 26px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-2); display: inline-flex; align-items: center; white-space: nowrap; }
 .btn:hover { background: var(--hover-strong); color: var(--text); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (max-width: 700px) {
+  .groupToggle { min-height: 44px; font-size: 13px; white-space: normal; }
+  .actions { gap: 0; }
+  .btn { min-height: 44px; min-width: 44px; padding: 0 14px; font-size: 14px; justify-content: center; }
+  .reason { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+}

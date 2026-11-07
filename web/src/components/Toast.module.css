@@ -5,3 +5,8 @@
 .ok { border-left-color: var(--success); }
 .dismiss { margin-left: auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
 @keyframes slide { from { transform: translateY(8px); opacity: 0; } }
+/* Phone: sit above the tab bar, the sticky bar or the terminal keys row, whichever the shell has set. */
+@media (max-width: 700px) {
+  .phone { left: 12px; right: 12px; bottom: calc(var(--hm-bottom-inset, 0px) + 12px); }
+  .phone .toast { max-width: none; font-size: 14px; }
+}

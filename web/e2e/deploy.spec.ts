@@ -1,6 +1,6 @@
 import { asUser, expect, test, type Page } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
-import { pickImageTag, reviewAndApply, serviceId } from './helpers'
+import { measureBoxes, pickImageTag, reviewAndApply, serviceId } from './helpers'
 
 // The Deploy tab: containers, task size, service settings and auto scaling reviewed as one change set. Every test
 // here mutates the shared estate, so the file runs in chromium-flows (after change.spec, which moves payments-api
@@ -123,17 +123,23 @@ test.describe('sam on payments-api', () => {
 test.describe('sam on a phone', () => {
   test.use(asUser('sam'))
 
-  test('Deploy never scrolls sideways at 390px and the pending aside stacks below the form', async ({ page }) => {
+  test('Deploy never scrolls sideways at 390px and the pending changes move to a sticky bar once something is edited', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 })
     await page.goto(paymentsApi)
-    const aside = page.getByRole('region', { name: 'Pending changes' })
-    await expect(aside).toBeVisible()
+    const bar = page.getByRole('region', { name: 'Pending changes' })
     const service = page.getByRole('region', { name: 'Service' })
-    await expect(service.getByRole('spinbutton', { name: 'Desired count' })).toBeVisible()
-    expect((await aside.boundingBox())!.y).toBeGreaterThan((await service.boundingBox())!.y)
+    const desired = service.getByRole('spinbutton', { name: 'Desired count' })
+    await expect(desired).toBeVisible()
+    // Nothing edited yet: no bar and no aside.
+    await expect(bar).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Add variable' })).toBeVisible()
     await expect(page.getByRole('table', { name: 'Scaling policies' }).or(page.getByRole('grid', { name: 'Scaling policies' }))).toBeVisible()
-    // Every Deploy panel, the aside and the page itself stay inside the window. (The header's tab strip is the page
+    await desired.fill('4')
+    await expect(bar.getByText('1 change')).toBeVisible()
+    const [barBox, serviceBox] = await measureBoxes(bar, service)
+    expect(barBox.y + barBox.height).toBeLessThanOrEqual(800)
+    expect(serviceBox.width).toBeLessThanOrEqual(390)
+    // Every Deploy panel and the page itself stay inside the window. (The header's tab strip is the page
     // frame's and is checked with the service page.)
     const overflow = await page.evaluate(() => {
       const limit = document.documentElement.clientWidth

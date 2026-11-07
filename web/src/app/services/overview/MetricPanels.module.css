@@ -16,3 +16,9 @@
 .rowDanger { border-color: var(--danger-border); color: var(--danger); }
 .rowDanger:hover { background: var(--danger-hover); color: var(--danger); }
 .kpiSub { display: block; margin-top: 2px; font: 400 12px var(--mono); letter-spacing: 0; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Phone: the 7 KPI tiles are three across and an odd last tile spans the row; a 44 px "…" opens the task actions. */
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-height: 44px; padding: 0; border: 0; background: none; color: var(--text-2); cursor: pointer; }
+@media (max-width: 700px) {
+  .kpiWrap > ul > li:last-child:nth-child(3n + 1) { grid-column: span 3; }
+}

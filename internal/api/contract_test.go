@@ -128,7 +128,8 @@ func contractShapes() map[string]any {
 		"changeset":          shapeOf(reflect.TypeFor[ChangeSetResponse]()),
 		"desiredCount":       shapeOf(reflect.TypeFor[DesiredCountResponse]()),
 		// redesign v4
-		"servicesList": shapeOf(reflect.TypeFor[ServiceListDTO]()),
+		"servicesList":    shapeOf(reflect.TypeFor[ServiceListDTO]()),
+		"servicesMetrics": shapeOf(reflect.TypeFor[ServicesMetricsDTO]()),
 		// plan 05
 		"networks":      shapeOf(reflect.TypeFor[NetworksOverviewDTO]()),
 		"networkRegion": shapeOf(reflect.TypeFor[NetworkRegionVPCsDTO]()),

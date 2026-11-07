@@ -86,3 +86,11 @@
 .editLink:hover {
   text-decoration: underline;
 }
+
+/* Phone: a 44 px stepper and a full-width update button. */
+@media (max-width: 700px) {
+  .icon { width: 52px; height: 52px; font-size: 20px; }
+  .count { flex: 1 1 auto; min-width: 0; width: auto; height: 52px; font-weight: 600; }
+  .btn { width: 100%; height: 44px; margin-top: 4px; }
+  .toolbar .btn { flex: 1 0 100%; }
+}

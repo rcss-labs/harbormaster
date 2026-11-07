@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { useTagAssignments, useTags } from '../../../api/hooks'
 import type { TagItemDTO } from '../../../api/types'
+import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
+import { DataTable, type DataTableColumn } from '../../../components/DataTable'
+import { Icon } from '../../../components/Icon'
 import { Panel } from '../../../components/Panel'
 import { Table, tableClass } from '../../../components/Table'
+import { usePhone } from '../../../components/usePhone'
 import { TagChip } from '../../../components/TagChip'
 import { useAuth } from '../../auth/AuthProvider'
 import { HeaderAction } from '../../settings/HeaderAction'
@@ -58,7 +62,89 @@ interface TagsTableProps {
   onDelete: (tag: TagItemDTO) => void
 }
 
-function TagsTable({ tags, onRename, onDelete }: TagsTableProps) {
+const DEFAULT_TAG_REASON = 'Dev is the default tag'
+const KEPT_IN_HARBORMASTER = "Tags live only in Harbormaster; AWS tags are never read or written. An untagged cluster is Dev; an untagged service inherits its cluster's tag."
+
+function usersWithAccess(tag: TagItemDTO) {
+  return tag.users.length > 0 ? (
+    <div className={styles.chips}>
+      {tag.users.map((user) => (
+        <span key={user.username} className={styles.chip}>
+          {user.username} <span className={styles.muted}>{user.preset}</span>
+        </span>
+      ))}
+    </div>
+  ) : (
+    <span className={styles.muted}>Global admins only</span>
+  )
+}
+
+function PhoneTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
+  const [menuFor, setMenuFor] = useState<number | null>(null)
+  const menuTag = tags.find((tag) => tag.id === menuFor)
+  const columns: DataTableColumn<TagItemDTO>[] = [
+    {
+      key: 'tag',
+      header: 'Tag',
+      phone: 'title',
+      render: (tag) => (
+        <span className={styles.tagTitle}>
+          <TagChip tag={{ id: tag.id, name: tag.name, color: tag.color, inherited: false }} />
+          {tag.builtin && <span className={`${styles.muted} ${styles.small}`}>default</span>}
+        </span>
+      ),
+    },
+    { key: 'clusters', header: 'Clusters', phoneLabel: false, render: (tag) => `${tag.clusters} clusters` },
+    { key: 'direct', header: 'Services tagged directly', phoneLabel: false, render: (tag) => `${tag.services_direct} services tagged directly` },
+    { key: 'effective', header: 'Services in effect', phoneLabel: false, render: (tag) => `${tag.services_effective} services in effect` },
+    { key: 'users', header: 'Users with access', render: usersWithAccess },
+  ]
+  return (
+    <Panel title="Tags" flush actions={<span title={KEPT_IN_HARBORMASTER}>Kept in Harbormaster only</span>}>
+      <DataTable
+        label="Tags"
+        columns={columns}
+        rows={tags}
+        rowKey={(tag) => String(tag.id)}
+        rowAction={(tag) => (
+          <button type="button" className={styles.moreBtn} aria-label={`Actions for tag ${tag.name}`} aria-haspopup="menu" onClick={() => setMenuFor(tag.id)}>
+            <Icon name="more" size={18} />
+          </button>
+        )}
+      />
+      {menuTag && (
+        <BottomSheet open onClose={() => setMenuFor(null)} label={`Actions for tag ${menuTag.name}`} title={menuTag.name} role="menu">
+          <SheetAction
+            label="Rename"
+            disabled={menuTag.builtin}
+            why={menuTag.builtin ? DEFAULT_TAG_REASON : undefined}
+            onClick={() => {
+              setMenuFor(null)
+              onRename(menuTag)
+            }}
+          />
+          <SheetAction
+            label="Delete"
+            danger
+            disabled={menuTag.builtin}
+            why={menuTag.builtin ? DEFAULT_TAG_REASON : undefined}
+            onClick={() => {
+              setMenuFor(null)
+              onDelete(menuTag)
+            }}
+          />
+        </BottomSheet>
+      )}
+    </Panel>
+  )
+}
+
+function TagsTable(props: TagsTableProps) {
+  const phone = usePhone()
+  return phone ? <PhoneTagsTable {...props} /> : <DesktopTagsTable {...props} />
+}
+
+function DesktopTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
   return (
     <Panel
       title="Tags"

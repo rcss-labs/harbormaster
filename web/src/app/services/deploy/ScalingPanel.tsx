@@ -1,8 +1,12 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { DeploySettingsResponse } from '../../../api/deploy'
+import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
+import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { PanelError } from '../../../components/PanelError'
+import { RowMenu } from '../../../components/RowMenu'
+import { usePhone } from '../../../components/usePhone'
 import { METRIC_LABELS, PolicyRowEditor } from './PolicyRowEditor'
 import { ScheduledActionEditor } from './ScheduledActionEditor'
 import { plural } from './format'
@@ -38,6 +42,7 @@ const parseNumber = (text: string): number | null => {
 export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName, onRetry }: ScalingPanelProps) {
   const [editingPolicy, setEditingPolicy] = useState<Editing>(null)
   const [editingAction, setEditingAction] = useState<Editing>(null)
+  const phone = usePhone()
   const lock = settings.can.operate ? undefined : `You need Operate on ${tagName}`
   const locked = lock !== undefined
   // Parts the server could not read (settings.partial): only the editor of that part is blocked.
@@ -90,6 +95,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
       key: 'actions',
       header: '',
       width: '130px',
+      phone: 'hidden',
       render: (policy) => (
         <span className={styles.rowActions}>
           {policy.editable && (
@@ -122,6 +128,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
       key: 'actions',
       header: '',
       width: '130px',
+      phone: 'hidden',
       render: (action) => (
         <span className={styles.rowActions}>
           <button type="button" className={styles.btn} aria-label={`Edit ${action.name}`} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'edit', name: action.name })}>
@@ -142,6 +149,32 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
     },
   ]
 
+  // Phone rows carry one "Actions" button; its sheet repeats the inline buttons with the same locks, the reason inside the row.
+  const policyRowAction = (policy: PolicyDraft) => (
+    <RowMenu label={`Actions for policy ${policy.name}`}>
+      {policy.editable && <SheetAction label="Edit" why={policiesLock} disabled={policiesLock !== undefined} onClick={() => setEditingPolicy({ kind: 'edit', name: policy.name })} />}
+      <SheetAction
+        label="Remove"
+        danger
+        why={policiesLock}
+        disabled={policiesLock !== undefined}
+        onClick={() => onChange({ ...draft, policies: draft.policies.filter((candidate) => candidate.name !== policy.name) })}
+      />
+    </RowMenu>
+  )
+  const actionRowAction = (action: ScheduledActionDraft) => (
+    <RowMenu label={`Actions for scheduled action ${action.name}`}>
+      <SheetAction label="Edit" why={scheduledLock} disabled={scheduledLock !== undefined} onClick={() => setEditingAction({ kind: 'edit', name: action.name })} />
+      <SheetAction
+        label="Remove"
+        danger
+        why={scheduledLock}
+        disabled={scheduledLock !== undefined}
+        onClick={() => onChange({ ...draft, scheduledActions: draft.scheduledActions.filter((candidate) => candidate.name !== action.name) })}
+      />
+    </RowMenu>
+  )
+
   const rangeValid = draft.min !== null && draft.max !== null && Number.isInteger(draft.min) && Number.isInteger(draft.max) && draft.min <= draft.max
   const outsideRange = draft.hasTarget && rangeValid && desiredCount !== null && (desiredCount < (draft.min as number) || desiredCount > (draft.max as number))
   const removing = !draft.hasTarget && settings.scaling.has_target
@@ -149,10 +182,34 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
   const policyBeingEdited = editingPolicy?.kind === 'edit' ? draft.policies.find((policy) => policy.name === editingPolicy.name) ?? null : null
   const actionBeingEdited = editingAction?.kind === 'edit' ? draft.scheduledActions.find((action) => action.name === editingAction.name) ?? null : null
 
+  const policyEditorLabel = policyBeingEdited ? `Edit ${policyBeingEdited.name}` : 'New scaling policy'
+  const policyEditor = editingPolicy ? (
+    <PolicyRowEditor
+      key={policyBeingEdited?.name ?? 'new'}
+      initial={policyBeingEdited}
+      existingNames={draft.policies.map((policy) => policy.name)}
+      targetGroups={settings.target_groups}
+      onSave={savePolicy}
+      onCancel={() => setEditingPolicy(null)}
+    />
+  ) : null
+  const actionEditorLabel = actionBeingEdited ? `Edit ${actionBeingEdited.name}` : 'New scheduled action'
+  const actionEditor = editingAction ? (
+    <ScheduledActionEditor
+      key={actionBeingEdited?.name ?? 'new'}
+      initial={actionBeingEdited}
+      existingNames={draft.scheduledActions.map((action) => action.name)}
+      onSave={saveAction}
+      onCancel={() => setEditingAction(null)}
+    />
+  ) : null
+
   const targetUnreadable = unreadable('scaling_target')
   return (
     <Panel title="Auto scaling" error={targetUnreadable ? { message: targetUnreadable.message, onRetry } : undefined}>
       <div className={styles.stack}>
+        {/* Phones have no hover: a whole-panel lock is one note; a part that could not be read gets its reason under its own button. */}
+        <LockNote>{lock}</LockNote>
         {draft.hasTarget ? (
           <div className={styles.group}>
             <div className={styles.fieldRow}>
@@ -191,6 +248,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
                 Remove target
               </button>
             </div>
+            <LockNote kind="why">{removeLock === lock ? undefined : removeLock}</LockNote>
           </div>
         ) : removing ? (
           <div className={styles.group}>
@@ -230,24 +288,20 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
                   rows={draft.policies}
                   rowKey={(policy) => policy.name}
                   minWidth={560}
+                  rowAction={phone ? policyRowAction : undefined}
                   empty="No scaling policies."
                 />
               )}
-              {editingPolicy ? (
-                <PolicyRowEditor
-                  key={policyBeingEdited?.name ?? 'new'}
-                  initial={policyBeingEdited}
-                  existingNames={draft.policies.map((policy) => policy.name)}
-                  targetGroups={settings.target_groups}
-                  onSave={savePolicy}
-                  onCancel={() => setEditingPolicy(null)}
-                />
-              ) : (
-                <div className={styles.actions}>
-                  <button type="button" className={styles.btn} disabled={policiesLock !== undefined} title={policiesLock} onClick={() => setEditingPolicy({ kind: 'new' })}>
-                    Add policy
-                  </button>
-                </div>
+              {editingPolicy && policyEditor && (phone ? <EditorSheet label={policyEditorLabel} onClose={() => setEditingPolicy(null)}>{policyEditor}</EditorSheet> : policyEditor)}
+              {!(editingPolicy && !phone) && (
+                <>
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.btn} disabled={policiesLock !== undefined} title={policiesLock} onClick={() => setEditingPolicy({ kind: 'new' })}>
+                      Add policy
+                    </button>
+                  </div>
+                  <LockNote kind="why">{policiesLock === lock ? undefined : policiesLock}</LockNote>
+                </>
               )}
             </div>
 
@@ -262,28 +316,34 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName,
                   rows={draft.scheduledActions}
                   rowKey={(action) => action.name}
                   minWidth={560}
+                  rowAction={phone ? actionRowAction : undefined}
                   empty="No scheduled actions."
                 />
               )}
-              {editingAction ? (
-                <ScheduledActionEditor
-                  key={actionBeingEdited?.name ?? 'new'}
-                  initial={actionBeingEdited}
-                  existingNames={draft.scheduledActions.map((action) => action.name)}
-                  onSave={saveAction}
-                  onCancel={() => setEditingAction(null)}
-                />
-              ) : (
-                <div className={styles.actions}>
-                  <button type="button" className={styles.btn} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'new' })}>
-                    Add scheduled action
-                  </button>
-                </div>
+              {editingAction && actionEditor && (phone ? <EditorSheet label={actionEditorLabel} onClose={() => setEditingAction(null)}>{actionEditor}</EditorSheet> : actionEditor)}
+              {!(editingAction && !phone) && (
+                <>
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.btn} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'new' })}>
+                      Add scheduled action
+                    </button>
+                  </div>
+                  <LockNote kind="why">{scheduledLock === lock ? undefined : scheduledLock}</LockNote>
+                </>
               )}
             </div>
           </>
         )}
       </div>
     </Panel>
+  )
+}
+
+/** Phone: an inline editor opens in a tall sheet named like the editor's form. */
+function EditorSheet({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <BottomSheet open tall onClose={onClose} label={label} title={label}>
+      {children}
+    </BottomSheet>
   )
 }

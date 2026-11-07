@@ -6,3 +6,6 @@
 .item:hover:not(:disabled) { background: var(--hover); }
 .item:disabled { color: var(--muted); cursor: not-allowed; }
 .danger { color: var(--danger); }
+@media (max-width: 700px) {
+  .sheetItem { display: flex; align-items: center; height: auto; min-height: 52px; line-height: 1.3; padding: 6px 16px; border-radius: 0; border-top: 1px solid var(--row-border); font-size: 14px; font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
+}

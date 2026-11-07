@@ -43,3 +43,18 @@
 .chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .secret { font-family: var(--mono); font-size: 14px; padding: 8px 10px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); user-select: all; }
 .menuRoom { height: 230px; padding: 0 !important; border: 0 !important; }
+
+/* Phone: rows, sheets and 44 px controls. */
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-2); cursor: pointer; }
+.legendRow { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px var(--pad); font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.canSee { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.permList { display: grid; gap: 8px; }
+.pbtnRow { display: flex; width: 100%; min-height: 52px; padding: 0 12px; font-size: 14px; gap: 10px; justify-content: flex-start; }
+.pbtnRow .mono { margin-left: auto; }
+@media (max-width: 700px) {
+  .ctl, .ctlLg { font-size: 16px; }
+  .check { min-height: 44px; }
+  .ppop label { min-height: 44px; display: flex; align-items: center; }
+  .btn { white-space: normal; }
+}
+.subLine { display: block; overflow-wrap: anywhere; }
