@@ -33,7 +33,7 @@ type MeAccountDTO struct {
 }
 
 // MeDTO is the signed-in user with everything the SPA needs to render navigation and permissions.
-// Perms maps a tag id (as a string) to its ActionSet bitmask (V=1 L=2 O=4 D=8 E=16 T=32).
+// Perms maps a tag id (as a string) to its ActionSet bitmask (V=1 L=2 O=4 D=8 E=16 T=32 R=64).
 type MeDTO struct {
 	ID                 int64          `json:"id"`
 	Username           string         `json:"username"`

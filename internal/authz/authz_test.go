@@ -161,12 +161,12 @@ func TestVisibleTagsAndPermissionsOf(t *testing.T) {
 	}
 }
 
-func TestActionNames(t *testing.T) {
+func TestActionNames_IncludesAcceptRiskLast(t *testing.T) {
 	got := ActionNames()
 	want := []struct {
 		a    Action
 		n, l string
-	}{{View, "View", "V"}, {Logs, "Logs", "L"}, {Operate, "Operate", "O"}, {Deploy, "Deploy", "D"}, {Edit, "Edit task definition", "E"}, {Terminal, "Terminal", "T"}}
+	}{{View, "View", "V"}, {Logs, "Logs", "L"}, {Operate, "Operate", "O"}, {Deploy, "Deploy", "D"}, {Edit, "Edit task definition", "E"}, {Terminal, "Terminal", "T"}, {AcceptRisk, "Accept risk", "R"}}
 	if len(got) != len(want) {
 		t.Fatalf("len = %d", len(got))
 	}
@@ -174,6 +174,42 @@ func TestActionNames(t *testing.T) {
 		if got[i].Action != w.a || got[i].Name != w.n || got[i].Letter != w.l {
 			t.Errorf("[%d] = %+v", i, got[i])
 		}
+	}
+	if AcceptRisk != 64 {
+		t.Errorf("AcceptRisk = %d, want 64", AcceptRisk)
+	}
+}
+
+// Accepting a vulnerability is a separate responsibility: no preset grants it, and Normalize
+// never adds it, so a value stored before the permission existed (0..63) cannot gain it.
+func TestPresets_NoneGrantAcceptRisk(t *testing.T) {
+	for name, set := range Presets {
+		if set.Has(AcceptRisk) {
+			t.Errorf("preset %s grants Accept risk", name)
+		}
+		if Normalize(set).Has(AcceptRisk) {
+			t.Errorf("Normalize(%s) grants Accept risk", name)
+		}
+	}
+	if Normalize(ActionSet(View)).Has(AcceptRisk) {
+		t.Error("Normalize(View) grants Accept risk")
+	}
+	if Presets["Full"] != 63 {
+		t.Errorf("Full = %d, want 63", Presets["Full"])
+	}
+	for stored := ActionSet(0); stored <= 63; stored++ {
+		if Normalize(stored).Has(AcceptRisk) {
+			t.Fatalf("stored value %d gains Accept risk", stored)
+		}
+	}
+	if got := PresetName(ActionSet(View | AcceptRisk)); got != "Custom" {
+		t.Errorf("View|AcceptRisk = %q, want Custom", got)
+	}
+	if got := PresetName(Presets["Full"] | ActionSet(AcceptRisk)); got != "Custom" {
+		t.Errorf("Full|AcceptRisk = %q, want Custom", got)
+	}
+	if got := Normalize(ActionSet(AcceptRisk)); got != ActionSet(View|AcceptRisk) {
+		t.Errorf("Normalize(AcceptRisk) = %d, want 65", got)
 	}
 }
 

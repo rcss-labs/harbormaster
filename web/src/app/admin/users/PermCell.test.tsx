@@ -62,4 +62,26 @@ describe('PermCell', () => {
     fireEvent.keyDown(popover, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  it('renders and toggles Accept risk', async () => {
+    const bodies: unknown[] = []
+    renderCell(7, bodies)
+    fireEvent.click(screen.getByRole('button', { name: 'omer on Prod: Operator' }))
+    fireEvent.click(screen.getByLabelText('Accept risk'))
+    await waitFor(() => expect(bodies).toEqual([{ actions: 71 }]))
+  })
+
+  it('Full is shown as Custom once Accept risk is added', () => {
+    renderCell(127)
+    const opener = screen.getByRole('button', { name: 'omer on Prod: Custom' })
+    expect(opener).toHaveTextContent('VLODETR')
+  })
+
+  it('choosing the Full preset leaves Accept risk off', async () => {
+    const bodies: unknown[] = []
+    renderCell(127, bodies)
+    fireEvent.click(screen.getByRole('button', { name: 'omer on Prod: Custom' }))
+    fireEvent.change(screen.getByLabelText('Preset for omer on Prod'), { target: { value: 'Full' } })
+    await waitFor(() => expect(bodies).toEqual([{ actions: 63 }]))
+  })
 })

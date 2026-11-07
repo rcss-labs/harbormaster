@@ -123,7 +123,7 @@ func (s *Server) setPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Actions < 0 || body.Actions > allActions {
-		s.fail(w, invalid("Actions must be between 0 and 63."))
+		s.fail(w, invalid("Actions must be between 0 and "+strconv.Itoa(allActions)+"."))
 		return
 	}
 	updated := authz.Normalize(authz.ActionSet(body.Actions))

@@ -10,13 +10,14 @@ describe('MyAccess', () => {
     server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
     renderApp('/me/access')
 
-    // Columns: Tag, View, Logs, Operate, Deploy, Edit task definition, Terminal, Services.
+    // Columns: Tag, View, Logs, Operate, Deploy, Edit task definition, Terminal, Accept risk, Services.
     const devRow = (await screen.findByText('Dev')).closest('tr') as HTMLElement
     const devCells = within(devRow).getAllByRole('cell').map((cell) => cell.textContent)
-    expect(devCells.slice(0, 7)).toEqual(['Dev', '✓', '✓', '✓', '–', '–', '–'])
+    expect(devCells.slice(0, 8)).toEqual(['Dev', '✓', '✓', '✓', '–', '–', '–', '–'])
 
     const stagingRow = screen.getByText('Staging').closest('tr') as HTMLElement
     const stagingCells = within(stagingRow).getAllByRole('cell').map((cell) => cell.textContent)
-    expect(stagingCells.slice(0, 7)).toEqual(['Staging', '✓', '–', '–', '–', '–', '–'])
+    expect(stagingCells.slice(0, 8)).toEqual(['Staging', '✓', '–', '–', '–', '–', '–', '–'])
+    expect(screen.getByRole('columnheader', { name: 'Accept risk' })).toBeInTheDocument()
   })
 })

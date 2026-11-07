@@ -12,6 +12,8 @@ const (
 	Deploy                      // D=8
 	Edit                        // E=16
 	Terminal                    // T=32
+	// AcceptRisk is in no preset, Full included: accepting a vulnerability is a separate responsibility.
+	AcceptRisk // R=64
 )
 
 // ActionSet is a bitmask of Actions granted on a tag.
@@ -66,5 +68,6 @@ func ActionNames() []struct {
 		{Deploy, "Deploy", "D"},
 		{Edit, "Edit task definition", "E"},
 		{Terminal, "Terminal", "T"},
+		{AcceptRisk, "Accept risk", "R"},
 	}
 }

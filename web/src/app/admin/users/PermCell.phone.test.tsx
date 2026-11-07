@@ -31,12 +31,12 @@ function renderCell(actions: number, bodies: unknown[] = []) {
 }
 
 describe('PermCell on a phone', () => {
-  it('opens a sheet with the preset select and the six toggles', () => {
+  it('opens a sheet with the preset select and the seven toggles', () => {
     renderCell(7)
     fireEvent.click(screen.getByRole('button', { name: 'omer on Prod: Operator' }))
     const sheet = screen.getByRole('dialog', { name: 'Permissions for omer on Prod' })
     expect(within(sheet).getByLabelText('Preset for omer on Prod')).toHaveValue('Operator')
-    for (const name of ['View', 'Logs', 'Operate', 'Deploy', 'Edit task definition', 'Terminal']) {
+    for (const name of ['View', 'Logs', 'Operate', 'Deploy', 'Edit task definition', 'Terminal', 'Accept risk']) {
       expect(within(sheet).getByLabelText(name)).toBeInTheDocument()
     }
     expect(within(sheet).getByText('Any action also turns on View. Turning View off clears the rest.')).toBeInTheDocument()
