@@ -39,12 +39,37 @@ type RetentionConfig struct {
 	AvailabilityDaily time.Duration
 	CapacityDaily     time.Duration
 	UtilDaily         time.Duration
+	// Image scan results and the runs that produced them.
+	ScanImages time.Duration
+	ScanRuns   time.Duration
 }
 
 // AnalyticsConfig toggles optional analytics collection.
 type AnalyticsConfig struct {
 	// Util enables the daily CloudWatch utilisation rollup (one GetMetricData batch per account and region a day).
 	Util bool
+}
+
+// ScanConfig holds the image security scanner settings. The scanner runs as an
+// on-demand ECS task launched with these launch settings.
+type ScanConfig struct {
+	Enabled           bool
+	ClusterARN        string
+	TaskDefinitionARN string
+	Subnets           []string
+	SecurityGroup     string
+	Bucket            string
+	RoleName          string
+	Interval          time.Duration
+	TaskTimeout       time.Duration
+	DBRefresh         time.Duration
+	DBMaxAge          time.Duration
+	CandidateRefresh  time.Duration
+	MaxTasks          int
+	BatchSize         int
+	CandidateTags     int
+	MaxImageMB        int
+	RematchBatch      int
 }
 
 // Config is the complete runtime configuration for the server.
@@ -66,6 +91,7 @@ type Config struct {
 	LoginWindow             time.Duration
 	Poll                    PollConfig
 	Retention               RetentionConfig
+	Scan                    ScanConfig
 	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
@@ -140,6 +166,17 @@ func (r *envReader) integer(name string, fallback int) int {
 	return parsed
 }
 
+// list splits a comma-separated variable, trimming spaces and dropping empty items.
+func (r *envReader) list(name string) []string {
+	var items []string
+	for _, item := range strings.Split(r.getenv(name), ",") {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
+}
+
 func (r *envReader) fail(name, format string, args ...any) {
 	if r.err == nil {
 		r.err = fmt.Errorf("%s: %s", name, fmt.Sprintf(format, args...))
@@ -194,6 +231,27 @@ func Load(getenv func(string) string) (Config, error) {
 			AvailabilityDaily: reader.duration("HM_RETENTION_AVAILABILITY_DAILY", 8760*time.Hour),
 			CapacityDaily:     reader.duration("HM_RETENTION_CAPACITY_DAILY", 8760*time.Hour),
 			UtilDaily:         reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
+			ScanImages:        reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
+			ScanRuns:          reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
+		},
+		Scan: ScanConfig{
+			Enabled:           reader.boolean("HM_SCAN_ENABLED", false),
+			ClusterARN:        reader.text("HM_SCAN_CLUSTER_ARN", ""),
+			TaskDefinitionARN: reader.text("HM_SCAN_TASK_DEFINITION", ""),
+			Subnets:           reader.list("HM_SCAN_SUBNETS"),
+			SecurityGroup:     reader.text("HM_SCAN_SECURITY_GROUP", ""),
+			Bucket:            reader.text("HM_SCAN_BUCKET", ""),
+			RoleName:          reader.text("HM_SCAN_ROLE_NAME", "harbormaster-scan"),
+			Interval:          reader.duration("HM_SCAN_INTERVAL", 60*time.Second),
+			TaskTimeout:       reader.duration("HM_SCAN_TASK_TIMEOUT", 30*time.Minute),
+			DBRefresh:         reader.duration("HM_SCAN_DB_REFRESH", 24*time.Hour),
+			DBMaxAge:          reader.duration("HM_SCAN_DB_MAX_AGE", 120*time.Hour),
+			CandidateRefresh:  reader.duration("HM_SCAN_CANDIDATE_REFRESH", 6*time.Hour),
+			MaxTasks:          reader.integer("HM_SCAN_MAX_TASKS", 1),
+			BatchSize:         reader.integer("HM_SCAN_BATCH_SIZE", 25),
+			CandidateTags:     reader.integer("HM_SCAN_CANDIDATE_TAGS", 3),
+			MaxImageMB:        reader.integer("HM_SCAN_MAX_IMAGE_MB", 4096),
+			RematchBatch:      reader.integer("HM_SCAN_REMATCH_BATCH", 500),
 		},
 		Analytics:       AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
@@ -223,8 +281,47 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
 		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")
 	}
+	if err := validateScan(cfg.Scan, cfg.FakeAWS); err != nil {
+		return Config{}, err
+	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
 		return Config{}, errors.New("HM_DATABASE_URL or HM_DATABASE_SECRET_ARN must be set")
 	}
 	return cfg, nil
+}
+
+// validateScan checks the scanner launch settings when the scanner is enabled
+// against real AWS (fake mode runs the fake scanner and needs none of them),
+// and the limits that apply whenever the values are set.
+func validateScan(scan ScanConfig, fakeAWS bool) error {
+	if scan.Enabled && !fakeAWS {
+		required := []struct {
+			name  string
+			value string
+		}{
+			{"HM_SCAN_CLUSTER_ARN", scan.ClusterARN},
+			{"HM_SCAN_TASK_DEFINITION", scan.TaskDefinitionARN},
+			{"HM_SCAN_SUBNETS", strings.Join(scan.Subnets, ",")},
+			{"HM_SCAN_SECURITY_GROUP", scan.SecurityGroup},
+			{"HM_SCAN_BUCKET", scan.Bucket},
+		}
+		for _, setting := range required {
+			if setting.value == "" {
+				return fmt.Errorf("%s: required when HM_SCAN_ENABLED is true", setting.name)
+			}
+		}
+	}
+	if scan.MaxTasks < 1 || scan.MaxTasks > 4 {
+		return errors.New("HM_SCAN_MAX_TASKS: must be between 1 and 4")
+	}
+	if scan.BatchSize < 1 || scan.BatchSize > 100 {
+		return errors.New("HM_SCAN_BATCH_SIZE: must be between 1 and 100")
+	}
+	if scan.CandidateTags < 0 || scan.CandidateTags > 10 {
+		return errors.New("HM_SCAN_CANDIDATE_TAGS: must be between 0 and 10")
+	}
+	if scan.TaskTimeout < 5*time.Minute {
+		return errors.New("HM_SCAN_TASK_TIMEOUT: must be at least 5m")
+	}
+	return nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,21 @@ func TestLoad_Defaults(t *testing.T) {
 			AvailabilityDaily: 8760 * time.Hour,
 			CapacityDaily:     8760 * time.Hour,
 			UtilDaily:         2160 * time.Hour,
+			ScanImages:        168 * time.Hour,
+			ScanRuns:          720 * time.Hour,
+		},
+		Scan: ScanConfig{
+			RoleName:         "harbormaster-scan",
+			Interval:         60 * time.Second,
+			TaskTimeout:      30 * time.Minute,
+			DBRefresh:        24 * time.Hour,
+			DBMaxAge:         120 * time.Hour,
+			CandidateRefresh: 6 * time.Hour,
+			MaxTasks:         1,
+			BatchSize:        25,
+			CandidateTags:    3,
+			MaxImageMB:       4096,
+			RematchBatch:     500,
 		},
 		Analytics:       AnalyticsConfig{Util: true},
 		PageSizeDefault: 100,
@@ -78,7 +94,7 @@ func TestLoad_Defaults(t *testing.T) {
 		ExecMaxSessionsPerUser: 3,
 	}
 
-	if cfg != want {
+	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("Load defaults mismatch\n got: %+v\nwant: %+v", cfg, want)
 	}
 }
@@ -342,5 +358,105 @@ func TestLoad_ParsesAnalyticsUtilFalse(t *testing.T) {
 	}
 	if cfg.Analytics.Util {
 		t.Errorf("Analytics.Util = true, want false")
+	}
+}
+
+func TestLoad_ScanDefaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Scan.Enabled {
+		t.Error("Scan.Enabled = true, want false")
+	}
+	if cfg.Scan.RoleName != "harbormaster-scan" {
+		t.Errorf("Scan.RoleName = %q, want harbormaster-scan", cfg.Scan.RoleName)
+	}
+	if cfg.Scan.Interval != 60*time.Second {
+		t.Errorf("Scan.Interval = %v, want 60s", cfg.Scan.Interval)
+	}
+	if cfg.Scan.CandidateTags != 3 {
+		t.Errorf("Scan.CandidateTags = %d, want 3", cfg.Scan.CandidateTags)
+	}
+}
+
+func TestLoad_ScanEnabledNeedsLaunchSettings(t *testing.T) {
+	_, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL":         "postgres://example",
+		"HM_SCAN_ENABLED":         "true",
+		"HM_SCAN_CLUSTER_ARN":     "arn:aws:ecs:us-east-1:123456789012:cluster/scan",
+		"HM_SCAN_TASK_DEFINITION": "scanner:1",
+		"HM_SCAN_SUBNETS":         "subnet-a",
+		"HM_SCAN_SECURITY_GROUP":  "sg-a",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "HM_SCAN_BUCKET") {
+		t.Fatalf("err = %v, want one naming HM_SCAN_BUCKET", err)
+	}
+}
+
+func TestLoad_ScanEnabledInFakeModeNeedsNothing(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL": "postgres://example",
+		"HM_FAKE_AWS":     "true",
+		"HM_SCAN_ENABLED": "true",
+	}))
+	if err != nil {
+		t.Fatalf("Load returned error in fake mode: %v", err)
+	}
+	if !cfg.Scan.Enabled {
+		t.Error("Scan.Enabled = false, want true")
+	}
+}
+
+func TestLoad_ScanSubnetsAreSplitAndTrimmed(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL": "postgres://example",
+		"HM_SCAN_SUBNETS": " subnet-a , subnet-b,,subnet-c ",
+	}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	want := []string{"subnet-a", "subnet-b", "subnet-c"}
+	if !reflect.DeepEqual(cfg.Scan.Subnets, want) {
+		t.Errorf("Scan.Subnets = %q, want %q", cfg.Scan.Subnets, want)
+	}
+}
+
+func TestLoad_ScanRetention(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.ScanImages != 168*time.Hour {
+		t.Errorf("Retention.ScanImages = %v, want 168h", cfg.Retention.ScanImages)
+	}
+	if cfg.Retention.ScanRuns != 720*time.Hour {
+		t.Errorf("Retention.ScanRuns = %v, want 720h", cfg.Retention.ScanRuns)
+	}
+}
+
+func TestLoad_ScanLimitBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		raw  string
+	}{
+		{name: "max tasks below range", key: "HM_SCAN_MAX_TASKS", raw: "0"},
+		{name: "max tasks above range", key: "HM_SCAN_MAX_TASKS", raw: "5"},
+		{name: "batch size below range", key: "HM_SCAN_BATCH_SIZE", raw: "0"},
+		{name: "batch size above range", key: "HM_SCAN_BATCH_SIZE", raw: "101"},
+		{name: "candidate tags above range", key: "HM_SCAN_CANDIDATE_TAGS", raw: "11"},
+		{name: "task timeout below minimum", key: "HM_SCAN_TASK_TIMEOUT", raw: "4m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(envFromMap(map[string]string{
+				"HM_DATABASE_URL": "postgres://example",
+				tt.key:            tt.raw,
+			}))
+			if err == nil || !strings.Contains(err.Error(), tt.key) {
+				t.Fatalf("err = %v, want one naming %s", err, tt.key)
+			}
+		})
 	}
 }

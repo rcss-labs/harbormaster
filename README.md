@@ -203,6 +203,32 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_RETENTION_AVAILABILITY_DAILY` | `8760h` | How long daily service availability rollups are kept |
 | `HM_RETENTION_CAPACITY_DAILY` | `8760h` | How long daily cluster capacity rollups are kept |
 | `HM_RETENTION_UTIL_DAILY` | `2160h` | How long daily service utilisation rollups are kept |
+| `HM_RETENTION_SCAN_IMAGES` | `168h` | How long image scan results are kept |
+| `HM_RETENTION_SCAN_RUNS` | `720h` | How long image scan run records are kept |
+
+### Image security
+
+The scanner is off until `HM_SCAN_ENABLED=true`. The `harbormaster` module sets the launch variables when `enable_image_scanning = true`, so you only set them by hand when running the binary directly. In `--fake-aws` mode the scanner is on and uses a fake scanner, so none of the launch variables are needed.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_SCAN_ENABLED` | `false` | Turn on image scanning. Required settings below must be set when this is `true` and `HM_FAKE_AWS` is off |
+| `HM_SCAN_CLUSTER_ARN` | | ECS cluster that runs the scanner task |
+| `HM_SCAN_TASK_DEFINITION` | | ECS task definition for the scanner task |
+| `HM_SCAN_SUBNETS` | | Comma-separated subnet IDs the scanner task runs in |
+| `HM_SCAN_SECURITY_GROUP` | | Security group for the scanner task |
+| `HM_SCAN_BUCKET` | | S3 bucket holding the vulnerability database archive and scan inputs |
+| `HM_SCAN_ROLE_NAME` | `harbormaster-scan` | Name of the per-account role the scanner task assumes to read ECR |
+| `HM_SCAN_INTERVAL` | `60s` | How often the leader checks for work to start |
+| `HM_SCAN_TASK_TIMEOUT` | `30m` | Maximum run time of one scanner task. Minimum 5m |
+| `HM_SCAN_DB_REFRESH` | `24h` | How often the vulnerability database is refreshed |
+| `HM_SCAN_DB_MAX_AGE` | `120h` | Age after which the vulnerability database is treated as stale |
+| `HM_SCAN_CANDIDATE_REFRESH` | `6h` | How often the candidate tags for each repository are recomputed |
+| `HM_SCAN_MAX_TASKS` | `1` | Scanner tasks that may run at once. Allowed range 1 to 4 |
+| `HM_SCAN_BATCH_SIZE` | `25` | Images per scanner task. Allowed range 1 to 100 |
+| `HM_SCAN_CANDIDATE_TAGS` | `3` | Newest tags per repository scanned as candidates. Allowed range 0 to 10 |
+| `HM_SCAN_MAX_IMAGE_MB` | `4096` | Largest image the scanner will pull, in MB |
+| `HM_SCAN_REMATCH_BATCH` | `500` | Findings re-matched per batch when the vulnerability database changes |
 
 ### Analytics
 
