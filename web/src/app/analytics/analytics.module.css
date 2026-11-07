@@ -51,3 +51,15 @@
 .spendTrack { height: 8px; border-radius: 4px; background: var(--row-border); overflow: hidden; }
 .spendTrack i { display: block; height: 100%; }
 .spendAmount { font: 500 12px var(--mono); color: var(--text-2); text-align: right; }
+
+.headroom { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.headroom input { width: 140px; }
+.headroom b { font: 600 12px var(--mono); color: var(--text); min-width: 3ch; }
+.pills { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.reasonList { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.reasonList li { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: 12px; align-items: center; }
+.draftNote { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+.draftList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.draftRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.draftName { font-weight: 500; min-width: 140px; }
+.draftRow a { color: var(--accent); margin-left: auto; }

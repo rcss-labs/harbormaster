@@ -27,3 +27,9 @@ export function costSummary(rows: CostService[], headroomPct: number): { saving:
   }
   return { saving, services, upperBound }
 }
+
+/** A service row with the suggestion in force at the chosen headroom. */
+export interface SuggestedService {
+  service: CostService
+  suggestion: CostSuggestion
+}

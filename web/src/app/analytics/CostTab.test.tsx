@@ -1,4 +1,5 @@
-import { screen, within } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -13,9 +14,9 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
-async function renderTab(data: AnalyticsCost = ANALYTICS_COST) {
+async function renderTab(data: AnalyticsCost = ANALYTICS_COST, queryClient?: QueryClient) {
   server.use(http.get('/api/analytics/cost', () => HttpResponse.json(data)))
-  renderApp('/analytics/cost')
+  renderApp('/analytics/cost', queryClient)
   return screen.findByRole('region', { name: /Monthly spend/ })
 }
 
@@ -120,5 +121,142 @@ describe('stepAt', () => {
     expect(stepAt(steps, 14)).toBe(steps[0].suggestion)
     expect(stepAt(steps, 15)).toBeNull()
     expect(stepAt(steps, 100)).toBeNull()
+  })
+})
+
+describe('Rightsizing panel', () => {
+  const [payments, catalog, web] = ANALYTICS_COST.rightsizing.services
+  const orders = {
+    ...payments,
+    service_id: 'orders-id',
+    service: 'orders-api',
+    tasks: 1,
+    auto_scaled: false,
+    steps: [{ from_headroom_pct: 10, suggestion: { cpu_units: 512, memory_mib: 1024, saving_monthly: 10, limited_by_containers: false } }],
+  }
+  const withServices = (services: AnalyticsCost['rightsizing']['services'], state: AnalyticsCost['rightsizing']['state'] = 'ok'): AnalyticsCost => ({
+    ...ANALYTICS_COST,
+    rightsizing: { ...ANALYTICS_COST.rightsizing, state, services },
+  })
+  const panelOf = async (data?: AnalyticsCost, queryClient?: QueryClient) => {
+    await renderTab(data, queryClient)
+    return within(screen.getByRole('region', { name: /^Rightsizing/ }))
+  }
+  const setSlider = (panel: ReturnType<typeof within>, value: number) => fireEvent.change(panel.getByLabelText('Headroom above p95'), { target: { value: String(value) } })
+
+  it('recomputes suggestions and KPIs from the slider without another request', async () => {
+    let requests = 0
+    server.use(http.get('/api/analytics/cost', () => { requests += 1; return HttpResponse.json(ANALYTICS_COST) }))
+    renderApp('/analytics/cost')
+    const panel = within(await screen.findByRole('region', { name: /^Rightsizing/ }))
+    const row = panel.getByText('payments-api').closest('[role="row"]') as HTMLElement
+    expect(row).toHaveTextContent('256 / 1024')
+    expect(kpi(/possible monthly saving at 30% headroom/)).toHaveTextContent('$25')
+    setSlider(panel, 45)
+    expect(panel.getByText('45%')).toBeInTheDocument()
+    expect(row).toHaveTextContent('512 / 1024')
+    expect(kpi(/possible monthly saving at 45% headroom/)).toHaveTextContent('$19')
+    expect(requests).toBe(1)
+  })
+
+  it('shows no selection for a service without Edit', async () => {
+    const panel = await panelOf(withServices([{ ...orders, can_edit: false, tag: { ...payments.tag, name: 'prod' } }]))
+    const box = panel.getByRole('checkbox', { name: 'Select orders-api' })
+    expect(box).toBeDisabled()
+    expect(box).not.toBeChecked()
+    expect(box).toHaveAttribute('title', 'You need Edit on prod')
+    expect(panel.getByText('0 selected · $0 per month')).toBeInTheDocument()
+    expect(panel.getByRole('button', { name: 'Draft change sets' })).toBeDisabled()
+  })
+
+  it('totals only the selected rows', async () => {
+    const panel = await panelOf(withServices([payments, orders]))
+    expect(panel.getByText('2 selected · $35 per month')).toBeInTheDocument()
+    await userEvent.click(panel.getByRole('checkbox', { name: 'Select orders-api' }))
+    expect(panel.getByText('1 selected · $25 per month')).toBeInTheDocument()
+  })
+
+  it('lists the reason for services with no suggestion', async () => {
+    const panel = await panelOf()
+    const none = within(screen.getByRole('region', { name: /No suggestion/ }))
+    expect(none.getByText('No price for this region')).toBeInTheDocument()
+    expect(none.getByText('Some tasks are not on Fargate, so only Fargate tasks are priced')).toBeInTheDocument()
+    expect(panel.queryByText('catalog-api')).not.toBeInTheDocument()
+    expect(catalog.status).toBe('no_price')
+    expect(web.status).toBe('mixed_capacity')
+  })
+
+  it('explains the rollup being off', async () => {
+    await panelOf(withServices([], 'rollup_off'))
+    expect(screen.getByText('The daily utilisation rollup is off, so there are no suggestions. Set HM_ANALYTICS_UTIL=true to collect it.')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /No suggestion/ })).not.toBeInTheDocument()
+  })
+
+  it('names the retention setting when retention is too short', async () => {
+    const panel = await panelOf(withServices([], 'retention_short'))
+    expect(panel.getByText(/HM_RETENTION_UTIL_DAILY/)).toHaveTextContent('14 days')
+  })
+
+  it('says every service is the right size when nothing has a suggestion', async () => {
+    const panel = await panelOf(withServices([{ ...orders, steps: [] }]))
+    expect(panel.getByText('At this headroom every service is already the right size.')).toBeInTheDocument()
+  })
+
+  it('opens the dialog with one Deploy link per selected service', async () => {
+    const posts: string[] = []
+    server.use(http.post('*', ({ request }) => { posts.push(request.url); return HttpResponse.json({}) }))
+    const panel = await panelOf(withServices([payments, orders]))
+    setSlider(panel, 45)
+    await userEvent.click(panel.getByRole('button', { name: 'Draft change sets' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Draft 2 change sets' }))
+    const links = dialog.getAllByRole('link', { name: 'Open in Deploy' })
+    expect(links).toHaveLength(2)
+    for (const link of links) {
+      expect(link.getAttribute('href')).toContain('task_cpu=')
+      expect(link.getAttribute('href')).toContain('task_memory=')
+      expect(link.getAttribute('href')).toContain('headroom=45')
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener')
+    }
+    expect(dialog.getByText(/Nothing deploys yet\./)).toHaveTextContent('"Rightsizing at 45% headroom"')
+    expect(posts).toEqual([])
+  })
+
+  it('marks a service opened after following its link', async () => {
+    const panel = await panelOf(withServices([payments]))
+    await userEvent.click(panel.getByRole('button', { name: 'Draft change sets' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Draft 1 change set' }))
+    expect(dialog.queryByText('Opened')).not.toBeInTheDocument()
+    const link = dialog.getByRole('link', { name: 'Open in Deploy' })
+    link.addEventListener('click', (event) => event.preventDefault())
+    await userEvent.click(link)
+    expect(dialog.getByText('Opened')).toBeInTheDocument()
+  })
+
+  it('keeps the slider and selection across a refetch', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const panel = await panelOf(withServices([payments, orders]), queryClient)
+    setSlider(panel, 45)
+    await userEvent.click(panel.getByRole('checkbox', { name: 'Select orders-api' }))
+    await queryClient.invalidateQueries({ queryKey: ['analytics'] })
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0))
+    expect(panel.getByLabelText('Headroom above p95')).toHaveValue('45')
+    expect(panel.getByRole('checkbox', { name: 'Select orders-api' })).not.toBeChecked()
+    expect(panel.getByRole('checkbox', { name: 'Select payments-api' })).toBeChecked()
+  })
+
+  it('marks auto-scaled services', async () => {
+    const panel = await panelOf(withServices([payments, orders]))
+    const pill = panel.getByText('Auto-scaled')
+    expect(pill).toHaveAttribute('title', 'A smaller task may need more tasks, so the saving is an estimate.')
+    expect(panel.getAllByText('Auto-scaled')).toHaveLength(1)
+  })
+
+  it('marks a suggestion limited by containers and Spot savings as an upper bound', async () => {
+    const limited = { ...orders, spot_tasks: 1, steps: [{ from_headroom_pct: 10, suggestion: { cpu_units: 512, memory_mib: 1024, saving_monthly: 10, limited_by_containers: true } }] }
+    const panel = await panelOf(withServices([limited]))
+    expect(panel.getByText('Limited by containers')).toBeInTheDocument()
+    expect(panel.getByText('Spot')).toBeInTheDocument()
+    expect(panel.getByText('up to $10')).toBeInTheDocument()
   })
 })

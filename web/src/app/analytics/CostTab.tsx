@@ -4,7 +4,9 @@ import { Banner } from '../../components/Banner'
 import { KpiStrip } from '../../components/KpiStrip'
 import { SegmentedFilter } from '../../components/Seg'
 import { AnalyticsPanel } from './AnalyticsPanel'
-import { costSummary, money } from './cost'
+import { DraftChangeSetsDialog } from './DraftChangeSetsDialog'
+import { RightsizingPanel } from './RightsizingPanel'
+import { costSummary, money, type SuggestedService } from './cost'
 import { COLOR, sourceFor, whole } from './format'
 import { KpiNote, SourcesPanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
@@ -14,8 +16,11 @@ type Grouping = 'cluster' | 'account' | 'tag'
 export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
   const { kpis, rightsizing } = data
   const [grouping, setGrouping] = useState<Grouping>('cluster')
-  // Task 8's panel owns the slider; the page starts at the server's default.
-  const [headroomPct] = useState(rightsizing.default_headroom_pct)
+  // Kept here, not in the panel, so a refetch does not reset the slider, the selection or the opened marks.
+  const [headroomPct, setHeadroomPct] = useState(rightsizing.default_headroom_pct)
+  const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
+  const [drafting, setDrafting] = useState<SuggestedService[] | null>(null)
   const common = { window: data.window, showSources }
 
   const ready = rightsizing.state === 'ok'
@@ -89,12 +94,32 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
           </AnalyticsPanel>
         </div>
         <div className={styles.full}>
-          <AnalyticsPanel title="Rightsizing" {...common} showSources={false}>
-            <p className={styles.kpiNote}>Suggested sizes appear here.</p>
-          </AnalyticsPanel>
+          <RightsizingPanel
+            rightsizing={rightsizing}
+            headroomPct={headroomPct}
+            onHeadroomChange={setHeadroomPct}
+            excluded={excluded}
+            onToggle={(serviceId) =>
+              setExcluded((previous) => {
+                const next = new Set(previous)
+                if (!next.delete(serviceId)) next.add(serviceId)
+                return next
+              })
+            }
+            onDraft={setDrafting}
+          />
         </div>
         <SourcesPanel sources={data.sources} {...common} />
       </div>
+      {drafting !== null && (
+        <DraftChangeSetsDialog
+          rows={drafting}
+          headroomPct={headroomPct}
+          opened={opened}
+          onOpened={(serviceId) => setOpened((previous) => new Set(previous).add(serviceId))}
+          onClose={() => setDrafting(null)}
+        />
+      )}
     </>
   )
 }
