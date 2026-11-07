@@ -17,9 +17,10 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 )
 
-// ErrorTermsPattern is a CloudWatch OR filter that matches a superset of the
-// error-level lines; matches are re-checked with Level.
-const ErrorTermsPattern = `?ERROR ?FATAL ?PANIC ?CRITICAL ?error ?fatal ?panic ?critical ?Error ?Fatal`
+// ErrorTermsPattern is a CloudWatch OR filter that matches a superset of the error-level lines;
+// matches are re-checked with Level. CloudWatch terms are case-sensitive while Level is not, so
+// the capitalised spellings of every level (level=Critical, "LogLevel":"Panic") are listed too.
+const ErrorTermsPattern = `?ERROR ?FATAL ?PANIC ?CRITICAL ?error ?fatal ?panic ?critical ?Error ?Fatal ?Panic ?Critical`
 
 const (
 	maxPagesPerChain   = 3
@@ -38,8 +39,12 @@ const (
 
 var errCallBudget = errors.New("error count call budget used up")
 
+// withoutSDKRetries makes every FilterLogEvents call one HTTP attempt, so SDK retries cannot bypass
+// the pacer and the call budget. A throttle is handled by serving stale entries instead.
+func withoutSDKRetries(o *cloudwatchlogs.Options) { o.RetryMaxAttempts = 1 }
+
 // variableRuns are the parts of a line that differ between occurrences of the same message.
-var variableRuns = regexp.MustCompile(`0[xX][0-9a-fA-F]+|\b[0-9a-fA-F]{8,}\b|\d+`)
+var variableRuns = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|0[xX][0-9a-fA-F]+|\b[0-9a-fA-F]{8,}\b|\d+`)
 
 type ErrorCountRequest struct {
 	Target        awsx.Target
@@ -109,8 +114,8 @@ func (c *ErrorCounter) Count(ctx context.Context, req ErrorCountRequest) (ErrorC
 	if req.Region != "" {
 		req.Target.Region = req.Region
 	}
-	if req.Bucket <= 0 {
-		return ErrorCounts{}, errors.New("error count bucket must be positive")
+	if req.Bucket < time.Millisecond {
+		return ErrorCounts{}, errors.New("error count bucket must be at least one millisecond")
 	}
 	prefixes := slices.Clone(req.Prefixes)
 	if len(prefixes) == 0 {
@@ -181,7 +186,8 @@ func (c *ErrorCounter) scan(ctx context.Context, target awsx.Target, group strin
 	}
 
 	var scanErr error
-	scanCut := false // budget or deadline ran out, as opposed to an AWS error
+	scanCut := false   // the scan deadline or the caller's context ended it
+	budgetCut := false // the call budget ended it
 	if len(pending) > 0 {
 		var api awsx.LogsAPI
 		api, scanErr = c.Clients.Logs(ctx, target)
@@ -191,19 +197,21 @@ func (c *ErrorCounter) scan(ctx context.Context, target awsx.Target, group strin
 				break
 			}
 			if calls+len(prefixes) > maxCallsPerRequest {
-				scanCut = true
+				budgetCut = true
 				break
 			}
+			fetched := c.Now() // before the first call, so a settling bucket is not mistaken for a closed one
 			bucket, err := c.scanBucket(ctx, api, target, group, prefixes, starts[i], size, &calls)
 			if err != nil {
-				if ctx.Err() != nil || errors.Is(err, errCallBudget) {
+				if errors.Is(err, errCallBudget) {
+					budgetCut = true
+				} else if ctx.Err() != nil {
 					scanCut = true
 				} else {
 					scanErr = err
 				}
 				break
 			}
-			fetched := c.Now()
 			buckets[i], fetchedAt[i] = bucket, fetched
 			c.store(bucketKey{target, group, prefixKey, starts[i].UnixMilli(), size}, bucket, fetched, size)
 		}
@@ -239,6 +247,8 @@ func (c *ErrorCounter) scan(ctx context.Context, target awsx.Target, group strin
 		switch {
 		case scanErr != nil:
 			return ErrorCounts{}, scanErr
+		case budgetCut:
+			return ErrorCounts{}, errCallBudget
 		case scanCut:
 			return ErrorCounts{}, context.DeadlineExceeded
 		}
@@ -270,7 +280,7 @@ func (c *ErrorCounter) scanBucket(ctx context.Context, api awsx.LogsAPI, target 
 				return ErrorBucket{}, err
 			}
 			*calls++
-			out, err := api.FilterLogEvents(ctx, in)
+			out, err := api.FilterLogEvents(ctx, in, withoutSDKRetries)
 			if err != nil {
 				return ErrorBucket{}, err
 			}

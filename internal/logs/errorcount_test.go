@@ -2,12 +2,14 @@ package logs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -78,6 +80,7 @@ func TestErrorCounter_CountsOnlyErrorLevelPerBucket(t *testing.T) {
 		errorLine(at(6, 0), "level=fatal y"),
 		errorLine(at(7, 0), "no error found"),
 		errorLine(at(8, 0), "WARN z"),
+		errorLine(at(12, 0), "level=Critical x"), // CloudWatch terms are case-sensitive; Level is not
 		errorLine(at(16, 0), "ERROR again"),
 		{Stream: "other/worker/task9", Timestamp: at(1, 30), Message: "ERROR in another stream"},
 	})
@@ -87,7 +90,7 @@ func TestErrorCounter_CountsOnlyErrorLevelPerBucket(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantStarts := []time.Time{at(0, 0), at(5, 0), at(10, 0), at(15, 0)}
-	wantCounts := []int{1, 2, 0, 1}
+	wantCounts := []int{1, 2, 1, 1}
 	if len(got.Buckets) != len(wantStarts) {
 		t.Fatalf("got %d buckets, want %d: %+v", len(got.Buckets), len(wantStarts), got.Buckets)
 	}
@@ -214,7 +217,7 @@ func TestErrorCounter_ClosedBucketsAreCached(t *testing.T) {
 	if _, err := counter.Count(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	// Buckets 11:55 (ended 12:00, 3 min before the first fetch) and 12:00 (open) were fresh for 60 s only.
+	// The 11:55 bucket ended at 12:00, 3 minutes before the first fetch, and 12:00 was open: both were fresh for 60 s only.
 	if extra := f.Calls()["FilterLogEvents"] - firstCalls; extra != 2 {
 		t.Errorf("second Count made %d calls, want 2 (only the buckets that ended under 5 minutes before the first fetch)", extra)
 	}
@@ -260,6 +263,12 @@ func TestErrorCounter_TopMessageGroupsNumbers(t *testing.T) {
 		errorLine(testNow.Add(2*time.Second), "ERROR timeout after 12ms"),
 		errorLine(testNow.Add(3*time.Second), "ERROR timeout after 731ms"),
 		errorLine(testNow.Add(4*time.Second), "ERROR disk full"),
+		errorLine(testNow.Add(5*time.Minute+5*time.Second), "ERROR lost session 3f9a1c2e-abcd-4def-8abc-0123456789ab"),
+		errorLine(testNow.Add(5*time.Minute+6*time.Second), "ERROR lost session 77b0cafe-dead-4bee-9fed-fedcba987654"),
+		errorLine(testNow.Add(5*time.Minute+7*time.Second), "ERROR lost session aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+		errorLine(testNow.Add(5*time.Minute+8*time.Second), "ERROR lost session 0a1b2c3d-4e5f-4a6b-8c7d-9e8f7a6b5c4d"),
+		errorLine(testNow.Add(5*time.Minute+9*time.Second), "ERROR cache miss"),
+		errorLine(testNow.Add(5*time.Minute+10*time.Second), "ERROR cache miss"),
 		errorLine(testNow.Add(10*time.Minute+time.Second), long),
 	})
 
@@ -273,8 +282,182 @@ func TestErrorCounter_TopMessageGroupsNumbers(t *testing.T) {
 	if top := got.Buckets[0].TopMessage; !strings.HasPrefix(top, "ERROR timeout after ") || got.Buckets[0].Count != 4 {
 		t.Errorf("TopMessage = %q count %d, want one timeout sample and count 4", top, got.Buckets[0].Count)
 	}
+	// Four lines differing only by UUID outnumber a message seen twice only if UUIDs group.
+	if top := got.Buckets[1].TopMessage; !strings.HasPrefix(top, "ERROR lost session ") || got.Buckets[1].Count != 6 {
+		t.Errorf("TopMessage = %q count %d, want a lost-session sample (UUIDs grouped) and count 6", top, got.Buckets[1].Count)
+	}
 	top := got.Buckets[2].TopMessage
 	if n := len([]rune(top)); n != 200 || top != string([]rune(long)[:200]) {
 		t.Errorf("long TopMessage has %d runes, want the first 200 intact", n)
+	}
+}
+
+type optionRecordingClients struct {
+	*fake.Fake
+	mu          sync.Mutex
+	maxAttempts []int
+}
+
+func (c *optionRecordingClients) Logs(ctx context.Context, t awsx.Target) (awsx.LogsAPI, error) {
+	api, err := c.Fake.Logs(ctx, t)
+	return &optionRecordingLogs{LogsAPI: api, clients: c}, err
+}
+
+type optionRecordingLogs struct {
+	awsx.LogsAPI
+	clients *optionRecordingClients
+}
+
+func (l *optionRecordingLogs) FilterLogEvents(ctx context.Context, in *cloudwatchlogs.FilterLogEventsInput, opts ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.FilterLogEventsOutput, error) {
+	var applied cloudwatchlogs.Options
+	for _, opt := range opts {
+		opt(&applied)
+	}
+	l.clients.mu.Lock()
+	l.clients.maxAttempts = append(l.clients.maxAttempts, applied.RetryMaxAttempts)
+	l.clients.mu.Unlock()
+	return l.LogsAPI.FilterLogEvents(ctx, in, opts...)
+}
+
+func TestErrorCounter_DisablesSDKRetries(t *testing.T) {
+	counter, f, clock := newTestErrorCounter(testNow.Add(30 * time.Minute))
+	recorder := &optionRecordingClients{Fake: f}
+	counter.Clients = recorder
+	f.Estate.SetLogLines(paymentsGroup, []fake.LogLine{errorLine(testNow.Add(time.Minute), "ERROR x")})
+	_ = clock
+
+	if _, err := counter.Count(context.Background(), baseErrorRequest(testNow, testNow.Add(9*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.maxAttempts) != 2 {
+		t.Fatalf("recorded %d calls, want 2", len(recorder.maxAttempts))
+	}
+	for i, attempts := range recorder.maxAttempts {
+		if attempts != 1 {
+			t.Errorf("call %d RetryMaxAttempts = %d, want 1 so retries cannot bypass the pacer and call budget", i, attempts)
+		}
+	}
+}
+
+func TestErrorCounter_SecondViewerSurvivesFirstViewerCancel(t *testing.T) {
+	counter, f, _ := newTestErrorCounter(testNow.Add(30 * time.Minute))
+	f.Estate.SetLogLines(paymentsGroup, []fake.LogLine{errorLine(testNow.Add(time.Minute), "ERROR x"), errorLine(testNow.Add(7*time.Minute), "ERROR y")})
+	held := make(chan struct{})
+	release := make(chan struct{})
+	var holdOnce sync.Once
+	counter.Sleep = func(ctx context.Context, _ time.Duration) error { // the scan's second call waits here
+		holdOnce.Do(func() { close(held) })
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	req := baseErrorRequest(testNow, testNow.Add(9*time.Minute)) // two buckets
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	defer cancelFirst()
+	type outcome struct {
+		counts ErrorCounts
+		err    error
+	}
+	firstDone, secondDone := make(chan outcome, 1), make(chan outcome, 1)
+	go func() { c, err := counter.Count(firstCtx, req); firstDone <- outcome{c, err} }()
+	<-held
+	go func() { c, err := counter.Count(context.Background(), req); secondDone <- outcome{c, err} }()
+	time.Sleep(50 * time.Millisecond) // let the second viewer join the running scan
+
+	cancelFirst()
+	if got := <-firstDone; !errors.Is(got.err, context.Canceled) {
+		t.Errorf("first viewer err = %v, want context.Canceled", got.err)
+	}
+	close(release)
+	second := <-secondDone
+	if second.err != nil || len(second.counts.Buckets) != 2 || !second.counts.Buckets[0].Known || !second.counts.Buckets[1].Known {
+		t.Fatalf("second viewer = %+v, err %v, want both buckets known", second.counts, second.err)
+	}
+	if calls := f.Calls()["FilterLogEvents"]; calls != 2 {
+		t.Errorf("FilterLogEvents calls = %d, want 2 (one shared scan)", calls)
+	}
+}
+
+func TestErrorCounter_EvictsExpiredEntriesBeforeFreshOnes(t *testing.T) {
+	now := testNow
+	counter, _, _ := newTestErrorCounter(now)
+	entry := func(expiresAt time.Time) cachedBucket {
+		return cachedBucket{bucket: ErrorBucket{Known: true}, fetchedAt: now, expiresAt: expiresAt}
+	}
+	for i := 0; i < maxCacheEntries/2; i++ {
+		counter.cache[bucketKey{group: "expired", start: int64(i)}] = entry(now.Add(-10 * time.Minute))
+		counter.cache[bucketKey{group: "fresh", start: int64(i)}] = entry(now.Add(10 * time.Minute))
+	}
+
+	counter.store(bucketKey{group: "new"}, ErrorBucket{Known: true}, now, 5*time.Minute)
+
+	if len(counter.cache) > maxCacheEntries {
+		t.Errorf("cache holds %d entries, want at most %d", len(counter.cache), maxCacheEntries)
+	}
+	fresh := 0
+	for key := range counter.cache {
+		if key.group == "fresh" {
+			fresh++
+		}
+	}
+	if fresh != maxCacheEntries/2 {
+		t.Errorf("%d fresh entries survive, want all %d", fresh, maxCacheEntries/2)
+	}
+	if _, ok := counter.cache[bucketKey{group: "new"}]; !ok {
+		t.Error("the newly stored entry was evicted")
+	}
+}
+
+func TestErrorCounter_FetchTimeIsTakenBeforeTheBucketScan(t *testing.T) {
+	// The 12:00 bucket ended at 12:05; at 12:09:58 it is still settling. Six prefixes make the scan take
+	// 2.5 s of paced waiting, so the bucket would look settled if the fetch time were taken afterwards.
+	now := time.Date(2026, 10, 31, 12, 9, 58, 0, time.UTC)
+	counter, f, clock := newTestErrorCounter(now)
+	f.Estate.SetLogLines(paymentsGroup, []fake.LogLine{errorLine(time.Date(2026, 10, 31, 12, 1, 0, 0, time.UTC), "ERROR x")})
+	req := baseErrorRequest(time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 12, 4, 0, 0, time.UTC))
+	req.Prefixes = []string{errorStreamPrefix, "p2", "p3", "p4", "p5", "p6"}
+
+	if _, err := counter.Count(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	firstCalls := f.Calls()["FilterLogEvents"]
+	clock.Advance(2 * time.Minute)
+	if _, err := counter.Count(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if f.Calls()["FilterLogEvents"] == firstCalls {
+		t.Error("second Count two minutes later made no calls, want a refetch: the bucket was settling when it was read")
+	}
+}
+
+func TestErrorCounter_RejectsSubMillisecondBucket(t *testing.T) {
+	counter, _, _ := newTestErrorCounter(testNow)
+	req := baseErrorRequest(testNow, testNow.Add(time.Minute))
+	req.Bucket = 500 * time.Microsecond
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Count panicked: %v; want an error", r)
+		}
+	}()
+	if _, err := counter.Count(context.Background(), req); err == nil {
+		t.Error("err = nil, want an error for a bucket under one millisecond")
+	}
+}
+
+func TestErrorCounter_BudgetStopWithNothingKnownReturnsBudgetError(t *testing.T) {
+	counter, f, _ := newTestErrorCounter(testNow.Add(time.Hour))
+	req := baseErrorRequest(testNow, testNow.Add(4*time.Minute))
+	for i := 0; i < maxCallsPerRequest+1; i++ { // one bucket needs more calls than a request may make
+		req.Prefixes = append(req.Prefixes, fmt.Sprintf("ecs/p%d", i))
+	}
+	if _, err := counter.Count(context.Background(), req); !errors.Is(err, errCallBudget) {
+		t.Errorf("err = %v, want the call budget error", err)
+	}
+	if calls := f.Calls()["FilterLogEvents"]; calls != 0 {
+		t.Errorf("FilterLogEvents calls = %d, want 0", calls)
 	}
 }
