@@ -105,25 +105,30 @@ export function envProblems(entries: EnvEntry[]): string[] {
   return problems
 }
 
-/** What the containers set aside, summed: the task needs at least this much. Memory counts the larger of a container's hard limit and reservation. */
+/** What the containers set aside, summed. Like AWS, a container counts its memoryReservation when set and its hard memory limit otherwise. */
 export function containerFloors(def: Definition): { cpu: number; memory: number } {
   const amount = (value: unknown) => (typeof value === 'number' && value > 0 ? value : 0)
   return containersOf(def).reduce<{ cpu: number; memory: number }>(
-    (floors, entry) => ({ cpu: floors.cpu + amount(entry?.cpu), memory: floors.memory + Math.max(amount(entry?.memory), amount(entry?.memoryReservation)) }),
+    (floors, entry) => ({ cpu: floors.cpu + amount(entry?.cpu), memory: floors.memory + (amount(entry?.memoryReservation) || amount(entry?.memory)) }),
     { cpu: 0, memory: 0 },
   )
 }
 
-/** Problems that make the draft unsendable, as short messages naming the container; empty when the draft is fine. */
-export function definitionErrors(def: Definition): string[] {
+/**
+ * Problems that make the draft unsendable, as short messages naming the container; empty when the draft is fine.
+ * The container floors are checked only against a `live` definition whose task size the draft changed, so a service that is
+ * already below its floor can still be scaled or rolled back; AWS validates the rest.
+ */
+export function definitionErrors(def: Definition, live?: Definition): string[] {
   const errors: string[] = []
   const cpu = String(def.cpu ?? '')
   const memory = String(def.memory ?? '')
   const allowedMemory = fargateMemoryOptions(cpu)
   if (allowedMemory.length > 0 && !allowedMemory.map(String).includes(memory)) errors.push(`Task memory ${memory} MiB is not available with ${cpu} CPU units.`)
   const floors = containerFloors(def)
-  if (floors.memory > 0 && memory !== '' && Number(memory) < floors.memory) errors.push(`Task memory ${memory} MiB is below the ${floors.memory} MiB its containers reserve.`)
-  if (floors.cpu > 0 && cpu !== '' && Number(cpu) < floors.cpu) errors.push(`Task CPU ${cpu} units is below the ${floors.cpu} units its containers reserve.`)
+  const sizeChanged = live !== undefined && (cpu !== String(live.cpu ?? '') || memory !== String(live.memory ?? ''))
+  if (sizeChanged && floors.memory > 0 && memory !== '' && Number(memory) < floors.memory) errors.push(`Task memory ${memory} MiB is below the ${floors.memory} MiB its containers reserve.`)
+  if (sizeChanged && floors.cpu > 0 && cpu !== '' && Number(cpu) < floors.cpu) errors.push(`Task CPU ${cpu} units is below the ${floors.cpu} units its containers reserve.`)
   for (const name of containerNames(def)) {
     for (const problem of envProblems(readEnvironment(def, name))) errors.push(`${name}: ${problem}`)
     for (const entry of readSecrets(def, name)) {

@@ -81,23 +81,45 @@ describe('draft reducers: each change touches only its path', () => {
 
 describe('task size against what containers reserve', () => {
   const sized = (containers: Record<string, unknown>[], cpu = '256', memory = '512'): Definition => ({ family: 'api', cpu, memory, containerDefinitions: containers })
+  const live = sized([{ name: 'api', image: 'r/api:1' }], '512', '1024')
 
-  it('reports a task size below what containers reserve', () => {
+  it('counts memoryReservation when set, otherwise memory, and sums cpu', () => {
+    const def = sized([
+      { name: 'api', image: 'r/api:1', memory: 400, memoryReservation: 100, cpu: 200 },
+      { name: 'side', image: 'r/side:1', memory: 300, cpu: 100 },
+    ])
+    expect(containerFloors(def)).toEqual({ cpu: 300, memory: 400 })
+  })
+
+  it('reports a task size below what containers reserve when the size differs from live', () => {
     const def = sized([
       { name: 'api', image: 'r/api:1', memory: 400, cpu: 200 },
       { name: 'side', image: 'r/side:1', memoryReservation: 300, cpu: 100 },
     ])
-    expect(containerFloors(def)).toEqual({ cpu: 300, memory: 700 })
-    expect(definitionErrors(def)).toEqual(['Task memory 512 MiB is below the 700 MiB its containers reserve.', 'Task CPU 256 units is below the 300 units its containers reserve.'])
+    expect(definitionErrors(def, live)).toEqual(['Task memory 512 MiB is below the 700 MiB its containers reserve.', 'Task CPU 256 units is below the 300 units its containers reserve.'])
   })
 
-  it('takes the larger of memory and memoryReservation per container', () => {
-    expect(containerFloors(sized([{ name: 'api', image: 'r/api:1', memory: 256, memoryReservation: 128 }, { name: 'b', image: 'r/b:1', memory: 64, memoryReservation: 128 }])).memory).toBe(384)
+  it('does not block two containers with a hard limit above a smaller reservation', () => {
+    const def = sized([
+      { name: 'a', image: 'r/a:1', memory: 400, memoryReservation: 100 },
+      { name: 'b', image: 'r/b:1', memory: 400, memoryReservation: 100 },
+    ])
+    expect(definitionErrors(def, live)).toEqual([])
+  })
+
+  it('allows a size equal to the floor', () => {
+    expect(definitionErrors(sized([{ name: 'a', image: 'r/a:1', memory: 512, cpu: 256 }]), live)).toEqual([])
+  })
+
+  it('does not check floors when the size equals the live size or no live definition is given', () => {
+    const def = sized([{ name: 'a', image: 'r/a:1', memory: 900 }])
+    expect(definitionErrors(def, def)).toEqual([])
+    expect(definitionErrors(def)).toEqual([])
   })
 
   it('reports nothing when containers set no limits', () => {
     const def = sized([{ name: 'api', image: 'r/api:1' }])
     expect(containerFloors(def)).toEqual({ cpu: 0, memory: 0 })
-    expect(definitionErrors(def)).toEqual([])
+    expect(definitionErrors(def, live)).toEqual([])
   })
 })

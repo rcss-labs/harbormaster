@@ -112,13 +112,19 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const suggestedDefinition = suggested && liveDefinition ? setTaskSize(liveDefinition, suggested) : undefined
   // Null until the user edits: the draft then follows the current task definition (including a refetch after a write).
   const definitionDraft = editedDefinition ?? preloaded ?? suggestedDefinition ?? liveDefinition
-  const shownReason = reason ?? (suggested ? rightsizeReason(suggested.headroomPct) : '')
   const serviceDraft = settings ? (editedService ?? serviceDraftFromSettings(settings)) : null
   const scalingDraft = settings ? (editedScaling ?? scalingDraftFromSettings(settings)) : null
   const tagName = service.data?.tag.name ?? 'this service'
   const serviceName = service.data?.name ?? 'this service'
   const definitionChanged = definitionDraft !== undefined && liveDefinition !== undefined && isDefinitionChanged(definitionDraft, liveDefinition)
-  const definitionProblems = definitionDraft ? definitionErrors(definitionDraft) : []
+  // The Cost tab's reason is prefilled only while the draft still holds the suggested size.
+  const suggestionHolds =
+    suggested !== null && liveDefinition !== undefined && definitionDraft !== undefined &&
+    String(definitionDraft.cpu) === suggested.cpu && String(definitionDraft.memory) === suggested.memory &&
+    isDefinitionChanged(setTaskSize(liveDefinition, suggested), liveDefinition)
+  const shownReason = reason ?? (suggested && suggestionHolds ? rightsizeReason(suggested.headroomPct) : '')
+  // A revision (rollback) is never blocked by the client-side container floor check.
+  const definitionProblems = definitionDraft ? definitionErrors(definitionDraft, revisionParam === null ? liveDefinition : undefined) : []
   const oomHint = definitionDraft
     ? oomMemoryHint({
         stoppedForOom: stoppedTasks.data?.items.some((task) => task.status === 'STOPPED' && task.stopped_reason.includes('OutOfMemoryError')) ?? false,
@@ -243,9 +249,9 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           dismissLabel: `Dismiss :${revisionParam}`,
           onDismiss: clearPresetParams,
         }
-      : suggested
+      : suggested && suggestedDefinition && liveDefinition
         ? {
-            text: definitionChanged ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.',
+            text: isDefinitionChanged(suggestedDefinition, liveDefinition) ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.',
             dismissLabel: 'Dismiss suggestion',
             onDismiss: clearPresetParams,
           }
@@ -327,7 +333,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
         {!phone && <PendingChangesAside {...asideProps} />}
       </div>
 
-      {phone && (changes > 0 || partial !== null || problems.length > 0) && (
+      {phone && (changes > 0 || partial !== null || problems.length > 0 || asideProps.loadedRevision !== undefined) && (
         <PendingChangesBar
           {...asideProps}
           sheetOpen={pendingSheetOpen}

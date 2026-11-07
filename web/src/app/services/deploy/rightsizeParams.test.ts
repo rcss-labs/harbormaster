@@ -16,6 +16,8 @@ describe('rightsize URL parameters', () => {
     ['headroom above 100', 'task_cpu=256&task_memory=1024&headroom=105'],
     ['non-numeric headroom', 'task_cpu=256&task_memory=1024&headroom=abc'],
     ['fractional headroom', 'task_cpu=256&task_memory=1024&headroom=30.5'],
+    ['an inherited object key as cpu', 'task_cpu=constructor&task_memory=512&headroom=30'],
+    ['__proto__ as cpu', 'task_cpu=__proto__&task_memory=512&headroom=30'],
     ['a missing memory', 'task_cpu=256&headroom=30'],
   ])('rejects %s', (_name, query) => {
     expect(parseRightsizeParams(new URLSearchParams(query))).toBeNull()
