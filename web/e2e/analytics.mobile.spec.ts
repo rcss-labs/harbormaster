@@ -4,7 +4,7 @@ import { asUser, expect, test } from './fixtures/test'
 // Read-only phone checks for Analytics. The viewport is set here so the spec is a phone spec whichever project picks it up.
 test.use({ ...asUser('sam'), viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 })
 
-const TABS = ['delivery', 'reliability', 'capacity', 'operations'] as const
+const TABS = ['delivery', 'reliability', 'capacity', 'operations', 'cost'] as const
 
 for (const tab of TABS) {
   test(`${tab} tab renders clean at 390 px`, async ({ page }) => {
