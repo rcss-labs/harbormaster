@@ -9,9 +9,27 @@ import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMP
 
 const route = `/services/${SERVICE_PAYMENTS.id}/timeline`
 
+// Two changes 4% of the one hour range apart: 144 seconds.
+function serveTwoCloseChanges() {
+  const change = (id: string, at: string) => ({ ...TIMELINE_FAILING.events[0], id, title: `${id} change`, at, diff: [] })
+  server.use(
+    http.get('/api/services/:id/timeline', () =>
+      HttpResponse.json({ ...TIMELINE_FAILING, incident: null, events: [change('Alpha', '2026-11-07T11:20:00Z'), change('Beta', '2026-11-07T11:22:24Z')] }),
+    ),
+  )
+}
+const markers = () => screen.getAllByRole('button', { name: /^\d\d:\d\d (Alpha|Beta) change$/ })
+
 const eventsTable = () => screen.getByRole('table')
 
 describe('TimelineTab', () => {
+  it('keeps markers 4% apart separate on desktop', async () => {
+    serveTwoCloseChanges()
+    renderApp(route)
+
+    await waitFor(() => expect(markers()).toHaveLength(2))
+  })
+
   it('shows the five lane toggles, range options and events from both endpoints', async () => {
     renderApp(route)
 

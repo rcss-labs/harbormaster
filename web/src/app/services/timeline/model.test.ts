@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TimelineEvent, TimelineLogErrorsDTO } from '../../../api/timeline'
-import { groupMarkers, logEvents, smallestRangeContaining } from './model'
+import { PHONE_GROUP_DISTANCE_PCT, groupMarkers, logEvents, smallestRangeContaining } from './model'
 
 const FROM = 0
 const TO = 1000
@@ -25,6 +25,12 @@ describe('groupMarkers', () => {
 
   it('keeps markers 2.5% apart separate', () => {
     expect(groupMarkers([marker('a', 100), marker('b', 125)], FROM, TO)).toHaveLength(2)
+  })
+
+  it('on a phone groups markers closer than a 44px marker on the 640px track, about 6.9%', () => {
+    const events = [marker('a', 100), marker('b', 160), marker('c', 175), marker('d', 240)]
+    expect(groupMarkers(events, FROM, TO).map((group) => group.items.map((item) => item.id))).toEqual([['a'], ['b', 'c'], ['d']])
+    expect(groupMarkers(events, FROM, TO, PHONE_GROUP_DISTANCE_PCT).map((group) => group.items.map((item) => item.id))).toEqual([['a', 'b'], ['c', 'd']])
   })
 })
 

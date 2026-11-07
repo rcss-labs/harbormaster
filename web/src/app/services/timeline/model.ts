@@ -23,6 +23,8 @@ export const RANGES: { value: TimelineRange; label: string; ms: number }[] = [
 
 /** Markers closer than this share of the track width merge into one group. */
 const GROUP_DISTANCE_PCT = 2.5
+/** On phones the markers are 44px wide on a 640px track, so they merge when closer than that share of the track. */
+export const PHONE_GROUP_DISTANCE_PCT = (44 / 640) * 100
 /** A typical rate needs this many counted, uncapped buckets to mean anything. */
 const MIN_BUCKETS_FOR_TYPICAL_RATE = 6
 
@@ -84,8 +86,8 @@ export function logEvents(data: TimelineLogErrorsDTO, to: number): TimelineEvent
   return events
 }
 
-/** Walks the events oldest to newest and joins each to the previous group when it sits within 2.5% of that group's first marker. */
-export function groupMarkers(events: TimelineEvent[], from: number, to: number): MarkerGroup[] {
+/** Walks the events oldest to newest and joins each to the previous group when it sits within `distancePct` (2.5% by default) of that group's first marker. */
+export function groupMarkers(events: TimelineEvent[], from: number, to: number, distancePct = GROUP_DISTANCE_PCT): MarkerGroup[] {
   const span = to - from
   const positioned = events
     .map((event) => {
@@ -97,7 +99,7 @@ export function groupMarkers(events: TimelineEvent[], from: number, to: number):
   const groups: MarkerGroup[] = []
   for (const { event, pct } of positioned) {
     const previous = groups.at(-1)
-    if (previous && pct - previous.pct < GROUP_DISTANCE_PCT - 1e-9) {
+    if (previous && pct - previous.pct < distancePct - 1e-9) {
       previous.items.push(event)
       if (event.severity === 'bad') previous.severity = 'bad'
     } else {

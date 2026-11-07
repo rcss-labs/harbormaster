@@ -11,7 +11,7 @@ import { Table } from '../../../components/Table'
 import { Toggle } from '../../../components/Toggle'
 import { usePhone } from '../../../components/usePhone'
 import { queryPanelError } from '../panelError'
-import { LANES, RANGES, formatEventTime, groupMarkers, logEvents, smallestRangeContaining, type MarkerGroup } from './model'
+import { LANES, PHONE_GROUP_DISTANCE_PCT, RANGES, formatEventTime, groupMarkers, logEvents, smallestRangeContaining, type MarkerGroup } from './model'
 import { TimelineBanner } from './TimelineBanner'
 import { TimelineDetail } from './TimelineDetail'
 import { useEventDiff } from './useEventDiff'
@@ -69,7 +69,7 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const laneEvents: Record<TimelineLane, TimelineEvent[]> = { change: [], stop: [], alert: [], logs: logLaneEvents, access: [] }
   for (const event of data?.events ?? []) laneEvents[event.lane].push(event)
 
-  const groups = Object.fromEntries(LANE_ORDER.map((lane) => [lane, groupMarkers(laneEvents[lane], from, to)])) as Record<TimelineLane, MarkerGroup[]>
+  const groups = Object.fromEntries(LANE_ORDER.map((lane) => [lane, groupMarkers(laneEvents[lane], from, to, phone ? PHONE_GROUP_DISTANCE_PCT : undefined)])) as Record<TimelineLane, MarkerGroup[]>
 
   const laneStates = Object.fromEntries(
     LANE_ORDER.map((lane): [TimelineLane, LaneRowState] => {
