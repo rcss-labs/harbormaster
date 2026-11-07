@@ -14,6 +14,5 @@ web/e2e/.auth/
 # IDE settings (local only)
 .idea/
 
-# Redesign working docs and mockups (local only)
-docs/redesign-v4/
-docs/superpowers/plans/2026-11-06-*
+# Project docs are kept locally, not in the repository
+docs/
