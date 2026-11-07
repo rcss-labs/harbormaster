@@ -6,7 +6,7 @@ import { SegmentedFilter } from '../../components/Seg'
 import { AnalyticsPanel } from './AnalyticsPanel'
 import { DraftChangeSetsDialog } from './DraftChangeSetsDialog'
 import { RightsizingPanel } from './RightsizingPanel'
-import { costSummary, money, type SuggestedService } from './cost'
+import { costSummary, money, selectedSuggestions } from './cost'
 import { COLOR, sourceFor, whole } from './format'
 import { KpiNote, SourcesPanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
@@ -20,7 +20,10 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
   const [headroomPct, setHeadroomPct] = useState(rightsizing.default_headroom_pct)
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
-  const [drafting, setDrafting] = useState<SuggestedService[] | null>(null)
+  const [drafting, setDrafting] = useState(false)
+  const draftRows = selectedSuggestions(rightsizing, headroomPct, excluded)
+  // The dialog follows the live selection; with nothing left to draft it closes.
+  if (drafting && draftRows.length === 0) setDrafting(false)
   const common = { window: data.window, showSources }
 
   const ready = rightsizing.state === 'ok'
@@ -106,18 +109,18 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
                 return next
               })
             }
-            onDraft={setDrafting}
+            onDraft={() => setDrafting(true)}
           />
         </div>
         <SourcesPanel sources={data.sources} {...common} />
       </div>
-      {drafting !== null && (
+      {drafting && (
         <DraftChangeSetsDialog
-          rows={drafting}
+          rows={draftRows}
           headroomPct={headroomPct}
           opened={opened}
           onOpened={(serviceId) => setOpened((previous) => new Set(previous).add(serviceId))}
-          onClose={() => setDrafting(null)}
+          onClose={() => setDrafting(false)}
         />
       )}
     </>

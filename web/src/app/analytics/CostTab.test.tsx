@@ -245,6 +245,59 @@ describe('Rightsizing panel', () => {
     expect(panel.getByRole('checkbox', { name: 'Select payments-api' })).toBeChecked()
   })
 
+  it('keeps the dialog in step with a refetch', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const panel = await panelOf(withServices([payments, orders]), queryClient)
+    await userEvent.click(panel.getByRole('button', { name: 'Draft change sets' }))
+    expect(screen.getByRole('dialog', { name: 'Draft 2 change sets' })).toBeInTheDocument()
+    server.use(http.get('/api/analytics/cost', () => HttpResponse.json(withServices([payments, { ...orders, can_edit: false }]))))
+    await queryClient.invalidateQueries({ queryKey: ['analytics'] })
+    const dialog = within(await screen.findByRole('dialog', { name: 'Draft 1 change set' }))
+    expect(dialog.getAllByRole('link', { name: 'Open in Deploy' })).toHaveLength(1)
+    server.use(http.get('/api/analytics/cost', () => HttpResponse.json(withServices([{ ...payments, steps: [] }, { ...orders, steps: [] }]))))
+    await queryClient.invalidateQueries({ queryKey: ['analytics'] })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('gives the slider a readable value and the table its units', async () => {
+    const panel = await panelOf()
+    expect(panel.getByLabelText('Headroom above p95')).toHaveAttribute('aria-valuetext', '30%')
+    expect(screen.getByRole('region', { name: /^Rightsizing/ })).toHaveTextContent('CPU units, memory MiB')
+  })
+
+  it('hides the footer when no service has a suggestion', async () => {
+    const panel = await panelOf(withServices([{ ...orders, steps: [] }]))
+    expect(panel.queryByRole('button', { name: 'Draft change sets' })).not.toBeInTheDocument()
+  })
+
+  it('omits the No suggestion panel when retention is short', async () => {
+    await panelOf(withServices([catalog], 'retention_short'))
+    expect(screen.queryByRole('region', { name: /No suggestion/ })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['not_fargate', 'Not on Fargate, so not priced'],
+    ['no_price', 'No price for this region'],
+    ['not_running', 'No running tasks'],
+    ['no_size', 'No task size in the task definition'],
+    ['no_data', 'No utilisation data. Is Container Insights on?'],
+    ['stale', 'Utilisation data is out of date'],
+    ['mixed_capacity', 'Some tasks are not on Fargate, so only Fargate tasks are priced'],
+  ] as const)('explains the %s status', async (status, text) => {
+    await panelOf(withServices([{ ...catalog, status }]))
+    expect(within(screen.getByRole('region', { name: /No suggestion/ })).getByText(text)).toBeInTheDocument()
+  })
+
+  it('shows how many days of data a short history has', async () => {
+    await panelOf(withServices([{ ...catalog, status: 'short_history', history_days: 9 }]))
+    expect(within(screen.getByRole('region', { name: /No suggestion/ })).getByText('9 of 14 days of data')).toBeInTheDocument()
+  })
+
+  it('falls back to a generic reason for an unknown status', async () => {
+    await panelOf(withServices([{ ...catalog, status: 'brand_new' as never }]))
+    expect(within(screen.getByRole('region', { name: /No suggestion/ })).getByText('No suggestion', { selector: 'span' })).toBeInTheDocument()
+  })
+
   it('marks auto-scaled services', async () => {
     const panel = await panelOf(withServices([payments, orders]))
     const pill = panel.getByText('Auto-scaled')

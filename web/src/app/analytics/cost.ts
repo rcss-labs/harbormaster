@@ -1,4 +1,4 @@
-import type { CostService, CostStep, CostSuggestion } from '../../api/analytics'
+import type { CostRightsizing, CostService, CostStep, CostSuggestion } from '../../api/analytics'
 
 /** Whole US dollars. */
 export const money = (value: number) => `$${Math.round(value).toLocaleString('en-US')}`
@@ -32,4 +32,20 @@ export function costSummary(rows: CostService[], headroomPct: number): { saving:
 export interface SuggestedService {
   service: CostService
   suggestion: CostSuggestion
+}
+
+/** Services with a suggestion at this headroom, in the order the server sent them. */
+export function suggestedServices(rightsizing: CostRightsizing, headroomPct: number): SuggestedService[] {
+  const rows: SuggestedService[] = []
+  for (const service of rightsizing.services) {
+    if (service.status !== 'ok') continue
+    const suggestion = stepAt(service.steps, headroomPct)
+    if (suggestion !== null) rows.push({ service, suggestion })
+  }
+  return rows
+}
+
+/** The suggested services the user can edit and has not unticked. */
+export function selectedSuggestions(rightsizing: CostRightsizing, headroomPct: number, excluded: ReadonlySet<string>): SuggestedService[] {
+  return suggestedServices(rightsizing, headroomPct).filter(({ service }) => service.can_edit && !excluded.has(service.service_id))
 }

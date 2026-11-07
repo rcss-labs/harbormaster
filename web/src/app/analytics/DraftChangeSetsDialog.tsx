@@ -16,7 +16,7 @@ interface DraftChangeSetsDialogProps {
 /** One link per selected service into the normal Deploy review. Nothing is posted from here. */
 export function DraftChangeSetsDialog({ rows, headroomPct, opened, onOpened, onClose }: DraftChangeSetsDialogProps) {
   return (
-    <Dialog title={`Draft ${rows.length} change ${rows.length === 1 ? 'set' : 'sets'}`} wide onClose={onClose} actions={[{ label: 'Close', onClick: onClose }]}>
+    <Dialog sub="CPU units, memory MiB" title={`Draft ${rows.length} change ${rows.length === 1 ? 'set' : 'sets'}`} wide onClose={onClose} actions={[{ label: 'Close', onClick: onClose }]}>
       <p className={styles.draftNote}>
         {`Nothing deploys yet. Each link opens that service's Deploy tab with the size filled in and the reason "Rightsizing at ${headroomPct}% headroom". Nothing is saved until you review and apply it there.`}
       </p>
