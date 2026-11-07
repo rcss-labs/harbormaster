@@ -354,15 +354,6 @@ type TimelineLogBucketDTO struct {
 // timeline read that touches log text, so it needs Logs. A CloudWatch failure is a 200 with state unavailable,
 // so the lane can show it and the rest of the timeline is unaffected.
 func (s *Server) getTimelineLogErrors(w http.ResponseWriter, r *http.Request) {
-	rangeName := r.URL.Query().Get("range")
-	if rangeName == "" {
-		rangeName = timelineDefaultRange
-	}
-	window, known := timelineRanges[rangeName]
-	if !known {
-		s.fail(w, invalid("range must be one of 1h, 6h, 24h or 7d."))
-		return
-	}
 	sel, err := s.resolveLogs(r, "all")
 	var forbidden errLogsForbidden
 	if errors.As(err, &forbidden) {
@@ -371,6 +362,15 @@ func (s *Server) getTimelineLogErrors(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	rangeName := r.URL.Query().Get("range")
+	if rangeName == "" {
+		rangeName = timelineDefaultRange
+	}
+	window, known := timelineRanges[rangeName]
+	if !known {
+		s.fail(w, invalid("range must be one of 1h, 6h, 24h or 7d."))
 		return
 	}
 	bucket := timelineLogBuckets[rangeName]
@@ -391,6 +391,9 @@ func (s *Server) getTimelineLogErrors(w http.ResponseWriter, r *http.Request) {
 		Prefixes: independentPrefixes(sel.prefixes), From: now.Add(-window), To: now, Bucket: bucket,
 	})
 	if err != nil {
+		if r.Context().Err() != nil {
+			return // the viewer left; there is nobody to answer and nothing failed
+		}
 		s.log().Error("count timeline log errors", "service", key.Service, "group", sel.group, "error", err)
 		out.State, out.Message = "unavailable", "Log errors could not be read."
 		if awsx.IsThrottle(err) {

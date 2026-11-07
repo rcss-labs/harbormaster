@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -591,4 +592,200 @@ func TestTimelineLogErrors_BadRangeIs422(t *testing.T) {
 		t.Errorf("status %d, want 422", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestIndependentPrefixes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"duplicate", []string{"a/", "a/"}, []string{"a/"}},
+		{"nested", []string{"a/b/", "a/"}, []string{"a/"}},
+		{"chain", []string{"a/b/c/", "a/", "a/b/"}, []string{"a/"}},
+		{"siblings that only share letters", []string{"ab/", "a/"}, []string{"a/", "ab/"}},
+		{"none", nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := independentPrefixes(tc.in); !slices.Equal(got, tc.want) {
+				t.Errorf("independentPrefixes(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The default server builds its own error counter; a missing default would panic on the first request.
+func TestTimelineLogErrors_DefaultCounterServesRequests(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	setPassword(t, st, "oncall")
+	pollAll(t, st, fk)
+	fk.FailAlways("FilterLogEvents", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded"})
+	c := login(t, srv, "oncall", testPassword)
+	status, body := getLogErrors(t, c, paymentsID(), "?range=1h")
+	if status != http.StatusOK || body.State != "unavailable" || body.Message != "AWS is limiting log requests. Try again in a minute." {
+		t.Fatalf("status %d state %q message %q, want 200 unavailable with the throttle message", status, body.State, body.Message)
+	}
+	if status, _ := getTimeline(t, c, paymentsID(), "?range=1h"); status != http.StatusOK {
+		t.Errorf("timeline status %d, want 200", status)
+	}
+}
+
+func TestTimelineLogErrors_BadRangeChecksAccessFirst(t *testing.T) {
+	srv, _, _ := logErrorsFixture(t)
+	omer := login(t, srv, "omer", testPassword)
+
+	resp := omer.get("/api/services/" + paymentsID() + "/timeline/log-errors?range=2d")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("invisible service with a bad range: status %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = omer.get("/api/services/" + stagingWebID() + "/timeline/log-errors?range=2d")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("view-only user with a bad range: status %d, want 403", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestTimelineLogErrors_InvisibleServiceIs404(t *testing.T) {
+	srv, fk, _ := logErrorsFixture(t)
+	resp := login(t, srv, "omer", testPassword).get("/api/services/" + paymentsID() + "/timeline/log-errors")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if calls := fk.Calls()["FilterLogEvents"]; calls != 0 {
+		t.Errorf("%d FilterLogEvents calls, want 0", calls)
+	}
+}
+
+func TestTimelineLogErrors_BucketSizePerRange(t *testing.T) {
+	srv, _, _ := logErrorsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+	for _, tc := range []struct {
+		query   string
+		seconds int
+	}{{"?range=1h", 300}, {"?range=6h", 1800}, {"?range=24h", 7200}, {"?range=7d", 43200}} {
+		status, body := getLogErrors(t, c, paymentsID(), tc.query)
+		if status != http.StatusOK || body.State != "ok" {
+			t.Fatalf("%s: status %d state %q (%s)", tc.query, status, body.State, body.Message)
+		}
+		if body.BucketSeconds != tc.seconds {
+			t.Errorf("%s: bucket_seconds = %d, want %d", tc.query, body.BucketSeconds, tc.seconds)
+		}
+		if n := len(body.Buckets); n < 12 || n > 15 {
+			t.Errorf("%s: %d buckets, want 12 to 15", tc.query, n)
+		}
+	}
+}
+
+// adjustableClock is a clock the test can move forward.
+type adjustableClock struct {
+	mu     sync.Mutex
+	offset time.Duration
+}
+
+func (c *adjustableClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Now().Add(c.offset)
+}
+
+func (c *adjustableClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.offset += d
+}
+
+func TestTimelineLogErrors_StaleBucketsAfterFailureArePartial(t *testing.T) {
+	clock := &adjustableClock{}
+	srv, fk, st, _ := newServerCustom(t, true, func(s *Server) {
+		s.Now = clock.Now
+		counter := logs.NewErrorCounter(s.Clients, clock.Now)
+		counter.Sleep = func(context.Context, time.Duration) error { return nil }
+		s.LogErrors = counter
+	})
+	seedMockupTags(t, st)
+	setPassword(t, st, "oncall")
+	pollAll(t, st, fk)
+	c := login(t, srv, "oncall", testPassword)
+
+	if status, body := getLogErrors(t, c, paymentsID(), "?range=1h"); status != http.StatusOK || body.State != "ok" {
+		t.Fatalf("first load: status %d state %q (%s), want 200 ok", status, body.State, body.Message)
+	}
+	// The open bucket's entry lasts 60 s; after it expires CloudWatch fails, so it is served stale.
+	clock.Advance(2 * time.Minute)
+	fk.FailAlways("FilterLogEvents", errors.New("boom"))
+	status, body := getLogErrors(t, c, paymentsID(), "?range=1h")
+	if status != http.StatusOK || body.State != "partial" {
+		t.Fatalf("status %d state %q (%s), want 200 partial", status, body.State, body.Message)
+	}
+	known := 0
+	for _, b := range body.Buckets {
+		if b.Known {
+			known++
+		}
+	}
+	if known == 0 {
+		t.Error("no known bucket, want the cached ones served")
+	}
+}
+
+// A viewer who leaves mid-scan is not a failure, so nothing is logged at error level.
+func TestTimelineLogErrors_ClientDisconnectIsNotLoggedAsFailure(t *testing.T) {
+	waiting := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	srv, fk, st, logBuffer := newServerCustom(t, true, func(s *Server) {
+		counter := logs.NewErrorCounter(s.Clients, s.Now)
+		counter.Sleep = func(ctx context.Context, _ time.Duration) error {
+			once.Do(func() { close(waiting) })
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		s.LogErrors = counter
+	})
+	t.Cleanup(func() { close(release) })
+	seedMockupTags(t, st)
+	setPassword(t, st, "oncall")
+	pollAll(t, st, fk)
+	c := login(t, srv, "oncall", testPassword)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/services/"+paymentsID()+"/timeline/log-errors", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if resp, err := c.http.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the scan never started")
+	}
+	cancel()
+	<-done
+	// The request log line is written when the handler returns.
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(logBuffer.String(), "path=/api/services/"+paymentsID()+"/timeline/log-errors") {
+		if time.Now().After(deadline) {
+			t.Fatal("the handler never finished")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if strings.Contains(logBuffer.String(), "level=ERROR") {
+		t.Errorf("a client disconnect was logged as an error:\n%s", logBuffer.String())
+	}
 }
