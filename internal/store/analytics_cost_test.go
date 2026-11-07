@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/cost"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -143,5 +144,90 @@ func TestAnalyticsCostServices_ReadsArchitectureAndFlags(t *testing.T) {
 	}
 	if l := facts["ledger"]; l.AutoScaled || l.RecentOOM || l.RequiresFargate || l.CPUUnits != nil {
 		t.Errorf("ledger = %+v, want no flags and no size", l)
+	}
+}
+
+func (fx reliabilityFixture) useTaskDefinition(t *testing.T, key model.ServiceKey, family string, td model.TaskDefinitionRef) {
+	t.Helper()
+	ctx := context.Background()
+	td.AccountID, td.Region, td.Family, td.Revision = key.AccountID, key.Region, family, 1
+	td.ARN = "arn:aws:ecs:" + key.Region + ":" + key.AccountID + ":task-definition/" + family + ":1"
+	if err := fx.s.UpsertTaskDefinition(ctx, td); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fx.s.UpsertServices(ctx, []model.Service{
+		{Key: key, Desired: 1, Running: 1, TaskDefinitionARN: td.ARN, PolledAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnalyticsCostServices_ContainerDefinitionsSurviveJSONEscapes(t *testing.T) {
+	fx := newReliabilityFixture(t)
+	raw, err := json.Marshal(map[string]any{"ContainerDefinitions": []map[string]any{{
+		"Name": "app", "Cpu": 256, "Memory": 512,
+		"Environment": []map[string]string{{"Name": "X", "Value": "quote \" newline \n backslash C:\\x"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.useTaskDefinition(t, fx.payments, "payments", model.TaskDefinitionRef{CPU: "1024", Memory: "2048", RequiresCompatibilities: []string{"FARGATE"}, Raw: raw})
+
+	got := costFacts(t, fx, fx.adminVis)["payments"]
+	var parsed []struct {
+		Environment []struct{ Value string }
+	}
+	if err := json.Unmarshal(got.ContainerDefinitions, &parsed); err != nil {
+		t.Fatalf("ContainerDefinitions is not valid JSON: %v (%q)", err, got.ContainerDefinitions)
+	}
+	if v := parsed[0].Environment[0].Value; v != "quote \" newline \n backslash C:\\x" {
+		t.Errorf("environment value = %q, want it unchanged", v)
+	}
+	floors, err := cost.ContainerFloors(got.ContainerDefinitions)
+	if err != nil || floors.CPUUnits != 256 || floors.MemoryMiB != 512 {
+		t.Errorf("floors = %+v (%v), want 256 units / 512 MiB", floors, err)
+	}
+}
+
+func TestAnalyticsCostServices_MissingContainerDefinitionsAreNil(t *testing.T) {
+	fx := newReliabilityFixture(t)
+	fx.useTaskDefinition(t, fx.payments, "payments", model.TaskDefinitionRef{CPU: "1024", Memory: "2048", Raw: json.RawMessage(`{"ContainerDefinitions": null}`)})
+	fx.useTaskDefinition(t, fx.ledger, "ledger", model.TaskDefinitionRef{CPU: "1024", Memory: "2048", Raw: json.RawMessage(`{}`)})
+	facts := costFacts(t, fx, fx.adminVis)
+	for _, name := range []string{"payments", "ledger", "batch"} { // batch has no task definition at all
+		if facts[name].ContainerDefinitions != nil {
+			t.Errorf("%s ContainerDefinitions = %q, want nil (floors unknown)", name, facts[name].ContainerDefinitions)
+		}
+	}
+}
+
+func TestAnalyticsCostServices_NonFargateAndNonNumericSizesAreNil(t *testing.T) {
+	fx := newReliabilityFixture(t)
+	fx.useTaskDefinition(t, fx.payments, "payments", model.TaskDefinitionRef{RequiresCompatibilities: []string{"EC2"}, Raw: json.RawMessage(`{}`)})
+	fx.useTaskDefinition(t, fx.ledger, "ledger", model.TaskDefinitionRef{CPU: "1 vCPU", Memory: "2 GB", RequiresCompatibilities: []string{"FARGATE"}, Raw: json.RawMessage(`{}`)})
+	facts := costFacts(t, fx, fx.adminVis)
+	if p := facts["payments"]; p.CPUUnits != nil || p.MemoryMiB != nil || p.RequiresFargate {
+		t.Errorf("EC2 task definition = %+v, want nil sizes and RequiresFargate false", p)
+	}
+	if l := facts["ledger"]; l.CPUUnits != nil || l.MemoryMiB != nil || !l.RequiresFargate {
+		t.Errorf("non-numeric sizes = %+v, want nil sizes and RequiresFargate true", l)
+	}
+}
+
+func TestAnalyticsCostServices_RecentOOMFromContainerExit137(t *testing.T) {
+	fx := newReliabilityFixture(t)
+	stoppedAt := time.Now().UTC().Add(-time.Hour)
+	exit := 137
+	if _, err := fx.s.UpsertTasks(context.Background(), []model.Task{{
+		Cluster: clusterKey("core"), ARN: readTaskARN("core", "oom137"), ServiceName: "payments", LastStatus: "STOPPED",
+		StopCode: "EssentialContainerExited", StoppedReason: "Essential container in task exited",
+		Containers: []model.Container{{Name: "app", ExitCode: &exit}},
+		StoppedAt:  &stoppedAt, PolledAt: stoppedAt, CreatedAt: stoppedAt.Add(-time.Hour),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	facts := costFacts(t, fx, fx.adminVis)
+	if !facts["payments"].RecentOOM || facts["ledger"].RecentOOM {
+		t.Errorf("RecentOOM payments/ledger = %v/%v, want true/false", facts["payments"].RecentOOM, facts["ledger"].RecentOOM)
 	}
 }

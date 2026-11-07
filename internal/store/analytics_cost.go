@@ -7,6 +7,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/status"
 )
 
 // CostServiceFact is what the cost evaluation needs to know about one service. Used values come from the daily
@@ -18,7 +19,7 @@ type CostServiceFact struct {
 	CPUUnits, MemoryMiB      *int // task definition size, nil when it is not a plain number
 	RequiresFargate          bool
 	Architecture, OSFamily   string
-	ContainerDefinitions     []byte // raw JSON of the task definition's ContainerDefinitions
+	ContainerDefinitions     []byte // raw JSON of ContainerDefinitions; nil means floors unknown
 	UsedCPUUnits, UsedMemMiB *float64
 	HistoryDays              int // days with every utilisation column present
 	LatestDay                *time.Time
@@ -38,12 +39,12 @@ func (s *Store) AnalyticsCostServices(ctx context.Context, f TargetFilter, vis V
 		   case when td.cpu ~ '^[0-9]+$' then td.cpu::int end, case when td.memory ~ '^[0-9]+$' then td.memory::int end,
 		   coalesce('FARGATE' = any(td.requires_compatibilities), false),
 		   coalesce(td.raw #>> '{RuntimePlatform,CpuArchitecture}', ''), coalesce(td.raw #>> '{RuntimePlatform,OperatingSystemFamily}', ''),
-		   (td.raw -> 'ContainerDefinitions')::text::bytea,
+		   nullif(td.raw -> 'ContainerDefinitions', 'null'::jsonb),
 		   used.cpu_units, used.mem_mib, used.days, used.latest_day,
 		   coalesce(scaling.has_target, false),
 		   exists (select 1 from tasks t
 		     where t.account_id = s.account_id and t.region = s.region and t.cluster_name = s.cluster_name
-		       and t.service_name = s.service_name and t.last_status = 'STOPPED' and t.stopped_reason like '%OutOfMemoryError%')
+		       and t.service_name = s.service_name and t.last_status = 'STOPPED' and t.stop_reason_group = `+q.add(status.StopReasonOutOfMemory)+`)
 		 from services s`+v.Joins+`
 		 left join task_definitions td on td.account_id = s.account_id and td.region = s.region and td.arn = s.task_definition_arn
 		 left join scaling on scaling.account_id = s.account_id and scaling.region = s.region
