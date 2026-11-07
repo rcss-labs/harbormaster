@@ -1,0 +1,14 @@
+{
+  "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "platform_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "platform": "linux/amd64",
+  "status": "scanned",
+  "syft_version": "1.0.0",
+  "sbom_generated_at": "2026-11-07T10:00:00Z",
+  "packages": 120,
+  "findings": [
+    {"vuln_id": "CVE-0000-0001", "severity": "High", "cvss": 7.5, "package_name": "openssl", "package_version": "3.0.1", "package_type": "deb", "location": "/var/lib/dpkg/status", "fixed_version": "3.0.2", "fix_state": "fixed", "data_source": "sample-db", "url": "https://example.com/CVE-0000-0001"},
+    {"vuln_id": "CVE-0000-0002", "severity": "low", "package_name": "zlib", "package_version": "1.2.0", "package_type": "deb", "fix_state": "not-fixed"}
+  ],
+  "truncated": false
+}
