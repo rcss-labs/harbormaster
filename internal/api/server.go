@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -63,10 +64,14 @@ type Server struct {
 	SAML *samlService
 	// FakeIdP is the dev-only fake identity provider, mounted at /fake-idp/ when non-nil.
 	FakeIdP http.Handler
+
+	// costWarned remembers which unreadable container definitions the cost tab already logged.
+	costWarned *sync.Map
 }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
+	s.costWarned = &sync.Map{}
 	if s.Log == nil {
 		s.Log = slog.Default()
 	}

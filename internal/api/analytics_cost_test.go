@@ -11,6 +11,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -203,11 +204,51 @@ func TestAnalyticsCost_EC2TaskHasNoDollars(t *testing.T) {
 		t.Errorf("total dropped by %.4f, want one task's share %.4f", before.KPIs.MonthlyTotal-after.KPIs.MonthlyTotal, oneTask)
 	}
 	web := costService(t, after, "web-frontend")
-	if web.Status != "not_fargate" || len(web.Steps) != 0 || web.Steps == nil {
-		t.Errorf("web-frontend status %q steps %#v, want not_fargate and an empty list", web.Status, web.Steps)
+	if web.Status != "mixed_capacity" || len(web.Steps) != 0 || web.Steps == nil {
+		t.Errorf("web-frontend status %q steps %#v, want mixed_capacity and an empty list", web.Status, web.Steps)
 	}
 	if !approx(web.Monthly, oneTask) {
 		t.Errorf("web-frontend monthly %.4f, want only its Fargate task %.4f", web.Monthly, oneTask)
+	}
+}
+
+func TestAnalyticsCost_AllEC2ServiceIsNotFargate(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	editRunningTasks(fk, "web-frontend", func(_ int, task *ecstypes.Task) {
+		task.LaunchType = ecstypes.LaunchTypeEc2
+		task.CapacityProviderName = nil
+	})
+	pollAll(t, st, fk)
+	web := costService(t, getCost(t, login(t, srv, "sam", testPassword), ""), "web-frontend")
+	if web.Status != "not_fargate" || web.Monthly != 0 || len(web.Steps) != 0 {
+		t.Errorf("web-frontend status %q monthly %.4f steps %d, want not_fargate with no dollars", web.Status, web.Monthly, len(web.Steps))
+	}
+}
+
+func TestAnalyticsCost_WindowsServiceHasNoDollars(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	c := login(t, srv, "sam", testPassword)
+	before := getCost(t, c, "")
+	if _, err := st.Pool.Exec(t.Context(), `update task_definitions set raw = jsonb_set(raw, '{RuntimePlatform}', '{"OperatingSystemFamily":"Windows_Server_2022_Core"}')
+		where arn in (select task_definition_arn from services where service_name = 'edge-nginx')`); err != nil {
+		t.Fatal(err)
+	}
+	got := getCost(t, c, "")
+	edge := costService(t, got, "edge-nginx")
+	if edge.Monthly != 0 || edge.Status != "not_fargate" {
+		t.Errorf("edge-nginx monthly %.4f status %q, want no dollars and not_fargate (the table holds Linux rates)", edge.Monthly, edge.Status)
+	}
+	if !approx(before.KPIs.MonthlyTotal-got.KPIs.MonthlyTotal, 20.72) || got.KPIs.UnpricedTasks != before.KPIs.UnpricedTasks+2 {
+		t.Errorf("total %.2f -> %.2f, unpriced %d -> %d; want edge-nginx's 20.72 removed and 2 more unpriced",
+			before.KPIs.MonthlyTotal, got.KPIs.MonthlyTotal, before.KPIs.UnpricedTasks, got.KPIs.UnpricedTasks)
+	}
+	if !approx(sumGroups(got.ByCluster), got.KPIs.MonthlyTotal) {
+		t.Errorf("by_cluster %.2f does not add up to %.2f", sumGroups(got.ByCluster), got.KPIs.MonthlyTotal)
 	}
 }
 
@@ -381,5 +422,117 @@ func TestAnalyticsCost_RejectsBadRange(t *testing.T) {
 	}
 	if got := getCost(t, c, "?range=24h"); got.Window.Requested != "24h" || got.Window.RangeApplies {
 		t.Errorf("window %+v, want requested 24h and range_applies false", got.Window)
+	}
+}
+
+func TestAnalyticsCost_FloorsLimitTheSuggestion(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	seedUtilHistory(t, st, serviceRow(t, st, "report-worker"), 30, 5, 5)
+	if _, err := st.Pool.Exec(t.Context(), `update task_definitions set raw = jsonb_set(raw, '{ContainerDefinitions}', '[{"Name":"app","Cpu":512,"Memory":1024}]')
+		where arn in (select task_definition_arn from services where service_name = 'report-worker')`); err != nil {
+		t.Fatal(err)
+	}
+	worker := costService(t, getCost(t, login(t, srv, "sam", testPassword), ""), "report-worker")
+	if worker.Status != "ok" || len(worker.Steps) == 0 || worker.Steps[0].Suggestion == nil {
+		t.Fatalf("report-worker status %q steps %+v", worker.Status, worker.Steps)
+	}
+	if got := worker.Steps[0].Suggestion; !got.LimitedByContainers || got.CPUUnits != 512 || got.MemoryMiB != 1024 {
+		t.Errorf("suggestion %+v, want 512/1024 limited by the containers' own minimums", got)
+	}
+}
+
+func TestAnalyticsCost_RecentOOMHoldsMemory(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	seedUtilHistory(t, st, serviceRow(t, st, "report-worker"), 30, 5, 5)
+	c := login(t, srv, "sam", testPassword)
+	calm := costService(t, getCost(t, c, ""), "report-worker")
+	if calm.RecentOOM || calm.Steps[0].Suggestion.MemoryMiB >= 2048 {
+		t.Fatalf("baseline %+v: want no OOM and a memory below the current 2048", calm.Steps[0].Suggestion)
+	}
+	tx, err := st.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context()) //nolint:errcheck // no-op after commit
+	for _, statement := range []string{
+		`create temp table oom_task on commit drop as select * from tasks where service_name = 'report-worker' and last_status = 'RUNNING' limit 1`,
+		`update oom_task set task_arn = task_arn || '-oom', last_status = 'STOPPED', stop_reason_group = '` + status.StopReasonOutOfMemory + `'`,
+		`insert into tasks select * from oom_task`,
+	} {
+		if _, err := tx.Exec(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	held := costService(t, getCost(t, c, ""), "report-worker")
+	if !held.RecentOOM || held.Steps[0].Suggestion == nil || held.Steps[0].Suggestion.MemoryMiB < 2048 {
+		t.Errorf("after an OOM stop: recent_oom %v suggestion %+v, want memory held at 2048", held.RecentOOM, held.Steps[0].Suggestion)
+	}
+}
+
+func TestAnalyticsCost_TaskIsPricedAtItsOwnSize(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	editRunningTasks(fk, "edge-nginx", func(index int, task *ecstypes.Task) {
+		if index == 0 { // mid-rollout: one task still runs the old, larger 512/1024 definition
+			cpu, memory := "512", "1024"
+			task.Cpu, task.Memory = &cpu, &memory
+		}
+	})
+	pollAll(t, st, fk)
+	edge := costService(t, getCost(t, login(t, srv, "sam", testPassword), ""), "edge-nginx")
+	// eu-central-1: 256/512 is 10.362 a month and 512/1024 twice that.
+	if !approx(edge.Monthly, 10.362*3) {
+		t.Errorf("edge-nginx monthly %.4f, want 31.09 (each task at its own size)", edge.Monthly)
+	}
+}
+
+func TestAnalyticsCost_StandaloneTasksAreNotInTheTotal(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	var standalone int
+	if err := st.Pool.QueryRow(t.Context(), `select count(*) from tasks where cluster_name = 'ci-tools' and last_status = 'RUNNING' and coalesce(service_name, '') = ''`).Scan(&standalone); err != nil || standalone == 0 {
+		t.Fatalf("estate has %d standalone running tasks in ci-tools (err %v), want some", standalone, err)
+	}
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+	var fromServices float64
+	for _, svc := range got.Rightsizing.Services {
+		if svc.Cluster == "ci-tools" {
+			fromServices += svc.Monthly
+		}
+	}
+	for _, group := range got.ByCluster {
+		if group.Label == "ci-tools" && !approx(group.Monthly, fromServices) {
+			t.Errorf("ci-tools %.4f, want its services' %.4f without the standalone task", group.Monthly, fromServices)
+		}
+	}
+}
+
+func TestAnalyticsCost_AccountLabelFallsBackToTheID(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	if _, err := st.Pool.Exec(t.Context(), `update aws_accounts set name = ''`); err != nil {
+		t.Fatal(err)
+	}
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+	if len(got.ByAccount) == 0 {
+		t.Fatal("by_account is empty")
+	}
+	for _, group := range got.ByAccount {
+		if group.Label != group.Key || group.Label == "" {
+			t.Errorf("account group %+v, want the id as its label", group)
+		}
 	}
 }

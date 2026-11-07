@@ -1,6 +1,7 @@
 package api
 
 import (
+	"hash/fnv"
 	"net/http"
 	"sort"
 	"strconv"
@@ -155,12 +156,16 @@ type serviceSpend struct {
 func (t *serviceSpend) tasks() int { return t.priced + t.unpriced }
 
 // tallyServiceSpend prices each running task of a visible service at its own size, so a rollout between two
-// task definition sizes is correct. Standalone tasks (no service) are skipped: how long they run is unknown, so a
+// task definition sizes is correct. Windows tasks are unpriced because the table holds Linux rates only. Standalone tasks (no service) are skipped: how long they run is unknown, so a
 // month of hours would overstate them. Tasks whose service is not among the visible facts are skipped too.
 func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostServiceFact) map[model.ServiceKey]*serviceSpend {
-	architectures := make(map[model.ServiceKey]string, len(facts))
+	type platform struct {
+		architecture string
+		windows      bool
+	}
+	platforms := make(map[model.ServiceKey]platform, len(facts))
 	for _, fact := range facts {
-		architectures[fact.Key] = fact.Architecture
+		platforms[fact.Key] = platform{architecture: fact.Architecture, windows: cost.IsWindows(fact.OSFamily)}
 	}
 	out := map[model.ServiceKey]*serviceSpend{}
 	for _, task := range tasks {
@@ -168,7 +173,7 @@ func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostService
 			continue
 		}
 		key := model.ServiceKey{ClusterKey: task.Cluster, Service: task.ServiceName}
-		architecture, visible := architectures[key]
+		service, visible := platforms[key]
 		if !visible {
 			continue
 		}
@@ -178,12 +183,12 @@ func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostService
 			out[key] = totals
 		}
 		class := cost.Classify(task.CapacityProvider, task.LaunchType, task.CPU, task.Memory)
-		if class == cost.Unpriced {
+		if class == cost.Unpriced || service.windows {
 			totals.unpriced++
 			totals.notFargate++
 			continue
 		}
-		rate, ok := cost.RateFor(task.Cluster.Region, architecture)
+		rate, ok := cost.RateFor(task.Cluster.Region, service.architecture)
 		if !ok {
 			totals.unpriced++
 			totals.noRateTasks++
@@ -218,7 +223,7 @@ func (s *Server) costServiceDTO(sc scope, fact store.CostServiceFact, totals *se
 	floorsKnown := false
 	if fact.ContainerDefinitions != nil {
 		if floors, err := cost.ContainerFloors(fact.ContainerDefinitions); err != nil {
-			s.Log.Warn("cost: cannot read container minimums", "service", fact.Key.ID(), "err", err)
+			s.warnUnreadableFloors(fact, err)
 		} else {
 			input.Floors, floorsKnown = floors, true
 		}
@@ -307,4 +312,15 @@ func sortedKeys(set map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// warnUnreadableFloors logs an unparsable container definition once per service and definition per process; the
+// endpoint is polled, so logging on every request would repeat the same line. The contents are never logged.
+func (s *Server) warnUnreadableFloors(fact store.CostServiceFact, err error) {
+	hash := fnv.New64a()
+	hash.Write(fact.ContainerDefinitions) //nolint:errcheck // hash writes never fail
+	key := fact.Key.ID() + "/" + strconv.FormatUint(hash.Sum64(), 16)
+	if _, seen := s.costWarned.LoadOrStore(key, struct{}{}); !seen {
+		s.Log.Warn("cost: cannot read container minimums", "service", fact.Key.ID(), "err", err)
+	}
 }

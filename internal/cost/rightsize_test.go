@@ -153,7 +153,7 @@ func TestEvaluate_NonFargateGetsNothing(t *testing.T) {
 		mutate func(in *Input)
 	}{
 		{"not fargate", func(in *Input) { in.RequiresFargate = false }},
-		{"unpriced task", func(in *Input) { in.UnpricedTasks = 1 }},
+		{"only unpriced tasks", func(in *Input) { in.OnDemandTasks, in.SpotTasks, in.UnpricedTasks = 0, 0, 2 }},
 		{"windows", func(in *Input) { in.OSFamily = "WINDOWS_SERVER_2022_CORE" }},
 		{"windows mixed case", func(in *Input) { in.OSFamily = "Windows_Server_2022_Core" }},
 	}
@@ -166,6 +166,20 @@ func TestEvaluate_NonFargateGetsNothing(t *testing.T) {
 				t.Fatalf("got (%q, %+v), want (not_fargate, nil)", status, steps)
 			}
 		})
+	}
+}
+
+func TestEvaluate_MixedCapacityGetsNoSteps(t *testing.T) {
+	for _, spot := range []bool{false, true} {
+		in := baseInput()
+		in.UnpricedTasks = 1
+		if spot {
+			in.OnDemandTasks, in.SpotTasks = 0, 1
+		}
+		status, steps := Evaluate(in)
+		if status != StatusMixedCapacity || steps != nil {
+			t.Errorf("spot %v: got (%q, %+v), want (mixed_capacity, nil)", spot, status, steps)
+		}
 	}
 }
 

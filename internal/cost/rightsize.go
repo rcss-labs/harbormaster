@@ -21,15 +21,17 @@ const (
 type Status string
 
 const (
-	StatusOK           Status = "ok"
-	StatusNotFargate   Status = "not_fargate"
-	StatusNoPrice      Status = "no_price"
-	StatusNotRunning   Status = "not_running"
-	StatusNoSize       Status = "no_size"
-	StatusNoData       Status = "no_data"
-	StatusShortHistory Status = "short_history"
-	StatusStale        Status = "stale"
-	StatusRollupOff    Status = "rollup_off"
+	StatusOK         Status = "ok"
+	StatusNotFargate Status = "not_fargate"
+	// StatusMixedCapacity is a service running both priced Fargate tasks and tasks without a Fargate price.
+	StatusMixedCapacity Status = "mixed_capacity"
+	StatusNoPrice       Status = "no_price"
+	StatusNotRunning    Status = "not_running"
+	StatusNoSize        Status = "no_size"
+	StatusNoData        Status = "no_data"
+	StatusShortHistory  Status = "short_history"
+	StatusStale         Status = "stale"
+	StatusRollupOff     Status = "rollup_off"
 )
 
 // Input is everything Evaluate needs about one service.
@@ -111,13 +113,23 @@ func Evaluate(in Input) (Status, []Step) {
 	return StatusOK, steps
 }
 
+// IsWindows reports whether an ECS operating system family is a Windows one. The price table holds Linux rates
+// only, so Windows tasks are never priced.
+func IsWindows(osFamily string) bool {
+	return strings.HasPrefix(strings.ToUpper(osFamily), "WINDOWS")
+}
+
 // gate applies the status rules in priority order and returns StatusOK when
 // the service can be evaluated.
 func gate(in Input) Status {
 	switch {
 	case !in.RollupEnabled:
 		return StatusRollupOff
-	case !in.RequiresFargate, in.UnpricedTasks > 0, strings.HasPrefix(strings.ToUpper(in.OSFamily), "WINDOWS"):
+	case !in.RequiresFargate, IsWindows(in.OSFamily):
+		return StatusNotFargate
+	case in.UnpricedTasks > 0 && in.OnDemandTasks+in.SpotTasks > 0:
+		return StatusMixedCapacity
+	case in.UnpricedTasks > 0:
 		return StatusNotFargate
 	}
 	if _, ok := RateFor(in.Region, in.Architecture); !ok {

@@ -333,6 +333,7 @@ export interface CostStep {
 export type CostServiceStatus =
   | 'ok'
   | 'not_fargate'
+  | 'mixed_capacity'
   | 'no_price'
   | 'not_running'
   | 'no_size'
