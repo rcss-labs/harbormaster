@@ -16,6 +16,10 @@ import styles from './terminal.module.css'
 const SYS = '\x1b[38;2;124;196;228m'
 const RESET = '\x1b[0m'
 
+/** A colour token's current value, so the xterm canvas follows the theme; `fallback` covers environments without the stylesheet. */
+const cssColor = (name: string, fallback: string): string =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+
 /** The danger colour token as an ANSI truecolor escape; falls back to the dark-theme value. */
 function dangerEscape(): string {
   const raw = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()
@@ -95,7 +99,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
     const term = new Terminal({
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace',
       fontSize: 12.5,
-      theme: { background: '#0d1217', foreground: '#d7e3ec' },
+      theme: { background: cssColor('--term', '#0d1217'), foreground: cssColor('--term-text', '#d7e3ec') },
       cursorBlink: true,
       scrollback: 5000,
       convertEol: false,
@@ -130,8 +134,8 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
   }
 
   return (
-    <div className={styles.layout}>
-      <div className={styles.root}>
+    <div className={`hm-fill hm-with-side ${styles.page}`}>
+      <section className={`${styles.root} hm-fill-col`} aria-label="Terminal">
         <div className={styles.toolbar}>
           <label className={styles.field}>
             <span>Task</span>
@@ -165,8 +169,11 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
             <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canConnect} onClick={connect}>Connect</button>
           )}
         </div>
-        <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
-      </div>
+        <div className={styles.termWrap}>
+          <div className={styles.term} ref={hostRef} data-testid="terminal-host" />
+        </div>
+      </section>
+      <div className={styles.side}>
       <Panel title="Session">
         <dl className={styles.session}>
           <dt>Via</dt>
@@ -180,6 +187,7 @@ export function TerminalPanel({ running }: { running: TaskDTO[] }) {
           Keystrokes and output are not recorded. The operations log records who opened the session, the task, container and command.
         </p>
       </Panel>
+      </div>
     </div>
   )
 }

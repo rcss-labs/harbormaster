@@ -58,7 +58,7 @@ func testConfig() config.Config {
 }
 
 // newServerWithLog builds a Server over a fresh schema and the mockup estate. seedUsers creates
-// admin "pavel" and non-admin "omer" (both with testPassword) before the setup token is generated.
+// admin "sam" and non-admin "omer" (both with testPassword) before the setup token is generated.
 func newServerWithLog(t *testing.T, seedUsers bool) (*httptest.Server, *fake.Fake, *store.Store, *syncBuffer) {
 	t.Helper()
 	return newServerCustom(t, seedUsers, nil)
@@ -77,7 +77,7 @@ func newServerCustom(t *testing.T, seedUsers bool, mutate func(*Server)) (*httpt
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.CreateUser(t.Context(), "pavel", hash, true, false); err != nil {
+		if _, err := st.CreateUser(t.Context(), "sam", hash, true, false); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := st.CreateUser(t.Context(), "omer", hash, false, false); err != nil {
@@ -103,7 +103,7 @@ func newServerCustom(t *testing.T, seedUsers bool, mutate func(*Server)) (*httpt
 	return srv, fk, st, logs
 }
 
-// newTestServer returns a running API over the mockup estate with users pavel (admin) and omer.
+// newTestServer returns a running API over the mockup estate with users sam (admin) and omer.
 func newTestServer(t *testing.T) (*httptest.Server, *fake.Fake, *store.Store) {
 	srv, fk, st, _ := newServerWithLog(t, true)
 	return srv, fk, st

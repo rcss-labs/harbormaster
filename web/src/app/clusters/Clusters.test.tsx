@@ -41,6 +41,16 @@ describe('Clusters', () => {
     expect(screen.queryByRole('button', { name: 'Cards' })).not.toBeInTheDocument()
   })
 
+  it('column picker hides a column and keeps the choice in storage', async () => {
+    const user = userEvent.setup()
+    renderApp('/clusters')
+    await screen.findByRole('table', { name: 'Clusters' })
+    await user.click(screen.getByRole('button', { name: 'Columns' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Spot' }))
+    expect(screen.queryByRole('columnheader', { name: /^Spot/ })).not.toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('harbormaster-columns:clusters') ?? 'null')).not.toContain('spot')
+  })
+
   it('shows tag and status filters with counts', async () => {
     renderApp('/clusters')
     await screen.findByRole('radio', { name: 'All 6' })
@@ -231,7 +241,8 @@ describe('Clusters', () => {
     const user = userEvent.setup()
     renderApp('/clusters')
     await screen.findByRole('table', { name: 'Clusters' })
-    const select = screen.getByRole('combobox', { name: 'Account filter' })
+    await user.click(screen.getByRole('button', { name: /^Scope:/ }))
+    const select = within(screen.getByRole('dialog', { name: 'Scope' })).getByRole('combobox', { name: 'Account filter' })
     const staging = within(select).getByRole('option', { name: /staging/i }) as HTMLOptionElement
     await user.selectOptions(select, staging.value)
     await waitFor(() => expect(shownNames()).toEqual(['staging-web']))
@@ -241,7 +252,7 @@ describe('Clusters', () => {
   it('Clear filters also clears the remembered account, region and tag scope', async () => {
     const user = userEvent.setup()
     localStorage.setItem(
-      'harbormaster-filters:pavel',
+      'harbormaster-filters:sam',
       JSON.stringify({ account: ACCOUNT_STAGING.account_id, region: 'us-east-1', tag: [TAG_STAGING.id] }),
     )
     renderApp(`/clusters?status=healthy&q=web&account=${ACCOUNT_STAGING.account_id}&region=us-east-1&tag=${TAG_STAGING.id}`)
@@ -251,7 +262,7 @@ describe('Clusters', () => {
 
     await waitFor(() => expect(shownNames()).toHaveLength(6))
     await waitFor(() => expect(screen.getByTestId('search').textContent).toBe(''))
-    const stored = JSON.parse(localStorage.getItem('harbormaster-filters:pavel') ?? '{}')
+    const stored = JSON.parse(localStorage.getItem('harbormaster-filters:sam') ?? '{}')
     expect(stored.account).toBeUndefined()
     expect(stored.region).toBeUndefined()
     expect(stored.tag).toBeUndefined()

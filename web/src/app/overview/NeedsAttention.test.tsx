@@ -5,9 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AlertDTO, AlertsDTO, ServiceDTO } from '../../api/types'
 import { ALERTS, ME_OMER, SERVICE_DETAILS } from '../../test/fixtures'
 import { server } from '../../test/msw'
+import { allSteadyList, listMatchingAlerts } from './attentionFixtures'
 import { renderApp } from '../../test/renderApp'
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  server.use(http.get('/api/services', () => HttpResponse.json(listMatchingAlerts())))
+})
 
 const panel = async (): Promise<HTMLElement> => {
   const region = await screen.findByRole('region', { name: 'Needs attention' })
@@ -22,16 +26,13 @@ const resizerDetail = SERVICE_DETAILS[resizer.service_id]
 /** n distinct failing-service alerts, ordered worst first like the API. */
 const manyAlerts = (count: number): AlertsDTO => ({
   ...ALERTS,
-  items: Array.from(
-    { length: count },
-    (_, i): AlertDTO => ({
-      ...resizer,
-      title: `svc-${i}: 0 of 2 tasks running`,
-      service_id: `svc-${i}`,
-      service: `svc-${i}`,
-      at: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
-    }),
-  ),
+  items: Array.from({ length: count }, (_, i): AlertDTO => ({
+    ...resizer,
+    title: `svc-${i}: 0 of 2 tasks running`,
+    service_id: `svc-${i}`,
+    service: `svc-${i}`,
+    at: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+  })),
   counts: { danger: count, warning: 0, info: 0 },
 })
 
@@ -44,7 +45,7 @@ describe('NeedsAttention', () => {
     expect(within(rows[0]).getByText('Failing')).toBeInTheDocument()
     expect(within(rows[2]).getByText('Warning')).toBeInTheDocument()
     expect(within(rows[3]).getByText('In progress')).toBeInTheDocument()
-    expect(within(region).getByText('4 open')).toBeInTheDocument()
+    expect(within(region).getByText('3 services · 1 account alert')).toBeInTheDocument()
   })
 
   it('names the cluster on each row and links the title to the service tab', async () => {
@@ -72,6 +73,43 @@ describe('NeedsAttention', () => {
     expect(within(row).getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', `/services/${resizer.service_id}/tasks`)
   })
 
+  it('shows cause, next step and just before', async () => {
+    renderApp('/')
+    const row = rowsOf(await panel())[0]
+    expect(within(row).getByText(resizer.cause)).toBeInTheDocument()
+    expect(within(row).getByRole('link', { name: resizer.next_step.label })).toHaveAttribute('href', resizer.next_step.href)
+    expect(within(row).getByText(`Just before: ${resizer.just_before?.text}`)).toBeInTheDocument()
+  })
+
+  it('shows no Just before line when the API omits it', async () => {
+    renderApp('/')
+    const rows = rowsOf(await panel())
+    expect(rows[3]).toHaveTextContent(ALERTS.items[3].cause)
+    expect(rows[3]).not.toHaveTextContent('Just before')
+    expect(rows[1]).not.toHaveTextContent('Just before')
+  })
+
+  it('shows no Next step link when the API has no href', async () => {
+    server.use(
+      http.get('/api/alerts', () =>
+        HttpResponse.json({
+          ...ALERTS,
+          items: [{ ...resizer, next_step: { label: '', href: '' } }],
+          counts: { danger: 1, warning: 0, info: 0 },
+        }),
+      ),
+    )
+    renderApp('/')
+    const row = rowsOf(await panel())[0]
+    expect(within(row).queryByText(/Next step/)).not.toBeInTheDocument()
+  })
+
+  it('account problem row links to settings', async () => {
+    renderApp('/')
+    const row = rowsOf(await panel())[1]
+    expect(within(row).getByRole('link', { name: 'Open accounts' })).toHaveAttribute('href', '/settings/accounts')
+  })
+
   it('filters by severity and shows the counts on the chips', async () => {
     const user = userEvent.setup()
     renderApp('/')
@@ -86,10 +124,15 @@ describe('NeedsAttention', () => {
   })
 
   it('caps the list at 6 rows until Show all N is pressed', async () => {
-    server.use(http.get('/api/alerts', () => HttpResponse.json(manyAlerts(9))))
+    server.use(
+      http.get('/api/alerts', () => HttpResponse.json(manyAlerts(9))),
+      http.get('/api/services', () => HttpResponse.json(allSteadyList())),
+    )
     const user = userEvent.setup()
     renderApp('/')
-    const region = await screen.findByRole('region', { name: 'Needs attention' })
+    const region = await screen.findByRole('region', {
+      name: 'Needs attention',
+    })
     await within(region).findByRole('button', { name: 'Show all 9' })
     expect(rowsOf(region)).toHaveLength(6)
     await user.click(within(region).getByRole('button', { name: 'Show all 9' }))
@@ -105,10 +148,19 @@ describe('NeedsAttention', () => {
   })
 
   it('says so when nothing needs attention', async () => {
-    server.use(http.get('/api/alerts', () => HttpResponse.json({ items: [], counts: { danger: 0, warning: 0, info: 0 }, polled_at: null })))
+    server.use(
+      http.get('/api/alerts', () =>
+        HttpResponse.json({
+          items: [],
+          counts: { danger: 0, warning: 0, info: 0 },
+          polled_at: null,
+        }),
+      ),
+      http.get('/api/services', () => HttpResponse.json(allSteadyList())),
+    )
     renderApp('/')
     expect(await screen.findByText('Nothing needs attention.')).toBeInTheDocument()
-    expect(screen.getByText('0 open')).toBeInTheDocument()
+    expect(screen.getByText('0 services')).toBeInTheDocument()
   })
 })
 
@@ -120,7 +172,14 @@ describe('NeedsAttention Restart', () => {
     server.use(
       http.post(`/api/services/${resizer.service_id}/restart`, () => {
         posted()
-        return HttpResponse.json({ deployment_id: 'dep-1', revision: resizerDetail.revision, kind: 'restart' }, { status: 202 })
+        return HttpResponse.json(
+          {
+            deployment_id: 'dep-1',
+            revision: resizerDetail.revision,
+            kind: 'restart',
+          },
+          { status: 202 },
+        )
       }),
     )
     const user = userEvent.setup()
@@ -151,30 +210,53 @@ describe('NeedsAttention Restart', () => {
     const row = rowsOf(await panel())[0]
     await waitFor(() => expect(within(row).getByRole('button', { name: 'Restart' })).toBeEnabled())
     await user.click(within(row).getByRole('button', { name: 'Restart' }))
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: 'Cancel',
+      }),
+    )
     expect(posted).not.toHaveBeenCalled()
   })
 
   it('disables Restart without Operate and names the tag in the title', async () => {
-    useDetail({ ...resizerDetail, can: { ...resizerDetail.can, operate: false } })
+    useDetail({
+      ...resizerDetail,
+      can: { ...resizerDetail.can, operate: false },
+    })
     renderApp('/')
-    const restart = within(rowsOf(await panel())[0]).getByRole('button', { name: 'Restart' })
+    const restart = within(rowsOf(await panel())[0]).getByRole('button', {
+      name: 'Restart',
+    })
     await waitFor(() => expect(restart).toHaveAttribute('title', `You need Operate on ${resizerDetail.tag.name}`))
     expect(restart).toBeDisabled()
   })
 
   it('disables Restart while a rollout is running', async () => {
-    useDetail({ ...resizerDetail, deployments: [{ ...resizerDetail.deployments[0], rollout_state: 'IN_PROGRESS' }] })
+    useDetail({
+      ...resizerDetail,
+      deployments: [{ ...resizerDetail.deployments[0], rollout_state: 'IN_PROGRESS' }],
+    })
     renderApp('/')
-    const restart = within(rowsOf(await panel())[0]).getByRole('button', { name: 'Restart' })
+    const restart = within(rowsOf(await panel())[0]).getByRole('button', {
+      name: 'Restart',
+    })
     await waitFor(() => expect(restart).toHaveAttribute('title', 'A rollout is already running'))
     expect(restart).toBeDisabled()
   })
 
   it('disables Restart when the controller does not support it, using its banner', async () => {
-    useDetail({ ...resizerDetail, controller: { ...resizerDetail.controller, supported: false, banner: 'Managed by the ECS controller.' } })
+    useDetail({
+      ...resizerDetail,
+      controller: {
+        ...resizerDetail.controller,
+        supported: false,
+        banner: 'Managed by the ECS controller.',
+      },
+    })
     renderApp('/')
-    const restart = within(rowsOf(await panel())[0]).getByRole('button', { name: 'Restart' })
+    const restart = within(rowsOf(await panel())[0]).getByRole('button', {
+      name: 'Restart',
+    })
     await waitFor(() => expect(restart).toHaveAttribute('title', 'Managed by the ECS controller.'))
     expect(restart).toBeDisabled()
   })
@@ -187,5 +269,6 @@ describe('NeedsAttention for non-admins', () => {
     const rows = rowsOf(await panel())
     expect(within(rows[1]).queryByRole('link', { name: ALERTS.items[1].title })).not.toBeInTheDocument()
     expect(rows[1]).toHaveTextContent(ALERTS.items[1].title)
+    expect(within(rows[1]).queryByRole('link', { name: 'Open accounts' })).not.toBeInTheDocument()
   })
 })

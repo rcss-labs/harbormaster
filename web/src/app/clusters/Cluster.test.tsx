@@ -73,12 +73,27 @@ describe('Cluster', () => {
     expect(await kpi('Memory now')).toBeInTheDocument()
   })
 
+  it('KPI Services and Tasks link to the lists scoped to this cluster; the numbers stay', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const services = await kpi('Services')
+    expect(within(services).getByRole('link')).toHaveAttribute('href', `/services?${new URLSearchParams({ q: CLUSTER_CORE.name })}`)
+    const tasks = await kpi('Tasks')
+    expect(within(tasks).getByRole('link')).toHaveAttribute('href', `/tasks?${new URLSearchParams({ filter: 'all', q: CLUSTER_CORE.name })}`)
+    expect(tasks).toHaveTextContent(`${CLUSTER_CORE.running}/${CLUSTER_CORE.desired}`)
+  })
+
   it('draws a bar per service in Tasks by service, with running and desired counts', async () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     const panel = (await screen.findByRole('heading', { name: 'Tasks by service' })).closest('section') as HTMLElement
     expect(within(panel).getByRole('link', { name: 'notifications' })).toBeInTheDocument()
     expect(within(panel).getAllByText('2 / 2').length).toBeGreaterThan(0)
     expect(within(panel).getByText(/bar = running/)).toBeInTheDocument()
+  })
+
+  it('exposes each Tasks by service bar as running of desired in its accessible name', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const panel = (await screen.findByRole('heading', { name: 'Tasks by service' })).closest('section') as HTMLElement
+    expect(within(panel).getAllByRole('img', { name: 'Running 2 of 2' }).length).toBeGreaterThan(0)
   })
 
   it('lists services in a table with problems first', async () => {

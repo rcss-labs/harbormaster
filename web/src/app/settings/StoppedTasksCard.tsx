@@ -17,6 +17,13 @@ function parseWindow(text: string): number | null {
   return minutes >= MIN_MINUTES && minutes <= MAX_MINUTES ? minutes : null
 }
 
+/** "90" -> "1 h 30 min"; whole hours drop the minutes. */
+function spellOut(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  return minutes % 60 === 0 ? `${hours} h` : `${hours} h ${minutes % 60} min`
+}
+
 /** Admin setting for how long stopped tasks stay visible on the Tasks page and service Tasks tab. */
 export function StoppedTasksCard() {
   const settings = useSettings()
@@ -73,6 +80,7 @@ export function StoppedTasksCard() {
           }}
         />
         <span>minutes</span>
+        {parseWindow(draft) !== null && <span className={styles.hint}>{spellOut(Number(draft))}</span>}
       </div>
       {error && (
         <p role="alert" className={styles.error}>

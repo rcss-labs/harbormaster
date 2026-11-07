@@ -1,38 +1,11 @@
-/* Deploy tab layout: Containers and Task size side by side, then Service and Auto scaling. */
-.grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+/* Deploy tab: the form column. The split with the Pending changes aside is .hm-split-sticky; from 2200px .hm-wide-form flows
+   the panels into two columns. Below that the panels stack, each spaced by the margin below. */
+.form {
+  min-width: 0;
 }
-.mono {
-  font-family: var(--mono);
+.form > * {
+  margin-bottom: 14px;
 }
-
-/* Pending-changes bar: stays at the bottom edge while the panels scroll under it. */
-.footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  margin-top: 14px;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-pop);
+.form > *:last-child {
+  margin-bottom: 0;
 }
-.footerInfo { display: grid; gap: 4px; min-width: 0; }
-.footerActions { display: flex; gap: 8px; }
-.count { font-weight: 600; }
-.note { display: inline-flex; gap: 10px; align-items: baseline; color: var(--muted); font-size: 12.5px; }
-.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
-.problems { margin: 0; padding-left: 18px; color: var(--danger); font-size: 12.5px; }
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; white-space: nowrap; }
-.btn:hover:not(:disabled) { background: var(--hover); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }

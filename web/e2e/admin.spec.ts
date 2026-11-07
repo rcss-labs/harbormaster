@@ -28,12 +28,12 @@ test.describe('admin pages as omer', () => {
     expect(response.status()).toBe(403)
     const body = await response.json()
     expect(body).toEqual({ error: { code: 'forbidden', message: expect.any(String) } })
-    expect(JSON.stringify(body)).not.toMatch(/pavel|dana|oncall/)
+    expect(JSON.stringify(body)).not.toMatch(/sam|dana|oncall/)
   })
 })
 
-test.describe('admin pages as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('admin pages as sam', () => {
+  test.use(asUser('sam'))
 
   test('the permission matrix shows the seeded users and their presets', async ({ page }) => {
     // The old admin path still works: it redirects into Settings.
@@ -45,21 +45,23 @@ test.describe('admin pages as pavel', () => {
       await expect(page.getByRole('columnheader', { name: new RegExp(`^${tag}\\b`) })).toBeVisible()
     }
     // Users from earlier specs stay in the database, so check for these rows rather than the exact set.
-    await expect(page.getByRole('row').filter({ hasText: 'Everything, on every tag' })).toContainText('pavel')
+    await expect(page.getByRole('row').filter({ hasText: 'Everything, on every tag' })).toContainText('sam')
     for (const user of ['dana', 'omer', 'oncall']) {
-      await expect(page.getByLabel(`Preset for ${user} on Dev`)).toBeVisible()
+      await expect(page.getByRole('button', { name: new RegExp(`^${user} on Dev: `) })).toBeVisible()
     }
-    await expect(page.getByLabel('Preset for omer on Dev')).toHaveValue('Operator')
+    await expect(page.getByRole('button', { name: 'omer on Dev: Operator' })).toBeVisible()
   })
 
   test('changing a preset is recorded in the audit log, then restored', async ({ page }) => {
     await page.goto('/settings/users')
+    await page.getByRole('button', { name: 'omer on Prod: None' }).click()
     const prod = page.getByLabel('Preset for omer on Prod')
     await expect(prod).toHaveValue('None')
     try {
       // The select updates optimistically, so wait for the saved response before leaving the page.
       await Promise.all([savedPermission(page), prod.selectOption('Viewer')])
       await expect(prod).toHaveValue('Viewer')
+      await expect(page.getByRole('button', { name: 'omer on Prod: Viewer' })).toBeVisible()
 
       await page.goto('/settings/audit')
       const entry = page.getByText('Gave omer View on Prod.')
@@ -69,8 +71,9 @@ test.describe('admin pages as pavel', () => {
       await expect(page.getByText(/omer.*Prod|Prod.*omer/).first()).toHaveText('Gave omer View on Prod.')
     } finally {
       await page.goto('/settings/users')
+      await page.getByRole('button', { name: /^omer on Prod: / }).click()
       await Promise.all([savedPermission(page), page.getByLabel('Preset for omer on Prod').selectOption('None')])
-      await expect(page.getByLabel('Preset for omer on Prod')).toHaveValue('None')
+      await expect(page.getByRole('button', { name: 'omer on Prod: None' })).toBeVisible()
     }
   })
 
@@ -90,7 +93,7 @@ test.describe('admin pages as pavel', () => {
     await dialog.getByRole('button', { name: 'Done' }).click()
     await expect(page.getByRole('row').filter({ hasText: username })).not.toHaveCount(0)
 
-    // browser.newContext inherits the describe's storageState (pavel), so start from an empty one.
+    // browser.newContext inherits the describe's storageState (sam), so start from an empty one.
     const { context, assertClean } = await newGuardedContext(browser, { baseURL: baseURL, storageState: { cookies: [], origins: [] } })
     const other = await context.newPage()
     await other.goto('/login')
@@ -107,14 +110,16 @@ test.describe('admin pages as pavel', () => {
     await context.close()
 
     // The table lists the user once in the matrix and once in the users card; delete from the users card.
-    const userRow = page.getByRole('row').filter({ hasText: username }).filter({ has: page.getByRole('button', { name: 'Delete' }) })
-    await userRow.getByRole('button', { name: 'Delete' }).click()
+    const userRow = page.getByRole('row').filter({ hasText: username }).filter({ has: page.getByRole('button', { name: `Actions for ${username}` }) })
+    await userRow.getByRole('button', { name: `Actions for ${username}` }).click()
+    await page.getByRole('menuitem', { name: 'Delete' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Delete user' }).click()
     await expect(page.getByRole('row').filter({ hasText: username })).toHaveCount(0)
 
     // Deleting yourself is refused: the button is disabled.
     const self = page.getByRole('row').filter({ hasText: '(you)' })
-    await expect(self.getByRole('button', { name: 'Delete' })).toBeDisabled()
+    await self.getByRole('button', { name: /^Actions for / }).click()
+    await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeDisabled()
   })
 
   test('tags: Dev is the default, a new tag can be created, refused a duplicate name and deleted', async ({ page }) => {

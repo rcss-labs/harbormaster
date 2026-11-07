@@ -1,0 +1,28 @@
+/* Global layout utilities shared by every page (redesign v4). Page containers have no max-width: they use the window. */
+
+/* Screens that fill the window: the working panel takes all the height left under the page header. */
+.hm-fill { flex: 1 1 0; min-height: 440px; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1180px) { .hm-fill.hm-with-side { grid-template-columns: minmax(0, 1fr) 340px; } }
+.hm-fill-col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.hm-fill-scroll { flex: 1 1 0; min-height: 300px; overflow: auto; }
+
+/* Form plus a sticky aside (Deploy's Pending changes): the aside stacks below the form under 1180px. */
+.hm-split-sticky { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.hm-split-sticky > aside { min-width: 0; }
+@media (min-width: 1180px) {
+  .hm-split-sticky { grid-template-columns: minmax(0, 1fr) 340px; }
+  .hm-split-sticky > aside { position: sticky; top: 0; }
+}
+
+/* Very wide screens (about 2200px and up): long single columns flow side by side instead of stretching. */
+.hm-wide-split { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@media (min-width: 2200px) {
+  .hm-wide-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .hm-wide-form { display: block; columns: 2; column-gap: 14px; }
+  .hm-wide-form > * { break-inside: avoid; margin-bottom: 14px; }
+}
+
+.hm-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
+
+/* Visually hidden, still read by assistive tech. */
+.hm-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

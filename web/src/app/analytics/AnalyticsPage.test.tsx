@@ -45,8 +45,11 @@ describe('Analytics routing', () => {
   })
 
   it('tab links keep ?account&tag&range and show the data window', async () => {
+    const urls = recordRequests()
     renderApp('/analytics/delivery?account=482109375512&tag=3&range=7d')
     const link = await screen.findByRole('link', { name: /^Reliability/ })
+    // Let this page's request land here, or it reaches the next test's recorder as a stray range=7d.
+    await waitFor(() => expect(urls.length).toBeGreaterThan(0))
     const href = new URL(link.getAttribute('href') ?? '', 'http://x')
     expect(href.pathname).toBe('/analytics/reliability')
     expect(href.searchParams.get('account')).toBe('482109375512')
@@ -252,7 +255,7 @@ describe('Analytics tables', () => {
   it('operations lists who operates and the most restarted services', async () => {
     renderApp('/analytics/operations')
     const who = await screen.findByRole('table', { name: 'Who operates' })
-    expect(within(who).getByText('pavel')).toBeInTheDocument()
+    expect(within(who).getByText('sam')).toBeInTheDocument()
     const restarted = screen.getByRole('table', { name: 'Most restarted services' })
     expect(within(restarted).getByRole('link', { name: 'payments-api' })).toHaveAttribute('href', expect.stringContaining('/services/'))
   })

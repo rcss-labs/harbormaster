@@ -407,3 +407,52 @@ describe('Tasks Terminal link', () => {
     expect(within(row).queryByRole('link', { name: 'Terminal' })).not.toBeInTheDocument()
   })
 })
+
+describe('Tasks drawer and columns', () => {
+  it('clicking a task id opens the drawer, and Stop from it opens the confirm dialog', async () => {
+    const task = healthy({ can: { operate: true, terminal: false } })
+    serve([task])
+    renderApp('/tasks?filter=running')
+    await userEvent.click(await screen.findByRole('button', { name: `Open details for task ${shortId(task)}` }))
+    const drawer = await screen.findByRole('dialog')
+    expect(within(drawer).getByText(task.id)).toBeInTheDocument()
+    await userEvent.click(within(drawer).getByRole('button', { name: 'Stop task' }))
+    expect(await screen.findByText(`Stop task ${shortId(task)}?`)).toBeInTheDocument()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+
+  it('Esc closes the drawer', async () => {
+    const task = healthy()
+    serve([task])
+    renderApp('/tasks?filter=running')
+    await userEvent.click(await screen.findByRole('button', { name: `Open details for task ${shortId(task)}` }))
+    await screen.findByRole('dialog')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('column picker hides a column, keeps Task, Service and Status, and remembers the choice', async () => {
+    localStorage.removeItem('harbormaster-columns:tasks')
+    serve([healthy()])
+    const first = renderApp('/tasks?filter=running')
+    await screen.findByRole('columnheader', { name: 'Capacity' })
+    await userEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    expect(screen.getByRole('checkbox', { name: 'Task' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'Status' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Capacity' }))
+    expect(screen.queryByRole('columnheader', { name: 'Capacity' })).not.toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('harbormaster-columns:tasks')!)).not.toContain('capacity')
+    first.unmount()
+
+    renderApp('/tasks?filter=running')
+    await screen.findByRole('columnheader', { name: 'Health' })
+    expect(screen.queryByRole('columnheader', { name: 'Capacity' })).not.toBeInTheDocument()
+    localStorage.removeItem('harbormaster-columns:tasks')
+  })
+
+  it('the filter input is the page filter for the "/" shortcut', async () => {
+    serve([healthy()])
+    renderApp('/tasks?filter=running')
+    expect(await screen.findByRole('searchbox', { name: 'Filter tasks' })).toHaveAttribute('data-hm-filter')
+  })
+})

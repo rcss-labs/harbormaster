@@ -57,8 +57,8 @@ async function waitForRolloutDone(page: Page) {
   await expect(progress.getByText('Completed')).toBeVisible({ timeout: 40_000 })
 }
 
-test.describe('pavel on payments-api', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on payments-api', () => {
+  test.use(asUser('sam'))
 
   test('deploys an older tag found by search plus a new env var; progress shows from→to and the operations log carries the reason', async ({ page }) => {
     const id = serviceId(...SVC.paymentsApi)
@@ -75,7 +75,11 @@ test.describe('pavel on payments-api', () => {
     await page.getByRole('button', { name: 'Add variable' }).click()
     await page.getByRole('textbox', { name: 'Variable name 4' }).fill('FEATURE_NEW_LEDGER')
     await page.getByRole('textbox', { name: 'Variable value 4' }).fill('off')
-    await expect(page.getByRole('region', { name: 'Pending changes' }).getByText('1 change')).toBeVisible()
+    const pending = page.getByRole('region', { name: 'Pending changes' })
+    await expect(pending.getByText('1 change')).toBeVisible()
+    // The aside shows each edited field live, before and after.
+    await expect(pending.getByRole('listitem', { name: 'Image tag' })).toContainText('→ 1.16.4')
+    await expect(pending.getByRole('listitem', { name: 'Environment FEATURE_NEW_LEDGER' })).toContainText('Environment FEATURE_NEW_LEDGER: Not set → off')
 
     await page.getByRole('button', { name: 'Review…' }).click()
     const review = page.getByRole('dialog')
@@ -107,17 +111,42 @@ test.describe('pavel on payments-api', () => {
 
   test('the Deploy label is bold and no other tab label is', async ({ page }) => {
     await page.goto(paymentsApi)
-    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'Operations log', exact: true }) })
+    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'History', exact: true }) })
     const deploy = tabs.getByRole('link', { name: /^Deploy/ })
     await expect(deploy.locator('strong')).toHaveText('Deploy')
     await expect(deploy.locator('strong')).toHaveCSS('font-weight', /^(600|700|800|900)$/)
     await expect(tabs.getByRole('link').locator('strong')).toHaveCount(1)
-    await expect(tabs.getByRole('link', { name: 'Operations log', exact: true }).locator('strong')).toHaveCount(0)
+    await expect(tabs.getByRole('link', { name: 'History', exact: true }).locator('strong')).toHaveCount(0)
   })
 })
 
-test.describe('pavel on staging api', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on a phone', () => {
+  test.use(asUser('sam'))
+
+  test('Deploy never scrolls sideways at 390px and the pending aside stacks below the form', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 })
+    await page.goto(paymentsApi)
+    const aside = page.getByRole('region', { name: 'Pending changes' })
+    await expect(aside).toBeVisible()
+    const service = page.getByRole('region', { name: 'Service' })
+    await expect(service.getByRole('spinbutton', { name: 'Desired count' })).toBeVisible()
+    expect((await aside.boundingBox())!.y).toBeGreaterThan((await service.boundingBox())!.y)
+    await expect(page.getByRole('button', { name: 'Add variable' })).toBeVisible()
+    await expect(page.getByRole('table', { name: 'Scaling policies' }).or(page.getByRole('grid', { name: 'Scaling policies' }))).toBeVisible()
+    // Every Deploy panel, the aside and the page itself stay inside the window. (The header's tab strip is the page
+    // frame's and is checked with the service page.)
+    const overflow = await page.evaluate(() => {
+      const limit = document.documentElement.clientWidth
+      const wide = Array.from(document.querySelectorAll('main section, main aside')).filter((element) => element.getBoundingClientRect().right > limit + 0.5)
+      return { page: document.documentElement.scrollWidth - limit, wide: wide.map((element) => element.getAttribute('aria-label') ?? element.tagName) }
+    })
+    expect(overflow.page).toBeLessThanOrEqual(0)
+    expect(overflow.wide).toEqual([])
+  })
+})
+
+test.describe('sam on staging api', () => {
+  test.use(asUser('sam'))
 
   test('edits the migrator sidecar image and the task size in one change set', async ({ page }) => {
     await page.goto(stagingApi)
@@ -183,8 +212,8 @@ test.describe('omer on search-indexer (Operate on Dev)', () => {
   })
 })
 
-test.describe('pavel on email-sender', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on email-sender', () => {
+  test.use(asUser('sam'))
 
   test('turning ECS Exec off restarts the service with a new deployment, without a new revision', async ({ page }) => {
     const id = serviceId(...emailSender)
@@ -215,8 +244,8 @@ test.describe('pavel on email-sender', () => {
   })
 })
 
-test.describe('pavel on auth-service', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on auth-service', () => {
+  test.use(asUser('sam'))
 
   test('changes only rollout settings (circuit breaker, percentages, grace period) and registers no revision', async ({ page }) => {
     const id = serviceId(...authService)
@@ -255,8 +284,8 @@ test.describe('pavel on auth-service', () => {
 // RetryWithRevisionDoesNotRegisterAgain), the API test _PartialIs200WithSteps and DeployTab.review.test.tsx.
 test.skip('partial failure shows the steps and retries without registering again', () => {})
 
-test.describe('pavel on image-resizer (failing OOM rollout)', () => {
-  test.use(asUser('pavel'))
+test.describe('sam on image-resizer (failing OOM rollout)', () => {
+  test.use(asUser('sam'))
 
   test('one-click rollback during the failing rollout returns the service to the earlier revision', async ({ page }) => {
     const id = serviceId(...SVC.imageResizer)
@@ -296,7 +325,7 @@ test.describe('omer on staging web (Viewer only)', () => {
 
   test('the Deploy tab is locked and shows no editors', async ({ page }) => {
     await page.goto(serviceUrl(...stagingWeb, 'deploy'))
-    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'Operations log', exact: true }) })
+    const tabs = page.locator('nav', { has: page.getByRole('link', { name: 'History', exact: true }) })
     const deploy = tabs.getByRole('link', { name: /^Deploy/ })
     // Locked tabs are marked with ⊘ and keep the bold label.
     await expect(deploy).toContainText('⊘')

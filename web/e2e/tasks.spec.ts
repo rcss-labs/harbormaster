@@ -2,8 +2,8 @@ import { asUser, expect, test } from './fixtures/test'
 
 // Read-only: runs in the observe project, before change.spec touches image-resizer.
 
-test.describe('tasks as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('tasks as sam', () => {
+  test.use(asUser('sam'))
 
   test('Problems first lists the image-resizer task stopped 4 min ago and hides the older ones', async ({ page }) => {
     await page.goto('/tasks')
@@ -30,8 +30,66 @@ test.describe('tasks as pavel', () => {
   })
 })
 
-test.describe('expected stops as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('task drawer and layout as sam', () => {
+  test.use(asUser('sam'))
+
+  test('a task id opens the drawer with the stop reason; Esc closes it', async ({ page }) => {
+    // Repeats off, so the row is a task and not a "×N tasks" group.
+    await page.goto('/tasks?group=0')
+    const stoppedResizer = page.getByRole('row').filter({ hasText: 'image-resizer' }).filter({ hasText: 'Stopped (exit 137)' }).first()
+    await expect(stoppedResizer).toBeVisible()
+    await stoppedResizer.getByRole('button', { name: /^Open details for task / }).click()
+    const drawer = page.getByRole('dialog')
+    await expect(drawer.getByText('Reported by ECS')).toBeVisible()
+    await expect(drawer.getByText('Identity')).toBeVisible()
+    await expect(drawer.getByRole('link', { name: 'Open logs' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(drawer).toHaveCount(0)
+  })
+
+  // Needs the seeded tasks: the fake writes one line per task every 9 s, so a replacement task started by a flow spec has too few.
+  test('the drawer of a running payments-api task shows 20 log lines of that task', async ({ page }) => {
+    const recentLogLines = 20
+    await page.goto('/tasks?group=0&filter=running')
+    const row = page.getByRole('row').filter({ hasText: 'payments-api' }).filter({ hasText: 'Running' }).first()
+    const opener = row.getByRole('button', { name: /^Open details for task / })
+    const shortId = ((await opener.getAttribute('aria-label')) ?? '').replace('Open details for task ', '')
+    await opener.click()
+    const drawer = page.getByRole('dialog')
+    await expect(drawer).toContainText('payments-api')
+
+    const logSection = drawer.locator('section').filter({ has: page.getByRole('heading', { name: 'Recent log lines' }) })
+    await expect(logSection.locator('div > div')).toHaveCount(recentLogLines)
+    await expect(drawer.getByText('No log lines.')).toHaveCount(0)
+
+    // The same lines come from the per-task logs endpoint, so the drawer is not showing a service-wide read.
+    const href = await drawer.getByRole('link', { name: 'Open logs' }).getAttribute('href')
+    const response = await page.request.get(`/api${href}?task=${shortId}&limit=${recentLogLines}`)
+    expect(response.ok()).toBe(true)
+    expect(((await response.json()) as { lines: unknown[] }).lines).toHaveLength(recentLogLines)
+  })
+
+  test('at 1440 the KPI strip and the pinned row actions stay visible, with no clipped KPI text', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/tasks?filter=running&group=0')
+    const kpis = page.getByRole('list', { name: 'Task summary' })
+    await expect(kpis).toBeVisible()
+    const clipped = await kpis.locator('li').evaluateAll((cells) => cells.filter((cell) => cell.scrollWidth > cell.clientWidth).length)
+    expect(clipped).toBe(0)
+
+    const stop = page.getByRole('button', { name: 'Stop', exact: true }).first()
+    await expect(stop).toBeVisible()
+    const box = await stop.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x + box!.width).toBeLessThanOrEqual(1440)
+    // The page itself never scrolls sideways; only the table does.
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+})
+
+test.describe('expected stops as sam', () => {
+  test.use(asUser('sam'))
 
   test('a Spot-interrupted task that exited 1 shows the "spot" chip, a teal stripe and is not an error', async ({ page }) => {
     await page.goto('/tasks?filter=stopped&group=0')

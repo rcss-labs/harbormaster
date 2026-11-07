@@ -473,6 +473,8 @@ type PollerItemDTO struct {
 	Failing     bool       `json:"failing"`
 	LastError   string     `json:"last_error"`
 	LastOKAt    *time.Time `json:"last_ok_at"`
+	// Tiers lists every data type, core or not; failing/throttled/last_error above aggregate core tiers only.
+	Tiers []PollerTierDTO `json:"tiers"`
 }
 
 // ItemsResponse is the body of the unpaginated list endpoints: {"items": [...]}.

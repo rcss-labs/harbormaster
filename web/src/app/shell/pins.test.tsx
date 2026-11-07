@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePins, type Pin } from './pins'
 
-let username = 'pavel'
+let username = 'sam'
 vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ me: { username } }) }))
 
 const service: Pin = { kind: 'service', id: 's1', name: 'payments-api', cluster: 'core-services' }
@@ -10,7 +10,7 @@ const cluster: Pin = { kind: 'cluster', id: 'c1', name: 'core-services', account
 
 beforeEach(() => {
   localStorage.clear()
-  username = 'pavel'
+  username = 'sam'
 })
 
 describe('usePins', () => {
@@ -35,14 +35,14 @@ describe('usePins', () => {
   })
 
   it('reads entries stored before pins had a kind as services', () => {
-    localStorage.setItem('harbormaster-pinned:pavel', JSON.stringify([{ id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' }]))
+    localStorage.setItem('harbormaster-pinned:sam', JSON.stringify([{ id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' }]))
     const { result } = renderHook(() => usePins())
     expect(result.current.pins).toEqual([{ kind: 'service', id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' }])
     expect(result.current.isPinned('service', 'abc')).toBe(true)
   })
 
   it('ignores malformed entries', () => {
-    localStorage.setItem('harbormaster-pinned:pavel', JSON.stringify([{ kind: 'cluster', id: 'x' }, 5, service]))
+    localStorage.setItem('harbormaster-pinned:sam', JSON.stringify([{ kind: 'cluster', id: 'x' }, 5, service]))
     const { result } = renderHook(() => usePins())
     expect(result.current.pins).toEqual([service])
   })
@@ -50,7 +50,7 @@ describe('usePins', () => {
   it('stores pins per user', () => {
     const { result } = renderHook(() => usePins())
     act(() => result.current.toggle(cluster))
-    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:pavel')!)).toEqual([cluster])
+    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)).toEqual([cluster])
     username = 'omer'
     const other = renderHook(() => usePins())
     expect(other.result.current.pins).toEqual([])

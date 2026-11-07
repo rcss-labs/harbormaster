@@ -5,7 +5,7 @@
 .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 .stack { display: grid; gap: 12px; }
 .accountName { font-weight: 600; color: var(--text); }
-.statusNote { font-size: 11.5px; color: var(--danger); white-space: normal; }
+.statusNote { font-size: 12px; color: var(--danger); white-space: normal; }
 .throttled { color: var(--warning); }
 .rowActions { display: inline-flex; gap: 6px; justify-content: flex-end; }
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -36,3 +36,8 @@
 .results { display: grid; gap: 4px; font-size: 12px; font-family: var(--mono); }
 .resultOk { color: var(--success); }
 .resultBad { color: var(--danger); }
+
+.errorDetails { margin-top: 4px; font-size: 12px; white-space: normal; }
+.errorDetails summary { cursor: pointer; color: var(--accent); }
+.errorBody { display: grid; gap: 4px; margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
+.testResults { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-family: var(--mono); font-size: 12px; }

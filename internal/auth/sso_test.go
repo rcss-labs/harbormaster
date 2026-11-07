@@ -34,7 +34,7 @@ func ssoIdentity(nameID, email string) saml.Identity {
 func enableSSO(t *testing.T, st *store.Store) store.User {
 	t.Helper()
 	ctx := context.Background()
-	admin := mustUser(t, st, "pavel", true)
+	admin := mustUser(t, st, "sam", true)
 	if _, err := st.SetBreakGlassChecked(ctx, admin.ID, true); err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestLoginSSO_PendingLinkBindsExistingUser(t *testing.T) {
 func TestLoginSSO_ExpiredPendingLinkFallsBackToJIT(t *testing.T) {
 	svc, st := newTestService(t)
 	ctx := context.Background()
-	admin := mustUser(t, st, "pavel", true)
+	admin := mustUser(t, st, "sam", true)
 	dana := mustUser(t, st, "dana", false)
 	if err := st.SetPendingLink(ctx, dana.ID, "dana@example.test", admin.ID, time.Now().Add(14*24*time.Hour)); err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestLoginSSO_ConcurrentFirstSignIn_OneUser(t *testing.T) {
 func TestPreviewSSO_WouldCreateAndWouldSignIn(t *testing.T) {
 	svc, st := newTestService(t)
 	ctx := context.Background()
-	admin := mustUser(t, st, "pavel", true)
+	admin := mustUser(t, st, "sam", true)
 	p, err := svc.PreviewSSO(ctx, ssoIdentity("alex@example.test", "alex@example.test"), ssoCfg())
 	if err != nil || p.Outcome != "would_create" || p.Username != "alex" || p.ExistingUser != nil {
 		t.Fatalf("preview = %+v, %v", p, err)
@@ -347,7 +347,7 @@ func TestStartLink_PasswordlessIgnoresVerifier(t *testing.T) {
 func TestLinkSSO_PasswordUntouched_SignInGatedBySSOState(t *testing.T) {
 	svc, st := newTestService(t)
 	ctx := context.Background()
-	admin := mustUser(t, st, "pavel", true)
+	admin := mustUser(t, st, "sam", true)
 	dana := mustUser(t, st, "dana", false)
 	before, _ := st.GetUser(ctx, dana.ID)
 
@@ -448,7 +448,7 @@ func TestLinkSSO_IdentityTakenAndConcurrent(t *testing.T) {
 func TestLinkSSO_IdentityPendingElsewhereIsTaken(t *testing.T) {
 	svc, st := newTestService(t)
 	ctx := context.Background()
-	admin := mustUser(t, st, "pavel", true)
+	admin := mustUser(t, st, "sam", true)
 	a := mustUser(t, st, "alice", false)
 	b := mustUser(t, st, "bob", false)
 	if err := st.SetPendingLink(ctx, b.ID, "pending-id", admin.ID, time.Now().Add(time.Hour)); err != nil {
@@ -463,7 +463,7 @@ func TestLinkSSO_IdentityPendingElsewhereIsTaken(t *testing.T) {
 func TestLinkSSO_UserGoneAndHasIdentity(t *testing.T) {
 	svc, st := newTestService(t)
 	ctx := context.Background()
-	mustUser(t, st, "pavel", true)
+	mustUser(t, st, "sam", true)
 	a := mustUser(t, st, "alice", false)
 	if err := st.DeleteUser(ctx, a.ID); err != nil {
 		t.Fatal(err)
@@ -498,7 +498,7 @@ func TestLogin_SSOOnRequiresBreakGlass(t *testing.T) {
 	if _, err := svc.Login(ctx, "omer", "wrong-password-xx", "10.0.0.1", "ua"); !errors.Is(err, ErrBadCredentials) {
 		t.Fatalf("wrong password: %v", err)
 	}
-	res, err := svc.Login(ctx, "pavel", testPassword, "10.0.0.1", "ua")
+	res, err := svc.Login(ctx, "sam", testPassword, "10.0.0.1", "ua")
 	if err != nil || res.SessionID == "" {
 		t.Fatalf("break-glass: %v", err)
 	}

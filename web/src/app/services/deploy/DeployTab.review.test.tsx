@@ -29,8 +29,9 @@ const desiredCount = () => within(screen.getByRole('region', { name: 'Service' }
 
 async function openDeployTab(path = route) {
   const view = renderApp(path)
-  await within(await screen.findByRole('region', { name: 'Service' })).findByRole('spinbutton', { name: 'Desired count' })
-  await within(await screen.findByRole('region', { name: 'Containers' })).findByRole('button', { name: 'Add variable' })
+  // Panels first render as skeletons and are replaced when their data arrives, so wait for content before taking a region.
+  await waitFor(() => desiredCount())
+  await screen.findByRole('button', { name: 'Add variable' })
   return view
 }
 

@@ -1,6 +1,6 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Pager } from './Pager'
+import { useMemo, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import styles from './DataTable.module.css'
+import { Pager } from './Pager'
 
 export interface DataTableColumn<R> {
   key: string
@@ -44,7 +44,17 @@ interface DataTableProps<R> {
   /** Controlled 1-based page. */
   page?: number
   onPageChange?: (page: number) => void
+  /** Pin the last column (the row actions) to the right edge while the table scrolls sideways. */
+  stickyActions?: boolean
+  /** Keys of the columns to show, in table order; all columns when omitted. */
+  visibleColumns?: string[]
+  /** Appends an "Actions" column rendering the returned controls for each row. */
+  rowAction?: (row: R) => ReactNode
 }
+
+const ACTIONS_KEY = '__actions'
+const BODY_ROW_STYLE: CSSProperties = { minHeight: 'var(--row)' }
+const STICKY_STYLE: CSSProperties = { position: 'sticky', right: 0 }
 
 function compare(a: string | number | null | undefined, b: string | number | null | undefined): number {
   if (a == null && b == null) return 0
@@ -56,7 +66,7 @@ function compare(a: string | number | null | undefined, b: string | number | nul
 
 export function DataTable<R>({
   label,
-  columns,
+  columns: allColumns,
   rows,
   rowKey,
   empty,
@@ -70,7 +80,23 @@ export function DataTable<R>({
   pageSize,
   page,
   onPageChange,
+  stickyActions = false,
+  visibleColumns,
+  rowAction,
 }: DataTableProps<R>) {
+  const columns = useMemo(() => {
+    const shown = visibleColumns ? allColumns.filter((column) => visibleColumns.includes(column.key)) : allColumns
+    if (!rowAction) return shown
+    const actions: DataTableColumn<R> = {
+      key: ACTIONS_KEY,
+      header: <span className="hm-sr">Actions</span>,
+      width: 'max-content',
+      align: 'right',
+      render: (row) => rowAction(row),
+    }
+    return [...shown, actions]
+  }, [allColumns, visibleColumns, rowAction])
+  const stickyKey = stickyActions ? columns[columns.length - 1]?.key : undefined
   const [innerSort, setInnerSort] = useState<SortState | null>(defaultSort)
   const [innerPage, setInnerPage] = useState(1)
   const activeSort = sort !== undefined ? sort : innerSort
@@ -107,7 +133,8 @@ export function DataTable<R>({
   }
 
   const template = columns.map((c) => c.width ?? '1fr').join(' ')
-  const gridStyle = { gridTemplateColumns: template }
+  // One grid for the whole table: head and body rows are subgrids, so every row shares the same column tracks.
+  const tableStyle: CSSProperties = { gridTemplateColumns: template, ...(minWidth ? { minWidth } : null) }
 
   const onRowKeyDown = (event: KeyboardEvent<HTMLDivElement>, row: R) => {
     if (event.key === 'Enter' && event.target === event.currentTarget) onRowClick?.(row)
@@ -116,9 +143,9 @@ export function DataTable<R>({
   return (
     <div className={styles.wrap}>
       <div className={styles.scroll} style={maxHeight !== undefined ? { maxHeight } : undefined}>
-        <div role="table" aria-label={label} className={styles.table} style={minWidth ? { minWidth } : undefined}>
-          <div role="rowgroup" className={styles.head}>
-            <div role="row" className={styles.row} style={gridStyle}>
+        <div role="table" aria-label={label} className={styles.table} style={tableStyle}>
+          <div role="rowgroup" className={`${styles.group} ${styles.head}`}>
+            <div role="row" className={styles.row}>
               {columns.map((column) => {
                 const sortable = column.sortValue !== undefined
                 const dir = activeSort?.key === column.key ? activeSort.dir : undefined
@@ -126,7 +153,8 @@ export function DataTable<R>({
                   <div
                     key={column.key}
                     role="columnheader"
-                    className={`${styles.th} ${column.align === 'right' ? styles.right : ''}`.trim()}
+                    className={`${styles.th} ${column.align === 'right' ? styles.right : ''} ${column.key === stickyKey ? styles.sticky : ''}`.trim()}
+                    style={column.key === stickyKey ? STICKY_STYLE : undefined}
                     aria-sort={sortable ? (dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none') : undefined}
                   >
                     {sortable ? (
@@ -144,7 +172,7 @@ export function DataTable<R>({
               })}
             </div>
           </div>
-          <div role="rowgroup">
+          <div role="rowgroup" className={styles.group}>
             {visible.length === 0 && empty !== undefined && <div className={styles.empty}>{empty}</div>}
             {visible.map((row, index) => {
               const status = rowStatus?.(row)
@@ -153,14 +181,19 @@ export function DataTable<R>({
                   key={rowKey(row)}
                   role="row"
                   className={`${styles.row} ${styles.body} ${status ? styles[status] : ''} ${onRowClick ? styles.clickable : ''}`.trim()}
-                  style={gridStyle}
+                  style={BODY_ROW_STYLE}
                   data-status={status}
                   tabIndex={onRowClick ? 0 : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   onKeyDown={onRowClick ? (event) => onRowKeyDown(event, row) : undefined}
                 >
                   {columns.map((column) => (
-                    <div key={column.key} role="cell" className={`${styles.td} ${column.align === 'right' ? styles.right : ''}`.trim()}>
+                    <div
+                      key={column.key}
+                      role="cell"
+                      className={`${styles.td} ${column.align === 'right' ? styles.right : ''} ${column.key === stickyKey ? styles.sticky : ''}`.trim()}
+                      style={column.key === stickyKey ? STICKY_STYLE : undefined}
+                    >
                       {column.render(row, index)}
                     </div>
                   ))}

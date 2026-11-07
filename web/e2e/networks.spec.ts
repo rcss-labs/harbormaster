@@ -13,7 +13,7 @@ const vpcUrl = (vpc: string) => `/networks?vpc=${encodeURIComponent(`${HOMELAB_A
 
 test('admin picks homelab-main from the VPC list and walks the placement outline', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto('/networks')
   await expect(page.getByRole('heading', { level: 1, name: 'Networks' })).toBeVisible()
 
@@ -55,7 +55,7 @@ test('dev user does not see Prod clusters in the placement outline', async ({ pa
 })
 
 test('service networking card opens the VPC on the Networks page', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}/overview`)
   await page.getByRole('link', { name: 'Network placement →' }).click()
   // The old /networks/<account>/<region>/<vpc> link redirects to the selection in the URL.
@@ -64,8 +64,8 @@ test('service networking card opens the VPC on the Networks page', async ({ page
   await expect(placement(page)).toBeVisible({ timeout: POLL_TIMEOUT })
 })
 
-test.describe('networks as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('networks as sam', () => {
+  test.use(asUser('sam'))
 
   test('lists the VPCs of both accounts, grouped by account', async ({ page }) => {
     await page.goto('/networks')

@@ -137,7 +137,7 @@ func TestStopReasonGroup_Table(t *testing.T) {
 		},
 		{
 			name: "stopped by a user via harbormaster",
-			task: model.Task{StoppedReason: "Task stopped by pavel via Harbormaster"},
+			task: model.Task{StoppedReason: "Task stopped by sam via Harbormaster"},
 			want: "Stopped by a user",
 		},
 		{

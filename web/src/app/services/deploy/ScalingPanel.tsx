@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DeploySettingsResponse } from '../../../api/deploy'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { Panel } from '../../../components/Panel'
+import { PanelError } from '../../../components/PanelError'
 import { METRIC_LABELS, PolicyRowEditor } from './PolicyRowEditor'
 import { ScheduledActionEditor } from './ScheduledActionEditor'
 import { plural } from './format'
@@ -15,6 +16,8 @@ interface ScalingPanelProps {
   /** The service draft's desired count (null while the field is empty), to warn when auto scaling would move it. */
   desiredCount: number | null
   tagName: string
+  /** Refetches the deploy settings; offered as Retry where a part of them could not be read. */
+  onRetry: () => void
 }
 
 type Editing = { kind: 'new' } | { kind: 'edit'; name: string } | null
@@ -32,11 +35,19 @@ const parseNumber = (text: string): number | null => {
 }
 
 /** Scalable target, target-tracking policies and scheduled actions, edited as a draft. Every edit needs Operate. */
-export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName }: ScalingPanelProps) {
+export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName, onRetry }: ScalingPanelProps) {
   const [editingPolicy, setEditingPolicy] = useState<Editing>(null)
   const [editingAction, setEditingAction] = useState<Editing>(null)
   const lock = settings.can.operate ? undefined : `You need Operate on ${tagName}`
   const locked = lock !== undefined
+  // Parts the server could not read (settings.partial): only the editor of that part is blocked.
+  const unreadable = (part: string) => settings.partial.find((entry) => entry.part === part)
+  const scheduledUnreadable = unreadable('scheduled_actions')
+  const policiesUnreadable = unreadable('scaling_policies')
+  const scheduledLock = lock ?? (scheduledUnreadable ? 'Scheduled actions could not be read' : undefined)
+  const policiesLock = lock ?? (policiesUnreadable ? 'Scaling policies could not be read' : undefined)
+  // Removing the target also removes what could not be read, so it waits for a successful read.
+  const removeLock = scheduledLock ?? policiesLock
 
   const addTarget = () => {
     const current = desiredCount ?? settings.desired_count
@@ -82,7 +93,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
       render: (policy) => (
         <span className={styles.rowActions}>
           {policy.editable && (
-            <button type="button" className={styles.btn} aria-label={`Edit ${policy.name}`} disabled={locked} title={lock} onClick={() => setEditingPolicy({ kind: 'edit', name: policy.name })}>
+            <button type="button" className={styles.btn} aria-label={`Edit ${policy.name}`} disabled={policiesLock !== undefined} title={policiesLock} onClick={() => setEditingPolicy({ kind: 'edit', name: policy.name })}>
               Edit
             </button>
           )}
@@ -90,8 +101,8 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
             type="button"
             className={`${styles.btn} ${styles.danger}`}
             aria-label={`Remove ${policy.name}`}
-            disabled={locked}
-            title={lock}
+            disabled={policiesLock !== undefined}
+            title={policiesLock}
             onClick={() => onChange({ ...draft, policies: draft.policies.filter((candidate) => candidate.name !== policy.name) })}
           >
             Remove
@@ -113,15 +124,15 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
       width: '130px',
       render: (action) => (
         <span className={styles.rowActions}>
-          <button type="button" className={styles.btn} aria-label={`Edit ${action.name}`} disabled={locked} title={lock} onClick={() => setEditingAction({ kind: 'edit', name: action.name })}>
+          <button type="button" className={styles.btn} aria-label={`Edit ${action.name}`} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'edit', name: action.name })}>
             Edit
           </button>
           <button
             type="button"
             className={`${styles.btn} ${styles.danger}`}
             aria-label={`Remove ${action.name}`}
-            disabled={locked}
-            title={lock}
+            disabled={scheduledLock !== undefined}
+            title={scheduledLock}
             onClick={() => onChange({ ...draft, scheduledActions: draft.scheduledActions.filter((candidate) => candidate.name !== action.name) })}
           >
             Remove
@@ -138,8 +149,9 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
   const policyBeingEdited = editingPolicy?.kind === 'edit' ? draft.policies.find((policy) => policy.name === editingPolicy.name) ?? null : null
   const actionBeingEdited = editingAction?.kind === 'edit' ? draft.scheduledActions.find((action) => action.name === editingAction.name) ?? null : null
 
+  const targetUnreadable = unreadable('scaling_target')
   return (
-    <Panel title="Auto scaling">
+    <Panel title="Auto scaling" error={targetUnreadable ? { message: targetUnreadable.message, onRetry } : undefined}>
       <div className={styles.stack}>
         {draft.hasTarget ? (
           <div className={styles.group}>
@@ -175,7 +187,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
               </p>
             )}
             <div className={styles.actions}>
-              <button type="button" className={`${styles.btn} ${styles.danger}`} disabled={locked} title={lock} onClick={removeTarget}>
+              <button type="button" className={`${styles.btn} ${styles.danger}`} disabled={removeLock !== undefined} title={removeLock} onClick={removeTarget}>
                 Remove target
               </button>
             </div>
@@ -209,14 +221,18 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
           <>
             <div className={styles.group}>
               <h3 className={styles.groupTitle}>Policies</h3>
-              <DataTable
-                label="Scaling policies"
-                columns={policyColumns}
-                rows={draft.policies}
-                rowKey={(policy) => policy.name}
-                minWidth={560}
-                empty="No scaling policies."
-              />
+              {policiesUnreadable ? (
+                <PanelError message={policiesUnreadable.message} onRetry={onRetry} />
+              ) : (
+                <DataTable
+                  label="Scaling policies"
+                  columns={policyColumns}
+                  rows={draft.policies}
+                  rowKey={(policy) => policy.name}
+                  minWidth={560}
+                  empty="No scaling policies."
+                />
+              )}
               {editingPolicy ? (
                 <PolicyRowEditor
                   key={policyBeingEdited?.name ?? 'new'}
@@ -228,7 +244,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
                 />
               ) : (
                 <div className={styles.actions}>
-                  <button type="button" className={styles.btn} disabled={locked} title={lock} onClick={() => setEditingPolicy({ kind: 'new' })}>
+                  <button type="button" className={styles.btn} disabled={policiesLock !== undefined} title={policiesLock} onClick={() => setEditingPolicy({ kind: 'new' })}>
                     Add policy
                   </button>
                 </div>
@@ -237,14 +253,18 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
 
             <div className={styles.group}>
               <h3 className={styles.groupTitle}>Scheduled actions</h3>
-              <DataTable
-                label="Scheduled actions"
-                columns={actionColumns}
-                rows={draft.scheduledActions}
-                rowKey={(action) => action.name}
-                minWidth={560}
-                empty="No scheduled actions."
-              />
+              {scheduledUnreadable ? (
+                <PanelError message={scheduledUnreadable.message} onRetry={onRetry} />
+              ) : (
+                <DataTable
+                  label="Scheduled actions"
+                  columns={actionColumns}
+                  rows={draft.scheduledActions}
+                  rowKey={(action) => action.name}
+                  minWidth={560}
+                  empty="No scheduled actions."
+                />
+              )}
               {editingAction ? (
                 <ScheduledActionEditor
                   key={actionBeingEdited?.name ?? 'new'}
@@ -255,7 +275,7 @@ export function ScalingPanel({ settings, draft, onChange, desiredCount, tagName 
                 />
               ) : (
                 <div className={styles.actions}>
-                  <button type="button" className={styles.btn} disabled={locked} title={lock} onClick={() => setEditingAction({ kind: 'new' })}>
+                  <button type="button" className={styles.btn} disabled={scheduledLock !== undefined} title={scheduledLock} onClick={() => setEditingAction({ kind: 'new' })}>
                     Add scheduled action
                   </button>
                 </div>

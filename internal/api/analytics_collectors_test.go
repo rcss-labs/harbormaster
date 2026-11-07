@@ -34,7 +34,7 @@ func TestDailyPanelsCollected_ReliabilityAvailabilityFromNightlyRollup(t *testin
 	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
 	seedMockupTags(t, st)
 	pollCountsAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	if before := getReliability(t, admin, ""); before.Availability90d.Available {
 		t.Fatal("availability_90d is available before any rollup ran: today is not a complete day")
 	}
@@ -68,7 +68,7 @@ func TestDailyPanelsCollected_CapacityFromCountsTickAndUtilRollup(t *testing.T) 
 	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
 	seedMockupTags(t, st)
 	pollCountsAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	before := getCapacity(t, admin, "")
 	if before.Memory90d.Available || before.OverReserved.Available {
 		t.Fatal("utilisation panels are available before the CloudWatch rollup ran")
@@ -115,7 +115,7 @@ func TestDailyPanelsCollected_DeliveryFailureReasonsFromOutcomeLogger(t *testing
 	srv, fk, st, _ := newServerCustom(t, true, withDailyRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	getDelivery := func() DeliveryDTO {
 		var out DeliveryDTO
 		decode(t, admin.get("/api/analytics/delivery?range=30d"), &out)

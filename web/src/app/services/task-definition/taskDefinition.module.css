@@ -16,12 +16,12 @@
 .mono { font-family: var(--mono); }
 .envRow { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
 .iconBtn { border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); border-radius: var(--radius); width: 30px; cursor: pointer; }
-.btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .editor { width: 100%; min-height: 420px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); box-sizing: border-box; }
 .invalid { border-color: var(--danger); }
-.toolbar { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .spacer { margin-left: auto; }
 .hint { color: var(--muted); font-size: 12px; }
 .err { color: var(--danger); font-size: 12px; }

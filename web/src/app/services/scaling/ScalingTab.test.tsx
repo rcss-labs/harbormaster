@@ -52,6 +52,26 @@ describe('ScalingTab', () => {
     expect(screen.queryByRole('link', { name: 'Edit in Deploy →' })).not.toBeInTheDocument()
   })
 
+  it('renders the readable parts and flags the unreadable scheduled actions, never "no scalable target"', async () => {
+    mockDesiredCount(desiredInfo(), { ...SCALING_PAYMENTS, scheduled_actions: [], unreadable_parts: ['scheduled_actions'] })
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    expect(await screen.findByText('Auto scaling')).toBeInTheDocument()
+    expect(definitionFor('Minimum tasks')).toHaveTextContent(String(SCALING_PAYMENTS.min))
+    expect(definitionFor('Maximum tasks')).toHaveTextContent(String(SCALING_PAYMENTS.max))
+    expect(definitionFor('Policy')).toHaveTextContent('ECSServiceAverageCPUUtilization')
+    expect(definitionFor('Scheduled actions')).toHaveTextContent('Scheduled actions could not be read')
+    expect(screen.queryByText('This service has no scalable target registered.')).not.toBeInTheDocument()
+  })
+
+  it('says the scalable target could not be read instead of claiming there is none', async () => {
+    mockDesiredCount(desiredInfo({ auto_scaling: null }), { ...SCALING_NONE, unreadable_parts: ['scaling_target'] })
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    expect(await screen.findByText('The scalable target could not be read.')).toBeInTheDocument()
+    expect(screen.queryByText('This service has no scalable target registered.')).not.toBeInTheDocument()
+  })
+
   it('renders min, max, policy and scheduled actions', async () => {
     mockDesiredCount()
     renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
@@ -198,6 +218,26 @@ describe('ScalingTab', () => {
     })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', `You need Operate on ${SERVICE_PAYMENTS.tag.name}`)
+  })
+
+  it('a failed scaling request errors only the scaling panels, keeps the stepper, and Retry refetches', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/services/:id/desired-count', () => HttpResponse.json(desiredInfo())),
+      http.get('/api/services/:id/scaling', () => {
+        calls += 1
+        return calls === 1
+          ? HttpResponse.json({ error: { code: 'aws_error', message: 'Scaling is unavailable' } }, { status: 502 })
+          : HttpResponse.json(SCALING_PAYMENTS)
+      }),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/scaling`)
+
+    const autoScaling = await screen.findByRole('region', { name: 'Auto scaling' })
+    expect(await within(autoScaling).findByRole('alert')).toHaveTextContent('Auto scaling could not be read.')
+    expect(screen.getByRole('spinbutton', { name: 'Scale to' })).toBeInTheDocument()
+    await userEvent.click(within(autoScaling).getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Minimum tasks')).toBeInTheDocument()
   })
 
   it('no target shows the empty state and the no-auto-scaling hint', async () => {

@@ -35,7 +35,7 @@ func TestClusters_DefaultOrderProblemsFirst(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := listClusters(t, login(t, srv, "pavel", testPassword), "")
+	got := listClusters(t, login(t, srv, "sam", testPassword), "")
 	if len(got.Items) != 6 {
 		t.Fatalf("items %d, want 6", len(got.Items))
 	}
@@ -58,7 +58,7 @@ func TestClusters_Pagination(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	first := listClusters(t, c, "?limit=4")
 	if len(first.Items) != 4 || first.Next == nil {
 		t.Fatalf("first page %d next %v", len(first.Items), first.Next)
@@ -73,7 +73,7 @@ func TestClusters_TagAndInheritance(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	for _, item := range listClusters(t, login(t, srv, "pavel", testPassword), "").Items {
+	for _, item := range listClusters(t, login(t, srv, "sam", testPassword), "").Items {
 		switch item.Name {
 		case "core-services":
 			if item.Tag.Name != "Prod" || item.Tag.Inherited {
@@ -95,7 +95,7 @@ func TestCluster_InvisibleIs404(t *testing.T) {
 	if resp := login(t, srv, "omer", testPassword).get("/api/clusters/" + id); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("omer status %d, want 404", resp.StatusCode)
 	}
-	if resp := login(t, srv, "pavel", testPassword).get("/api/clusters/not-an-id"); resp.StatusCode != http.StatusNotFound {
+	if resp := login(t, srv, "sam", testPassword).get("/api/clusters/not-an-id"); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("bad id status %d, want 404", resp.StatusCode)
 	}
 }
@@ -104,7 +104,7 @@ func TestCluster_SlotsAndReserved(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	resp := login(t, srv, "pavel", testPassword).get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
+	resp := login(t, srv, "sam", testPassword).get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
@@ -156,7 +156,7 @@ func TestClusterDetail_IncludesVPC(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)

@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router'
 import { isApiError, useRegisterRevision, useRevisions, useTaskDefinition } from '../../../api/change'
 import type { ServiceDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
-import { EmptyState } from '../../../components/EmptyState'
 import { TagChip } from '../../../components/TagChip'
 import { showWarning, useToast } from '../../../components/Toast'
+import { queryPanelError } from '../panelError'
 import { isRolloutRunning } from '../rollout'
 import { JsonEditor } from './JsonEditor'
 import { Panel } from '../../../components/Panel'
@@ -48,10 +48,17 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
   const [registerError, setRegisterError] = useState<string | undefined>()
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
   const data = taskDefinition.data
-  if (taskDefinition.isError && !data) {
-    return <EmptyState>{taskDefinition.error instanceof Error ? taskDefinition.error.message : 'The task definition could not be loaded.'}</EmptyState>
+  if (!data) {
+    return (
+      <Panel
+        title="Task definition JSON"
+        loading={!taskDefinition.isError}
+        error={queryPanelError(taskDefinition, 'The task definition could not be read.')}
+      >
+        {null}
+      </Panel>
+    )
   }
-  if (!data) return null
 
   const canEdit = service.can.edit
   const initialText = pretty(data.definition)

@@ -28,13 +28,13 @@ describe('EstateMap', () => {
     expect(cell).toHaveAttribute('href', `/clusters/${clusterId('background-jobs')}`)
   })
 
-  it('colours healthy cells with the healthy token and failing ones with danger', async () => {
+  it('colours healthy cells with the cell-ok token and failing ones with bad', async () => {
     renderApp('/')
     const region = await map()
     const healthy = await within(region).findByRole('link', { name: /^ci-tools/ })
     const failing = within(region).getByRole('link', { name: /^background-jobs/ })
-    expect(healthy.getAttribute('style')).toContain('var(--healthy-cell)')
-    expect(failing.getAttribute('style')).toContain('var(--danger)')
+    expect(healthy.getAttribute('style')).toContain('var(--cell-ok)')
+    expect(failing.getAttribute('style')).toContain('var(--bad)')
   })
 
   it('opens the cluster when a cell is clicked', async () => {

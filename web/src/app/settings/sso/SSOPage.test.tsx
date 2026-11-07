@@ -393,7 +393,7 @@ describe('SSOPage', () => {
   it('Test sign-in opens the IdP flow in a new tab', async () => {
     serveConfig(SSO_CONFIGURED_OFF)
     renderApp('/settings/sso')
-    const link = await screen.findByRole('link', { name: 'Test sign-in' })
+    const link = within(await screen.findByRole('region', { name: 'Test sign-in' })).getByRole('link', { name: 'Test sign-in' })
     expect(link).toHaveAttribute('href', '/api/auth/saml/login?test=1')
     expect(link).toHaveAttribute('target', '_blank')
   })
@@ -413,11 +413,11 @@ describe('SSOPage', () => {
     serveConfig(SSO_CONFIGURED_OFF)
     server.use(
       http.get('/api/sso/tests/:id', () =>
-        HttpResponse.json({ ...SSO_TEST_OK, outcome: 'would_sign_in', username: 'pavel', existing_user: 'pavel' }),
+        HttpResponse.json({ ...SSO_TEST_OK, outcome: 'would_sign_in', username: 'sam', existing_user: 'sam' }),
       ),
     )
     renderApp('/settings/sso?test=abc')
-    expect(await screen.findByText('Would sign in pavel')).toBeInTheDocument()
+    expect(await screen.findByText('Would sign in sam')).toBeInTheDocument()
   })
 
   it('test result would_link renders Would link dana (pending link)', async () => {
@@ -447,5 +447,61 @@ describe('SSOPage', () => {
     server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
     renderApp('/settings/sso')
     expect(await screen.findByText('Only global admins change single sign-on.')).toBeInTheDocument()
+  })
+})
+
+describe('SSOPage setup checklist', () => {
+  const stepStates = async () => {
+    const list = await screen.findByRole('list', { name: 'Set up single sign-on' })
+    return within(list)
+      .getAllByRole('listitem')
+      .map((item) => [within(item).getByRole('link').textContent, item.getAttribute('data-state')])
+  }
+
+  it('steps derive from config', async () => {
+    serveConfig(SSO_UNCONFIGURED)
+    const { unmount } = renderApp('/settings/sso')
+    expect(await stepStates()).toEqual([
+      ['Identity provider', 'todo'],
+      ['Service provider', 'blocked'],
+      ['Sign-in options', 'blocked'],
+      ['Test sign-in', 'blocked'],
+      ['Turn on', 'blocked'],
+    ])
+    unmount()
+
+    serveConfig(SSO_CONFIGURED_OFF)
+    const second = renderApp('/settings/sso')
+    expect(await stepStates()).toEqual([
+      ['Identity provider', 'done'],
+      ['Service provider', 'done'],
+      ['Sign-in options', 'done'],
+      ['Test sign-in', 'todo'],
+      ['Turn on', 'todo'],
+    ])
+    second.unmount()
+
+    serveConfig(SSO_CONFIGURED_ON)
+    renderApp('/settings/sso')
+    expect((await stepStates()).map(([, state]) => state)).toEqual(['done', 'done', 'done', 'done', 'done'])
+  })
+
+  it('links each step to its panel by anchor', async () => {
+    serveConfig(SSO_CONFIGURED_OFF)
+    renderApp('/settings/sso')
+    const list = await screen.findByRole('list', { name: 'Set up single sign-on' })
+    const hrefs = within(list).getAllByRole('link').map((link) => link.getAttribute('href'))
+    expect(hrefs).toEqual(['#sso-idp', '#sso-sp', '#sso-options', '#sso-test', '#sso-on'])
+    for (const href of hrefs) expect(document.querySelector(href!)).not.toBeNull()
+  })
+
+  it('Turn on blocked without break-glass keeps the tooltip', async () => {
+    serveConfig({ ...SSO_CONFIGURED_OFF, break_glass_admins: 0 })
+    renderApp('/settings/sso')
+    const states = await stepStates()
+    expect(states[4]).toEqual(['Turn on', 'blocked'])
+    const button = screen.getByRole('button', { name: 'Turn on single sign-on' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', GUARD_TITLE)
   })
 })

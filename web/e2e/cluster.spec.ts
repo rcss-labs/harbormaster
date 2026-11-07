@@ -20,6 +20,25 @@ test.describe('cluster as oncall', () => {
     await expect(notifications.getByText(/^(Deploying|Steady)$/)).toBeVisible()
     await expect(notifications).toContainText(/\d+ \/ 2/)
   })
+
+  for (const width of [390, 1440]) {
+    test(`core-services never scrolls the page sideways at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(CORE_SERVICES)
+      await expect(page.getByRole('heading', { level: 1, name: 'core-services' })).toBeVisible()
+      await page.waitForLoadState('networkidle')
+      // Wide tables scroll inside their own panel; the page itself must not.
+      const overflow = await page.evaluate(() => {
+        const main = document.querySelector('main')
+        return {
+          document: document.documentElement.scrollWidth - window.innerWidth,
+          main: main ? main.scrollWidth - main.clientWidth : 0,
+        }
+      })
+      expect(overflow.document, 'document scrollWidth beyond the window (px)').toBeLessThanOrEqual(0)
+      expect(overflow.main, 'main scrollWidth beyond its client width (px)').toBeLessThanOrEqual(0)
+    })
+  }
 })
 
 test.describe('pinned clusters as oncall', () => {

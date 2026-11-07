@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { KpiStrip } from './KpiStrip'
 
@@ -32,5 +33,35 @@ describe('KpiStrip', () => {
       />,
     )
     expect(container.querySelectorAll('svg')).toHaveLength(1)
+  })
+
+  it('href renders the cell as a link', () => {
+    render(
+      <MemoryRouter>
+        <KpiStrip
+          label="k"
+          items={[
+            { label: 'Failing', value: 4, href: '/services?status=failing' },
+            { label: 'Services', value: 12 },
+          ]}
+        />
+      </MemoryRouter>,
+    )
+    const link = screen.getByRole('link', { name: /Failing/ })
+    expect(link).toHaveAttribute('href', '/services?status=failing')
+    expect(link).toHaveTextContent('4')
+    expect(screen.getAllByRole('link')).toHaveLength(1)
+  })
+
+  it('renders a plain anchor when there is no router', () => {
+    render(<KpiStrip label="k" items={[{ label: 'Failing', value: 4, href: '/services' }]} />)
+    expect(screen.getByRole('link', { name: /Failing/ })).toHaveAttribute('href', '/services')
+  })
+
+  it('applies the tone class to the cell', () => {
+    render(<KpiStrip label="k" items={[{ label: 'Failing', value: 4, tone: 'bad' }, { label: 'Fine', value: 1 }]} />)
+    const [failing, fine] = screen.getAllByRole('listitem')
+    expect(failing).toHaveClass('tone-bad')
+    expect(fine.className).not.toMatch(/tone-/)
   })
 })

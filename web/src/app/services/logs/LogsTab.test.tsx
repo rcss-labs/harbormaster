@@ -59,6 +59,28 @@ describe('LogsTab', () => {
     ],
   }
 
+  it('the log box scrolls inside a column that fills the page height', async () => {
+    serveHistory(() => mixedLevels)
+    renderApp(route)
+    const log = await screen.findByRole('log')
+    expect(log).toHaveClass('hm-fill-scroll')
+    expect(log.closest('.hm-fill-col')).not.toBeNull()
+  })
+
+  it('a failed history request shows a panel error with Retry, not a blank', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/services/:id/logs', () => {
+        calls += 1
+        return calls === 1 ? HttpResponse.json({ error: { code: 'aws_error', message: 'CloudWatch said no' } }, { status: 502 }) : HttpResponse.json(mixedLevels)
+      }),
+    )
+    renderApp(route)
+    expect(await screen.findByRole('alert')).toHaveTextContent('The logs could not be loaded.')
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('log')).toBeInTheDocument()
+  })
+
   it('renders each history line as one row: time, an unwrapped stream cell and the message, tinted by level', async () => {
     serveHistory(() => mixedLevels)
     renderApp(route)

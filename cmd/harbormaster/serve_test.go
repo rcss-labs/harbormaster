@@ -56,7 +56,7 @@ func TestServe_FakeAWSBootsAndPolls(t *testing.T) {
 	for time.Now().Before(deadline) && clusters != 6 {
 		time.Sleep(150 * time.Millisecond)
 		if !loggedIn {
-			body, _ := json.Marshal(map[string]string{"username": "pavel", "password": "harbormaster-e2e-1"})
+			body, _ := json.Marshal(map[string]string{"username": "sam", "password": "harbormaster-e2e-1"})
 			resp, err := client.Post(base+"/api/auth/login", "application/json", bytes.NewReader(body))
 			if err != nil {
 				continue

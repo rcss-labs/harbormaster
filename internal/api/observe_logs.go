@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/logs"
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -165,6 +168,42 @@ func (s *Server) resolveLogs(r *http.Request, container string) (logsSelection, 
 	return sel, nil
 }
 
+// minTaskIDChars is the shortest task id prefix the logs endpoint accepts (the drawer shows 8).
+const minTaskIDChars = 8
+
+// restrictToTask narrows the selected stream prefixes to one task of the service. The task is
+// named by the leading characters of its id; it is resolved against the service's stored tasks, so
+// a prefix that matches no task (or, absurdly, two) is "not found" rather than a wider read. A
+// stream is "<prefix>/<container>/<task id>", so "<container prefix><task id>" selects exactly
+// that task's stream of each selected container.
+func (s *Server) restrictToTask(ctx context.Context, sel *logsSelection, key model.ServiceKey, short string) error {
+	if len(short) < minTaskIDChars {
+		return invalid(fmt.Sprintf("task must be at least %d characters.", minTaskIDChars))
+	}
+	rows, _, err := s.Store.ListTasks(ctx, store.TaskQuery{
+		TargetFilter: store.TargetFilter{AccountID: key.AccountID, Region: key.Region},
+		Vis:          store.Visibility{Admin: true}, // the caller was authorized on the service by resolveLogs
+		Cluster:      key.Cluster, Service: key.Service,
+	})
+	if err != nil {
+		return err
+	}
+	var taskIDs []string
+	for _, row := range rows {
+		id := row.ARN[strings.LastIndex(row.ARN, "/")+1:]
+		if strings.HasPrefix(id, short) {
+			taskIDs = append(taskIDs, id)
+		}
+	}
+	if len(taskIDs) != 1 {
+		return store.ErrNotFound
+	}
+	for i, prefix := range sel.prefixes {
+		sel.prefixes[i] = prefix + taskIDs[0]
+	}
+	return nil
+}
+
 // getLogs answers GET /api/services/{serviceId}/logs.
 func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -185,15 +224,31 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// limit narrows the page (the task drawer wants the newest 20 lines); it never exceeds the configured history size.
+	limit := cmp.Or(s.Cfg.LogHistoryLimit, defaultHistoryRows)
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			s.fail(w, invalid("limit must be a positive whole number."))
+			return
+		}
+		limit = min(limit, n)
+	}
+	key, _ := serviceKeyFrom(r)
+	if short := q.Get("task"); short != "" {
+		if err := s.restrictToTask(r.Context(), &sel, key, short); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	out := LogsDTO{Group: sel.group, Region: sel.region, Containers: sel.containers, Lines: []LogLineDTO{}}
 	if sel.group == "" {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	key, _ := serviceKeyFrom(r)
 	page, err := s.Logs.History(r.Context(), awsx.Target{AccountID: key.AccountID, Region: key.Region}, logs.HistoryRequest{
 		Group: sel.group, Region: sel.region, Prefixes: sel.prefixes, Before: before, Query: q.Get("q"),
-		Limit: cmp.Or(s.Cfg.LogHistoryLimit, defaultHistoryRows),
+		Limit: limit,
 	})
 	if err != nil {
 		s.fail(w, err)

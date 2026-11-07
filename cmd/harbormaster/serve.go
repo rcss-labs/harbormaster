@@ -224,7 +224,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			return fmt.Errorf("start fake IdP: %w", err)
 		}
 		fakeIdP = idp.Handler()
-		log.Info("fake AWS mode: demo data loaded; sign in as pavel / " + devseed.Password +
+		log.Info("fake AWS mode: demo data loaded; sign in as sam / " + devseed.Password +
 			"; fake IdP at " + strings.TrimRight(cfg.BaseURL, "/") + "/fake-idp/metadata")
 	} else {
 		real := awsx.NewReal(base, storeRoles{st})

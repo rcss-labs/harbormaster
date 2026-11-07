@@ -1,5 +1,5 @@
-import { screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import type { RollupPanel } from '../../api/analytics'
 import { ANALYTICS_RELIABILITY } from '../../test/fixtures'
 import { renderWithProviders } from '../../test/setup'
@@ -34,6 +34,12 @@ describe('AnalyticsPanel', () => {
     expect(screen.getByText('source service_counts_history · kept 7 days')).toBeInTheDocument()
   })
 
+  it('the footer says the retention in words, not hours', () => {
+    panel({ source: { table: 'service_availability_daily', kept: '2160h' } })
+    expect(screen.getByText('source service_availability_daily · kept 90 days')).toBeInTheDocument()
+    expect(screen.queryByText(/2160h/)).not.toBeInTheDocument()
+  })
+
   it('hides footer when showSources is false', () => {
     panel({ source: { table: 'service_counts_history', kept: '7 days' }, showSources: false })
     expect(screen.queryByText(/source service_counts_history/)).not.toBeInTheDocument()
@@ -42,7 +48,7 @@ describe('AnalyticsPanel', () => {
 
   it('an unavailable daily panel looks like any other: source footer, no variant', () => {
     panel({ rollup: unavailable, source: { table: 'service_availability_daily', kept: '8760h' } })
-    expect(screen.getByText('source service_availability_daily · kept 8760h')).toBeInTheDocument()
+    expect(screen.getByText('source service_availability_daily · kept 1 year')).toBeInTheDocument()
     expect(screen.queryByText(/needs new data/i)).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: /Availability/ })).not.toHaveAttribute('data-variant')
     expect(screen.getByText('chart body')).toBeInTheDocument()
@@ -57,6 +63,15 @@ describe('AnalyticsPanel', () => {
   it('has no empty state when data covers the window', () => {
     panel({ rollup: { available: true, data_since: '2026-09-01T00:00:00Z', data: {} } })
     expect(screen.queryByText(/Daily data started on/)).not.toBeInTheDocument()
+  })
+
+  it('shows its own error in place of the body, with a retry', () => {
+    const onRetry = vi.fn()
+    panel({ error: { message: 'Availability could not be read.', onRetry } })
+    expect(screen.getByRole('alert')).toHaveTextContent('Availability could not be read.')
+    expect(screen.queryByText('chart body')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 
   it('renders legend items as label and value', () => {

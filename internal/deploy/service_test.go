@@ -31,7 +31,7 @@ type harness struct {
 	svc   *deploy.Service
 	fake  *fake.Fake
 	store *store.Store
-	pavel authz.Subject
+	sam   authz.Subject
 }
 
 // newHarness builds a deploy.Service over the seeded fake estate and a test store
@@ -41,7 +41,7 @@ func newHarness(t *testing.T) *harness {
 	st := storetest.Open(t)
 	now := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
 	f := fake.New(fake.MockupEstate(func() time.Time { return now }))
-	user, err := st.CreateUser(t.Context(), "pavel", "hash", true, false)
+	user, err := st.CreateUser(t.Context(), "sam", "hash", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func newHarness(t *testing.T) *harness {
 		svc:   &deploy.Service{Store: st, Clients: f, MaxDesiredCount: 50, Now: func() time.Time { return now }},
 		fake:  f,
 		store: st,
-		pavel: authz.Subject{UserID: user.ID, Username: "pavel", Admin: true},
+		sam:   authz.Subject{UserID: user.ID, Username: "sam", Admin: true},
 	}
 }
 

@@ -694,7 +694,7 @@ for (const [id, cluster, name, desired, running, rev, repo, tag, cpu, mem, port,
   // operations log seed: Harbormaster actions + ECS service events
   const ev = (mins, src, actor, text) => s.ops.push({ ts: NOW - mins * MIN, src, actor, text });
   ev(60 * 30, 'ECS', 'ECS', `(service ${name}) has reached a steady state.`);
-  ev(60 * 26, 'Harbormaster', 'pavel', `Restarted service (force new deployment) on revision ${rev}.`);
+  ev(60 * 26, 'Harbormaster', 'sam', `Restarted service (force new deployment) on revision ${rev}.`);
   if (port && o.lb) ev(60 * 26 - 3, 'ECS', 'ECS', `(service ${name}) registered 1 targets in (target-group ${name}-tg).`);
   ev(60 * 26 - 6, 'ECS', 'ECS', `(service ${name}) has reached a steady state.`);
   if (o.oomBelow) {
@@ -733,19 +733,19 @@ const PRESETS = { None: [], Viewer: ['view'], Operator: ['view', 'logs', 'operat
 const TAG_COLORS = ['neutral', 'red', 'amber', 'blue', 'violet', 'green'];
 const TAGS = [{ name: 'Dev', color: 'neutral', builtin: true }, { name: 'Staging', color: 'amber' }, { name: 'Prod', color: 'red' }];
 const USERS = {
-  pavel: { name: 'pavel', admin: true, lastSeen: NOW - 2 * MIN, perms: {} },
+  sam: { name: 'sam', admin: true, lastSeen: NOW - 2 * MIN, perms: {} },
   dana: { name: 'dana', admin: false, lastSeen: NOW - 50 * MIN, perms: { Dev: PRESETS.Full.slice(), Staging: PRESETS.Deployer.slice(), Prod: ['view', 'logs'] } },
   omer: { name: 'omer', admin: false, lastSeen: NOW - 26 * 3600e3, perms: { Dev: PRESETS.Operator.slice(), Staging: ['view'] } },
   oncall: { name: 'oncall', admin: false, lastSeen: NOW - 3 * 86400e3, perms: { Staging: ['view', 'logs', 'operate', 'terminal'], Prod: ['view', 'logs', 'operate', 'terminal'] } },
 };
 const AUDIT = [
-  { ts: NOW - 2 * MIN, actor: 'pavel', text: 'Signed in.' },
-  { ts: NOW - 3 * 3600e3, actor: 'pavel', text: 'Gave oncall Terminal on Prod.' },
-  { ts: NOW - 5 * 3600e3, actor: 'pavel', text: 'Tagged cluster staging-web as Staging (was Dev).' },
-  { ts: NOW - 2 * 86400e3, actor: 'pavel', text: 'Created user omer with Operator on Dev.' },
-  { ts: NOW - 6 * 86400e3, actor: 'pavel', text: 'Created tag Prod.' },
+  { ts: NOW - 2 * MIN, actor: 'sam', text: 'Signed in.' },
+  { ts: NOW - 3 * 3600e3, actor: 'sam', text: 'Gave oncall Terminal on Prod.' },
+  { ts: NOW - 5 * 3600e3, actor: 'sam', text: 'Tagged cluster staging-web as Staging (was Dev).' },
+  { ts: NOW - 2 * 86400e3, actor: 'sam', text: 'Created user omer with Operator on Dev.' },
+  { ts: NOW - 6 * 86400e3, actor: 'sam', text: 'Created tag Prod.' },
 ];
-let currentUser = 'pavel';
+let currentUser = 'sam';
 const me = () => USERS[currentUser];
 const clusterTag = c => c.label || 'Dev';
 const serviceTag = s => s.label || clusterTag(CLUSTERS[s.cluster]);
@@ -1648,7 +1648,7 @@ function showLogin(err = '') {
     <label class="field"><span>Password</span><input class="ctl" id="login-pass" type="password" autocomplete="current-password" required></label>
     ${err ? `<div class="err">${esc(err)}</div>` : ''}
     <button class="btn primary" type="submit" style="justify-content:center">Sign in</button>
-    <p class="hint">Mockup users: <span class="mono">pavel</span> (global admin), <span class="mono">dana</span>, <span class="mono">omer</span>, <span class="mono">oncall</span>. Any password works.</p>
+    <p class="hint">Mockup users: <span class="mono">sam</span> (global admin), <span class="mono">dana</span>, <span class="mono">omer</span>, <span class="mono">oncall</span>. Any password works.</p>
   </form></div>`;
   $('#login-user').focus();
 }

@@ -1,13 +1,17 @@
-import { Fragment, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import type { TaskDTO } from '../api/types'
 import { Ago } from './Ago'
-import { Disclosure } from './Disclosure'
-import { Pill, type PillKind } from './Pill'
+import { DataTable, type DataTableColumn, type RowStatus } from './DataTable'
+import type { PillKind } from './Pill'
+import { RowMenu, RowMenuButton, RowMenuLink } from './RowMenu'
+import { StatusDot } from './StatusDot'
 import { StopCauseChip, stoppedStatus } from './stopStatus'
-import { StopTaskDialog } from './StopTaskDialog'
-import { Table, tableClass } from './Table'
+import { useNarrow } from './useNarrow'
 import styles from './TaskTable.module.css'
+
+/** Utilisation in percent of the reserved size, keyed by the task's short id (the id CloudWatch reports). */
+export type TaskUtilisation = Record<string, { cpu: number | null; mem: number | null }>
 
 interface TaskTableProps {
   items: TaskDTO[]
@@ -16,21 +20,46 @@ interface TaskTableProps {
   /** Cursor for the next page; "Load more" shows only when set. */
   next?: string
   onMore(): void
-  /** Live usage in percent of the reserved size, keyed by the task's short id (the id CloudWatch reports). */
-  utilisation?: Record<string, { cpu: number | null; mem: number | null }>
-  /** The service's desired count, for the Stop dialog's copy; left out on the global list. */
-  desiredCount?: number | null
-  /** Collapsible account > region > cluster groups (all open at first); left out on the service Tasks tab. */
-  grouped?: boolean
+  utilisation?: TaskUtilisation
+  /** Opens the task's details drawer; the task id is the control. */
+  onOpen(task: TaskDTO): void
+  /** The Stop row action; the host owns the confirm dialog. */
+  onStop(task: TaskDTO): void
+  /** Keys of the columns to show (see TASK_COLUMNS); all when omitted. */
+  visibleColumns?: string[]
 }
+
+export interface TaskColumnOption {
+  key: string
+  label: string
+  locked?: boolean
+}
+
+/** Column keys and picker labels shared by the Tasks page and the service Tasks tab. Task, Service and Status always show. */
+export const TASK_COLUMNS: TaskColumnOption[] = [
+  { key: 'task', label: 'Task', locked: true },
+  { key: 'service', label: 'Service', locked: true },
+  { key: 'status', label: 'Status', locked: true },
+  { key: 'health', label: 'Health' },
+  { key: 'revision', label: 'Rev' },
+  { key: 'ip', label: 'IP · Subnet' },
+  { key: 'capacity', label: 'Capacity' },
+  { key: 'cpu', label: 'CPU' },
+  { key: 'memory', label: 'Memory' },
+  { key: 'started', label: 'Started' },
+  { key: 'reason', label: 'Stopped reason' },
+]
+
+/** Sized to the widest row's buttons, which the table's shared grid tracks make the same for the header. */
+export const ACTIONS_WIDTH = 'max-content'
 
 const PROGRESS_STATUSES = ['PROVISIONING', 'PENDING', 'ACTIVATING']
 const titleCase = (status: string) => status.charAt(0) + status.slice(1).toLowerCase()
 
 /** vCPU from ECS CPU units: up to two decimals, trailing zeros dropped (256 → 0.25, 1024 → 1). */
-const formatVcpu = (cpuUnits: string) => String(+(Number(cpuUnits) / 1024).toFixed(2))
+export const formatVcpu = (cpuUnits: string) => String(+(Number(cpuUnits) / 1024).toFixed(2))
 
-function statusPill(task: TaskDTO): { kind: PillKind; label: string } {
+export function taskStatus(task: TaskDTO): { kind: PillKind; label: string } {
   if (task.status === 'RUNNING') return { kind: 'ok', label: 'Running' }
   if (PROGRESS_STATUSES.includes(task.status)) return { kind: 'info', label: titleCase(task.status) }
   if (task.status === 'STOPPED') return stoppedStatus(task)
@@ -38,261 +67,225 @@ function statusPill(task: TaskDTO): { kind: PillKind; label: string } {
   return { kind: 'mute', label: titleCase(task.status) }
 }
 
-function HealthCell({ task }: { task: TaskDTO }) {
+/** Row stripe: a failed stop is red, an expected stop teal; a running task failing its health check is amber. */
+export function taskStripe(task: TaskDTO): RowStatus | undefined {
+  if (task.status === 'STOPPED' && task.stop_kind === 'error') return 'bad'
+  if (task.status === 'STOPPED' && task.stop_kind === 'expected') return 'expected'
+  if (task.status === 'RUNNING' && task.health === 'UNHEALTHY') return 'warn'
+  return undefined
+}
+
+/** Service tasks open the service's Terminal tab; standalone tasks have no service and get their own page. */
+export const terminalPath = (task: TaskDTO) =>
+  task.service
+    ? `/services/${task.service.id}/terminal?task=${encodeURIComponent(task.id)}`
+    : `/tasks/${encodeURIComponent(task.short_id)}/terminal`
+
+/** "34% of 512 MiB" when usage is known, else the reserved size alone. */
+const usageOrReserved = (usedPercent: number | null | undefined, reserved: string) =>
+  usedPercent === null || usedPercent === undefined ? reserved : `${Math.round(usedPercent)}% of ${reserved}`
+
+export function TaskStatusCell({ task }: { task: TaskDTO }) {
+  const status = taskStatus(task)
+  return (
+    <span className={styles.statusCell}>
+      <StatusDot kind={status.kind}>{status.label}</StatusDot>
+      {task.status === 'STOPPED' && <StopCauseChip cause={task.stop_cause} />}
+    </span>
+  )
+}
+
+export function HealthCell({ task }: { task: TaskDTO }) {
   if (task.status !== 'RUNNING') return <span className={styles.muted}>–</span>
   if (task.health === 'HEALTHY') return <span className={styles.healthy}>Healthy</span>
   if (task.health === 'UNHEALTHY') return <span className={styles.unhealthy}>Unhealthy</span>
   return <span className={styles.muted}>No check</span>
 }
 
-/** Row stripe: a failed stop is red, an expected stop teal; a running task failing its health check is amber. */
-function stripeFor(task: TaskDTO): string | undefined {
-  if (task.status === 'STOPPED' && task.stop_kind === 'error') return tableClass.stripe('bad')
-  if (task.status === 'STOPPED' && task.stop_kind === 'expected') return tableClass.stripe('expected')
-  if (task.status === 'RUNNING' && task.health === 'UNHEALTHY') return tableClass.stripe('warn')
-  return undefined
-}
-
-function ServiceCell({ task }: { task: TaskDTO }) {
+export function ServiceCell({ task }: { task: TaskDTO }) {
   if (task.service) {
     return (
-      <>
-        <Link to={`/services/${task.service.id}/tasks`} className={styles.accent}>
+      <span className={styles.service}>
+        <Link to={`/services/${task.service.id}/tasks`} className={styles.accent} title={task.service.name}>
           {task.service.name}
         </Link>
-        <div className={styles.sub}>{task.cluster.name}</div>
-      </>
-    )
-  }
-  return (
-    <>
-      <span>{task.group}</span>
-      <div className={styles.sub}>Standalone · started by {task.started_by}</div>
-    </>
-  )
-}
-
-/** "34% of 512 MiB" when usage is known, else the reserved size alone. */
-const usageOrReserved = (usedPercent: number | null | undefined, reserved: string) =>
-  usedPercent === null || usedPercent === undefined ? reserved : `${Math.round(usedPercent)}% of ${reserved}`
-
-function TaskRow({
-  task,
-  withService,
-  usage,
-  desiredCount,
-}: {
-  task: TaskDTO
-  withService: boolean
-  usage?: { cpu: number | null; mem: number | null }
-  desiredCount: number | null
-}) {
-  const pill = statusPill(task)
-  const isRunning = task.status === 'RUNNING'
-  const [stopping, setStopping] = useState(false)
-  return (
-    <tr className={stripeFor(task)}>
-      <td className={styles.mono} title={task.id}>
-        {task.short_id.slice(0, 12)}
-      </td>
-      {withService && (
-        <td>
-          <ServiceCell task={task} />
-        </td>
-      )}
-      <td>
-        <span className={styles.statusCell}>
-          <Pill kind={pill.kind}>{pill.label}</Pill>
-          {task.status === 'STOPPED' && <StopCauseChip cause={task.stop_cause} />}
+        <span className={styles.sub} title={task.cluster.name}>
+          {task.cluster.name}
         </span>
-      </td>
-      <td>
-        <HealthCell task={task} />
-      </td>
-      <td className={styles.mono}>:{task.revision}</td>
-      <td>
-        <span className={styles.mono}>{task.private_ip}</span>
-        <div className={styles.sub}>
-          {task.subnet_id} · {task.az}
-        </div>
-      </td>
-      <td className={styles.small}>{task.capacity}</td>
-      <td className={tableClass.num}>{usageOrReserved(usage?.cpu, `${formatVcpu(task.cpu)} vCPU`)}</td>
-      <td className={tableClass.num}>{usageOrReserved(usage?.mem, `${task.memory} MiB`)}</td>
-      <td className={styles.muted}>{task.started_at ? <Ago ts={task.started_at} /> : '–'}</td>
-      <td className={styles.reason}>
-        {task.stopped_reason}
-        {task.stopped_at && (
-          <>
-            {task.stopped_reason ? ' ' : ''}
-            <span className={styles.muted}>
-              · <Ago ts={task.stopped_at} />
-            </span>
-          </>
-        )}
-      </td>
-      <td className={styles.actions}>
-        {isRunning && task.can.terminal && task.exec_enabled && (
-          <Link to={terminalPath(task)} className={styles.btn}>
-            Terminal
-          </Link>
-        )}{' '}
-        {isRunning && task.can.operate && (
-          <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={() => setStopping(true)}>
-            Stop
-          </button>
-        )}
-        {stopping && (
-          <StopTaskDialog
-            taskId={task.id}
-            shortId={task.short_id.slice(0, 12)}
-            serviceName={task.service?.name ?? null}
-            serviceId={task.service?.id ?? null}
-            desiredCount={desiredCount}
-            onClose={() => setStopping(false)}
-          />
-        )}
-      </td>
-    </tr>
-  )
-}
-
-/** Service tasks open the service's Terminal tab; standalone tasks have no service and get their own page. */
-const terminalPath = (task: TaskDTO) =>
-  task.service
-    ? `/services/${task.service.id}/terminal?task=${encodeURIComponent(task.id)}`
-    : `/tasks/${encodeURIComponent(task.short_id)}/terminal`
-
-interface ClusterGroup {
-  id: string
-  name: string
-  tasks: TaskDTO[]
-}
-interface RegionGroup {
-  name: string
-  clusters: ClusterGroup[]
-  count: number
-}
-interface AccountGroup {
-  name: string
-  regions: RegionGroup[]
-  count: number
-}
-
-/** Groups tasks by account, region and cluster; groups keep the order in which they first appear in `tasks`. */
-function groupTasks(tasks: TaskDTO[]): AccountGroup[] {
-  const accounts: AccountGroup[] = []
-  for (const task of tasks) {
-    let account = accounts.find((group) => group.name === task.account_name)
-    if (!account) accounts.push((account = { name: task.account_name, regions: [], count: 0 }))
-    let region = account.regions.find((group) => group.name === task.region)
-    if (!region) account.regions.push((region = { name: task.region, clusters: [], count: 0 }))
-    let cluster = region.clusters.find((group) => group.id === task.cluster.id)
-    if (!cluster) region.clusters.push((cluster = { id: task.cluster.id, name: task.cluster.name, tasks: [] }))
-    cluster.tasks.push(task)
-    region.count++
-    account.count++
-  }
-  return accounts
-}
-
-// Collapsed-state keys use names and cluster ids, not positions, so they survive refetches that reorder rows.
-const accountKey = (account: string) => `a:${account}`
-const regionKey = (account: string, region: string) => `r:${account}|${region}`
-const clusterKey = (clusterId: string) => `c:${clusterId}`
-
-const taskCount = (count: number) => `${count} task${count === 1 ? '' : 's'}`
-
-/** Task rows as in the mockup's taskRow(); Terminal deep-links into the service's Terminal tab. */
-export function TaskTable({ items, withService, next, onMore, utilisation, desiredCount = null, grouped = false }: TaskTableProps) {
-  // Everything is open unless its key is in this set, so groups that appear later start open.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const accounts = useMemo(() => (grouped ? groupTasks(items) : []), [grouped, items])
-  const columnCount = withService ? 12 : 11
-
-  const toggle = (key: string) =>
-    setCollapsed((current) => {
-      const nextSet = new Set(current)
-      if (!nextSet.delete(key)) nextSet.add(key)
-      return nextSet
-    })
-  const collapseAll = () =>
-    setCollapsed(
-      new Set(
-        accounts.flatMap((account) => [
-          accountKey(account.name),
-          ...account.regions.flatMap((region) => [
-            regionKey(account.name, region.name),
-            ...region.clusters.map((cluster) => clusterKey(cluster.id)),
-          ]),
-        ]),
-      ),
+      </span>
     )
-
-  const renderTask = (task: TaskDTO) => (
-    <TaskRow key={task.id} task={task} withService={withService} usage={utilisation?.[task.short_id]} desiredCount={desiredCount} />
+  }
+  const owner = `Standalone · started by ${task.started_by}`
+  return (
+    <span className={styles.service}>
+      <span title={task.group}>{task.group}</span>
+      <span className={styles.sub} title={owner}>
+        {owner}
+      </span>
+    </span>
   )
-  const groupRow = (key: string, level: 'account' | 'region' | 'cluster', label: string, count: number) => (
-    <tr className={styles[`${level}Row`]}>
-      <td colSpan={columnCount}>
-        <Disclosure label={label} expanded={!collapsed.has(key)} onToggle={() => toggle(key)} />
-        <span className={`${styles.muted} ${styles.summary}`}>{taskCount(count)}</span>
-      </td>
-    </tr>
-  )
+}
 
+/** The task id as a button that opens the details drawer. */
+export function TaskIdButton({ task, nested = false, onOpen }: { task: TaskDTO; nested?: boolean; onOpen(task: TaskDTO): void }) {
+  const shortId = task.short_id.slice(0, 12)
+  return (
+    <button
+      type="button"
+      className={`${styles.idButton} ${nested ? styles.nested : ''}`.trim()}
+      title={task.id}
+      aria-label={`Open details for task ${shortId}`}
+      onClick={() => onOpen(task)}
+    >
+      {shortId}
+    </button>
+  )
+}
+
+export function IpCell({ task }: { task: TaskDTO }) {
+  const where = `${task.subnet_id} · ${task.az}`
+  return (
+    <span className={styles.stack}>
+      <span className={styles.mono}>{task.private_ip}</span>
+      <span className={styles.subMono} title={where}>
+        {where}
+      </span>
+    </span>
+  )
+}
+
+export function ReasonCell({ task }: { task: TaskDTO }) {
+  const { stopped_reason: reason, stopped_at: stoppedAt } = task
+  return (
+    <span className={styles.reason} title={reason}>
+      {reason}
+      {stoppedAt && (
+        <span className={styles.muted}>
+          {reason ? ' · ' : ''}
+          <Ago ts={stoppedAt} />
+        </span>
+      )}
+    </span>
+  )
+}
+
+export const cpuText = (task: TaskDTO, usage?: { cpu: number | null }) => usageOrReserved(usage?.cpu, `${formatVcpu(task.cpu)} vCPU`)
+export const memoryText = (task: TaskDTO, usage?: { mem: number | null }) => usageOrReserved(usage?.mem, `${task.memory} MiB`)
+
+/** Row actions: Logs (when asked for and the task has a service), Terminal and Stop under the existing permission rules. */
+export function TaskActions({ task, withLogs = false, onStop }: { task: TaskDTO; withLogs?: boolean; onStop(task: TaskDTO): void }) {
+  const narrow = useNarrow()
+  const isRunning = task.status === 'RUNNING'
+  if (narrow) {
+    const showTerminal = isRunning && task.can.terminal && task.exec_enabled
+    const showStop = isRunning && task.can.operate
+    const showLogs = withLogs && task.service
+    if (!showLogs && !showTerminal && !showStop) return null
+    return (
+      <RowMenu label={`Actions for task ${task.short_id.slice(0, 12)}`}>
+        {showLogs && task.service && <RowMenuLink to={`/services/${task.service.id}/logs`}>Logs</RowMenuLink>}
+        {showTerminal && <RowMenuLink to={terminalPath(task)}>Terminal</RowMenuLink>}
+        {showStop && (
+          <RowMenuButton danger onClick={() => onStop(task)}>
+            Stop
+          </RowMenuButton>
+        )}
+      </RowMenu>
+    )
+  }
+  return (
+    <span className={styles.actions}>
+      {withLogs && task.service && (
+        <Link to={`/services/${task.service.id}/logs`} className={styles.btn}>
+          Logs
+        </Link>
+      )}
+      {isRunning && task.can.terminal && task.exec_enabled && (
+        <Link to={terminalPath(task)} className={styles.btn}>
+          Terminal
+        </Link>
+      )}
+      {isRunning && task.can.operate && (
+        <button type="button" className={`${styles.btn} ${styles.danger}`} onClick={() => onStop(task)}>
+          Stop
+        </button>
+      )}
+    </span>
+  )
+}
+
+/** Columns in table order, keyed by TASK_COLUMNS; the Tasks page wraps these to add its repeat-group rows. */
+export function taskColumns({
+  withService,
+  utilisation,
+  onOpen,
+  onStop,
+  withLogs = false,
+}: {
+  withService: boolean
+  utilisation?: TaskUtilisation
+  onOpen(task: TaskDTO): void
+  onStop(task: TaskDTO): void
+  withLogs?: boolean
+}): DataTableColumn<TaskDTO>[] {
+  const columns: DataTableColumn<TaskDTO>[] = [
+    { key: 'task', header: 'Task', width: '120px', render: (task) => <TaskIdButton task={task} onOpen={onOpen} /> },
+  ]
+  if (withService) columns.push({ key: 'service', header: 'Service', width: 'minmax(0,1.1fr)', render: (task) => <ServiceCell task={task} /> })
+  columns.push(
+    { key: 'status', header: 'Status', width: '230px', render: (task) => <TaskStatusCell task={task} /> },
+    { key: 'health', header: 'Health', width: '84px', render: (task) => <HealthCell task={task} /> },
+    { key: 'revision', header: 'Revision', width: '76px', render: (task) => <span className={styles.mono}>:{task.revision}</span> },
+    { key: 'ip', header: 'Subnet / IP', width: 'minmax(150px,1fr)', render: (task) => <IpCell task={task} /> },
+    { key: 'capacity', header: 'Capacity', width: '116px', render: (task) => <span className={styles.small}>{task.capacity}</span> },
+    {
+      key: 'cpu',
+      header: 'CPU',
+      width: '150px',
+      align: 'right',
+      render: (task) => <span className={styles.mono}>{cpuText(task, utilisation?.[task.short_id])}</span>,
+    },
+    {
+      key: 'memory',
+      header: 'Memory',
+      width: '150px',
+      align: 'right',
+      render: (task) => <span className={styles.mono}>{memoryText(task, utilisation?.[task.short_id])}</span>,
+    },
+    {
+      key: 'started',
+      header: 'Started',
+      width: '84px',
+      render: (task) => (task.started_at ? <Ago ts={task.started_at} /> : <span className={styles.muted}>–</span>),
+    },
+    { key: 'reason', header: 'Stopped reason', width: 'minmax(0,2fr)', render: (task) => <ReasonCell task={task} /> },
+    {
+      key: 'actions',
+      header: '',
+      width: ACTIONS_WIDTH,
+      align: 'right',
+      render: (task) => <TaskActions task={task} withLogs={withLogs} onStop={onStop} />,
+    },
+  )
+  return columns
+}
+
+/** Task rows for the service Tasks tab (and any flat task list): sticky actions, column visibility, "Load more". */
+export function TaskTable({ items, withService, next, onMore, utilisation, onOpen, onStop, visibleColumns }: TaskTableProps): ReactNode {
+  const columns = taskColumns({ withService, utilisation, onOpen, onStop })
   return (
     <div className={styles.panel}>
-      {grouped && (
-        <div className={styles.treeControls}>
-          <button type="button" className={styles.btn} onClick={() => setCollapsed(new Set())}>
-            Expand all
-          </button>
-          <button type="button" className={styles.btn} onClick={collapseAll}>
-            Collapse all
-          </button>
-        </div>
-      )}
-      <Table>
-        <thead>
-          <tr>
-            <th>Task</th>
-            {withService && <th>Service</th>}
-            <th>Status</th>
-            <th>Health</th>
-            <th>Revision</th>
-            <th>Subnet / IP</th>
-            <th>Capacity</th>
-            <th className={tableClass.num}>CPU</th>
-            <th className={tableClass.num}>Memory</th>
-            <th>Started</th>
-            <th>Stopped reason</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {grouped
-            ? accounts.map((account) => (
-                <Fragment key={account.name}>
-                  {groupRow(accountKey(account.name), 'account', account.name, account.count)}
-                  {!collapsed.has(accountKey(account.name)) &&
-                    account.regions.map((region) => (
-                      <Fragment key={region.name}>
-                        {groupRow(regionKey(account.name, region.name), 'region', region.name, region.count)}
-                        {!collapsed.has(regionKey(account.name, region.name)) &&
-                          region.clusters.map((cluster) => (
-                            <Fragment key={cluster.id}>
-                              {groupRow(clusterKey(cluster.id), 'cluster', cluster.name, cluster.tasks.length)}
-                              {!collapsed.has(clusterKey(cluster.id)) && cluster.tasks.map(renderTask)}
-                            </Fragment>
-                          ))}
-                      </Fragment>
-                    ))}
-                </Fragment>
-              ))
-            : items.map(renderTask)}
-        </tbody>
-      </Table>
+      <DataTable
+        label="Tasks"
+        columns={columns}
+        rows={items}
+        rowKey={(task) => task.id}
+        rowStatus={taskStripe}
+        visibleColumns={visibleColumns ? [...visibleColumns, 'actions'] : undefined}
+        stickyActions
+        minWidth={withService ? 1500 : 1350}
+        empty="No tasks match."
+      />
       {next && (
         <div className={styles.more}>
           <button type="button" className={styles.btn} onClick={onMore}>

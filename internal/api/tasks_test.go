@@ -40,7 +40,7 @@ func TestTasks_StandaloneVisibleByClusterTag(t *testing.T) {
 	pollAll(t, st, fk)
 
 	// db-migrate stopped 2 h ago; widen the window to a day so the test is about visibility only.
-	if resp := putWindow(login(t, srv, "pavel", testPassword), map[string]any{"stopped_tasks_window_minutes": 1440}); resp.StatusCode != http.StatusOK {
+	if resp := putWindow(login(t, srv, "sam", testPassword), map[string]any{"stopped_tasks_window_minutes": 1440}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT settings status %d", resp.StatusCode)
 	}
 	omer := getTasks(t, login(t, srv, "omer", testPassword), "/api/tasks?filter=all&limit=500")
@@ -73,7 +73,7 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	got := getTasks(t, c, "/api/tasks?limit=500") // default filter is problems
 
 	var stopped137, unhealthyCatalog bool
@@ -134,7 +134,7 @@ func TestTasks_ProblemsFilterAndCounts(t *testing.T) {
 func TestTasks_InvalidFilterIs422(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	pollAll(t, st, fk)
-	resp := login(t, srv, "pavel", testPassword).get("/api/tasks?filter=bogus")
+	resp := login(t, srv, "sam", testPassword).get("/api/tasks?filter=bogus")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d, want 422", resp.StatusCode)
 	}
@@ -146,7 +146,7 @@ func TestTasks_InvalidFilterIs422(t *testing.T) {
 func TestTasks_PaginationCursor(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	seen := map[string]bool{}
 	path := "/api/tasks?filter=all&limit=5"
 	pages := 0
@@ -182,12 +182,12 @@ func TestServiceTasks_ScopedAndInvisible(t *testing.T) {
 	pollAll(t, st, fk)
 	imageResizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
 
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	// The six OOM stops are 4-64 min old; widen the window so all of them are listed.
-	if resp := putWindow(pavel, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
+	if resp := putWindow(sam, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT settings status %d", resp.StatusCode)
 	}
-	got := getTasks(t, pavel, "/api/services/"+imageResizer+"/tasks?filter=all&limit=100")
+	got := getTasks(t, sam, "/api/services/"+imageResizer+"/tasks?filter=all&limit=100")
 	if len(got.Items) != 6 {
 		t.Fatalf("image-resizer tasks = %d, want 6", len(got.Items))
 	}
@@ -227,7 +227,7 @@ func TestTasks_CarryAccountNameAndRegion(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getTasks(t, login(t, srv, "pavel", testPassword), "/api/tasks?filter=running&limit=500")
+	got := getTasks(t, login(t, srv, "sam", testPassword), "/api/tasks?filter=running&limit=500")
 	if len(got.Items) == 0 {
 		t.Fatal("no running tasks")
 	}
@@ -249,7 +249,7 @@ func TestTasks_StoppedErrorCountFollowsWindowAndScope(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
 
 	// errorStops counts the listed stopped tasks that failed, the definition the count must match.
@@ -292,7 +292,7 @@ func TestServiceTasks_SummaryValues(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	// by_status only counts stops inside the window; widen it so all 6 OOM stops count.
 	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status %d", resp.StatusCode)
@@ -336,7 +336,7 @@ func TestTasks_WindowFollowsSetting(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status %d", resp.StatusCode)
 	}
@@ -397,7 +397,7 @@ func TestTasks_ByStatusFollowsWindowButStopReasonsKeep72Hours(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 10}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status %d", resp.StatusCode)
 	}

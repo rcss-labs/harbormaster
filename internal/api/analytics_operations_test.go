@@ -20,7 +20,7 @@ func TestOperationsAggregate_KPIsSeriesAndTables(t *testing.T) {
 		{Bucket: w.from.Add(2 * w.bucket), Kind: "terminal", Count: 6},
 	}
 	operators := []store.OperatorCounts{
-		{Username: "pavel", Counts: map[string]int{"deploy": 3, "rollback": 1, "restart": 2}, LastAt: analyticsNow},
+		{Username: "sam", Counts: map[string]int{"deploy": 3, "rollback": 1, "restart": 2}, LastAt: analyticsNow},
 		{Username: "omer", Counts: map[string]int{"scale": 4, "terminal": 6}, LastAt: analyticsNow},
 	}
 	got := aggregateOperations(buckets, operators, w)
@@ -52,7 +52,7 @@ func TestOperationsAggregate_KPIsSeriesAndTables(t *testing.T) {
 }
 
 func TestOperationsRows_CapAndColumns(t *testing.T) {
-	operators := []store.OperatorCounts{{Username: "pavel", Counts: map[string]int{"deploy": 3, "rollback": 1, "restart": 2, "scale": 1, "terminal": 1, "stop_task": 1}, LastAt: analyticsNow}}
+	operators := []store.OperatorCounts{{Username: "sam", Counts: map[string]int{"deploy": 3, "rollback": 1, "restart": 2, "scale": 1, "terminal": 1, "stop_task": 1}, LastAt: analyticsNow}}
 	table := operatorRows(operators)
 	row := table.Rows[0]
 	if table.Total != 1 || row.Total != 9 || row.Deploy != 4 || row.Restart != 2 || row.Scale != 1 || row.Terminal != 1 {
@@ -73,7 +73,7 @@ func TestAnalyticsOperations_RevisionsRegisteredFromOperationLog(t *testing.T) {
 	pollAll(t, st, fk)
 	setPassword(t, st, "omer")
 
-	pavel, err := st.GetUserByUsername(t.Context(), "pavel")
+	sam, err := st.GetUserByUsername(t.Context(), "sam")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestAnalyticsOperations_RevisionsRegisteredFromOperationLog(t *testing.T) {
 	} {
 		if err := st.AppendOperation(t.Context(), store.Operation{
 			AccountID: svc.AccountID, Region: svc.Region, Cluster: svc.Cluster, Service: &svc.Service,
-			ActorUserID: &pavel.ID, Source: "harbormaster", Text: "x", Details: details,
+			ActorUserID: &sam.ID, Source: "harbormaster", Text: "x", Details: details,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestAnalyticsOperations_RevisionsRegisteredFromOperationLog(t *testing.T) {
 		key := other.Key
 		if err := st.AppendOperation(t.Context(), store.Operation{
 			AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Service: &key.Service,
-			ActorUserID: &pavel.ID, Source: "harbormaster", Text: "x", Details: map[string]any{"op": "scale"},
+			ActorUserID: &sam.ID, Source: "harbormaster", Text: "x", Details: map[string]any{"op": "scale"},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +112,7 @@ func TestAnalyticsOperations_RevisionsRegisteredFromOperationLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	resp := admin.get("/api/analytics/operations?range=7d")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -123,7 +123,7 @@ func TestAnalyticsOperations_RevisionsRegisteredFromOperationLog(t *testing.T) {
 	if out.Tab != "operations" || out.KPIs.RevisionsRegistered != 1 || out.KPIs.Restarts != 2 || out.KPIs.Operations != 3+len(services) || out.KPIs.ScaleChanges != len(services) || out.KPIs.People != 1 {
 		t.Fatalf("kpis = %+v tab %q", out.KPIs, out.Tab)
 	}
-	if len(out.Who.Rows) != 1 || out.Who.Rows[0].Username != "pavel" {
+	if len(out.Who.Rows) != 1 || out.Who.Rows[0].Username != "sam" {
 		t.Errorf("who = %+v", out.Who)
 	}
 	if len(out.MostRestarted.Rows) != 1 || out.MostRestarted.Rows[0].Restarts != 2 || out.MostRestarted.Rows[0].Service != svc.Service {

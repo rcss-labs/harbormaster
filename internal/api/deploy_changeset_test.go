@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	astypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
+	"github.com/aws/smithy-go"
 )
 
 var changesetWrites = []string{"RegisterTaskDefinition", "UpdateService", "RegisterScalableTarget", "PutScalingPolicy", "PutScheduledAction",
@@ -34,10 +36,10 @@ func changesetPath() string { return "/api/services/" + paymentsID() + "/changes
 
 func TestChangeSet_403NamesFirstMissingAction(t *testing.T) {
 	env := newWriteEnv(t)
-	settings := liveSettings(t, env.login("pavel"))
+	settings := liveSettings(t, env.login("sam"))
 	body := map[string]any{
 		"base_revision": 42, "base_version": settings.Version,
-		"task_definition": map[string]any{"definition": draftFor(t, env.login("pavel"))},
+		"task_definition": map[string]any{"definition": draftFor(t, env.login("sam"))},
 		"service":         map[string]any{"desired_count": 4},
 	}
 	resp := env.login("operator").post(changesetPath(), body)
@@ -84,7 +86,7 @@ func TestChangeSet_EditOnlyRegistersOnly(t *testing.T) {
 
 func TestChangeSet_InvalidBodyStrictJSON(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	settings := liveSettings(t, admin)
 	for name, body := range map[string]any{
 		"unknown field":         map[string]any{"base_version": settings.Version, "service": map[string]any{"desired_count": 4, "bogus": true}},
@@ -107,7 +109,7 @@ func TestChangeSet_InvalidBodyStrictJSON(t *testing.T) {
 
 func TestChangeSet_PartialIs200WithSteps(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	settings := liveSettings(t, admin)
 	env.fk.FailNext("PutScalingPolicy", &astypes.ValidationException{Message: aws.String("nope")})
 	resp := admin.post(changesetPath(), map[string]any{
@@ -142,7 +144,7 @@ func TestChangeSet_PartialIs200WithSteps(t *testing.T) {
 
 func TestChangeSet_StaleVersion409CarriesSettings(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	settings := liveSettings(t, admin)
 	resp := admin.post(changesetPath(), map[string]any{
 		"base_revision": 42, "base_version": "not-the-live-version", "service": map[string]any{"desired_count": 4},
@@ -166,10 +168,83 @@ func TestDeploySettings_ViewOnly404ForInvisible(t *testing.T) {
 	wantStatus(t, env.login("viewer").get("/api/services/"+paymentsID()+"/deploy-settings"), http.StatusOK)
 }
 
+var errScheduledActionsUnsupported = &smithy.GenericAPIError{Code: "UnsupportedOperation", Message: "DescribeScheduledActions is not supported", Fault: smithy.FaultClient}
+
+func TestDeploySettings_PartialScheduledActions(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("sam")
+	if got := liveSettings(t, admin); got.Partial == nil || len(got.Partial) != 0 {
+		t.Fatalf("complete settings: partial = %#v, want an empty array", got.Partial)
+	}
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	got := liveSettings(t, admin)
+	if len(got.Partial) != 1 || got.Partial[0].Part != "scheduled_actions" || got.Partial[0].Code != "aws_error" ||
+		!strings.HasPrefix(got.Partial[0].Message, "Scheduled actions could not be read: ") {
+		t.Fatalf("partial = %+v", got.Partial)
+	}
+	if got.DeployedRevision != 42 || len(got.Scaling.Policies) != 1 || !got.Scaling.HasTarget ||
+		got.Scaling.ScheduledActions == nil || len(got.Scaling.ScheduledActions) != 0 {
+		t.Fatalf("every other part must still be returned: %+v", got)
+	}
+}
+
+func TestChangeSet_AppliesWhenScheduledActionsUnreadable(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("sam")
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	settings := liveSettings(t, admin)
+	resp := admin.post(changesetPath(), map[string]any{
+		"base_revision": 42, "base_version": settings.Version,
+		"service": map[string]any{"enable_execute_command": !settings.EnableExecuteCommand},
+	})
+	wantStatus(t, resp, http.StatusOK)
+	var out ChangeSetResponse
+	decode(t, resp, &out)
+	if out.Status != "applied" {
+		t.Fatalf("response = %+v", out)
+	}
+}
+
+func TestChangeSet_RefusesScheduledActionEditWhenUnreadable(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("sam")
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	settings := liveSettings(t, admin)
+	resp := admin.post(changesetPath(), map[string]any{
+		"base_revision": 42, "base_version": settings.Version,
+		"scaling": map[string]any{"put_scheduled_actions": []map[string]any{{
+			"name": "night", "schedule": "cron(0 2 * * ? *)", "timezone": "", "min_capacity": 1, "max_capacity": nil,
+		}}},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Scheduled actions could not be read; retry before changing them." {
+		t.Fatalf("error = %s: %s", code, msg)
+	}
+	assertNoChangesetWrites(t, env)
+}
+
+// Deregistering the target deletes its policies and scheduled actions too, so it cannot proceed while
+// the user could not see them.
+func TestChangeSet_RefusesRemoveTargetWhenScheduledActionsUnreadable(t *testing.T) {
+	env := newWriteEnv(t)
+	admin := env.login("sam")
+	env.fk.FailAlways("DescribeScheduledActions", errScheduledActionsUnsupported)
+	settings := liveSettings(t, admin)
+	resp := admin.post(changesetPath(), map[string]any{
+		"base_revision": 42, "base_version": settings.Version,
+		"scaling": map[string]any{"remove_target": true},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Scheduled actions could not be read; retry before changing them." {
+		t.Fatalf("error = %s: %s", code, msg)
+	}
+	assertNoChangesetWrites(t, env)
+}
+
 func TestDeploySettings_CanFlags(t *testing.T) {
 	env := newWriteEnv(t)
 	for user, want := range map[string]ChangeCanDTO{
-		"pavel":    {Edit: true, Deploy: true, Operate: true, Admin: true},
+		"sam":      {Edit: true, Deploy: true, Operate: true, Admin: true},
 		"deployer": {Edit: true, Deploy: true, Operate: true},
 		"operator": {Operate: true},
 		"editor":   {Edit: true},

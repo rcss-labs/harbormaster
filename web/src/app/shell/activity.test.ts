@@ -25,6 +25,9 @@ const alert = (minutesAgo: number, overrides: Partial<AlertDTO> = {}): AlertDTO 
   cluster: 'background-jobs',
   cluster_id: 'cl-9',
   tab: 'tasks',
+  cause: 'No task is running.',
+  next_step: { label: 'Open tasks', href: '/services/svc-9/tasks' },
+  just_before: null,
   ...overrides,
 })
 
@@ -40,7 +43,7 @@ describe('buildActivity', () => {
 describe('filterActivity', () => {
   const rows = buildActivity(
     [alert(5), alert(6, { severity: 'info' })],
-    [event(1), event(2, { source: 'harbormaster', actor: 'pavel', text: 'Restarted service.' })],
+    [event(1), event(2, { source: 'harbormaster', actor: 'sam', text: 'Restarted service.' })],
   )
   it('Problems keeps warning and danger alerts only', () => {
     expect(filterActivity(rows, 'problems')).toHaveLength(1)
@@ -48,7 +51,7 @@ describe('filterActivity', () => {
   it('Changes keeps events made through Harbormaster', () => {
     const changes = filterActivity(rows, 'changes')
     expect(changes).toHaveLength(1)
-    expect(changes[0].actor).toBe('pavel')
+    expect(changes[0].actor).toBe('sam')
   })
   it('All keeps everything', () => {
     expect(filterActivity(rows, 'all')).toHaveLength(4)

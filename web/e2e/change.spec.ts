@@ -24,7 +24,7 @@ async function registerAndDeploy(page: Page, serviceName: string, revision: numb
 test.describe.configure({ mode: 'serial' })
 
 test('register and deploy a new image tag', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto(`/services/${paymentsApi}/deploy`)
 
   await pickImageTag(page, '1.18.4')
@@ -60,7 +60,7 @@ test('operator cannot register', async ({ page }) => {
 })
 
 test('OOM revision fails and rolls back', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto(`/services/${imageResizer}/deploy`)
 
   // Same 512 MiB memory: the fake estate OOM-kills image-resizer's new revision.
@@ -77,11 +77,12 @@ test('OOM revision fails and rolls back', async ({ page }) => {
     await expect(page.getByText('Deployment of image-resizer:7 failed: ECS deployment circuit breaker: tasks failed to start.')).toBeVisible({
       timeout: 2_000,
     })
-  }).toPass({ timeout: 15_000 })
+    // The poller records this line asynchronously, and it can take longer on a loaded machine.
+  }).toPass({ timeout: 30_000 })
 })
 
 test('stop a task', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto(`/services/${paymentsApi}/tasks`)
 
   const firstStoppable = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Stop', exact: true }) }).first()

@@ -25,7 +25,7 @@ func seededForChangeReads(t *testing.T) (*apiClient, func(user string) *apiClien
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	return login(t, srv, "pavel", testPassword), func(user string) *apiClient { return login(t, srv, user, testPassword) }
+	return login(t, srv, "sam", testPassword), func(user string) *apiClient { return login(t, srv, user, testPassword) }
 }
 
 // viewerOnProd creates a user with only View on the Prod tag (which owns payments-api's cluster).
@@ -119,11 +119,11 @@ func TestGetRevisions_Shape(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	pavel, err := st.GetUserByUsername(t.Context(), "pavel")
+	sam, err := st.GetUserByUsername(t.Context(), "sam")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Register revision 43 as pavel so registered_by comes from revision_records.
+	// Register revision 43 as sam so registered_by comes from revision_records.
 	svc := &deploy.Service{Store: st, Clients: fk, MaxDesiredCount: 50, Now: time.Now}
 	paymentsKey := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 	deployed, err := svc.DeployedDefinition(t.Context(), paymentsKey)
@@ -147,19 +147,19 @@ func TestGetRevisions_Shape(t *testing.T) {
 		copied[i] = m
 	}
 	draft["containerDefinitions"] = copied
-	subject := authz.Subject{UserID: pavel.ID, Username: "pavel", Admin: true}
+	subject := authz.Subject{UserID: sam.ID, Username: "sam", Admin: true}
 	if _, err := svc.Register(t.Context(), subject, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
 		t.Fatal(err)
 	}
 
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	var out revisionsBody
 	decode(t, admin.get("/api/services/"+paymentsID()+"/revisions"), &out)
 	var got []string
 	for _, item := range out.Items {
 		got = append(got, fmt.Sprintf("%d %s %s", item.Revision, item.Status, item.RegisteredBy))
 	}
-	want := []string{"43 not_deployed pavel", "42 deployed terraform", "41 previous terraform", "40 previous terraform"}
+	want := []string{"43 not_deployed sam", "42 deployed terraform", "41 previous terraform", "40 previous terraform"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("items = %v, want %v", got, want)
 	}
@@ -240,7 +240,7 @@ func adminWithFake(t *testing.T) (*apiClient, *fake.Fake) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	return login(t, srv, "pavel", testPassword), fk
+	return login(t, srv, "sam", testPassword), fk
 }
 
 func TestGetImageTags_ECRAndFallback(t *testing.T) {
@@ -276,7 +276,7 @@ func TestGetImageTags_NoneForOtherAccountImage(t *testing.T) {
 		Current string `json:"current"`
 		Tags    []any  `json:"tags"`
 	}
-	decode(t, login(t, srv, "pavel", testPassword).get("/api/services/"+paymentsID()+"/image-tags"), &out)
+	decode(t, login(t, srv, "sam", testPassword).get("/api/services/"+paymentsID()+"/image-tags"), &out)
 	if out.Source != "none" || out.Current != "1.27" || out.Tags == nil || len(out.Tags) != 0 {
 		t.Errorf("fallback = %+v", out)
 	}
@@ -315,7 +315,7 @@ func TestGetService_IncludesControllerAndStrategyText(t *testing.T) {
 	}
 	fk.Estate.Mu.Unlock()
 	pollAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 
 	got := getService(t, admin, paymentsID())
 	if !got.Controller.Supported || got.Controller.Banner != "" || got.Controller.Type != "ECS" {

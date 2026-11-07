@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
@@ -13,13 +13,41 @@ const withoutTerminal = () =>
 
 /** The service tab link (the sidebar and breadcrumbs reuse some of these names). */
 const tabLink = (name: string | RegExp) =>
-  screen.getAllByRole('link', { name }).find((link) => link.getAttribute('href')?.startsWith('/services/')) as HTMLElement
+  within(screen.getByRole('navigation', { name: 'Service tabs' })).getByRole('link', { name })
 
 const withCan = (can: Partial<typeof SERVICE_PAYMENTS.can>) =>
   http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_PAYMENTS, can: { ...SERVICE_PAYMENTS.can, ...can } }))
 const viewerOnly = { logs: false, operate: false, deploy: false, edit: false, terminal: false }
 
 describe('ServicePage', () => {
+  it('header has a primary Deploy link to the Deploy tab', async () => {
+    server.use(withCan({ ...viewerOnly, deploy: true }))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    const tabs = screen.getByRole('navigation', { name: 'Service tabs' })
+    const headerLink = screen.getAllByRole('link', { name: 'Deploy' }).find((link) => !tabs.contains(link))
+    expect(headerLink).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/deploy`)
+  })
+
+  it('header shows a disabled Deploy button with the lock tooltip when locked', async () => {
+    server.use(withCan(viewerOnly))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    const tabs = screen.getByRole('navigation', { name: 'Service tabs' })
+    expect(screen.getAllByRole('link', { name: /^Deploy/ }).filter((link) => !tabs.contains(link))).toHaveLength(0)
+    const button = screen.getByRole('button', { name: 'Deploy' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', `You need Edit, Deploy or Operate on ${SERVICE_PAYMENTS.tag.name}`)
+  })
+
+  it('tab bar labels the Configure group and names the last tab History', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    const nav = screen.getByRole('navigation', { name: 'Service tabs' })
+    expect(within(nav).getByText('Configure')).toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'History' })).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/operations`)
+  })
+
   it('Deploy tab is bold and unlocked for Operate-only', async () => {
     server.use(withCan({ ...viewerOnly, operate: true }))
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)
@@ -100,10 +128,10 @@ describe('ServicePage', () => {
     await screen.findByText('Completed')
     expect(tabLink('Overview').className).toContain('active')
 
-    fireEvent.click(tabLink('Operations log'))
+    fireEvent.click(tabLink('History'))
     expect(await screen.findByRole('checkbox', { name: 'Show ECS service events' })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent(`/services/${SERVICE_PAYMENTS.id}/operations`)
-    expect(tabLink('Operations log').className).toContain('active')
+    expect(tabLink('History').className).toContain('active')
   })
 
   it('redirects an unknown tab to overview', async () => {

@@ -17,7 +17,7 @@ const POLL_TIMEOUT = 20_000
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Main' })
 
 test('overview shows cluster usage and needs attention', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   const cpuCard = card(page, 'Busiest clusters, CPU')
   await expect(cpuCard.getByText('core-services', { exact: true })).toBeVisible({ timeout: POLL_TIMEOUT })
 
@@ -34,7 +34,7 @@ test('overview shows cluster usage and needs attention', async ({ page }) => {
 })
 
 test('cluster page draws the usage chart', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   await page.getByRole('link', { name: /core-services/ }).first().click()
   await expect(page.getByRole('heading', { level: 1, name: 'core-services' })).toBeVisible()
@@ -45,7 +45,7 @@ test('cluster page draws the usage chart', async ({ page }) => {
 
 // The grid ends before now, so the fresh rollout's marker sits at the right edge (see deployMarks).
 test('cluster chart shows a deployment marker label', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   await page.getByRole('link', { name: /core-services/ }).first().click()
   const chart = card(page, 'Cluster CPU and memory, 24 h')
@@ -53,7 +53,7 @@ test('cluster chart shows a deployment marker label', async ({ page }) => {
 })
 
 test('edge-proxy says Container Insights is off', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await nav(page).getByRole('link', { name: 'Clusters' }).click()
   const row = page.getByRole('row', { name: /edge-proxy/ })
   await expect(row.getByTitle('Container Insights is off').first()).toBeVisible({ timeout: POLL_TIMEOUT })
@@ -65,7 +65,7 @@ test('edge-proxy says Container Insights is off', async ({ page }) => {
 })
 
 test('metrics tab range switch', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')}/metrics`)
   await expect(card(page, 'CPU utilization')).toBeVisible({ timeout: POLL_TIMEOUT })
   await page.getByRole('main').getByRole('button', { name: '6h', exact: true }).click()
@@ -74,7 +74,7 @@ test('metrics tab range switch', async ({ page }) => {
 })
 
 test('target health shows the unhealthy target', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   const catalog = serviceId(HOMELAB_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')
   await page.goto(`/services/${catalog}/overview`)
   const health = card(page, 'Target health')
@@ -82,7 +82,7 @@ test('target health shows the unhealthy target', async ({ page }) => {
 })
 
 test('scaling tab shows min, max and scheduled actions', async ({ page }) => {
-  await login(page, 'pavel')
+  await login(page, 'sam')
   const payments = serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
   await page.goto(`/services/${payments}/scaling`)
   const autoScaling = card(page, 'Auto scaling')

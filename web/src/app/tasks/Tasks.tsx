@@ -2,9 +2,11 @@ import { useDeferredValue, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useSettings } from '../../api/hooks'
 import type { TasksFilter, TasksListDTO } from '../../api/types'
+import { ColumnPicker, useColumnPrefs } from '../../components/ColumnPicker'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip, type KpiItem } from '../../components/KpiStrip'
 import { SegmentedFilter } from '../../components/Seg'
+import { TASK_COLUMNS } from '../../components/TaskTable'
 import { Toggle } from '../../components/Toggle'
 import { useCrumbs } from '../shell/crumbs'
 import { useFilters } from '../shell/useFilters'
@@ -12,7 +14,10 @@ import { HiddenStoppedNote } from './HiddenStoppedNote'
 import { buildRows, inSegment, matchesQuery } from './taskRows'
 import styles from './tasks.module.css'
 import { useAllTasks } from './useAllTasks'
+import { useTaskPanel } from './useTaskPanel'
 import { TasksTable } from './TasksTable'
+
+const COLUMN_DEFAULTS = TASK_COLUMNS.map((column) => column.key)
 
 const FILTERS: TasksFilter[] = ['problems', 'running', 'stopped', 'all']
 const DEFAULT_FILTER: TasksFilter = 'problems'
@@ -55,6 +60,8 @@ export function Tasks() {
   const all = useAllTasks(filters)
   const windowMinutes = useSettings().data?.stopped_tasks_window_minutes
   const deferredQuery = useDeferredValue(query)
+  const [visibleColumns, setVisibleColumns] = useColumnPrefs('harbormaster-columns:tasks', COLUMN_DEFAULTS)
+  const { onOpen, onStop, panel } = useTaskPanel(all.items)
 
   const matching = useMemo(() => all.items.filter((task) => matchesQuery(task, deferredQuery)), [all.items, deferredQuery])
   const counts = useMemo(
@@ -143,6 +150,7 @@ export function Tasks() {
           type="search"
           className={styles.search}
           aria-label="Filter tasks"
+          data-hm-filter
           placeholder="Filter by task ID, service, cluster, IP"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -151,6 +159,8 @@ export function Tasks() {
           Group repeats
         </Toggle>
         <HiddenStoppedNote />
+        <span className={styles.spacer} />
+        <ColumnPicker columns={TASK_COLUMNS} visible={visibleColumns} onChange={setVisibleColumns} defaults={COLUMN_DEFAULTS} />
       </div>
 
       {failed ? (
@@ -159,7 +169,11 @@ export function Tasks() {
         <EmptyState>Loading tasks…</EmptyState>
       ) : (
         <>
-          <TasksTable rows={rows} page={page} onPageChange={setPage} onToggleGroup={toggleGroup} empty="No tasks match." />
+          <TasksTable rows={rows} page={page} onPageChange={setPage} onToggleGroup={toggleGroup}
+            onOpen={onOpen}
+            onStop={onStop}
+            visibleColumns={visibleColumns}
+            empty="No tasks match." />
           {all.truncated && (
             <div className={styles.note}>
               {`Showing the first ${all.items.length} tasks. Filter by service, cluster or account to see the rest.`}
@@ -167,6 +181,7 @@ export function Tasks() {
           )}
         </>
       )}
+      {panel}
     </>
   )
 }

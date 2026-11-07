@@ -150,7 +150,7 @@ func TestStorage_MountOfUnknownFileSystemIgnored(t *testing.T) {
 		`update task_definitions set raw = replace(raw::text, $1, 'fs-deadbeef')::jsonb`, fsJenkins); err != nil {
 		t.Fatal(err)
 	}
-	out := getJSON[StorageDTO](t, login(t, srv, "pavel", testPassword), "/api/storage")
+	out := getJSON[StorageDTO](t, login(t, srv, "sam", testPassword), "/api/storage")
 	if len(out.Items) != 5 {
 		t.Fatalf("items = %d, want 5", len(out.Items))
 	}

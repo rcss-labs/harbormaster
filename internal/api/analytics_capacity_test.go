@@ -26,7 +26,7 @@ func TestAnalyticsCapacity_IgnoresRangeAndReportsIt(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	got := getCapacity(t, c, "?range=24h")
 
 	w := got.Window
@@ -58,7 +58,7 @@ func TestAnalyticsCapacity_KPIsMatchEstateAndDonutsAddUp(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getCapacity(t, login(t, srv, "pavel", testPassword), "")
+	got := getCapacity(t, login(t, srv, "sam", testPassword), "")
 
 	var wantVCPU, wantGiB float64
 	var wantTasks int
@@ -112,7 +112,7 @@ func TestAnalyticsCapacity_ReservedTrendStackedByTag(t *testing.T) {
 	if err := st.InsertCountsHistory(t.Context(), time.Now().UTC().Add(-time.Hour), rows); err != nil {
 		t.Fatal(err)
 	}
-	got := getCapacity(t, login(t, srv, "pavel", testPassword), "")
+	got := getCapacity(t, login(t, srv, "sam", testPassword), "")
 	if len(got.ReservedVCPU7d.Series) == 0 {
 		t.Fatal("reserved_vcpu_7d has no lines")
 	}
@@ -137,7 +137,7 @@ func TestAnalyticsCapacity_NonAdminSeesOnlyVisibleClusters(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withAnalyticsRetention)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	admin := getCapacity(t, login(t, srv, "pavel", testPassword), "")
+	admin := getCapacity(t, login(t, srv, "sam", testPassword), "")
 	omerClient := login(t, srv, "omer", testPassword)
 	omer := getCapacity(t, omerClient, "")
 
@@ -178,7 +178,7 @@ func TestAnalyticsCapacity_SubnetUsedPctIsAFraction(t *testing.T) {
 		[]model.Subnet{lowSubnet}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	got := getCapacity(t, login(t, srv, "pavel", testPassword), "")
+	got := getCapacity(t, login(t, srv, "sam", testPassword), "")
 	for _, row := range got.SubnetsLow {
 		if row.SubnetID == "subnet-low" {
 			// 20 of 251 usable addresses free: 91.99% used, reported as a 0..1 fraction like the other table fields.

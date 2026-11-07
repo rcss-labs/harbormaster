@@ -15,7 +15,7 @@ for (const role of Object.keys(USERS) as Role[]) {
 
 setup('wrong password is rejected', async ({ page }) => {
   await page.goto('/login')
-  await page.getByLabel('Username').fill(USERS.pavel.username)
+  await page.getByLabel('Username').fill(USERS.sam.username)
   await page.getByLabel('Password').fill('not-the-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByText('Wrong username or password.', { exact: true })).toBeVisible()

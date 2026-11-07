@@ -122,3 +122,38 @@ soak:
 		exit 2; \
 	fi
 	HM_SOAK=1 go test -count=1 -tags soak -run TestSoak -timeout 20m -v ./internal/poller
+
+# Floci harness (tools/floci): a local AWS emulator plus Postgres, so Harbormaster's real AWS code path is checked
+# against an ECS estate. Every script sources tools/floci/env.sh, which refuses (exit 2) any non-local endpoint.
+# Typical run: make floci-up floci-seed floci-check floci-down
+.PHONY: floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
+FLOCI_COMPOSE := docker compose -f tools/floci/docker-compose.yml
+
+floci-selfcheck:
+	tools/floci/env_test.sh
+
+floci-up:
+	tools/floci/env.sh >/dev/null
+	$(FLOCI_COMPOSE) up -d --wait
+
+floci-seed:
+	tools/floci/seed.sh
+
+# floci-serve prepares the database, then runs the server in the foreground; run tools/floci/connect.sh from another shell.
+floci-serve:
+	tools/floci/prepare.sh
+	tools/floci/serve.sh
+
+# floci-check builds the binary, prepares the database and runs the Playwright floci suite (its webServer starts the
+# server and its setup project runs connect.sh). Set HM_E2E_SCREENSHOT_DIR to keep a screenshot per route, width and theme.
+floci-check:
+	tools/floci/env.sh >/dev/null
+	$(MAKE) build
+	git checkout -- internal/web/dist/index.html
+	tools/floci/prepare.sh
+	cd web && npx playwright test -c playwright.floci.config.ts
+
+floci-down:
+	$(FLOCI_COMPOSE) down -v --remove-orphans
+	rm -f tools/floci/.admin-password
+	rm -rf web/.auth-floci

@@ -102,7 +102,7 @@ func TestRegister_Permissions(t *testing.T) {
 	} {
 		t.Run(tc.user, func(t *testing.T) {
 			env := newWriteEnv(t)
-			draft := draftFor(t, env.login("pavel"))
+			draft := draftFor(t, env.login("sam"))
 			resp := env.login(tc.user).post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
 			if resp.StatusCode != tc.status {
 				t.Fatalf("status %d, want %d", resp.StatusCode, tc.status)
@@ -132,7 +132,7 @@ func TestRegister_Permissions(t *testing.T) {
 
 func TestRegister_StaleBaseIs409WithDeployedRevision(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 41, "definition": draftFor(t, admin)})
 	wantStatus(t, resp, http.StatusConflict)
 	var out struct {
@@ -147,7 +147,7 @@ func TestRegister_StaleBaseIs409WithDeployedRevision(t *testing.T) {
 
 func TestRegister_ValidationIs422(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	draft := draftFor(t, admin)
 	draft["family"] = "other-family"
 	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
@@ -160,7 +160,7 @@ func TestRegister_ValidationIs422(t *testing.T) {
 
 func TestRegister_NonAdminRoleChangeIs422(t *testing.T) {
 	env := newWriteEnv(t)
-	draft := draftFor(t, env.login("pavel"))
+	draft := draftFor(t, env.login("sam"))
 	draft["taskRoleArn"] = "arn:aws:iam::" + homelabAccountID + ":role/escalated"
 	body := map[string]any{"base_revision": 42, "definition": draft}
 	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/revisions", body)
@@ -168,12 +168,12 @@ func TestRegister_NonAdminRoleChangeIs422(t *testing.T) {
 	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Changing roles needs a global admin" {
 		t.Errorf("error = %s %q", code, msg)
 	}
-	wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
+	wantStatus(t, env.login("sam").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
 }
 
 func TestRegister_NonAdminEnvironmentFileIs422AndNothingRegistered(t *testing.T) {
 	env := newWriteEnv(t)
-	draft := draftFor(t, env.login("pavel"))
+	draft := draftFor(t, env.login("sam"))
 	first := draft["containerDefinitions"].([]any)[0].(map[string]any)
 	first["environmentFiles"] = []any{map[string]any{"type": "s3", "value": "arn:aws:s3:::attacker-bucket/stolen.env"}}
 	body := map[string]any{"base_revision": 42, "definition": draft}
@@ -186,7 +186,7 @@ func TestRegister_NonAdminEnvironmentFileIs422AndNothingRegistered(t *testing.T)
 	if after := env.fk.Calls()["RegisterTaskDefinition"]; after != before {
 		t.Errorf("RegisterTaskDefinition called %d times for a rejected draft", after-before)
 	}
-	wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
+	wantStatus(t, env.login("sam").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
 }
 
 func TestRegister_NonAdminHostEscapeFieldsAre422AndNothingRegistered(t *testing.T) {
@@ -200,7 +200,7 @@ func TestRegister_NonAdminHostEscapeFieldsAre422AndNothingRegistered(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			env := newWriteEnv(t)
-			draft := draftFor(t, env.login("pavel"))
+			draft := draftFor(t, env.login("sam"))
 			mutate(draft)
 			body := map[string]any{"base_revision": 42, "definition": draft}
 			before := env.fk.Calls()["RegisterTaskDefinition"]
@@ -212,7 +212,7 @@ func TestRegister_NonAdminHostEscapeFieldsAre422AndNothingRegistered(t *testing.
 			if after := env.fk.Calls()["RegisterTaskDefinition"]; after != before {
 				t.Errorf("RegisterTaskDefinition called %d times for a rejected draft", after-before)
 			}
-			wantStatus(t, env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
+			wantStatus(t, env.login("sam").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
 		})
 	}
 }
@@ -254,14 +254,14 @@ func TestDeploy_Permissions(t *testing.T) {
 
 func TestDeploy_AlreadyDeployedIs422(t *testing.T) {
 	env := newWriteEnv(t)
-	resp := env.login("pavel").post("/api/services/"+paymentsID()+"/deploy", map[string]any{"revision": 42})
+	resp := env.login("sam").post("/api/services/"+paymentsID()+"/deploy", map[string]any{"revision": 42})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 }
 
 func TestDeploy_RolloutRunningIs409(t *testing.T) {
 	env := newWriteEnv(t)
 	id := serviceID(homelabAccountID, "us-east-1", "core-services", "notifications")
-	resp := env.login("pavel").post("/api/services/"+id+"/deploy", map[string]any{"revision": 8})
+	resp := env.login("sam").post("/api/services/"+id+"/deploy", map[string]any{"revision": 8})
 	wantStatus(t, resp, http.StatusConflict)
 	if code, msg := errorCode(t, resp); code != "conflict" || msg != "A rollout is already running" {
 		t.Errorf("error = %s %q", code, msg)
@@ -279,7 +279,7 @@ func TestDeploy_CodeDeployServiceIs422WithBanner(t *testing.T) {
 	}
 	env.fk.Estate.Mu.Unlock()
 	id := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
-	resp := env.login("pavel").post("/api/services/"+id+"/deploy", map[string]any{"revision": 5})
+	resp := env.login("sam").post("/api/services/"+id+"/deploy", map[string]any{"revision": 5})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	want := "This service is deployed by CodeDeploy. Harbormaster shows it but can't deploy it yet."
 	if code, msg := errorCode(t, resp); code != "invalid" || msg != want {
@@ -370,7 +370,7 @@ func TestStopTask_ServiceTagAndStandaloneClusterTag(t *testing.T) {
 
 func TestWrite_RequiresCSRF(t *testing.T) {
 	env := newWriteEnv(t)
-	resp := env.login("pavel").do(http.MethodPost, "/api/services/"+paymentsID()+"/restart", nil, map[string]string{"X-CSRF-Token": ""})
+	resp := env.login("sam").do(http.MethodPost, "/api/services/"+paymentsID()+"/restart", nil, map[string]string{"X-CSRF-Token": ""})
 	wantStatus(t, resp, http.StatusForbidden)
 	if code, _ := errorCode(t, resp); code != "csrf" {
 		t.Errorf("code = %q, want csrf", code)
@@ -379,7 +379,7 @@ func TestWrite_RequiresCSRF(t *testing.T) {
 
 func TestWrite_MissingRequiredFieldsAre422(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	id := paymentsID()
 	for _, tc := range []struct {
 		path, message string
@@ -406,7 +406,7 @@ func TestWrite_MissingRequiredFieldsAre422(t *testing.T) {
 
 func TestRegister_AWSValidationIs422Verbatim(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	draft := draftFor(t, admin)
 	env.fk.FailNext("RegisterTaskDefinition", &smithy.GenericAPIError{Code: "InvalidParameterException", Message: "Container.image should not be null or empty."})
 	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
@@ -418,7 +418,7 @@ func TestRegister_AWSValidationIs422Verbatim(t *testing.T) {
 
 func TestWrite_ThrottleIs503(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	atomic.StoreInt32(&env.fk.Throttle, 1)
 	resp := admin.post("/api/services/"+paymentsID()+"/restart", nil)
 	wantStatus(t, resp, http.StatusServiceUnavailable)
@@ -459,7 +459,7 @@ func TestRegister_NonAdminFoldedKeyBypassIs422AndNothingIsRegistered(t *testing.
 	for name, attack := range foldedKeyAttacks() {
 		t.Run(name, func(t *testing.T) {
 			env := newWriteEnv(t)
-			draft := draftFor(t, env.login("pavel"))
+			draft := draftFor(t, env.login("sam"))
 			attack(draft)
 			before := env.fk.Calls()["RegisterTaskDefinition"]
 			resp := env.login("editor").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
@@ -473,7 +473,7 @@ func TestRegister_NonAdminFoldedKeyBypassIs422AndNothingIsRegistered(t *testing.
 
 func TestRegister_UnknownDraftKeyIs422(t *testing.T) {
 	env := newWriteEnv(t)
-	admin := env.login("pavel")
+	admin := env.login("sam")
 	draft := draftFor(t, admin)
 	draft["taskRoleArnn"] = "typo"
 	resp := admin.post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
@@ -496,9 +496,9 @@ func dropTable(t *testing.T, env writeEnv, table string) {
 
 func TestRegister_RecordFailureAfterAWSAcceptedIs201WithWarning(t *testing.T) {
 	env := newWriteEnv(t)
-	draft := draftFor(t, env.login("pavel"))
+	draft := draftFor(t, env.login("sam"))
 	dropTable(t, env, "revision_records")
-	resp := env.login("pavel").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
+	resp := env.login("sam").post("/api/services/"+paymentsID()+"/revisions", map[string]any{"base_revision": 42, "definition": draft})
 	wantStatus(t, resp, http.StatusCreated)
 	var out map[string]any
 	decode(t, resp, &out)

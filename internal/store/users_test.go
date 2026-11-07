@@ -16,12 +16,12 @@ func TestCreateUser_CaseInsensitiveUnique(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateUser(ctx, "pavel", "hash", false, false); err != nil {
-		t.Fatalf("CreateUser pavel: %v", err)
+	if _, err := s.CreateUser(ctx, "sam", "hash", false, false); err != nil {
+		t.Fatalf("CreateUser sam: %v", err)
 	}
-	_, err := s.CreateUser(ctx, "Pavel", "hash", false, false)
+	_, err := s.CreateUser(ctx, "Sam", "hash", false, false)
 	if !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("CreateUser Pavel error = %v, want ErrConflict", err)
+		t.Fatalf("CreateUser Sam error = %v, want ErrConflict", err)
 	}
 }
 
@@ -29,16 +29,16 @@ func TestGetUserByUsername_IgnoresCase(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	created, err := s.CreateUser(ctx, "pavel", "hash", true, true)
+	created, err := s.CreateUser(ctx, "sam", "hash", true, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	got, err := s.GetUserByUsername(ctx, "PAVEL")
+	got, err := s.GetUserByUsername(ctx, "SAM")
 	if err != nil {
-		t.Fatalf("GetUserByUsername(PAVEL): %v", err)
+		t.Fatalf("GetUserByUsername(SAM): %v", err)
 	}
-	if got.ID != created.ID || got.Username != "pavel" || !got.Admin || !got.MustChangePassword {
-		t.Fatalf("GetUserByUsername(PAVEL) = %+v, want the created user", got)
+	if got.ID != created.ID || got.Username != "sam" || !got.Admin || !got.MustChangePassword {
+		t.Fatalf("GetUserByUsername(SAM) = %+v, want the created user", got)
 	}
 }
 
@@ -46,7 +46,7 @@ func TestDeleteUser_CascadesSessionsAndPermissions(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	user, err := s.CreateUser(ctx, "pavel", "hash", false, false)
+	user, err := s.CreateUser(ctx, "sam", "hash", false, false)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestDeleteUser_CascadesSessionsAndPermissions(t *testing.T) {
 func TestFailedAttempts_CountsOnlyFailuresInWindow(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	const username, ip = "pavel", "203.0.113.7"
+	const username, ip = "sam", "203.0.113.7"
 
 	for i := 0; i < 3; i++ {
 		if err := s.RecordLoginAttempt(ctx, username, ip, false); err != nil {

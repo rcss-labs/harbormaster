@@ -30,9 +30,7 @@
 }
 .groupTitle {
   margin: 0;
-  font: 600 11px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font: 600 12px/1.5 var(--sans);
   color: var(--dim);
 }
 .input,

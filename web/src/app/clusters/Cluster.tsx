@@ -4,12 +4,14 @@ import { ApiError } from '../../api/client'
 import { useCluster } from '../../api/hooks'
 import { useClusterMetrics } from '../../api/observe'
 import { BarChart } from '../../charts/BarChart'
-import { HBars } from '../../charts/HBars'
 import { fmtNum } from '../../charts/format'
+import { ColumnPicker, useColumnPrefs } from '../../components/ColumnPicker'
+import { DataBanner } from '../../components/DataBanner'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip } from '../../components/KpiStrip'
 import { PinButton } from '../../components/PinButton'
 import { Panel } from '../../components/Panel'
+import { StackBar } from '../../components/StackBar'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
 import { STATUS_COLOR, statusKind } from '../../components/status'
@@ -19,7 +21,7 @@ import { useCrumbs } from '../shell/crumbs'
 import { usePins } from '../shell/pins'
 import { ClusterUsageChart } from './ClusterUsageChart'
 import { formatPercent } from './clusterMetrics'
-import { ServicesTable } from './ServicesTable'
+import { SERVICE_COLUMN_OPTIONS, ServicesTable } from './ServicesTable'
 import { presentValues } from './ServiceCardMetrics'
 import styles from './clusters.module.css'
 import { serviceSeverity } from './serviceSeverity'
@@ -54,6 +56,10 @@ export function Cluster() {
   const { me } = useAuth()
   const { isPinned, toggle } = usePins()
   const [editing, setEditing] = useState<TagTarget | null>(null)
+  const [visibleColumns, setVisibleColumns] = useColumnPrefs(
+    'harbormaster-columns:cluster-services',
+    SERVICE_COLUMN_OPTIONS.map((column) => column.key),
+  )
   const cluster = clusterQuery.data
   const clusterMetrics = clusterMetricsQuery.data
   useCrumbs([['Clusters', '/clusters'], [cluster?.name ?? '']])
@@ -135,15 +141,21 @@ export function Cluster() {
           </a>
         </div>
       </header>
+      <DataBanner tiers={['Clusters and services', 'Tasks']} />
 
       <KpiStrip
         label="Cluster summary"
         items={[
-          { label: 'Services', value: withSub(services.length, `${steadyCount} steady`) },
+          {
+            label: 'Services',
+            value: withSub(services.length, `${steadyCount} steady`),
+            href: `/services?${new URLSearchParams({ q: cluster.name })}`,
+          },
           {
             label: 'Tasks',
             value: withSub(`${cluster.running}/${cluster.desired}`, missing > 0 ? `${missing} missing` : 'all running'),
             valueColor: missing > 0 ? 'var(--warning)' : undefined,
+            href: `/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`,
             spark: cluster.tasks_history_72h.map((point) => point.running),
             sparkColor: TASK_LINE_COLOR,
           },
@@ -166,15 +178,24 @@ export function Cluster() {
       <div className={styles.twoCol}>
         <ClusterUsageChart metrics={clusterMetrics} insights={insights} error={clusterMetricsQuery.error} />
         <Panel title="Tasks by service" actions={<span>bar = running · tick = desired</span>}>
-          <HBars
-            items={bySeverity.slice(0, BARS_SHOWN).map((service) => ({
-              name: service.name,
-              href: `/services/${service.id}/tasks`,
-              parts: [{ v: service.running, color: STATUS_COLOR[statusKind(service.status)] }],
-              ghost: service.desired,
-              label: `${service.running} / ${service.desired}`,
-            }))}
-          />
+          <div className={styles.barList}>
+            {bySeverity.slice(0, BARS_SHOWN).map((service) => {
+              // Each bar is scaled to the larger of running and desired, so the desired tick always fits.
+              const scale = Math.max(service.running, service.desired)
+              return (
+                <div key={service.id} className={styles.barRow}>
+                  <Link to={`/services/${service.id}/tasks`} className={styles.barName}>
+                    {service.name}
+                  </Link>
+                  <div className={styles.barTrack}>
+                    <StackBar parts={[{ n: service.running, color: STATUS_COLOR[statusKind(service.status)], label: 'Running' }]} total={scale} label="Tasks" />
+                    <i className={styles.barTick} style={{ left: `${scale > 0 ? (service.desired / scale) * 100 : 0}%` }} aria-hidden="true" />
+                  </div>
+                  <span className={styles.barValue}>{`${service.running} / ${service.desired}`}</span>
+                </div>
+              )
+            })}
+          </div>
           {bySeverity.length > BARS_SHOWN && (
             <div className={styles.note}>{`${bySeverity.length - BARS_SHOWN} more in the table below`}</div>
           )}
@@ -188,7 +209,12 @@ export function Cluster() {
       <Panel
         title="Services"
         flush
-        toolbar={<span className={styles.count}>{`${services.length} ${services.length === 1 ? 'service' : 'services'} · problems first`}</span>}
+        toolbar={
+          <>
+            <span className={styles.count}>{`${services.length} ${services.length === 1 ? 'service' : 'services'} · problems first`}</span>
+            <ColumnPicker columns={SERVICE_COLUMN_OPTIONS} visible={visibleColumns} onChange={setVisibleColumns} />
+          </>
+        }
       >
         <ServicesTable
           services={services}
@@ -196,6 +222,7 @@ export function Cluster() {
           onTagClick={handleTagClick}
           metrics={clusterMetrics?.services}
           insights={insights}
+          visibleColumns={visibleColumns}
         />
       </Panel>
 

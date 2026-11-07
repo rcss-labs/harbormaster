@@ -701,7 +701,7 @@ func (s *seeder) addStandalone() {
 	at := now.Add(-2 * time.Hour)
 	s.addTask(migrate, taskOptions{taskDefinitionARN: aws.ToString(migrateTD.Definition.TaskDefinitionArn), slot: 0,
 		startedAt: at.Add(-4 * time.Minute), stoppedAt: at, reason: "Essential container in task exited", exitCode: 0,
-		stopCode: ecstypes.TaskStopCodeEssentialContainerExited, group: "family:db-migrate", startedBy: "pavel"})
+		stopCode: ecstypes.TaskStopCodeEssentialContainerExited, group: "family:db-migrate", startedBy: "sam"})
 }
 
 func serviceNetwork(sp serviceSpec) *ecstypes.NetworkConfiguration {
