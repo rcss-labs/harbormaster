@@ -1,5 +1,7 @@
 // Fixtures for GET /api/services/{id}/timeline. The contract test checks them against the backend shape.
 // Types for these bodies live in api/timeline.ts, so the fixtures stay plain objects.
+import { http, HttpResponse } from 'msw'
+import { ALL_TASKS } from './fixtures'
 
 const NOW = '2026-11-07T12:00:00Z'
 
@@ -172,3 +174,16 @@ export const LOG_ERRORS_NO_LOGS = {
   buckets: [],
   fetched_at: null,
 }
+
+/** Default handlers for the timeline routes; msw.ts merges them. Override per test with `server.use`. */
+export const timelineHandlers = [
+  http.get('/api/services/:id/timeline/log-errors', () => HttpResponse.json(LOG_ERRORS_OK)),
+  http.get('/api/services/:id/timeline/tasks/:taskId', ({ params }) => {
+    const task = ALL_TASKS.find((candidate) => candidate.arn.endsWith(`/${params.taskId as string}`))
+    return task ? HttpResponse.json(task) : HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
+  }),
+  http.get('/api/services/:id/timeline', ({ request }) => {
+    const range = new URL(request.url).searchParams.get('range') ?? '1h'
+    return HttpResponse.json({ ...TIMELINE_FAILING, range })
+  }),
+]
