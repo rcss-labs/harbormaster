@@ -1,11 +1,16 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/timeline"
@@ -318,4 +323,108 @@ func (s *Server) getTimelineTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.fail(w, errNotFound)
+}
+
+// timelineLogBuckets is the bucket size per range: about 12 buckets, so a cold load stays inside the call budget.
+var timelineLogBuckets = map[string]time.Duration{
+	"1h": 5 * time.Minute, "6h": 30 * time.Minute, "24h": 2 * time.Hour, "7d": 12 * time.Hour,
+}
+
+// TimelineLogErrorsDTO is GET /api/services/{id}/timeline/log-errors. State is ok, partial (some bucket is unknown
+// or stale), unavailable (CloudWatch failed; Message says why) or no_logs (no container logs to CloudWatch).
+type TimelineLogErrorsDTO struct {
+	State         string                 `json:"state"`
+	Message       string                 `json:"message"`
+	BucketSeconds int                    `json:"bucket_seconds"`
+	Buckets       []TimelineLogBucketDTO `json:"buckets"`
+	FetchedAt     *time.Time             `json:"fetched_at"`
+}
+
+// TimelineLogBucketDTO is the error count of [Start, Start+bucket_seconds). Count is a lower bound when Capped
+// and meaningless when not Known.
+type TimelineLogBucketDTO struct {
+	Start      time.Time `json:"start"`
+	Count      int       `json:"count"`
+	Capped     bool      `json:"capped"`
+	Known      bool      `json:"known"`
+	TopMessage string    `json:"top_message"`
+}
+
+// getTimelineLogErrors answers GET /api/services/{serviceId}/timeline/log-errors?range=. It is the only
+// timeline read that touches log text, so it needs Logs. A CloudWatch failure is a 200 with state unavailable,
+// so the lane can show it and the rest of the timeline is unaffected.
+func (s *Server) getTimelineLogErrors(w http.ResponseWriter, r *http.Request) {
+	rangeName := r.URL.Query().Get("range")
+	if rangeName == "" {
+		rangeName = timelineDefaultRange
+	}
+	window, known := timelineRanges[rangeName]
+	if !known {
+		s.fail(w, invalid("range must be one of 1h, 6h, 24h or 7d."))
+		return
+	}
+	sel, err := s.resolveLogs(r, "all")
+	var forbidden errLogsForbidden
+	if errors.As(err, &forbidden) {
+		forbiddenAction(w, authz.Logs, forbidden.tag)
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	bucket := timelineLogBuckets[rangeName]
+	out := TimelineLogErrorsDTO{State: "ok", BucketSeconds: int(bucket / time.Second), Buckets: []TimelineLogBucketDTO{}}
+	if sel.group == "" {
+		out.State, out.Message = "no_logs", "No container in this service logs to CloudWatch."
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	key, err := serviceKeyFrom(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	now := s.now()
+	counts, err := s.LogErrors.Count(r.Context(), logs.ErrorCountRequest{
+		Target: awsx.Target{AccountID: sel.accountID, Region: sel.region}, Group: sel.group, Region: sel.region,
+		Prefixes: independentPrefixes(sel.prefixes), From: now.Add(-window), To: now, Bucket: bucket,
+	})
+	if err != nil {
+		s.log().Error("count timeline log errors", "service", key.Service, "group", sel.group, "error", err)
+		out.State, out.Message = "unavailable", "Log errors could not be read."
+		if awsx.IsThrottle(err) {
+			out.Message = "AWS is limiting log requests. Try again in a minute."
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	for _, b := range counts.Buckets {
+		out.Buckets = append(out.Buckets, TimelineLogBucketDTO{
+			Start: b.Start, Count: b.Count, Capped: b.Capped, Known: b.Known, TopMessage: b.TopMessage,
+		})
+	}
+	if counts.Partial || counts.Stale {
+		out.State = "partial"
+	}
+	if !counts.FetchedAt.IsZero() {
+		out.FetchedAt = &counts.FetchedAt
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// independentPrefixes drops duplicates and any prefix that another one starts with. Overlapping prefixes would
+// match the same stream twice and double-count its errors.
+func independentPrefixes(prefixes []string) []string {
+	sorted := slices.Clone(prefixes)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	var kept []string
+	for _, prefix := range sorted {
+		if len(kept) > 0 && strings.HasPrefix(prefix, kept[len(kept)-1]) {
+			continue
+		}
+		kept = append(kept, prefix)
+	}
+	return kept
 }

@@ -1,15 +1,21 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aws/smithy-go"
+
 	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -450,4 +456,139 @@ func TestTimelineTask_InvisibleServiceIs404(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status %d, want 404", resp.StatusCode)
 	}
+}
+
+// ---- log errors ----
+
+const paymentsLogGroup = "/ecs/core-services/payments-api"
+
+// logErrorsFixture serves the API with an error counter that does not wait between calls, so a cold load
+// of a whole range runs in milliseconds. prepare changes the estate before the first poll.
+func logErrorsFixture(t *testing.T, prepare ...func(*fake.Fake)) (*httptest.Server, *fake.Fake, *store.Store) {
+	t.Helper()
+	srv, fk, st, _ := newServerCustom(t, true, func(s *Server) {
+		counter := logs.NewErrorCounter(s.Clients, s.Now)
+		counter.Sleep = func(context.Context, time.Duration) error { return nil }
+		s.LogErrors = counter
+	})
+	seedMockupTags(t, st)
+	for _, u := range []string{"oncall", "omer"} {
+		setPassword(t, st, u)
+	}
+	for _, change := range prepare {
+		change(fk)
+	}
+	pollAll(t, st, fk)
+	return srv, fk, st
+}
+
+func getLogErrors(t *testing.T, c *apiClient, id, query string) (int, TimelineLogErrorsDTO) {
+	t.Helper()
+	resp := c.get("/api/services/" + id + "/timeline/log-errors" + query)
+	var body TimelineLogErrorsDTO
+	if resp.StatusCode == http.StatusOK {
+		decode(t, resp, &body)
+	} else {
+		resp.Body.Close()
+	}
+	return resp.StatusCode, body
+}
+
+func TestTimelineLogErrors_RequiresLogs(t *testing.T) {
+	srv, fk, _ := logErrorsFixture(t)
+	resp := login(t, srv, "omer", testPassword).get("/api/services/" + stagingWebID() + "/timeline/log-errors")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403", resp.StatusCode)
+	}
+	if code, _ := errorCode(t, resp); code != "forbidden" {
+		t.Errorf("error code %q, want forbidden", code)
+	}
+	if calls := fk.Calls()["FilterLogEvents"]; calls != 0 {
+		t.Errorf("%d FilterLogEvents calls, want 0", calls)
+	}
+}
+
+func TestTimelineLogErrors_CountsBuckets(t *testing.T) {
+	srv, fk, _ := logErrorsFixture(t)
+	now := time.Now()
+	stream := "ecs/payments-api/0123456789abcdef0123456789abcdef"
+	fk.Estate.SetLogLines(paymentsLogGroup, []fake.LogLine{
+		{Stream: stream, Timestamp: now.Add(-2 * time.Minute), Message: "ERROR card declined for order 1001"},
+		{Stream: stream, Timestamp: now.Add(-2 * time.Minute), Message: "ERROR card declined for order 1002"},
+		{Stream: stream, Timestamp: now.Add(-2 * time.Minute), Message: "INFO all fine"},
+	})
+	status, body := getLogErrors(t, login(t, srv, "oncall", testPassword), paymentsID(), "?range=1h")
+	if status != http.StatusOK || body.State != "ok" {
+		t.Fatalf("status %d state %q (%s), want 200 ok", status, body.State, body.Message)
+	}
+	if body.BucketSeconds != 300 {
+		t.Errorf("bucket_seconds = %d, want 300", body.BucketSeconds)
+	}
+	total := 0
+	for _, b := range body.Buckets {
+		if !b.Known {
+			t.Errorf("bucket %v unknown, want every bucket counted", b.Start)
+		}
+		total += b.Count
+		if b.Count > 0 && !strings.HasPrefix(b.TopMessage, "ERROR card declined for order") {
+			t.Errorf("top_message = %q", b.TopMessage)
+		}
+	}
+	if total != 2 {
+		t.Errorf("counted %d errors, want 2", total)
+	}
+	if body.FetchedAt == nil {
+		t.Error("fetched_at is null, want a time")
+	}
+}
+
+func TestTimelineLogErrors_ThrottleIsUnavailableAndTimelineStillLoads(t *testing.T) {
+	srv, fk, _ := logErrorsFixture(t)
+	fk.FailAlways("FilterLogEvents", &smithy.GenericAPIError{Code: "ThrottlingException", Message: "Rate exceeded"})
+	c := login(t, srv, "oncall", testPassword)
+	status, body := getLogErrors(t, c, paymentsID(), "?range=1h")
+	if status != http.StatusOK || body.State != "unavailable" {
+		t.Fatalf("status %d state %q, want 200 unavailable", status, body.State)
+	}
+	if body.Message != "AWS is limiting log requests. Try again in a minute." {
+		t.Errorf("message = %q", body.Message)
+	}
+	if len(body.Buckets) != 0 {
+		t.Errorf("%d buckets, want none", len(body.Buckets))
+	}
+	if status, timeline := getTimeline(t, c, paymentsID(), "?range=1h"); status != http.StatusOK || timeline.Range != "1h" {
+		t.Errorf("timeline status %d range %q, want 200 1h", status, timeline.Range)
+	}
+}
+
+func TestTimelineLogErrors_OtherFailureHasGenericMessage(t *testing.T) {
+	srv, fk, _ := logErrorsFixture(t)
+	fk.FailAlways("FilterLogEvents", errors.New("boom"))
+	status, body := getLogErrors(t, login(t, srv, "oncall", testPassword), paymentsID(), "")
+	if status != http.StatusOK || body.State != "unavailable" || body.Message != "Log errors could not be read." {
+		t.Errorf("status %d state %q message %q", status, body.State, body.Message)
+	}
+}
+
+func TestTimelineLogErrors_NoAwslogsContainer(t *testing.T) {
+	srv, fk, _ := logErrorsFixture(t, func(fk *fake.Fake) { useSplunkDriver(t, fk) })
+	status, body := getLogErrors(t, login(t, srv, "oncall", testPassword), stagingWebID(), "")
+	if status != http.StatusOK || body.State != "no_logs" {
+		t.Fatalf("status %d state %q, want 200 no_logs", status, body.State)
+	}
+	if body.Message != "No container in this service logs to CloudWatch." {
+		t.Errorf("message = %q", body.Message)
+	}
+	if calls := fk.Calls()["FilterLogEvents"]; calls != 0 {
+		t.Errorf("%d FilterLogEvents calls, want 0", calls)
+	}
+}
+
+func TestTimelineLogErrors_BadRangeIs422(t *testing.T) {
+	srv, _, _ := logErrorsFixture(t)
+	resp := login(t, srv, "oncall", testPassword).get("/api/services/" + paymentsID() + "/timeline/log-errors?range=2d")
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
 }

@@ -134,3 +134,41 @@ export const TIMELINE_EMPTY = {
   deployed_revision: 6,
   polled_at: '2026-11-07T11:59:30Z',
 }
+
+const LOG_ERRORS_BUCKET_SECONDS = 300
+
+function logBucket(minutesAgo: number, fields: { count?: number; capped?: boolean; known?: boolean; top_message?: string } = {}) {
+  const start = new Date(Date.parse(NOW) - minutesAgo * 60_000).toISOString().replace('.000Z', 'Z')
+  return { start, count: 0, capped: false, known: true, top_message: '', ...fields }
+}
+
+// GET /timeline/log-errors: all buckets counted.
+export const LOG_ERRORS_OK = {
+  state: 'ok',
+  message: '',
+  bucket_seconds: LOG_ERRORS_BUCKET_SECONDS,
+  buckets: [
+    logBucket(15),
+    logBucket(10, { count: 14, top_message: 'OutOfMemoryError: Java heap space' }),
+    logBucket(5, { count: 120, capped: true, top_message: 'OutOfMemoryError: Java heap space' }),
+  ],
+  fetched_at: NOW,
+}
+
+// CloudWatch failed: the lane shows the message and the rest of the timeline still loads.
+export const LOG_ERRORS_UNAVAILABLE = {
+  state: 'unavailable',
+  message: 'AWS is limiting log requests. Try again in a minute.',
+  bucket_seconds: LOG_ERRORS_BUCKET_SECONDS,
+  buckets: [],
+  fetched_at: null,
+}
+
+// No container of the service logs to CloudWatch.
+export const LOG_ERRORS_NO_LOGS = {
+  state: 'no_logs',
+  message: 'No container in this service logs to CloudWatch.',
+  bucket_seconds: LOG_ERRORS_BUCKET_SECONDS,
+  buckets: [],
+  fetched_at: null,
+}

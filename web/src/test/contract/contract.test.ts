@@ -49,7 +49,7 @@ import {
   TASK_DEFINITION_PAYMENTS,
 } from '../fixtures'
 import { DEPLOY_SETTINGS_BARE } from '../deployVariants'
-import { TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
+import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
 
@@ -183,6 +183,12 @@ describe('API contract', () => {
   it('the timeline fixtures match the backend shape', () => {
     expect(shapeProblems(TIMELINE_FAILING, contract.timeline, 'timeline failing')).toEqual([])
     expect(shapeProblems(TIMELINE_EMPTY, contract.timeline, 'timeline empty')).toEqual([])
+  })
+
+  it('the log error fixtures match the backend shape', () => {
+    expect(shapeProblems(LOG_ERRORS_OK, contract.timelineLogErrors, 'log errors ok')).toEqual([])
+    expect(shapeProblems(LOG_ERRORS_UNAVAILABLE, contract.timelineLogErrors, 'log errors unavailable')).toEqual([])
+    expect(shapeProblems(LOG_ERRORS_NO_LOGS, contract.timelineLogErrors, 'log errors no logs')).toEqual([])
   })
 
   it('every task fixture matches the backend task shape', () => {

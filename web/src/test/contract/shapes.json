@@ -2523,6 +2523,23 @@
     "range": "string",
     "to": "time"
   },
+  "timelineLogErrors": {
+    "bucket_seconds": "number",
+    "buckets": [
+      {
+        "capped": "boolean",
+        "count": "number",
+        "known": "boolean",
+        "start": "time",
+        "top_message": "string"
+      }
+    ],
+    "fetched_at": {
+      "$null": "time"
+    },
+    "message": "string",
+    "state": "string"
+  },
   "users": {
     "items": [
       {
