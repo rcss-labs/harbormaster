@@ -45,7 +45,9 @@
 
 @media (max-width: 700px) {
   .split { grid-template-columns: minmax(0, 1fr); }
-  .marker { min-width: 24px; }
+  /* The phone check wants 44px targets and 12px text; the global button min-height already makes the marker 44px tall, so the row grows to hold it. */
+  .laneRow { height: 44px; }
+  .marker { top: 50%; transform: translate(-50%, -50%); min-width: 44px; font-size: 12px; }
 }
 
 .detailBody { display: grid; gap: 10px; }
