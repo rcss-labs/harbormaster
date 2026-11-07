@@ -38,7 +38,7 @@ export function TimelineBanner({ incident, triggerDiff, onShowChange }: Timeline
   if (incident.trigger_unknown) {
     banner = (
       <Banner kind="warn">
-        <strong>Tasks have been failing for a long time.</strong> Harbormaster holds too many recent failures to tell what started it. Check the Deploy tab for revision history.
+        <strong>Tasks have been failing for a long time.</strong> Harbormaster holds too many recent failures to tell what started it. No rollback offered. Check the Deploy tab for revision history.
       </Banner>
     )
   } else if (incident.rolled_back) {

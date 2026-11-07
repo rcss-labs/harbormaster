@@ -91,7 +91,7 @@ export const TIMELINE_FAILING = {
       detail: 'Tasks keep stopping with out of memory errors.',
     }),
     event({
-      id: 'terminal:9d1e',
+      id: 'term:9d1e',
       lane: 'access',
       at: '2026-11-07T11:40:00Z',
       severity: 'info',

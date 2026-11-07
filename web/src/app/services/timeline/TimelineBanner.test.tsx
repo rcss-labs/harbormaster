@@ -66,7 +66,7 @@ describe('TimelineBanner', () => {
 
     const warning = within(await banner(/Tasks have been failing for a long time\./))
     expect(warning.getByText(/Harbormaster holds too many recent failures to tell what started it\./)).toBeInTheDocument()
-    expect(warning.getByText(/Check the Deploy tab for revision history\./)).toBeInTheDocument()
+    expect(warning.getByText(/No rollback offered\. Check the Deploy tab for revision history\./)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Show the change' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Roll back/ })).not.toBeInTheDocument()
   })
