@@ -117,7 +117,7 @@ func gate(in Input) Status {
 	switch {
 	case !in.RollupEnabled:
 		return StatusRollupOff
-	case !in.RequiresFargate, in.UnpricedTasks > 0, strings.HasPrefix(in.OSFamily, "WINDOWS"):
+	case !in.RequiresFargate, in.UnpricedTasks > 0, strings.HasPrefix(strings.ToUpper(in.OSFamily), "WINDOWS"):
 		return StatusNotFargate
 	}
 	if _, ok := RateFor(in.Region, in.Architecture); !ok {
@@ -128,7 +128,7 @@ func gate(in Input) Status {
 		return StatusNotRunning
 	case in.CPUUnits <= 0 || in.MemoryMiB <= 0:
 		return StatusNoSize
-	case in.HistoryDays == 0 || in.UsedCPUUnits == nil || in.UsedMemMiB == nil || in.LatestDay == nil:
+	case in.HistoryDays == 0 || in.UsedCPUUnits == nil || in.UsedMemMiB == nil || *in.UsedMemMiB <= 0 || in.LatestDay == nil:
 		return StatusNoData
 	case in.HistoryDays < MinHistoryDays:
 		return StatusShortHistory
@@ -178,5 +178,5 @@ func sameSuggestion(a, b *Suggestion) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.CPUUnits == b.CPUUnits && a.MemoryMiB == b.MemoryMiB
+	return a.CPUUnits == b.CPUUnits && a.MemoryMiB == b.MemoryMiB && a.LimitedByContainers == b.LimitedByContainers
 }

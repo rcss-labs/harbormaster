@@ -132,6 +132,9 @@ func TestEvaluate_HistoryGates(t *testing.T) {
 		{"latest 4 days old", func(in *Input) { d := testToday.AddDate(0, 0, -4); in.LatestDay = &d }, StatusStale},
 		{"latest 3 days old", func(in *Input) { d := testToday.AddDate(0, 0, -3); in.LatestDay = &d }, StatusOK},
 		{"memory nil", func(in *Input) { in.UsedMemMiB = nil }, StatusNoData},
+		{"memory zero", func(in *Input) { in.UsedMemMiB = floatPtr(0) }, StatusNoData},
+		{"cpu zero is valid", func(in *Input) { in.UsedCPUUnits = floatPtr(0) }, StatusOK},
+		{"latest day nil", func(in *Input) { in.LatestDay = nil }, StatusNoData},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,6 +155,7 @@ func TestEvaluate_NonFargateGetsNothing(t *testing.T) {
 		{"not fargate", func(in *Input) { in.RequiresFargate = false }},
 		{"unpriced task", func(in *Input) { in.UnpricedTasks = 1 }},
 		{"windows", func(in *Input) { in.OSFamily = "WINDOWS_SERVER_2022_CORE" }},
+		{"windows mixed case", func(in *Input) { in.OSFamily = "Windows_Server_2022_Core" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,6 +198,11 @@ func TestEvaluate_NotRunningAndNoSize(t *testing.T) {
 	if status, _ := Evaluate(in); status != StatusNoSize {
 		t.Fatalf("status = %q, want no_size", status)
 	}
+	in = baseInput()
+	in.MemoryMiB = 0
+	if status, _ := Evaluate(in); status != StatusNoSize {
+		t.Fatalf("status = %q, want no_size for zero memory", status)
+	}
 }
 
 func TestEvaluate_SpotTasksCountInSaving(t *testing.T) {
@@ -220,5 +229,52 @@ func TestEvaluate_PeggedServiceHasNoSuggestion(t *testing.T) {
 	status, steps := Evaluate(in)
 	if status != StatusOK || steps != nil {
 		t.Fatalf("got (%q, %+v), want (ok, nil)", status, steps)
+	}
+}
+
+func TestEvaluate_LimitedFlagChangesStepWhenFloorStopsBinding(t *testing.T) {
+	in := baseInput()
+	in.Floors = Floors{MemoryMiB: 3072}
+	_, steps := Evaluate(in)
+	if len(steps) != 3 || steps[1].FromHeadroomPct != 15 || steps[2].FromHeadroomPct != 70 {
+		t.Fatalf("steps = %+v, want stops at 10, 15, 70", steps)
+	}
+	if !steps[1].Suggestion.LimitedByContainers || steps[2].Suggestion.LimitedByContainers {
+		t.Fatalf("limited flags = %v then %v, want true then false",
+			steps[1].Suggestion.LimitedByContainers, steps[2].Suggestion.LimitedByContainers)
+	}
+	if steps[2].Suggestion.CPUUnits != 1024 || steps[2].Suggestion.MemoryMiB != 3072 {
+		t.Fatalf("step at 70 = %+v, want 1024/3072", steps[2].Suggestion)
+	}
+}
+
+func TestEvaluate_SuggestionCoversUsageAndFloors(t *testing.T) {
+	for _, usedCPU := range []float64{0, 100, 450, 900} {
+		for _, usedMem := range []float64{200, 1229, 2500} {
+			for _, floors := range []Floors{{}, {CPUUnits: 512}, {MemoryMiB: 3072}, {CPUUnits: 1024, MemoryMiB: 2048}} {
+				for _, oom := range []bool{false, true} {
+					in := baseInput()
+					in.UsedCPUUnits, in.UsedMemMiB = floatPtr(usedCPU), floatPtr(usedMem)
+					in.Floors, in.RecentOOM = floors, oom
+					_, steps := Evaluate(in)
+					for headroom := MinHeadroomPct; headroom <= MaxHeadroomPct; headroom += HeadroomStepPct {
+						got := suggestionAt(steps, headroom)
+						if got == nil {
+							continue
+						}
+						factor := 1 + float64(headroom)/100
+						wantMem := max(usedMem*factor, float64(floors.MemoryMiB))
+						if oom {
+							wantMem = max(wantMem, float64(in.MemoryMiB))
+						}
+						wantCPU := max(usedCPU*factor, float64(floors.CPUUnits))
+						if float64(got.CPUUnits) < wantCPU || float64(got.MemoryMiB) < wantMem {
+							t.Fatalf("used %v/%v floors %+v oom %v at %d: %+v below needed %v/%v",
+								usedCPU, usedMem, floors, oom, headroom, got, wantCPU, wantMem)
+						}
+					}
+				}
+			}
+		}
 	}
 }
