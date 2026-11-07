@@ -43,3 +43,11 @@
 @media (max-width: 700px) {
   .mono, .dimMono, .sourceTable { font-size: 12px; }
 }
+
+.spendTools { margin-bottom: 12px; }
+.spendList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.spendRow { display: grid; grid-template-columns: minmax(90px, 160px) minmax(0, 1fr) 90px; align-items: center; gap: 12px; font-size: 13px; }
+.spendLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spendTrack { height: 8px; border-radius: 4px; background: var(--row-border); overflow: hidden; }
+.spendTrack i { display: block; height: 100%; }
+.spendAmount { font: 500 12px var(--mono); color: var(--text-2); text-align: right; }

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router'
-import { useAnalytics, type AnalyticsRange, type AnalyticsResponse } from '../../api/analytics'
+import { useAnalytics, type AnalyticsRange, type AnalyticsResponse, type AnalyticsTab } from '../../api/analytics'
 import { Banner } from '../../components/Banner'
 import { Chips } from '../../components/Chips'
 import { Disclosure } from '../../components/Disclosure'
@@ -14,19 +14,21 @@ import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { visibleTagIds } from '../shell/useFilters'
 import { CapacityTab } from './CapacityTab'
+import { CostTab } from './CostTab'
 import { DeliveryTab } from './DeliveryTab'
 import { retentionText, windowText } from './format'
 import { OperationsTab } from './OperationsTab'
 import { ReliabilityTab } from './ReliabilityTab'
 import { useAnalyticsPrefs } from './prefs'
-import { ANALYTICS_RANGES, ANALYTICS_TABS, useAnalyticsState, type AnalyticsPageTab } from './useAnalyticsState'
+import { ANALYTICS_RANGES, ANALYTICS_TABS, useAnalyticsState } from './useAnalyticsState'
 import styles from './analytics.module.css'
 
-const TAB_META: Record<AnalyticsPageTab, { label: string; window: string }> = {
+const TAB_META: Record<AnalyticsTab, { label: string; window: string }> = {
   delivery: { label: 'Delivery', window: '90d' },
   reliability: { label: 'Reliability', window: '7d' },
   capacity: { label: 'Capacity', window: 'live + 7d' },
   operations: { label: 'Operations', window: '90d' },
+  cost: { label: 'Cost', window: 'live + 90d' },
 }
 
 const TAB_ITEMS: TabItem[] = ANALYTICS_TABS.map((tab) => ({
@@ -37,6 +39,8 @@ const TAB_ITEMS: TabItem[] = ANALYTICS_TABS.map((tab) => ({
 
 const CAPACITY_NOTICE =
   "Breakdowns use the latest poll. The 7-day trend is estimated from task-count history and each service's current task definition, so the range filter does not apply."
+
+const COST_NOTICE = 'Estimate at list prices as of 19 Oct 2026. Excludes load balancers, data transfer, storage above 20 GB and Spot discounts.'
 
 /** `/analytics` goes to the first tab and keeps the filters in the query string. */
 export function AnalyticsRedirect() {
@@ -50,7 +54,7 @@ export function AnalyticsPage() {
   return <AnalyticsView tab={tab} />
 }
 
-function AnalyticsView({ tab }: { tab: AnalyticsPageTab }) {
+function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
   useCrumbs([['Analytics', '/analytics/delivery'], [TAB_META[tab].label]])
   const { range, setRange, tag, setTags } = useAnalyticsState()
   const { me } = useAuth()
@@ -64,20 +68,23 @@ function AnalyticsView({ tab }: { tab: AnalyticsPageTab }) {
 
   const visibleTags = me ? me.tags.filter((t) => visibleTagIds(me).includes(t.id)) : []
   const selectedTag = tag?.length === 1 ? String(tag[0]) : tag?.length ? '' : 'all'
-  const rangeFixed = tab === 'capacity'
+  const rangeFixed = tab === 'capacity' || tab === 'cost'
 
-  const notice = rangeFixed
-    ? CAPACITY_NOTICE
-    : data?.window.clamped
-      ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${retentionText(data.window.retention)}.`
-      : null
+  const notice =
+    tab === 'capacity'
+      ? CAPACITY_NOTICE
+      : tab === 'cost'
+        ? COST_NOTICE
+        : data?.window.clamped
+          ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${retentionText(data.window.retention)}.`
+          : null
 
   return (
     <div className={styles.page}>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
           <h1 className="hm-phone-title-sr">Analytics</h1>
-          <div className={styles.meta}>Delivery, reliability, capacity and operations, across your clusters and services.</div>
+          <div className={styles.meta}>Delivery, reliability, capacity, operations and cost, across your clusters and services.</div>
         </div>
         <div className={styles.filters}>
           {phone ? (
@@ -142,5 +149,7 @@ function TabBody({ data, showSources }: { data: AnalyticsResponse; showSources: 
       return <CapacityTab data={data} {...props} />
     case 'operations':
       return <OperationsTab data={data} {...props} />
+    case 'cost':
+      return <CostTab data={data} {...props} />
   }
 }

@@ -384,7 +384,7 @@ export interface AnalyticsCost extends Envelope<'cost'> {
   rightsizing: CostRightsizing
 }
 
-export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations
+export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations | AnalyticsCost
 
 export interface AnalyticsByTab {
   delivery: AnalyticsDelivery

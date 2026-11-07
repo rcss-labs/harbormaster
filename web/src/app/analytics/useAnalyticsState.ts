@@ -3,15 +3,13 @@ import type { AnalyticsRange, AnalyticsTab } from '../../api/analytics'
 import { useParamSetter } from '../overview/useOverviewState'
 import { useFilters } from '../shell/useFilters'
 
-/** The tabs the page renders; the cost tab has its endpoint but no page yet. */
-export type AnalyticsPageTab = Exclude<AnalyticsTab, 'cost'>
-export const ANALYTICS_TABS: AnalyticsPageTab[] = ['delivery', 'reliability', 'capacity', 'operations']
+export const ANALYTICS_TABS: AnalyticsTab[] = ['delivery', 'reliability', 'capacity', 'operations', 'cost']
 export const ANALYTICS_RANGES: AnalyticsRange[] = ['24h', '7d', '30d', '90d']
 export const DEFAULT_ANALYTICS_RANGE: AnalyticsRange = '30d'
 
 export interface AnalyticsState {
   /** Null when the path segment is not a known tab; the page redirects then. */
-  tab: AnalyticsPageTab | null
+  tab: AnalyticsTab | null
   range: AnalyticsRange
   setRange: (range: AnalyticsRange) => void
   /** Tag ids of the global filter (?tag=), shared with the shell. */
