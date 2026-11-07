@@ -205,6 +205,14 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 		failuresCut := len(failures) >= timelineFailureLimit && burst.Count >= timelineFailureLimit
 		changesCut := (len(operations) >= timelineLaneLimit && oldestOperation(operations).After(burst.First)) ||
 			(len(deployments) >= timelineLaneLimit && oldestDeployment(deployments).After(burst.First))
+		// Rows older than the burst were read, but if none of them is an eligible change the dropped rows may
+		// hold the trigger, so "no change recorded" would be a guess.
+		triggerLookback := burst.First.Add(-timeline.TriggerLookback)
+		if incident.Trigger == nil {
+			changesCut = changesCut ||
+				(len(operations) >= timelineLaneLimit && oldestOperation(operations).After(triggerLookback)) ||
+				(len(deployments) >= timelineLaneLimit && oldestDeployment(deployments).After(triggerLookback))
+		}
 		if failuresCut || changesCut {
 			incident.MarkTriggerUnknown()
 		}

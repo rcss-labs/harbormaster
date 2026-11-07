@@ -434,6 +434,29 @@ func TestTimeline_TruncatedChangesNewerThanTheBurstHaveNoTrigger(t *testing.T) {
 	}
 }
 
+func TestTimeline_TruncatedChangesThatDroppedEveryEligibleOneHaveNoKnownTrigger(t *testing.T) {
+	withTimelineLimits(t, 2, 2000)
+	c, st, revision := timelineFixture(t)
+	key := paymentsKey()
+	// The deploy at -55m falls outside the two newest rows. The rows that were read include one older than the
+	// burst, but it is not an eligible change, so "no change recorded" would be a guess.
+	seedTimelineOperation(t, st, key, 55*time.Minute, "Deployed revision", map[string]any{
+		"op": "deploy", "from_revision": revision - 1, "to_revision": revision,
+	})
+	seedTimelineOperation(t, st, key, 50*time.Minute, "Registered revision", map[string]any{"op": "register"})
+	seedTimelineStop(t, st, key, "oom-a", "EssentialContainerExited", "OutOfMemoryError", 137, 30*time.Minute)
+	seedTimelineStop(t, st, key, "oom-b", "EssentialContainerExited", "OutOfMemoryError", 137, 25*time.Minute)
+	seedTimelineOperation(t, st, key, 10*time.Minute, "Registered revision", map[string]any{"op": "register"})
+
+	_, body := getTimeline(t, c, paymentsID(), "?range=1h")
+	if body.Incident == nil || !body.Incident.TriggerUnknown {
+		t.Fatalf("incident = %+v, want trigger_unknown true", body.Incident)
+	}
+	if body.Incident.Trigger != nil || body.Incident.RollbackRevision != nil {
+		t.Errorf("incident = %+v, want no trigger or rollback", body.Incident)
+	}
+}
+
 func TestTimeline_ChangeLaneIsNotTruncatedWhenTheRangeIsComplete(t *testing.T) {
 	withTimelineLimits(t, 2, 2000)
 	c, st, _ := timelineFixture(t)
