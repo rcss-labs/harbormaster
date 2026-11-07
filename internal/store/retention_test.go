@@ -203,3 +203,112 @@ func TestRunRetention_SAMLTables(t *testing.T) {
 		t.Fatalf("keys left = %d, want 2", len(keys))
 	}
 }
+
+func TestRunRetention_AgesOutImagesAndKeepsCandidateRowsForLiveOnes(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := s.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	seedScanImages(t, s, now.Add(-100*day),
+		scanSeen("sha256:aged", "ecr", "running"), scanSeen("sha256:live", "ecr", "running"),
+		scanSeen("sha256:cand-only-aged", "ecr", "candidate"), scanSeen("sha256:cand-shared", "ecr", "candidate"))
+	exec(`update scan_images set last_seen_running_at = $1 where digest = 'sha256:aged'`, now.Add(-95*day))
+	exec(`update scan_images set last_seen_running_at = $1 where digest = 'sha256:live'`, now.Add(-1*day))
+	for _, d := range []string{"sha256:aged", "sha256:live", "sha256:cand-only-aged", "sha256:cand-shared"} {
+		exec(`insert into scan_findings (digest, vuln_id, package_name, package_version, severity, first_seen_at, last_seen_at, run_id)
+			values ($1, 'CVE-0000-0001', 'p', '1', 'high', now(), now(), 1)`, d)
+	}
+	exec(`insert into scan_candidate_links values ('sha256:aged', 'sha256:cand-only-aged'), ('sha256:aged', 'sha256:cand-shared'), ('sha256:live', 'sha256:cand-shared')`)
+	for _, d := range []string{"sha256:aged", "sha256:live"} {
+		exec(`insert into scan_fix_candidates (running_digest, candidate_digest, tag, computed_at) values ($1, 'sha256:cand-shared', 't', now())`, d)
+	}
+
+	res, err := s.RunRetention(ctx, now, store.Retention{ScanImages: 90 * day})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["scan_images_aged"] != 1 {
+		t.Fatalf("scan_images_aged = %d, want 1 (%v)", res["scan_images_aged"], res)
+	}
+	count := func(sql string) int {
+		t.Helper()
+		var n int
+		if err := s.Pool.QueryRow(ctx, sql).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	aged, _ := s.GetScanImage(ctx, "sha256:aged")
+	if aged.Status != "aged_out" {
+		t.Fatalf("aged image status = %q, want aged_out", aged.Status)
+	}
+	live, _ := s.GetScanImage(ctx, "sha256:live")
+	if live.Status != "queued" {
+		t.Fatalf("live image status = %q, want untouched", live.Status)
+	}
+	if n := count(`select count(*) from scan_findings where digest in ('sha256:aged', 'sha256:cand-only-aged')`); n != 0 {
+		t.Fatalf("findings of aged image and its unlinked candidate = %d, want 0", n)
+	}
+	if n := count(`select count(*) from scan_findings where digest in ('sha256:live', 'sha256:cand-shared')`); n != 2 {
+		t.Fatalf("findings of live image and shared candidate = %d, want 2", n)
+	}
+	if n := count(`select count(*) from scan_images where digest = 'sha256:cand-only-aged'`); n != 0 {
+		t.Fatalf("unlinked candidate rows = %d, want 0", n)
+	}
+	if n := count(`select count(*) from scan_images where digest = 'sha256:cand-shared'`); n != 1 {
+		t.Fatalf("shared candidate rows = %d, want 1", n)
+	}
+	if n := count(`select count(*) from scan_candidate_links where running_digest = 'sha256:aged'`); n != 0 {
+		t.Fatalf("links of aged image = %d, want 0", n)
+	}
+	if n := count(`select count(*) from scan_candidate_links where running_digest = 'sha256:live'`); n != 1 {
+		t.Fatalf("links of live image = %d, want 1", n)
+	}
+	if n := count(`select count(*) from scan_fix_candidates where running_digest = 'sha256:aged'`); n != 0 {
+		t.Fatalf("fix candidate of aged image = %d, want 0", n)
+	}
+	if n := count(`select count(*) from scan_fix_candidates where running_digest = 'sha256:live'`); n != 1 {
+		t.Fatalf("fix candidate of live image = %d, want 1", n)
+	}
+}
+
+func TestRunRetention_DeletesFinishedRunsWithTheirImages(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	oldRun := newScanRun(t, s, "scan", "sha256:a")
+	recentRun := newScanRun(t, s, "scan", "sha256:b")
+	activeRun := newScanRun(t, s, "scan", "sha256:c")
+	for _, id := range []int64{oldRun, recentRun} {
+		if _, err := s.FinishScanRun(ctx, id, "succeeded", store.ScanRunPatch{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Pool.Exec(ctx, `update scan_runs set finished_at = $2 where id = $1`, oldRun, now.Add(-40*day)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update scan_runs set started_at = $2 where id = $1`, activeRun, now.Add(-40*day)); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.RunRetention(ctx, now, store.Retention{ScanRuns: 30 * day})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["scan_runs"] != 1 {
+		t.Fatalf("scan_runs deleted = %d, want 1 (%v)", res["scan_runs"], res)
+	}
+	var runs, batchRows int
+	_ = s.Pool.QueryRow(ctx, `select count(*) from scan_runs`).Scan(&runs)
+	_ = s.Pool.QueryRow(ctx, `select count(*) from scan_run_images where run_id = $1`, oldRun).Scan(&batchRows)
+	if runs != 2 || batchRows != 0 {
+		t.Fatalf("runs left = %d (want 2), batch rows of deleted run = %d (want 0)", runs, batchRows)
+	}
+}
