@@ -11,9 +11,13 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/timeline"
 )
 
+// The read limits are variables so tests can reach them with a few rows.
+var (
+	timelineLaneLimit    = 500
+	timelineFailureLimit = 2000
+)
+
 const (
-	timelineLaneLimit     = 500
-	timelineFailureLimit  = 2000
 	timelineIncidentSpan  = 7 * 24 * time.Hour
 	timelineDefaultRange  = "1h"
 	timelineAlertLaneNote = "Shows alerts active now. Harbormaster does not keep cleared alerts."
@@ -67,11 +71,14 @@ type TimelineLaneDTO struct {
 
 // TimelineIncidentDTO is the newest failure burst and the change most likely behind it.
 type TimelineIncidentDTO struct {
-	FirstFailureAt   time.Time         `json:"first_failure_at"`
-	LastFailureAt    time.Time         `json:"last_failure_at"`
-	FailureCount     int               `json:"failure_count"`
-	TopReason        string            `json:"top_reason"`
-	TopReasonCount   int               `json:"top_reason_count"`
+	FirstFailureAt time.Time `json:"first_failure_at"`
+	LastFailureAt  time.Time `json:"last_failure_at"`
+	FailureCount   int       `json:"failure_count"`
+	TopReason      string    `json:"top_reason"`
+	TopReasonCount int       `json:"top_reason_count"`
+	// TriggerUnknown is true when reads were cut off before the burst's real start or before its trigger, so
+	// FailureCount is a lower bound and no trigger or rollback is offered.
+	TriggerUnknown   bool              `json:"trigger_unknown"`
 	Trigger          *TimelineEventDTO `json:"trigger"`
 	RollbackRevision *int              `json:"rollback_revision"`
 	RolledBack       *TimelineEventDTO `json:"rolled_back"`
@@ -187,17 +194,29 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 	})
 	// service.Revision is the PRIMARY deployment's revision.
 	incident := timeline.BuildIncident(burst, events, service.Revision)
+	// A burst that fills the failure read may have started earlier, and truncated change reads may have dropped
+	// the real trigger, so naming one could blame an operator's action during the incident.
+	if incident != nil {
+		failuresCut := len(failures) >= timelineFailureLimit && burst.Count >= timelineFailureLimit
+		changesCut := (len(operations) >= timelineLaneLimit && oldestOperation(operations).After(burst.First)) ||
+			(len(deployments) >= timelineLaneLimit && oldestDeployment(deployments).After(burst.First))
+		if failuresCut || changesCut {
+			incident.MarkTriggerUnknown()
+		}
+	}
+	operationsCut := len(operations) >= timelineLaneLimit && oldestOperation(operations).After(from)
+	deploymentsCut := len(deployments) >= timelineLaneLimit && oldestDeployment(deployments).After(from)
 
 	out := TimelineDTO{
 		Range: rangeName, From: from, To: now, Events: []TimelineEventDTO{}, DeployedRevision: service.Revision,
 		PolledAt: polledAt,
 		Lanes: []TimelineLaneDTO{
-			{Lane: string(timeline.LaneChange), Truncated: len(operations) >= timelineLaneLimit || len(deployments) >= timelineLaneLimit,
+			{Lane: string(timeline.LaneChange), Truncated: operationsCut || deploymentsCut,
 				Note: retentionNote("Changes", shortestNonZeroRetention(s.Cfg.Retention.OperationLog, s.Cfg.Retention.DeploymentHistory), window)},
-			{Lane: string(timeline.LaneStop), Truncated: len(stops) >= timelineLaneLimit,
+			{Lane: string(timeline.LaneStop), Truncated: len(stops) >= timelineLaneLimit && stops[len(stops)-1].StoppedAt.After(from),
 				Note: retentionNote("Stops", s.Cfg.Retention.StoppedTasks, window)},
 			{Lane: string(timeline.LaneAlert), Note: timelineAlertLaneNote},
-			{Lane: string(timeline.LaneAccess), Truncated: len(operations) >= timelineLaneLimit},
+			{Lane: string(timeline.LaneAccess), Truncated: operationsCut},
 		},
 	}
 	for _, event := range timeline.InRange(events, from) {
@@ -206,12 +225,32 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 	if incident != nil && !incident.Last.Before(from) {
 		out.Incident = &TimelineIncidentDTO{
 			FirstFailureAt: incident.First, LastFailureAt: incident.Last, FailureCount: incident.Count,
-			TopReason: incident.TopReason, TopReasonCount: incident.TopReasonCount,
+			TopReason: incident.TopReason, TopReasonCount: incident.TopReasonCount, TriggerUnknown: incident.TriggerUnknown,
 			Trigger: timelineEventPointer(incident.Trigger), RollbackRevision: incident.RollbackRevision,
 			RolledBack: timelineEventPointer(incident.RolledBack),
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func oldestOperation(rows []store.OperationRow) time.Time {
+	oldest := rows[0].TS
+	for _, row := range rows {
+		if row.TS.Before(oldest) {
+			oldest = row.TS
+		}
+	}
+	return oldest
+}
+
+func oldestDeployment(rows []store.TimelineDeployment) time.Time {
+	oldest := rows[0].StartedAt
+	for _, row := range rows {
+		if row.StartedAt.Before(oldest) {
+			oldest = row.StartedAt
+		}
+	}
+	return oldest
 }
 
 // shortestNonZeroRetention is the smaller of the non-zero retentions; zero means nothing is pruned.
@@ -255,7 +294,7 @@ func (s *Server) getTimelineTask(w http.ResponseWriter, r *http.Request) {
 	filter := store.TargetFilter{AccountID: key.AccountID, Region: key.Region}
 	// Q also matches family and service names, so the exact id is checked on the ARN below.
 	rows, _, err := s.Store.ListTasks(ctx, store.TaskQuery{
-		TargetFilter: filter, Vis: sc.Vis, Cluster: key.Cluster, Service: key.Service, Q: taskID, Filter: "all",
+		TargetFilter: filter, Vis: sc.Vis, Cluster: key.Cluster, Service: key.Service, Q: taskID, Filter: "all", Limit: 20,
 	})
 	if err != nil {
 		s.fail(w, err)

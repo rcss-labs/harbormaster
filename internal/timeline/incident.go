@@ -59,6 +59,16 @@ type Incident struct {
 	RollbackRevision *int
 	// RolledBack is the newest rollback change after the trigger that returned to the revision before it.
 	RolledBack *Event
+	// TriggerUnknown is set when the history read for the burst was cut short, so the true trigger or the
+	// burst's real start may be missing and no trigger can be named.
+	TriggerUnknown bool
+}
+
+// MarkTriggerUnknown drops the trigger, rollback offer and rolled-back event, which cannot be trusted
+// when the reads behind them were truncated.
+func (i *Incident) MarkTriggerUnknown() {
+	i.TriggerUnknown = true
+	i.Trigger, i.RollbackRevision, i.RolledBack = nil, nil, nil
 }
 
 // BuildIncident names the last eligible change before the burst's first failure as its likely trigger.

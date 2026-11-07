@@ -2,12 +2,14 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -205,8 +207,15 @@ func TestTimeline_MakesNoAWSCalls(t *testing.T) {
 	for _, method := range []string{"FilterLogEvents", "DescribeServices"} {
 		fk.FailAlways(method, errors.New("AWS must not be called"))
 	}
-	if status, _ := getTimeline(t, login(t, srv, "sam", testPassword), paymentsID(), "?range=7d"); status != http.StatusOK {
+	seedTimelineStop(t, st, paymentsKey(), "0123456789abcdef", "EssentialContainerExited", "OutOfMemoryError", 137, time.Hour)
+	c := login(t, srv, "sam", testPassword)
+	if status, _ := getTimeline(t, c, paymentsID(), "?range=7d"); status != http.StatusOK {
 		t.Errorf("status %d, want 200 with AWS failing", status)
+	}
+	resp := c.get("/api/services/" + paymentsID() + "/timeline/tasks/0123456789abcdef")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("task route status %d, want 200 with AWS failing", resp.StatusCode)
 	}
 }
 
@@ -308,4 +317,137 @@ func TestTimelineTask_FindsOldStoppedTask(t *testing.T) {
 		t.Errorf("another service's task: status %d, want 404", other.StatusCode)
 	}
 	other.Body.Close()
+}
+
+// withTimelineLimits shrinks the read limits for one test.
+func withTimelineLimits(t *testing.T, lane, failures int) {
+	t.Helper()
+	oldLane, oldFailures := timelineLaneLimit, timelineFailureLimit
+	timelineLaneLimit, timelineFailureLimit = lane, failures
+	t.Cleanup(func() { timelineLaneLimit, timelineFailureLimit = oldLane, oldFailures })
+}
+
+func TestTimeline_CutOffBurstHasNoTrigger(t *testing.T) {
+	withTimelineLimits(t, 500, 3)
+	c, st, revision := timelineFixture(t)
+	key := paymentsKey()
+	seedTimelineOperation(t, st, key, 50*time.Minute, "Deployed revision", map[string]any{
+		"op": "deploy", "from_revision": revision - 1, "to_revision": revision,
+	})
+	// The crash loop began at -40m, but only the newest 3 failures are read. The restart during the loop must not
+	// be named as the trigger.
+	seedTimelineStop(t, st, key, "oom-a", "EssentialContainerExited", "OutOfMemoryError", 137, 40*time.Minute)
+	seedTimelineOperation(t, st, key, 35*time.Minute, "Restarted", map[string]any{"op": "restart"})
+	seedTimelineStop(t, st, key, "oom-b", "EssentialContainerExited", "OutOfMemoryError", 137, 30*time.Minute)
+	seedTimelineStop(t, st, key, "oom-c", "EssentialContainerExited", "OutOfMemoryError", 137, 25*time.Minute)
+	seedTimelineStop(t, st, key, "oom-d", "EssentialContainerExited", "OutOfMemoryError", 137, 20*time.Minute)
+
+	_, body := getTimeline(t, c, paymentsID(), "?range=1h")
+	if body.Incident == nil {
+		t.Fatal("incident is null, want one")
+	}
+	if !body.Incident.TriggerUnknown {
+		t.Error("trigger_unknown = false, want true for a burst that reaches the failure limit")
+	}
+	if body.Incident.Trigger != nil || body.Incident.RollbackRevision != nil || body.Incident.RolledBack != nil {
+		t.Errorf("incident = %+v, want no trigger, rollback or rolled back", body.Incident)
+	}
+}
+
+func TestTimeline_TruncatedChangesNewerThanTheBurstHaveNoTrigger(t *testing.T) {
+	withTimelineLimits(t, 2, 2000)
+	c, st, revision := timelineFixture(t)
+	key := paymentsKey()
+	seedTimelineOperation(t, st, key, 50*time.Minute, "Deployed revision", map[string]any{
+		"op": "deploy", "from_revision": revision - 1, "to_revision": revision,
+	})
+	seedTimelineStop(t, st, key, "oom-a", "EssentialContainerExited", "OutOfMemoryError", 137, 30*time.Minute)
+	seedTimelineStop(t, st, key, "oom-b", "EssentialContainerExited", "OutOfMemoryError", 137, 25*time.Minute)
+	// Two newer changes fill the limit, so the real deploy was dropped from the read.
+	seedTimelineOperation(t, st, key, 10*time.Minute, "Restarted", map[string]any{"op": "restart"})
+	seedTimelineOperation(t, st, key, 5*time.Minute, "Restarted", map[string]any{"op": "restart"})
+
+	_, body := getTimeline(t, c, paymentsID(), "?range=1h")
+	if body.Incident == nil || !body.Incident.TriggerUnknown {
+		t.Fatalf("incident = %+v, want trigger_unknown true", body.Incident)
+	}
+	if body.Incident.Trigger != nil || body.Incident.RollbackRevision != nil {
+		t.Errorf("incident = %+v, want no trigger or rollback", body.Incident)
+	}
+}
+
+func TestTimeline_ChangeLaneIsNotTruncatedWhenTheRangeIsComplete(t *testing.T) {
+	withTimelineLimits(t, 2, 2000)
+	c, st, _ := timelineFixture(t)
+	key := paymentsKey()
+	// The failures widen the read to 24h before the burst; both rows fill the limit but one is older than the range.
+	seedTimelineStop(t, st, key, "oom-a", "EssentialContainerExited", "OutOfMemoryError", 137, 30*time.Minute)
+	seedTimelineStop(t, st, key, "oom-b", "EssentialContainerExited", "OutOfMemoryError", 137, 25*time.Minute)
+	seedTimelineStop(t, st, key, "oom-c", "EssentialContainerExited", "OutOfMemoryError", 137, 20*time.Minute)
+	seedTimelineOperation(t, st, key, 3*time.Hour, "Restarted", map[string]any{"op": "restart"})
+	seedTimelineOperation(t, st, key, 40*time.Minute, "Restarted", map[string]any{"op": "restart"})
+
+	_, body := getTimeline(t, c, paymentsID(), "?range=1h")
+	for _, lane := range []string{"change", "access"} {
+		if l, _ := timelineLane(body, lane); l.Truncated {
+			t.Errorf("%s lane truncated, want false: every row in the range was read", lane)
+		}
+	}
+	if l, _ := timelineLane(body, "stop"); !l.Truncated {
+		t.Error("stop lane not truncated, want true: 3 stops in range, limit 2")
+	}
+}
+
+func TestTimeline_ClampedAlertCarriesEvidenceAt(t *testing.T) {
+	c, st, _ := timelineFixture(t)
+	srvFake := serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "Old evidence")
+	srvFake.alert.At = time.Now().Add(-3 * time.Hour)
+	for _, target := range []awsx.Target{srvFake.target} {
+		if err := st.ReplaceAlerts(t.Context(), target, []model.Alert{srvFake.alert}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body := getTimeline(t, c, paymentsID(), "?range=1h")
+	alerts := timelineEventsOn(body, "alert")
+	if len(alerts) != 1 || alerts[0].EvidenceAt == nil {
+		t.Fatalf("alert events = %+v, want one with evidence_at", alerts)
+	}
+	if alerts[0].At.Before(body.From) || alerts[0].EvidenceAt.After(body.From) {
+		t.Errorf("at %v evidence_at %v from %v; want at clamped to from and evidence_at before it", alerts[0].At, alerts[0].EvidenceAt, body.From)
+	}
+}
+
+func TestTimelineTask_BoundedLookupAndExactIDOnly(t *testing.T) {
+	c, st, _ := timelineFixture(t)
+	key := paymentsKey()
+	for i := 0; i < 25; i++ {
+		seedTimelineStop(t, st, key, fmt.Sprintf("bulk%028d", i), "EssentialContainerExited", "", 0, time.Hour)
+	}
+	seedTimelineStop(t, st, key, "0123456789abcdef0123456789abcdef", "EssentialContainerExited", "", 0, time.Hour)
+
+	for _, id := range []string{"bulk", "payments-api"} {
+		resp := c.get("/api/services/" + paymentsID() + "/timeline/tasks/" + id)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("task id %q: status %d, want 404 (substring or service name, not an id)", id, resp.StatusCode)
+		}
+	}
+	resp := c.get("/api/services/" + paymentsID() + "/timeline/tasks/0123456789abcdef0123456789abcdef")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("real id: status %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestTimelineTask_InvisibleServiceIs404(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	setPassword(t, st, "omer")
+	pollAll(t, st, fk)
+	seedTimelineStop(t, st, paymentsKey(), "0123456789abcdef", "EssentialContainerExited", "", 0, time.Hour)
+	resp := login(t, srv, "omer", testPassword).get("/api/services/" + paymentsID() + "/timeline/tasks/0123456789abcdef")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status %d, want 404", resp.StatusCode)
+	}
 }

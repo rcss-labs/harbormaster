@@ -110,6 +110,7 @@ export const TIMELINE_FAILING = {
     failure_count: 3,
     top_reason: 'Out of memory',
     top_reason_count: 3,
+    trigger_unknown: false,
     trigger: DEPLOY_6,
     rollback_revision: 5,
     rolled_back: null,
