@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const serverTail = "fields @timestamp, @message, @log, @logStream\nsort @timestamp desc\nlimit 50"
+const serverTail = "| fields @timestamp, @message, @log, @logStream\n| sort @timestamp desc\n| limit 50"
 
 func TestComposeQuery_ScopeStageFirst(t *testing.T) {
 	scopes := []StreamScope{
@@ -22,7 +22,7 @@ func TestComposeQuery_ScopeStageFirst(t *testing.T) {
 	if lines[0] != wantFirst {
 		t.Fatalf("first line\n got: %s\nwant: %s", lines[0], wantFirst)
 	}
-	if lines[1] != "filter @message like /err/" {
+	if lines[1] != "| filter @message like /err/" {
 		t.Fatalf("user stage line = %q", lines[1])
 	}
 	if strings.Join(lines[2:], "\n") != serverTail {
@@ -98,7 +98,7 @@ func TestComposeQuery_PipesInsideLiteralsAreNotStages(t *testing.T) {
 			continue
 		}
 		lines := strings.Split(out, "\n")
-		if len(lines) != 5 || lines[1] != q {
+		if len(lines) != 5 || lines[1] != "| "+q {
 			t.Errorf("%q: want one user stage, got %q", q, lines)
 		}
 	}
@@ -121,13 +121,13 @@ func TestComposeQuery_CommentsCannotHideServerStages(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(out, "\n")
-	if len(lines) != 5 || lines[1] != "filter x" {
+	if len(lines) != 5 || lines[1] != "| filter x" {
 		t.Fatalf("got %q", lines)
 	}
 	if strings.Contains(out, "#") {
 		t.Fatalf("comment survived: %q", out)
 	}
-	if strings.Join(lines[2:], "\n") != strings.Replace(serverTail, "limit 50", "limit 7", 1) {
+	if strings.Join(lines[2:], "\n") != strings.Replace(serverTail, "| limit 50", "| limit 7", 1) {
 		t.Fatalf("server stages damaged: %q", lines)
 	}
 	// # inside a literal is not a comment; a comment ending at newline resumes the query.
@@ -136,7 +136,7 @@ func TestComposeQuery_CommentsCannotHideServerStages(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := strings.Split(out, "\n")
-	if len(l) != 6 || l[1] != `filter @message like "#x"` || l[2] != "sort @timestamp" {
+	if len(l) != 6 || l[1] != `| filter @message like "#x"` || l[2] != "| sort @timestamp" {
 		t.Fatalf("got %q", l)
 	}
 }

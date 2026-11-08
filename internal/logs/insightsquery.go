@@ -45,7 +45,7 @@ func ValidateQuery(user string) error {
 
 // ComposeQuery returns a Logs Insights query that first restricts events to
 // the given scopes, then runs the user's stages, then fixes the output shape.
-// Each stage is on its own line so a comment in user text cannot swallow a
+// Each stage is on its own "| " line so a comment in user text cannot swallow a
 // server-owned stage.
 func ComposeQuery(user string, scopes []StreamScope, limit int) (string, error) {
 	stages, err := splitStages(user)
@@ -71,12 +71,16 @@ func ComposeQuery(user string, scopes []StreamScope, limit int) (string, error) 
 		clauses = append(clauses, fmt.Sprintf(`(@log = "%s" and @logStream like /^(%s)/)`,
 			escapeQuoted(scope.AccountID+":"+scope.Group), strings.Join(escaped, "|")))
 	}
+	// Insights separates commands with "|". The scope filter is first with no
+	// leading pipe; every later stage starts its own line with "| ".
 	lines := []string{"filter " + strings.Join(clauses, " or ")}
-	lines = append(lines, stages...)
+	for _, stage := range stages {
+		lines = append(lines, "| "+stage)
+	}
 	lines = append(lines,
-		"fields @timestamp, @message, @log, @logStream",
-		"sort @timestamp desc",
-		fmt.Sprintf("limit %d", limit),
+		"| fields @timestamp, @message, @log, @logStream",
+		"| sort @timestamp desc",
+		fmt.Sprintf("| limit %d", limit),
 	)
 	composed := strings.Join(lines, "\n")
 	if utf8.RuneCountInString(composed) > maxComposedChars {
