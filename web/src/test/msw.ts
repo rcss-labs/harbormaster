@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node'
 import {
   ACCOUNTS,
   ANALYTICS_CAPACITY,
+  ANALYTICS_COST,
   ANALYTICS_DELIVERY,
   ANALYTICS_OPERATIONS,
   ANALYTICS_RELIABILITY,
@@ -47,6 +48,7 @@ import {
   SSO_TEST_OK,
   SSO_UNCONFIGURED,
 } from './fixtures'
+import { timelineHandlers } from './timelineFixtures'
 import type { SearchResultDTO } from '../api/types'
 import { securityHandlers } from './securityFixtures'
 
@@ -71,6 +73,8 @@ function search(q: string): SearchResultDTO[] {
 
 /** Default handlers: every GET in the API reference answers with the fixtures. Override per test with `server.use`. */
 export const handlers = [
+  // Registered first so :id/timeline is not read as the service id route.
+  ...timelineHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),
   http.get('/api/auth/setup', () => HttpResponse.json({ needed: false })),
   http.get('/api/overview', () => HttpResponse.json(OVERVIEW)),
@@ -154,7 +158,7 @@ export const handlers = [
   http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
   // analytics: the fixture for the tab, with the requested range echoed into window.requested
   http.get('/api/analytics/:tab', ({ params, request }) => {
-    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS }[
+    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS, cost: ANALYTICS_COST }[
       params.tab as string
     ]
     if (!fixture) return notFound()

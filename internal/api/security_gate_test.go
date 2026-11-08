@@ -422,14 +422,14 @@ func TestChangeSet_GateFailurePausesWithReason(t *testing.T) {
 
 func TestChangeSet_GateUnsupportedSidecarImage(t *testing.T) {
 	env := newSecurityEnv(t)
-	env.setting(t, paymentsKey, true)
+	env.setting(t, securityPaymentsKey, true)
 	otel := "public.ecr.aws/aws-observability/aws-otel-collector:v0.41.0"
 
-	row := wantGate(t, applyImages(t, env.sam, paymentsKey, nil, "otel-collector", otel))["otel-collector"]
+	row := wantGate(t, applyImages(t, env.sam, securityPaymentsKey, nil, "otel-collector", otel))["otel-collector"]
 	if row.State != scanStateUnsupported || row.Message != nonECRMessage || row.Ref != otel || row.Digest != "" {
 		t.Fatalf("row = %+v, want unsupported with the copy and the image as ref", row)
 	}
-	wantApplied(t, applyImages(t, env.sam, paymentsKey, anyway(row), "otel-collector", otel))
+	wantApplied(t, applyImages(t, env.sam, securityPaymentsKey, anyway(row), "otel-collector", otel))
 }
 
 func TestGate_FailedImageStaysFailedUnderGateModeAndNothingIsLaunched(t *testing.T) {

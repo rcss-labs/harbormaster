@@ -25,9 +25,9 @@ const (
 )
 
 var (
-	edgeNginxKey  = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}, Service: "edge-nginx"}
-	certRenewerID = serviceID(homelabAccountID, "eu-central-1", "edge-proxy", "cert-renewer")
-	paymentsKey   = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	edgeNginxKey        = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}, Service: "edge-nginx"}
+	certRenewerID       = serviceID(homelabAccountID, "eu-central-1", "edge-proxy", "cert-renewer")
+	securityPaymentsKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 )
 
 // securityEnv is a server with image scanning on and the fake scanner behind it.
@@ -289,7 +289,7 @@ func TestScanRequest_ButtonWorksWithSettingOff(t *testing.T) {
 
 func TestScanRequest_RefusesNonECRAndUnknownTag(t *testing.T) {
 	env := newSecurityEnv(t)
-	payments := paymentsKey.ID()
+	payments := securityPaymentsKey.ID()
 
 	resp, _ := requestScan(t, env.sam, payments, "otel-collector", "v0.40.0", "")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -430,7 +430,7 @@ func TestScanRequest_NeedsDeployAndInvisibleIs404(t *testing.T) {
 		t.Fatalf("message %q should name Dev", message)
 	}
 
-	payments := paymentsKey.ID()
+	payments := securityPaymentsKey.ID()
 	resp, _ = requestScan(t, env.omer, payments, "payments-api", "1.18.2", "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("omer on a Prod service = %d, want 404", resp.StatusCode)
@@ -456,7 +456,7 @@ func TestSecurity_ListShowsOnlyRequestedAndVisible(t *testing.T) {
 		t.Fatalf("images before any request = %d, want none", len(list.Images))
 	}
 	devStatus := mustRequestScan(t, env.sam, edgeNginxKey.ID(), "edge-nginx", "1.27.2")
-	prodStatus := mustRequestScan(t, env.sam, paymentsKey.ID(), "payments-api", "1.18.2")
+	prodStatus := mustRequestScan(t, env.sam, securityPaymentsKey.ID(), "payments-api", "1.18.2")
 	env.scanAll(t)
 
 	list := securityList(t, env.omer)
@@ -481,7 +481,7 @@ func TestSecurity_ListShowsOnlyRequestedAndVisible(t *testing.T) {
 	}
 
 	// The same image requested later by a Prod service stays invisible to omer, and ordering follows the newest request.
-	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: devStatus.Image.Digest, Key: paymentsKey,
+	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: devStatus.Image.Digest, Key: securityPaymentsKey,
 		Container: "payments-api", Image: image.Image, Tag: image.Tag, Source: "manual", RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +560,7 @@ func TestSecurity_DetailListsFindingsWithAcceptancesOfVisibleServices(t *testing
 	env.scanAll(t)
 	digest := status.Image.Digest
 	// A Prod service asked for the same image too.
-	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: paymentsKey, Container: "payments-api",
+	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: securityPaymentsKey, Container: "payments-api",
 		Image: status.Image.Image, Tag: "1.27.2", Source: "manual", RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestSecurity_DetailListsFindingsWithAcceptancesOfVisibleServices(t *testing
 	if danas := finding(env.dana); len(danas.Acceptances) != 1 || !danas.Acceptances[0].CanRevoke || danas.Acceptances[0].By != "dana" {
 		t.Fatalf("dana's view = %+v", danas.Acceptances)
 	}
-	accept(sam.ID, paymentsKey)
+	accept(sam.ID, securityPaymentsKey)
 	both := detailOf(env.sam)
 	if f := both.Findings[0]; len(f.Acceptances) != 2 || !f.AcceptedEverywhere || both.Open.Critical != 0 || both.Accepted != 1 {
 		t.Fatalf("sam's view after both accepted = %+v open critical %d accepted %d", f, both.Open.Critical, both.Accepted)
@@ -633,7 +633,7 @@ func TestSecurity_ListCountsCoverTheServicesTheCallerCanSee(t *testing.T) {
 	status := mustRequestScan(t, env.dana, edgeNginxKey.ID(), "edge-nginx", "1.27.2")
 	env.scanAll(t)
 	digest := status.Image.Digest
-	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: paymentsKey, Container: "payments-api",
+	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: securityPaymentsKey, Container: "payments-api",
 		Image: status.Image.Image, Tag: "1.27.2", Source: "manual", RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}

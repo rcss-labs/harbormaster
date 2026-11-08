@@ -145,11 +145,14 @@ func contractShapes() map[string]any {
 		"analyticsCapacity":    shapeOf(reflect.TypeFor[CapacityDTO]()),
 		"analyticsOperations":  shapeOf(reflect.TypeFor[OperationsDTO]()),
 		// image security
-		"security":        shapeOf(reflect.TypeFor[SecurityDTO]()),
-		"securityImage":   shapeOf(reflect.TypeFor[SecurityImageDetailDTO]()),
-		"securityService": shapeOf(reflect.TypeFor[SecurityServiceDTO]()),
-		"scanStatus":      shapeOf(reflect.TypeFor[ScanStatusDTO]()),
-		"scanGate":        shapeOf(reflect.TypeFor[ScanGateErrorDTO]()),
+		"security":          shapeOf(reflect.TypeFor[SecurityDTO]()),
+		"securityImage":     shapeOf(reflect.TypeFor[SecurityImageDetailDTO]()),
+		"securityService":   shapeOf(reflect.TypeFor[SecurityServiceDTO]()),
+		"scanStatus":        shapeOf(reflect.TypeFor[ScanStatusDTO]()),
+		"scanGate":          shapeOf(reflect.TypeFor[ScanGateErrorDTO]()),
+		"analyticsCost":     shapeOf(reflect.TypeFor[CostDTO]()),
+		"timeline":          shapeOf(reflect.TypeFor[TimelineDTO]()),
+		"timelineLogErrors": shapeOf(reflect.TypeFor[TimelineLogErrorsDTO]()),
 	}
 }
 

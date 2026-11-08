@@ -298,6 +298,124 @@
       "used": "string"
     }
   },
+  "analyticsCost": {
+    "by_account": [
+      {
+        "key": "string",
+        "label": "string",
+        "monthly": "number",
+        "spot_monthly": "number",
+        "unpriced_tasks": "number"
+      }
+    ],
+    "by_cluster": [
+      {
+        "key": "string",
+        "label": "string",
+        "monthly": "number",
+        "spot_monthly": "number",
+        "unpriced_tasks": "number"
+      }
+    ],
+    "by_tag": [
+      {
+        "key": "string",
+        "label": "string",
+        "monthly": "number",
+        "spot_monthly": "number",
+        "unpriced_tasks": "number"
+      }
+    ],
+    "kpis": {
+      "monthly_total": "number",
+      "priced_tasks": "number",
+      "spot_monthly": "number",
+      "spot_tasks": "number",
+      "unpriced_regions": [
+        "string"
+      ],
+      "unpriced_tasks": "number"
+    },
+    "polled_at": "time",
+    "prices_as_of": "string",
+    "rightsizing": {
+      "default_headroom_pct": "number",
+      "min_history_days": "number",
+      "services": [
+        {
+          "architecture": "string",
+          "auto_scaled": "boolean",
+          "can_edit": "boolean",
+          "cluster": "string",
+          "cpu_units": {
+            "$null": "number"
+          },
+          "cpu_used_share": {
+            "$null": "number"
+          },
+          "history_days": "number",
+          "mem_used_share": {
+            "$null": "number"
+          },
+          "memory_mib": {
+            "$null": "number"
+          },
+          "monthly": "number",
+          "recent_oom": "boolean",
+          "region": "string",
+          "service": "string",
+          "service_id": "string",
+          "spot_tasks": "number",
+          "status": "string",
+          "steps": [
+            {
+              "from_headroom_pct": "number",
+              "suggestion": {
+                "$null": {
+                  "cpu_units": "number",
+                  "limited_by_containers": "boolean",
+                  "memory_mib": "number",
+                  "saving_monthly": "number"
+                }
+              }
+            }
+          ],
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string"
+          },
+          "tasks": "number"
+        }
+      ],
+      "state": "string"
+    },
+    "sources": [
+      {
+        "kept": "string",
+        "reads": "string",
+        "setting": {
+          "$null": "string"
+        },
+        "table": "string",
+        "window_used": {
+          "$null": "string"
+        }
+      }
+    ],
+    "tab": "string",
+    "window": {
+      "bucket": "string",
+      "clamped": "boolean",
+      "from": "time",
+      "range_applies": "boolean",
+      "requested": "string",
+      "retention": "string",
+      "to": "time",
+      "used": "string"
+    }
+  },
   "analyticsDelivery": {
     "duration": {
       "series": [
@@ -886,6 +1004,7 @@
       "$null": "time"
     },
     "name": "string",
+    "other_tasks": "number",
     "polled_at": "time",
     "region": "string",
     "reserved_gib": "number",
@@ -2716,6 +2835,7 @@
           "fargate": "number",
           "id": "string",
           "name": "string",
+          "other": "number",
           "spot": "number"
         }
       ],
@@ -2733,6 +2853,137 @@
         }
       ]
     }
+  },
+  "timeline": {
+    "deployed_revision": "number",
+    "events": [
+      {
+        "actor": "string",
+        "at": "time",
+        "detail": "string",
+        "diff": [
+          {
+            "from": "string",
+            "label": "string",
+            "to": "string"
+          }
+        ],
+        "evidence_at": {
+          "$null": "time"
+        },
+        "from_revision": {
+          "$null": "number"
+        },
+        "id": "string",
+        "lane": "string",
+        "op": "string",
+        "severity": "string",
+        "task_id": "string",
+        "title": "string",
+        "to_revision": {
+          "$null": "number"
+        }
+      }
+    ],
+    "from": "time",
+    "incident": {
+      "$null": {
+        "failure_count": "number",
+        "first_failure_at": "time",
+        "last_failure_at": "time",
+        "rollback_revision": {
+          "$null": "number"
+        },
+        "rolled_back": {
+          "$null": {
+            "actor": "string",
+            "at": "time",
+            "detail": "string",
+            "diff": [
+              {
+                "from": "string",
+                "label": "string",
+                "to": "string"
+              }
+            ],
+            "evidence_at": {
+              "$null": "time"
+            },
+            "from_revision": {
+              "$null": "number"
+            },
+            "id": "string",
+            "lane": "string",
+            "op": "string",
+            "severity": "string",
+            "task_id": "string",
+            "title": "string",
+            "to_revision": {
+              "$null": "number"
+            }
+          }
+        },
+        "top_reason": "string",
+        "top_reason_count": "number",
+        "trigger": {
+          "$null": {
+            "actor": "string",
+            "at": "time",
+            "detail": "string",
+            "diff": [
+              {
+                "from": "string",
+                "label": "string",
+                "to": "string"
+              }
+            ],
+            "evidence_at": {
+              "$null": "time"
+            },
+            "from_revision": {
+              "$null": "number"
+            },
+            "id": "string",
+            "lane": "string",
+            "op": "string",
+            "severity": "string",
+            "task_id": "string",
+            "title": "string",
+            "to_revision": {
+              "$null": "number"
+            }
+          }
+        },
+        "trigger_unknown": "boolean"
+      }
+    },
+    "lanes": [
+      {
+        "lane": "string",
+        "note": "string",
+        "truncated": "boolean"
+      }
+    ],
+    "polled_at": "time",
+    "range": "string",
+    "to": "time"
+  },
+  "timelineLogErrors": {
+    "bucket_seconds": "number",
+    "buckets": [
+      {
+        "capped": "boolean",
+        "count": "number",
+        "known": "boolean",
+        "start": "time",
+        "top_message": "string"
+      }
+    ],
+    "fetched_at": {
+      "$null": "time"
+    },
+    "message": "string",
+    "state": "string"
   },
   "users": {
     "items": [

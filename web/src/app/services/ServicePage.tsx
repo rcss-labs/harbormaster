@@ -22,6 +22,7 @@ import { PlaceholderTab } from './PlaceholderTab'
 import { ScalingTab } from './scaling/ScalingTab'
 import { ServiceHeader } from './ServiceHeader'
 import { TasksTab } from './TasksTab'
+import { TimelineTab } from './timeline/TimelineTab'
 import { TaskDefinitionTab } from './task-definition/TaskDefinitionTab'
 import { TerminalTab } from './terminal/TerminalTab'
 import { DeployTab } from './deploy/DeployTab'
@@ -80,6 +81,7 @@ export function ServicePage() {
   if (lockedOut) body = <LockPanel action={activeLock.action} tag={service.tag} />
   else if (tab === 'overview') body = <OverviewTab service={service} />
   else if (tab === 'tasks') body = <TasksTab serviceId={serviceId} />
+  else if (tab === 'timeline') body = <TimelineTab key={serviceId} serviceId={serviceId} service={service} />
   else if (tab === 'operations') body = <OperationsTab serviceId={serviceId} />
   else if (tab === 'metrics') body = <MetricsTab serviceId={serviceId} />
   else if (tab === 'logs') body = <LogsTab serviceId={serviceId} />

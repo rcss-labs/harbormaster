@@ -58,6 +58,7 @@ import type {
 } from '../api/deploy'
 import type {
   AnalyticsCapacity,
+  AnalyticsCost,
   AnalyticsDelivery,
   AnalyticsOperations,
   AnalyticsRange,
@@ -390,11 +391,12 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
   const stopped = items.filter((t) => t.status === 'STOPPED')
   const azCounts = new Map<string, number>()
   for (const task of running) azCounts.set(task.az, (azCounts.get(task.az) ?? 0) + 1)
-  const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number }>()
+  const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number; other: number }>()
   for (const task of running) {
-    const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0 }
+    const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0, other: 0 }
     if (task.capacity === 'FARGATE_SPOT') row.spot++
-    else row.fargate++
+    else if (task.capacity === 'FARGATE') row.fargate++
+    else row.other++
     clusters.set(task.cluster.id, row)
   }
   return {
@@ -560,6 +562,7 @@ function clusterDetail(def: ClusterDef): ClusterDTO {
     arn: `arn:aws:ecs:${def.region}:${def.account.account_id}:cluster/${def.name}`,
     console_url: `https://${def.region}.console.aws.amazon.com/ecs/v2/clusters/${def.name}`,
     fargate_tasks: running.filter((t) => t.capacity === 'FARGATE').length,
+    other_tasks: running.filter((t) => t.capacity !== 'FARGATE' && t.capacity !== 'FARGATE_SPOT').length,
     tasks_history_72h: history(card.running, card.desired),
     stops_per_hour: stopsPerHour(def.name.length, def.status === 'needs_attention' || def.status === 'degraded' ? [20, 21, 22] : []),
     services_detail: services,
@@ -1961,6 +1964,109 @@ export const ANALYTICS_RELIABILITY_DAILY: AnalyticsReliability = {
     ],
     total: 2,
   }),
+}
+
+/** Cost with a ladder of suggestions, an unpriced service without dollars, and a cluster that is only unpriced. */
+export const ANALYTICS_COST: AnalyticsCost = {
+  tab: 'cost',
+  window: analyticsWindow('90d', { requested: '30d', rangeApplies: false, retention: '2160h' }),
+  sources: [
+    source('tasks', 'Running tasks: cpu, memory, capacity provider', 'latest poll', null),
+    source('services', 'The services you can see', 'latest poll', null),
+    source('task_definitions', 'Task definition size and container minimums', 'latest poll', null),
+    source('service_util_daily', 'Daily CPU and memory use as a share of reserved', '2160h', 'HM_RETENTION_UTIL_DAILY'),
+  ],
+  polled_at: FIXTURE_NOW,
+  prices_as_of: '2026-10-19',
+  kpis: { monthly_total: 68.4, spot_monthly: 13.68, priced_tasks: 5, spot_tasks: 1, unpriced_tasks: 3, unpriced_regions: ['ap-south-1'] },
+  by_cluster: [
+    { key: analyticsCoreClusterId, label: 'core-services', monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
+    { key: analyticsStagingClusterId, label: 'staging-web', monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
+    { key: clusterId('482109375512', 'ap-south-1', 'eu-apps'), label: 'eu-apps', monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
+  ],
+  by_account: [
+    { key: ACCOUNT_HOMELAB.account_id, label: ACCOUNT_HOMELAB.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 2 },
+    { key: ACCOUNT_STAGING.account_id, label: ACCOUNT_STAGING.name, monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
+  ],
+  by_tag: [
+    { key: String(TAG_PROD.id), label: TAG_PROD.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
+    { key: String(TAG_STAGING.id), label: TAG_STAGING.name, monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
+    { key: String(TAG_DEV.id), label: TAG_DEV.name, monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
+  ],
+  rightsizing: {
+    state: 'ok',
+    min_history_days: 14,
+    default_headroom_pct: 30,
+    services: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        region: 'us-east-1',
+        architecture: 'X86_64',
+        tag: TAG_PROD,
+        tasks: 3,
+        spot_tasks: 0,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        cpu_used_share: 0.12,
+        mem_used_share: 0.31,
+        monthly: 41.04,
+        status: 'ok',
+        history_days: 30,
+        auto_scaled: true,
+        recent_oom: false,
+        can_edit: true,
+        steps: [
+          { from_headroom_pct: 10, suggestion: { cpu_units: 256, memory_mib: 1024, saving_monthly: 24.6, limited_by_containers: false } },
+          { from_headroom_pct: 40, suggestion: { cpu_units: 512, memory_mib: 1024, saving_monthly: 18.5, limited_by_containers: true } },
+          { from_headroom_pct: 85, suggestion: null },
+        ],
+      },
+      {
+        service_id: serviceId('482109375512', 'ap-south-1', 'eu-apps', 'catalog-api'),
+        service: 'catalog-api',
+        cluster: 'eu-apps',
+        region: 'ap-south-1',
+        architecture: 'X86_64',
+        tag: TAG_DEV,
+        tasks: 2,
+        spot_tasks: 0,
+        cpu_units: 512,
+        memory_mib: 1024,
+        cpu_used_share: null,
+        mem_used_share: null,
+        monthly: 0,
+        status: 'no_price',
+        history_days: 0,
+        auto_scaled: false,
+        recent_oom: false,
+        can_edit: false,
+        steps: [],
+      },
+      {
+        service_id: serviceId('731022849906', 'us-east-1', 'staging-web', 'web-frontend'),
+        service: 'web-frontend',
+        cluster: 'staging-web',
+        region: 'us-east-1',
+        architecture: 'X86_64',
+        tag: TAG_STAGING,
+        tasks: 3,
+        spot_tasks: 1,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        cpu_used_share: 0.4,
+        mem_used_share: 0.5,
+        monthly: 27.36,
+        status: 'mixed_capacity',
+        history_days: 30,
+        auto_scaled: false,
+        recent_oom: false,
+        can_edit: true,
+        steps: [],
+      },
+    ],
+  },
 }
 
 /** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */

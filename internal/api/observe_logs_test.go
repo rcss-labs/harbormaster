@@ -247,11 +247,10 @@ func TestLogsHistory_BeforePages(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
-	srv, fk, st := newTestServer(t)
-	seedMockupTags(t, st)
-	setPassword(t, st, "oncall")
-	// Switch every container of the staging web task definition to the splunk driver before polling.
+// useSplunkDriver switches every container of the staging web task definition to the splunk driver, so the
+// service has no container that logs to CloudWatch. Call it before the first poll: task definitions are read once.
+func useSplunkDriver(t *testing.T, fk *fake.Fake) {
+	t.Helper()
 	fk.Estate.Mu.Lock()
 	var family string
 	for _, s := range fk.Estate.Services {
@@ -275,6 +274,13 @@ func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
 	if family == "" {
 		t.Fatal("staging web task definition not found in the fake estate")
 	}
+}
+
+func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	setPassword(t, st, "oncall")
+	useSplunkDriver(t, fk)
 	pollAll(t, st, fk)
 
 	status, body := getLogs(t, login(t, srv, "oncall", testPassword), stagingWebID(), "")

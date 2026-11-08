@@ -72,6 +72,13 @@ func TestSetDesiredCount_ChangesAndLogs(t *testing.T) {
 	if op := lastOperationOp(t, h, paymentsKey); op != "scale" {
 		t.Fatalf("details.op = %v, want scale", op)
 	}
+	ops, err := h.store.ListOperations(t.Context(), paymentsKey, false, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ops[0].Details["from_desired"] != float64(3) || ops[0].Details["to_desired"] != float64(5) {
+		t.Fatalf("details = %v, want from_desired 3 and to_desired 5", ops[0].Details)
+	}
 }
 
 func TestSetDesiredCount_SameValueIsNoop(t *testing.T) {

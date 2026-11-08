@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -34,6 +35,9 @@ type Server struct {
 	Metrics *metrics.Client
 	// Logs reads CloudWatch Logs history and live tails (plan 03); New defaults it from Clients.
 	Logs *logs.Client
+	// LogErrors counts error lines per bucket for the service timeline; New builds the one counter every
+	// request shares, since the CloudWatch pacing only holds process-wide through a single counter.
+	LogErrors *logs.ErrorCounter
 	// TailLimiter caps concurrent live tails per user; New defaults it from Cfg.LogTailsPerUser.
 	TailLimiter *logs.TailLimiter
 	// Deploy runs the change path (plan 02).
@@ -66,6 +70,8 @@ type Server struct {
 
 	// Scan wakes the scan loop after a scan request; nil when scanning is off.
 	Scan ScanKicker
+	// costWarned remembers which unreadable container definitions the cost tab already logged.
+	costWarned *sync.Map
 }
 
 // ScanKicker wakes the scan loop so a request does not wait for the next interval. Kick reaches only the loop in the
@@ -75,6 +81,7 @@ type ScanKicker interface{ Kick() }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
+	s.costWarned = &sync.Map{}
 	if s.Log == nil {
 		s.Log = slog.Default()
 	}
@@ -90,6 +97,9 @@ func New(s Server) *Server {
 	}
 	if s.Logs == nil {
 		s.Logs = &logs.Client{Clients: s.Clients, Now: s.Now, MaxLookback: 7 * 24 * time.Hour}
+	}
+	if s.LogErrors == nil {
+		s.LogErrors = logs.NewErrorCounter(s.Clients, s.Now)
 	}
 	if s.TailLimiter == nil {
 		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
@@ -238,6 +248,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.storageRoutes(mux)   // plan 05
 	s.analyticsRoutes(mux) // analytics
 	s.securityRoutes(mux)  // image security
+	s.timelineRoutes(mux)  // service timeline
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})

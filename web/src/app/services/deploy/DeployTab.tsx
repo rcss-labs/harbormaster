@@ -17,6 +17,7 @@ import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
+import { isRolloutRunning } from '../rollout'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
 import { PendingChangesAside, PendingChangesBar } from './PendingChangesAside'
@@ -24,8 +25,9 @@ import { ScalingPanel } from './ScalingPanel'
 import { ServicePanel } from './ServicePanel'
 import { TaskSizePanel } from './TaskSizePanel'
 import { buildChangeSetRequest, buildRetryRequest, countSections, pendingRows, scalingLines, serviceRows, type ChangeSections } from './changeSummary'
-import { definitionErrors, isDefinitionChanged } from './draft'
+import { definitionErrors, isDefinitionChanged, setTaskSize } from './draft'
 import { rebaseScalingDraft, rebaseServiceDraft } from './rebase'
+import { parseRightsizeParams, RIGHTSIZE_PARAMS, rightsizeReason } from './rightsizeParams'
 import { scalingDraftErrors, scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
 import { serviceDraftErrors, serviceDraftFromSettings, serviceDraftToChange, type ServiceDraft } from './serviceDraft'
 import styles from './DeployTab.module.css'
@@ -80,7 +82,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const [reviewing, setReviewing] = useState(false)
   const phone = usePhone()
   const [pendingSheetOpen, setPendingSheetOpen] = useState(false)
-  const [reason, setReason] = useState('')
+  // Null until the user types: a suggestion from the Cost tab supplies the shown reason.
+  const [reason, setReason] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | undefined>()
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
   const [settingsChanged, setSettingsChanged] = useState(false)
@@ -104,15 +107,25 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   // A revision from ?revision=N is the starting point of the definition draft until the user edits it.
   const revisionPending = revisionParam !== null && deployedRevision !== undefined && revisionParam !== deployedRevision
   const preloaded = revisionPending ? (revisionTarget.data?.definition as Definition | undefined) : undefined
+  const canEditDefinition = (taskDefinition.data?.can ?? settings?.can)?.edit ?? false
+  // A task size from the Cost tab (?task_cpu=...) starts the draft unless a revision was asked for; it is only a draft until Review and apply.
+  const suggested = revisionParam === null && canEditDefinition ? parseRightsizeParams(searchParams) : null
+  const suggestedDefinition = suggested && liveDefinition ? setTaskSize(liveDefinition, suggested) : undefined
   // Null until the user edits: the draft then follows the current task definition (including a refetch after a write).
-  const definitionDraft = editedDefinition ?? preloaded ?? liveDefinition
+  const definitionDraft = editedDefinition ?? preloaded ?? suggestedDefinition ?? liveDefinition
   const serviceDraft = settings ? (editedService ?? serviceDraftFromSettings(settings)) : null
   const scalingDraft = settings ? (editedScaling ?? scalingDraftFromSettings(settings)) : null
   const tagName = service.data?.tag.name ?? 'this service'
   const serviceName = service.data?.name ?? 'this service'
-  const canEditDefinition = (taskDefinition.data?.can ?? settings?.can)?.edit ?? false
   const definitionChanged = definitionDraft !== undefined && liveDefinition !== undefined && isDefinitionChanged(definitionDraft, liveDefinition)
-  const definitionProblems = definitionDraft ? definitionErrors(definitionDraft) : []
+  // The Cost tab's reason is prefilled only while the draft still holds the suggested size.
+  const suggestionHolds =
+    suggested !== null && liveDefinition !== undefined && definitionDraft !== undefined &&
+    String(definitionDraft.cpu) === suggested.cpu && String(definitionDraft.memory) === suggested.memory &&
+    isDefinitionChanged(setTaskSize(liveDefinition, suggested), liveDefinition)
+  const shownReason = reason ?? (suggested && suggestionHolds ? rightsizeReason(suggested.headroomPct) : '')
+  // A revision (rollback) is never blocked by the client-side container floor check.
+  const definitionProblems = definitionDraft ? definitionErrors(definitionDraft, revisionParam === null ? liveDefinition : undefined) : []
   const oomHint = definitionDraft
     ? oomMemoryHint({
         stoppedForOom: stoppedTasks.data?.items.some((task) => task.status === 'STOPPED' && task.stopped_reason.includes('OutOfMemoryError')) ?? false,
@@ -123,7 +136,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     : undefined
 
   const sections: ChangeSections = {
-    target: !definitionChanged || !definitionDraft ? null : editedDefinition ? { kind: 'definition', definition: editedDefinition } : preloaded ? { kind: 'revision', revision: revisionParam as number } : null,
+    target: !definitionChanged || !definitionDraft ? null : editedDefinition ? { kind: 'definition', definition: editedDefinition } : preloaded ? { kind: 'revision', revision: revisionParam as number } : suggestedDefinition ? { kind: 'definition', definition: definitionDraft } : null,
     service: settings && serviceDraft ? serviceDraftToChange(settings, serviceDraft) : null,
     scaling: settings && scalingDraft ? scalingDraftToChange(settings, scalingDraft) : null,
   }
@@ -147,8 +160,9 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
       setter(value)
     }
 
-  const clearRevisionParam = () => {
-    if (searchParams.has('revision')) setSearchParams((previous) => { previous.delete('revision'); return previous }, { replace: true })
+  const clearPresetParams = () => {
+    const presets = ['revision', ...RIGHTSIZE_PARAMS]
+    if (presets.some((name) => searchParams.has(name))) setSearchParams((previous) => { presets.forEach((name) => previous.delete(name)); return previous }, { replace: true })
   }
 
   const resetDrafts = () => {
@@ -157,13 +171,13 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     setEditedDefinition(null)
     setEditBase(null)
     setPartial(null)
-    setReason('')
+    setReason(null)
     setReviewing(false)
     setPendingSheetOpen(false)
     setSubmitError(undefined)
     setMovedFrom(null)
     setSettingsChanged(false)
-    clearRevisionParam()
+    clearPresetParams()
   }
 
   // Takes fresh settings as the new baseline; the user's edits stay where they still differ from what is live now.
@@ -218,7 +232,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     }
   }
 
-  const apply = () => void submit(buildChangeSetRequest({ baseRevision: base.revision, baseVersion: base.version, reason, sections }))
+  const apply = () => void submit(buildChangeSetRequest({ baseRevision: base.revision, baseVersion: base.version, reason: shownReason, sections }))
   const retry = () => {
     const next = partial && buildRetryRequest(partial.request, partial.response)
     if (next) void submit(next)
@@ -234,9 +248,15 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
       ? {
           text: revisionTarget.isError ? `Revision :${revisionParam} could not be loaded` : revisionTarget.data ? `:${revisionParam} is loaded from the revisions list` : `Loading :${revisionParam}…`,
           dismissLabel: `Dismiss :${revisionParam}`,
-          onDismiss: clearRevisionParam,
+          onDismiss: clearPresetParams,
         }
-      : undefined,
+      : suggested && suggestedDefinition && liveDefinition
+        ? {
+            text: isDefinitionChanged(suggestedDefinition, liveDefinition) ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.',
+            dismissLabel: 'Dismiss suggestion',
+            onDismiss: clearPresetParams,
+          }
+        : undefined,
     discardDisabled: changes === 0 && partial === null,
     reviewDisabled: !reviewable,
     onDiscard: resetDrafts,
@@ -246,11 +266,37 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     },
   }
 
+  // ?review=1 (from the timeline's rollback) is consumed once the revision is in the draft: Review opens then if there is something to
+  // review, and never while a rollout runs. The user still applies.
+  const reviewRequested = searchParams.get('review') === '1'
+  const rolloutStateKnown = service.data !== undefined && (revisions.data !== undefined || revisions.isError)
+  const rolloutRunning = service.data !== undefined && isRolloutRunning(service.data, revisions.data)
+  const revisionIsDeployed = revisionParam !== null && revisionParam === deployedRevision
+  const revisionReady = revisionTarget.data !== undefined && liveDefinition !== undefined && deployedRevision !== undefined
+  useEffect(() => {
+    if (!reviewRequested || !rolloutStateKnown) return
+    const nothingToReview = revisionParam === null || revisionTarget.isError || taskDefinition.isError || revisionIsDeployed
+    if (!rolloutRunning && !nothingToReview && !revisionReady) return
+    if (!rolloutRunning && !nothingToReview && reviewable) asideProps.onReview()
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        next.delete('review')
+        return next
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onReview only sets state from values already listed here
+  }, [reviewRequested, rolloutStateKnown, rolloutRunning, revisionReady, reviewable, revisionParam, revisionTarget.isError, taskDefinition.isError, revisionIsDeployed])
+
   const showingProgress = service.data !== undefined && shouldShowProgress(service.data, now)
   const awaitingRollout = startedRollout !== null && !showingProgress && (deployedRevision ?? 0) < startedRollout
 
   return (
     <>
+      {revisionIsDeployed && (
+        <Banner kind="info">Revision :{revisionParam} is already deployed.</Banner>
+      )}
       {awaitingRollout && (
         <div role="status" aria-label="Rollout starting">
           <Banner kind="info">Rolling out :{startedRollout}. The fields below show the new image once ECS reports it.</Banner>
@@ -314,7 +360,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
         {!phone && <PendingChangesAside {...asideProps} />}
       </div>
 
-      {phone && (changes > 0 || partial !== null || problems.length > 0) && (
+      {phone && (changes > 0 || partial !== null || problems.length > 0 || asideProps.loadedRevision !== undefined) && (
         <PendingChangesBar
           {...asideProps}
           sheetOpen={pendingSheetOpen}
@@ -334,7 +380,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           serviceRows={settings && sections.service ? serviceRows(settings, sections.service) : []}
           scalingLines={settings && sections.scaling ? scalingLines(settings, sections.scaling) : []}
           canDeploy={canDeploy}
-          reason={reason}
+          reason={shownReason}
           busy={changeSet.isPending}
           error={submitError}
           movedFrom={movedFrom}

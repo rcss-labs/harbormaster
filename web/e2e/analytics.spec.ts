@@ -7,12 +7,13 @@ const TABS = [
   { link: 'Reliability', heading: 'Availability' },
   { link: 'Capacity', heading: 'Reserved vCPU, last 7 days' },
   { link: 'Operations', heading: 'Operations through Harbormaster' },
+  { link: 'Cost', heading: 'Monthly spend' },
 ]
 
 test.describe('analytics as sam', () => {
   test.use(asUser('sam'))
 
-  test('sidebar leads to Analytics and the four tabs render', async ({ page }) => {
+  test('sidebar leads to Analytics and the five tabs render', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Analytics/ }).click()
@@ -44,5 +45,44 @@ test.describe('analytics as sam', () => {
     await expect(reasons).toBeVisible({ timeout: 15_000 })
     await expect(reasons.getByText('No failed rollouts with a recorded reason in this range')).toHaveCount(0)
     await expect(page.getByText('PROPOSED')).toHaveCount(0)
+  })
+
+  // Read-only on purpose: the spec stops at the Review dialog so the shared estate is never changed.
+  test('cost suggestions open the Deploy tab for review', async ({ page, context }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/analytics/cost')
+    const table = page.getByRole('table', { name: 'Rightsizing suggestions' })
+    const jenkinsRow = table.getByRole('row', { name: /jenkins-controller/ })
+    await expect(jenkinsRow).toBeVisible({ timeout: 15_000 })
+    const suggestionAtDefault = await jenkinsRow.innerText()
+
+    await page.getByLabel('Headroom above p95').fill('80')
+    await expect(page.getByLabel('Headroom above p95')).toHaveValue('80')
+    await expect.poll(async () => (await table.getByRole('row', { name: /jenkins-controller/ }).count()) === 0 || (await table.getByRole('row', { name: /jenkins-controller/ }).innerText()) !== suggestionAtDefault).toBe(true)
+    await page.getByLabel('Headroom above p95').fill('30')
+    await expect.poll(() => jenkinsRow.innerText()).toBe(suggestionAtDefault)
+
+    const noSuggestion = page.getByRole('region', { name: 'No suggestion' })
+    const certRenewer = noSuggestion.getByRole('listitem').filter({ hasText: 'cert-renewer' })
+    await expect(certRenewer).toBeVisible()
+    await expect(certRenewer).not.toContainText('$')
+
+    await page.getByRole('button', { name: 'Draft change sets' }).click()
+    const draft = page.getByRole('dialog')
+    await expect(draft.getByText(/Nothing deploys yet\./)).toBeVisible()
+    const [deployPage] = await Promise.all([
+      context.waitForEvent('page'),
+      draft.getByRole('listitem').filter({ hasText: 'jenkins-controller' }).getByRole('link', { name: 'Open in Deploy' }).click(),
+    ])
+
+    const pending = deployPage.getByRole('region', { name: 'Pending changes' })
+    await expect(pending.getByRole('listitem', { name: 'Task CPU' })).toBeVisible({ timeout: 15_000 })
+    await expect(pending.getByRole('listitem', { name: 'Task memory' })).toBeVisible()
+    await pending.getByRole('button', { name: 'Review…' }).click()
+    const review = deployPage.getByRole('dialog')
+    await expect(review.getByRole('textbox', { name: 'Reason' })).toHaveValue('Rightsizing at 30% headroom')
+    await review.getByRole('button', { name: 'Keep editing' }).click()
+    await expect(review).toBeHidden()
+    await deployPage.close()
   })
 })

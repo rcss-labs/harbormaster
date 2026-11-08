@@ -28,8 +28,12 @@ import { formatPercent } from './clusterMetrics'
 import { SERVICE_COLUMN_OPTIONS, ServicesTable } from './ServicesTable'
 import { presentValues } from './ServiceCardMetrics'
 import styles from './clusters.module.css'
+
 import { serviceSeverity } from './serviceSeverity'
 import type { TagTarget } from './tagTarget'
+
+/** Tasks that are neither Fargate nor Fargate Spot: EC2, external or a custom capacity provider. */
+const OTHER_CAPACITY_LABEL = 'EC2/other'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
 const STOP_ERROR_COLOR = 'var(--danger)'
@@ -140,6 +144,7 @@ export function Cluster() {
             <span>·</span>
             <span>
               {cluster.fargate_tasks} Fargate · {cluster.spot_tasks} Spot
+              {cluster.other_tasks > 0 && ` · ${cluster.other_tasks} ${OTHER_CAPACITY_LABEL}`}
             </span>
           </div>
         </div>
@@ -245,8 +250,9 @@ export function Cluster() {
               parts={[
                 { n: cluster.fargate_tasks, color: 'var(--series-1)', label: 'Fargate' },
                 { n: cluster.spot_tasks, color: 'var(--series-2)', label: 'Spot' },
+                ...(cluster.other_tasks > 0 ? [{ n: cluster.other_tasks, color: 'var(--series-3)', label: OTHER_CAPACITY_LABEL }] : []),
               ]}
-              label="Fargate and Spot tasks"
+              label="Tasks by capacity"
               legend
             />
           </div>
