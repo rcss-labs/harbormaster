@@ -54,7 +54,7 @@ func TestRegister_HappyPath_RecordsEverything(t *testing.T) {
 	h := newHarness(t)
 	draft := draftFromDeployed(t, h, "482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3")
 
-	got, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
+	got, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestRegister_HappyPath_RecordsEverything(t *testing.T) {
 	}
 
 	registrars, err := h.store.RevisionRegistrars(t.Context(), []string{got.ARN})
-	if err != nil || registrars[got.ARN] != "pavel" {
+	if err != nil || registrars[got.ARN] != "sam" {
 		t.Fatalf("registrars = %v, err %v", registrars, err)
 	}
 	ops, err := h.store.ListOperations(t.Context(), paymentsKey, false, nil, 1)
@@ -83,8 +83,8 @@ func TestRegister_HappyPath_RecordsEverything(t *testing.T) {
 		t.Fatalf("operations = %v, err %v", ops, err)
 	}
 	want := "Registered task definition payments-api:43 (image 1.18.3, 512 CPU / 1024 MiB)."
-	if ops[0].Text != want || ops[0].Actor != "pavel" || ops[0].Source != "harbormaster" {
-		t.Fatalf("operation = %+v, want text %q by pavel", ops[0], want)
+	if ops[0].Text != want || ops[0].Actor != "sam" || ops[0].Source != "harbormaster" {
+		t.Fatalf("operation = %+v, want text %q by sam", ops[0], want)
 	}
 	if ops[0].Details["task_definition_arn"] != got.ARN || ops[0].Details["op"] != "task_definition" {
 		t.Fatalf("operation details = %v", ops[0].Details)
@@ -98,15 +98,15 @@ func TestRegister_StaleBase(t *testing.T) {
 	h := newHarness(t)
 	draft := draftFromDeployed(t, h, "payments-api:1.18.3")
 	// Someone else deploys revision 43 behind our back.
-	if _, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
+	if _, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.Deploy(t.Context(), h.pavel, paymentsKey, 43, false); err != nil {
+	if _, err := h.svc.Deploy(t.Context(), h.sam, paymentsKey, 43, false); err != nil {
 		t.Fatal(err)
 	}
 	before := countRevisions(h, "payments-api")
 
-	_, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
+	_, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
 	var stale *deploy.StaleBaseError
 	if !errors.As(err, &stale) || stale.BaseRevision != 42 || stale.DeployedRevision != 43 {
 		t.Fatalf("err = %v, want StaleBaseError{42, 43}", err)
@@ -125,7 +125,7 @@ func TestRegister_ValidationErrorIsNotRegistered(t *testing.T) {
 	draft["family"] = "payments-api-v2"
 	before := countRevisions(h, "payments-api")
 
-	_, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
+	_, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
 	var validation *deploy.ValidationError
 	if !errors.As(err, &validation) {
 		t.Fatalf("err = %v, want ValidationError", err)
@@ -147,7 +147,7 @@ func TestRegister_AWSValidationShownVerbatim(t *testing.T) {
 	message := "Container.image repository 'x' is invalid"
 	h.fake.FailNext("RegisterTaskDefinition", &ecstypes.InvalidParameterException{Message: aws.String(message)})
 
-	_, err := h.svc.Register(t.Context(), h.pavel, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
+	_, err := h.svc.Register(t.Context(), h.sam, paymentsKey, deploy.RegisterInput{BaseRevision: 42, Definition: draft})
 	var awsErr *deploy.AWSError
 	if !errors.As(err, &awsErr) || !awsErr.Validation || awsErr.Message != message {
 		t.Fatalf("err = %#v, want AWSError{Validation: true, Message: %q}", err, message)

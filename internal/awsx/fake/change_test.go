@@ -18,7 +18,7 @@ import (
 func TestFakeRegisterTaskDefinition_IncrementsRevisionAndKeepsTags(t *testing.T) {
 	api := ecsFor(t, newFake(), homelabID, "us-east-1")
 	ctx := context.Background()
-	tags := []ecstypes.Tag{{Key: aws.String("owner"), Value: aws.String("pavel")}}
+	tags := []ecstypes.Tag{{Key: aws.String("owner"), Value: aws.String("sam")}}
 	out, err := api.RegisterTaskDefinition(ctx, &ecs.RegisterTaskDefinitionInput{
 		Family:               aws.String("payments-api"),
 		ContainerDefinitions: []ecstypes.ContainerDefinition{{Name: aws.String("payments-api"), Image: aws.String("payments-api:1.18.3")}},
@@ -34,7 +34,7 @@ func TestFakeRegisterTaskDefinition_IncrementsRevisionAndKeepsTags(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Tags) != 1 || aws.ToString(listed.Tags[0].Key) != "owner" || aws.ToString(listed.Tags[0].Value) != "pavel" {
+	if len(listed.Tags) != 1 || aws.ToString(listed.Tags[0].Key) != "owner" || aws.ToString(listed.Tags[0].Value) != "sam" {
 		t.Fatalf("tags on new revision = %+v, want the input tags", listed.Tags)
 	}
 }
@@ -90,7 +90,7 @@ func TestFakeStopTask_SetsReasonAndEvent(t *testing.T) {
 		t.Fatalf("ListTasks: %v %v", err, running.TaskArns)
 	}
 	taskARN := running.TaskArns[0]
-	const reason = "Stopped by pavel via Harbormaster"
+	const reason = "Stopped by sam via Harbormaster"
 	if _, err := api.StopTask(ctx, &ecs.StopTaskInput{Cluster: aws.String("core-services"), Task: aws.String(taskARN), Reason: aws.String(reason)}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { SERVICE_PAYMENTS } from '../../../test/fixtures'
+import { http, HttpResponse } from 'msw'
+import { ALL_TASKS, SERVICE_PAYMENTS, tasksList } from '../../../test/fixtures'
+import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
 
 const panel = (name: string) => screen.getByRole('region', { name })
@@ -10,8 +12,10 @@ describe('DeployTab', () => {
   it('shows the four panels; Service and Auto scaling are editors seeded from deploy-settings', async () => {
     renderApp(`/services/${SERVICE_PAYMENTS.id}/deploy`)
 
+    await waitFor(() => within(panel('Service')).getByRole('spinbutton', { name: 'Desired count' }))
+    await screen.findByRole('button', { name: 'Add variable' })
     for (const title of ['Containers', 'Task size', 'Service', 'Auto scaling']) {
-      expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
     }
     const service = within(panel('Service'))
     expect(service.getByRole('spinbutton', { name: 'Desired count' })).toHaveValue(3)
@@ -31,11 +35,27 @@ describe('DeployTab', () => {
     const { container } = renderApp(`/services/${SERVICE_PAYMENTS.id}/deploy`)
     const grid = () => container.querySelector('[data-definition-changed]')!
 
-    const containers = within(await screen.findByRole('region', { name: 'Containers' }))
+    await screen.findByRole('button', { name: 'Add variable' })
+    const containers = within(screen.getByRole('region', { name: 'Containers' }))
     await waitFor(() => expect(grid()).toHaveAttribute('data-definition-changed', 'false'))
     await user.click(await containers.findByRole('button', { name: 'Add variable' }))
     expect(grid()).toHaveAttribute('data-definition-changed', 'true')
     await user.click(containers.getByRole('button', { name: 'Remove variable 2' }))
     expect(grid()).toHaveAttribute('data-definition-changed', 'false')
+  })
+
+  it('shows the out-of-memory hint only when the service has an OOM stop', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/deploy`)
+    await screen.findByRole('combobox', { name: 'Task memory' })
+    const size = within(screen.getByRole('region', { name: 'Task size' }))
+    expect(size.queryByText(/OutOfMemoryError/)).not.toBeInTheDocument()
+  })
+
+  it('shows the out-of-memory hint when a task stopped for OutOfMemoryError', async () => {
+    const oomTask = { ...ALL_TASKS.find((task) => task.stopped_reason.includes('OutOfMemoryError'))! }
+    server.use(http.get('/api/services/:id/tasks', () => HttpResponse.json({ ...tasksList([oomTask]), items: [oomTask] })))
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/deploy`)
+    await screen.findByRole('combobox', { name: 'Task memory' })
+    expect(await within(screen.getByRole('region', { name: 'Task size' })).findByText(/OutOfMemoryError .* at 1024 MiB/)).toBeInTheDocument()
   })
 })

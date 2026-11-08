@@ -59,6 +59,28 @@ describe('LogsTab', () => {
     ],
   }
 
+  it('the log box scrolls inside a column that fills the page height', async () => {
+    serveHistory(() => mixedLevels)
+    renderApp(route)
+    const log = await screen.findByRole('log')
+    expect(log).toHaveClass('hm-fill-scroll')
+    expect(log.closest('.hm-fill-col')).not.toBeNull()
+  })
+
+  it('a failed history request shows a panel error with Retry, not a blank', async () => {
+    let calls = 0
+    server.use(
+      http.get('/api/services/:id/logs', () => {
+        calls += 1
+        return calls === 1 ? HttpResponse.json({ error: { code: 'aws_error', message: 'CloudWatch said no' } }, { status: 502 }) : HttpResponse.json(mixedLevels)
+      }),
+    )
+    renderApp(route)
+    expect(await screen.findByRole('alert')).toHaveTextContent('The logs could not be loaded.')
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('log')).toBeInTheDocument()
+  })
+
   it('renders each history line as one row: time, an unwrapped stream cell and the message, tinted by level', async () => {
     serveHistory(() => mixedLevels)
     renderApp(route)
@@ -258,5 +280,63 @@ describe('LogsTab', () => {
     expect(await screen.findByText(message)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Resume' }))
     expect(MockSocket.instances).toHaveLength(2)
+  })
+  describe('?before=', () => {
+    const before = '2026-11-07T11:49:00.000Z'
+
+    it('with ?before= it reads history up to that time and pauses the tail', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent(before)}`)
+
+      expect(await screen.findByText(/Showing logs up to/)).toBeInTheDocument()
+      expect(seen[0].searchParams.get('before')).toBe(before)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(MockSocket.instances).toHaveLength(0)
+      expect(screen.getByRole('button', { name: 'Paused' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('Back to latest resumes the tail', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent(before)}`)
+      const user = userEvent.setup()
+
+      await user.click(await screen.findByRole('button', { name: 'Back to latest' }))
+
+      await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+      expect(screen.queryByText(/Showing logs up to/)).not.toBeInTheDocument()
+      expect(screen.getByTestId('search')).toHaveTextContent('')
+      expect(seen.at(-1)!.searchParams.has('before')).toBe(false)
+    })
+
+    it.each(['yesterday', '2026', '1', '2026-11-07', '2026-11-07T11:49:00'])('ignores an invalid value %s: no banner, latest history, live tail', async (value) => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${value}`)
+
+      await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+      expect(screen.queryByText(/Showing logs up to/)).not.toBeInTheDocument()
+      expect(seen[0].searchParams.has('before')).toBe(false)
+    })
+
+    it('sends a zoned timestamp re-serialised to UTC', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent('2026-11-07T13:49:00+02:00')}`)
+
+      expect(await screen.findByText(/Showing logs up to/)).toBeInTheDocument()
+      expect(seen[0].searchParams.get('before')).toBe('2026-11-07T11:49:00.000Z')
+    })
+
+    it('choosing Live behaves like Back to latest', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent(before)}`)
+      const user = userEvent.setup()
+      await screen.findByText(/Showing logs up to/)
+
+      await user.click(screen.getByRole('button', { name: 'Live' }))
+
+      await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+      expect(screen.queryByText(/Showing logs up to/)).not.toBeInTheDocument()
+      expect(screen.getByTestId('search')).toHaveTextContent('')
+      expect(seen.at(-1)!.searchParams.has('before')).toBe(false)
+    })
   })
 })

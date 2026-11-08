@@ -76,7 +76,7 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		admin bool
 		perms map[authz.TagID]authz.ActionSet
 	}{
-		{"pavel", true, nil},
+		{"sam", true, nil},
 		{"dana", false, map[authz.TagID]authz.ActionSet{dev.ID: authz.Presets["Full"], staging.ID: authz.Presets["Deployer"], prod.ID: viewLogs}},
 		{"omer", false, map[authz.TagID]authz.ActionSet{dev.ID: authz.Presets["Operator"], staging.ID: authz.Presets["Viewer"]}},
 		{"oncall", false, map[authz.TagID]authz.ActionSet{staging.ID: viewLogsOperateTerminal, prod.ID: viewLogsOperateTerminal}},
@@ -113,7 +113,7 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		return fmt.Errorf("tag artifact-proxy: %w", err)
 	}
 
-	return seedAudit(ctx, st, ids["pavel"])
+	return seedAudit(ctx, st, ids["sam"])
 }
 
 // requireSeedable allows seeding only into an empty database or one this package already seeded
@@ -194,7 +194,7 @@ func ensureTag(ctx context.Context, st *store.Store, name, color string) (store.
 }
 
 // seedAudit writes the mockup's activity history once.
-func seedAudit(ctx context.Context, st *store.Store, pavelID int64) error {
+func seedAudit(ctx context.Context, st *store.Store, samID int64) error {
 	existing, err := st.ListAudit(ctx, 500, 0)
 	if err != nil {
 		return err
@@ -218,7 +218,7 @@ func seedAudit(ctx context.Context, st *store.Store, pavelID int64) error {
 	}
 	for _, e := range entries {
 		err := st.Audit(ctx, store.AuditEntry{
-			TS: now.Add(-e.ago), ActorUserID: &pavelID, ActorUsername: "pavel",
+			TS: now.Add(-e.ago), ActorUserID: &samID, ActorUsername: "sam",
 			Action: e.action, Target: e.target, Summary: e.summary,
 			Details: map[string]any{"source": seedMarker},
 		})

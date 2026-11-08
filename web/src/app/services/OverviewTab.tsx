@@ -1,7 +1,9 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useServiceMetrics } from '../../api/observe'
 import type { DeploymentRecordDTO, ServiceDTO } from '../../api/types'
-import { Donut } from '../../charts/Donut'
+import { StackBar } from '../../components/StackBar'
+import { DataBanner } from '../../components/DataBanner'
 import { Legend } from '../../charts/Legend'
 import { LineChart } from '../../charts/LineChart'
 import { Timeline, type TimelineEvent } from '../../charts/Timeline'
@@ -11,7 +13,10 @@ import { Panel } from '../../components/Panel'
 import { FeedRow, Feed } from '../../components/Feed'
 import { KV } from '../../components/KV'
 import { ALBPanels, HealthCard, RunningTasksMeters, ServiceKpis, UsageChart } from './overview/MetricPanels'
+import { RolloutActions } from './overview/RolloutActions'
+import { usePhone } from '../../components/usePhone'
 import { RolloutCard } from './overview/RolloutCard'
+import { queryPanelError } from './panelError'
 import styles from './service.module.css'
 
 const FOURTEEN_DAYS_MS = 14 * 86_400_000
@@ -34,11 +39,30 @@ function timelineEvent(record: DeploymentRecordDTO): TimelineEvent {
   }
 }
 
+function TaskHealth({ service, pending, children }: { service: ServiceDTO; pending: number; children?: ReactNode }) {
+  return (
+    <Panel title="Task health" sub={<span className={styles.mono}>{`${service.running}/${service.desired} running`}</span>}>
+      <StackBar
+        label="Task health"
+        total={Math.max(service.desired, service.running)}
+        legend
+        parts={[
+          { label: 'Running', n: service.running, color: 'var(--ok)' },
+          { label: 'Missing tasks', n: pending, color: 'var(--bad)' },
+        ]}
+      />
+      {children && <div className={styles.afterBar}>{children}</div>}
+    </Panel>
+  )
+}
+
 export function OverviewTab({ service }: { service: ServiceDTO }) {
   const base = `/services/${service.id}`
+  const phone = usePhone()
   const pending = Math.max(0, service.desired - service.running)
   const now = useNow(60_000)
-  const metrics = useServiceMetrics(service.id, '24h').data
+  const metricsQuery = useServiceMetrics(service.id, '24h')
+  const metrics = metricsQuery.data
   const taskDefinition = service.task_definition
   const networking = service.networking
   const vpc = networking.vpc
@@ -61,24 +85,30 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
 
   return (
     <>
+      <DataBanner tiers={['Target health', 'Tasks']} />
       <ServiceKpis service={service} metrics={metrics} />
 
       <div className={`${styles.grid} ${styles.gWide}`}>
-        <UsageChart service={service} metrics={metrics} />
-        {loadBalancer ? (
+        <UsageChart
+          service={service}
+          metrics={metrics}
+          loading={metricsQuery.isPending}
+          error={queryPanelError(metricsQuery, 'CPU and memory could not be read.')}
+        />
+        {phone ? (
+          <>
+            <Panel title="Rollout">
+              {rollout}
+              <RolloutActions service={service} />
+            </Panel>
+            {loadBalancer ? <HealthCard service={service} /> : <TaskHealth service={service} pending={pending} />}
+          </>
+        ) : loadBalancer ? (
           <HealthCard service={service}>{rollout}</HealthCard>
         ) : (
-          <Panel title="Task health">
-            <Donut
-              segments={[
-                { name: 'Running', v: service.running, color: 'var(--success)' },
-                { name: 'Missing tasks', v: pending, color: 'var(--danger)' },
-              ]}
-              label={`${service.running}/${service.desired}`}
-              sub="running"
-            />
-            <div className={styles.afterDonut}>{rollout}</div>
-          </Panel>
+          <TaskHealth service={service} pending={pending}>
+            {rollout}
+          </TaskHealth>
         )}
       </div>
 
@@ -173,7 +203,14 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
                   </div>
                 )),
               ],
-              ['Task role', <span className={`${styles.mono} ${styles.small}`}>{imageTail(taskDefinition.task_role_arn)}</span>],
+              [
+                'Task role',
+                taskDefinition.task_role_arn ? (
+                  <span className={`${styles.mono} ${styles.small}`}>{imageTail(taskDefinition.task_role_arn)}</span>
+                ) : (
+                  <span className={styles.muted}>None</span>
+                ),
+              ],
               [
                 'ECS Exec',
                 service.enable_execute_command ? 'On' : <span className={styles.warning}>Off</span>,

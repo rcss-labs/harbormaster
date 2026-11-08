@@ -1,18 +1,21 @@
 // TanStack hooks for the observe endpoints. Metrics refresh once a minute (CloudWatch is slow and billed per call);
 // snapshot hooks (target health, scaling, alerts) refresh every 5 s like the other live data. Neither runs in a background tab.
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ApiError, api } from './client'
-import { queryString, type Filters } from './hooks'
+import { queryString, usePollerStatus, type Filters } from './hooks'
 import type {
   AlertsDTO,
   ClusterMetricsDTO,
   ClustersMetricsDTO,
   LogsHistoryDTO,
   OverviewMetricsDTO,
+  PollerEntryDTO,
+  PollerTierDTO,
   Range,
   ScalingDTO,
   Series,
   ServiceMetricsDTO,
+  ServicesMetricsDTO,
   TargetHealthDTO,
 } from './types'
 
@@ -26,6 +29,22 @@ export function useServiceMetrics(id: string, range: Range) {
   return useQuery({
     queryKey: ['service', id, 'metrics', range],
     queryFn: () => api.get<ServiceMetricsDTO>(`/api/services/${id}/metrics${queryString({ range })}`),
+    ...metricsPolling,
+  })
+}
+
+/**
+ * Latest CPU and memory for the services of one page of the Services list (ids are the scope; the
+ * server drops any it may not show). Ids are de-duplicated and sorted so the request, and so its
+ * ETag, is the same for the same page.
+ */
+export function useServicesMetrics(ids: string[]) {
+  const sorted = [...new Set(ids)].sort()
+  return useQuery({
+    queryKey: ['services', 'metrics', sorted],
+    queryFn: () => api.get<ServicesMetricsDTO>(`/api/services/metrics${queryString({ id: sorted })}`),
+    enabled: sorted.length > 0,
+    placeholderData: keepPreviousData,
     ...metricsPolling,
   })
 }
@@ -92,6 +111,55 @@ export function useLogHistory(id: string, { container, q, before }: LogHistoryPa
     queryFn: () => api.get<LogsHistoryDTO>(`/api/services/${id}/logs${queryString({ container, q, before })}`),
     staleTime: Infinity,
   })
+}
+
+export interface TaskLogsOptions {
+  /** Pass false until the drawer is open; nothing is requested while false. */
+  enabled?: boolean
+  limit?: number
+  container?: string
+}
+
+/** The newest log lines of one task (`task` is the short id, 8+ chars). Standalone tasks have no service, so callers pass enabled=false. */
+export function useTaskLogs(serviceId: string, taskShortId: string, { enabled = true, limit = 20, container }: TaskLogsOptions = {}) {
+  return useQuery({
+    queryKey: ['service', serviceId, 'logs', 'task', taskShortId, container, limit],
+    queryFn: () => api.get<LogsHistoryDTO>(`/api/services/${serviceId}/logs${queryString({ task: taskShortId, limit, container })}`),
+    enabled,
+    refetchInterval: SNAPSHOT_REFETCH_MS,
+    refetchIntervalInBackground: false,
+  })
+}
+
+/** A region (account x region) with at least one failing or throttled data type the page depends on. */
+export interface AffectedRegion extends PollerEntryDTO {
+  failingTiers: PollerTierDTO[]
+}
+
+export interface DataProblems {
+  /** Regions where a tier named in `labels` fails or is throttled. */
+  affected: AffectedRegion[]
+  /** Regions with no failing or throttled core tier; a non-core failure (e.g. auto scaling) does not count. */
+  current: number
+  total: number
+  isLoading: boolean
+}
+
+/**
+ * Which regions have a data problem a page cares about. `labels` are `PollerTierDTO.label` values the page depends on
+ * (for example `['Auto scaling']`); omit it to consider every tier. `current`/`total` count core tiers only, so a failing
+ * non-core tier never labels the whole region stale.
+ */
+export function useDataProblems(labels?: readonly string[]): DataProblems {
+  const poller = usePollerStatus()
+  const items = poller.data?.items ?? []
+  const isProblem = (tier: PollerTierDTO) => tier.failing || tier.throttled
+  const affected = items.flatMap((item) => {
+    const failingTiers = item.tiers.filter((tier) => isProblem(tier) && (!labels || labels.includes(tier.label)))
+    return failingTiers.length > 0 ? [{ ...item, failingTiers }] : []
+  })
+  const current = items.filter((item) => !item.tiers.some((tier) => tier.core && isProblem(tier))).length
+  return { affected, current, total: items.length, isLoading: poller.isLoading }
 }
 
 /** True when every point of every series is null (or there are no points): nothing to draw. */

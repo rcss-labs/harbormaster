@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node'
 import {
   ACCOUNTS,
   ANALYTICS_CAPACITY,
+  ANALYTICS_COST,
   ANALYTICS_DELIVERY,
   ANALYTICS_OPERATIONS,
   ANALYTICS_RELIABILITY,
@@ -10,6 +11,7 @@ import {
   AUDIT,
   CLUSTERS,
   CLUSTERS_METRICS,
+  SERVICES_METRICS,
   CLUSTER_DETAILS,
   CLUSTER_METRICS_CORE,
   ME_ADMIN,
@@ -17,6 +19,8 @@ import {
   OVERVIEW,
   PERMISSIONS,
   POLLER,
+  LOGS_HISTORY_PAYMENTS,
+  SERVICES_LIST,
   SERVICE_DETAILS,
   SERVICE_METRICS_CATALOG_NO_INSIGHTS,
   SERVICE_METRICS_PAYMENTS,
@@ -44,6 +48,7 @@ import {
   SSO_TEST_OK,
   SSO_UNCONFIGURED,
 } from './fixtures'
+import { timelineHandlers } from './timelineFixtures'
 import type { SearchResultDTO } from '../api/types'
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
@@ -67,6 +72,8 @@ function search(q: string): SearchResultDTO[] {
 
 /** Default handlers: every GET in the API reference answers with the fixtures. Override per test with `server.use`. */
 export const handlers = [
+  // Registered first so :id/timeline is not read as the service id route.
+  ...timelineHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),
   http.get('/api/auth/setup', () => HttpResponse.json({ needed: false })),
   http.get('/api/overview', () => HttpResponse.json(OVERVIEW)),
@@ -79,9 +86,31 @@ export const handlers = [
     return HttpResponse.json({ ...CLUSTERS, items })
   }),
   http.get('/api/clusters/metrics', () => HttpResponse.json(CLUSTERS_METRICS)),
+  // Registered before /api/services/:id so "metrics" is not read as an id. Mirrors the server: only the requested ids come back.
+  http.get('/api/services/metrics', ({ request }) => {
+    const ids = new Set(new URL(request.url).searchParams.getAll('id'))
+    const items = Object.fromEntries(Object.entries(SERVICES_METRICS.items).filter(([id]) => ids.has(id)))
+    return HttpResponse.json({ ...SERVICES_METRICS, items })
+  }),
   http.get('/api/clusters/:id', ({ params }) => {
     const cluster = CLUSTER_DETAILS[params.id as string]
     return cluster ? HttpResponse.json(cluster) : notFound()
+  }),
+  // Services list: same account/region/tag narrowing as clusters.
+  http.get('/api/services', ({ request }) => {
+    const url = new URL(request.url)
+    const account = url.searchParams.get('account')
+    const region = url.searchParams.get('region')
+    const tags = url.searchParams.getAll('tag').map(Number)
+    const items = SERVICES_LIST.items.filter(
+      (s) => (!account || s.account_id === account) && (!region || s.region === region) && (tags.length === 0 || tags.includes(s.tag.id)),
+    )
+    return HttpResponse.json({ ...SERVICES_LIST, items, total: items.length })
+  }),
+  // Log history; with `task` every line belongs to that task, as the server restricts reads to its streams.
+  http.get('/api/services/:id/logs', ({ request }) => {
+    const task = new URL(request.url).searchParams.get('task')
+    return HttpResponse.json(task ? { ...LOGS_HISTORY_PAYMENTS, lines: LOGS_HISTORY_PAYMENTS.lines.map((line) => ({ ...line, task_id: task })) } : LOGS_HISTORY_PAYMENTS)
   }),
   http.get('/api/services/:id/tasks', ({ params, request }) => {
     const id = params.id as string
@@ -128,7 +157,7 @@ export const handlers = [
   http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
   // analytics: the fixture for the tab, with the requested range echoed into window.requested
   http.get('/api/analytics/:tab', ({ params, request }) => {
-    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS }[
+    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS, cost: ANALYTICS_COST }[
       params.tab as string
     ]
     if (!fixture) return notFound()

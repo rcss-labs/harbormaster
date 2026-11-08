@@ -5,6 +5,8 @@ import { createQueryClient } from './api/queryClient'
 import { BrowserRouter } from 'react-router'
 import { AuthProvider } from './app/auth/AuthProvider'
 import { AppRoutes } from './app/router'
+import { applyStoredDensity } from './app/density'
+import { applyStoredScale } from './app/scale'
 import { applyStoredTheme } from './app/theme'
 import { ToastProvider } from './components/Toast'
 import '@fontsource/ibm-plex-sans/400.css'
@@ -14,8 +16,12 @@ import '@fontsource/geist-mono/400.css'
 import '@fontsource/geist-mono/500.css'
 import './styles/tokens.css'
 import './styles/base.css'
+import './styles/layout.css'
+import './styles/scale.css'
 
 applyStoredTheme()
+applyStoredDensity()
+applyStoredScale()
 
 const queryClient = createQueryClient()
 

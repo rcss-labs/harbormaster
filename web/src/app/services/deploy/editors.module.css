@@ -30,9 +30,7 @@
 }
 .groupTitle {
   margin: 0;
-  font: 600 11px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font: 600 12px/1.5 var(--sans);
   color: var(--dim);
 }
 .input,
@@ -132,4 +130,14 @@
   margin: 0;
   color: var(--muted);
   font-size: 12.5px;
+}
+
+/* Phone: fields run one per row, controls reach 44px (mobile.css raises inputs and buttons; the 30px/28px heights here are the floor). */
+@media (max-width: 700px) {
+  .fieldRow { grid-template-columns: minmax(0, 1fr); }
+  .field { font-size: 13px; }
+  /* The base rule sets font: inherit, which outranks the global 16px floor for form controls. */
+  .input, .select { font-size: 16px; }
+  .editor { padding: 0; border: 0; background: none; }
+  .actions .btn, .rowActions .btn { padding: 0 14px; }
 }

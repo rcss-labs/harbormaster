@@ -1,10 +1,16 @@
-.status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 500; }
-.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-.ok { color: var(--success); }
-.warn { color: var(--warning); }
-.bad { color: var(--danger); }
-.info { color: var(--info); }
-.info .dot { animation: pulse 1.2s ease-in-out infinite; }
-.expected { color: var(--expected); }
-.mute { color: var(--muted); }
-@keyframes pulse { 50% { opacity: 0.25; } }
+/* Status: shape and colour together (hm.css). The shape is the ::before mark, so it never depends on colour alone. */
+.st { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; white-space: nowrap; }
+.st::before { content: ""; display: block; width: 10px; height: 10px; flex: none; background: currentColor; }
+.st-ok { color: var(--ok); }
+.st-warn { color: var(--warn); }
+.st-bad { color: var(--bad); }
+.st-info { color: var(--info); }
+.st-exp { color: var(--exp); }
+.st-mute { color: var(--muted); }
+.st-ok::before { border-radius: 50%; }
+.st-warn::before { clip-path: polygon(50% 4%, 100% 96%, 0 96%); }
+.st-bad::before { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.st-info::before { border-radius: 50%; background: conic-gradient(currentColor 50%, transparent 0); box-shadow: inset 0 0 0 1.5px currentColor; }
+.st-exp::before { border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 2px currentColor; }
+.st-mute::before { height: 2px; border-radius: 1px; }
+.bare { gap: 0; }

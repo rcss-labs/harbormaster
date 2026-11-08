@@ -115,7 +115,7 @@ func (s *Service) SetDesiredCount(ctx context.Context, subj authz.Subject, key m
 		AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Service: &key.Service,
 		ActorUserID: &subj.UserID, Source: "harbormaster",
 		Text:    fmt.Sprintf("Changed desired count from %d to %d.", previous, n),
-		Details: map[string]any{"op": "scale"},
+		Details: map[string]any{"op": "scale", "from_desired": previous, "to_desired": n},
 	}
 	if warning := s.logAfterAWS(ctx, logged, "desired count change"); warning != "" {
 		result.Warning = strings.TrimSpace(result.Warning + " " + warning)

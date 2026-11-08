@@ -1,7 +1,10 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
@@ -70,6 +73,7 @@ type DeploySettingsResponse struct {
 	TargetGroups                  []DeployTargetGroupDTO     `json:"target_groups"`
 	Scaling                       DeployScalingDTO           `json:"scaling"`
 	Can                           ChangeCanDTO               `json:"can"`
+	Partial                       []PartialErrorDTO          `json:"partial"`
 }
 
 // changeCan is what subject may do to a service with the given effective tag.
@@ -93,12 +97,16 @@ func deploySettingsDTO(st deploy.DeploySettings, can ChangeCanDTO) DeploySetting
 		HealthCheckGracePeriodSeconds: st.HealthCheckGracePeriodSeconds,
 		HasLoadBalancer:               st.HasLoadBalancer,
 		TargetGroups:                  make([]DeployTargetGroupDTO, 0, len(st.TargetGroups)),
+		Partial:                       make([]PartialErrorDTO, 0),
 		Scaling: DeployScalingDTO{
 			HasTarget: st.Scaling.HasTarget, Min: st.Scaling.Min, Max: st.Scaling.Max,
 			Policies:         make([]DeployPolicyDTO, 0, len(st.Scaling.Policies)),
 			ScheduledActions: make([]DeployScheduledActionDTO, 0, len(st.Scaling.ScheduledActions)),
 		},
 		Can: can,
+	}
+	for _, part := range st.Partial {
+		out.Partial = append(out.Partial, PartialErrorDTO{Part: part.Part, Code: "aws_error", Message: partialMessage(part)})
 	}
 	for _, tg := range st.TargetGroups {
 		out.TargetGroups = append(out.TargetGroups, DeployTargetGroupDTO{ARN: tg.ARN, Name: tg.Name, ResourceLabel: tg.ResourceLabel})
@@ -116,6 +124,32 @@ func deploySettingsDTO(st deploy.DeploySettings, can ChangeCanDTO) DeploySetting
 		})
 	}
 	return out
+}
+
+var partialSubjects = map[string]string{
+	"task_role":         "The task role",
+	"target_groups":     "Target groups",
+	"scaling_target":    "The scalable target",
+	"scaling_policies":  "Scaling policies",
+	"scheduled_actions": "Scheduled actions",
+}
+
+// partialMessage is "<Part> could not be read: <AWS error>".
+func partialMessage(part deploy.PartError) string {
+	subject, ok := partialSubjects[part.Part]
+	if !ok {
+		subject = part.Part
+	}
+	return subject + " could not be read: " + errorText(part.Err)
+}
+
+// errorText is the AWS message of err when it has one, else its text.
+func errorText(err error) string {
+	var awsErr smithy.APIError
+	if errors.As(err, &awsErr) {
+		return awsErr.ErrorCode() + ": " + awsErr.ErrorMessage()
+	}
+	return err.Error()
 }
 
 func (s *Server) getDeploySettings(w http.ResponseWriter, r *http.Request) {

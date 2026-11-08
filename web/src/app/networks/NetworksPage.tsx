@@ -1,6 +1,9 @@
 import { useCallback } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router'
+import { DataBanner } from '../../components/DataBanner'
+import { Drawer } from '../../components/Drawer'
 import { EmptyState } from '../../components/EmptyState'
+import { usePhone } from '../../components/usePhone'
 import { useCrumbs } from '../shell/crumbs'
 import styles from './networks.module.css'
 import { useVpcList, type VpcEntry } from './useVpcList'
@@ -23,6 +26,7 @@ function groupByAccount(vpcs: VpcEntry[]) {
 export function NetworksPage() {
   useCrumbs([['Networks']])
   const [searchParams, setSearchParams] = useSearchParams()
+  const phone = usePhone()
   const { vpcs, accountCount, hiddenVpcs, isLoading, error } = useVpcList()
   const q = searchParams.get('q') ?? ''
   const selectedKey = searchParams.get('vpc')
@@ -50,11 +54,13 @@ export function NetworksPage() {
   const unknownSelection = Boolean(selectedKey) && !chosen && !isLoading
   const subnetTotal = vpcs.reduce((sum, vpc) => sum + vpc.subnets, 0)
   const taskTotal = vpcs.reduce((sum, vpc) => sum + vpc.tasks, 0)
+  // On phones the detail is a sheet that opens for a chosen VPC only; the first VPC is not opened on load.
+  const sheetVpc = phone && chosen ? chosen : undefined
 
   return (
     <div className={styles.page}>
       <div className={styles.pageHead}>
-        <h1>Networks</h1>
+        <h1 className="hm-phone-title-sr">Networks</h1>
         {vpcs.length > 0 && (
           <span className={styles.headMeta}>
             {`${vpcs.length} ${vpcs.length === 1 ? 'VPC' : 'VPCs'} · ${accountCount} ${accountCount === 1 ? 'account' : 'accounts'} · ${subnetTotal} subnets · ${taskTotal} running tasks`}
@@ -62,12 +68,14 @@ export function NetworksPage() {
         )}
       </div>
 
+      <DataBanner tiers={['Networks']} />
+
       {error && vpcs.length === 0 ? (
         <EmptyState>{error instanceof Error ? error.message : 'The networks could not be loaded.'}</EmptyState>
       ) : !isLoading && vpcs.length === 0 ? (
         <EmptyState>No active VPCs. A VPC is active when ECS tasks run in it.</EmptyState>
       ) : (
-        <div className={styles.layout}>
+        <div className={`hm-fill ${styles.layout}`}>
           <section className={styles.listPanel} aria-label="VPCs">
             <div className={styles.listSearch}>
               <input
@@ -100,6 +108,7 @@ export function NetworksPage() {
                         <span className={styles.vpcText}>
                           <span className={styles.vpcName}>{vpc.name}</span>
                           <span className={styles.sub}>{`${vpc.region} · ${vpc.cidr}`}</span>
+                          {phone && <span className={styles.sub}>{`${vpc.vpcId} · ${vpc.accountName}`}</span>}
                         </span>
                         <span className={styles.vpcCounts}>{`${vpc.clusterCount} cl · ${vpc.tasks} t`}</span>
                       </button>
@@ -112,10 +121,23 @@ export function NetworksPage() {
               <div className={styles.listFoot}>{`${hiddenVpcs} ${hiddenVpcs === 1 ? 'VPC' : 'VPCs'} without tasks hidden`}</div>
             )}
           </section>
-          <div className={styles.detail}>
-            {selected && <VpcDetail key={selected.key} entry={selected} />}
-            {unknownSelection && <EmptyState>No running tasks you can see in this VPC.</EmptyState>}
-          </div>
+          {sheetVpc ? (
+            <Drawer
+              open
+              onClose={() => setParam('vpc', '')}
+              title={sheetVpc.name}
+              sub={`${sheetVpc.vpcId} · ${sheetVpc.cidr} · ${sheetVpc.accountName} · ${sheetVpc.region}`}
+            >
+              <VpcDetail key={sheetVpc.key} entry={sheetVpc} headerless />
+            </Drawer>
+          ) : phone ? (
+            unknownSelection && <EmptyState>No running tasks you can see in this VPC.</EmptyState>
+          ) : (
+            <div className={styles.detail}>
+              {selected && <VpcDetail key={selected.key} entry={selected} />}
+              {unknownSelection && <EmptyState>No running tasks you can see in this VPC.</EmptyState>}
+            </div>
+          )}
         </div>
       )}
     </div>

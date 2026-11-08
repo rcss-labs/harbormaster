@@ -1,4 +1,0 @@
-.tile { padding: 10px 12px; display: grid; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
-.k { font-size: 11.5px; color: var(--muted); }
-.v { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; display: flex; align-items: baseline; gap: 6px; }
-.v small { font-size: 12px; font-weight: 400; color: var(--muted); }

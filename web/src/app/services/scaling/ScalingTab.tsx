@@ -4,10 +4,14 @@ import { useDesiredCountInfo, useSetDesiredCount, type DesiredCountInfo, type De
 import { useScaling } from '../../../api/observe'
 import { useService } from '../../../api/hooks'
 import type { ScalingDTO, ScalingPolicyDTO } from '../../../api/types'
+import { DataBanner } from '../../../components/DataBanner'
 import { Panel } from '../../../components/Panel'
+import type { PanelErrorProps } from '../../../components/PanelError'
+import { queryPanelError } from '../panelError'
 import { EmptyState } from '../../../components/EmptyState'
 import { Feed, FeedRow } from '../../../components/Feed'
 import { KV } from '../../../components/KV'
+import { LockNote } from '../../../components/LockNote'
 import { useToast } from '../../../components/Toast'
 import type { ServiceDTO } from '../../../api/types'
 import { DesiredCountDialog } from '../DesiredCountDialog'
@@ -31,9 +35,14 @@ function describePolicy(policy: ScalingPolicyDTO): ReactNode {
   return `Step scaling · ${policy.name}`
 }
 
+const isUnreadable = (scaling: ScalingDTO, part: string) => scaling.unreadable_parts.includes(part)
+
 function describeScheduled(scaling: ScalingDTO): string {
-  if (scaling.scheduled_actions.length === 0) return 'None'
-  return scaling.scheduled_actions.map((action) => `${action.name}: ${action.schedule} → min ${action.min_capacity ?? '–'}`).join('; ')
+  const known = scaling.scheduled_actions.map((action) => `${action.name}: ${action.schedule} → min ${action.min_capacity ?? '–'}`).join('; ')
+  if (isUnreadable(scaling, 'scheduled_actions')) {
+    return known ? `Scheduled actions could not be read. Last known: ${known}` : 'Scheduled actions could not be read'
+  }
+  return known || 'None'
 }
 
 /** The service's Scaling tab: the desired-count stepper and the read-only auto scaling set in Terraform. */
@@ -44,11 +53,14 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
   const setDesired = useSetDesiredCount(serviceId)
   const toast = useToast()
 
-  const failed = [service, info, scaling].find((query) => query.isError)
+  // The service and its desired count are the page's core; the scaling snapshot may fail on its own and only blanks its panels.
+  const failed = [service, info].find((query) => query.isError)
   if (failed) {
     return <EmptyState>{failed.error instanceof Error ? failed.error.message : 'The scaling settings could not be loaded.'}</EmptyState>
   }
-  if (!service.data || !info.data || !scaling.data) return null
+  if (!service.data || !info.data) return null
+  const scalingError = queryPanelError(scaling, 'Auto scaling could not be read.')
+  const scalingLoading = scaling.data === undefined && !scalingError
 
   const saveDesired: SaveDesired = (desired, onSettled) =>
     setDesired.mutate({ desired }, {
@@ -65,42 +77,43 @@ export function ScalingTab({ serviceId }: { serviceId: string }) {
       },
     })
 
+  const activities = scaling.data?.activities ?? []
   return (
     <>
+      <DataBanner tiers={['Auto scaling']} />
       <div className={styles.grid}>
-        <DesiredCountCard
-          info={info.data}
+        <DesiredCountCard info={info.data} scaling={scaling.data} service={service.data} saving={setDesired.isPending} onSave={saveDesired} />
+        <AutoScalingCard
           scaling={scaling.data}
-          service={service.data}
-          saving={setDesired.isPending}
-          onSave={saveDesired}
+          error={scalingError}
+          loading={scalingLoading}
+          serviceId={serviceId}
+          canOperate={service.data.can.operate}
         />
-        <AutoScalingCard scaling={scaling.data} serviceId={serviceId} canOperate={service.data.can.operate} />
       </div>
-      <div className={styles.activity}>
-        <Panel title="Scaling activity" flush>
-          {scaling.data.activities.length === 0 ? (
-            <EmptyState>No scaling activity in the last 7 days.</EmptyState>
-          ) : (
-            <Feed>
-              {[...scaling.data.activities]
-                .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
-                .map((activity) => (
-                  <FeedRow key={activity.id} ts={activity.started_at} source="ecs" actor="ecs">
-                    {activity.status_message || activity.description}
-                  </FeedRow>
-                ))}
-            </Feed>
-          )}
-        </Panel>
-      </div>
+      <Panel title="Scaling activity" flush error={scalingError} loading={scalingLoading}>
+        {activities.length === 0 ? (
+          <EmptyState>No scaling activity in the last 7 days.</EmptyState>
+        ) : (
+          <Feed>
+            {[...activities]
+              .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+              .map((activity) => (
+                <FeedRow key={activity.id} ts={activity.started_at} source="ecs" actor="ecs">
+                  {activity.status_message || activity.description}
+                </FeedRow>
+              ))}
+          </Feed>
+        )}
+      </Panel>
     </>
   )
 }
 
 interface DesiredCountCardProps {
   info: DesiredCountInfo
-  scaling: ScalingDTO
+  /** Undefined while the scaling snapshot is loading or failed: the range hints are then left out. */
+  scaling?: ScalingDTO
   service: ServiceDTO
   saving: boolean
   onSave: SaveDesired
@@ -122,20 +135,22 @@ function DesiredCountCard({ info, scaling, service, saving, onSave }: DesiredCou
   // A count above the service's maximum is not a valid draft: it cannot be applied or confirmed.
   const draftCount = parsed !== null && parsed <= info.max ? parsed : null
   const outOfRange = parsed !== null && draftCount === null
-  const outsideAutoScaling = draftCount !== null && scaling.has_target && (draftCount < scaling.min || draftCount > scaling.max)
+  const outsideAutoScaling = draftCount !== null && scaling?.has_target && (draftCount < scaling.min || draftCount > scaling.max)
 
   const step = (delta: number) => {
     const base = draftCount ?? info.desired
     setDraft(String(Math.min(info.max, Math.max(0, base + delta))))
   }
 
-  const autoScalingNote = scaling.has_target
-    ? `Auto scaling keeps this service between ${scaling.min} and ${scaling.max} tasks and may change a value outside that range back.`
-    : 'No auto scaling: the count stays where you set it.'
+  const autoScalingNote = !scaling
+    ? ''
+    : scaling.has_target
+      ? `Auto scaling keeps this service between ${scaling.min} and ${scaling.max} tasks and may change a value outside that range back.`
+      : 'No auto scaling: the count stays where you set it.'
 
   return (
     <Panel title="Desired count">
-      {scaling.has_target && <RangeBar scaling={scaling} desired={draftCount ?? info.desired} />}
+      {scaling?.has_target && <RangeBar scaling={scaling} desired={draftCount ?? info.desired} />}
       <div className={styles.toolbar}>
         <button type="button" className={styles.icon} aria-label="Fewer tasks" onClick={() => step(-1)}>
           −
@@ -162,6 +177,7 @@ function DesiredCountCard({ info, scaling, service, saving, onSave }: DesiredCou
           Update desired count
         </button>
       </div>
+      <LockNote kind="why">{canOperate ? undefined : `You need Operate on ${tagName}`}</LockNote>
       {outsideAutoScaling && <p className={styles.warning}>{`Outside the auto scaling range ${scaling.min}–${scaling.max}.`}</p>}
       {outOfRange && <p className={styles.warning}>{`The most this service can run is ${info.max} tasks.`}</p>}
       {confirming && (
@@ -201,17 +217,33 @@ function RangeBar({ scaling, desired }: { scaling: ScalingDTO; desired: number }
   )
 }
 
-function AutoScalingCard({ scaling, serviceId, canOperate }: { scaling: ScalingDTO; serviceId: string; canOperate: boolean }) {
+interface AutoScalingCardProps {
+  scaling?: ScalingDTO
+  error?: PanelErrorProps
+  loading: boolean
+  serviceId: string
+  canOperate: boolean
+}
+
+function AutoScalingCard({ scaling, error, loading, serviceId, canOperate }: AutoScalingCardProps) {
   const actions = (
     <>
       {canOperate && (
-        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`}>
+        <Link className={styles.editLink} to={`/services/${serviceId}/deploy`} data-hm-rl="">
           Edit in Deploy →
         </Link>
       )}
       Application Auto Scaling · set in Terraform
     </>
   )
+  if (!scaling) return <Panel title="Auto scaling" actions={actions} error={error} loading={loading}>{null}</Panel>
+  if (!scaling.has_target && isUnreadable(scaling, 'scaling_target')) {
+    return (
+      <Panel title="Auto scaling" actions={actions}>
+        <EmptyState>The scalable target could not be read.</EmptyState>
+      </Panel>
+    )
+  }
   if (!scaling.has_target) {
     return (
       <Panel title="Auto scaling" actions={actions}>
@@ -222,6 +254,7 @@ function AutoScalingCard({ scaling, serviceId, canOperate }: { scaling: ScalingD
   const rows: [ReactNode, ReactNode][] = [
     ['Minimum tasks', scaling.min],
     ['Maximum tasks', scaling.max],
+    ...(isUnreadable(scaling, 'scaling_policies') ? [['Policy', 'Scaling policies could not be read'] as [ReactNode, ReactNode]] : []),
     ...scaling.policies.map((policy): [ReactNode, ReactNode] => ['Policy', describePolicy(policy)]),
     ...scaling.policies.flatMap((policy): [ReactNode, ReactNode][] => [
       ['Scale-out cooldown', `${policy.scale_out_cooldown} s`],

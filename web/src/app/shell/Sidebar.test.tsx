@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MeDTO } from '../../api/types'
-import { AUTH_OPTIONS_ON, ME_ADMIN, ME_SSO_USER, TASKS } from '../../test/fixtures'
+import { AUTH_OPTIONS_ON, ME_ADMIN, ME_SSO_USER, SERVICE_PAYMENTS, TASKS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 import { navigateExternal } from './navigateExternal'
+import { openAccountMenu } from './testUtils'
 
 vi.mock('./navigateExternal', () => ({ navigateExternal: vi.fn() }))
 
@@ -28,19 +29,21 @@ afterEach(async () => {
 const ssoOn = () => server.use(http.get('/api/auth/options', () => HttpResponse.json(AUTH_OPTIONS_ON)))
 const meIs = (me: MeDTO) => server.use(http.get('/api/me', () => HttpResponse.json(me)))
 const LINK = 'Link SSO account'
+const nav = () => screen.findByRole('navigation', { name: 'Main' })
 
 describe('Sidebar SSO linking', () => {
   it('hides Change password for password-less users', async () => {
     meIs(ME_SSO_USER)
     renderApp('/')
-    await screen.findByRole('button', { name: 'Sign out' })
-    expect(screen.queryByRole('button', { name: 'Change password' })).not.toBeInTheDocument()
+    const menu = within(await openAccountMenu(userEvent.setup()))
+    expect(menu.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(menu.queryByRole('button', { name: 'Change password' })).not.toBeInTheDocument()
   })
 
   it('shows Link SSO account only when SSO is configured, the user has a password and is not linked', async () => {
     // SSO not configured (default handler): hidden.
     const first = renderApp('/')
-    await screen.findByRole('button', { name: 'Sign out' })
+    await openAccountMenu(userEvent.setup())
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByRole('button', { name: LINK })).not.toBeInTheDocument()
     first.unmount()
@@ -48,13 +51,14 @@ describe('Sidebar SSO linking', () => {
     // Configured, password, not linked: shown.
     ssoOn()
     const second = renderApp('/')
+    await openAccountMenu(userEvent.setup())
     expect(await screen.findByRole('button', { name: LINK })).toBeInTheDocument()
     second.unmount()
 
     // Configured but already linked: hidden.
     meIs({ ...ME_ADMIN, sso_linked: true })
     renderApp('/')
-    await screen.findByRole('button', { name: 'Sign out' })
+    await openAccountMenu(userEvent.setup())
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByRole('button', { name: LINK })).not.toBeInTheDocument()
   })
@@ -70,6 +74,7 @@ describe('Sidebar SSO linking', () => {
     )
     renderApp('/')
     const user = userEvent.setup()
+    await openAccountMenu(user)
     await user.click(await screen.findByRole('button', { name: LINK }))
     const dialog = screen.getByRole('dialog', { name: 'Link your SSO account' })
     await user.type(within(dialog).getByLabelText('Password'), 'hunter2')
@@ -83,6 +88,7 @@ describe('Sidebar SSO linking', () => {
     server.use(http.post('/api/auth/saml/link', () => HttpResponse.json({ redirect_url: 'javascript:alert(1)' })))
     renderApp('/')
     const user = userEvent.setup()
+    await openAccountMenu(user)
     await user.click(await screen.findByRole('button', { name: LINK }))
     const dialog = screen.getByRole('dialog', { name: 'Link your SSO account' })
     await user.type(within(dialog).getByLabelText('Password'), 'hunter2')
@@ -100,6 +106,7 @@ describe('Sidebar SSO linking', () => {
     )
     renderApp('/')
     const user = userEvent.setup()
+    await openAccountMenu(user)
     await user.click(await screen.findByRole('button', { name: LINK }))
     const dialog = screen.getByRole('dialog')
     await user.type(within(dialog).getByLabelText('Password'), 'nope')
@@ -157,7 +164,7 @@ describe('Sidebar Tasks badges', () => {
   it('shows no number when nothing is unhealthy or stopped with errors, not even the running total', async () => {
     tasksWith(0, 0)
     renderApp('/')
-    expect(await tasksLink()).toHaveTextContent(/^TKTasks$/)
+    expect(await tasksLink()).toHaveTextContent(/^Tasks$/)
   })
 
   it('does not count expected stops (stopped_expected) in the badge', async () => {
@@ -172,7 +179,7 @@ describe('Sidebar Tasks badges', () => {
     )
     renderApp('/')
     const link = await tasksLink()
-    expect(link).toHaveTextContent(/^TKTasks$/)
+    expect(link).toHaveTextContent(/^Tasks$/)
     expect(within(link).queryByLabelText(/stopped with errors/)).not.toBeInTheDocument()
   })
 
@@ -180,7 +187,7 @@ describe('Sidebar Tasks badges', () => {
     tasksWith(3, 0)
     renderApp('/')
     const link = await tasksLink()
-    await waitFor(() => expect(link).toHaveTextContent(/^TKTasks3$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^Tasks3$/))
     expect(within(link).getByLabelText('3 unhealthy')).toBeInTheDocument()
     expect(within(link).queryByLabelText(/stopped with errors/)).not.toBeInTheDocument()
   })
@@ -189,7 +196,7 @@ describe('Sidebar Tasks badges', () => {
     tasksWith(0, 2)
     renderApp('/')
     const link = await tasksLink()
-    await waitFor(() => expect(link).toHaveTextContent(/^TKTasks2$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^Tasks2$/))
     expect(within(link).getByLabelText(/^2 stopped with errors in the last \d+ min$/)).toBeInTheDocument()
     expect(within(link).queryByLabelText(/unhealthy/)).not.toBeInTheDocument()
   })
@@ -198,7 +205,7 @@ describe('Sidebar Tasks badges', () => {
     tasksWith(3, 2)
     renderApp('/')
     const link = await tasksLink()
-    await waitFor(() => expect(link).toHaveTextContent(/^TKTasks32$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^Tasks32$/))
   })
 })
 
@@ -208,7 +215,7 @@ describe('Sidebar Analytics', () => {
     await screen.findByRole('link', { name: /^Analytics/ })
     const names = within(screen.getByRole('navigation', { name: 'Main' }))
       .getAllByRole('link')
-      .map((link) => link.textContent?.replace(/^[A-Z]{2}/, ''))
+      .map((link) => link.textContent?.replace(/\d+$/, ''))
     expect(names.indexOf('Analytics')).toBe(names.indexOf('Storage') + 1)
     expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 1)
   })
@@ -218,5 +225,54 @@ describe('Sidebar Analytics', () => {
     const link = await screen.findByRole('link', { name: /^Analytics/ })
     expect(link.className).toMatch(/active/)
     expect(screen.getByRole('link', { name: /^Storage/ }).className).not.toMatch(/active/)
+  })
+})
+
+describe('Sidebar groups', () => {
+  it('groups and icons; Services active on a service page; account menu lists the three rules', async () => {
+    ssoOn()
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/overview`)
+    const main = await nav()
+    for (const group of ['Infrastructure', 'Insights', 'Admin']) expect(within(main).getByText(group)).toBeInTheDocument()
+    const links = within(main).getAllByRole('link')
+    expect(links.map((link) => link.textContent?.replace(/\d+$/, ''))).toEqual([
+      'Overview',
+      'Services',
+      'Clusters',
+      'Tasks',
+      'Networks',
+      'Storage',
+      'Analytics',
+      'Settings',
+    ])
+    // Every nav item carries an icon.
+    for (const link of links) expect(link.querySelector('svg')).not.toBeNull()
+    expect(within(main).getByRole('link', { name: /^Services/ }).className).toMatch(/active/)
+    expect(within(main).getByRole('link', { name: /^Clusters/ }).className).not.toMatch(/active/)
+
+    // The account rules: My access always, Change password with a password, Link SSO account only when unlinked and SSO is on.
+    const menu = within(await openAccountMenu(userEvent.setup()))
+    expect(menu.getByRole('link', { name: 'My access' })).toBeInTheDocument()
+    expect(menu.getByRole('button', { name: 'Change password' })).toBeInTheDocument()
+    expect(await menu.findByRole('button', { name: LINK })).toBeInTheDocument()
+    expect(menu.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+  })
+
+  it('names the account button after the user and reports its state', async () => {
+    renderApp('/')
+    const button = await screen.findByRole('button', { name: 'Account menu for sam' })
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.setup().click(button)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('g s from the keyboard lands on /services and ? opens the shortcuts dialog', async () => {
+    renderApp('/')
+    await nav()
+    const user = userEvent.setup()
+    await user.keyboard('gs')
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/services'))
+    await user.keyboard('?')
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
   })
 })

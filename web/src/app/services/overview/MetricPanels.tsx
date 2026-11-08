@@ -3,14 +3,19 @@ import { Link } from 'react-router'
 import { allNull, useTargetHealth } from '../../../api/observe'
 import type { RunningTaskDTO, ServiceDTO, ServiceMetricsDTO } from '../../../api/types'
 import { BarChart } from '../../../charts/BarChart'
-import { Donut } from '../../../charts/Donut'
 import { Legend } from '../../../charts/Legend'
 import { LineChart } from '../../../charts/LineChart'
 import { XL24, fmtNum, niceMax } from '../../../charts/format'
 import { useNow } from '../../../components/Ago'
 import { Banner } from '../../../components/Banner'
+import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
+import { Icon } from '../../../components/Icon'
+import { usePhone } from '../../../components/usePhone'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { Panel } from '../../../components/Panel'
+import type { PanelErrorProps } from '../../../components/PanelError'
+import { StackBar } from '../../../components/StackBar'
+import { queryPanelError } from '../panelError'
 import { StopTaskDialog } from '../../../components/StopTaskDialog'
 import { Meter } from '../../../components/Meter'
 import { KpiStrip, type KpiItem } from '../../../components/KpiStrip'
@@ -20,6 +25,11 @@ import styles from './MetricPanels.module.css'
 const DAY_MS = 86_400_000
 const CPU_COLOR = 'var(--series-1)'
 const MEMORY_COLOR = 'var(--series-2)'
+
+interface PanelState {
+  loading?: boolean
+  error?: PanelErrorProps
+}
 
 interface MetricsProps {
   service: ServiceDTO
@@ -103,11 +113,15 @@ export function ServiceKpis({ service, metrics }: MetricsProps) {
       },
     )
   }
-  return <KpiStrip label="Service summary" items={items} />
+  return (
+    <div className={styles.kpiWrap}>
+      <KpiStrip label="Service summary" items={items} />
+    </div>
+  )
 }
 
 /** CPU and memory over the last 24 h with deploy and restart markers. `now` is injectable for tests. */
-export function UsageChart({ service, metrics, now: nowOverride }: MetricsProps & { now?: number }) {
+export function UsageChart({ service, metrics, now: nowOverride, loading, error }: MetricsProps & PanelState & { now?: number }) {
   const clock = useNow(60_000)
   const now = nowOverride ?? clock
   const windowStart = now - DAY_MS
@@ -128,6 +142,8 @@ export function UsageChart({ service, metrics, now: nowOverride }: MetricsProps 
         </Link>
       }
       stale={metrics?.stale}
+      loading={loading}
+      error={error}
       empty={!off && metrics !== undefined && allNull(cpu, mem)}
     >
       {off ? (
@@ -158,7 +174,8 @@ export function UsageChart({ service, metrics, now: nowOverride }: MetricsProps 
 
 /** Target health donut for a service behind a load balancer; `children` (the deployment card) sit under the donut. */
 export function HealthCard({ service, children }: { service: ServiceDTO; children?: ReactNode }) {
-  const targetHealth = useTargetHealth(service.id).data
+  const targetHealthQuery = useTargetHealth(service.id)
+  const targetHealth = targetHealthQuery.data
   const loadBalancer = service.networking.load_balancers[0]
   // Until the target-group snapshot arrives, fall back to the running tasks' own health.
   const known = targetHealth && targetHealth.groups.length > 0
@@ -168,17 +185,23 @@ export function HealthCard({ service, children }: { service: ServiceDTO; childre
   const missing = Math.max(0, service.desired - healthy - unhealthy)
 
   return (
-    <Panel title="Target health" actions={loadBalancer?.target_group_name}>
-      <Donut
-        segments={[
-          { name: 'Healthy targets', v: healthy, color: 'var(--success)' },
-          { name: 'Unhealthy targets', v: unhealthy, color: 'var(--warning)' },
-          { name: 'Missing tasks', v: missing, color: 'var(--danger)' },
+    <Panel
+      title="Target health"
+      sub={<span className={styles.mono}>{`${healthy}/${service.desired} healthy`}</span>}
+      actions={loadBalancer?.target_group_name}
+      error={queryPanelError(targetHealthQuery, 'Target health could not be read.')}
+    >
+      <StackBar
+        label="Target health"
+        total={Math.max(service.desired, healthy + unhealthy)}
+        legend
+        parts={[
+          { label: 'Healthy targets', n: healthy, color: 'var(--ok)' },
+          { label: 'Unhealthy targets', n: unhealthy, color: 'var(--warn)' },
+          { label: 'Missing tasks', n: missing, color: 'var(--bad)' },
         ]}
-        label={`${healthy}/${service.desired}`}
-        sub="healthy"
       />
-      {children && <div className={styles.afterDonut}>{children}</div>}
+      {children && <div className={styles.afterBar}>{children}</div>}
     </Panel>
   )
 }
@@ -229,6 +252,8 @@ function UsageMeter({ value, color }: { value: number | null | undefined; color:
 export function RunningTasksMeters({ service, metrics }: MetricsProps) {
   const base = `/services/${service.id}`
   const [stopping, setStopping] = useState<RunningTaskDTO | null>(null)
+  const [actionsFor, setActionsFor] = useState<RunningTaskDTO | null>(null)
+  const phone = usePhone()
   const usageByTask = new Map((metrics?.tasks_now ?? []).map((usage) => [usage.task_id, usage]))
   const withMeters = metrics?.tasks_now != null
   const canShell = service.can.terminal && service.enable_execute_command
@@ -239,7 +264,7 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
       header: 'Task',
       width: '120px',
       render: (task) => (
-        <Link className={styles.mono} to={`${base}/tasks`} title={task.id}>
+        <Link className={styles.mono} to={`${base}/tasks`} title={task.id} data-hm-rl="">
           {task.short_id}
         </Link>
       ),
@@ -272,7 +297,13 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
       header: '',
       width: '170px',
       align: 'right',
-      render: (task) => (
+      phone: 'action',
+      render: (task) =>
+        phone ? (
+          <button type="button" className={styles.moreBtn} aria-label={`Actions for task ${task.short_id}`} aria-haspopup="menu" onClick={() => setActionsFor(task)}>
+            <Icon name="more" size={18} />
+          </button>
+        ) : (
         <span className={styles.rowActions}>
           {canShell && task.exec_agent_running && (
             <Link className={styles.rowBtn} to={`${base}/terminal?task=${encodeURIComponent(task.id)}`}>
@@ -290,7 +321,7 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
             </button>
           )}
         </span>
-      ),
+        ),
     },
   ]
 
@@ -306,6 +337,33 @@ export function RunningTasksMeters({ service, metrics }: MetricsProps) {
         minWidth={560}
         pageSize={25}
       />
+      {actionsFor && (
+        <BottomSheet
+          open
+          onClose={() => setActionsFor(null)}
+          role="menu"
+          label={`Actions for task ${actionsFor.short_id}`}
+          title={actionsFor.short_id}
+          sub={`${service.name} · ${actionsFor.az}`}
+        >
+          {canShell && actionsFor.exec_agent_running && (
+            <SheetAction icon="term" label="Shell" href={`${base}/terminal?task=${encodeURIComponent(actionsFor.id)}`} onClick={() => setActionsFor(null)} />
+          )}
+          {service.can.logs && <SheetAction icon="logs" label="Logs" href={`${base}/logs`} onClick={() => setActionsFor(null)} />}
+          <SheetAction icon="tasks" label="Task details" href={`${base}/tasks`} onClick={() => setActionsFor(null)} />
+          <SheetAction
+            icon="stop"
+            label="Stop task"
+            danger
+            disabled={!service.can.operate}
+            why={service.can.operate ? undefined : `Needs Operate on ${service.tag.name}`}
+            onClick={() => {
+              setStopping(actionsFor)
+              setActionsFor(null)
+            }}
+          />
+        </BottomSheet>
+      )}
       {stopping && (
         <StopTaskDialog
           taskId={stopping.id}

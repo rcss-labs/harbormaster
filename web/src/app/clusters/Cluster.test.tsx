@@ -44,6 +44,18 @@ describe('Cluster', () => {
     )
   })
 
+  it('counts EC2 tasks apart from Fargate and shows no EC2 label when there are none', async () => {
+    serveCluster({ ...CLUSTER_CORE, fargate_tasks: 4, spot_tasks: 1, other_tasks: 2 })
+    const { unmount } = renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    expect(await screen.findByText(/4 Fargate · 1 Spot · 2 EC2\/other/)).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Fargate 4, Spot 1, EC2/other 2 of 7' })).toBeInTheDocument()
+    unmount()
+
+    serveCluster({ ...CLUSTER_CORE, fargate_tasks: 4, spot_tasks: 1, other_tasks: 0 })
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    expect(await screen.findByText(/4 Fargate · 1 Spot/)).not.toHaveTextContent('EC2')
+  })
+
   it('links to the Tasks page filtered to this cluster', async () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     const heading = await screen.findByRole('heading', { name: CLUSTER_CORE.name, level: 1 })
@@ -73,12 +85,27 @@ describe('Cluster', () => {
     expect(await kpi('Memory now')).toBeInTheDocument()
   })
 
+  it('KPI Services and Tasks link to the lists scoped to this cluster; the numbers stay', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const services = await kpi('Services')
+    expect(within(services).getByRole('link')).toHaveAttribute('href', `/services?${new URLSearchParams({ q: CLUSTER_CORE.name })}`)
+    const tasks = await kpi('Tasks')
+    expect(within(tasks).getByRole('link')).toHaveAttribute('href', `/tasks?${new URLSearchParams({ filter: 'all', q: CLUSTER_CORE.name })}`)
+    expect(tasks).toHaveTextContent(`${CLUSTER_CORE.running}/${CLUSTER_CORE.desired}`)
+  })
+
   it('draws a bar per service in Tasks by service, with running and desired counts', async () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     const panel = (await screen.findByRole('heading', { name: 'Tasks by service' })).closest('section') as HTMLElement
     expect(within(panel).getByRole('link', { name: 'notifications' })).toBeInTheDocument()
     expect(within(panel).getAllByText('2 / 2').length).toBeGreaterThan(0)
     expect(within(panel).getByText(/bar = running/)).toBeInTheDocument()
+  })
+
+  it('exposes each Tasks by service bar as running of desired in its accessible name', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const panel = (await screen.findByRole('heading', { name: 'Tasks by service' })).closest('section') as HTMLElement
+    expect(within(panel).getAllByRole('img', { name: 'Running 2 of 2' }).length).toBeGreaterThan(0)
   })
 
   it('lists services in a table with problems first', async () => {

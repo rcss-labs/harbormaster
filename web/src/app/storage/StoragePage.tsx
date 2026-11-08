@@ -1,11 +1,17 @@
+import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { type StorageItem, useStorage } from '../../api/storage'
-import { DataTable, type DataTableColumn } from '../../components/DataTable'
+import { DataBanner } from '../../components/DataBanner'
+import { DataTable, type DataTableColumn, type SortState } from '../../components/DataTable'
+import { Drawer } from '../../components/Drawer'
 import { EmptyState } from '../../components/EmptyState'
+import { Icon } from '../../components/Icon'
 import { KpiStrip } from '../../components/KpiStrip'
 import { Panel } from '../../components/Panel'
 import { SegmentedFilter } from '../../components/Seg'
+import { SortFieldsButton } from '../../components/SortFieldsButton'
 import { StatusDot } from '../../components/StatusDot'
+import { usePhone } from '../../components/usePhone'
 import { useCrumbs } from '../shell/crumbs'
 import { formatMiBps, formatSize } from './format'
 import styles from './storage.module.css'
@@ -34,7 +40,20 @@ const searchText = (fs: StorageItem) =>
 // CloudWatch returning no datapoints is treated like a failed call: both mean there is nothing to show.
 const latestThroughput = (fs: StorageItem) => fs.throughput_24h?.at(-1)?.v
 
-const COLUMNS: DataTableColumn<StorageItem>[] = [
+const DEFAULT_SORT: SortState = { key: 'size', dir: 'desc' }
+
+const SORT_OPTIONS = [
+  { key: 'name', label: 'File system' },
+  { key: 'size', label: 'Size' },
+  { key: 'growth', label: 'Growth' },
+  { key: 'throughput', label: 'Throughput' },
+]
+
+/** The phone list shows the mount state as a status pill on the name line; the mounting services live in the details sheet. */
+const mountStatus = (fs: StorageItem) =>
+  fs.mounted_by.length === 0 ? <StatusDot kind="warn">Not mounted</StatusDot> : <StatusDot kind="ok">{plural(clientsOf(fs), 'client')}</StatusDot>
+
+const storageColumns = (phone: boolean): DataTableColumn<StorageItem>[] => [
   {
     key: 'name',
     header: 'File system',
@@ -94,8 +113,9 @@ const COLUMNS: DataTableColumn<StorageItem>[] = [
     key: 'mounted',
     header: 'Mounted by',
     width: 'minmax(220px, 2fr)',
+    phone: phone ? 'status' : undefined,
     render: (fs) =>
-      fs.mounted_by.length === 0 ? (
+      phone ? mountStatus(fs) : fs.mounted_by.length === 0 ? (
         <>
           <StatusDot kind="warn">Not mounted</StatusDot>
           <div className={styles.warn}>No service mounts this file system.</div>
@@ -121,6 +141,10 @@ export function StoragePage() {
   useCrumbs([['Storage']])
   const storage = useStorage()
   const [params, setParams] = useSearchParams()
+  const phone = usePhone()
+  const columns = useMemo(() => storageColumns(phone), [phone])
+  const [sort, setSort] = useState<SortState | null>(DEFAULT_SORT)
+  const [detailId, setDetailId] = useState<string | null>(null)
   const items = storage.data?.items
 
   const rawSegment = params.get('seg')
@@ -166,10 +190,13 @@ export function StoragePage() {
     .filter((fs) => (segment === 'all' ? true : segment === 'mounted' ? fs.mounted : !fs.mounted))
     .filter((fs) => !needle || searchText(fs).includes(needle))
 
+  const detail = items.find((fs) => fs.file_system_id === detailId) ?? null
+
   return (
     <>
       <PageHead />
       <div className={styles.stack}>
+        <DataBanner tiers={['Storage']} />
         <KpiStrip
           label="Storage summary"
           items={[
@@ -210,21 +237,83 @@ export function StoragePage() {
                 value={query}
                 onChange={(event) => update('q', event.target.value, '')}
               />
+              {phone && <SortFieldsButton sortOptions={SORT_OPTIONS} sort={sort} onSortChange={setSort} defaults={{ sort: DEFAULT_SORT }} />}
             </>
           }
         >
           <DataTable
             label="File systems"
-            columns={COLUMNS}
+            columns={columns}
             rows={visible}
             rowKey={(fs) => fs.file_system_id}
             minWidth={960}
-            defaultSort={{ key: 'size', dir: 'desc' }}
+            sort={sort}
+            onSortChange={setSort}
             rowStatus={(fs) => (fs.mounted ? undefined : 'warn')}
             empty="No file systems match."
+            rowAction={
+              phone
+                ? (fs) => (
+                    <button type="button" className={styles.details} aria-label={`Details for ${fs.name}`} aria-haspopup="dialog" onClick={() => setDetailId(fs.file_system_id)}>
+                      <Icon name="more" />
+                    </button>
+                  )
+                : undefined
+            }
           />
         </Panel>
       </div>
+      {detail && (
+        <Drawer open onClose={() => setDetailId(null)} title={detail.name} sub={[detail.file_system_id, detail.region, detail.vpc?.name].filter(Boolean).join(' · ')}>
+          <StorageDetail fs={detail} />
+        </Drawer>
+      )}
+    </>
+  )
+}
+
+/** The phone details sheet: the figures of the row, the access points and the services that mount the file system. */
+function StorageDetail({ fs }: { fs: StorageItem }) {
+  const latest = latestThroughput(fs)
+  return (
+    <>
+      <dl className={styles.kv}>
+        <dt>Size</dt>
+        <dd>{formatSize(fs.size_bytes)}</dd>
+        <dt>Growth</dt>
+        <dd>{fs.growth_30d_pct === null ? '—' : growthLabel(fs.growth_30d_pct)}</dd>
+        <dt>Throughput</dt>
+        <dd>
+          {latest === undefined ? '—' : formatMiBps(latest)} <span className={styles.sub}>{fs.throughput_mode}</span>
+        </dd>
+        <dt>Access points</dt>
+        <dd>{fs.access_points.length === 0 ? 'None' : plural(fs.access_points.length, 'access point')}</dd>
+      </dl>
+      {fs.access_points.length > 0 && (
+        <ul className={styles.list}>
+          {fs.access_points.map((ap) => (
+            <li key={ap.access_point_id} className={styles.mono}>
+              {`${ap.access_point_id} · ${ap.path} · uid ${ap.uid ?? '—'}`}
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className={styles.heading}>Mounted by</h3>
+      {fs.mounted_by.length === 0 ? (
+        <div className={styles.warn}>No service mounts this file system.</div>
+      ) : (
+        <ul className={styles.list}>
+          {fs.mounted_by.map((mount, index) => (
+            <li key={index} className={styles.mount}>
+              <Link to={`/services/${mount.service_id}/overview`} className={styles.link}>
+                {mount.service}
+              </Link>{' '}
+              <span className={styles.sub}>{`(${mount.cluster})`}</span>
+              <span className={styles.mono}> {mount.container_path}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   )
 }
@@ -233,7 +322,7 @@ function PageHead() {
   return (
     <div className={styles.pageHead}>
       <div className={styles.titles}>
-        <h1>Storage</h1>
+        <h1 className="hm-phone-title-sr">Storage</h1>
         <div className={styles.meta}>EFS file systems and the services that mount them. File systems are created by Terraform.</div>
       </div>
     </div>

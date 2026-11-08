@@ -1,9 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useLogHistory } from '../../../api/observe'
 import type { LogLine, LogsHistoryDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
+import { LockNote } from '../../../components/LockNote'
+import { Panel } from '../../../components/Panel'
+import { BottomSheet } from '../../../components/BottomSheet'
 import { Seg, SegmentedFilter } from '../../../components/Seg'
+import { usePhone } from '../../../components/usePhone'
+import { queryPanelError } from '../panelError'
 import { useAuth } from '../../auth/AuthProvider'
+import { formatEventTime } from '../timeline/model'
 import { level } from './level'
 import { useLogTail } from './useLogTail'
 import styles from './logs.module.css'
@@ -16,6 +23,15 @@ const NEAR_BOTTOM_PX = 24
 const clock = (iso: string): string => {
   const date = new Date(iso)
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
+}
+
+// Date.parse also accepts `2026` or a zoneless date, which the API rejects, so only a full RFC 3339 timestamp counts.
+const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/
+
+function parseBefore(value: string | null): string | undefined {
+  if (value === null || !RFC3339.test(value)) return undefined
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : new Date(time).toISOString()
 }
 
 type LevelFilter = 'all' | 'warn' | 'error'
@@ -52,6 +68,20 @@ function LogRow({ line }: { line: LogLine }) {
   )
 }
 
+/** Phone row: time and stream on one wrapping line, the whole message wrapped below; a tap opens the line's details. */
+function PhoneLogRow({ line, onPick }: { line: LogLine; onPick: () => void }) {
+  const severity = level(line.message)
+  return (
+    <button type="button" className={styles.pln} data-level={severity || undefined} aria-haspopup="dialog" onClick={onPick}>
+      <span className={styles.plnHead}>
+        <span className={styles.ts}>{clock(line.t)}</span>
+        <span className={styles.ct}>{`${line.container}/${line.task_id.slice(0, 8)}`}</span>
+      </span>
+      <span className={styles.plnMsg}>{line.message}</span>
+    </button>
+  )
+}
+
 interface OlderState {
   scope: string
   before?: string
@@ -61,11 +91,17 @@ interface OlderState {
 /** Logs tab: CloudWatch history (paged backwards), search, level filter and a live tail that follows the bottom. */
 export function LogsTab({ serviceId }: { serviceId: string }) {
   const { me } = useAuth()
+  const phone = usePhone()
+  const [picked, setPicked] = useState<LogLine | null>(null)
   const [container, setContainer] = useState('all')
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [searchInput, setSearchInput] = useState('')
   const [q, setQ] = useState('')
-  const [follow, setFollow] = useState(true)
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Opened from the Timeline: read history up to this time instead of the latest. An unparseable value is ignored.
+  const rawBefore = searchParams.get('before')
+  const beforeParam = parseBefore(rawBefore)
+  const [follow, setFollow] = useState(beforeParam === undefined)
   const boxRef = useRef<HTMLDivElement>(null)
   const autoScrollTopRef = useRef<number | null>(null)
 
@@ -75,12 +111,12 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   }, [searchInput])
 
   const containerParam = container === 'all' ? undefined : container
-  const scope = `${serviceId}|${containerParam ?? ''}|${q}`
+  const scope = `${serviceId}|${containerParam ?? ''}|${q}|${beforeParam ?? ''}`
   const [stored, setStored] = useState<OlderState>({ scope, lines: [] })
   const older: OlderState = stored.scope === scope ? stored : { scope, lines: [] }
 
-  const newest = useLogHistory(serviceId, { container: containerParam, q: q || undefined })
-  const olderPage = useLogHistory(serviceId, { container: containerParam, q: q || undefined, before: older.before })
+  const newest = useLogHistory(serviceId, { container: containerParam, q: q || undefined, before: beforeParam })
+  const olderPage = useLogHistory(serviceId, { container: containerParam, q: q || undefined, before: older.before ?? beforeParam })
   // Until the older page arrives, the page shown for `before` is still the newest one.
   const currentPage = older.before ? olderPage : newest
 
@@ -97,6 +133,18 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const tail = useLogTail({ serviceId, container: containerParam, q: q || undefined, enabled: follow && canTail, csrf: me?.csrf_token ?? '' })
 
   const { keepalive } = tail
+
+  const backToLatest = () => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        next.delete('before')
+        return next
+      },
+      { replace: true },
+    )
+    setFollow(true)
+  }
 
   const loadOlder = () => {
     const page = currentPage.data
@@ -135,9 +183,19 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const statusText = !follow ? 'paused' : tail.status === 'live' ? 'live tail' : tail.status === 'ended' ? 'tail stopped' : 'connecting'
 
   if (newest.isError && !info) {
-    return <Banner kind="bad">{newest.error instanceof Error ? newest.error.message : 'The logs could not be loaded.'}</Banner>
+    return (
+      <Panel title="Logs" error={queryPanelError(newest, 'The logs could not be loaded.')}>
+        {null}
+      </Panel>
+    )
   }
-  if (!info) return null
+  if (!info) {
+    return (
+      <Panel title="Logs" loading>
+        {null}
+      </Panel>
+    )
+  }
 
   const driverBanners = unsupported.map((c) => (
     <Banner key={c.name} kind="warn">
@@ -149,43 +207,86 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
 
   if (!canTail) return <div className={styles.banners}>{driverBanners}</div>
 
+  const containerSelect = (
+    <select className={styles.ctl} aria-label="Container" value={container} onChange={(event) => setContainer(event.target.value)}>
+      <option value="all">All containers</option>
+      {containers.map((c) => (
+        <option key={c.name} value={c.name} disabled={!c.supported} title={c.supported ? undefined : `${c.driver}: Harbormaster cannot show these logs`}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  )
+  const levelSeg = <SegmentedFilter label="Level" options={LEVEL_OPTIONS} value={levelFilter} onChange={setLevelFilter} />
+  const searchInputEl = (
+    <input
+      className={`${styles.ctl} ${styles.search}`}
+      aria-label="Search logs"
+      placeholder="Search logs"
+      value={searchInput}
+      onChange={(event) => {
+        setSearchInput(event.target.value)
+        tail.keepalive()
+      }}
+    />
+  )
+  const tailSeg = (
+    <Seg
+      label="Tail"
+      fit
+      options={[
+        { value: 'live', label: 'Live' },
+        { value: 'paused', label: 'Paused' },
+      ]}
+      value={follow ? 'live' : 'paused'}
+      onChange={(next) => (next === 'live' ? backToLatest() : setFollow(false))}
+    />
+  )
+  const statusLine = (
+    <span className={styles.status}>
+      CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {statusText}
+    </span>
+  )
+
   return (
-    <div className={styles.root}>
-      <div className={styles.toolbar}>
-        <select className={styles.ctl} aria-label="Container" value={container} onChange={(event) => setContainer(event.target.value)}>
-          <option value="all">All containers</option>
-          {containers.map((c) => (
-            <option key={c.name} value={c.name} disabled={!c.supported} title={c.supported ? undefined : `${c.driver}: Harbormaster cannot show these logs`}>
-              {c.name}
-            </option>
+    <section className={`${styles.root} hm-fill-col ${phone ? styles.rootPhone : ''}`.trim()} aria-label="Logs">
+      {phone ? (
+        <div className={`${styles.toolbar} ${styles.toolbarPhone}`}>
+          <div className={styles.toolRow}>
+            {containerSelect}
+            {tailSeg}
+          </div>
+          {unsupported.map((c) => (
+            <LockNote key={c.name} kind="why">{`${c.name}: ${c.driver}: Harbormaster cannot show these logs`}</LockNote>
           ))}
-        </select>
-        <SegmentedFilter label="Level" options={LEVEL_OPTIONS} value={levelFilter} onChange={setLevelFilter} />
-        <input
-          className={`${styles.ctl} ${styles.search}`}
-          aria-label="Search logs"
-          placeholder="Search logs"
-          value={searchInput}
-          onChange={(event) => {
-            setSearchInput(event.target.value)
-            tail.keepalive()
-          }}
-        />
-        <Seg
-          label="Tail"
-          options={[
-            { value: 'live', label: 'Live' },
-            { value: 'paused', label: 'Paused' },
-          ]}
-          value={follow ? 'live' : 'paused'}
-          onChange={(next) => setFollow(next === 'live')}
-        />
-        <span className={styles.status}>
-          CloudWatch Logs · <span className={styles.mono}>{info.group}</span> · {statusText}
-        </span>
-      </div>
+          {searchInputEl}
+          {levelSeg}
+          {statusLine}
+          <span className={styles.hint}>{visible.length} lines shown. Tap a line for details.</span>
+        </div>
+      ) : (
+        <div className={styles.toolbar}>
+          {containerSelect}
+          {levelSeg}
+          {searchInputEl}
+          {tailSeg}
+          {statusLine}
+        </div>
+      )}
       <div className={styles.banners}>
         {driverBanners}
+        {beforeParam && (
+          <Banner
+            kind="info"
+            action={
+              <button type="button" className={`${styles.btn} ${styles.bannerAction}`} onClick={backToLatest}>
+                Back to latest
+              </button>
+            }
+          >
+            {`Showing logs up to ${formatEventTime(beforeParam, true)}`}
+          </Banner>
+        )}
         {follow && tail.status === 'ended' && tail.endReason === 'idle' && (
           <Banner kind="info">
             Live tail stopped after 30 minutes idle.
@@ -209,17 +310,53 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
           </Banner>
         )}
       </div>
-      <div className={styles.logs} ref={boxRef} role="log" onScroll={onScroll} onWheel={keepalive} onPointerDown={keepalive} onKeyDown={keepalive} onTouchMove={keepalive}>
+      <div className={`${styles.logs} hm-fill-scroll`} ref={boxRef} role="log" onScroll={onScroll} onWheel={keepalive} onPointerDown={keepalive} onKeyDown={keepalive} onTouchMove={keepalive}>
         {olderBefore && (
           <button type="button" className={`${styles.btn} ${styles.older}`} onClick={loadOlder}>
             Load older
           </button>
         )}
         {visible.length === 0 && <div className={styles.empty}>No log lines.</div>}
-        {visible.map((line, index) => (
-          <LogRow key={`${line.t}|${line.task_id}|${index}`} line={line} />
-        ))}
+        {visible.map((line, index) =>
+          phone ? (
+            <PhoneLogRow key={`${line.t}|${line.task_id}|${index}`} line={line} onPick={() => setPicked(line)} />
+          ) : (
+            <LogRow key={`${line.t}|${line.task_id}|${index}`} line={line} />
+          ),
+        )}
       </div>
-    </div>
+      <BottomSheet
+        open={phone && picked !== null}
+        onClose={() => setPicked(null)}
+        label="Log line details"
+        title="Log line"
+        sub={picked ? <span className={styles.mono}>{clock(picked.t)}</span> : undefined}
+        footer={
+          <button type="button" className={styles.sheetClose} onClick={() => setPicked(null)}>
+            Close
+          </button>
+        }
+      >
+        {picked && (
+          <>
+            <dl className={styles.kv}>
+              <dt>Level</dt>
+              <dd>{level(picked.message) || 'info'}</dd>
+              <dt>Time</dt>
+              <dd className={styles.mono}>{picked.t}</dd>
+              <dt>Log group</dt>
+              <dd className={styles.mono}>{info.group}</dd>
+              <dt>Log stream</dt>
+              <dd className={styles.mono}>{`${picked.container}/${picked.task_id}`}</dd>
+              <dt>Task</dt>
+              <dd className={styles.mono}>{picked.task_id}</dd>
+              <dt>Container</dt>
+              <dd>{picked.container}</dd>
+            </dl>
+            <pre className={styles.code}>{picked.message}</pre>
+          </>
+        )}
+      </BottomSheet>
+    </section>
   )
 }

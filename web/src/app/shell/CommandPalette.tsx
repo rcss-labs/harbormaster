@@ -5,8 +5,9 @@ import { useAlerts } from '../../api/observe'
 import type { SearchResultDTO } from '../../api/types'
 import { useAuth } from '../auth/AuthProvider'
 import { toggleTheme } from '../theme'
+import { usePhone } from '../../components/usePhone'
 import { useShellState } from './ShellState'
-import { shortcutLabel } from './TopBar'
+import { shortcutLabel } from './platform'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
 
@@ -34,6 +35,7 @@ const matches = (query: string, ...parts: string[]) => parts.join(' ').toLowerCa
 /** ⌘K / Ctrl+K command palette: jump to a service, cluster or task, or run a shell action. */
 export function CommandPalette() {
   const { closePalette, toggleSidebar, toggleRail } = useShellState()
+  const phone = usePhone()
   const navigate = useNavigate()
   const { me } = useAuth()
   const { filters } = useFilters()
@@ -98,14 +100,16 @@ export function CommandPalette() {
       { key: 'act:theme', tag: 'ACT', label: 'Toggle theme', sub: 'Light / dark', run: act(() => void toggleTheme()) },
       { key: 'act:sidebar', tag: 'ACT', label: 'Toggle sidebar', sub: '[', run: act(toggleSidebar) },
       { key: 'act:activity', tag: 'ACT', label: 'Toggle activity', sub: 'Rail', run: act(toggleRail) },
-    ].filter((a) => matches(query, a.label, a.sub))
+    ].filter((a) => matches(query, a.label, a.sub) && !(phone && a.key === 'act:sidebar'))
 
     const pages: [string, string][] = [
       ['Overview', '/'],
+      ['Services', '/services'],
       ['Clusters', '/clusters'],
       ['Tasks', '/tasks'],
       ['Networks', '/networks'],
       ['Storage', '/storage'],
+      ['Analytics', '/analytics/delivery'],
       me?.admin ? ['Settings', '/settings/general'] : ['My access', '/me/access'],
     ]
     const goTo: PaletteItem[] = pages.map(([label, href]) => ({ key: `nav:${href}`, tag: 'NAV', label, sub: href, run: go(href) })).filter((p) => matches(query, p.label))
@@ -120,7 +124,7 @@ export function CommandPalette() {
     ]
       .map((g) => ({ ...g, items: g.items.slice(0, limit) }))
       .filter((g) => g.items.length > 0)
-  }, [query, searchItems, alerts.data, clusters.data, me, closePalette, navigate, toggleSidebar, toggleRail])
+  }, [query, searchItems, alerts.data, clusters.data, me, phone, closePalette, navigate, toggleSidebar, toggleRail])
 
   const flat = groups.flatMap((g) => g.items)
   const foundIndex = flat.findIndex((item) => item.key === activeKey)
@@ -181,7 +185,13 @@ export function CommandPalette() {
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
-          <kbd className={styles.kbd}>esc</kbd>
+          {phone ? (
+            <button type="button" className={styles.paletteCancel} onClick={closePalette}>
+              Cancel
+            </button>
+          ) : (
+            <kbd className={styles.kbd}>esc</kbd>
+          )}
         </div>
         <div className={styles.paletteList} role="listbox" id={`${baseId}-list`} aria-label="Results" ref={listRef}>
           {groups.map((group) => (

@@ -1,20 +1,53 @@
-/* Ported from the mockup's .toolbar, .field, .term and button rules (docs/design/mockup/index.html). */
-/* Root of the tab and of the standalone task page: a flex column so the terminal takes the remaining height. */
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px; align-items: start; flex: 1 0 auto; }
-@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+/* Terminal tab: the terminal panel fills the window below the tabs (.hm-fill, .hm-fill-col); the session panel sits beside it from 1180px and below it on narrower windows. */
 .session { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; margin: 0; font-size: 12px; }
 .session dt { color: var(--muted); }
 .session dd { margin: 0; text-align: right; font-family: var(--mono); }
-.sessionNote { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
-.root { display: flex; flex-direction: column; min-width: 0; align-self: stretch; }
-.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.field { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
-.field select { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); font: 12px var(--mono); text-transform: none; letter-spacing: 0; }
+.sessionNote { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.root { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.side { min-width: 0; align-self: start; }
+.toolbar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
+.field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
+.field select { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); font: 12px var(--mono); min-width: 0; max-width: 100%; }
 .field select:disabled { opacity: 0.6; }
 .btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; white-space: nowrap; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .danger { background: transparent; border-color: var(--danger-border); color: var(--danger); }
 .note { margin-left: auto; color: var(--muted); font-size: 12px; }
-.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); flex: 1 1 0; min-height: 320px; overflow: hidden; padding: 12px 14px; width: 100%; box-sizing: border-box; }
+/* The wrap takes the leftover height; the terminal host inside it is what xterm fits to. */
+.termWrap { flex: 1 1 0; min-height: 300px; display: flex; padding: var(--pad); min-width: 0; }
+.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 12px 14px; box-sizing: border-box; }
 .term :global(.xterm) { height: 100%; }
+
+/* Below 1180px the layout is one column in normal flow: the fixed-height grid would squeeze the rows and paint the terminal over the Session panel. */
+@media (max-width: 1179px) {
+  div.page { flex: none; min-height: 0; }
+  .page .termWrap { flex: none; height: 300px; }
+}
+
+/* Phone: the panel fills the page down to the keys row (or the tab bar); the target and the session facts open in sheets. */
+@media (max-width: 700px) {
+  div.page.pagePhone { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .pagePhone .root { flex: 1 1 0; min-height: 0; }
+  .pagePhone .toolbar { flex-wrap: nowrap; gap: 6px; padding: 6px 8px; }
+  .pagePhone .toolbar .btn { height: 44px; flex: none; }
+  .targetBtn { flex: 1 1 auto; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); text-align: left; cursor: pointer; }
+  .targetBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .targetBtn svg { flex: none; }
+  .targetText { min-width: 0; flex: 1 1 auto; font: 12px/1.3 var(--mono); overflow-wrap: anywhere; }
+  .infoBtn { flex: none; width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius); background: none; color: var(--text-2); cursor: pointer; }
+  .pagePhone .termWrap { flex: 1 1 0; min-height: 120px; padding: 8px; }
+  /* No padding, border or line-height on the host itself: xterm's fit divides the host's height by its cell height, and any
+     of those makes it count rows that do not fit. The inner padding lives on .xterm, which fit subtracts. */
+  .pagePhone .term { padding: 0; border: 0; line-height: 1; outline: 1px solid var(--border); outline-offset: -1px; }
+  .pagePhone .term :global(.xterm) { box-sizing: border-box; padding: 8px 10px; }
+  /* xterm's off-screen input is a 44 px target too (it takes the tap that opens the keyboard). */
+  .pagePhone .term :global(.xterm-helper-textarea) { min-width: 44px; font-size: 16px; }
+  .sheetFields { display: flex; flex-direction: column; gap: 14px; }
+  .sheetField { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 500; }
+  .sheetField select { width: 100%; min-width: 0; height: 44px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); font: 16px var(--mono); }
+  .sheetField select:disabled { opacity: 0.6; }
+  .sheetBtn { flex: 1 1 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: 500 14px var(--sans); cursor: pointer; white-space: nowrap; }
+  .sheetBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sheetPrimary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+}

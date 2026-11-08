@@ -116,6 +116,78 @@ func TestLogsHistory_ContainerFilter(t *testing.T) {
 	}
 }
 
+// paymentsTaskIDs are the ids (last ARN segment) of the stored payments-api tasks.
+func paymentsTaskIDs(t *testing.T, st *store.Store) []string {
+	t.Helper()
+	rows, _, err := st.ListTasks(t.Context(), store.TaskQuery{
+		TargetFilter: store.TargetFilter{AccountID: homelabAccountID, Region: "us-east-1"},
+		Vis:          store.Visibility{Admin: true}, Cluster: "core-services", Service: "payments-api",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, row := range rows {
+		ids = append(ids, row.ARN[strings.LastIndex(row.ARN, "/")+1:])
+	}
+	if len(ids) < 2 {
+		t.Fatalf("need at least two payments-api tasks to tell them apart, have %v", ids)
+	}
+	return ids
+}
+
+func TestLogs_TaskParamRestrictsStreams(t *testing.T) {
+	srv, _, st := logsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+	ids := paymentsTaskIDs(t, st)
+
+	_, all := getLogs(t, c, paymentsID(), "")
+	seen := map[string]bool{}
+	for _, l := range all.Lines {
+		seen[l.TaskID] = true
+	}
+	if len(seen) < 2 {
+		t.Fatalf("unfiltered logs come from %d task(s); the filter would prove nothing", len(seen))
+	}
+
+	for _, id := range ids {
+		// the drawer sends the 8 character short id; a full id works too
+		for _, param := range []string{id[:8], id} {
+			status, body := getLogs(t, c, paymentsID(), "?task="+param)
+			if status != http.StatusOK {
+				t.Fatalf("task=%s: status %d", param, status)
+			}
+			for _, l := range body.Lines {
+				if l.TaskID != id {
+					t.Fatalf("task=%s returned a line of task %s", param, l.TaskID)
+				}
+			}
+		}
+	}
+
+	// the container filter still applies inside the task
+	status, body := getLogs(t, c, paymentsID(), "?task="+ids[0][:8]+"&container=payments-api")
+	if status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+	for _, l := range body.Lines {
+		if l.TaskID != ids[0] || l.Container != "payments-api" {
+			t.Fatalf("line %+v outside task %s / payments-api", l, ids[0])
+		}
+	}
+}
+
+func TestLogs_TaskParamUnknownIs404(t *testing.T) {
+	srv, _, _ := logsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+	if status, _ := getLogs(t, c, paymentsID(), "?task=deadbeefdeadbeef"); status != http.StatusNotFound {
+		t.Errorf("unknown task: status %d, want 404", status)
+	}
+	if status, _ := getLogs(t, c, paymentsID(), "?task=abc"); status != http.StatusUnprocessableEntity {
+		t.Errorf("short task id: status %d, want 422", status)
+	}
+}
+
 func TestLogsHistory_ViewOnlyIs403WithMessage(t *testing.T) {
 	srv, _, _ := logsFixture(t)
 	resp := login(t, srv, "omer", testPassword).get("/api/services/" + stagingWebID() + "/logs")
@@ -175,11 +247,10 @@ func TestLogsHistory_BeforePages(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
-	srv, fk, st := newTestServer(t)
-	seedMockupTags(t, st)
-	setPassword(t, st, "oncall")
-	// Switch every container of the staging web task definition to the splunk driver before polling.
+// useSplunkDriver switches every container of the staging web task definition to the splunk driver, so the
+// service has no container that logs to CloudWatch. Call it before the first poll: task definitions are read once.
+func useSplunkDriver(t *testing.T, fk *fake.Fake) {
+	t.Helper()
 	fk.Estate.Mu.Lock()
 	var family string
 	for _, s := range fk.Estate.Services {
@@ -203,6 +274,13 @@ func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
 	if family == "" {
 		t.Fatal("staging web task definition not found in the fake estate")
 	}
+}
+
+func TestLogsHistory_NoAwslogsContainerIs200Empty(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	setPassword(t, st, "oncall")
+	useSplunkDriver(t, fk)
 	pollAll(t, st, fk)
 
 	status, body := getLogs(t, login(t, srv, "oncall", testPassword), stagingWebID(), "")
@@ -492,4 +570,32 @@ func TestLogsTail_BaseURLOrigin_Accepted(t *testing.T) {
 		t.Fatalf("dial with the base URL origin: %v", err)
 	}
 	conn.CloseNow()
+}
+
+// The task drawer asks for the newest 20 lines of one task with ?limit=20; the server must return no more than that
+// (it used to ignore the parameter and answer with the full history page every 5 s).
+func TestLogs_LimitParamCapsLines(t *testing.T) {
+	srv, _, _ := logsFixture(t)
+	c := login(t, srv, "oncall", testPassword)
+
+	_, all := getLogs(t, c, paymentsID(), "")
+	if len(all.Lines) <= 20 {
+		t.Fatalf("the unlimited read has only %d lines; the cap would prove nothing", len(all.Lines))
+	}
+	status, body := getLogs(t, c, paymentsID(), "?limit=20")
+	if status != http.StatusOK {
+		t.Fatalf("limit=20: status %d", status)
+	}
+	if len(body.Lines) != 20 {
+		t.Fatalf("limit=20 returned %d lines", len(body.Lines))
+	}
+	// the newest lines are kept, so the capped page ends with the newest line of the full one
+	if got, want := body.Lines[19].Message, all.Lines[len(all.Lines)-1].Message; got != want {
+		t.Fatalf("newest line = %q, want %q", got, want)
+	}
+	for _, bad := range []string{"0", "-1", "abc"} {
+		if status, _ := getLogs(t, c, paymentsID(), "?limit="+bad); status != http.StatusUnprocessableEntity {
+			t.Fatalf("limit=%s: status %d, want 422", bad, status)
+		}
+	}
 }

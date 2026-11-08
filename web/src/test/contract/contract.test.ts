@@ -8,6 +8,7 @@ import {
   CHANGESET_PARTIAL,
   ANALYTICS_CAPACITY,
   ANALYTICS_CAPACITY_DAILY,
+  ANALYTICS_COST,
   ANALYTICS_DELIVERY,
   ANALYTICS_DELIVERY_FAILURES,
   ANALYTICS_OPERATIONS,
@@ -17,8 +18,10 @@ import {
   AUTH_OPTIONS_OFF,
   AUTH_OPTIONS_ON,
   CLUSTERS_METRICS,
+  SERVICES_METRICS,
   CLUSTER_CORE,
   CLUSTER_METRICS_CORE,
+  DEPLOY_SETTINGS_PARTIAL,
   DEPLOY_SETTINGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
   IMAGE_TAGS_PAYMENTS,
@@ -27,6 +30,7 @@ import {
   ME_OMER,
   ME_SSO_USER,
   OVERVIEW_METRICS,
+  POLLER_TIERS,
   REVISIONS_PAYMENTS,
   SCALING_NONE,
   SCALING_PAYMENTS,
@@ -35,6 +39,7 @@ import {
   SERVICE_METRICS_STALE,
   SERVICE_NOTIFICATIONS,
   SERVICE_PAYMENTS,
+  SERVICES_LIST,
   SSO_CONFIGURED_OFF,
   SSO_CONFIGURED_ON,
   SSO_TEST_FAIL,
@@ -45,6 +50,7 @@ import {
   TASK_DEFINITION_PAYMENTS,
 } from '../fixtures'
 import { DEPLOY_SETTINGS_BARE } from '../deployVariants'
+import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
 
@@ -120,6 +126,10 @@ describe('API contract', () => {
     ['operations', () => body(`/api/services/${serviceId}/operations`)],
     ['search', () => body('/api/search?q=pa')],
     ['poller', () => body('/api/poller')],
+    ['poller', () => POLLER_TIERS],
+    ['servicesList', () => SERVICES_LIST],
+    ['servicesList', () => body('/api/services')],
+    ['logs', () => body(`/api/services/${serviceId}/logs?task=a1b2c3d4&limit=20`)],
     ['users', () => body('/api/users')],
     ['permissions', () => body('/api/permissions')],
     ['tags', () => body('/api/tags')],
@@ -133,6 +143,7 @@ describe('API contract', () => {
     ['serviceMetrics', () => SERVICE_METRICS_STALE],
     ['clusterMetrics', () => CLUSTER_METRICS_CORE],
     ['clustersMetrics', () => CLUSTERS_METRICS],
+    ['servicesMetrics', () => SERVICES_METRICS],
     ['overviewMetrics', () => OVERVIEW_METRICS],
     ['targetHealth', () => TARGET_HEALTH_EDGE],
     ['scaling', () => SCALING_PAYMENTS],
@@ -145,6 +156,7 @@ describe('API contract', () => {
     ['desiredCount', () => DESIRED_COUNT_PAYMENTS],
     ['deploySettings', () => DEPLOY_SETTINGS_PAYMENTS],
     ['deploySettings', () => DEPLOY_SETTINGS_BARE],
+    ['deploySettings', () => DEPLOY_SETTINGS_PARTIAL],
     ['changeset', () => CHANGESET_APPLIED],
     ['changeset', () => CHANGESET_PARTIAL],
     ['settings', () => body('/api/settings')],
@@ -163,10 +175,22 @@ describe('API contract', () => {
     ['analyticsReliability', () => ANALYTICS_RELIABILITY_DAILY],
     ['analyticsCapacity', () => ANALYTICS_CAPACITY_DAILY],
     ['analyticsOperations', () => ANALYTICS_OPERATIONS],
+    ['analyticsCost', () => ANALYTICS_COST],
     ['analyticsReliability', () => body('/api/analytics/reliability?range=30d')],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
     expect(shapeProblems(await load(), contract[name], name)).toEqual([])
+  })
+
+  it('the timeline fixtures match the backend shape', () => {
+    expect(shapeProblems(TIMELINE_FAILING, contract.timeline, 'timeline failing')).toEqual([])
+    expect(shapeProblems(TIMELINE_EMPTY, contract.timeline, 'timeline empty')).toEqual([])
+  })
+
+  it('the log error fixtures match the backend shape', () => {
+    expect(shapeProblems(LOG_ERRORS_OK, contract.timelineLogErrors, 'log errors ok')).toEqual([])
+    expect(shapeProblems(LOG_ERRORS_UNAVAILABLE, contract.timelineLogErrors, 'log errors unavailable')).toEqual([])
+    expect(shapeProblems(LOG_ERRORS_NO_LOGS, contract.timelineLogErrors, 'log errors no logs')).toEqual([])
   })
 
   it('every task fixture matches the backend task shape', () => {

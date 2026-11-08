@@ -47,7 +47,7 @@ func newExecRig(t *testing.T, mutate func(*Server)) *execRig {
 	for _, u := range []struct {
 		name  string
 		admin bool
-	}{{"pavel", true}, {"omer", false}} {
+	}{{"sam", true}, {"omer", false}} {
 		if _, err := st.CreateUser(t.Context(), u.name, hash, u.admin, false); err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +84,7 @@ func newExecRig(t *testing.T, mutate func(*Server)) *execRig {
 // status (via exec-targets) and returns its id and container name.
 func (r *execRig) taskWithAgent(t *testing.T, service, agent string) (id, container string) {
 	t.Helper()
-	admin := login(t, r.srv, "pavel", testPassword)
+	admin := login(t, r.srv, "sam", testPassword)
 	for _, task := range getTasks(t, admin, "/api/tasks?filter=all&limit=500").Items {
 		if task.Service == nil || task.Service.Name != service || task.Status != "RUNNING" {
 			continue
@@ -327,7 +327,7 @@ func TestExecWS_MissingCookie_401BeforeUpgrade(t *testing.T) {
 func TestExecWS_BadOrigin_Rejected(t *testing.T) {
 	r := newExecRig(t, func(s *Server) { s.Cfg.BaseURL = "http://hm.example.test" })
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	_, resp, err := r.dialExec(t, c, id, "container=payments-api&command=/bin/sh", http.Header{"Origin": {"https://evil.example"}})
 	if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("err = %v resp = %v, want 403 before upgrade", err, resp)
@@ -337,7 +337,7 @@ func TestExecWS_BadOrigin_Rejected(t *testing.T) {
 func TestExecWS_FirstMessageMustBeStartWithCSRF(t *testing.T) {
 	r := newExecRig(t, func(s *Server) { s.ExecStartTimeout = 100 * time.Millisecond })
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 
 	cases := []struct {
 		name     string
@@ -391,7 +391,7 @@ func TestExecWS_ViewWithoutTerminal_Forbidden(t *testing.T) {
 func TestExecWS_RejectsCommandOutsideAllowlist(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	for _, cmd := range []string{"/bin/sh;id", "", "/bin/zsh", "sh"} {
 		e := r.expectRefusal(t, c, id, "payments-api", cmd, "invalid_command", 4409)
 		if e.Message != "Command must be /bin/sh or /bin/bash." {
@@ -406,7 +406,7 @@ func TestExecWS_RejectsCommandOutsideAllowlist(t *testing.T) {
 func TestExecWS_ExecDisabled_4409(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := taskIDWhere(t, r.srv, "cert-renewer", "", "RUNNING")
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	container := getExecTargets(t, c, id, http.StatusOK).Containers[0].Name
 	e := r.expectRefusal(t, c, id, container, "/bin/sh", "exec_disabled", 4409)
 	if e.Message != "ECS Exec is off for cert-renewer." {
@@ -417,7 +417,7 @@ func TestExecWS_ExecDisabled_4409(t *testing.T) {
 func TestExecWS_AgentNotRunning_4409(t *testing.T) {
 	r := newExecRig(t, nil)
 	id, container := r.taskWithAgent(t, "auth-service", "PENDING")
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	e := r.expectRefusal(t, c, id, container, "/bin/sh", "agent_not_running", 4409)
 	if e.Message != "The ExecuteCommandAgent is not running in container "+container+"." {
 		t.Errorf("message = %q", e.Message)
@@ -430,7 +430,7 @@ func TestExecWS_AgentNotRunning_4409(t *testing.T) {
 func TestExecWS_UnknownContainer_4404(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	r.expectRefusal(t, c, id, "no-such-container", "/bin/sh", "not_found", 4404)
 	r.expectRefusal(t, c, id, "", "/bin/sh", "not_found", 4404)
 }
@@ -438,7 +438,7 @@ func TestExecWS_UnknownContainer_4404(t *testing.T) {
 func TestExecWS_SessionLimit_FourthConnectionRefused(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 
 	var open []*wsClient
 	for i := 0; i < 3; i++ {
@@ -476,7 +476,7 @@ func TestExecWS_SessionLimit_FourthConnectionRefused(t *testing.T) {
 func TestExecWS_HappyPath_StatusOutputAndOplog(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 
@@ -509,7 +509,7 @@ func TestExecWS_HappyPath_StatusOutputAndOplog(t *testing.T) {
 
 	short := taskShortID(t, id)
 	ops := r.operations(t, "Opened terminal session%")
-	if len(ops) != 1 || ops[0].Text != "Opened terminal session on task "+short+" (payments-api, /bin/sh)." || ops[0].Actor != "pavel" {
+	if len(ops) != 1 || ops[0].Text != "Opened terminal session on task "+short+" (payments-api, /bin/sh)." || ops[0].Actor != "sam" {
 		t.Fatalf("operations = %+v", ops)
 	}
 	if ops[0].Details["op"] != "terminal" || ops[0].Details["session_id"] != connected.SessionID || ops[0].Details["container"] != "payments-api" ||
@@ -531,7 +531,7 @@ func toJSON(v any) string {
 func TestExecWS_ClientClose_TerminatesAndLogsClose(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 	connected, _ := w.waitStatus("connected")
@@ -557,7 +557,7 @@ func TestExecWS_ClientClose_TerminatesAndLogsClose(t *testing.T) {
 func TestExecWS_AgentExit_StatusClosedThen1000(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 	connected, _ := w.waitStatus("connected")
@@ -575,7 +575,7 @@ func TestExecWS_AgentExit_StatusClosedThen1000(t *testing.T) {
 func TestExecWS_IdleTimeout_4408(t *testing.T) {
 	r := newExecRig(t, func(s *Server) { s.Cfg.ExecIdleTimeout = 50 * time.Millisecond })
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 	frames, _, code := w.drain()
@@ -598,7 +598,7 @@ func TestExecWS_DeadBrowserPeer_SessionTerminatedAndSlotFreed(t *testing.T) {
 		s.ExecPingTimeout = 100 * time.Millisecond
 	})
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 	connected, _ := w.waitStatus("connected")
@@ -622,7 +622,7 @@ func TestExecWS_LiveBrowserPeer_SurvivesPings(t *testing.T) {
 		s.ExecPingTimeout = 2 * time.Second
 	})
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 	connected, _ := w.waitStatus("connected")
@@ -642,7 +642,7 @@ func TestExecWS_LiveBrowserPeer_SurvivesPings(t *testing.T) {
 func TestExecWS_UpstreamDrop_4502(t *testing.T) {
 	r := newExecRig(t, nil)
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	w := r.open(t, c, id, "payments-api", "/bin/sh")
 	w.sendText(startFrame(c.csrf))
 	connected, _ := w.waitStatus("connected")
@@ -661,7 +661,7 @@ func TestExecWS_ExecuteCommandFailure_4502(t *testing.T) {
 	r := newExecRig(t, nil)
 	r.fk.ExecServer = nil // the fake ECS then fails ExecuteCommand
 	id := r.paymentsTask(t)
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	r.expectRefusal(t, c, id, "payments-api", "/bin/sh", "aws_error", 4502)
 	if ops := r.operations(t, "%terminal session%"); len(ops) != 0 {
 		t.Errorf("operations = %+v, want none", ops)
@@ -711,7 +711,7 @@ func TestExecWS_StandaloneTask_ExecOff_Refused(t *testing.T) {
 	r := newExecRig(t, nil)
 	r.setStandaloneExec(t, false)
 	id := taskIDWhere(t, r.srv, "", "release-build", "RUNNING")
-	c := login(t, r.srv, "pavel", testPassword)
+	c := login(t, r.srv, "sam", testPassword)
 	container := getExecTargets(t, c, id, http.StatusOK).Containers[0].Name
 	r.expectRefusal(t, c, id, container, "/bin/sh", "exec_disabled", 4409)
 	if ops := r.operations(t, "%terminal session%"); len(ops) != 0 {

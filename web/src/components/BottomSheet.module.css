@@ -1,0 +1,26 @@
+.scrim { position: fixed; inset: 0; z-index: 49; width: 100%; padding: 0; border: 0; background: var(--scrim); cursor: default; }
+.sheet { position: fixed; z-index: 50; left: 0; right: 0; bottom: 0; max-height: calc(var(--hm-vvh, 100dvh) - 48px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border-strong); border-bottom: 0; border-radius: 14px 14px 0 0; box-shadow: var(--pop); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.sheet:focus { outline: none; }
+.tall { height: calc(var(--hm-vvh, 100dvh) - 24px); }
+.grabber { width: 36px; height: 4px; flex: none; margin: 8px auto 0; border-radius: 2px; background: var(--border-strong); }
+.head { display: flex; align-items: center; gap: 8px; flex: none; min-height: 48px; padding: 4px 8px 4px 16px; }
+.titles { flex: 1 1 auto; min-width: 0; }
+.title { font-size: 16px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.sub { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.close { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--r); background: transparent; color: var(--text-2); cursor: pointer; }
+.close:hover { background: var(--hover); }
+.body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px 12px; display: flex; flex-direction: column; gap: 12px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.foot { display: flex; gap: 8px; flex: none; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--surface); }
+.foot > * { flex: 1 1 0; min-height: 44px; }
+.list { display: flex; flex-direction: column; margin: 0 -16px; }
+.row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 16px; border: 0; border-top: 1px solid var(--row-border); background: none; color: var(--text); font: 500 14px var(--sans); text-align: left; text-decoration: none; cursor: pointer; }
+.row svg { color: var(--text-2); }
+.row:hover:not(:disabled) { background: var(--hover); }
+.row[aria-current='page'] { color: var(--accent); }
+.row[aria-current='page'] svg { color: var(--accent); }
+.row:disabled { color: var(--muted); cursor: not-allowed; }
+.row:disabled svg { color: var(--muted); }
+.danger, .danger svg { color: var(--bad); }
+.text { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.why { font-size: 12px; font-weight: 400; color: var(--muted); }
+.right { margin-left: auto; flex: none; color: var(--muted); font: 400 12px var(--mono); }

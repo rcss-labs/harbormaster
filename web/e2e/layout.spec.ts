@@ -1,8 +1,9 @@
 import { asUser, expect, test } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
+import { measureBox, measureBoxes } from './helpers'
 
 // Read-only: runs in the observe project against the unmutated seed.
-test.use(asUser('pavel'))
+test.use(asUser('sam'))
 
 test('wide screens fill the content width', async ({ page }) => {
   await page.setViewportSize({ width: 2560, height: 1440 })
@@ -10,18 +11,18 @@ test('wide screens fill the content width', async ({ page }) => {
   const main = page.getByRole('main')
   await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
-  // Grid is sidebar | main | docked activity rail (>= 1280px): 2560 - 212 - 300 = 2048.
-  const mainBox = await main.boundingBox()
-  expect(mainBox!.width).toBeGreaterThan(1900)
+  // Grid is sidebar | main; the activity rail is a drawer and no longer docks: 2560 - 212 = 2348.
+  const mainBox = await measureBox(main)
+  expect(mainBox.width).toBeGreaterThan(2300)
 
   // The six KPI cells share one strip that spans the content width.
   const strip = main.getByRole('list', { name: 'Estate key figures' })
-  const stripBox = (await strip.boundingBox())!
+  const stripBox = await measureBox(strip)
   const cells = strip.getByRole('listitem')
   await expect(cells).toHaveCount(6)
-  const boxes = await Promise.all([0, 1, 2, 3, 4, 5].map((index) => cells.nth(index).boundingBox()))
-  for (const box of boxes) expect(Math.abs(box!.width - boxes[0]!.width)).toBeLessThan(2)
-  const last = boxes[5]!
+  const boxes = await measureBoxes(...[0, 1, 2, 3, 4, 5].map((index) => cells.nth(index)))
+  for (const box of boxes) expect(Math.abs(box.width - boxes[0].width)).toBeLessThan(2)
+  const last = boxes[5]
   expect(Math.abs(last.x + last.width - (stripBox.x + stripBox.width))).toBeLessThanOrEqual(2)
 })
 
@@ -33,7 +34,7 @@ test('the clusters table scrolls inside its panel at 920px without widening the 
   const main = page.getByRole('main')
   expect(await main.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
   // The table keeps its minimum width, so it is wider than the panel that scrolls it.
-  expect((await table.boundingBox())!.width).toBeGreaterThanOrEqual(1120)
+  expect((await measureBox(table)).width).toBeGreaterThanOrEqual(1120)
 })
 
 test('logs and terminal fill the viewport height', async ({ page }) => {
@@ -41,14 +42,14 @@ test('logs and terminal fill the viewport height', async ({ page }) => {
   await page.goto(serviceUrl(...SVC.paymentsApi, 'logs'))
   const logs = page.getByRole('log')
   await expect(logs).toBeVisible()
-  const logBox = (await logs.boundingBox())!
+  const logBox = await measureBox(logs)
   expect(logBox.height).toBeGreaterThan(520)
   expect(1440 - (logBox.y + logBox.height)).toBeLessThan(60)
 
   await page.goto(serviceUrl(...SVC.paymentsApi, 'terminal'))
   const host = page.getByTestId('terminal-host')
   await expect(host).toBeVisible()
-  expect((await host.boundingBox())!.height).toBeGreaterThan(480)
+  expect((await measureBox(host)).height).toBeGreaterThan(480)
 })
 
 test('narrow viewport has no horizontal overflow', async ({ page }) => {
@@ -84,4 +85,127 @@ test('long tabs keep their full height inside the scrolling content', async ({ p
     const overflow = await panel.evaluate((el) => el.scrollHeight - el.clientHeight)
     expect(overflow, `tab "${tab}" panel is squashed`).toBeLessThanOrEqual(1)
   }
+})
+
+// Header and body cells must share one set of column tracks, and the pinned actions column must never hide a cell
+// that cannot be scrolled into view.
+const tableTargets = [
+  { name: 'Services', path: () => '/services', table: 'Services' },
+  { name: 'service Tasks tab', path: () => serviceUrl(...SVC.paymentsApi, 'tasks'), table: 'Tasks' },
+]
+
+for (const target of tableTargets) {
+  // At 390 the table becomes a list of rows: the action button is the last child of each row and stays inside the screen.
+  test(`${target.name} rows keep their action button last and inside the viewport at 390px`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(target.path())
+    const table = page.getByRole('table', { name: target.table })
+    const firstRow = table.getByRole('row').first()
+    await expect(firstRow).toBeVisible()
+    await expect(table.getByRole('columnheader')).toHaveCount(0)
+    const action = firstRow.locator('[data-hm-cell="__actions"]')
+    await expect(action).toBeVisible()
+    expect(await firstRow.evaluate((row) => row.lastElementChild?.getAttribute('data-hm-cell'))).toBe('__actions')
+    const box = (await action.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    // The row's own text stays on screen too.
+    const rowBox = (await firstRow.boundingBox())!
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(390)
+  })
+
+  for (const width of [1440, 3840]) {
+    test(`${target.name} table keeps columns aligned and uncovered at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(target.path())
+      const table = page.getByRole('table', { name: target.table })
+      const firstRow = table.getByRole('row').nth(1)
+      await expect(firstRow).toBeVisible()
+
+      // The first cell (the name or task id) is what the user sees at its centre, not the sticky actions cell.
+      const firstCell = firstRow.getByRole('cell').first()
+      const covered = await firstCell.evaluate((cell) => {
+        const box = cell.getBoundingClientRect()
+        const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+        return !top || !cell.contains(top)
+      })
+      expect(covered, 'first cell is covered').toBe(false)
+
+      // Every column header sits over its cells.
+      const headerCells = table.getByRole('row').first().getByRole('columnheader')
+      const bodyCells = firstRow.getByRole('cell')
+      const count = await headerCells.count()
+      expect(await bodyCells.count()).toBe(count)
+      for (let index = 0; index < count; index++) {
+        const [header, cell] = await measureBoxes(headerCells.nth(index), bodyCells.nth(index))
+        expect(Math.abs(header.x - cell.x), `column ${index} header x ${header.x} vs cell x ${cell.x}`).toBeLessThanOrEqual(2)
+      }
+
+      // Scrolled fully right, the last data column ends where the pinned actions cell begins.
+      const clear = await firstRow.evaluate((row) => {
+        let scroller: HTMLElement | null = row.parentElement
+        while (scroller && getComputedStyle(scroller).overflowX === 'visible') scroller = scroller.parentElement
+        if (scroller) scroller.scrollLeft = scroller.scrollWidth
+        const cells = row.querySelectorAll('[role="cell"]')
+        const actions = cells[cells.length - 1].getBoundingClientRect()
+        const lastData = cells[cells.length - 2].getBoundingClientRect()
+        return actions.left - lastData.right
+      })
+      expect(clear, 'last data column is under the actions cell').toBeGreaterThanOrEqual(-1)
+    })
+  }
+}
+
+test.describe('row action menu at 390', () => {
+  test.use(asUser('sam'))
+
+  test('every action of the last row stays clickable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/services')
+    const lastRowActions = page.getByRole('button', { name: /actions/i }).last()
+    await lastRowActions.scrollIntoViewIfNeeded()
+    await lastRowActions.click()
+    const items = page.getByRole('menu').getByRole('menuitem')
+    expect(await items.count()).toBeGreaterThan(0)
+    // A trial click runs Playwright's hit-target check without acting, so a clipped or covered item fails here.
+    for (const item of await items.all()) {
+      if (await item.isEnabled()) await item.click({ trial: true, timeout: 5_000 })
+    }
+  })
+})
+
+// A filter label must never wrap inside its box. On a phone the filters are chips (`.hm-chips`) that scroll sideways by
+// design with a fade, so every option has to be reachable by scrolling, on one line, at one height.
+test.describe('segmented filters', () => {
+  test('at 390 labels stay on one line and every chip is reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/services')
+    const groups = page.locator('.hm-chips')
+    await expect(groups.first()).toBeVisible()
+    for (const name of ['My pins', 'In progress', 'Steady', 'Scaled to 0']) {
+      await expect(groups.locator('button', { hasText: new RegExp(`^${name}`) })).toHaveCount(1)
+    }
+    const chipHeight = (await measureBox(groups.locator('button', { hasText: /^All/ }).first())).height
+
+    const buttons = await groups.locator('button').all()
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const button of buttons) {
+      await button.scrollIntoViewIfNeeded()
+      const box = await measureBox(button)
+      const text = (await button.textContent()) ?? ''
+      expect(Math.abs(box.height - chipHeight), `"${text}" wraps (h=${box.height})`).toBeLessThanOrEqual(1)
+      expect(box.x, `"${text}" starts off screen`).toBeGreaterThanOrEqual(-0.5)
+      expect(box.x + box.width, `"${text}" ends off screen`).toBeLessThanOrEqual(390.5)
+    }
+  })
+
+  test('at 1440 the status filter keeps one row', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/services')
+    const radios = page.getByRole('radiogroup', { name: 'Status' }).getByRole('radio')
+    await expect(radios.first()).toBeVisible()
+    const tops = await radios.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)))
+    expect(new Set(tops).size).toBe(1)
+  })
 })

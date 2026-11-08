@@ -138,7 +138,7 @@ func TestGetScaling_NeverPolledIs200Empty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp := login(t, srv, "pavel", testPassword).get("/api/services/" + paymentsID() + "/scaling")
+	resp := login(t, srv, "sam", testPassword).get("/api/services/" + paymentsID() + "/scaling")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}

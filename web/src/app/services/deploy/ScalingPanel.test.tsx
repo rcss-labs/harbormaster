@@ -15,7 +15,7 @@ function Harness({ settings, desiredCount = settings.desired_count }: { settings
   return <ScalingPanel settings={settings} draft={draft} onChange={(next) => {
         latestDraft = next
         setDraft(next)
-      }} desiredCount={desiredCount} tagName="prod" />
+      }} desiredCount={desiredCount} tagName="prod" onRetry={() => {}} />
 }
 
 describe('ScalingPanel', () => {

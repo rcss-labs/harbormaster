@@ -6,6 +6,8 @@ import type { MeDTO, PollerDTO } from '../../api/types'
 import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
+import { installPhoneMedia } from '../../test/phone'
+import { openAccountMenu, openScope } from './testUtils'
 
 const originalWidth = window.innerWidth
 
@@ -43,7 +45,7 @@ describe('Shell', () => {
     expect(within(userNav).getByText('Account')).toBeInTheDocument()
     expect(within(userNav).getByRole('link', { name: 'My access' })).toHaveAttribute('href', '/me/access')
     expect(within(userNav).queryByText('Admin')).not.toBeInTheDocument()
-    expect(screen.getByText(/Signed in as/)).toHaveTextContent('omer · User')
+    expect(await screen.findByRole('button', { name: 'Account menu for omer' })).toHaveTextContent('omer · User')
   })
 
   it('sign out calls /api/auth/logout and returns to /login', async () => {
@@ -55,7 +57,9 @@ describe('Shell', () => {
       }),
     )
     renderApp('/')
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Sign out' }))
+    const user = userEvent.setup()
+    await openAccountMenu(user)
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/login'))
     expect(logoutCalls).toBe(1)
   })
@@ -63,35 +67,39 @@ describe('Shell', () => {
   it('still returns to /login when the logout request fails', async () => {
     server.use(http.post('/api/auth/logout', () => HttpResponse.json({ error: { code: 'internal', message: 'boom' } }, { status: 500 })))
     renderApp('/')
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Sign out' }))
+    const user = userEvent.setup()
+    await openAccountMenu(user)
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/login'))
+    expect(await screen.findByText('Sign out failed on the server. You were signed out in this browser.')).toBeInTheDocument()
   })
 
   it('filter change updates the URL and localStorage', async () => {
     renderApp('/clusters?keep=1')
     const user = userEvent.setup()
-    const account = await screen.findByLabelText('Account filter')
+    const account = within(await openScope(user)).getByLabelText('Account filter')
     await user.selectOptions(account, ACCOUNT_STAGING.account_id)
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`account=${ACCOUNT_STAGING.account_id}`))
     expect(screen.getByTestId('search')).toHaveTextContent('keep=1')
-    expect(JSON.parse(localStorage.getItem('harbormaster-filters:pavel')!)).toEqual({ account: ACCOUNT_STAGING.account_id })
+    expect(JSON.parse(localStorage.getItem('harbormaster-filters:sam')!)).toEqual({ account: ACCOUNT_STAGING.account_id })
   })
 
   it('falls back to All when the stored account no longer exists', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ account: '999999999999', region: 'us-east-1' }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ account: '999999999999', region: 'us-east-1' }))
     renderApp('/clusters')
-    const account = await screen.findByLabelText('Account filter')
+    const scope = within(await openScope(userEvent.setup()))
+    const account = scope.getByLabelText('Account filter')
     expect(account).toHaveValue('')
-    expect(screen.getByLabelText('Region filter')).toHaveValue('us-east-1')
+    expect(scope.getByLabelText('Region filter')).toHaveValue('us-east-1')
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('region=us-east-1'))
     expect(screen.getByTestId('search')).not.toHaveTextContent('account=')
   })
 
   it('clearing a restored filter to All stays All', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ account: ACCOUNT_STAGING.account_id }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ account: ACCOUNT_STAGING.account_id }))
     renderApp('/clusters')
     const user = userEvent.setup()
-    const account = await screen.findByLabelText('Account filter')
+    const account = within(await openScope(user)).getByLabelText('Account filter')
     await waitFor(() => expect(account).toHaveValue(ACCOUNT_STAGING.account_id))
     await user.selectOptions(account, '')
     await waitFor(() => expect(account).toHaveValue(''))
@@ -103,29 +111,29 @@ describe('Shell', () => {
   it('a filter chosen in-session survives a sidebar link', async () => {
     renderApp('/clusters')
     const user = userEvent.setup()
-    await user.selectOptions(await screen.findByLabelText('Account filter'), ACCOUNT_STAGING.account_id)
+    await user.selectOptions(within(await openScope(user)).getByLabelText('Account filter'), ACCOUNT_STAGING.account_id)
     await user.click(await screen.findByRole('link', { name: /Tasks/ }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks'))
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`account=${ACCOUNT_STAGING.account_id}`))
-    expect(screen.getByLabelText('Account filter')).toHaveValue(ACCOUNT_STAGING.account_id)
+    expect(within(await openScope(user)).getByLabelText('Account filter')).toHaveValue(ACCOUNT_STAGING.account_id)
   })
 
   it('tag filter writes repeated tag= params and localStorage', async () => {
     renderApp('/clusters')
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'Tag filter' }))
+    await user.click(within(await openScope(user)).getByRole('button', { name: 'Tag filter' }))
     await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
     await user.click(screen.getByRole('checkbox', { name: 'Staging' }))
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('tag=2'))
     expect(screen.getByTestId('search')).toHaveTextContent('tag=3')
-    expect(JSON.parse(localStorage.getItem('harbormaster-filters:pavel')!)).toEqual({ tag: [2, 3] })
+    expect(JSON.parse(localStorage.getItem('harbormaster-filters:sam')!)).toEqual({ tag: [2, 3] })
   })
 
   it('URL tag= wins over the stored tags', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [2] }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ tag: [2] }))
     renderApp('/clusters?tag=3')
-    expect(await screen.findByRole('button', { name: 'Tag filter' })).toHaveTextContent('Prod')
-    expect(screen.getByRole('button', { name: 'Tag filter' })).not.toHaveTextContent('Staging')
+    expect(await screen.findByRole('button', { name: /^Scope:/ })).toHaveTextContent('Prod')
+    expect(screen.getByRole('button', { name: /^Scope:/ })).not.toHaveTextContent('Staging')
   })
 
   it('drops stored tag ids the user can no longer see', async () => {
@@ -139,7 +147,7 @@ describe('Shell', () => {
       }),
     )
     renderApp('/clusters')
-    expect(await screen.findByRole('button', { name: 'Tag filter' })).toHaveTextContent('Staging')
+    expect(await screen.findByRole('button', { name: /^Scope:/ })).toHaveTextContent('Staging')
     // The sidebar also fetches the unfiltered list for pinned statuses; only the filtered requests carry tags.
     const filteredParams = () => tagParams.filter((tags) => tags.length > 0)
     await waitFor(() => expect(filteredParams().length).toBeGreaterThan(0))
@@ -147,7 +155,7 @@ describe('Shell', () => {
   })
 
   it('restores stored tags sorted ascending into the URL', async () => {
-    localStorage.setItem('harbormaster-filters:pavel', JSON.stringify({ tag: [3, 2] }))
+    localStorage.setItem('harbormaster-filters:sam', JSON.stringify({ tag: [3, 2] }))
     renderApp('/clusters')
     await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('tag=2&tag=3'))
   })
@@ -155,7 +163,8 @@ describe('Shell', () => {
   it('non-admins only see tags they can View in the tag filter options', async () => {
     server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
     renderApp('/clusters')
-    await userEvent.setup().click(await screen.findByRole('button', { name: 'Tag filter' }))
+    const user = userEvent.setup()
+    await user.click(within(await openScope(user)).getByRole('button', { name: 'Tag filter' }))
     expect(screen.getByRole('checkbox', { name: 'Dev' })).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Staging' })).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: 'Prod' })).not.toBeInTheDocument()
@@ -164,15 +173,15 @@ describe('Shell', () => {
   it('a tag filter chosen in-session survives a sidebar link', async () => {
     renderApp('/clusters')
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'Tag filter' }))
+    await user.click(within(await openScope(user)).getByRole('button', { name: 'Tag filter' }))
     await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
     await user.click(await screen.findByRole('link', { name: /Tasks/ }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks'))
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('tag=3'))
-    expect(screen.getByRole('button', { name: 'Tag filter' })).toHaveTextContent('Prod')
+    expect(screen.getByRole('button', { name: /^Scope:/ })).toHaveTextContent('Prod')
   })
 
-  it('renders throttled and stale banners from poller status', async () => {
+  it('activity drawer closed by default; no PollerBanners rendered', async () => {
     const [base] = POLLER.items
     const poller: PollerDTO = {
       items: [
@@ -182,8 +191,11 @@ describe('Shell', () => {
     }
     server.use(http.get('/api/poller', () => HttpResponse.json(poller)))
     renderApp('/')
-    expect(await screen.findByText(/is 7 min old: AccessDenied/)).toHaveTextContent('Data for homelab / eu-west-1 is 7 min old: AccessDenied')
-    expect(screen.getByText(/are slowed by AWS throttling/)).toHaveTextContent('Updates for staging / us-east-1 are slowed by AWS throttling')
+    await screen.findByRole('navigation', { name: 'Main' })
+    await screen.findByRole('button', { name: /regions current/ })
+    expect(screen.queryByRole('dialog', { name: 'Activity' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Data for .* is/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/slowed by AWS throttling/)).not.toBeInTheDocument()
   })
 
   it('shows the no-access message for a user without permissions', async () => {
@@ -232,10 +244,11 @@ describe('Search filters', () => {
     )
     renderApp('/clusters')
     const user = userEvent.setup()
-    await user.selectOptions(await screen.findByLabelText('Account filter'), ACCOUNT_STAGING.account_id)
-    await user.click(screen.getByRole('button', { name: 'Tag filter' }))
+    const scope = within(await openScope(user))
+    await user.selectOptions(scope.getByLabelText('Account filter'), ACCOUNT_STAGING.account_id)
+    await user.click(scope.getByRole('button', { name: 'Tag filter' }))
     await user.click(screen.getByRole('checkbox', { name: 'Prod' }))
-    await user.keyboard('{Escape}')
+    await user.keyboard('{Escape}{Escape}')
     await user.click(screen.getByRole('button', { name: /Search or run a command/ }))
     await user.type(within(await screen.findByRole('dialog', { name: 'Command palette' })).getByRole('combobox'), 'pa')
     await waitFor(() => expect(urls.length).toBeGreaterThan(0))
@@ -258,7 +271,7 @@ describe('Sidebar', () => {
     server.use(alerts(0))
     renderApp('/')
     const link = await within(await nav()).findByRole('link', { name: /Overview/ })
-    await waitFor(() => expect(link).toHaveTextContent(/^OVOverview$/))
+    await waitFor(() => expect(link).toHaveTextContent(/^Overview$/))
   })
 
   it('Networks link is enabled and points to /networks', async () => {
@@ -273,5 +286,41 @@ describe('Sidebar', () => {
     const link = within(await nav()).getByRole('link', { name: 'Storage' })
     expect(link).toHaveAttribute('href', '/storage')
     expect(link).not.toHaveAttribute('aria-disabled')
+  })
+})
+
+describe('Shell on a phone', () => {
+  let restoreMedia: () => void
+  beforeEach(() => {
+    restoreMedia = installPhoneMedia(true)
+  })
+  afterEach(() => {
+    restoreMedia()
+    delete document.documentElement.dataset.hmPhone
+  })
+
+  it('renders no sidebar, no density or help button, and sets data-hm-phone', async () => {
+    renderApp('/')
+    expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Sidebar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Toggle row density' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument()
+    expect(document.documentElement.dataset.hmPhone).toBe('1')
+  })
+
+  it('removes data-hm-phone when the shell unmounts', async () => {
+    const { unmount } = renderApp('/')
+    await screen.findByRole('navigation', { name: 'Main' })
+    unmount()
+    expect(document.documentElement.dataset.hmPhone).toBeUndefined()
+  })
+
+  it('opens the palette full-screen from the search button and Cancel closes it', async () => {
+    renderApp('/')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Search or run a command' }))
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' })
+    await user.click(within(palette).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument()
   })
 })

@@ -1,0 +1,2 @@
+.skeleton { display: flex; flex-direction: column; gap: 8px; }
+.line { display: block; border-radius: 4px; background: linear-gradient(90deg, var(--raised), var(--hover), var(--raised)); }

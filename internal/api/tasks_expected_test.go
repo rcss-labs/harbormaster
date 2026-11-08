@@ -11,7 +11,7 @@ func TestTasks_ExpectedStopsAreMarkedAndNotCountedAsErrors(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	if resp := putWindow(c, map[string]any{"stopped_tasks_window_minutes": 90}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status %d", resp.StatusCode)
 	}

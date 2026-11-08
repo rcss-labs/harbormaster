@@ -1,0 +1,70 @@
+/* Layout values follow the mockup: 86px label column, 38px rows, 640px minimum track, 20px markers, 25% grid lines. */
+.split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.split.stack { grid-template-columns: minmax(0, 1fr); }
+.list, .detail { display: grid; gap: 14px; min-width: 0; }
+
+.toggles { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.count { color: var(--muted); font-size: 12px; }
+.hint { margin: 0; color: var(--muted); }
+
+/* The track keeps its width and scrolls inside the panel, never the page. */
+.scroll { overflow-x: auto; }
+.track { position: relative; min-width: 640px; padding-bottom: 22px; }
+.laneRow { display: grid; grid-template-columns: 86px minmax(0, 1fr); height: 38px; align-items: center; border-bottom: 1px solid var(--border); }
+.laneLabel { font-size: 12px; color: var(--muted); }
+.laneTrack {
+  position: relative; height: 100%; display: flex; align-items: center;
+  background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px);
+  background-size: 25% 100%;
+  border-right: 1px solid var(--grid);
+}
+.laneNote { padding-left: 8px; font-size: 12px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+.laneNotes { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
+.retry { height: 22px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--raised); color: inherit; cursor: pointer; }
+
+.marker {
+  position: absolute; top: 9px; transform: translateX(-50%);
+  height: 20px; min-width: 20px; padding: 0 5px; border-radius: 10px; border: 2px solid var(--surface);
+  font: 600 10px var(--mono); color: var(--accent-ink); cursor: pointer; line-height: 16px;
+}
+.marker:focus-visible { outline-color: var(--text); }
+.bad { background: var(--danger); }
+.warn { background: var(--warning); }
+.acc { background: var(--accent); }
+.info { background: var(--info); }
+.sel { box-shadow: 0 0 0 2px var(--text); }
+
+.axis { position: relative; margin-left: 86px; height: 16px; }
+.tick { position: absolute; top: 4px; transform: translateX(-50%); font: 10px var(--mono); color: var(--muted); white-space: nowrap; }
+.tick:last-child { transform: translateX(-100%); }
+
+.time { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.eventTitle { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; font: inherit; }
+.eventTitle:hover { text-decoration: underline; }
+.selectedRow td { background: var(--accent-soft); }
+
+@media (max-width: 700px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  /* The phone check wants 44px targets and 12px text; the global button min-height already makes the marker 44px tall, so the row grows to hold it. */
+  .laneRow { height: 44px; }
+  .marker { top: 50%; transform: translate(-50%, -50%); min-width: 44px; font-size: 12px; }
+}
+
+.detailBody { display: grid; gap: 10px; }
+.detailBody p { margin: 0; }
+.detailHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.diff { display: grid; border: 1px solid var(--border); border-radius: var(--radius); font: 12px var(--mono); }
+.diffRow { display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 5px 8px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.diffRow:last-child { border-bottom: 0; }
+.diffLabel { color: var(--muted); }
+.diffFrom { color: var(--danger); text-decoration: line-through; }
+.diffTo { color: var(--success, inherit); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.action { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: inherit; text-decoration: none; font: inherit; font-weight: 500; cursor: pointer; }
+.action:hover { background: var(--hover); }
+.disabled, .action:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (max-width: 700px) { .action { min-height: 44px; } }
+
+.bannerBlock { display: grid; gap: 6px; margin-bottom: 14px; font-size: 12px; }
+.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.danger:hover { background: var(--danger); filter: brightness(1.07); }

@@ -121,7 +121,7 @@ func newMetricsHarness(t *testing.T, extraClusters int) *metricsHarness {
 	for _, u := range []struct {
 		name  string
 		admin bool
-	}{{"pavel", true}, {"omer", false}} {
+	}{{"sam", true}, {"omer", false}} {
 		if _, err := st.CreateUser(t.Context(), u.name, hash, u.admin, false); err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +247,7 @@ func TestServiceMetrics_InsightsOffSkipsInsights(t *testing.T) {
 
 func TestServiceMetrics_EnhancedAddsTasksNow(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	out := getServiceMetricsDTO(t, login(t, h.srv, "pavel", testPassword), paymentsID(), "")
+	out := getServiceMetricsDTO(t, login(t, h.srv, "sam", testPassword), paymentsID(), "")
 
 	if out.Insights != "enhanced" || len(out.TasksNow) != 3 {
 		t.Fatalf("insights %q, tasks_now = %d; want enhanced and 3", out.Insights, len(out.TasksNow))
@@ -272,7 +272,7 @@ func TestServiceMetrics_NoViewIs404(t *testing.T) {
 
 func TestServiceMetrics_BadRangeIs422(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/services/" + paymentsID() + "/metrics?range=2h")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/services/" + paymentsID() + "/metrics?range=2h")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d, want 422", resp.StatusCode)
 	}
@@ -284,7 +284,7 @@ func TestServiceMetrics_BadRangeIs422(t *testing.T) {
 func TestServiceMetrics_ThrottledColdCacheIs503(t *testing.T) {
 	h := newMetricsHarness(t, 0)
 	atomic.StoreInt32(&h.fake.ThrottleCloudWatch, 1000)
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/services/" + paymentsID() + "/metrics")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/services/" + paymentsID() + "/metrics")
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", resp.StatusCode)
 	}
@@ -295,7 +295,7 @@ func TestServiceMetrics_ThrottledColdCacheIs503(t *testing.T) {
 
 func TestServiceMetrics_StaleWhenThrottledWarmCache(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	c := login(t, h.srv, "pavel", testPassword)
+	c := login(t, h.srv, "sam", testPassword)
 	getServiceMetricsDTO(t, c, paymentsID(), "")
 
 	atomic.StoreInt32(&h.fake.ThrottleCloudWatch, 1000)
@@ -347,7 +347,7 @@ func TestServiceMetrics_TwoTargetGroupsSumRequestsAndAverageP95(t *testing.T) {
 		wantErr += metrics.SumAll(lastOf(g, 3600, metrics.Span24h, "e5xx_0"))
 	}
 
-	out := getServiceMetricsDTO(t, login(t, h.srv, "pavel", testPassword), paymentsID(), "")
+	out := getServiceMetricsDTO(t, login(t, h.srv, "sam", testPassword), paymentsID(), "")
 	if out.ALB == nil || out.ALB.ReqNow == nil || out.ALB.P95Now == nil {
 		t.Fatalf("alb = %+v", out.ALB)
 	}
@@ -479,7 +479,7 @@ func TestClusterMetrics_DisabledClusterServicesSerialiseEmptyArrays(t *testing.T
 
 func TestOverviewMetrics_TopSevenPlusOthers(t *testing.T) {
 	h := newMetricsHarness(t, 5) // 5 mockup clusters with Insights + 5 extra = 10
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/overview/metrics")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/overview/metrics")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
@@ -549,7 +549,7 @@ func TestTargetHealth_NoLoadBalancerIsEmpty(t *testing.T) {
 func TestClustersMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
 	h := newMetricsHarness(t, 0)
 	h.cw.throttleRegions("eu-west-1")
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/clusters/metrics")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/clusters/metrics")
 	if resp.StatusCode != http.StatusOK {
 		code, msg := errorCode(t, resp)
 		t.Fatalf("status %d (%s: %s), want 200", resp.StatusCode, code, msg)
@@ -573,7 +573,7 @@ func TestClustersMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
 func TestOverviewMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
 	h := newMetricsHarness(t, 0)
 	h.cw.throttleRegions("eu-west-1")
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/overview/metrics")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/overview/metrics")
 	if resp.StatusCode != http.StatusOK {
 		code, msg := errorCode(t, resp)
 		t.Fatalf("status %d (%s: %s), want 200", resp.StatusCode, code, msg)
@@ -593,7 +593,7 @@ func TestOverviewMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
 func TestClustersMetrics_EveryTargetThrottledIs503(t *testing.T) {
 	h := newMetricsHarness(t, 0)
 	h.cw.throttleRegions("us-east-1", "eu-west-1")
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/clusters/metrics")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/clusters/metrics")
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", resp.StatusCode)
 	}
@@ -601,7 +601,7 @@ func TestClustersMetrics_EveryTargetThrottledIs503(t *testing.T) {
 
 func TestClustersMetrics_NoErrorsSerialisesEmptyArray(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	resp := login(t, h.srv, "pavel", testPassword).get("/api/clusters/metrics")
+	resp := login(t, h.srv, "sam", testPassword).get("/api/clusters/metrics")
 	var raw map[string]json.RawMessage
 	decode(t, resp, &raw)
 	if got := string(raw["errors"]); got != "[]" {

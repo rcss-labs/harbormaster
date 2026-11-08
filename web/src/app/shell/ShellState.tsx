@@ -1,16 +1,12 @@
+import { useScale } from '../scale'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 export const SIDEBAR_STORAGE_KEY = 'harbormaster-sidebar'
 
 /** Below this viewport width the sidebar collapses by itself. */
 export const SIDEBAR_AUTO_COLLAPSE_BELOW = 1100
-/** From this viewport width the activity rail is docked beside the page; below it opens as an overlay. */
-export const RAIL_DOCK_FROM = 1280
 export const SIDEBAR_WIDE_PX = 212
 export const SIDEBAR_NARROW_PX = 52
-export const RAIL_PX = 300
-/** The live pulse in the top bar needs this much room. */
-const PULSE_MIN_MAIN_PX = 900
 
 type SidebarChoice = 'collapsed' | 'expanded' | null
 
@@ -24,48 +20,53 @@ function readSidebarChoice(): SidebarChoice {
 }
 
 interface ShellStateValue {
+  /** The window width in device-independent px, before the UI scale. */
+  windowWidth: number
+  /** The width the layout sees: the window width divided by the effective UI scale. */
+  layoutWidth: number
+  /** Same as `layoutWidth`. */
   width: number
   sidebarCollapsed: boolean
   toggleSidebar: () => void
-  /** The rail is shown (docked or as overlay). */
+  /** The activity drawer is open. It is never open by default and never docks beside the page. */
   railOpen: boolean
-  railDocked: boolean
   toggleRail: () => void
   closeRail: () => void
   paletteOpen: boolean
   openPalette: () => void
   closePalette: () => void
-  /** Width left for the page itself. */
-  mainWidth: number
-  showPulse: boolean
+  helpOpen: boolean
+  openHelp: () => void
+  closeHelp: () => void
 }
 
 const ShellStateContext = createContext<ShellStateValue | null>(null)
 
 /** True for fields where typing a `[` must not toggle the sidebar. */
-function isEditable(target: EventTarget | null): boolean {
+export function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
   return target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
 }
 
 /** True while a modal dialog is open, where a bare `[` must not change the page behind it. */
-const modalDialogOpen = () => document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') !== null
+export const modalDialogOpen = () => document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') !== null
 
 export function ShellStateProvider({ children }: { children: ReactNode }) {
-  const [width, setWidth] = useState(() => window.innerWidth)
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
+  const { effective } = useScale()
+  const layoutWidth = windowWidth / (effective / 100)
   const [sidebarChoice, setSidebarChoice] = useState<SidebarChoice>(readSidebarChoice)
-  const [railChoice, setRailChoice] = useState<boolean | null>(null)
+  const [railOpen, setRailOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth)
+    const onResize = () => setWindowWidth(window.innerWidth)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const railDocked = width >= RAIL_DOCK_FROM
-  const sidebarCollapsed = sidebarChoice ? sidebarChoice === 'collapsed' : width < SIDEBAR_AUTO_COLLAPSE_BELOW
-  const railOpen = railChoice ?? railDocked
+  const sidebarCollapsed = sidebarChoice ? sidebarChoice === 'collapsed' : layoutWidth < SIDEBAR_AUTO_COLLAPSE_BELOW
 
   const toggleSidebar = useCallback(() => {
     const next: SidebarChoice = sidebarCollapsed ? 'expanded' : 'collapsed'
@@ -77,8 +78,10 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
     }
   }, [sidebarCollapsed])
 
-  const toggleRail = useCallback(() => setRailChoice(!railOpen), [railOpen])
-  const closeRail = useCallback(() => setRailChoice(false), [])
+  const toggleRail = useCallback(() => setRailOpen((open) => !open), [])
+  const closeRail = useCallback(() => setRailOpen(false), [])
+  const openHelp = useCallback(() => setHelpOpen(true), [])
+  const closeHelp = useCallback(() => setHelpOpen(false), [])
   const openPalette = useCallback(() => setPaletteOpen(true), [])
   const closePalette = useCallback(() => setPaletteOpen(false), [])
 
@@ -98,34 +101,24 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [paletteOpen, toggleSidebar])
 
-  // As an overlay the rail closes on Escape (the palette handles its own Escape).
-  const overlayOpen = railOpen && !railDocked
-  useEffect(() => {
-    if (!overlayOpen || paletteOpen) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeRail()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [overlayOpen, paletteOpen, closeRail])
-
-  const mainWidth = width - (sidebarCollapsed ? SIDEBAR_NARROW_PX : SIDEBAR_WIDE_PX) - (railOpen && railDocked ? RAIL_PX : 0)
   const value = useMemo<ShellStateValue>(
     () => ({
-      width,
+      windowWidth,
+      layoutWidth,
+      width: layoutWidth,
       sidebarCollapsed,
       toggleSidebar,
       railOpen,
-      railDocked,
       toggleRail,
       closeRail,
       paletteOpen,
       openPalette,
       closePalette,
-      mainWidth,
-      showPulse: mainWidth >= PULSE_MIN_MAIN_PX,
+      helpOpen,
+      openHelp,
+      closeHelp,
     }),
-    [width, sidebarCollapsed, toggleSidebar, railOpen, railDocked, toggleRail, closeRail, paletteOpen, openPalette, closePalette, mainWidth],
+    [windowWidth, layoutWidth, sidebarCollapsed, toggleSidebar, railOpen, toggleRail, closeRail, paletteOpen, openPalette, closePalette, helpOpen, openHelp, closeHelp],
   )
   return <ShellStateContext.Provider value={value}>{children}</ShellStateContext.Provider>
 }

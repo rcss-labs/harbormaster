@@ -1,4 +1,5 @@
 import { Banner } from '../../components/Banner'
+import { LockNote } from '../../components/LockNote'
 import styles from './service.module.css'
 
 interface PendingRevisionBannerProps {
@@ -22,6 +23,7 @@ export function PendingRevisionBanner({ serviceName, pendingRevision, deployedRe
           {`Deploy :${pendingRevision}`}
         </button>
       </span>
+      <LockNote kind="why">{canDeploy ? undefined : deployDisabledReason}</LockNote>
     </Banner>
   )
 }

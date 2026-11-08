@@ -2,7 +2,9 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -39,16 +41,23 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
+	// Each part is read on its own: a part that fails keeps its last stored value and is flagged
+	// unreadable, so the other parts still refresh. The failures are returned after the store write.
+	var failed []error
+	var unreadable []string
 	targets, err := describeScalableTargets(ctx, api, "")
 	if err != nil {
-		return err
+		failed, unreadable = append(failed, err), append(unreadable, PartScalingTarget)
 	}
 	policies, err := describeScalingPolicies(ctx, api, "")
 	if err != nil {
-		return err
+		failed, unreadable = append(failed, err), append(unreadable, PartScalingPolicies)
 	}
 	scheduled, err := describeScheduledActions(ctx, api, "")
 	if err != nil {
+		failed, unreadable = append(failed, err), append(unreadable, PartScheduledActions)
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -56,8 +65,18 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 	rows := make([]model.Scaling, 0, len(services))
 	for _, svc := range services {
 		resourceID := scalingResourceID(svc.Key)
-		row := model.Scaling{Key: svc.Key, Policies: policies[resourceID], Scheduled: scheduled[resourceID], PolledAt: now}
-		if target, ok := targets[resourceID]; ok {
+		row := model.Scaling{Key: svc.Key, PolledAt: now}
+		var previous model.Scaling
+		if len(unreadable) > 0 {
+			previous, err = l.Store.ScalingForService(ctx, svc.Key)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+		}
+		row.Unreadable = unreadable
+		if slices.Contains(unreadable, PartScalingTarget) {
+			row.HasTarget, row.Min, row.Max, row.Activities = previous.HasTarget, previous.Min, previous.Max, previous.Activities
+		} else if target, ok := targets[resourceID]; ok {
 			row.HasTarget = true
 			row.Min = int(aws.ToInt32(target.MinCapacity))
 			row.Max = int(aws.ToInt32(target.MaxCapacity))
@@ -67,9 +86,22 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 			}
 			row.Activities = activities
 		}
+		if slices.Contains(unreadable, PartScalingPolicies) {
+			row.Policies = previous.Policies
+		} else {
+			row.Policies = policies[resourceID]
+		}
+		if slices.Contains(unreadable, PartScheduledActions) {
+			row.Scheduled = previous.Scheduled
+		} else {
+			row.Scheduled = scheduled[resourceID]
+		}
 		rows = append(rows, row)
 	}
-	return l.Store.UpsertScaling(ctx, rows)
+	if err := l.Store.UpsertScaling(ctx, rows); err != nil {
+		return err
+	}
+	return errors.Join(failed...)
 }
 
 // scalingResourceID is the Application Auto Scaling resource id of an ECS service.
@@ -236,6 +268,46 @@ func CollectServiceScalingConfig(ctx context.Context, api awsx.AutoScalingAPI, k
 		row.Max = int(aws.ToInt32(target.MaxCapacity))
 	}
 	return row, nil
+}
+
+// Names of the parts of a service's scaling configuration that can fail independently.
+const (
+	PartScalingTarget    = "scaling_target"
+	PartScalingPolicies  = "scaling_policies"
+	PartScheduledActions = "scheduled_actions"
+)
+
+// PartError is a part of a composite read that failed while the others succeeded.
+type PartError struct {
+	Part string
+	Err  error
+}
+
+// CollectServiceScalingConfigPartial is CollectServiceScalingConfig that keeps going when one read
+// fails: the part that failed stays at its zero value and is listed in the returned errors. A
+// cancelled context is not a part failure; callers check ctx.Err() themselves.
+func CollectServiceScalingConfigPartial(ctx context.Context, api awsx.AutoScalingAPI, key model.ServiceKey) (model.Scaling, []PartError) {
+	resourceID := scalingResourceID(key)
+	row := model.Scaling{Key: key, PolledAt: time.Now().UTC()}
+	var failed []PartError
+	if targets, err := describeScalableTargets(ctx, api, resourceID); err != nil {
+		failed = append(failed, PartError{PartScalingTarget, err})
+	} else if target, ok := targets[resourceID]; ok {
+		row.HasTarget = true
+		row.Min = int(aws.ToInt32(target.MinCapacity))
+		row.Max = int(aws.ToInt32(target.MaxCapacity))
+	}
+	if policies, err := describeScalingPolicies(ctx, api, resourceID); err != nil {
+		failed = append(failed, PartError{PartScalingPolicies, err})
+	} else {
+		row.Policies = policies[resourceID]
+	}
+	if scheduled, err := describeScheduledActions(ctx, api, resourceID); err != nil {
+		failed = append(failed, PartError{PartScheduledActions, err})
+	} else {
+		row.Scheduled = scheduled[resourceID]
+	}
+	return row, failed
 }
 
 // CollectServiceScaling is CollectServiceScalingConfig plus the recent activities of a scaled

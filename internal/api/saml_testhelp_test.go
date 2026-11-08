@@ -26,7 +26,7 @@ import (
 )
 
 // newServerWithFakeIdP returns a running API with the fake IdP mounted on the same origin and SSO
-// configured and enabled against it. pavel (admin, password, break-glass) and omer exist.
+// configured and enabled against it. sam (admin, password, break-glass) and omer exist.
 func newServerWithFakeIdP(t *testing.T) (*httptest.Server, *fakeidp.Server, *store.Store) {
 	srv, idp, st, _ := newServerWithFakeIdPCustom(t, nil)
 	return srv, idp, st
@@ -49,14 +49,14 @@ func newServerWithFakeIdPCustom(t *testing.T, mutate func(*Server)) (*httptest.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	pavel, err := st.CreateUser(t.Context(), "pavel", hash, true, false)
+	sam, err := st.CreateUser(t.Context(), "sam", hash, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.CreateUser(t.Context(), "omer", hash, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SetBreakGlassChecked(t.Context(), pavel.ID, true); err != nil {
+	if _, err := st.SetBreakGlassChecked(t.Context(), sam.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	configureFakeIdP(t, st, idp, cfg)

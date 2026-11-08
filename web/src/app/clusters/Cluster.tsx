@@ -4,26 +4,36 @@ import { ApiError } from '../../api/client'
 import { useCluster } from '../../api/hooks'
 import { useClusterMetrics } from '../../api/observe'
 import { BarChart } from '../../charts/BarChart'
-import { HBars } from '../../charts/HBars'
 import { fmtNum } from '../../charts/format'
+import { ColumnPicker, useColumnPrefs } from '../../components/ColumnPicker'
+import { DataBanner } from '../../components/DataBanner'
 import { EmptyState } from '../../components/EmptyState'
 import { KpiStrip } from '../../components/KpiStrip'
 import { PinButton } from '../../components/PinButton'
+import { Chips } from '../../components/Chips'
 import { Panel } from '../../components/Panel'
+import { StackBar } from '../../components/StackBar'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
+import { usePhone } from '../../components/usePhone'
+import { Icon } from '../../components/Icon'
 import { STATUS_COLOR, statusKind } from '../../components/status'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { usePins } from '../shell/pins'
+import { ClusterHeadSheet } from './ClusterSheets'
 import { ClusterUsageChart } from './ClusterUsageChart'
 import { formatPercent } from './clusterMetrics'
-import { ServicesTable } from './ServicesTable'
+import { SERVICE_COLUMN_OPTIONS, ServicesTable } from './ServicesTable'
 import { presentValues } from './ServiceCardMetrics'
 import styles from './clusters.module.css'
+
 import { serviceSeverity } from './serviceSeverity'
 import type { TagTarget } from './tagTarget'
+
+/** Tasks that are neither Fargate nor Fargate Spot: EC2, external or a custom capacity provider. */
+const OTHER_CAPACITY_LABEL = 'EC2/other'
 
 const STOP_NORMAL_COLOR = 'var(--border-strong)'
 const STOP_ERROR_COLOR = 'var(--danger)'
@@ -54,6 +64,12 @@ export function Cluster() {
   const { me } = useAuth()
   const { isPinned, toggle } = usePins()
   const [editing, setEditing] = useState<TagTarget | null>(null)
+  const [headSheetOpen, setHeadSheetOpen] = useState(false)
+  const phone = usePhone()
+  const [visibleColumns, setVisibleColumns] = useColumnPrefs(
+    'harbormaster-columns:cluster-services',
+    SERVICE_COLUMN_OPTIONS.map((column) => column.key),
+  )
   const cluster = clusterQuery.data
   const clusterMetrics = clusterMetricsQuery.data
   useCrumbs([['Clusters', '/clusters'], [cluster?.name ?? '']])
@@ -85,10 +101,10 @@ export function Cluster() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.pageHead}>
+      <header className={phone ? `${styles.pageHead} ${styles.stickyHead}` : styles.pageHead}>
         <div className={styles.titles}>
           <div className={styles.titleRow}>
-            <h1 className={styles.monoTitle}>{cluster.name}</h1>
+            <h1 className={`${styles.monoTitle} hm-phone-title-sr`}>{cluster.name}</h1>
             <TagChip
               tag={cluster.tag}
               kind="cluster"
@@ -102,6 +118,11 @@ export function Cluster() {
                 toggle({ kind: 'cluster', id: cluster.id, name: cluster.name, account_name: cluster.account_name, account_id: cluster.account_id })
               }
             />
+            {phone && (
+              <button type="button" className={styles.moreButton} aria-label={`More actions for ${cluster.name}`} aria-haspopup="dialog" onClick={() => setHeadSheetOpen(true)}>
+                <Icon name="more" size={18} />
+              </button>
+            )}
           </div>
           <div className={styles.metaLine}>
             <span>
@@ -123,27 +144,47 @@ export function Cluster() {
             <span>·</span>
             <span>
               {cluster.fargate_tasks} Fargate · {cluster.spot_tasks} Spot
+              {cluster.other_tasks > 0 && ` · ${cluster.other_tasks} ${OTHER_CAPACITY_LABEL}`}
             </span>
           </div>
         </div>
-        <div className={styles.actions}>
-          <Link className={styles.btn} to={`/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`}>
-            Tasks in this cluster
-          </Link>
-          <a className={styles.btn} href={cluster.console_url} target="_blank" rel="noopener">
-            Open in AWS console ↗
-          </a>
-        </div>
+        {!phone && (
+          <div className={styles.actions}>
+            <Link className={styles.btn} to={`/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`}>
+              Tasks in this cluster
+            </Link>
+            <a className={styles.btn} href={cluster.console_url} target="_blank" rel="noopener">
+              Open in AWS console ↗
+            </a>
+          </div>
+        )}
       </header>
+      {phone && (
+        <ClusterHeadSheet
+          open={headSheetOpen}
+          cluster={cluster}
+          onClose={() => setHeadSheetOpen(false)}
+          onEditTag={() => {
+            setHeadSheetOpen(false)
+            setEditing({ kind: 'cluster', id: cluster.id, name: cluster.name, tag: cluster.tag })
+          }}
+        />
+      )}
+      <DataBanner tiers={['Clusters and services', 'Tasks']} />
 
       <KpiStrip
         label="Cluster summary"
         items={[
-          { label: 'Services', value: withSub(services.length, `${steadyCount} steady`) },
+          {
+            label: 'Services',
+            value: withSub(services.length, `${steadyCount} steady`),
+            href: `/services?${new URLSearchParams({ q: cluster.name })}`,
+          },
           {
             label: 'Tasks',
             value: withSub(`${cluster.running}/${cluster.desired}`, missing > 0 ? `${missing} missing` : 'all running'),
             valueColor: missing > 0 ? 'var(--warning)' : undefined,
+            href: `/tasks?${new URLSearchParams({ filter: 'all', q: cluster.name })}`,
             spark: cluster.tasks_history_72h.map((point) => point.running),
             sparkColor: TASK_LINE_COLOR,
           },
@@ -163,32 +204,76 @@ export function Cluster() {
         ]}
       />
 
+      {phone && (
+        <Chips
+          label="Section"
+          value=""
+          options={[
+            { value: 'services', label: 'Services' },
+            { value: 'tasks', label: 'Tasks' },
+            { value: 'capacity', label: 'Capacity' },
+          ]}
+          onChange={(section) => document.getElementById(`cluster-${section}`)?.scrollIntoView({ block: 'start' })}
+        />
+      )}
+
       <div className={styles.twoCol}>
-        <ClusterUsageChart metrics={clusterMetrics} insights={insights} error={clusterMetricsQuery.error} />
+        <div id="cluster-capacity" className={styles.contents}>
+          <ClusterUsageChart metrics={clusterMetrics} insights={insights} error={clusterMetricsQuery.error} />
+        </div>
+        <div id="cluster-tasks" className={styles.contents}>
         <Panel title="Tasks by service" actions={<span>bar = running · tick = desired</span>}>
-          <HBars
-            items={bySeverity.slice(0, BARS_SHOWN).map((service) => ({
-              name: service.name,
-              href: `/services/${service.id}/tasks`,
-              parts: [{ v: service.running, color: STATUS_COLOR[statusKind(service.status)] }],
-              ghost: service.desired,
-              label: `${service.running} / ${service.desired}`,
-            }))}
-          />
+          <div className={styles.barList}>
+            {bySeverity.slice(0, BARS_SHOWN).map((service) => {
+              // Each bar is scaled to the larger of running and desired, so the desired tick always fits.
+              const scale = Math.max(service.running, service.desired)
+              return (
+                <div key={service.id} className={styles.barRow}>
+                  <Link to={`/services/${service.id}/tasks`} className={styles.barName}>
+                    {service.name}
+                  </Link>
+                  <div className={styles.barTrack}>
+                    <StackBar parts={[{ n: service.running, color: STATUS_COLOR[statusKind(service.status)], label: 'Running' }]} total={scale} label="Tasks" />
+                    <i className={styles.barTick} style={{ left: `${scale > 0 ? (service.desired / scale) * 100 : 0}%` }} aria-hidden="true" />
+                  </div>
+                  <span className={styles.barValue}>{`${service.running} / ${service.desired}`}</span>
+                </div>
+              )
+            })}
+          </div>
           {bySeverity.length > BARS_SHOWN && (
             <div className={styles.note}>{`${bySeverity.length - BARS_SHOWN} more in the table below`}</div>
           )}
+          <div className={styles.stopsBlock}>
+            <h3 className={styles.stopsTitle}>Capacity providers</h3>
+            <StackBar
+              parts={[
+                { n: cluster.fargate_tasks, color: 'var(--series-1)', label: 'Fargate' },
+                { n: cluster.spot_tasks, color: 'var(--series-2)', label: 'Spot' },
+                ...(cluster.other_tasks > 0 ? [{ n: cluster.other_tasks, color: 'var(--series-3)', label: OTHER_CAPACITY_LABEL }] : []),
+              ]}
+              label="Tasks by capacity"
+              legend
+            />
+          </div>
           <div className={styles.stopsBlock}>
             <h3 className={styles.stopsTitle}>Task stops per hour</h3>
             <BarChart cols={stopColumns} height={80} xLabels={[[0, '24 h ago'], [23, 'now']]} />
           </div>
         </Panel>
+        </div>
       </div>
 
+      <div id="cluster-services" className={styles.contents}>
       <Panel
         title="Services"
         flush
-        toolbar={<span className={styles.count}>{`${services.length} ${services.length === 1 ? 'service' : 'services'} · problems first`}</span>}
+        toolbar={
+          <>
+            <span className={styles.count}>{`${services.length} ${services.length === 1 ? 'service' : 'services'} · problems first`}</span>
+            <ColumnPicker columns={SERVICE_COLUMN_OPTIONS} visible={visibleColumns} onChange={setVisibleColumns} />
+          </>
+        }
       >
         <ServicesTable
           services={services}
@@ -196,8 +281,10 @@ export function Cluster() {
           onTagClick={handleTagClick}
           metrics={clusterMetrics?.services}
           insights={insights}
+          visibleColumns={visibleColumns}
         />
       </Panel>
+      </div>
 
       {editing?.kind === 'cluster' && (
         <EditTagDialog kind="cluster" id={editing.id} name={editing.name} current={editing.tag.id} onClose={() => setEditing(null)} />

@@ -18,14 +18,20 @@
 .sm { height: 26px; padding: 0 9px; font-size: 12px; }
 .danger { color: var(--danger); }
 
-.legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .matrix td { vertical-align: top; }
 .matrix th { white-space: nowrap; }
-.pcell { display: grid; gap: 5px; justify-items: start; }
-.ptogs { display: flex; gap: 3px; }
-.ptog { width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--border-strong); background: var(--surface); font: 600 11px var(--mono); color: var(--muted); cursor: pointer; padding: 0; }
-.ptog:hover { border-color: var(--accent); }
-.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.pcell { position: relative; }
+.pbtn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.pbtn:hover { background: var(--hover); }
+.pbtn .mono { color: var(--muted); }
+.ppop { display: grid; gap: 8px; }
+.menuWrap { position: relative; display: inline-block; }
+.menu { display: grid; gap: 2px; }
+.menuItem { display: block; width: 100%; text-align: left; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.menuItem:hover:not(:disabled) { background: var(--hover); }
+.menuItem:disabled { color: var(--muted); cursor: not-allowed; }
+.menuDanger { color: var(--danger); }
 
 .ctl { height: 26px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
 .ctlLg { height: 30px; font-size: inherit; padding: 0 8px; }
@@ -36,3 +42,19 @@
 .err { font-size: 12px; color: var(--danger); }
 .chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .secret { font-family: var(--mono); font-size: 14px; padding: 8px 10px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); user-select: all; }
+.menuRoom { height: 230px; padding: 0 !important; border: 0 !important; }
+
+/* Phone: rows, sheets and 44 px controls. */
+.moreBtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-2); cursor: pointer; }
+.legendRow { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px var(--pad); font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.canSee { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.permList { display: grid; gap: 8px; }
+.pbtnRow { display: flex; width: 100%; min-height: 52px; padding: 0 12px; font-size: 14px; gap: 10px; justify-content: flex-start; }
+.pbtnRow .mono { margin-left: auto; }
+@media (max-width: 700px) {
+  .ctl, .ctlLg { font-size: 16px; }
+  .check { min-height: 44px; }
+  .ppop label { min-height: 44px; display: flex; align-items: center; }
+  .btn { white-space: normal; }
+}
+.subLine { display: block; overflow-wrap: anywhere; }

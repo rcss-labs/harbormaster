@@ -14,7 +14,7 @@ func TestGetSession_ExpiredIsNotFound(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	user, err := s.CreateUser(ctx, "pavel", "hash", false, false)
+	user, err := s.CreateUser(ctx, "sam", "hash", false, false)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestGetSession_ExpiredIsNotFound(t *testing.T) {
 func TestSession_AuthSourceAndNotAfterRoundTrip(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()
-	user, _ := s.CreateUser(ctx, "pavel", "hash", false, false)
+	user, _ := s.CreateUser(ctx, "sam", "hash", false, false)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	notAfter := now.Add(30 * time.Minute)
 	base := store.Session{UserID: user.ID, CSRFToken: "c", CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour)}

@@ -5,8 +5,8 @@ import { SEED_PASSWORD } from './helpers'
 test('a new user with no permissions sees the empty state', async ({ browser, playwright, baseURL }) => {
   const username = `nobody17-${Math.random().toString(36).slice(2, 8)}`
 
-  // Create the user through the API as pavel (strict JSON body: username, admin).
-  const api = await playwright.request.newContext({ baseURL: baseURL, storageState: authFile('pavel') })
+  // Create the user through the API as sam (strict JSON body: username, admin).
+  const api = await playwright.request.newContext({ baseURL: baseURL, storageState: authFile('sam') })
   const me = await (await api.get('/api/me')).json()
   const created = await api.post('/api/users', {
     headers: { 'X-CSRF-Token': me.csrf_token },

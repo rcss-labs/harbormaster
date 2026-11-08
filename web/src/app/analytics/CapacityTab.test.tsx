@@ -29,8 +29,14 @@ describe('CapacityTab daily panels', () => {
       expect(within(panel).queryByText(/needs new data/i)).not.toBeInTheDocument()
       expect(within(panel).getByText(/^Daily data started on /)).toBeInTheDocument()
     }
-    expect(within(screen.getByRole('region', { name: /Reserved vs used vCPU/ })).getByText('source cluster_capacity_daily · kept 8760h')).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: /Most over-reserved/ })).getByText('source service_util_daily · kept 2160h')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: /Reserved vs used vCPU/ })).getByText('source cluster_capacity_daily · kept 1 year')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: /Most over-reserved/ })).getByText('source service_util_daily · kept 90 days')).toBeInTheDocument()
+  })
+
+  it('states the at-max panel\'s history retention in words', async () => {
+    await renderTab(ANALYTICS_CAPACITY_DAILY)
+    const panel = within(screen.getByRole('region', { name: /Services at auto-scaling max/ }))
+    expect(panel.getByText(/^source scaling \+ service_counts_history · kept \d+ (days?|year)$/)).toBeInTheDocument()
   })
 
   it('shows the over-reserved row with per-task sizes and unused vCPU', async () => {
@@ -54,6 +60,14 @@ describe('CapacityTab daily panels', () => {
       expect(panel.getByText(new RegExp(`^source ${tables[name]} · kept `))).toBeInTheDocument()
       expect(panel.queryByText(/needs new data|Not collected yet/i)).not.toBeInTheDocument()
     }
+  })
+})
+
+describe('CapacityTab breakdown bars', () => {
+  it('draws the vCPU by account and tasks by capacity provider breakdowns as stacked bars named with their totals', async () => {
+    await renderTab(ANALYTICS_CAPACITY)
+    expect(within(screen.getByRole('region', { name: 'Reserved vCPU by account' })).getByRole('img', { name: /of 14\.5$/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Tasks by capacity provider' })).getByRole('img', { name: /FARGATE 21, FARGATE_SPOT 6 of 27$/ })).toBeInTheDocument()
   })
 })
 

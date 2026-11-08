@@ -2,7 +2,7 @@ import { SEED_PASSWORD } from '../helpers'
 
 // Seeded by internal/devseed/devseed.go (served by `serve --fake-aws`); all share the e2e password.
 export const USERS = {
-  pavel: { username: 'pavel', password: SEED_PASSWORD, admin: true },
+  sam: { username: 'sam', password: SEED_PASSWORD, admin: true },
   dana: { username: 'dana', password: SEED_PASSWORD, admin: false },
   omer: { username: 'omer', password: SEED_PASSWORD, admin: false },
   oncall: { username: 'oncall', password: SEED_PASSWORD, admin: false },

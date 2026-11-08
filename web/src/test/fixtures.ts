@@ -3,6 +3,10 @@
 import type {
   AccountsDTO,
   AlertsDTO,
+  PartialErrorDTO,
+  ServiceListDTO,
+  ServiceListItemDTO,
+  PollerTierDTO,
   AuditDTO,
   AuthOptionsDTO,
   CertDTO,
@@ -12,6 +16,7 @@ import type {
   ClusterServiceDTO,
   ClusterStatus,
   ClustersMetricsDTO,
+  ServicesMetricsDTO,
   DeploysDayDTO,
   EventDTO,
   ListDTO,
@@ -53,6 +58,7 @@ import type {
 } from '../api/deploy'
 import type {
   AnalyticsCapacity,
+  AnalyticsCost,
   AnalyticsDelivery,
   AnalyticsOperations,
   AnalyticsRange,
@@ -334,7 +340,7 @@ function standaloneTasks(): TaskDTO[] {
       ...none,
       ...taskBase(background, 'db-migrate-0', 0),
       group: `family:${STANDALONE_DB_MIGRATE}`,
-      started_by: 'pavel',
+      started_by: 'sam',
       status: 'STOPPED',
       exit_code: 0,
       family: STANDALONE_DB_MIGRATE,
@@ -385,11 +391,12 @@ export function tasksList(items: TaskDTO[]): TasksListDTO {
   const stopped = items.filter((t) => t.status === 'STOPPED')
   const azCounts = new Map<string, number>()
   for (const task of running) azCounts.set(task.az, (azCounts.get(task.az) ?? 0) + 1)
-  const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number }>()
+  const clusters = new Map<string, { id: string; name: string; fargate: number; spot: number; other: number }>()
   for (const task of running) {
-    const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0 }
+    const row = clusters.get(task.cluster.id) ?? { id: task.cluster.id, name: task.cluster.name, fargate: 0, spot: 0, other: 0 }
     if (task.capacity === 'FARGATE_SPOT') row.spot++
-    else row.fargate++
+    else if (task.capacity === 'FARGATE') row.fargate++
+    else row.other++
     clusters.set(task.cluster.id, row)
   }
   return {
@@ -473,7 +480,7 @@ function serviceEvents(def: ServiceDef): EventDTO[] {
   const ecs = (minutes: number, text: string): EventDTO => ({ ts: minutesAgo(minutes), source: 'ecs', actor: 'ECS', ...base, text })
   const events: EventDTO[] = [
     ecs(60 * 30, `(service ${def.name}) has reached a steady state.`),
-    { ts: minutesAgo(60 * 26), source: 'harbormaster', actor: 'pavel', ...base, text: `Restarted service (force new deployment) on revision ${def.revision}.` },
+    { ts: minutesAgo(60 * 26), source: 'harbormaster', actor: 'sam', ...base, text: `Restarted service (force new deployment) on revision ${def.revision}.` },
     ecs(60 * 26 - 6, `(service ${def.name}) has reached a steady state.`),
   ]
   if (def.lb) events.push(ecs(60 * 26 - 3, `(service ${def.name}) registered 1 targets in (target-group ${def.name}-tg).`))
@@ -555,6 +562,7 @@ function clusterDetail(def: ClusterDef): ClusterDTO {
     arn: `arn:aws:ecs:${def.region}:${def.account.account_id}:cluster/${def.name}`,
     console_url: `https://${def.region}.console.aws.amazon.com/ecs/v2/clusters/${def.name}`,
     fargate_tasks: running.filter((t) => t.capacity === 'FARGATE').length,
+    other_tasks: running.filter((t) => t.capacity !== 'FARGATE' && t.capacity !== 'FARGATE_SPOT').length,
     tasks_history_72h: history(card.running, card.desired),
     stops_per_hour: stopsPerHour(def.name.length, def.status === 'needs_attention' || def.status === 'degraded' ? [20, 21, 22] : []),
     services_detail: services,
@@ -675,6 +683,49 @@ export const SERVICE_NOTIFICATIONS: ServiceDTO = SERVICE_DETAILS[serviceIdOf(ser
 
 export const CLUSTERS: ListDTO<ClusterCardDTO> = { items: CLUSTER_DEFS.map(clusterCard), next: null, polled_at: FIXTURE_NOW }
 
+const SERVICE_ATTENTION: Record<string, string> = {
+  'image-resizer': 'No task is running; ECS keeps failing to start one.',
+  'catalog-api': 'One task is failing its health check.',
+  notifications: 'Deploying revision 10, 1 of 2 tasks replaced.',
+}
+
+function serviceListItem(def: ServiceDef): ServiceListItemDTO {
+  const cluster = clusterDef(def.cluster)
+  // artifact-proxy carries its own Prod tag; every other service inherits its cluster's tag.
+  const ownTag = def.name === 'artifact-proxy'
+  return {
+    id: serviceIdOf(def),
+    name: def.name,
+    cluster: clusterRefOf(cluster),
+    account_id: cluster.account.account_id,
+    account_name: cluster.account.name,
+    region: cluster.region,
+    tag: ownTag ? TAG_PROD : clusterTag(cluster),
+    tag_inherited: !ownTag,
+    status: def.status,
+    attention: SERVICE_ATTENTION[def.name] ?? '',
+    family: def.name,
+    revision: def.revision,
+    image_tag: def.imageTag,
+    running: def.running,
+    desired: def.desired,
+    cpu: String(def.cpu),
+    memory: String(def.memory),
+    latest_registered_revision: def.name === 'web-frontend' ? def.revision + 1 : null,
+    last_change_at: minutesAgo(def.status === 'steady' ? 60 * 26 : 3),
+    rollout: def.name === 'notifications' ? 'in_progress' : def.name === 'image-resizer' ? 'failed' : null,
+    can: { operate: true, logs: true, terminal: def.exec },
+  }
+}
+
+/** GET /api/services for an admin: all fifteen services of the fake estate. */
+export const SERVICES_LIST: ServiceListDTO = {
+  items: SERVICE_DEFS.map(serviceListItem),
+  total: SERVICE_DEFS.length,
+  truncated: false,
+  polled_at: FIXTURE_NOW,
+}
+
 export const OPERATIONS_FOR = (serviceIdValue: string): EventDTO[] =>
   ALL_EVENTS.filter((e) => e.service.id === serviceIdValue)
 
@@ -727,10 +778,10 @@ const ME_ACCOUNTS = [
 
 export const ME_ADMIN: MeDTO = {
   id: 1,
-  username: 'pavel',
+  username: 'sam',
   admin: true,
   must_change_password: false,
-  csrf_token: 'csrf-token-pavel',
+  csrf_token: 'csrf-token-sam',
   perms: {},
   tags: ME_TAGS([TAG_DEV, TAG_STAGING, TAG_PROD]),
   accounts: ME_ACCOUNTS,
@@ -738,8 +789,8 @@ export const ME_ADMIN: MeDTO = {
   has_password: true,
   sso_linked: false,
   break_glass: true,
-  email: 'pavel@example.test',
-  display_name: 'Pavel',
+  email: 'sam@example.test',
+  display_name: 'Sam',
 }
 
 export const ME_OMER: MeDTO = {
@@ -794,7 +845,7 @@ export const USERS: UsersDTO = {
   items: [
     {
       id: 1,
-      username: 'pavel',
+      username: 'sam',
       admin: true,
       must_change_password: false,
       last_sign_in_at: minutesAgo(2),
@@ -802,9 +853,9 @@ export const USERS: UsersDTO = {
       ...NO_SSO,
       break_glass: true,
       sso: 'linked',
-      sso_name_id: 'pavel@example.test',
-      email: 'pavel@example.test',
-      display_name: 'Pavel',
+      sso_name_id: 'sam@example.test',
+      email: 'sam@example.test',
+      display_name: 'Sam',
     },
     {
       id: 2,
@@ -862,7 +913,7 @@ export const USERS: UsersDTO = {
 export const PERMISSIONS: PermissionsDTO = {
   tags: [TAG_DEV, TAG_STAGING, TAG_PROD].map((t) => ({ id: t.id, name: t.name, color: t.color, services_in_effect: servicesInEffect(t.id) })),
   users: [
-    { id: 1, username: 'pavel', admin: true, perms: {} },
+    { id: 1, username: 'sam', admin: true, perms: {} },
     { id: 2, username: 'dana', admin: false, perms: { '1': 63, '2': 31, '3': 3 } },
     { id: 3, username: 'omer', admin: false, perms: { '1': 7, '2': 1 } },
     { id: 4, username: 'oncall', admin: false, perms: { '2': 39, '3': 39 } },
@@ -919,21 +970,63 @@ export const ACCOUNTS: AccountsDTO = {
 
 export const AUDIT: AuditDTO = {
   items: [
-    { id: 5, ts: minutesAgo(2), actor: 'pavel', action: 'auth.login', target: 'pavel', summary: 'Signed in.', details: null, ip: '10.0.4.17' },
-    { id: 4, ts: minutesAgo(180), actor: 'pavel', action: 'permission.set', target: 'oncall', summary: 'Gave oncall Terminal on Prod.', details: { tag: 'Prod', actions: 39 }, ip: '10.0.4.17' },
-    { id: 3, ts: minutesAgo(300), actor: 'pavel', action: 'cluster.tag', target: 'staging-web', summary: 'Tagged cluster staging-web as Staging (was Dev).', details: { from: 'Dev', to: 'Staging' }, ip: '10.0.4.17' },
-    { id: 2, ts: minutesAgo(2 * 1440), actor: 'pavel', action: 'user.create', target: 'omer', summary: 'Created user omer with Operator on Dev.', details: null, ip: '10.0.4.17' },
-    { id: 1, ts: minutesAgo(6 * 1440), actor: 'pavel', action: 'tag.create', target: 'Prod', summary: 'Created tag Prod.', details: null, ip: '10.0.4.17' },
+    { id: 5, ts: minutesAgo(2), actor: 'sam', action: 'auth.login', target: 'sam', summary: 'Signed in.', details: null, ip: '10.0.4.17' },
+    { id: 4, ts: minutesAgo(180), actor: 'sam', action: 'permission.set', target: 'oncall', summary: 'Gave oncall Terminal on Prod.', details: { tag: 'Prod', actions: 39 }, ip: '10.0.4.17' },
+    { id: 3, ts: minutesAgo(300), actor: 'sam', action: 'cluster.tag', target: 'staging-web', summary: 'Tagged cluster staging-web as Staging (was Dev).', details: { from: 'Dev', to: 'Staging' }, ip: '10.0.4.17' },
+    { id: 2, ts: minutesAgo(2 * 1440), actor: 'sam', action: 'user.create', target: 'omer', summary: 'Created user omer with Operator on Dev.', details: null, ip: '10.0.4.17' },
+    { id: 1, ts: minutesAgo(6 * 1440), actor: 'sam', action: 'tag.create', target: 'Prod', summary: 'Created tag Prod.', details: null, ip: '10.0.4.17' },
   ],
   next: null,
   polled_at: FIXTURE_NOW,
+}
+
+/** The tiers the poller reports per region (labels merge tiers; see Decision 4 of the v4 plan). */
+function pollerTiers(overrides: Partial<Record<string, Partial<PollerTierDTO>>> = {}): PollerTierDTO[] {
+  const tier = (name: string, label: string, core: boolean, intervalMs: number): PollerTierDTO => ({
+    tier: name,
+    label,
+    core,
+    failing: false,
+    throttled: false,
+    last_ok_at: minutesAgo(0),
+    last_error: '',
+    interval_ms: intervalMs,
+    ...overrides[name],
+  })
+  return [
+    tier('services', 'Clusters and services', true, 5000),
+    tier('runningTasks', 'Tasks', true, 5000),
+    tier('target_health', 'Target health', false, 30000),
+    tier('scaling', 'Auto scaling', false, 60000),
+    tier('alerts', 'Alerts', false, 15000),
+    tier('network', 'Networks', false, 300000),
+    tier('storage', 'Storage', false, 300000),
+  ]
 }
 
 export const POLLER: PollerDTO = {
   items: [
     ...REGIONS.map((region) => ({ account_id: ACCOUNT_HOMELAB.account_id, account_name: ACCOUNT_HOMELAB.name, region })),
     { account_id: ACCOUNT_STAGING.account_id, account_name: ACCOUNT_STAGING.name, region: 'us-east-1' },
-  ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0) })),
+  ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0), tiers: pollerTiers() })),
+}
+
+/** One region whose Auto scaling tier fails while every core tier is current: failing/throttled stay false. */
+export const POLLER_TIERS: PollerDTO = {
+  items: [
+    {
+      account_id: ACCOUNT_HOMELAB.account_id,
+      account_name: ACCOUNT_HOMELAB.name,
+      region: 'eu-west-1',
+      throttled: false,
+      failing: false,
+      last_error: '',
+      last_ok_at: minutesAgo(0),
+      tiers: pollerTiers({
+        scaling: { failing: true, last_ok_at: null, last_error: 'DescribeScheduledActions: UnsupportedOperation: not supported by this endpoint' },
+      }),
+    },
+  ],
 }
 
 // ---- observe (plan 03): metrics, target health, scaling, alerts, log history ----
@@ -1056,6 +1149,27 @@ export const CLUSTERS_METRICS: ClustersMetricsDTO = {
   errors: [],
 }
 
+const notificationsId = serviceIdOf(serviceDef('notifications'))
+
+/** payments-api and notifications measured, edge-nginx has Insights off, staging api is absent because its target was throttled. */
+export const SERVICES_METRICS: ServicesMetricsDTO = {
+  items: {
+    [paymentsId]: { insights: 'enhanced', cpu: 41.2, mem: 63 },
+    [notificationsId]: { insights: 'enabled', cpu: 12, mem: 35 },
+    [edgeNginxId]: { insights: 'disabled', cpu: null, mem: null },
+  },
+  errors: [
+    {
+      account_id: ACCOUNT_STAGING.account_id,
+      region: 'us-east-1',
+      code: 'throttled',
+      message: 'CloudWatch is throttling requests. Try again shortly.',
+    },
+  ],
+  stale: null,
+  polled_at: '2026-11-06T10:00:05Z',
+}
+
 export const OVERVIEW_METRICS: OverviewMetricsDTO = {
   timestamps: metricTimestamps,
   cpu_by_cluster: [
@@ -1118,6 +1232,7 @@ export const SCALING_PAYMENTS: ScalingDTO = {
       ended_at: null,
     },
   ],
+  unreadable_parts: [],
   polled_at: FIXTURE_NOW,
 }
 
@@ -1129,6 +1244,7 @@ export const SCALING_NONE: ScalingDTO = {
   policies: [],
   scheduled_actions: [],
   activities: [],
+  unreadable_parts: [],
   polled_at: FIXTURE_NOW,
 }
 
@@ -1145,6 +1261,9 @@ export const ALERTS: AlertsDTO = {
       cluster: 'background-jobs',
       cluster_id: backgroundJobsClusterId,
       tab: 'tasks',
+      cause: 'No task is running; ECS keeps failing to start one.',
+      next_step: { label: 'Open logs', href: `/services/${imageResizerId}/logs` },
+      just_before: { at: minutesAgo(18), text: 'Deployed :6 (dana)', source: 'harbormaster' },
     },
     {
       kind: 'account_unreachable',
@@ -1157,6 +1276,9 @@ export const ALERTS: AlertsDTO = {
       cluster: '',
       cluster_id: '',
       tab: '',
+      cause: 'AccessDenied: the role could not be assumed.',
+      next_step: { label: 'Open AWS accounts', href: '/settings/accounts' },
+      just_before: null,
     },
     {
       kind: 'unhealthy_task',
@@ -1169,6 +1291,9 @@ export const ALERTS: AlertsDTO = {
       cluster: 'eu-apps',
       cluster_id: euAppsClusterId,
       tab: 'tasks',
+      cause: 'One task is failing its health check.',
+      next_step: { label: 'Open tasks', href: `/services/${catalogId}/tasks` },
+      just_before: { at: minutesAgo(70), text: 'Deployed :23', source: 'deployment' },
     },
     {
       kind: 'rollout_in_progress',
@@ -1181,6 +1306,9 @@ export const ALERTS: AlertsDTO = {
       cluster: 'edge-proxy',
       cluster_id: edgeProxyClusterId,
       tab: 'overview',
+      cause: 'Deploying revision 15, 1 of 2 tasks replaced.',
+      next_step: { label: 'Open service', href: `/services/${edgeNginxId}/overview` },
+      just_before: null,
     },
   ],
   counts: { danger: 2, warning: 1, info: 1 },
@@ -1220,7 +1348,7 @@ export const TASK_DEFINITION_PAYMENTS: TaskDefinitionResponse = {
 }
 export const REVISIONS_PAYMENTS: RevisionsResponse = {
   items: [
-    { revision: 43, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:43', status: 'not_deployed', image_tag: '1.18.3', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'pavel' },
+    { revision: 43, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:43', status: 'not_deployed', image_tag: '1.18.3', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'sam' },
     { revision: 42, arn: 'arn:aws:ecs:us-east-1:1:task-definition/payments-api:42', status: 'deployed', image_tag: '1.18.2', cpu: '512', memory: '1024', registered_at: FIXTURE_NOW, registered_by: 'terraform' },
   ],
   deployed_revision: 42,
@@ -1294,6 +1422,20 @@ export const DEPLOY_SETTINGS_PAYMENTS: DeploySettingsResponse = {
     scheduled_actions: [{ name: 'business-hours', schedule: 'cron(0 7 * * ? *)', timezone: 'Asia/Jerusalem', min_capacity: 3, max_capacity: null }],
   },
   can: { edit: true, deploy: true, operate: true, admin: false },
+  partial: [],
+}
+
+/** Scheduled actions could not be read (floci lacks DescribeScheduledActions); every other part is intact. */
+export const DEPLOY_SETTINGS_PARTIAL: DeploySettingsResponse = {
+  ...DEPLOY_SETTINGS_PAYMENTS,
+  scaling: { ...DEPLOY_SETTINGS_PAYMENTS.scaling, scheduled_actions: [] },
+  partial: [
+    {
+      part: 'scheduled_actions',
+      code: 'aws_error',
+      message: 'Scheduled actions could not be read: UnsupportedOperation: not supported by this endpoint',
+    } satisfies PartialErrorDTO,
+  ],
 }
 
 export const REVISION_DEFINITION_PAYMENTS_41: RevisionDefinitionResponse = {
@@ -1772,7 +1914,7 @@ export const ANALYTICS_OPERATIONS: AnalyticsOperations = {
   restarts_per_100_deploys: analyticsSeries('30d', [{ key: 'restarts_per_100_deploys', label: 'Restarts per 100 deploys' }], (_, j) => (j % 5 === 4 ? null : 10 + (j % 4) * 5)),
   who: {
     rows: [
-      { username: 'pavel', total: 70, deploy: 40, restart: 5, scale: 15, terminal: 4, last_at: minutesAgo(25) },
+      { username: 'sam', total: 70, deploy: 40, restart: 5, scale: 15, terminal: 4, last_at: minutesAgo(25) },
       { username: 'omer', total: 30, deploy: 10, restart: 4, scale: 7, terminal: 3, last_at: minutesAgo(600) },
     ],
     total: 2,
@@ -1822,6 +1964,109 @@ export const ANALYTICS_RELIABILITY_DAILY: AnalyticsReliability = {
     ],
     total: 2,
   }),
+}
+
+/** Cost with a ladder of suggestions, an unpriced service without dollars, and a cluster that is only unpriced. */
+export const ANALYTICS_COST: AnalyticsCost = {
+  tab: 'cost',
+  window: analyticsWindow('90d', { requested: '30d', rangeApplies: false, retention: '2160h' }),
+  sources: [
+    source('tasks', 'Running tasks: cpu, memory, capacity provider', 'latest poll', null),
+    source('services', 'The services you can see', 'latest poll', null),
+    source('task_definitions', 'Task definition size and container minimums', 'latest poll', null),
+    source('service_util_daily', 'Daily CPU and memory use as a share of reserved', '2160h', 'HM_RETENTION_UTIL_DAILY'),
+  ],
+  polled_at: FIXTURE_NOW,
+  prices_as_of: '2026-10-19',
+  kpis: { monthly_total: 68.4, spot_monthly: 13.68, priced_tasks: 5, spot_tasks: 1, unpriced_tasks: 3, unpriced_regions: ['ap-south-1'] },
+  by_cluster: [
+    { key: analyticsCoreClusterId, label: 'core-services', monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
+    { key: analyticsStagingClusterId, label: 'staging-web', monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
+    { key: clusterId('482109375512', 'ap-south-1', 'eu-apps'), label: 'eu-apps', monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
+  ],
+  by_account: [
+    { key: ACCOUNT_HOMELAB.account_id, label: ACCOUNT_HOMELAB.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 2 },
+    { key: ACCOUNT_STAGING.account_id, label: ACCOUNT_STAGING.name, monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
+  ],
+  by_tag: [
+    { key: String(TAG_PROD.id), label: TAG_PROD.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
+    { key: String(TAG_STAGING.id), label: TAG_STAGING.name, monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
+    { key: String(TAG_DEV.id), label: TAG_DEV.name, monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
+  ],
+  rightsizing: {
+    state: 'ok',
+    min_history_days: 14,
+    default_headroom_pct: 30,
+    services: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        region: 'us-east-1',
+        architecture: 'X86_64',
+        tag: TAG_PROD,
+        tasks: 3,
+        spot_tasks: 0,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        cpu_used_share: 0.12,
+        mem_used_share: 0.31,
+        monthly: 41.04,
+        status: 'ok',
+        history_days: 30,
+        auto_scaled: true,
+        recent_oom: false,
+        can_edit: true,
+        steps: [
+          { from_headroom_pct: 10, suggestion: { cpu_units: 256, memory_mib: 1024, saving_monthly: 24.6, limited_by_containers: false } },
+          { from_headroom_pct: 40, suggestion: { cpu_units: 512, memory_mib: 1024, saving_monthly: 18.5, limited_by_containers: true } },
+          { from_headroom_pct: 85, suggestion: null },
+        ],
+      },
+      {
+        service_id: serviceId('482109375512', 'ap-south-1', 'eu-apps', 'catalog-api'),
+        service: 'catalog-api',
+        cluster: 'eu-apps',
+        region: 'ap-south-1',
+        architecture: 'X86_64',
+        tag: TAG_DEV,
+        tasks: 2,
+        spot_tasks: 0,
+        cpu_units: 512,
+        memory_mib: 1024,
+        cpu_used_share: null,
+        mem_used_share: null,
+        monthly: 0,
+        status: 'no_price',
+        history_days: 0,
+        auto_scaled: false,
+        recent_oom: false,
+        can_edit: false,
+        steps: [],
+      },
+      {
+        service_id: serviceId('731022849906', 'us-east-1', 'staging-web', 'web-frontend'),
+        service: 'web-frontend',
+        cluster: 'staging-web',
+        region: 'us-east-1',
+        architecture: 'X86_64',
+        tag: TAG_STAGING,
+        tasks: 3,
+        spot_tasks: 1,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        cpu_used_share: 0.4,
+        mem_used_share: 0.5,
+        monthly: 27.36,
+        status: 'mixed_capacity',
+        history_days: 30,
+        auto_scaled: false,
+        recent_oom: false,
+        can_edit: true,
+        steps: [],
+      },
+    ],
+  },
 }
 
 /** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */

@@ -127,6 +127,9 @@ func contractShapes() map[string]any {
 		"deploySettings":     shapeOf(reflect.TypeFor[DeploySettingsResponse]()),
 		"changeset":          shapeOf(reflect.TypeFor[ChangeSetResponse]()),
 		"desiredCount":       shapeOf(reflect.TypeFor[DesiredCountResponse]()),
+		// redesign v4
+		"servicesList":    shapeOf(reflect.TypeFor[ServiceListDTO]()),
+		"servicesMetrics": shapeOf(reflect.TypeFor[ServicesMetricsDTO]()),
 		// plan 05
 		"networks":      shapeOf(reflect.TypeFor[NetworksOverviewDTO]()),
 		"networkRegion": shapeOf(reflect.TypeFor[NetworkRegionVPCsDTO]()),
@@ -141,6 +144,9 @@ func contractShapes() map[string]any {
 		"analyticsReliability": shapeOf(reflect.TypeFor[ReliabilityDTO]()),
 		"analyticsCapacity":    shapeOf(reflect.TypeFor[CapacityDTO]()),
 		"analyticsOperations":  shapeOf(reflect.TypeFor[OperationsDTO]()),
+		"analyticsCost":        shapeOf(reflect.TypeFor[CostDTO]()),
+		"timeline":             shapeOf(reflect.TypeFor[TimelineDTO]()),
+		"timelineLogErrors":    shapeOf(reflect.TypeFor[TimelineLogErrorsDTO]()),
 	}
 }
 

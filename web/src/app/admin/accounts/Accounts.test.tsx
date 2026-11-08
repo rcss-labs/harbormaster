@@ -94,7 +94,7 @@ describe('Accounts', () => {
     expect(connectBodies.map((body) => body.external_id)).toEqual([firstId])
   })
 
-  it('status pill from last_error', async () => {
+  it('error expands', async () => {
     const broken: AccountsDTO = {
       ...ACCOUNTS,
       items: ACCOUNTS.items.map((account, index) =>
@@ -104,8 +104,19 @@ describe('Accounts', () => {
     server.use(http.get('/api/accounts', () => HttpResponse.json(broken)))
 
     renderApp('/settings/accounts')
-    const pill = await screen.findByText('Error')
-    expect(pill).toHaveAttribute('title', 'AccessDenied: role trust policy rejects the external ID')
+    expect(await screen.findByText('Error')).toBeInTheDocument()
+    const summary = screen.getByText('Show AWS error')
+    const details = summary.closest('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    fireEvent.click(summary)
+    expect(details.open).toBe(true)
+    expect(within(details).getByText('AccessDenied: role trust policy rejects the external ID')).toBeInTheDocument()
+  })
+
+  it('has no AWS error disclosure for a healthy account', async () => {
+    renderApp('/settings/accounts')
+    await screen.findByRole('table', { name: 'AWS accounts' })
+    expect(screen.queryByText('Show AWS error')).not.toBeInTheDocument()
   })
 
   it('shows "Slowed by AWS throttling" for an account whose poller is throttled', async () => {
@@ -125,7 +136,7 @@ describe('Accounts', () => {
     expect(within(other).queryByText('Slowed by AWS throttling')).not.toBeInTheDocument()
   })
 
-  it('shows "Data is N min old" with the error when the poller is failing', async () => {
+  it('shows "Data is N min old" and keeps the raw error behind Show AWS error when the poller is failing', async () => {
     const lastOk = new Date(Date.now() - 12 * 60_000).toISOString()
     server.use(
       http.get('/api/poller', () =>
@@ -140,7 +151,10 @@ describe('Accounts', () => {
     )
     renderApp('/settings/accounts')
     const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
-    expect(await within(row).findByText('Data is 12 min old: ExpiredToken')).toBeInTheDocument()
+    expect(await within(row).findByText('Data is 12 min old')).toBeInTheDocument()
+    const details = within(row).getByText('Show AWS error').closest('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(within(details).getByText('ExpiredToken')).toBeInTheDocument()
   })
 
   it('Test now posts the account role, external id and regions and reports each region', async () => {
@@ -158,6 +172,10 @@ describe('Accounts', () => {
     const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'Test now' }))
     expect(await screen.findByText(/eu-west-1: AccessDenied/)).toBeInTheDocument()
+    // The same results stay on the row, under Show AWS error.
+    const details = (await within(row).findByText('Show AWS error')).closest('details') as HTMLDetailsElement
+    expect(within(details).getByText('eu-west-1 · AccessDenied')).toBeInTheDocument()
+    expect(within(details).getByText('us-east-1 · 2 clusters')).toBeInTheDocument()
     expect(bodies).toEqual([
       {
         role_arn: ACCOUNTS.items[0].role_arn,

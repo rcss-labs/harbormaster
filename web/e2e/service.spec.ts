@@ -1,6 +1,6 @@
 import { asUser, expect, test, type Page } from './fixtures/test'
 import { SVC, serviceUrl } from './fixtures/ids'
-import { serviceId } from './helpers'
+import { measureBox, measureBoxes, serviceId } from './helpers'
 
 // Role-based complement to change.spec (admin register/deploy/rollback, operator read-only, stop task) and
 // terminal.spec (admin terminal, exec-off banner): one describe per Service page tab, each signed in as the
@@ -52,19 +52,19 @@ test.describe('header: Prod viewer', () => {
 test.describe('overview as oncall', () => {
   test.use(asUser('oncall'))
 
-  test('payments-api shows 3 running of 3, the target health donut and the deployments timeline', async ({ page }) => {
+  test('payments-api shows 3 running of 3, the target health stacked bar and the deployments timeline', async ({ page }) => {
     await page.goto(paymentsApi())
     // The Tasks KPI reads "<running>/<desired>" plus "all running" or "<n> pending". change.spec stops a
     // payments-api task; ECS replaces it within a few polls, so wait for the whole value to read 3/3.
     await expect(page.getByRole('list', { name: 'Service summary' }).getByText(/^3\/3\s*all running$/)).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('heading', { name: 'Target health' })).toBeVisible()
-    await expect(page.getByRole('img').filter({ hasText: '3/3' })).toBeVisible()
+    await expect(page.getByRole('img', { name: /^Healthy targets 3, Unhealthy targets 0, Missing tasks 0 of 3$/ })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Deployments, 14 days' })).toBeVisible()
   })
 })
 
-test.describe('metrics as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('metrics as sam', () => {
+  test.use(asUser('sam'))
 
   test('edge-nginx (Container Insights off) shows the Terraform banner and no charts', async ({ page }) => {
     await page.goto(edgeNginx('metrics'))
@@ -153,8 +153,8 @@ test.describe('task definition: registering', () => {
     })
   })
 
-  test.describe('pavel on payments-api (global admin)', () => {
-    test.use(asUser('pavel'))
+  test.describe('sam on payments-api (global admin)', () => {
+    test.use(asUser('sam'))
 
     test('changing the family is refused: Use Terraform to create a new family', async ({ page }) => {
       await page.goto(paymentsApi('task-definition'))
@@ -293,8 +293,8 @@ test.describe('terminal', () => {
   })
 })
 
-test.describe('operations log as pavel', () => {
-  test.use(asUser('pavel'))
+test.describe('operations log as sam', () => {
+  test.use(asUser('sam'))
 
   test('is newest first, and the toggle hides ECS service events', async ({ page }) => {
     const response = await page.request.get(`/api/services/${serviceId(...SVC.paymentsApi)}/operations?include_ecs=true`)
@@ -310,9 +310,8 @@ test.describe('operations log as pavel', () => {
     // The rendered list follows the API order: the first two entries with unique text appear top to bottom.
     const unique = items.filter((item) => items.filter((other) => other.text === item.text).length === 1).slice(0, 2)
     expect(unique).toHaveLength(2)
-    const top = await page.getByText(unique[0].text, { exact: true }).boundingBox()
-    const below = await page.getByText(unique[1].text, { exact: true }).boundingBox()
-    expect(top!.y).toBeLessThan(below!.y)
+    const [top, below] = await measureBoxes(page.getByText(unique[0].text, { exact: true }), page.getByText(unique[1].text, { exact: true }))
+    expect(top.y).toBeLessThan(below.y)
     await page.getByLabel('Show ECS service events').uncheck()
     await expect(ecsRows).toHaveCount(0)
   })
@@ -350,4 +349,39 @@ test.describe('header: Dev operator', () => {
     await page.goto(imageResizer('operations'))
     await expect(page.getByText('Restarted service (force new deployment) on revision 6.').first()).toBeVisible()
   })
+})
+
+test.describe('full-height tabs and narrow windows', () => {
+  test.use(asUser('sam'))
+
+  // The logs and terminal panels run to the bottom of the window at any height, scrolling inside themselves.
+  for (const [tab, region] of [['logs', 'Logs'], ['terminal', 'Terminal']] as const) {
+    for (const height of [800, 1100, 1440]) {
+      test(`${tab} panel ends within 24px of the window bottom at height ${height}`, async ({ page }) => {
+        await page.setViewportSize({ width: 1600, height })
+        await page.goto(paymentsApi(tab))
+        const panel = page.getByRole('region', { name: region, exact: true })
+        await expect(panel).toBeVisible()
+        // measureBox re-reads until the panel is attached: it can re-render between the visibility check and the read.
+        const bottomGap = async () => {
+          const box = await measureBox(panel)
+          return height - (box.y + box.height)
+        }
+        await expect.poll(bottomGap).toBeLessThanOrEqual(24)
+        expect(await bottomGap()).toBeGreaterThanOrEqual(0)
+      })
+    }
+  }
+
+  // Every tab of this page fits a 390px phone without sideways scrolling (<main> is the scroll container).
+  for (const tab of ['overview', 'logs', 'metrics', 'terminal', 'task-definition', 'scaling', 'operations']) {
+    test(`${tab} has no sideways overflow at 390px`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 800 })
+      await page.goto(paymentsApi(tab))
+      await expect(page.getByRole('heading', { name: 'payments-api', level: 1 })).toBeVisible()
+      await expect(page.getByRole('main').getByRole('region').first()).toBeVisible()
+      const overflow = await page.getByRole('main').evaluate((el) => el.scrollWidth - el.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+    })
+  }
 })

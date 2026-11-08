@@ -251,9 +251,10 @@ func levelPrefix(level string) string {
 }
 
 // filterEvents applies stream names, a stream prefix and a simple filter
-// pattern (every whitespace-separated term, or one quoted phrase, must occur).
+// pattern: every whitespace-separated term, or one quoted phrase, must occur;
+// when every term starts with "?" any one of them is enough.
 func filterEvents(events []logEvent, names []string, prefix, pattern string) []logEvent {
-	terms := patternTerms(pattern)
+	terms, anyTerm := patternTerms(pattern)
 	kept := events[:0:0]
 	for _, ev := range events {
 		if len(names) > 0 && !hasString(names, ev.stream) {
@@ -262,10 +263,10 @@ func filterEvents(events []logEvent, names []string, prefix, pattern string) []l
 		if prefix != "" && !strings.HasPrefix(ev.stream, prefix) {
 			continue
 		}
-		match := true
+		match := !anyTerm
 		for _, term := range terms {
-			if !strings.Contains(ev.message, term) {
-				match = false
+			if strings.Contains(ev.message, term) == anyTerm {
+				match = anyTerm
 				break
 			}
 		}
@@ -276,15 +277,24 @@ func filterEvents(events []logEvent, names []string, prefix, pattern string) []l
 	return kept
 }
 
-func patternTerms(pattern string) []string {
+// patternTerms splits a pattern into its terms. anyTerm is true for an OR
+// pattern, where every term is written "?term" and one occurrence suffices.
+func patternTerms(pattern string) (terms []string, anyTerm bool) {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
-		return nil
+		return nil, false
 	}
 	if len(pattern) >= 2 && strings.HasPrefix(pattern, `"`) && strings.HasSuffix(pattern, `"`) {
-		return []string{pattern[1 : len(pattern)-1]}
+		return []string{pattern[1 : len(pattern)-1]}, false
 	}
-	return strings.Fields(pattern)
+	fields := strings.Fields(pattern)
+	for _, field := range fields {
+		if len(field) < 2 || !strings.HasPrefix(field, "?") {
+			return fields, false
+		}
+		terms = append(terms, field[1:])
+	}
+	return terms, true
 }
 
 // LiveTail starts a session that sends SessionStart, then a SessionUpdate with

@@ -3,10 +3,12 @@ import { useState } from 'react'
 import { api } from '../../../api/client'
 import type { SSOConfigDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
+import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { Pill } from '../../../components/Pill'
 import { useToast } from '../../../components/Toast'
+import { usePhone } from '../../../components/usePhone'
 import { useAuth } from '../../auth/AuthProvider'
 import { HeaderAction } from '../HeaderAction'
 import styles from './sso.module.css'
@@ -23,6 +25,7 @@ export function StatusCard({ config }: { config: SSOConfigDTO }) {
   const { me } = useAuth()
   const queryClient = useQueryClient()
   const toast = useToast()
+  const phone = usePhone()
   const [confirming, setConfirming] = useState(false)
 
   const setEnabled = useMutation({
@@ -51,6 +54,7 @@ export function StatusCard({ config }: { config: SSOConfigDTO }) {
         </button>
       </HeaderAction>
       <div className={styles.stack}>
+        <LockNote kind="why">{guarded ? GUARD_TITLE : undefined}</LockNote>
         {config.warnings.map((warning) => (
           <Banner key={warning} kind="warn">
             {warning}
@@ -58,7 +62,7 @@ export function StatusCard({ config }: { config: SSOConfigDTO }) {
         ))}
         {me && !me.sso_linked && (
           <p className={styles.hint}>
-            Link your own account first so you can sign in with SSO: use Link SSO account in the sidebar.
+            Link your own account first so you can sign in with SSO: use Link SSO account in {phone ? 'More' : 'the sidebar'}.
           </p>
         )}
       </div>

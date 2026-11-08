@@ -44,7 +44,7 @@ type execTargetsResponse struct {
 // taskIDWhere looks a task up through the admin task list; service "" means standalone.
 func taskIDWhere(t *testing.T, srv *httptest.Server, service, family, status string) string {
 	t.Helper()
-	list := getTasks(t, login(t, srv, "pavel", testPassword), "/api/tasks?filter=all&limit=500")
+	list := getTasks(t, login(t, srv, "sam", testPassword), "/api/tasks?filter=all&limit=500")
 	for _, task := range list.Items {
 		if (service == "") != (task.Service == nil) || (service != "" && task.Service.Name != service) {
 			continue
@@ -86,7 +86,7 @@ func seededExecServer(t *testing.T) *httptest.Server {
 func TestExecTargets_ReturnsContainersAndFlags(t *testing.T) {
 	srv := seededExecServer(t)
 	id := taskIDWhere(t, srv, "payments-api", "", "RUNNING")
-	got := getExecTargets(t, login(t, srv, "pavel", testPassword), id, http.StatusOK)
+	got := getExecTargets(t, login(t, srv, "sam", testPassword), id, http.StatusOK)
 	if got.TaskID != id || !got.ExecEnabled || !got.CanTerminal {
 		t.Errorf("got %+v", got)
 	}
@@ -110,7 +110,7 @@ func TestExecTargets_ReturnsContainersAndFlags(t *testing.T) {
 func TestExecTargets_ExecOffService(t *testing.T) {
 	srv := seededExecServer(t)
 	id := taskIDWhere(t, srv, "cert-renewer", "", "RUNNING")
-	got := getExecTargets(t, login(t, srv, "pavel", testPassword), id, http.StatusOK)
+	got := getExecTargets(t, login(t, srv, "sam", testPassword), id, http.StatusOK)
 	if got.ExecEnabled || len(got.Containers) == 0 {
 		t.Errorf("got %+v, want exec_enabled false with containers listed", got)
 	}
@@ -134,7 +134,7 @@ func TestExecTargets_InvisibleTask_404(t *testing.T) {
 func TestExecTargets_StoppedTask_404(t *testing.T) {
 	srv := seededExecServer(t)
 	id := taskIDWhere(t, srv, "image-resizer", "", "STOPPED")
-	getExecTargets(t, login(t, srv, "pavel", testPassword), id, http.StatusNotFound)
+	getExecTargets(t, login(t, srv, "sam", testPassword), id, http.StatusNotFound)
 }
 
 func TestExecTargets_StandaloneTask_UsesClusterTagAndOwnFlag(t *testing.T) {
@@ -159,7 +159,7 @@ func TestTasksList_StandaloneExecEnabledFollowsTaskFlag(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	admin := login(t, srv, "pavel", testPassword)
+	admin := login(t, srv, "sam", testPassword)
 	standaloneExec := func() bool {
 		for _, task := range getTasks(t, admin, "/api/tasks?filter=running&limit=500").Items {
 			if task.Service == nil && task.Family == "release-build" {

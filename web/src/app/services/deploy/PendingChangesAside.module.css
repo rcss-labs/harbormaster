@@ -1,0 +1,40 @@
+/* Pending changes: sticky beside the form from 1180px (.hm-split-sticky), stacked below it on narrower windows. */
+.aside {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  /* Sticky, so a long list scrolls inside instead of pushing Review off screen. */
+  max-height: calc(100vh / var(--hm-zoom, 1) - 24px);
+}
+.head { padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
+.count { margin: 0; font-size: 13px; font-weight: 600; }
+.body { padding: var(--pad); display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
+.empty { margin: 0; color: var(--muted); }
+.note { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; color: var(--muted); }
+.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; }
+.group { display: flex; flex-direction: column; gap: 4px; }
+.groupTitle { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.rows { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.row { overflow-wrap: anywhere; min-width: 0; }
+.label { font-weight: 500; }
+.before { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.after { color: var(--text); font-family: var(--mono); font-size: 12px; }
+.problems { margin: 0; padding-left: 18px; color: var(--bad); overflow-wrap: anywhere; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; padding: 8px var(--pad); border-top: 1px solid var(--border); }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }
+
+/* Phone: the bar (.hm-bar from mobile.css) holds the count button, Discard and Review…; the list lives in a sheet. */
+@media (max-width: 700px) {
+  .bar > .btn { padding: 0 14px; }
+  .barSummary { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; justify-content: flex-start; padding: 0 4px; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; }
+  .barCount { font-weight: 600; white-space: nowrap; }
+  .barProblems { color: var(--bad); font-size: 12px; white-space: nowrap; }
+  .body { overflow: visible; padding: 0; }
+}

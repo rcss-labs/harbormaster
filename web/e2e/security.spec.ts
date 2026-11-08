@@ -5,7 +5,7 @@ const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 test.describe('security', () => {
-  test.use(asUser('pavel'))
+  test.use(asUser('sam'))
 
   test('every response carries security headers', async ({ request }) => {
     const expected = { '/': 200, '/api/nope': 404, '/healthz': 200 }

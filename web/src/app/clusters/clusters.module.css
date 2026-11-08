@@ -7,7 +7,7 @@
 .titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .monoTitle { font-family: var(--mono); letter-spacing: -0.02em; }
 .meta { color: var(--muted); font-size: 12px; align-self: baseline; }
-.metaLine { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font: 11.5px var(--mono); color: var(--dim); }
+.metaLine { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font: 12px var(--mono); color: var(--dim); }
 .metaLine > span:not(:only-child) { color: var(--muted); }
 .accentLink { color: var(--accent); }
 .actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
@@ -19,38 +19,67 @@
 .nameSearch { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; width: 260px; max-width: 100%; }
 
 .tablePanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; overflow: hidden; }
-.note { font-size: 11.5px; color: var(--dim); }
+.note { font-size: 12px; color: var(--dim); }
 
 .twoCol { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 @container (max-width: 1100px) {
   .twoCol { grid-template-columns: minmax(0, 1fr); }
 }
+.chartFrame { min-width: 0; overflow: hidden; }
 .stopsBlock { margin-top: 16px; }
 .stopsTitle { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
-.count { font: 11px var(--mono); color: var(--muted); }
-.kpiSub { font: 400 11.5px var(--sans); letter-spacing: 0; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+.count { font: 12px var(--mono); color: var(--muted); }
+.kpiSub { font: 400 12px var(--sans); letter-spacing: 0; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+
+/* Tasks by service: one row per service, a stacked bar with a desired tick, then the running / desired count */
+.barList { display: grid; gap: 10px; min-width: 0; }
+.barRow { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; gap: 10px; align-items: center; min-width: 0; }
+.barName { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barName:hover { color: var(--accent); }
+.barTrack { position: relative; min-width: 0; }
+.barTick { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); }
+.barValue { font: 12px var(--mono); color: var(--text-2); white-space: nowrap; }
 
 /* Table cells */
-.mono { font-family: var(--mono); font-size: 11.5px; }
+.mono { font-family: var(--mono); font-size: 12px; }
 .muted { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .dim { color: var(--dim); }
 .nameCell { display: grid; line-height: 1.25; min-width: 0; }
 .clusterLink { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clusterLink:hover { color: var(--accent); }
-.where { font: 10.5px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.where { font: 12px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .svcPreview { display: flex; gap: 10px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
 .svcLink { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 .svcLink:hover { color: var(--text); }
 .svcDot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; flex: none; }
-.svcMore { font: 11px var(--mono); color: var(--dim); }
+.svcMore { font: 12px var(--mono); color: var(--dim); }
 .tasks { display: flex; align-items: center; gap: 8px; }
 .track { flex: 1; min-width: 20px; height: 4px; border-radius: 2px; background: var(--border); display: flex; overflow: hidden; }
 .track > span { display: block; height: 100%; }
 .usage { display: flex; align-items: center; gap: 6px; }
 .usage > svg { flex: 1; min-width: 0; }
 .usageGap { flex: 1; }
-.usageNow { font: 11.5px var(--mono); width: 34px; text-align: right; }
+.usageNow { font: 12px var(--mono); width: 40px; text-align: right; }
 
 .noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .noAccess h2 { margin: 0; font-size: 12.5px; }
 .noAccess p { margin: 0; color: var(--muted); }
+
+/* Section chips: display contents keeps each section's panel as the grid or flex item it was. */
+.contents { display: contents; }
+
+/* Phone only: the list's filters stack above the table; the detail's header stays on screen while the page scrolls. */
+.phoneFilters { display: grid; gap: 8px; min-width: 0; }
+.phoneSearchRow { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.stickyHead { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-top: 4px; }
+.moreButton { width: 44px; height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); cursor: pointer; flex: none; }
+.whereLine { font: 12px var(--mono); color: var(--dim); overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .nameSearch { width: auto; flex: 1 1 auto; min-width: 0; height: 44px; font-size: 16px; }
+}
+
+/* A long cluster name wraps inside its row instead of running past the screen edge and pushing the actions button away. */
+@media (max-width: 700px) {
+  .clusterLink { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; min-width: 0; }
+}

@@ -202,6 +202,8 @@ export interface ClusterDTO extends ClusterCardDTO {
   arn: string
   console_url: string
   fargate_tasks: number
+  /** Running tasks that are neither Fargate nor Fargate Spot: EC2, external or a custom capacity provider. */
+  other_tasks: number
   tasks_history_72h: PointDTO[]
   stops_per_hour: StopsHourDTO[]
   services_detail: ClusterServiceDTO[]
@@ -350,7 +352,7 @@ export interface TasksListDTO {
   summary: {
     by_status: { running_healthy: number; running_unhealthy: number; stopped_error: number; stopped_normal: number; stopped_expected: number }
     by_az: { az: string; count: number }[]
-    by_cluster: { id: string; name: string; fargate: number; spot: number }[]
+    by_cluster: { id: string; name: string; fargate: number; spot: number; other: number }[]
     stop_reasons: ReasonCountDTO[]
   }
 }
@@ -369,6 +371,45 @@ export interface SearchDTO {
 
 export type OperationsDTO = ListDTO<EventDTO>
 
+/** One part of a composite response that could not be read. */
+export interface PartialErrorDTO {
+  part: string
+  code: string
+  message: string
+}
+
+export interface ServiceListItemDTO {
+  id: string
+  name: string
+  cluster: ClusterRef
+  account_id: string
+  account_name: string
+  region: string
+  tag: TagDTO
+  tag_inherited: boolean
+  status: Status
+  /** Text of the newest open alert, or `''`. */
+  attention: string
+  family: string
+  revision: number
+  image_tag: string
+  running: number
+  desired: number
+  cpu: string
+  memory: string
+  latest_registered_revision: number | null
+  last_change_at: string | null
+  rollout: 'in_progress' | 'failed' | 'completed' | null
+  can: { operate: boolean; logs: boolean; terminal: boolean }
+}
+/** GET /api/services: every visible service; filtering, sorting and paging are the client's job. */
+export interface ServiceListDTO {
+  items: ServiceListItemDTO[]
+  total: number
+  truncated: boolean
+  polled_at: string
+}
+
 export interface PollerEntryDTO {
   account_id: string
   account_name: string
@@ -377,6 +418,20 @@ export interface PollerEntryDTO {
   failing: boolean
   last_error: string
   last_ok_at: string | null
+  /** Every data type, core or not. throttled/failing/last_error above aggregate the core tiers only. */
+  tiers: PollerTierDTO[]
+}
+/** One data type of an account x region; tiers sharing a label are merged (worst state wins). */
+export interface PollerTierDTO {
+  tier: string
+  /** "Clusters and services", "Tasks", "Target health", "Auto scaling", "Alerts", "Networks" or "Storage". */
+  label: string
+  core: boolean
+  failing: boolean
+  throttled: boolean
+  last_ok_at: string | null
+  last_error: string
+  interval_ms: number
 }
 export interface PollerDTO {
   items: PollerEntryDTO[]
@@ -552,6 +607,19 @@ export interface ClustersMetricsDTO {
   stale: StaleInfo | null
   errors: TargetErrorDTO[]
 }
+/** Latest CPU and memory of one service. `insights: 'disabled'` means nothing was measured (cpu and mem are null, not 0). */
+export interface ServiceNowMetricsDTO {
+  insights: string
+  cpu: number | null
+  mem: number | null
+}
+/** GET /api/services/metrics: only ids the caller may see and whose account x region could be read; failed targets are in `errors`. */
+export interface ServicesMetricsDTO {
+  items: Record<string, ServiceNowMetricsDTO>
+  errors: TargetErrorDTO[]
+  stale: StaleInfo | null
+  polled_at: string
+}
 export interface ClusterSeriesDTO {
   id: string
   label: string
@@ -610,6 +678,8 @@ export interface ScalingDTO {
   policies: ScalingPolicyDTO[]
   scheduled_actions: ScheduledActionDTO[]
   activities: ScalingActivityDTO[]
+  /** Parts the last poll could not read: scaling_target, scaling_policies or scheduled_actions. Their values are the last known ones. */
+  unreadable_parts: string[]
   polled_at: string | null
 }
 export interface AlertDTO {
@@ -623,6 +693,21 @@ export interface AlertDTO {
   cluster: string
   cluster_id: string
   tab: string
+  /** The same sentence as `text`. */
+  cause: string
+  /** `label` and `href` are empty when the server has no next step. */
+  next_step: AlertStepDTO
+  /** The newest change just before the alert; null when unknown, never guessed. */
+  just_before: AlertChangeDTO | null
+}
+export interface AlertStepDTO {
+  label: string
+  href: string
+}
+export interface AlertChangeDTO {
+  at: string
+  text: string
+  source: 'harbormaster' | 'deployment'
 }
 export interface AlertsDTO {
   items: AlertDTO[]

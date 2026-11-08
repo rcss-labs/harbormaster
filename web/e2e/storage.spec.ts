@@ -11,7 +11,7 @@ const fsRow = (page: Page, name: string) => fsRows(page).filter({ hasText: name 
 
 test('admin sees five file systems including Not mounted', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await login(page, 'pavel')
+  await login(page, 'sam')
   await page.goto('/storage')
 
   const archive = fsRow(page, 'uploads-archive')
@@ -32,9 +32,9 @@ test('dev user sees four', async ({ page }) => {
 })
 
 // plan 06 (task 19): the contents of a row and which file systems each role can name. The tests above already cover
-// the five rows and the Not mounted flag for pavel, and omer's count of four.
-test.describe('storage as pavel', () => {
-  test.use(asUser('pavel'))
+// the five rows and the Not mounted flag for sam, and omer's count of four.
+test.describe('storage as sam', () => {
+  test.use(asUser('sam'))
 
   test('jenkins-home is mounted by jenkins-controller at /var/jenkins_home', async ({ page }) => {
     await page.goto('/storage')

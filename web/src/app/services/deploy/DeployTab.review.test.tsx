@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { ChangeSetRequest, ChangeSetResponse } from '../../../api/deploy'
-import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS, SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE } from '../../../test/fixtures'
+import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS, REVISION_DEFINITION_PAYMENTS_41, SERVICE_NOTIFICATIONS, SERVICE_PAYMENTS, TASK_DEFINITION_EDITABLE } from '../../../test/fixtures'
 import { withCan } from '../../../test/deployVariants'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -29,8 +29,9 @@ const desiredCount = () => within(screen.getByRole('region', { name: 'Service' }
 
 async function openDeployTab(path = route) {
   const view = renderApp(path)
-  await within(await screen.findByRole('region', { name: 'Service' })).findByRole('spinbutton', { name: 'Desired count' })
-  await within(await screen.findByRole('region', { name: 'Containers' })).findByRole('button', { name: 'Add variable' })
+  // Panels first render as skeletons and are replaced when their data arrives, so wait for content before taking a region.
+  await waitFor(() => desiredCount())
+  await screen.findByRole('button', { name: 'Add variable' })
   return view
 }
 
@@ -99,6 +100,105 @@ describe('DeployTab: footer', () => {
     await user.click(within(footer()).getByRole('button', { name: 'Dismiss :41' }))
     expect(within(footer()).getByText('0 changes')).toBeInTheDocument()
     expect(screen.getByTestId('search')).toHaveTextContent('')
+  })
+})
+
+describe('DeployTab: ?review=1', () => {
+  const searchOf = () => screen.getByTestId('search')
+
+  it('opens review for ?revision and review=1 once the revision has loaded', async () => {
+    const user = userEvent.setup()
+    const bodies = captureChangeSets(() => HttpResponse.json(CHANGESET_APPLIED))
+    renderApp(`${route}?revision=41&review=1`)
+
+    const review = within(await screen.findByRole('dialog'))
+    expect(review.getByText(/\+ .*"image": "payments-api:1\.18\.1"/)).toBeInTheDocument()
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(searchOf()).toHaveTextContent('revision=41')
+    expect(bodies).toHaveLength(0)
+
+    await user.click(review.getByRole('button', { name: 'Keep editing' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  /** Answers revision 41 only when `release()` is called, so a test can act while it loads. */
+  function holdRevision() {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('/api/services/:id/revisions/:revision', async () => {
+        await gate
+        return HttpResponse.json(REVISION_DEFINITION_PAYMENTS_41)
+      }),
+    )
+    return release
+  }
+
+  it('consumes review without opening when the loaded revision has a problem, and stays closed once fixed', async () => {
+    const user = userEvent.setup()
+    const release = holdRevision()
+    await openDeployTab(`${route}?revision=41&review=1`)
+    await setDesiredCount(user, '')
+
+    release()
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await setDesiredCount(user, '4')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not open review for an edit made while the revision is still loading', async () => {
+    const user = userEvent.setup()
+    const release = holdRevision()
+    await openDeployTab(`${route}?revision=41&review=1`)
+    await setDesiredCount(user, '5')
+    expect(reviewButton()).toBeEnabled()
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(searchOf()).toHaveTextContent('review=1')
+
+    release()
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('says so when the requested revision is already deployed', async () => {
+    renderApp(`${route}?revision=42&review=1`)
+
+    expect(await screen.findByText('Revision :42 is already deployed.')).toBeInTheDocument()
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('consumes review when the live task definition fails to load, so a successful retry does not open it unprompted', async () => {
+    let failing = true
+    server.use(http.get('/api/services/:id/task-definition', () => (failing ? HttpResponse.json({ error: 'unavailable' }, { status: 500 }) : HttpResponse.json(TASK_DEFINITION_EDITABLE))))
+    renderApp(`${route}?revision=41&review=1`)
+
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    failing = false
+    await userEvent.setup().click((await screen.findAllByRole('button', { name: 'Retry' }))[0])
+    await screen.findByRole('button', { name: 'Add variable' })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not auto-open review while a rollout runs', async () => {
+    server.use(http.get('/api/services/:id', () => HttpResponse.json({ ...SERVICE_NOTIFICATIONS, id: SERVICE_PAYMENTS.id })))
+    renderApp(`${route}?revision=41&review=1`)
+
+    await screen.findByRole('region', { name: 'Rollout progress' })
+    await waitFor(() => expect(searchOf()).not.toHaveTextContent('review'))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
 
@@ -254,6 +354,27 @@ describe('Review', () => {
     expect(desiredCount()).toHaveValue(3)
     expect(within(screen.getByRole('region', { name: 'Containers' })).getByLabelText('Variable value 1')).toHaveValue('info')
   })
+})
+
+describe('DeployTab: after an apply, until ECS reports the rollout', () => {
+  it('says the rollout is starting while the fields still show the old revision, and drops the note once the new revision is live', async () => {
+    const user = userEvent.setup()
+    captureChangeSets(() => HttpResponse.json(CHANGESET_APPLIED))
+    await openDeployTab()
+    await setEnvValue(user, 'debug')
+    await user.click(reviewButton())
+    await user.click(within(dialog()).getByRole('button', { name: 'Register and deploy :44' }))
+    expect(await screen.findByText('Deploying payments-api to :43.')).toBeInTheDocument()
+
+    // The stored snapshot still says :42 and shows no rollout: the editors fall back to the old image, so the tab must not look idle.
+    const note = await screen.findByRole('status', { name: 'Rollout starting' })
+    expect(note).toHaveTextContent('Rolling out :43')
+
+    server.use(
+      http.get('/api/services/:id/task-definition', () => HttpResponse.json({ ...TASK_DEFINITION_EDITABLE, deployed_revision: 43 })),
+    )
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Rollout starting' })).not.toBeInTheDocument(), { timeout: 8000 })
+  }, 15000)
 })
 
 describe('DeployTab: rollout progress', () => {

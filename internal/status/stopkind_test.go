@@ -38,7 +38,7 @@ func TestStopKind_Table(t *testing.T) {
 		{"spot interruption with exit 0", model.Task{LastStatus: "STOPPED", StopCode: "SpotInterruption", StoppedReason: spotReason, Containers: exitCodes(0)}, "", "spot"},
 		{"spot interruption without exit code", model.Task{LastStatus: "STOPPED", StopCode: "SpotInterruption"}, "", "spot"},
 		{"termination notice", model.Task{LastStatus: "STOPPED", StopCode: "TerminationNotice", Containers: exitCodes(1)}, "expected", "maintenance"},
-		{"user via harbormaster", model.Task{LastStatus: "STOPPED", StoppedReason: "Task stopped by pavel via Harbormaster", Containers: exitCodes(143)}, "expected", "user"},
+		{"user via harbormaster", model.Task{LastStatus: "STOPPED", StoppedReason: "Task stopped by sam via Harbormaster", Containers: exitCodes(143)}, "expected", "user"},
 		{"user initiated stop code", model.Task{LastStatus: "STOPPED", StopCode: "UserInitiated", Containers: exitCodes(0)}, "", "user"},
 		{"scale in", model.Task{LastStatus: "STOPPED", StopCode: "ServiceSchedulerInitiated", StoppedReason: "Scaling activity initiated by (desired count change)", Containers: exitCodes(1)}, "expected", "scale-in"},
 		{"deployment scaling activity with exit 1", model.Task{LastStatus: "STOPPED", StopCode: "ServiceSchedulerInitiated", StoppedReason: deployReason, Containers: exitCodes(1)}, "expected", "scaling"},

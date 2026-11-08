@@ -1,144 +1,205 @@
-/* Shell: sidebar | main | activity rail (212px | 1fr | 300px), per docs/redesign/README.md. */
-.app { --side: 212px; --rail: 0px; display: grid; grid-template-columns: var(--side) minmax(0, 1fr) var(--rail); height: 100%; overflow: hidden; }
+/* Shell v4: sidebar | main. The activity rail is a Drawer now, so it never takes a grid column. */
+.app { --side: 212px; display: grid; grid-template-columns: var(--side) minmax(0, 1fr); height: 100%; overflow: hidden; }
 .appCollapsed { --side: 52px; }
-.appDocked { --rail: 300px; }
 
-.sidebar { background: var(--chrome); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
-.brand { height: 48px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--border); position: relative; }
+/* The sidebar does not clip: the account popover opens upward and may spill past the 52px collapsed rail. */
+.sidebar { background: var(--chrome); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; z-index: 2; }
+.brand { min-height: 52px; flex: none; display: flex; flex-direction: column; justify-content: center; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--border); }
 .brand img { width: 26px; height: 26px; }
 .brand span { font-size: 13.5px; letter-spacing: -0.01em; }
-.brandSub { position: absolute; left: 48px; bottom: 6px; font: 9px var(--mono); color: var(--dim); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
-.brand > :first-child { transform: translateY(-4px); }
+.brandSub { padding-left: 36px; margin-top: -6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .nav, .pinned { display: flex; flex-direction: column; gap: 1px; padding: 8px 6px; }
-.nav a { position: relative; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 6px; border-radius: var(--radius); color: var(--muted); font-weight: 500; }
+.nav a { position: relative; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px; border-radius: var(--r); color: var(--muted); font-weight: 500; }
 .nav a:hover, .pinned a:hover { background: var(--hover); color: var(--text); }
 .nav a.active { background: var(--accent-soft); color: var(--accent); }
-.glyph { width: 24px; height: 22px; flex: none; display: grid; place-items: center; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); font: 600 9.5px var(--mono); letter-spacing: 0.02em; }
-.active .glyph { border-color: var(--accent-soft-border); }
+.navIcon { flex: none; }
 .navLabel { flex: 1; white-space: nowrap; }
 .counts { display: inline-flex; gap: 6px; align-items: baseline; }
-.count { font: 600 10.5px var(--mono); color: var(--muted); }
-.countBad { color: var(--danger); }
-.countWarn { color: var(--warning); }
-.navSection { padding: 10px 6px 4px; font: 500 10px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; }
-.nav .navSection { padding-left: 6px; }
+.count { font: 600 12px var(--mono); color: var(--muted); }
+.countBad { color: var(--bad); }
+.countWarn { color: var(--warn); }
+.navSection { padding: 10px 8px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .pinned { padding-top: 0; min-height: 0; overflow: auto; }
-.pinned a { display: flex; flex-direction: column; align-items: stretch; gap: 1px; min-height: 28px; padding: 4px 8px; border-radius: var(--radius); color: var(--text-2); }
+.pinned a { display: flex; flex-direction: column; align-items: stretch; gap: 1px; min-height: 28px; padding: 4px 8px; border-radius: var(--r); color: var(--text-2); }
 .pinned a.active { background: var(--accent-soft); color: var(--accent); }
 .pinTop { display: flex; align-items: flex-start; gap: 8px; }
-.pinDot { width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; flex: none; background: var(--border-strong); }
-.pin_ok { background: var(--success); }
-.pin_warn { background: var(--warning); }
-.pin_bad { background: var(--danger); }
-.pin_info { background: var(--info); }
-.pin_mute { background: var(--border-strong); }
+.pinMark { display: inline-flex; margin-top: 3px; flex: none; }
 .pinName { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
-.pinDetail { padding-left: 14px; font: 10.5px var(--mono); color: var(--dim); overflow-wrap: anywhere; }
-.pinnedEmpty { padding: 2px 8px; font-size: 11.5px; color: var(--dim); }
-.sideFoot { margin-top: auto; border-top: 1px solid var(--border); padding: 8px 6px; display: grid; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.pinDetail { padding-left: 18px; font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.pinnedEmpty { padding: 2px 8px; font-size: 12px; color: var(--muted); }
+.sideFoot { margin-top: auto; border-top: 1px solid var(--border); padding: 8px 6px; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .sideFoot strong { color: var(--text); font-weight: 500; }
-.user { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
-.avatar { width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--hover-strong); display: grid; place-items: center; font: 600 10px var(--mono); color: var(--accent); }
+.accWrap { position: relative; }
+/* The account popover opens upward from the foot of the sidebar. */
+.accWrap > [role="group"] { top: auto; bottom: calc(100% + 4px); left: 0; }
+.accountBtn { width: 100%; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; font: inherit; text-align: left; }
+.accountBtn:hover, .accountBtn[aria-expanded="true"] { background: var(--hover); }
+.avatar { width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--active); display: grid; place-items: center; font: 600 12px var(--mono); color: var(--accent); }
 .userText { min-width: 0; line-height: 1.3; }
-.sideActions { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 6px; }
-.collapseBtn { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 6px; border: 0; border-radius: var(--radius); background: transparent; color: var(--dim); cursor: pointer; font: 11px var(--mono); }
+.accountMenu { display: flex; flex-direction: column; gap: 2px; margin: -4px; }
+.menuItem { display: flex; align-items: center; height: 30px; padding: 0 8px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); cursor: pointer; font: inherit; font-weight: 500; text-align: left; }
+.menuItem:hover { background: var(--hover); }
+.menuDanger { color: var(--bad); margin-top: 2px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r) var(--r); }
+.collapseBtn { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; font: inherit; }
 .collapseBtn:hover { background: var(--hover); color: var(--text); }
-.collapseGlyph { width: 24px; text-align: center; }
+.collapseBtn .kbd { margin-left: auto; }
 
-/* Collapsed: 52px rail of glyph boxes. Labels stay in the DOM (clipped) so links keep their accessible names. */
+/* Collapsed: 52px rail of icons. Labels stay in the DOM (clipped) so links keep their accessible names. */
 .sidebarCollapsed .navLabel, .sidebarCollapsed .collapseText { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sidebarCollapsed .brand { padding: 0 12px; }
-.sidebarCollapsed .brand span, .sidebarCollapsed .brandSub, .sidebarCollapsed .navSection, .sidebarCollapsed .pinned, .sidebarCollapsed .sideActions, .sidebarCollapsed .userText { display: none; }
-.sidebarCollapsed .brand > :first-child { transform: none; }
-.sidebarCollapsed .user { justify-content: center; padding: 0; }
-.sidebarCollapsed .counts { position: absolute; top: 1px; right: 2px; gap: 2px; background: var(--chrome); border-radius: 4px; padding: 0 2px; }
-.sidebarCollapsed .count { font-size: 9.5px; }
+.sidebarCollapsed .brand span, .sidebarCollapsed .brandSub, .sidebarCollapsed .navSection, .sidebarCollapsed .pinned, .sidebarCollapsed .userText { display: none; }
+.sidebarCollapsed .accountBtn { justify-content: center; padding: 4px 0; }
+.sidebarCollapsed .accWrap > [role="group"] { left: 46px; bottom: 0; }
+.sidebarCollapsed .counts { position: absolute; top: 0; right: 2px; gap: 2px; background: var(--chrome); border-radius: var(--r-s); padding: 0 2px; }
 
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--chrome); }
-.scope { flex: none; display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 4px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); }
-.scopeLabel { font: 10px var(--mono); color: var(--dim); letter-spacing: 0.06em; margin-right: 2px; }
-.scope .ctl { height: 24px; border-color: transparent; background: transparent; font-weight: 500; }
-.scope .ctl:hover { background: var(--hover); }
-.crumbs { display: flex; align-items: center; gap: 6px; color: var(--muted); min-width: 0; overflow: hidden; white-space: nowrap; }
+/* Crumbs wrap and shrink (min-width: 0) before they can overlap the search button; the search shrinks to 160px. */
+.topbar { min-height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--border); background: var(--chrome); position: relative; z-index: 3; }
+.popAnchor { position: relative; flex: none; }
+.scopeBtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 280px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; }
+.scopeBtn:hover { background: var(--hover); }
+.scopeText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scopePop { display: grid; gap: 12px; }
+.scopeFields { display: grid; gap: 8px; }
+.scopeFields .ctl { width: 100%; }
+/* The tag checkbox list opens inline, pushing "Saved scopes" down, instead of floating over it. */
+.scopeFields [role="group"] { position: static; margin-top: 4px; box-shadow: none; min-width: 0; width: 100%; }
+.scopeSaved { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); }
+.chipMain, .chipX { border: 0; background: transparent; color: var(--text); cursor: pointer; font: inherit; }
+.chipMain { padding: 2px 4px 2px 10px; }
+.chipX { display: inline-flex; align-items: center; padding: 2px 6px 2px 2px; color: var(--muted); }
+.chipMain:hover, .chipX:hover { color: var(--accent); }
+.scopeName { display: flex; gap: 6px; }
+.scopeName input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: inherit; }
+
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; flex: 1 1 120px; min-width: 0; color: var(--muted); line-height: 1.3; overflow-wrap: anywhere; }
 .crumbs a:hover { color: var(--text); }
-.sep { color: var(--dim); }
+.sep { color: var(--muted); }
 .here { color: var(--text); font-weight: 500; }
-.topTools { margin-left: auto; flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.pulse { display: flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--muted); padding-right: 4px; white-space: nowrap; }
-.pulseDot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 2s ease-in-out infinite; }
-.pulseStale .pulseDot { background: var(--warning); animation: none; }
-@keyframes pulse { 50% { opacity: 0.25; } }
-.searchBtn { flex: 1; min-width: 120px; max-width: 300px; height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--dim); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; }
-.searchBtn:hover { border-color: var(--dim); }
-.searchText { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.kbd { font: 10.5px var(--mono); color: var(--muted); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; }
-.activityCount { font: 600 10.5px var(--mono); color: var(--danger); }
+.searchBtn { flex: 0 1 280px; min-width: 160px; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--muted); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; font: inherit; }
+.searchBtn:hover { border-color: var(--muted); }
+.searchBtn svg { flex: none; }
+.searchText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.kbd { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 5px; flex: none; }
+.freshBtn { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); cursor: pointer; font: inherit; white-space: nowrap; }
+.freshBtn:hover { background: var(--hover); }
+.freshNote { margin-left: 6px; color: var(--muted); white-space: nowrap; }
+/* Only where the top bar has room: below this it would squeeze the breadcrumb. The popover always has the detail. */
+@media (max-width: 1599px) { .freshNote { display: none; } }
+.freshPop { display: grid; gap: 4px; }
+.freshRegion { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--row-border); }
+.freshCurrent { color: var(--muted); }
+.freshError { margin: 4px 0 0; padding: 6px 8px; border-radius: var(--r-s); background: var(--raised); font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.iconBtn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px; flex: none; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text-2); cursor: pointer; }
+.iconBtn:hover { background: var(--hover); color: var(--text); }
+.activityCount { font: 600 12px var(--mono); color: var(--bad); }
 .content { flex: 1; overflow: auto; padding: 16px 20px 32px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 /* The content area scrolls, so its children keep their natural height instead of shrinking (Tabs has overflow-x: auto, which would let it collapse). */
 .content > * { flex-shrink: 0; }
 
-.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
-.btn { height: 28px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
-.btn:hover { background: var(--hover); }
-.btnOn { background: var(--accent-soft); border-color: var(--accent-soft-border); color: var(--accent); }
-.avatarBtn { border: 0; padding: 0; cursor: pointer; }
-.avatarBtn:hover { background: var(--accent-soft); }
-/* The sidebar clips its overflow, so the collapsed account menu is fixed beside the 52px rail. */
-.accountMenu { position: fixed; left: 58px; bottom: 44px; z-index: 30; display: grid; gap: 4px; padding: 6px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-pop); }
-.sideActions .btn, .accountMenu .btn { height: 24px; font-size: 11.5px; padding: 0 8px; background: transparent; color: var(--text-2); }
+.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: inherit; }
+.btn { height: 28px; padding: 0 10px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btnOn { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
 
-/* Activity rail: docked as the third grid column, or a fixed overlay with a backdrop. */
-.rail { background: var(--chrome); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
-.railOverlay { position: fixed; top: 0; right: 0; bottom: 0; width: 300px; max-width: 92vw; z-index: 30; box-shadow: var(--shadow-pop); }
-.railBackdrop { position: fixed; inset: 0; z-index: 29; background: rgba(4, 7, 10, 0.5); }
-.railHead { height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--border); }
-.railHead h2 { font-size: 12.5px; }
-.railClose { margin-left: auto; border: 0; background: transparent; color: var(--dim); cursor: pointer; font-size: 16px; line-height: 1; }
-.railClose:hover { color: var(--text); }
-.railFilters { padding: 8px 14px; border-bottom: 1px solid var(--border); }
-.railList { flex: 1; overflow: auto; }
-.railEmpty { padding: 20px; text-align: center; color: var(--dim); }
-.railRow { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--row-border); }
-.railDot { width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; background: currentColor; }
+/* Activity drawer body. */
+.railFilters { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.railList { display: grid; }
+.railEmpty { padding: 20px; text-align: center; color: var(--muted); }
+.railRow { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--row-border); }
 .railBody { display: grid; gap: 2px; min-width: 0; }
 .railTop { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .railSubject { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .railSubject:hover { color: var(--accent); }
-.railCount { font: 600 10px var(--mono); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
-.railWhen { margin-left: auto; font: 10.5px var(--mono); color: var(--dim); white-space: nowrap; }
-.railText { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
-.railActor { font: 10.5px var(--mono); color: var(--dim); }
-.sevDanger { color: var(--danger); }
-.sevWarning { color: var(--warning); }
-.sevInfo { color: var(--info); }
-.sevOk { color: var(--accent); }
+.railCount { font: 600 12px var(--mono); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 4px; color: var(--text-2); }
+.railWhen { margin-left: auto; font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+.railText { color: var(--text-2); overflow-wrap: anywhere; }
+.railActor { font: 12px var(--mono); color: var(--muted); }
+
+/* Keyboard shortcuts dialog. */
+.keys { display: grid; gap: 6px; margin: 0; }
+.keyRow { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 10px; }
+.keyRow dt, .keyRow dd { margin: 0; }
 
 /* Command palette */
-.paletteBackdrop { position: fixed; inset: 0; z-index: 40; background: rgba(4, 7, 10, 0.6); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
-.palette { width: 600px; max-width: 92vw; background: var(--raised); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow-pop); overflow: hidden; }
+.paletteBackdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: calc(12vh / var(--hm-zoom, 1)); }
+.palette { width: 620px; max-width: calc(92vw / var(--hm-zoom, 1)); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--pop); overflow: hidden; }
 .paletteInput { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 46px; border-bottom: 1px solid var(--border); }
-.paletteInput input { flex: 1; height: 100%; border: 0; background: transparent; outline: none; font-size: 14px; min-width: 0; }
-.paletteInput input::placeholder { color: var(--dim); }
-.paletteChevron { font: 600 11px var(--mono); color: var(--accent); }
+.paletteInput input { flex: 1; height: 100%; border: 0; background: transparent; color: var(--text); outline: none; font-size: 14px; min-width: 0; }
+.paletteInput input::placeholder { color: var(--muted); }
+.paletteChevron { font: 600 12px var(--mono); color: var(--accent); }
 .paletteList { max-height: 400px; overflow: auto; padding: 6px; }
-.paletteGroup { padding: 8px 8px 4px; font: 500 10px var(--mono); color: var(--dim); letter-spacing: 0.08em; text-transform: uppercase; }
-.paletteOption { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer; }
-.paletteActive { background: var(--hover-strong); }
-.paletteTag { width: 42px; flex: none; font: 500 10px var(--mono); color: var(--muted); letter-spacing: 0.04em; }
+.paletteGroup { padding: 8px 8px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.paletteOption { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: var(--r-s); cursor: pointer; }
+.paletteActive { background: var(--active); }
+.paletteTag { width: 42px; flex: none; font: 500 12px var(--mono); color: var(--muted); }
 .paletteLabel { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.paletteSub { margin-left: auto; font: 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
-.paletteEmpty { padding: 20px; text-align: center; color: var(--dim); }
-.paletteFoot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border); font: 10.5px var(--mono); color: var(--dim); }
+.paletteSub { margin-left: auto; font: 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
+.paletteEmpty { padding: 20px; text-align: center; color: var(--muted); }
+.paletteFoot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border); font: 12px var(--mono); color: var(--muted); }
 .paletteFootEnd { margin-left: auto; }
 
 @media (max-width: 900px) {
   .content { padding: 12px; }
-  .topbar { padding: 0 12px; }
+  .topbar { padding: 6px 12px; }
   .crumbs { display: none; }
 }
 
 .dialogField { display: grid; gap: 5px; }
 .dialogField > span { font-size: 12px; color: var(--muted); font-weight: 500; }
-.dialogField input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
-.dialogError { min-height: 1.2em; margin-top: 8px; font-size: 12px; color: var(--danger); }
+.dialogField input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font-family: inherit; }
+.dialogError { min-height: 1.2em; margin-top: 8px; font-size: 12px; color: var(--bad); }
+
+/* Phone shell: a top bar on one row, the page in the middle, five tabs fixed to the bottom edge. */
+@media (max-width: 700px) {
+  .appPhone { display: flex; flex-direction: column; height: var(--hm-vvh, 100dvh); overflow: hidden; }
+  /* Wraps the top bar, the page and the tab bar so the page keeps its tree position across the breakpoint; it adds no box of its own. */
+  .stagePhone { display: contents; }
+  /* The page scrolls inside main and keeps clear of the tab bar, the terminal keys row or a sticky bar. */
+  .content.contentPhone { padding: 12px 12px calc(var(--hm-bottom-inset, 0px) + 16px); min-width: 0; }
+
+  .mtop { position: relative; z-index: 30; flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; min-height: 52px; padding: env(safe-area-inset-top, 0px) 4px 0 2px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+  .mIcon { display: inline-flex; align-items: center; justify-content: center; gap: 4px; width: 44px; height: 44px; flex: none; padding: 0; border: 0; border-radius: var(--r); background: none; color: var(--text-2); cursor: pointer; text-decoration: none; }
+  .mIcon:hover { background: var(--hover); color: var(--text); }
+  .mLogo { width: 26px; height: 26px; }
+  .mFresh { width: auto; min-width: 44px; padding: 0 6px; font: 500 12px var(--mono); }
+  .mTitle { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 4px; line-height: 1.2; }
+  .mTitleText { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .mSub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .mScope { display: inline-flex; align-items: center; gap: 5px; height: 36px; max-width: 112px; flex: none; margin: 0 2px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 12px var(--sans); cursor: pointer; }
+  .mScope svg { flex: none; }
+  .mScopeText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  .tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); height: calc(var(--hm-tabbar) + var(--hm-sab)); padding-bottom: var(--hm-sab); background: var(--chrome); border-top: 1px solid var(--border); }
+  :global(:root[data-hm-keys]) .tabbar { display: none; }
+  .tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 44px; color: var(--text-2); font-size: 12px; font-weight: 500; line-height: 1.2; white-space: nowrap; text-decoration: none; }
+  .tab:hover { color: var(--text); }
+  .tab[aria-current='page'] { color: var(--accent); }
+  .tab[aria-current='page']::after { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 28px; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent); }
+  .tabIcon { position: relative; display: inline-flex; width: 22px; height: 22px; }
+  .tabIcon > svg { width: 22px; height: 22px; }
+  /* The badge sits on the icon's top-right corner, clear of the label, ringed in the bar colour so it never merges with the glyph. */
+  .tabBadge { position: absolute; top: -8px; left: calc(100% - 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; box-shadow: 0 0 0 2px var(--chrome); color: var(--surface); font: 600 12px/18px var(--mono); text-align: center; pointer-events: none; }
+  .tabBadgeBad { background: var(--bad); }
+  .tabBadgeWarn { background: var(--warn); }
+
+  .sheetBtn { flex: 1 1 0; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 500 14px var(--sans); cursor: pointer; white-space: nowrap; }
+  .sheetBtnPrimary { border-color: var(--accent); background: var(--accent); color: var(--surface); }
+
+  /* Command palette: the whole visible screen, rows 48px tall, a 44px Cancel instead of the esc hint. */
+  .paletteBackdrop { top: var(--hm-vvt, 0px); bottom: auto; height: var(--hm-vvh, 100dvh); padding: 0; background: var(--bg); }
+  .palette { width: 100%; max-width: none; height: 100%; display: flex; flex-direction: column; border: 0; border-radius: 0; box-shadow: none; }
+  .paletteInput { height: auto; min-height: 52px; padding: 4px 4px 4px 12px; }
+  .paletteInput input { font-size: 16px; min-height: 44px; }
+  .paletteCancel { flex: none; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r); background: none; color: var(--text); font: 500 14px var(--sans); cursor: pointer; }
+  .paletteList { flex: 1 1 0; max-height: none; padding: 0; }
+  .paletteGroup { padding: 12px 16px 4px; }
+  .paletteOption { min-height: 48px; height: auto; padding: 4px 16px; border-radius: 0; }
+  .paletteLabel { white-space: normal; overflow-wrap: anywhere; }
+  .paletteFoot { padding-bottom: calc(8px + var(--hm-sab)); }
+  .paletteFoot > span:not(.paletteFootEnd) { display: none; }
+  .paletteFootEnd { margin-left: 0; }
+}

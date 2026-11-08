@@ -72,7 +72,7 @@ func TestSPA_ServedForDeepLink(t *testing.T) {
 
 func TestETag_304OnMatch(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	first := c.get("/api/me")
 	first.Body.Close()
 	etag := first.Header.Get("ETag")
@@ -92,7 +92,7 @@ func TestETag_304OnMatch(t *testing.T) {
 
 func TestCSRF_RequiredOnPost(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.do(http.MethodPost, "/api/auth/logout", nil, map[string]string{"X-CSRF-Token": ""})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)

@@ -163,6 +163,19 @@ func taskDefinitionSize(estate *fake.Estate, svc fake.Service) (cpu, mem int, ok
 	return 0, 0, false
 }
 
+// costDemoUtil pins the use of a few services so the Cost tab shows each case: low use gives a suggestion, high use
+// gives none, and a short history is too short to suggest from. Services without rows (edge-proxy) show no data.
+var costDemoUtil = map[string]struct {
+	cpuBase, memBase float64
+	days             int // zero: the full history
+}{
+	"jenkins-controller": {9, 24, 0},
+	"search-indexer":     {9, 24, 0},
+	"report-worker":      {9, 24, 0},
+	"payments-api":       {70, 75, 0},
+	"artifact-proxy":     {30, 45, 5},
+}
+
 func seedUtil(ctx context.Context, st *store.Store, estate *fake.Estate, today time.Time) error {
 	batch := &pgx.Batch{}
 	for _, svc := range estate.Services {
@@ -181,7 +194,14 @@ func seedUtil(ctx context.Context, st *store.Store, estate *fake.Estate, today t
 		if pick(3, key) == 0 {
 			cpuBase, memBase = 9, 24
 		}
-		for daysAgo := 1; daysAgo <= analyticsHistoryDays; daysAgo++ {
+		historyDays := analyticsHistoryDays
+		if demo, ok := costDemoUtil[name]; ok {
+			cpuBase, memBase = demo.cpuBase, demo.memBase
+			if demo.days > 0 {
+				historyDays = demo.days
+			}
+		}
+		for daysAgo := 1; daysAgo <= historyDays; daysAgo++ {
 			cpuAvg := cpuBase + 12*wave(key+"c", daysAgo)
 			memAvg := memBase + 10*wave(key+"m", daysAgo)
 			batch.Queue(

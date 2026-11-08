@@ -1,6 +1,8 @@
 import { useEffect, useId, useState, type KeyboardEvent } from 'react'
 import { useContainerImageTags } from '../../../api/deploy'
 import { Ago } from '../../../components/Ago'
+import { BottomSheet } from '../../../components/BottomSheet'
+import { usePhone } from '../../../components/usePhone'
 import { IMAGE_TAG_RE } from '../task-definition/mainContainer'
 import styles from './containers.module.css'
 import form from './editors.module.css'
@@ -16,6 +18,8 @@ export interface ImageTagPickerProps {
 }
 
 const SEARCH_DEBOUNCE_MS = 250
+/** On a phone, ECR registries with more tags than this list and search them in a sheet instead of a dropdown. */
+const SHEET_TAG_THRESHOLD = 8
 
 /**
  * Image tag combobox. With ECR it lists the newest tags and searches all of them on the server as you type;
@@ -28,6 +32,8 @@ export function ImageTagPicker({ serviceId, container, currentTag, deployedTag, 
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
+  const phone = usePhone()
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(text ?? ''), SEARCH_DEBOUNCE_MS)
@@ -39,7 +45,8 @@ export function ImageTagPicker({ serviceId, container, currentTag, deployedTag, 
   const isEcr = response?.source === 'ecr'
   const isFreeText = response?.source === 'none'
   const options = isEcr ? response.tags : []
-  const listOpen = open && isEcr && !disabled
+  const sheetMode = phone && isEcr && response.total > SHEET_TAG_THRESHOLD
+  const listOpen = open && isEcr && !disabled && !sheetMode
   const searching = tags.isPlaceholderData
   const unfiltered = query.trim() === '' && !searching
 
@@ -49,6 +56,12 @@ export function ImageTagPicker({ serviceId, container, currentTag, deployedTag, 
     onChange(tag)
     setText(null)
     setOpen(false)
+    setSheetOpen(false)
+  }
+
+  const closeSheet = () => {
+    setSheetOpen(false)
+    setText(null)
   }
 
   const onInput = (value: string) => {
@@ -59,6 +72,11 @@ export function ImageTagPicker({ serviceId, container, currentTag, deployedTag, 
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Opening on focus would reopen the sheet when focus returns to the field after it closes.
+    if (sheetMode && (event.key === 'Enter' || event.key === 'ArrowDown')) {
+      event.preventDefault()
+      return setSheetOpen(true)
+    }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       if (!isEcr) return
       event.preventDefault()
@@ -95,10 +113,12 @@ export function ImageTagPicker({ serviceId, container, currentTag, deployedTag, 
         autoComplete="off"
         spellCheck={false}
         disabled={disabled}
+        aria-haspopup={sheetMode ? 'dialog' : undefined}
+        readOnly={sheetMode || undefined}
         value={text ?? currentTag}
         onChange={(event) => onInput(event.target.value)}
-        onFocus={() => isEcr && setOpen(true)}
-        onClick={() => isEcr && setOpen(true)}
+        onFocus={() => !sheetMode && isEcr && setOpen(true)}
+        onClick={() => (sheetMode ? setSheetOpen(true) : isEcr && setOpen(true))}
         onBlur={() => {
           setOpen(false)
           if (isEcr) setText(null)
@@ -112,6 +132,33 @@ export function ImageTagPicker({ serviceId, container, currentTag, deployedTag, 
         <p className={form.error} role="alert">
           Tag may contain letters, digits, . _ - and must start with a letter, digit or _ (128 characters at most).
         </p>
+      )}
+      {sheetMode && !disabled && (
+        <BottomSheet open={sheetOpen} onClose={closeSheet} label="Image tag" title="Image tag" sub={footer} tall>
+          <input
+            type="search"
+            className={`${form.input} ${styles.pickerInput}`}
+            aria-label="Search image tags"
+            placeholder="Search tags"
+            autoComplete="off"
+            spellCheck={false}
+            value={text ?? ''}
+            onChange={(event) => setText(event.target.value)}
+          />
+          <ul className={`${styles.sheetList}`} role="listbox" aria-label="Image tags" aria-busy={searching || undefined}>
+            {options.map((option, index) => (
+              <li key={option.tag} role="option" aria-selected={option.tag === currentTag} className={`${styles.option} ${styles.sheetOption}`} onClick={() => choose(option.tag)}>
+                <span className={styles.tagName}>{option.tag}</span>
+                {unfiltered && index === 0 && <span className={styles.mark}>newest</span>}
+                {option.tag === deployedTag && <span className={`${styles.mark} ${styles.markDeployed}`}>deployed</span>}
+                <span className={styles.pushed}>
+                  <Ago ts={option.pushed_at} />
+                </span>
+              </li>
+            ))}
+            {options.length === 0 && !searching && <li className={styles.noMatches}>No tags match.</li>}
+          </ul>
+        </BottomSheet>
       )}
       {listOpen && (
         <ul className={styles.listbox} role="listbox" id={listboxId} aria-label="Image tags" aria-busy={searching || undefined}>

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import styles from './Toast.module.css'
+import { usePhone } from './usePhone'
 
 export const TOAST_DURATION_MS = 5200
 
@@ -20,6 +21,7 @@ const ToastContext = createContext<ToastApi | null>(null)
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([])
+  const phone = usePhone()
   const nextId = useRef(1)
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>())
 
@@ -51,7 +53,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className={styles.toasts} role="status" aria-live="polite">
+      <div className={`${styles.toasts} ${phone ? styles.phone : ''}`.trim()} role="status" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className={`${styles.toast} ${toast.kind === 'info' ? '' : styles[toast.kind]}`.trim()}>
             <div>{toast.message}</div>

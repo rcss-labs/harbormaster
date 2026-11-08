@@ -32,7 +32,7 @@ func TestSearch_RespectsVisibility(t *testing.T) {
 	if got := search(t, login(t, srv, "omer", testPassword), "pay"); len(got.Items) != 0 {
 		t.Errorf("omer search pay = %+v, want none", got.Items)
 	}
-	got := search(t, login(t, srv, "pavel", testPassword), "pay")
+	got := search(t, login(t, srv, "sam", testPassword), "pay")
 	var found bool
 	for _, item := range got.Items {
 		if item.Kind == "service" && item.Label == "payments-api" {
@@ -50,7 +50,7 @@ func TestSearch_RespectsVisibility(t *testing.T) {
 func TestSearch_ShortQueryAndClusterHref(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	if got := search(t, c, "p"); got.Items == nil || len(got.Items) != 0 {
 		t.Errorf("short query items = %#v, want empty non-nil", got.Items)
 	}
@@ -64,7 +64,7 @@ func TestOperations_ToggleECS(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	path := "/api/services/" + paymentsID() + "/operations"
 
 	var withECS, without ListResponse[EventDTO]
@@ -125,7 +125,7 @@ func TestPoller_OnlyVisibleTargets(t *testing.T) {
 	var admin, omer struct {
 		Items []PollerItemDTO `json:"items"`
 	}
-	resp := login(t, srv, "pavel", testPassword).get("/api/poller")
+	resp := login(t, srv, "sam", testPassword).get("/api/poller")
 	decode(t, resp, &admin)
 	resp = login(t, srv, "omer", testPassword).get("/api/poller")
 	decode(t, resp, &omer)
@@ -191,7 +191,7 @@ func TestPoller_LastErrorOnlyForAdminsOrFailingTargets(t *testing.T) {
 		t.Fatalf("%s: target missing in %+v", user, got.Items)
 		return "", false
 	}
-	if msg, failing := errorFor("pavel"); msg == "" || failing {
+	if msg, failing := errorFor("sam"); msg == "" || failing {
 		t.Errorf("admin: last_error %q failing %v, want the error and not failing", msg, failing)
 	}
 	if msg, _ := errorFor("omer"); msg != "" {

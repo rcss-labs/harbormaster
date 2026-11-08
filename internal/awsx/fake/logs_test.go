@@ -258,3 +258,38 @@ func TestFakeFilterLogEvents_HealthLineWithinAnyShortWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterLogEvents_OrPatternMatchesAnyTerm(t *testing.T) {
+	f := newFake()
+	var lines []LogLine
+	for i, message := range []string{"ERROR a", "FATAL b", "WARN c", "ERROR FATAL both"} {
+		lines = append(lines, LogLine{Stream: "ecs/payments-api/taskaaa", Timestamp: fixedNow.Add(-time.Duration(i+1) * time.Minute), Message: message})
+	}
+	f.Estate.SetLogLines(paymentsLogGroup, lines)
+	api := logsFor(t, f, homelabUSEast1)
+	filter := func(pattern string) []string {
+		out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
+			LogGroupName:  aws.String(paymentsLogGroup),
+			StartTime:     aws.Int64(fixedNow.Add(-time.Hour).UnixMilli()),
+			EndTime:       aws.Int64(fixedNow.UnixMilli()),
+			FilterPattern: aws.String(pattern),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, ev := range out.Events {
+			got = append(got, aws.ToString(ev.Message))
+		}
+		return got
+	}
+	if got := filter("?ERROR ?FATAL"); len(got) != 3 {
+		t.Errorf("?ERROR ?FATAL matched %v, want the 3 lines with either term", got)
+	}
+	if got := filter("ERROR FATAL"); len(got) != 1 {
+		t.Errorf("ERROR FATAL matched %v, want only the line with both terms", got)
+	}
+	if got := filter(`"ERROR a"`); len(got) != 1 {
+		t.Errorf(`"ERROR a" matched %v, want the one phrase match`, got)
+	}
+}

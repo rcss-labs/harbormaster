@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import styles from './charts.module.css'
 import { fmtNum, niceMax } from './format'
 
@@ -18,6 +19,8 @@ interface BarChartProps {
 
 const VIEW_WIDTH = 1000
 const VIEW_HEIGHT = 100
+/** Charts never grow past this many px, whatever the caller asks. */
+const MAX_HEIGHT = 340
 
 /** Stacked column chart in a fixed-height panel (mockup vbars()). */
 export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartProps) {
@@ -27,7 +30,7 @@ export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartPro
   const yLabels = [0, 1, 2].map((step) => ({ top: `${100 - (step / 2) * 100}%`, text: `${fmtNum((top * step) / 2)}${unit}` }))
 
   return (
-    <div className={styles.pchart} style={{ height }}>
+    <div className={styles.pchart} style={{ height: Math.min(MAX_HEIGHT, height) }}>
       <div className={styles.py}>
         {yLabels.map((label) => (
           <span key={label.top} style={{ top: label.top }}>
@@ -66,7 +69,11 @@ export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartPro
       <div />
       <div className={styles.px} style={{ position: 'relative' }}>
         {xLabels.map(([index, label]) => (
-          <span key={index} style={{ position: 'absolute', left: `${((index + 0.5) / cols.length) * 100}%`, transform: 'translateX(-50%)' }}>
+          <span
+            key={index}
+            className={styles.pxBar}
+            style={{ position: 'absolute', left: `${((index + 0.5) / cols.length) * 100}%`, '--at': ((index + 0.5) / cols.length) * 100 } as CSSProperties}
+          >
             {label}
           </span>
         ))}

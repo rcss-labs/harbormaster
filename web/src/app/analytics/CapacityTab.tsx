@@ -6,7 +6,7 @@ import { KpiStrip } from '../../components/KpiStrip'
 import { useAuth } from '../auth/AuthProvider'
 import { BarCell, MonoCell, ServiceLink, TagCell } from './cells'
 import { COLOR, daysBefore, memoryText, minutesText, oneDecimal, percent, sourceFor, TAG_COLOR, whole } from './format'
-import { DonutPanel, dailyEmpty, KpiNote, rollupRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
+import { StackPanel, dailyEmpty, KpiNote, rollupRows, SeriesPanel, SourcesPanel, TablePanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
 
 const ACCOUNT_COLORS = [COLOR.accent, COLOR.info, COLOR.ok, COLOR.orange, COLOR.warn, COLOR.gray]
@@ -144,13 +144,13 @@ export function CapacityTab({ data, showSources }: TabProps<AnalyticsCapacity>) 
           source={counts ? { table: 'service_counts_history × task_definitions', kept: counts.kept } : undefined}
           legend={(lines) => lines.map((line) => ({ label: line.label, color: line.color, value: fmtNum(latest(line.values) ?? 0) }))}
         />
-        <DonutPanel {...common} title="Reserved vCPU by account" span="half" donut={data.vcpu_by_account} centerSub="vCPU" colors={ACCOUNT_COLORS} source={tasks} />
-        <DonutPanel
+        <StackPanel {...common} title="Reserved vCPU by account" span="half" donut={data.vcpu_by_account} unit="vCPU" colors={ACCOUNT_COLORS} source={tasks} />
+        <StackPanel
           {...common}
           title="Tasks by capacity provider"
           span="half"
           donut={data.tasks_by_capacity_provider}
-          centerSub="tasks"
+          unit="tasks"
           colors={PROVIDER_COLORS}
           source={tasks ? { table: 'tasks.capacity_provider', kept: tasks.kept } : undefined}
         />
@@ -224,7 +224,7 @@ export function CapacityTab({ data, showSources }: TabProps<AnalyticsCapacity>) 
           {...common}
           title="Services at auto-scaling max"
           span="half"
-          source={counts ? { table: 'scaling + service_counts_history', kept: `history kept ${counts.kept}` } : undefined}
+          source={counts ? { table: 'scaling + service_counts_history', kept: counts.kept } : undefined}
           rows={data.at_scaling_max}
           columns={atMaxColumns}
           rowKey={(row) => row.service_id}

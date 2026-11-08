@@ -13,3 +13,6 @@ web/e2e/.auth/
 
 # IDE settings (local only)
 .idea/
+
+# Project docs are kept locally, not in the repository
+docs/

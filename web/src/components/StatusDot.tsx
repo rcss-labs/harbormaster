@@ -10,12 +10,26 @@ interface StatusDotProps {
   clusterStatus?: ClusterStatus
   /** Explicit colour for ad-hoc states; `children` then supplies the text. */
   kind?: PillKind
+  /** Shape only, no text. The text stays as the accessible name. */
+  bare?: boolean
   children?: ReactNode
   title?: string
 }
 
-/** 6px dot plus coloured text, no background. Replaces Pill in tables. */
-export function StatusDot({ status, clusterStatus, kind, children, title }: StatusDotProps) {
+const SHAPE_CLASS: Record<PillKind, string> = {
+  ok: 'st-ok',
+  warn: 'st-warn',
+  bad: 'st-bad',
+  info: 'st-info',
+  expected: 'st-exp',
+  mute: 'st-mute',
+}
+
+/**
+ * Status as shape + colour + text, so state never relies on colour alone: circle ok, triangle warn,
+ * diamond bad, half-disc info, ring expected, dash mute. Replaces Pill in tables.
+ */
+export function StatusDot({ status, clusterStatus, kind, bare = false, children, title }: StatusDotProps) {
   let resolvedKind: PillKind = kind ?? 'mute'
   let text: ReactNode = children
   if (clusterStatus !== undefined) {
@@ -25,9 +39,15 @@ export function StatusDot({ status, clusterStatus, kind, children, title }: Stat
     resolvedKind = statusKind(status)
     text ??= statusLabel(status)
   }
+  const shape = SHAPE_CLASS[resolvedKind]
+  const className = `${styles.st} ${styles[shape]} ${bare ? styles.bare : ''}`.trim()
+  if (bare) {
+    return (
+      <span className={className} title={title} role="img" aria-label={typeof text === 'string' ? text : undefined} />
+    )
+  }
   return (
-    <span className={`${styles.status} ${styles[resolvedKind]}`} title={title}>
-      <span className={styles.dot} aria-hidden="true" />
+    <span className={className} title={title}>
       {text}
     </span>
   )

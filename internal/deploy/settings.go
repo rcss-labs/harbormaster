@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -35,7 +36,20 @@ type DeploySettings struct {
 	HasLoadBalancer                        bool
 	TargetGroups                           []TargetGroupSetting
 	Scaling                                ScalingSettings
+
+	// Partial lists the parts that could not be read. Each stays at its zero value and is left out
+	// of Version (see version).
+	Partial []PartError
 }
+
+// PartError is a part of the settings that could not be read.
+type PartError = poller.PartError
+
+// Parts of the settings that can fail on their own. The scaling parts are named by the poller.
+const (
+	PartTaskRole     = "task_role"
+	PartTargetGroups = "target_groups"
+)
 
 // DeploymentSettings is the service's deployment configuration with ECS defaults filled in.
 type DeploymentSettings struct {
@@ -92,29 +106,32 @@ func (s *Service) settingsFrom(ctx context.Context, key model.ServiceKey, live e
 	if err != nil {
 		return DeploySettings{}, err
 	}
-	taskRole, err := s.taskRoleOf(ctx, key, aws.ToString(primary.TaskDefinition))
-	if err != nil {
-		return DeploySettings{}, err
-	}
 	out := DeploySettings{
 		Family: family, DeployedRevision: revision, Controller: Controller(live),
 		DesiredCount: int(live.DesiredCount), RunningCount: int(live.RunningCount), MaxDesired: s.maxDesired(),
-		EnableExecuteCommand: live.EnableExecuteCommand, TaskRoleARN: taskRole,
+		EnableExecuteCommand:    live.EnableExecuteCommand,
 		DeploymentConfiguration: deploymentSettingsOf(live), HasLoadBalancer: len(live.LoadBalancers) > 0,
 	}
 	if live.HealthCheckGracePeriodSeconds != nil {
 		grace := int(*live.HealthCheckGracePeriodSeconds)
 		out.HealthCheckGracePeriodSeconds = &grace
 	}
+	// The live service, its primary deployment and the clients stay fatal. The parts below read other
+	// APIs, so one failing must not hide the rest; a cancelled request is not a part failure.
+	if out.TaskRoleARN, err = s.taskRoleOf(ctx, key, aws.ToString(primary.TaskDefinition)); err != nil {
+		out.Partial = append(out.Partial, PartError{Part: PartTaskRole, Err: err})
+	}
 	if out.TargetGroups, err = s.targetGroupsOf(ctx, key, live); err != nil {
-		return DeploySettings{}, err
+		out.TargetGroups = nil
+		out.Partial = append(out.Partial, PartError{Part: PartTargetGroups, Err: err})
 	}
 	autoScaling, err := s.Clients.AutoScaling(ctx, targetOf(key))
 	if err != nil {
 		return DeploySettings{}, err
 	}
-	scaling, err := poller.CollectServiceScalingConfig(ctx, autoScaling, key)
-	if err != nil {
+	scaling, scalingParts := poller.CollectServiceScalingConfigPartial(ctx, autoScaling, key)
+	out.Partial = append(out.Partial, scalingParts...)
+	if err := ctx.Err(); err != nil {
 		return DeploySettings{}, err
 	}
 	out.Scaling = scalingSettingsOf(scaling)
@@ -246,22 +263,71 @@ func policySettingOf(policy model.ScalingPolicy) PolicySetting {
 	return setting
 }
 
-// version hashes the configuration a client edits against. The hash covers ECS Exec,
-// deployment configuration, grace period, load balancer presence, target groups and the whole
-// scaling configuration. It leaves out what is observation or is guarded elsewhere: desired count
-// (autoscaling moves it; last writer wins), running count,
-// max desired (server config), task role, family, controller and the deployed revision
-// (base_revision guards that one).
+// versionSegments names the part behind each segment of a version; the first, "core", is always readable.
+var versionSegments = [...]string{"core", PartTargetGroups, poller.PartScalingTarget, poller.PartScalingPolicies, poller.PartScheduledActions}
+
+// unreadableSegment stands in for the hash of a part listed in Partial.
+const unreadableSegment = "-"
+
+// version hashes the configuration a client edits against, one hash per part joined by ".":
+// ECS Exec, deployment configuration, grace period and load balancer presence ("core"), then target
+// groups, the scalable target, scaling policies and scheduled actions. A part listed in Partial is
+// "-". It leaves out what is observation or is guarded elsewhere: desired count (autoscaling moves
+// it; last writer wins), running count, max desired (server config), task role, family, controller
+// and the deployed revision (base_revision guards that one).
+//
+// Two versions are compared with versionConflict, not string equality: a part unreadable on either
+// side is skipped, so a part that fails when the client reads (or when it applies) does not turn
+// every unrelated change set into a conflict, while the readable parts are still compared.
 func (d DeploySettings) version() string {
-	canonical, _ := json.Marshal(struct {
+	core := struct {
 		EnableExecuteCommand    bool
 		DeploymentConfiguration DeploymentSettings
 		HealthCheckGrace        *int
 		HasLoadBalancer         bool
-		TargetGroups            []TargetGroupSetting
-		Scaling                 ScalingSettings
-	}{d.EnableExecuteCommand, d.DeploymentConfiguration, d.HealthCheckGracePeriodSeconds,
-		d.HasLoadBalancer, d.TargetGroups, d.Scaling})
-	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:])
+	}{d.EnableExecuteCommand, d.DeploymentConfiguration, d.HealthCheckGracePeriodSeconds, d.HasLoadBalancer}
+	target := struct {
+		HasTarget bool
+		Min, Max  int
+	}{d.Scaling.HasTarget, d.Scaling.Min, d.Scaling.Max}
+	values := [...]any{core, d.TargetGroups, target, d.Scaling.Policies, d.Scaling.ScheduledActions}
+	segments := make([]string, len(versionSegments))
+	for i, part := range versionSegments {
+		if d.unreadable(part) {
+			segments[i] = unreadableSegment
+			continue
+		}
+		canonical, _ := json.Marshal(values[i])
+		sum := sha256.Sum256(canonical)
+		segments[i] = hex.EncodeToString(sum[:8])
+	}
+	return strings.Join(segments, ".")
+}
+
+// unreadable reports whether part is listed in Partial.
+func (d DeploySettings) unreadable(part string) bool {
+	return slices.ContainsFunc(d.Partial, func(p PartError) bool { return p.Part == part })
+}
+
+// versionConflict reports whether the settings changed since the client read base. A part that was
+// unreadable when the client read it, or is unreadable now, cannot be compared and is skipped. The
+// exception is a part the change set edits (touched) that the client never saw: that is a conflict.
+// A part unreadable now and edited is refused before the versions are compared.
+func versionConflict(base, current string, touched []string) bool {
+	baseSegments, currentSegments := strings.Split(base, "."), strings.Split(current, ".")
+	if len(baseSegments) != len(versionSegments) || len(currentSegments) != len(versionSegments) {
+		return true
+	}
+	for i, part := range versionSegments {
+		switch {
+		case baseSegments[i] == unreadableSegment:
+			if slices.Contains(touched, part) {
+				return true
+			}
+		case currentSegments[i] == unreadableSegment:
+		case baseSegments[i] != currentSegments[i]:
+			return true
+		}
+	}
+	return false
 }

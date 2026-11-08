@@ -78,7 +78,7 @@ describe('UsageChart', () => {
 })
 
 describe('HealthCard', () => {
-  it('target health donut label 1/2 healthy', async () => {
+  it('target health stacked bar names the counts: 1 healthy, 1 unhealthy, 0 missing of 2', async () => {
     const health: TargetHealthDTO = {
       groups: [{ target_group_arn: 'arn:tg', name: 'catalog-api-tg', healthy: 1, unhealthy: 1, targets: [] }],
       healthy: 1,
@@ -87,10 +87,10 @@ describe('HealthCard', () => {
     }
     server.use(http.get('/api/services/:id/target-health', () => HttpResponse.json(health)))
     renderWithProviders(<HealthCard service={CATALOG}>deploy</HealthCard>)
-    expect(await screen.findByText('1/2')).toBeInTheDocument()
-    expect(screen.getByText('healthy')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Healthy targets 1, Unhealthy targets 1, Missing tasks 0 of 2' })).toBeInTheDocument()
+    expect(screen.getByText('1/2 healthy')).toBeInTheDocument()
     expect(screen.getByText('catalog-api-tg')).toBeInTheDocument()
-    expect(screen.getByText('Unhealthy targets')).toBeInTheDocument()
+    expect(screen.getByText('Unhealthy targets').parentElement).toHaveTextContent('1')
     expect(screen.getByText('Missing tasks').parentElement).toHaveTextContent('0')
   })
 })

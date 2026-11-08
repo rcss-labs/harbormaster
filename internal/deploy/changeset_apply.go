@@ -150,7 +150,11 @@ func (s *Service) ApplyChangeSet(ctx context.Context, subj authz.Subject, key mo
 		if cs.BaseVersion == "" {
 			return ChangeSetResult{}, invalid("base_version is required with a service or scaling change")
 		}
-		if cs.BaseVersion != st.Version {
+		edited := partsEdited(cs)
+		if err := refuseUnreadableEdits(st, edited); err != nil {
+			return ChangeSetResult{}, err
+		}
+		if versionConflict(cs.BaseVersion, st.Version, edited) {
 			return ChangeSetResult{}, &StaleVersionError{Current: st}
 		}
 	}
@@ -397,7 +401,8 @@ func (r *changeSetRun) recordServiceStep(ctx context.Context, svc *ecstypes.Serv
 		line("restart", fmt.Sprintf("Restarted service (force new deployment) on revision %d.", rollout.ToRevision), deployment)
 	}
 	if r.plan.desired != nil {
-		line("scale", fmt.Sprintf("Changed desired count from %d to %d.", r.st.DesiredCount, *r.plan.desired), nil)
+		line("scale", fmt.Sprintf("Changed desired count from %d to %d.", r.st.DesiredCount, *r.plan.desired),
+			map[string]any{"from_desired": r.st.DesiredCount, "to_desired": *r.plan.desired})
 	}
 	if r.plan.exec != nil {
 		verb := "Disabled"

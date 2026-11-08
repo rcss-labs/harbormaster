@@ -1,22 +1,29 @@
 .wrap { min-width: 0; }
 .scroll { overflow: auto; }
-.table { width: 100%; }
-.head { position: sticky; top: 0; z-index: 1; background: var(--surface); }
-.row { display: grid; align-items: center; column-gap: 12px; padding: 0 12px; border-left: 3px solid transparent; }
-.head .row { height: 30px; border-bottom: 1px solid var(--border); }
-.body { min-height: 32px; border-bottom: 1px solid var(--row-border); }
+.table { display: grid; width: 100%; column-gap: 12px; }
+/* Rowgroups and rows are subgrids of .table, so header and body cells share one set of tracks. */
+.group { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
+.head { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 0 var(--pad); border-left: 3px solid transparent; }
+.head .row { min-height: 32px; border-bottom: 1px solid var(--border); }
+.body { min-height: var(--row); border-bottom: 1px solid var(--row-border); }
 .body:last-child { border-bottom: 0; }
-.body.bad { border-left-color: var(--danger); }
-.body.warn { border-left-color: var(--warning); }
-.body.expected { border-left-color: var(--expected); }
+.body.bad { border-left-color: var(--bad); }
+.body.warn { border-left-color: var(--warn); }
+.body.expected { border-left-color: var(--exp); }
 .body.info { border-left-color: var(--info); }
 .clickable { cursor: pointer; }
 .body:hover { background: var(--hover); }
-.th { font: 500 10px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+.th { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .td { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .right { text-align: right; justify-self: stretch; }
+/* The pinned actions column needs an opaque background so scrolled cells do not show through it. */
+.sticky { z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--border); overflow: visible; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; }
+.body:hover .sticky { background: var(--hover); }
 .sortButton { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
-.sortButton:hover { color: var(--text-2); }
+.sortButton:hover { color: var(--text); }
 .sortButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.arrow { font-size: 8px; min-width: 8px; }
-.empty { padding: 24px 12px; text-align: center; color: var(--muted); }
+.arrow { font-size: 12px; min-width: 10px; }
+.empty { grid-column: 1 / -1; padding: 24px 12px; text-align: center; color: var(--muted); }
+/* Phone: the sort button sits at the right above the rows; a meta value's label reads before it. */
+.phoneTools { display: flex; justify-content: flex-end; padding: 4px var(--pad) 0; }

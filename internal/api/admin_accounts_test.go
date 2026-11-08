@@ -24,10 +24,10 @@ type testProbeResult struct {
 func TestAccounts_TestUsesProber(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedAccounts(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
 	var known testProbeResult
-	decode(t, pavel.post("/api/accounts/test", map[string]any{
+	decode(t, sam.post("/api/accounts/test", map[string]any{
 		"role_arn": homelabRoleARN, "external_id": "x", "regions": []string{"us-east-1", "eu-west-1"},
 	}), &known)
 	if len(known.Regions) != 2 {
@@ -38,7 +38,7 @@ func TestAccounts_TestUsesProber(t *testing.T) {
 	}
 
 	var unknown testProbeResult
-	decode(t, pavel.post("/api/accounts/test", map[string]any{
+	decode(t, sam.post("/api/accounts/test", map[string]any{
 		"role_arn": "arn:aws:iam::111111111111:role/harbormaster-access", "external_id": "x", "regions": []string{"us-east-1"},
 	}), &unknown)
 	if len(unknown.Regions) != 1 || unknown.Regions[0].OK || unknown.Regions[0].Error == "" {
@@ -48,9 +48,9 @@ func TestAccounts_TestUsesProber(t *testing.T) {
 
 func TestAccounts_CreateParsesAccountID(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
-	resp := pavel.post("/api/accounts", map[string]any{
+	resp := sam.post("/api/accounts", map[string]any{
 		"name": "homelab-admin", "role_arn": homelabRoleARN, "external_id": "x", "regions": []string{"us-east-1"},
 	})
 	if resp.StatusCode != http.StatusCreated {
@@ -65,7 +65,7 @@ func TestAccounts_CreateParsesAccountID(t *testing.T) {
 		t.Errorf("created = %+v, want account_id 482109375512 for homelab-admin", created)
 	}
 
-	resp = pavel.post("/api/accounts", map[string]any{
+	resp = sam.post("/api/accounts", map[string]any{
 		"name": "bad", "role_arn": "arn:aws:iam::12345:role/x", "external_id": "x", "regions": []string{"us-east-1"},
 	})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -80,7 +80,7 @@ func TestAccounts_DeleteRemovesClustersFromAPI(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedAccounts(t, st)
 	pollAll(t, st, fk)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
 	var accounts struct {
 		Items []struct {
@@ -88,7 +88,7 @@ func TestAccounts_DeleteRemovesClustersFromAPI(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"items"`
 	}
-	decode(t, pavel.get("/api/accounts"), &accounts)
+	decode(t, sam.get("/api/accounts"), &accounts)
 	var stagingID int64
 	for _, a := range accounts.Items {
 		if a.Name == "staging-example" {
@@ -99,14 +99,14 @@ func TestAccounts_DeleteRemovesClustersFromAPI(t *testing.T) {
 		t.Fatalf("staging-example not listed in %+v", accounts.Items)
 	}
 
-	if resp := pavel.do(http.MethodDelete, "/api/accounts/"+itoa(stagingID), nil, nil); resp.StatusCode != http.StatusNoContent {
+	if resp := sam.do(http.MethodDelete, "/api/accounts/"+itoa(stagingID), nil, nil); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", resp.StatusCode)
 	}
 
 	var clusters struct {
 		Items []json.RawMessage `json:"items"`
 	}
-	decode(t, pavel.get("/api/clusters"), &clusters)
+	decode(t, sam.get("/api/clusters"), &clusters)
 	if len(clusters.Items) != 5 {
 		t.Errorf("clusters after delete = %d, want 5", len(clusters.Items))
 	}
@@ -117,13 +117,13 @@ func TestAudit_NewestFirstPaged(t *testing.T) {
 	base := time.Now().Add(time.Hour)
 	for i := range 5 {
 		if err := st.Audit(t.Context(), store.AuditEntry{
-			TS: base.Add(time.Duration(i) * time.Minute), ActorUsername: "pavel",
+			TS: base.Add(time.Duration(i) * time.Minute), ActorUsername: "sam",
 			Action: "test_seed", Target: "seed", Summary: fmt.Sprintf("seed %d", i), IP: "127.0.0.1",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
 	type auditPage struct {
 		Items []struct {
@@ -133,7 +133,7 @@ func TestAudit_NewestFirstPaged(t *testing.T) {
 		Next *string `json:"next"`
 	}
 	var first auditPage
-	decode(t, pavel.get("/api/audit?limit=2"), &first)
+	decode(t, sam.get("/api/audit?limit=2"), &first)
 	if len(first.Items) != 2 || first.Items[0].Summary != "seed 4" || first.Items[1].Summary != "seed 3" {
 		t.Fatalf("first page = %+v, want seed 4 then seed 3", first.Items)
 	}
@@ -145,7 +145,7 @@ func TestAudit_NewestFirstPaged(t *testing.T) {
 	}
 
 	var second auditPage
-	decode(t, pavel.get("/api/audit?limit=2&cursor="+*first.Next), &second)
+	decode(t, sam.get("/api/audit?limit=2&cursor="+*first.Next), &second)
 	if len(second.Items) != 2 || second.Items[0].Summary != "seed 2" || second.Items[1].Summary != "seed 1" {
 		t.Errorf("second page = %+v, want seed 2 then seed 1", second.Items)
 	}

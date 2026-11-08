@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ALERTS, CLUSTER_CORE, SERVICE_PAYMENTS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
+import { openAccountMenu, openScope } from './testUtils'
 
 const originalWidth = window.innerWidth
 const setWidth = (width: number) => {
@@ -24,6 +25,7 @@ afterEach(async () => {
 
 const sidebarToggle = () => screen.findByRole('button', { name: /sidebar$/i })
 const railToggle = () => screen.findByRole('button', { name: /^Activity/ })
+const activityDrawer = () => screen.findByRole('dialog', { name: 'Activity' })
 
 describe('collapsible sidebar', () => {
   it('starts expanded on a wide screen and toggles with the [ key', async () => {
@@ -52,7 +54,7 @@ describe('collapsible sidebar', () => {
     renderApp('/clusters')
     const toggle = await sidebarToggle()
     const user = userEvent.setup()
-    await user.click(await screen.findByLabelText('Account filter'))
+    await user.click(within(await openScope(user)).getByLabelText('Account filter'))
     await user.keyboard('[[')
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     ;(document.activeElement as HTMLElement).blur()
@@ -75,7 +77,7 @@ describe('collapsible sidebar', () => {
     }
   })
 
-  it('keeps Sign out, Change password reachable from the avatar menu when collapsed', async () => {
+  it('keeps Sign out, Change password reachable from the account menu when collapsed', async () => {
     setWidth(1000)
     renderApp('/')
     await sidebarToggle()
@@ -85,8 +87,10 @@ describe('collapsible sidebar', () => {
     expect(avatar).toHaveAttribute('aria-expanded', 'false')
     await user.click(avatar)
     expect(avatar).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('button', { name: 'Change password' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    const menu = within(await openAccountMenu(user))
+    expect(menu.getByRole('button', { name: 'Change password' })).toBeInTheDocument()
+    expect(menu.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(menu.getByRole('link', { name: 'My access' })).toHaveAttribute('href', '/me/access')
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
   })
@@ -122,8 +126,8 @@ describe('collapsible sidebar', () => {
       http.get('/api/poller', () =>
         HttpResponse.json({
           items: [
-            { account_id: '1', account_name: 'a', region: 'us-east-1', throttled: false, failing: true, last_error: 'x', last_ok_at: null },
-            { account_id: '1', account_name: 'a', region: 'eu-west-1', throttled: true, failing: false, last_error: '', last_ok_at: null },
+            { account_id: '1', account_name: 'a', region: 'us-east-1', throttled: false, failing: true, last_error: 'x', last_ok_at: null, tiers: [] },
+            { account_id: '1', account_name: 'a', region: 'eu-west-1', throttled: true, failing: false, last_error: '', last_ok_at: null, tiers: [] },
           ],
         }),
       ),
@@ -141,7 +145,7 @@ describe('pinned services and clusters', () => {
     await user.click(await screen.findByRole('button', { name: 'Pin payments-api' }))
     const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
     expect(within(pinned).getByRole('link', { name: /payments-api/ })).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/overview`)
-    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:pavel')!)).toHaveLength(1)
+    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)).toHaveLength(1)
 
     await user.click(screen.getByRole('button', { name: 'Unpin payments-api' }))
     expect(within(screen.getByRole('navigation', { name: 'Pinned' })).queryByRole('link')).not.toBeInTheDocument()
@@ -165,7 +169,7 @@ describe('pinned services and clusters', () => {
 
   it('shows a service on two lines: name, then its cluster, with a live status dot', async () => {
     localStorage.setItem(
-      'harbormaster-pinned:pavel',
+      'harbormaster-pinned:sam',
       JSON.stringify([{ kind: 'service', id: SERVICE_PAYMENTS.id, name: 'payments-api', cluster: 'core-services' }]),
     )
     renderApp('/')
@@ -179,7 +183,7 @@ describe('pinned services and clusters', () => {
 
   it('shows a cluster on two lines: name, then account name and id, with its status colour', async () => {
     localStorage.setItem(
-      'harbormaster-pinned:pavel',
+      'harbormaster-pinned:sam',
       JSON.stringify([{ kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'homelab-admin', account_id: '482109375512' }]),
     )
     renderApp('/')
@@ -192,7 +196,7 @@ describe('pinned services and clusters', () => {
 
   it('uses a muted dot when the pinned item is not visible', async () => {
     localStorage.setItem(
-      'harbormaster-pinned:pavel',
+      'harbormaster-pinned:sam',
       JSON.stringify([
         { id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' },
         { kind: 'cluster', id: 'gone', name: 'old-cluster', account_name: 'homelab-admin', account_id: '1' },
@@ -214,18 +218,11 @@ describe('pinned services and clusters', () => {
 })
 
 describe('top bar', () => {
-  it('shows the polling pulse and an Activity toggle with the problem count', async () => {
+  it('has an Activity button with the problem count in its name', async () => {
     renderApp('/')
-    expect(await screen.findByText(/live · polled \d+s ago/)).toBeInTheDocument()
     const toggle = await railToggle()
     await waitFor(() => expect(toggle).toHaveTextContent(String(ALERTS.counts.danger)))
-  })
-
-  it('hides the pulse when the main column is narrow', async () => {
-    setWidth(920)
-    renderApp('/')
-    await railToggle()
-    expect(screen.queryByText(/live · polled/)).not.toBeInTheDocument()
+    expect(toggle).toHaveAccessibleName(`Activity, ${ALERTS.counts.danger} problems`)
   })
 
   it('has a search button that names the shortcut for the platform', async () => {
@@ -234,36 +231,52 @@ describe('top bar', () => {
     expect(button).toHaveTextContent('Ctrl K')
   })
 
-  it('keeps the account and region filters inside the Scope chip', async () => {
+  it('keeps the account, region and tag controls inside one Scope button and popover', async () => {
     renderApp('/')
-    const scope = await screen.findByRole('group', { name: 'Scope' })
-    expect(within(scope).getByLabelText('Account filter')).toBeInTheDocument()
-    expect(within(scope).getByLabelText('Region filter')).toBeInTheDocument()
+    const user = userEvent.setup()
+    expect(screen.queryByLabelText('Account filter')).not.toBeInTheDocument()
+    const scope = within(await openScope(user))
+    expect(scope.getByLabelText('Account filter')).toBeInTheDocument()
+    expect(scope.getByLabelText('Region filter')).toBeInTheDocument()
+    expect(scope.getByRole('button', { name: 'Tag filter' })).toBeInTheDocument()
+  })
+
+  it('toggles row density and remembers it', async () => {
+    renderApp('/')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Toggle row density' }))
+    expect(document.documentElement.dataset.density).toBe('comfortable')
+    expect(localStorage.getItem('harbormaster-density')).toBe('comfortable')
+    delete document.documentElement.dataset.density
+  })
+
+  it('crumbs wrap in a shrinkable block that sits before the search button', async () => {
+    renderApp('/clusters')
+    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' })
+    const search = screen.getByRole('button', { name: /Search or run a command/ })
+    expect(crumbs.className).toMatch(/crumbs/)
+    expect(search.className).toMatch(/searchBtn/)
+    expect(crumbs.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
-describe('activity rail', () => {
-  it('is docked beside the page on a wide screen and closes from its toggle', async () => {
+describe('activity drawer', () => {
+  it('is closed by default at every width and never docks beside the page', async () => {
     renderApp('/')
-    const rail = await screen.findByRole('complementary', { name: 'Activity' })
-    expect(screen.queryByRole('dialog', { name: 'Activity' })).not.toBeInTheDocument()
     const toggle = await railToggle()
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    await userEvent.setup().click(toggle)
-    expect(rail).not.toBeInTheDocument()
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('dialog', { name: 'Activity' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Activity' })).not.toBeInTheDocument()
   })
 
-  it('is closed on a narrow screen, opens as an overlay dialog and closes on Escape', async () => {
-    setWidth(1100)
+  it('opens as a dialog from the top bar and closes on Escape', async () => {
+    setWidth(2560)
     renderApp('/')
     const toggle = await railToggle()
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('dialog', { name: 'Activity' })).not.toBeInTheDocument()
     const user = userEvent.setup()
     await user.click(toggle)
-    expect(await screen.findByRole('dialog', { name: 'Activity' })).toBeInTheDocument()
-    expect(screen.queryByRole('complementary', { name: 'Activity' })).not.toBeInTheDocument()
+    expect(await activityDrawer()).toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog', { name: 'Activity' })).not.toBeInTheDocument()
   })
@@ -276,22 +289,23 @@ describe('activity rail', () => {
         return HttpResponse.json({
           ...OVERVIEW,
           events: [
-            { ...base, source: 'harbormaster', actor: 'pavel', text: 'Restarted service.' },
+            { ...base, source: 'harbormaster', actor: 'sam', text: 'Restarted service.' },
             { ...base, source: 'ecs', actor: 'ECS', text: 'has reached a steady state.' },
           ],
         })
       }),
     )
     renderApp('/')
-    const rail = await screen.findByRole('complementary', { name: 'Activity' })
     const user = userEvent.setup()
+    await user.click(await railToggle())
+    const rail = await activityDrawer()
     // Default is Problems: danger and warning alerts only.
     expect(await within(rail).findByText('image-resizer')).toBeInTheDocument()
     expect(within(rail).getByText('catalog-api')).toBeInTheDocument()
     expect(within(rail).queryByText('edge-nginx')).not.toBeInTheDocument()
     await user.click(within(rail).getByRole('radio', { name: /^Changes/ }))
     expect(within(rail).queryByText('image-resizer')).not.toBeInTheDocument()
-    expect(await within(rail).findByText('pavel')).toBeInTheDocument()
+    expect(await within(rail).findByText('sam')).toBeInTheDocument()
     expect(within(rail).queryByText('has reached a steady state.')).not.toBeInTheDocument()
     await user.click(within(rail).getByRole('radio', { name: /^All/ }))
     expect(within(rail).getByText('edge-nginx')).toBeInTheDocument()
@@ -314,8 +328,10 @@ describe('activity rail', () => {
       }),
     )
     renderApp('/')
-    const rail = await screen.findByRole('complementary', { name: 'Activity' })
-    await userEvent.setup().click(within(rail).getByRole('radio', { name: /^All/ }))
+    const user = userEvent.setup()
+    await user.click(await railToggle())
+    const rail = await activityDrawer()
+    await user.click(within(rail).getByRole('radio', { name: /^All/ }))
     expect(await within(rail).findByText('×3')).toBeInTheDocument()
     expect(within(rail).getAllByText('has reached a steady state.')).toHaveLength(1)
   })

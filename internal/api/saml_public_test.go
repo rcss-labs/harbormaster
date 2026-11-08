@@ -143,8 +143,8 @@ func TestSAMLLogin_TestRequiresAdminButWorksWhileDisabled(t *testing.T) {
 	if n := countRows(t, st, `select count(*) from saml_requests`); n != 0 {
 		t.Fatalf("rows = %d", n)
 	}
-	pavel := login(t, srv, "pavel", testPassword)
-	admin := browserWithJar(t, srv, pavel.http.Jar)
+	sam := login(t, srv, "sam", testPassword)
+	admin := browserWithJar(t, srv, sam.http.Jar)
 	resp := admin.get("/api/auth/saml/login?test=1")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
@@ -383,14 +383,14 @@ func TestACS_SSOOffRefusesLoginPurposeOnly(t *testing.T) {
 
 func TestACS_NoCSRFHeaderNeeded_ButSessionCookieIgnored(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	var oldSession string
-	for _, c := range pavel.http.Jar.Cookies(mustURL(t, srv.URL)) {
+	for _, c := range sam.http.Jar.Cookies(mustURL(t, srv.URL)) {
 		if c.Name == "hm_session" {
 			oldSession = c.Value
 		}
 	}
-	b := browserWithJar(t, srv, pavel.http.Jar) // the browser still carries pavel's hm_session
+	b := browserWithJar(t, srv, sam.http.Jar) // the browser still carries sam's hm_session
 	resp := b.signIn("/api/auth/saml/login", "alex")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
@@ -399,14 +399,14 @@ func TestACS_NoCSRFHeaderNeeded_ButSessionCookieIgnored(t *testing.T) {
 	if got := meUsername(t, b); got != "alex" {
 		t.Fatalf("new session belongs to %q, want the asserted identity", got)
 	}
-	// pavel's own session row is untouched and still works.
+	// sam's own session row is untouched and still works.
 	jar, _ := cookiejar.New(nil)
 	jar.SetCookies(mustURL(t, srv.URL), []*http.Cookie{{Name: "hm_session", Value: oldSession, Path: "/"}})
-	if got := meUsername(t, browserWithJar(t, srv, jar)); got != "pavel" {
+	if got := meUsername(t, browserWithJar(t, srv, jar)); got != "sam" {
 		t.Fatalf("presented session now resolves to %q", got)
 	}
 	if n := countRows(t, st, `select count(*) from sessions`); n != 2 {
-		t.Fatalf("sessions = %d, want pavel's plus alex's", n)
+		t.Fatalf("sessions = %d, want sam's plus alex's", n)
 	}
 }
 
@@ -539,8 +539,8 @@ func TestACS_TestFlowWritesResultNoSession(t *testing.T) {
 	if _, err := st.SetSAMLEnabled(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	pavel := login(t, srv, "pavel", testPassword)
-	b := browserWithJar(t, srv, pavel.http.Jar)
+	sam := login(t, srv, "sam", testPassword)
+	b := browserWithJar(t, srv, sam.http.Jar)
 	loc := b.startLogin("/api/auth/saml/login?test=1")
 	id, _ := url.Parse(loc)
 	requestID := id.Query().Get("RelayState")
@@ -551,7 +551,7 @@ func TestACS_TestFlowWritesResultNoSession(t *testing.T) {
 		t.Fatalf("ACS = %d %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	if n := countRows(t, st, `select count(*) from sessions`); n != 1 {
-		t.Fatalf("sessions = %d, want only pavel's", n)
+		t.Fatalf("sessions = %d, want only sam's", n)
 	}
 	if n := countRows(t, st, `select count(*) from users where username = 'alex'`); n != 0 {
 		t.Fatal("test sign-in created a user")
@@ -578,8 +578,8 @@ func TestACS_TestFlowWritesResultNoSession(t *testing.T) {
 
 func TestACS_TestFlowFailureIsStoredAsResult(t *testing.T) {
 	srv, idp, st := newServerWithFakeIdP(t)
-	pavel := login(t, srv, "pavel", testPassword)
-	b := browserWithJar(t, srv, pavel.http.Jar)
+	sam := login(t, srv, "sam", testPassword)
+	b := browserWithJar(t, srv, sam.http.Jar)
 	idp.SetTamper(fakeIdPUnsigned())
 	loc := b.startLogin("/api/auth/saml/login?test=1")
 	requestID := mustURL(t, loc).Query().Get("RelayState")
@@ -638,8 +638,8 @@ func TestACS_LoginFlow_PendingLinkSignsInExistingUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pavel, _ := st.GetUserByUsername(t.Context(), "pavel")
-	if err := st.SetPendingLink(t.Context(), dana.ID, "dana"+fakeIdPUserEmailDomain, pavel.ID, time.Now().Add(time.Hour)); err != nil {
+	sam, _ := st.GetUserByUsername(t.Context(), "sam")
+	if err := st.SetPendingLink(t.Context(), dana.ID, "dana"+fakeIdPUserEmailDomain, sam.ID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	usersBefore := countRows(t, st, `select count(*) from users`)
@@ -695,7 +695,7 @@ func TestSAMLMetadata_PublicAndShape(t *testing.T) {
 
 func TestSAMLLink_StartRequiresCSRFAndPassword(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 
 	if resp := c.get("/api/auth/saml/link"); resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("GET link = %d", resp.StatusCode)
@@ -726,7 +726,7 @@ func TestSAMLLink_StartRequiresCSRFAndPassword(t *testing.T) {
 	if loc.Host != strings.TrimPrefix(srv.URL, "http://") || loc.Path != "/fake-idp/sso" || cookie == nil || cookie.Path != "/api/auth/saml/acs" {
 		t.Fatalf("redirect_url %s cookie %+v", out.RedirectURL, cookie)
 	}
-	pavel, _ := st.GetUserByUsername(t.Context(), "pavel")
+	sam, _ := st.GetUserByUsername(t.Context(), "sam")
 	var purpose string
 	var userID int64
 	var hash string
@@ -734,14 +734,14 @@ func TestSAMLLink_StartRequiresCSRFAndPassword(t *testing.T) {
 		Scan(&purpose, &userID, &hash); err != nil {
 		t.Fatal(err)
 	}
-	if purpose != "link" || userID != pavel.ID || hash != sha256Hex(cookie.Value) {
+	if purpose != "link" || userID != sam.ID || hash != sha256Hex(cookie.Value) {
 		t.Fatalf("row = %q %d %q", purpose, userID, hash)
 	}
 }
 
 func TestSAMLLink_WrongPasswordsCountTowardUserLockout(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	for i := 0; i < testConfig().LoginMaxPerUser; i++ {
 		resp := c.post("/api/auth/saml/link", map[string]string{"password": "not-the-password-1"})
 		resp.Body.Close()
@@ -758,7 +758,7 @@ func TestSAMLLink_WrongPasswordsCountTowardUserLockout(t *testing.T) {
 		t.Fatalf("locked user with the right password = %d", resp.StatusCode)
 	}
 	other := newAPIClient(t, srv)
-	signIn := other.post("/api/auth/login", map[string]string{"username": "pavel", "password": testPassword})
+	signIn := other.post("/api/auth/login", map[string]string{"username": "sam", "password": testPassword})
 	signIn.Body.Close()
 	if signIn.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("password sign-in after link-start lockout = %d", signIn.StatusCode)
@@ -770,7 +770,7 @@ func TestSAMLLink_StartWorksWhileSSODisabled(t *testing.T) {
 	if _, err := st.SetSAMLEnabled(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	resp := c.post("/api/auth/saml/link", map[string]string{"password": testPassword})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -780,10 +780,10 @@ func TestSAMLLink_StartWorksWhileSSODisabled(t *testing.T) {
 
 func TestSAMLLink_StartRefusals(t *testing.T) {
 	srv, idp, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
-	pavel, _ := st.GetUserByUsername(t.Context(), "pavel")
+	c := login(t, srv, "sam", testPassword)
+	sam, _ := st.GetUserByUsername(t.Context(), "sam")
 	if _, err := st.BindSSOIdentity(t.Context(), store.BindSSO{
-		UserID: pavel.ID, IdPEntityID: idp.EntityID(), ExternalID: "x@example.test", ExternalIDFormat: "f",
+		UserID: sam.ID, IdPEntityID: idp.EntityID(), ExternalID: "x@example.test", ExternalIDFormat: "f",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -793,7 +793,7 @@ func TestSAMLLink_StartRefusals(t *testing.T) {
 	}
 
 	plain, _, _ := newTestServer(t)
-	pc := login(t, plain, "pavel", testPassword)
+	pc := login(t, plain, "sam", testPassword)
 	resp = pc.post("/api/auth/saml/link", map[string]string{"password": testPassword})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
@@ -820,10 +820,10 @@ func TestACS_LinkFlow_BindsAndKeepsSession(t *testing.T) {
 	if _, err := st.SetSAMLEnabled(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	b := browserWithJar(t, srv, c.http.Jar) // the SPA's browser: carries hm_session and the binding cookie
 	redirectURL, _ := startLink(t, c)
-	acs, form := b.idpResponse(redirectURL, "pavel")
+	acs, form := b.idpResponse(redirectURL, "sam")
 	resp := b.postForm(acs, form)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/?sso_link=ok" {
@@ -840,27 +840,27 @@ func TestACS_LinkFlow_BindsAndKeepsSession(t *testing.T) {
 	if me.StatusCode != http.StatusOK {
 		t.Fatalf("existing session stopped working: %d", me.StatusCode)
 	}
-	pavel, _ := st.GetUserByUsername(t.Context(), "pavel")
-	if !pavel.SSOLinked() || pavel.ExternalID != "pavel"+fakeIdPUserEmailDomain || pavel.IdPEntityID != idp.EntityID() || !pavel.HasPassword() {
-		t.Fatalf("pavel = %+v", pavel)
+	sam, _ := st.GetUserByUsername(t.Context(), "sam")
+	if !sam.SSOLinked() || sam.ExternalID != "sam"+fakeIdPUserEmailDomain || sam.IdPEntityID != idp.EntityID() || !sam.HasPassword() {
+		t.Fatalf("sam = %+v", sam)
 	}
 }
 
 func TestACS_LinkFlow_NoSessionCookieNeeded(t *testing.T) {
 	srv, _, st := newServerWithFakeIdP(t)
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	redirectURL, cookie := startLink(t, c)
 	jar, _ := cookiejar.New(nil) // a browser with no hm_session at all
 	jar.SetCookies(mustURL(t, srv.URL), []*http.Cookie{{Name: cookie.Name, Value: cookie.Value, Path: cookie.Path}})
 	b := browserWithJar(t, srv, jar)
-	acs, form := b.idpResponse(redirectURL, "pavel")
+	acs, form := b.idpResponse(redirectURL, "sam")
 	resp := b.postForm(acs, form)
 	resp.Body.Close()
 	if resp.Header.Get("Location") != "/?sso_link=ok" {
 		t.Fatalf("ACS = %q", resp.Header.Get("Location"))
 	}
-	pavel, _ := st.GetUserByUsername(t.Context(), "pavel")
-	if !pavel.SSOLinked() {
+	sam, _ := st.GetUserByUsername(t.Context(), "sam")
+	if !sam.SSOLinked() {
 		t.Fatal("the row's user was not linked")
 	}
 }
@@ -868,14 +868,14 @@ func TestACS_LinkFlow_NoSessionCookieNeeded(t *testing.T) {
 func TestACS_LinkFlow_IdentityTakenRedirect(t *testing.T) {
 	srv, idp, st := newServerWithFakeIdP(t)
 	if _, err := st.CreateSAMLUser(t.Context(), store.NewSAMLUser{
-		Username: "alex", IdPEntityID: idp.EntityID(), ExternalID: "pavel" + fakeIdPUserEmailDomain, ExternalIDFormat: "f",
+		Username: "alex", IdPEntityID: idp.EntityID(), ExternalID: "sam" + fakeIdPUserEmailDomain, ExternalIDFormat: "f",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	b := browserWithJar(t, srv, c.http.Jar)
 	redirectURL, _ := startLink(t, c)
-	acs, form := b.idpResponse(redirectURL, "pavel")
+	acs, form := b.idpResponse(redirectURL, "sam")
 	resp := b.postForm(acs, form)
 	resp.Body.Close()
 	if resp.Header.Get("Location") != "/?sso_link=sso_identity_taken" {
@@ -884,19 +884,19 @@ func TestACS_LinkFlow_IdentityTakenRedirect(t *testing.T) {
 	if n := len(auditByAction(t, st, "sso_link_failed")); n != 1 {
 		t.Fatalf("sso_link_failed audits = %d", n)
 	}
-	pavel, _ := st.GetUserByUsername(t.Context(), "pavel")
-	if pavel.SSOLinked() {
-		t.Fatal("pavel was linked to a taken identity")
+	sam, _ := st.GetUserByUsername(t.Context(), "sam")
+	if sam.SSOLinked() {
+		t.Fatal("sam was linked to a taken identity")
 	}
 }
 
 func TestACS_LinkFlow_FailureBeforeBindingIsAuditedAndRedirectsToLinkError(t *testing.T) {
 	srv, idp, st := newServerWithFakeIdP(t)
 	idp.SetTamper(fakeIdPUnsigned())
-	c := login(t, srv, "pavel", testPassword)
+	c := login(t, srv, "sam", testPassword)
 	b := browserWithJar(t, srv, c.http.Jar)
 	redirectURL, _ := startLink(t, c)
-	acs, form := b.idpResponse(redirectURL, "pavel")
+	acs, form := b.idpResponse(redirectURL, "sam")
 	resp := b.postForm(acs, form)
 	resp.Body.Close()
 	if resp.Header.Get("Location") != "/?sso_link="+saml.ReasonUnsigned {

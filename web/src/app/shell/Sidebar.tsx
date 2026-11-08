@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router'
+import { useState } from 'react'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
-import { useAuthOptions, useClusters, usePollerStatus, useSettings, useTasks } from '../../api/hooks'
+import { useAuthOptions, useClusters, usePollerStatus, useServicesList, useSettings, useTasks } from '../../api/hooks'
 import type { ClusterCardDTO } from '../../api/types'
 import { Brand } from '../../components/Brand'
-import type { PillKind } from '../../components/Pill'
+import { Icon } from '../../components/Icon'
+import type { IconName } from '../../components/icons'
+import { Popover } from '../../components/Popover'
+import { StatusDot } from '../../components/StatusDot'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
 import { LinkSSODialog } from './LinkSSODialog'
-import { clusterStatusKind, clusterStatusLabel, statusKind, statusLabel } from '../../components/status'
 import type { Pin } from './pins'
 import { usePins } from './pins'
+import { pinStatus } from './pinStatus'
 import { useShellState } from './ShellState'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
@@ -25,8 +28,7 @@ interface NavBadge {
 interface NavItemProps {
   to: string
   label: string
-  /** Two-letter mono glyph shown in the box before the label. */
-  glyph: string
+  icon: IconName
   count?: number
   bad?: boolean
   /** Coloured counts after the label; they come in addition to `count`. */
@@ -36,16 +38,14 @@ interface NavItemProps {
   end?: boolean
 }
 
-function NavItem({ to, label, glyph, count, bad, badges = [], alsoActiveFor = [], end }: NavItemProps) {
+function NavItem({ to, label, icon, count, bad, badges = [], alsoActiveFor = [], end }: NavItemProps) {
   const { pathname } = useLocation()
   const extra = alsoActiveFor.some((prefix) => pathname.startsWith(prefix))
   const hasCounts = count !== undefined || badges.length > 0
   const tooltip = [label, ...(count !== undefined ? [String(count)] : []), ...badges.map((b) => b.label)].join(' · ')
   return (
     <NavLink to={to} end={end} title={tooltip} className={({ isActive }) => (isActive || extra ? styles.active : undefined)}>
-      <span className={styles.glyph} aria-hidden="true">
-        {glyph}
-      </span>
+      <Icon name={icon} className={styles.navIcon} />
       <span className={styles.navLabel}>{label}</span>
       {hasCounts && (
         <span className={styles.counts}>
@@ -71,30 +71,18 @@ interface PinnedItemProps {
   clusters: ClusterCardDTO[] | undefined
 }
 
-/** Two lines: status dot and full name, then the cluster (service) or account (cluster). The dot follows the live status. */
+/** Two lines: status mark and full name, then the cluster (service) or account (cluster). The mark follows the live status. */
 function PinnedItem({ pin, clusters }: PinnedItemProps) {
-  let kind: PillKind = 'mute'
-  let statusText = 'Status unknown'
-  if (pin.kind === 'cluster') {
-    const cluster = clusters?.find((c) => c.id === pin.id)
-    if (cluster) {
-      kind = clusterStatusKind(cluster.status)
-      statusText = clusterStatusLabel(cluster.status)
-    }
-  } else {
-    const service = clusters?.flatMap((c) => c.services).find((s) => s.id === pin.id)
-    if (service) {
-      kind = statusKind(service.status)
-      statusText = statusLabel(service.status)
-    }
-  }
+  const { kind, text: statusText } = pinStatus(pin, clusters)
   const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
   const description = `${pin.name} · ${statusText} · ${detail}`
   const to = pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`
   return (
     <NavLink to={to} title={description} aria-label={description}>
       <span className={styles.pinTop}>
-        <span className={`${styles.pinDot} ${styles[`pin_${kind}`]}`} data-kind={kind} aria-hidden="true" />
+        <span className={styles.pinMark} data-kind={kind} aria-hidden="true">
+          <StatusDot bare kind={kind} />
+        </span>
         <span className={styles.pinName}>{pin.name}</span>
       </span>
       <span className={styles.pinDetail}>{detail}</span>
@@ -113,6 +101,7 @@ export function Sidebar() {
   const isAdmin = me?.admin ?? false
   const alerts = useAlerts(filters)
   const clusters = useClusters(filters)
+  const services = useServicesList(filters)
   const running = useTasks({ ...filters, filter: 'running' })
   const settings = useSettings()
   const authOptions = useAuthOptions()
@@ -122,13 +111,6 @@ export function Sidebar() {
   const allClusters = useClusters()
   const [linking, setLinking] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const menuShown = menuOpen && sidebarCollapsed
-  useEffect(() => {
-    if (!menuShown) return
-    const onKeyDown = (event: KeyboardEvent) => event.key === 'Escape' && setMenuOpen(false)
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [menuShown])
   if (!me) return null
 
   const canLinkSSO = authOptions.data?.sso != null && me.has_password && !me.sso_linked
@@ -145,30 +127,13 @@ export function Sidebar() {
   const settingsBadges: NavBadge[] = accountIssues > 0 ? [{ count: accountIssues, kind: 'warn', label: `${accountIssues} account issues` }] : []
   const dangerAlerts = alerts.data?.counts.danger ?? 0
   const signOut = async () => {
+    setMenuOpen(false)
     try {
       await logout()
     } catch {
       toast.show('Sign out failed on the server. You were signed out in this browser.', 'bad')
     }
   }
-
-  const actions = (
-    <>
-      {me.has_password && (
-        <button type="button" className={styles.btn} onClick={() => navigate('/password')}>
-          Change password
-        </button>
-      )}
-      {canLinkSSO && (
-        <button type="button" className={styles.btn} onClick={() => setLinking(true)}>
-          Link SSO account
-        </button>
-      )}
-      <button type="button" className={styles.btn} onClick={signOut}>
-        Sign out
-      </button>
-    </>
-  )
 
   return (
     <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`} aria-label="Sidebar">
@@ -177,21 +142,24 @@ export function Sidebar() {
         <div className={styles.brandSub}>ECS control center</div>
       </div>
       <nav className={styles.nav} aria-label="Main">
-        <NavItem to="/" end glyph="OV" label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
-        <NavItem to="/clusters" glyph="CL" label="Clusters" count={clusters.data?.items.length} alsoActiveFor={['/clusters', '/services']} />
-        <NavItem to="/tasks" glyph="TK" label="Tasks" badges={taskBadges} />
-        <NavItem to="/networks" glyph="NW" label="Networks" />
-        <NavItem to="/storage" glyph="ST" label="Storage" />
-        <NavItem to="/analytics/delivery" glyph="AN" label="Analytics" alsoActiveFor={['/analytics']} />
+        <NavItem to="/" end icon="overview" label="Overview" count={dangerAlerts > 0 ? dangerAlerts : undefined} bad />
+        <NavItem to="/services" icon="services" label="Services" count={services.data?.total} />
+        <NavItem to="/clusters" icon="clusters" label="Clusters" count={clusters.data?.items.length} />
+        <NavItem to="/tasks" icon="tasks" label="Tasks" badges={taskBadges} />
+        <div className={styles.navSection}>Infrastructure</div>
+        <NavItem to="/networks" icon="networks" label="Networks" />
+        <NavItem to="/storage" icon="storage" label="Storage" />
+        <div className={styles.navSection}>Insights</div>
+        <NavItem to="/analytics/delivery" icon="analytics" label="Analytics" alsoActiveFor={['/analytics']} />
         {isAdmin ? (
           <>
             <div className={styles.navSection}>Admin</div>
-            <NavItem to="/settings/general" glyph="SE" label="Settings" badges={settingsBadges} alsoActiveFor={['/settings']} />
+            <NavItem to="/settings/general" icon="settings" label="Settings" badges={settingsBadges} alsoActiveFor={['/settings']} />
           </>
         ) : (
           <>
             <div className={styles.navSection}>Account</div>
-            <NavItem to="/me/access" glyph="MA" label="My access" />
+            <NavItem to="/me/access" icon="user" label="My access" />
           </>
         )}
       </nav>
@@ -203,38 +171,58 @@ export function Sidebar() {
         ))}
       </nav>
       <div className={styles.sideFoot}>
-        <div className={styles.user}>
-          {sidebarCollapsed ? (
-            // The text block and the action buttons are hidden when collapsed, so the avatar opens them as a menu.
-            <button
-              type="button"
-              className={`${styles.avatar} ${styles.avatarBtn}`}
-              aria-label={`Account menu for ${me.username}`}
-              aria-haspopup="true"
-              aria-expanded={menuShown}
-              title={me.username}
-              onClick={() => setMenuOpen((open) => !open)}
-            >
-              {initials(me.username)}
-            </button>
-          ) : (
-            <span className={styles.avatar} aria-hidden="true" title={me.username}>
+        <div className={styles.accWrap}>
+          <button
+            type="button"
+            className={styles.accountBtn}
+            aria-label={`Account menu for ${me.username}`}
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
+            title={`${me.username} · ${me.admin ? 'Global admin' : 'User'}`}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span className={styles.avatar} aria-hidden="true">
               {initials(me.username)}
             </span>
-          )}
-          <div className={styles.userText}>
-            Signed in as <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
-          </div>
-        </div>
-        {sidebarCollapsed ? (
-          menuShown && (
-            <div className={styles.accountMenu} role="group" aria-label="Account" onClick={() => setMenuOpen(false)}>
-              {actions}
+            <span className={styles.userText}>
+              <strong>{me.username}</strong> · {me.admin ? 'Global admin' : 'User'}
+            </span>
+          </button>
+          <Popover open={menuOpen} onClose={() => setMenuOpen(false)} label="Account" width={232} role="group">
+            <div className={styles.accountMenu}>
+              <Link to="/me/access" className={styles.menuItem} onClick={() => setMenuOpen(false)}>
+                My access
+              </Link>
+              {me.has_password && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    navigate('/password')
+                  }}
+                >
+                  Change password
+                </button>
+              )}
+              {canLinkSSO && (
+                <button
+                  type="button"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setLinking(true)
+                  }}
+                >
+                  Link SSO account
+                </button>
+              )}
+              <button type="button" className={`${styles.menuItem} ${styles.menuDanger}`} onClick={signOut}>
+                Sign out
+              </button>
             </div>
-          )
-        ) : (
-          <div className={styles.sideActions}>{actions}</div>
-        )}
+          </Popover>
+        </div>
         <button
           type="button"
           className={styles.collapseBtn}
@@ -243,12 +231,13 @@ export function Sidebar() {
           title={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar ([)`}
           onClick={toggleSidebar}
         >
-          <span className={styles.collapseGlyph} aria-hidden="true">
-            {sidebarCollapsed ? '»' : '«'}
-          </span>
+          <Icon name="panel" className={styles.navIcon} />
           <span className={styles.collapseText} aria-hidden="true">
-            Collapse [
+            Collapse
           </span>
+          <kbd className={`${styles.kbd} ${styles.collapseText}`} aria-hidden="true">
+            [
+          </kbd>
         </button>
       </div>
       {linking && <LinkSSODialog onClose={() => setLinking(false)} />}

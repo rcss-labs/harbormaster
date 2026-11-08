@@ -5,7 +5,10 @@ import { api } from '../../../api/client'
 import { useAccounts, usePollerStatus, useTags } from '../../../api/hooks'
 import type { AccountDTO, PollerEntryDTO, RegionResult } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
+import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
+import { Icon } from '../../../components/Icon'
+import { usePhone } from '../../../components/usePhone'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { KV } from '../../../components/KV'
 import { Panel } from '../../../components/Panel'
@@ -23,16 +26,26 @@ type DialogState = { kind: 'connect' } | { kind: 'edit' | 'disconnect'; account:
 
 const minutesSince = (iso: string) => Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 60_000))
 
-/** Status of one account: its own state, then what the poller reports for its regions. */
-function AccountStatus({ account, polled }: { account: AccountDTO; polled: PollerEntryDTO[] }) {
+/** Status of one account: its own state, then what the poller reports for its regions. Raw AWS errors stay behind a disclosure. */
+function AccountStatus({
+  account,
+  polled,
+  tested,
+  detail = 'inline',
+}: {
+  account: AccountDTO
+  polled: PollerEntryDTO[]
+  tested: RegionResult[] | undefined
+  /** `inline`: the AWS error sits behind a disclosure; `none`: left out (phones show it in the details sheet); `open`: always shown. */
+  detail?: 'inline' | 'none' | 'open'
+}) {
   const failing = polled.filter((entry) => entry.failing)
   const throttled = polled.some((entry) => entry.throttled)
+  const hasDetail = detail !== 'none' && ((account.status === 'error' && account.last_error !== '') || failing.length > 0 || (tested?.length ?? 0) > 0)
   return (
     <>
       {account.status === 'error' ? (
-        <StatusDot kind="bad" title={account.last_error}>
-          Error
-        </StatusDot>
+        <StatusDot kind="bad">Error</StatusDot>
       ) : account.status === 'disabled' ? (
         <StatusDot kind="mute">Disabled</StatusDot>
       ) : (
@@ -40,10 +53,32 @@ function AccountStatus({ account, polled }: { account: AccountDTO; polled: Polle
       )}
       {failing.map((entry) => (
         <div key={entry.region} className={styles.statusNote} title={entry.region}>
-          {`Data is ${entry.last_ok_at ? `${minutesSince(entry.last_ok_at)} min old` : 'unavailable'}: ${entry.last_error}`}
+          {`Data is ${entry.last_ok_at ? `${minutesSince(entry.last_ok_at)} min old` : 'unavailable'}`}
         </div>
       ))}
       {throttled && <div className={`${styles.statusNote} ${styles.throttled}`}>Slowed by AWS throttling</div>}
+      {hasDetail && (
+        <details className={styles.errorDetails} open={detail === 'open' || undefined}>
+          <summary>Show AWS error</summary>
+          <div className={styles.errorBody}>
+            {account.status === 'error' && account.last_error !== '' && <div className={styles.mono}>{account.last_error}</div>}
+            {failing.map((entry) => (
+              <div key={entry.region} className={styles.mono}>
+                {entry.last_error}
+              </div>
+            ))}
+            {tested && tested.length > 0 && (
+              <ul className={styles.testResults} aria-label="Last test">
+                {tested.map((result) => (
+                  <li key={result.region} className={result.ok ? styles.resultOk : styles.resultBad}>
+                    {result.ok ? `${result.region} · ${result.clusters} ${result.clusters === 1 ? 'cluster' : 'clusters'}` : `${result.region} · ${result.error}`}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+      )}
     </>
   )
 }
@@ -61,6 +96,10 @@ export function Accounts() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const [dialog, setDialog] = useState<DialogState>(null)
+  const [testResults, setTestResults] = useState<Record<number, RegionResult[]>>({})
+  const phone = usePhone()
+  const [menuFor, setMenuFor] = useState<number | null>(null)
+  const [detailsFor, setDetailsFor] = useState<number | null>(null)
 
   const disconnect = useMutation({
     mutationFn: (account: AccountDTO) => api.del(`/api/accounts/${account.id}`),
@@ -87,6 +126,7 @@ export function Accounts() {
         })
         .then((body) => ({ account, regions: body.regions })),
     onSuccess: ({ account, regions }) => {
+      setTestResults((current) => ({ ...current, [account.id]: regions }))
       const allOk = regions.every((region) => region.ok)
       toast.show(`${account.name}: ${regions.map(describeRegion).join('; ')}`, allOk ? 'ok' : 'bad')
       void queryClient.invalidateQueries({ queryKey: ['poller'] })
@@ -97,6 +137,8 @@ export function Accounts() {
   if (!me || !isAdmin) return null
 
   const close = () => setDialog(null)
+  const menuAccount = accounts.data?.items.find((account) => account.id === menuFor)
+  const detailsAccount = accounts.data?.items.find((account) => account.id === detailsFor)
   const runtime = accounts.data?.runtime
   const polledFor = (account: AccountDTO) => (poller.data?.items ?? []).filter((entry) => entry.account_id === account.account_id)
 
@@ -104,6 +146,7 @@ export function Accounts() {
     {
       key: 'account',
       header: 'Account',
+      phone: 'title',
       width: 'minmax(150px, 1.2fr)',
       render: (account) => (
         <>
@@ -115,28 +158,45 @@ export function Accounts() {
     {
       key: 'role',
       header: 'Role Harbormaster assumes',
+      phone: 'hidden',
       width: 'minmax(220px, 2fr)',
       render: (account) => <span className={`${styles.mono} ${styles.small}`}>{account.role_arn}</span>,
     },
     { key: 'regions', header: 'Regions scanned', width: 'minmax(150px, 1fr)', render: (account) => account.regions.join(', ') },
-    { key: 'clusters', header: 'Clusters', width: '80px', align: 'right', render: (account) => account.clusters },
+    {
+      key: 'clusters',
+      header: 'Clusters',
+      phoneLabel: false,
+      width: '80px',
+      align: 'right',
+      render: (account) => (phone ? `${account.clusters} ${account.clusters === 1 ? 'cluster' : 'clusters'}` : account.clusters),
+    },
     {
       key: 'status',
       header: 'Status',
       width: 'minmax(200px, 1.5fr)',
-      render: (account) => <AccountStatus account={account} polled={polledFor(account)} />,
+      render: (account) => (
+        <AccountStatus account={account} polled={polledFor(account)} tested={testResults[account.id]} detail={phone ? 'none' : 'inline'} />
+      ),
     },
     {
       key: 'last',
       header: 'Last check',
+      phoneLabel: false,
       width: '100px',
-      render: (account) => <span className={styles.muted}>{account.last_ok_at ? <Ago ts={account.last_ok_at} /> : '–'}</span>,
+      render: (account) => (
+        <span className={styles.muted}>
+          {phone && 'Last check '}
+          {account.last_ok_at ? <Ago ts={account.last_ok_at} /> : '–'}
+        </span>
+      ),
     },
     {
       key: 'actions',
       header: '',
       width: '250px',
       align: 'right',
+      phone: 'hidden',
       render: (account) => (
         <span className={styles.rowActions}>
           <button
@@ -174,7 +234,16 @@ export function Accounts() {
               columns={columns}
               rows={accounts.data.items}
               rowKey={(account) => String(account.id)}
-              minWidth={1100}
+              minWidth={phone ? undefined : 1100}
+              rowAction={
+                phone
+                  ? (account) => (
+                      <button type="button" className={styles.moreBtn} aria-label={`Actions for ${account.name}`} aria-haspopup="menu" onClick={() => setMenuFor(account.id)}>
+                        <Icon name="more" size={18} />
+                      </button>
+                    )
+                  : undefined
+              }
               empty="No accounts connected."
               rowStatus={(account) => {
                 const polled = polledFor(account)
@@ -229,6 +298,51 @@ export function Accounts() {
         )}
       </div>
 
+      {menuAccount && (
+        <BottomSheet open onClose={() => setMenuFor(null)} label={`Actions for ${menuAccount.name}`} title={menuAccount.name} sub={menuAccount.account_id} role="menu">
+          <SheetAction
+            label="Test now"
+            disabled={testNow.isPending}
+            onClick={() => {
+              setMenuFor(null)
+              testNow.mutate(menuAccount)
+            }}
+          />
+          <SheetAction
+            label="Edit"
+            onClick={() => {
+              setMenuFor(null)
+              setDialog({ kind: 'edit', account: menuAccount })
+            }}
+          />
+          <SheetAction
+            label="Details"
+            onClick={() => {
+              setMenuFor(null)
+              setDetailsFor(menuAccount.id)
+            }}
+          />
+          <SheetAction
+            label="Disconnect"
+            danger
+            onClick={() => {
+              setMenuFor(null)
+              setDialog({ kind: 'disconnect', account: menuAccount })
+            }}
+          />
+        </BottomSheet>
+      )}
+      {detailsAccount && (
+        <BottomSheet open onClose={() => setDetailsFor(null)} label={`Details for ${detailsAccount.name}`} title={detailsAccount.name} sub={detailsAccount.account_id}>
+          <KV
+            rows={[
+              ['Role Harbormaster assumes', <span className={styles.mono}>{detailsAccount.role_arn}</span>],
+              ['Regions scanned', detailsAccount.regions.join(', ')],
+            ]}
+          />
+          <AccountStatus account={detailsAccount} polled={polledFor(detailsAccount)} tested={testResults[detailsAccount.id]} detail="open" />
+        </BottomSheet>
+      )}
       {dialog?.kind === 'connect' && <ConnectAccountDialog onClose={close} />}
       {dialog?.kind === 'edit' && <EditAccountDialog account={dialog.account} onClose={close} />}
       {dialog?.kind === 'disconnect' && (

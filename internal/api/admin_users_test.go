@@ -63,17 +63,17 @@ func TestUsers_NonAdminIs403(t *testing.T) {
 func TestListUsers_CanSee(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedMockupTags(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	var out struct {
 		Items []testUserDTO `json:"items"`
 	}
-	decode(t, pavel.get("/api/users"), &out)
+	decode(t, sam.get("/api/users"), &out)
 	byName := map[string]testUserDTO{}
 	for _, u := range out.Items {
 		byName[u.Username] = u
 	}
-	if len(byName["pavel"].CanSee) != 3 {
-		t.Fatalf("admin can_see = %+v, want all 3 tags", byName["pavel"].CanSee)
+	if len(byName["sam"].CanSee) != 3 {
+		t.Fatalf("admin can_see = %+v, want all 3 tags", byName["sam"].CanSee)
 	}
 	oncall := byName["oncall"].CanSee
 	if len(oncall) != 2 || oncall[0].Name != "Prod" || oncall[1].Name != "Staging" {
@@ -83,9 +83,9 @@ func TestListUsers_CanSee(t *testing.T) {
 
 func TestCreateUser_ValidationAndConflict(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	for _, name := range []string{"a", "Bad", "1abc", "has space", "x" + string(make([]byte, 40))} {
-		resp := pavel.post("/api/users", map[string]any{"username": name, "admin": false})
+		resp := sam.post("/api/users", map[string]any{"username": name, "admin": false})
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("%q: status %d", name, resp.StatusCode)
 		}
@@ -93,7 +93,7 @@ func TestCreateUser_ValidationAndConflict(t *testing.T) {
 			t.Fatalf("%q: message %q", name, msg)
 		}
 	}
-	resp := pavel.post("/api/users", map[string]any{"username": "gina.k", "admin": true})
+	resp := sam.post("/api/users", map[string]any{"username": "gina.k", "admin": true})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create status %d", resp.StatusCode)
 	}
@@ -108,7 +108,7 @@ func TestCreateUser_ValidationAndConflict(t *testing.T) {
 	if a := lastAudit(t, st); a.Action != "user_create" || a.Target != "user:gina.k" || a.Summary != "Created user gina.k as global admin." {
 		t.Fatalf("audit = %+v", a)
 	}
-	resp = pavel.post("/api/users", map[string]any{"username": "gina.k", "admin": false})
+	resp = sam.post("/api/users", map[string]any{"username": "gina.k", "admin": false})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("duplicate status %d", resp.StatusCode)
 	}
@@ -116,12 +116,12 @@ func TestCreateUser_ValidationAndConflict(t *testing.T) {
 		t.Fatalf("conflict message %q", msg)
 	}
 	// Case-insensitive duplicate of an existing user is also a conflict.
-	resp = pavel.post("/api/users", map[string]any{"username": "omer", "admin": false})
+	resp = sam.post("/api/users", map[string]any{"username": "omer", "admin": false})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("existing user status %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	resp = pavel.post("/api/users", map[string]any{"username": "plain", "admin": false})
+	resp = sam.post("/api/users", map[string]any{"username": "plain", "admin": false})
 	decode(t, resp, &created)
 	if a := lastAudit(t, st); a.Summary != "Created user plain." {
 		t.Fatalf("audit summary %q", a.Summary)
@@ -130,11 +130,11 @@ func TestCreateUser_ValidationAndConflict(t *testing.T) {
 
 func TestCreateUser_TemporaryPasswordForcesChange(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	var created struct {
 		TemporaryPassword string `json:"temporary_password"`
 	}
-	decode(t, pavel.post("/api/users", map[string]any{"username": "newbie", "admin": false}), &created)
+	decode(t, sam.post("/api/users", map[string]any{"username": "newbie", "admin": false}), &created)
 	newbie := login(t, srv, "newbie", created.TemporaryPassword)
 	var me MeDTO
 	// /api/me is allowed while a password change is pending.
@@ -146,23 +146,23 @@ func TestCreateUser_TemporaryPasswordForcesChange(t *testing.T) {
 
 func TestDeleteUser_SelfAndLastAdminRefused(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
-	pavelID := userID(t, st, "pavel")
-	resp := pavel.do("DELETE", fmt.Sprintf("/api/users/%d", pavelID), nil, nil)
+	sam := login(t, srv, "sam", testPassword)
+	samID := userID(t, st, "sam")
+	resp := sam.do("DELETE", fmt.Sprintf("/api/users/%d", samID), nil, nil)
 	if resp.StatusCode != 422 {
 		t.Fatalf("self delete %d", resp.StatusCode)
 	}
 	if _, msg := errorCode(t, resp); msg != "You cannot delete yourself." {
 		t.Fatalf("msg %q", msg)
 	}
-	resp = pavel.do("DELETE", "/api/users/999999", nil, nil)
+	resp = sam.do("DELETE", "/api/users/999999", nil, nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("unknown delete %d", resp.StatusCode)
 	}
 	resp.Body.Close()
 
 	omerID := userID(t, st, "omer")
-	resp = pavel.do("DELETE", fmt.Sprintf("/api/users/%d", omerID), nil, nil)
+	resp = sam.do("DELETE", fmt.Sprintf("/api/users/%d", omerID), nil, nil)
 	if resp.StatusCode != 204 {
 		t.Fatalf("delete omer %d", resp.StatusCode)
 	}
@@ -182,10 +182,10 @@ func TestSetAdmin_LastAdminRefused(t *testing.T) {
 	if err := st.SetAdmin(t.Context(), omerID, true); err != nil {
 		t.Fatal(err)
 	}
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	omer := login(t, srv, "omer", testPassword)
-	// pavel demotes omer (2 admins -> ok); then omer is no longer admin; pavel is last admin.
-	resp := pavel.post(fmt.Sprintf("/api/users/%d/admin", omerID), map[string]any{"admin": false})
+	// sam demotes omer (2 admins -> ok); then omer is no longer admin; sam is last admin.
+	resp := sam.post(fmt.Sprintf("/api/users/%d/admin", omerID), map[string]any{"admin": false})
 	if resp.StatusCode != 204 {
 		t.Fatalf("demote omer %d", resp.StatusCode)
 	}
@@ -195,9 +195,9 @@ func TestSetAdmin_LastAdminRefused(t *testing.T) {
 		t.Fatalf("demoted admin session = %d, want 401", resp.StatusCode)
 	}
 	resp.Body.Close()
-	// pavel is the last admin: cannot be demoted.
-	pavelID := userID(t, st, "pavel")
-	resp = pavel.post(fmt.Sprintf("/api/users/%d/admin", pavelID), map[string]any{"admin": false})
+	// sam is the last admin: cannot be demoted.
+	samID := userID(t, st, "sam")
+	resp = sam.post(fmt.Sprintf("/api/users/%d/admin", samID), map[string]any{"admin": false})
 	if resp.StatusCode != 422 {
 		t.Fatalf("demote last admin %d", resp.StatusCode)
 	}
@@ -209,32 +209,32 @@ func TestSetAdmin_LastAdminRefused(t *testing.T) {
 func TestRemoveAdmin_EndsSessionsOfThatUser(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	omerID := userID(t, st, "omer")
-	pavelID := userID(t, st, "pavel")
+	samID := userID(t, st, "sam")
 	if err := st.SetAdmin(t.Context(), omerID, true); err != nil {
 		t.Fatal(err)
 	}
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	omer := login(t, srv, "omer", testPassword)
-	resp := omer.post(fmt.Sprintf("/api/users/%d/admin", pavelID), map[string]any{"admin": false})
+	resp := omer.post(fmt.Sprintf("/api/users/%d/admin", samID), map[string]any{"admin": false})
 	if resp.StatusCode != 204 {
 		t.Fatalf("demote status %d", resp.StatusCode)
 	}
-	if a := lastAudit(t, st); a.Action != "admin_revoke" || a.Summary != "Removed pavel as global admin." {
+	if a := lastAudit(t, st); a.Action != "admin_revoke" || a.Summary != "Removed sam as global admin." {
 		t.Fatalf("audit %+v", a)
 	}
-	resp = pavel.get("/api/me")
+	resp = sam.get("/api/me")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("demoted user's next request = %d, want 401", resp.StatusCode)
 	}
 	resp.Body.Close()
 	// Granting again is audited; a no-op is not.
-	resp = omer.post(fmt.Sprintf("/api/users/%d/admin", pavelID), map[string]any{"admin": true})
+	resp = omer.post(fmt.Sprintf("/api/users/%d/admin", samID), map[string]any{"admin": true})
 	resp.Body.Close()
-	if a := lastAudit(t, st); a.Action != "admin_grant" || a.Summary != "Made pavel a global admin." {
+	if a := lastAudit(t, st); a.Action != "admin_grant" || a.Summary != "Made sam a global admin." {
 		t.Fatalf("audit %+v", a)
 	}
 	before := lastAudit(t, st).ID
-	resp = omer.post(fmt.Sprintf("/api/users/%d/admin", pavelID), map[string]any{"admin": true})
+	resp = omer.post(fmt.Sprintf("/api/users/%d/admin", samID), map[string]any{"admin": true})
 	if resp.StatusCode != 204 {
 		t.Fatalf("no-op status %d", resp.StatusCode)
 	}
@@ -246,12 +246,12 @@ func TestRemoveAdmin_EndsSessionsOfThatUser(t *testing.T) {
 
 func TestResetPassword(t *testing.T) {
 	srv, _, st := newTestServer(t)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	omer := login(t, srv, "omer", testPassword)
 	var out struct {
 		TemporaryPassword string `json:"temporary_password"`
 	}
-	decode(t, pavel.post(fmt.Sprintf("/api/users/%d/reset-password", userID(t, st, "omer")), nil), &out)
+	decode(t, sam.post(fmt.Sprintf("/api/users/%d/reset-password", userID(t, st, "omer")), nil), &out)
 	if out.TemporaryPassword == "" {
 		t.Fatal("no temporary password")
 	}
@@ -269,7 +269,7 @@ func TestResetPassword(t *testing.T) {
 func TestPermissions_NormalizesAndAudits(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedMockupTags(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	tags, err := st.ListTags(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -286,7 +286,7 @@ func TestPermissions_NormalizesAndAudits(t *testing.T) {
 	var got struct {
 		Actions int `json:"actions"`
 	}
-	resp := pavel.do("PUT", path, map[string]any{"actions": 2}, nil)
+	resp := sam.do("PUT", path, map[string]any{"actions": 2}, nil)
 	decode(t, resp, &got)
 	if got.Actions != 3 {
 		t.Fatalf("actions = %d, want 3", got.Actions)
@@ -301,13 +301,13 @@ func TestPermissions_NormalizesAndAudits(t *testing.T) {
 
 	// Unchanged -> 200, no audit.
 	before := a.ID
-	resp = pavel.do("PUT", path, map[string]any{"actions": 3}, nil)
+	resp = sam.do("PUT", path, map[string]any{"actions": 3}, nil)
 	decode(t, resp, &got)
 	if got.Actions != 3 || lastAudit(t, st).ID != before {
 		t.Fatalf("unchanged: %d, audited=%v", got.Actions, lastAudit(t, st).ID != before)
 	}
 
-	resp = pavel.do("PUT", path, map[string]any{"actions": 0}, nil)
+	resp = sam.do("PUT", path, map[string]any{"actions": 0}, nil)
 	decode(t, resp, &got)
 	if got.Actions != 0 {
 		t.Fatalf("actions = %d", got.Actions)
@@ -317,8 +317,8 @@ func TestPermissions_NormalizesAndAudits(t *testing.T) {
 	}
 
 	// Both lines when something is added and something removed.
-	pavel.do("PUT", path, map[string]any{"actions": 3}, nil).Body.Close()
-	pavel.do("PUT", path, map[string]any{"actions": 33}, nil).Body.Close() // V,L -> V,T
+	sam.do("PUT", path, map[string]any{"actions": 3}, nil).Body.Close()
+	sam.do("PUT", path, map[string]any{"actions": 33}, nil).Body.Close() // V,L -> V,T
 	if a := lastAudit(t, st); a.Summary != "Gave omer Terminal on Prod. Removed Logs on Prod from omer." {
 		t.Fatalf("audit summary %q", a.Summary)
 	}
@@ -327,21 +327,21 @@ func TestPermissions_NormalizesAndAudits(t *testing.T) {
 func TestPermissions_Validation(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedMockupTags(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
-	omerID, pavelID := userID(t, st, "omer"), userID(t, st, "pavel")
+	sam := login(t, srv, "sam", testPassword)
+	omerID, samID := userID(t, st, "omer"), userID(t, st, "sam")
 	for _, tc := range []struct {
 		path    string
 		actions int
 		status  int
 		msg     string
 	}{
-		{fmt.Sprintf("/api/permissions/%d/1", pavelID), 1, 422, "Global admins have every permission."},
+		{fmt.Sprintf("/api/permissions/%d/1", samID), 1, 422, "Global admins have every permission."},
 		{fmt.Sprintf("/api/permissions/%d/1", omerID), 64, 422, ""},
 		{fmt.Sprintf("/api/permissions/%d/1", omerID), -1, 422, ""},
 		{"/api/permissions/999999/1", 1, 404, ""},
 		{fmt.Sprintf("/api/permissions/%d/999999", omerID), 1, 404, ""},
 	} {
-		resp := pavel.do("PUT", tc.path, map[string]any{"actions": tc.actions}, nil)
+		resp := sam.do("PUT", tc.path, map[string]any{"actions": tc.actions}, nil)
 		if resp.StatusCode != tc.status {
 			t.Errorf("%s %d: status %d, want %d", tc.path, tc.actions, resp.StatusCode, tc.status)
 		}
@@ -358,7 +358,7 @@ func TestPermissions_Validation(t *testing.T) {
 func TestGetPermissions_Matrix(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedMockupTags(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 	var out struct {
 		Tags []struct {
 			ID               int64  `json:"id"`
@@ -373,7 +373,7 @@ func TestGetPermissions_Matrix(t *testing.T) {
 			Perms    map[string]int `json:"perms"`
 		} `json:"users"`
 	}
-	decode(t, pavel.get("/api/permissions"), &out)
+	decode(t, sam.get("/api/permissions"), &out)
 	if len(out.Tags) != 3 || out.Tags[0].Name != "Dev" || out.Tags[1].Name != "Prod" || out.Tags[2].Name != "Staging" {
 		t.Fatalf("tags %+v", out.Tags)
 	}
@@ -387,7 +387,7 @@ func TestGetPermissions_Matrix(t *testing.T) {
 			t.Fatalf("%s perms is null", u.Username)
 		}
 	}
-	if fmt.Sprint(names) != "[dana omer oncall pavel]" {
+	if fmt.Sprint(names) != "[dana omer oncall sam]" {
 		t.Fatalf("users %v", names)
 	}
 	if out.Users[0].Perms[fmt.Sprint(out.Tags[0].ID)] != 63 {

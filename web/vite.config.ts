@@ -17,7 +17,9 @@ export default defineConfig({
     environment: 'jsdom',
     environmentOptions: { jsdom: { url: 'http://localhost:3000/' } },
     setupFiles: ['src/test/setup.ts'],
+    // The first render of a heavy page in a file (charts, forms, a whole app tree) can pass the 5 s default when the machine is busy.
+    testTimeout: 15_000,
     css: { modules: { classNameStrategy: 'non-scoped' } },
-    exclude: ['e2e/**', 'node_modules/**'],
+    exclude: ['e2e/**', 'e2e-floci/**', 'node_modules/**'],
   },
 })

@@ -31,7 +31,7 @@ func TestService_DetailShape(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getService(t, login(t, srv, "pavel", testPassword), paymentsID())
+	got := getService(t, login(t, srv, "sam", testPassword), paymentsID())
 
 	if got.Name != "payments-api" || got.Cluster.Name != "core-services" || got.AccountID != homelabAccountID || got.Region != "us-east-1" {
 		t.Errorf("identity = %s %s %s %s", got.Name, got.Cluster.Name, got.AccountID, got.Region)
@@ -88,7 +88,7 @@ func TestService_NotificationsRollout(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	got := getService(t, login(t, srv, "pavel", testPassword),
+	got := getService(t, login(t, srv, "sam", testPassword),
 		serviceID(homelabAccountID, "us-east-1", "core-services", "notifications"))
 
 	if got.Status != model.StatusDeploying {
@@ -124,7 +124,7 @@ func TestService_InvisibleIs404(t *testing.T) {
 	cases := []struct{ user, id string }{
 		{"omer", paymentsID()},
 		{"oncall", serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")},
-		{"pavel", "not-a-service-id"},
+		{"sam", "not-a-service-id"},
 	}
 	for _, c := range cases {
 		resp := login(t, srv, c.user, testPassword).get("/api/services/" + c.id)
@@ -159,7 +159,7 @@ func TestServiceDetail_IncludesVPCAndSecurityGroupNames(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	pollAll(t, st, fk) // the first network run can precede services, so SG names need a second pass
-	got := getService(t, login(t, srv, "pavel", testPassword), paymentsID())
+	got := getService(t, login(t, srv, "sam", testPassword), paymentsID())
 	if got.Networking.VPC == nil || got.Networking.VPC.VPCID != vpcMain || got.Networking.VPC.Name != "homelab-main" {
 		t.Errorf("vpc = %+v, want %s homelab-main", got.Networking.VPC, vpcMain)
 	}

@@ -2,35 +2,36 @@
 
 Harbormaster is a web control center for AWS ECS. It gives a DevOps team the experience Stackstead gives for a Docker host (one place to see what runs, how it behaves, and to change it safely), but the backend is AWS: ECS clusters, services and tasks, task definitions, ECR images, EFS file systems, VPCs and CloudWatch.
 
-![Harbormaster](docs/design/assets/main_logo.png)
+![Harbormaster](assets/main_logo.png)
 
 ## Screens
 
-- [Overview](docs/design/screens/overview.png): cluster usage and service health at a glance
-- [Clusters](docs/design/screens/clusters.png): every cluster in the connected accounts and regions
-- [Cluster](docs/design/screens/cluster.png): one cluster with its services and capacity
-- [Service overview](docs/design/screens/service-overview.png): a service's status, rollout and summary
-- [Service metrics](docs/design/screens/service-metrics.png): CloudWatch and Container Insights charts for a service
-- [Service task definition](docs/design/screens/service-task-definition.png): the task definition JSON, its revisions and rollback; deploys open the Deploy tab
-- [Service deploy](docs/design/2026-10-31-harbormaster-design.md#deploy-tab): containers, task size, service settings and auto scaling, reviewed as one change set with a reason and live rollout progress
-- [Service tasks](docs/design/screens/service-tasks.png): running and stopped tasks of a service
-- [Service scaling](docs/design/screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
-- [Service logs](docs/design/screens/service-logs.png): CloudWatch log history and live tail
-- [Service terminal](docs/design/screens/service-terminal.png): an interactive shell in a running task through ECS Exec
-- [Service operations log](docs/design/screens/service-operations-log.png): who changed or opened what, and when
-- [Tasks](docs/design/screens/tasks.png): tasks across the estate
-- [Network tree](docs/design/screens/network-tree.png): VPCs, subnets and their connections
-- [Network account](docs/design/screens/network-account.png): networking for one connected account
-- [Network region](docs/design/screens/network-region.png): networking for one region
-- [Storage](docs/design/screens/storage.png): EFS file systems, access points and mount targets
-- [Users and permissions](docs/design/screens/users-permissions.png): global admin view of users and their access
-- [Tags](docs/design/screens/tags.png): the tags that drive permissions
-- [AWS accounts](docs/design/screens/aws-accounts.png): connected accounts, their regions and connection status
-- [Audit log](docs/design/screens/audit-log.png): sign-ins and changes made in Harbormaster
+- [Overview](screens/overview.png): cluster usage and service health at a glance
+- [Clusters](screens/clusters.png): every cluster in the connected accounts and regions
+- [Cluster](screens/cluster.png): one cluster with its services and capacity
+- [Service overview](screens/service-overview.png): a service's status, rollout and summary
+- [Service metrics](screens/service-metrics.png): CloudWatch and Container Insights charts for a service
+- [Service task definition](screens/service-task-definition.png): the task definition JSON, its revisions and rollback; deploys open the Deploy tab
+- [Service deploy](2026-10-31-harbormaster-design.md#deploy-tab): containers, task size, service settings and auto scaling, reviewed as one change set with a reason and live rollout progress
+- [Service tasks](screens/service-tasks.png): running and stopped tasks of a service
+- [Service timeline](screens/service-timeline.png): one service's changes, task stops, active alerts, log errors and terminal sessions on one time axis, with the likely trigger of a failure and rollback from it
+- [Service scaling](screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
+- [Service logs](screens/service-logs.png): CloudWatch log history and live tail
+- [Service terminal](screens/service-terminal.png): an interactive shell in a running task through ECS Exec
+- [Service operations log](screens/service-operations-log.png): who changed or opened what, and when
+- [Tasks](screens/tasks.png): tasks across the estate
+- [Network tree](screens/network-tree.png): VPCs, subnets and their connections
+- [Network account](screens/network-account.png): networking for one connected account
+- [Network region](screens/network-region.png): networking for one region
+- [Storage](screens/storage.png): EFS file systems, access points and mount targets
+- [Users and permissions](screens/users-permissions.png): global admin view of users and their access
+- [Tags](screens/tags.png): the tags that drive permissions
+- [AWS accounts](screens/aws-accounts.png): connected accounts, their regions and connection status
+- [Audit log](screens/audit-log.png): sign-ins and changes made in Harbormaster
 
 ## How it runs
 
-![Harbormaster architecture: browsers reach an ALB over HTTPS in the Harbormaster AWS account; the ECS service "harbormaster" (Fargate) runs the API, the leader-only poller, the exec bridge and the log tail, backed by RDS PostgreSQL and Secrets Manager; it assumes an IAM role per region in each managed account (sts:AssumeRole with external ID) to reach ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.](docs/design/assets/AWS%20Harbormaster%20Architecture%20Overview.png)
+![Harbormaster architecture: browsers reach an ALB over HTTPS in the Harbormaster AWS account; the ECS service "harbormaster" (Fargate) runs the API, the leader-only poller, the exec bridge and the log tail, backed by RDS PostgreSQL and Secrets Manager; it assumes an IAM role per region in each managed account (sts:AssumeRole with external ID) to reach ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.](assets/AWS%20Harbormaster%20Architecture%20Overview.png)
 
 Harbormaster is one Go binary that serves an embedded React single-page app. Browsers poll `/api` about every 5 seconds, so the view stays current without a push channel. Exactly one task (the poller leader, chosen with a Postgres advisory lock) polls AWS and writes snapshots to Postgres, and any task can answer API reads from them, while logs, metrics, deploys and terminal sessions call AWS directly from whichever task serves the request. What a user can see and do comes from their tags and permissions, and the server checks them on every request, including the WebSocket endpoints for the terminal and live logs.
 
@@ -161,7 +162,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` | | Secrets Manager secret with the initial `admin` password (see First run) |
 | `HM_METRICS_TOKEN` | | Bearer token for `GET /metrics`. Empty disables the endpoint (it returns 404) |
 | `HM_COOKIE_SECURE` | `true` | Set the Secure flag on cookies. Use `false` only for plain-HTTP local runs. It does not relax SSO metadata fetching: only `HM_FAKE_AWS` allows `http` and private addresses there |
-| `HM_FAKE_AWS` | `false` | Local demo only, same as `serve --fake-aws`. Seeds demo users (admin `pavel` with a published password) and refuses to run against a database that already has users or accounts. Never set in production |
+| `HM_FAKE_AWS` | `false` | Local demo only, same as `serve --fake-aws`. Seeds demo users (admin `sam` with a published password) and refuses to run against a database that already has users or accounts. Never set in production |
 | `HM_TRUSTED_PROXY` | `false` | Trust the rightmost `X-Forwarded-For` entry as the client IP. Enable only behind a proxy that appends the real client address (the Terraform module sets it for the ALB) |
 | `HM_LOG_LEVEL` | `info` | Log level |
 | `HM_SESSION_IDLE` | `12h` | Idle session timeout |
@@ -208,7 +209,17 @@ All settings are environment variables, read by `internal/config`. Durations use
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `HM_ANALYTICS_UTIL` | `true` | Daily CloudWatch utilisation rollup for the Capacity tab; one GetMetricData batch per account and region a day |
+| `HM_ANALYTICS_UTIL` | `true` | Daily CloudWatch utilisation rollup for the Capacity and Cost tabs; one GetMetricData batch per account and region a day |
+
+#### Cost tab
+
+The Cost tab estimates the monthly run rate of the running Fargate tasks at list prices, grouped by cluster, account or tag. It is an estimate from the latest poll, not a bill. The page states the price date (19 Oct 2026) and what it leaves out: load balancers, data transfer, storage above 20 GB and Spot discounts.
+
+- **Spot:** Fargate Spot tasks are counted at the Fargate list price with no Spot discount, so the figure is an upper bound and a saving that includes Spot tasks reads "up to".
+- **EC2 and other capacity:** tasks that are not Fargate (EC2, external or a custom capacity provider) get no dollar figure and are counted in a banner as not priced. The same goes for a region without a price table; Harbormaster never borrows another region's price. The cluster page shows these tasks as "EC2/other" next to the Fargate and Spot counts.
+- **Rightsizing:** each service gets the smallest valid Fargate task size that covers its highest daily p95 CPU and memory plus the headroom set on the slider (10 to 100 percent, default 30). A suggestion needs at least 14 days of complete utilisation rows and a latest row no older than 3 days; otherwise the service is listed under "No suggestion" with the reason.
+- **Applying a suggestion:** "Draft change sets" does not deploy anything. It links to each selected service's Deploy tab with the size filled in and the reason "Rightsizing at N% headroom", and the change goes through the usual Review dialog.
+- **Permissions and prices:** no AWS permission is added, and nothing calls an AWS pricing API. Everything comes from data Harbormaster already collects. Prices are a table in `internal/cost/prices.go`, refreshed by hand.
 
 ### Limits
 
@@ -397,7 +408,7 @@ export HM_TEST_DATABASE_URL='postgres://...'   # the URL make test-db prints
 make run                            # http://127.0.0.1:8480, in-memory fake AWS estate
 ```
 
-`make run` starts `serve --fake-aws`: it migrates the database, seeds demo users, tags and permissions, and serves a fake ECS estate, so no AWS credentials are needed. Sign in as `pavel` / `harbormaster-e2e-1` (a global admin). `dana`, `omer` and `oncall` use the same password with narrower access. Never use `--fake-aws` (or `HM_FAKE_AWS`) against a database that holds real users.
+`make run` starts `serve --fake-aws`: it migrates the database, seeds demo users, tags and permissions, and serves a fake ECS estate, so no AWS credentials are needed. Sign in as `sam` / `harbormaster-e2e-1` (a global admin). `dana`, `omer` and `oncall` use the same password with narrower access. Never use `--fake-aws` (or `HM_FAKE_AWS`) against a database that holds real users.
 
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 

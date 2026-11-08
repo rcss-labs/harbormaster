@@ -13,7 +13,13 @@ const userRow = (page: Page, username: string) =>
   page
     .getByRole('row')
     .filter({ hasText: new RegExp(`^${username}(?:\\s|${username}@|(?![a-z0-9.-]))`) })
-    .filter({ has: page.getByRole('button', { name: 'Delete' }) })
+    .filter({ has: page.getByRole('button', { name: /^Actions for / }) })
+
+/** Opens the user's Actions menu and clicks the named item. */
+async function rowAction(page: Page, username: string, item: string) {
+  await userRow(page, username).getByRole('button', { name: `Actions for ${username}` }).click()
+  await page.getByRole('menuitem', { name: item }).click()
+}
 
 /** Completes the fake IdP form: it auto-posts the signed response back to Harbormaster. */
 async function signInAtFakeIdP(page: Page, user: string) {
@@ -36,7 +42,7 @@ const savedPermission = (page: Page) =>
   page.waitForResponse((response) => response.url().includes('/api/permissions/') && response.request().method() === 'PUT' && response.ok())
 
 test.describe.serial('single sign-on against the fake identity provider', () => {
-  test.use(asUser('pavel'))
+  test.use(asUser('sam'))
 
   test('configure, test, link, enable, sign in, replay, unlink', async ({ page, browser, baseURL, playwright }) => {
     test.setTimeout(180_000)
@@ -52,7 +58,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // (2) Test sign-in opens a popup that ends on the settings page with the result.
       const popupPromise = page.waitForEvent('popup')
-      await page.getByRole('link', { name: 'Test sign-in' }).click()
+      await page.getByRole('region', { name: 'Test sign-in' }).getByRole('link', { name: 'Test sign-in' }).click()
       const popup = await popupPromise
       await signInAtFakeIdP(popup, 'alex')
       await popup.waitForURL(/\/settings\/sso\?test=/)
@@ -62,28 +68,29 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // (3) Self-link while SSO is still off.
       await page.goto('/')
+      await page.getByRole('button', { name: 'Account menu for sam' }).click()
       await page.getByRole('button', { name: 'Link SSO account' }).click()
       const linkDialog = page.getByRole('dialog', { name: 'Link your SSO account' })
       await linkDialog.getByLabel('Password').fill(SEED_PASSWORD)
       await linkDialog.getByRole('button', { name: 'Continue to identity provider' }).click()
-      await signInAtFakeIdP(page, 'pavel')
+      await signInAtFakeIdP(page, 'sam')
       await expect(page).toHaveURL(/\/(\?.*)?$/)
       await expect(page.getByText('Your SSO account is linked.')).toBeVisible()
       await page.goto('/settings/users')
-      await expect(userRow(page, 'pavel')).toContainText('Password')
-      await expect(userRow(page, 'pavel')).toContainText('SSO linked')
+      await expect(userRow(page, 'sam')).toContainText('Password')
+      await expect(userRow(page, 'sam')).toContainText('SSO linked')
 
       // (4) Pending link for dana.
-      await userRow(page, 'dana').getByRole('button', { name: 'Link SSO…' }).click()
+      await rowAction(page, 'dana', 'Link SSO…')
       const pendingDialog = page.getByRole('dialog')
       await pendingDialog.getByLabel('NameID').fill('dana@example.test')
       await pendingDialog.getByRole('button', { name: 'Set pending link' }).click()
       await expect(userRow(page, 'dana')).toContainText('Link pending')
 
-      // (5) Break-glass for pavel, so turning SSO on cannot lock the admins out.
-      await userRow(page, 'pavel').getByRole('button', { name: 'Make break-glass' }).click()
+      // (5) Break-glass for sam, so turning SSO on cannot lock the admins out.
+      await rowAction(page, 'sam', 'Make break-glass')
       await page.getByRole('dialog').getByRole('button', { name: 'Make break-glass' }).click()
-      await expect(userRow(page, 'pavel')).toContainText('Break-glass')
+      await expect(userRow(page, 'sam')).toContainText('Break-glass')
 
       // (6) Turn SSO on.
       await page.goto('/settings/sso')
@@ -96,7 +103,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         const dana = await startContext(browser, baseURL)
         await ssoSignIn(dana.page, 'dana')
         await expect(dana.page).toHaveURL(/\/(\?.*)?$/)
-        await expect(dana.page.getByText('Signed in as')).toContainText('dana')
+        await expect(dana.page.getByRole('button', { name: 'Account menu for dana' })).toContainText('dana')
         await dana.page.goto('/clusters')
         await expect(dana.page.getByRole('table', { name: 'Clusters' }).getByRole('row')).toHaveCount(7)
         await dana.assertClean()
@@ -117,6 +124,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         await expect(alex.page.getByText(NO_ACCESS)).toBeVisible()
 
         await page.goto('/settings/users')
+        await page.getByRole('button', { name: /^alex on Dev: / }).click()
         const preset = page.getByLabel('Preset for alex on Dev')
         await Promise.all([savedPermission(page), preset.selectOption('Viewer')])
         await expect(preset).toHaveValue('Viewer')
@@ -141,23 +149,23 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         await omer.assertClean()
         await omer.context.close()
 
-        const pavelPassword = await startContext(browser, baseURL)
-        await pavelPassword.page.goto('/login')
-        await pavelPassword.page.getByRole('button', { name: 'Sign in with a password instead' }).click()
-        await pavelPassword.page.getByLabel('Username').fill('pavel')
-        await pavelPassword.page.getByLabel('Password').fill(SEED_PASSWORD)
-        await pavelPassword.page.getByRole('button', { name: 'Sign in' }).click()
-        await expect(pavelPassword.page.getByRole('navigation', { name: 'Main' })).toBeVisible()
-        await pavelPassword.assertClean()
-        await pavelPassword.context.close()
+        const samPassword = await startContext(browser, baseURL)
+        await samPassword.page.goto('/login')
+        await samPassword.page.getByRole('button', { name: 'Sign in with a password instead' }).click()
+        await samPassword.page.getByLabel('Username').fill('sam')
+        await samPassword.page.getByLabel('Password').fill(SEED_PASSWORD)
+        await samPassword.page.getByRole('button', { name: 'Sign in' }).click()
+        await expect(samPassword.page.getByRole('navigation', { name: 'Main' })).toBeVisible()
+        await samPassword.assertClean()
+        await samPassword.context.close()
 
-        const pavelSso = await startContext(browser, baseURL)
-        await ssoSignIn(pavelSso.page, 'pavel')
-        await expect(pavelSso.page.getByRole('navigation', { name: 'Main' })).toBeVisible()
-        await expect(pavelSso.page.getByText('Signed in as')).toContainText('pavel')
-        await expect(pavelSso.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' })).toBeVisible()
-        await pavelSso.assertClean()
-        await pavelSso.context.close()
+        const samSso = await startContext(browser, baseURL)
+        await ssoSignIn(samSso.page, 'sam')
+        await expect(samSso.page.getByRole('navigation', { name: 'Main' })).toBeVisible()
+        await expect(samSso.page.getByRole('button', { name: 'Account menu for sam' })).toContainText('sam')
+        await expect(samSso.page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' })).toBeVisible()
+        await samSso.assertClean()
+        await samSso.context.close()
       }
 
       // (10) A captured ACS POST cannot be replayed.
@@ -179,7 +187,7 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
       for (const entry of [
         'Created user alex from SSO.',
         'Signed in with SSO.',
-        'Linked pavel to SSO identity pavel@example.test.',
+        'Linked sam to SSO identity sam@example.test.',
         'Linked dana to SSO identity dana@example.test.',
       ]) {
         await expect(page.getByText(entry).first()).toBeVisible()
@@ -187,13 +195,13 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
 
       // (12) Unlink: alex has no password, dana keeps hers.
       await page.goto('/settings/users')
-      await userRow(page, 'alex').getByRole('button', { name: 'Unlink SSO…' }).click()
+      await rowAction(page, 'alex', 'Unlink SSO…')
       let confirm = page.getByRole('dialog')
       await expect(confirm.getByText('They get a temporary password and must choose their own at next sign-in.')).toBeVisible()
       await confirm.getByRole('button', { name: 'Unlink' }).click()
       await expect(page.getByText(/New temporary password for alex: /)).toBeVisible()
 
-      await userRow(page, 'dana').getByRole('button', { name: 'Unlink SSO…' }).click()
+      await rowAction(page, 'dana', 'Unlink SSO…')
       confirm = page.getByRole('dialog')
       await expect(confirm.getByText('They keep their password.')).toBeVisible()
       await confirm.getByRole('button', { name: 'Unlink' }).click()
@@ -216,16 +224,16 @@ test.describe.serial('single sign-on against the fake identity provider', () => 
         await dana.context.close()
       }
 
-      // Leave pavel as the seed left him: unlinked, no break-glass flag. (alex is deleted below.)
+      // Leave sam as the seed left him: unlinked, no break-glass flag. (alex is deleted below.)
       await page.goto('/settings/users')
-      await userRow(page, 'pavel').getByRole('button', { name: 'Unlink SSO…' }).click()
+      await rowAction(page, 'sam', 'Unlink SSO…')
       await expect(page.getByRole('dialog').getByText('They keep their password.')).toBeVisible()
       await page.getByRole('dialog').getByRole('button', { name: 'Unlink' }).click()
-      await expect(userRow(page, 'pavel')).not.toContainText('SSO linked')
-      await userRow(page, 'pavel').getByRole('button', { name: 'Remove break-glass' }).click()
+      await expect(userRow(page, 'sam')).not.toContainText('SSO linked')
+      await rowAction(page, 'sam', 'Remove break-glass')
       await page.getByRole('dialog').getByRole('button', { name: 'Remove break-glass' }).click()
-      await expect(userRow(page, 'pavel')).not.toContainText('Break-glass')
-      await userRow(page, 'alex').getByRole('button', { name: 'Delete' }).click()
+      await expect(userRow(page, 'sam')).not.toContainText('Break-glass')
+      await rowAction(page, 'alex', 'Delete')
       await page.getByRole('dialog').getByRole('button', { name: 'Delete user' }).click()
       await expect(userRow(page, 'alex')).toHaveCount(0)
     } finally {

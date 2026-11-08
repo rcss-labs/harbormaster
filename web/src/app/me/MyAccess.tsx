@@ -1,4 +1,8 @@
+import type { ReactNode } from 'react'
 import { ACTIONS, VIEW_BIT, bitOf } from '../admin/perms'
+import { KV } from '../../components/KV'
+import { Panel } from '../../components/Panel'
+import { usePhone } from '../../components/usePhone'
 import { Table, tableClass } from '../../components/Table'
 import { TagChip } from '../../components/TagChip'
 import { useAuth } from '../auth/AuthProvider'
@@ -9,27 +13,55 @@ import styles from './myAccess.module.css'
 export function MyAccess() {
   useCrumbs([['My access']])
   const { me } = useAuth()
+  const phone = usePhone()
   if (!me) return null
 
   if (me.admin) {
     return (
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>My access</h1>
+          <h1 className="hm-phone-title-sr">My access</h1>
           <div className={styles.meta}>You are a global admin: you can do everything, on every tag.</div>
         </div>
       </div>
     )
   }
 
+  const granted = (tagId: number) => me.perms[tagId] ?? 0
+  const allowed = (tagId: number, index: number) => (granted(tagId) & VIEW_BIT) !== 0 && (granted(tagId) & bitOf(index)) !== 0
+
   return (
     <>
       <div className={styles.pageHead}>
         <div className={styles.titles}>
-          <h1>My access</h1>
+          <h1 className="hm-phone-title-sr">My access</h1>
           <div className={styles.meta}>What you can do on each tag. Ask a global admin to change it.</div>
         </div>
       </div>
+      {phone ? (
+        <div className={styles.tagPanels}>
+          {me.tags.map((tag) => (
+            <Panel
+              key={tag.id}
+              label={`Permissions on ${tag.name}`}
+              title={<TagChip tag={{ id: tag.id, name: tag.name, color: tag.color, inherited: false }} />}
+              actions={<span>{tag.services_in_effect} services</span>}
+            >
+              <KV
+                rows={[
+                  ...ACTIONS.map(([key, label], index): [string, ReactNode] => [
+                    label,
+                    <span key={key} className={allowed(tag.id, index) ? styles.yes : styles.no}>
+                      {allowed(tag.id, index) ? '✓' : '–'}
+                    </span>,
+                  ]),
+                  ['Services', <span className={styles.mono}>{tag.services_in_effect}</span>],
+                ]}
+              />
+            </Panel>
+          ))}
+        </div>
+      ) : (
       <div className={styles.card}>
         <Table>
           <thead>
@@ -69,6 +101,7 @@ export function MyAccess() {
           </tbody>
         </Table>
       </div>
+      )}
     </>
   )
 }

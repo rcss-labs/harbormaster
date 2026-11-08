@@ -1,19 +1,25 @@
 import type { ActionKey } from '../../api/types'
 import type { LockAction } from '../../components/LockPanel'
 
-export type TabKey = 'overview' | 'metrics' | 'task-definition' | 'deploy' | 'tasks' | 'scaling' | 'logs' | 'terminal' | 'operations'
+export type TabKey = 'overview' | 'metrics' | 'task-definition' | 'deploy' | 'tasks' | 'timeline' | 'scaling' | 'logs' | 'terminal' | 'operations'
 
-export const TABS: [TabKey, string][] = [
+/** `configure` tabs sit after a gap and a "Configure" label in the tab bar. */
+export type TabGroup = 'configure'
+
+export const TABS: [TabKey, string, TabGroup?][] = [
   ['overview', 'Overview'],
-  ['metrics', 'Metrics'],
-  ['task-definition', 'Task definition'],
-  ['deploy', 'Deploy'],
   ['tasks', 'Tasks'],
-  ['scaling', 'Scaling'],
+  ['timeline', 'Timeline'],
   ['logs', 'Logs'],
+  ['metrics', 'Metrics'],
   ['terminal', 'Terminal'],
-  ['operations', 'Operations log'],
+  ['deploy', 'Deploy', 'configure'],
+  ['task-definition', 'Task definition', 'configure'],
+  ['scaling', 'Scaling', 'configure'],
+  ['operations', 'History'],
 ]
+
+export const TAB_GROUP_LABELS: Record<TabGroup, string> = { configure: 'Configure' }
 
 /** Tabs whose label is bold: the Deploy tab owns every edit. */
 export const BOLD_TABS: ReadonlySet<TabKey> = new Set<TabKey>(['deploy'])

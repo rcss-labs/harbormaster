@@ -117,9 +117,9 @@ func TestTagFilter_ClustersAndServiceCounts(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	ids := lookupTagIDs(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
-	prod := listClusters(t, pavel, "?"+ids.Prod)
+	prod := listClusters(t, sam, "?"+ids.Prod)
 	if len(prod.Items) != 2 {
 		t.Fatalf("Prod clusters = %v, want core-services and ci-tools", clusterNames(prod.Items))
 	}
@@ -139,13 +139,13 @@ func TestTagFilter_ClustersAndServiceCounts(t *testing.T) {
 		t.Errorf("core-services %d/%d ci-tools running %d, want 9/9 and 1", core.Running, core.Desired, ci.Running)
 	}
 
-	if got := listClusters(t, pavel, "?"+ids.Staging); !equalStrings(clusterNames(got.Items), []string{"staging-web"}) {
+	if got := listClusters(t, sam, "?"+ids.Staging); !equalStrings(clusterNames(got.Items), []string{"staging-web"}) {
 		t.Errorf("Staging clusters = %v, want [staging-web]", clusterNames(got.Items))
 	}
-	if got := listClusters(t, pavel, "?"+ids.Prod+"&"+ids.Staging); len(got.Items) != 3 {
+	if got := listClusters(t, sam, "?"+ids.Prod+"&"+ids.Staging); len(got.Items) != 3 {
 		t.Errorf("Prod+Staging clusters = %v, want 3", clusterNames(got.Items))
 	}
-	dev := listClusters(t, pavel, "?"+ids.Dev)
+	dev := listClusters(t, sam, "?"+ids.Dev)
 	if len(dev.Items) != 4 {
 		t.Errorf("Dev clusters = %v, want 4", clusterNames(dev.Items))
 	}
@@ -159,15 +159,15 @@ func TestTagFilter_OverviewAndTasks(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	ids := lookupTagIDs(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
-	overview := getOverview(t, pavel, "?"+ids.Prod)
+	overview := getOverview(t, sam, "?"+ids.Prod)
 	if len(overview.Clusters) != 2 || overview.Services.Total != 5 || overview.Tasks.Running != 10 {
 		t.Errorf("Prod overview clusters %d services %d running %d, want 2, 5, 10",
 			len(overview.Clusters), overview.Services.Total, overview.Tasks.Running)
 	}
 
-	prod := getTasks(t, pavel, "/api/tasks?"+ids.Prod+"&filter=running&limit=500")
+	prod := getTasks(t, sam, "/api/tasks?"+ids.Prod+"&filter=running&limit=500")
 	if prod.Counts.Running != 10 {
 		t.Errorf("Prod running tasks = %d, want 10", prod.Counts.Running)
 	}
@@ -177,7 +177,7 @@ func TestTagFilter_OverviewAndTasks(t *testing.T) {
 		}
 	}
 
-	dev := getTasks(t, pavel, "/api/tasks?"+ids.Dev+"&filter=running&limit=500")
+	dev := getTasks(t, sam, "/api/tasks?"+ids.Dev+"&filter=running&limit=500")
 	if dev.Counts.Running != 10 {
 		t.Errorf("Dev running tasks = %d, want 10", dev.Counts.Running)
 	}
@@ -217,7 +217,7 @@ func TestTagFilter_InvalidIs422(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	resp := login(t, srv, "pavel", testPassword).get("/api/clusters?tag=abc")
+	resp := login(t, srv, "sam", testPassword).get("/api/clusters?tag=abc")
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d, want 422", resp.StatusCode)
 	}
@@ -235,7 +235,7 @@ func TestTagFilter_Alerts(t *testing.T) {
 		serviceAlert(homelabAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
 		serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
 	)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
 	// Account-level alerts are visible to an unfiltered admin but, under a tag filter, only where a
 	// matching cluster exists in that account x region. This pins the current narrowing behaviour.
@@ -247,15 +247,15 @@ func TestTagFilter_Alerts(t *testing.T) {
 	replaceAlerts(t, st, fk, accountAlerts...)
 	for _, region := range allRegions {
 		title := "account notice " + region
-		if got := itemTitles(getAlertsBody(t, pavel, "")); !slices.Contains(got, title) {
+		if got := itemTitles(getAlertsBody(t, sam, "")); !slices.Contains(got, title) {
 			t.Errorf("unfiltered admin alerts = %v, want %q", got, title)
 		}
 		for _, tag := range []string{ids.Dev, ids.Staging, ids.Prod} {
 			hasCluster := false
-			for _, cluster := range listClusters(t, pavel, "?"+tag).Items {
+			for _, cluster := range listClusters(t, sam, "?"+tag).Items {
 				hasCluster = hasCluster || (cluster.AccountID == homelabAccountID && cluster.Region == region)
 			}
-			if got := itemTitles(getAlertsBody(t, pavel, "?"+tag)); slices.Contains(got, title) != hasCluster {
+			if got := itemTitles(getAlertsBody(t, sam, "?"+tag)); slices.Contains(got, title) != hasCluster {
 				t.Errorf("%s under %s: alerts %v, visible want %v (a matching cluster exists: %v)", title, tag, got, hasCluster, hasCluster)
 			}
 		}
@@ -265,13 +265,13 @@ func TestTagFilter_Alerts(t *testing.T) {
 		serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
 	)
 
-	staging := getAlertsBody(t, pavel, "?"+ids.Staging)
+	staging := getAlertsBody(t, sam, "?"+ids.Staging)
 	for _, item := range staging.Items {
 		if item.Service == "image-resizer" {
 			t.Errorf("Staging alerts include image-resizer: %v", itemTitles(staging))
 		}
 	}
-	dev := getAlertsBody(t, pavel, "?"+ids.Dev)
+	dev := getAlertsBody(t, sam, "?"+ids.Dev)
 	if got := itemTitles(dev); !equalStrings(got, []string{"image-resizer danger"}) {
 		t.Errorf("Dev alerts = %v, want only the image-resizer alert", got)
 	}
@@ -288,12 +288,12 @@ func TestTagFilter_Search(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	ids := lookupTagIDs(t, st)
-	pavel := login(t, srv, "pavel", testPassword)
+	sam := login(t, srv, "sam", testPassword)
 
-	if got := search(t, pavel, "image&"+ids.Prod); len(got.Items) != 0 {
+	if got := search(t, sam, "image&"+ids.Prod); len(got.Items) != 0 {
 		t.Errorf("search image under Prod = %+v, want none", got.Items)
 	}
-	if got := search(t, pavel, "image&"+ids.Dev); len(got.Items) < 1 {
+	if got := search(t, sam, "image&"+ids.Dev); len(got.Items) < 1 {
 		t.Error("search image under Dev found nothing, want image-resizer")
 	}
 }

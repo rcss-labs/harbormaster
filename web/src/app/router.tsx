@@ -8,10 +8,12 @@ import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
+import { MorePage } from './more/MorePage'
 import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
 import { SettingsPage } from './settings/SettingsPage'
 import { ServicePage } from './services/ServicePage'
+import { ServicesPage } from './services/list/ServicesPage'
 import { Shell } from './shell/Shell'
 import { MyAccess } from './me/MyAccess'
 import { StoragePage } from './storage/StoragePage'
@@ -69,6 +71,7 @@ export function AppRoutes() {
           <Route index element={<Overview />} />
           <Route path="clusters" element={<Clusters />} />
           <Route path="clusters/:clusterId" element={<Cluster />} />
+          <Route path="services" element={<ServicesPage />} />
           <Route path="services/:serviceId/:tab?" element={<ServicePage />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="tasks/:shortId/terminal" element={<TaskTerminal />} />
@@ -79,6 +82,7 @@ export function AppRoutes() {
           <Route path="admin/accounts" element={<Navigate to="/settings/accounts" replace />} />
           <Route path="admin/audit" element={<Navigate to="/settings/audit" replace />} />
           <Route path="me/access" element={<MyAccess />} />
+          <Route path="more" element={<MorePage />} />
           {/* plan 05: networks and storage */}
           <Route path="networks" element={<NetworksPage />} />
           <Route path="networks/:accountId/:region" element={<NetworkRegionRedirect />} />

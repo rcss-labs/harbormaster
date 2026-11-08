@@ -1,5 +1,6 @@
 import { screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '../../test/setup'
 import { MetricPanel } from './MetricPanel'
 
@@ -31,5 +32,24 @@ describe('MetricPanel', () => {
       </MetricPanel>,
     )
     expect(screen.getByText('No load balancer')).toBeInTheDocument()
+  })
+
+  it('shows its own error with Retry in place of the chart, and hides the chart while loading', async () => {
+    const retry = vi.fn()
+    const { rerender } = renderWithProviders(
+      <MetricPanel title="CPU" error={{ message: 'CPU could not be read.', onRetry: retry }}>
+        <div>chart body</div>
+      </MetricPanel>,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('CPU could not be read.')
+    expect(screen.queryByText('chart body')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(retry).toHaveBeenCalledTimes(1)
+    rerender(
+      <MetricPanel title="CPU" loading>
+        <div>chart body</div>
+      </MetricPanel>,
+    )
+    expect(screen.queryByText('chart body')).not.toBeInTheDocument()
   })
 })

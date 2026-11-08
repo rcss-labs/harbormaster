@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { BottomSheet } from './BottomSheet'
 import styles from './Dialog.module.css'
+import { usePhone } from './usePhone'
 
 export interface DialogAction {
   label: string
@@ -17,7 +19,42 @@ interface DialogProps {
   children?: ReactNode
 }
 
-export function Dialog({ title, sub, actions, wide, onClose, children }: DialogProps) {
+const KIND_ORDER = { default: 0, danger: 1, primary: 2 } as const
+
+/** A centred modal on desktop; on phones a bottom sheet whose actions are full-width footer buttons, primary last. */
+export function Dialog(props: DialogProps) {
+  return usePhone() ? <PhoneDialog {...props} /> : <DesktopDialog {...props} />
+}
+
+function PhoneDialog({ title, sub, actions, onClose, children }: DialogProps) {
+  const ordered = [...actions].sort((a, b) => KIND_ORDER[a.kind ?? 'default'] - KIND_ORDER[b.kind ?? 'default'])
+  return (
+    <BottomSheet
+      open
+      onClose={onClose}
+      label={typeof title === 'string' ? title : ''}
+      labelledByTitle
+      title={title}
+      sub={sub}
+      initialFocus="input, select, textarea"
+      footer={ordered.map((action) => (
+        <button
+          key={action.label}
+          type="button"
+          className={`${styles.btn} ${action.kind && action.kind !== 'default' ? styles[action.kind] : ''}`.trim()}
+          disabled={action.disabled}
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      ))}
+    >
+      {children}
+    </BottomSheet>
+  )
+}
+
+function DesktopDialog({ title, sub, actions, wide, onClose, children }: DialogProps) {
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(onClose)
