@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -30,16 +32,85 @@ const (
 // demo data (which includes an admin with a publicly known password) is refused.
 var ErrDatabaseNotEmpty = errors.New("database already has users or accounts; refusing to seed demo data (unset HM_FAKE_AWS)")
 
-// Apply seeds the database, including recent analytics history (see SeedAnalyticsHistory). It is idempotent:
-// existing tags, users, accounts, audit history and daily rows are left alone, so applying twice changes nothing.
-func Apply(ctx context.Context, st *store.Store) error {
+// Apply seeds the database, including the demo off-hours schedules and recent analytics history (see
+// SeedAnalyticsHistory). It is idempotent: existing tags, users, accounts, schedules, audit history and daily rows are
+// left alone, so applying twice changes nothing. offHoursDemoEnabled sets whether the staging schedule is enabled.
+// The schedules are seeded here rather than in ForceApply because the API tests call ForceApply and expect no schedules.
+func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool) error {
 	if err := requireSeedable(ctx, st); err != nil {
 		return err
 	}
 	if err := ForceApply(ctx, st); err != nil {
 		return err
 	}
+	sam, err := st.GetUserByUsername(ctx, "sam")
+	if err != nil {
+		return fmt.Errorf("find seeded admin: %w", err)
+	}
+	if err := seedOffHours(ctx, st, offHoursDemoEnabled, sam.ID); err != nil {
+		return err
+	}
 	return SeedAnalyticsHistory(ctx, st, time.Now())
+}
+
+const (
+	stagingScheduleName = "Staging nights and weekends"
+	previewScheduleName = "Preview environments"
+)
+
+// seedOffHours creates the two demo schedules (D13) that are not already present by name. Only the staging schedule
+// is enabled, and only when enabled is true, so e2e can turn it off. It writes one audit row, when it creates the
+// staging schedule. It enrols no services; the reconciler does that on its next cycle. A selector already taken by
+// another schedule is skipped, so a restart never fails on a schedule an admin created.
+func seedOffHours(ctx context.Context, st *store.Store, enabled bool, samID int64) error {
+	existing, err := st.ListOffHoursSchedules(ctx)
+	if err != nil {
+		return err
+	}
+	present := map[string]bool{}
+	for _, sc := range existing {
+		present[sc.Name] = true
+	}
+	demos := []store.OffHoursSchedule{
+		{Name: stagingScheduleName, Enabled: enabled, TagKey: "env", TagValue: "staging", Timezone: "Asia/Jerusalem", Awake: weekdaysAwake(7, 20)},
+		{Name: previewScheduleName, Enabled: false, TagKey: "env", TagValue: "preview", Timezone: "Asia/Jerusalem", Awake: weekdaysAwake(9, 18)},
+	}
+	for _, sc := range demos {
+		if present[sc.Name] {
+			continue
+		}
+		created, err := st.CreateOffHoursSchedule(ctx, sc, samID)
+		if errors.Is(err, store.ErrConflict) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("seed off-hours schedule %s: %w", sc.Name, err)
+		}
+		if sc.Name != stagingScheduleName {
+			continue
+		}
+		err = st.Audit(ctx, store.AuditEntry{
+			ActorUserID: &samID, ActorUsername: "sam",
+			Action: "offhours_schedule_create", Target: "offhours:" + strconv.FormatInt(created.ID, 10),
+			Summary: "Created off-hours schedule " + strconv.Quote(created.Name) + ".",
+			Details: map[string]any{"source": seedMarker},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// weekdaysAwake returns the awake grid for Monday to Friday, from hour `from` up to but not including hour `to`.
+func weekdaysAwake(from, to int) string {
+	var rows [7][24]bool
+	for day := 0; day < 5; day++ {
+		for hour := from; hour < to; hour++ {
+			rows[day][hour] = true
+		}
+	}
+	return offhours.WeekFromRows(rows).String()
 }
 
 // ForceApply seeds without the empty-database guard. It exists for tests that pre-create users

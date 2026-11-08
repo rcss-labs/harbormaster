@@ -219,6 +219,9 @@ func (c *ecsClient) DescribeServices(_ context.Context, in *ecs.DescribeServices
 			}
 			found = true
 			svc := deepCopy(s.Service)
+			if !includesServiceTags(in.Include) {
+				svc.Tags = nil
+			}
 			events := e.Events[aws.ToString(svc.ServiceArn)]
 			svc.Events = deepCopy(events[:min(len(events), maxServiceEvents)])
 			out.Services = append(out.Services, svc)
@@ -353,4 +356,14 @@ func (c *ecsClient) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTa
 		return nil, &ecstypes.ClientException{Message: aws.String("Unable to describe task definition.")}
 	}
 	return &ecs.DescribeTaskDefinitionOutput{TaskDefinition: ptrTo(deepCopy(*best))}, nil
+}
+
+// includesServiceTags reports whether DescribeServices was asked for service tags.
+func includesServiceTags(include []ecstypes.ServiceField) bool {
+	for _, field := range include {
+		if field == ecstypes.ServiceFieldTags {
+			return true
+		}
+	}
+	return false
 }

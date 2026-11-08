@@ -69,6 +69,15 @@ type ScanConfig struct {
 	MaxImageMB        int
 }
 
+// OffHoursConfig holds the off-hours reconciler settings.
+type OffHoursConfig struct {
+	// Interval is how often the leader reconciles scheduled actions and capacity (HM_OFFHOURS_INTERVAL).
+	Interval time.Duration
+	// FakeDemo enables the seeded demo schedule in fake AWS mode (HM_FAKE_OFFHOURS_DEMO). It applies only when the
+	// demo schedule is first seeded; an existing one is left as it is.
+	FakeDemo bool
+}
+
 // Config is the complete runtime configuration for the server.
 type Config struct {
 	Listen                  string
@@ -89,6 +98,7 @@ type Config struct {
 	Poll                    PollConfig
 	Retention               RetentionConfig
 	Scan                    ScanConfig
+	OffHours                OffHoursConfig
 	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
@@ -247,6 +257,10 @@ func Load(getenv func(string) string) (Config, error) {
 			BatchSize:         reader.integer("HM_SCAN_BATCH_SIZE", 25),
 			MaxImageMB:        reader.integer("HM_SCAN_MAX_IMAGE_MB", 4096),
 		},
+		OffHours: OffHoursConfig{
+			Interval: reader.duration("HM_OFFHOURS_INTERVAL", 60*time.Second),
+			FakeDemo: reader.boolean("HM_FAKE_OFFHOURS_DEMO", true),
+		},
 		Analytics:       AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:     reader.integer("HM_PAGE_SIZE_MAX", 500),
@@ -274,6 +288,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
 		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")
+	}
+	if cfg.OffHours.Interval < time.Second {
+		return Config{}, errors.New("HM_OFFHOURS_INTERVAL: must be at least 1s")
 	}
 	if err := validateScan(cfg.Scan); err != nil {
 		return Config{}, err

@@ -1,10 +1,11 @@
 import styles from './AdminOnly.module.css'
 
-export type AdminArea = 'users' | 'tags' | 'accounts' | 'sso' | 'audit' | 'general'
+export type AdminArea = 'users' | 'tags' | 'offhours' | 'accounts' | 'sso' | 'audit' | 'general'
 
 const COPY: Record<AdminArea, string> = {
   users: 'Only global admins manage users and permissions.',
   tags: 'Only global admins create tags and assign them.',
+  offhours: 'Only admins can manage off-hours schedules.',
   accounts: 'Only global admins manage AWS accounts.',
   sso: 'Only global admins change single sign-on.',
   audit: 'Only global admins can read the audit log.',

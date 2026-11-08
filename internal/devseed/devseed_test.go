@@ -25,7 +25,7 @@ func TestDevseed_IdempotentAndMatchesMockup(t *testing.T) {
 	st := storetest.Open(t)
 
 	for i := 0; i < 2; i++ {
-		if err := devseed.Apply(ctx, st); err != nil {
+		if err := devseed.Apply(ctx, st, true); err != nil {
 			t.Fatalf("apply #%d: %v", i+1, err)
 		}
 	}
@@ -61,8 +61,8 @@ func TestDevseed_IdempotentAndMatchesMockup(t *testing.T) {
 		t.Fatalf("accounts = %v, %v; want 2", accounts, err)
 	}
 	entries, err := st.ListAudit(ctx, 100, 0)
-	if err != nil || len(entries) != 5 {
-		t.Fatalf("audit rows = %d, %v; want 5", len(entries), err)
+	if err != nil || len(entries) != 6 {
+		t.Fatalf("audit rows = %d, %v; want 6 (five history rows and the staging schedule)", len(entries), err)
 	}
 
 	omer, err := st.GetUserByUsername(ctx, "omer")
@@ -105,7 +105,7 @@ func TestDevseed_RefusesPopulatedDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := devseed.Apply(ctx, st)
+	err := devseed.Apply(ctx, st, true)
 	if !errors.Is(err, devseed.ErrDatabaseNotEmpty) {
 		t.Fatalf("Apply error = %v, want ErrDatabaseNotEmpty", err)
 	}
@@ -140,7 +140,7 @@ func TestApply_SeedsAnalyticsHistoryOnceAndForceApplyDoesNot(t *testing.T) {
 	st := storetest.Open(t)
 	var first [5]int
 	for run := 0; run < 2; run++ {
-		if err := devseed.Apply(ctx, st); err != nil {
+		if err := devseed.Apply(ctx, st, true); err != nil {
 			t.Fatal(err)
 		}
 		got := [5]int{
@@ -178,7 +178,7 @@ func TestDevseed_TurnsOnPreDeployScanForEdgeNginxOnly(t *testing.T) {
 	ctx := t.Context()
 	st := storetest.Open(t)
 	for i := 0; i < 2; i++ {
-		if err := devseed.Apply(ctx, st); err != nil {
+		if err := devseed.Apply(ctx, st, true); err != nil {
 			t.Fatalf("apply #%d: %v", i+1, err)
 		}
 	}
@@ -203,7 +203,7 @@ func TestDevseed_TurnsOnPreDeployScanForEdgeNginxOnly(t *testing.T) {
 func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 	ctx := t.Context()
 	st := storetest.Open(t)
-	if err := devseed.Apply(ctx, st); err != nil {
+	if err := devseed.Apply(ctx, st, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -329,5 +329,110 @@ func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 	}
 	if !limited {
 		t.Errorf("no api suggestion is limited by its containers: %+v", steps)
+	}
+}
+
+// awakeWeekdays is the 168-character awake grid for Monday to Friday, from hour `from` up to but not including `to`.
+func awakeWeekdays(from, to int) string {
+	grid := make([]byte, 168)
+	for i := range grid {
+		grid[i] = '0'
+		day, hour := i/24, i%24
+		if day < 5 && hour >= from && hour < to {
+			grid[i] = '1'
+		}
+	}
+	return string(grid)
+}
+
+// TestDevseed_OffHoursSchedules checks the demo schedules: the staging one is enabled only when the demo flag is on,
+// both are seeded once by name with one audit row, and the staging selector matches the staging-web services.
+func TestDevseed_OffHoursSchedules(t *testing.T) {
+	ctx := t.Context()
+	const stagingName, previewName = "Staging nights and weekends", "Preview environments"
+	const stagingAudit = `Created off-hours schedule "Staging nights and weekends".`
+
+	st := storetest.Open(t)
+	for i := 0; i < 2; i++ {
+		if err := devseed.Apply(ctx, st, true); err != nil {
+			t.Fatalf("apply #%d: %v", i+1, err)
+		}
+	}
+	schedules, err := st.ListOffHoursSchedules(ctx)
+	if err != nil || len(schedules) != 2 {
+		t.Fatalf("schedules = %d, %v; want 2", len(schedules), err)
+	}
+	byName := map[string]store.OffHoursSchedule{}
+	for _, sc := range schedules {
+		byName[sc.Name] = sc
+	}
+	staging, okStaging := byName[stagingName]
+	preview, okPreview := byName[previewName]
+	if !okStaging || !okPreview {
+		t.Fatalf("schedules = %v; want %q and %q", byName, stagingName, previewName)
+	}
+	if !staging.Enabled {
+		t.Error("staging schedule is disabled with the demo flag on; want enabled")
+	}
+	if staging.TagKey != "env" || staging.TagValue != "staging" || staging.Timezone != "Asia/Jerusalem" || staging.Awake != awakeWeekdays(7, 20) {
+		t.Errorf("staging = %+v; want env=staging, Asia/Jerusalem, weekdays 07-20", staging)
+	}
+	if preview.Enabled || preview.TagKey != "env" || preview.TagValue != "preview" || preview.Timezone != "Asia/Jerusalem" || preview.Awake != awakeWeekdays(9, 18) {
+		t.Errorf("preview = %+v; want disabled, env=preview, Asia/Jerusalem, weekdays 09-18", preview)
+	}
+
+	// Fill the service table from the fake estate, as the poller does, so the selectors have services to match.
+	clients := fake.New(fake.MockupEstate(time.Now))
+	for _, target := range []awsx.Target{
+		{AccountID: "482109375512", Region: "us-east-1"},
+		{AccountID: "482109375512", Region: "eu-central-1"},
+		{AccountID: "731022849906", Region: "us-east-1"},
+	} {
+		if err := poller.PollOnce(ctx, st, clients, poller.Config{MaxInFlight: 4}, target); err != nil {
+			t.Fatalf("poll %v: %v", target, err)
+		}
+	}
+	matches, err := st.OffHoursMatches(ctx, "env", "staging")
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("staging matches = %d, %v; want the staging-web services", len(matches), err)
+	}
+	for _, m := range matches {
+		if m.Key.Cluster != "staging-web" {
+			t.Errorf("staging matched %s in cluster %s; want only staging-web", m.Key.Service, m.Key.Cluster)
+		}
+	}
+	if previewMatches, err := st.OffHoursMatches(ctx, "env", "preview"); err != nil || len(previewMatches) != 0 {
+		t.Errorf("preview matches = %d, %v; want none", len(previewMatches), err)
+	}
+
+	entries, err := st.ListAudit(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audits := 0
+	for _, e := range entries {
+		if e.Summary == stagingAudit {
+			audits++
+		}
+	}
+	if audits != 1 {
+		t.Errorf("staging creation audit rows = %d, want 1 after two applies", audits)
+	}
+
+	off := storetest.Open(t)
+	if err := devseed.Apply(ctx, off, false); err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := off.ListOffHoursSchedules(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disabled) != 2 {
+		t.Fatalf("schedules = %d with the demo flag off; want 2", len(disabled))
+	}
+	for _, sc := range disabled {
+		if sc.Name == stagingName && sc.Enabled {
+			t.Error("staging schedule is enabled with the demo flag off; want disabled")
+		}
 	}
 }

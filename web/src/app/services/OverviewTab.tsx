@@ -16,6 +16,7 @@ import { ALBPanels, HealthCard, RunningTasksMeters, ServiceKpis, UsageChart } fr
 import { RolloutActions } from './overview/RolloutActions'
 import { usePhone } from '../../components/usePhone'
 import { RolloutCard } from './overview/RolloutCard'
+import { OffHoursCard } from './overview/OffHoursCard'
 import { queryPanelError } from './panelError'
 import styles from './service.module.css'
 
@@ -111,6 +112,8 @@ export function OverviewTab({ service }: { service: ServiceDTO }) {
           </TaskHealth>
         )}
       </div>
+
+      <OffHoursCard service={service} />
 
       <ALBPanels service={service} metrics={metrics} />
 

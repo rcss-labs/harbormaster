@@ -76,6 +76,14 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 			p.cfg.Scan.Run(ctx)
 		}()
 	}
+	if p.cfg.OffHours != nil {
+		// Same reason: only the leader changes scheduled actions and capacity.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.cfg.OffHours.Run(ctx)
+		}()
+	}
 	p.runRollups(ctx)
 	p.runRetention(ctx)
 	for {

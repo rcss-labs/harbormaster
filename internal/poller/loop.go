@@ -59,6 +59,8 @@ type Loop struct {
 	// seenDeployments are deployment ids already offered to deployment_history by this loop.
 	seenDeployments map[string]bool
 	writes          store.WriteResult
+	// warnedNoTags holds the clusters already logged for the describe-without-tags fallback.
+	warnedNoTags map[string]bool
 }
 
 // tierDef pairs a tier with its work function.
@@ -481,6 +483,20 @@ func (l *Loop) syncServiceList(ctx context.Context) error {
 	})
 }
 
+// warnNoTagsOnce logs the tags fallback once per cluster so a legacy cluster does not flood the log every cycle.
+func (l *Loop) warnNoTagsOnce(cluster string, cause error) {
+	l.mu.Lock()
+	first := !l.warnedNoTags[cluster]
+	if l.warnedNoTags == nil {
+		l.warnedNoTags = map[string]bool{}
+	}
+	l.warnedNoTags[cluster] = true
+	l.mu.Unlock()
+	if first {
+		l.log.Warn("poller: describing services without tags; tag lookup was rejected", "cluster", cluster, "err", cause)
+	}
+}
+
 // syncServices describes services in batches of ten, stores services and new events, and
 // flags services whose counts or PRIMARY deployment changed so their tasks get re-described.
 func (l *Loop) syncServices(ctx context.Context) error {
@@ -497,7 +513,18 @@ func (l *Loop) syncServices(ctx context.Context) error {
 		var services []model.Service
 		var events []model.ServiceEvent
 		for _, batch := range chunk(names, describeServicesLimit) {
-			out, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String(k.Cluster), Services: batch})
+			out, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{
+				Cluster:  aws.String(k.Cluster),
+				Services: batch,
+				Include:  []ecstypes.ServiceField{ecstypes.ServiceFieldTags},
+			})
+			var invalid *ecstypes.InvalidParameterException
+			if errors.As(err, &invalid) {
+				// Legacy short-ARN services reject tag lookups. Describe the batch without tags rather than
+				// losing the whole cluster; those services carry no tags and so match no off-hours schedule.
+				l.warnNoTagsOnce(k.Cluster, err)
+				out, err = api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String(k.Cluster), Services: batch})
+			}
 			if err != nil {
 				return fmt.Errorf("describe services: %w", err)
 			}

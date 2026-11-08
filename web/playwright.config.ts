@@ -37,6 +37,9 @@ const serverEnv = {
   HM_POLL_STORAGE: '5s', // plan 05
   HM_METRICS_TOKEN: 'e2e-metrics-token', // plan 06
   HM_SCAN_INTERVAL: '3s', // image security: the scan loop picks a requested scan up within seconds
+  // Off-hours: the demo staging schedule is off so the wall clock cannot put staging to sleep under the read-only specs.
+  HM_FAKE_OFFHOURS_DEMO: 'false',
+  HM_OFFHOURS_INTERVAL: '2s', // the reconciler picks up a schedule change within seconds
 }
 
 export default defineConfig({
