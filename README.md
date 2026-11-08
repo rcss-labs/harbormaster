@@ -188,12 +188,13 @@ An off-hours schedule puts the ECS services that carry an AWS tag to sleep on a 
 
 - **Mechanism.** At sleep, Harbormaster sets the minimum and maximum capacity of the service's Application Auto Scaling scalable target to 0 through scheduled actions in the schedule's timezone; at wake the scheduled action restores the values it saved. Scaling policies are left in place. When the service has no scalable target, Harbormaster registers one (and logs it); if the target goes missing later it is registered again. The saved capacity is stored in Harbormaster's database, and a target that Harbormaster registered itself is deregistered when the schedule is deleted.
 - **Which services.** A schedule selects services by their **AWS service tag** (`key=value`), not by cluster tags or Harbormaster permission tags. A tag has one schedule, and a schedule whose services overlap another's is refused (409) when you save it. If a service later comes to match two schedules, after a tag change in AWS, it stays on the one it is enrolled in (otherwise the lowest id) and the other schedule shows it as conflicting ("Also matches ..."). A service whose auto scaling minimum is 0 is not managed ("Not managed: its auto scaling minimum is 0, so it could not wake on its own.").
-- **Saving.** Saving a schedule during its sleep hours puts its services to sleep straight away; the editor warns first. Deleting a schedule gives its services their saved capacity back.
+- **Saving.** Saving a schedule during its sleep hours puts its services to sleep straight away; the editor warns first. Disabling or deleting a schedule gives its services their saved capacity back.
 - **Wake for 2 hours.** Anyone with **Operate** on the service's tag can wake an asleep service for two hours, or put a woken one back to sleep, from the table or the Overview card. Wake survives a restart of Harbormaster. Creating, editing and deleting schedules is for global admins. Both are written to the operations log and the audit log.
 - **Ownership.** Harbormaster only creates, changes and deletes scheduled actions whose names start with `harbormaster-offhours-`. Other scheduled actions are never touched.
 - **Reconciler.** The leader replica checks every enrolled service every `HM_OFFHOURS_INTERVAL` (60 seconds) and enforces the state the grid asks for, so a skipped or doubled action (for example around a daylight saving change) is repaired within one interval after the 5-minute grace. The fake AWS does not run scheduled actions, so there the reconciler alone moves the state.
 - **Outside changes.** If someone changes the scalable target's range outside Harbormaster, it is adopted as the saved capacity, and then, if the service should be asleep, it is put back to sleep. Changes within 5 minutes of a grid edge or of Harbormaster's own change are left alone (the grace period), for clock skew and AWS latency. A tag-only change in AWS is picked up on the next poll, and the first poll after an upgrade rewrites tagged service rows once.
 - **Deploy tab.** A scaling change on the Deploy tab that would delete the schedule's scheduled actions, or set the desired count of a sleeping service, is refused with 409 (`<service> is on the off-hours schedule "<name>". ...`).
+- **Disabling an account.** Disable or delete the schedules before you disable a Harbormaster account: enrolled services in a disabled account are left as they are, and their AWS scheduled actions keep running.
 - **Read-only accounts.** An account connected with `read_only` cannot be changed, so its services are shown as blocked with the read-only reason and retried hourly.
 - **Cost.** The saving is a list-price estimate from `internal/cost` (Fargate vCPU and memory hours); services it cannot price show a dash. It is not your bill.
 - **Permissions.** No AWS permission is added. The existing `application-autoscaling` permissions of `harbormaster-access` cover scheduled actions and target registration; `read_only` accounts are simply shown as blocked.
@@ -277,7 +278,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_JITTER` | `500ms` | Random jitter added to poll schedules |
 | `HM_POLL_MAX_INFLIGHT` | `8` | Maximum concurrent AWS calls |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
-| `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled |
+| `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled; applies only when the demo schedule is first seeded, not to an existing one |
 
 ### Retention
 

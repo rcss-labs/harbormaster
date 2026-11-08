@@ -73,7 +73,8 @@ type ScanConfig struct {
 type OffHoursConfig struct {
 	// Interval is how often the leader reconciles scheduled actions and capacity (HM_OFFHOURS_INTERVAL).
 	Interval time.Duration
-	// FakeDemo enables the seeded demo schedule in fake AWS mode (HM_FAKE_OFFHOURS_DEMO).
+	// FakeDemo enables the seeded demo schedule in fake AWS mode (HM_FAKE_OFFHOURS_DEMO). It applies only when the
+	// demo schedule is first seeded; an existing one is left as it is.
 	FakeDemo bool
 }
 
