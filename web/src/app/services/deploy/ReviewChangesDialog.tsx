@@ -63,7 +63,8 @@ export function ReviewChangesDialog(props: ReviewChangesDialogProps) {
       actions={
         scanGate
           ? [
-              { label: 'Cancel', onClick: scanGate.onCancel },
+              // The request in flight may still be applied, so there is nothing to cancel until it has answered.
+              { label: 'Cancel', onClick: scanGate.onCancel, disabled: busy },
               { label: 'Deploy anyway', kind: 'primary', onClick: scanGate.onDeployAnyway, disabled: busy },
             ]
           : [

@@ -56,6 +56,14 @@ function GateRow({ serviceId, row, onSettled }: { serviceId: string; row: ScanGa
 }
 
 /** One row per changed image the pre-deploy gate paused on. Rows whose scan is still moving are followed until they settle. */
+// Each 409 gets its own id so its rows start over: a repeated row for the same container and digest must be read and settled again.
+const gateIds = new WeakMap<ScanGate, number>()
+let lastGateId = 0
+const gateIdOf = (gate: ScanGate): number => {
+  if (!gateIds.has(gate)) gateIds.set(gate, ++lastGateId)
+  return gateIds.get(gate) as number
+}
+
 export function ScanGatePanel({ serviceId, gate, onRowSettled }: ScanGatePanelProps) {
   return (
     <section aria-label="Image scan" className={styles.gate}>
@@ -63,7 +71,7 @@ export function ScanGatePanel({ serviceId, gate, onRowSettled }: ScanGatePanelPr
       <p className={styles.gateBody}>A scan never blocks a deploy; critical findings pause it until you choose.</p>
       <ul className={styles.gateRows}>
         {gate.images.map((row) => (
-          <GateRow key={`${row.container}:${row.ref}`} serviceId={serviceId} row={row} onSettled={onRowSettled} />
+          <GateRow key={`${gateIdOf(gate)}:${row.container}:${row.ref}`} serviceId={serviceId} row={row} onSettled={onRowSettled} />
         ))}
       </ul>
     </section>

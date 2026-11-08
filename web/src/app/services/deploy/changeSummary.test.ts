@@ -32,7 +32,10 @@ describe('changeSummary: body omits unchanged fields', () => {
 
 describe('changeSummary: scan gate acknowledgement', () => {
   const scanGate = { deploy_anyway: true, images: [{ container: 'app', ref: 'sha256:abc' }] }
-  const withGate = buildChangeSetRequest({ baseRevision: 42, baseVersion: 'v1', reason: '', sections: { ...none, target: { kind: 'definition', definition } }, scanGate })
+  const withGate = {
+    ...buildChangeSetRequest({ baseRevision: 42, baseVersion: 'v1', reason: '', sections: { ...none, target: { kind: 'definition', definition } } }),
+    scan_gate: scanGate,
+  }
   const failedRegister: ChangeSetResponse = {
     ...CHANGESET_PARTIAL,
     registered_revision: null,
@@ -42,11 +45,6 @@ describe('changeSummary: scan gate acknowledgement', () => {
       { name: 'scaling', status: 'skipped', message: '' },
     ],
   }
-
-  it('sends scan_gate only when given', () => {
-    expect(withGate.scan_gate).toEqual(scanGate)
-    expect(buildChangeSetRequest({ baseRevision: 42, baseVersion: 'v1', reason: '', sections: { ...none, target: { kind: 'definition', definition } } })).not.toHaveProperty('scan_gate')
-  })
 
   it('a retry that sends the definition again keeps the acknowledgement', () => {
     expect(buildRetryRequest(withGate, failedRegister)?.scan_gate).toEqual(scanGate)

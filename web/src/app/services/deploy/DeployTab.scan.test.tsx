@@ -289,6 +289,44 @@ describe('DeployTab: image scanning', () => {
     expect(screen.queryByRole('region', { name: 'Image scan' })).not.toBeInTheDocument()
   })
 
+  it('Cancel waits while a resubmission is in flight, and a late 409 after closing shows no dead panel', async () => {
+    const user = userEvent.setup()
+    serveSetting(settingOn)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const bodies = captureChangeSets(() => HttpResponse.json(CHANGESET_APPLIED))
+    server.use(
+      http.post('/api/services/:id/changeset', async ({ request }) => {
+        bodies.push((await request.json()) as ChangeSetRequest)
+        if (bodies.length === 1) return gateResponse(SCAN_GATE_QUEUED)
+        await held
+        return gateResponse(SCAN_GATE_CRITICAL)
+      }),
+    )
+    captureScanReads(() => SCAN_STATUS_SCANNED)
+    await openDeployTab()
+    await submitDefinitionChange(user)
+    await waitFor(() => expect(bodies).toHaveLength(2))
+
+    // The server may still apply the request in flight, so Cancel cannot honestly promise anything until it answers.
+    expect(within(dialog()).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByRole('region', { name: 'Image scan' })).not.toBeInTheDocument()
+  })
+
+  it('a repeated pending 409 for the same digest still continues', async () => {
+    const user = userEvent.setup()
+    serveSetting(settingOn)
+    const bodies = captureChangeSets((call) => (call < 3 ? gateResponse(SCAN_GATE_QUEUED) : HttpResponse.json(CHANGESET_APPLIED)))
+    captureScanReads(() => SCAN_STATUS_SCANNED)
+    await openDeployTab()
+    await submitDefinitionChange(user)
+    await waitFor(() => expect(bodies).toHaveLength(3))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
   it('cancel closes without posting again', async () => {
     const user = userEvent.setup()
     serveSetting(settingOn)

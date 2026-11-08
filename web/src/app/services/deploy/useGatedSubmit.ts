@@ -24,11 +24,19 @@ export function useGatedSubmit<Request extends { scan_gate?: ScanGateRequest }>(
   const [gate, setGate] = useState<ScanGate | null>(null)
   const [settled, setSettled] = useState<ReadonlySet<string>>(new Set())
   const [busy, setBusy] = useState(false)
-  // The request as the caller built it, without an acknowledgement: what an automatic resubmission sends.
+  // The request as the caller submitted it: what an automatic resubmission sends. A partial retry submits a request that already
+  // carries its earlier acknowledgement; the server ignores an acknowledgement that no longer matches the latest rows.
   const original = useRef<Request | null>(null)
   const resumed = useRef<ScanGate | null>(null)
+  // Set synchronously, unlike `busy`, so the automatic resubmission and a Deploy anyway click can never both send.
+  const inFlight = useRef(false)
+  // Bumped by cancel: an answer to a request sent before it must not bring a gate back, because Deploy anyway would have nothing to resend.
+  const generation = useRef(0)
 
   const run = async (request: Request) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    const sentIn = generation.current
     setBusy(true)
     try {
       await send(request)
@@ -39,9 +47,12 @@ export function useGatedSubmit<Request extends { scan_gate?: ScanGateRequest }>(
         setGate(null)
         throw failure
       }
-      setGate(paused)
-      setSettled(new Set())
+      if (generation.current === sentIn) {
+        setGate(paused)
+        setSettled(new Set())
+      }
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
@@ -62,6 +73,7 @@ export function useGatedSubmit<Request extends { scan_gate?: ScanGateRequest }>(
   }
 
   const cancel = useCallback(() => {
+    generation.current += 1
     original.current = null
     setGate(null)
   }, [])
@@ -69,7 +81,7 @@ export function useGatedSubmit<Request extends { scan_gate?: ScanGateRequest }>(
   // Once no row is waiting any more, the same request goes again. Each gate is resumed at most once, so a gate that comes back
   // paused for another reason waits for the user instead of looping.
   useEffect(() => {
-    if (!gate || busy || resumed.current === gate || !original.current) return
+    if (!gate || busy || inFlight.current || resumed.current === gate || !original.current) return
     const waiting = gate.images.filter(isPendingGateRow)
     if (waiting.length === 0 || !waiting.every((row) => settled.has(row.container))) return
     resumed.current = gate
