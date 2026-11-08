@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -892,4 +893,55 @@ func TestChangeSet_GateRetryPendingShowsTheStoredReason(t *testing.T) {
 	if row.State != scanStateFailed || !strings.Contains(row.Message, "The scanner task failed") || row.Message == "The scan did not finish in time." {
 		t.Fatalf("row = %+v, want the stored failure reason", row)
 	}
+}
+
+// addActiveDeployment makes the service's polled snapshot list a second, ACTIVE deployment of the revision, as ECS does
+// while a newer revision rolls out over the one that has been running.
+func addActiveDeployment(t *testing.T, env *securityEnv, arn string) {
+	t.Helper()
+	var raw []byte
+	err := env.st.Pool.QueryRow(t.Context(), `select raw from services where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4`,
+		edgeNginxKey.AccountID, edgeNginxKey.Region, edgeNginxKey.Cluster, edgeNginxKey.Service).Scan(&raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var service map[string]any
+	if err := json.Unmarshal(raw, &service); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range service {
+		if strings.EqualFold(key, "deployments") {
+			service[key] = append(value.([]any), map[string]any{"Id": "ecs-svc/old", "Status": "ACTIVE", "TaskDefinition": arn})
+		}
+	}
+	updated, _ := json.Marshal(service)
+	if _, err := env.st.Pool.Exec(t.Context(), `update services set raw = $5 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4`,
+		edgeNginxKey.AccountID, edgeNginxKey.Region, edgeNginxKey.Cluster, edgeNginxKey.Service, updated); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeployByRevision_ActiveInTheSnapshotRanEvenWithoutAHistoryRow(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, arn := registerUnscannedRevision(t, env)
+	// Its history row is long gone (retention), but it is still serving tasks as the ACTIVE deployment.
+	addActiveDeployment(t, env, arn)
+
+	wantStatus(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision, "interrupt": true}), http.StatusAccepted)
+	if env.preDeployRequests(t) != 0 {
+		t.Fatal("a rollback to the ACTIVE deployment reached the gate")
+	}
+}
+
+func TestDeployByRevision_RanBeforeIsNotGatedWhenTheDescribeCallFails(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, arn := registerUnscannedRevision(t, env)
+	recordRan(t, env, arn, revision, "completed")
+	// Not cached by the poller, so reading its images would need DescribeTaskDefinition.
+	if _, err := env.st.Pool.Exec(t.Context(), `delete from task_definitions where arn = $1`, arn); err != nil {
+		t.Fatal(err)
+	}
+	env.fk.FailAlways("DescribeTaskDefinition", &smithy.GenericAPIError{Code: "ServerException", Message: "down"})
+
+	wantStatus(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision}), http.StatusAccepted)
 }

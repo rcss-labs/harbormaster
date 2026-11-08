@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -168,6 +171,28 @@ func (s *Server) scanGateForRevision(ctx context.Context, key model.ServiceKey, 
 	if !on {
 		return passed, nil
 	}
+	// "Ran before" is settled from Harbormaster's own data first, so a rollback to a revision that ran never waits on, or
+	// fails with, a call to ECS. The ARN is built from the family of the polled snapshot.
+	snapshot, snapshotErr := s.polledService(ctx, key)
+	var arn string
+	if snapshotErr == nil {
+		if primary, ok := deploy.PrimaryDeployment(snapshot); ok {
+			current := aws.ToString(primary.TaskDefinition)
+			if cut := strings.LastIndex(current, ":"); cut > 0 {
+				arn = fmt.Sprintf("%s:%d", current[:cut], revision)
+			}
+		}
+	}
+	if arn != "" {
+		ran, err := s.revisionRan(ctx, key, snapshot, arn)
+		if err != nil {
+			return gateOutcome{}, err
+		}
+		if ran {
+			return passed, nil
+		}
+	}
+
 	target, err := s.Deploy.RevisionDefinition(ctx, key, revision)
 	if errors.Is(err, store.ErrNotFound) {
 		return passed, nil // not a revision of this family: the apply refuses it
@@ -183,12 +208,14 @@ func (s *Server) scanGateForRevision(ctx context.Context, key model.ServiceKey, 
 	if deployedErr == nil && deployed.Revision == revision {
 		return passed, nil
 	}
-	ran, err := s.Store.RevisionRanBefore(ctx, key, target.ARN)
-	if err != nil {
-		return gateOutcome{}, err
-	}
-	if ran {
-		return passed, nil
+	if arn == "" { // no snapshot to build the ARN from: ask with the ARN the revision itself reports
+		ran, err := s.revisionRan(ctx, key, snapshot, target.ARN)
+		if err != nil {
+			return gateOutcome{}, err
+		}
+		if ran {
+			return passed, nil
+		}
 	}
 	images, platform, err := deploy.DefinitionImages(target.Definition)
 	if err != nil {
@@ -209,6 +236,28 @@ func (s *Server) scanGateForRevision(ctx context.Context, key model.ServiceKey, 
 		}
 	}
 	return s.judgeImages(ctx, key, changed, platform, ack, actor)
+}
+
+// polledService is the service as the poller last stored it.
+func (s *Server) polledService(ctx context.Context, key model.ServiceKey) (ecstypes.Service, error) {
+	row, err := s.Store.GetService(ctx, key)
+	if err != nil {
+		return ecstypes.Service{}, err
+	}
+	return deploy.ParseService(row.Raw)
+}
+
+// revisionRan reports whether the revision ran on the service: it is the PRIMARY or an ACTIVE deployment in the polled
+// snapshot (a revision that has served tasks for longer than the deployment history is kept has no row left), or the
+// deployment history has a record of it that did not fail.
+func (s *Server) revisionRan(ctx context.Context, key model.ServiceKey, snapshot ecstypes.Service, arn string) (bool, error) {
+	for _, deployment := range snapshot.Deployments {
+		status := aws.ToString(deployment.Status)
+		if (status == "PRIMARY" || status == "ACTIVE") && aws.ToString(deployment.TaskDefinition) == arn {
+			return true, nil
+		}
+	}
+	return s.Store.RevisionRanBefore(ctx, key, arn)
 }
 
 // allAcknowledged reports whether every row has an acknowledgement for the same container and ref.
