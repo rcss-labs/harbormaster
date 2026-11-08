@@ -22,6 +22,8 @@ import (
 // call, so a client cannot prove it passed earlier and a direct API call cannot skip it.
 
 // Gate states beyond the scan states of security_dto.go.
+var gateResolveTimeout = 15 * time.Second
+
 const (
 	gateStatePass     = "pass"
 	gateStateCritical = "critical"
@@ -93,7 +95,11 @@ func (s *Server) scanGate(ctx context.Context, key model.ServiceKey, baseRevisio
 	if err != nil {
 		return passed, nil
 	}
-	baseline := s.baselineImages(ctx, key, baseRevision)
+	family, err := deploy.DefinitionFamily(definition)
+	if err != nil {
+		return passed, nil
+	}
+	baseline := s.baselineImages(ctx, key, baseRevision, family)
 
 	containers := make([]string, 0, len(submitted))
 	for name, image := range submitted {
@@ -143,12 +149,19 @@ func allAcknowledged(rows []ScanGateImageDTO, acks []ScanGateAck) bool {
 
 // baselineImages is the images of the definition the request was edited from. When it cannot be read every container
 // counts as changed: the gate then pauses where it could have passed, and never the other way round.
-func (s *Server) baselineImages(ctx context.Context, key model.ServiceKey, baseRevision int) map[string]string {
+//
+// The revision is looked up in the family of the polled snapshot, which can lag the live service. A baseline whose family
+// is not the submitted definition's family is not the definition being edited, so it counts as unreadable too.
+func (s *Server) baselineImages(ctx context.Context, key model.ServiceKey, baseRevision int, family string) map[string]string {
 	revision, err := s.Deploy.RevisionDefinition(ctx, key, baseRevision)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
 			s.log().Warn("gate: base revision unreadable, gating every image", "service", key.ID(), "revision", baseRevision, "error", err)
 		}
+		return nil
+	}
+	if baseFamily, _ := revision.Definition["family"].(string); baseFamily != family {
+		s.log().Warn("gate: base revision is of another family, gating every image", "service", key.ID(), "revision", baseRevision)
 		return nil
 	}
 	images, _, err := deploy.DefinitionImages(revision.Definition)
@@ -163,7 +176,13 @@ func (s *Server) baselineImages(ctx context.Context, key model.ServiceKey, baseR
 // pre_deploy request for the service and container, whether its scan is queued, joined or reused.
 func (s *Server) gateRow(ctx context.Context, key model.ServiceKey, container, imageRef, platform string, actor authz.Subject) (ScanGateImageDTO, error) {
 	row := ScanGateImageDTO{Container: container, Image: imageRef, Ref: imageRef}
-	resolved, err := s.resolveImage(ctx, imageRef, platform)
+	// A black-holed ECR or STS endpoint must end in the pause, never in a hung request.
+	resolveCtx, cancel := context.WithTimeout(ctx, gateResolveTimeout)
+	defer cancel()
+	resolved, err := s.resolveImage(resolveCtx, imageRef, platform)
+	if err != nil && errors.Is(resolveCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		err = errResolve{"timeout"}
+	}
 	var unsupported errUnsupported
 	var unresolved errResolve
 	switch {
@@ -219,7 +238,7 @@ func (s *Server) gateState(ctx context.Context, image store.ScanImage, now time.
 		if image.FailureCode == scan.CodeTimeout {
 			return scanStateFailed, gateTimeoutMessage, nil
 		}
-		message = scan.FailureAction(image.FailureCode, image.FailureDetail, image.RegistryAccountID)
+		message = scan.FailureCopy(image.Status, image.FailureCode, image.FailureDetail, image.RegistryAccountID)
 		if message == "" {
 			message = image.FailureDetail
 		}

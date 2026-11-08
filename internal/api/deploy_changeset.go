@@ -214,7 +214,7 @@ func (s *Server) applyChangeSet(w http.ResponseWriter, r *http.Request) {
 	}
 	response := changeSetResponse(result)
 	if len(gate.Acknowledged) > 0 {
-		if err := s.recordDeployAnyway(r, key, gate, result.Status == "registered_only", sc.Subject); err != nil {
+		if err := s.recordDeployAnyway(r, key, gate, result.Status == "registered_only" || (result.Status == "partial" && result.Rollout == nil), sc.Subject); err != nil {
 			response.Warning = joinWarning(response.Warning, deployAnywayNotRecorded)
 		}
 	}

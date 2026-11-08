@@ -101,7 +101,7 @@ func imageDTO(img store.ScanImage) SecurityImageDTO {
 		Digest: img.Digest, Image: img.ImageRef, Repository: img.Repository, Tag: img.Tag,
 		RegistryAccountID: img.RegistryAccountID, RegistryRegion: img.RegistryRegion,
 		Status: img.Status, FailureCode: img.FailureCode, FailureDetail: img.FailureDetail,
-		FailureAction: scan.FailureAction(img.FailureCode, img.FailureDetail, img.RegistryAccountID),
+		FailureAction: scan.FailureCopy(img.Status, img.FailureCode, img.FailureDetail, img.RegistryAccountID),
 		Platform:      img.Platform, ScannedAt: img.ScannedAt, MatchedDBBuiltAt: img.MatchedDBBuiltAt,
 		SyftVersion: img.SyftVersion, Packages: img.Packages, Truncated: img.Truncated,
 		LastRequestedAt: img.LastRequestedAt,
@@ -497,7 +497,7 @@ func scanStateOf(image store.ScanImage, db store.ScanDBState, now time.Time) (st
 	case scan.StatusScanned:
 		return scanStateScanned, ""
 	case scan.StatusFailed:
-		message := scan.FailureAction(image.FailureCode, image.FailureDetail, image.RegistryAccountID)
+		message := scan.FailureCopy(image.Status, image.FailureCode, image.FailureDetail, image.RegistryAccountID)
 		if message == "" {
 			message = image.FailureDetail
 		}

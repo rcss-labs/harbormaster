@@ -1,5 +1,14 @@
 package scan
 
+// FailureCopy is FailureAction for an image in the given status. A timeout is only "retried" while the image is queued
+// for that retry; once it has failed the retry is spent and only a Rescan helps.
+func FailureCopy(status, code, detail, accountID string) string {
+	if status == StatusFailed && code == CodeTimeout {
+		return "The scan did not finish in time, even with a larger scanner task. Rescan to try again."
+	}
+	return FailureAction(code, detail, accountID)
+}
+
 // FailureAction is the operator-facing copy for a failure code.
 func FailureAction(code, detail, accountID string) string {
 	switch code {

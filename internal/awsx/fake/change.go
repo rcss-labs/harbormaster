@@ -225,11 +225,18 @@ var _ awsx.ECRAPI = (*ecrClient)(nil)
 // DescribeImages returns one image per seeded tag of the repository, newest
 // first, or only the images named in ImageIds (by tag or digest). A repository
 // is one that a task definition in this target pulls from.
-func (c *ecrClient) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
+func (c *ecrClient) DescribeImages(ctx context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
 	done, err := c.f.begin(c.target, "ecr", "DescribeImages")
 	defer done()
 	if err != nil {
 		return nil, err
+	}
+	if c.f.ECRDelay > 0 {
+		select {
+		case <-time.After(c.f.ECRDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	e := c.f.Estate
 	e.Mu.Lock()

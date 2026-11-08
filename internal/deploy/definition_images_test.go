@@ -56,3 +56,30 @@ func TestDefinitionImages_RejectsWhatPrepareRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestDefinitionImages_RejectsDuplicateContainerNames(t *testing.T) {
+	// The map form would keep one of the two images and the gate would judge only that one.
+	def := Definition{"family": "web", "containerDefinitions": []any{
+		map[string]any{"name": "app", "image": "evil:1"},
+		map[string]any{"name": "app", "image": "live:1"}}}
+	if _, _, err := DefinitionImages(def); err == nil {
+		t.Error("DefinitionImages accepted two containers with one name")
+	}
+}
+
+func TestPrepare_RejectsDuplicateContainerNames(t *testing.T) {
+	base := Definition{"family": "web", "containerDefinitions": []any{map[string]any{"name": "app", "image": "live:1"}}}
+	draft := Definition{"family": "web", "containerDefinitions": []any{
+		map[string]any{"name": "app", "image": "evil:1"},
+		map[string]any{"name": "app", "image": "live:1"}}}
+	if _, err := Prepare(base, draft, true, "123456789012", nil); err == nil {
+		t.Error("Prepare accepted two containers with one name")
+	}
+}
+
+func TestDefinitionFamily_ReadsCanonicalForm(t *testing.T) {
+	family, err := DefinitionFamily(Definition{"Family": "web", "ContainerDefinitions": []any{map[string]any{"name": "a", "image": "b"}}})
+	if err != nil || family != "web" {
+		t.Errorf("family = %q, err = %v, want web", family, err)
+	}
+}

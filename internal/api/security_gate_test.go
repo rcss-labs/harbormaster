@@ -667,3 +667,91 @@ func TestRegisterRevision_DeployAnywayPasses(t *testing.T) {
 		t.Fatalf("audit entries = %+v, want one worded Registered anyway", entries)
 	}
 }
+
+func TestChangeSet_DuplicateContainerNamesAreRefusedBeforeAnything(t *testing.T) {
+	env := newSecurityEnv(t)
+	def, revision := definitionOf(t, env.dana, edgeNginxKey)
+	live := def["containerDefinitions"].([]any)[0].(map[string]any)
+	evil := map[string]any{}
+	for k, v := range live {
+		evil[k] = v
+	}
+	evil["image"] = ecrImage(edgeNginxKey, "edge-nginx", "1.27.1")
+	def["containerDefinitions"] = []any{evil, live}
+
+	wantStatus(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", gateBody(revision, def, nil)), http.StatusUnprocessableEntity)
+	if env.fk.Calls()["RegisterTaskDefinition"] != 0 || countRows(t, env.st, `select count(*) from scan_images`) != 0 {
+		t.Fatal("a duplicate container name registered a definition or queued a scan")
+	}
+}
+
+func TestChangeSet_GateResolveTimeoutOffersDeployAnyway(t *testing.T) {
+	old := gateResolveTimeout
+	gateResolveTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { gateResolveTimeout = old })
+	env := newSecurityEnv(t)
+	env.fk.ECRDelay = time.Hour
+	image := ecrImage(edgeNginxKey, "edge-nginx", "1.27.3")
+
+	row := wantGate(t, applyImages(t, env.dana, edgeNginxKey, nil, "edge-nginx", image))["edge-nginx"]
+	want := "The image could not be checked in ECR (timeout). You can deploy anyway."
+	if row.State != scanStateFailed || row.Message != want || row.Ref != image {
+		t.Fatalf("row = %+v, want failed with %q", row, want)
+	}
+	wantApplied(t, applyImages(t, env.dana, edgeNginxKey, anyway(row), "edge-nginx", image))
+}
+
+func TestScanCopy_TerminalTimeoutDoesNotPromiseARetry(t *testing.T) {
+	env := newSecurityEnv(t)
+	status := mustRequestScan(t, env.dana, edgeNginxKey.ID(), "edge-nginx", "1.27.3")
+	digest := status.Image.Digest
+	if err := env.st.FailScanImages(t.Context(), []string{digest}, "timeout", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	var detail SecurityImageDetailDTO
+	decode(t, env.dana.get("/api/security/images/"+digest), &detail)
+	if strings.Contains(detail.FailureAction, "retried once") || !strings.Contains(detail.FailureAction, "Rescan") {
+		t.Errorf("image failure_action = %q, want no retry promise and a Rescan hint", detail.FailureAction)
+	}
+	got := scanStatus(t, env.dana, edgeNginxKey.ID(), "digest="+digest)
+	if got.State != scanStateFailed || strings.Contains(got.Message, "retried once") {
+		t.Errorf("scan status = %+v, want failed without a retry promise", got)
+	}
+}
+
+func TestChangeSet_PartialDeployAnywayIsNotLoggedAsDeployed(t *testing.T) {
+	env := newSecurityEnv(t)
+	image := ecrImage(edgeNginxKey, "edge-nginx", "1.27.3")
+	row := wantGate(t, applyImages(t, env.dana, edgeNginxKey, nil, "edge-nginx", image))["edge-nginx"]
+	def, revision := definitionOf(t, env.dana, edgeNginxKey)
+	setImage(def, "edge-nginx", image)
+	var settings DeploySettingsResponse
+	decode(t, env.dana.get("/api/services/"+edgeNginxKey.ID()+"/deploy-settings"), &settings)
+	env.fk.FailNext("UpdateService", &smithy.GenericAPIError{Code: "ServerException", Message: "boom"})
+
+	body := gateBody(revision, def, anyway(row))
+	body["base_version"] = settings.Version
+	body["service"] = map[string]any{"desired_count": 3}
+	out := wantApplied(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", body))
+	if out.Status != "partial" {
+		t.Fatalf("status = %q, want partial", out.Status)
+	}
+	if n := countRows(t, env.st, `select count(*) from operation_log where details->>'op' = 'deploy_anyway' and text like 'Registered anyway%'`); n != 1 {
+		t.Fatalf("%d deploy_anyway operations worded Registered anyway, want 1", n)
+	}
+	if n := countRows(t, env.st, `select count(*) from operation_log where text like 'Deployed anyway%'`); n != 0 {
+		t.Fatal("a change set that deployed nothing was logged as Deployed anyway")
+	}
+}
+
+func TestChangeSet_GateBaselineOfAnotherFamilyGatesEverything(t *testing.T) {
+	env := newSecurityEnv(t)
+	def, revision := definitionOf(t, env.dana, edgeNginxKey)
+	def["family"] = "some-other-family" // the image strings are unchanged from the base revision
+
+	rows := wantGate(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", gateBody(revision, def, nil)))
+	if rows["edge-nginx"].State == "" {
+		t.Fatalf("rows = %+v, want the container gated when the baseline family differs", rows)
+	}
+}
