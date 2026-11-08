@@ -26,6 +26,8 @@ type Fake struct {
 	// Throttle makes the next N ECS calls fail with ThrottlingException.
 	// Access it atomically once calls are in flight; setting it before is fine.
 	Throttle int32
+	// ECRDelay makes every ECR DescribeImages call wait this long, or until its context ends.
+	ECRDelay time.Duration
 	// ExecServer backs ECS ExecuteCommand and SSM TerminateSession (plan 04); nil means no exec support.
 	ExecServer *SSMServer
 

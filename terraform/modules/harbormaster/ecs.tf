@@ -10,6 +10,7 @@ locals {
     var.bootstrap_admin_password_secret_arn == null ? {} : {
       HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN = var.bootstrap_admin_password_secret_arn
     },
+    local.scan_server_env,
   )
 
   container_secrets = merge(

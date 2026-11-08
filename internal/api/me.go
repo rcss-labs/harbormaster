@@ -12,7 +12,7 @@ import (
 )
 
 // allActions is every permission bit; admins hold it on every tag.
-const allActions = int(authz.View | authz.Logs | authz.Operate | authz.Deploy | authz.Edit | authz.Terminal)
+const allActions = int(authz.View | authz.Logs | authz.Operate | authz.Deploy | authz.Edit | authz.Terminal | authz.AcceptRisk)
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFrom(r.Context())

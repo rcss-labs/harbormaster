@@ -58,7 +58,11 @@ export function buildRetryRequest(request: ChangeSetRequest, response: ChangeSet
   // The definition goes again only while the rollout is still pending: a done service step already deployed it.
   if (request.task_definition && registered && !serviceDone) {
     if (registered.status === 'done' && response.registered_revision !== null) retry.task_definition = { revision: response.registered_revision }
-    else if (registered.status !== 'done') retry.task_definition = request.task_definition
+    else if (registered.status !== 'done') {
+      retry.task_definition = request.task_definition
+      // Only a definition is gated: a retry by registered revision needs no acknowledgement.
+      if (request.scan_gate) retry.scan_gate = request.scan_gate
+    }
   }
   if (request.service && unfinished('service')) retry.service = request.service
   if (request.scaling && unfinished('scaling')) retry.scaling = request.scaling

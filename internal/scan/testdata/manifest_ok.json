@@ -1,0 +1,15 @@
+{
+  "run_id": 42,
+  "kind": "scan",
+  "status": "succeeded",
+  "scanner_image_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "syft_version": "1.0.0",
+  "grype_version": "0.90.0",
+  "db_checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "db_built_at": "2026-11-07T01:00:00Z",
+  "error": "",
+  "images": [
+    {"digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": "scanned"},
+    {"digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "status": "failed", "failure_code": "pull_denied", "failure_detail": "denied"}
+  ]
+}

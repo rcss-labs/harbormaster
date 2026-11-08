@@ -123,6 +123,11 @@ variable "extra_env" {
     condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
     error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY or HM_METRICS_TOKEN (the module injects them from Secrets Manager), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
   }
+
+  validation {
+    condition     = length(setintersection(keys(var.extra_env), ["HM_SCAN_ENABLED", "HM_SCAN_CLUSTER_ARN", "HM_SCAN_TASK_DEFINITION", "HM_SCAN_SUBNETS", "HM_SCAN_SECURITY_GROUP", "HM_SCAN_BUCKET", "HM_SCAN_ROLE_NAME"])) == 0
+    error_message = "extra_env must not set HM_SCAN_ENABLED, HM_SCAN_CLUSTER_ARN, HM_SCAN_TASK_DEFINITION, HM_SCAN_SUBNETS, HM_SCAN_SECURITY_GROUP, HM_SCAN_BUCKET or HM_SCAN_ROLE_NAME (the module sets them from enable_image_scanning and the scan_* variables)."
+  }
 }
 
 variable "db_instance_class" {
@@ -188,4 +193,78 @@ variable "tags" {
   description = "Tags applied to every taggable resource."
   type        = map(string)
   default     = {}
+}
+
+variable "enable_image_scanning" {
+  description = "Creates the vulnerability scanner (task definition, bucket, roles, security group, log group) and the server's scan permissions, and turns scanning on in the server."
+  type        = bool
+  default     = false
+}
+
+variable "scanner_image" {
+  description = "Scanner image pinned by digest, for example <account>.dkr.ecr.<region>.amazonaws.com/harbormaster-scanner@sha256:<64 hex>. Required when enable_image_scanning is true (checked by a precondition on the task definition)."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.scanner_image == null || can(regex("@sha256:[a-f0-9]{64}$", var.scanner_image))
+    error_message = "scanner_image must be null or end in @sha256:<64 lowercase hex characters>."
+  }
+}
+
+variable "scanner_cpu" {
+  description = "Scanner task CPU units; must be a valid Fargate pair with scanner_memory."
+  type        = number
+  default     = 1024
+}
+
+variable "scanner_memory" {
+  description = "Scanner task memory in MiB."
+  type        = number
+  default     = 2048
+}
+
+variable "scanner_ephemeral_storage_gib" {
+  description = "Scanner task ephemeral storage in GiB (the /work volume: image layers, Syft and Grype caches, the vulnerability database)."
+  type        = number
+  default     = 40
+
+  validation {
+    condition     = var.scanner_ephemeral_storage_gib >= 21 && var.scanner_ephemeral_storage_gib <= 200
+    error_message = "scanner_ephemeral_storage_gib must be between 21 and 200."
+  }
+}
+
+variable "scan_bucket_name" {
+  description = "Name of the scan bucket. Null resolves to harbormaster-scan-<account id>-<region>."
+  type        = string
+  default     = null
+}
+
+variable "scan_role_name" {
+  description = "Name of the per-account role the scanner assumes to read ECR (the harbormaster-access module's scan_role_name)."
+  type        = string
+  default     = "harbormaster-scan"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.scan_role_name)) && length(var.scan_role_name) <= 64
+    error_message = "scan_role_name must be at most 64 characters of lowercase letters, digits and hyphens."
+  }
+}
+
+variable "scan_role_arns" {
+  description = "Role ARN patterns the scanner task role may assume. Null resolves to arn:aws:iam::*:role/<scan_role_name>. Tighten to explicit role ARNs so the wildcard account is not trusted."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.scan_role_arns == null ? true : length(var.scan_role_arns) > 0
+    error_message = "scan_role_arns must be null (the default pattern) or a non-empty list."
+  }
+}
+
+variable "scanner_egress_cidrs" {
+  description = "Destinations the scanner may reach on tcp 443 (ECR, S3 and STS). It never contacts the vulnerability data publisher."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }

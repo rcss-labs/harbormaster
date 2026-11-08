@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -324,6 +325,67 @@ func TestPermissions_NormalizesAndAudits(t *testing.T) {
 	}
 }
 
+func TestSetPermission_AcceptRiskRoundTripsAndAudits(t *testing.T) {
+	srv, _, st := newTestServer(t)
+	seedMockupTags(t, st)
+	sam := login(t, srv, "sam", testPassword)
+	omerID := userID(t, st, "omer")
+	tags, err := st.ListTags(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prodID int64
+	for _, tg := range tags {
+		if tg.Name == "Prod" {
+			prodID = int64(tg.ID)
+		}
+	}
+	path := fmt.Sprintf("/api/permissions/%d/%d", omerID, prodID)
+	var got struct {
+		Actions int `json:"actions"`
+	}
+	decode(t, sam.do("PUT", path, map[string]any{"actions": 64}, nil), &got)
+	if got.Actions != 65 {
+		t.Fatalf("actions = %d, want 65", got.Actions)
+	}
+	if a := lastAudit(t, st); !strings.Contains(a.Summary, "Accept risk") {
+		t.Fatalf("audit summary %q", a.Summary)
+	}
+	omer := login(t, srv, "omer", testPassword)
+	var me struct {
+		Perms map[string]int `json:"perms"`
+	}
+	decode(t, omer.get("/api/me"), &me)
+	if me.Perms[fmt.Sprint(prodID)] != 65 {
+		t.Fatalf("omer perms %+v", me.Perms)
+	}
+	resp := sam.do("PUT", path, map[string]any{"actions": 128}, nil)
+	if resp.StatusCode != 422 {
+		t.Fatalf("status %d, want 422", resp.StatusCode)
+	}
+	if _, msg := errorCode(t, resp); msg != "Actions must be between 0 and 127." {
+		t.Fatalf("message %q", msg)
+	}
+}
+
+func TestMe_AdminPermsIncludeAcceptRisk(t *testing.T) {
+	srv, _, st := newTestServer(t)
+	seedMockupTags(t, st)
+	sam := login(t, srv, "sam", testPassword)
+	var me struct {
+		Perms map[string]int `json:"perms"`
+	}
+	decode(t, sam.get("/api/me"), &me)
+	if len(me.Perms) == 0 {
+		t.Fatal("admin has no perms")
+	}
+	for tag, perms := range me.Perms {
+		if perms != 127 {
+			t.Errorf("tag %s perms = %d, want 127", tag, perms)
+		}
+	}
+}
+
 func TestPermissions_Validation(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedMockupTags(t, st)
@@ -336,7 +398,7 @@ func TestPermissions_Validation(t *testing.T) {
 		msg     string
 	}{
 		{fmt.Sprintf("/api/permissions/%d/1", samID), 1, 422, "Global admins have every permission."},
-		{fmt.Sprintf("/api/permissions/%d/1", omerID), 64, 422, ""},
+		{fmt.Sprintf("/api/permissions/%d/1", omerID), 128, 422, ""},
 		{fmt.Sprintf("/api/permissions/%d/1", omerID), -1, 422, ""},
 		{"/api/permissions/999999/1", 1, 404, ""},
 		{fmt.Sprintf("/api/permissions/%d/999999", omerID), 1, 404, ""},

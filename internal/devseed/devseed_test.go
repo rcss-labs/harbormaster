@@ -174,6 +174,29 @@ func TestApply_SeedsAnalyticsHistoryOnceAndForceApplyDoesNot(t *testing.T) {
 	}
 }
 
+func TestDevseed_TurnsOnPreDeployScanForEdgeNginxOnly(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	for i := 0; i < 2; i++ {
+		if err := devseed.Apply(ctx, st); err != nil {
+			t.Fatalf("apply #%d: %v", i+1, err)
+		}
+	}
+	homelab := model.ClusterKey{AccountID: "482109375512", Region: "eu-central-1", Cluster: "edge-proxy"}
+	if on, err := st.PreDeployScan(ctx, model.ServiceKey{ClusterKey: homelab, Service: "edge-nginx"}); err != nil || !on {
+		t.Fatalf("edge-nginx pre-deploy scan = %v, %v; want on", on, err)
+	}
+	// payments-api stays off: the e2e flows change its image and would stop at the scan gate.
+	core := model.ClusterKey{AccountID: "482109375512", Region: "us-east-1", Cluster: "core-services"}
+	if on, err := st.PreDeployScan(ctx, model.ServiceKey{ClusterKey: core, Service: "payments-api"}); err != nil || on {
+		t.Fatalf("payments-api pre-deploy scan = %v, %v; want off", on, err)
+	}
+	var rows int
+	if err := st.Pool.QueryRow(ctx, `select count(*) from service_scan_settings`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("setting rows = %d, %v; want only edge-nginx", rows, err)
+	}
+}
+
 // TestDevseed_CostDemoHasEveryCase checks that `make run` has a service for each Cost tab case that needs a
 // particular estate or history: tasks without a Fargate price, Spot tasks, short and long history, and a task
 // definition whose sidecar keeps a service from shrinking.

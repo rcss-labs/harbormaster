@@ -11,6 +11,8 @@ type Retention struct {
 	StoppedTasks, ServiceEvents, CountsHistory, OperationLog, DeploymentHistory, AuditLog, OrphanTags time.Duration
 	// Daily analytics tables are keyed by day and pruned on day < cutoff date.
 	AvailabilityDaily, CapacityDaily, UtilDaily time.Duration
+	// ScanRuns prunes finished scanner runs; ScanImages deletes scan results not requested for that long.
+	ScanRuns, ScanImages time.Duration
 }
 
 // RetentionResult maps a table key ("tasks", "service_events", ...) to rows deleted.
@@ -42,6 +44,8 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		{"service_availability_daily", `delete from service_availability_daily where day < $1::date`, r.AvailabilityDaily},
 		{"cluster_capacity_daily", `delete from cluster_capacity_daily where day < $1::date`, r.CapacityDaily},
 		{"service_util_daily", `delete from service_util_daily where day < $1::date`, r.UtilDaily},
+		// Deleting a run cascades to its scan_run_images batch.
+		{"scan_runs", `delete from scan_runs where finished_at < $1 and status not in ('launching', 'running')`, r.ScanRuns},
 	}
 	for _, step := range timed {
 		if step.age <= 0 {
@@ -60,6 +64,13 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 			return result, fmt.Errorf("retention audit_log: %w", err)
 		}
 		result["audit_log"] = n
+
+		// Acceptances live as long as the audit entries that mention them.
+		tag, err := s.Pool.Exec(ctx, `delete from scan_risk_acceptances where coalesce(revoked_at, expires_at) < $1`, now.Add(-r.AuditLog))
+		if err != nil {
+			return result, fmt.Errorf("retention scan_acceptances_pruned: %w", err)
+		}
+		result["scan_acceptances_pruned"] = tag.RowsAffected()
 	}
 
 	n, err := s.DeleteExpiredSessions(ctx)
@@ -96,6 +107,14 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		result[step.key] = tag.RowsAffected()
 	}
 
+	if r.ScanImages > 0 {
+		expired, err := s.deleteExpiredScanImages(ctx, now.Add(-r.ScanImages), now)
+		if err != nil {
+			return result, fmt.Errorf("retention scan_images_expired: %w", err)
+		}
+		result["scan_images_expired"] = expired
+	}
+
 	if r.OrphanTags > 0 {
 		clusters, services, err := s.deleteOrphanedTagsBeforeCounts(ctx, now.Add(-r.OrphanTags))
 		if err != nil {
@@ -105,4 +124,15 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		result["service_tags"] = services
 	}
 	return result, nil
+}
+
+// deleteExpiredScanImages deletes finished scan results not requested since cutoff, with their findings and requests
+// (they cascade from the image row). Risk acceptances do not: they have no foreign key, so one that is still in force
+// keeps its image here and re-applies if the digest is scanned again. It uses the same predicate as ExpiredScanImages.
+func (s *Store) deleteExpiredScanImages(ctx context.Context, cutoff, now time.Time) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `delete from scan_images where `+expiredScanImagesWhere, cutoff, now)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }

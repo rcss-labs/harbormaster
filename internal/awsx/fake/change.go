@@ -223,33 +223,105 @@ type ecrClient struct {
 var _ awsx.ECRAPI = (*ecrClient)(nil)
 
 // DescribeImages returns one image per seeded tag of the repository, newest
-// first. A repository is one that a task definition in this target pulls from.
-func (c *ecrClient) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
+// first, or only the images named in ImageIds (by tag or digest). A repository
+// is one that a task definition in this target pulls from.
+func (c *ecrClient) DescribeImages(ctx context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
 	done, err := c.f.begin(c.target, "ecr", "DescribeImages")
 	defer done()
 	if err != nil {
 		return nil, err
+	}
+	if c.f.ECRDelay > 0 {
+		select {
+		case <-time.After(c.f.ECRDelay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	e := c.f.Estate
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
 	repository := aws.ToString(in.RepositoryName)
 	now := e.now()
-	if tags, ok := e.Repositories[repository]; ok && c.pullsFrom(repository) {
-		out := &ecr.DescribeImagesOutput{}
-		for i, tag := range tags {
-			out.ImageDetails = append(out.ImageDetails, ecrtypes.ImageDetail{
-				RegistryId:     aws.String(c.target.AccountID),
-				RepositoryName: aws.String(repository),
-				ImageDigest:    aws.String(fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(repository+":"+tag)))),
-				ImageTags:      []string{tag},
-				ImagePushedAt:  aws.Time(now.Add(-time.Duration(i+1) * 24 * time.Hour)),
-			})
-		}
-		return out, nil
+	tags, ok := e.Repositories[repository]
+	if !ok || !c.pullsFrom(repository) {
+		return nil, &ecrtypes.RepositoryNotFoundException{Message: aws.String(
+			"The repository with name '" + repository + "' does not exist in the registry with id '" + c.target.AccountID + "'")}
 	}
-	return nil, &ecrtypes.RepositoryNotFoundException{Message: aws.String(
-		"The repository with name '" + repository + "' does not exist in the registry with id '" + c.target.AccountID + "'")}
+	out := &ecr.DescribeImagesOutput{}
+	for i, tag := range tags {
+		digest := e.digestFor(repository + ":" + tag)
+		if len(in.ImageIds) > 0 && !imageIdentified(in.ImageIds, tag, digest) {
+			continue
+		}
+		out.ImageDetails = append(out.ImageDetails, ecrtypes.ImageDetail{
+			RegistryId:             aws.String(c.target.AccountID),
+			RepositoryName:         aws.String(repository),
+			ImageDigest:            aws.String(digest),
+			ImageTags:              []string{tag},
+			ImagePushedAt:          aws.Time(now.Add(-time.Duration(i+1) * 24 * time.Hour)),
+			ImageManifestMediaType: aws.String(fakeImageMediaType),
+			ImageSizeInBytes:       aws.Int64(fakeImageSize(digest)),
+		})
+	}
+	if len(in.ImageIds) > 0 && len(out.ImageDetails) == 0 {
+		return nil, &ecrtypes.ImageNotFoundException{Message: aws.String(
+			"The image requested does not exist in the specified repository '" + repository + "'")}
+	}
+	return out, nil
+}
+
+// fakeImageMediaType is the manifest type every fake image reports.
+const fakeImageMediaType = "application/vnd.docker.distribution.manifest.v2+json"
+
+// fakeImageSize is a stable size between 40 and 168 MiB derived from the digest.
+func fakeImageSize(digest string) int64 {
+	var seed int64
+	for _, b := range []byte(digest[len(digest)-4:]) {
+		seed = seed*31 + int64(b)
+	}
+	return (40 + seed%128) << 20
+}
+
+func imageIdentified(ids []ecrtypes.ImageIdentifier, tag, digest string) bool {
+	for _, id := range ids {
+		if (id.ImageTag != nil && *id.ImageTag == tag) || (id.ImageDigest != nil && *id.ImageDigest == digest) {
+			return true
+		}
+	}
+	return false
+}
+
+// ImageDigestFor is the digest the tag of "repository:tag" resolves to: the
+// sha256 of that string, unless MoveTag pointed the tag elsewhere.
+func (e *Estate) ImageDigestFor(image string) string {
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	return e.digestFor(image)
+}
+
+// digestFor is ImageDigestFor for a caller that holds Mu.
+func (e *Estate) digestFor(image string) string {
+	if moved, ok := e.movedTags[image]; ok {
+		return moved
+	}
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(image)))
+}
+
+// MoveTag points the tag at a new digest, as a push of a mutable tag does,
+// and returns it. Every call gives a digest the tag has not had before.
+func (e *Estate) MoveTag(repository, tag string) string {
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	image := repository + ":" + tag
+	if e.movedTags == nil {
+		e.movedTags = map[string]string{}
+		e.tagMoves = map[string]int{}
+	}
+	e.tagMoves[image]++
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(fmt.Sprintf("%s#%d", image, e.tagMoves[image]))))
+	e.movedTags[image] = digest
+	return digest
 }
 
 // pullsFrom reports whether a task definition in this target has a container

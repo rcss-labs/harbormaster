@@ -145,3 +145,19 @@ func (s *Store) DeleteDeploymentsBefore(ctx context.Context, t time.Time) (int64
 	}
 	return tag.RowsAffected(), nil
 }
+
+// RevisionRanBefore reports whether the service has a deployment record of the task definition revision that did not
+// fail: a rollout Harbormaster started (written when it starts) or one the poller saw on the service (Terraform or CI
+// included). Records older than the deployment history retention are gone, so an old revision reads as never run.
+func (s *Store) RevisionRanBefore(ctx context.Context, k model.ServiceKey, taskDefinitionARN string) (bool, error) {
+	var ran bool
+	err := s.Pool.QueryRow(ctx,
+		`select exists (select 1 from deployment_history
+		 where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4
+		   and task_definition_arn = $5 and coalesce(outcome, '') <> 'failed')`,
+		k.AccountID, k.Region, k.Cluster, k.Service, taskDefinitionARN).Scan(&ran)
+	if err != nil {
+		return false, fmt.Errorf("revision ran before: %w", err)
+	}
+	return ran, nil
+}

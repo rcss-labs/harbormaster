@@ -22,6 +22,8 @@ import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
 import { PendingChangesAside, PendingChangesBar } from './PendingChangesAside'
 import { ScalingPanel } from './ScalingPanel'
+import { ScanImageStatus } from './ScanImageStatus'
+import { ScanSettingToggle } from './ScanSettingToggle'
 import { ServicePanel } from './ServicePanel'
 import { TaskSizePanel } from './TaskSizePanel'
 import { buildChangeSetRequest, buildRetryRequest, countSections, pendingRows, scalingLines, serviceRows, type ChangeSections } from './changeSummary'
@@ -30,6 +32,7 @@ import { rebaseScalingDraft, rebaseServiceDraft } from './rebase'
 import { parseRightsizeParams, RIGHTSIZE_PARAMS, rightsizeReason } from './rightsizeParams'
 import { scalingDraftErrors, scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
 import { serviceDraftErrors, serviceDraftFromSettings, serviceDraftToChange, type ServiceDraft } from './serviceDraft'
+import { scanGateOf, useGatedSubmit } from './useGatedSubmit'
 import styles from './DeployTab.module.css'
 
 /** What the drafts were based on when the user started editing; the change set is sent against it. */
@@ -228,14 +231,17 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
       if (response.status === 'partial') setPartial({ request, response })
       else onFinished(response)
     } catch (failure) {
+      // The scan gate is not a failure: the review dialog shows it and the gate hook decides what happens next.
+      if (scanGateOf(failure)) throw failure
       await onFailed(failure)
     }
   }
+  const gated = useGatedSubmit(submit)
 
-  const apply = () => void submit(buildChangeSetRequest({ baseRevision: base.revision, baseVersion: base.version, reason: shownReason, sections }))
+  const apply = () => void gated.submit(buildChangeSetRequest({ baseRevision: base.revision, baseVersion: base.version, reason: shownReason, sections }))
   const retry = () => {
     const next = partial && buildRetryRequest(partial.request, partial.response)
-    if (next) void submit(next)
+    if (next) void gated.submit(next)
   }
   // Without the deployed revision there is nothing to guard the change set with, so Review waits for it.
   const reviewable = (changes > 0 || partial !== null) && problems.length === 0 && deployedRevision !== undefined
@@ -317,6 +323,9 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
                 canEdit={canEditDefinition}
                 isAdmin={settings?.can.admin ?? false}
                 tagName={tagName}
+                belowImageTag={(container, tag) => (
+                  <ScanImageStatus serviceId={serviceId} container={container} tag={tag} canDeploy={canDeploy} tagName={tagName} />
+                )}
               />
               <TaskSizePanel definition={definitionDraft} onChange={edit(setEditedDefinition)} canEdit={canEditDefinition} tagName={tagName} oomHint={oomHint} />
             </>
@@ -336,7 +345,13 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           )}
           {settings && serviceDraft && scalingDraft ? (
             <>
-              <ServicePanel settings={settings} draft={serviceDraft} onChange={edit(setEditedService)} tagName={tagName} />
+              <ServicePanel
+                settings={settings}
+                draft={serviceDraft}
+                onChange={edit(setEditedService)}
+                tagName={tagName}
+                scanSetting={<ScanSettingToggle serviceId={serviceId} serviceName={serviceName} tagName={tagName} />}
+              />
               <ScalingPanel
                 settings={settings}
                 draft={scalingDraft}
@@ -381,7 +396,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           scalingLines={settings && sections.scaling ? scalingLines(settings, sections.scaling) : []}
           canDeploy={canDeploy}
           reason={shownReason}
-          busy={changeSet.isPending}
+          busy={changeSet.isPending || gated.busy}
           error={submitError}
           movedFrom={movedFrom}
           settingsChanged={settingsChanged}
@@ -389,7 +404,13 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           onReasonChange={setReason}
           onApply={apply}
           onRetry={retry}
+          scanGate={
+            gated.gate
+              ? { serviceId, gate: gated.gate, onRowSettled: gated.settleRow, onDeployAnyway: gated.deployAnyway, onCancel: gated.cancel }
+              : undefined
+          }
           onClose={() => {
+            gated.cancel()
             setReviewing(false)
             setSubmitError(undefined)
           }}

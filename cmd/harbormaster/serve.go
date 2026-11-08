@@ -28,9 +28,13 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
+	"github.com/rcss-labs/harbormaster/internal/scanjob"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
+
+// grypeLatestURL is Anchore's listing of the current Grype vulnerability database.
+const grypeLatestURL = "https://grype.anchore.io/databases/v6/latest.json"
 
 const (
 	shutdownTimeout = 15 * time.Second
@@ -173,6 +177,13 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// The API's SSRF filter relaxes http loopback URLs only when cfg.FakeAWS is set, so the --fake-aws
 	// flag must set it too or the demo IdP's metadata cannot be imported.
 	cfg.FakeAWS = fakeAWS
+	// Fake mode always has image scanning on, backed by the fake scanner, so the demo and the e2e suite need no variables.
+	if fakeAWS {
+		cfg.Scan.Enabled = true
+	}
+	if err := cfg.ValidateScanLaunch(); err != nil {
+		return err
+	}
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
 
 	var base aws.Config
@@ -204,6 +215,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		execInsecureStream bool
 		// plan 07: the fake IdP exists only in fake AWS mode; nil leaves /fake-idp/ unrouted.
 		fakeIdP http.Handler
+		// scanRunner is the image scan loop; nil when scanning is off.
+		scanRunner *scanjob.Runner
 	)
 	if fakeAWS {
 		estate := fake.MockupEstate(time.Now)
@@ -214,6 +227,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		defer ssmServer.Close()
 		f.ExecServer = ssmServer
 		execInsecureStream = true
+		// The fake scanner is the launcher, the bucket and the DB source in one; the demo's cert-renewer cannot be pulled.
+		fakeScanner := fake.NewScanner(estate)
+		fakeScanner.FailPull("cert-renewer")
+		scanRunner = &scanjob.Runner{Store: st, Launcher: fakeScanner, Bucket: fakeScanner, DB: fakeScanner, Cfg: cfg.Scan, Now: time.Now, Log: log}
 		clients, prober = f, f
 		go estate.RunRollouts(ctx, fakeRolloutStep)
 		if err := devseed.Apply(ctx, st); err != nil {
@@ -229,6 +246,14 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	} else {
 		real := awsx.NewReal(base, storeRoles{st})
 		clients, prober = real, real
+		if cfg.Scan.Enabled {
+			// The scan loop uses the server's own AWS config, never an access role.
+			home := awsx.NewHome(base, awsx.HomeConfig{ClusterARN: cfg.Scan.ClusterARN, TaskDefinitionARN: cfg.Scan.TaskDefinitionARN,
+				SecurityGroup: cfg.Scan.SecurityGroup, Bucket: cfg.Scan.Bucket, Subnets: cfg.Scan.Subnets})
+			source := scanjob.NewHTTPDBSource(&http.Client{}, grypeLatestURL)
+			source.Log = log
+			scanRunner = &scanjob.Runner{Store: st, Launcher: home, Bucket: home, DB: source, Cfg: cfg.Scan, Now: time.Now, Log: log}
+		}
 		if err := auth.Bootstrap(ctx, st, awsx.NewSecretReader(base), cfg.BootstrapAdminSecretARN, log); err != nil {
 			return err
 		}
@@ -239,6 +264,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	}
 
 	telemetry.Default.SetBuildInfo(version) // plan 06
+	var scanKicker api.ScanKicker           // stays a nil interface when scanning is off
+	if scanRunner != nil {
+		scanKicker = scanRunner
+	}
 	server := api.New(api.Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
@@ -247,6 +276,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		FakeIdP:                 fakeIdP,
 		MetricsToken:            cfg.MetricsToken, // plan 06
 		Telemetry:               telemetry.Default,
+		Scan:                    scanKicker,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	listener, err := net.Listen("tcp", cfg.Listen)
@@ -254,11 +284,13 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 
+	pollerConfig := poller.ConfigFrom(cfg)
+	pollerConfig.Scan = scanRunner
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
 	go func() {
 		defer close(pollerDone)
-		if err := poller.New(st, clients, poller.ConfigFrom(cfg), log).Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := poller.New(st, clients, pollerConfig, log).Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("poller stopped", "error", err)
 		}
 	}()

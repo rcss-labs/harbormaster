@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Chips } from '../../../components/Chips'
 import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
@@ -37,6 +37,8 @@ interface ContainersPanelProps {
   isAdmin: boolean
   /** Name of the service's tag, for the "You need Edit on ..." lock title. */
   tagName: string
+  /** Rendered under the image tag picker of the selected container, outside the Edit lock; gets the container name and its draft tag. */
+  belowImageTag?: (container: string, tag: string) => ReactNode
 }
 
 /** Repository part of an image reference (everything before the tag). */
@@ -47,7 +49,7 @@ const imageRepository = (image: unknown): string => {
 }
 
 /** Image tag, environment, secrets, command, entry point and health check of one container at a time. */
-export function ContainersPanel({ serviceId, definition, deployed, onChange, canEdit, isAdmin, tagName }: ContainersPanelProps) {
+export function ContainersPanel({ serviceId, definition, deployed, onChange, canEdit, isAdmin, tagName, belowImageTag }: ContainersPanelProps) {
   const phone = usePhone()
   const names = containerNames(definition)
   const [selected, setSelected] = useState<string | null>(null)
@@ -76,19 +78,22 @@ export function ContainersPanel({ serviceId, definition, deployed, onChange, can
       <div className={form.stack}>
         <LockNote>{lock}</LockNote>
         {phone && names.length > 1 && <Chips label="Container" options={switcherOptions} value={active} onChange={setSelected} wrap />}
-        <fieldset className={styles.lockable} disabled={!canEdit} title={lock} key={active}>
-          <div className={form.stack}>
-            <div className={form.group}>
-              <h3 className={form.groupTitle}>Image tag</h3>
-              <ImageTagPicker
-                serviceId={serviceId}
-                container={active}
-                currentTag={imageTagOf(container.image)}
-                deployedTag={imageTagOf(deployedContainer?.image)}
-                disabled={!canEdit}
-                onChange={(tag) => onChange(setContainerImageTag(definition, active, tag))}
-              />
-            </div>
+        <div className={form.group}>
+          <h3 className={form.groupTitle}>Image tag</h3>
+          <fieldset className={styles.lockable} disabled={!canEdit} title={lock} key={active}>
+            <ImageTagPicker
+              serviceId={serviceId}
+              container={active}
+              currentTag={imageTagOf(container.image)}
+              deployedTag={imageTagOf(deployedContainer?.image)}
+              disabled={!canEdit}
+              onChange={(tag) => onChange(setContainerImageTag(definition, active, tag))}
+            />
+          </fieldset>
+          {belowImageTag?.(active, imageTagOf(container.image))}
+        </div>
+        <fieldset className={styles.lockable} disabled={!canEdit} title={lock} key={`${active}:rest`}>
+          <div className={`${form.stack} ${styles.afterImageTag}`}>
             <div className={form.group}>
               <h3 className={form.groupTitle}>Environment</h3>
               <EnvEditor entries={readEnvironment(definition, active)} onChange={(entries) => onChange(setEnvironment(definition, active, entries))} />

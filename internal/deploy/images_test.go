@@ -381,3 +381,32 @@ func TestImageTags_UnknownContainer422(t *testing.T) {
 		t.Fatalf("err = %v, want ValidationError", err)
 	}
 }
+
+func TestContainerImage_ReturnsImageAndPlatformOfTheNamedContainer(t *testing.T) {
+	h := newHarness(t)
+	image, platform, err := h.svc.ContainerImage(t.Context(), imageResizerKey, "image-resizer")
+	if err != nil || !strings.HasSuffix(image, "/image-resizer:0.4.2") || platform != "linux/amd64" {
+		t.Fatalf("ContainerImage = %q, %q, %v; want the image-resizer image on linux/amd64", image, platform, err)
+	}
+
+	var validation *deploy.ValidationError
+	if _, _, err := h.svc.ContainerImage(t.Context(), imageResizerKey, "no-such-container"); !errors.As(err, &validation) {
+		t.Fatalf("unknown container: err = %v, want a *ValidationError", err)
+	}
+
+	// An ARM64 runtime platform is read from the definition; dropping the stored copy makes the service fetch the changed one.
+	arn := aws.ToString(h.primary(t, imageResizerKey).TaskDefinition)
+	h.fake.Estate.Mu.Lock()
+	for i := range h.fake.Estate.TaskDefinitions {
+		if td := &h.fake.Estate.TaskDefinitions[i]; aws.ToString(td.Definition.TaskDefinitionArn) == arn {
+			td.Definition.RuntimePlatform = &ecstypes.RuntimePlatform{CpuArchitecture: ecstypes.CPUArchitectureArm64}
+		}
+	}
+	h.fake.Estate.Mu.Unlock()
+	if _, err := h.store.Pool.Exec(t.Context(), `delete from task_definitions where arn = $1`, arn); err != nil {
+		t.Fatal(err)
+	}
+	if _, platform, err := h.svc.ContainerImage(t.Context(), imageResizerKey, "image-resizer"); err != nil || platform != "linux/arm64" {
+		t.Fatalf("platform = %q, %v; want linux/arm64", platform, err)
+	}
+}

@@ -13,6 +13,7 @@ module "harbormaster_access" {
 
   harbormaster_task_role_arn = "arn:aws:iam::123456789012:role/harbormaster-server-task"
   external_id                = "replace-with-the-id-shown-in-harbormaster"
+  # scanner_task_role_arn      = "arn:aws:iam::123456789012:role/harbormaster-scanner-task"
 }
 
 output "role_arn" {

@@ -1,11 +1,14 @@
 import { useState } from 'react'
-import { isApiError, useDeploy } from '../../../api/change'
+import { isApiError, useDeploy, type DeployBody } from '../../../api/change'
 import type { DeploymentDTO, ServiceDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
+import { Dialog } from '../../../components/Dialog'
 import { Pill } from '../../../components/Pill'
 import { showWarning, useToast } from '../../../components/Toast'
 import styles from './RolloutProgress.module.css'
+import { ScanGatePanel } from './ScanGatePanel'
+import { scanGateOf, useGatedSubmit } from './useGatedSubmit'
 
 const COMPLETED_VISIBLE_MS = 60_000
 
@@ -45,6 +48,22 @@ export function RolloutProgress({ serviceId, service, canDeploy, tagName }: Roll
   const deploy = useDeploy(serviceId)
   const toast = useToast()
   const [confirming, setConfirming] = useState(false)
+  // A rollback to a revision that ran before is not gated; a revision the service has no record of running is, and then
+  // the same Image scan panel offers Deploy anyway.
+  const send = async (request: DeployBody) => {
+    try {
+      const started = await deploy.mutateAsync(request)
+      showWarning(toast, started.warning)
+    } catch (failure) {
+      if (scanGateOf(failure)) throw failure
+      if (isApiError(failure, 'forbidden')) toast.show(`You need Deploy on ${tagName} to roll back.`, 'bad')
+      else if (isApiError(failure, 'conflict')) toast.show('The service changed meanwhile; check the rollout and try again.', 'bad')
+      else toast.show(failure instanceof Error ? failure.message : 'The rollback could not be started.', 'bad')
+    } finally {
+      setConfirming(false)
+    }
+  }
+  const gated = useGatedSubmit(send)
   const primary = primaryOf(service)
   if (!primary) return null
 
@@ -55,18 +74,8 @@ export function RolloutProgress({ serviceId, service, canDeploy, tagName }: Roll
   const newCount = primary.running_count
   const oldCount = target?.running_count ?? 0
 
-  const rollBack = async () => {
-    if (!target) return
-    try {
-      const started = await deploy.mutateAsync({ revision: target.revision, interrupt: true })
-      showWarning(toast, started.warning)
-    } catch (failure) {
-      if (isApiError(failure, 'forbidden')) toast.show(`You need Deploy on ${tagName} to roll back.`, 'bad')
-      else if (isApiError(failure, 'conflict')) toast.show('The service changed meanwhile; check the rollout and try again.', 'bad')
-      else toast.show(failure instanceof Error ? failure.message : 'The rollback could not be started.', 'bad')
-    } finally {
-      setConfirming(false)
-    }
+  const rollBack = () => {
+    if (target) void gated.submit({ revision: target.revision, interrupt: true })
   }
 
   return (
@@ -109,10 +118,23 @@ export function RolloutProgress({ serviceId, service, canDeploy, tagName }: Roll
           sub={`Stops the rollout of :${primary.revision} and returns the service to :${target.revision}.`}
           confirmLabel={`Roll back to :${target.revision}`}
           danger
-          confirmDisabled={deploy.isPending}
-          onConfirm={() => void rollBack()}
+          confirmDisabled={gated.busy}
+          onConfirm={rollBack}
           onCancel={() => setConfirming(false)}
         />
+      )}
+      {gated.gate && target && (
+        <Dialog
+          title={`Roll back ${service.name} to :${target.revision}?`}
+          sub="The image scan paused this deploy."
+          onClose={gated.cancel}
+          actions={[
+            { label: 'Cancel', onClick: gated.cancel, disabled: gated.busy },
+            { label: 'Deploy anyway', kind: 'primary', onClick: gated.deployAnyway, disabled: gated.busy },
+          ]}
+        >
+          <ScanGatePanel serviceId={serviceId} gate={gated.gate} onRowSettled={gated.settleRow} />
+        </Dialog>
       )}
     </section>
   )
