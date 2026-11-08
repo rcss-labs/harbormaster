@@ -42,3 +42,16 @@ func TestHealthcheck_NeedsExecutableTools(t *testing.T) {
 		t.Errorf("healthcheck = %d, want 1 for a non-executable grype", code)
 	}
 }
+
+func TestVersionCommand_PrintsProgramNameAndVersion(t *testing.T) {
+	previous := version
+	version = "v9.9.9"
+	t.Cleanup(func() { version = previous })
+	var stdout bytes.Buffer
+	if code := run([]string{"version"}, &stdout, &bytes.Buffer{}, func(string) string { return "" }); code != 0 {
+		t.Fatalf("version exit = %d, want 0", code)
+	}
+	if got, want := stdout.String(), "harbormaster-scanner v9.9.9\n"; got != want {
+		t.Errorf("version output = %q, want %q", got, want)
+	}
+}

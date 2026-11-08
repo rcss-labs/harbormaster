@@ -20,7 +20,10 @@ https://github.com/anchore/<project>/releases/download/v<version>/, then:
   1. checks the sha256 of the checksums file against <checksums-sha256>
   2. cosign verify-blob --bundle with <identity> and the GitHub Actions OIDC issuer
   3. checks the tarball against the signed checksums file
-  4. extracts the binary and requires 'statically linked' in its 'file' output
+  4. extracts the binary and its LICENSE, and requires 'statically linked' and the architecture of <arch>
+     (x86-64 for amd64, aarch64 for arm64) in the binary's 'file' output
+
+Writes <outdir>/<project> and <outdir>/<project>.LICENSE.
 
 Exit codes: 0 ok, 1 verification or download failed, 2 usage error.
 USAGE
@@ -97,13 +100,23 @@ grep -F " ${tarball_name}" "${workdir}/${checksums_name}" >"${workdir}/tarball.s
 echo "OK: ${tarball_name} matches the signed checksums"
 
 mkdir "${workdir}/extract"
-tar -xzf "${workdir}/${tarball_name}" -C "${workdir}/extract" "$project" || fail "${tarball_name} has no ${project} binary"
+tar -xzf "${workdir}/${tarball_name}" -C "${workdir}/extract" "$project" LICENSE ||
+  fail "${tarball_name} has no ${project} binary and LICENSE"
 file_output="$(file -b "${workdir}/extract/${project}")"
 case "$file_output" in
   *"statically linked"*) ;;
   *) fail "${project} is not statically linked: ${file_output}" ;;
 esac
-echo "OK: ${project} is statically linked (${file_output})"
+case "$arch" in
+  amd64) want_machine="x86-64" ;;
+  arm64) want_machine="aarch64" ;;
+esac
+case "$file_output" in
+  *"$want_machine"*) ;;
+  *) fail "${project} is not a ${want_machine} binary: ${file_output}" ;;
+esac
+echo "OK: ${project} is statically linked for ${arch} (${file_output})"
 
 install -m 0755 "${workdir}/extract/${project}" "${outdir}/${project}"
+install -m 0644 "${workdir}/extract/LICENSE" "${outdir}/${project}.LICENSE"
 echo "OK: ${outdir}/${project} verified"

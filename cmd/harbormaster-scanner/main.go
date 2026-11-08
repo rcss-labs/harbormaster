@@ -50,7 +50,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	}
 	switch args[0] {
 	case "version":
-		fmt.Fprintln(stdout, version)
+		fmt.Fprintln(stdout, "harbormaster-scanner", version)
 		return 0
 	case "healthcheck":
 		return healthcheck(stderr, getenv)

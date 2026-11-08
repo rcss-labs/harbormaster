@@ -3,6 +3,30 @@
 # The fetch and go-build stages run on the build host's native platform, so building for another architecture
 # needs no emulation. Syft and Grype are downloaded for the target architecture and verified with cosign and
 # their signed checksums by tools/scanner-verify.sh; a failed verification fails the build.
+#
+# Bumping Syft or Grype (treat the PR as a security change; a reviewer must repeat steps 2 to 4 independently):
+#  1. Pick the release tag and download <project>_<version>_checksums.txt and its .sigstore.json into a new, empty
+#     directory. Never run anything downloaded outside the build container.
+#  2. Read the signing certificate from the bundle and take its SAN:
+#       jq -r '.verificationMaterial.certificate.rawBytes' <bundle> | base64 -d \
+#         | openssl x509 -inform der -noout -ext subjectAltName
+#     Pin that exact string as <PROJECT>_IDENTITY (no wildcard). Today it is the release workflow on refs/heads/main,
+#     not on the tag, so the SAN alone does not tie the signature to the tag.
+#  3. Also check the certificate's source-repository-ref and workflow-sha extensions (Fulcio OIDs 1.3.6.1.4.1.57264.1.14
+#     and 1.3.6.1.4.1.57264.1.3, or `openssl x509 -text`) against the release tag: the commit must be the tag's commit
+#     (git ls-remote https://github.com/anchore/<project> 'refs/tags/v<version>^{}'). Do not pin if it is not.
+#     Checked for the current pins: syft 30f4bce7... and grype 82d7a0ea... are both the certificate's workflow SHA and the
+#     tag's commit.
+#  4. Run tools/scanner-verify.sh for amd64 and arm64 with the new values, take sha256sum of the checksums.txt that
+#     verified and pin it as <PROJECT>_CHECKSUMS_SHA256; update the version ARG and THIRD_PARTY_NOTICES.md.
+#
+# The cosign image below was checked against Sigstore's own signature: `cosign verify
+# ghcr.io/sigstore/cosign/cosign@sha256:ad281047... --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com
+# --certificate-oidc-issuer https://accounts.google.com`, run with that same cosign v2.6.5 inside a container on
+# 2026-11-08, verified the claims, the transparency log entry and the certificate chain. Repeat it when bumping cosign.
+#
+# The `file` package is pinned to an Alpine revision (5.47-r2). Alpine removes superseded revisions from its
+# repository, so the build fails when r2 is dropped: bump it to the version `apk policy file` shows then.
 
 # ghcr.io/sigstore/cosign/cosign:v2.6.5 (verifier only; never in the final image)
 FROM --platform=$BUILDPLATFORM ghcr.io/sigstore/cosign/cosign:v2.6.5@sha256:ad281047f85c5e1fc6ffbc30c2b55be3b07b4032bef715a12122ce5829619aca AS cosign
@@ -19,7 +43,8 @@ ARG GRYPE_CHECKSUMS_SHA256=031a06d6c9184a3a0b379f1544938bdf8ecc18327aa2e46ea912b
 # runs from main, hence refs/heads/main rather than the tag.
 ARG SYFT_IDENTITY=https://github.com/anchore/syft/.github/workflows/release.yaml@refs/heads/main
 ARG GRYPE_IDENTITY=https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main
-# busybox has no `file`; scanner-verify.sh needs it to confirm the binaries are static.
+# busybox has no `file`; scanner-verify.sh needs it to confirm the binaries are static and the right architecture.
+# Pinned to the Alpine revision: bump it when Alpine drops 5.47-r2 (see the top of this file).
 RUN apk add --no-cache file=5.47-r2
 COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
 COPY tools/scanner-verify.sh /usr/local/bin/scanner-verify.sh
@@ -47,15 +72,17 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c
 COPY --from=go-build /out/harbormaster-scanner /harbormaster-scanner
 COPY --from=fetch /out/bin/syft /usr/local/bin/syft
 COPY --from=fetch /out/bin/grype /usr/local/bin/grype
+# Licences of the shipped binaries, taken from the verified release tarballs.
+COPY --from=fetch /out/bin/syft.LICENSE /licenses/syft
+COPY --from=fetch /out/bin/grype.LICENSE /licenses/grype
 # 65532 is distroless nonroot. A volume mounted on /work (Fargate) is writable by the non-root user because
 # the mount point carries this ownership; a bare `docker run --tmpfs /work` is writable too.
 COPY --from=fetch --chown=65532:65532 /out/work /work
 USER nonroot:nonroot
+# The Syft and Grype cache variables (/work/cache/{syft,grype}) are set per call by the runner:
+# internal/scanner/run.go syftEnv and internal/scanner/db.go grypeEnv.
 ENV HM_SCAN_WORK_DIR=/work \
-    TMPDIR=/work/tmp \
-    SYFT_CACHE_DIR=/work/syft \
-    GRYPE_DB_CACHE_DIR=/work/grype \
-    XDG_CACHE_HOME=/work/cache
+    TMPDIR=/work/tmp
 VOLUME /work
 # Exec form: the image has no shell.
 HEALTHCHECK --interval=30s --timeout=5s CMD ["/harbormaster-scanner", "healthcheck"]

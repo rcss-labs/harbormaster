@@ -5,14 +5,17 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-usage: tools/check-scanner-image.sh [--can-run] <image>
+usage: tools/check-scanner-image.sh [--can-run] <image> <version>
 
+  version        the VERSION the image was built with; 'version' must print exactly
+                 'harbormaster-scanner <version>', so a stale image or 'dev' fails
   --can-run      only probe whether this host can execute the image (native or emulated);
                  exit 0 if it can, 1 if not
-  CHECK_IMAGE_STATIC_ONLY=1   run only the checks that do not execute the image (image exists, user, healthcheck)
+  CHECK_IMAGE_STATIC_ONLY=1   run only the checks that do not execute the image: image exists, user, healthcheck,
+                 no bin/sh in the exported filesystem, and 'file' on the three binaries (architecture, static)
 
 Checks, in order; each prints its name on failure and exits 1:
-  image exists, non-root user, HEALTHCHECK runs 'healthcheck', 'version' prints one version line,
+  image exists, non-root user, HEALTHCHECK runs 'healthcheck', 'version' prints the expected line,
   no /bin/sh, 'syft version' and 'grype version' under --read-only --tmpfs /work, 'healthcheck' exits 0.
 
 Exit codes: 0 ok, 1 a check failed, 2 usage error.
@@ -25,12 +28,13 @@ if [ "${1:-}" = "--can-run" ]; then
   shift
 fi
 
-if [ "$#" -ne 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+if [ "$#" -ne 2 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
   usage >&2
   exit 2
 fi
 
 image="$1"
+expected_version="$2"
 
 if [ "$can_run_only" = 1 ]; then
   platform="$(docker inspect --format '{{.Os}}/{{.Architecture}}' "$image")" || exit 1
@@ -61,14 +65,38 @@ case "$healthcheck" in
 esac
 
 if [ "${CHECK_IMAGE_STATIC_ONLY:-0}" = 1 ]; then
+  # Nothing is executed: inspect the exported filesystem and the binaries with tar and file.
+  container="hm-scanner-check-$$-$(date +%s)"
+  extract_dir="$(mktemp -d)"
+  trap 'docker rm -f "$container" >/dev/null 2>&1 || true; rm -rf "$extract_dir"' EXIT
+  docker create --name "$container" --platform "$platform" "$image" >/dev/null || fail "image exists: docker create failed"
+  # Listing into a variable first: with pipefail, grep -q closing the pipe early would hide a match.
+  filesystem_listing="$(docker export "$container" | tar -t)" || fail "no /bin/sh: could not list the exported filesystem"
+  if printf '%s\n' "$filesystem_listing" | grep -Eq '^(\./)?bin/sh$'; then
+    fail "no /bin/sh: exported filesystem contains bin/sh"
+  fi
+  echo "OK: no bin/sh in the exported filesystem"
+  case "${platform#*/}" in
+    amd64) want_machine="x86-64" ;;
+    arm64) want_machine="aarch64" ;;
+    *) fail "binary architecture: unsupported image architecture ${platform#*/}" ;;
+  esac
+  for binary in harbormaster-scanner usr/local/bin/syft usr/local/bin/grype; do
+    docker cp "$container:/$binary" "$extract_dir/$(basename "$binary")" >/dev/null || fail "binary architecture: /$binary is missing"
+    file_output="$(file -b "$extract_dir/$(basename "$binary")")"
+    case "$file_output" in
+      *"$want_machine"*"statically linked"*) ;;
+      *) fail "binary architecture: /$binary is not a static $want_machine binary: $file_output" ;;
+    esac
+  done
+  echo "OK: harbormaster-scanner, syft and grype are static $want_machine binaries"
   echo "static checks passed (runtime checks skipped)"
   exit 0
 fi
 
 version_output="$(docker run --rm --platform "$platform" "$image" version)" || fail "version: 'version' command failed"
-if ! printf '%s\n' "$version_output" | grep -Eq '^[^[:space:]]+$'; then
-  fail "version: expected one non-empty version line, got: $version_output"
-fi
+[ "$version_output" = "harbormaster-scanner $expected_version" ] ||
+  fail "version: expected 'harbormaster-scanner $expected_version', got: $version_output"
 echo "OK: version prints '$version_output'"
 
 if docker run --rm --platform "$platform" --entrypoint /bin/sh "$image" -c true >/dev/null 2>&1; then

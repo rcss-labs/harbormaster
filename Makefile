@@ -96,14 +96,14 @@ scanner-image:
 # check-scanner-image follows check-image: runtime checks on the shipped image when this host can execute it,
 # otherwise static checks on it and runtime checks on a native build of the same Dockerfile.
 check-scanner-image:
-	@if tools/check-scanner-image.sh --can-run harbormaster-scanner:$(VERSION); then \
-		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION); \
+	@if tools/check-scanner-image.sh --can-run harbormaster-scanner:$(VERSION) $(VERSION); then \
+		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION) $(VERSION); \
 	else \
 		native="$$(docker info --format '{{.Architecture}}' | sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/')"; \
 		echo "check-scanner-image: host cannot run harbormaster-scanner:$(VERSION); static checks on it, runtime checks on a native $$native build"; \
-		CHECK_IMAGE_STATIC_ONLY=1 tools/check-scanner-image.sh harbormaster-scanner:$(VERSION) && \
+		CHECK_IMAGE_STATIC_ONLY=1 tools/check-scanner-image.sh harbormaster-scanner:$(VERSION) $(VERSION) && \
 		docker build -q -f Dockerfile.scanner --platform linux/$$native --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-scanner:$(VERSION)-check . >/dev/null && \
-		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION)-check; \
+		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION)-check $(VERSION); \
 	fi
 
 # release runs its prerequisites in order (do not use make -j). The build step generates the web app,
