@@ -1,4 +1,5 @@
-// MSW fixtures for the Log search routes. The server tasks replace these in place and check them against the Go contract.
+// MSW fixtures for the Log search routes. The service-list and result fixtures are checked against the Go
+// contract in contract/contract.test.ts; the saved-search ones follow with the saved-searches API.
 import { http, HttpResponse } from 'msw'
 import type { ListDTO } from '../api/types'
 import type { LogSearchResultDTO, LogSearchServiceDTO, SavedLogSearchDTO } from '../api/logSearch'
@@ -41,13 +42,20 @@ export const LOG_SEARCH_RESULT_CAPPED: LogSearchResultDTO = {
   records_matched: 48_210,
 }
 
+const NO_PERMISSION_MESSAGE =
+  'The harbormaster-access role in admin cannot run Logs Insights queries. Update the access module to the latest version.'
+
 export const LOG_SEARCH_RESULT_NO_PERMISSION: LogSearchResultDTO = {
   ...LOG_SEARCH_RESULT,
   rows: [],
   records_matched: 0,
   bytes_scanned: 0,
   cost_usd: 0,
-  targets: [{ ...okTarget, state: 'no_permission', message: 'Harbormaster cannot read these log groups.', bytes_scanned: 0, records_matched: 0 }],
+  services: [
+    { id: 'svc-payments', name: 'payments', state: 'target_failed', message: NO_PERMISSION_MESSAGE },
+    { id: 'svc-catalog', name: 'catalog', state: 'target_failed', message: NO_PERMISSION_MESSAGE },
+  ],
+  targets: [{ ...okTarget, state: 'no_permission', message: NO_PERMISSION_MESSAGE, bytes_scanned: 0, records_matched: 0 }],
 }
 
 export const SAVED_LOG_SEARCHES: ListDTO<SavedLogSearchDTO> = {

@@ -1377,6 +1377,60 @@
     "total": "number",
     "truncated": "boolean"
   },
+  "logSearchResult": {
+    "bytes_scanned": "number",
+    "capped": "boolean",
+    "cost_usd": "number",
+    "duration_ms": "number",
+    "from": "time",
+    "records_matched": "number",
+    "rows": [
+      {
+        "container": "string",
+        "message": "string",
+        "message_truncated": "boolean",
+        "service_id": "string",
+        "t": "time",
+        "task_id": "string"
+      }
+    ],
+    "services": [
+      {
+        "id": "string",
+        "message": "string",
+        "name": "string",
+        "state": "string"
+      }
+    ],
+    "targets": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "bytes_scanned": "number",
+        "message": "string",
+        "records_matched": "number",
+        "region": "string",
+        "state": "string"
+      }
+    ],
+    "to": "time"
+  },
+  "logSearchServices": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "cluster": "string",
+        "id": "string",
+        "name": "string",
+        "region": "string"
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time"
+  },
   "login": {
     "user": {
       "accounts": [

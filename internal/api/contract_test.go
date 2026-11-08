@@ -153,6 +153,9 @@ func contractShapes() map[string]any {
 		"analyticsCost":     shapeOf(reflect.TypeFor[CostDTO]()),
 		"timeline":          shapeOf(reflect.TypeFor[TimelineDTO]()),
 		"timelineLogErrors": shapeOf(reflect.TypeFor[TimelineLogErrorsDTO]()),
+		// log search
+		"logSearchServices": shapeOf(reflect.TypeFor[ListResponse[LogSearchServiceDTO]]()),
+		"logSearchResult":   shapeOf(reflect.TypeFor[LogSearchResultDTO]()),
 	}
 }
 

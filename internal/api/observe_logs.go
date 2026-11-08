@@ -92,12 +92,24 @@ func (s *Server) resolveLogs(r *http.Request, container string) (logsSelection, 
 	if err != nil {
 		return logsSelection{}, err
 	}
-	ctx := r.Context()
-	row, err := s.Store.GetServiceView(ctx, key, sc.Vis)
+	return s.logScope(r.Context(), sc.Subject, sc.Vis, key, container)
+}
+
+// serviceLogScope is the Logs-tab authorization and log-location lookup for one service, for callers that
+// are not serving the Logs tab (the cross-service log search): the subject's full visibility, Logs on the
+// service's effective tag, every supported container of the first supported container's group.
+func (s *Server) serviceLogScope(ctx context.Context, subject authz.Subject, key model.ServiceKey) (logsSelection, error) {
+	return s.logScope(ctx, subject, visibilityOf(subject), key, "all")
+}
+
+// logScope is the shared body of resolveLogs and serviceLogScope: vis decides what is visible (an invisible
+// service is store.ErrNotFound), then Logs on the effective tag is required.
+func (s *Server) logScope(ctx context.Context, subject authz.Subject, vis store.Visibility, key model.ServiceKey, container string) (logsSelection, error) {
+	row, err := s.Store.GetServiceView(ctx, key, vis)
 	if err != nil {
 		return logsSelection{}, err
 	}
-	if !authz.Can(sc.Subject, authz.Logs, row.EffectiveTagID) {
+	if !authz.Can(subject, authz.Logs, row.EffectiveTagID) {
 		tags, err := s.tagDTOs(ctx)
 		if err != nil {
 			return logsSelection{}, err
