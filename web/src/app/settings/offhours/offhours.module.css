@@ -1,0 +1,74 @@
+/* Ported from the approved mockup (upgrade 1, "Off-hours schedules") onto the app's tokens. */
+.page { display: grid; gap: 12px; min-width: 0; }
+.head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.split { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 12px; align-items: start; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.07); }
+.danger { color: var(--danger); border-color: var(--danger-border); }
+.sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+/* Schedule list */
+.list { list-style: none; margin: 0; padding: 0; }
+.listItem { border-top: 1px solid var(--row-border); }
+.listItem:first-child { border-top: 0; }
+.listButton { all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px var(--pad); cursor: pointer; }
+.listButton:hover { background: var(--hover); }
+.listButton:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.listButton[aria-current='true'] { background: var(--accent-soft); }
+.listName { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.listEmpty { padding: var(--pad); color: var(--muted); }
+
+/* Editor */
+.editor { display: grid; gap: 10px; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field > span { font-size: 12px; font-weight: 500; color: var(--text-2); }
+.ctl { width: 100%; min-height: 30px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
+.check { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; font-weight: 500; }
+.check input { accent-color: var(--accent); margin: 0; }
+.noteRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.noteRow .note { flex: 1; min-width: 0; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.actionsRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actionsRow .spacer { margin-left: auto; }
+.error { color: var(--danger); font-size: 12px; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
+
+/* The 7x24 grid keeps a readable cell width, so it scrolls inside its own box and never widens the page. */
+.gridScroll { overflow-x: auto; max-width: 100%; padding-bottom: 2px; }
+.week { display: grid; grid-template-columns: 34px repeat(24, minmax(14px, 1fr)); gap: 2px; min-width: 460px; }
+.weekRow { display: contents; }
+.hourLabel { font: 10px var(--mono); color: var(--muted); text-align: center; }
+.dayLabel { font: 11px var(--mono); color: var(--muted); display: flex; align-items: center; }
+.cell { all: unset; box-sizing: border-box; cursor: pointer; height: 18px; border-radius: 2px; background: var(--grid); touch-action: manipulation; }
+.cellOn { background: var(--accent); }
+.cell:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+.cell[data-now='true'] { box-shadow: inset 0 0 0 2px var(--warn); }
+
+/* Preview */
+.preview { display: grid; gap: 8px; border-top: 1px solid var(--row-border); padding-top: 10px; }
+.previewTitle { font-size: 12px; font-weight: 600; color: var(--text-2); margin: 0; }
+.matched { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font: 12px var(--mono); }
+.warnList { margin: 6px 0 0; padding-left: 18px; }
+.warnList li { overflow-wrap: anywhere; }
+
+/* Services */
+.service { font-weight: 600; }
+.stateCell { display: grid; gap: 4px; justify-items: start; min-width: 0; }
+.reason { color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; white-space: normal; }
+.mono { font-family: var(--mono); }
+.cost { font-family: var(--mono); }
+
+@media (max-width: 980px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 700px) {
+  .fields { grid-template-columns: minmax(0, 1fr); }
+  .actionsRow .spacer { margin-left: 0; }
+  .actionsRow .btn { flex: 1 1 auto; justify-content: center; }
+  .cell { height: 24px; }
+}
