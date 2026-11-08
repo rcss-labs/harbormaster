@@ -144,10 +144,13 @@ const IMAGE_EDGE: SecurityImage = {
   packages: 214,
   truncated: false,
   open: { ...NO_COUNTS, critical: 1, high: 1, medium: 1 },
-  accepted: 1,
+  accepted: 0,
   last_requested_at: '2026-10-31T11:35:00Z',
   can: { accept: true, rescan: true },
 }
+
+/** The same image as payments-api sees it: its acceptance of the critical finding counts there, and only there. */
+const IMAGE_EDGE_FOR_PAYMENTS: SecurityImage = { ...IMAGE_EDGE, open: { ...NO_COUNTS, high: 1, medium: 1 }, accepted: 1 }
 
 export const SECURITY_IMAGE_EDGE: SecurityImageDetail = {
   ...IMAGE_EDGE,
@@ -227,7 +230,7 @@ export const SECURITY_SERVICE_EDGE: SecurityService = {
   enabled: true,
   pre_deploy_scan: true,
   can_change_setting: true,
-  images: [IMAGE_EDGE],
+  images: [IMAGE_EDGE_FOR_PAYMENTS],
 }
 
 export const SECURITY_SERVICE_OFF: SecurityService = {
@@ -241,7 +244,7 @@ export const SCAN_STATUS_NONE: ScanStatus = { enabled: true, state: 'none', imag
 
 export const SCAN_STATUS_QUEUED: ScanStatus = { enabled: true, state: 'queued', image: IMAGE_QUEUED, message: '' }
 
-export const SCAN_STATUS_SCANNED: ScanStatus = { enabled: true, state: 'scanned', image: IMAGE_EDGE, message: '' }
+export const SCAN_STATUS_SCANNED: ScanStatus = { enabled: true, state: 'scanned', image: IMAGE_EDGE_FOR_PAYMENTS, message: '' }
 
 export const SCAN_STATUS_FAILED: ScanStatus = { enabled: true, state: 'failed', image: IMAGE_FAILED, message: TIMEOUT_COPY }
 
@@ -279,31 +282,33 @@ export const SCAN_GATE_FAILED: ScanGate = {
   ],
 }
 
-/** The security response the scenario selects for the page-level read. */
+/** The page-level states: the list and the service read answer for one of these. */
 export type SecurityScenario = 'on' | 'stale' | 'off'
-
-let scenario: SecurityScenario = 'on'
-
-/** Chooses what GET /api/security and GET /api/security/services/{id} answer. Reset to 'on' between tests. */
-export function setSecurityScenario(next: SecurityScenario): void {
-  scenario = next
-}
-
-const securityFor = (current: SecurityScenario): SecurityResponse =>
-  current === 'off' ? SECURITY_OFF : current === 'stale' ? SECURITY_STALE : SECURITY
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
 
-/** Default handlers for the security endpoints; msw.ts spreads them into the default set. */
+/**
+ * The list and service reads for a scenario. Tests pass them to `server.use(...)`; `resetHandlers` in setup.ts reverts them
+ * after each test. The image, scan and write handlers are the same for every scenario.
+ */
+export function securityScenarioHandlers(scenario: SecurityScenario) {
+  return [
+    http.get('/api/security', () =>
+      HttpResponse.json(scenario === 'off' ? SECURITY_OFF : scenario === 'stale' ? SECURITY_STALE : SECURITY),
+    ),
+    http.get('/api/security/services/:serviceId', ({ params }) => {
+      if (params.serviceId !== SERVICE_PAYMENTS.id) return notFound()
+      return HttpResponse.json(scenario === 'off' ? SECURITY_SERVICE_OFF : SECURITY_SERVICE_EDGE)
+    }),
+  ]
+}
+
+/** Default handlers for the security endpoints, serving the 'on' scenario; msw.ts spreads them into the default set. */
 export const securityHandlers = [
-  http.get('/api/security', () => HttpResponse.json(securityFor(scenario))),
+  ...securityScenarioHandlers('on'),
   http.get('/api/security/images/:digest', ({ params }) =>
     params.digest === DIGEST_EDGE ? HttpResponse.json(SECURITY_IMAGE_EDGE) : notFound(),
   ),
-  http.get('/api/security/services/:serviceId', ({ params }) => {
-    if (params.serviceId !== SERVICE_PAYMENTS.id) return notFound()
-    return HttpResponse.json(scenario === 'off' ? SECURITY_SERVICE_OFF : SECURITY_SERVICE_EDGE)
-  }),
   http.put('/api/security/services/:serviceId/setting', async ({ request }) => {
     const body = (await request.json()) as { pre_deploy_scan: boolean }
     return HttpResponse.json({ ...SECURITY_SERVICE_EDGE, pre_deploy_scan: body.pre_deploy_scan })

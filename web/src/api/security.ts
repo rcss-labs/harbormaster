@@ -247,6 +247,7 @@ export function useSecurityService(serviceId: string) {
   return useQuery({
     queryKey: ['security', 'service', serviceId],
     queryFn: () => api.get<SecurityService>(`/api/security/services/${serviceId}`),
+    enabled: serviceId !== '',
   })
 }
 
