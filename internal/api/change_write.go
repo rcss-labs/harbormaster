@@ -8,6 +8,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -113,12 +114,15 @@ func (s *Server) failChange(w http.ResponseWriter, err error) {
 	var validation *deploy.ValidationError
 	var unsupported *deploy.UnsupportedControllerError
 	var awsErr *deploy.AWSError
+	var offHours *offhours.ConflictError
 	switch {
 	case errors.As(err, &stale):
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":             map[string]string{"code": "conflict", "message": stale.Error()},
 			"deployed_revision": stale.DeployedRevision,
 		})
+	case errors.As(err, &offHours):
+		writeError(w, http.StatusConflict, "conflict", offHours.Message)
 	case errors.Is(err, deploy.ErrRolloutRunning):
 		writeError(w, http.StatusConflict, "conflict", deploy.ErrRolloutRunning.Error())
 	case errors.As(err, &validation):

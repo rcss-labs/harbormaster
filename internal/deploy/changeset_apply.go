@@ -134,6 +134,9 @@ func (s *Service) ApplyChangeSet(ctx context.Context, subj authz.Subject, key mo
 	if err := validateShape(cs); err != nil {
 		return ChangeSetResult{}, err
 	}
+	if err := s.guardScaling(ctx, key, cs.Scaling); err != nil {
+		return ChangeSetResult{}, err
+	}
 	ecsAPI, live, err := s.liveService(ctx, key)
 	if err != nil {
 		return ChangeSetResult{}, err

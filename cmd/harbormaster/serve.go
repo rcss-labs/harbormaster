@@ -276,7 +276,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	server := api.New(api.Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
-		Deploy:                  &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
+		Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,
+			Guard: &offhours.Guard{Store: st, Now: time.Now}},
 		ExecAllowInsecureStream: execInsecureStream,
 		FakeIdP:                 fakeIdP,
 		MetricsToken:            cfg.MetricsToken, // plan 06

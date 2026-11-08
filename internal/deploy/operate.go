@@ -91,6 +91,11 @@ func (s *Service) SetDesiredCount(ctx context.Context, subj authz.Subject, key m
 	if ceiling := s.maxDesired(); n < 0 || n > ceiling {
 		return DesiredCountResult{}, &ValidationError{Message: fmt.Sprintf("Desired count must be between 0 and %d", ceiling)}
 	}
+	if s.Guard != nil {
+		if err := s.Guard.DesiredCount(ctx, key); err != nil {
+			return DesiredCountResult{}, err
+		}
+	}
 	api, live, err := s.liveService(ctx, key)
 	if err != nil {
 		return DesiredCountResult{}, err

@@ -31,12 +31,21 @@ type ScalingRangeSource interface {
 // Service runs the change-path operations on ECS services: registering task
 // definition revisions, deploying, rolling back and restarting.
 // Permission checks live in the API layer, not here.
+// CapacityGuard lets another feature veto capacity writes. The off-hours Guard implements it; both methods
+// return nil when the service is not affected.
+type CapacityGuard interface {
+	DesiredCount(ctx context.Context, k model.ServiceKey) error
+	Scaling(ctx context.Context, k model.ServiceKey, setsRange, removesTarget bool, actionNames []string) error
+}
+
 type Service struct {
 	Store           *store.Store
 	Clients         awsx.Clients
 	Scaling         ScalingRangeSource
 	MaxDesiredCount int
 	Now             func() time.Time
+	// Guard refuses capacity writes that would undo an off-hours schedule. Nil means no guard.
+	Guard CapacityGuard
 	// InTx runs the post-AWS writes of one action in a single transaction. Nil means
 	// Store.InTx; tests replace it to make the recording step fail.
 	InTx func(ctx context.Context, fn func(store.Tx) error) error

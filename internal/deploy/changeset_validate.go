@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	astypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
+
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 const maxReasonLength = 500
@@ -291,4 +294,18 @@ func predefinedMetric(metric string) astypes.MetricType {
 	default:
 		return astypes.MetricTypeECSServiceAverageCPUUtilization
 	}
+}
+
+// guardScaling asks the capacity guard (off-hours) whether the scaling part may be applied. It runs before any AWS
+// read: the answer depends only on the enrolment.
+func (s *Service) guardScaling(ctx context.Context, key model.ServiceKey, scaling *ScalingChange) error {
+	if s.Guard == nil || scaling == nil {
+		return nil
+	}
+	names := make([]string, 0, len(scaling.PutScheduledActions)+len(scaling.DeleteScheduledActions))
+	for _, action := range scaling.PutScheduledActions {
+		names = append(names, action.Name)
+	}
+	names = append(names, scaling.DeleteScheduledActions...)
+	return s.Guard.Scaling(ctx, key, scaling.Target != nil, scaling.RemoveTarget, names)
 }
