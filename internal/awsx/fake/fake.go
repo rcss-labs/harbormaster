@@ -45,8 +45,10 @@ type Fake struct {
 	LiveTailInterval    time.Duration // gap between live tail updates; 0 means 2 s
 	LiveTailError       error         // ends every live tail stream with this error (see LiveTailErrorAfter)
 	LiveTailErrorAfter  int           // number of SessionUpdates sent before LiveTailError ends the stream
-	liveTailMu          sync.Mutex
-	lastLiveTailInput   *cloudwatchlogs.StartLiveTailInput
+	// InsightsAlwaysRunning makes GetQueryResults report Running forever (test hook for timeouts and cancellation).
+	InsightsAlwaysRunning bool
+	liveTailMu            sync.Mutex
+	lastLiveTailInput     *cloudwatchlogs.StartLiveTailInput
 
 	// CallLatency delays every API call (plan 06), so concurrent callers overlap and MaxInFlight is meaningful.
 	CallLatency time.Duration
@@ -58,6 +60,8 @@ type Fake struct {
 	limits     map[awsx.Target]*tokenBucket
 
 	failures failureQueue // see failnext.go
+
+	insights insightsState // Logs Insights queries; see insights.go
 }
 
 // New wraps an estate.
