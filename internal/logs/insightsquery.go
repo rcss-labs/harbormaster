@@ -113,12 +113,15 @@ func splitStages(user string) ([]string, error) {
 	var (
 		stages  []string
 		cur     strings.Builder
+		code    strings.Builder // current stage with literals blanked, for the alias check
 		sawPipe bool
 	)
 	runes := []rune(user)
 	flush := func() error {
 		stage := strings.TrimSpace(cur.String())
 		cur.Reset()
+		codeText := code.String()
+		code.Reset()
 		if stage == "" {
 			if sawPipe {
 				return &QueryError{Message: "A pipe must be followed by a command."}
@@ -127,6 +130,9 @@ func splitStages(user string) ([]string, error) {
 		}
 		if err := checkCommand(stage); err != nil {
 			return err
+		}
+		if aliasesToAtName(codeText) {
+			return &QueryError{Message: "Log search cannot rename fields that start with @."}
 		}
 		stages = append(stages, stage)
 		return nil
@@ -146,16 +152,23 @@ func splitStages(user string) ([]string, error) {
 			}
 		case r == '\n' || r == '\r':
 			cur.WriteByte(' ')
+			code.WriteByte(' ')
 			i++
-		case r == '"' || r == '\'' || r == '`' || (r == '/' && regexAllowedAfter(cur.String())):
+		case r == '"' || r == '\'' || r == '`' || (r == '/' && opensRegex(cur.String())):
 			end, ok := scanLiteral(runes, i)
 			if !ok {
 				return nil, &QueryError{Message: errUnreadable}
 			}
 			cur.WriteString(string(runes[i:end]))
+			code.WriteString(" _ ")
 			i = end
 		default:
+			if r == '/' && quoteFollows(runes, i+1) {
+				// Division followed by a quote: guessing could desync from AWS's reading.
+				return nil, &QueryError{Message: errUnreadable}
+			}
 			cur.WriteRune(r)
+			code.WriteRune(r)
 			i++
 		}
 	}
@@ -165,19 +178,70 @@ func splitStages(user string) ([]string, error) {
 	return stages, nil
 }
 
-// scanLiteral returns the index just past the literal opened at runes[start],
-// honouring backslash escapes.
+// scanLiteral returns the index just past the literal opened at runes[start].
+// Backslash escapes the next rune in strings and regexes but not in backticks.
+// A raw newline inside any literal is unreadable: it would break the
+// one-stage-per-line layout.
 func scanLiteral(runes []rune, start int) (int, bool) {
 	delim := runes[start]
 	for i := start + 1; i < len(runes); i++ {
 		switch runes[i] {
+		case '\n', '\r':
+			return 0, false
 		case '\\':
-			i++
+			if delim != '`' {
+				i++
+				if i < len(runes) && (runes[i] == '\n' || runes[i] == '\r') {
+					return 0, false
+				}
+			}
 		case delim:
 			return i + 1, true
 		}
 	}
 	return 0, false
+}
+
+// opensRegex reports whether a "/" starts a regex literal: in a parse stage,
+// or after like, not like, =~ or "(". Anywhere else it is division.
+func opensRegex(stageSoFar string) bool {
+	return strings.EqualFold(leadingWord(stageSoFar), "parse") || regexAllowedAfter(stageSoFar)
+}
+
+func quoteFollows(runes []rune, from int) bool {
+	for i := from; i < len(runes); i++ {
+		if unicode.IsSpace(runes[i]) {
+			continue
+		}
+		return runes[i] == '"' || runes[i] == '\'' || runes[i] == '`'
+	}
+	return false
+}
+
+// aliasesToAtName reports whether the literal-blanked stage text contains
+// "as @name". Attribution relies on @log and @logStream staying intact.
+func aliasesToAtName(code string) bool {
+	words := strings.Fields(code)
+	for i := 0; i+1 < len(words); i++ {
+		if strings.EqualFold(words[i], "as") && strings.HasPrefix(words[i+1], "@") {
+			return true
+		}
+	}
+	return false
+}
+
+// leadingWord returns the first identifier-like word of s after leading space.
+func leadingWord(s string) string {
+	s = strings.TrimLeftFunc(s, unicode.IsSpace)
+	end := 0
+	for end < len(s) {
+		r, size := utf8.DecodeRuneInString(s[end:])
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+			break
+		}
+		end += size
+	}
+	return s[:end]
 }
 
 // regexAllowedAfter reports whether a "/" opens a regex literal: only after
@@ -199,20 +263,10 @@ func regexAllowedAfter(before string) bool {
 }
 
 func checkCommand(stage string) error {
-	end := 0
-	for end < len(stage) {
-		r, size := utf8.DecodeRuneInString(stage[end:])
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
-			break
-		}
-		end += size
-	}
-	command := stage[:end]
+	command := leadingWord(stage)
 	if command == "" {
-		command = stage[:1]
-		if r, _ := utf8.DecodeRuneInString(stage); r != utf8.RuneError {
-			command = string(r)
-		}
+		r, _ := utf8.DecodeRuneInString(stage)
+		command = string(r)
 	}
 	lower := strings.ToLower(command)
 	if allowedCommands[lower] {

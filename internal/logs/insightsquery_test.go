@@ -193,3 +193,76 @@ func TestComposeQuery_TooLong(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestComposeQuery_ParseRegexHidesNoPipe(t *testing.T) {
+	scopes := []StreamScope{{AccountID: "1", Group: "g", Prefixes: []string{"p/"}}}
+	cases := []struct{ query, cmd string }{
+		{`parse @message /(?<q>")/ | unmask @message | parse @message /(?<r>")/`, "unmask"},
+		{`parse @message /(?<q>")/ | stats count(*) by @log | parse @message /(?<r>")/`, "stats"},
+		{`parse @message /(?<q>')/ | display @message | parse @message /(?<r>')/`, "display"},
+	}
+	for _, tc := range cases {
+		_, err := ComposeQuery(tc.query, scopes, 10)
+		var qe *QueryError
+		if !errors.As(err, &qe) || !strings.Contains(qe.Message, tc.cmd) {
+			t.Errorf("%q: want rejection naming %s, got %v", tc.query, tc.cmd, err)
+		}
+	}
+	q := `parse @message /(?<a>x|y)/ as a`
+	out, err := ComposeQuery(q, scopes, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(out, "\n"); len(lines) != 5 || lines[1] != "| "+q {
+		t.Fatalf("want one parse stage, got %q", lines)
+	}
+}
+
+func TestComposeQuery_DivisionBeforeQuoteIsUnreadable(t *testing.T) {
+	err := ValidateQuery(`fields a / "x"`)
+	var qe *QueryError
+	if !errors.As(err, &qe) || qe.Message != errUnreadable {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestComposeQuery_BackslashInBackticksEscapesNothing(t *testing.T) {
+	q := "fields `a\\` | stats count(*) by @log | filter @message like \"`\\\"\""
+	err := ValidateQuery(q)
+	var qe *QueryError
+	if !errors.As(err, &qe) || !strings.Contains(qe.Message, "stats") {
+		t.Fatalf("want stats rejection, got %v", err)
+	}
+}
+
+func TestComposeQuery_NewlineInsideLiteralIsUnreadable(t *testing.T) {
+	for _, q := range []string{
+		"filter @message like \"a\n| stats count(*)\"",
+		"filter @message like 'a\r| stats'",
+		"fields `a\nb`",
+		"filter @message like /a\n|b/",
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != errUnreadable {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+}
+
+func TestComposeQuery_RejectsAliasToAtNames(t *testing.T) {
+	for _, q := range []string{
+		`fields @message as @log`,
+		`parse @message "*" AS @logStream`,
+		`fields concat(a, b) as   @x`,
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != "Log search cannot rename fields that start with @." {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+	if err := ValidateQuery(`filter @message like "as @x" | fields a as b`); err != nil {
+		t.Errorf("as @ inside a literal or plain alias must pass: %v", err)
+	}
+}
