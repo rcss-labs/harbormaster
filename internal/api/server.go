@@ -73,6 +73,8 @@ type Server struct {
 	Scan ScanKicker
 	// OffHours applies manual wake and sleep of off-hours services; nil when off-hours is not wired.
 	OffHours *offhours.Applier
+	// OffHoursTimeout bounds the lock wait and the AWS work of a manual wake or sleep (default 20 s).
+	OffHoursTimeout time.Duration
 	// KickOffHours wakes the off-hours reconciler after a schedule change; nil is a no-op. Like Scan it reaches only
 	// the reconciler in this process, so on another task a change waits at most HM_OFFHOURS_INTERVAL.
 	KickOffHours func()

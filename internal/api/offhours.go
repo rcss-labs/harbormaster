@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -15,6 +14,11 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/cost"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/store"
+)
+
+const (
+	defaultOffHoursTimeout = 20 * time.Second
+	offHoursRecordTimeout  = 5 * time.Second
 )
 
 const staleScheduleMessage = "This schedule changed since you opened it. Reload to see the latest."
@@ -336,28 +340,6 @@ func (s *Server) listOffHoursTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ItemsResponse[OffHoursTagOptionDTO]{Items: items})
 }
 
-// awsTagsOf reads the AWS tags out of a polled service's raw JSON. A null value is the empty value.
-func awsTagsOf(raw json.RawMessage) map[string]string {
-	var parsed struct {
-		Tags []struct {
-			Key   string
-			Value *string
-		}
-	}
-	tags := map[string]string{}
-	if json.Unmarshal(raw, &parsed) != nil {
-		return tags
-	}
-	for _, t := range parsed.Tags {
-		if t.Value != nil {
-			tags[t.Key] = *t.Value
-		} else {
-			tags[t.Key] = ""
-		}
-	}
-	return tags
-}
-
 func (s *Server) getServiceOffHours(w http.ResponseWriter, r *http.Request) {
 	key, sc, row, ok := s.visibleService(w, r)
 	if !ok {
@@ -371,34 +353,54 @@ func (s *Server) getServiceOffHours(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sort.Slice(schedules, func(i, j int) bool { return schedules[i].ID < schedules[j].ID })
-	enrolment, err := s.Store.GetOffHoursEnrolment(ctx, key)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, err)
+	enrolment, enrolErr := s.Store.GetOffHoursEnrolment(ctx, key)
+	if enrolErr != nil && !errors.Is(enrolErr, store.ErrNotFound) {
+		s.fail(w, enrolErr)
 		return
 	}
-	tags := awsTagsOf(row.Raw)
-	var chosen *store.OffHoursSchedule
-	var also string
-	for i := range schedules {
-		candidate := &schedules[i]
-		value, has := tags[candidate.TagKey]
-		matches := candidate.Enabled && has && value == candidate.TagValue
-		enrolledHere := err == nil && enrolment.ScheduleID != nil && *enrolment.ScheduleID == candidate.ID
-		switch {
-		case enrolledHere:
-			chosen = candidate
-		case matches && chosen == nil:
-			chosen = candidate
-		case matches && chosen != nil:
-			also = "Also matches " + strconv.Quote(candidate.Name) + ". Stays on " + strconv.Quote(chosen.Name) + "."
+	// The store decides what a schedule matches (active services only), the same as the schedule views.
+	var matching []store.OffHoursSchedule
+	for _, candidate := range schedules {
+		if !candidate.Enabled {
+			continue
 		}
+		matched, err := s.Store.OffHoursMatches(ctx, candidate.TagKey, candidate.TagValue)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		for _, m := range matched {
+			if m.Key == key {
+				matching = append(matching, candidate)
+				break
+			}
+		}
+	}
+	// The service stays on the schedule it is enrolled in, else the lowest id (D2).
+	var chosen *store.OffHoursSchedule
+	if enrolErr == nil && enrolment.ScheduleID != nil {
+		for i := range schedules {
+			if schedules[i].ID == *enrolment.ScheduleID {
+				chosen = &schedules[i]
+			}
+		}
+	}
+	if chosen == nil && len(matching) > 0 {
+		chosen = &matching[0]
 	}
 	if chosen == nil {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
+	var also string
+	for _, candidate := range matching {
+		if candidate.ID != chosen.ID {
+			also = "Also matches " + strconv.Quote(candidate.Name) + ". Stays on " + strconv.Quote(chosen.Name) + "."
+			break
+		}
+	}
 	out.ScheduleName, out.Timezone = chosen.Name, chosen.Timezone
-	enrolled := err == nil && enrolment.ScheduleID != nil && *enrolment.ScheduleID == chosen.ID
+	enrolled := enrolErr == nil && enrolment.ScheduleID != nil && *enrolment.ScheduleID == chosen.ID
 	var st offHoursState
 	if enrolled {
 		week, parseErr := offhours.ParseWeek(chosen.Awake)
@@ -417,9 +419,12 @@ func (s *Server) getServiceOffHours(w http.ResponseWriter, r *http.Request) {
 			accountName = key.AccountID
 		}
 		st = enrolledState(enrolment, week, loc, s.now(), accountName)
-	} else if st, err = s.unenrolledState(ctx, key, row.Desired); err != nil {
-		s.fail(w, err)
-		return
+	} else {
+		var stateErr error
+		if st, stateErr = s.unenrolledState(ctx, key, row.Desired); stateErr != nil {
+			s.fail(w, stateErr)
+			return
+		}
 	}
 	if st.Reason == "" {
 		st.Reason = also
@@ -437,8 +442,9 @@ func (s *Server) sleepServiceOffHours(w http.ResponseWriter, r *http.Request) {
 }
 
 // changeServiceOffHours wakes or puts back to sleep an enrolled service (D7). It runs in the handler, holding the
-// enrolment lock in a transaction bounded by 20 s. The transaction commits even when an AWS write after the first
-// one fails, so the row's stamp and woken window are never lost; the reconciler then converges AWS.
+// enrolment lock in a transaction. The Applier stamps the row before it writes to AWS, so the transaction must
+// commit even when a later write fails or the client leaves: it runs on a context detached from the request, and
+// only the work inside it has a deadline (OffHoursTimeout, 20 s by default). The reconciler then converges AWS.
 func (s *Server) changeServiceOffHours(w http.ResponseWriter, r *http.Request, wake bool) {
 	key, _, _, ok := s.requireAction(w, r, authz.Operate)
 	if !ok {
@@ -449,8 +455,11 @@ func (s *Server) changeServiceOffHours(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 	actor, _ := auth.UserFrom(r.Context())
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
+	base := context.WithoutCancel(r.Context())
+	timeout := s.OffHoursTimeout
+	if timeout <= 0 {
+		timeout = defaultOffHoursTimeout
+	}
 
 	var (
 		opErr    error
@@ -458,7 +467,9 @@ func (s *Server) changeServiceOffHours(w http.ResponseWriter, r *http.Request, w
 		until    time.Time
 		schedule store.OffHoursSchedule
 	)
-	txErr := s.Store.InTx(ctx, func(tx store.Tx) error {
+	txErr := s.Store.InTx(base, func(tx store.Tx) error {
+		ctx, cancel := context.WithTimeout(base, timeout)
+		defer cancel()
 		e, err := s.Store.LockOffHoursEnrolment(ctx, tx, key)
 		if err != nil {
 			return err
@@ -479,11 +490,15 @@ func (s *Server) changeServiceOffHours(w http.ResponseWriter, r *http.Request, w
 			opErr = s.OffHours.PutBackToSleep(ctx, tx, &e, schedule, actor.ID)
 		}
 		if errors.Is(opErr, offhours.ErrAccessDenied) {
-			e.State, e.BlockedReason = "blocked", "access_denied"
+			// Like the reconciler: blocked, checked now, no error text, so the hourly retry backoff applies.
+			now := s.now()
+			e.State, e.BlockedReason, e.LastError, e.LastCheckedAt = "blocked", "access_denied", "", &now
 			if wake {
 				e.WokenUntil, e.WokenBy = nil, nil // the wake never reached AWS
 			}
-			return s.Store.UpsertOffHoursEnrolment(ctx, tx, e)
+			recordCtx, cancelRecord := context.WithTimeout(base, offHoursRecordTimeout)
+			defer cancelRecord()
+			return s.Store.UpsertOffHoursEnrolment(recordCtx, tx, e)
 		}
 		return nil // commit what was written even when opErr is set
 	})
@@ -491,6 +506,10 @@ func (s *Server) changeServiceOffHours(w http.ResponseWriter, r *http.Request, w
 	switch {
 	case errors.Is(txErr, store.ErrNotFound):
 		s.fail(w, &APIError{Status: http.StatusNotFound, Code: "not_found", Message: key.Service + " is not on an off-hours schedule."})
+		return
+	case errors.Is(txErr, context.DeadlineExceeded):
+		// The reconciler may hold the row lock for a while; nothing was written.
+		s.fail(w, offHoursConflict("This service is being updated. Try again in a moment."))
 		return
 	case txErr != nil:
 		s.fail(w, txErr)

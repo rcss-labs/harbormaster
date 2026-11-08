@@ -26,6 +26,10 @@ type offHoursEnv struct {
 	st    *store.Store
 	kicks *atomic.Int32
 	now   time.Time
+	// onApplierNow, when set, runs on every clock read of the Applier (not of the server).
+	onApplierNow func()
+	// workTimeout overrides the wake/sleep deadline; zero keeps the default.
+	workTimeout time.Duration
 }
 
 var stagingWebKey = model.ServiceKey{
@@ -47,11 +51,23 @@ func mondayNoon(t *testing.T) time.Time    { return berlinTime(t, 2026, time.Nov
 
 func newOffHoursEnv(t *testing.T, now time.Time) *offHoursEnv {
 	t.Helper()
-	env := &offHoursEnv{kicks: &atomic.Int32{}, now: now}
+	return newOffHoursEnvWithTimeout(t, now, 0)
+}
+
+func newOffHoursEnvWithTimeout(t *testing.T, now time.Time, workTimeout time.Duration) *offHoursEnv {
+	t.Helper()
+	env := &offHoursEnv{kicks: &atomic.Int32{}, now: now, workTimeout: workTimeout}
 	clock := func() time.Time { return now }
 	srv, fk, st, _ := newServerCustom(t, true, func(s *Server) {
 		s.Now = clock
-		s.OffHours = &offhours.Applier{Store: s.Store, Clients: s.Clients, Now: clock}
+		applierClock := func() time.Time {
+			if env.onApplierNow != nil {
+				env.onApplierNow()
+			}
+			return now
+		}
+		s.OffHours = &offhours.Applier{Store: s.Store, Clients: s.Clients, Now: applierClock}
+		s.OffHoursTimeout = env.workTimeout
 		s.KickOffHours = func() { env.kicks.Add(1) }
 	})
 	env.srv, env.fk, env.st = srv, fk, st
@@ -511,6 +527,10 @@ func TestServiceOffHours_AccessDeniedFromAWSMarksBlocked(t *testing.T) {
 	if enrolment.State != "blocked" || enrolment.BlockedReason != "access_denied" || enrolment.WokenUntil != nil {
 		t.Errorf("enrolment = %+v, want blocked by access_denied and not woken", enrolment)
 	}
+	if enrolment.LastCheckedAt == nil || enrolment.LastError != "" {
+		t.Errorf("last_checked_at = %v last_error = %q, want the check time set and no error so the hourly backoff applies",
+			enrolment.LastCheckedAt, enrolment.LastError)
+	}
 }
 
 func TestServiceOffHours_InvisibleIs404(t *testing.T) {
@@ -530,5 +550,102 @@ func TestServiceOffHours_InvisibleIs404(t *testing.T) {
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("%s %s = %d, want 404", call.method, call.suffix, resp.StatusCode)
 		}
+	}
+}
+
+// wokenOperations counts the wake_for operation rows of staging-web/web.
+func (e *offHoursEnv) wokenOperations(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := e.st.Pool.QueryRow(context.Background(),
+		`select count(*) from operation_log where service_name = 'web' and cluster_name = 'staging-web' and details ->> 'action' = 'wake_for'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A client that disconnects after the first AWS write must not roll back the row: AWS has already changed.
+func TestServiceOffHours_WakeSurvivesClientDisconnect(t *testing.T) {
+	env := newOffHoursEnv(t, saturdayNight(t))
+	env.enrolStagingWeb(t, "active", "")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var reads atomic.Int32
+	env.onApplierNow = func() {
+		// Reads: WakeFor, stamp, then setRange's stamp, which follows the first AWS write (the "at" action).
+		if reads.Add(1) == 3 {
+			cancel()
+			time.Sleep(300 * time.Millisecond) // let the server notice the disconnect
+		}
+	}
+	c := login(t, env.srv, "oncall", testPassword)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+serviceOffHoursPath(stagingWebKey, "/wake"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-CSRF-Token", c.csrf)
+	if resp, err := c.http.Do(req); err == nil {
+		resp.Body.Close()
+		t.Fatal("the request finished; the test meant to cancel it midway")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for env.wokenOperations(t) == 0 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	enrolment, err := env.st.GetOffHoursEnrolment(t.Context(), stagingWebKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enrolment.WokenUntil == nil || env.wokenOperations(t) != 1 {
+		t.Errorf("woken_until = %v operations = %d, want the wake kept after the client left", enrolment.WokenUntil, env.wokenOperations(t))
+	}
+}
+
+// An AWS write after the first fails: the answer is a 5xx but the stamped row stays, so the reconciler can converge.
+func TestServiceOffHours_WakeKeepsRowWhenLaterAWSWriteFails(t *testing.T) {
+	env := newOffHoursEnv(t, saturdayNight(t))
+	env.enrolStagingWeb(t, "active", "")
+	env.fk.FailNext("RegisterScalableTarget", &smithy.GenericAPIError{Code: "InternalFailure", Message: "boom"})
+	resp := login(t, env.srv, "oncall", testPassword).post(serviceOffHoursPath(stagingWebKey, "/wake"), nil)
+	resp.Body.Close()
+	if resp.StatusCode < 500 {
+		t.Fatalf("wake = %d, want a 5xx", resp.StatusCode)
+	}
+	enrolment, err := env.st.GetOffHoursEnrolment(t.Context(), stagingWebKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enrolment.WokenUntil == nil || enrolment.LastAppliedAt == nil {
+		t.Errorf("enrolment = %+v, want woken_until and last_applied_at kept", enrolment)
+	}
+}
+
+// The reconciler may hold the row lock; waiting past the deadline is a retryable conflict, not a server error.
+func TestServiceOffHours_LockWaitTimeoutIsConflict(t *testing.T) {
+	env := newOffHoursEnvWithTimeout(t, saturdayNight(t), 300*time.Millisecond)
+	env.enrolStagingWeb(t, "active", "")
+	locked, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- env.st.InTx(context.Background(), func(tx store.Tx) error {
+			if _, err := env.st.LockOffHoursEnrolment(context.Background(), tx, stagingWebKey); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	resp := login(t, env.srv, "oncall", testPassword).post(serviceOffHoursPath(stagingWebKey, "/wake"), nil)
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("wake behind a held lock = %d, want 409", resp.StatusCode)
+	}
+	if _, msg := errorCode(t, resp); msg != "This service is being updated. Try again in a moment." {
+		t.Errorf("message = %q", msg)
 	}
 }

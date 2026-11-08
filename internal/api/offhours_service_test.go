@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"testing"
+
+	"github.com/rcss-labs/harbormaster/internal/offhours"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // TestServiceOffHours_UnenrolledStateFromPolledScaling pins the state of a service the schedule matches but has not
@@ -82,5 +85,41 @@ func TestServiceOffHours_NoScheduleMatches(t *testing.T) {
 	decode(t, login(t, env.srv, "oncall", testPassword).get(serviceOffHoursPath(stagingWebKey, "")), &state)
 	if state.Enrolled || state.ScheduleName != "" || state.State != "" {
 		t.Errorf("state = %+v, want an empty answer", state)
+	}
+}
+
+// A service two enabled schedules match stays on the one it is enrolled in, and says so.
+func TestServiceOffHours_AlsoMatchesNamesTheKeptSchedule(t *testing.T) {
+	env := newOffHoursEnv(t, saturdayNight(t))
+	ctx := context.Background()
+	env.tagService(t, stagingWebKey, "team", "web")
+	grid := offhours.WeekFromRows(weekdayGrid()).String()
+	first, err := env.st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "staging nights", Enabled: true,
+		TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: grid}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := env.st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "web team", Enabled: true,
+		TagKey: "team", TagValue: "web", Timezone: "Europe/Berlin", Awake: grid}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID >= second.ID {
+		t.Fatalf("ids = %d, %d", first.ID, second.ID)
+	}
+	one := 1
+	if err := env.st.InTx(ctx, func(tx store.Tx) error {
+		return env.st.UpsertOffHoursEnrolment(ctx, tx, store.OffHoursEnrolment{Key: stagingWebKey, ScheduleID: &second.ID,
+			SavedMin: 1, SavedMax: 1, SavedDesired: &one, RegisteredTarget: true, AwakeTasks: 1, State: "active"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		ScheduleName string `json:"schedule_name"`
+		Reason       string `json:"reason"`
+	}
+	decode(t, login(t, env.srv, "oncall", testPassword).get(serviceOffHoursPath(stagingWebKey, "")), &state)
+	if state.ScheduleName != "web team" || state.Reason != `Also matches "staging nights". Stays on "web team".` {
+		t.Errorf("state = %+v, want web team with the also-matches sentence naming itself as kept", state)
 	}
 }
