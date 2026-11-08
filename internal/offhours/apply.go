@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -244,6 +246,11 @@ func (a *Applier) SyncActions(ctx context.Context, e store.OffHoursEnrolment, sc
 		return err
 	}
 	wanted := DesiredActions(week, sc.Timezone, Capacity{Min: e.SavedMin, Max: e.SavedMax})
+	// Wake actions go first: if a later put fails, a lone sleep action would put the service to sleep with
+	// nothing to wake it.
+	sort.SliceStable(wanted, func(i, j int) bool {
+		return strings.HasPrefix(wanted[i].Name, wakeActionPrefix) && !strings.HasPrefix(wanted[j].Name, wakeActionPrefix)
+	})
 	if e.WokenUntil != nil && a.now().Before(*e.WokenUntil) {
 		if action, ok := wokenAction(week, loc, sc.Timezone, *e.WokenUntil); ok {
 			wanted = append(wanted, action)
@@ -305,6 +312,35 @@ func (a *Applier) username(ctx context.Context, userID int64) (string, error) {
 	return user.Username, nil
 }
 
+// recoverSleepingRange handles a target at 0/0. If Harbormaster's own wake action is there, the service is
+// asleep from an enrolment whose row was lost, and the wake action carries the range to restore. The target was
+// not necessarily registered by Harbormaster, so the caller records registered_target=false. Without a wake
+// action the saved range is unknowable.
+func (a *Applier) recoverSleepingRange(k model.ServiceKey, live Live) (min, max int, err error) {
+	for _, action := range live.Actions {
+		if strings.HasPrefix(action.Name, wakeActionPrefix) && action.MaxCapacity != nil && *action.MaxCapacity > 0 {
+			min := 0
+			if action.MinCapacity != nil {
+				min = *action.MinCapacity
+			}
+			a.logger().Warn("off-hours: recovering the saved range of a sleeping service from its wake action; whether Harbormaster registered the target is unknown",
+				"service", k.Service, "cluster", k.Cluster, "min", min, "max", *action.MaxCapacity)
+			return min, *action.MaxCapacity, nil
+		}
+	}
+	if len(live.Actions) > 0 {
+		return 0, 0, ErrNeedsAttention
+	}
+	return 0, 0, ErrZeroCapacity
+}
+
+func (a *Applier) logger() *slog.Logger {
+	if a.Log != nil {
+		return a.Log
+	}
+	return slog.Default()
+}
+
 // Enrol saves the service's capacity, registers a scalable target when it has none, writes the scheduled actions
 // and stores the enrolment. A service with nothing to restore returns ErrZeroCapacity before any write.
 func (a *Applier) Enrol(ctx context.Context, tx store.Tx, sc store.OffHoursSchedule, m store.OffHoursMatch, live Live) (store.OffHoursEnrolment, error) {
@@ -313,17 +349,24 @@ func (a *Applier) Enrol(ctx context.Context, tx store.Tx, sc store.OffHoursSched
 	}
 	scheduleID := sc.ID
 	e := store.OffHoursEnrolment{Key: m.Key, ScheduleID: &scheduleID, State: "active"}
-	if live.HasTarget {
-		if live.Max == 0 {
-			return store.OffHoursEnrolment{}, ErrZeroCapacity
+	switch {
+	case live.HasTarget && live.Max == 0:
+		min, max, err := a.recoverSleepingRange(e.Key, live)
+		if err != nil {
+			return store.OffHoursEnrolment{}, err
 		}
+		e.SavedMin, e.SavedMax = min, max
+	case live.HasTarget:
 		e.SavedMin, e.SavedMax = live.Min, live.Max
-	} else {
+	default:
 		if live.Desired == 0 {
 			return store.OffHoursEnrolment{}, ErrZeroCapacity
 		}
 		desired := live.Desired
 		e.SavedMin, e.SavedMax, e.SavedDesired, e.RegisteredTarget = desired, desired, &desired, true
+	}
+	if e.SavedMin == 0 {
+		return store.OffHoursEnrolment{}, ErrMinZero
 	}
 
 	if err := a.stamp(ctx, tx, &e); err != nil {
@@ -380,6 +423,9 @@ func (a *Applier) WakeFor(ctx context.Context, tx store.Tx, e *store.OffHoursEnr
 	}
 	until := WakeUntil(week, loc, now)
 	e.WokenUntil, e.WokenBy = &until, &actor
+	if err := a.stamp(ctx, tx, e); err != nil {
+		return time.Time{}, err
+	}
 
 	if action, ok := wokenAction(week, loc, sc.Timezone, until); ok {
 		if err := a.putAction(ctx, e.Key, action); err != nil {
@@ -430,20 +476,30 @@ func (a *Applier) Release(ctx context.Context, tx store.Tx, e store.OffHoursEnro
 		if err != nil && !isNotFound(err) {
 			return mapAWS(fmt.Errorf("deregister the scalable target of %s: %w", e.Key.Service, err))
 		}
+		// An own target has min = max = the desired count, so the saved min is the fallback.
+		desired := e.SavedMin
 		if e.SavedDesired != nil {
+			desired = *e.SavedDesired
+		}
+		if desired > 0 {
 			ecsAPI, err := a.Clients.ECS(ctx, targetOf(e.Key))
 			if err != nil {
 				return err
 			}
 			if _, err := ecsAPI.UpdateService(ctx, &ecs.UpdateServiceInput{
 				Cluster: aws.String(e.Key.Cluster), Service: aws.String(e.Key.Service),
-				DesiredCount: aws.Int32(int32(*e.SavedDesired))}); err != nil {
+				DesiredCount: aws.Int32(int32(desired))}); err != nil {
 				return mapAWS(fmt.Errorf("restore the desired count of %s: %w", e.Key.Service, err))
 			}
-			text = fmt.Sprintf("Left off-hours schedule %q: restored desired count %d.", scheduleName, *e.SavedDesired)
+			text = fmt.Sprintf("Left off-hours schedule %q: restored desired count %d.", scheduleName, desired)
 		}
 	} else {
-		for _, action := range live.Actions {
+		// The caller's live may be stale; list the owned actions again so none is left behind.
+		current, err := a.ReadLive(ctx, e.Key)
+		if err != nil {
+			return err
+		}
+		for _, action := range current.Actions {
 			if err := a.deleteAction(ctx, e.Key, action.Name); err != nil {
 				return err
 			}

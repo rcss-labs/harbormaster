@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
 
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
@@ -465,5 +467,159 @@ func TestApplier_WritesOperationForEachChange(t *testing.T) {
 	}
 	if ops[2].Actor != "sam" || ops[1].Actor != "" {
 		t.Fatalf("actors = %q (sleep), %q (wake_for), want the reconciler and sam", ops[1].Actor, ops[2].Actor)
+	}
+}
+
+// failingWakePuts wraps Clients so that putting a wake action fails, as a throttle or an outage would mid-sync.
+type failingWakePuts struct{ awsx.Clients }
+
+func (c failingWakePuts) AutoScaling(ctx context.Context, t awsx.Target) (awsx.AutoScalingAPI, error) {
+	api, err := c.Clients.AutoScaling(ctx, t)
+	return failingWakeAPI{api}, err
+}
+
+type failingWakeAPI struct{ awsx.AutoScalingAPI }
+
+func (a failingWakeAPI) PutScheduledAction(ctx context.Context, in *applicationautoscaling.PutScheduledActionInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScheduledActionOutput, error) {
+	if strings.Contains(aws.ToString(in.ScheduledActionName), "-wake-") {
+		return nil, errors.New("injected put failure")
+	}
+	return a.AutoScalingAPI.PutScheduledAction(ctx, in, opts...)
+}
+
+func (h *applierHarness) enrolErr(t *testing.T) error {
+	t.Helper()
+	live, err := h.applier.ReadLive(t.Context(), paymentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h.inTx(t, func(tx store.Tx) error {
+		_, err := h.applier.Enrol(t.Context(), tx, h.schedule, store.OffHoursMatch{Key: paymentsKey, Desired: live.Desired}, live)
+		return err
+	})
+}
+
+func TestApplier_EnrolRefusesMinZero(t *testing.T) {
+	h := newApplierHarness(t)
+	h.fake.Estate.Mu.Lock()
+	h.fake.Estate.ScalingConfig[paymentsKey].Min = 0
+	h.fake.Estate.Mu.Unlock()
+	if err := h.enrolErr(t); !errors.Is(err, offhours.ErrMinZero) {
+		t.Fatalf("Enrol = %v, want ErrMinZero", err)
+	}
+	if want := "Not managed: its auto scaling minimum is 0, so it could not wake on its own."; offhours.ErrMinZero.Error() != want {
+		t.Fatalf("reason = %q", offhours.ErrMinZero)
+	}
+	if got := h.allActions(); len(got) != 1 {
+		t.Fatalf("actions = %v, want only nightly-batch (no AWS write)", got)
+	}
+	if _, err := h.store.GetOffHoursEnrolment(t.Context(), paymentsKey); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("enrolment stored: %v", err)
+	}
+}
+
+func TestApplier_SyncPutsWakeActionsBeforeSleepActions(t *testing.T) {
+	h := newApplierHarness(t)
+	h.applier.Clients = failingWakePuts{h.fake}
+	err := h.enrolErr(t)
+	if err == nil {
+		t.Fatal("Enrol succeeded despite the injected wake put failure")
+	}
+	for name := range h.allActions() {
+		if strings.Contains(name, "-sleep-") {
+			t.Fatalf("action %s exists after a failed wake put; a lone sleep action strands the service", name)
+		}
+	}
+}
+
+func TestApplier_EnrolRecoversRangeFromWakeAction(t *testing.T) {
+	h := newApplierHarness(t)
+	e := h.enrol(t)
+	h.sleep(t, &e)
+	if _, err := h.store.Pool.Exec(t.Context(), `delete from offhours_enrolments`); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered := h.enrol(t)
+	if recovered.SavedMin != 2 || recovered.SavedMax != 6 || recovered.RegisteredTarget || recovered.SavedDesired != nil {
+		t.Fatalf("enrolment = %+v, want saved 2/6 recovered from the wake action, not an own target", recovered)
+	}
+	if min, max, _ := h.target(); min != 0 || max != 0 {
+		t.Fatalf("range = %d/%d, recovering must not change it", min, max)
+	}
+}
+
+func TestApplier_EnrolNeedsAttentionWithoutWakeAction(t *testing.T) {
+	h := newApplierHarness(t)
+	h.fake.Estate.Mu.Lock()
+	cfg := h.fake.Estate.ScalingConfig[paymentsKey]
+	cfg.Min, cfg.Max = 0, 0
+	cfg.Scheduled = append(cfg.Scheduled, fake.ScheduledSeed{
+		Name: "harbormaster-offhours-sleep-20", Schedule: "cron(0 20 ? * MON *)", Min: aws.Int32(0), Max: aws.Int32(0)})
+	h.fake.Estate.Mu.Unlock()
+	if err := h.enrolErr(t); !errors.Is(err, offhours.ErrNeedsAttention) {
+		t.Fatalf("Enrol = %v, want ErrNeedsAttention", err)
+	}
+	if want := "Needs attention: asleep with no wake action. Check its scheduled actions."; offhours.ErrNeedsAttention.Error() != want {
+		t.Fatalf("reason = %q", offhours.ErrNeedsAttention)
+	}
+}
+
+func TestApplier_ReleaseOwnTargetWithoutSavedDesiredUsesSavedMin(t *testing.T) {
+	h := newApplierHarness(t)
+	h.removeTarget()
+	h.setDesired(t, 2)
+	e := h.enrol(t)
+	h.sleep(t, &e)
+	e.SavedDesired = nil
+	h.release(t, e)
+	if got := h.desired(t); got != 2 {
+		t.Fatalf("desired = %d, want 2 restored from saved min", got)
+	}
+	if got := h.lastOperationText(t); got != `Left off-hours schedule "staging nights": restored desired count 2.` {
+		t.Fatalf("operation = %q", got)
+	}
+}
+
+func TestApplier_ReleaseDeletesOwnedActionsMissingFromStaleLive(t *testing.T) {
+	h := newApplierHarness(t)
+	e := h.enrol(t)
+	h.sleep(t, &e)
+	if err := h.inTx(t, func(tx store.Tx) error {
+		return h.applier.Release(t.Context(), tx, e, offhours.Live{}, h.schedule.Name)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name := range h.allActions() {
+		if strings.HasPrefix(name, offhours.ActionPrefix) {
+			t.Fatalf("owned action %s survived a release with a stale live", name)
+		}
+	}
+	if min, max, _ := h.target(); min != 2 || max != 6 {
+		t.Fatalf("range = %d/%d, want the saved 2/6", min, max)
+	}
+}
+
+func TestApplier_WakeForStampsBeforeTheAtAction(t *testing.T) {
+	h := newApplierHarness(t)
+	e := h.enrol(t)
+	h.sleep(t, &e)
+	h.now = h.now.Add(time.Minute)
+	h.fake.FailNext("PutScheduledAction", errors.New("injected put failure"))
+
+	// Commit the row even though the AWS write fails, as the reconciler does.
+	var wakeErr error
+	if err := h.inTx(t, func(tx store.Tx) error {
+		_, wakeErr = h.applier.WakeFor(t.Context(), tx, &e, h.schedule, h.userID)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if wakeErr == nil {
+		t.Fatal("WakeFor succeeded despite the injected put failure")
+	}
+	stored, err := h.store.GetOffHoursEnrolment(t.Context(), paymentsKey)
+	if err != nil || stored.LastAppliedAt == nil || !stored.LastAppliedAt.Equal(h.now) {
+		t.Fatalf("stored = %+v err=%v, want last_applied_at = now before the at() action was put", stored, err)
 	}
 }
