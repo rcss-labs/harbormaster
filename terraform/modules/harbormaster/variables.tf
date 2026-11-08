@@ -256,6 +256,11 @@ variable "scan_role_arns" {
   description = "Role ARN patterns the scanner task role may assume. Null resolves to arn:aws:iam::*:role/<scan_role_name>. Tighten to explicit role ARNs so the wildcard account is not trusted."
   type        = list(string)
   default     = null
+
+  validation {
+    condition     = var.scan_role_arns == null ? true : length(var.scan_role_arns) > 0
+    error_message = "scan_role_arns must be null (the default pattern) or a non-empty list."
+  }
 }
 
 variable "scanner_egress_cidrs" {

@@ -70,6 +70,8 @@ With `read_only = true` only `harbormaster-access-read` is created. Harbormaster
 
 Setting `scanner_task_role_arn` creates the `scan_role_name` role (default `harbormaster-scan`). Its trust policy admits only the scanner ECS task role, never the Harbormaster server role, and requires the same external ID. The scanner task assumes it to pull images from ECR for Syft. The role holds only read actions, so it is created regardless of `read_only`, and `read_only` does not affect it.
 
+The server never holds pull credentials itself, and the scan role has no write action. That is the isolation; it is not a claim that the server gains nothing. A compromised Harbormaster server writes the job manifest (image, role ARN, external ID) and can launch the scanner, so it can direct the scan role to pull any repository in `scan_repository_arns` of any connected account, `read_only` accounts included, and receive package inventories back. Narrow `scan_repository_arns` to the repositories that should be scannable.
+
 | Policy | Statement | Actions | Resource | Condition |
 |---|---|---|---|---|
 | `harbormaster-scan-pull` | `EcrAuthToken` | `ecr:GetAuthorizationToken` | `*` | none |

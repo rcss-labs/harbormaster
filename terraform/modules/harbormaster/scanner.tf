@@ -57,6 +57,38 @@ resource "aws_s3_bucket_public_access_block" "scan" {
   restrict_public_buckets = true
 }
 
+data "aws_iam_policy_document" "scan_bucket_tls" {
+  count = local.scan_enabled ? 1 : 0
+
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.scan[0].arn, "${aws_s3_bucket.scan[0].arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "scan" {
+  count = local.scan_enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.scan[0].id
+  policy = data.aws_iam_policy_document.scan_bucket_tls[0].json
+
+  # Bucket policy and public access block changes on one bucket must not run concurrently.
+  depends_on = [aws_s3_bucket_public_access_block.scan]
+}
+
 # SSE-S3 only. The database KMS key (var.db_kms_key_id) is not used: it would need kms grants on both roles and would
 # share the database's key with the scan data.
 resource "aws_s3_bucket_server_side_encryption_configuration" "scan" {
@@ -245,15 +277,36 @@ data "aws_iam_policy_document" "task_scan" {
     }
   }
 
+  # Cluster-scoped only: a tag condition would hide a task that ECS no longer reports, which DescribeTasks must
+  # answer with MISSING.
   statement {
-    sid       = "WatchAndStopTasks"
-    actions   = ["ecs:DescribeTasks", "ecs:StopTask"]
+    sid       = "WatchTasks"
+    actions   = ["ecs:DescribeTasks"]
     resources = ["${local.ecs_task_arn_prefix}/*"]
 
     condition {
       test     = "ArnEquals"
       variable = "ecs:cluster"
       values   = [aws_ecs_cluster.this.arn]
+    }
+  }
+
+  # Only tasks the launch tagged harbormaster:scan-run (awsx/home.go), so the server's own service tasks cannot be stopped.
+  statement {
+    sid       = "StopScannerTasks"
+    actions   = ["ecs:StopTask"]
+    resources = ["${local.ecs_task_arn_prefix}/*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.this.arn]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "ecs:ResourceTag/harbormaster:scan-run"
+      values   = ["*"]
     }
   }
 

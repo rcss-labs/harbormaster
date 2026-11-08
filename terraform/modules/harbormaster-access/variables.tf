@@ -66,6 +66,11 @@ variable "scan_repository_arns" {
   description = "ECR repository ARN patterns the scan role may pull from. Null (default) resolves to arn:aws:ecr:*:<this account>:repository/*."
   type        = list(string)
   default     = null
+
+  validation {
+    condition     = var.scan_repository_arns == null ? true : length(var.scan_repository_arns) > 0
+    error_message = "scan_repository_arns must be null (the default pattern) or a non-empty list."
+  }
 }
 
 variable "read_only" {
