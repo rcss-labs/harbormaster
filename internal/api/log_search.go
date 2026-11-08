@@ -276,8 +276,19 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6. Search. r.Context() ends when the client goes away, which stops the queries.
-	found, searchErr := s.LogSearch.Search(ctx, logs.SearchRequest{Services: searchServices, Query: req.Query, From: from, To: to})
+	// 6. Search. r.Context() ends when the client goes away, which stops the queries; so does BeginDrain
+	// (Shutdown), so a running search sends StopQuery and audits inside the shutdown drain. Only the search
+	// watches the drain: other handlers keep draining normally.
+	searchCtx, cancelSearch := context.WithCancel(ctx)
+	defer cancelSearch()
+	go func() {
+		select {
+		case <-s.draining:
+			cancelSearch()
+		case <-searchCtx.Done():
+		}
+	}()
+	found, searchErr := s.LogSearch.Search(searchCtx, logs.SearchRequest{Services: searchServices, Query: req.Query, From: from, To: to})
 
 	// 7. Map the outcome.
 	names := s.accountNamesFor(ctx, found.Targets)

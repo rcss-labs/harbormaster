@@ -29,6 +29,7 @@ type logSearchEnv struct {
 	fk      *fake.Fake
 	st      *store.Store
 	limiter *logs.TailLimiter
+	api     *Server
 }
 
 // newLogSearchEnv builds a server whose searcher polls fast, so a search over the fake takes milliseconds.
@@ -36,14 +37,14 @@ func newLogSearchEnv(t *testing.T, prepare func(*fake.Estate), wrap ...func(awsx
 	t.Helper()
 	env := &logSearchEnv{limiter: logs.NewTailLimiter(1)}
 	var srv *httptest.Server
-	srv, env.fk, env.st, _ = newServerCustom(t, true, func(s *Server) {
+	srv, env.api, env.fk, env.st, _ = newServerCustomAPI(t, true, func(s *Server) {
 		if prepare != nil {
 			prepare(s.Clients.(*fake.Fake).Estate)
 		}
 		for _, w := range wrap {
 			s.Clients = w(s.Clients)
 		}
-		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, PollEvery: 5 * time.Millisecond}
+		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, PollEvery: 5 * time.Millisecond, Timeout: 3 * time.Second}
 		s.SearchLimiter = env.limiter
 	})
 	env.srv = srv
@@ -574,5 +575,52 @@ func TestLogSearch_InvisibleIs404BeforeForbidden(t *testing.T) {
 	}
 	if n := env.fk.Calls()["StartQuery"]; n != 0 {
 		t.Errorf("StartQuery called %d times", n)
+	}
+}
+
+// BeginDrain (called when Shutdown starts) must stop a running search the same way a client abort does:
+// StopQuery sent, slot released, one audit row, and a normal response whose targets say cancelled.
+func TestLogSearch_DrainStopsRunningSearch(t *testing.T) {
+	env := newLogSearchEnv(t, nil)
+	env.fk.InsightsAlwaysRunning = true
+	c := login(t, env.srv, "sam", testPassword)
+	type result struct {
+		status int
+		body   searchBody
+	}
+	got := make(chan result, 1)
+	go func() {
+		resp := c.post("/api/log-search", searchReq(paymentsID()))
+		var r result
+		r.status = resp.StatusCode
+		decode(t, resp, &r.body)
+		got <- r
+	}()
+	waitFor(t, "the search to start", func() bool { return env.fk.Calls()["StartQuery"] >= 1 })
+	env.api.BeginDrain()
+
+	r := <-got
+	if r.status != http.StatusOK {
+		t.Fatalf("status %d, want 200", r.status)
+	}
+	if len(r.body.Targets) == 0 {
+		t.Fatal("no targets in the response")
+	}
+	for _, target := range r.body.Targets {
+		if target.State != "cancelled" {
+			t.Errorf("target state %q, want cancelled (a timeout means the drain did not stop it)", target.State)
+		}
+	}
+	if len(env.fk.StoppedQueries()) == 0 {
+		t.Error("the running query was not stopped")
+	}
+	waitFor(t, "the slot to be released", func() bool {
+		user, err := env.st.GetUserByUsername(t.Context(), "sam")
+		return err == nil && env.limiter.Count(user.ID) == 0
+	})
+	waitFor(t, "the audit row", func() bool { return len(auditRows(t, env.st, "log_search")) == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if n := len(auditRows(t, env.st, "log_search")); n != 1 {
+		t.Errorf("%d log_search audit rows, want exactly 1", n)
 	}
 }

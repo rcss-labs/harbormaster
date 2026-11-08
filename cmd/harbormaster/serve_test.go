@@ -222,36 +222,53 @@ func TestServe_FakeAWSHasImageScanningOn(t *testing.T) {
 	}
 }
 
-// A handler blocked on its request context (a running log search) must be told to stop when Shutdown
-// begins, otherwise it outlives the grace period without stopping its Logs Insights query.
-func TestNewHTTPServer_ShutdownCancelsRequestContexts(t *testing.T) {
+// Shutdown must not cancel in-flight requests: other handlers (deploys, writes, exec) keep the full drain.
+// Only the OnShutdown hook (server.BeginDrain) signals, and that reaches log searches alone.
+func TestHTTPServer_ShutdownDrainsInFlightRequestsAndRunsOnShutdown(t *testing.T) {
 	started := make(chan struct{})
+	finish := make(chan struct{})
 	ctxErr := make(chan error, 1)
-	srv := newHTTPServer("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
-		<-r.Context().Done()
+		<-finish
 		ctxErr <- r.Context().Err()
-	}))
+	})}
+	hookRan := make(chan struct{})
+	srv.RegisterOnShutdown(func() { close(hookRan) })
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = srv.Serve(listener) }()
-
 	go func() {
-		resp, err := http.Get("http://" + listener.Addr().String())
-		if err == nil {
+		if resp, err := http.Get("http://" + listener.Addr().String()); err == nil {
 			resp.Body.Close()
 		}
 	}()
 	<-started
 
-	shutdownCtx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		t.Fatalf("Shutdown: %v (the in-flight handler was never cancelled)", err)
+	shutdownDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		shutdownDone <- srv.Shutdown(ctx)
+	}()
+	select {
+	case <-hookRan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RegisterOnShutdown hook did not run when Shutdown began")
 	}
-	if got := <-ctxErr; got != context.Canceled {
-		t.Errorf("request context error = %v, want context.Canceled", got)
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case err := <-ctxErr:
+		t.Fatalf("in-flight request context ended at Shutdown (err %v); it must keep draining", err)
+	default:
+	}
+	close(finish)
+	if err := <-ctxErr; err != nil {
+		t.Errorf("request context error = %v, want nil", err)
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Errorf("Shutdown: %v", err)
 	}
 }
