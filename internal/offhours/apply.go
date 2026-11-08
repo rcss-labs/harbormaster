@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
 	astypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -120,10 +121,15 @@ func (a *Applier) ReadLive(ctx context.Context, k model.ServiceKey) (Live, error
 	services, err := ecsAPI.DescribeServices(ctx, &ecs.DescribeServicesInput{
 		Cluster: aws.String(k.Cluster), Services: []string{k.Service}})
 	if err != nil {
+		var noCluster *ecstypes.ClusterNotFoundException
+		var noService *ecstypes.ServiceNotFoundException
+		if errors.As(err, &noCluster) || errors.As(err, &noService) {
+			return Live{}, fmt.Errorf("%w: %s/%s", ErrServiceGone, k.Cluster, k.Service)
+		}
 		return Live{}, mapAWS(fmt.Errorf("describe service %s: %w", k.Service, err))
 	}
-	if len(services.Services) == 0 {
-		return Live{}, fmt.Errorf("service %s/%s not found in ECS", k.Cluster, k.Service)
+	if len(services.Services) == 0 || aws.ToString(services.Services[0].Status) == "INACTIVE" {
+		return Live{}, fmt.Errorf("%w: %s/%s", ErrServiceGone, k.Cluster, k.Service)
 	}
 	live.Desired = int(services.Services[0].DesiredCount)
 	return live, nil

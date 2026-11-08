@@ -26,6 +26,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
@@ -258,6 +259,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			return err
 		}
 	}
+	// One applier serves the API (manual wake and sleep) and the reconciler (the leader's loop); both change AWS
+	// through the same code under the same per-service lock.
+	offHoursApplier := &offhours.Applier{Store: st, Clients: clients, Now: time.Now, Log: log}
+	offHoursReconciler := &offhours.Reconciler{Applier: offHoursApplier, Store: st, Interval: cfg.OffHours.Interval, Now: time.Now, Log: log}
 	setup, err := auth.NewSetup(ctx, st, log)
 	if err != nil {
 		return err
@@ -277,6 +282,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		MetricsToken:            cfg.MetricsToken, // plan 06
 		Telemetry:               telemetry.Default,
 		Scan:                    scanKicker,
+		OffHours:                offHoursApplier,
+		KickOffHours:            offHoursReconciler.Kick,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	listener, err := net.Listen("tcp", cfg.Listen)
@@ -286,6 +293,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 
 	pollerConfig := poller.ConfigFrom(cfg)
 	pollerConfig.Scan = scanRunner
+	pollerConfig.OffHours = offHoursReconciler
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
 	go func() {

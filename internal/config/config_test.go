@@ -76,6 +76,7 @@ func TestLoad_Defaults(t *testing.T) {
 			BatchSize:   25,
 			MaxImageMB:  4096,
 		},
+		OffHours:        OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
 		Analytics:       AnalyticsConfig{Util: true},
 		PageSizeDefault: 100,
 		PageSizeMax:     500,
@@ -513,5 +514,31 @@ func TestLoad_ScanLimitBounds(t *testing.T) {
 				t.Fatalf("err = %v, want one naming %s", err, tt.key)
 			}
 		})
+	}
+}
+
+func TestLoad_OffHoursDefaultsAndBounds(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.OffHours.Interval != 60*time.Second {
+		t.Errorf("OffHours.Interval = %v, want 60s", cfg.OffHours.Interval)
+	}
+	if !cfg.OffHours.FakeDemo {
+		t.Error("OffHours.FakeDemo = false, want true")
+	}
+
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_OFFHOURS_INTERVAL": "1s", "HM_FAKE_OFFHOURS_DEMO": "false"}))
+	if err != nil {
+		t.Fatalf("Load returned error for the 1s edge: %v", err)
+	}
+	if cfg.OffHours.Interval != time.Second || cfg.OffHours.FakeDemo {
+		t.Errorf("OffHours = %+v, want 1s and no demo", cfg.OffHours)
+	}
+
+	_, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_OFFHOURS_INTERVAL": "500ms"}))
+	if err == nil || !strings.Contains(err.Error(), "HM_OFFHOURS_INTERVAL") {
+		t.Fatalf("err = %v, want one naming HM_OFFHOURS_INTERVAL", err)
 	}
 }

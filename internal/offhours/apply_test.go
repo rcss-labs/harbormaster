@@ -507,8 +507,8 @@ func TestApplier_EnrolRefusesMinZero(t *testing.T) {
 	if err := h.enrolErr(t); !errors.Is(err, offhours.ErrMinZero) {
 		t.Fatalf("Enrol = %v, want ErrMinZero", err)
 	}
-	if want := "Not managed: its auto scaling minimum is 0, so it could not wake on its own."; offhours.ErrMinZero.Error() != want {
-		t.Fatalf("reason = %q", offhours.ErrMinZero)
+	if want := "Not managed: its auto scaling minimum is 0, so it could not wake on its own."; offhours.ReasonMinZero != want {
+		t.Fatalf("reason = %q", offhours.ReasonMinZero)
 	}
 	if got := h.allActions(); len(got) != 1 {
 		t.Fatalf("actions = %v, want only nightly-batch (no AWS write)", got)
@@ -560,8 +560,8 @@ func TestApplier_EnrolNeedsAttentionWithoutWakeAction(t *testing.T) {
 	if err := h.enrolErr(t); !errors.Is(err, offhours.ErrNeedsAttention) {
 		t.Fatalf("Enrol = %v, want ErrNeedsAttention", err)
 	}
-	if want := "Needs attention: asleep with no wake action. Check its scheduled actions."; offhours.ErrNeedsAttention.Error() != want {
-		t.Fatalf("reason = %q", offhours.ErrNeedsAttention)
+	if want := "Needs attention: asleep with no wake action. Check its scheduled actions."; offhours.ReasonNeedsAttention != want {
+		t.Fatalf("reason = %q", offhours.ReasonNeedsAttention)
 	}
 }
 

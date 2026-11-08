@@ -10,6 +10,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -52,6 +53,8 @@ type Config struct {
 	StartStagger time.Duration
 	// Scan launches and reconciles image scans; nil when scanning is off. It runs only while this instance leads.
 	Scan *scanjob.Runner
+	// OffHours reconciles off-hours scheduled actions and capacity; nil leaves it off. It runs only while this instance leads.
+	OffHours *offhours.Reconciler
 }
 
 // ConfigFrom derives the poller configuration from the server configuration.
