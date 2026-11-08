@@ -7,8 +7,13 @@ import styles from './logsearch.module.css'
 
 const PAGE_SIZE = 200
 
-/** `2026-11-08T10:00:03.250Z` becomes `10:00:03.250` (UTC). */
-const lineTime = (iso: string) => iso.slice(11, 23)
+const pad = (n: number, width = 2) => String(n).padStart(width, '0')
+
+/** `10:00:03.250` in the browser's time zone, like the Logs tab. */
+function lineTime(iso: string): string {
+  const date = new Date(iso)
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`
+}
 
 /** The result lines, 200 at a time. Each line links to the service's Logs tab at that second. */
 export function ResultLines({ result }: { result: LogSearchResultDTO }) {

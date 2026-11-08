@@ -30,8 +30,11 @@ describe('LogSearchPage on phones', () => {
     expect(list).toHaveAttribute('data-layout', 'cards')
     const first = within(list).getAllByRole('link')[0]
     // Time and service on the first line, the message on the second.
-    expect(within(first).getByText('10:00:03.250')).toBeInTheDocument()
-    expect(within(first).getByTestId('line-meta')).toHaveTextContent('10:00:03.250payments')
+    const d = new Date('2026-11-08T10:00:03.250Z')
+    const two = (n: number) => String(n).padStart(2, '0')
+    const clock = `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
+    expect(within(first).getByText(clock)).toBeInTheDocument()
+    expect(within(first).getByTestId('line-meta')).toHaveTextContent(`${clock}payments`)
     expect(within(first).getByTestId('line-message')).toHaveTextContent('ERROR card declined')
     // The histogram scrolls in its own panel instead of widening the page.
     expect(screen.getByRole('img', { name: 'Hits over time' }).parentElement).toHaveAttribute('data-scroll', 'x')

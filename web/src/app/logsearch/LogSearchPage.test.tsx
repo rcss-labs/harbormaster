@@ -34,6 +34,13 @@ function runReturns(result: LogSearchResultDTO) {
   return bodies
 }
 
+const two = (n: number) => String(n).padStart(2, '0')
+/** The time a line shows: the browser's local zone, like the Logs tab. */
+const localClock = (iso: string) => {
+  const d = new Date(iso)
+  return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`
+}
+
 const run = async (user: ReturnType<typeof userEvent.setup>) => user.click(await screen.findByRole('button', { name: 'Run query' }))
 
 describe('Log search form', () => {
@@ -84,8 +91,17 @@ describe('Log search form', () => {
   it('shows the empty state when no services are readable', async () => {
     server.use(http.get('/api/log-search/services', () => HttpResponse.json({ ...LOG_SEARCH_SERVICES, items: [] })))
     renderApp('/logs')
-    expect(await screen.findByText('No services are available to search.')).toBeInTheDocument()
+    expect(await screen.findByText('You have no services you can read logs of.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Run query' })).not.toBeInTheDocument()
+  })
+
+  it('re-reads the form when the URL changes while mounted', async () => {
+    const user = userEvent.setup()
+    renderApp('/logs?services=svc-payments&q=abc')
+    expect(await screen.findByRole('textbox', { name: 'Query' })).toHaveValue('abc')
+    await user.click(screen.getByRole('link', { name: /^Log search/ }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Query' })).toHaveValue(''))
+    expect(within(screen.getByRole('list', { name: 'Selected services' })).queryByText('payments')).not.toBeInTheDocument()
   })
 
   it('asks for a start and end on the custom range and writes them to the URL', async () => {
@@ -116,7 +132,7 @@ describe('Log search results', () => {
     expect(hits.getByText('catalog').parentElement?.parentElement).toHaveTextContent(/catalog.*1/)
     const lines = within(screen.getByRole('list', { name: 'Matching lines' })).getAllByRole('link')
     expect(lines).toHaveLength(3)
-    expect(lines[0]).toHaveTextContent('10:00:03.250')
+    expect(lines[0]).toHaveTextContent(localClock('2026-11-08T10:00:03.250Z'))
     expect(lines[0]).toHaveTextContent('payments')
     expect(lines[0]).toHaveTextContent('ERROR card declined')
   })
@@ -127,7 +143,7 @@ describe('Log search results', () => {
     renderApp(BOTH)
     await run(user)
     expect(await screen.findByText('48,210 matching lines')).toBeInTheDocument()
-    expect(screen.getByText(/Showing the first 3 of 48,210 matching lines/)).toBeInTheDocument()
+    expect(screen.getByText(/Showing the newest 3 of 48,210 matching lines\. The histogram and hits by service cover the lines shown\./)).toBeInTheDocument()
   })
 
   it('shows the per-account permission message', async () => {
@@ -175,6 +191,14 @@ describe('Log search results', () => {
     await user.click(screen.getByRole('button', { name: 'Show more' }))
     expect(count()).toBe(450)
     expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument()
+  })
+
+  it('uses the singular for one matching line', async () => {
+    const user = userEvent.setup()
+    runReturns({ ...LOG_SEARCH_RESULT, rows: LOG_SEARCH_RESULT.rows.slice(0, 1), records_matched: 1 })
+    renderApp(BOTH)
+    await run(user)
+    expect(await screen.findByText('1 matching line')).toBeInTheDocument()
   })
 
   it('shows the empty message when nothing matched', async () => {
@@ -273,8 +297,13 @@ describe('Saved log searches', () => {
     expect(screen.getByRole('textbox', { name: 'Query' })).toHaveValue('filter @message like /ERROR/')
     expect(within(screen.getByRole('list', { name: 'Selected services' })).getByText('payments')).toBeInTheDocument()
     expect(screen.getByTestId('search')).toHaveTextContent('services=svc-payments')
-    expect(screen.getByText('1 services in this query are no longer available to you.')).toBeInTheDocument()
+    expect(screen.getByText('1 service in this query is no longer available to you.')).toBeInTheDocument()
     expect(runs).toHaveLength(0)
+
+    // Editing the services clears that note.
+    await user.click(within(screen.getByRole('list', { name: 'Selected services' })).getByRole('button', { name: 'Remove payments' }))
+    expect(screen.queryByText(/no longer available to you/)).not.toBeInTheDocument()
+    await user.click(panel.getByRole('button', { name: 'Load Payment errors' }))
 
     // Delete: asks first.
     await user.click(panel.getByRole('button', { name: 'Delete Morning checkout' }))

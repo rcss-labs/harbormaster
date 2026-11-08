@@ -5,10 +5,13 @@ import styles from './logsearch.module.css'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-/** UTC, like the line times; the date is added only when the range is longer than a day. */
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** Local time, like the line times; the date is added only when the range is longer than a day. */
 function bucketLabel(ms: number, withDate: boolean): string {
-  const iso = new Date(ms).toISOString()
-  return withDate ? `${iso.slice(5, 10)} ${iso.slice(11, 16)}` : iso.slice(11, 16)
+  const date = new Date(ms)
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return withDate ? `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}` : clock
 }
 
 /** Lines per time bucket over the searched range. The strip scrolls inside its panel so a long range never widens the page. */
@@ -19,7 +22,7 @@ export function HitsHistogram({ result }: { result: LogSearchResultDTO }) {
   const withDate = to - from > DAY_MS
   const columns = buckets.map((bucket) => ({
     parts: [{ v: bucket.count, color: 'var(--accent)' }],
-    title: `${bucketLabel(bucket.start, withDate)} UTC · ${bucket.count} ${bucket.count === 1 ? 'line' : 'lines'}`,
+    title: `${bucketLabel(bucket.start, withDate)} · ${bucket.count} ${bucket.count === 1 ? 'line' : 'lines'}`,
   }))
   const labelAt = [...new Set([0, Math.floor((buckets.length - 1) / 2), buckets.length - 1])]
   return (

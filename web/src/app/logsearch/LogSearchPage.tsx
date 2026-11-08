@@ -71,22 +71,31 @@ export function LogSearchPage() {
   // The form lives in state and is mirrored to the URL, so typing is never held back by a navigation. Opening a URL only fills the form.
   const [params, setParams] = useSearchParams()
   const [form, setForm] = useState<SearchForm>(() => formFromParams(params))
-  const paramsRef = useRef(params)
+  const [hiddenServices, setHiddenServices] = useState(0)
+  // URLs this page wrote itself; a URL that arrives later and is not one of them came from outside (a nav link, Back).
+  const written = useRef(new Set<string>())
+  const paramsText = params.toString()
   useEffect(() => {
-    paramsRef.current = params
-  })
+    const next = paramsFromForm(form).toString()
+    if (next === paramsText) return
+    written.current.add(next)
+    setParams(new URLSearchParams(next), { replace: true })
+    // Only a form change writes; a URL change is handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form])
   useEffect(() => {
-    const next = paramsFromForm(form)
-    if (next.toString() !== paramsRef.current.toString()) setParams(next, { replace: true })
-  }, [form, setParams])
+    if (written.current.has(paramsText)) return
+    written.current.clear()
+    setForm(formFromParams(new URLSearchParams(paramsText)))
+    setHiddenServices(0)
+  }, [paramsText])
 
   const [savedOpen, setSavedOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [saveError, setSaveError] = useState('')
   const [deleting, setDeleting] = useState<SavedLogSearchDTO | null>(null)
-  const [hiddenServices, setHiddenServices] = useState(0)
-
+  
   const invalid = validateForm(form, now)
   const running = run.isPending
   const failure = run.error && run.error.name !== 'AbortError' ? run.error : null
@@ -163,7 +172,7 @@ export function LogSearchPage() {
     return (
       <>
         {head}
-        <EmptyState>No services are available to search.</EmptyState>
+        <EmptyState>You have no services you can read logs of.</EmptyState>
       </>
     )
   }
@@ -176,7 +185,10 @@ export function LogSearchPage() {
       <div className={styles.top}>
         <Panel title="Search">
           <form className={styles.form} aria-label="Log search" data-layout={phone ? 'stacked' : 'wide'} onSubmit={submit}>
-            <ServicePicker services={services.data.items} selectedIds={form.serviceIds} onChange={(serviceIds) => setForm({ ...form, serviceIds })} />
+            <ServicePicker services={services.data.items} selectedIds={form.serviceIds} onChange={(serviceIds) => {
+                setForm({ ...form, serviceIds })
+                setHiddenServices(0)
+              }} />
             <div className={styles.field}>
               <span className={styles.fieldLabel}>Range</span>
               <Seg label="Range" options={RANGES.map((range) => ({ value: range.value, label: range.label }))} value={form.range} onChange={setRange} />
@@ -241,7 +253,7 @@ export function LogSearchPage() {
         )}
       </div>
 
-      {hiddenServices > 0 && <Banner kind="info">{`${hiddenServices} services in this query are no longer available to you.`}</Banner>}
+      {hiddenServices > 0 && <Banner kind="info">{hiddenServices === 1 ? '1 service in this query is no longer available to you.' : `${hiddenServices} services in this query are no longer available to you.`}</Banner>}
       {failure && (
         <div role="alert">
           <Banner kind="bad">
@@ -259,14 +271,14 @@ export function LogSearchPage() {
           ) : (
             <>
               <div className={styles.charts}>
-                <Panel title="Hits over time" sub={run.data.capped ? <span className={styles.hint}>lines shown only</span> : undefined}>
+                <Panel title="Hits over time">
                   <HitsHistogram result={run.data} />
                 </Panel>
                 <Panel title="Hits by service" footer="Select a line to open that service's Logs tab at that second.">
                   <HitsByService result={run.data} />
                 </Panel>
               </div>
-              <Panel title="Lines" sub={<span className={styles.hint}>Times are UTC.</span>} flush>
+              <Panel title="Lines" flush>
                 <ResultLines result={run.data} />
               </Panel>
             </>

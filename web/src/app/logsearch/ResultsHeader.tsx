@@ -13,14 +13,14 @@ export function ResultsHeader({ result }: { result: LogSearchResultDTO }) {
   return (
     <>
       <div className={styles.resultsHead}>
-        <strong className={styles.count}>{`${number(result.records_matched)} matching lines`}</strong>
+        <strong className={styles.count}>{`${number(result.records_matched)} matching ${result.records_matched === 1 ? 'line' : 'lines'}`}</strong>
         <span className={styles.stats}>{`${formatBytes(result.bytes_scanned)} scanned in ${seconds} s · ${formatCost(result.bytes_scanned)}`}</span>
       </div>
       {(result.capped || failedTargets.length > 0 || withoutAwslogs.length > 0) && (
         <div className={styles.notices}>
           {result.capped && (
             <Banner kind="warn">
-              {`Showing the first ${number(result.rows.length)} of ${number(result.records_matched)} matching lines. Narrow the range or the query to see the rest.`}
+              {`Showing the newest ${number(result.rows.length)} of ${number(result.records_matched)} matching lines. The histogram and hits by service cover the lines shown.`}
             </Banner>
           )}
           {failedTargets.map((target) => (
