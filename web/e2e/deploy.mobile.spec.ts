@@ -89,7 +89,8 @@ test.describe('lock reasons as omer', () => {
 
     await expect(region('Containers').getByText('You need Edit on Dev')).toBeVisible()
     await expect(region('Task size').getByText('You need Edit on Dev')).toBeVisible()
-    await expect(region('Service').getByText('You need Deploy on Dev')).toBeVisible()
+    // Two notes now: the settings lock and the scan toggle's own.
+    await expect(region('Service').getByText('You need Deploy on Dev').first()).toBeVisible()
     // Operate is allowed, so the Service panel carries no Operate note and the stepper is live.
     await expect(region('Service').getByText('You need Operate on Dev')).toHaveCount(0)
     await expect(region('Service').getByRole('spinbutton', { name: 'Desired count' })).toBeEnabled()

@@ -177,6 +177,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// The API's SSRF filter relaxes http loopback URLs only when cfg.FakeAWS is set, so the --fake-aws
 	// flag must set it too or the demo IdP's metadata cannot be imported.
 	cfg.FakeAWS = fakeAWS
+	// Fake mode always has image scanning on, backed by the fake scanner, so the demo and the e2e suite need no variables.
+	if fakeAWS {
+		cfg.Scan.Enabled = true
+	}
 	if err := cfg.ValidateScanLaunch(); err != nil {
 		return err
 	}

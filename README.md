@@ -19,6 +19,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 - [Service logs](docs/design/screens/service-logs.png): CloudWatch log history and live tail
 - [Service terminal](docs/design/screens/service-terminal.png): an interactive shell in a running task through ECS Exec
 - [Service operations log](docs/design/screens/service-operations-log.png): who changed or opened what, and when
+- Image security (`/security`): the images someone asked to scan, their open findings by severity, how fresh the vulnerability data is, and risk acceptances; see Image security below
 - [Tasks](docs/design/screens/tasks.png): tasks across the estate
 - [Network tree](docs/design/screens/network-tree.png): VPCs, subnets and their connections
 - [Network account](docs/design/screens/network-account.png): networking for one connected account
@@ -125,6 +126,57 @@ The `harbormaster` module's `access_role_arns` defaults to `["arn:aws:iam::*:rol
 ```hcl
 access_role_arns = ["arn:aws:iam::111111111111:role/harbormaster-access"]
 ```
+
+## Image security
+
+Harbormaster scans container images for known vulnerabilities with Syft and Grype, in a separate ECS task that it starts on demand. Nothing is scanned automatically: no discovery, no schedule, no re-matching of old images. A scan happens only when someone asks for one in one of two ways.
+
+1. **The button.** On a service's Deploy tab, `Scan for vulnerabilities` scans the selected container's selected tag, whether or not the setting below is on. It needs Deploy on the service.
+2. **The setting.** The Deploy tab's Service panel has a switch, `Scan Image for Vulnerabilities Before Deploy`, off for every service until someone turns it on. With it on, a change that sets a new image on a container is scanned first. Changing the setting needs Deploy on the service (or global admin) and is written to the operations log and the audit log.
+
+Results are on the **Security** page (`/security`), which lists only the images that were requested, filtered by what you may see: an image you cannot see is not listed and its address answers 404.
+
+### What the gate does
+
+When the setting is on, applying a change set or registering a revision whose container has a new or changed image string pauses while the image is checked. Each changed image is resolved to the digest its tag points at in that very call, and only a scan of that digest counts; if the tag has moved since an earlier scan, the new digest is scanned. The resolution has a 15 second deadline; a timeout pauses with `Deploy anyway`. The gate has these outcomes:
+
+- **Pass:** no open critical finding for this service. The change goes ahead.
+- **Waiting:** the scan is queued, running or waiting for a vulnerability data refresh. The Review dialog shows the progress.
+- **Critical:** the scan found open critical findings, shown with a link to them.
+- **Problem:** the image is not on ECR private, the registry account is not connected, the scan failed or timed out, or the vulnerability data is too old.
+
+Whatever the state, the dialog offers `Deploy anyway`, and the gate never blocks outright: an ECR, S3 or scanner failure is a gate state, not an error. `Deploy anyway` applies the change and is written to the operations log and the audit log (`security.deploy_anyway`). The gate is enforced on the server, so the API and the Task definition tab are held to it as well as the Deploy tab.
+
+What it does not gate: rollback, redeploy of an existing revision (including `?revision=` from the Timeline), restart, desired count, scaling-only and settings-only changes. A container whose image string is unchanged is not gated either, even if its tag has moved. A change set that names the same container twice is rejected with 422.
+
+**Residual risk.** ECS registers the tag, not the digest. A push to the tag between the gate and ECS pulling the image, or a later task start, can run a different digest from the one that was scanned. Use immutable ECR tags to close this gap.
+
+### Accepting risk
+
+Accepting a finding hides it for the services it was made for, for up to 30 days, with a reason; it needs the **Accept risk** permission on the service's tag or global admin. An acceptance covers one vulnerability and package version on one exact digest, and only the services it was made for: another service that uses the same digest still counts the finding until someone with Accept risk on that service accepts it there. It returns when it expires or is revoked (by whoever made it, an admin or a holder of Accept risk on that service). Acceptances are audit-logged. Acceptance records outlive their image: with `HM_RETENTION_AUDIT_LOG=0` the rows for deleted digests are kept indefinitely, otherwise they are pruned once they have ended for longer than the audit log retention.
+
+### Where the setting is stored
+
+The per-service setting is stored in Harbormaster's database, keyed by account, region, cluster and service name, not by ARN. It is not an ECS or Terraform setting, so a deploy through Terraform cannot change it, and a service that is deleted and recreated with the same name keeps its setting.
+
+### Enable it
+
+1. Build and push the scanner image (`make scanner-image`) and note its digest.
+2. In the `harbormaster` module set `enable_image_scanning = true` and `scanner_image = "...@sha256:<digest>"`. Read the `scanner_task_role_arn` output.
+3. In every account you want to scan, apply `harbormaster-access` with `scanner_task_role_arn` set, which creates the `harbormaster-scan` role (and keep the external ID the account already uses).
+
+Terraform details, variables and the full permission tables are in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md#image-scanning) and [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md#image-scanning). Configuration variables are under Configuration > Image security.
+
+**Permissions, in short.** In the Harbormaster account, the server task role starts and stops the scanner task, passes its two roles, and reads and writes the scan bucket (it also writes the vulnerability database there). In each connected account, the `harbormaster-scan` role lets only the scanner task role pull images from ECR; resolving a tag to a digest uses the existing `ecr:DescribeImages` of `harbormaster-access`, which `read_only` keeps. `harbormaster-access` is not widened.
+
+**Network.** The scanner reaches ECR, S3 and STS over 443 through NAT. The server reaches `grype.anchore.io` only for an on-demand vulnerability data refresh.
+
+### Limits and retention
+
+- Amazon ECR private images only. Other registries, including ECR Public, are refused with the reason.
+- One scanner task at a time by default (`HM_SCAN_MAX_TASKS`), 30 minutes per task, 10 minutes per image, three attempts, images up to `HM_SCAN_MAX_IMAGE_MB`.
+- A scan result is kept for `HM_RETENTION_SCAN_IMAGES` after the image was last requested, except that an image with an active acceptance is kept until its acceptances end.
+- The vulnerability database is refreshed on demand, before a requested scan when it is older than `HM_SCAN_DB_REFRESH` (24 hours); the Security page says "Updating vulnerability data" meanwhile. Past `HM_SCAN_DB_MAX_AGE` (120 hours) scans wait, and a gate shows the reason with `Deploy anyway`. To use an operator mirror instead, set `HM_SCAN_DB_REFRESH=0` and write the same bucket keys (see the module README).
 
 ## Terraform and Harbormaster deploys
 
@@ -415,6 +467,7 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 - Single sign-on accepts only assertions signed by a configured IdP certificate and addressed to this Harbormaster. Unsigned responses and responses to sign-ins Harbormaster did not start are rejected.
 - Each sign-in request is single use and expires after `HM_SAML_REQUEST_TTL`. Assertion and response IDs are recorded, so a captured response cannot be replayed. A binding cookie must match the request, so a response from another browser is refused.
 - The SP private key is stored encrypted in the database under `HM_SESSION_KEY`. SAML messages, certificate PEM and private keys are never written to logs. Audit entries carry fingerprints and field names only.
+- Image scanning: the scanner task holds only the `harbormaster-scan` role and its bucket, runs under its own execution role (not the server's), has no database URL, session key or `harbormaster-access` role, and everything it writes is validated under fixed size and shape limits before use. The pre-deploy gate is enforced on the server, not in the browser.
 - Task definition fields that can reach the container host are admin-only. Non-admins may keep or remove them relative to the deployed revision but cannot add or change them: task and execution roles, secrets outside existing prefixes, `environmentFiles`, FSx credentials, the FireLens S3 config, `credentialSpecs`, `privileged`, `linuxParameters.capabilities.add` and `devices`, `dockerSecurityOptions`, `systemControls`, `pidMode`/`ipcMode`/`networkMode` set to `host`, host volumes (`volumes[].host.sourcePath`), `dockerVolumeConfiguration` and `s3filesVolumeConfiguration`. A rejected draft returns 422 and nothing is registered.
 
 ## Development

@@ -195,3 +195,28 @@ func TestServe_ProductionDoesNotMountFakeIdP(t *testing.T) {
 		t.Errorf("GET /fake-idp/metadata without fake AWS returned fake IdP metadata (status %d)", status)
 	}
 }
+
+// Fake mode turns image scanning on with no HM_SCAN_* variables, so the demo and the e2e suite show the feature.
+func TestServe_FakeAWSHasImageScanningOn(t *testing.T) {
+	base, stop := serveUnderTest(t, map[string]string{"HM_FAKE_AWS": "1"})
+	defer stop()
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar, Timeout: 2 * time.Second}
+	body, _ := json.Marshal(map[string]string{"username": "sam", "password": "harbormaster-e2e-1"})
+	resp, err := client.Post(base+"/api/auth/login", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("login = %v, %v", resp, err)
+	}
+	resp.Body.Close()
+	resp, err = client.Get(base + "/api/security")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Enabled {
+		t.Fatalf("GET /api/security enabled = %v, err = %v; want true in fake mode", out.Enabled, err)
+	}
+}

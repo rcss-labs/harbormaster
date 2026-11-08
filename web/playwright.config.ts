@@ -36,6 +36,7 @@ const serverEnv = {
   HM_POLL_NETWORK: '5s', // plan 05
   HM_POLL_STORAGE: '5s', // plan 05
   HM_METRICS_TOKEN: 'e2e-metrics-token', // plan 06
+  HM_SCAN_INTERVAL: '3s', // image security: the scan loop picks a requested scan up within seconds
 }
 
 export default defineConfig({
