@@ -478,3 +478,16 @@ func TestLoop_AllAWSCallsShareTheInFlightLimit(t *testing.T) {
 		t.Fatalf("MaxInFlight = %d, want <= %d", got, limit)
 	}
 }
+
+func TestServicesTier_StoresAWSTags(t *testing.T) {
+	h := mockupHarness(t)
+	staging := newLoop(h.loop.p, awsx.Target{AccountID: "731022849906", Region: "us-east-1"})
+	if err := staging.runOnce(context.Background()); err != nil {
+		t.Fatalf("staging runOnce: %v", err)
+	}
+	if got := h.count(t, `select count(*) from services
+		where service_name = 'api' and cluster_name = 'staging-web'
+		and raw->'Tags' @> '[{"Key":"env","Value":"staging"}]'`); got != 1 {
+		t.Fatalf("staging-web api rows tagged env=staging = %d, want 1", got)
+	}
+}

@@ -15,6 +15,8 @@ import (
 // Estate.ScalingConfig under Mu, so the describe calls and Estate.Advance see
 // the change at once. FailNext("PutScalingPolicy", err) and the other
 // operation names inject failures; ThrottleAutoScaling throttles them too.
+// Scheduled actions (cron and at) are stored but never executed here: the
+// reconciler enforces the off-hours range instead (D3 covers the demo).
 
 func nonEmptyPtr(s string) *string {
 	if s == "" {
@@ -87,11 +89,15 @@ func (c *autoScalingClient) existingConfig(key model.ServiceKey) (*ScalingSeed, 
 }
 
 // RegisterScalableTarget creates the target or updates its range; policies and
-// scheduled actions of an existing target are kept.
+// scheduled actions of an existing target are kept. As AWS does, the service's
+// desired count is clamped into the new range.
 func (c *autoScalingClient) RegisterScalableTarget(_ context.Context, in *applicationautoscaling.RegisterScalableTargetInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.RegisterScalableTargetOutput, error) {
 	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "RegisterScalableTarget", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
+		return nil, err
+	}
+	if err := c.f.writeDenied(c.target); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -125,6 +131,7 @@ func (c *autoScalingClient) RegisterScalableTarget(_ context.Context, in *applic
 		e.ScalingConfig[key] = current
 	}
 	current.Min, current.Max = min, max
+	e.clampToScalingRange()
 	return &applicationautoscaling.RegisterScalableTargetOutput{
 		ScalableTargetARN: aws.String("arn:aws:application-autoscaling:" + key.Region + ":" + key.AccountID + ":scalable-target/" + hexOf(hashSeed(resourceID(key), 4)))}, nil
 }
@@ -135,6 +142,9 @@ func (c *autoScalingClient) DeregisterScalableTarget(_ context.Context, in *appl
 	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DeregisterScalableTarget", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
+		return nil, err
+	}
+	if err := c.f.writeDenied(c.target); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -157,6 +167,9 @@ func (c *autoScalingClient) PutScalingPolicy(_ context.Context, in *applicationa
 	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "PutScalingPolicy", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
+		return nil, err
+	}
+	if err := c.f.writeDenied(c.target); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -211,6 +224,9 @@ func (c *autoScalingClient) DeleteScalingPolicy(_ context.Context, in *applicati
 	if err != nil {
 		return nil, err
 	}
+	if err := c.f.writeDenied(c.target); err != nil {
+		return nil, err
+	}
 	e := c.f.Estate
 	e.Mu.Lock()
 	defer e.Mu.Unlock()
@@ -236,6 +252,9 @@ func (c *autoScalingClient) PutScheduledAction(_ context.Context, in *applicatio
 	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "PutScheduledAction", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
+		return nil, err
+	}
+	if err := c.f.writeDenied(c.target); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate
@@ -270,6 +289,9 @@ func (c *autoScalingClient) DeleteScheduledAction(_ context.Context, in *applica
 	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DeleteScheduledAction", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
+		return nil, err
+	}
+	if err := c.f.writeDenied(c.target); err != nil {
 		return nil, err
 	}
 	e := c.f.Estate

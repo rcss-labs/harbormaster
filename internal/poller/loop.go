@@ -497,7 +497,11 @@ func (l *Loop) syncServices(ctx context.Context) error {
 		var services []model.Service
 		var events []model.ServiceEvent
 		for _, batch := range chunk(names, describeServicesLimit) {
-			out, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String(k.Cluster), Services: batch})
+			out, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{
+				Cluster:  aws.String(k.Cluster),
+				Services: batch,
+				Include:  []ecstypes.ServiceField{ecstypes.ServiceFieldTags},
+			})
 			if err != nil {
 				return fmt.Errorf("describe services: %w", err)
 			}

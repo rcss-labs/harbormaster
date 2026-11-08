@@ -187,3 +187,21 @@ func TestFakeAutoScaling_AdvanceClampsDesiredIntoRange(t *testing.T) {
 		t.Fatalf("desired after lowering max = %d, want 2", got)
 	}
 }
+
+func TestFakeRegisterScalableTarget_ClampsDesired(t *testing.T) {
+	t.Run("max 0 stops the service", func(t *testing.T) {
+		f := newFake()
+		registerTarget(t, scalingAPI(t, f), emailSenderResource, 0, 0)
+		if got := describe(t, f, "background-jobs", "email-sender").DesiredCount; got != 0 {
+			t.Fatalf("desired after max 0 = %d, want 0", got)
+		}
+	})
+	t.Run("min above desired raises it", func(t *testing.T) {
+		f := newFake()
+		registerTarget(t, scalingAPI(t, f), emailSenderResource, 3, 4)
+		svc := describe(t, f, "background-jobs", "email-sender")
+		if svc.DesiredCount != 3 || primaryOf(svc).DesiredCount != 3 {
+			t.Fatalf("desired after min 3 = %d (primary %d), want 3", svc.DesiredCount, primaryOf(svc).DesiredCount)
+		}
+	})
+}
