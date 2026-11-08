@@ -1850,6 +1850,7 @@
       "rescan": "boolean"
     },
     "digest": "string",
+    "enabled": "boolean",
     "failure_action": "string",
     "failure_code": "string",
     "failure_detail": "string",
@@ -1884,6 +1885,7 @@
         "vuln_id": "string"
       }
     ],
+    "hint": "string",
     "image": "string",
     "last_requested_at": "time",
     "matched_db_built_at": {

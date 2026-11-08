@@ -37,8 +37,12 @@ func scanScanRequest(row pgx.Row) (ScanRequest, error) {
 // AddScanRequest records a request, or moves the time, source, requester, image and tag of the one already recorded for
 // the same digest, service and container.
 func (s *Store) AddScanRequest(ctx context.Context, r ScanRequest) (int64, error) {
+	return addScanRequest(ctx, s.Pool, r)
+}
+
+func addScanRequest(ctx context.Context, db rowQuerier, r ScanRequest) (int64, error) {
 	var id int64
-	err := s.Pool.QueryRow(ctx, `insert into scan_requests (digest, account_id, region, cluster_name, service_name, container,
+	err := db.QueryRow(ctx, `insert into scan_requests (digest, account_id, region, cluster_name, service_name, container,
 		  image, tag, source, requested_by, requested_at)
 		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), $9, $10, $11)
 		on conflict (digest, account_id, region, cluster_name, service_name, container) do update set

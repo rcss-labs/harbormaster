@@ -92,8 +92,10 @@ type SecurityCanDTO struct {
 	Rescan bool `json:"rescan"`
 }
 
-// SecurityImageDetailDTO is GET /api/security/images/{digest}.
+// SecurityImageDetailDTO is GET /api/security/images/{digest}. With scanning off only Enabled and Hint are set.
 type SecurityImageDetailDTO struct {
+	Enabled bool   `json:"enabled"`
+	Hint    string `json:"hint"`
 	SecurityImageDTO
 	Findings []SecurityFindingDTO `json:"findings"`
 }

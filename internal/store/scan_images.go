@@ -25,12 +25,14 @@ type ScanImage struct {
 	FirstSeenAt, LastRequestedAt                                                                                 time.Time
 	QueuedAt, ScannedAt                                                                                          *time.Time
 	RequestedBy                                                                                                  *int64
+	// ManifestMediaType is what ECR reports for the digest; the importer tells an image index from a single manifest by it.
+	ManifestMediaType string
 }
 
 // maxScanAttempts is the number of scan attempts after which an image is marked failed.
 const maxScanAttempts = 3
 
-const scanImageColumns = `digest, coalesce(platform_digest, ''), coalesce(platform, ''), image_ref, coalesce(tag, ''),
+const scanImageColumns = `digest, coalesce(platform_digest, ''), coalesce(platform, ''), coalesce(manifest_media_type, ''), image_ref, coalesce(tag, ''),
 	registry_kind, coalesce(registry_account_id, ''), coalesce(registry_region, ''), coalesce(repository, ''),
 	status, coalesce(failure_code, ''), coalesce(failure_detail, ''), attempts, next_attempt_at, large,
 	coalesce(syft_version, ''), coalesce(scanner_image_digest, ''),
@@ -40,7 +42,7 @@ const scanImageColumns = `digest, coalesce(platform_digest, ''), coalesce(platfo
 // scanScanImage reads a row of scanImageColumns followed by any extra columns.
 func scanScanImage(row pgx.Row, extra ...any) (ScanImage, error) {
 	var i ScanImage
-	dest := append([]any{&i.Digest, &i.PlatformDigest, &i.Platform, &i.ImageRef, &i.Tag,
+	dest := append([]any{&i.Digest, &i.PlatformDigest, &i.Platform, &i.ManifestMediaType, &i.ImageRef, &i.Tag,
 		&i.RegistryKind, &i.RegistryAccountID, &i.RegistryRegion, &i.Repository,
 		&i.Status, &i.FailureCode, &i.FailureDetail, &i.Attempts, &i.NextAttemptAt, &i.Large,
 		&i.SyftVersion, &i.ScannerImageDigest,
@@ -68,9 +70,9 @@ func (s *Store) queryScanImages(ctx context.Context, sql string, args ...any) ([
 
 // "xmax = 0" is true only for a row this statement inserted. A request only moves last_requested_at of a known row:
 // putting a scanned or failed image back in the queue is RequeueScanImage's job.
-const upsertRequestedScanImageSQL = `insert into scan_images (digest, platform, image_ref, tag, registry_kind, registry_account_id,
+const upsertRequestedScanImageSQL = `insert into scan_images (digest, platform, manifest_media_type, image_ref, tag, registry_kind, registry_account_id,
 	  registry_region, repository, status, first_seen_at, last_requested_at, queued_at, requested_by, updated_at)
-	values ($1, nullif($2, ''), $3, nullif($4, ''), $5, nullif($6, ''), nullif($7, ''), nullif($8, ''),
+	values ($1, nullif($2, ''), nullif($11, ''), $3, nullif($4, ''), $5, nullif($6, ''), nullif($7, ''), nullif($8, ''),
 	  'queued', $9, $9, $9, $10, $9)
 	on conflict (digest) do update set last_requested_at = $9, updated_at = $9
 	returning ` + scanImageColumns + `, (xmax = 0)`
@@ -78,9 +80,13 @@ const upsertRequestedScanImageSQL = `insert into scan_images (digest, platform, 
 // UpsertRequestedScanImage records a request to scan an image: a new digest is queued, a known one only has its request
 // time moved. created is true only for a new row.
 func (s *Store) UpsertRequestedScanImage(ctx context.Context, img ScanImage, now time.Time) (ScanImage, bool, error) {
+	return upsertRequestedScanImage(ctx, s.Pool, img, now)
+}
+
+func upsertRequestedScanImage(ctx context.Context, db rowQuerier, img ScanImage, now time.Time) (ScanImage, bool, error) {
 	var created bool
-	stored, err := scanScanImage(s.Pool.QueryRow(ctx, upsertRequestedScanImageSQL, img.Digest, img.Platform, img.ImageRef, img.Tag,
-		img.RegistryKind, img.RegistryAccountID, img.RegistryRegion, img.Repository, now, img.RequestedBy), &created)
+	stored, err := scanScanImage(db.QueryRow(ctx, upsertRequestedScanImageSQL, img.Digest, img.Platform, img.ImageRef, img.Tag,
+		img.RegistryKind, img.RegistryAccountID, img.RegistryRegion, img.Repository, now, img.RequestedBy, img.ManifestMediaType), &created)
 	if err != nil {
 		return ScanImage{}, false, fmt.Errorf("upsert requested scan image %s: %w", img.Digest, err)
 	}
@@ -248,4 +254,29 @@ func (s *Store) CountQueuedScanImages(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count queued scan images: %w", err)
 	}
 	return n, nil
+}
+
+// RequestScanImage records a request in one transaction: the image row (see UpsertRequestedScanImage) and the request of
+// the service container (see AddScanRequest). If either fails, neither is kept.
+func (s *Store) RequestScanImage(ctx context.Context, img ScanImage, req ScanRequest, now time.Time) (ScanImage, bool, error) {
+	var stored ScanImage
+	var created bool
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		var err error
+		if stored, created, err = upsertRequestedScanImage(ctx, tx, img, now); err != nil {
+			return err
+		}
+		req.Digest, req.RequestedAt = img.Digest, now
+		_, err = addScanRequest(ctx, tx, req)
+		return err
+	})
+	if err != nil {
+		return ScanImage{}, false, err
+	}
+	return stored, created, nil
+}
+
+// rowQuerier is what the shared statements need; both the pool and a transaction satisfy it.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }

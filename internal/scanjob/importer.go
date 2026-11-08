@@ -220,6 +220,11 @@ func (r *Runner) importScanned(ctx context.Context, run store.ScanRun, manifest 
 		return false
 	}
 
+	if err := checkPlatform(img, result); err != nil {
+		r.requeue(ctx, img, scan.CodeTaskFailed, scan.SanitizeText("the scanner's result was invalid: "+err.Error()))
+		return false
+	}
+
 	now := r.now()
 	packages := result.Packages
 	syftVersion := result.SyftVersion
@@ -249,4 +254,17 @@ func (r *Runner) getResult(ctx context.Context, key string) ([]byte, error) {
 		body, err = r.Bucket.Get(ctx, key, scan.MaxResultBytes)
 	}
 	return body, err
+}
+
+// checkPlatform rejects a result for another platform than the one asked for, and, for a single-manifest image, one whose
+// platform digest is not the image's own digest. An image index may name any of its manifests; an unknown media type is
+// not checked for that.
+func checkPlatform(img store.ScanImage, result scan.Result) error {
+	if result.Platform != img.Platform {
+		return errors.New("result platform does not match the requested platform")
+	}
+	if img.ManifestMediaType != "" && !scan.IsImageIndex(img.ManifestMediaType) && result.PlatformDigest != img.Digest {
+		return errors.New("result platform digest does not match the image digest")
+	}
+	return nil
 }

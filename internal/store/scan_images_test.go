@@ -429,3 +429,42 @@ func TestCountQueuedScanImages_CountsOnlyQueued(t *testing.T) {
 		t.Fatalf("queued = %d err=%v, want 2 (a retry that is not due yet still waits)", n, err)
 	}
 }
+
+func TestUpsertRequestedScanImage_KeepsManifestMediaType(t *testing.T) {
+	s := storetest.Open(t)
+	img := scanRequest("sha256:a")
+	img.ManifestMediaType = "application/vnd.oci.image.index.v1+json"
+	stored, _, err := s.UpsertRequestedScanImage(context.Background(), img, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetScanImage(context.Background(), "sha256:a")
+	if err != nil || got.ManifestMediaType != img.ManifestMediaType || stored.ManifestMediaType != img.ManifestMediaType {
+		t.Fatalf("media type = %q (stored %q) err=%v, want %q", got.ManifestMediaType, stored.ManifestMediaType, err, img.ManifestMediaType)
+	}
+}
+
+func TestRequestScanImage_KeepsNeitherRowWhenTheRequestFails(t *testing.T) {
+	fx := newReadFixture(t)
+	s, ctx := fx.s, context.Background()
+	key := serviceKey("core-services", "payments-api")
+
+	bad := store.ScanRequest{Key: key, Container: "app", Image: "repo", Tag: "v1", Source: "not-a-source"}
+	if _, _, err := s.RequestScanImage(ctx, scanRequest("sha256:a"), bad, fx.now); err == nil {
+		t.Fatal("a request with an unknown source should fail")
+	}
+	if _, err := s.GetScanImage(ctx, "sha256:a"); err == nil {
+		t.Fatal("the image row was kept although its request failed")
+	}
+
+	good := bad
+	good.Source = "manual"
+	img, created, err := s.RequestScanImage(ctx, scanRequest("sha256:a"), good, fx.now)
+	if err != nil || !created || img.Status != "queued" {
+		t.Fatalf("RequestScanImage = %+v created=%v err=%v, want a queued new image", img, created, err)
+	}
+	latest, err := s.LatestScanRequest(ctx, key, "app", "v1", "")
+	if err != nil || latest.Digest != "sha256:a" {
+		t.Fatalf("latest request = %+v err=%v, want one for sha256:a", latest, err)
+	}
+}

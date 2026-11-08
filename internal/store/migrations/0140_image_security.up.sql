@@ -5,6 +5,8 @@ create table scan_images (
   digest text primary key,
   platform_digest text,
   platform text,
+  -- What ECR reports for the digest; tells an image index from a single manifest.
+  manifest_media_type text,
   image_ref text not null,
   tag text,
   registry_kind text not null check (registry_kind = 'ecr'),

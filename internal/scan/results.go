@@ -208,6 +208,9 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 	if raw.Status != StatusScanned {
 		return Result{}, errors.New("result status is not scanned")
 	}
+	if !digestPattern.MatchString(raw.PlatformDigest) {
+		return Result{}, errors.New("result platform digest is missing or not valid")
+	}
 	if raw.Packages < 0 || raw.Packages > math.MaxInt32 {
 		return Result{}, errors.New("result package count is out of range")
 	}
@@ -217,13 +220,11 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 
 	res := Result{
 		Digest:          raw.Digest,
+		PlatformDigest:  raw.PlatformDigest,
 		Status:          StatusScanned,
 		SBOMGeneratedAt: raw.SBOMGeneratedAt,
 		Packages:        int(raw.Packages),
 		Truncated:       raw.Truncated,
-	}
-	if digestPattern.MatchString(raw.PlatformDigest) {
-		res.PlatformDigest = raw.PlatformDigest
 	}
 	if platformPattern.MatchString(raw.Platform) {
 		res.Platform = raw.Platform
@@ -417,4 +418,10 @@ func ParseUpstreamDB(data []byte, now time.Time) (UpstreamDB, error) {
 		return UpstreamDB{}, errors.New("upstream db listing has an invalid build time")
 	}
 	return db, nil
+}
+
+// IsImageIndex reports whether an ECR manifest media type is a multi-platform index (OCI index or Docker manifest list).
+func IsImageIndex(mediaType string) bool {
+	return mediaType == "application/vnd.oci.image.index.v1+json" ||
+		mediaType == "application/vnd.docker.distribution.manifest.list.v2+json"
 }

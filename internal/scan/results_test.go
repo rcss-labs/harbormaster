@@ -19,7 +19,7 @@ const (
 
 func resultBody(t *testing.T, digest string, findings []Finding, mutate func(map[string]any)) []byte {
 	t.Helper()
-	m := map[string]any{"digest": digest, "status": "scanned", "findings": findings}
+	m := map[string]any{"digest": digest, "platform_digest": digest, "status": "scanned", "findings": findings}
 	if mutate != nil {
 		mutate(m)
 	}
@@ -150,7 +150,6 @@ func TestParseResult_DropsBadIDsAndURLs(t *testing.T) {
 
 func TestParseResult_ClearsBadMetadata(t *testing.T) {
 	res, err := ParseResult(resultBody(t, digestA, nil, func(m map[string]any) {
-		m["platform_digest"] = "sha256:short"
 		m["platform"] = "windows/amd64"
 		m["syft_version"] = "1.0\n; rm -rf"
 	}), digestA)
@@ -160,8 +159,20 @@ func TestParseResult_ClearsBadMetadata(t *testing.T) {
 	if res.Digest != digestA {
 		t.Fatalf("digest should be kept, got %q", res.Digest)
 	}
-	if res.PlatformDigest != "" || res.Platform != "" || res.SyftVersion != "" {
+	if res.Platform != "" || res.SyftVersion != "" {
 		t.Errorf("bad metadata should be emptied: %+v", res)
+	}
+}
+
+func TestParseResult_RejectsMissingOrInvalidPlatformDigest(t *testing.T) {
+	for name, value := range map[string]any{"empty": "", "short": "sha256:short", "wrong algorithm": "md5:" + strings.Repeat("a", 32), "not a string": 7} {
+		_, err := ParseResult(resultBody(t, digestA, nil, func(m map[string]any) { m["platform_digest"] = value }), digestA)
+		if err == nil {
+			t.Errorf("%s platform digest should be rejected, not dropped", name)
+		}
+	}
+	if _, err := ParseResult(resultBody(t, digestA, nil, func(m map[string]any) { delete(m, "platform_digest") }), digestA); err == nil {
+		t.Error("a result without a platform digest should be rejected")
 	}
 }
 
@@ -324,7 +335,7 @@ func TestSeverityCounts_Total(t *testing.T) {
 
 func TestParseResult_BoundsMemoryOnManyEmptyFindings(t *testing.T) {
 	var body bytes.Buffer
-	body.WriteString(`{"digest":"` + digestA + `","status":"scanned","findings":[`)
+	body.WriteString(`{"digest":"` + digestA + `","platform_digest":"` + digestA + `","status":"scanned","findings":[`)
 	for body.Len() < MaxResultBytes-10 {
 		body.WriteString("{},")
 	}

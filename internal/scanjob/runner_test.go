@@ -578,3 +578,62 @@ func TestRunner_KickWakesTheLoop(t *testing.T) {
 		t.Fatalf("launches = %d, want the kicked cycle to launch the request", len(fx.scanner.Launches()))
 	}
 }
+
+// resultWith is a scanned result for digest whose platform fields the test sets.
+func resultWith(t *testing.T, digest, platformDigest, platform string) []byte {
+	t.Helper()
+	return manifestBody(t, map[string]any{"digest": digest, "platform_digest": platformDigest, "platform": platform, "status": "scanned", "packages": 5, "findings": []any{}})
+}
+
+func TestRunner_ResultWithTheWrongPlatformIsRequeued(t *testing.T) {
+	const singleManifest = "application/vnd.docker.distribution.manifest.v2+json"
+	const imageIndex = "application/vnd.oci.image.index.v1+json"
+	const otherDigest = "sha256:" + "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
+	cases := []struct {
+		name, mediaType      string
+		platformDigest       func(digest string) string
+		platform             string
+		wantScanned          bool
+		wantFailureMentioned string
+	}{
+		{"the platform differs from the image's", singleManifest, func(d string) string { return d }, "linux/arm64", false, "platform"},
+		{"a single manifest with another platform digest", singleManifest, func(string) string { return otherDigest }, "linux/amd64", false, "platform digest"},
+		{"an empty platform digest", singleManifest, func(string) string { return "" }, "linux/amd64", false, "platform digest"},
+		{"an index may name another manifest", imageIndex, func(string) string { return otherDigest }, "linux/amd64", true, ""},
+		{"a single manifest naming itself", singleManifest, func(d string) string { return d }, "linux/amd64", true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newFixture(t)
+			script := &scriptedLauncher{bucket: fx.scanner}
+			fx.runner.Launcher = script
+			digest := fx.queue(edge, edgeTag)
+			if _, err := fx.st.Pool.Exec(context.Background(), `update scan_images set manifest_media_type = $2 where digest = $1`, digest, tc.mediaType); err != nil {
+				t.Fatal(err)
+			}
+			script.script = func(job scan.Job) map[string][]byte {
+				return map[string][]byte{
+					scan.ManifestKey(job.RunID): manifestBody(t, map[string]any{"run_id": job.RunID, "kind": "scan", "status": "succeeded",
+						"images": []map[string]any{{"digest": digest, "status": "scanned"}}}),
+					scan.ResultKey(job.RunID, digest): resultWith(t, digest, tc.platformDigest(digest), tc.platform),
+				}
+			}
+			fx.cycle()
+			fx.cycle()
+			img := fx.image(digest)
+			if tc.wantScanned {
+				if img.Status != "scanned" {
+					t.Fatalf("image = %q %q %q, want scanned", img.Status, img.FailureCode, img.FailureDetail)
+				}
+				return
+			}
+			if img.Status != "queued" || img.Attempts != 1 || img.FailureCode != scan.CodeTaskFailed || !strings.Contains(img.FailureDetail, tc.wantFailureMentioned) {
+				t.Fatalf("image = %q attempts %d code %q detail %q, want queued, one attempt, task_failed mentioning %q",
+					img.Status, img.Attempts, img.FailureCode, img.FailureDetail, tc.wantFailureMentioned)
+			}
+			if findings, _ := fx.st.ScanFindings(context.Background(), digest); len(findings) != 0 {
+				t.Fatalf("a rejected result stored findings: %+v", findings)
+			}
+		})
+	}
+}

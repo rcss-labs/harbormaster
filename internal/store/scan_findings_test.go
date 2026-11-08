@@ -150,7 +150,7 @@ func TestOpenFindingCounts_ExpiredAcceptanceCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	counts, accepted, err := s.OpenFindingCounts(ctx, []string{"sha256:expired", "sha256:live", "sha256:revoked"}, &svc, fx.now)
+	counts, accepted, err := s.OpenFindingCounts(ctx, []string{"sha256:expired", "sha256:live", "sha256:revoked"}, []model.ServiceKey{svc}, fx.now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestOpenFindingCounts_AcceptanceIsPerService(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	check := func(label string, scope *model.ServiceKey, wantCritical, wantAccepted int) {
+	check := func(label string, scope []model.ServiceKey, wantCritical, wantAccepted int) {
 		t.Helper()
 		counts, accepted, err := s.OpenFindingCounts(ctx, []string{"sha256:a"}, scope, fx.now)
 		if err != nil {
@@ -186,10 +186,41 @@ func TestOpenFindingCounts_AcceptanceIsPerService(t *testing.T) {
 	}
 
 	acceptCritical(t, s, "sha256:a", fx.now.Add(time.Hour), a)
-	check("scope A", &a, 0, 1)
-	check("scope B", &b, 1, 0)
+	check("scope A", []model.ServiceKey{a}, 0, 1)
+	check("scope B", []model.ServiceKey{b}, 1, 0)
 	check("no scope, only A accepted", nil, 1, 0)
 
 	acceptCritical(t, s, "sha256:a", fx.now.Add(time.Hour), b)
 	check("no scope, A and B accepted", nil, 0, 1)
+}
+
+func TestOpenFindingCounts_AcceptedOnlyWhenEveryServiceOfTheSetAccepted(t *testing.T) {
+	fx := newReadFixture(t)
+	s, ctx := fx.s, context.Background()
+	a, b, c := serviceKey("core-services", "payments-api"), serviceKey("core-services", "notifications"), serviceKey("ci-tools", "artifact-proxy")
+	openFindingFixture(t, fx, "sha256:a")
+	for _, key := range []model.ServiceKey{a, b, c} {
+		if _, err := s.AddScanRequest(ctx, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v1",
+			Source: "manual", RequestedAt: fx.now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	acceptCritical(t, s, "sha256:a", fx.now.Add(time.Hour), a, b)
+	for label, tc := range map[string]struct {
+		set                      []model.ServiceKey
+		wantCritical, wantAccept int
+	}{
+		"both accepting services":    {[]model.ServiceKey{a, b}, 0, 1},
+		"one that has not accepted":  {[]model.ServiceKey{a, b, c}, 1, 0},
+		"only the third":             {[]model.ServiceKey{c}, 1, 0},
+		"no set means every service": {nil, 1, 0},
+	} {
+		counts, accepted, err := s.OpenFindingCounts(ctx, []string{"sha256:a"}, tc.set, fx.now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if counts["sha256:a"].Critical != tc.wantCritical || accepted["sha256:a"] != tc.wantAccept {
+			t.Errorf("%s: critical=%d accepted=%d, want %d and %d", label, counts["sha256:a"].Critical, accepted["sha256:a"], tc.wantCritical, tc.wantAccept)
+		}
+	}
 }

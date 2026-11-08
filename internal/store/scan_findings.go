@@ -135,18 +135,24 @@ func (s *Store) ScanFindings(ctx context.Context, digest string) ([]ScanFinding,
 }
 
 // OpenFindingCounts counts each digest's findings by severity, leaving out accepted ones, and counts the accepted ones.
-// An acceptance is active while it is not revoked and expires after now. With a scope, a finding is accepted when that
-// service has an active acceptance; without one, only when the digest has requests and every requesting service has.
-func (s *Store) OpenFindingCounts(ctx context.Context, digests []string, scope *model.ServiceKey, now time.Time) (map[string]scan.SeverityCounts, map[string]int, error) {
+// An acceptance is active while it is not revoked and expires after now. With a scope, a finding is accepted when every
+// service of the set has an active acceptance; without one, only when the digest has requests and every requesting
+// service has.
+func (s *Store) OpenFindingCounts(ctx context.Context, digests []string, scope []model.ServiceKey, now time.Time) (map[string]scan.SeverityCounts, map[string]int, error) {
 	args := []any{digests, now}
 	const activeAcceptance = `from scan_risk_acceptances a where a.digest = f.digest and a.vuln_id = f.vuln_id
 		and a.package_name = f.package_name and a.package_version = f.package_version
 		and a.revoked_at is null and a.expires_at > $2`
 	var acceptedSQL string
-	if scope != nil {
-		args = append(args, scope.AccountID, scope.Region, scope.Cluster, scope.Service)
-		acceptedSQL = `exists (select 1 ` + activeAcceptance + `
-			and a.account_id = $3 and a.region = $4 and a.cluster_name = $5 and a.service_name = $6)`
+	if len(scope) > 0 {
+		accounts, regions, clusters, services := make([]string, len(scope)), make([]string, len(scope)), make([]string, len(scope)), make([]string, len(scope))
+		for i, key := range scope {
+			accounts[i], regions[i], clusters[i], services[i] = key.AccountID, key.Region, key.Cluster, key.Service
+		}
+		args = append(args, accounts, regions, clusters, services)
+		acceptedSQL = `not exists (select 1 from unnest($3::text[], $4::text[], $5::text[], $6::text[]) as s(account_id, region, cluster_name, service_name)
+			where not exists (select 1 ` + activeAcceptance + `
+			  and a.account_id = s.account_id and a.region = s.region and a.cluster_name = s.cluster_name and a.service_name = s.service_name))`
 	} else {
 		acceptedSQL = `(exists (select 1 from scan_requests r where r.digest = f.digest) and not exists (
 			select 1 from scan_requests r where r.digest = f.digest and not exists (select 1 ` + activeAcceptance + `

@@ -11,7 +11,6 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
-	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/scan"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -36,9 +35,9 @@ type resolvedImage struct {
 }
 
 // resolveImage finds the digest an image reference points to now, through the access role of the registry's account. Only
-// Amazon ECR private images in a connected account can be resolved. The key is the requesting service; the registry
-// account is the one named by the image reference.
-func (s *Server) resolveImage(ctx context.Context, key model.ServiceKey, imageRef, platform string) (resolvedImage, error) {
+// Amazon ECR private images in a connected account can be resolved; the registry account is the one the image reference
+// names, not the requesting service's.
+func (s *Server) resolveImage(ctx context.Context, imageRef, platform string) (resolvedImage, error) {
 	ref := scan.ParseImageRef(imageRef)
 	if ref.Kind != scan.KindECR {
 		return resolvedImage{}, errUnsupported{"Only Amazon ECR private images are scanned in this version."}
@@ -120,15 +119,12 @@ func (s *Server) ensureScan(ctx context.Context, img resolvedImage, req store.Sc
 	row := store.ScanImage{
 		Digest: img.Digest, Platform: img.Platform, ImageRef: img.Ref.ImageRef(), Tag: img.Tag,
 		RegistryKind: scan.KindECR, RegistryAccountID: img.Ref.AccountID, RegistryRegion: img.Ref.Region,
-		Repository: img.Repository, RequestedBy: req.RequestedBy,
+		Repository: img.Repository, RequestedBy: req.RequestedBy, ManifestMediaType: img.MediaType,
 	}
-	stored, created, err := s.Store.UpsertRequestedScanImage(ctx, row, now)
+	// Every requesting service is recorded, whatever happens to the scan, so each one can see the image; the image and
+	// its request are stored together.
+	stored, created, err := s.Store.RequestScanImage(ctx, row, req, now)
 	if err != nil {
-		return store.ScanImage{}, err
-	}
-	// Every requesting service is recorded, whatever happens to the scan, so each one can see the image.
-	req.Digest, req.RequestedAt = img.Digest, now
-	if _, err := s.Store.AddScanRequest(ctx, req); err != nil {
 		return store.ScanImage{}, err
 	}
 

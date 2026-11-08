@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -48,14 +49,10 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 	if err != nil {
 		return nil, err
 	}
-	open, accepted, err := s.Store.OpenFindingCounts(ctx, digests, only, s.now())
-	if err != nil {
-		return nil, err
-	}
 
 	views := make([]imageView, 0, len(images))
 	for _, img := range images {
-		view := imageView{dto: imageDTO(img, open[img.Digest], accepted[img.Digest])}
+		view := imageView{dto: imageDTO(img)}
 		view.dto.Requests = []SecurityRequestDTO{}
 		seen := map[model.ServiceKey]bool{}
 		for _, request := range requests[img.Digest] {
@@ -82,14 +79,24 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 				view.services = append(view.services, request.Key)
 			}
 		}
-		if len(view.dto.Requests) > 0 {
-			views = append(views, view)
+		if len(view.dto.Requests) == 0 {
+			continue
 		}
+		// Counts cover exactly the services whose requests are listed, so they agree with the acceptance flags.
+		open, accepted, err := s.Store.OpenFindingCounts(ctx, []string{img.Digest}, view.services, s.now())
+		if err != nil {
+			return nil, err
+		}
+		counts := open[img.Digest]
+		view.dto.Open = SeverityCountsDTO{Critical: counts.Critical, High: counts.High, Medium: counts.Medium, Low: counts.Low,
+			Negligible: counts.Negligible, Unknown: counts.Unknown}
+		view.dto.Accepted = accepted[img.Digest]
+		views = append(views, view)
 	}
 	return views, nil
 }
 
-func imageDTO(img store.ScanImage, open scan.SeverityCounts, accepted int) SecurityImageDTO {
+func imageDTO(img store.ScanImage) SecurityImageDTO {
 	return SecurityImageDTO{
 		Digest: img.Digest, Image: img.ImageRef, Repository: img.Repository, Tag: img.Tag,
 		RegistryAccountID: img.RegistryAccountID, RegistryRegion: img.RegistryRegion,
@@ -97,9 +104,7 @@ func imageDTO(img store.ScanImage, open scan.SeverityCounts, accepted int) Secur
 		FailureAction: scan.FailureAction(img.FailureCode, img.FailureDetail, img.RegistryAccountID),
 		Platform:      img.Platform, ScannedAt: img.ScannedAt, MatchedDBBuiltAt: img.MatchedDBBuiltAt,
 		SyftVersion: img.SyftVersion, Packages: img.Packages, Truncated: img.Truncated,
-		Open: SeverityCountsDTO{Critical: open.Critical, High: open.High, Medium: open.Medium, Low: open.Low,
-			Negligible: open.Negligible, Unknown: open.Unknown},
-		Accepted: accepted, LastRequestedAt: img.LastRequestedAt,
+		LastRequestedAt: img.LastRequestedAt,
 	}
 }
 
@@ -176,7 +181,8 @@ func (s *Server) listSecurity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getSecurityImage(w http.ResponseWriter, r *http.Request) {
 	if !s.scanningOn() {
-		s.fail(w, errNotFound)
+		writeJSON(w, http.StatusOK, SecurityImageDetailDTO{Hint: scanningOffHint, SecurityImageDTO: SecurityImageDTO{Requests: []SecurityRequestDTO{}},
+			Findings: []SecurityFindingDTO{}})
 		return
 	}
 	sc, err := s.scopeFrom(r)
@@ -206,7 +212,7 @@ func (s *Server) getSecurityImage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, SecurityImageDetailDTO{SecurityImageDTO: views[0].dto, Findings: findings})
+	writeJSON(w, http.StatusOK, SecurityImageDetailDTO{Enabled: true, SecurityImageDTO: views[0].dto, Findings: findings})
 }
 
 type findingKey struct{ vulnID, packageName, packageVersion string }
@@ -398,13 +404,14 @@ func (s *Server) postScanRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	// The tag of the container's image is replaced by the one asked for; a tag that cannot be part of a reference is
 	// recognised by the reference no longer parsing as the registry it came from.
-	base := scan.ParseImageRef(current)
-	requested := base.ImageRef() + ":" + body.Tag
-	if scan.ParseImageRef(requested).Kind != base.Kind {
+	requested := scan.ParseImageRef(current).ImageRef() + ":" + body.Tag
+	// The tag must be a plain tag: ParseImageRef reads "x@sha256:..." as a digest reference, which would resolve by digest
+	// and file the scan under a tag that does not point to it.
+	if parsed := scan.ParseImageRef(requested); !requestTagPattern.MatchString(body.Tag) || parsed.Digest != "" || parsed.Tag != body.Tag {
 		s.fail(w, invalid("Tag is not valid."))
 		return
 	}
-	img, err := s.resolveImage(ctx, key, requested, platform)
+	img, err := s.resolveImage(ctx, requested, platform)
 	if err != nil {
 		s.failResolve(w, err)
 		return
@@ -434,6 +441,9 @@ func (s *Server) postScanRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, status)
 }
+
+// requestTagPattern is the form of an image tag.
+var requestTagPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
 
 // failResolve answers an error from resolveImage: an image that cannot be scanned is 422 with the reason, and an ECR
 // problem is 503 with a retry hint.

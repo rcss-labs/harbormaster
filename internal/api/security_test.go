@@ -152,6 +152,11 @@ func TestSecurity_OffReturnsHintAndRefusesWrites(t *testing.T) {
 	resp := sam.get("/api/security/services/" + edge)
 	var service SecurityServiceDTO
 	decode(t, resp, &service)
+	var detail SecurityImageDetailDTO
+	decode(t, sam.get("/api/security/images/sha256:"+strings.Repeat("a", 64)), &detail)
+	if detail.Enabled || detail.Hint != scanningOffHint {
+		t.Fatalf("detail while off = enabled %v hint %q, want off with the hint", detail.Enabled, detail.Hint)
+	}
 	if service.Enabled || service.Images == nil {
 		t.Fatalf("service = %+v, want off with an empty image list", service)
 	}
@@ -243,6 +248,10 @@ func TestScanRequest_ResolvesTagAndQueues(t *testing.T) {
 		t.Fatalf("%d manual scan_requests rows for the digest, want 1", n)
 	}
 
+	if n := countRows(t, env.st, `select count(*) from scan_images where digest = $1 and manifest_media_type = 'application/vnd.docker.distribution.manifest.v2+json'`, wantDigest); n != 1 {
+		t.Fatal("the manifest media type reported by ECR was not stored with the image")
+	}
+
 	env.scanAll(t)
 	done := scanStatus(t, env.dana, edge, "container=edge-nginx&tag=1.27.2")
 	if done.State != scanStateScanned || done.Image == nil || done.Image.Open.Critical != 1 {
@@ -292,6 +301,14 @@ func TestScanRequest_RefusesNonECRAndUnknownTag(t *testing.T) {
 	}
 	if _, message := errorCode(t, resp); message != "Tag 9.9.9 is not in ECR." {
 		t.Fatalf("message = %q", message)
+	}
+
+	digest := env.fk.Estate.ImageDigestFor("edge-nginx:1.27.2")
+	for _, tag := range []string{"x@" + digest, "1.27.2@" + digest, "bad tag", "-leading-dash", strings.Repeat("a", 129)} {
+		resp, _ = requestScan(t, env.sam, edgeNginxKey.ID(), "edge-nginx", tag, "")
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("tag %q = %d, want 422", tag, resp.StatusCode)
+		}
 	}
 
 	resp, _ = requestScan(t, env.sam, edgeNginxKey.ID(), "no-such-container", "1.27.2", "")
@@ -561,7 +578,7 @@ func TestSecurity_DetailListsFindingsWithAcceptancesOfVisibleServices(t *testing
 	}
 	accept(dana.ID, edgeNginxKey)
 
-	finding := func(c *apiClient) SecurityFindingDTO {
+	detailOf := func(c *apiClient) SecurityImageDetailDTO {
 		t.Helper()
 		resp := c.get("/api/security/images/" + url.PathEscape(digest))
 		if resp.StatusCode != http.StatusOK {
@@ -569,31 +586,77 @@ func TestSecurity_DetailListsFindingsWithAcceptancesOfVisibleServices(t *testing
 		}
 		var detail SecurityImageDetailDTO
 		decode(t, resp, &detail)
-		if len(detail.Findings) != 3 || detail.Findings[0].VulnID != "CVE-0000-1042" {
-			t.Fatalf("findings = %+v, want three, the critical first", detail.Findings)
+		if !detail.Enabled || len(detail.Findings) != 3 || detail.Findings[0].VulnID != "CVE-0000-1042" {
+			t.Fatalf("detail = enabled %v findings %+v, want three, the critical first", detail.Enabled, detail.Findings)
 		}
-		return detail.Findings[0]
+		return detail
 	}
+	finding := func(c *apiClient) SecurityFindingDTO { return detailOf(c).Findings[0] }
 
-	// omer sees only the Dev acceptance; every service he can see has accepted, so it counts as accepted for him.
-	omers := finding(env.omer)
-	if len(omers.Acceptances) != 1 || omers.Acceptances[0].Service != "edge-nginx" || omers.Acceptances[0].CanRevoke || !omers.AcceptedEverywhere {
-		t.Fatalf("omer's view = %+v", omers)
+	// omer sees only the Dev acceptance; every service he can see has accepted, so the finding is accepted for him and
+	// the counts say the same.
+	omers := detailOf(env.omer)
+	if f := omers.Findings[0]; len(f.Acceptances) != 1 || f.Acceptances[0].Service != "edge-nginx" || f.Acceptances[0].CanRevoke || !f.AcceptedEverywhere {
+		t.Fatalf("omer's finding = %+v", f)
 	}
-	// the Prod service has not accepted, so for sam it is not accepted everywhere
-	sams := finding(env.sam)
-	if len(sams.Acceptances) != 1 || !sams.Acceptances[0].CanRevoke || sams.AcceptedEverywhere {
-		t.Fatalf("sam's view = %+v", sams)
+	if omers.Open.Critical != 0 || omers.Accepted != 1 {
+		t.Fatalf("omer's counts: open critical %d accepted %d, want 0 and 1", omers.Open.Critical, omers.Accepted)
+	}
+	// the Prod service has not accepted, so for sam it is open and not accepted everywhere
+	sams := detailOf(env.sam)
+	if f := sams.Findings[0]; len(f.Acceptances) != 1 || !f.Acceptances[0].CanRevoke || f.AcceptedEverywhere {
+		t.Fatalf("sam's finding = %+v", f)
+	}
+	if sams.Open.Critical != 1 || sams.Accepted != 0 {
+		t.Fatalf("sam's counts: open critical %d accepted %d, want 1 and 0", sams.Open.Critical, sams.Accepted)
 	}
 	// the accepter may revoke without holding Accept risk
 	if danas := finding(env.dana); len(danas.Acceptances) != 1 || !danas.Acceptances[0].CanRevoke || danas.Acceptances[0].By != "dana" {
 		t.Fatalf("dana's view = %+v", danas.Acceptances)
 	}
 	accept(sam.ID, paymentsKey)
-	if sams := finding(env.sam); len(sams.Acceptances) != 2 || !sams.AcceptedEverywhere {
-		t.Fatalf("sam's view after both accepted = %+v", sams)
+	both := detailOf(env.sam)
+	if f := both.Findings[0]; len(f.Acceptances) != 2 || !f.AcceptedEverywhere || both.Open.Critical != 0 || both.Accepted != 1 {
+		t.Fatalf("sam's view after both accepted = %+v open critical %d accepted %d", f, both.Open.Critical, both.Accepted)
 	}
 	if finding(env.omer).Acceptances[0].ServiceID != edgeNginxKey.ID() {
 		t.Fatal("omer's acceptance should name the edge-nginx service id")
+	}
+}
+
+func TestSecurity_ListCountsCoverTheServicesTheCallerCanSee(t *testing.T) {
+	env := newSecurityEnv(t)
+	status := mustRequestScan(t, env.dana, edgeNginxKey.ID(), "edge-nginx", "1.27.2")
+	env.scanAll(t)
+	digest := status.Image.Digest
+	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: paymentsKey, Container: "payments-api",
+		Image: status.Image.Image, Tag: "1.27.2", Source: "manual", RequestedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	dana, err := env.st.GetUserByUsername(t.Context(), "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The Dev service accepts all three findings; the Prod service accepts none.
+	for _, f := range []struct{ id, pkg, version string }{{"CVE-0000-1042", "openssl", "3.0.13"}, {"CVE-0000-2210", "nginx", "1.27.2"}, {"CVE-0000-3188", "zlib", "1.3"}} {
+		base := store.ScanAcceptance{Digest: digest, VulnID: f.id, PackageName: f.pkg, PackageVersion: f.version, Reason: "accepted for the Dev service",
+			AcceptedBy: &dana.ID, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(24 * time.Hour)}
+		if _, err := env.st.CreateScanAcceptances(t.Context(), base, []model.ServiceKey{edgeNginxKey}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		who                  string
+		c                    *apiClient
+		wantOpen, wantAccept int
+	}{{"omer sees only the Dev service", env.omer, 0, 3}, {"sam sees both services", env.sam, 3, 0}} {
+		list := securityList(t, tc.c)
+		if len(list.Images) != 1 {
+			t.Fatalf("%s: %d images, want 1", tc.who, len(list.Images))
+		}
+		image := list.Images[0]
+		if open := image.Open.Critical + image.Open.High + image.Open.Medium; open != tc.wantOpen || image.Accepted != tc.wantAccept {
+			t.Fatalf("%s: open %d accepted %d, want %d and %d", tc.who, open, image.Accepted, tc.wantOpen, tc.wantAccept)
+		}
 	}
 }
