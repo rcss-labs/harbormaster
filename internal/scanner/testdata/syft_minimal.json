@@ -1,0 +1,9 @@
+{
+  "artifacts": [
+    {"id": "1", "name": "openssl", "version": "1.1.1", "type": "deb"},
+    {"id": "2", "name": "zlib", "version": "1.2.11", "type": "deb"},
+    {"id": "3", "name": "busybox", "version": "1.35.0", "type": "binary"}
+  ],
+  "source": {"type": "image", "target": {"manifestDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}},
+  "descriptor": {"name": "syft", "version": "1.57.0"}
+}
