@@ -180,6 +180,26 @@ Terraform details, variables and the full permission tables are in [`terraform/m
 - A scan result is kept for `HM_RETENTION_SCAN_IMAGES` after the image was last requested, except that an image with an active acceptance is kept until its acceptances end.
 - The vulnerability database is refreshed on demand, before a requested scan when it is older than `HM_SCAN_DB_REFRESH` (24 hours); the Security page says "Updating vulnerability data" meanwhile. Past `HM_SCAN_DB_MAX_AGE` (120 hours) scans wait, and a gate shows the reason with `Deploy anyway`. To use an operator mirror instead, set `HM_SCAN_DB_REFRESH=0` and write the same bucket keys (see the module README).
 
+## Off-hours schedules
+
+An off-hours schedule puts the ECS services that carry an AWS tag to sleep on a weekly grid and wakes them again, so a staging or dev estate does not pay for idle tasks at night. It is under **Settings > Off-hours** (`/settings/offhours`, global admin only). A schedule has a name, an enabled switch, a tag `key=value`, a timezone and a 7 x 24 grid of awake hours with presets. The editor previews the services the tag matches and how many will go to sleep when you save, and warns when a matched service looks like production. The services table shows each service's tasks, state and list-price cost, with `Wake for 2 hours` and `Put back to sleep`. A service on a schedule also gets an `Off-hours` card on its Overview.
+
+### How it works
+
+- **Mechanism.** At sleep, Harbormaster sets the minimum and maximum capacity of the service's Application Auto Scaling scalable target to 0 through scheduled actions in the schedule's timezone; at wake the scheduled action restores the values it saved. Scaling policies are left in place. When the service has no scalable target, Harbormaster registers one (and logs it); if the target goes missing later it is registered again. The saved capacity is stored in Harbormaster's database, and a target that Harbormaster registered itself is deregistered when the schedule is deleted.
+- **Which services.** A schedule selects services by their **AWS service tag** (`key=value`), not by cluster tags or Harbormaster permission tags. A service on two enabled schedules is shown as conflicting and is left alone. A service whose auto scaling minimum is 0 is not managed ("Not managed: its auto scaling minimum is 0, so it could not wake on its own.").
+- **Saving.** Saving a schedule during its sleep hours puts its services to sleep straight away; the editor warns first. Deleting a schedule gives its services their saved capacity back.
+- **Wake for 2 hours.** Anyone with **Operate** on the service's tag can wake an asleep service for two hours, or put a woken one back to sleep, from the table or the Overview card. Wake survives a restart of Harbormaster. Creating, editing and deleting schedules is for global admins. Both are written to the operations log and the audit log.
+- **Ownership.** Harbormaster only creates, changes and deletes scheduled actions whose names start with `harbormaster-offhours-`. Other scheduled actions are never touched.
+- **Reconciler.** The leader replica checks every enrolled service every `HM_OFFHOURS_INTERVAL` (60 seconds) and enforces the state the grid asks for, so a skipped or doubled action (for example around a daylight saving change) is repaired within one interval. The fake AWS does not run scheduled actions, so there the reconciler alone moves the state.
+- **Outside changes.** If someone changes the scalable target's range outside Harbormaster, it is adopted as the saved capacity, and then, if the service should be asleep, it is put back to sleep. Changes within 5 minutes of a grid edge or of Harbormaster's own change are left alone (the grace period), for clock skew and AWS latency. A tag-only change in AWS is picked up on the next poll, and the first poll after an upgrade rewrites tagged service rows once.
+- **Deploy tab.** A scaling change on the Deploy tab that would delete the schedule's scheduled actions, or set the desired count of a sleeping service, is refused with 409 (`<service> is on the off-hours schedule "<name>". ...`).
+- **Read-only accounts.** An account connected with `read_only` cannot be changed, so its services are shown as blocked with the read-only reason and retried hourly.
+- **Cost.** The saving is a list-price estimate from `internal/cost` (Fargate vCPU and memory hours); services it cannot price show a dash. It is not your bill.
+- **Permissions.** No AWS permission is added. The existing `application-autoscaling` permissions of `harbormaster-access` cover scheduled actions and target registration; `read_only` accounts are simply shown as blocked.
+
+Daylight saving: an action at an hour that does not exist or repeats follows AWS's timezone handling, and the reconciler repairs the result after the grace period.
+
 ## Terraform and Harbormaster deploys
 
 AWS is the source of truth, and Terraform will see a revision registered here as
@@ -199,6 +219,17 @@ resource "aws_ecs_service" "payments_api" {
 The Deploy tab also changes auto scaling (Operate) and the service's `enable_execute_command`, `deployment_configuration` and `health_check_grace_period_seconds` (Deploy). Terraform reverts those on its next apply unless they are in `ignore_changes` too, so add them to the list if Harbormaster should own them.
 
 For auto scaling, pick one place to manage it. Either keep `aws_appautoscaling_target`, `aws_appautoscaling_policy` and `aws_appautoscaling_scheduled_action` in Terraform and do not edit them in Harbormaster, or remove them from Terraform and let the Deploy tab own them. An edit or delete made in Harbormaster to a policy or scheduled action that Terraform manages is reverted by the next apply.
+
+Off-hours schedules (see Off-hours schedules above) change an `aws_appautoscaling_target`'s minimum and maximum, and create scheduled actions and, for a service without a scalable target, a target that exist outside Terraform. Without `ignore_changes`, a Terraform apply during sleep hours wakes the service until Harbormaster puts it back to sleep, and an apply that changes the range is adopted as the saved capacity. A scheduled action created by Terraform that raises the range at night would be adopted the same way. Keep `desired_count` in the service's `ignore_changes`, as recommended above.
+
+```hcl
+resource "aws_appautoscaling_target" "api" {
+  # ...
+  lifecycle { ignore_changes = [min_capacity, max_capacity] }
+}
+```
+
+Scheduled actions managed by Terraform (`aws_appautoscaling_scheduled_action`) are never touched by Harbormaster, but they can fight a schedule if they also set the range.
 
 Harbormaster does not check or enforce any of this.
 
@@ -245,6 +276,8 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_STORAGE` | `5m` | EFS storage poll interval |
 | `HM_POLL_JITTER` | `500ms` | Random jitter added to poll schedules |
 | `HM_POLL_MAX_INFLIGHT` | `8` | Maximum concurrent AWS calls |
+| `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
+| `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled |
 
 ### Retention
 
