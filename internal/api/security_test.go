@@ -50,14 +50,18 @@ func scanTestConfig() config.ScanConfig {
 	}
 }
 
-func newSecurityEnv(t *testing.T) *securityEnv {
+func newSecurityEnv(t *testing.T) *securityEnv { return newSecurityEnvClock(t, time.Now) }
+
+// newSecurityEnvClock is newSecurityEnv with the server and the scan loop reading now, so a test can move time.
+func newSecurityEnvClock(t *testing.T, now func() time.Time) *securityEnv {
 	t.Helper()
 	env := &securityEnv{}
 	srv, fk, st, _ := newServerCustom(t, true, func(s *Server) {
 		env.fk = s.Clients.(*fake.Fake)
 		env.scanner = fake.NewScanner(env.fk.Estate)
 		env.runner = &scanjob.Runner{Store: s.Store, Launcher: env.scanner, Bucket: env.scanner, DB: env.scanner,
-			Cfg: scanTestConfig(), Now: time.Now, Log: s.Log}
+			Cfg: scanTestConfig(), Now: now, Log: s.Log}
+		s.Now = now
 		s.Cfg.Scan = scanTestConfig()
 		s.Scan = env.runner
 	})

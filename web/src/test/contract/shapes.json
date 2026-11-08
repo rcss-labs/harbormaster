@@ -1684,6 +1684,28 @@
       "string"
     ]
   },
+  "scanGate": {
+    "images": [
+      {
+        "accepted": "number",
+        "container": "string",
+        "digest": "string",
+        "image": "string",
+        "message": "string",
+        "open": {
+          "critical": "number",
+          "high": "number",
+          "low": "number",
+          "medium": "number",
+          "negligible": "number",
+          "unknown": "number"
+        },
+        "ref": "string",
+        "state": "string"
+      }
+    ],
+    "message": "string"
+  },
   "scanStatus": {
     "enabled": "boolean",
     "image": {

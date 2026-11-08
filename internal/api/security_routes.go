@@ -10,4 +10,7 @@ func (s *Server) securityRoutes(mux *http.ServeMux) {
 	s.handle(mux, "PUT /api/security/services/{serviceId}/setting", s.putScanSetting, routeOptions{})
 	s.handle(mux, "POST /api/security/services/{serviceId}/scans", s.postScanRequest, routeOptions{})
 	s.handle(mux, "GET /api/security/services/{serviceId}/scans", s.getScanStatus, routeOptions{})
+	s.handle(mux, "POST /api/security/images/{digest}/acceptances", s.postAcceptance, routeOptions{})
+	s.handle(mux, "DELETE /api/security/acceptances/{id}", s.deleteAcceptance, routeOptions{})
+	s.handle(mux, "POST /api/security/images/{digest}/rescan", s.postRescan, routeOptions{})
 }

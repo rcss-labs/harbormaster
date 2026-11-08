@@ -16,6 +16,8 @@ type ChangeSetRequest struct {
 	TaskDefinition *ChangeSetTaskDefinition `json:"task_definition"`
 	Service        *ChangeSetService        `json:"service"`
 	Scaling        *ChangeSetScaling        `json:"scaling"`
+	// ScanGate answers the pre-deploy image scan gate; the server re-evaluates the gate on every call.
+	ScanGate *ScanGateRequest `json:"scan_gate"`
 }
 
 // ChangeSetTaskDefinition carries a new definition to register, or the revision a previous run registered. Exactly one is set.
@@ -184,6 +186,15 @@ func (s *Server) applyChangeSet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The pre-deploy image gate: after the caller's actions are checked, so a caller without them is refused before any ECR
+	// call or queued scan. A rollback, a redeploy by revision and every non-image change carries no definition.
+	var gate gateOutcome
+	if td := cs.TaskDefinition; td != nil && td.Definition != nil {
+		var ok bool
+		if gate, ok = s.checkScanGate(w, r, key, cs.BaseRevision, td.Definition, body.ScanGate, sc.Subject); !ok {
+			return
+		}
+	}
 	result, err := s.Deploy.ApplyChangeSet(r.Context(), sc.Subject, key, cs)
 	if err != nil {
 		var forbidden *deploy.ForbiddenError
@@ -201,5 +212,11 @@ func (s *Server) applyChangeSet(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, changeSetResponse(result))
+	response := changeSetResponse(result)
+	if len(gate.Acknowledged) > 0 {
+		if err := s.recordDeployAnyway(r, key, gate, result.Status == "registered_only", sc.Subject); err != nil {
+			response.Warning = joinWarning(response.Warning, deployAnywayNotRecorded)
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }

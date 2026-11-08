@@ -15,6 +15,8 @@ import (
 type RegisterRequest struct {
 	BaseRevision *int           `json:"base_revision"`
 	Definition   map[string]any `json:"definition"`
+	// ScanGate answers the pre-deploy image scan gate; the server re-evaluates the gate on every call.
+	ScanGate *ScanGateRequest `json:"scan_gate"`
 }
 
 // RegisterResponse describes the newly registered revision.
@@ -146,6 +148,10 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("definition is required."))
 		return
 	}
+	gate, ok := s.checkScanGate(w, r, key, *body.BaseRevision, body.Definition, body.ScanGate, subject)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	// Everything the response needs is read before registering: once AWS has accepted the
 	// revision, a failed read must not turn the answer into an error the user would retry.
@@ -164,13 +170,19 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		s.failChange(w, err)
 		return
 	}
+	warning := warningPointer(registered.Warning)
+	if len(gate.Acknowledged) > 0 {
+		if err := s.recordDeployAnyway(r, key, gate, true, subject); err != nil {
+			warning = joinWarning(warning, "Registered anyway, but Harbormaster could not record who chose it.")
+		}
+	}
 	writeJSON(w, http.StatusCreated, RegisterResponse{
 		Revision: registered.Revision, ARN: registered.ARN, ImageTag: registered.ImageTag,
 		CPU: registered.CPU, Memory: registered.Memory,
 		CanDeploy: authz.Can(subject, authz.Deploy, row.EffectiveTagID) && deployed.Controller.Supported,
 		Tag:       inheritedTag(tags, row.EffectiveTagID, row.TagInherited),
 		Strategy:  deployed.Strategy,
-		Warning:   warningPointer(registered.Warning),
+		Warning:   warning,
 	})
 }
 

@@ -110,6 +110,17 @@ func (s *Store) ActiveScanRuns(ctx context.Context) ([]ScanRun, error) {
 	return out, rows.Err()
 }
 
+// ActiveScanRunStart is when the newest active run listing digest started, or nil when no active run lists it.
+func (s *Store) ActiveScanRunStart(ctx context.Context, digest string) (*time.Time, error) {
+	var started *time.Time
+	err := s.Pool.QueryRow(ctx, `select max(r.started_at) from scan_run_images ri join scan_runs r on r.id = ri.run_id
+		where ri.digest = $1 and r.status in ('launching', 'running')`, digest).Scan(&started)
+	if err != nil {
+		return nil, fmt.Errorf("active scan run start: %w", err)
+	}
+	return started, nil
+}
+
 // FinishScanRun claims the run's end. It reports false when another caller already finished it,
 // which makes a repeated import harmless. The database fields stay as recorded at launch.
 func (s *Store) FinishScanRun(ctx context.Context, id int64, status string, patch ScanRunPatch) (bool, error) {
