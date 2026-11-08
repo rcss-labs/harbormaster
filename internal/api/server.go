@@ -16,6 +16,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/execbridge"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
+	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 	"github.com/rcss-labs/harbormaster/internal/web"
@@ -70,6 +71,11 @@ type Server struct {
 
 	// Scan wakes the scan loop after a scan request; nil when scanning is off.
 	Scan ScanKicker
+	// OffHours applies manual wake and sleep of off-hours services; nil when off-hours is not wired.
+	OffHours *offhours.Applier
+	// KickOffHours wakes the off-hours reconciler after a schedule change; nil is a no-op. Like Scan it reaches only
+	// the reconciler in this process, so on another task a change waits at most HM_OFFHOURS_INTERVAL.
+	KickOffHours func()
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
 }
@@ -249,6 +255,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.analyticsRoutes(mux) // analytics
 	s.securityRoutes(mux)  // image security
 	s.timelineRoutes(mux)  // service timeline
+	s.offHoursRoutes(mux)  // off-hours schedules
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})

@@ -49,6 +49,7 @@ import {
   SSO_UNCONFIGURED,
 } from './fixtures'
 import { timelineHandlers } from './timelineFixtures'
+import { offhoursHandlers } from './offhoursFixtures'
 import type { SearchResultDTO } from '../api/types'
 import { securityHandlers } from './securityFixtures'
 
@@ -75,6 +76,7 @@ function search(q: string): SearchResultDTO[] {
 export const handlers = [
   // Registered first so :id/timeline is not read as the service id route.
   ...timelineHandlers,
+  ...offhoursHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),
   http.get('/api/auth/setup', () => HttpResponse.json({ needed: false })),
   http.get('/api/overview', () => HttpResponse.json(OVERVIEW)),

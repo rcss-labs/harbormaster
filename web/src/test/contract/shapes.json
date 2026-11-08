@@ -1524,6 +1524,178 @@
     ],
     "polled_at": "time"
   },
+  "offhoursList": {
+    "items": [
+      {
+        "asleep_count": "number",
+        "awake": [
+          [
+            "boolean"
+          ]
+        ],
+        "awake_hours_per_week": "number",
+        "blocked_count": "number",
+        "enabled": "boolean",
+        "id": "number",
+        "monthly_saving": {
+          "$null": "number"
+        },
+        "name": "string",
+        "service_count": "number",
+        "services": [
+          {
+            "account_name": "string",
+            "awake_tasks": "number",
+            "can_operate": "boolean",
+            "cluster": "string",
+            "current_tasks": "number",
+            "looks_like_production": [
+              "string"
+            ],
+            "monthly_always_on": {
+              "$null": "number"
+            },
+            "reason": "string",
+            "region": "string",
+            "service": "string",
+            "service_id": "string",
+            "state": "string",
+            "tag": {
+              "color": "string",
+              "id": "number",
+              "inherited": "boolean",
+              "name": "string"
+            },
+            "until": {
+              "$null": "time"
+            }
+          }
+        ],
+        "tag_key": "string",
+        "tag_value": "string",
+        "timezone": "string",
+        "unpriced_services": "number",
+        "updated_at": "time",
+        "updated_by": "string",
+        "version": "number"
+      }
+    ],
+    "monthly_saving_total": {
+      "$null": "number"
+    },
+    "now": "time",
+    "prices_as_of": "string"
+  },
+  "offhoursPreview": {
+    "awake_hours_per_week": "number",
+    "monthly_saving": {
+      "$null": "number"
+    },
+    "overlaps": [
+      {
+        "schedule_id": "number",
+        "schedule_name": "string",
+        "services": [
+          "string"
+        ]
+      }
+    ],
+    "services": [
+      {
+        "account_name": "string",
+        "awake_tasks": "number",
+        "can_operate": "boolean",
+        "cluster": "string",
+        "current_tasks": "number",
+        "looks_like_production": [
+          "string"
+        ],
+        "monthly_always_on": {
+          "$null": "number"
+        },
+        "reason": "string",
+        "region": "string",
+        "service": "string",
+        "service_id": "string",
+        "state": "string",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "until": {
+          "$null": "time"
+        }
+      }
+    ],
+    "sleep_now": "number"
+  },
+  "offhoursSchedule": {
+    "asleep_count": "number",
+    "awake": [
+      [
+        "boolean"
+      ]
+    ],
+    "awake_hours_per_week": "number",
+    "blocked_count": "number",
+    "enabled": "boolean",
+    "id": "number",
+    "monthly_saving": {
+      "$null": "number"
+    },
+    "name": "string",
+    "service_count": "number",
+    "services": [
+      {
+        "account_name": "string",
+        "awake_tasks": "number",
+        "can_operate": "boolean",
+        "cluster": "string",
+        "current_tasks": "number",
+        "looks_like_production": [
+          "string"
+        ],
+        "monthly_always_on": {
+          "$null": "number"
+        },
+        "reason": "string",
+        "region": "string",
+        "service": "string",
+        "service_id": "string",
+        "state": "string",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "until": {
+          "$null": "time"
+        }
+      }
+    ],
+    "tag_key": "string",
+    "tag_value": "string",
+    "timezone": "string",
+    "unpriced_services": "number",
+    "updated_at": "time",
+    "updated_by": "string",
+    "version": "number"
+  },
+  "offhoursTags": {
+    "items": [
+      {
+        "key": "string",
+        "services": "number",
+        "value": "string"
+      }
+    ]
+  },
+  "offhoursWake": {
+    "woken_until": "time"
+  },
   "operations": {
     "items": [
       {
@@ -2420,6 +2592,17 @@
     "timestamps": [
       "time"
     ]
+  },
+  "serviceOffHours": {
+    "can_operate": "boolean",
+    "enrolled": "boolean",
+    "reason": "string",
+    "schedule_name": "string",
+    "state": "string",
+    "timezone": "string",
+    "until": {
+      "$null": "time"
+    }
   },
   "servicesList": {
     "items": [

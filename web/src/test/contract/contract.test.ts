@@ -64,6 +64,20 @@ import {
   SECURITY_SERVICE_OFF,
   SECURITY_STALE,
 } from '../securityFixtures'
+import {
+  OFFHOURS_LIST,
+  OFFHOURS_LIST_EMPTY,
+  OFFHOURS_PREVIEW_PRODUCTION,
+  OFFHOURS_PREVIEW_STAGING,
+  OFFHOURS_STAGING_DETAIL,
+  OFFHOURS_TAGS,
+  OFFHOURS_UNPRICED_DETAIL,
+  SERVICE_OFFHOURS_ASLEEP,
+  SERVICE_OFFHOURS_BLOCKED,
+  SERVICE_OFFHOURS_NONE,
+  SERVICE_OFFHOURS_WOKEN,
+  WAKE_RESPONSE,
+} from '../offhoursFixtures'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
@@ -220,6 +234,26 @@ describe('API contract', () => {
     expect(shapeProblems(LOG_ERRORS_OK, contract.timelineLogErrors, 'log errors ok')).toEqual([])
     expect(shapeProblems(LOG_ERRORS_UNAVAILABLE, contract.timelineLogErrors, 'log errors unavailable')).toEqual([])
     expect(shapeProblems(LOG_ERRORS_NO_LOGS, contract.timelineLogErrors, 'log errors no logs')).toEqual([])
+  })
+
+  it('the off-hours fixtures match the backend shape', () => {
+    const cases: [string, unknown, string][] = [
+      ['list', OFFHOURS_LIST, 'offhoursList'],
+      ['empty list', OFFHOURS_LIST_EMPTY, 'offhoursList'],
+      ['staging detail', OFFHOURS_STAGING_DETAIL, 'offhoursSchedule'],
+      ['unpriced detail', OFFHOURS_UNPRICED_DETAIL, 'offhoursSchedule'],
+      ['preview production', OFFHOURS_PREVIEW_PRODUCTION, 'offhoursPreview'],
+      ['preview staging', OFFHOURS_PREVIEW_STAGING, 'offhoursPreview'],
+      ['tags', OFFHOURS_TAGS, 'offhoursTags'],
+      ['service asleep', SERVICE_OFFHOURS_ASLEEP, 'serviceOffHours'],
+      ['service woken', SERVICE_OFFHOURS_WOKEN, 'serviceOffHours'],
+      ['service blocked', SERVICE_OFFHOURS_BLOCKED, 'serviceOffHours'],
+      ['service none', SERVICE_OFFHOURS_NONE, 'serviceOffHours'],
+      ['wake', WAKE_RESPONSE, 'offhoursWake'],
+    ]
+    for (const [label, fixture, shape] of cases) {
+      expect(shapeProblems(fixture, contract[shape], `off-hours ${label}`)).toEqual([])
+    }
   })
 
   it('every task fixture matches the backend task shape', () => {
