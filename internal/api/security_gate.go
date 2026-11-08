@@ -101,25 +101,39 @@ func (s *Server) scanGate(ctx context.Context, key model.ServiceKey, baseRevisio
 	}
 	baseline := s.baselineImages(ctx, key, baseRevision, family)
 
-	containers := make([]string, 0, len(submitted))
+	changed := map[string]string{}
 	for name, image := range submitted {
 		if name == "" || image == "" {
 			continue // Prepare refuses a container without a name or an image; the apply answers 422
 		}
 		if previous, known := baseline[name]; !known || previous != image {
-			containers = append(containers, name)
+			changed[name] = image
 		}
+	}
+	return s.judgeImages(ctx, key, changed, platform, ack, actor)
+}
+
+// judgeImages resolves each image now and judges the digest it resolves to, then applies the caller's acknowledgement.
+// images is container name to image string, only for the containers the gate has to look at.
+func (s *Server) judgeImages(ctx context.Context, key model.ServiceKey, images map[string]string, platform string, ack *ScanGateRequest, actor authz.Subject) (gateOutcome, error) {
+	containers := make([]string, 0, len(images))
+	for name := range images {
+		containers = append(containers, name)
 	}
 	slices.Sort(containers)
 	rows := make([]ScanGateImageDTO, 0, len(containers))
 	for _, name := range containers {
-		row, err := s.gateRow(ctx, key, name, submitted[name], platform, actor)
+		row, err := s.gateRow(ctx, key, name, images[name], platform, actor)
 		if err != nil {
 			return gateOutcome{}, err
 		}
 		rows = append(rows, row)
 	}
+	return s.decide(rows, ack), nil
+}
 
+// decide turns the rows into the outcome: pass, pass by acknowledgement, or pause.
+func (s *Server) decide(rows []ScanGateImageDTO, ack *ScanGateRequest) gateOutcome {
 	var needAck []ScanGateImageDTO
 	for _, row := range rows {
 		if row.State != gateStatePass {
@@ -127,14 +141,74 @@ func (s *Server) scanGate(ctx context.Context, key model.ServiceKey, baseRevisio
 		}
 	}
 	if len(needAck) == 0 {
-		return passed, nil
+		return gateOutcome{Passed: true}
 	}
 	if ack != nil && ack.DeployAnyway && allAcknowledged(needAck, ack.Images) {
-		return gateOutcome{Passed: true, Acknowledged: needAck}, nil
+		return gateOutcome{Passed: true, Acknowledged: needAck}
 	}
 	return gateOutcome{Gate: ScanGateErrorDTO{
 		Message: "Some images have not passed the pre-deploy scan. You can deploy anyway.", Images: rows,
-	}}, nil
+	}}
+}
+
+// scanGateForRevision gates a deploy that names an existing revision (a change set with task_definition.revision, or
+// POST /deploy). It applies when the setting is on, the revision is not the running one, the service has no record of
+// ever running it, and an image differs from the running deployment's. A rollback to a revision that ran before, a
+// restart and a redeploy of the running revision are never gated. Missing history gates: it can only pause more, and
+// Deploy anyway is always offered. The digests are resolved now, as for a definition (D22).
+func (s *Server) scanGateForRevision(ctx context.Context, key model.ServiceKey, revision int, ack *ScanGateRequest, actor authz.Subject) (gateOutcome, error) {
+	passed := gateOutcome{Passed: true}
+	if !s.scanningOn() || revision <= 0 {
+		return passed, nil
+	}
+	on, err := s.Store.PreDeployScan(ctx, key)
+	if err != nil {
+		return gateOutcome{}, err
+	}
+	if !on {
+		return passed, nil
+	}
+	target, err := s.Deploy.RevisionDefinition(ctx, key, revision)
+	if errors.Is(err, store.ErrNotFound) {
+		return passed, nil // not a revision of this family: the apply refuses it
+	}
+	if err != nil {
+		s.log().Warn("gate: revision unreadable", "service", key.ID(), "revision", revision, "error", err)
+		return s.decide([]ScanGateImageDTO{{
+			Container: fmt.Sprintf("revision :%d", revision), Image: fmt.Sprintf("revision :%d", revision), Ref: fmt.Sprintf("revision:%d", revision),
+			State: scanStateFailed, Message: "The images of the revision could not be read. You can deploy anyway.",
+		}}, ack), nil
+	}
+	deployed, deployedErr := s.Deploy.DeployedDefinition(ctx, key)
+	if deployedErr == nil && deployed.Revision == revision {
+		return passed, nil
+	}
+	ran, err := s.Store.RevisionRanBefore(ctx, key, target.ARN)
+	if err != nil {
+		return gateOutcome{}, err
+	}
+	if ran {
+		return passed, nil
+	}
+	images, platform, err := deploy.DefinitionImages(target.Definition)
+	if err != nil {
+		return passed, nil
+	}
+	// The running images are the baseline. When they cannot be read every container counts as changed.
+	var running map[string]string
+	if deployedErr == nil {
+		running, _, _ = deploy.DefinitionImages(deployed.Definition)
+	}
+	changed := map[string]string{}
+	for name, image := range images {
+		if name == "" || image == "" {
+			continue
+		}
+		if previous, known := running[name]; !known || previous != image {
+			changed[name] = image
+		}
+	}
+	return s.judgeImages(ctx, key, changed, platform, ack, actor)
 }
 
 // allAcknowledged reports whether every row has an acknowledgement for the same container and ref.
@@ -250,9 +324,15 @@ func (s *Server) gateState(ctx context.Context, image store.ScanImage, now time.
 		if image.FailureCode == scan.CodeDBStale {
 			return scanStateDBStale, scan.FailureAction(image.FailureCode, image.FailureDetail, image.RegistryAccountID), nil
 		}
+		// A retry in the backoff shows what stored it there (the scanner task failed, AWS throttled the pull, ...);
+		// only an image that waited too long, or has no stored reason, reads as a timeout.
 		retryPending := image.NextAttemptAt != nil && image.NextAttemptAt.After(now)
-		waitedTooLong := image.QueuedAt != nil && now.Sub(*image.QueuedAt) > timeout
-		if retryPending || waitedTooLong {
+		if retryPending {
+			if reason := scan.FailureCopy(image.Status, image.FailureCode, image.FailureDetail, image.RegistryAccountID); reason != "" {
+				return scanStateFailed, reason, nil
+			}
+		}
+		if waitedTooLong := image.QueuedAt != nil && now.Sub(*image.QueuedAt) > timeout; retryPending || waitedTooLong {
 			return scanStateFailed, gateTimeoutMessage, nil
 		}
 		dbState, err := s.Store.ScanDBState(ctx)
@@ -288,6 +368,20 @@ func writeScanGate(w http.ResponseWriter, gate ScanGateErrorDTO) {
 // checkScanGate runs the gate for a request and answers it when the request must stop; ok is false then.
 func (s *Server) checkScanGate(w http.ResponseWriter, r *http.Request, key model.ServiceKey, baseRevision int, definition map[string]any, ack *ScanGateRequest, actor authz.Subject) (gateOutcome, bool) {
 	outcome, err := s.scanGate(r.Context(), key, baseRevision, definition, ack, actor)
+	if err != nil {
+		s.fail(w, err)
+		return outcome, false
+	}
+	if !outcome.Passed {
+		writeScanGate(w, outcome.Gate)
+		return outcome, false
+	}
+	return outcome, true
+}
+
+// checkRevisionGate is checkScanGate for a deploy that names an existing revision.
+func (s *Server) checkRevisionGate(w http.ResponseWriter, r *http.Request, key model.ServiceKey, revision int, ack *ScanGateRequest, actor authz.Subject) (gateOutcome, bool) {
+	outcome, err := s.scanGateForRevision(r.Context(), key, revision, ack, actor)
 	if err != nil {
 		s.fail(w, err)
 		return outcome, false

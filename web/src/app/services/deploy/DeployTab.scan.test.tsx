@@ -108,7 +108,7 @@ describe('DeployTab: image scanning', () => {
     expect(toggle).not.toBeChecked()
     expect(toggle).toBeDisabled()
     expect(toggle.closest('span[title]')).toHaveAttribute('title', 'You need Deploy on Prod')
-    expect(screen.getByText('Rollbacks, restarts and redeploys of an existing revision are never scanned or delayed.')).toBeInTheDocument()
+    expect(screen.getByText('Rollbacks to a revision that ran before, restarts and redeploys of the running revision are never scanned or delayed.')).toBeInTheDocument()
   })
 
   it('saves the setting at once and says so', async () => {
@@ -287,6 +287,24 @@ describe('DeployTab: image scanning', () => {
     expect(bodies[0].task_definition).toEqual({ revision: 41 })
     expect(bodies[0].scan_gate).toBeUndefined()
     expect(screen.queryByRole('region', { name: 'Image scan' })).not.toBeInTheDocument()
+  })
+
+  it('a revision that never ran is paused by the gate and deploys anyway with the acknowledgement', async () => {
+    const user = userEvent.setup()
+    serveSetting(settingOn)
+    const bodies = captureChangeSets((call) => (call === 1 ? gateResponse(SCAN_GATE_FAILED) : HttpResponse.json(CHANGESET_APPLIED)))
+    server.use(http.get('/api/services/:id/revisions/:revision', () => HttpResponse.json(REVISION_DEFINITION_PAYMENTS_41)))
+    await openDeployTab(`${route}?revision=41`)
+    await waitFor(() => expect(within(footer()).getByText('1 change')).toBeInTheDocument())
+    await user.click(within(footer()).getByRole('button', { name: 'Review…' }))
+    await user.click(within(dialog()).getByRole('button', { name: 'Deploy :41' }))
+
+    expect(await screen.findByRole('region', { name: 'Image scan' })).toBeInTheDocument()
+    await user.click(within(dialog()).getByRole('button', { name: 'Deploy anyway' }))
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1].task_definition).toEqual({ revision: 41 })
+    expect(bodies[1].scan_gate).toEqual({ deploy_anyway: true, images: SCAN_GATE_FAILED.images.map(({ container, ref }) => ({ container, ref })) })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it('Cancel waits while a resubmission is in flight, and a late 409 after closing shows no dead panel', async () => {

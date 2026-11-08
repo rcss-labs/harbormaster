@@ -187,11 +187,17 @@ func (s *Server) applyChangeSet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// The pre-deploy image gate: after the caller's actions are checked, so a caller without them is refused before any ECR
-	// call or queued scan. A rollback, a redeploy by revision and every non-image change carries no definition.
+	// call or queued scan. A deploy by revision is gated only for a revision that never ran; rollbacks and non-image changes pass.
 	var gate gateOutcome
-	if td := cs.TaskDefinition; td != nil && td.Definition != nil {
+	if td := cs.TaskDefinition; td != nil {
 		var ok bool
-		if gate, ok = s.checkScanGate(w, r, key, cs.BaseRevision, td.Definition, body.ScanGate, sc.Subject); !ok {
+		if td.Definition != nil {
+			gate, ok = s.checkScanGate(w, r, key, cs.BaseRevision, td.Definition, body.ScanGate, sc.Subject)
+		} else {
+			// A deploy by revision is gated only when that revision never ran on this service and an image differs.
+			gate, ok = s.checkRevisionGate(w, r, key, td.Revision, body.ScanGate, sc.Subject)
+		}
+		if !ok {
 			return
 		}
 	}

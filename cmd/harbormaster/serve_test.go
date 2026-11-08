@@ -50,7 +50,8 @@ func TestServe_FakeAWSBootsAndPolls(t *testing.T) {
 	client := &http.Client{Jar: jar, Timeout: 2 * time.Second}
 	base := "http://" + addr
 
-	deadline := time.Now().Add(10 * time.Second)
+	// Fake mode migrates and seeds before it listens; a loaded host needs far more than a few seconds.
+	deadline := time.Now().Add(60 * time.Second)
 	loggedIn := false
 	clusters := 0
 	for time.Now().Before(deadline) && clusters != 6 {
@@ -147,7 +148,7 @@ func serveUnderTest(t *testing.T, env map[string]string) (base string, stop func
 		}
 		if time.Now().After(deadline) {
 			cancel()
-			t.Fatal("server did not start within 10s")
+			t.Fatal("server did not start within 60s")
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

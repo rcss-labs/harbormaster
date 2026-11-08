@@ -35,7 +35,7 @@ export function ScanSettingToggle({ serviceId, serviceName, tagName }: ScanSetti
           Scan Image for Vulnerabilities Before Deploy
         </Toggle>
       </span>
-      <p className={styles.hint}>Rollbacks, restarts and redeploys of an existing revision are never scanned or delayed.</p>
+      <p className={styles.hint}>Rollbacks to a revision that ran before, restarts and redeploys of the running revision are never scanned or delayed.</p>
     </div>
   )
 }

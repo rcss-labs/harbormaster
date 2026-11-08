@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 var (
@@ -607,6 +609,13 @@ func TestChangeSet_RollbackByRevisionIsNeverGated(t *testing.T) {
 	env := newSecurityEnv(t)
 	env.setting(t, edgeNginxKey, true)
 	_, revision := definitionOf(t, env.dana, edgeNginxKey)
+	var revisions RevisionsResponse
+	decode(t, env.dana.get("/api/services/"+edgeNginxKey.ID()+"/revisions"), &revisions)
+	for _, item := range revisions.Items {
+		if item.Revision == revision-1 {
+			recordRan(t, env, item.ARN, item.Revision, "completed") // the revision being rolled back to ran before
+		}
+	}
 
 	// Roll back to the previous revision, then change only the desired count.
 	resp := env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", map[string]any{
@@ -753,5 +762,134 @@ func TestChangeSet_GateBaselineOfAnotherFamilyGatesEverything(t *testing.T) {
 	rows := wantGate(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", gateBody(revision, def, nil)))
 	if rows["edge-nginx"].State == "" {
 		t.Fatalf("rows = %+v, want the container gated when the baseline family differs", rows)
+	}
+}
+
+// registerUnscannedRevision registers a revision of edge-nginx whose image is a new tag, without deploying it, while the
+// setting is off, then turns the setting on. It returns the revision and its ARN.
+func registerUnscannedRevision(t *testing.T, env *securityEnv) (revision int, arn string) {
+	t.Helper()
+	env.setting(t, edgeNginxKey, false)
+	editor := env.addUser(t, "editor", map[string]authz.ActionSet{"Dev": authz.ActionSet(authz.View | authz.Edit)})
+	out := wantApplied(t, applyImages(t, editor, edgeNginxKey, nil, "edge-nginx", ecrImage(edgeNginxKey, "edge-nginx", "1.27.3")))
+	if out.Status != "registered_only" || out.RegisteredRevision == nil {
+		t.Fatalf("registration = %+v, want registered_only", out)
+	}
+	env.setting(t, edgeNginxKey, true)
+	var revisions RevisionsResponse
+	decode(t, env.dana.get("/api/services/"+edgeNginxKey.ID()+"/revisions"), &revisions)
+	for _, item := range revisions.Items {
+		if item.Revision == *out.RegisteredRevision {
+			return item.Revision, item.ARN
+		}
+	}
+	t.Fatalf("revision %d not listed", *out.RegisteredRevision)
+	return 0, ""
+}
+
+func deployRevisionBody(base, revision int, gate *ScanGateRequest) map[string]any {
+	body := map[string]any{"base_revision": base, "task_definition": map[string]any{"revision": revision}}
+	if gate != nil {
+		body["scan_gate"] = gate
+	}
+	return body
+}
+
+func recordRan(t *testing.T, env *securityEnv, arn string, revision int, outcome string) {
+	t.Helper()
+	if _, err := env.st.InsertDeploymentIfNew(t.Context(), store.DeploymentRecord{
+		Key: edgeNginxKey, DeploymentID: fmt.Sprintf("ecs-svc/%d", revision), TaskDefinitionARN: arn, Revision: revision,
+		Kind: "deploy", StartedAt: time.Now().Add(-time.Hour), Outcome: outcome,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChangeSet_RevisionDeployIsGatedWhenNewAndImageDiffers(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, _ := registerUnscannedRevision(t, env)
+	path := "/api/services/" + edgeNginxKey.ID() + "/changeset"
+
+	row := wantGate(t, env.dana.post(path, deployRevisionBody(19, revision, nil)))["edge-nginx"]
+	digest := env.fk.Estate.ImageDigestFor("edge-nginx:1.27.3")
+	if row.State != scanStateQueued || row.Digest != digest {
+		t.Fatalf("row = %+v, want queued for the digest resolved now (%s)", row, digest)
+	}
+	if env.fk.Calls()["UpdateService"] != 0 {
+		t.Fatal("the service was updated while the gate paused the deploy")
+	}
+	// An acknowledgement of a digest other than the one resolved now is no acknowledgement (D22).
+	stale := &ScanGateRequest{DeployAnyway: true, Images: []ScanGateAck{{Container: "edge-nginx", Ref: "sha256:" + strings.Repeat("0", 64)}}}
+	wantGate(t, env.dana.post(path, deployRevisionBody(19, revision, stale)))
+
+	wantApplied(t, env.dana.post(path, deployRevisionBody(19, revision, anyway(row))))
+	if env.deployAnywayRows(t) != 1 {
+		t.Fatalf("%d deploy_anyway rows, want 1", env.deployAnywayRows(t))
+	}
+}
+
+func TestChangeSet_RevisionDeployIsNotGatedWhenItRanBefore(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, arn := registerUnscannedRevision(t, env)
+	recordRan(t, env, arn, revision, "completed")
+
+	wantApplied(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", deployRevisionBody(19, revision, nil)))
+	if env.preDeployRequests(t) != 0 || countRows(t, env.st, `select count(*) from scan_images`) != 0 {
+		t.Fatal("a revision that ran before reached the gate")
+	}
+}
+
+func TestChangeSet_RevisionDeployIsGatedWhenHistoryIsUnknown(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, arn := registerUnscannedRevision(t, env)
+	path := "/api/services/" + edgeNginxKey.ID() + "/changeset"
+
+	// No record at all, and a record of a rollout that failed: neither shows that the revision ran.
+	wantGate(t, env.dana.post(path, deployRevisionBody(19, revision, nil)))
+	recordRan(t, env, arn, revision, "failed")
+	wantGate(t, env.dana.post(path, deployRevisionBody(19, revision, nil)))
+}
+
+func TestChangeSet_RevisionDeployWithTheRunningImagesIsNotGated(t *testing.T) {
+	env := newSecurityEnv(t)
+	env.setting(t, edgeNginxKey, false)
+	editor := env.addUser(t, "editor", map[string]authz.ActionSet{"Dev": authz.ActionSet(authz.View | authz.Edit)})
+	def, revision := definitionOf(t, editor, edgeNginxKey)
+	def["cpu"] = "512" // a new revision whose images are the running ones
+	def["memory"] = "1024"
+	out := wantApplied(t, editor.post("/api/services/"+edgeNginxKey.ID()+"/changeset", gateBody(revision, def, nil)))
+	env.setting(t, edgeNginxKey, true)
+
+	wantApplied(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", deployRevisionBody(revision, *out.RegisteredRevision, nil)))
+	if env.preDeployRequests(t) != 0 {
+		t.Fatal("a revision with the running images was gated")
+	}
+}
+
+func TestDeployByRevision_IsGatedLikeTheChangeSet(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, arn := registerUnscannedRevision(t, env)
+	path := "/api/services/" + edgeNginxKey.ID() + "/deploy"
+
+	row := wantGate(t, env.dana.post(path, map[string]any{"revision": revision}))["edge-nginx"]
+	if row.State != scanStateQueued {
+		t.Fatalf("row = %+v, want queued", row)
+	}
+	recordRan(t, env, arn, revision, "completed")
+	wantStatus(t, env.dana.post(path, map[string]any{"revision": revision}), http.StatusAccepted)
+}
+
+func TestChangeSet_GateRetryPendingShowsTheStoredReason(t *testing.T) {
+	env := newSecurityEnv(t)
+	image := ecrImage(edgeNginxKey, "edge-nginx", "1.27.3")
+	wantGate(t, applyImages(t, env.dana, edgeNginxKey, nil, "edge-nginx", image))
+	digest := env.fk.Estate.ImageDigestFor("edge-nginx:1.27.3")
+	if err := env.st.DeferScanImages(t.Context(), []string{digest}, time.Now().Add(5*time.Minute), "task_failed", "exit code 1"); err != nil {
+		t.Fatal(err)
+	}
+
+	row := wantGate(t, applyImages(t, env.dana, edgeNginxKey, nil, "edge-nginx", image))["edge-nginx"]
+	if row.State != scanStateFailed || !strings.Contains(row.Message, "The scanner task failed") || row.Message == "The scan did not finish in time." {
+		t.Fatalf("row = %+v, want the stored failure reason", row)
 	}
 }

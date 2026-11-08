@@ -47,6 +47,8 @@ export interface DeployBody {
   revision: number
   /** Skips the rollout-running gate for a rollback (the progress panel's one-click rollback). */
   interrupt?: boolean
+  /** Answers the pre-deploy image scan gate, which applies to a revision that never ran on this service. */
+  scan_gate?: ScanGateRequest
 }
 
 /** 202 from POST /api/services/{id}/deploy. */

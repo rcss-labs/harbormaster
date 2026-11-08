@@ -39,6 +39,8 @@ type DeployRequest struct {
 	// Interrupt lets a rollback replace a rollout in progress. Only the progress panel's
 	// one-click rollback sends it.
 	Interrupt bool `json:"interrupt"`
+	// ScanGate answers the pre-deploy image scan gate, which applies to a revision that never ran on this service.
+	ScanGate *ScanGateRequest `json:"scan_gate"`
 }
 
 // RolloutResponse is the answer to deploy and restart. FromRevision is omitted for restarts.
@@ -200,14 +202,24 @@ func (s *Server) deployRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("revision is required."))
 		return
 	}
+	gate, ok := s.checkRevisionGate(w, r, key, *body.Revision, body.ScanGate, subject)
+	if !ok {
+		return
+	}
 	rollout, err := s.Deploy.Deploy(r.Context(), subject, key, *body.Revision, body.Interrupt)
 	if err != nil {
 		s.failChange(w, err)
 		return
 	}
+	warning := warningPointer(rollout.Warning)
+	if len(gate.Acknowledged) > 0 {
+		if err := s.recordDeployAnyway(r, key, gate, false, subject); err != nil {
+			warning = joinWarning(warning, deployAnywayNotRecorded)
+		}
+	}
 	writeJSON(w, http.StatusAccepted, RolloutResponse{
 		DeploymentID: rollout.DeploymentID, FromRevision: &rollout.FromRevision, ToRevision: &rollout.ToRevision, Kind: rollout.Kind,
-		Warning: warningPointer(rollout.Warning),
+		Warning: warning,
 	})
 }
 
