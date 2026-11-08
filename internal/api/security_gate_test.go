@@ -897,7 +897,7 @@ func TestChangeSet_GateRetryPendingShowsTheStoredReason(t *testing.T) {
 
 // addActiveDeployment makes the service's polled snapshot list a second, ACTIVE deployment of the revision, as ECS does
 // while a newer revision rolls out over the one that has been running.
-func addActiveDeployment(t *testing.T, env *securityEnv, arn string) {
+func addActiveDeployment(t *testing.T, env *securityEnv, arn string, rolloutState string) {
 	t.Helper()
 	var raw []byte
 	err := env.st.Pool.QueryRow(t.Context(), `select raw from services where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4`,
@@ -911,7 +911,7 @@ func addActiveDeployment(t *testing.T, env *securityEnv, arn string) {
 	}
 	for key, value := range service {
 		if strings.EqualFold(key, "deployments") {
-			service[key] = append(value.([]any), map[string]any{"Id": "ecs-svc/old", "Status": "ACTIVE", "TaskDefinition": arn})
+			service[key] = append(value.([]any), map[string]any{"Id": "ecs-svc/old", "Status": "ACTIVE", "TaskDefinition": arn, "RolloutState": rolloutState})
 		}
 	}
 	updated, _ := json.Marshal(service)
@@ -925,7 +925,7 @@ func TestDeployByRevision_ActiveInTheSnapshotRanEvenWithoutAHistoryRow(t *testin
 	env := newSecurityEnv(t)
 	revision, arn := registerUnscannedRevision(t, env)
 	// Its history row is long gone (retention), but it is still serving tasks as the ACTIVE deployment.
-	addActiveDeployment(t, env, arn)
+	addActiveDeployment(t, env, arn, "COMPLETED")
 
 	wantStatus(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision, "interrupt": true}), http.StatusAccepted)
 	if env.preDeployRequests(t) != 0 {
@@ -944,4 +944,13 @@ func TestDeployByRevision_RanBeforeIsNotGatedWhenTheDescribeCallFails(t *testing
 	env.fk.FailAlways("DescribeTaskDefinition", &smithy.GenericAPIError{Code: "ServerException", Message: "down"})
 
 	wantStatus(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision}), http.StatusAccepted)
+}
+
+func TestDeployByRevision_FailedActiveDeploymentOfANeverRunRevisionIsGated(t *testing.T) {
+	env := newSecurityEnv(t)
+	revision, arn := registerUnscannedRevision(t, env)
+	// A CI rollout of this revision tripped the circuit breaker; its tasks are draining and it never ran healthily.
+	addActiveDeployment(t, env, arn, "FAILED")
+
+	wantGate(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision, "interrupt": true}))
 }

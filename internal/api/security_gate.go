@@ -253,7 +253,8 @@ func (s *Server) polledService(ctx context.Context, key model.ServiceKey) (ecsty
 func (s *Server) revisionRan(ctx context.Context, key model.ServiceKey, snapshot ecstypes.Service, arn string) (bool, error) {
 	for _, deployment := range snapshot.Deployments {
 		status := aws.ToString(deployment.Status)
-		if (status == "PRIMARY" || status == "ACTIVE") && aws.ToString(deployment.TaskDefinition) == arn {
+		// A deployment whose rollout failed (circuit breaker) is not a run, as deployment_history excludes outcome failed.
+		if (status == "PRIMARY" || status == "ACTIVE") && deployment.RolloutState != ecstypes.DeploymentRolloutStateFailed && aws.ToString(deployment.TaskDefinition) == arn {
 			return true, nil
 		}
 	}
