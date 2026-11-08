@@ -28,7 +28,7 @@ export function ImageDetail({ digest }: { digest: string }) {
   const requestRescan = () =>
     rescan.mutate(undefined, {
       onSuccess: () => toast.show(SECURITY_COPY.rescanQueued, 'ok'),
-      onError: (error) => toast.show(error instanceof Error ? error.message : 'The rescan could not be requested.', 'bad'),
+      onError: (error) => toast.show(error instanceof Error ? error.message : SECURITY_COPY.rescanFailed, 'bad'),
     })
 
   const scanned = image.status === 'scanned'

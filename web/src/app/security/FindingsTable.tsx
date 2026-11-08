@@ -36,6 +36,7 @@ interface PendingRevoke {
 export function FindingsTable({ image }: { image: SecurityImageDetail }) {
   const toast = useToast()
   const revoke = useRevokeAcceptance()
+  const requestingServices = new Set(image.requests.map((request) => request.service_id)).size
   const [accepting, setAccepting] = useState<SecurityFinding | null>(null)
   const [revoking, setRevoking] = useState<PendingRevoke | null>(null)
 
@@ -57,7 +58,7 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
               <span className={styles.findingNote} title={acceptanceTitle(finding.acceptances)}>
                 {finding.accepted_everywhere
                   ? SECURITY_COPY.acceptedUntil(formatDate(earliestExpiry(finding.acceptances)))
-                  : SECURITY_COPY.acceptedForSome(accepted, image.requests.length)}
+                  : SECURITY_COPY.acceptedForSome(new Set(finding.acceptances.map((a) => a.service_id)).size, requestingServices)}
               </span>
             )}
           </>
@@ -110,14 +111,14 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
     const { vulnId, acceptance } = revoking
     revoke.mutate(acceptance.id, {
       onSuccess: () => toast.show(SECURITY_COPY.revokedToast(vulnId, acceptance.service), 'ok'),
-      onError: (error) => toast.show(error instanceof Error ? error.message : 'The acceptance could not be revoked.', 'bad'),
+      onError: (error) => toast.show(error instanceof Error ? error.message : SECURITY_COPY.revokeFailed, 'bad'),
       onSettled: () => setRevoking(null),
     })
   }
 
   return (
     <>
-      <DataTable label="Findings" columns={columns} rows={image.findings} rowKey={(finding) => `${finding.vuln_id}|${finding.package}|${finding.version}|${finding.location}`} minWidth={760} />
+      <DataTable label={SECURITY_COPY.findingsLabel} columns={columns} rows={image.findings} rowKey={(finding) => `${finding.vuln_id}|${finding.package}|${finding.version}|${finding.location}`} minWidth={760} />
       {accepting && <AcceptRiskDialog digest={image.digest} finding={accepting} requests={image.requests} onClose={() => setAccepting(null)} />}
       {revoking && (
         <ConfirmDialog

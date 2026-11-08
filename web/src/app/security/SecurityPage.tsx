@@ -149,12 +149,12 @@ export function SecurityPage() {
       <div className={styles.stack}>
         {banners}
         <Panel
-          title="Images"
+          title={SECURITY_COPY.imagesLabel}
           flush
           toolbar={
             <>
               <SegmentedFilter
-                label="Scan state"
+                label={SECURITY_COPY.scanStateLabel}
                 value={segment}
                 onChange={(value) => update('filter', value, 'all')}
                 options={[
@@ -175,7 +175,7 @@ export function SecurityPage() {
           }
         >
           <DataTable
-            label="Images"
+            label={SECURITY_COPY.imagesLabel}
             columns={columns}
             rows={visible}
             rowKey={(image) => image.digest}
@@ -186,7 +186,7 @@ export function SecurityPage() {
           />
         </Panel>
         {selected && !phone && (
-          <Panel title={imageName(selected)} sub={selected.digest.slice(0, SHORT_DIGEST_LENGTH)} label="Image detail" flush>
+          <Panel title={imageName(selected)} sub={selected.digest.slice(0, SHORT_DIGEST_LENGTH)} label={SECURITY_COPY.imageDetailLabel} flush>
             <ImageDetail digest={selected.digest} />
           </Panel>
         )}

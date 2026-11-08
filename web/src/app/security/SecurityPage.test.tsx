@@ -108,6 +108,14 @@ describe('SecurityPage', () => {
     expect(critical).not.toHaveTextContent('Accepted until')
   })
 
+  it('counts services, not containers, in the partial acceptance note', async () => {
+    const extraContainer = { ...SECURITY_IMAGE_EDGE.requests[0], container: 'sidecar' }
+    serveDetail({ ...SECURITY_IMAGE_EDGE, requests: [...SECURITY_IMAGE_EDGE.requests, extraContainer] })
+    renderApp(`/security?image=${DIGEST_EDGE}`)
+    const findings = await screen.findByRole('table', { name: 'Findings' })
+    expect(bodyRows(findings)[0]).toHaveTextContent('Accepted for 1 of 2 services')
+  })
+
   it('shows Accepted until when every requesting service accepted the finding', async () => {
     const [first, ...rest] = SECURITY_IMAGE_EDGE.findings
     serveDetail({ ...SECURITY_IMAGE_EDGE, findings: [{ ...first, accepted_everywhere: true }, ...rest] })

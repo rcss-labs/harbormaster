@@ -9,6 +9,8 @@ import styles from './security.module.css'
 const MAX_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 
+const uniqueByService = (requests: SecurityRequest[]) => [...new Map(requests.map((request) => [request.service_id, request])).values()]
+
 interface AcceptRiskDialogProps {
   digest: string
   finding: SecurityFinding
@@ -20,7 +22,9 @@ interface AcceptRiskDialogProps {
 export function AcceptRiskDialog({ digest, finding, requests, onClose }: AcceptRiskDialogProps) {
   const toast = useToast()
   const accept = useAcceptRisk(digest)
-  const acceptable = requests.filter((request) => request.can_accept)
+  // The server rejects the whole request when any chosen service already holds an acceptance, so those are left out.
+  const alreadyAccepted = new Set(finding.acceptances.map((acceptance) => acceptance.service_id))
+  const acceptable = uniqueByService(requests).filter((request) => request.can_accept && !alreadyAccepted.has(request.service_id))
   const [selected, setSelected] = useState(() => new Set(acceptable.map((request) => request.service_id)))
   const [reason, setReason] = useState('')
   const [daysText, setDaysText] = useState(String(MAX_DAYS))
@@ -53,7 +57,7 @@ export function AcceptRiskDialog({ digest, finding, requests, onClose }: AcceptR
           toast.show(SECURITY_COPY.acceptedToast(finding.vuln_id, formatDate(Date.now() + days * DAY_MS), serviceIds.length), 'ok')
           onClose()
         },
-        onError: (error) => toast.show(error instanceof Error ? error.message : 'The risk could not be accepted.', 'bad'),
+        onError: (error) => toast.show(error instanceof Error ? error.message : SECURITY_COPY.acceptFailed, 'bad'),
       },
     )
   }
