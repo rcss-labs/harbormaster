@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -304,6 +306,50 @@ func TestMigrate_AwakeCheckRejectsBadGrid(t *testing.T) {
 		sc.Awake = awake
 		if _, err := s.CreateOffHoursSchedule(ctx, sc, 0); err == nil {
 			t.Errorf("%s: grid accepted, want a check violation", name)
+		}
+	}
+}
+
+// A tag-only change must reach services.raw (the off-hours reconciler matches on it); the
+// same tags must not rewrite the row.
+func TestUpsertServices_TagOnlyChangeUpdatesRaw(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	key := serviceKey("core-services", "api")
+	svc := func(tags map[string]string, rawTags string) model.Service {
+		return model.Service{Key: key, Status: "ACTIVE", Desired: 2, Tags: tags,
+			Raw: []byte(`{"Tags":` + rawTags + `}`), PolledAt: time.Now()}
+	}
+	staging := `[{"Key":"env","Value":"staging"}]`
+	steps := []struct {
+		name string
+		row  model.Service
+		want store.WriteResult
+	}{
+		{"insert", svc(map[string]string{"env": "staging"}, staging), store.WriteResult{Inserted: 1}},
+		{"identical", svc(map[string]string{"env": "staging"}, staging), store.WriteResult{Unchanged: 1}},
+		{"tag edited", svc(map[string]string{"env": "prod"}, `[{"Key":"env","Value":"prod"}]`), store.WriteResult{Updated: 1}},
+		{"tag removed", svc(nil, `[]`), store.WriteResult{Updated: 1}},
+		{"tag added", svc(map[string]string{"env": "staging"}, staging), store.WriteResult{Updated: 1}},
+	}
+	for _, step := range steps {
+		got, err := s.UpsertServices(ctx, []model.Service{step.row})
+		if err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		if got != step.want {
+			t.Fatalf("%s: write result = %+v, want %+v", step.name, got, step.want)
+		}
+		var rawTags string
+		if err := s.Pool.QueryRow(ctx,
+			`select coalesce(raw -> 'Tags', 'null')::text from services where cluster_name = $1 and service_name = $2`,
+			key.Cluster, key.Service).Scan(&rawTags); err != nil {
+			t.Fatal(err)
+		}
+		var want, have any
+		_ = json.Unmarshal(step.row.Raw, &want)
+		_ = json.Unmarshal([]byte(rawTags), &have)
+		if !reflect.DeepEqual(want.(map[string]any)["Tags"], have) {
+			t.Fatalf("%s: stored raw Tags = %s, want %s", step.name, rawTags, step.row.Raw)
 		}
 	}
 }

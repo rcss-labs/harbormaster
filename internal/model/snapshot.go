@@ -63,9 +63,14 @@ type Service struct {
 	AssignPublicIP         bool
 	LoadBalancers          []ServiceLoadBalancer
 	Deployments            []Deployment
-	CreatedAt              time.Time
-	Raw                    json.RawMessage
-	PolledAt               time.Time
+	// Tags are the service's AWS tags by key. Raw holds them too, but Raw is excluded from the
+	// content hash, so this normalized copy is what makes a tag-only change count as changed.
+	// JSON encoding sorts map keys, so tag order never affects the hash;
+	// omitempty keeps untagged services' existing hashes unchanged.
+	Tags      map[string]string `json:",omitempty"`
+	CreatedAt time.Time
+	Raw       json.RawMessage
+	PolledAt  time.Time
 }
 
 type ServiceLoadBalancer struct {
