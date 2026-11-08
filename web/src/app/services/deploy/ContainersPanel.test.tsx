@@ -59,7 +59,8 @@ describe('ContainersPanel', () => {
   it('is locked without Edit, with the reason as title', () => {
     server.use(imageTagsHandler())
     renderWithProviders(<Harness canEdit={false} />)
-    expect(screen.getByTitle('You need Edit on prod')).toBeInTheDocument()
+    // The image tag picker and the other editors are separate fieldsets, so the Scan button between them is not locked by Edit.
+    expect(screen.getAllByTitle('You need Edit on prod')).toHaveLength(2)
     expect(screen.getByRole('combobox', { name: 'Image tag' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Add variable' })).toBeDisabled()
   })

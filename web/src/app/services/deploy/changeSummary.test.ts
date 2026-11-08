@@ -30,6 +30,39 @@ describe('changeSummary: body omits unchanged fields', () => {
   })
 })
 
+describe('changeSummary: scan gate acknowledgement', () => {
+  const scanGate = { deploy_anyway: true, images: [{ container: 'app', ref: 'sha256:abc' }] }
+  const withGate = buildChangeSetRequest({ baseRevision: 42, baseVersion: 'v1', reason: '', sections: { ...none, target: { kind: 'definition', definition } }, scanGate })
+  const failedRegister: ChangeSetResponse = {
+    ...CHANGESET_PARTIAL,
+    registered_revision: null,
+    steps: [
+      { name: 'register', status: 'failed', message: 'x' },
+      { name: 'service', status: 'skipped', message: '' },
+      { name: 'scaling', status: 'skipped', message: '' },
+    ],
+  }
+
+  it('sends scan_gate only when given', () => {
+    expect(withGate.scan_gate).toEqual(scanGate)
+    expect(buildChangeSetRequest({ baseRevision: 42, baseVersion: 'v1', reason: '', sections: { ...none, target: { kind: 'definition', definition } } })).not.toHaveProperty('scan_gate')
+  })
+
+  it('a retry that sends the definition again keeps the acknowledgement', () => {
+    expect(buildRetryRequest(withGate, failedRegister)?.scan_gate).toEqual(scanGate)
+  })
+
+  it('a retry by registered revision is not gated and drops it', () => {
+    const retry = buildRetryRequest(withGate, { ...CHANGESET_PARTIAL, registered_revision: 43, steps: [
+      { name: 'register', status: 'done', message: '' },
+      { name: 'service', status: 'failed', message: 'x' },
+      { name: 'scaling', status: 'skipped', message: '' },
+    ] })
+    expect(retry?.task_definition).toEqual({ revision: 43 })
+    expect(retry).not.toHaveProperty('scan_gate')
+  })
+})
+
 describe('buildRetryRequest', () => {
   const original = buildChangeSetRequest({
     baseRevision: 42,

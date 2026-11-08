@@ -1,4 +1,5 @@
 import type { ChangeSetRequest, ChangeSetResponse, DeploySettingsResponse } from '../../../api/deploy'
+import type { ScanGateRequest } from '../../../api/security'
 import { containersOf, imageTagOf, type Definition } from '../task-definition/mainContainer'
 import { containerNames, readArgv, readEnvironment, readHealthCheck, readSecrets, type HealthCheck } from './draft'
 import type { ScalingChange } from './scalingDraft'
@@ -22,7 +23,7 @@ export const countSections = ({ target, service, scaling }: ChangeSections): num
  * The request body: only sections that changed are present. `base_version` guards the service and scaling writes, so a
  * definition-only change set sends an empty one and cannot trip over unrelated settings drift.
  */
-export function buildChangeSetRequest(input: { baseRevision: number; baseVersion: string; reason: string; sections: ChangeSections }): ChangeSetRequest {
+export function buildChangeSetRequest(input: { baseRevision: number; baseVersion: string; reason: string; sections: ChangeSections; scanGate?: ScanGateRequest }): ChangeSetRequest {
   const { sections } = input
   const body: ChangeSetRequest = {
     base_revision: input.baseRevision,
@@ -32,6 +33,7 @@ export function buildChangeSetRequest(input: { baseRevision: number; baseVersion
   if (sections.target) body.task_definition = sections.target.kind === 'definition' ? { definition: sections.target.definition } : { revision: sections.target.revision }
   if (sections.service) body.service = sections.service
   if (sections.scaling) body.scaling = sections.scaling
+  if (input.scanGate) body.scan_gate = input.scanGate
   return body
 }
 
@@ -58,7 +60,11 @@ export function buildRetryRequest(request: ChangeSetRequest, response: ChangeSet
   // The definition goes again only while the rollout is still pending: a done service step already deployed it.
   if (request.task_definition && registered && !serviceDone) {
     if (registered.status === 'done' && response.registered_revision !== null) retry.task_definition = { revision: response.registered_revision }
-    else if (registered.status !== 'done') retry.task_definition = request.task_definition
+    else if (registered.status !== 'done') {
+      retry.task_definition = request.task_definition
+      // Only a definition is gated: a retry by registered revision needs no acknowledgement.
+      if (request.scan_gate) retry.scan_gate = request.scan_gate
+    }
   }
   if (request.service && unfinished('service')) retry.service = request.service
   if (request.scaling && unfinished('scaling')) retry.scaling = request.scaling

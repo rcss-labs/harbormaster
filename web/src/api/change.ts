@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { api, ApiError } from './client'
+import type { ScanGateRequest } from './security'
 import type {
   RevisionsResponse,
   TagDTO,
@@ -25,6 +26,8 @@ const live = { refetchInterval: 5000, refetchIntervalInBackground: false } as co
 export interface RegisterRevisionBody {
   base_revision: number
   definition: Record<string, unknown>
+  /** The caller's answer to the pre-deploy image scan gate. */
+  scan_gate?: ScanGateRequest
 }
 
 /** 201 from POST /api/services/{id}/revisions. */

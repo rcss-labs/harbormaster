@@ -1,10 +1,21 @@
 import type { ChangeSetResponse } from '../../../api/deploy'
+import type { ScanGate } from '../../../api/security'
 import { Banner } from '../../../components/Banner'
 import { Dialog } from '../../../components/Dialog'
 import { diffLines } from '../task-definition/diffLines'
 import diff from '../task-definition/taskDefinition.module.css'
+import { ScanGatePanel } from './ScanGatePanel'
 import { REASON_MAX_LENGTH, primaryLabel, summarySentence, type ChangeSections, type ServiceRow } from './changeSummary'
 import styles from './ReviewChangesDialog.module.css'
+
+/** The pre-deploy scan gate, while it has paused the apply. */
+export interface ScanGateView {
+  serviceId: string
+  gate: ScanGate
+  onRowSettled(container: string): void
+  onDeployAnyway(): void
+  onCancel(): void
+}
 
 interface ReviewChangesDialogProps {
   serviceName: string
@@ -30,6 +41,8 @@ interface ReviewChangesDialogProps {
   onApply(): void
   onRetry(): void
   onClose(): void
+  /** Set while the gate waits for the user: the dialog then offers Deploy anyway and Cancel instead of its usual actions. */
+  scanGate?: ScanGateView
 }
 
 const STEP_LABEL = { register: 'Register revision', service: 'Update service', scaling: 'Update auto scaling' } as const
@@ -38,6 +51,7 @@ const STATUS_LABEL = { done: 'Done', failed: 'Failed', skipped: 'Skipped' } as c
 export function ReviewChangesDialog(props: ReviewChangesDialogProps) {
   const { sections, partial, busy } = props
   const rowClass = { '+': diff.add, '-': diff.del, gap: diff.gap, ' ': '' }
+  const { scanGate } = props
   const label = primaryLabel({ sections, predictedRevision: props.predictedRevision, canDeploy: props.canDeploy })
 
   return (
@@ -46,13 +60,21 @@ export function ReviewChangesDialog(props: ReviewChangesDialogProps) {
       title={`Review changes to ${props.serviceName}`}
       sub={summarySentence({ serviceName: props.serviceName, sections, predictedRevision: props.predictedRevision, canDeploy: props.canDeploy })}
       onClose={props.onClose}
-      actions={[
-        { label: partial ? 'Close' : 'Keep editing', onClick: props.onClose },
-        partial
-          ? { label: 'Retry remaining steps', kind: 'primary', onClick: props.onRetry, disabled: busy }
-          : { label, kind: 'primary', onClick: props.onApply, disabled: busy },
-      ]}
+      actions={
+        scanGate
+          ? [
+              { label: 'Cancel', onClick: scanGate.onCancel },
+              { label: 'Deploy anyway', kind: 'primary', onClick: scanGate.onDeployAnyway, disabled: busy },
+            ]
+          : [
+              { label: partial ? 'Close' : 'Keep editing', onClick: props.onClose },
+              partial
+                ? { label: 'Retry remaining steps', kind: 'primary', onClick: props.onRetry, disabled: busy }
+                : { label, kind: 'primary', onClick: props.onApply, disabled: busy },
+            ]
+      }
     >
+      {scanGate && <ScanGatePanel serviceId={scanGate.serviceId} gate={scanGate.gate} onRowSettled={scanGate.onRowSettled} />}
       {props.tagName === 'Prod' && <Banner kind="warn">This is a Prod service.</Banner>}
       {props.movedFrom !== null && (
         <Banner kind="warn">{`The service moved from :${props.movedFrom} to :${props.deployedRevision} while you were editing. Check the diff before applying.`}</Banner>

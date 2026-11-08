@@ -265,6 +265,23 @@ export const SCAN_GATE_CRITICAL: ScanGate = {
   ],
 }
 
+/** The pre-deploy gate paused while the scan of the changed image is still waiting for the scanner. */
+export const SCAN_GATE_QUEUED: ScanGate = {
+  message: GATE_MESSAGE,
+  images: [
+    {
+      container: 'payments-api',
+      image: `${REGISTRY}/payments-api:1.18.2`,
+      ref: DIGEST_QUEUED,
+      digest: DIGEST_QUEUED,
+      state: 'queued',
+      open: NO_COUNTS,
+      accepted: 0,
+      message: '',
+    },
+  ],
+}
+
 /** The pre-deploy gate paused because ECR did not answer in time, so the row has no digest. */
 export const SCAN_GATE_FAILED: ScanGate = {
   message: GATE_MESSAGE,

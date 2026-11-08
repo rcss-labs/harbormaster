@@ -149,3 +149,8 @@
   .iconBtn { height: 44px; width: 44px; }
   .healthGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* The Image tag group sits outside this fieldset, so its first group keeps the divider the group above it would have drawn. */
+div.afterImageTag > div:first-child {
+  padding-top: 12px;
+  border-top: 1px solid var(--row-border);
+}

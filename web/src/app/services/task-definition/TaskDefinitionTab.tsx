@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { isApiError, useRegisterRevision, useRevisions, useTaskDefinition } from '../../../api/change'
+import { isApiError, useRegisterRevision, useRevisions, useTaskDefinition, type RegisterRevisionBody } from '../../../api/change'
 import type { ServiceDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
 import { TagChip } from '../../../components/TagChip'
 import { showWarning, useToast } from '../../../components/Toast'
+import { scanGateOf, useGatedSubmit } from '../deploy/useGatedSubmit'
 import { queryPanelError } from '../panelError'
 import { isRolloutRunning } from '../rollout'
 import { JsonEditor } from './JsonEditor'
@@ -47,6 +48,42 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
   const [reviewing, setReviewing] = useState(false)
   const [registerError, setRegisterError] = useState<string | undefined>()
   const [movedFrom, setMovedFrom] = useState<number | null>(null)
+  const closeReview = () => {
+    setReviewing(false)
+    setRegisterError(undefined)
+    setMovedFrom(null)
+  }
+
+  // The scan gate is not a failure: it propagates to the gate hook, which shows it in the review dialog.
+  const sendRegistration = async (body: RegisterRevisionBody) => {
+    setRegisterError(undefined)
+    try {
+      const result = await register.mutateAsync(body)
+      closeReview()
+      setDraft(null)
+      showWarning(toast, result.warning)
+      toast.show(`${service.name}:${result.revision} is registered. Deploy it from the Deploy tab when you are ready.`, 'ok')
+    } catch (failure) {
+      if (scanGateOf(failure)) throw failure
+      if (isApiError(failure, 'conflict') && draft) {
+        // The service moved on: take the new deployed revision from a fresh read and show the diff again.
+        const fresh = await taskDefinition.refetch()
+        if (fresh.isError || !fresh.data) {
+          setRegisterError(fresh.error instanceof Error ? fresh.error.message : 'The service could not be re-read after the conflict.')
+        } else {
+          setMovedFrom(draft.baseRevision)
+          setDraft({ ...draft, baseRevision: fresh.data.deployed_revision })
+        }
+      } else {
+        setRegisterError(failure instanceof Error ? failure.message : 'The revision could not be registered.')
+      }
+    }
+  }
+  const gated = useGatedSubmit(sendRegistration)
+  const keepEditing = () => {
+    gated.cancel()
+    closeReview()
+  }
   const data = taskDefinition.data
   if (!data) {
     return (
@@ -70,35 +107,9 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
     setDraft(trimEnd(next) === initialText ? null : { text: next, baseRevision: draft?.baseRevision ?? data.deployed_revision })
   const predictedRevision = Math.max(data.deployed_revision, ...(revisions.data?.items.map((item) => item.revision) ?? [])) + 1
 
-  const closeReview = () => {
-    setReviewing(false)
-    setRegisterError(undefined)
-    setMovedFrom(null)
-  }
-
-  const onRegister = async () => {
+  const onRegister = () => {
     if (!draft || !definition) return
-    setRegisterError(undefined)
-    try {
-      const result = await register.mutateAsync({ base_revision: draft.baseRevision, definition })
-      closeReview()
-      setDraft(null)
-      showWarning(toast, result.warning)
-      toast.show(`${service.name}:${result.revision} is registered. Deploy it from the Deploy tab when you are ready.`, 'ok')
-    } catch (failure) {
-      if (isApiError(failure, 'conflict')) {
-        // The service moved on: take the new deployed revision from a fresh read and show the diff again.
-        const fresh = await taskDefinition.refetch()
-        if (fresh.isError || !fresh.data) {
-          setRegisterError(fresh.error instanceof Error ? fresh.error.message : 'The service could not be re-read after the conflict.')
-        } else {
-          setMovedFrom(draft.baseRevision)
-          setDraft({ ...draft, baseRevision: fresh.data.deployed_revision })
-        }
-      } else {
-        setRegisterError(failure instanceof Error ? failure.message : 'The revision could not be registered.')
-      }
-    }
+    void gated.submit({ base_revision: draft.baseRevision, definition })
   }
 
   const openInDeployTab = (revision: number) => navigate(`/services/${serviceId}/deploy?revision=${revision}`)
@@ -156,10 +167,15 @@ export function TaskDefinitionTab({ serviceId, service }: { serviceId: string; s
           baseRevision={movedFrom ?? draft.baseRevision}
           before={initialText}
           after={trimEnd(text)}
-          registering={register.isPending}
+          registering={register.isPending || gated.busy}
           error={registerError}
-          onKeepEditing={closeReview}
+          onKeepEditing={keepEditing}
           onRegister={onRegister}
+          scanGate={
+            gated.gate
+              ? { serviceId, gate: gated.gate, onRowSettled: gated.settleRow, onDeployAnyway: gated.deployAnyway, onCancel: gated.cancel }
+              : undefined
+          }
         />
       )}
     </>

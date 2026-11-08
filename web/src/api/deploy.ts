@@ -6,6 +6,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import { refetchWhileSettling } from './change'
+import type { ScanGate, ScanGateRequest } from './security'
 import type { ControllerRefDTO, ImageTagsResponse, PartialErrorDTO } from './types'
 
 export interface ChangeCanDTO {
@@ -118,6 +119,13 @@ export interface ChangeSetRequest {
     put_scheduled_actions?: ChangeSetScheduledActionPut[]
     delete_scheduled_actions?: string[]
   }
+  /** The caller's answer to the pre-deploy image scan gate. Only a request that registers a definition is gated. */
+  scan_gate?: ScanGateRequest
+}
+
+/** The body of the 409 (`error.code === 'scan_gate'`) that a change set or registration answers while the gate is paused. */
+export interface ScanGateConflictBody {
+  scan_gate: ScanGate
 }
 
 export interface ChangeSetStep {
