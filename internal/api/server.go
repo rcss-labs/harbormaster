@@ -35,6 +35,9 @@ type Server struct {
 	Metrics *metrics.Client
 	// Logs reads CloudWatch Logs history and live tails (plan 03); New defaults it from Clients.
 	Logs *logs.Client
+	// LogErrors counts error lines per bucket for the service timeline; New builds the one counter every
+	// request shares, since the CloudWatch pacing only holds process-wide through a single counter.
+	LogErrors *logs.ErrorCounter
 	// TailLimiter caps concurrent live tails per user; New defaults it from Cfg.LogTailsPerUser.
 	TailLimiter *logs.TailLimiter
 	// Deploy runs the change path (plan 02).
@@ -87,6 +90,9 @@ func New(s Server) *Server {
 	}
 	if s.Logs == nil {
 		s.Logs = &logs.Client{Clients: s.Clients, Now: s.Now, MaxLookback: 7 * 24 * time.Hour}
+	}
+	if s.LogErrors == nil {
+		s.LogErrors = logs.NewErrorCounter(s.Clients, s.Now)
 	}
 	if s.TailLimiter == nil {
 		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
@@ -234,6 +240,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.networkRoutes(mux)   // plan 05
 	s.storageRoutes(mux)   // plan 05
 	s.analyticsRoutes(mux) // analytics
+	s.timelineRoutes(mux)  // service timeline
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})

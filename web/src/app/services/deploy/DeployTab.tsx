@@ -17,6 +17,7 @@ import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
 import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
+import { isRolloutRunning } from '../rollout'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 import { ReviewChangesDialog } from './ReviewChangesDialog'
 import { PendingChangesAside, PendingChangesBar } from './PendingChangesAside'
@@ -265,11 +266,37 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     },
   }
 
+  // ?review=1 (from the timeline's rollback) is consumed once the revision is in the draft: Review opens then if there is something to
+  // review, and never while a rollout runs. The user still applies.
+  const reviewRequested = searchParams.get('review') === '1'
+  const rolloutStateKnown = service.data !== undefined && (revisions.data !== undefined || revisions.isError)
+  const rolloutRunning = service.data !== undefined && isRolloutRunning(service.data, revisions.data)
+  const revisionIsDeployed = revisionParam !== null && revisionParam === deployedRevision
+  const revisionReady = revisionTarget.data !== undefined && liveDefinition !== undefined && deployedRevision !== undefined
+  useEffect(() => {
+    if (!reviewRequested || !rolloutStateKnown) return
+    const nothingToReview = revisionParam === null || revisionTarget.isError || taskDefinition.isError || revisionIsDeployed
+    if (!rolloutRunning && !nothingToReview && !revisionReady) return
+    if (!rolloutRunning && !nothingToReview && reviewable) asideProps.onReview()
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        next.delete('review')
+        return next
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onReview only sets state from values already listed here
+  }, [reviewRequested, rolloutStateKnown, rolloutRunning, revisionReady, reviewable, revisionParam, revisionTarget.isError, taskDefinition.isError, revisionIsDeployed])
+
   const showingProgress = service.data !== undefined && shouldShowProgress(service.data, now)
   const awaitingRollout = startedRollout !== null && !showingProgress && (deployedRevision ?? 0) < startedRollout
 
   return (
     <>
+      {revisionIsDeployed && (
+        <Banner kind="info">Revision :{revisionParam} is already deployed.</Banner>
+      )}
       {awaitingRollout && (
         <div role="status" aria-label="Rollout starting">
           <Banner kind="info">Rolling out :{startedRollout}. The fields below show the new image once ECS reports it.</Banner>

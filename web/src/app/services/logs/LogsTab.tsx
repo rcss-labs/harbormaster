@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useLogHistory } from '../../../api/observe'
 import type { LogLine, LogsHistoryDTO } from '../../../api/types'
 import { Banner } from '../../../components/Banner'
@@ -9,6 +10,7 @@ import { Seg, SegmentedFilter } from '../../../components/Seg'
 import { usePhone } from '../../../components/usePhone'
 import { queryPanelError } from '../panelError'
 import { useAuth } from '../../auth/AuthProvider'
+import { formatEventTime } from '../timeline/model'
 import { level } from './level'
 import { useLogTail } from './useLogTail'
 import styles from './logs.module.css'
@@ -21,6 +23,15 @@ const NEAR_BOTTOM_PX = 24
 const clock = (iso: string): string => {
   const date = new Date(iso)
   return [date.getHours(), date.getMinutes(), date.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':')
+}
+
+// Date.parse also accepts `2026` or a zoneless date, which the API rejects, so only a full RFC 3339 timestamp counts.
+const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/
+
+function parseBefore(value: string | null): string | undefined {
+  if (value === null || !RFC3339.test(value)) return undefined
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? undefined : new Date(time).toISOString()
 }
 
 type LevelFilter = 'all' | 'warn' | 'error'
@@ -86,7 +97,11 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [searchInput, setSearchInput] = useState('')
   const [q, setQ] = useState('')
-  const [follow, setFollow] = useState(true)
+  const [searchParams, setSearchParams] = useSearchParams()
+  // Opened from the Timeline: read history up to this time instead of the latest. An unparseable value is ignored.
+  const rawBefore = searchParams.get('before')
+  const beforeParam = parseBefore(rawBefore)
+  const [follow, setFollow] = useState(beforeParam === undefined)
   const boxRef = useRef<HTMLDivElement>(null)
   const autoScrollTopRef = useRef<number | null>(null)
 
@@ -96,12 +111,12 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   }, [searchInput])
 
   const containerParam = container === 'all' ? undefined : container
-  const scope = `${serviceId}|${containerParam ?? ''}|${q}`
+  const scope = `${serviceId}|${containerParam ?? ''}|${q}|${beforeParam ?? ''}`
   const [stored, setStored] = useState<OlderState>({ scope, lines: [] })
   const older: OlderState = stored.scope === scope ? stored : { scope, lines: [] }
 
-  const newest = useLogHistory(serviceId, { container: containerParam, q: q || undefined })
-  const olderPage = useLogHistory(serviceId, { container: containerParam, q: q || undefined, before: older.before })
+  const newest = useLogHistory(serviceId, { container: containerParam, q: q || undefined, before: beforeParam })
+  const olderPage = useLogHistory(serviceId, { container: containerParam, q: q || undefined, before: older.before ?? beforeParam })
   // Until the older page arrives, the page shown for `before` is still the newest one.
   const currentPage = older.before ? olderPage : newest
 
@@ -118,6 +133,18 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
   const tail = useLogTail({ serviceId, container: containerParam, q: q || undefined, enabled: follow && canTail, csrf: me?.csrf_token ?? '' })
 
   const { keepalive } = tail
+
+  const backToLatest = () => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        next.delete('before')
+        return next
+      },
+      { replace: true },
+    )
+    setFollow(true)
+  }
 
   const loadOlder = () => {
     const page = currentPage.data
@@ -212,7 +239,7 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
         { value: 'paused', label: 'Paused' },
       ]}
       value={follow ? 'live' : 'paused'}
-      onChange={(next) => setFollow(next === 'live')}
+      onChange={(next) => (next === 'live' ? backToLatest() : setFollow(false))}
     />
   )
   const statusLine = (
@@ -248,6 +275,18 @@ export function LogsTab({ serviceId }: { serviceId: string }) {
       )}
       <div className={styles.banners}>
         {driverBanners}
+        {beforeParam && (
+          <Banner
+            kind="info"
+            action={
+              <button type="button" className={`${styles.btn} ${styles.bannerAction}`} onClick={backToLatest}>
+                Back to latest
+              </button>
+            }
+          >
+            {`Showing logs up to ${formatEventTime(beforeParam, true)}`}
+          </Banner>
+        )}
         {follow && tail.status === 'ended' && tail.endReason === 'idle' && (
           <Banner kind="info">
             Live tail stopped after 30 minutes idle.

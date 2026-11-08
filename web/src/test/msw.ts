@@ -48,6 +48,7 @@ import {
   SSO_TEST_OK,
   SSO_UNCONFIGURED,
 } from './fixtures'
+import { timelineHandlers } from './timelineFixtures'
 import type { SearchResultDTO } from '../api/types'
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
@@ -71,6 +72,8 @@ function search(q: string): SearchResultDTO[] {
 
 /** Default handlers: every GET in the API reference answers with the fixtures. Override per test with `server.use`. */
 export const handlers = [
+  // Registered first so :id/timeline is not read as the service id route.
+  ...timelineHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),
   http.get('/api/auth/setup', () => HttpResponse.json({ needed: false })),
   http.get('/api/overview', () => HttpResponse.json(OVERVIEW)),

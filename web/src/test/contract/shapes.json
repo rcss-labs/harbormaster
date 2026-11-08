@@ -2529,6 +2529,137 @@
       ]
     }
   },
+  "timeline": {
+    "deployed_revision": "number",
+    "events": [
+      {
+        "actor": "string",
+        "at": "time",
+        "detail": "string",
+        "diff": [
+          {
+            "from": "string",
+            "label": "string",
+            "to": "string"
+          }
+        ],
+        "evidence_at": {
+          "$null": "time"
+        },
+        "from_revision": {
+          "$null": "number"
+        },
+        "id": "string",
+        "lane": "string",
+        "op": "string",
+        "severity": "string",
+        "task_id": "string",
+        "title": "string",
+        "to_revision": {
+          "$null": "number"
+        }
+      }
+    ],
+    "from": "time",
+    "incident": {
+      "$null": {
+        "failure_count": "number",
+        "first_failure_at": "time",
+        "last_failure_at": "time",
+        "rollback_revision": {
+          "$null": "number"
+        },
+        "rolled_back": {
+          "$null": {
+            "actor": "string",
+            "at": "time",
+            "detail": "string",
+            "diff": [
+              {
+                "from": "string",
+                "label": "string",
+                "to": "string"
+              }
+            ],
+            "evidence_at": {
+              "$null": "time"
+            },
+            "from_revision": {
+              "$null": "number"
+            },
+            "id": "string",
+            "lane": "string",
+            "op": "string",
+            "severity": "string",
+            "task_id": "string",
+            "title": "string",
+            "to_revision": {
+              "$null": "number"
+            }
+          }
+        },
+        "top_reason": "string",
+        "top_reason_count": "number",
+        "trigger": {
+          "$null": {
+            "actor": "string",
+            "at": "time",
+            "detail": "string",
+            "diff": [
+              {
+                "from": "string",
+                "label": "string",
+                "to": "string"
+              }
+            ],
+            "evidence_at": {
+              "$null": "time"
+            },
+            "from_revision": {
+              "$null": "number"
+            },
+            "id": "string",
+            "lane": "string",
+            "op": "string",
+            "severity": "string",
+            "task_id": "string",
+            "title": "string",
+            "to_revision": {
+              "$null": "number"
+            }
+          }
+        },
+        "trigger_unknown": "boolean"
+      }
+    },
+    "lanes": [
+      {
+        "lane": "string",
+        "note": "string",
+        "truncated": "boolean"
+      }
+    ],
+    "polled_at": "time",
+    "range": "string",
+    "to": "time"
+  },
+  "timelineLogErrors": {
+    "bucket_seconds": "number",
+    "buckets": [
+      {
+        "capped": "boolean",
+        "count": "number",
+        "known": "boolean",
+        "start": "time",
+        "top_message": "string"
+      }
+    ],
+    "fetched_at": {
+      "$null": "time"
+    },
+    "message": "string",
+    "state": "string"
+  },
   "users": {
     "items": [
       {

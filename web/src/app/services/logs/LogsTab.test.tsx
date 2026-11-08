@@ -281,4 +281,62 @@ describe('LogsTab', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Resume' }))
     expect(MockSocket.instances).toHaveLength(2)
   })
+  describe('?before=', () => {
+    const before = '2026-11-07T11:49:00.000Z'
+
+    it('with ?before= it reads history up to that time and pauses the tail', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent(before)}`)
+
+      expect(await screen.findByText(/Showing logs up to/)).toBeInTheDocument()
+      expect(seen[0].searchParams.get('before')).toBe(before)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(MockSocket.instances).toHaveLength(0)
+      expect(screen.getByRole('button', { name: 'Paused' })).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('Back to latest resumes the tail', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent(before)}`)
+      const user = userEvent.setup()
+
+      await user.click(await screen.findByRole('button', { name: 'Back to latest' }))
+
+      await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+      expect(screen.queryByText(/Showing logs up to/)).not.toBeInTheDocument()
+      expect(screen.getByTestId('search')).toHaveTextContent('')
+      expect(seen.at(-1)!.searchParams.has('before')).toBe(false)
+    })
+
+    it.each(['yesterday', '2026', '1', '2026-11-07', '2026-11-07T11:49:00'])('ignores an invalid value %s: no banner, latest history, live tail', async (value) => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${value}`)
+
+      await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+      expect(screen.queryByText(/Showing logs up to/)).not.toBeInTheDocument()
+      expect(seen[0].searchParams.has('before')).toBe(false)
+    })
+
+    it('sends a zoned timestamp re-serialised to UTC', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent('2026-11-07T13:49:00+02:00')}`)
+
+      expect(await screen.findByText(/Showing logs up to/)).toBeInTheDocument()
+      expect(seen[0].searchParams.get('before')).toBe('2026-11-07T11:49:00.000Z')
+    })
+
+    it('choosing Live behaves like Back to latest', async () => {
+      const seen = serveHistory(() => supportedOnly)
+      renderApp(`${route}?before=${encodeURIComponent(before)}`)
+      const user = userEvent.setup()
+      await screen.findByText(/Showing logs up to/)
+
+      await user.click(screen.getByRole('button', { name: 'Live' }))
+
+      await waitFor(() => expect(MockSocket.instances).toHaveLength(1))
+      expect(screen.queryByText(/Showing logs up to/)).not.toBeInTheDocument()
+      expect(screen.getByTestId('search')).toHaveTextContent('')
+      expect(seen.at(-1)!.searchParams.has('before')).toBe(false)
+    })
+  })
 })
