@@ -7,6 +7,7 @@ const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
 export const MAX_SERVICES = 20
+const MAX_QUERY_LENGTH = 4000
 export const MAX_RANGE_MS = 7 * DAY
 /** The server allows an end a minute ahead of its clock; the form does the same. */
 const FUTURE_SLACK_MS = MINUTE
@@ -38,7 +39,7 @@ const isRange = (value: string | null): value is LogSearchRange => RANGES.some((
 export function formFromParams(p: URLSearchParams): SearchForm {
   const range = p.get('range')
   const form: SearchForm = {
-    serviceIds: [...new Set(p.getAll('service').filter(Boolean))].slice(0, MAX_SERVICES),
+    serviceIds: [...new Set((p.get('services') ?? '').split(',').filter(Boolean))].slice(0, MAX_SERVICES),
     range: isRange(range) ? range : DEFAULT_RANGE,
     query: p.get('q') ?? '',
   }
@@ -54,7 +55,7 @@ export function formFromParams(p: URLSearchParams): SearchForm {
 /** Writes the form to URL parameters; empty values are left out. */
 export function paramsFromForm(f: SearchForm): URLSearchParams {
   const p = new URLSearchParams()
-  for (const id of f.serviceIds) p.append('service', id)
+  if (f.serviceIds.length > 0) p.set('services', f.serviceIds.join(','))
   p.set('range', f.range)
   if (f.range === 'custom') {
     if (f.from) p.set('from', f.from)
@@ -68,6 +69,7 @@ export function paramsFromForm(f: SearchForm): URLSearchParams {
 export function validateForm(f: SearchForm, now: number): string | null {
   if (f.serviceIds.length === 0) return 'Choose at least one service.'
   if (f.serviceIds.length > MAX_SERVICES) return `Choose at most ${MAX_SERVICES} services.`
+  if (f.query.length > MAX_QUERY_LENGTH) return 'Queries can be up to 4,000 characters.'
   if (f.range !== 'custom') return null
   const from = f.from ? Date.parse(f.from) : NaN
   const to = f.to ? Date.parse(f.to) : NaN
@@ -113,7 +115,7 @@ export function hitsByService(rows: { service_id: string }[], services: { id: st
 
 export function formatCost(bytes: number): string {
   const usd = (bytes / GB) * COST_PER_GB_USD
-  return usd < 0.005 ? 'less than $0.01' : `about $${usd.toFixed(2)}`
+  return usd < 0.01 ? 'less than $0.01' : `about $${usd.toFixed(2)}`
 }
 
 export function formatBytes(bytes: number): string {

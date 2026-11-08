@@ -105,7 +105,7 @@ export function useLogSearchServices() {
 /**
  * Runs a search. The request carries an AbortSignal and is aborted when the page unmounts or `cancel()` is
  * called, so a search nobody waits for does not keep scanning on the server. Errors are ApiErrors
- * (422, 403, 404, 409, 429 use the app's error body).
+ * (422, 403, 404, 409, 429 use the app's error body). Cancel or unmount rejects with an AbortError, which the page should not show as a failure.
  */
 export function useRunLogSearch() {
   const controller = useRef<AbortController | null>(null)

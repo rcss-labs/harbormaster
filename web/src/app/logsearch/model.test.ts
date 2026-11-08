@@ -26,13 +26,15 @@ describe('log search model', () => {
       query: 'level=error',
     }
     expect(formFromParams(paramsFromForm(form))).toEqual(form)
+    expect(paramsFromForm(form).get('services')).toBe('a,b')
+    expect(formFromParams(new URLSearchParams('services=a,b,,a&range=15m')).serviceIds).toEqual(['a', 'b'])
     expect(paramsFromForm({ serviceIds: [], range: '1h', query: '' }).has('q')).toBe(false)
     expect(paramsFromForm({ serviceIds: [], range: '1h', query: '' }).has('from')).toBe(false)
   })
 
   it('falls back to 1 hour for an unknown range and keeps 20 services', () => {
     const ids = Array.from({ length: 25 }, (_, i) => `svc-${i}`)
-    const params = new URLSearchParams([['range', '3w'], ...ids.map((id) => ['service', id]), ['service', 'svc-0']])
+    const params = new URLSearchParams({ range: '3w', services: [...ids, 'svc-0'].join(',') })
     const form = formFromParams(params)
     expect(form.range).toBe('1h')
     expect(form.serviceIds).toEqual(ids.slice(0, 20))
@@ -50,6 +52,8 @@ describe('log search model', () => {
     expect(validateForm({ ...base, serviceIds: [], range: '1h' }, NOW)).toBe('Choose at least one service.')
     expect(validateForm({ ...base, serviceIds: Array.from({ length: 21 }, (_, i) => `s${i}`), range: '1h' }, NOW)).toBe('Choose at most 20 services.')
     expect(validateForm({ ...base, range: '1h' }, NOW)).toBeNull()
+    expect(validateForm({ ...base, range: '1h', query: 'x'.repeat(4001) }, NOW)).toBe('Queries can be up to 4,000 characters.')
+    expect(validateForm({ ...base, range: '1h', query: 'x'.repeat(4000) }, NOW)).toBeNull()
   })
 
   it('buckets rows by range size and keeps empty buckets', () => {
@@ -105,6 +109,7 @@ describe('log search model', () => {
     const GB = 2 ** 30
     expect(formatCost(4 * GB)).toBe('about $0.02')
     expect(formatCost(GB / 2)).toBe('less than $0.01')
+    expect(formatCost(GB)).toBe('less than $0.01')
     expect(formatCost(0)).toBe('less than $0.01')
     expect(formatCost(2 * GB)).toBe('about $0.01')
     expect(formatBytes(1.4 * GB)).toBe('1.4 GB')
