@@ -48,6 +48,7 @@ import {
   SSO_UNCONFIGURED,
 } from './fixtures'
 import type { SearchResultDTO } from '../api/types'
+import { securityHandlers } from './securityFixtures'
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
 
@@ -206,6 +207,7 @@ export const handlers = [
     if (!user) return notFound()
     return HttpResponse.json(user.has_password ? {} : { temporary_password: 'tmp-pass-1234' })
   }),
+  ...securityHandlers,
 ]
 
 export const server = setupServer(...handlers)

@@ -49,6 +49,20 @@ import {
   TASK_DEFINITION_PAYMENTS,
 } from '../fixtures'
 import { DEPLOY_SETTINGS_BARE } from '../deployVariants'
+import {
+  SCAN_GATE_CRITICAL,
+  SCAN_GATE_FAILED,
+  SCAN_STATUS_FAILED,
+  SCAN_STATUS_NONE,
+  SCAN_STATUS_QUEUED,
+  SCAN_STATUS_SCANNED,
+  SECURITY,
+  SECURITY_IMAGE_EDGE,
+  SECURITY_OFF,
+  SECURITY_SERVICE_EDGE,
+  SECURITY_SERVICE_OFF,
+  SECURITY_STALE,
+} from '../securityFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
 
@@ -174,6 +188,21 @@ describe('API contract', () => {
     ['analyticsCapacity', () => ANALYTICS_CAPACITY_DAILY],
     ['analyticsOperations', () => ANALYTICS_OPERATIONS],
     ['analyticsReliability', () => body('/api/analytics/reliability?range=30d')],
+    ['security', () => SECURITY],
+    ['security', () => SECURITY_OFF],
+    ['security', () => SECURITY_STALE],
+    ['security', () => body('/api/security')],
+    ['securityImage', () => SECURITY_IMAGE_EDGE],
+    ['securityService', () => SECURITY_SERVICE_EDGE],
+    ['securityService', () => SECURITY_SERVICE_OFF],
+    ['securityService', () => body(`/api/security/services/${serviceId}`)],
+    ['scanStatus', () => SCAN_STATUS_NONE],
+    ['scanStatus', () => SCAN_STATUS_QUEUED],
+    ['scanStatus', () => SCAN_STATUS_SCANNED],
+    ['scanStatus', () => SCAN_STATUS_FAILED],
+    ['scanStatus', () => body(`/api/security/services/${serviceId}/scans?container=payments-api&tag=1.19.0`)],
+    ['scanGate', () => SCAN_GATE_CRITICAL],
+    ['scanGate', () => SCAN_GATE_FAILED],
   ]
   it.each(cases)('%s matches the backend shape', async (name, load) => {
     expect(shapeProblems(await load(), contract[name], name)).toEqual([])
