@@ -38,6 +38,14 @@ Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in c
 | `log_retention_days` | number | `30` | |
 | `alb_idle_timeout` | number | `1800` | Terminal and log-tail WebSockets idle up to 20 minutes. |
 | `tags` | map(string) | `{}` | Applied to every taggable resource. |
+| `enable_image_scanning` | bool | `false` | Creates the scanner and the server's scan permissions and sets the `HM_SCAN_*` variables. See "Image scanning". |
+| `scanner_image` | string | `null` | Scanner image pinned by digest (`...@sha256:<64 hex>`); required when scanning is enabled (precondition on the task definition). |
+| `scanner_cpu` / `scanner_memory` | number | `1024` / `2048` | Scanner task size; a valid Fargate pair. |
+| `scanner_ephemeral_storage_gib` | number | `40` | `/work` size, 21 to 200. |
+| `scan_bucket_name` | string | `null` | Null resolves to `harbormaster-scan-<account id>-<region>`. |
+| `scan_role_name` | string | `"harbormaster-scan"` | Role name in each account; becomes `HM_SCAN_ROLE_NAME`. Must match the access module's `scan_role_name`. |
+| `scan_role_arns` | list(string) | `null` | What the scanner task role may assume. Null resolves to `arn:aws:iam::*:role/<scan_role_name>`; tighten it like `access_role_arns`. |
+| `scanner_egress_cidrs` | list(string) | `["0.0.0.0/0"]` | Scanner egress, tcp 443 only (ECR, S3, STS). |
 
 ## Outputs
 
@@ -54,6 +62,42 @@ Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in c
 | `log_group_name` | `/ecs/harbormaster/harbormaster-server`. |
 | `security_group_ids` | Map with keys `alb`, `server`, `db`. |
 | `database_url_secret_arn` | ARN of the database URL secret (not its value). |
+| `scanner_task_role_arn` | Scanner task role ARN; the principal the access module's scan role trusts. Null when scanning is off. |
+| `scan_bucket_name` | Scan bucket name. Null when scanning is off. |
+
+## Image scanning
+
+Off by default. With `enable_image_scanning = true` the module creates a private S3 bucket (SSE-S3, public access blocked, lifecycle expiry of `jobs/` after 7 days, `results/` after 30 and `grype-db/` after 10, which is longer than the server's `HM_SCAN_DB_MAX_AGE` of 120 hours), the `harbormaster-scanner` Fargate task definition, its log group `/ecs/harbormaster/harbormaster-scanner`, a security group with HTTPS egress only and no ingress, and two roles: `harbormaster-scanner-task` and `harbormaster-scanner-execution`. The server task role gains the `harbormaster-server-scan` policy, and the server container gets `HM_SCAN_ENABLED`, `HM_SCAN_CLUSTER_ARN`, `HM_SCAN_TASK_DEFINITION`, `HM_SCAN_SUBNETS`, `HM_SCAN_SECURITY_GROUP`, `HM_SCAN_BUCKET` and `HM_SCAN_ROLE_NAME` (rejected in `extra_env`).
+
+The scanner has its own execution role because the server's execution role can read the database URL and the session key. The scanner container has no `secrets` block and receives only `HM_SCAN_BUCKET` and `HM_SCAN_IMAGE_DIGEST` from the task definition, plus the run id and mode from the server's launch overrides.
+
+**Enablement is two steps.**
+1. Apply this module with `enable_image_scanning = true` and `scanner_image` set. Read the `scanner_task_role_arn` output.
+2. Apply the `harbormaster-access` module in each account to be scanned with that ARN, which creates the `harbormaster-scan` role the scanner assumes (trusted only by the scanner task role, with the external ID).
+
+**Residual risk (D20).** The server task role can write `jobs/` and `grype-db/`, and the scanner trusts what it reads there, checking only the archive's checksum against the job. A compromised server can therefore feed the scanner a database of its choosing. The scanner cannot reach the server's secrets or the database, writes only `results/`, and everything it writes is parsed with size and shape limits before use.
+
+**Egress.** The server needs HTTPS egress to `grype.anchore.io` (its security group allows all outbound) only when a scan is requested with data older than `HM_SCAN_DB_REFRESH` (24 hours by default). To use an operator mirror instead, write `grype-db/v6/<name>.tar.zst` and `grype-db/v6/latest.json` with `{built_at, checksum, archive_key}` to the bucket and set `HM_SCAN_DB_REFRESH=0` through `extra_env`. Refresh the mirror within 10 days or the lifecycle rule removes it.
+
+**`/work`.** The task mounts a Fargate task volume on `/work` with a read-only root filesystem. `Dockerfile.scanner` creates `/work` owned by uid 65532 (`COPY --chown=65532:65532 ... /work`) and the container runs as that user; Fargate task volumes take the ownership of an existing directory in the image. This has not been run on Fargate yet: the first real scan confirms that the scanner can write to `/work`.
+
+### Permissions
+
+Server task role (`harbormaster-server-scan`):
+
+| Action | Resource | Used for |
+|---|---|---|
+| `ecs:RunTask` | `task-definition/harbormaster-scanner:*`, condition `ecs:cluster` is the Harbormaster cluster | Starting a scan |
+| `ecs:TagResource` | `task/harbormaster/*`, condition `ecs:CreateAction` is `RunTask` | The tag set at launch |
+| `ecs:DescribeTasks`, `ecs:StopTask` | `task/harbormaster/*`, same cluster condition | Following a run, stopping a task |
+| `iam:PassRole` | the two scanner roles, condition `iam:PassedToService` is `ecs-tasks.amazonaws.com` | `RunTask` |
+| `s3:PutObject` | `jobs/*`, `grype-db/*` | Job files, database archive (multipart included) |
+| `s3:AbortMultipartUpload` | `grype-db/*` | A failed archive upload |
+| `s3:GetObject` | `results/*`, `grype-db/v6/latest.json` | Manifests, results, database listing |
+| `s3:DeleteObject` | `jobs/*`, `results/*` | Age-out of finished runs |
+| `s3:ListBucket` | the bucket | Only so a missing object is 404 and not 403 |
+
+Scanner task role (`harbormaster-scanner-task`): `sts:AssumeRole` on `scan_role_arns`; `s3:GetObject` on `jobs/*` and `grype-db/*`; `s3:PutObject` on `results/*`. Scanner execution role: the AWS managed `AmazonECSTaskExecutionRolePolicy` only.
 
 ## First run
 

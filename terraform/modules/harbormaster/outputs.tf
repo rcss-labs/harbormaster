@@ -56,3 +56,13 @@ output "database_url_secret_arn" {
   description = "ARN of the Secrets Manager secret holding the database URL (the ARN only, not the value)."
   value       = aws_secretsmanager_secret.database_url.arn
 }
+
+output "scanner_task_role_arn" {
+  description = "ARN of the scanner task role, the principal the access module's scan role trusts. Null when image scanning is off."
+  value       = one(aws_iam_role.scanner_task[*].arn)
+}
+
+output "scan_bucket_name" {
+  description = "Name of the scan bucket. Null when image scanning is off."
+  value       = one(aws_s3_bucket.scan[*].bucket)
+}
