@@ -90,7 +90,7 @@ func TestComposeQuery_PipesInsideLiteralsAreNotStages(t *testing.T) {
 		`filter @message not like /a\/|b/`,
 		`filter @message =~ /a|b/`,
 		`filter (@message like /a|b/)`,
-		`filter @message like "a\"|b"`,
+		`filter @message like 'a"|b'`,
 	} {
 		out, err := ComposeQuery(q, scopes, 10)
 		if err != nil {
@@ -322,5 +322,50 @@ func TestComposeQuery_RejectsControlAndLineSeparatorCharacters(t *testing.T) {
 	}
 	if err := ValidateQuery("filter a\t=\r\n1"); err != nil {
 		t.Errorf("tab and newlines are fine: %v", err)
+	}
+}
+
+func TestComposeQuery_AliasOutsideParseNamesOneField(t *testing.T) {
+	for _, q := range []string{
+		`fields x as y, @message`,
+		`fields concat(a, b) as c, @message`,
+		`fields x as y, z as w, @logStream`,
+	} {
+		if err := ValidateQuery(q); err != nil {
+			t.Errorf("%q: %v", q, err)
+		}
+	}
+	for _, q := range []string{
+		`fields x as y, z as @log`,
+		"fields x as y, z as `@logStream`",
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != "Log search cannot rename fields that start with @." {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+}
+
+func TestComposeQuery_BackslashBeforeOwnQuoteIsUnreadable(t *testing.T) {
+	for _, q := range []string{
+		`filter a like "x\" | unmask @message # "`,
+		`filter a = 'x\' | stats count(*) # '`,
+		`filter a = "x\"y"`,
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != errUnreadable {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+	for _, q := range []string{
+		`filter @logStream like /web\/abc/`,
+		`filter a = "it's \'fine\' here" | filter b = 'say \"hi\"'`,
+		`filter a = "tab\there" | filter b = "x\\"`,
+	} {
+		if err := ValidateQuery(q); err != nil {
+			t.Errorf("%q: %v", q, err)
+		}
 	}
 }

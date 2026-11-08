@@ -137,7 +137,7 @@ func splitStages(user string) ([]string, error) {
 		if err := checkCommand(stage); err != nil {
 			return err
 		}
-		if aliasesToAtName(codeText) {
+		if aliasesToAtName(codeText, strings.EqualFold(leadingWord(stage), "parse")) {
 			return &QueryError{Message: "Log search cannot rename fields that start with @."}
 		}
 		stages = append(stages, stage)
@@ -191,7 +191,9 @@ func splitStages(user string) ([]string, error) {
 
 // scanLiteral returns the index just past the literal opened at runes[start].
 // Backslash escapes the next rune in strings and regexes; any backslash in a
-// backtick literal is unreadable.
+// backtick literal is unreadable. In a quoted string, a backslash before the
+// string's own quote is unreadable: if AWS does not treat it as an escape the
+// string would end there and the rest could be read as new stages.
 // A raw newline inside any literal is unreadable: it would break the
 // one-stage-per-line layout.
 func scanLiteral(runes []rune, start int) (int, bool) {
@@ -207,6 +209,9 @@ func scanLiteral(runes []rune, start int) (int, bool) {
 			}
 			i++
 			if i < len(runes) && (runes[i] == '\n' || runes[i] == '\r') {
+				return 0, false
+			}
+			if i < len(runes) && runes[i] == delim && delim != '/' {
 				return 0, false
 			}
 		case delim:
@@ -252,10 +257,12 @@ func ambiguousDivision(runes []rune, from int) bool {
 	return false
 }
 
-// aliasesToAtName reports whether any name after "as" in the stage starts with
-// "@", plain or backticked. code has string and regex literals blanked but
-// backticked names intact. Attribution relies on @log and @logStream.
-func aliasesToAtName(code string) bool {
+// aliasesToAtName reports whether a name after "as" in the stage starts with
+// "@", plain or backticked. In parse, "as" takes a comma-separated name list;
+// elsewhere it names one field and a comma starts the next field. code has
+// string and regex literals blanked but backticked names intact. Attribution
+// relies on @log and @logStream.
+func aliasesToAtName(code string, isParse bool) bool {
 	runes := []rune(code)
 	isIdent := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '@' }
 	skipSpace := func(i int) int {
@@ -298,7 +305,7 @@ func aliasesToAtName(code string) bool {
 				}
 			}
 			pos = skipSpace(pos)
-			if pos < len(runes) && runes[pos] == ',' {
+			if isParse && pos < len(runes) && runes[pos] == ',' {
 				pos++
 				continue
 			}
