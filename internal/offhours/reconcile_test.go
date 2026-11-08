@@ -362,6 +362,32 @@ func TestReconcile_RecoveredSleepingTargetEnrolledInAwakeHoursIsWokenAtOnce(t *t
 	h.requireRange(t, 2, 6)
 }
 
+func TestReconcile_EnrolsTargetlessServiceInAwakeHoursWritesOneOperation(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.removeTarget()
+	h.at(9, 10, 0) // Monday morning: the grid is awake
+	h.cycle(t)
+
+	if e := h.enrolment(t); !e.RegisteredTarget {
+		t.Fatalf("enrolment = %+v, want an own target", e)
+	}
+	enrols, wakes := 0, 0
+	for _, op := range h.operations(t) {
+		if op.Details["op"] != "offhours" {
+			continue
+		}
+		switch op.Details["action"] {
+		case "enrol":
+			enrols++
+		case "wake":
+			wakes++
+		}
+	}
+	if enrols != 1 || wakes != 0 {
+		t.Fatalf("off-hours operations: enrol = %d, wake = %d, want 1 and 0", enrols, wakes)
+	}
+}
+
 func TestReconcile_ExpiredWakeIsEnforcedWhenAtActionMissing(t *testing.T) {
 	h := newReconcilerHarness(t)
 	until := h.sleepAndWake(t)

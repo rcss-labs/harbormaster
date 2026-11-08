@@ -389,7 +389,7 @@ func (r *Reconciler) enrolNew(ctx context.Context, c candidate) error {
 			if err := r.Applier.Sleep(ctx, tx, &e, nil, c.schedule.Name); err != nil {
 				return err
 			}
-		case live.Max == 0:
+		case live.HasTarget && live.Max == 0:
 			// Recovered from a lost row while asleep and enrolled in awake hours: wake it now, the fresh stamp
 			// would otherwise hold the next cycle in grace.
 			if err := r.Applier.Wake(ctx, tx, &e, nil, c.schedule.Name); err != nil {
