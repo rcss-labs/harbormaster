@@ -113,6 +113,15 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		return fmt.Errorf("tag artifact-proxy: %w", err)
 	}
 
+	// Only edge-nginx scans before deploy: the e2e flows change payments-api's image and would stop at the scan gate.
+	edgeNginx := model.ServiceKey{
+		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "eu-central-1", Cluster: "edge-proxy"},
+		Service:    "edge-nginx",
+	}
+	if _, err := st.SetPreDeployScan(ctx, edgeNginx, true, 0, time.Now()); err != nil {
+		return fmt.Errorf("turn on pre-deploy scan for edge-nginx: %w", err)
+	}
+
 	return seedAudit(ctx, st, ids["sam"])
 }
 

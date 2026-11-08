@@ -15,6 +15,8 @@ import (
 type RegisterRequest struct {
 	BaseRevision *int           `json:"base_revision"`
 	Definition   map[string]any `json:"definition"`
+	// ScanGate answers the pre-deploy image scan gate; the server re-evaluates the gate on every call.
+	ScanGate *ScanGateRequest `json:"scan_gate"`
 }
 
 // RegisterResponse describes the newly registered revision.
@@ -37,6 +39,8 @@ type DeployRequest struct {
 	// Interrupt lets a rollback replace a rollout in progress. Only the progress panel's
 	// one-click rollback sends it.
 	Interrupt bool `json:"interrupt"`
+	// ScanGate answers the pre-deploy image scan gate, which applies to a revision that never ran on this service.
+	ScanGate *ScanGateRequest `json:"scan_gate"`
 }
 
 // RolloutResponse is the answer to deploy and restart. FromRevision is omitted for restarts.
@@ -146,6 +150,10 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("definition is required."))
 		return
 	}
+	gate, ok := s.checkScanGate(w, r, key, *body.BaseRevision, body.Definition, body.ScanGate, subject)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	// Everything the response needs is read before registering: once AWS has accepted the
 	// revision, a failed read must not turn the answer into an error the user would retry.
@@ -164,13 +172,19 @@ func (s *Server) registerRevision(w http.ResponseWriter, r *http.Request) {
 		s.failChange(w, err)
 		return
 	}
+	warning := warningPointer(registered.Warning)
+	if len(gate.Acknowledged) > 0 {
+		if err := s.recordDeployAnyway(r, key, gate, true, subject); err != nil {
+			warning = joinWarning(warning, "Registered anyway, but Harbormaster could not record who chose it.")
+		}
+	}
 	writeJSON(w, http.StatusCreated, RegisterResponse{
 		Revision: registered.Revision, ARN: registered.ARN, ImageTag: registered.ImageTag,
 		CPU: registered.CPU, Memory: registered.Memory,
 		CanDeploy: authz.Can(subject, authz.Deploy, row.EffectiveTagID) && deployed.Controller.Supported,
 		Tag:       inheritedTag(tags, row.EffectiveTagID, row.TagInherited),
 		Strategy:  deployed.Strategy,
-		Warning:   warningPointer(registered.Warning),
+		Warning:   warning,
 	})
 }
 
@@ -188,14 +202,24 @@ func (s *Server) deployRevision(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("revision is required."))
 		return
 	}
+	gate, ok := s.checkRevisionGate(w, r, key, *body.Revision, body.ScanGate, subject)
+	if !ok {
+		return
+	}
 	rollout, err := s.Deploy.Deploy(r.Context(), subject, key, *body.Revision, body.Interrupt)
 	if err != nil {
 		s.failChange(w, err)
 		return
 	}
+	warning := warningPointer(rollout.Warning)
+	if len(gate.Acknowledged) > 0 {
+		if err := s.recordDeployAnyway(r, key, gate, false, subject); err != nil {
+			warning = joinWarning(warning, deployAnywayNotRecorded)
+		}
+	}
 	writeJSON(w, http.StatusAccepted, RolloutResponse{
 		DeploymentID: rollout.DeploymentID, FromRevision: &rollout.FromRevision, ToRevision: &rollout.ToRevision, Kind: rollout.Kind,
-		Warning: warningPointer(rollout.Warning),
+		Warning: warning,
 	})
 }
 

@@ -82,6 +82,9 @@ func validateCanonical(base, draft Definition, admin bool, accountID string) err
 			return invalid("Task definition JSON is invalid: containerDefinitions[%d] needs a name and an image", i)
 		}
 	}
+	if name := duplicateContainerName(containers); name != "" {
+		return invalid("Task definition JSON is invalid: container name %q is used more than once", name)
+	}
 
 	if draft["family"] != base["family"] {
 		return invalid("Use Terraform to create a new family")
@@ -489,4 +492,18 @@ func validateHostEscalations(base, draft Definition) error {
 		}
 	}
 	return nil
+}
+
+// duplicateContainerName returns a container name used by more than one entry, or "".
+func duplicateContainerName(containers []any) string {
+	seen := map[string]bool{}
+	for _, entry := range containers {
+		container, _ := entry.(map[string]any)
+		name, _ := container["name"].(string)
+		if seen[name] {
+			return name
+		}
+		seen[name] = true
+	}
+	return ""
 }

@@ -22,7 +22,7 @@ interface PermCellProps {
   servicesInEffect?: number
 }
 
-/** One button per user and tag; its popover holds a preset select and six action toggles. Edits apply optimistically and roll back on error. */
+/** One button per user and tag; its popover holds a preset select and seven action toggles. Edits apply optimistically and roll back on error. */
 export function PermCell({ userId, username, tagId, tagName, tagColor, servicesInEffect, actions }: PermCellProps) {
   const phone = usePhone()
   const queryClient = useQueryClient()

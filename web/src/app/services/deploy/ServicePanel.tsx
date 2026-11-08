@@ -13,6 +13,8 @@ interface ServicePanelProps {
   onChange: (draft: ServiceDraft) => void
   /** Name of the service's tag, for the "You need Operate on ..." lock titles. */
   tagName: string
+  /** The image scanning setting, which saves at once and so is not part of the draft. Absent when the panel is shown without it. */
+  scanSetting?: ReactNode
 }
 
 const EXEC_ACTIONS = ['CreateControlChannel', 'CreateDataChannel', 'OpenControlChannel', 'OpenDataChannel'].map((action) => `ssmmessages:${action}`)
@@ -33,7 +35,7 @@ function LockedToggle({ lock, ...props }: { lock?: string; checked: boolean; onC
 }
 
 /** Desired count, ECS Exec, rollout safety and force-new-deployment, edited as a draft (nothing is sent from here). */
-export function ServicePanel({ settings, draft, onChange, tagName }: ServicePanelProps) {
+export function ServicePanel({ settings, draft, onChange, tagName, scanSetting }: ServicePanelProps) {
   const update = (patch: Partial<ServiceDraft>) => onChange({ ...draft, ...patch })
   const operateLock = settings.can.operate ? undefined : `You need Operate on ${tagName}`
   const deployLock = settings.can.deploy ? undefined : `You need Deploy on ${tagName}`
@@ -167,6 +169,7 @@ export function ServicePanel({ settings, draft, onChange, tagName }: ServicePane
           </LockedToggle>
           <p className={styles.hint}>Replaces every running task with a fresh one from the same task definition.</p>
         </div>
+        {scanSetting}
       </div>
     </Panel>
   )

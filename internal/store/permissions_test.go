@@ -90,3 +90,29 @@ func TestLoadSubject_HasPermsAndAdminFlag(t *testing.T) {
 		t.Errorf("missing user error = %v, want ErrNotFound", err)
 	}
 }
+
+// Rows written before the Accept risk permission existed (up to 63, Full included) read back
+// unchanged, and a value with the Accept risk bit survives a round trip.
+func TestSetPermission_AcceptRiskBitIsStoredAndOldValuesKeepTheirValue(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	u, _ := s.CreateUser(ctx, "alice", "h", false, false)
+
+	full := authz.Presets["Full"]
+	if err := s.SetPermission(ctx, u.ID, tag.ID, full); err != nil {
+		t.Fatal(err)
+	}
+	perms, _ := s.PermissionsOf(ctx, u.ID)
+	if perms[tag.ID] != full || perms[tag.ID].Has(authz.AcceptRisk) {
+		t.Fatalf("Full read back as %d", perms[tag.ID])
+	}
+	withRisk := full | authz.ActionSet(authz.AcceptRisk)
+	if err := s.SetPermission(ctx, u.ID, tag.ID, withRisk); err != nil {
+		t.Fatal(err)
+	}
+	perms, _ = s.PermissionsOf(ctx, u.ID)
+	if perms[tag.ID] != withRisk {
+		t.Fatalf("with Accept risk read back as %d, want %d", perms[tag.ID], withRisk)
+	}
+}

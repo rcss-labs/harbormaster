@@ -66,6 +66,9 @@ type Estate struct {
 	// repository name. A repository is visible to a target that has a task
 	// definition with a container image from it (see ecrClient.DescribeImages).
 	Repositories map[string][]string
+	// RunningTags is the tag each repository's service ran when the estate was
+	// seeded; the fake scanner measures how far a tag is ahead of it.
+	RunningTags map[string]string
 
 	// Plan 03 (observe) state; see seed_observe.go. All guarded by Mu.
 	MetricProfiles    map[model.ServiceKey]MetricProfile
@@ -78,6 +81,10 @@ type Estate struct {
 
 	// Plan 05 (networks and storage) state; see estate_network.go. Guarded by Mu.
 	Network NetworkEstate
+
+	// movedTags and tagMoves implement MoveTag (see change.go), keyed by "repository:tag".
+	movedTags map[string]string
+	tagMoves  map[string]int
 
 	// rollbackDeployments holds the ids of circuit-breaker rollback
 	// deployments, which are exempt from the OOM failure path (see rollout.go).

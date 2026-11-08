@@ -68,9 +68,16 @@ type Server struct {
 	// FakeIdP is the dev-only fake identity provider, mounted at /fake-idp/ when non-nil.
 	FakeIdP http.Handler
 
+	// Scan wakes the scan loop after a scan request; nil when scanning is off.
+	Scan ScanKicker
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
 }
+
+// ScanKicker wakes the scan loop so a request does not wait for the next interval. Kick reaches only the loop in the
+// process that runs it: requests are served by any task but the loop runs only in the poller leader, so on another task a
+// request waits at most HM_SCAN_INTERVAL.
+type ScanKicker interface{ Kick() }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
@@ -240,6 +247,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.networkRoutes(mux)   // plan 05
 	s.storageRoutes(mux)   // plan 05
 	s.analyticsRoutes(mux) // analytics
+	s.securityRoutes(mux)  // image security
 	s.timelineRoutes(mux)  // service timeline
 
 	// Change-path reads (plan 02).

@@ -68,6 +68,14 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 	defer retentionTicker.Stop()
 
 	refresh()
+	if p.cfg.Scan != nil {
+		// Only the leader runs this supervisor, so only the leader launches and reconciles scans.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.cfg.Scan.Run(ctx)
+		}()
+	}
 	p.runRollups(ctx)
 	p.runRetention(ctx)
 	for {

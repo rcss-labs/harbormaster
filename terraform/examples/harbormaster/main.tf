@@ -25,6 +25,12 @@ module "harbormaster" {
   certificate_arn    = local.certificate_arn
   image              = local.image
   base_url           = local.base_url
+
+  # Image vulnerability scanning (off by default). Step 1: apply with the block below, pinning the scanner image by
+  # digest. Step 2: pass the scanner_task_role_arn output to the harbormaster-access module. See the module README.
+  # enable_image_scanning = true
+  # scanner_image         = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/harbormaster-scanner@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  # scan_role_arns        = ["arn:aws:iam::111111111111:role/harbormaster-scan"]
 }
 
 output "task_role_arn" {
@@ -36,3 +42,9 @@ output "alb_dns_name" {
   description = "DNS name of the Harbormaster load balancer."
   value       = module.harbormaster.alb_dns_name
 }
+
+# Uncomment together with enable_image_scanning. Null while scanning is off.
+# output "scanner_task_role_arn" {
+#   description = "Scanner task role ARN to pass to the harbormaster-access module."
+#   value       = module.harbormaster.scanner_task_role_arn
+# }

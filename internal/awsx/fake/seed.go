@@ -532,6 +532,15 @@ func (s *seeder) addRepository(name string, tags []string) {
 	}
 }
 
+func (s *seeder) addRunningTag(repository, tag string) {
+	if s.e.RunningTags == nil {
+		s.e.RunningTags = map[string]string{}
+	}
+	if _, ok := s.e.RunningTags[repository]; !ok {
+		s.e.RunningTags[repository] = tag
+	}
+}
+
 func (s *seeder) addService(sp serviceSpec) {
 	c := clusterSeed(sp.cluster)
 	now := s.e.now()
@@ -615,8 +624,10 @@ func (s *seeder) addService(sp serviceSpec) {
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
 		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
 	s.addRepository(sp.repo, ecrTagsFor(sp))
+	s.addRunningTag(sp.repo, sp.tag)
 	if sp.ecrSidecar != "" {
 		s.addRepository(sp.ecrSidecar, repositoryTags(sp.ecrSidecarTag, "", sp.ecrSidecarTags))
+		s.addRunningTag(sp.ecrSidecar, sp.ecrSidecarTag)
 	}
 
 	// Running tasks. With a rollout in flight, the first task is on the new revision.

@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
+	"github.com/rcss-labs/harbormaster/internal/scanjob"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -49,6 +50,8 @@ type Config struct {
 	// StartStagger spaces the first cycles of the task tiers (runningTasks, stoppedTasks, fullTasks)
 	// so a fresh loop does not drain ECS's cluster-resource-read bucket; zero disables staggering.
 	StartStagger time.Duration
+	// Scan launches and reconciles image scans; nil when scanning is off. It runs only while this instance leads.
+	Scan *scanjob.Runner
 }
 
 // ConfigFrom derives the poller configuration from the server configuration.

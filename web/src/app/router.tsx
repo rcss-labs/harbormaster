@@ -11,6 +11,7 @@ import { Clusters } from './clusters/Clusters'
 import { MorePage } from './more/MorePage'
 import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
+import { SecurityPage } from './security/SecurityPage'
 import { SettingsPage } from './settings/SettingsPage'
 import { ServicePage } from './services/ServicePage'
 import { ServicesPage } from './services/list/ServicesPage'
@@ -90,6 +91,7 @@ export function AppRoutes() {
           <Route path="storage" element={<StoragePage />} />
           <Route path="analytics" element={<AnalyticsRedirect />} />
           <Route path="analytics/:tab" element={<AnalyticsPage />} />
+          <Route path="security" element={<SecurityPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>

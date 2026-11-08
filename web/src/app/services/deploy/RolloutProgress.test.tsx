@@ -7,6 +7,7 @@ import type { DeploymentDTO, ServiceDTO } from '../../../api/types'
 import { ToastProvider } from '../../../components/Toast'
 import { SERVICE_NOTIFICATIONS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
+import { SCAN_GATE_FAILED } from '../../../test/securityFixtures'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
 
 const NOW = Date.parse('2026-11-03T12:00:00Z')
@@ -71,6 +72,31 @@ describe('RolloutProgress', () => {
     expect(body).toBeUndefined()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Roll back to :9' }))
     await waitFor(() => expect(body).toEqual({ revision: 9, interrupt: true }))
+  })
+
+  it('a rollback paused by the image scan shows the panel and Deploy anyway sends the acknowledgement', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.post('/api/services/:id/deploy', async ({ request }) => {
+        bodies.push(await request.json())
+        if (bodies.length === 1) {
+          return HttpResponse.json({ error: { code: 'scan_gate', message: SCAN_GATE_FAILED.message }, scan_gate: SCAN_GATE_FAILED }, { status: 409 })
+        }
+        return HttpResponse.json({ deployment_id: 'd-1', started_at: iso(0) }, { status: 202 })
+      }),
+    )
+    renderProgress(rolling)
+    await userEvent.click(screen.getByRole('button', { name: 'Roll back to :9' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Roll back to :9' }))
+
+    expect(await screen.findByRole('region', { name: 'Image scan' })).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deploy anyway' }))
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toEqual({
+      revision: 9,
+      interrupt: true,
+      scan_gate: { deploy_anyway: true, images: SCAN_GATE_FAILED.images.map(({ container, ref }) => ({ container, ref })) },
+    })
   })
 
   it('hides rollback without Deploy', () => {

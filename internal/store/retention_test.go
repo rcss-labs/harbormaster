@@ -2,9 +2,11 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -201,5 +203,191 @@ func TestRunRetention_SAMLTables(t *testing.T) {
 	keys, _ := s.ListSPKeys(ctx)
 	if len(keys) != 2 {
 		t.Fatalf("keys left = %d, want 2", len(keys))
+	}
+}
+
+const acceptanceInsert = `insert into scan_risk_acceptances (digest, vuln_id, package_name, package_version, account_id, region,
+	cluster_name, service_name, reason, expires_at, revoked_at)
+	values ($1, 'CVE-0000-0001', 'p', '1', '111111111111', 'eu-west-1', 'c', 's', 'r', $2, $3)`
+
+func TestRunRetention_DeletesExpiredScanImagesButKeepsAcceptances(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := s.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	seedScanImages(t, s, now.Add(-100*day), "sha256:expired", "sha256:accepted", "sha256:queued-old")
+	seedScanImages(t, s, now.Add(-1*day), "sha256:fresh")
+	exec(`update scan_images set status = 'scanned' where digest in ('sha256:expired', 'sha256:accepted', 'sha256:fresh')`)
+	for _, d := range []string{"sha256:expired", "sha256:accepted", "sha256:fresh"} {
+		exec(`insert into scan_findings (digest, vuln_id, package_name, package_version, severity, first_seen_at, last_seen_at, run_id)
+			values ($1, 'CVE-0000-0001', 'p', '1', 'high', now(), now(), 1)`, d)
+		exec(`insert into scan_requests (digest, account_id, region, cluster_name, service_name, container, image, source, requested_at)
+			values ($1, '111111111111', 'eu-west-1', 'c', 's', 'app', 'img', 'manual', now())`, d)
+	}
+	// One idle image has an active acceptance, the other an expired one.
+	exec(acceptanceInsert, "sha256:accepted", now.Add(10*day), nil)
+	exec(acceptanceInsert, "sha256:expired", now.Add(-day), nil)
+
+	res, err := s.RunRetention(ctx, now, store.Retention{ScanImages: 90 * day})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["scan_images_expired"] != 1 {
+		t.Fatalf("scan_images_expired = %d, want 1 (%v)", res["scan_images_expired"], res)
+	}
+	count := func(sql string) int {
+		t.Helper()
+		var n int
+		if err := s.Pool.QueryRow(ctx, sql).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := s.GetScanImage(ctx, "sha256:expired"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expired image err = %v, want ErrNotFound", err)
+	}
+	for _, table := range []string{"scan_findings", "scan_requests"} {
+		if n := count(`select count(*) from ` + table + ` where digest = 'sha256:expired'`); n != 0 {
+			t.Fatalf("%s rows of expired image = %d, want 0", table, n)
+		}
+		for _, kept := range []string{"sha256:accepted", "sha256:fresh"} {
+			if n := count(`select count(*) from ` + table + ` where digest = '` + kept + `'`); n != 1 {
+				t.Fatalf("%s rows of %s = %d, want 1", table, kept, n)
+			}
+		}
+	}
+	// Acceptances are never cascaded away with the image; only their own pruning removes them.
+	if n := count(`select count(*) from scan_risk_acceptances`); n != 2 {
+		t.Fatalf("acceptance rows = %d, want 2", n)
+	}
+	// A queued row stays however old its request is: it has not been scanned yet.
+	if queued := mustGetScanImage(t, s, "sha256:queued-old"); queued.Status != "queued" {
+		t.Fatalf("queued image status = %q, want untouched", queued.Status)
+	}
+	mustGetScanImage(t, s, "sha256:accepted")
+	mustGetScanImage(t, s, "sha256:fresh")
+}
+
+func TestRunRetention_ActiveAcceptanceStillHidesAfterReRequestAndImport(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	expires := now.Add(10 * day)
+	seedScanImages(t, s, now.Add(-100*day), "sha256:accepted")
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned' where digest = 'sha256:accepted'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, acceptanceInsert, "sha256:accepted", expires, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunRetention(ctx, now, store.Retention{ScanImages: 90 * day}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The digest is requested again, and a later import writes the same finding.
+	if _, _, err := s.UpsertRequestedScanImage(ctx, scanRequest("sha256:accepted"), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `insert into scan_findings (digest, vuln_id, package_name, package_version, severity, first_seen_at, last_seen_at, run_id)
+		values ('sha256:accepted', 'CVE-0000-0001', 'p', '1', 'high', now(), now(), 2)`); err != nil {
+		t.Fatal(err)
+	}
+	var open int
+	err := s.Pool.QueryRow(ctx, `select count(*) from scan_findings f where f.digest = 'sha256:accepted' and not exists (
+		select 1 from scan_risk_acceptances a where a.digest = f.digest and a.vuln_id = f.vuln_id
+		  and a.package_name = f.package_name and a.package_version = f.package_version
+		  and a.account_id = '111111111111' and a.region = 'eu-west-1' and a.cluster_name = 'c' and a.service_name = 's'
+		  and a.revoked_at is null and a.expires_at > $1)`, now).Scan(&open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open != 0 {
+		t.Fatalf("open findings after re-request and import = %d, want 0 (the acceptance still applies)", open)
+	}
+}
+
+func TestRunRetention_PrunesAcceptancesAfterAuditRetention(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	auditAge := 365 * day
+	seedScanImages(t, s, now, "sha256:a", "sha256:b", "sha256:c", "sha256:d")
+	revoked := now.Add(-auditAge - day)
+	for _, row := range []struct {
+		digest           string
+		expires, revoked any
+	}{
+		{"sha256:a", now.Add(-auditAge - 2*day), nil},       // expired before the cutoff: pruned
+		{"sha256:b", now.Add(30 * day), revoked},            // revoked before the cutoff: pruned
+		{"sha256:c", now.Add(-auditAge + day), nil},         // expired within the audit window: kept
+		{"sha256:d", now.Add(30 * day), now.Add(-30 * day)}, // revoked recently: kept
+	} {
+		if _, err := s.Pool.Exec(ctx, acceptanceInsert, row.digest, row.expires, row.revoked); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := s.RunRetention(ctx, now, store.Retention{AuditLog: auditAge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["scan_acceptances_pruned"] != 2 {
+		t.Fatalf("scan_acceptances_pruned = %d, want 2 (%v)", res["scan_acceptances_pruned"], res)
+	}
+	var left []string
+	rows, err := s.Pool.Query(ctx, `select digest from scan_risk_acceptances order by digest`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(left) != 2 || left[0] != "sha256:c" || left[1] != "sha256:d" {
+		t.Fatalf("acceptances left = %v err %v, want c and d", left, err)
+	}
+}
+
+func TestRunRetention_DeletesFinishedRunsWithTheirImages(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	day := 24 * time.Hour
+	oldRun := newScanRun(t, s, "scan", "sha256:a")
+	recentRun := newScanRun(t, s, "scan", "sha256:b")
+	activeRun := newScanRun(t, s, "scan", "sha256:c")
+	for _, id := range []int64{oldRun, recentRun} {
+		if _, err := s.FinishScanRun(ctx, id, "succeeded", store.ScanRunPatch{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Pool.Exec(ctx, `update scan_runs set finished_at = $2 where id = $1`, oldRun, now.Add(-40*day)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update scan_runs set started_at = $2 where id = $1`, activeRun, now.Add(-40*day)); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.RunRetention(ctx, now, store.Retention{ScanRuns: 30 * day})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["scan_runs"] != 1 {
+		t.Fatalf("scan_runs deleted = %d, want 1 (%v)", res["scan_runs"], res)
+	}
+	var runs, batchRows int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from scan_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, `select count(*) from scan_run_images where run_id = $1`, oldRun).Scan(&batchRows); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 2 || batchRows != 0 {
+		t.Fatalf("runs left = %d (want 2), batch rows of deleted run = %d (want 0)", runs, batchRows)
 	}
 }

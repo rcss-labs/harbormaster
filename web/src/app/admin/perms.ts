@@ -1,4 +1,4 @@
-/** Permission actions as [key, label, letter]; each is one bit, in this order (1, 2, 4, 8, 16, 32). */
+/** Permission actions as [key, label, letter]; each is one bit, in this order (1, 2, 4, 8, 16, 32, 64). Accept risk is in no preset, Full included. */
 export const ACTIONS = [
   ['view', 'View', 'V'],
   ['logs', 'Logs', 'L'],
@@ -6,6 +6,7 @@ export const ACTIONS = [
   ['deploy', 'Deploy', 'D'],
   ['edit', 'Edit task definition', 'E'],
   ['terminal', 'Terminal', 'T'],
+  ['accept_risk', 'Accept risk', 'R'],
 ] as const
 
 export const VIEW_BIT = 1
