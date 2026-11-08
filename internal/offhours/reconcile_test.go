@@ -153,6 +153,10 @@ func TestReconcile_EnrolsMatchesAndSleepsInSleepHours(t *testing.T) {
 	if e.SavedMin != 2 || e.SavedMax != 6 || e.State != "active" || e.LastCheckedAt == nil {
 		t.Fatalf("enrolment = %+v, want saved 2/6, active, checked", e)
 	}
+	// The Tasks column reads "N -> 0" for a sleeping service, so N must be what it ran before it was put to sleep.
+	if e.AwakeTasks == 0 {
+		t.Fatalf("awake tasks = %d, want the desired count the service had before it slept", e.AwakeTasks)
+	}
 	h.requireRange(t, 0, 0)
 	h.requireActions(t, "nightly-batch", "harbormaster-offhours-wake-07", "harbormaster-offhours-sleep-20")
 	var texts []string
