@@ -308,6 +308,24 @@ func TestOffHoursPreview_SleepNowCount(t *testing.T) {
 	}
 }
 
+func TestOffHoursPreview_SleepNowSkipsEnrolledServicesAlreadyAsleep(t *testing.T) {
+	env := newOffHoursEnv(t, saturdayNight(t))
+	sc := env.enrolStagingWeb(t, "active", "") // staging-web is enrolled and asleep already
+	body := scheduleBody("staging nights", "env", "staging")
+	body["schedule_id"] = sc.ID
+	var preview struct {
+		Services []serviceResp `json:"services"`
+		SleepNow int           `json:"sleep_now"`
+	}
+	decode(t, env.admin(t).post("/api/offhours/preview", body), &preview)
+	if len(preview.Services) < 2 {
+		t.Fatalf("services = %d, want at least 2", len(preview.Services))
+	}
+	if want := len(preview.Services) - 1; preview.SleepNow != want {
+		t.Errorf("sleep_now = %d, want %d: the enrolled service is asleep already", preview.SleepNow, want)
+	}
+}
+
 func TestOffHoursList_SavingUsesCostPackage(t *testing.T) {
 	env := newOffHoursEnv(t, saturdayNight(t))
 	c := env.admin(t)

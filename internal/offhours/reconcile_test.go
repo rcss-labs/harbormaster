@@ -323,6 +323,45 @@ func TestReconcile_NewLeaderHonoursWokenUntil(t *testing.T) {
 	}
 }
 
+func TestReconcile_GridEditDuringWakeDropsTheAtAction(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 10, 0)
+	h.cycle(t)
+	h.at(9, 23, 0) // Monday night, asleep
+	e := h.enrolment(t)
+	until, err := h.wakeFor(t, &e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 11, 10, 1, 0, 0, 0, h.berlin); !until.Equal(want) {
+		t.Fatalf("until = %v, want %v", until, want)
+	}
+	// The admin makes 00:00-02:00 awake: the window ends inside awake hours, so the at() action must not sleep it.
+	h.saveSchedule(t, func(sc *store.OffHoursSchedule) { sc.Awake = weekdayGrid(0, 2) })
+	h.at(9, 23, 30)
+	h.cycle(t)
+
+	if _, ok := h.allActions()["harbormaster-offhours-woken-until"]; ok {
+		t.Fatal("the woken-until action survived a grid edit that makes the window end awake")
+	}
+	h.requireRange(t, 2, 6)
+}
+
+func TestReconcile_RecoveredSleepingTargetEnrolledInAwakeHoursIsWokenAtOnce(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 22, 0)
+	h.cycle(t) // enrolled at night: asleep
+	h.requireRange(t, 0, 0)
+	if _, err := h.store.Pool.Exec(t.Context(), `delete from offhours_enrolments`); err != nil {
+		t.Fatal(err)
+	}
+
+	h.at(9, 10, 0) // awake hours; the wake action still carries the range
+	h.cycle(t)
+
+	h.requireRange(t, 2, 6)
+}
+
 func TestReconcile_ExpiredWakeIsEnforcedWhenAtActionMissing(t *testing.T) {
 	h := newReconcilerHarness(t)
 	until := h.sleepAndWake(t)

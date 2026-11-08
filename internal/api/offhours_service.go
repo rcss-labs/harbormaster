@@ -468,3 +468,23 @@ func (b *offHoursBuilder) uniqueError(selfID int64, name, tagKey, tagValue strin
 	}
 	return nil
 }
+
+// asleepUnderStoredSchedule reports whether an enrolled service is asleep right now under the schedule saved in
+// the database, so a preview of an edit counts only the services the save would put to sleep.
+func (b *offHoursBuilder) asleepUnderStoredSchedule(e store.OffHoursEnrolment) bool {
+	if e.State == "blocked" || e.ScheduleID == nil {
+		return false
+	}
+	for _, sc := range b.schedules {
+		if sc.ID != *e.ScheduleID {
+			continue
+		}
+		week, err := offhours.ParseWeek(sc.Awake)
+		loc, locErr := time.LoadLocation(sc.Timezone)
+		if err != nil || locErr != nil {
+			return false
+		}
+		return offhours.StateAt(week, loc, b.now, e.WokenUntil).Kind == offhours.Asleep
+	}
+	return false
+}

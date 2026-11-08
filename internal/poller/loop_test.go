@@ -491,3 +491,28 @@ func TestServicesTier_StoresAWSTags(t *testing.T) {
 		t.Fatalf("staging-web api rows tagged env=staging = %d, want 1", got)
 	}
 }
+
+// Legacy short-ARN services make tagging calls fail with InvalidParameterException; the services tier must still
+// store the cluster's services (without tags) instead of failing the whole cluster.
+func TestServicesTier_FallsBackToNoTagsOnInvalidParameter(t *testing.T) {
+	st := storetest.Open(t)
+	f := fake.New(fake.MockupEstate(func() time.Time { return loopNow }))
+	var logs bytes.Buffer
+	p := New(st, f, Config{MaxInFlight: 4}, slog.New(slog.NewTextHandler(&logs, nil)))
+	loop := newLoop(p, loopTarget)
+	f.FailNext("DescribeServices", &ecstypes.InvalidParameterException{Message: aws.String("short ARN")})
+
+	if err := loop.runOnce(context.Background()); err != nil {
+		t.Fatalf("runOnce: %v", err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(context.Background(), `select count(*) from services`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Fatal("no services stored after the tags fallback")
+	}
+	if got := strings.Count(logs.String(), "without tags"); got != 1 {
+		t.Fatalf("fallback warnings = %d, want 1 per cluster:\n%s", got, logs.String())
+	}
+}

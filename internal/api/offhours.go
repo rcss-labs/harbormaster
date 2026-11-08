@@ -284,9 +284,11 @@ func (s *Server) previewOffHours(w http.ResponseWriter, r *http.Request) {
 	for _, m := range matched {
 		var st offHoursState
 		awakeTasks := m.Desired
+		alreadyAsleep := false
 		if e, ok := b.enrolments[m.Key]; ok && e.ScheduleID != nil {
 			st = enrolledState(e, week, loc, b.now, b.accountName(m.Key.AccountID))
 			awakeTasks = e.AwakeTasks
+			alreadyAsleep = b.asleepUnderStoredSchedule(e)
 		} else {
 			if st, err = s.unenrolledState(r.Context(), m.Key, m.Desired); err != nil {
 				s.fail(w, err)
@@ -298,7 +300,7 @@ func (s *Server) previewOffHours(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		svc := b.baseService(m, st, awakeTasks)
-		if svc.State == "asleep" {
+		if svc.State == "asleep" && !alreadyAsleep {
 			preview.SleepNow++
 		}
 		preview.Services = append(preview.Services, svc)

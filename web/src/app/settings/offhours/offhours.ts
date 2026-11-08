@@ -122,13 +122,13 @@ export interface TagSelector {
   value: string
 }
 
-/** Parses `key=value`; null when either side is empty. */
+/** Parses `key=value`; the value may be empty (`key=`), as the server accepts. Null without a key or an equals sign. */
 export function parseTagSelector(text: string): TagSelector | null {
   const at = text.indexOf('=')
   if (at < 0) return null
   const key = text.slice(0, at).trim()
   const value = text.slice(at + 1).trim()
-  return key && value ? { key, value } : null
+  return key ? { key, value } : null
 }
 
 export function browserTimezone(): string {

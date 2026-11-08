@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { OFFHOURS_ASLEEP, OFFHOURS_BLOCKED, OFFHOURS_NOT_MANAGED, OFFHOURS_PRODUCTION, OFFHOURS_UNPRICED, OFFHOURS_WOKEN } from '../../../test/offhoursFixtures'
-import { PRESETS, awakeHours, currentCell, presetGrid, stateLabel, wallClock } from './offhours'
+import { PRESETS, awakeHours, currentCell, parseTagSelector, presetGrid, stateLabel, wallClock } from './offhours'
+
+describe('parseTagSelector', () => {
+  it('accepts key=value and key= with an empty value, as the server does', () => {
+    expect(parseTagSelector('env=staging')).toEqual({ key: 'env', value: 'staging' })
+    expect(parseTagSelector(' env = ')).toEqual({ key: 'env', value: '' })
+    expect(parseTagSelector('env=')).toEqual({ key: 'env', value: '' })
+  })
+
+  it('rejects text without a key or without an equals sign', () => {
+    expect(parseTagSelector('env')).toBeNull()
+    expect(parseTagSelector('=prod')).toBeNull()
+    expect(parseTagSelector('')).toBeNull()
+  })
+})
 
 const NOW = '2026-11-07T21:00:00Z'
 

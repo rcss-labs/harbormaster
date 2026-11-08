@@ -384,8 +384,15 @@ func (r *Reconciler) enrolNew(ctx context.Context, c candidate) error {
 			return err
 		}
 		now := r.now()
-		if StateAt(week, loc, now, nil).Kind == Asleep {
+		switch {
+		case StateAt(week, loc, now, nil).Kind == Asleep:
 			if err := r.Applier.Sleep(ctx, tx, &e, nil, c.schedule.Name); err != nil {
+				return err
+			}
+		case live.Max == 0:
+			// Recovered from a lost row while asleep and enrolled in awake hours: wake it now, the fresh stamp
+			// would otherwise hold the next cycle in grace.
+			if err := r.Applier.Wake(ctx, tx, &e, nil, c.schedule.Name); err != nil {
 				return err
 			}
 		}

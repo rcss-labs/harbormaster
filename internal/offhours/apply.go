@@ -258,8 +258,11 @@ func (a *Applier) SyncActions(ctx context.Context, e store.OffHoursEnrolment, sc
 		return strings.HasPrefix(wanted[i].Name, wakeActionPrefix) && !strings.HasPrefix(wanted[j].Name, wakeActionPrefix)
 	})
 	if e.WokenUntil != nil && a.now().Before(*e.WokenUntil) {
-		if action, ok := wokenAction(week, loc, sc.Timezone, *e.WokenUntil); ok {
-			wanted = append(wanted, action)
+		// A grid edit can make the hour the window ends awake; the at() sleep would then fire inside awake hours.
+		if StateAt(week, loc, *e.WokenUntil, nil).Kind != Awake {
+			if action, ok := wokenAction(week, loc, sc.Timezone, *e.WokenUntil); ok {
+				wanted = append(wanted, action)
+			}
 		}
 	}
 
