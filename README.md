@@ -2,36 +2,36 @@
 
 Harbormaster is a web control center for AWS ECS. It gives a DevOps team the experience Stackstead gives for a Docker host (one place to see what runs, how it behaves, and to change it safely), but the backend is AWS: ECS clusters, services and tasks, task definitions, ECR images, EFS file systems, VPCs and CloudWatch.
 
-![Harbormaster](docs/design/assets/main_logo.png)
+![Harbormaster](assets/main_logo.png)
 
 ## Screens
 
-- [Overview](docs/design/screens/overview.png): cluster usage and service health at a glance
-- [Clusters](docs/design/screens/clusters.png): every cluster in the connected accounts and regions
-- [Cluster](docs/design/screens/cluster.png): one cluster with its services and capacity
-- [Service overview](docs/design/screens/service-overview.png): a service's status, rollout and summary
-- [Service metrics](docs/design/screens/service-metrics.png): CloudWatch and Container Insights charts for a service
-- [Service task definition](docs/design/screens/service-task-definition.png): the task definition JSON, its revisions and rollback; deploys open the Deploy tab
-- [Service deploy](docs/design/2026-10-31-harbormaster-design.md#deploy-tab): containers, task size, service settings and auto scaling, reviewed as one change set with a reason and live rollout progress
-- [Service tasks](docs/design/screens/service-tasks.png): running and stopped tasks of a service
-- [Service timeline](docs/design/screens/service-timeline.png): one service's changes, task stops, active alerts, log errors and terminal sessions on one time axis, with the likely trigger of a failure and rollback from it
-- [Service scaling](docs/design/screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
-- [Service logs](docs/design/screens/service-logs.png): CloudWatch log history and live tail
-- [Service terminal](docs/design/screens/service-terminal.png): an interactive shell in a running task through ECS Exec
-- [Service operations log](docs/design/screens/service-operations-log.png): who changed or opened what, and when
-- [Tasks](docs/design/screens/tasks.png): tasks across the estate
-- [Network tree](docs/design/screens/network-tree.png): VPCs, subnets and their connections
-- [Network account](docs/design/screens/network-account.png): networking for one connected account
-- [Network region](docs/design/screens/network-region.png): networking for one region
-- [Storage](docs/design/screens/storage.png): EFS file systems, access points and mount targets
-- [Users and permissions](docs/design/screens/users-permissions.png): global admin view of users and their access
-- [Tags](docs/design/screens/tags.png): the tags that drive permissions
-- [AWS accounts](docs/design/screens/aws-accounts.png): connected accounts, their regions and connection status
-- [Audit log](docs/design/screens/audit-log.png): sign-ins and changes made in Harbormaster
+- [Overview](screens/overview.png): cluster usage and service health at a glance
+- [Clusters](screens/clusters.png): every cluster in the connected accounts and regions
+- [Cluster](screens/cluster.png): one cluster with its services and capacity
+- [Service overview](screens/service-overview.png): a service's status, rollout and summary
+- [Service metrics](screens/service-metrics.png): CloudWatch and Container Insights charts for a service
+- [Service task definition](screens/service-task-definition.png): the task definition JSON, its revisions and rollback; deploys open the Deploy tab
+- [Service deploy](2026-10-31-harbormaster-design.md#deploy-tab): containers, task size, service settings and auto scaling, reviewed as one change set with a reason and live rollout progress
+- [Service tasks](screens/service-tasks.png): running and stopped tasks of a service
+- [Service timeline](screens/service-timeline.png): one service's changes, task stops, active alerts, log errors and terminal sessions on one time axis, with the likely trigger of a failure and rollback from it
+- [Service scaling](screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
+- [Service logs](screens/service-logs.png): CloudWatch log history and live tail
+- [Service terminal](screens/service-terminal.png): an interactive shell in a running task through ECS Exec
+- [Service operations log](screens/service-operations-log.png): who changed or opened what, and when
+- [Tasks](screens/tasks.png): tasks across the estate
+- [Network tree](screens/network-tree.png): VPCs, subnets and their connections
+- [Network account](screens/network-account.png): networking for one connected account
+- [Network region](screens/network-region.png): networking for one region
+- [Storage](screens/storage.png): EFS file systems, access points and mount targets
+- [Users and permissions](screens/users-permissions.png): global admin view of users and their access
+- [Tags](screens/tags.png): the tags that drive permissions
+- [AWS accounts](screens/aws-accounts.png): connected accounts, their regions and connection status
+- [Audit log](screens/audit-log.png): sign-ins and changes made in Harbormaster
 
 ## How it runs
 
-![Harbormaster architecture: browsers reach an ALB over HTTPS in the Harbormaster AWS account; the ECS service "harbormaster" (Fargate) runs the API, the leader-only poller, the exec bridge and the log tail, backed by RDS PostgreSQL and Secrets Manager; it assumes an IAM role per region in each managed account (sts:AssumeRole with external ID) to reach ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.](docs/design/assets/AWS%20Harbormaster%20Architecture%20Overview.png)
+![Harbormaster architecture: browsers reach an ALB over HTTPS in the Harbormaster AWS account; the ECS service "harbormaster" (Fargate) runs the API, the leader-only poller, the exec bridge and the log tail, backed by RDS PostgreSQL and Secrets Manager; it assumes an IAM role per region in each managed account (sts:AssumeRole with external ID) to reach ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.](assets/AWS%20Harbormaster%20Architecture%20Overview.png)
 
 Harbormaster is one Go binary that serves an embedded React single-page app. Browsers poll `/api` about every 5 seconds, so the view stays current without a push channel. Exactly one task (the poller leader, chosen with a Postgres advisory lock) polls AWS and writes snapshots to Postgres, and any task can answer API reads from them, while logs, metrics, deploys and terminal sessions call AWS directly from whichever task serves the request. What a user can see and do comes from their tags and permissions, and the server checks them on every request, including the WebSocket endpoints for the terminal and live logs.
 
