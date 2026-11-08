@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
 
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
@@ -609,4 +611,87 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 func fakeSleepSeed() fake.ScheduledSeed {
 	return fake.ScheduledSeed{Name: "harbormaster-offhours-sleep-20", Schedule: "cron(0 20 ? * MON-FRI *)", Timezone: "Europe/Berlin",
 		Min: aws.Int32(0), Max: aws.Int32(0)}
+}
+
+// cancelAfterRegister cancels a context right after the first successful RegisterScalableTarget, as losing
+// leadership in the middle of a service would.
+type cancelAfterRegister struct {
+	*fake.Fake
+	cancel context.CancelFunc
+}
+
+type cancellingAutoScaling struct {
+	awsx.AutoScalingAPI
+	cancel context.CancelFunc
+}
+
+func (c cancelAfterRegister) AutoScaling(ctx context.Context, t awsx.Target) (awsx.AutoScalingAPI, error) {
+	api, err := c.Fake.AutoScaling(ctx, t)
+	return cancellingAutoScaling{AutoScalingAPI: api, cancel: c.cancel}, err
+}
+
+func (c cancellingAutoScaling) RegisterScalableTarget(ctx context.Context, in *applicationautoscaling.RegisterScalableTargetInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.RegisterScalableTargetOutput, error) {
+	out, err := c.AutoScalingAPI.RegisterScalableTarget(ctx, in, opts...)
+	c.cancel()
+	return out, err
+}
+
+func TestReconcile_CancelledLeaderContextStillKeepsTheRow(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.removeTarget()
+	h.setDesired(t, 2)
+	h.at(9, 10, 0)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	h.applier.Clients = cancelAfterRegister{Fake: h.fake, cancel: cancel}
+
+	_ = h.rec.Cycle(ctx)
+
+	if _, _, ok := h.target(); !ok {
+		t.Fatal("the target was not registered")
+	}
+	if e := h.enrolment(t); !e.RegisteredTarget {
+		t.Fatalf("enrolment = %+v, want registered_target kept after the context was cancelled", e)
+	}
+}
+
+func TestReconcile_MissingTargetIsReRegisteredAndLogged(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 10, 0)
+	h.cycle(t)
+	h.removeTarget()
+	h.at(9, 11, 0)
+	h.cycle(t)
+
+	h.requireRange(t, 2, 6)
+	if e := h.enrolment(t); !e.RegisteredTarget {
+		t.Fatalf("enrolment = %+v, want registered_target set", e)
+	}
+	found := false
+	for _, op := range h.operations(t) {
+		found = found || op.Text == "Scalable target was missing; re-registered with min 2, max 6."
+	}
+	if !found {
+		t.Fatal("no operation for the re-registered target")
+	}
+}
+
+func TestReconcile_EnrolledServiceInDisabledAccountIsLeftAlone(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 10, 0)
+	h.cycle(t)
+	if _, err := h.store.Pool.Exec(t.Context(), `update aws_accounts set enabled = false`); err != nil {
+		t.Fatal(err)
+	}
+	h.tagService(t, paymentsKey, `[{"Key":"env","Value":"dev"}]`, "ACTIVE")
+	before := h.fake.CallCounts()
+	h.cycle(t)
+
+	h.enrolment(t)
+	h.requireActions(t, "nightly-batch", "harbormaster-offhours-wake-07", "harbormaster-offhours-sleep-20")
+	for k, n := range h.fake.CallCounts() {
+		if n != before[k] {
+			t.Fatalf("AWS call %s ran %d times in a disabled account", k, n-before[k])
+		}
+	}
 }

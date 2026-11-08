@@ -20,6 +20,8 @@ const (
 	blockedRetry = time.Hour
 	// lastErrorLimit caps last_error so a long AWS message cannot bloat the row.
 	lastErrorLimit = 500
+	// serviceTimeout bounds one service's transaction and AWS calls.
+	serviceTimeout = 30 * time.Second
 )
 
 // Reconciler keeps AWS scheduled actions and capacity in line with the off-hours schedules. It runs only in the
@@ -145,7 +147,7 @@ func (r *Reconciler) Cycle(ctx context.Context) error {
 		if c, ok := members[e.Key]; ok {
 			member = &c
 		}
-		r.handle(r.reconcileEnrolled(ctx, e.Key, member, scheduleByID), e.Key, attentionNow)
+		r.handle(ctx, r.reconcileEnrolled(ctx, e.Key, member, scheduleByID), e.Key, attentionNow)
 	}
 	for _, key := range sortedKeys(members) {
 		if ctx.Err() != nil {
@@ -154,7 +156,7 @@ func (r *Reconciler) Cycle(ctx context.Context) error {
 		if _, ok := enrolled[key]; ok {
 			continue
 		}
-		r.handle(r.enrolNew(ctx, members[key]), key, attentionNow)
+		r.handle(ctx, r.enrolNew(ctx, members[key]), key, attentionNow)
 	}
 	r.pruneAttention(attentionNow)
 	return nil
@@ -196,15 +198,26 @@ func sortedKeys(members map[model.ServiceKey]candidate) []model.ServiceKey {
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		a, b := keys[i], keys[j]
-		return fmt.Sprint(a.AccountID, a.Region, a.Cluster, a.Service) < fmt.Sprint(b.AccountID, b.Region, b.Cluster, b.Service)
+		if a.AccountID != b.AccountID {
+			return a.AccountID < b.AccountID
+		}
+		if a.Region != b.Region {
+			return a.Region < b.Region
+		}
+		if a.Cluster != b.Cluster {
+			return a.Cluster < b.Cluster
+		}
+		return a.Service < b.Service
 	})
 	return keys
 }
 
 // handle logs the outcome of one service. Refusals that are expected are not errors.
-func (r *Reconciler) handle(err error, key model.ServiceKey, attentionNow map[model.ServiceKey]bool) {
+func (r *Reconciler) handle(ctx context.Context, err error, key model.ServiceKey, attentionNow map[model.ServiceKey]bool) {
 	switch {
 	case err == nil:
+	case ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)):
+		r.log().Debug("offhours: stopped while reconciling", "service", key.Service, "cluster", key.Cluster)
 	case errors.Is(err, ErrNeedsAttention):
 		attentionNow[key] = true
 		r.noteAttention(context.Background(), key)
@@ -260,10 +273,15 @@ func (r *Reconciler) pruneAttention(current map[model.ServiceKey]bool) {
 // with last_error (or the blocked state) recorded: the Applier stamps the row before it writes to AWS, so a row
 // means AWS may be partly changed and a rollback would lose track of it. The transaction is rolled back only when
 // there is no row to keep (a refusal before any write, or a failure before the row was stored).
-func (r *Reconciler) inService(ctx context.Context, key model.ServiceKey, fn func(tx store.Tx) error) error {
+//
+// The work runs on a context detached from ctx with its own deadline: losing leadership or shutting down in the
+// middle of a service must not roll back after AWS was already changed. ctx is checked between services only.
+func (r *Reconciler) inService(ctx context.Context, key model.ServiceKey, fn func(ctx context.Context, tx store.Tx) error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), serviceTimeout)
+	defer cancel()
 	var failure error
 	err := r.Store.InTx(ctx, func(tx store.Tx) error {
-		fnErr := fn(tx)
+		fnErr := fn(ctx, tx)
 		if fnErr == nil {
 			return nil
 		}
@@ -328,7 +346,7 @@ func (r *Reconciler) retryDue(e store.OffHoursEnrolment, sc *store.OffHoursSched
 
 // enrolNew enrols a selected service and puts it to sleep at once if the grid says so (D5).
 func (r *Reconciler) enrolNew(ctx context.Context, c candidate) error {
-	return r.inService(ctx, c.match.Key, func(tx store.Tx) error {
+	return r.inService(ctx, c.match.Key, func(ctx context.Context, tx store.Tx) error {
 		if _, err := r.Store.LockOffHoursEnrolment(ctx, tx, c.match.Key); err == nil {
 			return nil // enrolled by someone else since the cycle began
 		} else if !errors.Is(err, store.ErrNotFound) {
@@ -365,7 +383,7 @@ func (r *Reconciler) finish(ctx context.Context, tx store.Tx, e *store.OffHoursE
 }
 
 func (r *Reconciler) reconcileEnrolled(ctx context.Context, key model.ServiceKey, member *candidate, schedules map[int64]store.OffHoursSchedule) error {
-	return r.inService(ctx, key, func(tx store.Tx) error {
+	return r.inService(ctx, key, func(ctx context.Context, tx store.Tx) error {
 		e, err := r.Store.LockOffHoursEnrolment(ctx, tx, key)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil // released by someone else since the cycle began
@@ -458,8 +476,16 @@ func (r *Reconciler) syncMember(ctx context.Context, tx store.Tx, e store.OffHou
 	expectAwake := state.Kind != Asleep
 	if !live.HasTarget {
 		// Someone removed the target, or Enrol stopped before it registered one. Scheduled actions need a target.
-		e.RegisteredTarget = true
+		e.RegisteredTarget = true // Harbormaster owns the target from now on
 		if err := r.setExpectedRange(ctx, tx, &e, expectAwake, sc.Name); err != nil {
+			return err
+		}
+		min, max := 0, 0
+		if expectAwake {
+			min, max = e.SavedMin, e.SavedMax
+		}
+		if err := r.Applier.record(ctx, tx, e, nil, "reregister",
+			fmt.Sprintf("Scalable target was missing; re-registered with min %d, max %d.", min, max)); err != nil {
 			return err
 		}
 		live.HasTarget = true
