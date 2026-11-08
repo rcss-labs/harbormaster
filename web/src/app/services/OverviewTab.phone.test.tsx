@@ -1,10 +1,17 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SERVICE_PAYMENTS } from '../../test/fixtures'
+import { SERVICE_OFFHOURS_ASLEEP } from '../../test/offhoursFixtures'
+import { server } from '../../test/msw'
 import { installPhoneMedia } from '../../test/phone'
 import { renderWithProviders } from '../../test/setup'
 import { OverviewTab } from './OverviewTab'
+
+const offHoursCss = readFileSync(resolve(process.cwd(), 'src/app/services/overview/OffHoursCard.module.css'), 'utf8')
 
 let restoreMedia: () => void
 beforeEach(() => {
@@ -41,5 +48,13 @@ describe('OverviewTab on phones', () => {
     const menu = screen.getByRole('menu', { name: `Actions for task ${task.short_id}` })
     expect(within(menu).getByRole('menuitem', { name: 'Logs' })).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/logs`)
     expect(within(menu).getByRole('menuitem', { name: 'Stop task' })).toBeEnabled()
+  })
+
+  it('Off-hours card fits without sideways scroll', async () => {
+    server.use(http.get(`/api/services/${SERVICE_PAYMENTS.id}/offhours`, () => HttpResponse.json(SERVICE_OFFHOURS_ASLEEP)))
+    renderWithProviders(<OverviewTab service={SERVICE_PAYMENTS} />)
+    await screen.findByRole('region', { name: 'Off-hours' })
+    // jsdom has no layout: the card's buttons and reason must wrap inside the panel, as the stylesheet says.
+    expect(offHoursCss).toMatch(/\.actions\s*{[^}]*flex-wrap:\s*wrap/)
   })
 })
