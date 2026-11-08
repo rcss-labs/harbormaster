@@ -1,5 +1,5 @@
-// MSW fixtures for the Log search routes. The service-list and result fixtures are checked against the Go
-// contract in contract/contract.test.ts; the saved-search ones follow with the saved-searches API.
+// MSW fixtures for the Log search routes. All of them are checked against the Go contract in
+// contract/contract.test.ts.
 import { http, HttpResponse } from 'msw'
 import type { ListDTO } from '../api/types'
 import type { LogSearchResultDTO, LogSearchServiceDTO, SavedLogSearchDTO } from '../api/logSearch'
@@ -63,12 +63,23 @@ export const SAVED_LOG_SEARCHES: ListDTO<SavedLogSearchDTO> = {
     {
       id: 'saved-1',
       name: 'Payment errors',
-      query: 'ERROR',
+      query: 'filter @message like /ERROR/',
       service_ids: ['svc-payments'],
-      hidden_services: 0,
+      hidden_services: 1,
       range: '1h',
       from: null,
       to: null,
+      updated_at: FIXTURE_NOW,
+    },
+    {
+      id: 'saved-2',
+      name: 'Morning checkout',
+      query: '',
+      service_ids: ['svc-catalog'],
+      hidden_services: 0,
+      range: 'custom',
+      from: '2026-11-08T09:00:00Z',
+      to: '2026-11-08T10:00:00Z',
       updated_at: FIXTURE_NOW,
     },
   ],
@@ -82,7 +93,7 @@ export const logSearchHandlers = [
   http.get('/api/log-search/saved', () => HttpResponse.json(SAVED_LOG_SEARCHES)),
   http.post('/api/log-search/saved', async ({ request }) => {
     const body = (await request.json()) as Omit<SavedLogSearchDTO, 'id' | 'hidden_services' | 'updated_at'>
-    return HttpResponse.json({ ...SAVED_LOG_SEARCHES.items[0], ...body, id: 'saved-2', updated_at: FIXTURE_NOW }, { status: 201 })
+    return HttpResponse.json({ ...SAVED_LOG_SEARCHES.items[0], ...body, id: 'saved-3', hidden_services: 0, updated_at: FIXTURE_NOW })
   }),
   http.delete('/api/log-search/saved/:id', () => new HttpResponse(null, { status: 204 })),
 ]

@@ -1415,6 +1415,31 @@
     ],
     "to": "time"
   },
+  "logSearchSaved": {
+    "items": [
+      {
+        "from": {
+          "$null": "time"
+        },
+        "hidden_services": "number",
+        "id": "string",
+        "name": "string",
+        "query": "string",
+        "range": "string",
+        "service_ids": [
+          "string"
+        ],
+        "to": {
+          "$null": "time"
+        },
+        "updated_at": "time"
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time"
+  },
   "logSearchServices": {
     "items": [
       {

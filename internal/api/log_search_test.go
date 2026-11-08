@@ -536,3 +536,19 @@ func TestLogSearch_AuditsNotOperations(t *testing.T) {
 		t.Errorf("%d operation_log rows, want 0", operations)
 	}
 }
+
+// A service the caller cannot see makes the whole request 404, even when an earlier id is visible without Logs.
+func TestLogSearch_InvisibleIs404BeforeForbidden(t *testing.T) {
+	env := newLogSearchEnv(t, nil)
+	c := login(t, env.srv, "omer", testPassword)
+	for _, ids := range [][]string{{stagingWebID(), paymentsID()}, {paymentsID(), stagingWebID()}} {
+		resp := c.post("/api/log-search", searchReq(ids...))
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%v: status %d, want 404", ids, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	if n := env.fk.Calls()["StartQuery"]; n != 0 {
+		t.Errorf("StartQuery called %d times", n)
+	}
+}

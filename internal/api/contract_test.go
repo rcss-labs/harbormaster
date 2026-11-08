@@ -156,6 +156,7 @@ func contractShapes() map[string]any {
 		// log search
 		"logSearchServices": shapeOf(reflect.TypeFor[ListResponse[LogSearchServiceDTO]]()),
 		"logSearchResult":   shapeOf(reflect.TypeFor[LogSearchResultDTO]()),
+		"logSearchSaved":    shapeOf(reflect.TypeFor[ListResponse[SavedLogSearchDTO]]()),
 	}
 }
 

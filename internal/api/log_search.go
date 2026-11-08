@@ -211,54 +211,25 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Everything that can be checked without reading a service.
-	maxServices := cmp.Or(s.Cfg.LogSearchMaxServices, defaultLogSearchMaxServices)
 	ids := dedupe(req.ServiceIDs)
-	switch {
-	case len(ids) == 0:
-		s.fail(w, invalid("Choose at least one service."))
-		return
-	case len(ids) > maxServices:
-		s.fail(w, invalid(fmt.Sprintf("Choose at most %d services.", maxServices)))
-		return
-	}
-	now := s.now()
-	from, to, err := logSearchWindow(req.Range, req.From, req.To, now, cmp.Or(s.Cfg.LogSearchMaxRange, defaultLogSearchMaxRange))
+	from, to, err := s.checkLogSearchRequest(ids, req.Range, req.From, req.To, req.Query)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if utf8.RuneCountInString(req.Query) > maxLogSearchQueryChars {
-		s.fail(w, invalid("The query is too long (at most 4,000 characters)."))
-		return
-	}
 
-	// 2. Each service: it must exist for this caller (404) and the caller needs Logs on it (403).
+	// 2. Each service the caller may search.
 	subject := auth.SubjectFrom(ctx)
 	user, _ := auth.UserFrom(ctx)
-	var services []searchedService
-	seen := map[string]bool{}
-	for _, id := range ids {
-		key, err := model.ParseServiceID(id)
-		if err != nil {
-			s.fail(w, invalid("That is not a valid service."))
-			return
-		}
-		if seen[key.ID()] {
-			continue
-		}
-		seen[key.ID()] = true
-		sel, err := s.serviceLogScope(ctx, subject, key)
-		var forbidden errLogsForbidden
-		if errors.As(err, &forbidden) {
-			forbiddenAction(w, authz.Logs, forbidden.tag)
-			return
-		}
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		services = append(services, searchedService{key: key, sel: sel})
+	services, err := s.resolveSearchServices(ctx, subject, ids)
+	var forbidden errLogsForbidden
+	if errors.As(err, &forbidden) {
+		forbiddenAction(w, authz.Logs, forbidden.tag)
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 
 	// 3. Services with nothing in CloudWatch are reported, not queried.
@@ -361,6 +332,72 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, result)
 	}
+}
+
+// checkLogSearchRequest is the validation both log search endpoints share, all of it before any service is
+// read: the service count, the time window and the query length. ids must already be deduplicated.
+func (s *Server) checkLogSearchRequest(ids []string, rangeName string, from, to *time.Time, query string) (time.Time, time.Time, error) {
+	maxServices := cmp.Or(s.Cfg.LogSearchMaxServices, defaultLogSearchMaxServices)
+	var start, end time.Time
+	switch {
+	case len(ids) == 0:
+		return start, end, invalid("Choose at least one service.")
+	case len(ids) > maxServices:
+		return start, end, invalid(fmt.Sprintf("Choose at most %d services.", maxServices))
+	}
+	start, end, err := logSearchWindow(rangeName, from, to, s.now(), cmp.Or(s.Cfg.LogSearchMaxRange, defaultLogSearchMaxRange))
+	if err != nil {
+		return start, end, err
+	}
+	if utf8.RuneCountInString(query) > maxLogSearchQueryChars {
+		return start, end, invalid("The query is too long (at most 4,000 characters).")
+	}
+	return start, end, nil
+}
+
+// resolveSearchServices authorizes the services a log search names, for a search and for a saved search alike.
+// Every id is parsed and looked up before any answer: an id the caller cannot see makes the whole request a
+// not-found (D3), and only when none is missing is the first id without Logs returned as errLogsForbidden.
+func (s *Server) resolveSearchServices(ctx context.Context, subject authz.Subject, ids []string) ([]searchedService, error) {
+	keys := make([]model.ServiceKey, 0, len(ids))
+	for _, id := range ids {
+		key, err := model.ParseServiceID(id)
+		if err != nil {
+			return nil, invalid("That is not a valid service.")
+		}
+		keys = append(keys, key)
+	}
+	var services []searchedService
+	var firstForbidden error
+	notFound := false
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if seen[key.ID()] {
+			continue
+		}
+		seen[key.ID()] = true
+		sel, err := s.serviceLogScope(ctx, subject, key)
+		var forbidden errLogsForbidden
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			notFound = true
+		case errors.As(err, &forbidden):
+			if firstForbidden == nil {
+				firstForbidden = forbidden
+			}
+		case err != nil:
+			return nil, err
+		default:
+			services = append(services, searchedService{key: key, sel: sel})
+		}
+	}
+	if notFound {
+		return nil, store.ErrNotFound
+	}
+	if firstForbidden != nil {
+		return nil, firstForbidden
+	}
+	return services, nil
 }
 
 func searchQueryError(err error) error {
