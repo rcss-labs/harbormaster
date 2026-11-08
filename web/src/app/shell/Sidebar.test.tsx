@@ -210,6 +210,17 @@ describe('Sidebar Tasks badges', () => {
 })
 
 describe('Sidebar Analytics', () => {
+  it('shows Security under Insights, after Analytics and without a count', async () => {
+    renderApp('/')
+    const link = await screen.findByRole('link', { name: /^Security/ })
+    expect(link).toHaveTextContent(/^Security$/)
+    expect(link.querySelector('svg')).not.toBeNull()
+    const names = within(screen.getByRole('navigation', { name: 'Main' }))
+      .getAllByRole('link')
+      .map((item) => item.textContent?.replace(/\d+$/, ''))
+    expect(names.indexOf('Security')).toBe(names.indexOf('Analytics') + 1)
+  })
+
   it('shows Analytics between Storage and Settings', async () => {
     renderApp('/')
     await screen.findByRole('link', { name: /^Analytics/ })
@@ -217,7 +228,7 @@ describe('Sidebar Analytics', () => {
       .getAllByRole('link')
       .map((link) => link.textContent?.replace(/\d+$/, ''))
     expect(names.indexOf('Analytics')).toBe(names.indexOf('Storage') + 1)
-    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 1)
+    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 2)
   })
 
   it('is active on every analytics tab', async () => {
@@ -243,6 +254,7 @@ describe('Sidebar groups', () => {
       'Networks',
       'Storage',
       'Analytics',
+      'Security',
       'Settings',
     ])
     // Every nav item carries an icon.
