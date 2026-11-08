@@ -263,3 +263,19 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 - Copyright: Copyright (c) 2012 Dave Grijalva; Copyright (c) 2021 golang-jwt maintainers
 - Source: https://github.com/golang-jwt/jwt (licence file: `LICENSE` at tag v4.5.2)
 - Note: required by the module graph (via crewjam/saml's `samlsp` package); Harbormaster does not import it.
+
+### github.com/anchore/syft
+
+- Version: v1.57.0
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Anchore, Inc.
+- Source: https://github.com/anchore/syft (licence file: `LICENSE` at tag v1.57.0)
+- Note: not vendored and not a Go module dependency. The release binary is downloaded at image build time, verified with cosign and its signed checksums, and shipped unmodified at `/usr/local/bin/syft` in the scanner image (`Dockerfile.scanner`).
+
+### github.com/anchore/grype
+
+- Version: v0.121.2
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Anchore, Inc.
+- Source: https://github.com/anchore/grype (licence file: `LICENSE` at tag v0.121.2)
+- Note: not vendored and not a Go module dependency. The release binary is downloaded at image build time, verified with cosign and its signed checksums, and shipped unmodified at `/usr/local/bin/grype` in the scanner image (`Dockerfile.scanner`).

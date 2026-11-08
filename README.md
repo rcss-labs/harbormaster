@@ -56,6 +56,8 @@ Replace `<acct>` with your AWS account ID. The image must be pinned to a tag; th
 
 `make image` builds `--platform linux/amd64` by default, matching the module's default `cpu_architecture = "X86_64"`, whatever machine you build on (Apple silicon included; the Go and web stages cross-compile natively, so no emulation is needed to build). To run on Graviton, set `cpu_architecture = "ARM64"` in the module and build with `make image VERSION=v1.0.0 ARCH=arm64`. The image architecture must match the module setting, otherwise ECS tasks fail with `exec format error`.
 
+The image-security feature runs scans in a separate scanner image: `make scanner-image VERSION=v1.0.0` (same `ARCH` rule) builds `harbormaster-scanner:v1.0.0` from `Dockerfile.scanner`, and `make check-scanner-image VERSION=v1.0.0` checks it. The build downloads Syft and Grype, verifies their cosign signatures and checksums (`tools/scanner-verify.sh`, versions and identities pinned as `ARG`s) and fails if anything does not verify. Tag and push it to ECR the same way as the main image.
+
 ### Terraform and the harbormaster module
 
 Deploy Harbormaster with the `harbormaster` module, pinned to the release tag:

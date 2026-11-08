@@ -69,7 +69,7 @@ test-it-exec:
 # ARCH is the image architecture. The default matches the module's cpu_architecture = "X86_64"; pass ARCH=arm64
 # together with cpu_architecture = "ARM64". check-image runs the image as built (emulated on a different host arch).
 ARCH ?= amd64
-.PHONY: image check-image release release-check
+.PHONY: image check-image release release-check scanner-image check-scanner-image
 image:
 	docker build --platform linux/$(ARCH) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
 
@@ -88,10 +88,29 @@ check-image:
 		tools/check-image.sh harbormaster:$(VERSION)-check; \
 	fi
 
+# scanner-image builds the scanner task image (Dockerfile.scanner): the harbormaster-scanner binary plus Syft and
+# Grype, downloaded and verified (cosign, signed checksums) inside the build. Nothing is pushed.
+scanner-image:
+	docker build -f Dockerfile.scanner --platform linux/$(ARCH) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-scanner:$(VERSION) .
+
+# check-scanner-image follows check-image: runtime checks on the shipped image when this host can execute it,
+# otherwise static checks on it and runtime checks on a native build of the same Dockerfile.
+check-scanner-image:
+	@if tools/check-scanner-image.sh --can-run harbormaster-scanner:$(VERSION); then \
+		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION); \
+	else \
+		native="$$(docker info --format '{{.Architecture}}' | sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/')"; \
+		echo "check-scanner-image: host cannot run harbormaster-scanner:$(VERSION); static checks on it, runtime checks on a native $$native build"; \
+		CHECK_IMAGE_STATIC_ONLY=1 tools/check-scanner-image.sh harbormaster-scanner:$(VERSION) && \
+		docker build -q -f Dockerfile.scanner --platform linux/$$native --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-scanner:$(VERSION)-check . >/dev/null && \
+		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION)-check; \
+	fi
+
 # release runs its prerequisites in order (do not use make -j). The build step generates the web app,
 # so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
-release: lint test vulncheck build image check-image
+release: lint test vulncheck build image check-image scanner-image check-scanner-image
 	@echo "image: harbormaster:$(VERSION)"
+	@echo "scanner image: harbormaster-scanner:$(VERSION)"
 	bin/harbormaster version
 
 # vulncheck scans the call graph of every package against the Go vulnerability database (needs network access).

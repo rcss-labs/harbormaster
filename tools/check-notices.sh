@@ -49,6 +49,8 @@ requiredNoticeStrings=(
 	"mattermost/xml-roundtrip-validator"
 	"jonboulle/clockwork"
 	"golang-jwt/jwt"
+	"anchore/syft"
+	"anchore/grype"
 )
 if [[ ! -f "$notices" ]]; then
 	fail "$notices is missing"
