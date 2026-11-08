@@ -13,7 +13,8 @@ type syftDocument struct {
 	Artifacts []json.RawMessage `json:"artifacts"`
 	Source    struct {
 		Target struct {
-			ManifestDigest string `json:"manifestDigest"`
+			ManifestDigest string   `json:"manifestDigest"`
+			RepoDigests    []string `json:"repoDigests"`
 		} `json:"target"`
 	} `json:"source"`
 }
@@ -54,4 +55,22 @@ func parseToolVersion(output []byte) string {
 		}
 	}
 	return ""
+}
+
+// sbomNamesDigest reports whether Syft's source is the image the job named:
+// one of its repo digests ends in @digest, or its manifest digest is digest.
+func sbomNamesDigest(sbom []byte, digest string) bool {
+	doc, err := parseSyftDocument(sbom)
+	if err != nil {
+		return false
+	}
+	if doc.Source.Target.ManifestDigest == digest {
+		return true
+	}
+	for _, repoDigest := range doc.Source.Target.RepoDigests {
+		if strings.HasSuffix(repoDigest, "@"+digest) {
+			return true
+		}
+	}
+	return false
 }

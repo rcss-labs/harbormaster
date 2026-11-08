@@ -33,3 +33,10 @@ func TestResolvePlatformDigest_SingleManifestIsItself(t *testing.T) {
 		t.Errorf("digest=%q isIndex=%v err=%v, want no index and an empty digest (the caller keeps its own)", digest, isIndex, err)
 	}
 }
+
+func TestResolvePlatformDigest_RejectsMalformedDigest(t *testing.T) {
+	index := strings.Replace(string(testdata(t, "manifest_index.json")), digestAMD64, "sha256:zz; --evil", 1)
+	if digest, _, err := ResolvePlatformDigest([]byte(index), mediaIndex, "linux/amd64"); err == nil {
+		t.Errorf("digest %q accepted, want an error for a malformed digest", digest)
+	}
+}

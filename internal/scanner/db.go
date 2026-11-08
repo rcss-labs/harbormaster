@@ -84,6 +84,7 @@ func (r *Runner) grypeEnv(maxAgeHours int) []string {
 	return []string{
 		"HOME=" + r.Opts.WorkDir,
 		"TMPDIR=" + r.tmpDir(),
+		"GRYPE_CHECK_FOR_APP_UPDATE=false",
 		"GRYPE_DB_AUTO_UPDATE=false",
 		"GRYPE_DB_REQUIRE_UPDATE_CHECK=false",
 		"GRYPE_DB_VALIDATE_AGE=true",

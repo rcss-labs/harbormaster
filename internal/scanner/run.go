@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,6 +18,12 @@ import (
 	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
 
 	"github.com/rcss-labs/harbormaster/internal/scan"
+)
+
+// Caps on files the tools write; variables so tests can lower them.
+var (
+	maxSBOMBytes        int64 = 256 << 20
+	maxGrypeReportBytes int64 = 64 << 20
 )
 
 const (
@@ -120,7 +127,7 @@ func (r *Runner) Run(ctx context.Context) (exitCode int) {
 func (r *Runner) toolVersion(ctx context.Context, path string) string {
 	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
-	res, err := r.Cmd.Run(ctx, path, []string{"version"}, []string{"HOME=" + r.Opts.WorkDir}, toolStdoutMax)
+	res, err := r.Cmd.Run(ctx, path, []string{"version"}, []string{"HOME=" + r.Opts.WorkDir, "SYFT_CHECK_FOR_APP_UPDATE=false", "GRYPE_CHECK_FOR_APP_UPDATE=false"}, toolStdoutMax)
 	if err != nil || res.ExitCode != 0 {
 		return ""
 	}
@@ -137,7 +144,7 @@ func (r *Runner) scanImages(ctx context.Context, job scan.Job, started time.Time
 				Digest: img.Digest, Status: scan.OutcomeSkipped, FailureDetail: "task time budget used up"})
 			continue
 		}
-		outcomes = append(outcomes, r.scanImage(ctx, job, img))
+		outcomes = append(outcomes, r.scanImage(ctx, job, img, started))
 	}
 	return outcomes
 }
@@ -154,12 +161,15 @@ func awsOutcome(digest string, err error) scan.ImageOutcome {
 	return failed(digest, scan.CodeTaskFailed, err.Error())
 }
 
-func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage) scan.ImageOutcome {
+func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage, started time.Time) scan.ImageOutcome {
 	reg, ok := job.Registries[img.AccountID]
 	if !ok {
 		return failed(img.Digest, scan.CodeUnsupportedRegistry, "no scan role for this registry")
 	}
 	ref := scan.ParseImageRef(img.ImageRef)
+	if ref.Kind != scan.KindECR || ref.AccountID != img.AccountID || ref.Region != img.Region {
+		return failed(img.Digest, scan.CodeUnsupportedRegistry, "image is not in the job's ECR registry")
+	}
 	client, err := r.ecrClient(ctx, reg, img.Region)
 	if err != nil {
 		return awsOutcome(img.Digest, err)
@@ -185,7 +195,7 @@ func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage)
 	if platform == "" {
 		platform = defaultPlatform
 	}
-	source, platformDigest, err := r.resolveSource(ctx, client, img, ref, platform)
+	source, platformDigest, fellBack, err := r.resolveSource(ctx, client, img, ref, platform)
 	if err != nil {
 		return awsOutcome(img.Digest, err)
 	}
@@ -201,10 +211,13 @@ func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage)
 	if imageTimeout <= 0 {
 		imageTimeout = defaultImageTimeout
 	}
+	if budget := time.Duration(job.Limits.TaskBudgetSeconds) * time.Second; budget > 0 {
+		imageTimeout = min(imageTimeout, budget-r.Opts.Now().Sub(started))
+	}
 	syftCtx, cancelSyft := context.WithTimeout(ctx, imageTimeout)
 	defer cancelSyft()
 	syftRes, err := r.Cmd.Run(syftCtx, r.Opts.SyftPath,
-		[]string{"registry:" + source, "--platform", platform, "-o", "syft-json=" + sbomPath},
+		[]string{"registry:" + source, "--platform=" + platform, "-o", "syft-json=" + sbomPath},
 		r.syftEnv(ref.Host, auth), toolStdoutMax)
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
@@ -218,7 +231,10 @@ func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage)
 		return failed(img.Digest, scan.CodeTaskFailed, syftRes.StderrTail)
 	}
 
-	sbom, err := os.ReadFile(sbomPath)
+	sbom, err := readCapped(sbomPath, maxSBOMBytes)
+	if errors.Is(err, errTooLarge) {
+		return failed(img.Digest, scan.CodeResultTooLarge, "SBOM is larger than the limit")
+	}
 	if err != nil {
 		return failed(img.Digest, scan.CodeTaskFailed, "syft wrote no SBOM")
 	}
@@ -226,8 +242,13 @@ func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage)
 	if err != nil {
 		return failed(img.Digest, scan.CodeTaskFailed, err.Error())
 	}
-	if platformDigest == "" { // tag fallback: Syft resolved the platform manifest
+	if fellBack {
+		// ECR would not serve the manifest, so Syft chose the platform. Only
+		// accept it when the SBOM proves it is the image the job named.
 		platformDigest = sbomManifestDigest(sbom)
+		if platformDigest == "" || !sbomNamesDigest(sbom, img.Digest) {
+			return failed(img.Digest, scan.CodeTaskFailed, "scanned image does not match the job's digest")
+		}
 	}
 
 	findings, err := r.grypeFindings(ctx, job, sbomPath, filepath.Join(workDir, "grype.json"))
@@ -258,33 +279,69 @@ type codedError struct{ code, detail string }
 
 func (e codedError) Error() string { return e.detail }
 
-// resolveSource decides what Syft pulls: the platform manifest by digest, or
-// (D1) the tag when ECR will not serve the manifest by digest. In the tag case
-// platformDigest is empty and is read from the SBOM afterwards.
-func (r *Runner) resolveSource(ctx context.Context, client ECRClient, img scan.JobImage, ref scan.Ref, platform string) (source, platformDigest string, err error) {
+// resolveSource decides what Syft pulls. Normally it is the platform manifest
+// by digest. When ECR cannot serve the manifest by digest (D1: not found or an
+// unsupported type, as an error or a BatchGetImage failure), Syft pulls the job
+// digest itself and chooses the platform; fellBack is then true and the caller
+// must verify the SBOM. The job's digest is always the anchor, never the tag.
+func (r *Runner) resolveSource(ctx context.Context, client ECRClient, img scan.JobImage, ref scan.Ref, platform string) (source, platformDigest string, fellBack bool, err error) {
 	got, err := client.BatchGetImage(ctx, &ecr.BatchGetImageInput{
 		RegistryId: aws.String(img.AccountID), RepositoryName: aws.String(ref.Repository),
 		ImageIds:           []ecrtypes.ImageIdentifier{{ImageDigest: aws.String(img.Digest)}},
 		AcceptedMediaTypes: []string{mediaOCIIndex, mediaDockerList, mediaOCIManifest, mediaDockerV2},
 	})
-	if err == nil && len(got.Images) == 0 {
-		err = errors.New("image manifest not returned")
-	}
-	if err != nil {
-		if _, coded := awsFailureCode(err); coded || img.Tag == "" {
-			return "", "", err
+	switch {
+	case err != nil:
+		if !fallbackErrorCodes[apiErrorCode(err)] {
+			return "", "", false, err
 		}
-		return img.ImageRef + ":" + img.Tag, "", nil
+	case len(got.Images) == 0:
+		if len(got.Failures) == 0 || !fallbackFailureCodes[string(got.Failures[0].FailureCode)] {
+			return "", "", false, errors.New("ECR did not return the image manifest")
+		}
+	default:
+		resolved, _, err := ResolvePlatformDigest([]byte(aws.ToString(got.Images[0].ImageManifest)),
+			aws.ToString(got.Images[0].ImageManifestMediaType), platform)
+		if err != nil {
+			return "", "", false, err
+		}
+		if resolved == "" {
+			resolved = img.Digest
+		}
+		return img.ImageRef + "@" + resolved, resolved, false, nil
 	}
-	resolved, _, err := ResolvePlatformDigest([]byte(aws.ToString(got.Images[0].ImageManifest)),
-		aws.ToString(got.Images[0].ImageManifestMediaType), platform)
+	return img.ImageRef + "@" + img.Digest, "", true, nil
+}
+
+var (
+	fallbackErrorCodes   = map[string]bool{"ImageNotFoundException": true, "UnsupportedImageTypeException": true}
+	fallbackFailureCodes = map[string]bool{"ImageNotFound": true, "ImageReferencedByManifestList": true}
+)
+
+var errTooLarge = errors.New("file is larger than the limit")
+
+// readCapped reads a tool's output file, refusing one larger than limit.
+func readCapped(path string, limit int64) ([]byte, error) {
+	info, err := os.Stat(path)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
-	if resolved == "" {
-		resolved = img.Digest
+	if info.Size() > limit {
+		return nil, errTooLarge
 	}
-	return img.ImageRef + "@" + resolved, resolved, nil
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, errTooLarge
+	}
+	return data, nil
 }
 
 func (r *Runner) ecrClient(ctx context.Context, reg scan.JobRegistry, region string) (ECRClient, error) {
@@ -318,6 +375,7 @@ func (r *Runner) syftEnv(host string, auth registryAuth) []string {
 	return []string{
 		"HOME=" + r.Opts.WorkDir,
 		"TMPDIR=" + r.tmpDir(),
+		"SYFT_CHECK_FOR_APP_UPDATE=false",
 		"SYFT_CACHE_DIR=" + filepath.Join(r.Opts.WorkDir, "cache", "syft"),
 		"SYFT_REGISTRY_AUTH_AUTHORITY=" + host,
 		"SYFT_REGISTRY_AUTH_USERNAME=" + auth.username,
@@ -338,7 +396,10 @@ func (r *Runner) grypeFindings(ctx context.Context, job scan.Job, sbomPath, outP
 	case res.ExitCode != 0:
 		return nil, codedError{scan.CodeTaskFailed, res.StderrTail}
 	}
-	data, err := os.ReadFile(outPath)
+	data, err := readCapped(outPath, maxGrypeReportBytes)
+	if errors.Is(err, errTooLarge) {
+		return nil, codedError{scan.CodeResultTooLarge, "grype report is larger than the limit"}
+	}
 	if err != nil {
 		return nil, errors.New("grype wrote no report")
 	}

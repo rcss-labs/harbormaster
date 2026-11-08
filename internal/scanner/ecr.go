@@ -54,7 +54,8 @@ func NewAssumedECRClient(base aws.Config) func(ctx context.Context, role, extern
 // ResolvePlatformDigest picks the manifest of platform ("linux/arm64",
 // optionally with a variant) from an OCI index or Docker manifest list.
 // For a single-image manifest it returns an empty digest and isIndex false:
-// the image digest is already the platform digest.
+// the contract is that "" means the caller's own image digest is already the
+// platform digest. A digest from the index must match sha256:<64 hex>.
 func ResolvePlatformDigest(manifest []byte, mediaType, platform string) (digest string, isIndex bool, err error) {
 	if mediaType != mediaOCIIndex && mediaType != mediaDockerList {
 		return "", false, nil
@@ -82,6 +83,9 @@ func ResolvePlatformDigest(manifest []byte, mediaType, platform string) (digest 
 	for _, m := range index.Manifests {
 		if m.Platform.OS == parts[0] && m.Platform.Architecture == parts[1] &&
 			(len(parts) < 3 || m.Platform.Variant == parts[2]) {
+			if !sbomDigestPattern.MatchString(m.Digest) {
+				return "", true, errors.New("image index lists a malformed digest")
+			}
 			return m.Digest, true, nil
 		}
 	}
@@ -90,11 +94,7 @@ func ResolvePlatformDigest(manifest []byte, mediaType, platform string) (digest 
 
 // awsFailureCode maps an AWS error to a coded outcome; ok is false for other errors.
 func awsFailureCode(err error) (code string, ok bool) {
-	var apiErr smithy.APIError
-	if !errors.As(err, &apiErr) {
-		return "", false
-	}
-	switch apiErr.ErrorCode() {
+	switch apiErrorCode(err) {
 	case accessDeniedCode, accessDeniedCode2:
 		return scan.CodePullDenied, true
 	case throttlingCode:
@@ -123,4 +123,13 @@ func fetchRegistryAuth(ctx context.Context, client ECRClient) (registryAuth, err
 		return registryAuth{}, errors.New("ECR authorization token is not valid")
 	}
 	return registryAuth{username: username, password: password}, nil
+}
+
+// apiErrorCode is the AWS error code of err, or "" for any other error.
+func apiErrorCode(err error) string {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode()
+	}
+	return ""
 }

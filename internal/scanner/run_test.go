@@ -92,9 +92,10 @@ func (m *memS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s
 }
 
 type call struct {
-	name string
-	args []string
-	env  []string
+	name    string
+	args    []string
+	env     []string
+	timeout time.Duration // time left on the context when the call started; 0 when it had no deadline
 }
 
 // fakeCmd stands in for Syft and Grype: it writes testdata where the real
@@ -110,8 +111,11 @@ type fakeCmd struct {
 	onSyftScan func()
 }
 
-func (f *fakeCmd) Run(_ context.Context, name string, args []string, env []string, _ int64) (CommandResult, error) {
+func (f *fakeCmd) Run(ctx context.Context, name string, args []string, env []string, _ int64) (CommandResult, error) {
 	c := call{name: name, args: args, env: env}
+	if deadline, ok := ctx.Deadline(); ok {
+		c.timeout = time.Until(deadline)
+	}
 	f.calls = append(f.calls, c)
 	isSyft := strings.HasSuffix(name, "syft")
 	switch {
@@ -179,6 +183,7 @@ type fakeECR struct {
 	describeErr error
 	tokenErr    error
 	batchErr    map[string]error
+	batchFail   map[string]string // digest -> BatchGetImage failure code, returned with no error
 	tokenCalls  int
 	batchCalls  []string
 }
@@ -210,6 +215,9 @@ func (f *fakeECR) BatchGetImage(_ context.Context, in *ecr.BatchGetImageInput, _
 	f.batchCalls = append(f.batchCalls, digest)
 	if err := f.batchErr[digest]; err != nil {
 		return nil, err
+	}
+	if code := f.batchFail[digest]; code != "" {
+		return &ecr.BatchGetImageOutput{Failures: []ecrtypes.ImageFailure{{FailureCode: ecrtypes.ImageFailureCode(code)}}}, nil
 	}
 	m, ok := f.manifests[digest]
 	if !ok {
@@ -257,7 +265,7 @@ func newHarness(t *testing.T, images ...scan.JobImage) *harness {
 			digestIndex:  {mediaIndex, testdata(t, "manifest_index.json")},
 			digestSingle: {mediaDocker, testdata(t, "manifest_image.json")},
 		},
-		sizes: map[string]int64{}, batchErr: map[string]error{},
+		sizes: map[string]int64{}, batchErr: map[string]error{}, batchFail: map[string]string{},
 	}
 	h.runner = &Runner{
 		Opts: Options{Bucket: "bucket", WorkDir: t.TempDir(), SyftPath: "/bin/syft", GrypePath: "/bin/grype",
@@ -376,6 +384,9 @@ func TestRun_ScanWritesResultAndManifest(t *testing.T) {
 	if len(scans) != 2 {
 		t.Fatalf("syft scans = %d, want 2", len(scans))
 	}
+	if !contains(scans[0].args, "--platform=linux/amd64") {
+		t.Errorf("syft args = %v, want --platform=linux/amd64 in one argument", scans[0].args)
+	}
 	if got := scans[0].args[0]; got != "registry:"+testRepoRef+"@"+digestAMD64 {
 		t.Errorf("syft source = %q, want the amd64 platform digest", got)
 	}
@@ -387,6 +398,9 @@ func TestRun_ScanWritesResultAndManifest(t *testing.T) {
 		if !strings.Contains(env, want) {
 			t.Errorf("syft env lacks %q", want)
 		}
+	}
+	if !contains(scans[0].env, "SYFT_CHECK_FOR_APP_UPDATE=false") {
+		t.Error("syft env lacks SYFT_CHECK_FOR_APP_UPDATE=false")
 	}
 	for _, kv := range scans[0].env {
 		if strings.HasPrefix(kv, "AWS_") {
@@ -406,18 +420,163 @@ func TestRun_ScanWritesResultAndManifest(t *testing.T) {
 	}
 }
 
-func TestRun_FallsBackToTagWhenDigestFails(t *testing.T) {
+func contains(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRun_FallsBackWhenECRCannotServeTheDigest(t *testing.T) {
+	for _, failure := range []string{"ImageNotFound", "ImageReferencedByManifestList"} {
+		t.Run(failure, func(t *testing.T) {
+			h := newHarness(t, image(digestIndex, "edge"))
+			h.ecr.batchFail[digestIndex] = failure
+			if code := h.run(); code != 0 {
+				t.Fatalf("exit code = %d, want 0", code)
+			}
+			scans := h.cmd.scanCalls("syft")
+			if len(scans) != 1 || scans[0].args[0] != "registry:"+testRepoRef+"@"+digestIndex || !contains(scans[0].args, "--platform=linux/amd64") {
+				t.Fatalf("syft scans = %+v, want one scan anchored on the job digest with a platform", scans)
+			}
+			if got := h.result(digestIndex).PlatformDigest; got != digestSBOM {
+				t.Errorf("platform digest = %s, want the SBOM's source manifestDigest %s", got, digestSBOM)
+			}
+		})
+	}
+}
+
+func TestRun_FallbackNeverFiledUnderADifferentImage(t *testing.T) {
+	otherSBOM := func(extra string) func(c call) (CommandResult, error, bool) {
+		return func(c call) (CommandResult, error, bool) {
+			doc := `{"artifacts":[{"id":"1"}],"source":{"target":{` + extra + `}}}`
+			for _, arg := range c.args {
+				if path, ok := strings.CutPrefix(arg, "syft-json="); ok {
+					if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			return CommandResult{}, nil, true
+		}
+	}
+	other := "sha256:" + strings.Repeat("f", 64)
+	cases := map[string]string{
+		"the scanned image is another digest": `"repoDigests":["` + testRepoRef + `@` + other + `"],"manifestDigest":"` + other + `"`,
+		"no manifest digest in the SBOM":      `"repoDigests":["` + testRepoRef + `@` + digestIndex + `"]`,
+	}
+	for name, target := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, image(digestIndex, "edge"))
+			h.ecr.batchFail[digestIndex] = "ImageNotFound"
+			h.cmd.syftFn = otherSBOM(target)
+			if code := h.run(); code != 0 {
+				t.Fatalf("exit code = %d, want 0", code)
+			}
+			if o := h.outcome(digestIndex); o.Status != scan.OutcomeFailed || o.FailureCode != scan.CodeTaskFailed {
+				t.Errorf("outcome = %+v, want failed/task_failed", o)
+			}
+			if h.hasResult(digestIndex) {
+				t.Error("no result may be written for an image the job did not name")
+			}
+		})
+	}
+}
+
+func TestRun_UnknownBatchGetImageErrorDoesNotFallBack(t *testing.T) {
 	h := newHarness(t, image(digestIndex, "edge"))
-	h.ecr.batchErr[digestIndex] = errors.New("manifest unknown")
+	h.ecr.batchErr[digestIndex] = errors.New("connection reset by peer")
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if o := h.outcome(digestIndex); o.Status != scan.OutcomeFailed || o.FailureCode != scan.CodeTaskFailed {
+		t.Errorf("outcome = %+v, want failed/task_failed", o)
+	}
+	if n := len(h.cmd.scanCalls("syft")); n != 0 {
+		t.Errorf("syft ran %d times after an unknown ECR error", n)
+	}
+}
+
+func TestRun_RefusesImagesOutsideTheJobsECRRegistry(t *testing.T) {
+	foreign := image(digestSingle, "stable")
+	foreign.ImageRef = "evil.example.com/web"
+	wrongRegion := image(digestIndex, "edge")
+	wrongRegion.ImageRef = testAccount + ".dkr.ecr.eu-west-1.amazonaws.com/web"
+	h := newHarness(t, foreign, wrongRegion)
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	for _, digest := range []string{digestSingle, digestIndex} {
+		if o := h.outcome(digest); o.Status != scan.OutcomeFailed || o.FailureCode != scan.CodeUnsupportedRegistry {
+			t.Errorf("outcome for %s = %+v, want failed/unsupported_registry", digest, o)
+		}
+	}
+	if h.ecr.tokenCalls != 0 || len(h.assumed) != 0 {
+		t.Errorf("tokens=%d assumed=%v, want no credentials used for a foreign host", h.ecr.tokenCalls, h.assumed)
+	}
+}
+
+func TestRun_ToolFilesOverTheCapFailTheImage(t *testing.T) {
+	t.Run("sbom", func(t *testing.T) {
+		old := maxSBOMBytes
+		maxSBOMBytes = 100
+		t.Cleanup(func() { maxSBOMBytes = old })
+		h := newHarness(t, image(digestSingle, "stable"))
+		if code := h.run(); code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if o := h.outcome(digestSingle); o.Status != scan.OutcomeFailed || o.FailureCode != scan.CodeResultTooLarge {
+			t.Errorf("outcome = %+v, want failed/result_too_large", o)
+		}
+		if h.hasResult(digestSingle) || len(h.cmd.scanCalls("grype")) != 0 {
+			t.Error("grype must not run and no result may be written")
+		}
+	})
+	t.Run("grype report", func(t *testing.T) {
+		old := maxGrypeReportBytes
+		maxGrypeReportBytes = 100
+		t.Cleanup(func() { maxGrypeReportBytes = old })
+		h := newHarness(t, image(digestSingle, "stable"))
+		if code := h.run(); code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if o := h.outcome(digestSingle); o.Status != scan.OutcomeFailed || o.FailureCode != scan.CodeResultTooLarge {
+			t.Errorf("outcome = %+v, want failed/result_too_large", o)
+		}
+		if h.hasResult(digestSingle) {
+			t.Error("no result may be written")
+		}
+	})
+}
+
+func TestRun_ImageTimeoutIsCappedByTheRemainingBudget(t *testing.T) {
+	h := newHarness(t, image(digestSingle, "stable"))
+	h.job.Limits.TaskBudgetSeconds = 60
+	h.job.Limits.ImageTimeoutSeconds = 600
 	if code := h.run(); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	scans := h.cmd.scanCalls("syft")
-	if len(scans) != 1 || scans[0].args[0] != "registry:"+testRepoRef+":edge" {
-		t.Fatalf("syft scans = %+v, want one scan of the tag reference", scans)
+	if len(scans) != 1 || scans[0].timeout <= 0 || scans[0].timeout > 60*time.Second {
+		t.Fatalf("syft timeout = %v, want at most the 60s budget", scans[0].timeout)
 	}
-	if got := h.result(digestIndex).PlatformDigest; got != digestSBOM {
-		t.Errorf("platform digest = %s, want the SBOM's source manifestDigest %s", got, digestSBOM)
+}
+
+func TestRun_ToolsDoNotCheckForUpdates(t *testing.T) {
+	h := newHarness(t, image(digestSingle, "stable"))
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	for _, c := range h.cmd.calls {
+		want := "GRYPE_CHECK_FOR_APP_UPDATE=false"
+		if strings.HasSuffix(c.name, "syft") {
+			want = "SYFT_CHECK_FOR_APP_UPDATE=false"
+		}
+		if !contains(c.env, want) {
+			t.Errorf("%s %v env lacks %s", c.name, c.args, want)
+		}
 	}
 }
 
@@ -553,6 +712,9 @@ func TestRun_FailureCodes(t *testing.T) {
 		}, scan.CodePullDenied, ""},
 		{"access denied on token", func(h *harness) {
 			h.ecr.tokenErr = &smithy.GenericAPIError{Code: "AccessDenied", Message: "no"}
+		}, scan.CodePullDenied, ""},
+		{"access denied on batch get", func(h *harness) {
+			h.ecr.batchErr[digestSingle] = &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "no"}
 		}, scan.CodePullDenied, ""},
 		{"throttled", func(h *harness) {
 			h.ecr.describeErr = &smithy.GenericAPIError{Code: "ThrottlingException", Message: "slow down"}

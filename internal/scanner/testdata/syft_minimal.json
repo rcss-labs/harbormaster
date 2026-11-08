@@ -4,6 +4,6 @@
     {"id": "2", "name": "zlib", "version": "1.2.11", "type": "deb"},
     {"id": "3", "name": "busybox", "version": "1.35.0", "type": "binary"}
   ],
-  "source": {"type": "image", "target": {"manifestDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}},
+  "source": {"type": "image", "target": {"repoDigests": ["111111111111.dkr.ecr.us-east-1.amazonaws.com/web@sha256:1111111111111111111111111111111111111111111111111111111111111111"], "manifestDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}},
   "descriptor": {"name": "syft", "version": "1.57.0"}
 }

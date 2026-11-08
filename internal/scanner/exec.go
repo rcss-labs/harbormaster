@@ -9,6 +9,9 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
+	"unicode/utf8"
 )
 
 const maxStderrTail = 256
@@ -28,7 +31,10 @@ type Command interface {
 }
 
 // OSCommand runs programs with os/exec.
-type OSCommand struct{}
+type OSCommand struct {
+	// WaitDelay bounds how long Run waits for output pipes after the process ends or is killed.
+	WaitDelay time.Duration
+}
 
 type limitedBuffer struct {
 	buf bytes.Buffer
@@ -42,31 +48,67 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil // excess output is dropped, not an error
 }
 
-func (OSCommand) Run(ctx context.Context, name string, args []string, env []string, stdoutMax int64) (CommandResult, error) {
+// tailBuffer keeps only the last max bytes written.
+type tailBuffer struct {
+	buf []byte
+	max int
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.max {
+		t.buf = append(t.buf[:0], t.buf[len(t.buf)-t.max:]...)
+	}
+	return len(p), nil
+}
+
+const (
+	stderrTailWindow = 8 << 10
+	defaultWaitDelay = 5 * time.Second
+)
+
+func (c OSCommand) Run(ctx context.Context, name string, args []string, env []string, stdoutMax int64) (CommandResult, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = env
+	// The tool runs in its own process group so a timeout kills its children too.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = c.WaitDelay
+	if cmd.WaitDelay <= 0 {
+		cmd.WaitDelay = defaultWaitDelay
+	}
 	stdout := &limitedBuffer{max: stdoutMax}
-	stderr := &limitedBuffer{max: 64 << 10}
+	stderr := &tailBuffer{max: stderrTailWindow}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 
 	err := cmd.Run()
-	result := CommandResult{Stdout: stdout.buf.Bytes(), StderrTail: lastLine(stderr.buf.String())}
+	result := CommandResult{Stdout: stdout.buf.Bytes(), StderrTail: lastLine(string(stderr.buf))}
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	switch {
+	case errors.As(err, &exitErr):
 		result.ExitCode = exitErr.ExitCode()
 		return result, nil
+	case errors.Is(err, exec.ErrWaitDelay):
+		return result, nil // the process succeeded; a child kept the pipes open
 	}
 	return result, err
 }
 
+// lastLine is the last non-empty line, cut to maxStderrTail bytes on a rune boundary.
 func lastLine(text string) string {
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	line := strings.TrimSpace(lines[len(lines)-1])
-	if len(line) > maxStderrTail {
-		line = line[:maxStderrTail]
+	text = strings.ToValidUTF8(strings.TrimSpace(text), "")
+	if i := strings.LastIndex(text, "\n"); i >= 0 {
+		text = strings.TrimSpace(text[i+1:])
 	}
-	return line
+	if len(text) > maxStderrTail {
+		cut := maxStderrTail
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+	}
+	return text
 }
