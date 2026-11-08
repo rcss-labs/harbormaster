@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -66,6 +66,23 @@ describe('WeekGrid', () => {
     await userEvent.pointer([{ keys: '[MouseLeft>]', target: cell('Tue 2:00 asleep') }, { target: cell('Tue 3:00 asleep') }, { keys: '[/MouseLeft]' }])
     expect(cell('Tue 2:00 awake')).toHaveAttribute('aria-pressed', 'true')
     expect(cell('Tue 3:00 awake')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('leaves a cell alone when a touch swipe starts on it', () => {
+    render(<Harness initial={presetGrid('Weekdays 07–20')} />)
+    const target = cell('Mon 7:00 awake')
+    fireEvent.pointerDown(target, { pointerType: 'touch', button: 0 })
+    fireEvent.pointerCancel(target, { pointerType: 'touch' })
+    expect(cell('Mon 7:00 awake')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('toggles a cell on a touch tap', () => {
+    render(<Harness initial={presetGrid('Weekdays 07–20')} />)
+    const target = cell('Mon 7:00 awake')
+    fireEvent.pointerDown(target, { pointerType: 'touch', button: 0 })
+    fireEvent.pointerUp(target, { pointerType: 'touch' })
+    fireEvent.click(target, { detail: 1 })
+    expect(cell('Mon 7:00 asleep')).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('arrow keys move focus', async () => {

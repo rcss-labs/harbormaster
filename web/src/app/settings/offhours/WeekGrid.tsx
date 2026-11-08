@@ -25,6 +25,7 @@ export function WeekGrid({ value, onChange, now }: WeekGridProps) {
     latest.current = value
   }, [value])
   const painting = useRef<boolean | null>(null)
+  const lastPointer = useRef('')
 
   useEffect(() => {
     const stop = () => {
@@ -98,16 +99,20 @@ export function WeekGrid({ value, onChange, now }: WeekGridProps) {
                 onFocus={() => setActive({ day, hour })}
                 onKeyDown={(event) => onKeyDown(event, day, hour)}
                 onPointerDown={(event) => {
-                  if (event.button !== 0) return
+                  lastPointer.current = event.pointerType
+                  // A touch may be the start of a scroll, so only a tap (its click) toggles.
+                  if (event.button !== 0 || event.pointerType === 'touch') return
                   painting.current = !latest.current[day][hour]
                   paint(day, hour, painting.current)
                 }}
                 onPointerEnter={() => {
                   if (painting.current !== null) paint(day, hour, painting.current)
                 }}
-                // Mouse and touch toggle on pointer down. A click with no pointer behind it (Enter or Space) toggles here.
+                // A mouse toggles on pointer down. A tap or a keypress (Enter, Space) arrives as a click and toggles here.
                 onClick={(event) => {
-                  if (event.detail === 0) paint(day, hour, !latest.current[day][hour])
+                  const tapped = lastPointer.current === 'touch'
+                  lastPointer.current = ''
+                  if (event.detail === 0 || tapped) paint(day, hour, !latest.current[day][hour])
                 }}
               />
             )

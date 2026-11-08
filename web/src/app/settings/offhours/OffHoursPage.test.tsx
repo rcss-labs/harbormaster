@@ -110,7 +110,7 @@ describe('OffHoursPage', () => {
     expect(banner).toHaveAttribute('data-hm-banner', 'warn')
     expect(within(banner).getByText('core-services/payments-api')).toBeInTheDocument()
     expect(within(banner).getByText('AWS tag env=prod; Harbormaster tag "Prod"')).toBeInTheDocument()
-    expect(screen.getByText(/core-services\/payments-api.*Staging nights and weekends/)).toBeInTheDocument()
+    expect(screen.getByText('Schedule "Staging nights and weekends" already matches 1 of these services: core-services/payments-api.')).toBeInTheDocument()
 
     const save = screen.getByRole('button', { name: 'Save' })
     expect(save).toBeEnabled()
@@ -150,6 +150,57 @@ describe('OffHoursPage', () => {
     servePreview({ ...OFFHOURS_PREVIEW_STAGING, sleep_now: 3 })
     renderApp('/settings/offhours')
     expect(await screen.findByText('3 services will go to sleep when you save.', undefined, SLOW)).toBeInTheDocument()
+  })
+
+  it('names at most ten overlapping services, then how many more', async () => {
+    const services = Array.from({ length: 12 }, (_, i) => `core/svc-${i + 1}`)
+    servePreview({ ...OFFHOURS_PREVIEW_PRODUCTION, overlaps: [{ schedule_id: 2, schedule_name: 'Preview environments', services }] })
+    renderApp('/settings/offhours')
+    const names = services.slice(0, 10).join(', ')
+    expect(await screen.findByText(`Schedule "Preview environments" already matches 12 of these services: ${names} and 2 more.`, undefined, SLOW)).toBeInTheDocument()
+  })
+
+  it('shows a plain dash with no title until the figures are loaded', async () => {
+    server.use(http.get('/api/offhours/schedules', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return HttpResponse.json(OFFHOURS_LIST)
+    }))
+    renderApp('/settings/offhours')
+    const kpis = await screen.findByRole('list', { name: 'Off-hours savings' })
+    const dashes = within(kpis).getAllByText('—')
+    expect(dashes.length).toBeGreaterThan(0)
+    for (const dash of dashes) expect(dash).not.toHaveAttribute('title')
+    await waitFor(() => expect(within(kpis).getByText('Estimated saving a month, all schedules').parentElement).toHaveTextContent('$25'))
+  })
+
+  it('drops the preview when the tag stops being a valid key=value', async () => {
+    servePreview({ ...OFFHOURS_PREVIEW_STAGING, sleep_now: 3 })
+    renderApp('/settings/offhours')
+    expect(await screen.findByText('3 services will go to sleep when you save.', undefined, SLOW)).toBeInTheDocument()
+    await userEvent.clear(screen.getByLabelText('Services tagged'))
+    await waitFor(() => expect(screen.queryByText('3 services will go to sleep when you save.')).not.toBeInTheDocument())
+  })
+
+  it('does not fetch the deleted schedule again while the list refreshes', async () => {
+    let deleted = false
+    let detailFetchesAfterDelete = 0
+    server.use(
+      http.get('/api/offhours/schedules', () => HttpResponse.json(deleted ? { ...OFFHOURS_LIST, items: [OFFHOURS_LIST.items[1]] } : OFFHOURS_LIST)),
+      http.get('/api/offhours/schedules/1', () => {
+        if (deleted) detailFetchesAfterDelete++
+        return deleted ? HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 }) : HttpResponse.json(OFFHOURS_STAGING_DETAIL)
+      }),
+      http.delete('/api/offhours/schedules/:id', async () => {
+        deleted = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderApp('/settings/offhours')
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete schedule' }))
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Preview environments'))
+    expect(detailFetchesAfterDelete).toBe(0)
+    expect(screen.queryByText('Could not load this schedule.')).not.toBeInTheDocument()
   })
 
   it('says nothing about sleeping when no service would sleep now', async () => {

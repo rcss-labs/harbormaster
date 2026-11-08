@@ -45,8 +45,16 @@ function supportedZones(): string[] {
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
+const MAX_OVERLAP_NAMES = 10
+
+/** The same sentence the server refuses a save with, so the preview and the 409 read alike. */
 function overlapSentence(overlap: OffHoursOverlap): string {
-  return `${overlap.services.join(', ')} already ${plural(overlap.services.length, 'follows', 'follow')} "${overlap.schedule_name}".`
+  const { services } = overlap
+  const names =
+    services.length <= MAX_OVERLAP_NAMES
+      ? services.join(', ')
+      : `${services.slice(0, MAX_OVERLAP_NAMES).join(', ')} and ${services.length - MAX_OVERLAP_NAMES} more`
+  return `Schedule "${overlap.schedule_name}" already matches ${services.length} of these services: ${names}.`
 }
 
 function Preview({ preview, error, now, timezone }: { preview: OffHoursPreview | null; error: string | null; now: string; timezone: string }) {

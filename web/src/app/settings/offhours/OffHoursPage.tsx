@@ -45,12 +45,9 @@ const draftOf = (schedule: OffHoursSchedule): ScheduleDraft => ({
 
 const blankDraft = (): ScheduleDraft => ({ name: '', enabled: true, tag: '', timezone: browserTimezone(), awake: emptyGrid() })
 
-const dollars = (value: number | null) =>
-  value === null ? (
-    <span title={NOT_PRICED}>—</span>
-  ) : (
-    money(value)
-  )
+/** `undefined` means not loaded yet: a plain dash. `null` is the server saying it could not price this. */
+const dollars = (value: number | null | undefined) =>
+  value === undefined ? '—' : value === null ? <span title={NOT_PRICED}>—</span> : money(value)
 
 function messageOf(error: unknown): string {
   return error instanceof ApiError ? error.message : 'Something went wrong. Try again.'
@@ -61,7 +58,9 @@ export function OffHoursPage() {
   const list = useOffHoursSchedules()
   const tags = useOffHoursTags()
   const [picked, setPicked] = useState<Selection | null>(null)
-  const items = useMemo(() => list.data?.items ?? [], [list.data])
+  // Ids being deleted stay out of the list and out of reach until the refreshed list arrives.
+  const [removedIds, setRemovedIds] = useState<number[]>([])
+  const items = useMemo(() => (list.data?.items ?? []).filter((schedule) => !removedIds.includes(schedule.id)), [list.data, removedIds])
   // Until someone picks a row, the first schedule is open; with none at all, the editor starts a new one.
   const selected: Selection = picked ?? items[0]?.id ?? 'new'
   const detail = useOffHoursSchedule(selected === 'new' ? null : selected)
@@ -96,12 +95,17 @@ export function OffHoursPage() {
     [draft, selector, scheduleId],
   )
   const preview = useOffHoursPreview()
-  const { mutate: requestPreview } = preview
+  const { mutate: requestPreview, reset: resetPreview } = preview
+  // An answer belongs to the form it was asked for: drop it when another schedule (or a new one) opens.
+  useEffect(() => resetPreview(), [key, resetPreview])
   useEffect(() => {
-    if (!previewBody) return
+    if (!previewBody) {
+      resetPreview()
+      return
+    }
     const timer = setTimeout(() => requestPreview(previewBody), PREVIEW_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [previewBody, requestPreview])
+  }, [previewBody, requestPreview, resetPreview])
   // An answer for another schedule must not feed this one's numbers.
   const previewFresh = preview.variables?.schedule_id === scheduleId
   const previewData = previewFresh ? (preview.data ?? null) : null
@@ -144,17 +148,20 @@ export function OffHoursPage() {
 
   const removeSchedule = () => {
     if (selected === 'new') return
-    remove.mutate(selected, {
-      onSuccess: () => {
-        setConfirmingDelete(false)
-        toast.show('Schedule deleted.', 'ok')
-        setPicked(null)
-        setState(null)
-      },
+    const id = selected
+    // Move off the schedule first, so nothing refetches a detail that is about to be gone.
+    setRemovedIds((ids) => [...ids, id])
+    setPicked(null)
+    setState(null)
+    setConfirmingDelete(false)
+    remove.mutate(id, {
+      onSuccess: () => toast.show('Schedule deleted.', 'ok'),
       onError: (error) => {
-        setConfirmingDelete(false)
-        setSaveError(messageOf(error))
+        setRemovedIds((ids) => ids.filter((other) => other !== id))
+        setPicked(id)
+        toast.show(messageOf(error), 'bad')
       },
+      onSettled: () => setRemovedIds((ids) => ids.filter((other) => other !== id)),
     })
   }
 
@@ -164,9 +171,9 @@ export function OffHoursPage() {
   }
 
   const now = list.data?.now ?? new Date().toISOString()
-  const savedSaving = detailData ? detailData.monthly_saving : null
+  const savedSaving = detailData?.monthly_saving
   const kpis: KpiItem[] = [
-    { label: 'Estimated saving a month, all schedules', value: dollars(list.data?.monthly_saving_total ?? null) },
+    { label: 'Estimated saving a month, all schedules', value: dollars(list.data?.monthly_saving_total) },
     { label: 'Awake a week on this schedule (of 168)', value: draft ? `${awakeHours(draft.awake)} h` : '—' },
     { label: 'Saving a month on this schedule', value: dollars(previewData ? previewData.monthly_saving : savedSaving) },
   ]
