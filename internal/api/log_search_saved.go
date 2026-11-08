@@ -58,14 +58,20 @@ func (s *Server) listSavedLogSearches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := make([]SavedLogSearchDTO, 0, len(searches))
+	// Saved searches often share services, so each id is looked up once per request.
+	readableByID := map[string]bool{}
 	for _, search := range searches {
 		readable := []string{}
 		hidden := 0
 		for _, id := range search.ServiceIDs {
-			ok, err := s.canReadServiceLogs(ctx, subject, id)
-			if err != nil {
-				s.fail(w, err)
-				return
+			ok, seen := readableByID[id]
+			if !seen {
+				var err error
+				if ok, err = s.canReadServiceLogs(ctx, subject, id); err != nil {
+					s.fail(w, err)
+					return
+				}
+				readableByID[id] = ok
 			}
 			if ok {
 				readable = append(readable, id)

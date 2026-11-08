@@ -41,6 +41,10 @@ type spyClients struct {
 	// scripted, when set, replaces the fake: StartQuery returns "scripted-q" and every
 	// GetQueryResults returns this response.
 	scripted *cloudwatchlogs.GetQueryResultsOutput
+	// cancelDuringStart, when set, is called after AWS has created the query and before the
+	// response reaches the caller, like a cancel landing mid-request. If the StartQuery context
+	// is done by then, the response is lost the way an HTTP client loses it.
+	cancelDuringStart func()
 }
 
 type spyStart struct {
@@ -79,6 +83,14 @@ func (l *spyLogs) StartQuery(ctx context.Context, in *cloudwatchlogs.StartQueryI
 	}
 	if l.s.scripted != nil {
 		return &cloudwatchlogs.StartQueryOutput{QueryId: aws.String("scripted-q")}, nil
+	}
+	if l.s.cancelDuringStart != nil {
+		out, err := l.LogsAPI.StartQuery(context.WithoutCancel(ctx), in, o...)
+		l.s.cancelDuringStart()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return out, err
 	}
 	return l.LogsAPI.StartQuery(ctx, in, o...)
 }
@@ -418,6 +430,25 @@ func TestSearcher_CancelStopsQueries(t *testing.T) {
 	}
 	if len(spy.stopCtxErrs) != 1 || spy.stopCtxErrs[0] != nil {
 		t.Errorf("StopQuery context errors = %v, want a live context", spy.stopCtxErrs)
+	}
+}
+
+func TestSearcher_CancelDuringStartQueryStillStopsTheQuery(t *testing.T) {
+	f := newSearchFake()
+	f.InsightsAlwaysRunning = true
+	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
+	s, spy := newSearcher(f)
+	ctx, cancel := context.WithCancel(context.Background())
+	spy.cancelDuringStart = cancel
+	res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Targets[0].State != StateCancelled {
+		t.Errorf("state = %s, want cancelled", res.Targets[0].State)
+	}
+	if got := f.StoppedQueries(); len(got) != 1 {
+		t.Errorf("stopped = %v, want the query that was just created stopped", got)
 	}
 }
 

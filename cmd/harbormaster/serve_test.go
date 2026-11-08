@@ -221,3 +221,37 @@ func TestServe_FakeAWSHasImageScanningOn(t *testing.T) {
 		t.Fatalf("GET /api/security enabled = %v, err = %v; want true in fake mode", out.Enabled, err)
 	}
 }
+
+// A handler blocked on its request context (a running log search) must be told to stop when Shutdown
+// begins, otherwise it outlives the grace period without stopping its Logs Insights query.
+func TestNewHTTPServer_ShutdownCancelsRequestContexts(t *testing.T) {
+	started := make(chan struct{})
+	ctxErr := make(chan error, 1)
+	srv := newHTTPServer("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		ctxErr <- r.Context().Err()
+	}))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve(listener) }()
+
+	go func() {
+		resp, err := http.Get("http://" + listener.Addr().String())
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-started
+
+	shutdownCtx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown: %v (the in-flight handler was never cancelled)", err)
+	}
+	if got := <-ctxErr; got != context.Canceled {
+		t.Errorf("request context error = %v, want context.Canceled", got)
+	}
+}

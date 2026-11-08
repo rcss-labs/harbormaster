@@ -2,6 +2,7 @@ package logs
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -137,6 +138,9 @@ func splitStages(user string) ([]string, error) {
 		if err := checkCommand(stage); err != nil {
 			return err
 		}
+		if callsUnmask(codeText) {
+			return &QueryError{Message: "Log search does not support unmask."}
+		}
 		if aliasesToAtName(codeText, strings.EqualFold(leadingWord(stage), "parse")) {
 			return &QueryError{Message: "Log search cannot rename fields that start with @."}
 		}
@@ -164,6 +168,10 @@ func splitStages(user string) ([]string, error) {
 			end, ok := scanLiteral(runes, i)
 			if !ok {
 				return nil, &QueryError{Message: errUnreadable}
+			}
+			if r == '/' && strings.EqualFold(leadingWord(cur.String()), "parse") && namesAtGroup(string(runes[i:end])) {
+				// A named group becomes a field, so this renames to @logStream just like "as" does.
+				return nil, &QueryError{Message: "Log search cannot rename fields that start with @."}
 			}
 			cur.WriteString(string(runes[i:end]))
 			if r == '`' {
@@ -313,6 +321,19 @@ func aliasesToAtName(code string, isParse bool) bool {
 		}
 	}
 	return false
+}
+
+var unmaskCall = regexp.MustCompile(`(?i)(^|[^\p{L}\p{N}_])unmask\s*\(`)
+
+// callsUnmask reports whether the stage calls unmask(...) as a function. code has literals blanked, so
+// only real calls match. Stage-level UNMASK is refused earlier by checkCommand.
+func callsUnmask(code string) bool {
+	return unmaskCall.MatchString(code)
+}
+
+// namesAtGroup reports whether a regex literal declares a named group whose name starts with "@".
+func namesAtGroup(literal string) bool {
+	return strings.Contains(literal, "(?<@") || strings.Contains(literal, "(?P<@")
 }
 
 // leadingWord returns the first identifier-like word of s after leading space.

@@ -28,6 +28,8 @@ const (
 	maxMessageBytes = 4 << 10
 	// stopQueryTimeout bounds the cleanup StopQuery calls after a deadline or cancel.
 	stopQueryTimeout = 5 * time.Second
+	// startQueryTimeout bounds StartQuery, which runs detached from cancels (see batchRun.do).
+	startQueryTimeout = 10 * time.Second
 
 	defaultMaxRows   = 10000
 	defaultTimeout   = 60 * time.Second
@@ -320,13 +322,17 @@ func (r *batchRun) do() batchOutcome {
 		out.startErr = err
 		return out
 	}
-	start, err := api.StartQuery(r.ctx, &cloudwatchlogs.StartQueryInput{
+	// StartQuery runs on a short detached context so a cancel landing mid-request cannot lose the
+	// query id: a created query whose id we never saw keeps running and billing.
+	startCtx, cancelStart := context.WithTimeout(context.WithoutCancel(r.ctx), startQueryTimeout)
+	start, err := api.StartQuery(startCtx, &cloudwatchlogs.StartQueryInput{
 		LogGroupNames: r.b.groups,
 		StartTime:     aws.Int64(r.from.Unix()),
 		EndTime:       aws.Int64(ceilUnix(r.to)),
 		QueryString:   aws.String(r.query),
 		Limit:         aws.Int32(int32(r.maxRows)),
 	})
+	cancelStart()
 	if err != nil {
 		if r.ctx.Err() != nil {
 			return r.interrupted(batchOutcome{}, nil)
@@ -334,6 +340,9 @@ func (r *batchRun) do() batchOutcome {
 		return r.failure(err)
 	}
 	queryID := aws.ToString(start.QueryId)
+	if r.ctx.Err() != nil { // cancelled or timed out while starting: stop what was just created
+		return r.interrupted(batchOutcome{}, api, queryID)
+	}
 
 	var last batchOutcome
 	for {

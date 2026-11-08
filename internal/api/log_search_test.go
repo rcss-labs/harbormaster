@@ -260,8 +260,8 @@ func TestLogSearch_Validation(t *testing.T) {
 		{"custom backwards", custom(now, now.Add(-time.Hour)), "The start must be before the end."},
 		{"8 day custom", custom(now.Add(-8*24*time.Hour), now), "Choose a range of at most 7 days."},
 		{"future end", custom(now.Add(-time.Hour), now.Add(time.Hour)), "The end of the range cannot be in the future."},
-		{"long query", withQuery(strings.Repeat("a", 4001)), "The query is too long"},
-		{"stats query", withQuery("stats count(*) by bin(1m)"), ""},
+		{"long query", withQuery(strings.Repeat("a", 4001)), "Queries can be up to 4,000 characters."},
+		{"stats query", withQuery("stats count(*) by bin(1m)"), "does not support the stats command"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -434,6 +434,30 @@ func TestLogSearch_OneRunningPerUser(t *testing.T) {
 	}
 	if env.fk.Calls()["StartQuery"] < 2 {
 		t.Error("dana's search never started a query: she was blocked")
+	}
+	cancel()
+	<-done
+}
+
+func TestLogSearch_RunningSearchAnswers409WithoutSpendingTokens(t *testing.T) {
+	env := newLogSearchEnv(t, nil)
+	env.fk.InsightsAlwaysRunning = true
+	c := login(t, env.srv, "sam", testPassword)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if resp, err := postWithContext(ctx, c, searchReq(paymentsID())); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	waitFor(t, "the first search to start", func() bool { return env.fk.Calls()["StartQuery"] >= 1 })
+	for i := 1; i <= 10; i++ {
+		resp := c.post("/api/log-search", searchReq(paymentsID()))
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("attempt %d during a running search: status %d, want 409", i, resp.StatusCode)
+		}
+		resp.Body.Close()
 	}
 	cancel()
 	<-done

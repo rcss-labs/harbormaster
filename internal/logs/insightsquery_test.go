@@ -46,6 +46,10 @@ func TestComposeQuery_RejectsCommands(t *testing.T) {
 		{`pattern @message`, "pattern", ""},
 		{`filter a | diff`, "diff", ""},
 		{`where a = 1`, "where", ""},
+		{`fields unmask(@message) as m`, "unmask", "does not support unmask."},
+		{`filter UNMASK (@message) like "x"`, "unmask", "does not support unmask."},
+		{`parse @message /(?<@logStream>.*)/`, "@", "cannot rename fields that start with @."},
+		{`parse @message /(?P<@log>.*)/`, "@", "cannot rename fields that start with @."},
 	}
 	for _, tc := range cases {
 		out, err := ComposeQuery(tc.query, scopes, 10)
@@ -64,6 +68,17 @@ func TestComposeQuery_RejectsCommands(t *testing.T) {
 		}
 		if ValidateQuery(tc.query) == nil {
 			t.Errorf("%q: ValidateQuery accepted", tc.query)
+		}
+	}
+}
+
+func TestComposeQuery_UnmaskOrAtGroupInsideLiteralsOrOtherPlacesPasses(t *testing.T) {
+	for _, q := range []string{
+		`filter @message like "unmask(x)"`,
+		`parse @message /(?<user>\w+)/ | filter user != "(?<@x>"`,
+	} {
+		if err := ValidateQuery(q); err != nil {
+			t.Errorf("%q: %v", q, err)
 		}
 	}
 }

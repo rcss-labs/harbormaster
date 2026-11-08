@@ -263,17 +263,18 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Guardrails: a token bucket per user, then one running search per user.
-	if !s.searchBucket.Allow(strconv.FormatInt(user.ID, 10)) {
-		s.fail(w, errSearchRateLimited)
-		return
-	}
+	// 5. Guardrails: one running search per user, then a token bucket. The slot comes first so a user
+	// pressing Run during a running search gets 409 without burning tokens into a 429.
 	release, acquired := s.SearchLimiter.Acquire(user.ID)
 	if !acquired {
 		s.fail(w, errSearchRunning)
 		return
 	}
 	defer release()
+	if !s.searchBucket.Allow(strconv.FormatInt(user.ID, 10)) {
+		s.fail(w, errSearchRateLimited)
+		return
+	}
 
 	// 6. Search. r.Context() ends when the client goes away, which stops the queries.
 	found, searchErr := s.LogSearch.Search(ctx, logs.SearchRequest{Services: searchServices, Query: req.Query, From: from, To: to})
@@ -350,7 +351,7 @@ func (s *Server) checkLogSearchRequest(ids []string, rangeName string, from, to 
 		return start, end, err
 	}
 	if utf8.RuneCountInString(query) > maxLogSearchQueryChars {
-		return start, end, invalid("The query is too long (at most 4,000 characters).")
+		return start, end, invalid("Queries can be up to 4,000 characters.")
 	}
 	return start, end, nil
 }

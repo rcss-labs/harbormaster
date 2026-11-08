@@ -278,7 +278,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		Telemetry:               telemetry.Default,
 		Scan:                    scanKicker,
 	})
-	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	httpServer := newHTTPServer(cfg.Listen, server.Handler())
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
@@ -318,4 +318,19 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		result = nil
 	}
 	return result
+}
+
+// newHTTPServer builds the server with request contexts that end when Shutdown begins. Shutdown alone
+// waits for in-flight handlers without telling them to stop, so a long log search would outlive the
+// process's grace period and never send StopQuery or write its audit row (Logs Insights bills until the
+// query is stopped). Cancelling the request contexts lets those handlers clean up on their detached
+// contexts before Shutdown returns.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	requestsCtx, cancelRequests := context.WithCancel(context.Background())
+	srv := &http.Server{
+		Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return requestsCtx },
+	}
+	srv.RegisterOnShutdown(cancelRequests)
+	return srv
 }
