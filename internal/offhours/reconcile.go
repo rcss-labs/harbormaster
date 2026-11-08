@@ -20,8 +20,11 @@ const (
 	blockedRetry = time.Hour
 	// lastErrorLimit caps last_error so a long AWS message cannot bloat the row.
 	lastErrorLimit = 500
-	// serviceTimeout bounds one service's transaction and AWS calls.
-	serviceTimeout = 30 * time.Second
+	// defaultServiceTimeout bounds one service's AWS calls and writes.
+	defaultServiceTimeout = 30 * time.Second
+	// recordTimeout bounds recording a failure; it has its own budget so an expired service deadline cannot
+	// stop the row from being kept.
+	recordTimeout = 5 * time.Second
 )
 
 // Reconciler keeps AWS scheduled actions and capacity in line with the off-hours schedules. It runs only in the
@@ -36,6 +39,8 @@ type Reconciler struct {
 	Interval time.Duration
 	Now      func() time.Time
 	Log      *slog.Logger
+	// ServiceTimeout bounds the work on one service; zero means 30 s.
+	ServiceTimeout time.Duration
 
 	kickOnce sync.Once
 	kickCh   chan struct{}
@@ -223,6 +228,8 @@ func (r *Reconciler) handle(ctx context.Context, err error, key model.ServiceKey
 		r.noteAttention(context.Background(), key)
 	case errors.Is(err, ErrZeroCapacity), errors.Is(err, ErrMinZero), errors.Is(err, ErrServiceGone):
 		r.log().Debug("offhours: service not managed", "service", key.Service, "cluster", key.Cluster, "reason", err)
+	case errors.Is(err, context.DeadlineExceeded):
+		r.log().Warn("offhours: service timed out, retrying next cycle", "service", key.Service, "cluster", key.Cluster, "err", err)
 	case errors.Is(err, ErrAccessDenied):
 		r.log().Warn("offhours: access denied", "service", key.Service, "cluster", key.Cluster, "err", err)
 	case awsx.IsThrottle(err):
@@ -277,18 +284,26 @@ func (r *Reconciler) pruneAttention(current map[model.ServiceKey]bool) {
 // The work runs on a context detached from ctx with its own deadline: losing leadership or shutting down in the
 // middle of a service must not roll back after AWS was already changed. ctx is checked between services only.
 func (r *Reconciler) inService(ctx context.Context, key model.ServiceKey, fn func(ctx context.Context, tx store.Tx) error) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), serviceTimeout)
-	defer cancel()
+	base := context.WithoutCancel(ctx)
+	timeout := r.ServiceTimeout
+	if timeout <= 0 {
+		timeout = defaultServiceTimeout
+	}
 	var failure error
-	err := r.Store.InTx(ctx, func(tx store.Tx) error {
-		fnErr := fn(ctx, tx)
+	// The transaction itself (begin, commit) has no deadline: only the work and the failure record do.
+	err := r.Store.InTx(base, func(tx store.Tx) error {
+		workCtx, cancel := context.WithTimeout(base, timeout)
+		fnErr := fn(workCtx, tx)
+		cancel()
 		if fnErr == nil {
 			return nil
 		}
 		if isRefusal(fnErr) {
 			return fnErr
 		}
-		if recordErr := r.recordFailure(ctx, tx, key, fnErr); recordErr != nil {
+		recordCtx, cancelRecord := context.WithTimeout(base, recordTimeout)
+		defer cancelRecord()
+		if recordErr := r.recordFailure(recordCtx, tx, key, fnErr); recordErr != nil {
 			return fnErr
 		}
 		failure = fnErr
@@ -347,6 +362,10 @@ func (r *Reconciler) retryDue(e store.OffHoursEnrolment, sc *store.OffHoursSched
 // enrolNew enrols a selected service and puts it to sleep at once if the grid says so (D5).
 func (r *Reconciler) enrolNew(ctx context.Context, c candidate) error {
 	return r.inService(ctx, c.match.Key, func(ctx context.Context, tx store.Tx) error {
+		// Serialise new enrolments across leaders: a stale ex-leader and the new leader must not both enrol it.
+		if err := r.Store.LockOffHoursService(ctx, tx, c.match.Key); err != nil {
+			return err
+		}
 		if _, err := r.Store.LockOffHoursEnrolment(ctx, tx, c.match.Key); err == nil {
 			return nil // enrolled by someone else since the cycle began
 		} else if !errors.Is(err, store.ErrNotFound) {
@@ -477,23 +496,21 @@ func (r *Reconciler) syncMember(ctx context.Context, tx store.Tx, e store.OffHou
 	if !live.HasTarget {
 		// Someone removed the target, or Enrol stopped before it registered one. Scheduled actions need a target.
 		e.RegisteredTarget = true // Harbormaster owns the target from now on
-		if err := r.setExpectedRange(ctx, tx, &e, expectAwake, sc.Name); err != nil {
-			return err
-		}
 		min, max := 0, 0
 		if expectAwake {
 			min, max = e.SavedMin, e.SavedMax
+		}
+		if err := r.Applier.stamp(ctx, tx, &e); err != nil {
+			return err
+		}
+		if err := r.Applier.registerRange(ctx, e.Key, min, max); err != nil {
+			return err
 		}
 		if err := r.Applier.record(ctx, tx, e, nil, "reregister",
 			fmt.Sprintf("Scalable target was missing; re-registered with min %d, max %d.", min, max)); err != nil {
 			return err
 		}
-		live.HasTarget = true
-		if expectAwake {
-			live.Min, live.Max = e.SavedMin, e.SavedMax
-		} else {
-			live.Min, live.Max = 0, 0
-		}
+		live.HasTarget, live.Min, live.Max = true, min, max
 	}
 
 	if err := r.Applier.SyncActions(ctx, e, sc, live); err != nil {
@@ -520,11 +537,4 @@ func (r *Reconciler) syncMember(ctx context.Context, tx store.Tx, e store.OffHou
 		e.AwakeTasks = live.Desired
 	}
 	return r.finish(ctx, tx, &e, now)
-}
-
-func (r *Reconciler) setExpectedRange(ctx context.Context, tx store.Tx, e *store.OffHoursEnrolment, awake bool, scheduleName string) error {
-	if awake {
-		return r.Applier.Wake(ctx, tx, e, nil, scheduleName)
-	}
-	return r.Applier.Sleep(ctx, tx, e, nil, scheduleName)
 }

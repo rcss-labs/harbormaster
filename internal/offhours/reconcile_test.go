@@ -655,6 +655,60 @@ func TestReconcile_CancelledLeaderContextStillKeepsTheRow(t *testing.T) {
 	}
 }
 
+// stallAfterRegister blocks after the first successful RegisterScalableTarget until the call's context expires.
+type stallAfterRegister struct{ *fake.Fake }
+
+type stallingAutoScaling struct{ awsx.AutoScalingAPI }
+
+func (c stallAfterRegister) AutoScaling(ctx context.Context, t awsx.Target) (awsx.AutoScalingAPI, error) {
+	api, err := c.Fake.AutoScaling(ctx, t)
+	return stallingAutoScaling{AutoScalingAPI: api}, err
+}
+
+func (c stallingAutoScaling) RegisterScalableTarget(ctx context.Context, in *applicationautoscaling.RegisterScalableTargetInput, opts ...func(*applicationautoscaling.Options)) (*applicationautoscaling.RegisterScalableTargetOutput, error) {
+	out, err := c.AutoScalingAPI.RegisterScalableTarget(ctx, in, opts...)
+	<-ctx.Done()
+	return out, err
+}
+
+func TestReconcile_ServiceDeadlineExpiryStillKeepsTheRowAndRecordsTheError(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.removeTarget()
+	h.setDesired(t, 2)
+	h.at(9, 10, 0)
+	h.applier.Clients = stallAfterRegister{Fake: h.fake}
+	h.rec.ServiceTimeout = 100 * time.Millisecond
+
+	_ = h.rec.Cycle(t.Context())
+
+	e := h.enrolment(t)
+	if !e.RegisteredTarget || e.LastError == "" {
+		t.Fatalf("enrolment = %+v, want registered_target kept and last_error recorded", e)
+	}
+}
+
+func TestReconcile_ConcurrentLeadersEnrolAServiceOnce(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 10, 0)
+	other := h.reconciler()
+	done := make(chan struct{}, 2)
+	for _, r := range []*offhours.Reconciler{h.rec, other} {
+		go func() { _ = r.Cycle(t.Context()); done <- struct{}{} }()
+	}
+	<-done
+	<-done
+
+	joins := 0
+	for _, op := range h.operations(t) {
+		if strings.HasPrefix(op.Text, "Joined off-hours schedule") {
+			joins++
+		}
+	}
+	if joins != 1 {
+		t.Fatalf("%d join entries, want 1", joins)
+	}
+}
+
 func TestReconcile_MissingTargetIsReRegisteredAndLogged(t *testing.T) {
 	h := newReconcilerHarness(t)
 	h.at(9, 10, 0)
@@ -673,6 +727,9 @@ func TestReconcile_MissingTargetIsReRegisteredAndLogged(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no operation for the re-registered target")
+	}
+	if got := h.lastOperationText(t); got != "Scalable target was missing; re-registered with min 2, max 6." {
+		t.Fatalf("last operation = %q, want only the re-register entry for the repair", got)
 	}
 }
 

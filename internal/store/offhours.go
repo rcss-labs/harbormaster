@@ -302,3 +302,14 @@ func (s *Store) DeleteOffHoursEnrolment(ctx context.Context, tx Tx, k model.Serv
 	}
 	return nil
 }
+
+// LockOffHoursService takes a transaction-scoped advisory lock keyed by the service, so two reconcilers (a stale
+// ex-leader and the new leader) cannot both enrol a service that has no row yet to lock. It waits for the holder.
+func (s *Store) LockOffHoursService(ctx context.Context, tx Tx, k model.ServiceKey) error {
+	_, err := tx.tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"offhours/"+k.AccountID+"/"+k.Region+"/"+k.Cluster+"/"+k.Service)
+	if err != nil {
+		return fmt.Errorf("lock off-hours service: %w", err)
+	}
+	return nil
+}
