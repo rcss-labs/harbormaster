@@ -17,7 +17,7 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 		t.Fatalf("first Migrate: %v", err)
 	}
 	if !reflect.DeepEqual(applied, []int{1, 2, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 140, 150}) {
-		t.Fatalf("first Migrate applied %v, want [1 2 20 30 40 50 60 70 80 90 100 110 140]", applied)
+		t.Fatalf("first Migrate applied %v, want [1 2 20 30 40 50 60 70 80 90 100 110 140 150]", applied)
 	}
 	applied, err = s.Migrate(ctx)
 	if err != nil {
@@ -47,7 +47,7 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 		versions = append(versions, v)
 	}
 	if !reflect.DeepEqual(versions, []int{1, 2, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 140, 150}) {
-		t.Fatalf("versions = %v, want [1 2 20 30 40 50 60 70 80 90 100 110 140]", versions)
+		t.Fatalf("versions = %v, want [1 2 20 30 40 50 60 70 80 90 100 110 140 150]", versions)
 	}
 }
 

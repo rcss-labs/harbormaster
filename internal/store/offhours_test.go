@@ -126,6 +126,21 @@ func TestOffHoursMatches_ExactTagOnly(t *testing.T) {
 	}
 }
 
+func TestOffHoursMatches_EmptyValueMatchesNullAndEmpty(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	seedTaggedService(t, s, "null-value", "ACTIVE", `[{"Key":"flag","Value":null}]`, "", "")
+	seedTaggedService(t, s, "empty-value", "ACTIVE", `[{"Key":"flag","Value":""}]`, "", "")
+	seedTaggedService(t, s, "set-value", "ACTIVE", `[{"Key":"flag","Value":"on"}]`, "", "")
+
+	got, err := s.OffHoursMatches(ctx, "flag", "")
+	if err != nil || len(got) != 2 || got[0].Key.Service != "empty-value" || got[1].Key.Service != "null-value" {
+		t.Fatalf("matches for empty value = %+v err=%v, want empty-value and null-value", got, err)
+	}
+	if got, err := s.OffHoursMatches(ctx, "flag", "on"); err != nil || len(got) != 1 {
+		t.Fatalf("matches for on = %+v err=%v, want only set-value", got, err)
+	}
+}
+
 func TestOffHoursMatches_ReturnsPricingFacts(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	arn := "arn:aws:ecs:us-east-1:123456789012:task-definition/web:7"
@@ -156,6 +171,8 @@ func TestOffHoursTagValues_CountsServices(t *testing.T) {
 	seedTaggedService(t, s, "b", "ACTIVE", `[{"Key":"env","Value":"staging"}]`, "", "")
 	seedTaggedService(t, s, "c", "ACTIVE", `[{"Key":"env","Value":"dev"}]`, "", "")
 	seedTaggedService(t, s, "gone", "INACTIVE", `[{"Key":"env","Value":"dev"}]`, "", "")
+	// The SDK marshals an unset tag value as null; it counts as the empty value.
+	seedTaggedService(t, s, "null-value", "ACTIVE", `[{"Key":"x","Value":null},{"Key":"x","Value":""}]`, "", "")
 
 	got, err := s.OffHoursTagValues(ctx)
 	if err != nil {
@@ -165,7 +182,7 @@ func TestOffHoursTagValues_CountsServices(t *testing.T) {
 	for _, v := range got {
 		counts[[2]string{v.Key, v.Value}] = v.Services
 	}
-	want := map[[2]string]int{{"env", "staging"}: 2, {"env", "dev"}: 1, {"team", "x"}: 1}
+	want := map[[2]string]int{{"env", "staging"}: 2, {"env", "dev"}: 1, {"team", "x"}: 1, {"x", ""}: 1}
 	if len(counts) != len(want) {
 		t.Fatalf("tag values = %v, want %v", counts, want)
 	}
@@ -261,8 +278,8 @@ func TestOffHoursEnrolment_LockBlocksSecondTx(t *testing.T) {
 		_, err := s.LockOffHoursEnrolment(short, tx, key)
 		return err
 	})
-	if err == nil {
-		t.Fatal("second lock succeeded while the first transaction was open")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second lock = %v, want it to wait until the context deadline", err)
 	}
 
 	close(release)

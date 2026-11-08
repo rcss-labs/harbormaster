@@ -159,7 +159,9 @@ func (s *Store) OffHoursMatches(ctx context.Context, tagKey, tagValue string) ([
 		 from services s`+v.Joins+`
 		 left join task_definitions td on td.account_id = s.account_id and td.region = s.region and td.arn = s.task_definition_arn
 		 where s.status = 'ACTIVE'
-		   and s.raw -> 'Tags' @> jsonb_build_array(jsonb_build_object('Key', $1::text, 'Value', $2::text))
+		   and (s.raw -> 'Tags' @> jsonb_build_array(jsonb_build_object('Key', $1::text, 'Value', $2::text))
+		     -- An unset tag value is marshalled as null; it is the same as the empty value.
+		     or ($2::text = '' and s.raw -> 'Tags' @> jsonb_build_array(jsonb_build_object('Key', $1::text, 'Value', null::text))))
 		 order by s.account_id, s.region, s.cluster_name, s.service_name`, tagKey, tagValue)
 	if err != nil {
 		return nil, fmt.Errorf("off-hours matches: %w", err)
@@ -189,9 +191,10 @@ func (s *Store) OffHoursMatches(ctx context.Context, tagKey, tagValue string) ([
 // OffHoursTagValues lists every AWS tag key/value on ACTIVE services with the number of services carrying it.
 func (s *Store) OffHoursTagValues(ctx context.Context) ([]OffHoursTagValue, error) {
 	rows, err := s.Pool.Query(ctx,
-		`select t ->> 'Key', t ->> 'Value', count(*)
+		`select t ->> 'Key', coalesce(t ->> 'Value', ''),
+		   count(distinct (s.account_id, s.region, s.cluster_name, s.service_name))
 		 from services s, jsonb_array_elements(case when jsonb_typeof(s.raw -> 'Tags') = 'array' then s.raw -> 'Tags' else '[]'::jsonb end) t
-		 where s.status = 'ACTIVE' and t ? 'Key' and t ? 'Value'
+		 where s.status = 'ACTIVE' and t ? 'Key'
 		 group by 1, 2 order by 1, 2`)
 	if err != nil {
 		return nil, fmt.Errorf("off-hours tag values: %w", err)
