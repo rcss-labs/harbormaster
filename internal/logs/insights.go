@@ -132,7 +132,7 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 		sleep = sleepCtx
 	}
 	maxRows := req.MaxRows
-	if maxRows <= 0 {
+	if maxRows <= 0 || maxRows > defaultMaxRows { // Insights returns at most 10,000 rows
 		maxRows = defaultMaxRows
 	}
 	started := now()
@@ -211,7 +211,7 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 			clientErr = errors.Join(clientErr, out.startErr)
 		}
 		for _, raw := range out.rows {
-			if row, ok := mapRow(raw, indexes[batches[i].target]); ok {
+			if row, ok := mapRow(raw, batches[i].target.AccountID, indexes[batches[i].target]); ok {
 				result.Rows = append(result.Rows, row)
 			}
 		}
@@ -267,6 +267,11 @@ func planSearch(services []SearchService) ([]awsx.Target, []batch, map[awsx.Targ
 		prefixesByGroup := map[string][]string{}
 		var groups []string
 		for _, svc := range svcs {
+			if len(svc.Prefixes) == 0 {
+				// Fail closed: no prefixes would mean "every stream" of the group. The API layer
+				// guarantees non-empty prefixes (every selected service has an awslogs container).
+				continue
+			}
 			serviceIDs[t] = append(serviceIDs[t], svc.ID)
 			if _, seen := prefixesByGroup[svc.Group]; !seen {
 				groups = append(groups, svc.Group)
@@ -306,7 +311,7 @@ type batchRun struct {
 
 func (r *batchRun) do() batchOutcome {
 	if r.ctx.Err() != nil { // the deadline or a cancel arrived while waiting for a slot
-		return r.interrupted(batchOutcome{})
+		return r.interrupted(batchOutcome{}, nil)
 	}
 	api, err := r.s.Clients.Logs(r.ctx, r.b.target)
 	if err != nil {
@@ -320,11 +325,11 @@ func (r *batchRun) do() batchOutcome {
 		StartTime:     aws.Int64(r.from.Unix()),
 		EndTime:       aws.Int64(ceilUnix(r.to)),
 		QueryString:   aws.String(r.query),
-		Limit:         aws.Int32(int32(min(r.maxRows, defaultMaxRows))),
+		Limit:         aws.Int32(int32(r.maxRows)),
 	})
 	if err != nil {
 		if r.ctx.Err() != nil {
-			return r.interrupted(batchOutcome{})
+			return r.interrupted(batchOutcome{}, nil)
 		}
 		return r.failure(err)
 	}
@@ -333,12 +338,12 @@ func (r *batchRun) do() batchOutcome {
 	var last batchOutcome
 	for {
 		if r.ctx.Err() != nil {
-			return r.interrupted(last, queryID)
+			return r.interrupted(last, api, queryID)
 		}
 		res, err := api.GetQueryResults(r.ctx, &cloudwatchlogs.GetQueryResultsInput{QueryId: aws.String(queryID)})
 		if err != nil {
 			if r.ctx.Err() != nil {
-				return r.interrupted(last, queryID)
+				return r.interrupted(last, api, queryID)
 			}
 			r.stop(api, queryID)
 			out := r.failure(err)
@@ -361,18 +366,18 @@ func (r *batchRun) do() batchOutcome {
 			return last
 		}
 		if err := r.sleep(r.ctx, r.pollEvery); err != nil {
-			return r.interrupted(last, queryID)
+			return r.interrupted(last, api, queryID)
 		}
 	}
 }
 
 // interrupted stops the unfinished queries and reports timeout or cancelled, keeping rows already seen.
-func (r *batchRun) interrupted(last batchOutcome, queryIDs ...string) batchOutcome {
-	if len(queryIDs) > 0 {
-		if api, err := r.s.Clients.Logs(r.ctx, r.b.target); err == nil {
-			for _, id := range queryIDs {
-				r.stop(api, id)
-			}
+// It reuses the client do() already holds: building a new one with the finished context can fail
+// (credential retrieval), which would silently leave the query running and billing.
+func (r *batchRun) interrupted(last batchOutcome, api awsx.LogsAPI, queryIDs ...string) batchOutcome {
+	if api != nil {
+		for _, id := range queryIDs {
+			r.stop(api, id)
 		}
 	}
 	if r.parent.Err() != nil || errors.Is(r.ctx.Err(), context.Canceled) {
@@ -432,9 +437,9 @@ func outcomeOf(res *cloudwatchlogs.GetQueryResultsOutput) batchOutcome {
 
 // mapRow attributes a result row to a selected service, or drops it. Dropping rows that map to no
 // selected service is defence in depth: the composed query already filters by stream prefix.
-func mapRow(raw map[string]string, idx targetIndex) (SearchRow, bool) {
-	_, group, ok := strings.Cut(raw["@log"], ":")
-	if !ok {
+func mapRow(raw map[string]string, accountID string, idx targetIndex) (SearchRow, bool) {
+	account, group, ok := strings.Cut(raw["@log"], ":")
+	if !ok || account != accountID {
 		return SearchRow{}, false
 	}
 	stream := raw["@logStream"]

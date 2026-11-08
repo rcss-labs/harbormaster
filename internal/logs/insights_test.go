@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	logstypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -33,6 +35,12 @@ type spyClients struct {
 	stopCtxErrs []error // ctx.Err() seen by each StopQuery call
 	failStart   map[string]error
 	failLogs    error
+	// failLogsOnDoneCtx makes Logs fail when given a finished context, like awsx.Real
+	// retrieving credentials with it.
+	failLogsOnDoneCtx bool
+	// scripted, when set, replaces the fake: StartQuery returns "scripted-q" and every
+	// GetQueryResults returns this response.
+	scripted *cloudwatchlogs.GetQueryResultsOutput
 }
 
 type spyStart struct {
@@ -44,6 +52,9 @@ type spyStart struct {
 func (s *spyClients) Logs(ctx context.Context, t awsx.Target) (awsx.LogsAPI, error) {
 	if s.failLogs != nil {
 		return nil, s.failLogs
+	}
+	if s.failLogsOnDoneCtx && ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	api, err := s.Clients.Logs(ctx, t)
 	if err != nil {
@@ -66,6 +77,9 @@ func (l *spyLogs) StartQuery(ctx context.Context, in *cloudwatchlogs.StartQueryI
 	if err != nil {
 		return nil, err
 	}
+	if l.s.scripted != nil {
+		return &cloudwatchlogs.StartQueryOutput{QueryId: aws.String("scripted-q")}, nil
+	}
 	return l.LogsAPI.StartQuery(ctx, in, o...)
 }
 
@@ -73,7 +87,26 @@ func (l *spyLogs) StopQuery(ctx context.Context, in *cloudwatchlogs.StopQueryInp
 	l.s.mu.Lock()
 	l.s.stopCtxErrs = append(l.s.stopCtxErrs, ctx.Err())
 	l.s.mu.Unlock()
+	if l.s.scripted != nil {
+		return &cloudwatchlogs.StopQueryOutput{Success: true}, nil
+	}
 	return l.LogsAPI.StopQuery(ctx, in, o...)
+}
+
+func (l *spyLogs) GetQueryResults(ctx context.Context, in *cloudwatchlogs.GetQueryResultsInput, o ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetQueryResultsOutput, error) {
+	if l.s.scripted != nil {
+		return l.s.scripted, nil
+	}
+	return l.LogsAPI.GetQueryResults(ctx, in, o...)
+}
+
+func resultRow(ts, msg, log, stream string) []logstypes.ResultField {
+	return []logstypes.ResultField{
+		{Field: aws.String("@timestamp"), Value: aws.String(ts)},
+		{Field: aws.String("@message"), Value: aws.String(msg)},
+		{Field: aws.String("@log"), Value: aws.String(log)},
+		{Field: aws.String("@logStream"), Value: aws.String(stream)},
+	}
 }
 
 func (s *spyClients) startsOn(t awsx.Target) []spyStart {
@@ -401,38 +434,187 @@ func TestSearcher_MalformedQueryIsQueryError(t *testing.T) {
 	}
 }
 
+func TestSearcher_StopQueryDoesNotNeedALiveContextToBuildTheClient(t *testing.T) {
+	f := newSearchFake()
+	f.InsightsAlwaysRunning = true
+	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
+	s, spy := newSearcher(f)
+	spy.failLogsOnDoneCtx = true
+	s.Timeout = 20 * time.Millisecond
+	if _, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"))); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.StoppedQueries(); len(got) != 1 {
+		t.Fatalf("stopped = %v, want the running query stopped", got)
+	}
+}
+
+func TestSearcher_DropsRowsOutsideTheSelectedScope(t *testing.T) {
+	f := newSearchFake()
+	s, spy := newSearcher(f)
+	const ts = "2026-10-31 11:59:00.000"
+	spy.scripted = &cloudwatchlogs.GetQueryResultsOutput{
+		Status: logstypes.QueryStatusComplete,
+		Results: [][]logstypes.ResultField{
+			resultRow(ts, "keep", homelabAccount+":/g/a", "api/web/t1"),
+			resultRow(ts, "unselected stream", homelabAccount+":/g/a", "worker/job/t2"),
+			resultRow(ts, "wrong group", homelabAccount+":/g/other", "api/web/t1"),
+			resultRow(ts, "wrong account", stagingAccount+":/g/a", "api/web/t1"),
+			resultRow(ts, "no log", "", "api/web/t1"),
+		},
+		Statistics: &logstypes.QueryStatistics{RecordsMatched: 5},
+	}
+	res, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0].Message != "keep" {
+		t.Fatalf("rows = %+v, want only the in-scope row", res.Rows)
+	}
+}
+
+func TestSearcher_KeepsRowsSeenWhileRunningOnTimeoutAndCancel(t *testing.T) {
+	for _, mode := range []string{"timeout", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newSearchFake()
+			s, spy := newSearcher(f)
+			spy.scripted = &cloudwatchlogs.GetQueryResultsOutput{
+				Status:     logstypes.QueryStatusRunning,
+				Results:    [][]logstypes.ResultField{resultRow("2026-10-31 11:59:00.000", "partial", homelabAccount+":/g/a", "api/web/t1")},
+				Statistics: &logstypes.QueryStatistics{RecordsMatched: 7},
+			}
+			ctx := context.Background()
+			if mode == "timeout" {
+				s.Timeout = 20 * time.Millisecond
+			} else {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+			}
+			res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := StateTimeout
+			if mode == "cancel" {
+				want = StateCancelled
+			}
+			if res.Targets[0].State != want || len(res.Rows) != 1 || res.Rows[0].Message != "partial" || res.RecordsMatched != 7 {
+				t.Errorf("state=%s rows=%+v matched=%d, want %s with the partial row and 7", res.Targets[0].State, res.Rows, res.RecordsMatched, want)
+			}
+		})
+	}
+}
+
+func TestSearcher_ClampsMaxRowsToInsightsLimit(t *testing.T) {
+	f := newSearchFake()
+	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
+	s, spy := newSearcher(f)
+	req := searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"))
+	req.MaxRows = 50000
+	if _, err := s.Search(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if q := spy.starts[0].query; !strings.HasSuffix(q, "| limit 10000") {
+		t.Errorf("query ends %q, want | limit 10000", q[max(0, len(q)-30):])
+	}
+}
+
+func TestSearcher_SkipsServicesWithoutPrefixes(t *testing.T) {
+	f := newSearchFake()
+	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
+	s, _ := newSearcher(f)
+	res, err := s.Search(context.Background(), searchReq(
+		svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"),
+		svc("noprefix", homelabAccount, "us-east-1", "/g/b")))
+	if err != nil {
+		t.Fatalf("a service without prefixes must not fail the search: %v", err)
+	}
+	if len(res.Rows) != 1 || res.Rows[0].ServiceID != "A" {
+		t.Errorf("rows = %+v", res.Rows)
+	}
+}
+
+// staticRole is a one-account RoleSource for the integration test.
+type staticRole struct{ account, arn string }
+
+func (r staticRole) Role(_ context.Context, accountID string) (string, string, error) {
+	if accountID != r.account {
+		return "", "", awsx.ErrAccountUnknown
+	}
+	return r.arn, "", nil
+}
+
 // TestSearcherIT_RealInsights runs one composed query against a real log group.
-// Set HM_IT_AWS=1, HM_IT_ACCOUNT, HM_IT_REGION, HM_IT_GROUP and HM_IT_PREFIX, and provide a real
-// awsx.Clients through realITClients; it is skipped by default.
+// Requires HM_IT_AWS=1 plus HM_IT_ROLE_ARN, HM_IT_ACCOUNT, HM_IT_REGION, HM_IT_GROUP and HM_IT_PREFIX
+// (ambient AWS credentials must be allowed to assume the role). Skipped by default.
 func TestSearcherIT_RealInsights(t *testing.T) {
 	if os.Getenv("HM_IT_AWS") != "1" {
 		t.Skip("set HM_IT_AWS=1 to run against real AWS")
 	}
-	clients := realITClients(t)
-	s := &Searcher{Clients: clients}
-	prefix := os.Getenv("HM_IT_PREFIX")
+	env := map[string]string{}
+	for _, k := range []string{"HM_IT_ROLE_ARN", "HM_IT_ACCOUNT", "HM_IT_REGION", "HM_IT_GROUP", "HM_IT_PREFIX"} {
+		if env[k] = os.Getenv(k); env[k] == "" {
+			t.Skipf("%s is required when HM_IT_AWS=1", k)
+		}
+	}
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(env["HM_IT_REGION"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Searcher{Clients: awsx.NewReal(cfg, staticRole{account: env["HM_IT_ACCOUNT"], arn: env["HM_IT_ROLE_ARN"]})}
+
+	// Run through the raw API too so the @log and @logStream shape is asserted directly.
+	target := awsx.Target{AccountID: env["HM_IT_ACCOUNT"], Region: env["HM_IT_REGION"]}
+	query, err := ComposeQuery("", []StreamScope{{AccountID: target.AccountID, Group: env["HM_IT_GROUP"], Prefixes: []string{env["HM_IT_PREFIX"]}}}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := s.Clients.Logs(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
+	start, err := api.StartQuery(context.Background(), &cloudwatchlogs.StartQueryInput{
+		LogGroupNames: []string{env["HM_IT_GROUP"]}, StartTime: aws.Int64(now.Add(-24 * time.Hour).Unix()),
+		EndTime: aws.Int64(now.Unix()), QueryString: aws.String(query),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows [][]logstypes.ResultField
+	for range 60 {
+		out, err := api.GetQueryResults(context.Background(), &cloudwatchlogs.GetQueryResultsInput{QueryId: start.QueryId})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Status == logstypes.QueryStatusComplete {
+			rows = out.Results
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no rows from the composed query")
+	}
+	for _, row := range rows {
+		got := map[string]string{}
+		for _, f := range row {
+			got[aws.ToString(f.Field)] = aws.ToString(f.Value)
+		}
+		if got["@log"] != env["HM_IT_ACCOUNT"]+":"+env["HM_IT_GROUP"] || !strings.HasPrefix(got["@logStream"], env["HM_IT_PREFIX"]) {
+			t.Errorf("@log=%q @logStream=%q, want %s:%s and prefix %s", got["@log"], got["@logStream"], env["HM_IT_ACCOUNT"], env["HM_IT_GROUP"], env["HM_IT_PREFIX"])
+		}
+	}
+
 	res, err := s.Search(context.Background(), SearchRequest{
-		Services: []SearchService{svc("it", os.Getenv("HM_IT_ACCOUNT"), os.Getenv("HM_IT_REGION"), os.Getenv("HM_IT_GROUP"), prefix)},
+		Services: []SearchService{svc("it", target.AccountID, target.Region, env["HM_IT_GROUP"], env["HM_IT_PREFIX"])},
 		From:     now.Add(-24 * time.Hour), To: now, MaxRows: 10,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Rows) == 0 {
-		t.Fatalf("no rows; targets = %+v", res.Targets)
+	if len(res.Rows) == 0 || res.Rows[0].ServiceID != "it" {
+		t.Fatalf("rows = %+v targets = %+v", res.Rows, res.Targets)
 	}
-	for _, r := range res.Rows {
-		if r.ServiceID != "it" || r.TaskID == "" {
-			t.Errorf("@log/@logStream not mapped: %+v", r)
-		}
-	}
-}
-
-// realITClients builds the real AWS clients for the guarded integration test.
-// It is left to the owner to wire (the test is skipped unless HM_IT_AWS=1).
-func realITClients(t *testing.T) awsx.Clients {
-	t.Helper()
-	t.Skip("wire awsx.Real here before running the integration test")
-	return nil
 }
