@@ -115,6 +115,8 @@ Harbormaster reads and changes resources in other accounts by assuming a role in
 
 Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, change auto scaling or alarms, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
 
+Roles created before the Logs Insights actions were added to `harbormaster-access` lack `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`. Log search shows a message for that account until the access module is re-applied in it; the rest of Harbormaster works without the re-apply.
+
 ### Same account
 
 The account where Harbormaster runs can also be connected through a role in that same account (design spec §11.1). Use the same flow: apply `harbormaster-access` in that account with the task role ARN and the external ID. If you have tightened `access_role_arns` (below), add that role's ARN to the list.
@@ -311,6 +313,9 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks at list
 | `HM_LOG_TAIL_IDLE` | `30m` | Close a live log tail after this long without activity |
 | `HM_LOG_TAILS_PER_USER` | `2` | Concurrent live log tails per user |
 | `HM_LOG_HISTORY_LIMIT` | `500` | Maximum log events returned by one history query |
+| `HM_LOG_SEARCH_TIMEOUT` | `60s` | How long one Logs Insights log search may run before it is stopped |
+| `HM_LOG_SEARCH_MAX_SERVICES` | `20` | Maximum services one log search may cover |
+| `HM_LOG_SEARCH_MAX_RANGE` | `168h` | Longest time range one log search may cover |
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
 | `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, enforced per Harbormaster task (see Running more than one task) |
