@@ -8,6 +8,11 @@ locals {
     "arn:aws:iam::${local.account_id}:role/*-task",
     "arn:aws:iam::${local.account_id}:role/ecs-task-execution",
   ]
+
+  # Null resolves to every repository in this account, like pass_role_arns.
+  scan_repository_arns = var.scan_repository_arns != null ? var.scan_repository_arns : [
+    "arn:aws:ecr:*:${local.account_id}:repository/*",
+  ]
 }
 
 data "aws_iam_policy_document" "trust" {
@@ -159,4 +164,65 @@ resource "aws_iam_role_policy" "write" {
   name   = "harbormaster-access-write"
   role   = aws_iam_role.this.id
   policy = data.aws_iam_policy_document.write.json
+}
+
+# The scan role is trusted by the scanner task only, never by the server, and holds read-only ECR pull
+# actions, so it is created regardless of read_only.
+data "aws_iam_policy_document" "scan_trust" {
+  count = var.scanner_task_role_arn == null ? 0 : 1
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [var.scanner_task_role_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "sts:ExternalId"
+      values   = [var.external_id]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "scan_pull" {
+  count = var.scanner_task_role_arn == null ? 0 : 1
+
+  statement {
+    sid       = "EcrAuthToken"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "EcrPull"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:DescribeImages",
+    ]
+    resources = local.scan_repository_arns
+  }
+}
+
+resource "aws_iam_role" "scan" {
+  count = var.scanner_task_role_arn == null ? 0 : 1
+
+  name                 = var.scan_role_name
+  assume_role_policy   = data.aws_iam_policy_document.scan_trust[0].json
+  max_session_duration = 3600
+  tags                 = var.tags
+}
+
+resource "aws_iam_role_policy" "scan_pull" {
+  count = var.scanner_task_role_arn == null ? 0 : 1
+
+  name   = "harbormaster-scan-pull"
+  role   = aws_iam_role.scan[0].id
+  policy = data.aws_iam_policy_document.scan_pull[0].json
 }
