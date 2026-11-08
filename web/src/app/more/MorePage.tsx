@@ -132,6 +132,7 @@ export function MorePage() {
 
       <Panel label="Insights" heading="Insights">
         <Row icon="analytics" label="Analytics" to="/analytics/delivery" />
+        <Row icon="logs" label="Log search" to="/logs" />
       </Panel>
 
       {me.admin && (

@@ -221,6 +221,18 @@ describe('Sidebar Analytics', () => {
     expect(names.indexOf('Security')).toBe(names.indexOf('Analytics') + 1)
   })
 
+  it('shows Log search under Insights, after Security, with an icon and no count', async () => {
+    renderApp('/')
+    const link = await screen.findByRole('link', { name: /^Log search/ })
+    expect(link).toHaveTextContent(/^Log search$/)
+    expect(link).toHaveAttribute('href', '/logs')
+    expect(link.querySelector('svg')).not.toBeNull()
+    const names = within(screen.getByRole('navigation', { name: 'Main' }))
+      .getAllByRole('link')
+      .map((item) => item.textContent?.replace(/\d+$/, ''))
+    expect(names.indexOf('Log search')).toBe(names.indexOf('Security') + 1)
+  })
+
   it('shows Analytics between Storage and Settings', async () => {
     renderApp('/')
     await screen.findByRole('link', { name: /^Analytics/ })
@@ -228,7 +240,7 @@ describe('Sidebar Analytics', () => {
       .getAllByRole('link')
       .map((link) => link.textContent?.replace(/\d+$/, ''))
     expect(names.indexOf('Analytics')).toBe(names.indexOf('Storage') + 1)
-    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 2)
+    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 3)
   })
 
   it('is active on every analytics tab', async () => {
@@ -255,6 +267,7 @@ describe('Sidebar groups', () => {
       'Storage',
       'Analytics',
       'Security',
+      'Log search',
       'Settings',
     ])
     // Every nav item carries an icon.
