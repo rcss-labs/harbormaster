@@ -144,6 +144,11 @@ func contractShapes() map[string]any {
 		"analyticsReliability": shapeOf(reflect.TypeFor[ReliabilityDTO]()),
 		"analyticsCapacity":    shapeOf(reflect.TypeFor[CapacityDTO]()),
 		"analyticsOperations":  shapeOf(reflect.TypeFor[OperationsDTO]()),
+		// image security
+		"security":        shapeOf(reflect.TypeFor[SecurityDTO]()),
+		"securityImage":   shapeOf(reflect.TypeFor[SecurityImageDetailDTO]()),
+		"securityService": shapeOf(reflect.TypeFor[SecurityServiceDTO]()),
+		"scanStatus":      shapeOf(reflect.TypeFor[ScanStatusDTO]()),
 	}
 }
 

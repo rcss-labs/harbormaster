@@ -36,3 +36,47 @@ func TestPreDeployScan_DefaultOffAndSurvivesServiceRecreation(t *testing.T) {
 		t.Fatalf("setting on when already on: changed=%v err=%v, want false", changed, err)
 	}
 }
+
+func TestSetPreDeployScan_ConcurrentTogglesReportOneChange(t *testing.T) {
+	fx := newReadFixture(t)
+	s, ctx := fx.s, context.Background()
+	key := serviceKey("core-services", "payments-api")
+
+	const callers = 16
+	start := make(chan struct{})
+	changes := make(chan bool, callers)
+	for range callers {
+		go func() {
+			<-start
+			changed, err := s.SetPreDeployScan(ctx, key, true, 0, fx.now)
+			if err != nil {
+				t.Errorf("SetPreDeployScan: %v", err)
+			}
+			changes <- changed
+		}()
+	}
+	close(start)
+	reported := 0
+	for range callers {
+		if <-changes {
+			reported++
+		}
+	}
+	if reported != 1 {
+		t.Fatalf("%d concurrent callers reported a change, want exactly 1", reported)
+	}
+}
+
+func TestSetPreDeployScan_OffWithoutRowWritesNothing(t *testing.T) {
+	fx := newReadFixture(t)
+	s, ctx := fx.s, context.Background()
+	key := serviceKey("core-services", "payments-api")
+
+	if changed, err := s.SetPreDeployScan(ctx, key, false, 0, fx.now); err != nil || changed {
+		t.Fatalf("off without a row: changed=%v err=%v, want false", changed, err)
+	}
+	var rows int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from service_scan_settings`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("rows = %d err=%v, want none", rows, err)
+	}
+}

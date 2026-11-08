@@ -414,3 +414,18 @@ func TestFailScanImages_FailsQueuedAndScanningOnly(t *testing.T) {
 		t.Fatalf("b status = %q, want scanned (untouched)", b.Status)
 	}
 }
+
+func TestCountQueuedScanImages_CountsOnlyQueued(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedScanImages(t, s, time.Now(), "sha256:a", "sha256:b", "sha256:c")
+	if _, err := s.Pool.Exec(ctx, `update scan_images set status = 'scanned' where digest = 'sha256:a'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update scan_images set next_attempt_at = now() + interval '1 hour' where digest = 'sha256:b'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.CountQueuedScanImages(ctx); err != nil || n != 2 {
+		t.Fatalf("queued = %d err=%v, want 2 (a retry that is not due yet still waits)", n, err)
+	}
+}

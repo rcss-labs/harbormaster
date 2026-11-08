@@ -240,3 +240,12 @@ func (s *Store) FailScanImages(ctx context.Context, digests []string, code, deta
 	}
 	return nil
 }
+
+// CountQueuedScanImages counts the images waiting for a scan, retries not yet due included.
+func (s *Store) CountQueuedScanImages(ctx context.Context) (int, error) {
+	var n int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from scan_images where status = 'queued'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count queued scan images: %w", err)
+	}
+	return n, nil
+}

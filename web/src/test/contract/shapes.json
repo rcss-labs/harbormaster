@@ -1684,6 +1684,70 @@
       "string"
     ]
   },
+  "scanStatus": {
+    "enabled": "boolean",
+    "image": {
+      "$null": {
+        "accepted": "number",
+        "can": {
+          "accept": "boolean",
+          "rescan": "boolean"
+        },
+        "digest": "string",
+        "failure_action": "string",
+        "failure_code": "string",
+        "failure_detail": "string",
+        "image": "string",
+        "last_requested_at": "time",
+        "matched_db_built_at": {
+          "$null": "time"
+        },
+        "open": {
+          "critical": "number",
+          "high": "number",
+          "low": "number",
+          "medium": "number",
+          "negligible": "number",
+          "unknown": "number"
+        },
+        "packages": {
+          "$null": "number"
+        },
+        "platform": "string",
+        "registry_account_id": "string",
+        "registry_region": "string",
+        "repository": "string",
+        "requests": [
+          {
+            "at": "time",
+            "by": "string",
+            "can_accept": "boolean",
+            "cluster": "string",
+            "container": "string",
+            "permission_tag": {
+              "color": "string",
+              "id": "number",
+              "inherited": "boolean",
+              "name": "string"
+            },
+            "service": "string",
+            "service_id": "string",
+            "source": "string",
+            "tag": "string"
+          }
+        ],
+        "scanned_at": {
+          "$null": "time"
+        },
+        "status": "string",
+        "syft_version": "string",
+        "tag": "string",
+        "truncated": "boolean"
+      }
+    },
+    "message": "string",
+    "state": "string"
+  },
   "search": {
     "items": [
       {
@@ -1693,6 +1757,243 @@
         "sub": "string"
       }
     ]
+  },
+  "security": {
+    "db": {
+      "built_at": {
+        "$null": "time"
+      },
+      "freshness": "string",
+      "last_refresh_error": "string",
+      "refreshing": "boolean"
+    },
+    "enabled": "boolean",
+    "hint": "string",
+    "images": [
+      {
+        "accepted": "number",
+        "can": {
+          "accept": "boolean",
+          "rescan": "boolean"
+        },
+        "digest": "string",
+        "failure_action": "string",
+        "failure_code": "string",
+        "failure_detail": "string",
+        "image": "string",
+        "last_requested_at": "time",
+        "matched_db_built_at": {
+          "$null": "time"
+        },
+        "open": {
+          "critical": "number",
+          "high": "number",
+          "low": "number",
+          "medium": "number",
+          "negligible": "number",
+          "unknown": "number"
+        },
+        "packages": {
+          "$null": "number"
+        },
+        "platform": "string",
+        "registry_account_id": "string",
+        "registry_region": "string",
+        "repository": "string",
+        "requests": [
+          {
+            "at": "time",
+            "by": "string",
+            "can_accept": "boolean",
+            "cluster": "string",
+            "container": "string",
+            "permission_tag": {
+              "color": "string",
+              "id": "number",
+              "inherited": "boolean",
+              "name": "string"
+            },
+            "service": "string",
+            "service_id": "string",
+            "source": "string",
+            "tag": "string"
+          }
+        ],
+        "scanned_at": {
+          "$null": "time"
+        },
+        "status": "string",
+        "syft_version": "string",
+        "tag": "string",
+        "truncated": "boolean"
+      }
+    ],
+    "note": "string",
+    "polled_at": "time",
+    "scanner": {
+      "failing_since": {
+        "$null": "time"
+      },
+      "last_error": "string",
+      "last_success_at": {
+        "$null": "time"
+      },
+      "queued": "number",
+      "running_images": "number",
+      "running_runs": "number"
+    }
+  },
+  "securityImage": {
+    "accepted": "number",
+    "can": {
+      "accept": "boolean",
+      "rescan": "boolean"
+    },
+    "digest": "string",
+    "failure_action": "string",
+    "failure_code": "string",
+    "failure_detail": "string",
+    "findings": [
+      {
+        "acceptances": [
+          {
+            "by": "string",
+            "can_revoke": "boolean",
+            "created_at": "time",
+            "expires_at": "time",
+            "id": "number",
+            "reason": "string",
+            "service": "string",
+            "service_id": "string"
+          }
+        ],
+        "accepted_everywhere": "boolean",
+        "cvss": {
+          "$null": "number"
+        },
+        "data_source": "string",
+        "first_seen_at": "time",
+        "fix_state": "string",
+        "fixed_version": "string",
+        "location": "string",
+        "package": "string",
+        "severity": "string",
+        "type": "string",
+        "url": "string",
+        "version": "string",
+        "vuln_id": "string"
+      }
+    ],
+    "image": "string",
+    "last_requested_at": "time",
+    "matched_db_built_at": {
+      "$null": "time"
+    },
+    "open": {
+      "critical": "number",
+      "high": "number",
+      "low": "number",
+      "medium": "number",
+      "negligible": "number",
+      "unknown": "number"
+    },
+    "packages": {
+      "$null": "number"
+    },
+    "platform": "string",
+    "registry_account_id": "string",
+    "registry_region": "string",
+    "repository": "string",
+    "requests": [
+      {
+        "at": "time",
+        "by": "string",
+        "can_accept": "boolean",
+        "cluster": "string",
+        "container": "string",
+        "permission_tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "service": "string",
+        "service_id": "string",
+        "source": "string",
+        "tag": "string"
+      }
+    ],
+    "scanned_at": {
+      "$null": "time"
+    },
+    "status": "string",
+    "syft_version": "string",
+    "tag": "string",
+    "truncated": "boolean"
+  },
+  "securityService": {
+    "can_change_setting": "boolean",
+    "enabled": "boolean",
+    "images": [
+      {
+        "accepted": "number",
+        "can": {
+          "accept": "boolean",
+          "rescan": "boolean"
+        },
+        "digest": "string",
+        "failure_action": "string",
+        "failure_code": "string",
+        "failure_detail": "string",
+        "image": "string",
+        "last_requested_at": "time",
+        "matched_db_built_at": {
+          "$null": "time"
+        },
+        "open": {
+          "critical": "number",
+          "high": "number",
+          "low": "number",
+          "medium": "number",
+          "negligible": "number",
+          "unknown": "number"
+        },
+        "packages": {
+          "$null": "number"
+        },
+        "platform": "string",
+        "registry_account_id": "string",
+        "registry_region": "string",
+        "repository": "string",
+        "requests": [
+          {
+            "at": "time",
+            "by": "string",
+            "can_accept": "boolean",
+            "cluster": "string",
+            "container": "string",
+            "permission_tag": {
+              "color": "string",
+              "id": "number",
+              "inherited": "boolean",
+              "name": "string"
+            },
+            "service": "string",
+            "service_id": "string",
+            "source": "string",
+            "tag": "string"
+          }
+        ],
+        "scanned_at": {
+          "$null": "time"
+        },
+        "status": "string",
+        "syft_version": "string",
+        "tag": "string",
+        "truncated": "boolean"
+      }
+    ],
+    "pre_deploy_scan": "boolean"
   },
   "service": {
     "account_id": "string",

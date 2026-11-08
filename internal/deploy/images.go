@@ -2,9 +2,11 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	ecrtypes "github.com/aws/aws-sdk-go-v2/service/ecr/types"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
@@ -186,4 +189,27 @@ func (s *Service) describeImageTags(ctx context.Context, key model.ServiceKey, r
 	}
 	sort.SliceStable(tags, func(i, j int) bool { return tags[i].PushedAt.After(tags[j].PushedAt) })
 	return tags, nil
+}
+
+// ContainerImage returns the image reference of one container of the service's PRIMARY task definition and the CPU
+// platform the task runs on: linux/arm64 for an ARM64 runtimePlatform, else linux/amd64. A container that is not in
+// the definition is a *ValidationError.
+func (s *Service) ContainerImage(ctx context.Context, key model.ServiceKey, container string) (image, platform string, err error) {
+	_, ref, err := s.primaryDefinition(ctx, key)
+	if err != nil {
+		return "", "", err
+	}
+	index := slices.IndexFunc(ref.Containers, func(candidate model.ContainerDef) bool { return candidate.Name == container })
+	if index < 0 {
+		return "", "", &ValidationError{Message: fmt.Sprintf("Container %q is not in the task definition", container)}
+	}
+	var described ecstypes.TaskDefinition
+	if err := json.Unmarshal(ref.Raw, &described); err != nil {
+		return "", "", fmt.Errorf("decode task definition %s: %w", ref.ARN, err)
+	}
+	platform = "linux/amd64"
+	if described.RuntimePlatform != nil && described.RuntimePlatform.CpuArchitecture == ecstypes.CPUArchitectureArm64 {
+		platform = "linux/arm64"
+	}
+	return ref.Containers[index].Image, platform, nil
 }
