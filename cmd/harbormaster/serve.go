@@ -234,7 +234,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		scanRunner = &scanjob.Runner{Store: st, Launcher: fakeScanner, Bucket: fakeScanner, DB: fakeScanner, Cfg: cfg.Scan, Now: time.Now, Log: log}
 		clients, prober = f, f
 		go estate.RunRollouts(ctx, fakeRolloutStep)
-		if err := devseed.Apply(ctx, st); err != nil {
+		if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo); err != nil {
 			return fmt.Errorf("seed demo data: %w", err)
 		}
 		idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
