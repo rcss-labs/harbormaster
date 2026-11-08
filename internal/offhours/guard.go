@@ -36,10 +36,10 @@ func (g *Guard) DesiredCount(ctx context.Context, k model.ServiceKey) error {
 		return err
 	}
 	switch {
+	case enrolment.State == "blocked" || enrolment.RegisteredTarget: // a blocked service cannot be woken
+		return conflict(k, schedule, reasonHeld)
 	case asleep:
 		return conflict(k, schedule, reasonAsleep)
-	case enrolment.State == "blocked" || enrolment.RegisteredTarget:
-		return conflict(k, schedule, reasonHeld)
 	}
 	return nil
 }
@@ -52,13 +52,13 @@ func (g *Guard) Scaling(ctx context.Context, k model.ServiceKey, setsRange, remo
 	if err != nil || !enrolled {
 		return err
 	}
+	if removesTarget {
+		return conflict(k, schedule, reasonHeld)
+	}
 	for _, name := range actionNames {
 		if IsOwned(name) {
 			return conflict(k, schedule, reasonActions)
 		}
-	}
-	if removesTarget {
-		return conflict(k, schedule, reasonHeld)
 	}
 	if setsRange {
 		asleep, err := g.asleep(enrolment, schedule)
@@ -90,6 +90,9 @@ func (g *Guard) load(ctx context.Context, k model.ServiceKey) (store.OffHoursEnr
 	}
 	if err != nil {
 		return enrolment, store.OffHoursSchedule{}, false, err
+	}
+	if !schedule.Enabled { // the reconciler releases the service of a disabled schedule too
+		return enrolment, schedule, false, nil
 	}
 	return enrolment, schedule, true, nil
 }

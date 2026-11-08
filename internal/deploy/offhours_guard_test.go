@@ -13,6 +13,10 @@ import (
 // enrolPayments puts payments-api on a schedule named "always" whose grid is all awake or all asleep, and makes the
 // service use the real off-hours guard.
 func enrolPayments(t *testing.T, h *harness, awakeAllWeek, registeredTarget bool) {
+	enrolPaymentsInState(t, h, awakeAllWeek, registeredTarget, "active")
+}
+
+func enrolPaymentsInState(t *testing.T, h *harness, awakeAllWeek, registeredTarget bool, state string) {
 	t.Helper()
 	grid := strings.Repeat("0", 168)
 	if awakeAllWeek {
@@ -25,7 +29,7 @@ func enrolPayments(t *testing.T, h *harness, awakeAllWeek, registeredTarget bool
 	}
 	err = h.store.InTx(t.Context(), func(tx store.Tx) error {
 		return h.store.UpsertOffHoursEnrolment(t.Context(), tx, store.OffHoursEnrolment{
-			Key: paymentsKey, ScheduleID: &sc.ID, SavedMin: 1, SavedMax: 4, RegisteredTarget: registeredTarget, State: "active"})
+			Key: paymentsKey, ScheduleID: &sc.ID, SavedMin: 1, SavedMax: 4, RegisteredTarget: registeredTarget, State: state})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,4 +100,15 @@ func TestChangeSet_RangeEditAllowedWhileAwake(t *testing.T) {
 	if _, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs); err != nil {
 		t.Fatalf("range edit while awake: %v", err)
 	}
+}
+
+func TestChangeSet_RefusesServiceDesiredCountWhenBlocked(t *testing.T) {
+	h := newHarness(t)
+	enrolPaymentsInState(t, h, true, false, "blocked")
+	before := writeCalls(h)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.Service = &deploy.ServiceChange{DesiredCount: ptr(5)}
+	_, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs)
+	wantOffHoursConflict(t, err, "Its task count is held by the schedule.")
+	assertNoNewWrites(t, h, before)
 }

@@ -15,6 +15,8 @@ type guardHarness struct {
 	guard *offhours.Guard
 	store *store.Store
 	now   time.Time
+	// disabled creates the schedule switched off.
+	disabled bool
 }
 
 // newGuardHarness builds a Guard over a Mon-Fri 07-20 Europe/Berlin schedule named "staging nights". The clock is
@@ -46,7 +48,7 @@ func (h *guardHarness) enrol(t *testing.T, state string, registeredTarget bool, 
 		}
 	}
 	sc, err := h.store.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{
-		Name: "staging nights", Enabled: true, TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: string(awake)}, user.ID)
+		Name: "staging nights", Enabled: !h.disabled, TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: string(awake)}, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +134,33 @@ func TestGuard_NotEnrolledAllowsAll(t *testing.T) {
 		t.Fatalf("DesiredCount: %v", err)
 	}
 	if err := h.guard.Scaling(ctx, paymentsKey, true, true, []string{"harbormaster-offhours-wake-07"}); err != nil {
+		t.Fatalf("Scaling: %v", err)
+	}
+}
+
+func TestGuard_BlockedAndAsleepReportsHeld(t *testing.T) {
+	h := newGuardHarness(t)
+	h.enrol(t, "blocked", false, nil)
+	h.now = h.now.Add(12 * time.Hour) // asleep too, but a blocked service cannot be woken
+	wantConflict(t, h.guard.DesiredCount(t.Context(), paymentsKey), "Its task count is held by the schedule.")
+}
+
+func TestGuard_RemoveTargetWithOwnedActionReportsHeld(t *testing.T) {
+	h := newGuardHarness(t)
+	h.enrol(t, "active", false, nil)
+	wantConflict(t, h.guard.Scaling(t.Context(), paymentsKey, false, true, []string{"harbormaster-offhours-wake-07"}),
+		"Its task count is held by the schedule.")
+}
+
+func TestGuard_DisabledScheduleIsNotEnrolled(t *testing.T) {
+	h := newGuardHarness(t)
+	h.disabled = true
+	h.enrol(t, "active", true, nil)
+	h.now = h.now.Add(12 * time.Hour)
+	if err := h.guard.DesiredCount(t.Context(), paymentsKey); err != nil {
+		t.Fatalf("DesiredCount: %v", err)
+	}
+	if err := h.guard.Scaling(t.Context(), paymentsKey, true, true, []string{"harbormaster-offhours-wake-07"}); err != nil {
 		t.Fatalf("Scaling: %v", err)
 	}
 }

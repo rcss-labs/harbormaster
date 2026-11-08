@@ -296,10 +296,19 @@ func predefinedMetric(metric string) astypes.MetricType {
 	}
 }
 
-// guardScaling asks the capacity guard (off-hours) whether the scaling part may be applied. It runs before any AWS
+// guardCapacity asks the capacity guard (off-hours) whether the desired count and scaling parts may be applied. It runs before any AWS
 // read: the answer depends only on the enrolment.
-func (s *Service) guardScaling(ctx context.Context, key model.ServiceKey, scaling *ScalingChange) error {
-	if s.Guard == nil || scaling == nil {
+func (s *Service) guardCapacity(ctx context.Context, key model.ServiceKey, cs ChangeSet) error {
+	if s.Guard == nil {
+		return nil
+	}
+	if cs.Service != nil && cs.Service.DesiredCount != nil {
+		if err := s.Guard.DesiredCount(ctx, key); err != nil {
+			return err
+		}
+	}
+	scaling := cs.Scaling
+	if scaling == nil {
 		return nil
 	}
 	names := make([]string, 0, len(scaling.PutScheduledActions)+len(scaling.DeleteScheduledActions))

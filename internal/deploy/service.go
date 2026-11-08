@@ -28,9 +28,6 @@ type ScalingRangeSource interface {
 	Range(ctx context.Context, key model.ServiceKey) (min, max int, ok bool, err error)
 }
 
-// Service runs the change-path operations on ECS services: registering task
-// definition revisions, deploying, rolling back and restarting.
-// Permission checks live in the API layer, not here.
 // CapacityGuard lets another feature veto capacity writes. The off-hours Guard implements it; both methods
 // return nil when the service is not affected.
 type CapacityGuard interface {
@@ -38,6 +35,9 @@ type CapacityGuard interface {
 	Scaling(ctx context.Context, k model.ServiceKey, setsRange, removesTarget bool, actionNames []string) error
 }
 
+// Service runs the change-path operations on ECS services: registering task
+// definition revisions, deploying, rolling back and restarting.
+// Permission checks live in the API layer, not here.
 type Service struct {
 	Store           *store.Store
 	Clients         awsx.Clients
