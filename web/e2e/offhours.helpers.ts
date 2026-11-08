@@ -14,7 +14,7 @@ async function writeHeaders(request: APIRequestContext) {
   return { 'X-CSRF-Token': me.csrf_token }
 }
 
-interface SavedSchedule {
+export interface SavedSchedule {
   name: string
   enabled: boolean
   tag_key: string
@@ -23,16 +23,21 @@ interface SavedSchedule {
   awake: boolean[][]
 }
 
+async function deleteSchedule(request: APIRequestContext, id: number, headers: Record<string, string>) {
+  const response = await request.delete(`/api/offhours/schedules/${id}`, { headers })
+  expect(response.ok(), await response.text()).toBe(true)
+}
+
 /**
  * Takes aside the schedules that would collide with an e2e one (a tag allows one schedule, and the demo estate seeds
  * "Staging nights and weekends" on env=staging, disabled): deletes the e2e schedule by name and any other schedule on
- * the tag, and returns what was removed so `restoreSchedules` can put the estate back.
+ * the tag. What it removed is pushed onto `aside` as it goes, so a caller whose `finally` runs `restoreSchedules`
+ * gets back everything collected even if a later request throws.
  */
-export async function clearScheduleSlot(request: APIRequestContext, name: string, tag: string): Promise<SavedSchedule[]> {
+export async function clearScheduleSlot(request: APIRequestContext, name: string, tag: string, aside: SavedSchedule[]) {
   const [tagKey, tagValue] = tag.split('=')
   const headers = await writeHeaders(request)
   const list = await (await request.get('/api/offhours/schedules')).json()
-  const aside: SavedSchedule[] = []
   for (const item of (list.items ?? []) as { id: number; name: string; tag_key: string; tag_value: string }[]) {
     const onTag = item.tag_key === tagKey && item.tag_value === tagValue
     if (item.name !== name && !onTag) continue
@@ -40,9 +45,8 @@ export async function clearScheduleSlot(request: APIRequestContext, name: string
       const d = await (await request.get(`/api/offhours/schedules/${item.id}`)).json()
       aside.push({ name: d.name, enabled: d.enabled, tag_key: d.tag_key, tag_value: d.tag_value, timezone: d.timezone, awake: d.awake })
     }
-    await request.delete(`/api/offhours/schedules/${item.id}`, { headers })
+    await deleteSchedule(request, item.id, headers)
   }
-  return aside
 }
 
 /** Removes the e2e schedule and recreates the schedules `clearScheduleSlot` set aside. */
@@ -50,7 +54,7 @@ export async function restoreSchedules(request: APIRequestContext, name: string,
   const headers = await writeHeaders(request)
   const list = await (await request.get('/api/offhours/schedules')).json()
   for (const item of (list.items ?? []) as { id: number; name: string }[]) {
-    if (item.name === name) await request.delete(`/api/offhours/schedules/${item.id}`, { headers })
+    if (item.name === name) await deleteSchedule(request, item.id, headers)
   }
   for (const schedule of aside) {
     const response = await request.post('/api/offhours/schedules', { data: schedule, headers })

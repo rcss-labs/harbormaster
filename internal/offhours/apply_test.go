@@ -547,6 +547,10 @@ func TestApplier_EnrolRecoversRangeFromWakeAction(t *testing.T) {
 	if min, max, _ := h.target(); min != 0 || max != 0 {
 		t.Fatalf("range = %d/%d, recovering must not change it", min, max)
 	}
+	// The target is at 0/0 so nothing runs; the awake count falls back to the saved minimum.
+	if recovered.AwakeTasks != recovered.SavedMin {
+		t.Fatalf("awake tasks = %d, want the saved min %d", recovered.AwakeTasks, recovered.SavedMin)
+	}
 }
 
 func TestApplier_EnrolNeedsAttentionWithoutWakeAction(t *testing.T) {

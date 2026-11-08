@@ -1,4 +1,4 @@
-import { clearScheduleSlot, createSchedule, desiredTasks, restoreSchedules } from './offhours.helpers'
+import { clearScheduleSlot, createSchedule, desiredTasks, restoreSchedules, type SavedSchedule } from './offhours.helpers'
 import { serviceUrl } from './fixtures/ids'
 import { watchPage } from './fixtures/phone'
 import { asUser, expect, test } from './fixtures/test'
@@ -12,9 +12,12 @@ const stagingWebId = serviceId('731022849906', 'us-east-1', 'staging-web', 'web'
 
 test('the page does not scroll sideways, the grid scrolls inside its panel and a wake from the card works', async ({ page, request }) => {
   watchPage(page)
-  const aside = await clearScheduleSlot(request, NAME, 'env=staging')
-  const seededTasks = await desiredTasks(request, stagingWebId)
+  const aside: SavedSchedule[] = []
+  let seededTasks = 0
   try {
+    await clearScheduleSlot(request, NAME, 'env=staging', aside)
+    seededTasks = await desiredTasks(request, stagingWebId)
+    expect(seededTasks).toBeGreaterThan(0)
     await createSchedule(request, NAME, 'env=staging')
     await page.goto('/settings/offhours')
     await page.getByRole('list', { name: 'Schedules' }).getByRole('button', { name: new RegExp(NAME) }).click()
@@ -42,6 +45,6 @@ test('the page does not scroll sideways, the grid scrolls inside its panel and a
     await expect(card).toContainText('Woken until', { timeout: 15_000 })
   } finally {
     await restoreSchedules(request, NAME, aside)
-    await expect.poll(() => desiredTasks(request, stagingWebId), { timeout: 15_000 }).toBe(seededTasks)
+    if (seededTasks > 0) await expect.poll(() => desiredTasks(request, stagingWebId), { timeout: 15_000 }).toBe(seededTasks)
   }
 })

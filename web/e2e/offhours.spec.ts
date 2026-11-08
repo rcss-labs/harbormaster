@@ -1,4 +1,4 @@
-import { DAY_NAMES, awakeHourUtc, clearScheduleSlot, createSchedule, desiredTasks, restoreSchedules, startSchedule } from './offhours.helpers'
+import { DAY_NAMES, awakeHourUtc, clearScheduleSlot, createSchedule, desiredTasks, restoreSchedules, type SavedSchedule, startSchedule } from './offhours.helpers'
 import { serviceUrl } from './fixtures/ids'
 import { asUser, expect, test } from './fixtures/test'
 import { serviceId } from './helpers'
@@ -17,15 +17,22 @@ const stagingWebUrl = serviceUrl(STAGING_ACCOUNT, 'us-east-1', 'staging-web', 'w
 test.describe('sam', () => {
   test.use(asUser('sam'))
 
-  let aside: Awaited<ReturnType<typeof clearScheduleSlot>> = []
+  let aside: SavedSchedule[] = []
+  let seededTasks = 0
   test.beforeEach(async ({ request }) => {
-    aside = await clearScheduleSlot(request, NAME, 'env=staging')
+    aside = []
+    await clearScheduleSlot(request, NAME, 'env=staging', aside)
+    // Read after the slot is cleared, and require tasks, so a leak from an earlier run (a service left asleep) cannot hide.
+    seededTasks = await desiredTasks(request, stagingWebId)
+    expect(seededTasks).toBeGreaterThan(0)
   })
-  test.afterEach(async ({ request }) => restoreSchedules(request, NAME, aside))
+  test.afterEach(async ({ request }) => {
+    await restoreSchedules(request, NAME, aside)
+    // Deleting a schedule only kicks the reconciler; wait for the capacity to be back before the next test.
+    await expect.poll(() => desiredTasks(request, stagingWebId), { timeout: 15_000 }).toBe(seededTasks)
+  })
 
   test('a staging schedule puts web to sleep, wakes it for two hours, sleeps it again and restores it on delete', async ({ page, request }) => {
-    const seededTasks = await desiredTasks(request, stagingWebId)
-    expect(seededTasks).toBeGreaterThan(0)
     const stagingCount = (await (await request.get('/api/offhours/tags')).json()).items.find(
       (option: { key: string; value: string }) => option.key === 'env' && option.value === 'staging',
     ).services as number
@@ -75,9 +82,12 @@ test.describe('oncall (Operate on Staging)', () => {
   test('wakes a sleeping staging service from its Overview card', async ({ page, browser }) => {
     // sam's session creates the schedule through the API; oncall only has Operate on the service.
     const admin = await browser.newContext({ ...asUser('sam'), baseURL: test.info().project.use.baseURL })
-    const seededTasks = await desiredTasks(admin.request, stagingWebId)
-    const aside = await clearScheduleSlot(admin.request, NAME, 'env=staging')
+    const aside: SavedSchedule[] = []
+    let seededTasks = 0
     try {
+      await clearScheduleSlot(admin.request, NAME, 'env=staging', aside)
+      seededTasks = await desiredTasks(admin.request, stagingWebId)
+      expect(seededTasks).toBeGreaterThan(0)
       await createSchedule(admin.request, NAME, 'env=staging')
       await page.goto(stagingWebUrl)
       const card = page.locator('section', { has: page.getByRole('heading', { name: 'Off-hours' }) })
@@ -86,9 +96,12 @@ test.describe('oncall (Operate on Staging)', () => {
       await expect(card).toContainText('Woken until', { timeout: 15_000 })
       await expect(card.getByRole('button', { name: 'Put back to sleep' })).toBeVisible()
     } finally {
-      await restoreSchedules(admin.request, NAME, aside)
-      await expect.poll(() => desiredTasks(admin.request, stagingWebId), { timeout: 15_000 }).toBe(seededTasks)
-      await admin.close()
+      try {
+        await restoreSchedules(admin.request, NAME, aside)
+        if (seededTasks > 0) await expect.poll(() => desiredTasks(admin.request, stagingWebId), { timeout: 15_000 }).toBe(seededTasks)
+      } finally {
+        await admin.close()
+      }
     }
   })
 })

@@ -376,6 +376,10 @@ func (a *Applier) Enrol(ctx context.Context, tx store.Tx, sc store.OffHoursSched
 	}
 	// Remember what runs now: a service enrolled in sleep hours is put to sleep at once, and the page shows "N -> 0".
 	e.AwakeTasks = live.Desired
+	if e.AwakeTasks == 0 {
+		// Recovered from a sleeping target: nothing runs now, so the saved minimum is the best figure for "N -> 0".
+		e.AwakeTasks = e.SavedMin
+	}
 
 	if err := a.stamp(ctx, tx, &e); err != nil {
 		return store.OffHoursEnrolment{}, err
