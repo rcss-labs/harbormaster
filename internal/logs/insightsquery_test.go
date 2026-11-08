@@ -107,10 +107,14 @@ func TestComposeQuery_PipesInsideLiteralsAreNotStages(t *testing.T) {
 func TestComposeQuery_SlashIsDivisionOutsideRegexContext(t *testing.T) {
 	scopes := []StreamScope{{AccountID: "1", Group: "g", Prefixes: []string{"p/"}}}
 	// "/" after a field name is division, so the pipe after it is a real stage separator.
-	_, err := ComposeQuery(`fields a / b | stats count(*) / 2`, scopes, 10)
+	_, err := ComposeQuery(`fields a / b | stats count(*)`, scopes, 10)
 	var qe *QueryError
 	if !errors.As(err, &qe) || !strings.Contains(qe.Message, "stats") {
 		t.Fatalf("want stats rejection, got %v", err)
+	}
+	out, err := ComposeQuery(`fields a / 2 as half`, scopes, 10)
+	if err != nil || len(strings.Split(out, "\n")) != 5 {
+		t.Fatalf("plain division must compose: %v %q", err, out)
 	}
 }
 
@@ -228,10 +232,16 @@ func TestComposeQuery_DivisionBeforeQuoteIsUnreadable(t *testing.T) {
 
 func TestComposeQuery_BackslashInBackticksEscapesNothing(t *testing.T) {
 	q := "fields `a\\` | stats count(*) by @log | filter @message like \"`\\\"\""
-	err := ValidateQuery(q)
-	var qe *QueryError
-	if !errors.As(err, &qe) || !strings.Contains(qe.Message, "stats") {
-		t.Fatalf("want stats rejection, got %v", err)
+	for _, q := range []string{
+		q,
+		"fields `a\\`, \"` | unmask @message # \"",
+		"fields `a\\b`",
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != errUnreadable {
+			t.Errorf("%q: want unreadable error, got %v", q, err)
+		}
 	}
 }
 
@@ -264,5 +274,53 @@ func TestComposeQuery_RejectsAliasToAtNames(t *testing.T) {
 	}
 	if err := ValidateQuery(`filter @message like "as @x" | fields a as b`); err != nil {
 		t.Errorf("as @ inside a literal or plain alias must pass: %v", err)
+	}
+}
+
+func TestComposeQuery_RejectsAliasToAtNamesEverywhere(t *testing.T) {
+	for _, q := range []string{
+		`parse @message "* *" as a, @logStream`,
+		"fields x as `@log`",
+		"fields x as `  @log`",
+		`fields x as@log`,
+		"parse @message \"* *\" as a,`@log`",
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != "Log search cannot rename fields that start with @." {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+	for _, q := range []string{`parse @message "* *" as a, b`, "fields `my field` as renamed", `sort @timestamp asc`} {
+		if err := ValidateQuery(q); err != nil {
+			t.Errorf("%q: %v", q, err)
+		}
+	}
+}
+
+func TestComposeQuery_DivisionFollowedByLaterSlashAcrossQuoteOrPipeIsUnreadable(t *testing.T) {
+	for _, q := range []string{
+		`filter x = 1 / y "a|" / 2`,
+		`filter x = 1 / y | filter z / 2`,
+		"filter x = 1 / y ` / 2",
+	} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != errUnreadable {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+}
+
+func TestComposeQuery_RejectsControlAndLineSeparatorCharacters(t *testing.T) {
+	for _, q := range []string{"filter a\u2028| stats count(*)", "filter a\u2029", "filter a\u0085", "filter a\x00", "filter a\x0b"} {
+		err := ValidateQuery(q)
+		var qe *QueryError
+		if !errors.As(err, &qe) || qe.Message != errUnreadable {
+			t.Errorf("%q: got %v", q, err)
+		}
+	}
+	if err := ValidateQuery("filter a\t=\r\n1"); err != nil {
+		t.Errorf("tab and newlines are fine: %v", err)
 	}
 }

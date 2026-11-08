@@ -117,6 +117,12 @@ func splitStages(user string) ([]string, error) {
 		sawPipe bool
 	)
 	runes := []rune(user)
+	for _, r := range runes {
+		isControl := unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r'
+		if isControl || r == '\u2028' || r == '\u2029' {
+			return nil, &QueryError{Message: errUnreadable}
+		}
+	}
 	flush := func() error {
 		stage := strings.TrimSpace(cur.String())
 		cur.Reset()
@@ -160,11 +166,16 @@ func splitStages(user string) ([]string, error) {
 				return nil, &QueryError{Message: errUnreadable}
 			}
 			cur.WriteString(string(runes[i:end]))
-			code.WriteString(" _ ")
+			if r == '`' {
+				// Backticked names stay visible: `@log` is still an @ name.
+				code.WriteString(" " + string(runes[i:end]) + " ")
+			} else {
+				code.WriteString(" _ ")
+			}
 			i = end
 		default:
-			if r == '/' && quoteFollows(runes, i+1) {
-				// Division followed by a quote: guessing could desync from AWS's reading.
+			if r == '/' && (quoteFollows(runes, i+1) || ambiguousDivision(runes, i+1)) {
+				// Guessing here could desync from AWS's reading of the query.
 				return nil, &QueryError{Message: errUnreadable}
 			}
 			cur.WriteRune(r)
@@ -179,7 +190,8 @@ func splitStages(user string) ([]string, error) {
 }
 
 // scanLiteral returns the index just past the literal opened at runes[start].
-// Backslash escapes the next rune in strings and regexes but not in backticks.
+// Backslash escapes the next rune in strings and regexes; any backslash in a
+// backtick literal is unreadable.
 // A raw newline inside any literal is unreadable: it would break the
 // one-stage-per-line layout.
 func scanLiteral(runes []rune, start int) (int, bool) {
@@ -189,11 +201,13 @@ func scanLiteral(runes []rune, start int) (int, bool) {
 		case '\n', '\r':
 			return 0, false
 		case '\\':
-			if delim != '`' {
-				i++
-				if i < len(runes) && (runes[i] == '\n' || runes[i] == '\r') {
-					return 0, false
-				}
+			if delim == '`' {
+				// Unknown whether AWS escapes inside backticks: refuse to guess.
+				return 0, false
+			}
+			i++
+			if i < len(runes) && (runes[i] == '\n' || runes[i] == '\r') {
+				return 0, false
 			}
 		case delim:
 			return i + 1, true
@@ -218,13 +232,77 @@ func quoteFollows(runes []rune, from int) bool {
 	return false
 }
 
-// aliasesToAtName reports whether the literal-blanked stage text contains
-// "as @name". Attribution relies on @log and @logStream staying intact.
+// ambiguousDivision reports whether, after a "/" read as division, another "/"
+// follows with a quote, backtick or pipe between them. That shape could be a
+// regex in AWS's reading that hides a pipe, so it is refused.
+func ambiguousDivision(runes []rune, from int) bool {
+	for i := from; i < len(runes); i++ {
+		if runes[i] == '/' {
+			return false
+		}
+		if runes[i] == '"' || runes[i] == '\'' || runes[i] == '`' || runes[i] == '|' {
+			for j := i + 1; j < len(runes); j++ {
+				if runes[j] == '/' {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// aliasesToAtName reports whether any name after "as" in the stage starts with
+// "@", plain or backticked. code has string and regex literals blanked but
+// backticked names intact. Attribution relies on @log and @logStream.
 func aliasesToAtName(code string) bool {
-	words := strings.Fields(code)
-	for i := 0; i+1 < len(words); i++ {
-		if strings.EqualFold(words[i], "as") && strings.HasPrefix(words[i+1], "@") {
-			return true
+	runes := []rune(code)
+	isIdent := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '@' }
+	skipSpace := func(i int) int {
+		for i < len(runes) && unicode.IsSpace(runes[i]) {
+			i++
+		}
+		return i
+	}
+	for i := 0; i+1 < len(runes); i++ {
+		if (runes[i] != 'a' && runes[i] != 'A') || (runes[i+1] != 's' && runes[i+1] != 'S') {
+			continue
+		}
+		if i > 0 && isIdent(runes[i-1]) {
+			continue
+		}
+		pos := i + 2
+		if pos < len(runes) && isIdent(runes[pos]) && runes[pos] != '@' {
+			continue // asc, assert, ...
+		}
+		for {
+			pos = skipSpace(pos)
+			if pos >= len(runes) {
+				break
+			}
+			if runes[pos] == '`' {
+				end := pos + 1
+				for end < len(runes) && runes[end] != '`' {
+					end++
+				}
+				if skipSpace(pos+1) < len(runes) && runes[skipSpace(pos+1)] == '@' {
+					return true
+				}
+				pos = end + 1
+			} else {
+				if runes[pos] == '@' {
+					return true
+				}
+				for pos < len(runes) && !unicode.IsSpace(runes[pos]) && runes[pos] != ',' {
+					pos++
+				}
+			}
+			pos = skipSpace(pos)
+			if pos < len(runes) && runes[pos] == ',' {
+				pos++
+				continue
+			}
+			break
 		}
 	}
 	return false
