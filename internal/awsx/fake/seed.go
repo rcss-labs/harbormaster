@@ -87,6 +87,12 @@ type serviceSpec struct {
 	// the service's own account (tagged ecrSidecarTag, with ecrSidecarTags tags).
 	ecrSidecar, ecrSidecarTag string
 	ecrSidecarTags            int
+	// ec2 runs the service and its tasks on the EC2 launch type, which has no Fargate price.
+	ec2 bool
+	// spot runs the tasks on the FARGATE_SPOT capacity provider.
+	spot bool
+	// sidecarMemoryReservation, when above zero, is the soft memory limit (MiB) of the ecrSidecar container.
+	sidecarMemoryReservation int32
 }
 
 var seedServices = []serviceSpec{
@@ -97,7 +103,7 @@ var seedServices = []serviceSpec{
 	{cluster: "core-services", name: "auth-service", desired: 2, running: 2, rev: 15, repo: "auth-service", tag: "0.9.7", cpu: 256, memory: 512, port: 9000, lb: true, exec: true,
 		env: []envVar{{"TOKEN_TTL", "3600"}, {"ISSUER", "https://auth.rcss.local"}}},
 	// notifications is mid-rollout: one task on :10 (PRIMARY), one on :9 (ACTIVE).
-	{cluster: "core-services", name: "notifications", desired: 2, running: 2, rev: 9, repo: "notifications", tag: "2.2.0", cpu: 256, memory: 512, port: 8081, exec: true, deployingTag: "2.3.0",
+	{cluster: "core-services", name: "notifications", desired: 2, running: 2, rev: 9, repo: "notifications", tag: "2.2.0", cpu: 256, memory: 512, port: 8081, exec: true, spot: true, deployingTag: "2.3.0",
 		env: []envVar{{"QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/482109375512/notify"}}},
 	{cluster: "background-jobs", name: "report-worker", desired: 1, running: 1, rev: 31, repo: "report-worker", tag: "5.0.1", cpu: 1024, memory: 2048, exec: true, efs: &efsReports,
 		env: []envVar{{"REPORT_BUCKET", "rcss-reports"}}},
@@ -116,12 +122,12 @@ var seedServices = []serviceSpec{
 		env: []envVar{{"BATCH_SIZE", "500"}}},
 	{cluster: "edge-proxy", name: "edge-nginx", desired: 2, running: 2, rev: 19, repo: "edge-nginx", tag: "1.27.2", cpu: 256, memory: 512, port: 443, lb: true, exec: true, public: true, efs: &efsNginx,
 		env: []envVar{{"WORKER_PROCESSES", "auto"}}},
-	{cluster: "edge-proxy", name: "cert-renewer", desired: 1, running: 1, rev: 4, repo: "cert-renewer", tag: "0.2.1", cpu: 256, memory: 512, efs: &efsCerts,
+	{cluster: "edge-proxy", name: "cert-renewer", desired: 1, running: 1, rev: 4, repo: "cert-renewer", tag: "0.2.1", cpu: 256, memory: 512, ec2: true, efs: &efsCerts,
 		env: []envVar{{"ACME_EMAIL", "ops@rcss.local"}}},
 	{cluster: "staging-web", name: "web", desired: 1, running: 1, rev: 33, repo: "web", tag: "3.5.0-rc.1", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://api.staging.local:8080"}}},
 	{cluster: "staging-web", name: "api", desired: 1, running: 1, rev: 21, repo: "api", tag: "1.19.0-rc.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true,
-		ecrSidecar: "migrator", ecrSidecarTag: "1.4.2", ecrSidecarTags: 6,
+		ecrSidecar: "migrator", ecrSidecarTag: "1.4.2", ecrSidecarTags: 6, sidecarMemoryReservation: 768,
 		env: []envVar{{"NODE_ENV", "staging"}}},
 }
 
@@ -345,7 +351,7 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 		TaskRoleArn:             aws.String("arn:aws:iam::" + c.accountID + ":role/" + sp.name + "-task"),
 		ExecutionRoleArn:        aws.String("arn:aws:iam::" + c.accountID + ":role/ecs-task-execution"),
 		NetworkMode:             ecstypes.NetworkModeAwsvpc,
-		RequiresCompatibilities: []ecstypes.Compatibility{ecstypes.CompatibilityFargate},
+		RequiresCompatibilities: []ecstypes.Compatibility{requiredCompatibility(sp)},
 		Compatibilities:         []ecstypes.Compatibility{ecstypes.CompatibilityEc2, ecstypes.CompatibilityFargate},
 		Cpu:                     aws.String(itoa(sp.cpu)),
 		Memory:                  aws.String(itoa(sp.memory)),
@@ -367,10 +373,14 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 			Essential: aws.Bool(false), LogConfiguration: &ecstypes.LogConfiguration{LogDriver: ecstypes.LogDriverAwsfirelens}})
 	}
 	if sp.ecrSidecar != "" {
-		td.ContainerDefinitions = append(td.ContainerDefinitions, ecstypes.ContainerDefinition{
+		sidecar := ecstypes.ContainerDefinition{
 			Name:      aws.String(sp.ecrSidecar),
 			Image:     aws.String(c.accountID + ".dkr.ecr." + c.region + ".amazonaws.com/" + sp.ecrSidecar + ":" + sp.ecrSidecarTag),
-			Essential: aws.Bool(false), LogConfiguration: logCfg})
+			Essential: aws.Bool(false), LogConfiguration: logCfg}
+		if sp.sidecarMemoryReservation > 0 {
+			sidecar.MemoryReservation = aws.Int32(sp.sidecarMemoryReservation)
+		}
+		td.ContainerDefinitions = append(td.ContainerDefinitions, sidecar)
 	}
 	return TaskDefinition{AccountID: c.accountID, Region: c.region, Definition: td, Tags: deepCopy(seedTaskDefinitionTags)}
 }
@@ -418,8 +428,12 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 			health = ecstypes.HealthStatusHealthy
 		}
 	}
+	// The draw happens for every task so a per-service override leaves the other seeded values unchanged.
 	capacity := "FARGATE"
 	if s.rng.Float64() > 0.85 {
+		capacity = "FARGATE_SPOT"
+	}
+	if sp.spot {
 		capacity = "FARGATE_SPOT"
 	}
 
@@ -477,7 +491,7 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 		LastStatus:           aws.String(status),
 		DesiredStatus:        aws.String(status),
 		HealthStatus:         health,
-		LaunchType:           ecstypes.LaunchTypeFargate,
+		LaunchType:           launchTypeFor(sp),
 		CapacityProviderName: aws.String(capacity),
 		Cpu:                  td.Cpu,
 		Memory:               td.Memory,
@@ -500,6 +514,10 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 		task.StoppingAt = aws.Time(o.stoppedAt)
 		task.StoppedReason = aws.String(o.reason)
 		task.StopCode = o.stopCode
+	}
+	if sp.ec2 {
+		task.CapacityProviderName = nil
+		task.PlatformVersion = nil
 	}
 	s.e.Tasks = append(s.e.Tasks, Task{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Task: task})
 }
@@ -547,7 +565,7 @@ func (s *seeder) addService(sp serviceSpec) {
 			DesiredCount: 1, RolloutState: ecstypes.DeploymentRolloutStateCompleted,
 			RolloutStateReason: aws.String("ECS deployment " + oldID + " completed."),
 			CreatedAt:          aws.Time(now.Add(-30 * time.Hour)), UpdatedAt: aws.Time(now.Add(-30 * time.Hour)),
-			LaunchType: ecstypes.LaunchTypeFargate, NetworkConfiguration: serviceNetwork(sp),
+			LaunchType: launchTypeFor(sp), NetworkConfiguration: serviceNetwork(sp),
 		})
 	}
 	primary := ecstypes.Deployment{
@@ -555,7 +573,7 @@ func (s *seeder) addService(sp serviceSpec) {
 		DesiredCount: int32(sp.desired), RolloutState: ecstypes.DeploymentRolloutStateCompleted,
 		RolloutStateReason: aws.String("ECS deployment " + primaryID + " completed."),
 		CreatedAt:          aws.Time(now.Add(-primaryAge)), UpdatedAt: aws.Time(now.Add(-primaryAge)),
-		LaunchType: ecstypes.LaunchTypeFargate, NetworkConfiguration: serviceNetwork(sp),
+		LaunchType: launchTypeFor(sp), NetworkConfiguration: serviceNetwork(sp),
 	}
 	if sp.deployingTag != "" {
 		primary.RolloutState = ecstypes.DeploymentRolloutStateInProgress
@@ -573,7 +591,7 @@ func (s *seeder) addService(sp serviceSpec) {
 		ClusterArn:      aws.String(clusterARN(c.region, c.accountID, sp.cluster)),
 		Status:          aws.String("ACTIVE"),
 		DesiredCount:    int32(sp.desired),
-		LaunchType:      ecstypes.LaunchTypeFargate,
+		LaunchType:      launchTypeFor(sp),
 		PlatformVersion: aws.String("LATEST"), PlatformFamily: aws.String("Linux"),
 		SchedulingStrategy:   ecstypes.SchedulingStrategyReplica,
 		DeploymentController: &ecstypes.DeploymentController{Type: ecstypes.DeploymentControllerTypeEcs},
@@ -590,6 +608,9 @@ func (s *seeder) addService(sp serviceSpec) {
 		svc.LoadBalancers = []ecstypes.LoadBalancer{{
 			TargetGroupArn: aws.String("arn:aws:elasticloadbalancing:" + c.region + ":" + c.accountID + ":targetgroup/" + sp.name + "-tg/" + s.hex(16)),
 			ContainerName:  aws.String(sp.name), ContainerPort: aws.Int32(int32(sp.port))}}
+	}
+	if sp.ec2 {
+		svc.PlatformVersion = nil
 	}
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
 		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
@@ -702,6 +723,20 @@ func (s *seeder) addStandalone() {
 	s.addTask(migrate, taskOptions{taskDefinitionARN: aws.ToString(migrateTD.Definition.TaskDefinitionArn), slot: 0,
 		startedAt: at.Add(-4 * time.Minute), stoppedAt: at, reason: "Essential container in task exited", exitCode: 0,
 		stopCode: ecstypes.TaskStopCodeEssentialContainerExited, group: "family:db-migrate", startedBy: "sam"})
+}
+
+func launchTypeFor(sp serviceSpec) ecstypes.LaunchType {
+	if sp.ec2 {
+		return ecstypes.LaunchTypeEc2
+	}
+	return ecstypes.LaunchTypeFargate
+}
+
+func requiredCompatibility(sp serviceSpec) ecstypes.Compatibility {
+	if sp.ec2 {
+		return ecstypes.CompatibilityEc2
+	}
+	return ecstypes.CompatibilityFargate
 }
 
 func serviceNetwork(sp serviceSpec) *ecstypes.NetworkConfiguration {

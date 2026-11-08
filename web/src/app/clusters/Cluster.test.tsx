@@ -44,6 +44,18 @@ describe('Cluster', () => {
     )
   })
 
+  it('counts EC2 tasks apart from Fargate and shows no EC2 label when there are none', async () => {
+    serveCluster({ ...CLUSTER_CORE, fargate_tasks: 4, spot_tasks: 1, other_tasks: 2 })
+    const { unmount } = renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    expect(await screen.findByText(/4 Fargate · 1 Spot · 2 EC2\/other/)).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Fargate 4, Spot 1, EC2/other 2 of 7' })).toBeInTheDocument()
+    unmount()
+
+    serveCluster({ ...CLUSTER_CORE, fargate_tasks: 4, spot_tasks: 1, other_tasks: 0 })
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    expect(await screen.findByText(/4 Fargate · 1 Spot/)).not.toHaveTextContent('EC2')
+  })
+
   it('links to the Tasks page filtered to this cluster', async () => {
     renderApp(`/clusters/${CLUSTER_CORE.id}`)
     const heading = await screen.findByRole('heading', { name: CLUSTER_CORE.name, level: 1 })

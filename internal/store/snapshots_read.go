@@ -517,9 +517,13 @@ func (s *Store) RunningTasks(ctx context.Context, f TargetFilter, vis Visibility
 type TaskSummary struct {
 	RunningHealthy, RunningUnhealthy, StoppedError, StoppedNormal, StoppedExpected int
 	ByAZ                                                                           map[string]int
-	ByCluster                                                                      map[model.ClusterKey]struct{ Fargate, Spot int }
+	ByCluster                                                                      map[model.ClusterKey]ClusterTaskCapacity
 	StopReasons                                                                    map[string]int // STOPPED since the cutoff, by reason group
 }
+
+// ClusterTaskCapacity counts a cluster's running tasks by capacity. Other is every task that is neither
+// Fargate nor Fargate Spot: EC2, external, or a custom capacity provider.
+type ClusterTaskCapacity struct{ Fargate, Spot, Other int }
 
 // TaskSummaryQuery scopes a task summary; Cluster and Service narrow it when non-empty.
 type TaskSummaryQuery struct {
@@ -540,7 +544,7 @@ func (s *Store) TaskSummaryFor(ctx context.Context, tq TaskSummaryQuery) (TaskSu
 	f, vis, since := tq.TargetFilter, tq.Vis, tq.Since
 	summary := TaskSummary{
 		ByAZ:        map[string]int{},
-		ByCluster:   map[model.ClusterKey]struct{ Fargate, Spot int }{},
+		ByCluster:   map[model.ClusterKey]ClusterTaskCapacity{},
 		StopReasons: map[string]int{},
 	}
 	var q queryArgs
@@ -594,8 +598,9 @@ func (s *Store) TaskSummaryFor(ctx context.Context, tq TaskSummaryQuery) (TaskSu
 		return TaskSummary{}, fmt.Errorf("task summary by az: %w", err)
 	}
 
-	clusterRows, err := s.Pool.Query(ctx, `select t.account_id, t.region, t.cluster_name,
-	   count(*) filter (where t.capacity_provider is distinct from 'FARGATE_SPOT'),
+	// Same provider and launch-type rule as cost.IsFargateOnDemand; the store cannot import cost.
+	clusterRows, err := s.Pool.Query(ctx, `select t.account_id, t.region, t.cluster_name, count(*),
+	   count(*) filter (where t.capacity_provider = 'FARGATE' or (coalesce(t.capacity_provider, '') = '' and t.launch_type = 'FARGATE')),
 	   count(*) filter (where t.capacity_provider = 'FARGATE_SPOT')`+base+
 		` and `+runningSQL+` group by 1, 2, 3`, baseArgs...)
 	if err != nil {
@@ -603,12 +608,12 @@ func (s *Store) TaskSummaryFor(ctx context.Context, tq TaskSummaryQuery) (TaskSu
 	}
 	for clusterRows.Next() {
 		var k model.ClusterKey
-		var fargate, spot int
-		if err := clusterRows.Scan(&k.AccountID, &k.Region, &k.Cluster, &fargate, &spot); err != nil {
+		var running, fargate, spot int
+		if err := clusterRows.Scan(&k.AccountID, &k.Region, &k.Cluster, &running, &fargate, &spot); err != nil {
 			clusterRows.Close()
 			return TaskSummary{}, fmt.Errorf("scan cluster count: %w", err)
 		}
-		summary.ByCluster[k] = struct{ Fargate, Spot int }{fargate, spot}
+		summary.ByCluster[k] = ClusterTaskCapacity{Fargate: fargate, Spot: spot, Other: running - fargate - spot}
 	}
 	clusterRows.Close()
 	if err := clusterRows.Err(); err != nil {

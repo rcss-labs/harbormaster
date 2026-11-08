@@ -25,7 +25,7 @@ const FARGATE_MEMORY: Record<string, number[]> = {
 }
 
 export function fargateMemoryOptions(cpu: string): number[] {
-  return FARGATE_MEMORY[cpu] ?? []
+  return Object.hasOwn(FARGATE_MEMORY, cpu) ? FARGATE_MEMORY[cpu] : []
 }
 
 /** The smallest valid memory for `cpu` that is at least `minimum`, or the largest one; undefined for an unknown cpu. */

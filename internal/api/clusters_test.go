@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
@@ -165,5 +168,47 @@ func TestClusterDetail_IncludesVPC(t *testing.T) {
 	decode(t, resp, &got)
 	if got.VPC == nil || got.VPC.VPCID != vpcMain || got.VPC.Name != "homelab-main" {
 		t.Errorf("vpc = %+v, want %s homelab-main", got.VPC, vpcMain)
+	}
+}
+
+func TestClusterDetail_CountsFargateSpotAndOtherCapacity(t *testing.T) {
+	srv, fk, st := newTestServer(t)
+	seedMockupTags(t, st)
+	fk.Estate.Mu.Lock()
+	seen := 0
+	for i := range fk.Estate.Tasks {
+		task := &fk.Estate.Tasks[i]
+		if task.ClusterName != "core-services" || aws.ToString(task.Task.LastStatus) != "RUNNING" {
+			continue
+		}
+		provider := "FARGATE"
+		task.Task.LaunchType = ecstypes.LaunchTypeFargate
+		switch seen {
+		case 0:
+			provider = "FARGATE_SPOT"
+		case 1:
+			task.Task.LaunchType = ecstypes.LaunchTypeEc2
+			task.Task.CapacityProviderName = nil
+			provider = ""
+		case 2:
+			provider = "ec2-asg-provider"
+			task.Task.LaunchType = ""
+		}
+		if provider != "" {
+			task.Task.CapacityProviderName = aws.String(provider)
+		}
+		seen++
+	}
+	fk.Estate.Mu.Unlock()
+	pollAll(t, st, fk)
+
+	resp := login(t, srv, "sam", testPassword).get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var got ClusterDTO
+	decode(t, resp, &got)
+	if got.SpotTasks != 1 || got.OtherTasks != 2 || got.FargateTasks != seen-3 {
+		t.Errorf("fargate %d spot %d other %d of %d running, want %d, 1, 2", got.FargateTasks, got.SpotTasks, got.OtherTasks, seen, seen-3)
 	}
 }

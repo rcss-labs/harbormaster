@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node'
 import {
   ACCOUNTS,
   ANALYTICS_CAPACITY,
+  ANALYTICS_COST,
   ANALYTICS_DELIVERY,
   ANALYTICS_OPERATIONS,
   ANALYTICS_RELIABILITY,
@@ -153,7 +154,7 @@ export const handlers = [
   http.get('/api/alerts', () => HttpResponse.json(ALERTS)),
   // analytics: the fixture for the tab, with the requested range echoed into window.requested
   http.get('/api/analytics/:tab', ({ params, request }) => {
-    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS }[
+    const fixture = { delivery: ANALYTICS_DELIVERY, reliability: ANALYTICS_RELIABILITY, capacity: ANALYTICS_CAPACITY, operations: ANALYTICS_OPERATIONS, cost: ANALYTICS_COST }[
       params.tab as string
     ]
     if (!fixture) return notFound()

@@ -12,6 +12,8 @@ interface AnalyticsPanelProps {
   /** Dim sub-title after the title, e.g. "deploy, restart and scale". */
   sub?: string
   legend?: ChartLegendItem[]
+  /** Controls shown beside the title, e.g. a slider. */
+  toolbar?: ReactNode
   /** Where the data comes from; drives the `source <table> · kept N` footer. */
   source?: { table: string; kept: string }
   /** Set for panels read from a daily rollup; lets the panel say when the daily data started. */
@@ -31,6 +33,7 @@ export function AnalyticsPanel({
   title,
   sub,
   legend,
+  toolbar,
   source,
   rollup,
   window,
@@ -51,6 +54,7 @@ export function AnalyticsPanel({
     <Panel
       title={title}
       sub={sub !== undefined ? <span className={styles.sub}>{sub}</span> : undefined}
+      toolbar={toolbar}
       legend={legend && legend.length > 0 ? <ChartLegend items={legend} /> : undefined}
       footer={footer}
       flush={flush}

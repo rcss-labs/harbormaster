@@ -3,7 +3,7 @@ import type { AnalyticsRange, AnalyticsTab } from '../../api/analytics'
 import { useParamSetter } from '../overview/useOverviewState'
 import { useFilters } from '../shell/useFilters'
 
-export const ANALYTICS_TABS: AnalyticsTab[] = ['delivery', 'reliability', 'capacity', 'operations']
+export const ANALYTICS_TABS: AnalyticsTab[] = ['delivery', 'reliability', 'capacity', 'operations', 'cost']
 export const ANALYTICS_RANGES: AnalyticsRange[] = ['24h', '7d', '30d', '90d']
 export const DEFAULT_ANALYTICS_RANGE: AnalyticsRange = '30d'
 

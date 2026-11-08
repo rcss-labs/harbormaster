@@ -220,6 +220,7 @@ type ClusterDTO struct {
 	ARN             string              `json:"arn"`
 	ConsoleURL      string              `json:"console_url"`
 	FargateTasks    int                 `json:"fargate_tasks"`
+	OtherTasks      int                 `json:"other_tasks"` // running tasks that are neither Fargate nor Fargate Spot (EC2, external, custom provider)
 	TasksHistory72h []PointDTO          `json:"tasks_history_72h"`
 	StopsPerHour    []StopBucketDTO     `json:"stops_per_hour"`
 	ServicesDetail  []ClusterServiceDTO `json:"services_detail"`
@@ -431,12 +432,13 @@ type AZCountDTO struct {
 	Count int    `json:"count"`
 }
 
-// ClusterCapacityDTO counts a cluster's running tasks by Fargate capacity.
+// ClusterCapacityDTO counts a cluster's running tasks by Fargate capacity. Other covers EC2, external and custom capacity providers.
 type ClusterCapacityDTO struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Fargate int    `json:"fargate"`
 	Spot    int    `json:"spot"`
+	Other   int    `json:"other"` // neither Fargate nor Fargate Spot
 }
 
 // TaskSummaryDTO is the aggregate block of a task list.

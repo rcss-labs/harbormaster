@@ -1,4 +1,4 @@
-// Wire types for GET /api/analytics/{delivery,reliability,capacity,operations} and the hook that fetches them.
+// Wire types for GET /api/analytics/{delivery,reliability,capacity,operations,cost} and the hook that fetches them.
 // The types mirror internal/api/analytics_dto.go.
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useFilters } from '../app/shell/useFilters'
@@ -9,7 +9,7 @@ import type { TagDTO } from './types'
 const METRICS_REFETCH_MS = 60_000
 const metricsPolling = { refetchInterval: METRICS_REFETCH_MS, refetchIntervalInBackground: false } as const
 
-export type AnalyticsTab = 'delivery' | 'reliability' | 'capacity' | 'operations'
+export type AnalyticsTab = 'delivery' | 'reliability' | 'capacity' | 'operations' | 'cost'
 export type AnalyticsRange = '24h' | '7d' | '30d' | '90d'
 
 export interface AnalyticsWindow {
@@ -294,13 +294,104 @@ export interface AnalyticsOperations extends Envelope<'operations'> {
   most_restarted: TopTable<RestartedServiceRow>
 }
 
-export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations
+// ---- cost ----
+
+export interface CostKpis {
+  /** USD per month at list prices; Spot is included at the on-demand list price. */
+  monthly_total: number
+  spot_monthly: number
+  priced_tasks: number
+  spot_tasks: number
+  /** Running tasks with no Fargate price (EC2, external, or a region without a rate). They never show a dollar figure. */
+  unpriced_tasks: number
+  /** Regions that have Fargate tasks but no price. */
+  unpriced_regions: string[]
+}
+
+/** Spend of one cluster, account or tag. `key` is the cluster id, account id or tag id. */
+export interface CostGroup {
+  key: string
+  label: string
+  monthly: number
+  spot_monthly: number
+  unpriced_tasks: number
+}
+
+export interface CostSuggestion {
+  cpu_units: number
+  memory_mib: number
+  saving_monthly: number
+  limited_by_containers: boolean
+}
+
+/** Applies from `from_headroom_pct` up to the next step; a null suggestion means no worthwhile saving there. */
+export interface CostStep {
+  from_headroom_pct: number
+  suggestion: CostSuggestion | null
+}
+
+export type CostServiceStatus =
+  | 'ok'
+  | 'not_fargate'
+  | 'mixed_capacity'
+  | 'no_price'
+  | 'not_running'
+  | 'no_size'
+  | 'no_data'
+  | 'short_history'
+  | 'stale'
+  | 'rollup_off'
+
+export interface CostService {
+  service_id: string
+  service: string
+  cluster: string
+  region: string
+  architecture: string
+  tag: TagDTO
+  tasks: number
+  spot_tasks: number
+  cpu_units: number | null
+  memory_mib: number | null
+  /** 0..1 of the current size; may exceed 1 after a downsize. Null without data. */
+  cpu_used_share: number | null
+  mem_used_share: number | null
+  monthly: number
+  status: CostServiceStatus
+  history_days: number
+  auto_scaled: boolean
+  recent_oom: boolean
+  can_edit: boolean
+  /** Never null; empty unless the status is ok and some headroom stop saves money. */
+  steps: CostStep[]
+}
+
+export interface CostRightsizing {
+  state: 'ok' | 'rollup_off' | 'retention_short'
+  min_history_days: number
+  default_headroom_pct: number
+  /** Every visible service, not capped: the KPIs sum them. */
+  services: CostService[]
+}
+
+export interface AnalyticsCost extends Envelope<'cost'> {
+  /** List price publication date, YYYY-MM-DD. */
+  prices_as_of: string
+  kpis: CostKpis
+  by_cluster: CostGroup[]
+  by_account: CostGroup[]
+  by_tag: CostGroup[]
+  rightsizing: CostRightsizing
+}
+
+export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations | AnalyticsCost
 
 export interface AnalyticsByTab {
   delivery: AnalyticsDelivery
   reliability: AnalyticsReliability
   capacity: AnalyticsCapacity
   operations: AnalyticsOperations
+  cost: AnalyticsCost
 }
 
 /**
