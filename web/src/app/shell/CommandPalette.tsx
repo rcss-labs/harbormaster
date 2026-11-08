@@ -110,6 +110,7 @@ export function CommandPalette() {
       ['Networks', '/networks'],
       ['Storage', '/storage'],
       ['Analytics', '/analytics/delivery'],
+      ['Log search', '/logs'],
       me?.admin ? ['Settings', '/settings/general'] : ['My access', '/me/access'],
     ]
     const goTo: PaletteItem[] = pages.map(([label, href]) => ({ key: `nav:${href}`, tag: 'NAV', label, sub: href, run: go(href) })).filter((p) => matches(query, p.label))

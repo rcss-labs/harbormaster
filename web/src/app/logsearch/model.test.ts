@@ -44,10 +44,10 @@ describe('log search model', () => {
   it('rejects a custom range over 7 days and a future end', () => {
     const base: SearchForm = { serviceIds: ['a'], range: 'custom', query: '' }
     const iso = (ms: number) => new Date(ms).toISOString()
-    expect(validateForm({ ...base, from: iso(NOW - 8 * DAY), to: iso(NOW) }, NOW)).toMatch(/7 days/)
-    expect(validateForm({ ...base, from: iso(NOW - HOUR), to: iso(NOW + HOUR) }, NOW)).toMatch(/future/)
+    expect(validateForm({ ...base, from: iso(NOW - 8 * DAY), to: iso(NOW) }, NOW)).toBe('Choose a range of at most 7 days.')
+    expect(validateForm({ ...base, from: iso(NOW - HOUR), to: iso(NOW + HOUR) }, NOW)).toBe('The end of the range cannot be in the future.')
     expect(validateForm({ ...base, from: iso(NOW - HOUR), to: iso(NOW - 2 * HOUR) }, NOW)).toMatch(/before/)
-    expect(validateForm({ ...base }, NOW)).toMatch(/start and end/)
+    expect(validateForm({ ...base }, NOW)).toBe('Custom ranges need a start and an end.')
     expect(validateForm({ ...base, from: iso(NOW - 7 * DAY), to: iso(NOW) }, NOW)).toBeNull()
     expect(validateForm({ ...base, serviceIds: [], range: '1h' }, NOW)).toBe('Choose at least one service.')
     expect(validateForm({ ...base, serviceIds: Array.from({ length: 21 }, (_, i) => `s${i}`), range: '1h' }, NOW)).toBe('Choose at most 20 services.')

@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -165,6 +166,35 @@ describe('Log search results', () => {
     renderApp(BOTH)
     await run(user)
     expect(await screen.findByText('catalog has no container that logs to CloudWatch.')).toBeInTheDocument()
+  })
+
+  it('keeps results after navigating away and back, without a second run', async () => {
+    const user = userEvent.setup()
+    const bodies = runReturns(LOG_SEARCH_RESULT)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const first = renderApp(BOTH, queryClient)
+    await run(user)
+    expect(await screen.findByText('3 matching lines')).toBeInTheDocument()
+    first.unmount() // a line link leaves the page; Back mounts it again with the same URL
+
+    renderApp(BOTH, queryClient)
+    expect(await screen.findByText('3 matching lines')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(bodies).toHaveLength(1)
+  })
+
+  it('does not show kept results for a different form', async () => {
+    const user = userEvent.setup()
+    runReturns(LOG_SEARCH_RESULT)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const first = renderApp(BOTH, queryClient)
+    await run(user)
+    expect(await screen.findByText('3 matching lines')).toBeInTheDocument()
+    first.unmount()
+
+    renderApp(`${BOTH}&q=other`, queryClient)
+    expect(await screen.findByRole('button', { name: 'Run query' })).toBeInTheDocument()
+    expect(screen.queryByText('3 matching lines')).not.toBeInTheDocument()
   })
 
   it('opens the Logs tab at the line\'s second', async () => {

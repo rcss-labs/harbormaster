@@ -92,6 +92,14 @@ export interface SaveLogSearchBody {
 
 const SERVICES_STALE_MS = 60_000
 const SAVED_KEY = ['log-search', 'saved'] as const
+const LAST_KEY = ['log-search', 'last'] as const
+
+/** The most recent successful run, kept in the query cache so the page can show it again after a round trip (D10). */
+export interface LastLogSearch {
+  request: LogSearchRequest
+  result: LogSearchResultDTO
+  submittedAt: number
+}
 
 /** Services the caller may search, with the account and region each log group is read from. */
 export function useLogSearchServices() {
@@ -108,6 +116,7 @@ export function useLogSearchServices() {
  * (422, 403, 404, 409, 429 use the app's error body). Cancel or unmount rejects with an AbortError, which the page should not show as a failure.
  */
 export function useRunLogSearch() {
+  const queryClient = useQueryClient()
   const controller = useRef<AbortController | null>(null)
   const mutation = useMutation({
     mutationKey: ['log-search', 'run'],
@@ -117,9 +126,29 @@ export function useRunLogSearch() {
       controller.current = own
       return apiFetch<LogSearchResultDTO>('/api/log-search', { method: 'POST', body: JSON.stringify(body), signal: own.signal })
     },
+    onSuccess: (result, request) => {
+      // Never evicted by time: the next run replaces it and signing out clears the whole cache.
+      queryClient.setQueryDefaults(LAST_KEY, { gcTime: Infinity })
+      queryClient.setQueryData<LastLogSearch>(LAST_KEY, { request, result, submittedAt: Date.now() })
+    },
   })
   useEffect(() => () => controller.current?.abort(), [])
   return { ...mutation, cancel: () => controller.current?.abort() }
+}
+
+/**
+ * The kept result of the last run when it answered exactly this request, else undefined. It never runs a
+ * search: opening a link only fills the form (D8), so a paid run always needs a click.
+ */
+export function useKeptLogSearch(request: LogSearchRequest): LastLogSearch | undefined {
+  const { data } = useQuery<LastLogSearch | null>({
+    queryKey: LAST_KEY,
+    queryFn: () => null,
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  })
+  return data && JSON.stringify(data.request) === JSON.stringify(request) ? data : undefined
 }
 
 export function useSavedLogSearches() {

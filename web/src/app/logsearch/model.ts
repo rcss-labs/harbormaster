@@ -73,10 +73,10 @@ export function validateForm(f: SearchForm, now: number): string | null {
   if (f.range !== 'custom') return null
   const from = f.from ? Date.parse(f.from) : NaN
   const to = f.to ? Date.parse(f.to) : NaN
-  if (Number.isNaN(from) || Number.isNaN(to)) return 'Choose a start and end time.'
+  if (Number.isNaN(from) || Number.isNaN(to)) return 'Custom ranges need a start and an end.'
   if (from >= to) return 'The start must be before the end.'
-  if (to - from > MAX_RANGE_MS) return 'The range can be at most 7 days.'
-  if (to > now + FUTURE_SLACK_MS) return 'The end cannot be in the future.'
+  if (to - from > MAX_RANGE_MS) return 'Choose a range of at most 7 days.'
+  if (to > now + FUTURE_SLACK_MS) return 'The end of the range cannot be in the future.'
   return null
 }
 

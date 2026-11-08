@@ -5,6 +5,7 @@ import {
   useLogSearchServices,
   useRunLogSearch,
   useSaveLogSearch,
+  useKeptLogSearch,
   useSavedLogSearches,
   type LogSearchRange,
   type LogSearchRequest,
@@ -96,6 +97,10 @@ export function LogSearchPage() {
   const [saveError, setSaveError] = useState('')
   const [deleting, setDeleting] = useState<SavedLogSearchDTO | null>(null)
   
+  // A result from this visit stays on screen while the form is edited; after coming back to the page,
+  // the kept result shows only while the form still equals the request that produced it.
+  const kept = useKeptLogSearch(requestFrom(form))
+  const shown = run.data ? { result: run.data, key: run.submittedAt } : kept ? { result: kept.result, key: kept.submittedAt } : null
   const invalid = validateForm(form, now)
   const running = run.isPending
   const failure = run.error && run.error.name !== 'AbortError' ? run.error : null
@@ -263,23 +268,23 @@ export function LogSearchPage() {
         </div>
       )}
 
-      {run.data && (
-        <div className={styles.page} key={run.submittedAt}>
-          <ResultsHeader result={run.data} />
-          {run.data.rows.length === 0 ? (
+      {shown && (
+        <div className={styles.page} key={shown.key}>
+          <ResultsHeader result={shown.result} />
+          {shown.result.rows.length === 0 ? (
             <EmptyState>No lines matched.</EmptyState>
           ) : (
             <>
               <div className={styles.charts}>
                 <Panel title="Hits over time">
-                  <HitsHistogram result={run.data} />
+                  <HitsHistogram result={shown.result} />
                 </Panel>
                 <Panel title="Hits by service" footer="Select a line to open that service's Logs tab at that second.">
-                  <HitsByService result={run.data} />
+                  <HitsByService result={shown.result} />
                 </Panel>
               </div>
               <Panel title="Lines" flush>
-                <ResultLines result={run.data} />
+                <ResultLines result={shown.result} />
               </Panel>
             </>
           )}
