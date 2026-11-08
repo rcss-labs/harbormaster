@@ -287,6 +287,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		KickOffHours:            offHoursReconciler.Kick,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and
+	// audit on detached contexts), so deploys, writes, exec and tails keep their full drain.
+	httpServer.RegisterOnShutdown(server.BeginDrain)
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err

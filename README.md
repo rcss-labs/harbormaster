@@ -17,6 +17,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 - [Service timeline](screens/service-timeline.png): one service's changes, task stops, active alerts, log errors and terminal sessions on one time axis, with the likely trigger of a failure and rollback from it
 - [Service scaling](screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
 - [Service logs](screens/service-logs.png): CloudWatch log history and live tail
+- Log search (`/logs`): one CloudWatch Logs Insights query across the logs of several services; see Log search below
 - [Service terminal](screens/service-terminal.png): an interactive shell in a running task through ECS Exec
 - [Service operations log](screens/service-operations-log.png): who changed or opened what, and when
 - Image security (`/security`): the images someone asked to scan, their open findings by severity, how fresh the vulnerability data is, and risk acceptances; see Image security below
@@ -115,6 +116,8 @@ Harbormaster reads and changes resources in other accounts by assuming a role in
 
 Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, change auto scaling or alarms, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
 
+Roles created before the Logs Insights actions were added to `harbormaster-access` lack `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`. Log search shows a message for that account until the access module is re-applied in it; the rest of Harbormaster works without the re-apply.
+
 ### Same account
 
 The account where Harbormaster runs can also be connected through a role in that same account (design spec §11.1). Use the same flow: apply `harbormaster-access` in that account with the task role ARN and the external ID. If you have tightened `access_role_arns` (below), add that role's ARN to the list.
@@ -200,6 +203,18 @@ An off-hours schedule puts the ECS services that carry an AWS tag to sleep on a 
 - **Permissions.** No AWS permission is added. The existing `application-autoscaling` permissions of `harbormaster-access` cover scheduled actions and target registration; `read_only` accounts are simply shown as blocked.
 
 Daylight saving: an action at an hour that does not exist or repeats follows AWS's timezone handling, and the reconciler repairs the result after the grace period.
+
+## Log search
+
+The **Log search** page (`/logs`, under Insights in the navigation; under More on a phone) runs one CloudWatch Logs Insights query over the logs of up to 20 services at once, for a range of 15 minutes, 1 hour, 24 hours or a custom range of up to 7 days. Results show the matching lines, hits over time and hits by service. Selecting a line opens that service's Logs tab at that second (`Showing logs up to`). Times are in your browser's time zone. Saved queries are kept per user. A search URL fills in the form but never runs it.
+
+- **Permissions.** A service is listed and searchable only when you have Logs on it through its tag. A service you cannot see is never listed, and a request that includes one answers 404 for the whole request. A service you can see but lack Logs on answers 403.
+- **IAM.** The `harbormaster-access` role needs `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`; the module grants them in its read statement, so they stay with `read_only = true`. For a role created before they were added, the page shows `The harbormaster-access role in {account} cannot run Logs Insights queries. Update the access module to the latest version.` for that account only; see [Connecting AWS accounts](#connecting-aws-accounts).
+- **Guardrails.** `HM_LOG_SEARCH_TIMEOUT`, `HM_LOG_SEARCH_MAX_SERVICES` and `HM_LOG_SEARCH_MAX_RANGE` (see [Limits](#limits)). A user can run 6 searches in a burst, then 1 per 10 seconds (HTTP 429), and one search at a time per Harbormaster task (HTTP 409), so with more than one task the limit applies on each.
+- **Supported commands.** `fields`, `filter`, `parse`, `dedup`, `sort` and `limit`. `SOURCE` and aggregates such as `stats` are refused: log groups always come from the selected services, and every result line must carry its log group and stream so Harbormaster can attribute it and hide streams you may not read. Renaming a field to an `@...` name is refused for the same reason. The query checker must agree with AWS on where a string or regular expression ends, so a few ambiguous forms are refused: an escaped quote of the quote type that encloses the string (switch to the other quote type), a backslash inside backticks, and a `/` division followed later by another `/` with a quote, backtick or `|` between them.
+- **Cost.** Logs Insights charges $0.005 per GB scanned (GB = 2^30 bytes). Harbormaster shows the bytes scanned and the cost after each run; there is no estimate before it.
+- **Audit.** Every run is written to the audit log as `log_search` with the query text. It is not written to the operations log. Query text can contain identifiers, so it is kept for `HM_RETENTION_AUDIT_LOG`.
+- **Under `make run`.** The fake AWS supports `filter @message like /regex/`, `like "text"`, `not like` and `limit`. Other allowed commands are accepted and ignored.
 
 ## Terraform and Harbormaster deploys
 
@@ -345,6 +360,9 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks at list
 | `HM_LOG_TAIL_IDLE` | `30m` | Close a live log tail after this long without activity |
 | `HM_LOG_TAILS_PER_USER` | `2` | Concurrent live log tails per user |
 | `HM_LOG_HISTORY_LIMIT` | `500` | Maximum log events returned by one history query |
+| `HM_LOG_SEARCH_TIMEOUT` | `60s` | How long one Logs Insights log search may run before it is stopped |
+| `HM_LOG_SEARCH_MAX_SERVICES` | `20` | Maximum services one log search may cover |
+| `HM_LOG_SEARCH_MAX_RANGE` | `168h` | Longest time range one log search may cover |
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
 | `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, enforced per Harbormaster task (see Running more than one task) |

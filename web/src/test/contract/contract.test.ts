@@ -78,6 +78,13 @@ import {
   SERVICE_OFFHOURS_WOKEN,
   WAKE_RESPONSE,
 } from '../offhoursFixtures'
+import {
+  LOG_SEARCH_RESULT,
+  LOG_SEARCH_RESULT_CAPPED,
+  LOG_SEARCH_RESULT_NO_PERMISSION,
+  LOG_SEARCH_SERVICES,
+  SAVED_LOG_SEARCHES,
+} from '../logSearchFixtures'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
@@ -254,6 +261,16 @@ describe('API contract', () => {
     for (const [label, fixture, shape] of cases) {
       expect(shapeProblems(fixture, contract[shape], `off-hours ${label}`)).toEqual([])
     }
+  })
+
+  it('the log search fixtures match the backend shape', async () => {
+    expect(shapeProblems(LOG_SEARCH_SERVICES, contract.logSearchServices, 'log search services')).toEqual([])
+    expect(shapeProblems(LOG_SEARCH_RESULT, contract.logSearchResult, 'log search result')).toEqual([])
+    expect(shapeProblems(LOG_SEARCH_RESULT_CAPPED, contract.logSearchResult, 'log search capped')).toEqual([])
+    expect(shapeProblems(LOG_SEARCH_RESULT_NO_PERMISSION, contract.logSearchResult, 'log search no permission')).toEqual([])
+    expect(shapeProblems(await body('/api/log-search/services'), contract.logSearchServices, 'msw log search services')).toEqual([])
+    expect(shapeProblems(SAVED_LOG_SEARCHES, contract.logSearchSaved, 'saved log searches')).toEqual([])
+    expect(shapeProblems(await body('/api/log-search/saved'), contract.logSearchSaved, 'msw saved log searches')).toEqual([])
   })
 
   it('every task fixture matches the backend task shape', () => {

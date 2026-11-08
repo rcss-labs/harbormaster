@@ -59,6 +59,9 @@ data "aws_iam_policy_document" "read" {
       "logs:GetLogEvents",
       "logs:StartLiveTail",
       "logs:StopLiveTail",
+      "logs:StartQuery",
+      "logs:GetQueryResults",
+      "logs:StopQuery",
       "ecr:DescribeImages",
       "ecr:DescribeRepositories",
     ]

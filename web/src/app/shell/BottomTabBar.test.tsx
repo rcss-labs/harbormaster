@@ -28,7 +28,7 @@ describe('BottomTabBar', () => {
     expect(bar.getByRole('link', { name: /^Overview/ })).not.toHaveAttribute('aria-current')
   })
 
-  it.each(['/settings/users', '/networks', '/storage', '/analytics/delivery', '/me/access'])('More is current on %s', async (path) => {
+  it.each(['/settings/users', '/networks', '/storage', '/analytics/delivery', '/me/access', '/logs'])('More is current on %s', async (path) => {
     renderApp(path)
     const bar = await tabs()
     expect(bar.getByRole('link', { name: /^More/ })).toHaveAttribute('aria-current', 'page')

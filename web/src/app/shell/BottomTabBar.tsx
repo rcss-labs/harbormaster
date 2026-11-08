@@ -6,7 +6,7 @@ import { useShellCounts } from './useShellCounts'
 import styles from './shell.module.css'
 
 /** Paths that belong under the More tab, so it stays current on the pages it leads to. */
-const MORE_PREFIXES = ['/more', '/networks', '/storage', '/analytics', '/settings', '/me', '/password']
+const MORE_PREFIXES = ['/more', '/networks', '/storage', '/analytics', '/logs', '/settings', '/me', '/password']
 
 const under = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`)
 

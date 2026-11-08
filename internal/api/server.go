@@ -41,6 +41,16 @@ type Server struct {
 	LogErrors *logs.ErrorCounter
 	// TailLimiter caps concurrent live tails per user; New defaults it from Cfg.LogTailsPerUser.
 	TailLimiter *logs.TailLimiter
+	// LogSearch runs Logs Insights searches across services; New defaults it from Clients and Cfg.
+	LogSearch *logs.Searcher
+	// SearchLimiter caps concurrent log searches per user (one); New creates it when nil.
+	SearchLimiter *logs.TailLimiter
+	// draining is closed by BeginDrain when the process starts shutting down; running log searches watch it
+	// so they stop their Insights queries and audit inside the shutdown drain.
+	draining      chan struct{}
+	beginDrainOne *sync.Once
+	// searchBucket rate-limits log searches per user.
+	searchBucket *ipBucket
 	// Deploy runs the change path (plan 02).
 	Deploy *deploy.Service
 
@@ -90,6 +100,7 @@ type ScanKicker interface{ Kick() }
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
 	s.costWarned = &sync.Map{}
+	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()
 	}
@@ -111,6 +122,15 @@ func New(s Server) *Server {
 	}
 	if s.TailLimiter == nil {
 		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
+	}
+	if s.LogSearch == nil {
+		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, Timeout: s.Cfg.LogSearchTimeout}
+	}
+	if s.SearchLimiter == nil {
+		s.SearchLimiter = logs.NewTailLimiter(1)
+	}
+	if s.searchBucket == nil {
+		s.searchBucket = newIPBucket(searchBucketCapacity, searchBucketRefillPerSecond, s.Now)
 	}
 	// plan 06
 	if s.Telemetry == nil {
@@ -258,6 +278,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.securityRoutes(mux)  // image security
 	s.timelineRoutes(mux)  // service timeline
 	s.offHoursRoutes(mux)  // off-hours schedules
+	s.logSearchRoutes(mux) // cross-service log search
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
@@ -293,4 +314,13 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write([]byte("ok"))
+}
+
+// BeginDrain tells running log searches to stop; call it when Shutdown begins. Safe to call more than once,
+// and a no-op on a Server that was not built by New.
+func (s *Server) BeginDrain() {
+	if s == nil || s.draining == nil || s.beginDrainOne == nil {
+		return
+	}
+	s.beginDrainOne.Do(func() { close(s.draining) })
 }

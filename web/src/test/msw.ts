@@ -52,6 +52,7 @@ import { timelineHandlers } from './timelineFixtures'
 import { offhoursHandlers } from './offhoursFixtures'
 import type { SearchResultDTO } from '../api/types'
 import { securityHandlers } from './securityFixtures'
+import { logSearchHandlers } from './logSearchFixtures'
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
 
@@ -214,6 +215,7 @@ export const handlers = [
     return HttpResponse.json(user.has_password ? {} : { temporary_password: 'tmp-pass-1234' })
   }),
   ...securityHandlers,
+  ...logSearchHandlers,
 ]
 
 export const server = setupServer(...handlers)

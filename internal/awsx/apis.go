@@ -96,6 +96,11 @@ type LogsAPI interface {
 	// *StartLiveTailEventStream is a concrete struct that cannot be faked, so
 	// the real client wraps it in a LiveTailStream.
 	LiveTail(ctx context.Context, in *cloudwatchlogs.StartLiveTailInput) (LiveTailStream, error)
+
+	// Logs Insights (log search); these keep the SDK signatures.
+	StartQuery(ctx context.Context, in *cloudwatchlogs.StartQueryInput, opts ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StartQueryOutput, error)
+	GetQueryResults(ctx context.Context, in *cloudwatchlogs.GetQueryResultsInput, opts ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetQueryResultsOutput, error)
+	StopQuery(ctx context.Context, in *cloudwatchlogs.StopQueryInput, opts ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StopQueryOutput, error)
 }
 
 // LiveTailStream is a running Logs Live Tail session.

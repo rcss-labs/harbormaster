@@ -160,6 +160,10 @@ func contractShapes() map[string]any {
 		"offhoursTags":     shapeOf(reflect.TypeFor[ItemsResponse[OffHoursTagOptionDTO]]()),
 		"serviceOffHours":  shapeOf(reflect.TypeFor[ServiceOffHoursDTO]()),
 		"offhoursWake":     shapeOf(reflect.TypeFor[WakeResponse]()),
+		// log search
+		"logSearchServices": shapeOf(reflect.TypeFor[ListResponse[LogSearchServiceDTO]]()),
+		"logSearchResult":   shapeOf(reflect.TypeFor[LogSearchResultDTO]()),
+		"logSearchSaved":    shapeOf(reflect.TypeFor[ListResponse[SavedLogSearchDTO]]()),
 	}
 }
 

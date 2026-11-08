@@ -68,6 +68,14 @@ func newServerWithLog(t *testing.T, seedUsers bool) (*httptest.Server, *fake.Fak
 // a failing metrics fetcher).
 func newServerCustom(t *testing.T, seedUsers bool, mutate func(*Server)) (*httptest.Server, *fake.Fake, *store.Store, *syncBuffer) {
 	t.Helper()
+	srv, _, fk, st, logs := newServerCustomAPI(t, seedUsers, mutate)
+	return srv, fk, st, logs
+}
+
+// newServerCustomAPI is newServerCustom that also returns the *Server the handler runs on, for tests that
+// call its methods (BeginDrain).
+func newServerCustomAPI(t *testing.T, seedUsers bool, mutate func(*Server)) (*httptest.Server, *Server, *fake.Fake, *store.Store, *syncBuffer) {
+	t.Helper()
 	st := storetest.Open(t)
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewTextHandler(logs, nil))
@@ -100,7 +108,7 @@ func newServerCustom(t *testing.T, seedUsers bool, mutate func(*Server)) (*httpt
 	api := New(server)
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return srv, fk, st, logs
+	return srv, api, fk, st, logs
 }
 
 // newTestServer returns a running API over the mockup estate with users sam (admin) and omer.

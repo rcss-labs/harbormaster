@@ -89,6 +89,13 @@ describe('command palette', () => {
     expect(within(analytics).getByRole('option', { name: /Analytics/ })).toBeInTheDocument()
   })
 
+  it('Go to lists Log search', async () => {
+    const { user, dialog } = await openPalette()
+    await user.type(within(dialog).getByRole('combobox'), 'log s')
+    const goTo = await waitFor(() => groupOf(dialog, 'Go to'))
+    expect(within(goTo).getByRole('option', { name: /Log search/ })).toBeInTheDocument()
+  })
+
   it('opens the highlighted item with Enter and closes', async () => {
     const { user, dialog } = await openPalette()
     await user.type(within(dialog).getByRole('combobox'), 'Tasks')
