@@ -49,10 +49,19 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 	if err != nil {
 		return nil, err
 	}
+	repoKeys := make([]store.RepoKey, len(images))
+	for i, img := range images {
+		repoKeys[i] = repoKeyOf(img)
+	}
+	bases, err := s.Store.RepoBases(ctx, repoKeys)
+	if err != nil {
+		return nil, err
+	}
 
 	views := make([]imageView, 0, len(images))
 	for _, img := range images {
 		view := imageView{dto: imageDTO(img)}
+		view.dto.BaseImage = baseImageOf(img, bases[repoKeyOf(img)])
 		view.dto.Requests = []SecurityRequestDTO{}
 		seen := map[model.ServiceKey]bool{}
 		for _, request := range requests[img.Digest] {
@@ -73,7 +82,9 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 				At: request.RequestedAt, PermissionTag: inheritedTag(tagDTOs, tagID, !ownTag), CanAccept: canAccept,
 			})
 			view.dto.Can.Accept = view.dto.Can.Accept || canAccept
-			view.dto.Can.Rescan = view.dto.Can.Rescan || authz.Can(sc.Subject, authz.Deploy, tagID)
+			canDeploy := authz.Can(sc.Subject, authz.Deploy, tagID)
+			view.dto.Can.Rescan = view.dto.Can.Rescan || canDeploy
+			view.dto.Can.SetBase = view.dto.Can.Rescan
 			if !seen[request.Key] {
 				seen[request.Key] = true
 				view.services = append(view.services, request.Key)
@@ -94,6 +105,58 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 		views = append(views, view)
 	}
 	return views, nil
+}
+
+func repoKeyOf(img store.ScanImage) store.RepoKey {
+	return store.RepoKey{AccountID: img.RegistryAccountID, Region: img.RegistryRegion, Repository: img.Repository}
+}
+
+// baseImageOf compares the base configured for the image's repository with what the last scan recorded. A scan counts
+// only when it used the configured ref; until then the state is pending.
+func baseImageOf(img store.ScanImage, configured string) BaseImageDTO {
+	dto := BaseImageDTO{Ref: configured, ScannedRef: img.BaseRef, State: baseStateNone, TotalLayers: len(img.LayerIDs)}
+	switch {
+	case configured == "":
+		return dto
+	case img.ScannedAt == nil || img.BaseRef != configured:
+		dto.State = baseStatePending
+	case img.BaseError != "":
+		dto.State = baseStateError
+		dto.Message = "Could not read " + configured + ": " + img.BaseError
+	case baseIsPrefix(img.BaseLayerIDs, img.LayerIDs):
+		dto.State, dto.MatchedLayers = baseStateMatched, len(img.BaseLayerIDs)
+	default:
+		dto.State = baseStateMismatch
+		dto.Message = "This image is not built on the current " + configured +
+			". It may use an older version of it; rebuild the image or set the base by digest."
+	}
+	return dto
+}
+
+// baseIsPrefix reports whether the base layers are non-empty and the first layers of the image.
+func baseIsPrefix(base, image []string) bool {
+	if len(base) == 0 || len(base) > len(image) {
+		return false
+	}
+	for i, layer := range base {
+		if image[i] != layer {
+			return false
+		}
+	}
+	return true
+}
+
+// findingOrigin says whether a finding's layer is one of the base layers. It is only known when the base matched.
+func findingOrigin(img store.ScanImage, base BaseImageDTO, layerID string) string {
+	if base.State != baseStateMatched || layerID == "" {
+		return ""
+	}
+	for _, layer := range img.LayerIDs[:base.MatchedLayers] {
+		if layer == layerID {
+			return "base"
+		}
+	}
+	return "app"
 }
 
 func imageDTO(img store.ScanImage) SecurityImageDTO {
@@ -207,7 +270,7 @@ func (s *Server) getSecurityImage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errNotFound) // an image the caller cannot see does not exist for them
 		return
 	}
-	findings, err := s.findingDTOs(r, sc, image.Digest, views[0].services)
+	findings, err := s.findingDTOs(r, sc, image, views[0])
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -219,8 +282,8 @@ type findingKey struct{ vulnID, packageName, packageVersion string }
 
 // findingDTOs lists an image's findings with their active acceptances. Acceptances of services the caller cannot see are
 // left out, and a finding is accepted everywhere when every service the caller can see has accepted it.
-func (s *Server) findingDTOs(r *http.Request, sc scope, digest string, visible []model.ServiceKey) ([]SecurityFindingDTO, error) {
-	ctx := r.Context()
+func (s *Server) findingDTOs(r *http.Request, sc scope, image store.ScanImage, view imageView) ([]SecurityFindingDTO, error) {
+	ctx, digest, visible := r.Context(), image.Digest, view.services
 	findings, err := s.Store.ScanFindings(ctx, digest)
 	if err != nil {
 		return nil, err
@@ -267,6 +330,7 @@ func (s *Server) findingDTOs(r *http.Request, sc scope, digest string, visible [
 			VulnID: f.VulnID, Severity: f.Severity, CVSS: f.CVSS, Package: f.PackageName, Version: f.PackageVersion,
 			Type: f.PackageType, Location: f.Location, FixedVersion: f.FixedVersion, FixState: f.FixState,
 			DataSource: f.DataSource, URL: f.URL, FirstSeenAt: f.FirstSeenAt, Acceptances: acceptancesOf,
+			Origin:             findingOrigin(image, view.dto.BaseImage, f.LayerID),
 			AcceptedEverywhere: len(visible) > 0 && len(acceptedBy[key]) == len(visible),
 		}
 	}

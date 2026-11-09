@@ -70,6 +70,7 @@ const (
 	MaxDBArchiveBytes = 1 << 30
 	MaxFindings       = 5000
 	MaxStringLen      = 256
+	MaxLayers         = 256 // most layer diff ids kept for an image or its base
 	MaxURLLen         = 512
 
 	DBWarnAge   = 36 * time.Hour

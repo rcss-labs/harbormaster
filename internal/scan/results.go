@@ -66,9 +66,6 @@ type BaseLayers struct {
 	Error  string   `json:"error"`
 }
 
-// MaxLayers caps the layers kept for an image or a base image.
-const MaxLayers = 256
-
 type ImageOutcome struct {
 	Digest        string `json:"digest"`
 	Status        string `json:"status"`
@@ -180,6 +177,8 @@ type rawResult struct {
 	Packages        int64           `json:"packages"`
 	Findings        json.RawMessage `json:"findings"`
 	Truncated       bool            `json:"truncated"`
+	Layers          []string        `json:"layers"`
+	Base            *BaseLayers     `json:"base"`
 }
 
 // readFindings decodes the findings array element by element and stops after
@@ -212,6 +211,20 @@ func readFindings(raw json.RawMessage, handle func(Finding) bool) (cut bool, err
 		}
 	}
 	return false, nil
+}
+
+// validLayers returns the layer diff ids when every one is a digest and there are at most MaxLayers; otherwise nil, since
+// a partial list would make a prefix comparison wrong.
+func validLayers(layers []string) []string {
+	if len(layers) == 0 || len(layers) > MaxLayers {
+		return nil
+	}
+	for _, layer := range layers {
+		if !digestPattern.MatchString(layer) {
+			return nil
+		}
+	}
+	return layers
 }
 
 // ParseResult validates one image's result file. The input is untrusted.
@@ -251,6 +264,16 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 		res.SyftVersion = raw.SyftVersion
 	}
 
+	res.Layers = validLayers(raw.Layers)
+	if raw.Base != nil {
+		res.Base = &BaseLayers{
+			Ref: SanitizeText(raw.Base.Ref), Layers: validLayers(raw.Base.Layers), Error: SanitizeText(raw.Base.Error),
+		}
+		if digestPattern.MatchString(raw.Base.Digest) {
+			res.Base.Digest = raw.Base.Digest
+		}
+	}
+
 	type dedupeKey struct{ vuln, pkg, version string }
 	seen := make(map[dedupeKey]struct{}, MaxFindings)
 	cut, err := readFindings(raw.Findings, func(f Finding) bool {
@@ -269,6 +292,9 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 			FixState:       SanitizeText(f.FixState),
 			DataSource:     SanitizeText(f.DataSource),
 			URL:            safeHTTPSURL(f.URL),
+		}
+		if digestPattern.MatchString(f.LayerID) {
+			clean.LayerID = f.LayerID
 		}
 		if f.CVSS != nil && !math.IsNaN(*f.CVSS) {
 			score := math.Min(math.Max(*f.CVSS, 0), 10)

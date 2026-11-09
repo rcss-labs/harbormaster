@@ -234,7 +234,8 @@ func (r *Runner) importScanned(ctx context.Context, run store.ScanRun, manifest 
 	recorded := store.ScanImageResult{
 		Status: scan.StatusScanned, PlatformDigest: result.PlatformDigest, Platform: result.Platform, SyftVersion: syftVersion,
 		ScannerImageDigest: manifest.ScannerImageDigest, ScannedAt: &now, Packages: &packages, Truncated: result.Truncated,
-		MatchedDBBuiltAt: run.DBBuiltAt}
+		MatchedDBBuiltAt: run.DBBuiltAt,
+		Layers:           result.Layers, Base: result.Base}
 	err = r.Store.RecordScanResult(ctx, img.Digest, run.ID, recorded, result.Findings, now)
 	if err != nil {
 		err = r.Store.RecordScanResult(ctx, img.Digest, run.ID, recorded, result.Findings, now)
