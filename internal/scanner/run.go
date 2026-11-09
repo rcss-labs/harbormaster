@@ -2,12 +2,14 @@ package scanner
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,8 +54,10 @@ type Runner struct {
 	Cmd    Command
 	NewECR func(ctx context.Context, role, externalID, region string) (ECRClient, error)
 	Log    *slog.Logger
-	// BaseTransport carries base image registry requests; nil means http.DefaultTransport.
-	BaseTransport http.RoundTripper
+	// Test seams for base image fetches; nil means the real resolver, dialer and trust roots.
+	baseLookup func(ctx context.Context, host string) ([]netip.Addr, error)
+	baseDial   func(ctx context.Context, network, address string) (net.Conn, error)
+	baseTLS    *tls.Config
 
 	bases       map[string]scan.BaseLayers // by base ref and platform, for the run
 	syftVersion string

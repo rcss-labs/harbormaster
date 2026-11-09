@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -40,7 +42,10 @@ const (
 	errInvalidRef = "The base image reference is not valid."
 	errNotFound   = "The base image was not found."
 	errDenied     = "The registry refused access to the base image."
+	errBlocked    = "The base image registry is not reachable from the scanner."
 )
+
+var errBlockedDestination = errors.New("destination is not allowed")
 
 func baseReadFailure(code string) error {
 	return errors.New("The base image could not be read: " + code)
@@ -127,9 +132,11 @@ func (r *Runner) readBase(ctx context.Context, registries map[string]scan.JobReg
 	if err != nil {
 		return "", nil, err
 	}
-	session := &baseSession{client: r.baseClient(), baseRef: parsed}
+	session := &baseSession{baseRef: parsed}
+	isECR := false
 	if match := ecrHostPattern.FindStringSubmatch(parsed.host); match != nil {
 		account, region := match[1], match[2]
+		isECR = true
 		reg, ok := registries[account]
 		if !ok {
 			return "", nil, fmt.Errorf("Connect AWS account %s to read this base image.", account)
@@ -148,14 +155,21 @@ func (r *Runner) readBase(ctx context.Context, registries map[string]scan.JobReg
 			return "", nil, baseReadFailure(contextCode(ctx, "credentials"))
 		}
 	}
+	session.client = r.baseClient(isECR)
 	return session.resolve(ctx, platform)
 }
 
-// baseClient is the HTTP client for registries: https only, bounded redirects, and no credentials sent
-// to a host other than the one first asked.
-func (r *Runner) baseClient() *http.Client {
+// baseClient is the HTTP client for registries: https only, bounded redirects, no proxy, no credentials
+// sent to a host other than the one first asked, and connections only to allowed addresses.
+func (r *Runner) baseClient(allowPrivate bool) *http.Client {
 	return &http.Client{
-		Transport: r.BaseTransport,
+		Transport: &http.Transport{
+			Proxy:               nil,
+			DialContext:         r.baseDialContext(allowPrivate),
+			TLSClientConfig:     r.baseTLS,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DisableKeepAlives:   true,
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > maxRedirects {
 				return errors.New("too many redirects")
@@ -169,6 +183,77 @@ func (r *Runner) baseClient() *http.Client {
 			return nil
 		},
 	}
+}
+
+// baseDialContext resolves the host itself and dials only an address that passed baseDestinationAllowed,
+// so the check holds for DNS rebinding, redirects and IP literals alike: the address checked is the
+// address connected to.
+func (r *Runner) baseDialContext(allowPrivate bool) func(ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		var addrs []netip.Addr
+		if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
+			addrs = []netip.Addr{literal}
+		} else if r.baseLookup != nil {
+			addrs, err = r.baseLookup(ctx, host)
+		} else {
+			addrs, err = net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		}
+		if err != nil {
+			return nil, err
+		}
+		dial := r.baseDial
+		if dial == nil {
+			dial = (&net.Dialer{}).DialContext
+		}
+		var lastErr error = errBlockedDestination
+		for _, addr := range addrs {
+			if !baseDestinationAllowed(addr, allowPrivate) {
+				continue
+			}
+			conn, dialErr := dial(ctx, network, net.JoinHostPort(addr.Unmap().String(), port))
+			if dialErr == nil {
+				return conn, nil
+			}
+			lastErr = dialErr
+		}
+		return nil, lastErr
+	}
+}
+
+// Prefixes that stay blocked for every registry, including ECR.
+var (
+	carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
+	ec2IPv6Metadata = netip.MustParsePrefix("fd00:ec2::/32") // inside fc00::/7, so it needs its own entry
+)
+
+// baseDestinationAllowed reports whether the scanner may connect to addr. Loopback, link-local (which holds
+// the 169.254.169.254 metadata endpoint), unspecified, multicast, carrier-grade NAT and the EC2 IPv6
+// metadata range are never allowed. Private ranges (RFC 1918, fc00::/7) are allowed only for ECR private
+// registries: their VPC interface endpoints, and the S3 endpoints their blob redirects reach, resolve to
+// private addresses. Keying this on the ref's own host, not on each redirect target, keeps it simple: an
+// ECR registry can redirect only to what ECR itself serves, and the never-allowed ranges still apply.
+func baseDestinationAllowed(addr netip.Addr, allowPrivate bool) bool {
+	addr = addr.Unmap()
+	switch {
+	case !addr.IsValid(), addr.IsUnspecified(), addr.IsLoopback(), addr.IsLinkLocalUnicast(), addr.IsMulticast(),
+		carrierGradeNAT.Contains(addr), ec2IPv6Metadata.Contains(addr):
+		return false
+	case addr.IsPrivate():
+		return allowPrivate
+	}
+	return true
+}
+
+// requestFailure maps a transport error to the user-facing error.
+func requestFailure(ctx context.Context, err error) error {
+	if errors.Is(err, errBlockedDestination) {
+		return errors.New(errBlocked)
+	}
+	return baseReadFailure(contextCode(ctx, "network"))
 }
 
 type baseSession struct {
@@ -289,7 +374,7 @@ func (s *baseSession) get(ctx context.Context, path, accept string, limit int64)
 		}
 		resp, err := s.client.Do(req)
 		if err != nil {
-			return nil, nil, baseReadFailure(contextCode(ctx, "network"))
+			return nil, nil, requestFailure(ctx, err)
 		}
 		if resp.StatusCode == http.StatusUnauthorized && s.authorization == "" && !s.tokenFetched {
 			challenge := resp.Header.Get("WWW-Authenticate")
@@ -363,7 +448,7 @@ func (s *baseSession) fetchToken(ctx context.Context, challenge string) error {
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return baseReadFailure(contextCode(ctx, "network"))
+		return requestFailure(ctx, err)
 	}
 	defer resp.Body.Close()
 	body, err := readBounded(resp.Body, maxTokenBytes)

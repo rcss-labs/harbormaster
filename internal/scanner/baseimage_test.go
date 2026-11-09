@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -160,31 +161,61 @@ func (f *fakeRegistry) requestCount() int {
 	return len(f.requests)
 }
 
-// address is host:port of the test server, usable as a registry host in a reference.
-func (f *fakeRegistry) address() string { return f.srv.Listener.Addr().String() }
+// testRegistryHost is the public-looking name the fake registry answers to; the test network maps it to the server.
+const testRegistryHost = "registry.test"
 
-// transportFor trusts the test server's certificate and sends the named hosts to it.
-func transportFor(srv *httptest.Server, hosts ...string) http.RoundTripper {
-	transport := srv.Client().Transport.(*http.Transport).Clone()
-	transport.TLSClientConfig.ServerName = "example.com" // the test certificate's name
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		if host, _, err := net.SplitHostPort(address); err == nil && slices.Contains(hosts, host) {
-			address = srv.Listener.Addr().String()
-		}
-		return (&net.Dialer{}).DialContext(ctx, network, address)
-	}
-	return transport
+// testRoute makes a host name resolve to ip and sends every connection to that ip to srv.
+type testRoute struct {
+	ip  string
+	srv *httptest.Server
 }
 
-func newBaseRunner(transport http.RoundTripper) *Runner {
-	return &Runner{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), BaseTransport: transport,
+// routes sends testRegistryHost, at a public address, to this registry.
+func (f *fakeRegistry) routes() map[string]testRoute {
+	return map[string]testRoute{testRegistryHost: {"198.51.100.1", f.srv}}
+}
+
+// useTestNetwork replaces name resolution and the final connect, so the production address filter still runs
+// on the resolved addresses while the connection lands on an httptest server.
+func useTestNetwork(r *Runner, routes map[string]testRoute) {
+	byIP := map[string]*httptest.Server{}
+	var anyServer *httptest.Server
+	for _, route := range routes {
+		byIP[route.ip] = route.srv
+		anyServer = route.srv
+	}
+	r.baseLookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+		route, ok := routes[host]
+		if !ok {
+			return nil, fmt.Errorf("no such host %s", host)
+		}
+		return []netip.Addr{netip.MustParseAddr(route.ip)}, nil
+	}
+	r.baseDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, _, _ := net.SplitHostPort(address)
+		srv, ok := byIP[host]
+		if !ok {
+			return nil, fmt.Errorf("test network has no route to %s", host)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
+	}
+	if anyServer != nil {
+		r.baseTLS = anyServer.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+		r.baseTLS.ServerName = "example.com" // the test certificate's name
+	}
+}
+
+func newBaseRunner(routes map[string]testRoute) *Runner {
+	r := &Runner{Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		ecrClients: map[string]ECRClient{}, auths: map[string]registryAuth{}}
+	useTestNetwork(r, routes)
+	return r
 }
 
 func TestBaseLayers_AnonymousBearerFlowOnDockerHub(t *testing.T) {
 	reg := newFakeRegistry(t, "library/node", "20-bookworm-slim")
 	reg.needToken = true
-	r := newBaseRunner(transportFor(reg.srv, "registry-1.docker.io"))
+	r := newBaseRunner(map[string]testRoute{"registry-1.docker.io": {"198.51.100.2", reg.srv}})
 
 	got := r.baseLayers(context.Background(), nil, "node:20-bookworm-slim", "linux/arm64")
 
@@ -206,8 +237,8 @@ func TestBaseLayers_AnonymousBearerFlowOnDockerHub(t *testing.T) {
 
 func TestBaseLayers_DefaultsToTheAMD64PlatformAndCachesPerRun(t *testing.T) {
 	reg := newFakeRegistry(t, "team/base", "1")
-	r := newBaseRunner(reg.srv.Client().Transport)
-	ref := reg.address() + "/team/base:1"
+	r := newBaseRunner(reg.routes())
+	ref := testRegistryHost + "/team/base:1"
 
 	first := r.baseLayers(context.Background(), nil, ref, "")
 	requests := reg.requestCount()
@@ -227,9 +258,9 @@ func TestBaseLayers_DefaultsToTheAMD64PlatformAndCachesPerRun(t *testing.T) {
 
 func TestBaseLayers_DigestReference(t *testing.T) {
 	reg := newFakeRegistry(t, "team/base", "1")
-	r := newBaseRunner(reg.srv.Client().Transport)
+	r := newBaseRunner(reg.routes())
 
-	got := r.baseLayers(context.Background(), nil, reg.address()+"/team/base@"+reg.amd64Digest, "linux/amd64")
+	got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base@"+reg.amd64Digest, "linux/amd64")
 
 	if got.Error != "" || got.Digest != reg.amd64Digest || !slices.Equal(got.Layers, reg.amd64Layers) {
 		t.Errorf("base = %+v", got)
@@ -258,9 +289,9 @@ func TestBaseLayers_FailuresUseFixedPhrasesAndNeverEchoBodies(t *testing.T) {
 			reg := newFakeRegistry(t, "team/base", "1")
 			tc.setup(reg)
 			reg.rebuild() // the manifests name the overridden config
-			r := newBaseRunner(reg.srv.Client().Transport)
+			r := newBaseRunner(reg.routes())
 
-			got := r.baseLayers(context.Background(), nil, reg.address()+"/team/base:1", "linux/amd64")
+			got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base:1", "linux/amd64")
 
 			if got.Error != tc.want || len(got.Layers) != 0 || got.Ref == "" {
 				t.Errorf("base = %+v, want error %q and no layers", got, tc.want)
@@ -275,9 +306,9 @@ func TestBaseLayers_FailuresUseFixedPhrasesAndNeverEchoBodies(t *testing.T) {
 func TestBaseLayers_ConfigThatDoesNotMatchItsDigestIsRejected(t *testing.T) {
 	reg := newFakeRegistry(t, "team/base", "1")
 	reg.configBody = configJSON([]string{diffID("9")}) // valid, but not the bytes the manifests name
-	r := newBaseRunner(reg.srv.Client().Transport)
+	r := newBaseRunner(reg.routes())
 
-	got := r.baseLayers(context.Background(), nil, reg.address()+"/team/base:1", "linux/amd64")
+	got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base:1", "linux/amd64")
 
 	if got.Error != "The base image could not be read: digest mismatch" {
 		t.Errorf("base = %+v", got)
@@ -286,11 +317,11 @@ func TestBaseLayers_ConfigThatDoesNotMatchItsDigestIsRejected(t *testing.T) {
 
 func TestBaseLayers_InvalidReferencesMakeNoNetworkCall(t *testing.T) {
 	reg := newFakeRegistry(t, "team/base", "1")
-	r := newBaseRunner(reg.srv.Client().Transport)
+	r := newBaseRunner(reg.routes())
 	for _, ref := range []string{
 		"", "UPPER/case:1", "node:", "node:bad tag", "a//b", "node@sha256:short", "-bad/name:1",
-		reg.address() + "/team/../base:1", "http://" + reg.address() + "/team/base:1",
-		reg.address() + "/" + strings.Repeat("a", 256),
+		testRegistryHost + "/team/../base:1", "http://" + testRegistryHost + "/team/base:1",
+		testRegistryHost + "/" + strings.Repeat("a", 256),
 	} {
 		got := r.baseLayers(context.Background(), nil, ref, "linux/amd64")
 		if got.Error != "The base image reference is not valid." {
@@ -336,9 +367,9 @@ func TestBaseLayers_BearerRealmMustBeHTTPS(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer registry.Close()
-	r := newBaseRunner(registry.Client().Transport)
+	r := newBaseRunner(map[string]testRoute{testRegistryHost: {"198.51.100.1", registry}})
 
-	got := r.baseLayers(context.Background(), nil, registry.Listener.Addr().String()+"/team/base:1", "linux/amd64")
+	got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base:1", "linux/amd64")
 
 	if got.Error != "The registry refused access to the base image." || tokenHits != 0 {
 		t.Errorf("base = %+v, token hits = %d", got, tokenHits)
@@ -361,11 +392,11 @@ func TestBaseLayers_CrossHostRedirectDoesNotCarryAuthorization(t *testing.T) {
 		_, _ = w.Write(config)
 	}))
 	defer cdn.Close()
-	reg.blobRedirect = cdn.URL + "/blob"
+	reg.blobRedirect = "https://cdn.test/blob"
 
 	h := newHarness(t)
 	r := h.runner
-	r.BaseTransport = transportFor(reg.srv, host)
+	useTestNetwork(r, map[string]testRoute{host: {"10.0.0.5", reg.srv}, "cdn.test": {"198.51.100.9", cdn}})
 
 	got := r.baseLayers(context.Background(), h.job.Registries, host+"/platform-base:3.2", "linux/amd64")
 
@@ -388,7 +419,7 @@ func TestBaseLayers_ECRHostUsesBasicAuthFromTheAccountsRole(t *testing.T) {
 	reg.wantBasic = "Basic " + base64.StdEncoding.EncodeToString([]byte("AWS:"+testPassword))
 	h := newHarness(t)
 	r := h.runner
-	r.BaseTransport = transportFor(reg.srv, host)
+	useTestNetwork(r, map[string]testRoute{host: {"10.0.0.5", reg.srv}})
 
 	got := r.baseLayers(context.Background(), h.job.Registries, host+"/platform-base:3.2", "linux/amd64")
 
@@ -407,7 +438,7 @@ func TestBaseLayers_ECRAccountNotConnectedMakesNoNetworkCall(t *testing.T) {
 	reg := newFakeRegistry(t, "platform-base", "3.2")
 	h := newHarness(t)
 	r := h.runner
-	r.BaseTransport = transportFor(reg.srv, "999999999999.dkr.ecr.eu-west-1.amazonaws.com")
+	useTestNetwork(r, map[string]testRoute{"999999999999.dkr.ecr.eu-west-1.amazonaws.com": {"10.0.0.5", reg.srv}})
 
 	got := r.baseLayers(context.Background(), h.job.Registries, "999999999999.dkr.ecr.eu-west-1.amazonaws.com/platform-base:3.2", "linux/amd64")
 
@@ -430,10 +461,10 @@ func TestBaseLayers_SlowRegistryEndsAtTheTimeout(t *testing.T) {
 	old := baseTimeout
 	baseTimeout = 100 * time.Millisecond
 	defer func() { baseTimeout = old }()
-	r := newBaseRunner(slow.Client().Transport)
+	r := newBaseRunner(map[string]testRoute{testRegistryHost: {"198.51.100.1", slow}})
 
 	started := time.Now()
-	got := r.baseLayers(context.Background(), nil, slow.Listener.Addr().String()+"/team/base:1", "linux/amd64")
+	got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base:1", "linux/amd64")
 
 	if got.Error != "The base image could not be read: timeout" || time.Since(started) > 2*time.Second {
 		t.Errorf("base = %+v after %v", got, time.Since(started))
@@ -446,7 +477,7 @@ func TestRun_ImageWithBaseRefGetsBaseLayersAndLayerIDs(t *testing.T) {
 	img := image(digestSingle, "stable")
 	img.BaseRef = host + "/platform-base:3.2"
 	h := newHarness(t, img)
-	h.runner.BaseTransport = transportFor(reg.srv, host)
+	useTestNetwork(h.runner, map[string]testRoute{host: {"10.0.0.5", reg.srv}})
 
 	if code := h.run(); code != 0 {
 		t.Fatalf("exit code = %d", code)
@@ -502,4 +533,95 @@ func storedResult(t *testing.T, h *harness, digest string) scan.Result {
 		t.Fatal(err)
 	}
 	return res
+}
+
+func TestBaseDestinationAllowed(t *testing.T) {
+	cases := []struct {
+		addr          string
+		public, onECR bool
+	}{
+		{"93.184.216.34", true, true},
+		{"2606:2800:220:1::1", true, true},
+		{"10.1.2.3", false, true},
+		{"172.16.0.1", false, true},
+		{"192.168.1.1", false, true},
+		{"fc00::1", false, true},
+		{"::ffff:10.1.2.3", false, true}, // IPv4-mapped forms are judged as the IPv4 address
+		{"127.0.0.1", false, false},
+		{"::1", false, false},
+		{"::ffff:127.0.0.1", false, false},
+		{"169.254.169.254", false, false},
+		{"::ffff:169.254.169.254", false, false},
+		{"fe80::1", false, false},
+		{"fd00:ec2::254", false, false},
+		{"100.64.0.1", false, false},
+		{"0.0.0.0", false, false},
+		{"::", false, false},
+		{"224.0.0.1", false, false},
+		{"ff02::1", false, false},
+	}
+	for _, tc := range cases {
+		addr := netip.MustParseAddr(tc.addr)
+		if got := baseDestinationAllowed(addr, false); got != tc.public {
+			t.Errorf("%s allowed = %v, want %v", tc.addr, got, tc.public)
+		}
+		if got := baseDestinationAllowed(addr, true); got != tc.onECR {
+			t.Errorf("%s allowed for ECR = %v, want %v", tc.addr, got, tc.onECR)
+		}
+	}
+}
+
+const unreachable = "The base image registry is not reachable from the scanner."
+
+func TestBaseLayers_PublicRegistryResolvingToAPrivateAddressIsBlocked(t *testing.T) {
+	reg := newFakeRegistry(t, "team/base", "1")
+	r := newBaseRunner(map[string]testRoute{testRegistryHost: {"10.0.0.5", reg.srv}})
+
+	got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base:1", "linux/amd64")
+
+	if got.Error != unreachable || reg.requestCount() != 0 {
+		t.Errorf("base = %+v, registry requests = %d", got, reg.requestCount())
+	}
+	if strings.Contains(got.Error, "10.0.0.5") {
+		t.Error("the blocked address is echoed")
+	}
+}
+
+func TestBaseLayers_RedirectToTheMetadataEndpointIsBlocked(t *testing.T) {
+	reg := newFakeRegistry(t, "team/base", "1")
+	reg.blobRedirect = "https://169.254.169.254/latest/meta-data/"
+	r := newBaseRunner(reg.routes())
+
+	got := r.baseLayers(context.Background(), nil, testRegistryHost+"/team/base:1", "linux/amd64")
+
+	if got.Error != unreachable {
+		t.Errorf("base = %+v", got)
+	}
+}
+
+func TestBaseLayers_ECRHostResolvingToAPrivateAddressIsAllowed(t *testing.T) {
+	host := testAccount + ".dkr.ecr.us-east-1.amazonaws.com"
+	reg := newFakeRegistry(t, "platform-base", "3.2")
+	h := newHarness(t)
+	useTestNetwork(h.runner, map[string]testRoute{host: {"10.0.0.5", reg.srv}})
+
+	got := h.runner.baseLayers(context.Background(), h.job.Registries, host+"/platform-base:3.2", "linux/amd64")
+
+	if got.Error != "" || !slices.Equal(got.Layers, reg.amd64Layers) {
+		t.Errorf("base = %+v", got)
+	}
+}
+
+func TestBaseLayers_ECRHostRedirectingToLoopbackIsStillBlocked(t *testing.T) {
+	host := testAccount + ".dkr.ecr.us-east-1.amazonaws.com"
+	reg := newFakeRegistry(t, "platform-base", "3.2")
+	reg.blobRedirect = "https://127.0.0.1/blob"
+	h := newHarness(t)
+	useTestNetwork(h.runner, map[string]testRoute{host: {"10.0.0.5", reg.srv}})
+
+	got := h.runner.baseLayers(context.Background(), h.job.Registries, host+"/platform-base:3.2", "linux/amd64")
+
+	if got.Error != unreachable {
+		t.Errorf("base = %+v", got)
+	}
 }
