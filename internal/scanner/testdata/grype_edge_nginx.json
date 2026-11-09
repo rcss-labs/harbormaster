@@ -9,7 +9,7 @@
         "fix": {"versions": ["1.2.3-1", "1.2.4-1"], "state": "fixed"},
         "cvss": [{"metrics": {"baseScore": 9.8}}]
       },
-      "artifact": {"name": "openssl", "version": "1.1.1", "type": "deb", "locations": [{"path": "/var/lib/dpkg/status"}]}
+      "artifact": {"name": "openssl", "version": "1.1.1", "type": "deb", "locations": [{"path": "/var/lib/dpkg/status", "layerID": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}
     },
     {
       "vulnerability": {
@@ -30,7 +30,7 @@
         "urls": ["https://example.com/CVE-0000-0003"],
         "fix": {"versions": [], "state": "wont-fix"}
       },
-      "artifact": {"name": "busybox", "version": "1.35.0", "type": "binary", "locations": [{"path": "/bin/busybox"}]}
+      "artifact": {"name": "busybox", "version": "1.35.0", "type": "binary", "locations": [{"path": "/bin/busybox", "layerID": "not-a-diff-id"}]}
     }
   ],
   "source": {"type": "sbom"},
