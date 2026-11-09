@@ -35,6 +35,8 @@ type Finding struct {
 	FixState       string   `json:"fix_state"`
 	DataSource     string   `json:"data_source"`
 	URL            string   `json:"url"`
+	// LayerID is the diff ID (sha256 of the uncompressed layer) the package was found in; empty when unknown.
+	LayerID string `json:"layer_id"`
 }
 
 func (f Finding) Key() FindingKey { return FindingKey{VulnID: f.VulnID, PackageName: f.PackageName} }
@@ -49,7 +51,23 @@ type Result struct {
 	Packages        int       `json:"packages"`
 	Findings        []Finding `json:"findings"`
 	Truncated       bool      `json:"truncated"`
+	// Layers are the diff IDs of the scanned image, bottom layer first.
+	Layers []string `json:"layers"`
+	// Base is set when the job named a base image for this image.
+	Base *BaseLayers `json:"base,omitempty"`
 }
+
+// BaseLayers is what the scanner found for the base image the job named: its diff IDs, bottom layer first, or why
+// it could not read them. A failure here never fails the scan.
+type BaseLayers struct {
+	Ref    string   `json:"ref"`
+	Digest string   `json:"digest"`
+	Layers []string `json:"layers"`
+	Error  string   `json:"error"`
+}
+
+// MaxLayers caps the layers kept for an image or a base image.
+const MaxLayers = 256
 
 type ImageOutcome struct {
 	Digest        string `json:"digest"`

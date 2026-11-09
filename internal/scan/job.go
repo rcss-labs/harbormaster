@@ -114,6 +114,8 @@ type JobImage struct {
 	AccountID string `json:"account_id"`
 	Region    string `json:"region"`
 	Large     bool   `json:"large"`
+	// BaseRef is the base image configured for the image's repository, as the user typed it; empty when none is.
+	BaseRef string `json:"base_ref,omitempty"`
 }
 
 func trimSHA(digest string) string { return strings.TrimPrefix(digest, "sha256:") }
