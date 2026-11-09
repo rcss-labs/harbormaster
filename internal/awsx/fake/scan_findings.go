@@ -1,6 +1,12 @@
 package fake
 
-import "github.com/rcss-labs/harbormaster/internal/scan"
+import (
+	"crypto/sha256"
+	"fmt"
+	"strings"
+
+	"github.com/rcss-labs/harbormaster/internal/scan"
+)
 
 // fakeFinding is one table entry. The finding disappears from a tag that is
 // at least fixedAtStep steps newer than the seeded running tag.
@@ -59,6 +65,7 @@ var fakeFindingTable = map[string][]fakeFinding{
 // than the seeded running tag drops entries from the front, one per step.
 func (s *Scanner) FindingsFor(repository, tag string) []scan.Finding {
 	steps := s.stepsAhead(repository, tag)
+	layers := FakeLayersFor(repository)
 	var findings []scan.Finding
 	for _, entry := range fakeFindingTable[repository] {
 		if steps >= entry.fixedAtStep {
@@ -67,6 +74,10 @@ func (s *Scanner) FindingsFor(repository, tag string) []scan.Finding {
 		finding := entry.finding
 		score := entry.cvss
 		finding.CVSS = &score
+		finding.LayerID = layers[fakeAppLayerStart]
+		if finding.PackageType == "deb" {
+			finding.LayerID = layers[1] // OS packages come with the base image
+		}
 		findings = append(findings, finding)
 	}
 	return findings
@@ -90,4 +101,41 @@ func (s *Scanner) stepsAhead(repository, tag string) int {
 		return 0
 	}
 	return running - candidate
+}
+
+// Every fake image has fakeBaseLayerCount base layers followed by the app layers.
+const (
+	fakeBaseLayerCount = 3
+	fakeAppLayerStart  = fakeBaseLayerCount
+	fakeLayerCount     = 5
+)
+
+func fakeDigest(seed string) string { return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(seed))) }
+
+// FakeLayersFor is the fake layer diff ids of a repository's images, base first. All tags share them.
+func FakeLayersFor(repository string) []string {
+	layers := make([]string, fakeLayerCount)
+	for i := range layers {
+		layers[i] = fakeDigest(fmt.Sprintf("layer/%s/%d", repository, i))
+	}
+	return layers
+}
+
+// FakeBaseFor is how the fake scanner resolves a base image reference for an image of the repository. The last path
+// segment "missing" cannot be read (an error); the tag "old" is an older build of the base, so its layers are not a prefix
+// of the image's; any other reference is the image's own base layers.
+func FakeBaseFor(repository, ref string) *scan.BaseLayers {
+	parsed := scan.ParseImageRef(ref)
+	base := &scan.BaseLayers{Ref: ref, Digest: fakeDigest("base/" + ref)}
+	switch segments := strings.Split(parsed.Repository, "/"); {
+	case segments[len(segments)-1] == "missing":
+		base.Digest, base.Error = "", "manifest unknown"
+	case parsed.Tag == "old":
+		for i := range fakeBaseLayerCount {
+			base.Layers = append(base.Layers, fakeDigest(fmt.Sprintf("old-layer/%s/%d", ref, i)))
+		}
+	default:
+		base.Layers = FakeLayersFor(repository)[:fakeBaseLayerCount]
+	}
+	return base
 }

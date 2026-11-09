@@ -35,9 +35,19 @@ type Finding struct {
 	FixState       string   `json:"fix_state"`
 	DataSource     string   `json:"data_source"`
 	URL            string   `json:"url"`
+	// LayerID is the diff id of the image layer the package was found in.
+	LayerID string `json:"layer_id,omitempty"`
 }
 
 func (f Finding) Key() FindingKey { return FindingKey{VulnID: f.VulnID, PackageName: f.PackageName} }
+
+// BaseLayers is what the scanner learned about the configured base image: its layer diff ids, or why it could not read them.
+type BaseLayers struct {
+	Ref    string   `json:"ref"`
+	Digest string   `json:"digest"`
+	Layers []string `json:"layers"`
+	Error  string   `json:"error"`
+}
 
 type Result struct {
 	Digest          string    `json:"digest"`
@@ -49,6 +59,9 @@ type Result struct {
 	Packages        int       `json:"packages"`
 	Findings        []Finding `json:"findings"`
 	Truncated       bool      `json:"truncated"`
+	// Layers are the image's layer diff ids, base first.
+	Layers []string    `json:"layers,omitempty"`
+	Base   *BaseLayers `json:"base,omitempty"`
 }
 
 type ImageOutcome struct {
@@ -162,6 +175,8 @@ type rawResult struct {
 	Packages        int64           `json:"packages"`
 	Findings        json.RawMessage `json:"findings"`
 	Truncated       bool            `json:"truncated"`
+	Layers          []string        `json:"layers"`
+	Base            *BaseLayers     `json:"base"`
 }
 
 // readFindings decodes the findings array element by element and stops after
@@ -194,6 +209,20 @@ func readFindings(raw json.RawMessage, handle func(Finding) bool) (cut bool, err
 		}
 	}
 	return false, nil
+}
+
+// validLayers returns the layer diff ids when every one is a digest and there are at most MaxLayers; otherwise nil, since
+// a partial list would make a prefix comparison wrong.
+func validLayers(layers []string) []string {
+	if len(layers) == 0 || len(layers) > MaxLayers {
+		return nil
+	}
+	for _, layer := range layers {
+		if !digestPattern.MatchString(layer) {
+			return nil
+		}
+	}
+	return layers
 }
 
 // ParseResult validates one image's result file. The input is untrusted.
@@ -233,6 +262,16 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 		res.SyftVersion = raw.SyftVersion
 	}
 
+	res.Layers = validLayers(raw.Layers)
+	if raw.Base != nil {
+		res.Base = &BaseLayers{
+			Ref: SanitizeText(raw.Base.Ref), Layers: validLayers(raw.Base.Layers), Error: SanitizeText(raw.Base.Error),
+		}
+		if digestPattern.MatchString(raw.Base.Digest) {
+			res.Base.Digest = raw.Base.Digest
+		}
+	}
+
 	type dedupeKey struct{ vuln, pkg, version string }
 	seen := make(map[dedupeKey]struct{}, MaxFindings)
 	cut, err := readFindings(raw.Findings, func(f Finding) bool {
@@ -251,6 +290,9 @@ func ParseResult(data []byte, wantDigest string) (Result, error) {
 			FixState:       SanitizeText(f.FixState),
 			DataSource:     SanitizeText(f.DataSource),
 			URL:            safeHTTPSURL(f.URL),
+		}
+		if digestPattern.MatchString(f.LayerID) {
+			clean.LayerID = f.LayerID
 		}
 		if f.CVSS != nil && !math.IsNaN(*f.CVSS) {
 			score := math.Min(math.Max(*f.CVSS, 0), 10)

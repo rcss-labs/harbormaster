@@ -256,6 +256,36 @@ func (s *Server) deleteAcceptance(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// queueRescan files a manual request for the image under the newest request of a service the caller may deploy, and queues
+// a scan of it. An image already queued or scanning is left to that scan.
+func (s *Server) queueRescan(r *http.Request, sc scope, image store.ScanImage) (store.ScanRequest, store.ScanImage, error) {
+	ctx := r.Context()
+	tags, err := s.tags(r)
+	if err != nil {
+		return store.ScanRequest{}, store.ScanImage{}, err
+	}
+	requests, err := s.Store.ScanRequestsForDigests(ctx, []string{image.Digest})
+	if err != nil {
+		return store.ScanRequest{}, store.ScanImage{}, err
+	}
+	var request store.ScanRequest
+	for _, candidate := range requests[image.Digest] {
+		if authz.Can(sc.Subject, authz.Deploy, authz.EffectiveServiceTag(tags, candidate.Key)) {
+			request = candidate
+			break
+		}
+	}
+	request.ID, request.Source, request.RequestedBy = 0, "manual", nil
+	if sc.Subject.UserID != 0 {
+		request.RequestedBy = &sc.Subject.UserID
+	}
+	stored, err := s.ensureScan(ctx, resolvedImage{
+		Ref: scan.ParseImageRef(image.ImageRef), Repository: image.Repository, Tag: image.Tag, Digest: image.Digest,
+		MediaType: image.ManifestMediaType, Platform: image.Platform,
+	}, request, ensureRescan)
+	return request, stored, err
+}
+
 func (s *Server) postRescan(w http.ResponseWriter, r *http.Request) {
 	if !s.scanningOn() {
 		s.fail(w, errScanningOff)
@@ -273,33 +303,7 @@ func (s *Server) postRescan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "conflict", "This image is already waiting for a scan.")
 		return
 	}
-	ctx := r.Context()
-	tags, err := s.tags(r)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	requests, err := s.Store.ScanRequestsForDigests(ctx, []string{image.Digest})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	// The rescan is filed under the newest request of a service the caller may deploy.
-	var request store.ScanRequest
-	for _, candidate := range requests[image.Digest] {
-		if authz.Can(sc.Subject, authz.Deploy, authz.EffectiveServiceTag(tags, candidate.Key)) {
-			request = candidate
-			break
-		}
-	}
-	request.ID, request.Source, request.RequestedBy = 0, "manual", nil
-	if sc.Subject.UserID != 0 {
-		request.RequestedBy = &sc.Subject.UserID
-	}
-	stored, err := s.ensureScan(ctx, resolvedImage{
-		Ref: scan.ParseImageRef(image.ImageRef), Repository: image.Repository, Tag: image.Tag, Digest: image.Digest,
-		MediaType: image.ManifestMediaType, Platform: image.Platform,
-	}, request, ensureRescan)
+	request, stored, err := s.queueRescan(r, sc, image)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -312,4 +316,59 @@ func (s *Server) postRescan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, status)
+}
+
+// putBaseImage sets, or with an empty ref clears, the base image of the image's repository, then queues a rescan so the
+// layers are compared against it. The base is shared by every tag and digest of the repository.
+func (s *Server) putBaseImage(w http.ResponseWriter, r *http.Request) {
+	if !s.scanningOn() {
+		s.fail(w, errScanningOff)
+		return
+	}
+	image, view, sc, ok := s.visibleImage(w, r, r.PathValue("digest"))
+	if !ok {
+		return
+	}
+	if !view.dto.Can.SetBase {
+		writeError(w, http.StatusForbidden, "forbidden", "You need Deploy on a service that requested this image")
+		return
+	}
+	var body SetBaseImageRequest
+	if err := decodeStrictJSON(w, r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	ref := body.BaseRef
+	if ref != "" && !scan.ValidBaseRef(ref) {
+		s.fail(w, invalid("base_ref is not a valid image reference."))
+		return
+	}
+	ctx := r.Context()
+	if err := s.Store.SetRepoBase(ctx, repoKeyOf(image), ref, sc.Subject.UserID, s.now()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	summary := "Cleared the base image of " + image.Repository + "."
+	if ref != "" {
+		summary = "Set the base image of " + image.Repository + " to " + ref + "."
+	}
+	s.auditAdmin(r, "security.base_image", imageTarget(image.Digest), summary,
+		map[string]any{"digest": image.Digest, "repository": image.Repository, "base_ref": ref})
+
+	// An image already queued or scanning is not an error: its scan reads the base when the job is built.
+	if _, image, err := s.queueRescan(r, sc, image); err != nil {
+		s.fail(w, err)
+		return
+	} else if views, err := s.imageViews(r, sc, []store.ScanImage{image}, nil); err != nil {
+		s.fail(w, err)
+		return
+	} else if len(views) == 0 {
+		s.fail(w, errNotFound)
+		return
+	} else if findings, err := s.findingDTOs(r, sc, image, views[0]); err != nil {
+		s.fail(w, err)
+		return
+	} else {
+		writeJSON(w, http.StatusOK, SecurityImageDetailDTO{Enabled: true, SecurityImageDTO: views[0].dto, Findings: findings})
+	}
 }

@@ -27,6 +27,10 @@ type ScanImage struct {
 	RequestedBy                                                                                                  *int64
 	// ManifestMediaType is what ECR reports for the digest; the importer tells an image index from a single manifest by it.
 	ManifestMediaType string
+	// LayerIDs are the image's layer diff ids, base first. BaseRef, BaseDigest, BaseLayerIDs and BaseError are the base
+	// image as the last scan saw it, not the repository's current setting.
+	LayerIDs, BaseLayerIDs         []string
+	BaseRef, BaseDigest, BaseError string
 }
 
 // maxScanAttempts is the number of scan attempts after which an image is marked failed.
@@ -37,7 +41,8 @@ const scanImageColumns = `digest, coalesce(platform_digest, ''), coalesce(platfo
 	status, coalesce(failure_code, ''), coalesce(failure_detail, ''), attempts, next_attempt_at, large,
 	coalesce(syft_version, ''), coalesce(scanner_image_digest, ''),
 	last_matched_run_id, matched_at, matched_db_built_at, packages, truncated, pushed_at,
-	first_seen_at, last_requested_at, queued_at, scanned_at, requested_by`
+	first_seen_at, last_requested_at, queued_at, scanned_at, requested_by,
+	layer_ids, coalesce(base_ref, ''), coalesce(base_digest, ''), base_layer_ids, coalesce(base_error, '')`
 
 // scanScanImage reads a row of scanImageColumns followed by any extra columns.
 func scanScanImage(row pgx.Row, extra ...any) (ScanImage, error) {
@@ -47,7 +52,8 @@ func scanScanImage(row pgx.Row, extra ...any) (ScanImage, error) {
 		&i.Status, &i.FailureCode, &i.FailureDetail, &i.Attempts, &i.NextAttemptAt, &i.Large,
 		&i.SyftVersion, &i.ScannerImageDigest,
 		&i.LastMatchedRunID, &i.MatchedAt, &i.MatchedDBBuiltAt, &i.Packages, &i.Truncated, &i.PushedAt,
-		&i.FirstSeenAt, &i.LastRequestedAt, &i.QueuedAt, &i.ScannedAt, &i.RequestedBy}, extra...)
+		&i.FirstSeenAt, &i.LastRequestedAt, &i.QueuedAt, &i.ScannedAt, &i.RequestedBy,
+		&i.LayerIDs, &i.BaseRef, &i.BaseDigest, &i.BaseLayerIDs, &i.BaseError}, extra...)
 	return i, row.Scan(dest...)
 }
 

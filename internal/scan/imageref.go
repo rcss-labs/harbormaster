@@ -75,3 +75,38 @@ func ParseImageRef(image string) Ref {
 
 // ImageRef is host/repository with no tag or digest.
 func (r Ref) ImageRef() string { return r.Host + "/" + r.Repository }
+
+var hostPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$`)
+
+// maxRefLen is the longest image reference accepted for a base image.
+const maxRefLen = 255
+
+// ValidBaseRef reports whether ref is a well-formed image reference: an optional registry host, a lowercase repository
+// path, and an optional tag and digest. Docker Hub names without a host are allowed.
+func ValidBaseRef(ref string) bool {
+	if ref == "" || len(ref) > maxRefLen {
+		return false
+	}
+	name := ref
+	if i := strings.Index(name, "@"); i >= 0 {
+		if !digestPattern.MatchString(name[i+1:]) {
+			return false
+		}
+		name = name[:i]
+	}
+	if i := strings.Index(name, "/"); i >= 0 {
+		if first := name[:i]; strings.ContainsAny(first, ".:") || first == "localhost" {
+			if !hostPattern.MatchString(first) {
+				return false
+			}
+			name = name[i+1:]
+		}
+	}
+	if i := strings.LastIndex(name, ":"); i >= 0 && !strings.Contains(name[i:], "/") {
+		if !tagPattern.MatchString(name[i+1:]) {
+			return false
+		}
+		name = name[:i]
+	}
+	return repositoryPattern.MatchString(name)
+}

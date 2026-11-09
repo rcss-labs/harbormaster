@@ -2081,9 +2081,18 @@
     "image": {
       "$null": {
         "accepted": "number",
+        "base_image": {
+          "matched_layers": "number",
+          "message": "string",
+          "ref": "string",
+          "scanned_ref": "string",
+          "state": "string",
+          "total_layers": "number"
+        },
         "can": {
           "accept": "boolean",
-          "rescan": "boolean"
+          "rescan": "boolean",
+          "set_base": "boolean"
         },
         "digest": "string",
         "failure_action": "string",
@@ -2164,9 +2173,18 @@
     "images": [
       {
         "accepted": "number",
+        "base_image": {
+          "matched_layers": "number",
+          "message": "string",
+          "ref": "string",
+          "scanned_ref": "string",
+          "state": "string",
+          "total_layers": "number"
+        },
         "can": {
           "accept": "boolean",
-          "rescan": "boolean"
+          "rescan": "boolean",
+          "set_base": "boolean"
         },
         "digest": "string",
         "failure_action": "string",
@@ -2237,9 +2255,18 @@
   },
   "securityImage": {
     "accepted": "number",
+    "base_image": {
+      "matched_layers": "number",
+      "message": "string",
+      "ref": "string",
+      "scanned_ref": "string",
+      "state": "string",
+      "total_layers": "number"
+    },
     "can": {
       "accept": "boolean",
-      "rescan": "boolean"
+      "rescan": "boolean",
+      "set_base": "boolean"
     },
     "digest": "string",
     "enabled": "boolean",
@@ -2269,6 +2296,7 @@
         "fix_state": "string",
         "fixed_version": "string",
         "location": "string",
+        "origin": "string",
         "package": "string",
         "severity": "string",
         "type": "string",
@@ -2331,9 +2359,18 @@
     "images": [
       {
         "accepted": "number",
+        "base_image": {
+          "matched_layers": "number",
+          "message": "string",
+          "ref": "string",
+          "scanned_ref": "string",
+          "state": "string",
+          "total_layers": "number"
+        },
         "can": {
           "accept": "boolean",
-          "rescan": "boolean"
+          "rescan": "boolean",
+          "set_base": "boolean"
         },
         "digest": "string",
         "failure_action": "string",
