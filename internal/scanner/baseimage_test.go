@@ -559,6 +559,9 @@ func TestBaseDestinationAllowed(t *testing.T) {
 		{"::", false, false},
 		{"224.0.0.1", false, false},
 		{"ff02::1", false, false},
+		{"64:ff9b::a9fe:a9fe", false, false}, // NAT64 embeds 169.254.169.254
+		{"64:ff9b:1::a01:203", false, false},
+		{"2002:a9fe:a9fe::1", false, false}, // 6to4 embeds 169.254.169.254
 	}
 	for _, tc := range cases {
 		addr := netip.MustParseAddr(tc.addr)

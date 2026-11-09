@@ -4,11 +4,11 @@
     {"id": "2", "name": "zlib", "version": "1.2.11", "type": "deb"},
     {"id": "3", "name": "busybox", "version": "1.35.0", "type": "binary"}
   ],
-  "source": {"type": "image", "metadata": {"userInput": "web", "imageID": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "manifestDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "layers": [
+  "source": {"type": "image", "metadata": {"userInput": "web", "imageID": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "manifestDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "repoDigests": ["111111111111.dkr.ecr.us-east-1.amazonaws.com/web@sha256:1111111111111111111111111111111111111111111111111111111111111111"], "layers": [
     {"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "size": 100},
     {"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "size": 200},
     {"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333", "size": 300},
     {"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "size": 400}
-  ]}, "target": {"repoDigests": ["111111111111.dkr.ecr.us-east-1.amazonaws.com/web@sha256:1111111111111111111111111111111111111111111111111111111111111111"], "manifestDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}},
+  ]}},
   "descriptor": {"name": "syft", "version": "1.57.0"}
 }

@@ -228,6 +228,12 @@ func (r *Runner) baseDialContext(allowPrivate bool) func(ctx context.Context, ne
 var (
 	carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
 	ec2IPv6Metadata = netip.MustParsePrefix("fd00:ec2::/32") // inside fc00::/7, so it needs its own entry
+	// Translation prefixes embed an IPv4 address the filter would otherwise not see; registries do not need them.
+	translatedIPv6 = []netip.Prefix{
+		netip.MustParsePrefix("64:ff9b::/96"),   // NAT64
+		netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64
+		netip.MustParsePrefix("2002::/16"),      // 6to4
+	}
 )
 
 // baseDestinationAllowed reports whether the scanner may connect to addr. Loopback, link-local (which holds
@@ -240,12 +246,21 @@ func baseDestinationAllowed(addr netip.Addr, allowPrivate bool) bool {
 	addr = addr.Unmap()
 	switch {
 	case !addr.IsValid(), addr.IsUnspecified(), addr.IsLoopback(), addr.IsLinkLocalUnicast(), addr.IsMulticast(),
-		carrierGradeNAT.Contains(addr), ec2IPv6Metadata.Contains(addr):
+		carrierGradeNAT.Contains(addr), ec2IPv6Metadata.Contains(addr), inAny(translatedIPv6, addr):
 		return false
 	case addr.IsPrivate():
 		return allowPrivate
 	}
 	return true
+}
+
+func inAny(prefixes []netip.Prefix, addr netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 // requestFailure maps a transport error to the user-facing error.

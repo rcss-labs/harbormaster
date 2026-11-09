@@ -14,8 +14,11 @@ var sbomDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 type syftDocument struct {
 	Artifacts []json.RawMessage `json:"artifacts"`
 	Source    struct {
+		// Metadata is where Syft 1.x (schema 9+) describes the image; Target is the older shape.
 		Metadata struct {
-			Layers []struct {
+			ManifestDigest string   `json:"manifestDigest"`
+			RepoDigests    []string `json:"repoDigests"`
+			Layers         []struct {
 				Digest string `json:"digest"`
 			} `json:"layers"`
 		} `json:"metadata"`
@@ -34,6 +37,14 @@ func parseSyftDocument(sbom []byte) (syftDocument, error) {
 	return doc, nil
 }
 
+// imageIdentity is the manifest digest and repo digests Syft resolved the image to, from whichever schema it wrote.
+func (doc syftDocument) imageIdentity() (manifestDigest string, repoDigests []string) {
+	if doc.Source.Metadata.ManifestDigest != "" || len(doc.Source.Metadata.RepoDigests) > 0 {
+		return doc.Source.Metadata.ManifestDigest, doc.Source.Metadata.RepoDigests
+	}
+	return doc.Source.Target.ManifestDigest, doc.Source.Target.RepoDigests
+}
+
 // CountSBOMPackages is the number of artifacts in a syft-json document.
 // Grype's report has no package count, so the SBOM is the source.
 func CountSBOMPackages(sbom []byte) (int, error) {
@@ -48,10 +59,14 @@ func CountSBOMPackages(sbom []byte) (int, error) {
 // or "" when it is absent or malformed.
 func sbomManifestDigest(sbom []byte) string {
 	doc, err := parseSyftDocument(sbom)
-	if err != nil || !sbomDigestPattern.MatchString(doc.Source.Target.ManifestDigest) {
+	if err != nil {
 		return ""
 	}
-	return doc.Source.Target.ManifestDigest
+	manifestDigest, _ := doc.imageIdentity()
+	if !sbomDigestPattern.MatchString(manifestDigest) {
+		return ""
+	}
+	return manifestDigest
 }
 
 // parseToolVersion reads the "Version: x.y.z" line of `syft version` or `grype version`.
@@ -71,10 +86,11 @@ func sbomNamesDigest(sbom []byte, digest string) bool {
 	if err != nil {
 		return false
 	}
-	if doc.Source.Target.ManifestDigest == digest {
+	manifestDigest, repoDigests := doc.imageIdentity()
+	if manifestDigest == digest {
 		return true
 	}
-	for _, repoDigest := range doc.Source.Target.RepoDigests {
+	for _, repoDigest := range repoDigests {
 		if strings.HasSuffix(repoDigest, "@"+digest) {
 			return true
 		}
