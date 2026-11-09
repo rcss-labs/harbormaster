@@ -3,8 +3,10 @@ package fake
 import (
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"math/rand/v2"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,17 +95,19 @@ type serviceSpec struct {
 	spot bool
 	// sidecarMemoryReservation, when above zero, is the soft memory limit (MiB) of the ecrSidecar container.
 	sidecarMemoryReservation int32
+	// awsTags are the ECS service tags, as the off-hours selectors read them.
+	awsTags map[string]string
 }
 
 var seedServices = []serviceSpec{
-	{cluster: "core-services", name: "payments-api", desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
+	{cluster: "core-services", name: "payments-api", awsTags: envTags("prod"), desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
 		env: []envVar{{"NODE_ENV", "production"}, {"PAYMENTS_PROVIDER", "stripe"}, {"DB_POOL_SIZE", "20"}}},
-	{cluster: "core-services", name: "web-frontend", desired: 2, running: 2, rev: 87, repo: "web-frontend", tag: "3.4.0", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
+	{cluster: "core-services", name: "web-frontend", awsTags: envTags("prod"), desired: 2, running: 2, rev: 87, repo: "web-frontend", tag: "3.4.0", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://payments-api.core.local:8080"}}},
-	{cluster: "core-services", name: "auth-service", desired: 2, running: 2, rev: 15, repo: "auth-service", tag: "0.9.7", cpu: 256, memory: 512, port: 9000, lb: true, exec: true,
+	{cluster: "core-services", name: "auth-service", awsTags: envTags("prod"), desired: 2, running: 2, rev: 15, repo: "auth-service", tag: "0.9.7", cpu: 256, memory: 512, port: 9000, lb: true, exec: true,
 		env: []envVar{{"TOKEN_TTL", "3600"}, {"ISSUER", "https://auth.rcss.local"}}},
 	// notifications is mid-rollout: one task on :10 (PRIMARY), one on :9 (ACTIVE).
-	{cluster: "core-services", name: "notifications", desired: 2, running: 2, rev: 9, repo: "notifications", tag: "2.2.0", cpu: 256, memory: 512, port: 8081, exec: true, spot: true, deployingTag: "2.3.0",
+	{cluster: "core-services", name: "notifications", awsTags: envTags("prod"), desired: 2, running: 2, rev: 9, repo: "notifications", tag: "2.2.0", cpu: 256, memory: 512, port: 8081, exec: true, spot: true, deployingTag: "2.3.0",
 		env: []envVar{{"QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/482109375512/notify"}}},
 	{cluster: "background-jobs", name: "report-worker", desired: 1, running: 1, rev: 31, repo: "report-worker", tag: "5.0.1", cpu: 1024, memory: 2048, exec: true, efs: &efsReports,
 		env: []envVar{{"REPORT_BUCKET", "rcss-reports"}}},
@@ -112,9 +116,9 @@ var seedServices = []serviceSpec{
 	// 256/512 is a valid Fargate size (the mockup's 512/512 is not).
 	{cluster: "background-jobs", name: "image-resizer", desired: 2, running: 0, rev: 6, repo: "image-resizer", tag: "0.4.2", cpu: 256, memory: 512, port: 8090, oom: true,
 		env: []envVar{{"MAX_IMAGE_MP", "40"}}},
-	{cluster: "ci-tools", name: "jenkins-controller", desired: 1, running: 1, rev: 58, repo: "jenkins", tag: "2.479.1-lts", cpu: 2048, memory: 4096, port: 8080, lb: true, exec: true, efs: &efsJenkins,
+	{cluster: "ci-tools", name: "jenkins-controller", awsTags: envTags("dev"), desired: 1, running: 1, rev: 58, repo: "jenkins", tag: "2.479.1-lts", cpu: 2048, memory: 4096, port: 8080, lb: true, exec: true, efs: &efsJenkins,
 		env: []envVar{{"JAVA_OPTS", "-Xmx3g"}}},
-	{cluster: "ci-tools", name: "artifact-proxy", desired: 1, running: 1, rev: 7, repo: "artifact-proxy", tag: "1.0.4", cpu: 512, memory: 1024, port: 8081, exec: true,
+	{cluster: "ci-tools", name: "artifact-proxy", awsTags: envTags("dev"), desired: 1, running: 1, rev: 7, repo: "artifact-proxy", tag: "1.0.4", cpu: 512, memory: 1024, port: 8081, exec: true,
 		env: []envVar{{"UPSTREAM", "https://registry.npmjs.org"}}},
 	{cluster: "eu-apps", name: "catalog-api", desired: 2, running: 2, rev: 23, repo: "catalog-api", tag: "4.1.0", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, unhealthy: 1,
 		env: []envVar{{"CACHE_TTL", "300"}}},
@@ -124,17 +128,20 @@ var seedServices = []serviceSpec{
 		env: []envVar{{"WORKER_PROCESSES", "auto"}}},
 	{cluster: "edge-proxy", name: "cert-renewer", desired: 1, running: 1, rev: 4, repo: "cert-renewer", tag: "0.2.1", cpu: 256, memory: 512, ec2: true, efs: &efsCerts,
 		env: []envVar{{"ACME_EMAIL", "ops@rcss.local"}}},
-	{cluster: "staging-web", name: "web", desired: 1, running: 1, rev: 33, repo: "web", tag: "3.5.0-rc.1", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
+	{cluster: "staging-web", name: "web", awsTags: envTags("staging"), desired: 1, running: 1, rev: 33, repo: "web", tag: "3.5.0-rc.1", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://api.staging.local:8080"}}},
-	{cluster: "staging-web", name: "api", desired: 1, running: 1, rev: 21, repo: "api", tag: "1.19.0-rc.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true,
+	{cluster: "staging-web", name: "api", awsTags: envTags("staging"), desired: 1, running: 1, rev: 21, repo: "api", tag: "1.19.0-rc.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true,
 		ecrSidecar: "migrator", ecrSidecarTag: "1.4.2", ecrSidecarTags: 6, sidecarMemoryReservation: 768,
 		env: []envVar{{"NODE_ENV", "staging"}}},
 }
 
 var standaloneSpecs = []serviceSpec{
-	{cluster: "ci-tools", name: "release-build", rev: 3, repo: "release-build", tag: "3.0.0", cpu: 1024, memory: 2048, standalone: true, exec: true},
+	{cluster: "ci-tools", name: "release-build", awsTags: envTags("dev"), rev: 3, repo: "release-build", tag: "3.0.0", cpu: 1024, memory: 2048, standalone: true, exec: true},
 	{cluster: "background-jobs", name: "db-migrate", rev: 12, repo: "db-migrate", tag: "12.0.0", cpu: 512, memory: 1024, standalone: true},
 }
+
+// envTags is the awsTags of a service that carries only an env tag.
+func envTags(env string) map[string]string { return map[string]string{"env": env} }
 
 // seedTaskDefinitionTags are applied to every seeded task definition revision.
 var seedTaskDefinitionTags = []ecstypes.Tag{{Key: aws.String("managed-by"), Value: aws.String("terraform")}}
@@ -620,6 +627,9 @@ func (s *seeder) addService(sp serviceSpec) {
 	}
 	if sp.ec2 {
 		svc.PlatformVersion = nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(sp.awsTags)) {
+		svc.Tags = append(svc.Tags, ecstypes.Tag{Key: aws.String(key), Value: aws.String(sp.awsTags[key])})
 	}
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
 		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})

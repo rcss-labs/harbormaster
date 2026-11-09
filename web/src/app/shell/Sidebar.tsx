@@ -152,6 +152,7 @@ export function Sidebar() {
         <div className={styles.navSection}>Insights</div>
         <NavItem to="/analytics/delivery" icon="analytics" label="Analytics" alsoActiveFor={['/analytics']} />
         <NavItem to="/security" icon="shield" label="Security" />
+        <NavItem to="/logs" icon="logs" label="Log search" />
         {isAdmin ? (
           <>
             <div className={styles.navSection}>Admin</div>

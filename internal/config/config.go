@@ -69,6 +69,15 @@ type ScanConfig struct {
 	MaxImageMB        int
 }
 
+// OffHoursConfig holds the off-hours reconciler settings.
+type OffHoursConfig struct {
+	// Interval is how often the leader reconciles scheduled actions and capacity (HM_OFFHOURS_INTERVAL).
+	Interval time.Duration
+	// FakeDemo enables the seeded demo schedule in fake AWS mode (HM_FAKE_OFFHOURS_DEMO). It applies only when the
+	// demo schedule is first seeded; an existing one is left as it is.
+	FakeDemo bool
+}
+
 // Config is the complete runtime configuration for the server.
 type Config struct {
 	Listen                  string
@@ -89,6 +98,7 @@ type Config struct {
 	Poll                    PollConfig
 	Retention               RetentionConfig
 	Scan                    ScanConfig
+	OffHours                OffHoursConfig
 	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
@@ -96,6 +106,9 @@ type Config struct {
 	LogTailIdle             time.Duration
 	LogTailsPerUser         int
 	LogHistoryLimit         int
+	LogSearchTimeout        time.Duration
+	LogSearchMaxServices    int
+	LogSearchMaxRange       time.Duration
 	MaxDesiredCount         int
 
 	// SAML: how long a sign-in request (and its binding cookie) stays valid
@@ -247,15 +260,22 @@ func Load(getenv func(string) string) (Config, error) {
 			BatchSize:         reader.integer("HM_SCAN_BATCH_SIZE", 25),
 			MaxImageMB:        reader.integer("HM_SCAN_MAX_IMAGE_MB", 4096),
 		},
-		Analytics:       AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
-		PageSizeDefault: reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
-		PageSizeMax:     reader.integer("HM_PAGE_SIZE_MAX", 500),
-		MetricsCacheTTL: reader.duration("HM_METRICS_CACHE_TTL", 60*time.Second),
-		LogTailIdle:     reader.duration("HM_LOG_TAIL_IDLE", 30*time.Minute),
-		LogTailsPerUser: reader.integer("HM_LOG_TAILS_PER_USER", 2),
-		LogHistoryLimit: reader.integer("HM_LOG_HISTORY_LIMIT", 500),
-		MaxDesiredCount: reader.integer("HM_MAX_DESIRED_COUNT", 50),
-		SAMLRequestTTL:  reader.duration("HM_SAML_REQUEST_TTL", 10*time.Minute),
+		OffHours: OffHoursConfig{
+			Interval: reader.duration("HM_OFFHOURS_INTERVAL", 60*time.Second),
+			FakeDemo: reader.boolean("HM_FAKE_OFFHOURS_DEMO", true),
+		},
+		Analytics:            AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
+		PageSizeDefault:      reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
+		PageSizeMax:          reader.integer("HM_PAGE_SIZE_MAX", 500),
+		MetricsCacheTTL:      reader.duration("HM_METRICS_CACHE_TTL", 60*time.Second),
+		LogTailIdle:          reader.duration("HM_LOG_TAIL_IDLE", 30*time.Minute),
+		LogTailsPerUser:      reader.integer("HM_LOG_TAILS_PER_USER", 2),
+		LogHistoryLimit:      reader.integer("HM_LOG_HISTORY_LIMIT", 500),
+		LogSearchTimeout:     reader.duration("HM_LOG_SEARCH_TIMEOUT", 60*time.Second),
+		LogSearchMaxServices: reader.integer("HM_LOG_SEARCH_MAX_SERVICES", 20),
+		LogSearchMaxRange:    reader.duration("HM_LOG_SEARCH_MAX_RANGE", 168*time.Hour),
+		MaxDesiredCount:      reader.integer("HM_MAX_DESIRED_COUNT", 50),
+		SAMLRequestTTL:       reader.duration("HM_SAML_REQUEST_TTL", 10*time.Minute),
 
 		// plan 04: terminal
 		ExecIdleTimeout:        reader.duration("HM_EXEC_IDLE_TIMEOUT", 20*time.Minute),
@@ -272,8 +292,20 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.MaxDesiredCount < 1 {
 		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
 	}
+	if cfg.LogSearchTimeout <= 0 {
+		return Config{}, errors.New("HM_LOG_SEARCH_TIMEOUT: must be positive")
+	}
+	if cfg.LogSearchMaxServices < 1 {
+		return Config{}, errors.New("HM_LOG_SEARCH_MAX_SERVICES: must be at least 1")
+	}
+	if cfg.LogSearchMaxRange <= 0 {
+		return Config{}, errors.New("HM_LOG_SEARCH_MAX_RANGE: must be positive")
+	}
 	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
 		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")
+	}
+	if cfg.OffHours.Interval < time.Second {
+		return Config{}, errors.New("HM_OFFHOURS_INTERVAL: must be at least 1s")
 	}
 	if err := validateScan(cfg.Scan); err != nil {
 		return Config{}, err

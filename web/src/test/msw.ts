@@ -49,8 +49,10 @@ import {
   SSO_UNCONFIGURED,
 } from './fixtures'
 import { timelineHandlers } from './timelineFixtures'
+import { offhoursHandlers } from './offhoursFixtures'
 import type { SearchResultDTO } from '../api/types'
 import { securityHandlers } from './securityFixtures'
+import { logSearchHandlers } from './logSearchFixtures'
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
 
@@ -75,6 +77,7 @@ function search(q: string): SearchResultDTO[] {
 export const handlers = [
   // Registered first so :id/timeline is not read as the service id route.
   ...timelineHandlers,
+  ...offhoursHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),
   http.get('/api/auth/setup', () => HttpResponse.json({ needed: false })),
   http.get('/api/overview', () => HttpResponse.json(OVERVIEW)),
@@ -212,6 +215,7 @@ export const handlers = [
     return HttpResponse.json(user.has_password ? {} : { temporary_password: 'tmp-pass-1234' })
   }),
   ...securityHandlers,
+  ...logSearchHandlers,
 ]
 
 export const server = setupServer(...handlers)

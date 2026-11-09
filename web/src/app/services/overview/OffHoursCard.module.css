@@ -1,0 +1,8 @@
+.body { display: grid; gap: 10px; justify-items: start; min-width: 0; }
+.line { margin: 0; overflow-wrap: anywhere; }
+.reason { margin: 0; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.btn { height: 26px; padding: 0 9px; font-size: 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); cursor: pointer; font-weight: 500; font-family: inherit; color: inherit; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }

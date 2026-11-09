@@ -64,6 +64,27 @@ import {
   SECURITY_SERVICE_OFF,
   SECURITY_STALE,
 } from '../securityFixtures'
+import {
+  OFFHOURS_LIST,
+  OFFHOURS_LIST_EMPTY,
+  OFFHOURS_PREVIEW_PRODUCTION,
+  OFFHOURS_PREVIEW_STAGING,
+  OFFHOURS_STAGING_DETAIL,
+  OFFHOURS_TAGS,
+  OFFHOURS_UNPRICED_DETAIL,
+  SERVICE_OFFHOURS_ASLEEP,
+  SERVICE_OFFHOURS_BLOCKED,
+  SERVICE_OFFHOURS_NONE,
+  SERVICE_OFFHOURS_WOKEN,
+  WAKE_RESPONSE,
+} from '../offhoursFixtures'
+import {
+  LOG_SEARCH_RESULT,
+  LOG_SEARCH_RESULT_CAPPED,
+  LOG_SEARCH_RESULT_NO_PERMISSION,
+  LOG_SEARCH_SERVICES,
+  SAVED_LOG_SEARCHES,
+} from '../logSearchFixtures'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
@@ -220,6 +241,36 @@ describe('API contract', () => {
     expect(shapeProblems(LOG_ERRORS_OK, contract.timelineLogErrors, 'log errors ok')).toEqual([])
     expect(shapeProblems(LOG_ERRORS_UNAVAILABLE, contract.timelineLogErrors, 'log errors unavailable')).toEqual([])
     expect(shapeProblems(LOG_ERRORS_NO_LOGS, contract.timelineLogErrors, 'log errors no logs')).toEqual([])
+  })
+
+  it('the off-hours fixtures match the backend shape', () => {
+    const cases: [string, unknown, string][] = [
+      ['list', OFFHOURS_LIST, 'offhoursList'],
+      ['empty list', OFFHOURS_LIST_EMPTY, 'offhoursList'],
+      ['staging detail', OFFHOURS_STAGING_DETAIL, 'offhoursSchedule'],
+      ['unpriced detail', OFFHOURS_UNPRICED_DETAIL, 'offhoursSchedule'],
+      ['preview production', OFFHOURS_PREVIEW_PRODUCTION, 'offhoursPreview'],
+      ['preview staging', OFFHOURS_PREVIEW_STAGING, 'offhoursPreview'],
+      ['tags', OFFHOURS_TAGS, 'offhoursTags'],
+      ['service asleep', SERVICE_OFFHOURS_ASLEEP, 'serviceOffHours'],
+      ['service woken', SERVICE_OFFHOURS_WOKEN, 'serviceOffHours'],
+      ['service blocked', SERVICE_OFFHOURS_BLOCKED, 'serviceOffHours'],
+      ['service none', SERVICE_OFFHOURS_NONE, 'serviceOffHours'],
+      ['wake', WAKE_RESPONSE, 'offhoursWake'],
+    ]
+    for (const [label, fixture, shape] of cases) {
+      expect(shapeProblems(fixture, contract[shape], `off-hours ${label}`)).toEqual([])
+    }
+  })
+
+  it('the log search fixtures match the backend shape', async () => {
+    expect(shapeProblems(LOG_SEARCH_SERVICES, contract.logSearchServices, 'log search services')).toEqual([])
+    expect(shapeProblems(LOG_SEARCH_RESULT, contract.logSearchResult, 'log search result')).toEqual([])
+    expect(shapeProblems(LOG_SEARCH_RESULT_CAPPED, contract.logSearchResult, 'log search capped')).toEqual([])
+    expect(shapeProblems(LOG_SEARCH_RESULT_NO_PERMISSION, contract.logSearchResult, 'log search no permission')).toEqual([])
+    expect(shapeProblems(await body('/api/log-search/services'), contract.logSearchServices, 'msw log search services')).toEqual([])
+    expect(shapeProblems(SAVED_LOG_SEARCHES, contract.logSearchSaved, 'saved log searches')).toEqual([])
+    expect(shapeProblems(await body('/api/log-search/saved'), contract.logSearchSaved, 'msw saved log searches')).toEqual([])
   })
 
   it('every task fixture matches the backend task shape', () => {

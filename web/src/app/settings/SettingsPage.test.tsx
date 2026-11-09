@@ -11,11 +11,11 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
-const SETTINGS_LABELS = ['General', 'AWS accounts', 'Users & permissions', 'Tags', 'Single sign-on', 'Audit log']
+const SETTINGS_LABELS = ['General', 'AWS accounts', 'Users & permissions', 'Tags', 'Off-hours', 'Single sign-on', 'Audit log']
 const location = () => screen.getByTestId('location')
 
 describe('SettingsPage', () => {
-  it('renders the six tabs in order and the General tab by default', async () => {
+  it('renders the seven tabs in order and the General tab by default', async () => {
     renderApp('/settings')
     expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument()
     expect(location()).toHaveTextContent('/settings/general')
@@ -42,12 +42,12 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('Only global admins create tags and assign them.')).toBeInTheDocument()
   })
 
-  it('has a Single sign-on tab after Tags', async () => {
+  it('has a Single sign-on tab after Off-hours', async () => {
     renderApp('/settings/sso')
     expect(await screen.findByRole('link', { name: 'Single sign-on' })).toBeInTheDocument()
     expect(location()).toHaveTextContent('/settings/sso')
     const labels = screen.getAllByRole('link').map((link) => link.textContent)
-    expect(labels.indexOf('Single sign-on')).toBe(labels.indexOf('Tags') + 1)
+    expect(labels.indexOf('Single sign-on')).toBe(labels.indexOf('Off-hours') + 1)
   })
 
   it('tabs switch content', async () => {

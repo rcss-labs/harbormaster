@@ -221,3 +221,54 @@ func TestServe_FakeAWSHasImageScanningOn(t *testing.T) {
 		t.Fatalf("GET /api/security enabled = %v, err = %v; want true in fake mode", out.Enabled, err)
 	}
 }
+
+// Shutdown must not cancel in-flight requests: other handlers (deploys, writes, exec) keep the full drain.
+// Only the OnShutdown hook (server.BeginDrain) signals, and that reaches log searches alone.
+func TestHTTPServer_ShutdownDrainsInFlightRequestsAndRunsOnShutdown(t *testing.T) {
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	ctxErr := make(chan error, 1)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-finish
+		ctxErr <- r.Context().Err()
+	})}
+	hookRan := make(chan struct{})
+	srv.RegisterOnShutdown(func() { close(hookRan) })
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve(listener) }()
+	go func() {
+		if resp, err := http.Get("http://" + listener.Addr().String()); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-started
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		shutdownDone <- srv.Shutdown(ctx)
+	}()
+	select {
+	case <-hookRan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RegisterOnShutdown hook did not run when Shutdown began")
+	}
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case err := <-ctxErr:
+		t.Fatalf("in-flight request context ended at Shutdown (err %v); it must keep draining", err)
+	default:
+	}
+	close(finish)
+	if err := <-ctxErr; err != nil {
+		t.Errorf("request context error = %v, want nil", err)
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Errorf("Shutdown: %v", err)
+	}
+}

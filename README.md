@@ -17,6 +17,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 - [Service timeline](screens/service-timeline.png): one service's changes, task stops, active alerts, log errors and terminal sessions on one time axis, with the likely trigger of a failure and rollback from it
 - [Service scaling](screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
 - [Service logs](screens/service-logs.png): CloudWatch log history and live tail
+- Log search (`/logs`): one CloudWatch Logs Insights query across the logs of several services; see Log search below
 - [Service terminal](screens/service-terminal.png): an interactive shell in a running task through ECS Exec
 - [Service operations log](screens/service-operations-log.png): who changed or opened what, and when
 - Image security (`/security`): the images someone asked to scan, their open findings by severity, how fresh the vulnerability data is, and risk acceptances; see Image security below
@@ -115,6 +116,8 @@ Harbormaster reads and changes resources in other accounts by assuming a role in
 
 Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, change auto scaling or alarms, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
 
+Roles created before the Logs Insights actions were added to `harbormaster-access` lack `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`. Log search shows a message for that account until the access module is re-applied in it; the rest of Harbormaster works without the re-apply.
+
 ### Same account
 
 The account where Harbormaster runs can also be connected through a role in that same account (design spec §11.1). Use the same flow: apply `harbormaster-access` in that account with the task role ARN and the external ID. If you have tightened `access_role_arns` (below), add that role's ARN to the list.
@@ -180,6 +183,39 @@ Terraform details, variables and the full permission tables are in [`terraform/m
 - A scan result is kept for `HM_RETENTION_SCAN_IMAGES` after the image was last requested, except that an image with an active acceptance is kept until its acceptances end.
 - The vulnerability database is refreshed on demand, before a requested scan when it is older than `HM_SCAN_DB_REFRESH` (24 hours); the Security page says "Updating vulnerability data" meanwhile. Past `HM_SCAN_DB_MAX_AGE` (120 hours) scans wait, and a gate shows the reason with `Deploy anyway`. To use an operator mirror instead, set `HM_SCAN_DB_REFRESH=0` and write the same bucket keys (see the module README).
 
+## Off-hours schedules
+
+An off-hours schedule puts the ECS services that carry an AWS tag to sleep on a weekly grid and wakes them again, so a staging or dev estate does not pay for idle tasks at night. It is under **Settings > Off-hours** (`/settings/offhours`, global admin only). A schedule has a name, an enabled switch, a tag `key=value`, a timezone and a 7 x 24 grid of awake hours with presets. The editor previews the services the tag matches and how many will go to sleep when you save, and warns when a matched service looks like production. The services table shows each service's tasks, state and list-price cost, with `Wake for 2 hours` and `Put back to sleep`. A service on a schedule also gets an `Off-hours` card on its Overview.
+
+### How it works
+
+- **Mechanism.** At sleep, Harbormaster sets the minimum and maximum capacity of the service's Application Auto Scaling scalable target to 0 through scheduled actions in the schedule's timezone; at wake the scheduled action restores the values it saved. Scaling policies are left in place. When the service has no scalable target, Harbormaster registers one (and logs it); if the target goes missing later it is registered again. The saved capacity is stored in Harbormaster's database, and a target that Harbormaster registered itself is deregistered when the schedule is deleted.
+- **Which services.** A schedule selects services by their **AWS service tag** (`key=value`), not by cluster tags or Harbormaster permission tags. A tag has one schedule, and a schedule whose services overlap another's is refused (409) when you save it. If a service later comes to match two schedules, after a tag change in AWS, it stays on the one it is enrolled in (otherwise the lowest id) and the other schedule shows it as conflicting ("Also matches ..."). A service whose auto scaling minimum is 0 is not managed ("Not managed: its auto scaling minimum is 0, so it could not wake on its own.").
+- **Saving.** Saving a schedule during its sleep hours puts its services to sleep straight away; the editor warns first. Disabling or deleting a schedule gives its services their saved capacity back.
+- **Wake for 2 hours.** Anyone with **Operate** on the service's tag can wake an asleep service for two hours, or put a woken one back to sleep, from the table or the Overview card. Wake survives a restart of Harbormaster. Creating, editing and deleting schedules is for global admins. Both are written to the operations log and the audit log.
+- **Ownership.** Harbormaster only creates, changes and deletes scheduled actions whose names start with `harbormaster-offhours-`. Other scheduled actions are never touched.
+- **Reconciler.** The leader replica checks every enrolled service every `HM_OFFHOURS_INTERVAL` (60 seconds) and enforces the state the grid asks for, so a skipped or doubled action (for example around a daylight saving change) is repaired within one interval after the 5-minute grace. The fake AWS does not run scheduled actions, so there the reconciler alone moves the state.
+- **Outside changes.** If someone changes the scalable target's range outside Harbormaster, it is adopted as the saved capacity, and then, if the service should be asleep, it is put back to sleep. Changes within 5 minutes of a grid edge or of Harbormaster's own change are left alone (the grace period), for clock skew and AWS latency. A tag-only change in AWS is picked up on the next poll, and the first poll after an upgrade rewrites tagged service rows once.
+- **Deploy tab.** A scaling change on the Deploy tab that would delete the schedule's scheduled actions, or set the desired count of a sleeping service, is refused with 409 (`<service> is on the off-hours schedule "<name>". ...`).
+- **Disabling an account.** Disable or delete the schedules before you disable a Harbormaster account: enrolled services in a disabled account are left as they are, and their AWS scheduled actions keep running.
+- **Read-only accounts.** An account connected with `read_only` cannot be changed, so its services are shown as blocked with the read-only reason and retried hourly.
+- **Cost.** The saving is a list-price estimate from `internal/cost` (Fargate vCPU and memory hours); services it cannot price show a dash. It is not your bill.
+- **Permissions.** No AWS permission is added. The existing `application-autoscaling` permissions of `harbormaster-access` cover scheduled actions and target registration; `read_only` accounts are simply shown as blocked.
+
+Daylight saving: an action at an hour that does not exist or repeats follows AWS's timezone handling, and the reconciler repairs the result after the grace period.
+
+## Log search
+
+The **Log search** page (`/logs`, under Insights in the navigation; under More on a phone) runs one CloudWatch Logs Insights query over the logs of up to 20 services at once, for a range of 15 minutes, 1 hour, 24 hours or a custom range of up to 7 days. Results show the matching lines, hits over time and hits by service. Selecting a line opens that service's Logs tab at that second (`Showing logs up to`). Times are in your browser's time zone. Saved queries are kept per user. A search URL fills in the form but never runs it.
+
+- **Permissions.** A service is listed and searchable only when you have Logs on it through its tag. A service you cannot see is never listed, and a request that includes one answers 404 for the whole request. A service you can see but lack Logs on answers 403.
+- **IAM.** The `harbormaster-access` role needs `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`; the module grants them in its read statement, so they stay with `read_only = true`. For a role created before they were added, the page shows `The harbormaster-access role in {account} cannot run Logs Insights queries. Update the access module to the latest version.` for that account only; see [Connecting AWS accounts](#connecting-aws-accounts).
+- **Guardrails.** `HM_LOG_SEARCH_TIMEOUT`, `HM_LOG_SEARCH_MAX_SERVICES` and `HM_LOG_SEARCH_MAX_RANGE` (see [Limits](#limits)). A user can run 6 searches in a burst, then 1 per 10 seconds (HTTP 429), and one search at a time per Harbormaster task (HTTP 409), so with more than one task the limit applies on each.
+- **Supported commands.** `fields`, `filter`, `parse`, `dedup`, `sort` and `limit`. `SOURCE` and aggregates such as `stats` are refused: log groups always come from the selected services, and every result line must carry its log group and stream so Harbormaster can attribute it and hide streams you may not read. Renaming a field to an `@...` name is refused for the same reason. The query checker must agree with AWS on where a string or regular expression ends, so a few ambiguous forms are refused: an escaped quote of the quote type that encloses the string (switch to the other quote type), a backslash inside backticks, and a `/` division followed later by another `/` with a quote, backtick or `|` between them.
+- **Cost.** Logs Insights charges $0.005 per GB scanned (GB = 2^30 bytes). Harbormaster shows the bytes scanned and the cost after each run; there is no estimate before it.
+- **Audit.** Every run is written to the audit log as `log_search` with the query text. It is not written to the operations log. Query text can contain identifiers, so it is kept for `HM_RETENTION_AUDIT_LOG`.
+- **Under `make run`.** The fake AWS supports `filter @message like /regex/`, `like "text"`, `not like` and `limit`. Other allowed commands are accepted and ignored.
+
 ## Terraform and Harbormaster deploys
 
 AWS is the source of truth, and Terraform will see a revision registered here as
@@ -199,6 +235,17 @@ resource "aws_ecs_service" "payments_api" {
 The Deploy tab also changes auto scaling (Operate) and the service's `enable_execute_command`, `deployment_configuration` and `health_check_grace_period_seconds` (Deploy). Terraform reverts those on its next apply unless they are in `ignore_changes` too, so add them to the list if Harbormaster should own them.
 
 For auto scaling, pick one place to manage it. Either keep `aws_appautoscaling_target`, `aws_appautoscaling_policy` and `aws_appautoscaling_scheduled_action` in Terraform and do not edit them in Harbormaster, or remove them from Terraform and let the Deploy tab own them. An edit or delete made in Harbormaster to a policy or scheduled action that Terraform manages is reverted by the next apply.
+
+Off-hours schedules (see Off-hours schedules above) change an `aws_appautoscaling_target`'s minimum and maximum, and create scheduled actions and, for a service without a scalable target, a target that exist outside Terraform. Without `ignore_changes`, a Terraform apply during sleep hours wakes the service until Harbormaster puts it back to sleep, and an apply that changes the range is adopted as the saved capacity. A scheduled action created by Terraform that raises the range at night would be adopted the same way. Keep `desired_count` in the service's `ignore_changes`, as recommended above.
+
+```hcl
+resource "aws_appautoscaling_target" "api" {
+  # ...
+  lifecycle { ignore_changes = [min_capacity, max_capacity] }
+}
+```
+
+Scheduled actions managed by Terraform (`aws_appautoscaling_scheduled_action`) are never touched by Harbormaster, but they can fight a schedule if they also set the range.
 
 Harbormaster does not check or enforce any of this.
 
@@ -245,6 +292,8 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_STORAGE` | `5m` | EFS storage poll interval |
 | `HM_POLL_JITTER` | `500ms` | Random jitter added to poll schedules |
 | `HM_POLL_MAX_INFLIGHT` | `8` | Maximum concurrent AWS calls |
+| `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
+| `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled; applies only when the demo schedule is first seeded, not to an existing one |
 
 ### Retention
 
@@ -311,6 +360,9 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks at list
 | `HM_LOG_TAIL_IDLE` | `30m` | Close a live log tail after this long without activity |
 | `HM_LOG_TAILS_PER_USER` | `2` | Concurrent live log tails per user |
 | `HM_LOG_HISTORY_LIMIT` | `500` | Maximum log events returned by one history query |
+| `HM_LOG_SEARCH_TIMEOUT` | `60s` | How long one Logs Insights log search may run before it is stopped |
+| `HM_LOG_SEARCH_MAX_SERVICES` | `20` | Maximum services one log search may cover |
+| `HM_LOG_SEARCH_MAX_RANGE` | `168h` | Longest time range one log search may cover |
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
 | `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, enforced per Harbormaster task (see Running more than one task) |

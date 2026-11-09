@@ -13,4 +13,10 @@ describe('router', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Services' })).toBeInTheDocument()
     expect(await screen.findByRole('table', { name: 'Services' })).toBeInTheDocument()
   })
+
+  it('/logs renders the log search page', async () => {
+    renderApp('/logs')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Log search' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Run query' })).toBeInTheDocument()
+  })
 })

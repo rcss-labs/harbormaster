@@ -76,15 +76,19 @@ func TestLoad_Defaults(t *testing.T) {
 			BatchSize:   25,
 			MaxImageMB:  4096,
 		},
-		Analytics:       AnalyticsConfig{Util: true},
-		PageSizeDefault: 100,
-		PageSizeMax:     500,
-		MetricsCacheTTL: 60 * time.Second,
-		LogTailIdle:     30 * time.Minute,
-		LogTailsPerUser: 2,
-		LogHistoryLimit: 500,
-		MaxDesiredCount: 50,
-		SAMLRequestTTL:  10 * time.Minute,
+		OffHours:             OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
+		Analytics:            AnalyticsConfig{Util: true},
+		PageSizeDefault:      100,
+		PageSizeMax:          500,
+		MetricsCacheTTL:      60 * time.Second,
+		LogTailIdle:          30 * time.Minute,
+		LogTailsPerUser:      2,
+		LogHistoryLimit:      500,
+		LogSearchTimeout:     60 * time.Second,
+		LogSearchMaxServices: 20,
+		LogSearchMaxRange:    168 * time.Hour,
+		MaxDesiredCount:      50,
+		SAMLRequestTTL:       10 * time.Minute,
 		// plan 04: terminal
 		ExecIdleTimeout:        20 * time.Minute,
 		ExecMaxDuration:        4 * time.Hour,
@@ -513,5 +517,49 @@ func TestLoad_ScanLimitBounds(t *testing.T) {
 				t.Fatalf("err = %v, want one naming %s", err, tt.key)
 			}
 		})
+	}
+}
+
+func TestLoad_OffHoursDefaultsAndBounds(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.OffHours.Interval != 60*time.Second {
+		t.Errorf("OffHours.Interval = %v, want 60s", cfg.OffHours.Interval)
+	}
+	if !cfg.OffHours.FakeDemo {
+		t.Error("OffHours.FakeDemo = false, want true")
+	}
+
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_OFFHOURS_INTERVAL": "1s", "HM_FAKE_OFFHOURS_DEMO": "false"}))
+	if err != nil {
+		t.Fatalf("Load returned error for the 1s edge: %v", err)
+	}
+	if cfg.OffHours.Interval != time.Second || cfg.OffHours.FakeDemo {
+		t.Errorf("OffHours = %+v, want 1s and no demo", cfg.OffHours)
+	}
+
+	_, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_OFFHOURS_INTERVAL": "500ms"}))
+	if err == nil || !strings.Contains(err.Error(), "HM_OFFHOURS_INTERVAL") {
+		t.Fatalf("err = %v, want one naming HM_OFFHOURS_INTERVAL", err)
+	}
+}
+
+func TestConfig_LogSearchDefaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.LogSearchTimeout != 60*time.Second || cfg.LogSearchMaxServices != 20 || cfg.LogSearchMaxRange != 168*time.Hour {
+		t.Errorf("log search defaults = %v %d %v, want 60s 20 168h", cfg.LogSearchTimeout, cfg.LogSearchMaxServices, cfg.LogSearchMaxRange)
+	}
+	for name, value := range map[string]string{
+		"HM_LOG_SEARCH_TIMEOUT": "0s", "HM_LOG_SEARCH_MAX_SERVICES": "0", "HM_LOG_SEARCH_MAX_RANGE": "-1h",
+	} {
+		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", name: value}))
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s=%s: error %v, want one naming %s", name, value, err, name)
+		}
 	}
 }

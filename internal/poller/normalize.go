@@ -132,6 +132,12 @@ func normalizeService(t awsx.Target, cluster string, s ecstypes.Service, now tim
 			ContainerPort:  int(aws.ToInt32(lb.ContainerPort)),
 		})
 	}
+	for _, tag := range s.Tags {
+		if out.Tags == nil {
+			out.Tags = map[string]string{}
+		}
+		out.Tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+	}
 	primaryARN := out.TaskDefinitionARN
 	for _, d := range s.Deployments {
 		deployment := model.Deployment{

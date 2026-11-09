@@ -45,8 +45,10 @@ type Fake struct {
 	LiveTailInterval    time.Duration // gap between live tail updates; 0 means 2 s
 	LiveTailError       error         // ends every live tail stream with this error (see LiveTailErrorAfter)
 	LiveTailErrorAfter  int           // number of SessionUpdates sent before LiveTailError ends the stream
-	liveTailMu          sync.Mutex
-	lastLiveTailInput   *cloudwatchlogs.StartLiveTailInput
+	// InsightsAlwaysRunning makes GetQueryResults report Running forever (test hook for timeouts and cancellation).
+	InsightsAlwaysRunning bool
+	liveTailMu            sync.Mutex
+	lastLiveTailInput     *cloudwatchlogs.StartLiveTailInput
 
 	// CallLatency delays every API call (plan 06), so concurrent callers overlap and MaxInFlight is meaningful.
 	CallLatency time.Duration
@@ -57,7 +59,10 @@ type Fake struct {
 	inFlight   map[awsx.Target]*flight // plan 06
 	limits     map[awsx.Target]*tokenBucket
 
-	failures failureQueue // see failnext.go
+	failures     failureQueue    // see failnext.go
+	deniedWrites map[string]bool // accounts whose Application Auto Scaling writes fail; see DenyWrites
+
+	insights insightsState // Logs Insights queries; see insights.go
 }
 
 // New wraps an estate.
@@ -231,4 +236,25 @@ func (f *Fake) Probe(_ context.Context, roleARN, externalID string, regions []st
 		results[i] = awsx.RegionResult{Region: region, OK: true, Clusters: n}
 	}
 	return results
+}
+
+// DenyWrites makes every Application Auto Scaling write in the account fail with
+// AccessDeniedException, as an IAM policy without those actions would. Reads still work.
+func (f *Fake) DenyWrites(accountID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deniedWrites == nil {
+		f.deniedWrites = map[string]bool{}
+	}
+	f.deniedWrites[accountID] = true
+}
+
+// writeDenied is the AccessDeniedException for a write to the target's account, or nil.
+func (f *Fake) writeDenied(t awsx.Target) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.deniedWrites[t.AccountID] {
+		return nil
+	}
+	return &smithy.GenericAPIError{Code: "AccessDeniedException", Message: "User is not authorized to perform this application-autoscaling write", Fault: smithy.FaultClient}
 }

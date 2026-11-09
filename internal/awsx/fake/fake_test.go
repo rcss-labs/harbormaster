@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	applicationautoscaling "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
+	astypes "github.com/aws/aws-sdk-go-v2/service/applicationautoscaling/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 )
@@ -356,4 +359,28 @@ func TestFake_ProbeAuthorisesKnownAccounts(t *testing.T) {
 			t.Fatalf("probe(%s) = %+v, want AccessDenied", role, bad)
 		}
 	}
+}
+
+func TestFakeDenyWrites(t *testing.T) {
+	ctx := context.Background()
+	f := newFake()
+	api := scalingAPI(t, f)
+	registerTarget(t, api, emailSenderResource, 1, 4)
+	f.DenyWrites(homelabID)
+
+	_, err := api.PutScheduledAction(ctx, &applicationautoscaling.PutScheduledActionInput{
+		ServiceNamespace: astypes.ServiceNamespaceEcs, ScalableDimension: astypes.ScalableDimensionECSServiceDesiredCount,
+		ResourceId: aws.String(emailSenderResource), ScheduledActionName: aws.String("off-hours"),
+		Schedule:             aws.String("cron(0 20 ? * MON-FRI *)"),
+		ScalableTargetAction: &astypes.ScalableTargetAction{MinCapacity: aws.Int32(0), MaxCapacity: aws.Int32(0)}})
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "AccessDeniedException" {
+		t.Fatalf("PutScheduledAction in denied account: err = %v, want AccessDeniedException", err)
+	}
+
+	stagingAPI, err := f.AutoScaling(ctx, awsx.Target{AccountID: stagingID, Region: "us-east-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerTarget(t, stagingAPI, "service/staging-web/web", 1, 2)
 }

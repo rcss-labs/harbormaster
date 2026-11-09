@@ -153,6 +153,17 @@ func contractShapes() map[string]any {
 		"analyticsCost":     shapeOf(reflect.TypeFor[CostDTO]()),
 		"timeline":          shapeOf(reflect.TypeFor[TimelineDTO]()),
 		"timelineLogErrors": shapeOf(reflect.TypeFor[TimelineLogErrorsDTO]()),
+		// off-hours schedules
+		"offhoursList":     shapeOf(reflect.TypeFor[OffHoursListDTO]()),
+		"offhoursSchedule": shapeOf(reflect.TypeFor[OffHoursScheduleDTO]()),
+		"offhoursPreview":  shapeOf(reflect.TypeFor[OffHoursPreviewDTO]()),
+		"offhoursTags":     shapeOf(reflect.TypeFor[ItemsResponse[OffHoursTagOptionDTO]]()),
+		"serviceOffHours":  shapeOf(reflect.TypeFor[ServiceOffHoursDTO]()),
+		"offhoursWake":     shapeOf(reflect.TypeFor[WakeResponse]()),
+		// log search
+		"logSearchServices": shapeOf(reflect.TypeFor[ListResponse[LogSearchServiceDTO]]()),
+		"logSearchResult":   shapeOf(reflect.TypeFor[LogSearchResultDTO]()),
+		"logSearchSaved":    shapeOf(reflect.TypeFor[ListResponse[SavedLogSearchDTO]]()),
 	}
 }
 

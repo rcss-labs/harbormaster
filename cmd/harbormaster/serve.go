@@ -26,6 +26,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
@@ -233,7 +234,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		scanRunner = &scanjob.Runner{Store: st, Launcher: fakeScanner, Bucket: fakeScanner, DB: fakeScanner, Cfg: cfg.Scan, Now: time.Now, Log: log}
 		clients, prober = f, f
 		go estate.RunRollouts(ctx, fakeRolloutStep)
-		if err := devseed.Apply(ctx, st); err != nil {
+		if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo); err != nil {
 			return fmt.Errorf("seed demo data: %w", err)
 		}
 		idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
@@ -258,6 +259,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			return err
 		}
 	}
+	// One applier serves the API (manual wake and sleep) and the reconciler (the leader's loop); both change AWS
+	// through the same code under the same per-service lock.
+	offHoursApplier := &offhours.Applier{Store: st, Clients: clients, Now: time.Now, Log: log}
+	offHoursReconciler := &offhours.Reconciler{Applier: offHoursApplier, Store: st, Interval: cfg.OffHours.Interval, Now: time.Now, Log: log}
 	setup, err := auth.NewSetup(ctx, st, log)
 	if err != nil {
 		return err
@@ -271,14 +276,20 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	server := api.New(api.Server{
 		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
-		Deploy:                  &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now},
+		Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,
+			Guard: &offhours.Guard{Store: st, Now: time.Now}},
 		ExecAllowInsecureStream: execInsecureStream,
 		FakeIdP:                 fakeIdP,
 		MetricsToken:            cfg.MetricsToken, // plan 06
 		Telemetry:               telemetry.Default,
 		Scan:                    scanKicker,
+		OffHours:                offHoursApplier,
+		KickOffHours:            offHoursReconciler.Kick,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and
+	// audit on detached contexts), so deploys, writes, exec and tails keep their full drain.
+	httpServer.RegisterOnShutdown(server.BeginDrain)
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
@@ -286,6 +297,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 
 	pollerConfig := poller.ConfigFrom(cfg)
 	pollerConfig.Scan = scanRunner
+	pollerConfig.OffHours = offHoursReconciler
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
 	go func() {

@@ -254,3 +254,33 @@ func TestChunk(t *testing.T) {
 		t.Fatalf("chunk = %v", got)
 	}
 }
+
+func TestNormalizeService_TagsDriveContentHash(t *testing.T) {
+	now := time.Now()
+	withTags := func(tags ...ecstypes.Tag) ecstypes.Service {
+		return ecstypes.Service{ServiceName: aws.String("api"), Status: aws.String("ACTIVE"), Tags: tags}
+	}
+	env := ecstypes.Tag{Key: aws.String("env"), Value: aws.String("staging")}
+	team := ecstypes.Tag{Key: aws.String("team"), Value: aws.String("core")}
+	hash := func(s ecstypes.Service) string {
+		svc, _ := normalizeService(normTarget, "core-services", s, now)
+		return store.ContentHash(svc)
+	}
+
+	if hash(withTags(env, team)) != hash(withTags(team, env)) {
+		t.Error("same tags in a different order changed the content hash")
+	}
+	base := hash(withTags(env, team))
+	for name, changed := range map[string]ecstypes.Service{
+		"removed": withTags(team),
+		"edited":  withTags(ecstypes.Tag{Key: aws.String("env"), Value: aws.String("prod")}, team),
+		"added":   withTags(env, team, ecstypes.Tag{Key: aws.String("owner"), Value: aws.String("x")}),
+	} {
+		if hash(changed) == base {
+			t.Errorf("tag %s did not change the content hash", name)
+		}
+	}
+	if hash(withTags()) != hash(ecstypes.Service{ServiceName: aws.String("api"), Status: aws.String("ACTIVE")}) {
+		t.Error("empty and absent tags hash differently")
+	}
+}
