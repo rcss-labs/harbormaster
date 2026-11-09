@@ -70,6 +70,7 @@ const (
 	MaxDBArchiveBytes = 1 << 30
 	MaxFindings       = 5000
 	MaxStringLen      = 256
+	MaxLayers         = 256 // most layer diff ids kept for an image or its base
 	MaxURLLen         = 512
 
 	DBWarnAge   = 36 * time.Hour
@@ -114,6 +115,8 @@ type JobImage struct {
 	AccountID string `json:"account_id"`
 	Region    string `json:"region"`
 	Large     bool   `json:"large"`
+	// BaseRef is the base image configured for the image's repository, as the user typed it; empty when none is.
+	BaseRef string `json:"base_ref,omitempty"`
 }
 
 func trimSHA(digest string) string { return strings.TrimPrefix(digest, "sha256:") }

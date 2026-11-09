@@ -30,7 +30,8 @@ type grypeReport struct {
 			Version   string `json:"version"`
 			Type      string `json:"type"`
 			Locations []struct {
-				Path string `json:"path"`
+				Path    string `json:"path"`
+				LayerID string `json:"layerID"`
 			} `json:"locations"`
 		} `json:"artifact"`
 	} `json:"matches"`
@@ -62,6 +63,9 @@ func ParseGrypeOutput(data []byte) ([]scan.Finding, error) {
 		}
 		if len(a.Locations) > 0 {
 			finding.Location = a.Locations[0].Path
+			if sbomDigestPattern.MatchString(a.Locations[0].LayerID) {
+				finding.LayerID = a.Locations[0].LayerID
+			}
 		}
 		findings = append(findings, finding)
 	}

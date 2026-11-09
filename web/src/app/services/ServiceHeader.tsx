@@ -12,6 +12,7 @@ import { usePins } from '../shell/pins'
 import { TAB_LOCKS, isUnlocked } from './tabs'
 import { DesiredCountSheet, HeaderActions } from './HeaderActions'
 import { RestartDialog, restartBlockedTitle } from './RestartDialog'
+import { ScanImagesButton, ScanImagesDialog, useScanningEnabled } from './ScanImagesButton'
 import styles from './service.module.css'
 
 interface ServiceHeaderProps {
@@ -63,6 +64,7 @@ export function ServiceHeader({ service, onTagClick, tab }: ServiceHeaderProps) 
         </div>
       </div>
       <div className={styles.actions}>
+        <ScanImagesButton service={service} />
         {isUnlocked(TAB_LOCKS.deploy!, service.can) ? (
           <Link className={styles.btnPrimary} to={`/services/${service.id}/deploy`}>
             Deploy
@@ -78,7 +80,7 @@ export function ServiceHeader({ service, onTagClick, tab }: ServiceHeaderProps) 
   )
 }
 
-type PhoneSheet = 'actions' | 'restart' | 'desired'
+type PhoneSheet = 'actions' | 'restart' | 'desired' | 'scan'
 
 interface PhoneServiceHeaderProps {
   service: ServiceDTO
@@ -97,6 +99,7 @@ function PhoneServiceHeader({ service, tab, launchType, tagChip, pinned, onToggl
   const tagName = service.tag.name
   const restartBlocked = restartBlockedTitle(service)
   const canOperate = service.can.operate
+  const scanning = useScanningEnabled(service.id)
   const close = () => setSheet(null)
 
   return (
@@ -136,6 +139,15 @@ function PhoneServiceHeader({ service, tab, launchType, tagChip, pinned, onToggl
           disabled={!canOperate}
           onClick={() => setSheet('desired')}
         />
+        {scanning && (
+          <SheetAction
+            icon="shield"
+            label="Scan image"
+            why={service.can.deploy ? undefined : `You need Deploy on ${tagName}`}
+            disabled={!service.can.deploy}
+            onClick={() => setSheet('scan')}
+          />
+        )}
         <SheetAction
           icon="deploy"
           label="Deploy"
@@ -162,6 +174,7 @@ function PhoneServiceHeader({ service, tab, launchType, tagChip, pinned, onToggl
         />
       </BottomSheet>
       {sheet === 'restart' && <RestartDialog serviceId={service.id} service={service} onClose={close} />}
+      {sheet === 'scan' && <ScanImagesDialog service={service} onClose={close} />}
       {sheet === 'desired' && <DesiredCountSheet serviceId={service.id} service={service} onClose={close} />}
     </div>
   )

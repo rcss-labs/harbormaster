@@ -1,0 +1,5 @@
+.containers { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.container { display: grid; gap: 6px; min-width: 0; }
+.name { font-weight: 600; }
+.image { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.note { margin: 0 0 12px; color: var(--muted); font-size: 13px; }

@@ -40,7 +40,7 @@ describe('ServiceHeader on phones', () => {
     const names = within(menu)
       .getAllByRole('menuitem')
       .map((item) => item.textContent)
-    expect(names).toEqual(['Restart', `Change desired countNow ${SERVICE_PAYMENTS.desired}.`, 'Deploy', 'Pin to Overview and Services', 'AWS console'])
+    expect(names).toEqual(['Restart', `Change desired countNow ${SERVICE_PAYMENTS.desired}.`, 'Scan image', 'Deploy', 'Pin to Overview and Services', 'AWS console'])
     expect(within(menu).getByRole('menuitem', { name: /^Restart/ })).toBeEnabled()
   })
 
