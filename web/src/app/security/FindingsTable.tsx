@@ -184,6 +184,9 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
                       </span>
                       {group.name}
                     </button>
+                    <span className={styles.findingNote} title={SECURITY_COPY.packageKindTitle[group.kind]}>
+                      {SECURITY_COPY.packageKind[group.kind]}
+                    </span>
                   </span>
                   <span className={styles.mono}>{group.versions.join(', ')}</span>
                   <span>

@@ -125,6 +125,17 @@ describe('SecurityPage', () => {
     expect(screen.queryByRole('table', { name: 'Vulnerabilities in openssl' })).not.toBeInTheDocument()
   })
 
+  it('labels each package as an OS package or an app dependency from its type', async () => {
+    const [critical, ...rest] = SECURITY_IMAGE_EDGE.findings
+    const npm = { ...critical, vuln_id: 'GHSA-xxxx', package: 'node-forge', version: '1.3.1', type: 'npm', severity: 'critical' as const, acceptances: [] }
+    serveDetail({ ...SECURITY_IMAGE_EDGE, findings: [critical, npm, ...rest] })
+    renderApp(`/security?image=${DIGEST_EDGE}`)
+    const rows = await packageRows()
+    const row = (name: string) => rows.find((r) => within(r).queryByRole('button', { name }))!
+    expect(within(row('openssl')).getByText('OS package')).toHaveAttribute('title', expect.stringContaining('usually come from the base image'))
+    expect(within(row('node-forge')).getByText('App dependency')).toBeInTheDocument()
+  })
+
   it('accepts the risk of a whole package', async () => {
     const bodies: unknown[] = []
     server.use(

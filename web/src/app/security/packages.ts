@@ -2,9 +2,16 @@ import type { SecurityFinding, Severity } from '../../api/security'
 
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3, negligible: 4, unknown: 5 }
 
+/** Package types of operating system package managers; everything else is a language or app dependency. */
+const OS_PACKAGE_TYPES = new Set(['deb', 'apk', 'rpm', 'alpm', 'portage', 'nix'])
+
+export type PackageKind = 'os' | 'app'
+
 /** The findings of one package name across every version of it in the image. */
 export interface PackageGroup {
   name: string
+  /** Guessed from the package type: OS packages usually come from the base image. */
+  kind: PackageKind
   /** Worst severity among the findings. */
   severity: Severity
   /** Installed versions, newest first. */
@@ -71,6 +78,7 @@ export function groupByPackage(findings: SecurityFinding[]): PackageGroup[] {
     const sorted = [...members].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.vuln_id.localeCompare(b.vuln_id))
     return {
       name,
+      kind: members.some((f) => OS_PACKAGE_TYPES.has(f.type)) ? 'os' : 'app',
       severity: sorted[0].severity,
       versions: [...new Set(members.map((f) => f.version))].sort((a, b) => compareVersions(b, a)),
       fixVersion: newest(members.map((f) => f.fixed_version).filter((v) => v !== '')),

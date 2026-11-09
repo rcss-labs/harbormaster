@@ -51,6 +51,11 @@ export const SECURITY_COPY = {
     `${name} accepted until ${date} for ${services} ${services === 1 ? 'service' : 'services'}. Each vulnerability returns to the list when that ends.`,
   vulnerabilityCount: (count: number) => `${count} ${count === 1 ? 'vulnerability' : 'vulnerabilities'}`,
   withoutFix: (count: number) => `${count} without a fix`,
+  packageKind: { os: 'OS package', app: 'App dependency' },
+  packageKindTitle: {
+    os: 'Guessed from the package type: OS packages usually come from the base image, unless the Dockerfile installs them.',
+    app: 'Guessed from the package type: language and app dependencies are usually added by the Dockerfile, unless the base image ships them.',
+  },
   partlyAccepted: 'Partly accepted',
   packagesAccepted: (accepted: number, total: number) => `${accepted} of ${total} accepted`,
   vulnerabilitiesIn: (name: string) => `Vulnerabilities in ${name}`,
