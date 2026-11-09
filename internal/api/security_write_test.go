@@ -356,3 +356,79 @@ func TestRescan_AlreadyQueuedIs409(t *testing.T) {
 		t.Fatal("a refused rescan was audited")
 	}
 }
+
+func packageAcceptancesPath(digest string) string {
+	return "/api/security/images/" + url.PathEscape(digest) + "/package-acceptances"
+}
+
+func opensslPackage() AcceptPackageRiskRequest {
+	return AcceptPackageRiskRequest{PackageName: "openssl", Reason: "patched in the next base image", Days: 30}
+}
+
+// addFinding stores one more finding on a scanned image, so a package can carry several vulnerabilities and versions.
+func addFinding(t *testing.T, env *securityEnv, digest, vulnID, severity, pkg, version string) {
+	t.Helper()
+	if _, err := env.st.Pool.Exec(t.Context(), `insert into scan_findings (digest, vuln_id, package_name, package_version, severity,
+		first_seen_at, last_seen_at, run_id) values ($1, $2, $3, $4, $5, now(), now(), 0)`, digest, vulnID, pkg, version, severity); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAcceptPackageRisk_AcceptsEveryOpenFindingOfThePackage(t *testing.T) {
+	env := newSecurityEnv(t)
+	holder := env.riskHolder(t, "risk")
+	digest := scannedCriticalEdgeNginx(t, env)
+	addFinding(t, env, digest, "CVE-0000-1043", "high", "openssl", "3.0.13")
+	addFinding(t, env, digest, "CVE-0000-1044", "medium", "openssl", "3.0.11")
+	accept(t, holder, digest, edgeNginxCritical(), http.StatusCreated) // already accepted: the package accept skips it
+
+	resp := holder.post(packageAcceptancesPath(digest), opensslPackage())
+	wantStatus(t, resp, http.StatusCreated)
+	var out AcceptRiskResponse
+	decode(t, resp, &out)
+	if len(out.IDs) != 2 {
+		t.Fatalf("wrote %d acceptances, want the 2 openssl findings not yet accepted", len(out.IDs))
+	}
+	if n := countRows(t, env.st, `select count(*) from scan_risk_acceptances where package_name <> 'openssl'`); n != 0 {
+		t.Fatalf("%d acceptances outside openssl, want none", n)
+	}
+	if got := securityImage(t, holder, digest); got.Accepted != 3 || got.Open.Critical != 0 || got.Open.High != 1 || got.Open.Medium != 1 {
+		t.Fatalf("open %+v accepted %d, want nginx high and zlib medium open and 3 accepted", got.Open, got.Accepted)
+	}
+	entries := auditByAction(t, env.st, "security.accept_package")
+	want := "Accepted 2 findings in openssl on edge-nginx:1.27.1 for 30 days for edge-nginx."
+	if len(entries) != 1 || entries[0].ActorUsername != "risk" || entries[0].Summary != want {
+		t.Fatalf("audit entries = %+v, want one by risk with summary %q", entries, want)
+	}
+
+	wantStatus(t, holder.post(packageAcceptancesPath(digest), opensslPackage()), http.StatusConflict)
+}
+
+func TestAcceptPackageRisk_ValidatesInputAndPermission(t *testing.T) {
+	env := newSecurityEnv(t)
+	holder := env.riskHolder(t, "risk")
+	nobody := env.addUser(t, "nobody", nil)
+	digest := scannedCriticalEdgeNginx(t, env)
+
+	mutate := func(f func(*AcceptPackageRiskRequest)) AcceptPackageRiskRequest {
+		body := opensslPackage()
+		f(&body)
+		return body
+	}
+	for name, body := range map[string]AcceptPackageRiskRequest{
+		"empty reason":    mutate(func(b *AcceptPackageRiskRequest) { b.Reason = "" }),
+		"zero days":       mutate(func(b *AcceptPackageRiskRequest) { b.Days = 0 }),
+		"too many days":   mutate(func(b *AcceptPackageRiskRequest) { b.Days = 31 }),
+		"unknown package": mutate(func(b *AcceptPackageRiskRequest) { b.PackageName = "left-pad" }),
+		"not a requester": mutate(func(b *AcceptPackageRiskRequest) { b.ServiceIDs = []string{certRenewerKey.ID()} }),
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantStatus(t, holder.post(packageAcceptancesPath(digest), body), http.StatusUnprocessableEntity)
+		})
+	}
+	wantStatus(t, nobody.post(packageAcceptancesPath(digest), opensslPackage()), http.StatusNotFound)
+	wantStatus(t, env.dana.post(packageAcceptancesPath(digest), opensslPackage()), http.StatusForbidden) // Full has no Accept risk
+	if n := countRows(t, env.st, `select count(*) from scan_risk_acceptances`); n != 0 {
+		t.Fatalf("%d acceptances written by refused calls, want none", n)
+	}
+}

@@ -30,6 +30,15 @@ type AcceptRiskRequest struct {
 	ServiceIDs     []string `json:"service_ids,omitempty"`
 }
 
+// AcceptPackageRiskRequest is the body of POST /api/security/images/{digest}/package-acceptances: every finding of the
+// package, in any of its versions, that a chosen service has not accepted yet.
+type AcceptPackageRiskRequest struct {
+	PackageName string   `json:"package_name"`
+	Reason      string   `json:"reason"`
+	Days        int      `json:"days"`
+	ServiceIDs  []string `json:"service_ids,omitempty"`
+}
+
 // AcceptRiskResponse lists the acceptances written, one per service.
 type AcceptRiskResponse struct {
 	IDs []int64 `json:"ids"`
@@ -99,13 +108,9 @@ func (s *Server) postAcceptance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	reason := strings.TrimSpace(body.Reason)
-	switch {
-	case reason == "" || utf8.RuneCountInString(reason) > maxAcceptanceReasonRunes:
-		s.fail(w, invalid(fmt.Sprintf("reason is required and at most %d characters.", maxAcceptanceReasonRunes)))
-		return
-	case body.Days < 1 || body.Days > maxAcceptanceDays:
-		s.fail(w, invalid(fmt.Sprintf("days must be between 1 and %d.", maxAcceptanceDays)))
+	reason, err := acceptanceTerms(body.Reason, body.Days)
+	if err != nil {
+		s.fail(w, err)
 		return
 	}
 	findings, err := s.Store.ScanFindings(ctx, image.Digest)
@@ -149,13 +154,102 @@ func (s *Server) postAcceptance(w http.ResponseWriter, r *http.Request) {
 	for i, key := range services {
 		names[i], serviceIDs[i] = key.Service, key.ID()
 	}
-	dayWord := "days"
-	if body.Days == 1 {
-		dayWord = "day"
-	}
 	s.auditAdmin(r, "security.accept", imageTarget(image.Digest),
-		fmt.Sprintf("Accepted %s in %s on %s for %d %s for %s.", body.VulnID, body.PackageName, imageLabel(image), body.Days, dayWord, strings.Join(names, ", ")),
+		fmt.Sprintf("Accepted %s in %s on %s for %s for %s.", body.VulnID, body.PackageName, imageLabel(image), dayCount(body.Days), strings.Join(names, ", ")),
 		map[string]any{"digest": image.Digest, "vuln_id": body.VulnID, "package_name": body.PackageName, "package_version": body.PackageVersion,
+			"days": body.Days, "reason": reason, "services": serviceIDs})
+	writeJSON(w, http.StatusCreated, AcceptRiskResponse{IDs: ids})
+}
+
+// acceptanceTerms checks the reason and length of an acceptance and returns the trimmed reason.
+func acceptanceTerms(reason string, days int) (string, error) {
+	reason = strings.TrimSpace(reason)
+	switch {
+	case reason == "" || utf8.RuneCountInString(reason) > maxAcceptanceReasonRunes:
+		return "", invalid(fmt.Sprintf("reason is required and at most %d characters.", maxAcceptanceReasonRunes))
+	case days < 1 || days > maxAcceptanceDays:
+		return "", invalid(fmt.Sprintf("days must be between 1 and %d.", maxAcceptanceDays))
+	}
+	return reason, nil
+}
+
+// dayCount is "1 day" or "n days".
+func dayCount(days int) string {
+	if days == 1 {
+		return "1 day"
+	}
+	return strconv.Itoa(days) + " days"
+}
+
+// postPackageAcceptance accepts every finding of one package, in any version, for the chosen services. Pairs already
+// accepted are left as they are; nothing left to accept is 409.
+func (s *Server) postPackageAcceptance(w http.ResponseWriter, r *http.Request) {
+	if !s.scanningOn() {
+		s.fail(w, errScanningOff)
+		return
+	}
+	image, view, sc, ok := s.visibleImage(w, r, r.PathValue("digest"))
+	if !ok {
+		return
+	}
+	var body AcceptPackageRiskRequest
+	if err := decodeStrictJSON(w, r, &body); err != nil {
+		s.fail(w, err)
+		return
+	}
+	ctx := r.Context()
+	reason, err := acceptanceTerms(body.Reason, body.Days)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	findings, err := s.Store.ScanFindings(ctx, image.Digest)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	var keys []store.FindingKey
+	for _, f := range findings {
+		if f.PackageName == body.PackageName {
+			keys = append(keys, store.FindingKey{VulnID: f.VulnID, PackageName: f.PackageName, PackageVersion: f.PackageVersion})
+		}
+	}
+	if len(keys) == 0 {
+		s.fail(w, invalid("That package has no findings in this image."))
+		return
+	}
+
+	services, ok := s.acceptanceServices(w, r, sc.Subject, image.Digest, view, body.ServiceIDs)
+	if !ok {
+		return
+	}
+	now := s.now()
+	base := store.ScanAcceptance{Digest: image.Digest, Reason: reason, CreatedAt: now, ExpiresAt: now.Add(time.Duration(body.Days) * 24 * time.Hour)}
+	if sc.Subject.UserID != 0 {
+		base.AcceptedBy = &sc.Subject.UserID
+	}
+	ids, err := s.Store.CreatePackageScanAcceptances(ctx, base, keys, services)
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", "Every finding of that package is already accepted for these services.")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	names := make([]string, len(services))
+	serviceIDs := make([]string, len(services))
+	for i, key := range services {
+		names[i], serviceIDs[i] = key.Service, key.ID()
+	}
+	findingWord := "findings"
+	if len(ids) == 1 {
+		findingWord = "finding"
+	}
+	s.auditAdmin(r, "security.accept_package", imageTarget(image.Digest),
+		fmt.Sprintf("Accepted %d %s in %s on %s for %s for %s.", len(ids), findingWord, body.PackageName, imageLabel(image), dayCount(body.Days), strings.Join(names, ", ")),
+		map[string]any{"digest": image.Digest, "package_name": body.PackageName, "acceptances": len(ids),
 			"days": body.Days, "reason": reason, "services": serviceIDs})
 	writeJSON(w, http.StatusCreated, AcceptRiskResponse{IDs: ids})
 }

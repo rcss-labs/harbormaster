@@ -43,6 +43,17 @@ export const SECURITY_COPY = {
   acceptSubmit: (days: number) => `Accept for ${days} ${days === 1 ? 'day' : 'days'}`,
   acceptedToast: (vulnId: string, date: string, services: number) =>
     `${vulnId} accepted until ${date} for ${services} ${services === 1 ? 'service' : 'services'}. It returns to the list when that ends.`,
+  acceptPackageRisk: 'Accept package risk',
+  acceptPackageTitle: (name: string) => `Accept risk for every vulnerability in ${name}`,
+  acceptPackageSub: (count: number, versions: string[]) =>
+    `${count} ${count === 1 ? 'vulnerability' : 'vulnerabilities'} in ${versions.length === 1 ? 'version' : 'versions'} ${versions.join(', ')}`,
+  packageAcceptedToast: (name: string, date: string, services: number) =>
+    `${name} accepted until ${date} for ${services} ${services === 1 ? 'service' : 'services'}. Each vulnerability returns to the list when that ends.`,
+  vulnerabilityCount: (count: number) => `${count} ${count === 1 ? 'vulnerability' : 'vulnerabilities'}`,
+  withoutFix: (count: number) => `${count} without a fix`,
+  partlyAccepted: 'Partly accepted',
+  packagesAccepted: (accepted: number, total: number) => `${accepted} of ${total} accepted`,
+  vulnerabilitiesIn: (name: string) => `Vulnerabilities in ${name}`,
   revokeTitle: (vulnId: string, service: string) => `Revoke acceptance of ${vulnId} for ${service}`,
   revokeBody: (vulnId: string, service: string) => `${service} will count ${vulnId} again.`,
   revokedToast: (vulnId: string, service: string) => `${vulnId} is open again for ${service}.`,

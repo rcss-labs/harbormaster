@@ -208,6 +208,13 @@ export interface AcceptRiskRequest {
   service_ids?: string[]
 }
 
+export interface AcceptPackageRiskRequest {
+  package_name: string
+  reason: string
+  days: number
+  service_ids?: string[]
+}
+
 export interface AcceptRiskResponse {
   ids: number[]
 }
@@ -286,6 +293,15 @@ export function useAcceptRisk(digest: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: AcceptRiskRequest) => api.post<AcceptRiskResponse>(`/api/security/images/${digest}/acceptances`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['security'] }),
+  })
+}
+
+/** Accepts every vulnerability of one package, in any version, that a chosen service still counts. */
+export function useAcceptPackageRisk(digest: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: AcceptPackageRiskRequest) => api.post<AcceptRiskResponse>(`/api/security/images/${digest}/package-acceptances`, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['security'] }),
   })
 }

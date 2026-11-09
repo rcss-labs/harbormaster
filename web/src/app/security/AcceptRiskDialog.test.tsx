@@ -22,7 +22,7 @@ function posted() {
 }
 
 const open = (requests = SECURITY_IMAGE_EDGE.requests, onClose = vi.fn()) =>
-  renderWithProviders(<AcceptRiskDialog digest={SECURITY_IMAGE_EDGE.digest} finding={HIGH_FINDING} requests={requests} onClose={onClose} />)
+  renderWithProviders(<AcceptRiskDialog digest={SECURITY_IMAGE_EDGE.digest} target={{ kind: 'finding', finding: HIGH_FINDING }} requests={requests} onClose={onClose} />)
 
 describe('AcceptRiskDialog', () => {
   it('AcceptRiskDialog lists only services the user can accept for and posts them', async () => {
@@ -54,7 +54,7 @@ describe('AcceptRiskDialog', () => {
     const bodies = posted()
     const critical = SECURITY_IMAGE_EDGE.findings[0]
     const requests = SECURITY_IMAGE_EDGE.requests.map((request) => ({ ...request, can_accept: true }))
-    renderWithProviders(<AcceptRiskDialog digest={SECURITY_IMAGE_EDGE.digest} finding={critical} requests={requests} onClose={vi.fn()} />)
+    renderWithProviders(<AcceptRiskDialog digest={SECURITY_IMAGE_EDGE.digest} target={{ kind: 'finding', finding: critical }} requests={requests} onClose={vi.fn()} />)
     const dialog = await screen.findByRole('dialog', { name: 'Accept risk for CVE-0000-0001' })
     expect(within(dialog).queryByRole('checkbox', { name: 'payments-api' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('checkbox', { name: 'notifications' })).toBeChecked()
