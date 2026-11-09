@@ -1,4 +1,4 @@
-import type { SecurityFinding, Severity } from '../../api/security'
+import type { BaseImageState, SecurityFinding, Severity } from '../../api/security'
 
 export const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3, negligible: 4, unknown: 5 }
 
@@ -65,6 +65,22 @@ export function compareVersions(a: string, b: string): number {
   const [epochA, restA] = splitEpoch(a)
   const [epochB, restB] = splitEpoch(b)
   return epochA !== epochB ? epochA - epochB : compareParts(restA, restB)
+}
+
+/** Where a package came from, measured from the image layers. */
+export type PackageOrigin = 'base' | 'app' | 'both'
+
+/**
+ * The measured origin of a package, or null when there is none and the guessed kind should show: the base image state is
+ * not matched, or no finding of the package has an origin. Findings with an unknown origin are ignored.
+ */
+export function packageOrigin(group: PackageGroup, baseState: BaseImageState): PackageOrigin | null {
+  if (baseState !== 'matched') return null
+  const fromBase = group.findings.some((finding) => finding.origin === 'base')
+  const fromApp = group.findings.some((finding) => finding.origin === 'app')
+  if (fromBase && fromApp) return 'both'
+  if (fromBase) return 'base'
+  return fromApp ? 'app' : null
 }
 
 const newest = (versions: string[]) => versions.reduce((best, version) => (best === '' || compareVersions(version, best) > 0 ? version : best), '')

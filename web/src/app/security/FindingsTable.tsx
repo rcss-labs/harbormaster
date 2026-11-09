@@ -8,7 +8,7 @@ import { useToast } from '../../components/Toast'
 import { AcceptRiskDialog, servicesToAccept, servicesToAcceptPackage, type AcceptTarget } from './AcceptRiskDialog'
 import { SECURITY_COPY } from './copy'
 import { formatDate } from './freshness'
-import { groupByPackage, type PackageGroup } from './packages'
+import { groupByPackage, packageOrigin, type PackageGroup } from './packages'
 import styles from './security.module.css'
 
 const SEVERITY_KIND: Record<Severity, PillKind> = {
@@ -169,6 +169,7 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
             const open = expanded.has(group.name)
             const bodyId = `package-${group.name.replace(/[^A-Za-z0-9_-]/g, '_')}`
             const note = packageNote(group)
+            const origin = packageOrigin(group, image.base_image.state)
             return (
               <div role="listitem" key={group.name} className={styles.package}>
                 <div className={styles.packageRow} onClick={(event) => onRowClick(event, group.name)}>
@@ -184,9 +185,15 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
                       </span>
                       {group.name}
                     </button>
-                    <span className={styles.findingNote} title={SECURITY_COPY.packageKindTitle[group.kind]}>
-                      {SECURITY_COPY.packageKind[group.kind]}
-                    </span>
+                    {origin ? (
+                      <span className={styles.findingNote} title={SECURITY_COPY.packageOriginTitle(image.base_image.ref)}>
+                        {SECURITY_COPY.packageOrigin[origin]}
+                      </span>
+                    ) : (
+                      <span className={styles.findingNote} title={SECURITY_COPY.packageKindTitle[group.kind]}>
+                        {SECURITY_COPY.packageKind[group.kind]}
+                      </span>
+                    )}
                   </span>
                   <span className={styles.mono}>{group.versions.join(', ')}</span>
                   <span>

@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { SecurityImageDetail, SecurityResponse } from '../../api/security'
+import type { SecurityBaseImage, SecurityImageDetail, SecurityResponse } from '../../api/security'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 import {
@@ -231,7 +231,7 @@ describe('SecurityPage', () => {
   })
 
   it('hides Accept risk without the permission', async () => {
-    serveDetail({ ...SECURITY_IMAGE_EDGE, can: { accept: false, rescan: true } })
+    serveDetail({ ...SECURITY_IMAGE_EDGE, can: { accept: false, rescan: true, set_base: true } })
     renderApp(`/security?image=${DIGEST_EDGE}`)
     await expandPackage('libxml2')
     expect(screen.queryByRole('button', { name: 'Accept risk' })).not.toBeInTheDocument()
@@ -270,5 +270,155 @@ describe('SecurityPage', () => {
     serveDetail({ ...SECURITY_IMAGE_EDGE, findings: [], packages: 0 })
     renderApp(`/security?image=${DIGEST_EDGE}`)
     expect(await screen.findByText('No OS or language packages found; nothing to match.')).toBeInTheDocument()
+  })
+
+  describe('base image', () => {
+    const matchedBase: SecurityBaseImage = {
+      ref: 'node:20-bookworm-slim',
+      scanned_ref: 'node@sha256:abc',
+      state: 'matched',
+      matched_layers: 4,
+      total_layers: 9,
+      message: '',
+    }
+    const withBase = (base_image: SecurityBaseImage, extra: Partial<SecurityImageDetail> = {}): SecurityImageDetail => ({
+      ...SECURITY_IMAGE_EDGE,
+      base_image,
+      ...extra,
+    })
+    const detailRegion = () => screen.findByRole('region', { name: 'Image detail' })
+
+    it('replaces the guessed label with the measured origin of each package', async () => {
+      const [openssl, ...rest] = SECURITY_IMAGE_EDGE.findings
+      const npm = { ...openssl, vuln_id: 'GHSA-xxxx', package: 'node-forge', version: '1.3.1', type: 'npm', acceptances: [] }
+      serveDetail(withBase(matchedBase, { findings: [{ ...openssl, origin: 'base' }, { ...npm, origin: 'app' }, ...rest] }))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const rows = await packageRows()
+      const row = (name: string) => rows.find((r) => within(r).queryByRole('button', { name }))!
+      expect(within(row('openssl')).getByText('Base image')).toHaveAttribute('title', 'Measured from the image layers against node:20-bookworm-slim.')
+      expect(within(row('openssl')).queryByText('OS package')).not.toBeInTheDocument()
+      expect(within(row('node-forge')).getByText('App layers')).toBeInTheDocument()
+      // No origin on this one: the guess stays.
+      expect(within(row('libxml2')).getByText('OS package')).toBeInTheDocument()
+    })
+
+    it('says Base image and app layers for a package found in both', async () => {
+      const [openssl, ...rest] = SECURITY_IMAGE_EDGE.findings
+      const fromApp = { ...openssl, vuln_id: 'CVE-0000-0020', origin: 'app' as const, acceptances: [] }
+      serveDetail(withBase(matchedBase, { findings: [{ ...openssl, origin: 'base' }, fromApp, ...rest] }))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      expect((await packageRows())[0]).toHaveTextContent('Base image and app layers')
+    })
+
+    it('shows no base image and offers to set one', async () => {
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      expect(await within(detail).findByText('Base image: not set')).toBeInTheDocument()
+      expect(within(detail).getByRole('button', { name: 'Set base image' })).toBeInTheDocument()
+    })
+
+    it('does not offer to set the base image without the permission', async () => {
+      serveDetail(withBase(SECURITY_IMAGE_EDGE.base_image, { can: { accept: true, rescan: true, set_base: false } }))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      expect(await within(detail).findByText('Base image: not set')).toBeInTheDocument()
+      expect(within(detail).queryByRole('button', { name: 'Set base image' })).not.toBeInTheDocument()
+    })
+
+    it('does not offer to change a set base image without the permission', async () => {
+      serveDetail(withBase(matchedBase, { can: { accept: true, rescan: true, set_base: false } }))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      expect(await within(detail).findByText('Base image: node:20-bookworm-slim')).toBeInTheDocument()
+      expect(within(detail).queryByRole('button', { name: 'Change' })).not.toBeInTheDocument()
+    })
+
+    it('saves the base image and tells the user a rescan is queued', async () => {
+      const bodies: unknown[] = []
+      server.use(
+        http.put('/api/security/images/:digest/base-image', async ({ request }) => {
+          bodies.push(await request.json())
+          return HttpResponse.json(withBase({ ...matchedBase, ref: 'node:20', state: 'pending' }))
+        }),
+      )
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      await userEvent.click(await within(detail).findByRole('button', { name: 'Set base image' }))
+      expect(within(detail).getByText('The FROM image of the Dockerfile. Applies to every tag of platform-base.')).toBeInTheDocument()
+      await userEvent.type(within(detail).getByRole('textbox', { name: 'Base image' }), 'node:20')
+      await userEvent.click(within(detail).getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(bodies).toEqual([{ base_ref: 'node:20' }]))
+      expect(await screen.findByText('Base image saved. The image is queued for a rescan.')).toBeInTheDocument()
+    })
+
+    it('rejects an empty or spaced reference before calling the server', async () => {
+      const bodies: unknown[] = []
+      server.use(
+        http.put('/api/security/images/:digest/base-image', async ({ request }) => {
+          bodies.push(await request.json())
+          return HttpResponse.json(withBase(matchedBase))
+        }),
+      )
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      await userEvent.click(await within(detail).findByRole('button', { name: 'Set base image' }))
+      await userEvent.click(within(detail).getByRole('button', { name: 'Save' }))
+      expect(await within(detail).findByText('Enter an image reference.')).toBeInTheDocument()
+      await userEvent.type(within(detail).getByRole('textbox', { name: 'Base image' }), 'node 20')
+      await userEvent.click(within(detail).getByRole('button', { name: 'Save' }))
+      expect(await within(detail).findByText('An image reference has no spaces.')).toBeInTheDocument()
+      expect(bodies).toEqual([])
+    })
+
+    it('shows the server message when the base image is refused', async () => {
+      server.use(
+        http.put('/api/security/images/:digest/base-image', () =>
+          HttpResponse.json({ error: { code: 'invalid', message: 'node:99 was not found in the registry.' } }, { status: 422 }),
+        ),
+      )
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      await userEvent.click(await within(detail).findByRole('button', { name: 'Set base image' }))
+      await userEvent.type(within(detail).getByRole('textbox', { name: 'Base image' }), 'node:99')
+      await userEvent.click(within(detail).getByRole('button', { name: 'Save' }))
+      expect(await screen.findByText('node:99 was not found in the registry.')).toBeInTheDocument()
+    })
+
+    it('clears the base image with an empty reference', async () => {
+      const bodies: unknown[] = []
+      serveDetail(withBase(matchedBase))
+      server.use(
+        http.put('/api/security/images/:digest/base-image', async ({ request }) => {
+          bodies.push(await request.json())
+          return HttpResponse.json(SECURITY_IMAGE_EDGE)
+        }),
+      )
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      await userEvent.click(await within(detail).findByRole('button', { name: 'Change' }))
+      expect(within(detail).getByRole('textbox', { name: 'Base image' })).toHaveValue('node:20-bookworm-slim')
+      await userEvent.click(within(detail).getByRole('button', { name: 'Clear' }))
+      await waitFor(() => expect(bodies).toEqual([{ base_ref: '' }]))
+    })
+
+    it('shows how many layers come from a matched base image', async () => {
+      serveDetail(withBase(matchedBase))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const detail = await detailRegion()
+      expect(await within(detail).findByText('Base image: node:20-bookworm-slim')).toBeInTheDocument()
+      expect(within(detail).getByText('4 of 9 layers come from it')).toBeInTheDocument()
+    })
+
+    it('shows that a rescan is queued while the base image is pending', async () => {
+      serveDetail(withBase({ ...matchedBase, state: 'pending', matched_layers: 0, total_layers: 0 }))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      expect(await within(await detailRegion()).findByText('Rescan queued to compare layers')).toBeInTheDocument()
+    })
+
+    it.each(['mismatch', 'error'] as const)('shows the server message for a %s base image', async (state) => {
+      serveDetail(withBase({ ...matchedBase, state, message: `Server says ${state}.` }))
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      expect(await within(await detailRegion()).findByText(`Server says ${state}.`)).toBeInTheDocument()
+    })
   })
 })

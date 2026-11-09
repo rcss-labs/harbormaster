@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SecurityFinding } from '../../api/security'
 import { SECURITY_IMAGE_EDGE } from '../../test/securityFixtures'
-import { compareVersions, groupByPackage } from './packages'
+import { compareVersions, groupByPackage, packageOrigin } from './packages'
 
 const base = SECURITY_IMAGE_EDGE.findings[2]
 const finding = (over: Partial<SecurityFinding>): SecurityFinding => ({ ...base, acceptances: [], accepted_everywhere: false, ...over })
@@ -52,5 +52,34 @@ describe('groupByPackage', () => {
       finding({ package: 'c', severity: 'critical' }),
     ])
     expect(groups.map((group) => group.name)).toEqual(['c', 'b', 'a'])
+  })
+})
+
+describe('packageOrigin', () => {
+  const group = (...origins: SecurityFinding['origin'][]) =>
+    groupByPackage(origins.map((origin, index) => finding({ vuln_id: `CVE-${index}`, package: 'pkg', origin })))[0]
+
+  it('is base when every finding came from the base image', () => {
+    expect(packageOrigin(group('base', 'base'), 'matched')).toBe('base')
+  })
+
+  it('is app when every finding came from the app layers', () => {
+    expect(packageOrigin(group('app'), 'matched')).toBe('app')
+  })
+
+  it('is both when the findings come from both', () => {
+    expect(packageOrigin(group('base', 'app'), 'matched')).toBe('both')
+  })
+
+  it('ignores findings with an unknown origin', () => {
+    expect(packageOrigin(group('', 'app'), 'matched')).toBe('app')
+  })
+
+  it('is null when no finding has an origin, so the guess stays', () => {
+    expect(packageOrigin(group('', ''), 'matched')).toBeNull()
+  })
+
+  it.each(['none', 'pending', 'mismatch', 'error'] as const)('is null when the base image state is %s', (state) => {
+    expect(packageOrigin(group('base'), state)).toBeNull()
   })
 })

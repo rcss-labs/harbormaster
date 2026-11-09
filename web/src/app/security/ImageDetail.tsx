@@ -2,6 +2,7 @@ import { useRescanImage, useSecurityImage, type ScanImageStatus } from '../../ap
 import { formatAgo, useNow } from '../../components/Ago'
 import { Pill, type PillKind } from '../../components/Pill'
 import { useToast } from '../../components/Toast'
+import { BaseImageFact } from './BaseImageFact'
 import { SCAN_STATUS_LABEL, SECURITY_COPY } from './copy'
 import { FindingsTable } from './FindingsTable'
 import styles from './security.module.css'
@@ -47,6 +48,9 @@ export function ImageDetail({ digest }: { digest: string }) {
         )}
         {image.platform !== '' && <li>{image.platform}</li>}
         {image.packages !== null && <li>{SECURITY_COPY.packages(image.packages)}</li>}
+        <li>
+          <BaseImageFact image={image} />
+        </li>
       </ul>
       {!scanned && (
         <div className={styles.failure}>
