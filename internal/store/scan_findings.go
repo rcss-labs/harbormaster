@@ -27,6 +27,9 @@ type ScanImageResult struct {
 	Packages                                                                                      *int
 	Truncated                                                                                     bool
 	MatchedDBBuiltAt                                                                              *time.Time
+	// Layers are the image's layer diff ids and Base what the scanner learned about the configured base image; both may be nil.
+	Layers []string
+	Base   *scan.BaseLayers
 }
 
 // findingInsertChunk bounds the statements queued in one batch round trip.
@@ -48,14 +51,21 @@ func (s *Store) RecordScanResult(ctx context.Context, digest string, runID int64
 		if res.ScannedAt != nil {
 			scannedAt = *res.ScannedAt
 		}
+		var baseRef, baseDigest, baseError string
+		var baseLayers []string
+		if res.Base != nil {
+			baseRef, baseDigest, baseLayers, baseError = res.Base.Ref, res.Base.Digest, res.Base.Layers, res.Base.Error
+		}
 		updated, err := tx.Exec(ctx, `update scan_images set status = 'scanned', failure_code = null, failure_detail = null,
 			  attempts = 0, defers = 0, next_attempt_at = null,
 			  platform_digest = nullif($2, ''), platform = coalesce(nullif($3, ''), platform),
 			  syft_version = nullif($4, ''), scanner_image_digest = nullif($5, ''),
 			  last_matched_run_id = $6, matched_at = $7, matched_db_built_at = $8,
-			  packages = $9, truncated = $10, scanned_at = $11, updated_at = $7
+			  packages = $9, truncated = $10, scanned_at = $11, updated_at = $7,
+			  layer_ids = $12, base_ref = nullif($13, ''), base_digest = nullif($14, ''), base_layer_ids = $15, base_error = nullif($16, '')
 			where digest = $1`, digest, res.PlatformDigest, res.Platform, res.SyftVersion, res.ScannerImageDigest,
-			runID, now, res.MatchedDBBuiltAt, res.Packages, res.Truncated, scannedAt)
+			runID, now, res.MatchedDBBuiltAt, res.Packages, res.Truncated, scannedAt,
+			res.Layers, baseRef, baseDigest, baseLayers, baseError)
 		if err != nil {
 			return err
 		}
@@ -82,18 +92,18 @@ func replaceScanFindings(ctx context.Context, tx pgx.Tx, digest string, runID in
 	}
 	// An existing key keeps its first_seen_at: the update leaves that column out.
 	const upsert = `insert into scan_findings (digest, vuln_id, package_name, package_version, package_type, location, severity,
-		  cvss, fixed_version, fix_state, data_source, url, first_seen_at, last_seen_at, run_id)
-		values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, $8, nullif($9, ''), nullif($10, ''), nullif($11, ''), nullif($12, ''), $13, $13, $14)
+		  cvss, fixed_version, fix_state, data_source, url, first_seen_at, last_seen_at, run_id, layer_id)
+		values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, $8, nullif($9, ''), nullif($10, ''), nullif($11, ''), nullif($12, ''), $13, $13, $14, nullif($15, ''))
 		on conflict (digest, vuln_id, package_name, package_version) do update set
 		  package_type = excluded.package_type, location = excluded.location, severity = excluded.severity, cvss = excluded.cvss,
 		  fixed_version = excluded.fixed_version, fix_state = excluded.fix_state, data_source = excluded.data_source,
-		  url = excluded.url, last_seen_at = excluded.last_seen_at, run_id = excluded.run_id`
+		  url = excluded.url, last_seen_at = excluded.last_seen_at, run_id = excluded.run_id, layer_id = excluded.layer_id`
 	for start := 0; start < len(findings); start += findingInsertChunk {
 		end := min(start+findingInsertChunk, len(findings))
 		var batch pgx.Batch
 		for _, f := range findings[start:end] {
 			batch.Queue(upsert, digest, f.VulnID, f.PackageName, f.PackageVersion, f.PackageType, f.Location, f.Severity,
-				f.CVSS, f.FixedVersion, f.FixState, f.DataSource, f.URL, now, runID)
+				f.CVSS, f.FixedVersion, f.FixState, f.DataSource, f.URL, now, runID, f.LayerID)
 		}
 		results := tx.SendBatch(ctx, &batch)
 		for range end - start {
@@ -117,7 +127,7 @@ const severityRankSQL = `case severity when 'critical' then 0 when 'high' then 1
 func (s *Store) ScanFindings(ctx context.Context, digest string) ([]ScanFinding, error) {
 	rows, err := s.Pool.Query(ctx, `select digest, vuln_id, severity, cvss, package_name, package_version,
 		  coalesce(package_type, ''), coalesce(location, ''), coalesce(fixed_version, ''), coalesce(fix_state, ''),
-		  coalesce(data_source, ''), coalesce(url, ''), first_seen_at, last_seen_at, run_id
+		  coalesce(data_source, ''), coalesce(url, ''), first_seen_at, last_seen_at, run_id, coalesce(layer_id, '')
 		from scan_findings where digest = $1 order by `+severityRankSQL+`, vuln_id, package_name, package_version`, digest)
 	if err != nil {
 		return nil, fmt.Errorf("scan findings: %w", err)
@@ -125,7 +135,7 @@ func (s *Store) ScanFindings(ctx context.Context, digest string) ([]ScanFinding,
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ScanFinding, error) {
 		var f ScanFinding
 		err := row.Scan(&f.Digest, &f.VulnID, &f.Severity, &f.CVSS, &f.PackageName, &f.PackageVersion, &f.PackageType,
-			&f.Location, &f.FixedVersion, &f.FixState, &f.DataSource, &f.URL, &f.FirstSeenAt, &f.LastSeenAt, &f.RunID)
+			&f.Location, &f.FixedVersion, &f.FixState, &f.DataSource, &f.URL, &f.FirstSeenAt, &f.LastSeenAt, &f.RunID, &f.LayerID)
 		return f, err
 	})
 	if err != nil {

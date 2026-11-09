@@ -81,6 +81,22 @@ export interface SecurityRequest {
 export interface SecurityCan {
   accept: boolean
   rescan: boolean
+  set_base: boolean
+}
+
+/**
+ * How the base image of an image's repository relates to this image. Matched means the base layers are a prefix of this
+ * image's layers, so findings carry an origin; mismatch and error carry the server's explanation in message.
+ */
+export type BaseImageState = 'none' | 'pending' | 'matched' | 'mismatch' | 'error'
+
+export interface SecurityBaseImage {
+  ref: string
+  scanned_ref: string
+  state: BaseImageState
+  matched_layers: number
+  total_layers: number
+  message: string
 }
 
 /** One requested image, as the Security page lists it. */
@@ -105,6 +121,7 @@ export interface SecurityImage {
   open: SeverityCounts
   accepted: number
   last_requested_at: string
+  base_image: SecurityBaseImage
   can: SecurityCan
 }
 
@@ -144,6 +161,8 @@ export interface SecurityFinding {
   data_source: string
   url: string
   first_seen_at: string
+  /** Which layers added the package. Empty unless the base image state is matched. */
+  origin: 'base' | 'app' | ''
   acceptances: SecurityAcceptance[]
   accepted_everywhere: boolean
 }
@@ -203,6 +222,13 @@ export interface AcceptRiskRequest {
   vuln_id: string
   package_name: string
   package_version: string
+  reason: string
+  days: number
+  service_ids?: string[]
+}
+
+export interface AcceptPackageRiskRequest {
+  package_name: string
   reason: string
   days: number
   service_ids?: string[]
@@ -290,6 +316,15 @@ export function useAcceptRisk(digest: string) {
   })
 }
 
+/** Accepts every vulnerability of one package, in any version, that a chosen service still counts. */
+export function useAcceptPackageRisk(digest: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: AcceptPackageRiskRequest) => api.post<AcceptRiskResponse>(`/api/security/images/${digest}/package-acceptances`, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['security'] }),
+  })
+}
+
 export function useRevokeAcceptance() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -302,6 +337,16 @@ export function useRescanImage(digest: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => api.post<ScanStatus>(`/api/security/images/${digest}/rescan`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['security'] }),
+  })
+}
+
+/** Sets the base image of the image's repository; an empty ref clears it. The server queues a rescan after saving. */
+export function useSetBaseImage(digest: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (baseRef: string) =>
+      api.put<SecurityImageDetail>(`/api/security/images/${digest}/base-image`, { base_ref: baseRef }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['security'] }),
   })
 }

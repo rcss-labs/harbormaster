@@ -258,10 +258,15 @@ func (s *Scanner) writeRun(runID int64, job scan.Job, large bool) {
 		if platform == "" {
 			platform = "linux/amd64"
 		}
-		s.putJSON(scan.ResultKey(runID, image.Digest), scan.Result{
+		result := scan.Result{
 			Digest: image.Digest, PlatformDigest: image.Digest, Platform: platform, Status: scan.StatusScanned,
 			SyftVersion: fakeSyftVersion, SBOMGeneratedAt: now, Packages: packages, Findings: findings,
-		})
+			Layers: FakeLayersFor(repository),
+		}
+		if image.BaseRef != "" {
+			result.Base = FakeBaseFor(repository, image.BaseRef)
+		}
+		s.putJSON(scan.ResultKey(runID, image.Digest), result)
 	}
 	s.putJSON(scan.ManifestKey(runID), manifest)
 }

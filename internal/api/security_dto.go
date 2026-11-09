@@ -69,7 +69,33 @@ type SecurityImageDTO struct {
 	Open              SeverityCountsDTO    `json:"open"`
 	Accepted          int                  `json:"accepted"`
 	LastRequestedAt   time.Time            `json:"last_requested_at"`
+	BaseImage         BaseImageDTO         `json:"base_image"`
 	Can               SecurityCanDTO       `json:"can"`
+}
+
+// Base image states of BaseImageDTO.
+const (
+	baseStateNone     = "none"
+	baseStatePending  = "pending"
+	baseStateMatched  = "matched"
+	baseStateMismatch = "mismatch"
+	baseStateError    = "error"
+)
+
+// BaseImageDTO is the base image set for the image's repository and how the last scan compared with it. ScannedRef is the
+// base the last scan used. MatchedLayers and TotalLayers are set when the image's layers are known.
+type BaseImageDTO struct {
+	Ref           string `json:"ref"`
+	ScannedRef    string `json:"scanned_ref"`
+	State         string `json:"state"`
+	MatchedLayers int    `json:"matched_layers"`
+	TotalLayers   int    `json:"total_layers"`
+	Message       string `json:"message"`
+}
+
+// SetBaseImageRequest is the body of PUT /api/security/images/{digest}/base-image. An empty ref clears the base.
+type SetBaseImageRequest struct {
+	BaseRef string `json:"base_ref"`
 }
 
 // SecurityRequestDTO is one service container that asked for the image to be scanned.
@@ -88,8 +114,9 @@ type SecurityRequestDTO struct {
 
 // SecurityCanDTO says what the caller may do with an image.
 type SecurityCanDTO struct {
-	Accept bool `json:"accept"`
-	Rescan bool `json:"rescan"`
+	Accept  bool `json:"accept"`
+	Rescan  bool `json:"rescan"`
+	SetBase bool `json:"set_base"`
 }
 
 // SecurityImageDetailDTO is GET /api/security/images/{digest}. With scanning off only Enabled and Hint are set.
@@ -117,6 +144,8 @@ type SecurityFindingDTO struct {
 	FirstSeenAt        time.Time               `json:"first_seen_at"`
 	Acceptances        []SecurityAcceptanceDTO `json:"acceptances"`
 	AcceptedEverywhere bool                    `json:"accepted_everywhere"`
+	// Origin is "base" or "app" when the base image matched the image's layers, otherwise empty.
+	Origin string `json:"origin"`
 }
 
 // SecurityAcceptanceDTO is an active risk acceptance of one finding for one service.

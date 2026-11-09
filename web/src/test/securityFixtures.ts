@@ -6,6 +6,7 @@ import type {
   ScanGate,
   ScanStatus,
   SecurityAcceptance,
+  SecurityBaseImage,
   SecurityFinding,
   SecurityImage,
   SecurityImageDetail,
@@ -60,6 +61,7 @@ const EDGE_FINDINGS: SecurityFinding[] = [
     data_source: 'nvd:cpe',
     url: 'https://nvd.nist.gov/vuln/detail/CVE-0000-0001',
     first_seen_at: '2026-10-28T06:00:00Z',
+    origin: '',
     acceptances: [acceptedByPayments],
     accepted_everywhere: false,
   },
@@ -76,6 +78,7 @@ const EDGE_FINDINGS: SecurityFinding[] = [
     data_source: 'nvd:cpe',
     url: 'https://nvd.nist.gov/vuln/detail/CVE-0000-0002',
     first_seen_at: '2026-10-28T06:00:00Z',
+    origin: '',
     acceptances: [],
     accepted_everywhere: false,
   },
@@ -92,6 +95,7 @@ const EDGE_FINDINGS: SecurityFinding[] = [
     data_source: 'nvd:cpe',
     url: 'https://nvd.nist.gov/vuln/detail/CVE-0000-0003',
     first_seen_at: '2026-10-29T06:00:00Z',
+    origin: '',
     acceptances: [],
     accepted_everywhere: false,
   },
@@ -125,6 +129,8 @@ const EDGE_REQUESTS: SecurityRequest[] = [
   },
 ]
 
+const NO_BASE_IMAGE: SecurityBaseImage = { ref: '', scanned_ref: '', state: 'none', matched_layers: 0, total_layers: 0, message: '' }
+
 const IMAGE_EDGE: SecurityImage = {
   digest: DIGEST_EDGE,
   image: `${REGISTRY}/platform-base:3.2.0`,
@@ -146,7 +152,8 @@ const IMAGE_EDGE: SecurityImage = {
   open: { ...NO_COUNTS, critical: 1, high: 1, medium: 1 },
   accepted: 0,
   last_requested_at: '2026-10-31T11:35:00Z',
-  can: { accept: true, rescan: true },
+  base_image: NO_BASE_IMAGE,
+  can: { accept: true, rescan: true, set_base: true },
 }
 
 /** The same image as payments-api sees it: its acceptance of the critical finding counts there, and only there. */

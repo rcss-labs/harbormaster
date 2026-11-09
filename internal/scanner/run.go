@@ -2,11 +2,14 @@ package scanner
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,7 +54,12 @@ type Runner struct {
 	Cmd    Command
 	NewECR func(ctx context.Context, role, externalID, region string) (ECRClient, error)
 	Log    *slog.Logger
+	// Test seams for base image fetches; nil means the real resolver, dialer and trust roots.
+	baseLookup func(ctx context.Context, host string) ([]netip.Addr, error)
+	baseDial   func(ctx context.Context, network, address string) (net.Conn, error)
+	baseTLS    *tls.Config
 
+	bases       map[string]scan.BaseLayers // by base ref and platform, for the run
 	syftVersion string
 	ecrClients  map[string]ECRClient
 	auths       map[string]registryAuth
@@ -67,7 +75,7 @@ func (r *Runner) Run(ctx context.Context) (exitCode int) {
 		return 1
 	}
 	started := r.Opts.Now()
-	r.ecrClients, r.auths = map[string]ECRClient{}, map[string]registryAuth{}
+	r.ecrClients, r.auths, r.bases = map[string]ECRClient{}, map[string]registryAuth{}, map[string]scan.BaseLayers{}
 	for _, dir := range []string{r.tmpDir(), filepath.Join(r.Opts.WorkDir, "cache", "syft"), filepath.Join(r.Opts.WorkDir, "cache", "grype")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			r.Log.Error("create work directory", "dir", dir, "err", err)
@@ -263,6 +271,12 @@ func (r *Runner) scanImage(ctx context.Context, job scan.Job, img scan.JobImage,
 	result := scan.Result{
 		Digest: img.Digest, PlatformDigest: platformDigest, Platform: platform, Status: scan.StatusScanned,
 		SyftVersion: r.syftVersion, SBOMGeneratedAt: r.Opts.Now().UTC(), Packages: packages,
+		Layers: sbomLayers(sbom),
+	}
+	if img.BaseRef != "" {
+		// Bounded by baseTimeout, and a failure is recorded in the result rather than failing the scan.
+		base := r.baseLayers(ctx, job.Registries, img.BaseRef, platform)
+		result.Base = &base
 	}
 	body := fitResult(result, findings, job.Limits.MaxFindings)
 	if body == nil {

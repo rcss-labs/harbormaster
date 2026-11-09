@@ -180,7 +180,11 @@ func (r *Runner) launchBatch(ctx context.Context, state store.ScanDBState, batch
 		}
 		return r.finishRun(ctx, runID, "failed", store.ScanRunPatch{Error: detail, ImagesFailed: len(batch)})
 	}
-	body, err := json.Marshal(r.buildJob(runID, state, batch, accounts, now))
+	bases, accounts, err := r.baseImages(ctx, batch, accounts)
+	if err != nil {
+		return fail(fmt.Errorf("read the base images: %w", err))
+	}
+	body, err := json.Marshal(r.buildJob(runID, state, batch, accounts, bases, now))
 	if err != nil {
 		return fail(err)
 	}
@@ -207,8 +211,49 @@ func (r *Runner) requeueAfterLaunchFailure(ctx context.Context, batch []store.Sc
 	}
 }
 
-// buildJob lists the batch and the registry credentials of the batch's accounts only.
-func (r *Runner) buildJob(runID int64, state store.ScanDBState, batch []store.ScanImage, accounts map[string]store.AWSAccount, now time.Time) scan.Job {
+// baseImages reads the base image configured for each repository of the batch. A base in an ECR private registry of a
+// connected, enabled account adds that account to the returned accounts, so the scanner can assume its scan role; a base
+// anywhere else (or in an account that is not connected) is still passed on, and the scanner reports what it cannot read.
+func (r *Runner) baseImages(ctx context.Context, batch []store.ScanImage, accounts map[string]store.AWSAccount) (map[store.RepoKey]string, map[string]store.AWSAccount, error) {
+	keys := make([]store.RepoKey, len(batch))
+	for i, img := range batch {
+		keys[i] = repoKeyOf(img)
+	}
+	bases, err := r.Store.RepoBases(ctx, keys)
+	if err != nil {
+		return nil, nil, err
+	}
+	withBase := make(map[string]store.AWSAccount, len(accounts))
+	for id, account := range accounts {
+		withBase[id] = account
+	}
+	for _, ref := range bases {
+		parsed := scan.ParseImageRef(ref)
+		if parsed.Kind != scan.KindECR {
+			continue
+		}
+		if _, known := withBase[parsed.AccountID]; known {
+			continue
+		}
+		account, err := r.Store.GetAccountByAccountID(ctx, parsed.AccountID)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+		case err != nil:
+			return nil, nil, err
+		case account.Enabled:
+			withBase[parsed.AccountID] = account
+		}
+	}
+	return bases, withBase, nil
+}
+
+func repoKeyOf(img store.ScanImage) store.RepoKey {
+	return store.RepoKey{AccountID: img.RegistryAccountID, Region: img.RegistryRegion, Repository: img.Repository}
+}
+
+// buildJob lists the batch and the registry credentials of the batch's accounts only, plus those of the accounts that
+// hold the images' base images.
+func (r *Runner) buildJob(runID int64, state store.ScanDBState, batch []store.ScanImage, accounts map[string]store.AWSAccount, bases map[store.RepoKey]string, now time.Time) scan.Job {
 	job := scan.Job{
 		RunID: runID, Kind: scan.ModeScan, Deadline: now.Add(r.Cfg.TaskTimeout),
 		Limits: scan.JobLimits{
@@ -227,9 +272,19 @@ func (r *Runner) buildJob(runID int64, state store.ScanDBState, batch []store.Sc
 				RoleARN:    fmt.Sprintf("arn:aws:iam::%s:role/%s", id, r.Cfg.RoleName),
 				ExternalID: accounts[id].ExternalID, Region: img.RegistryRegion}
 		}
+		baseRef := bases[repoKeyOf(img)]
+		if parsed := scan.ParseImageRef(baseRef); parsed.Kind == scan.KindECR {
+			if account, ok := accounts[parsed.AccountID]; ok {
+				if _, added := job.Registries[parsed.AccountID]; !added {
+					job.Registries[parsed.AccountID] = scan.JobRegistry{
+						RoleARN:    fmt.Sprintf("arn:aws:iam::%s:role/%s", parsed.AccountID, r.Cfg.RoleName),
+						ExternalID: account.ExternalID, Region: parsed.Region}
+				}
+			}
+		}
 		job.Images = append(job.Images, scan.JobImage{
 			Digest: img.Digest, ImageRef: img.ImageRef, Tag: img.Tag, Platform: img.Platform,
-			AccountID: id, Region: img.RegistryRegion, Large: img.Large})
+			AccountID: id, Region: img.RegistryRegion, Large: img.Large, BaseRef: baseRef})
 	}
 	sort.Slice(job.Images, func(i, j int) bool { return job.Images[i].Digest < job.Images[j].Digest })
 	return job
