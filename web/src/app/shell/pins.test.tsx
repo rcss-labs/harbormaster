@@ -27,6 +27,15 @@ describe('usePins', () => {
     expect(result.current.isPinned('cluster', 'c1')).toBe(false)
   })
 
+  it('removes one pin by kind and id and keeps a pin of the other kind with the same id', () => {
+    const { result } = renderHook(() => usePins())
+    act(() => result.current.toggle({ ...service, id: 'same' }))
+    act(() => result.current.toggle({ ...cluster, id: 'same' }))
+    act(() => result.current.remove('service', 'same'))
+    expect(result.current.pins).toEqual([{ ...cluster, id: 'same' }])
+    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)).toEqual([{ ...cluster, id: 'same' }])
+  })
+
   it('keys a service and a cluster with the same id separately', () => {
     const { result } = renderHook(() => usePins())
     act(() => result.current.toggle({ ...service, id: 'same' }))
