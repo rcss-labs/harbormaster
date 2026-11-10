@@ -15,6 +15,13 @@ test.describe('settings as sam', () => {
     await expect(windowInput(page)).toHaveValue('10')
   })
 
+  test('the tab strip does not scroll up and down', async ({ page }) => {
+    await page.goto('/settings/general')
+    const strip = page.getByRole('navigation').filter({ has: page.getByRole('link', { name: 'AWS accounts' }) })
+    const { scrollHeight, clientHeight } = await strip.evaluate((el) => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }))
+    expect(scrollHeight).toBe(clientHeight)
+  })
+
   test('tabs and redirects', async ({ page }) => {
     await page.goto('/settings/general')
     await page.getByRole('link', { name: 'AWS accounts' }).click()
