@@ -19,7 +19,7 @@ import { Pill } from '../../../components/Pill'
 import { useToast } from '../../../components/Toast'
 import { money } from '../../analytics/cost'
 import { HeaderAction } from '../HeaderAction'
-import { NOT_PRICED, awakeHours, browserTimezone, currentCell, emptyGrid, parseTagSelector } from './offhours'
+import { NOT_PRICED, awakeHours, browserTimezone, currentCell, emptyGrid, selectorInputOf, tagSummary } from './offhours'
 import { ScheduleEditor, type ScheduleDraft } from './ScheduleEditor'
 import { ScheduleServices } from './ScheduleServices'
 import styles from './offhours.module.css'
@@ -38,12 +38,13 @@ interface DraftState {
 const draftOf = (schedule: OffHoursSchedule): ScheduleDraft => ({
   name: schedule.name,
   enabled: schedule.enabled,
-  tag: `${schedule.tag_key}=${schedule.tag_value}`,
+  tags: schedule.tags.map(selectorInputOf),
+  excluded: schedule.excluded.map((service) => service.service_id),
   timezone: schedule.timezone,
   awake: schedule.awake,
 })
 
-const blankDraft = (): ScheduleDraft => ({ name: '', enabled: true, tag: '', timezone: browserTimezone(), awake: emptyGrid() })
+const blankDraft = (): ScheduleDraft => ({ name: '', enabled: true, tags: [], excluded: [], timezone: browserTimezone(), awake: emptyGrid() })
 
 /** `undefined` means not loaded yet: a plain dash. `null` is the server saying it could not price this. */
 const dollars = (value: number | null | undefined) =>
@@ -85,14 +86,20 @@ export function OffHoursPage() {
   const remove = useDeleteOffHoursSchedule()
 
   const scheduleId = selected === 'new' ? undefined : selected
-  const tagText = draft?.tag
-  const selector = useMemo(() => (tagText === undefined ? null : parseTagSelector(tagText)), [tagText])
   const previewBody = useMemo<OffHoursPreviewRequest | null>(
     () =>
-      draft && selector
-        ? { name: draft.name, enabled: draft.enabled, tag_key: selector.key, tag_value: selector.value, timezone: draft.timezone, awake: draft.awake, schedule_id: scheduleId }
+      draft && draft.tags.length > 0
+        ? {
+            name: draft.name,
+            enabled: draft.enabled,
+            tags: draft.tags,
+            excluded_service_ids: draft.excluded,
+            timezone: draft.timezone,
+            awake: draft.awake,
+            schedule_id: scheduleId,
+          }
         : null,
-    [draft, selector, scheduleId],
+    [draft, scheduleId],
   )
   const preview = useOffHoursPreview()
   const { mutate: requestPreview, reset: resetPreview } = preview
@@ -118,17 +125,16 @@ export function OffHoursPage() {
 
   const save = () => {
     if (!state) return
-    const parsed = parseTagSelector(state.draft.tag)
-    if (!parsed) {
-      setSaveError('Enter the tag as key=value, for example env=staging.')
+    if (state.draft.tags.length === 0) {
+      setSaveError('Pick at least one tag.')
       return
     }
     setSaveError(null)
     const body: OffHoursScheduleInput = {
       name: state.draft.name,
       enabled: state.draft.enabled,
-      tag_key: parsed.key,
-      tag_value: parsed.value,
+      tags: state.draft.tags,
+      excluded_service_ids: state.draft.excluded,
       timezone: state.draft.timezone,
       awake: state.draft.awake,
       ...(selected === 'new' ? {} : { version: state.version }),
@@ -205,7 +211,7 @@ export function OffHoursPage() {
                   <button type="button" className={styles.listButton} aria-current={selected === schedule.id} onClick={() => open(schedule.id)}>
                     <span>
                       <span className={styles.listName}>{schedule.name}</span>
-                      <span className={`${styles.muted} ${styles.small}`}>{`${schedule.tag_key}=${schedule.tag_value} · ${schedule.awake_hours_per_week} h awake a week`}</span>
+                      <span className={`${styles.muted} ${styles.small}`}>{`${tagSummary(schedule.tags, schedule.excluded.length)} · ${schedule.awake_hours_per_week} h awake a week`}</span>
                     </span>
                     <Pill kind={schedule.enabled ? 'ok' : 'mute'}>{schedule.enabled ? 'On' : 'Off'}</Pill>
                   </button>
@@ -219,7 +225,9 @@ export function OffHoursPage() {
             draft={draft}
             onChange={patchDraft}
             isNew={selected === 'new'}
-            tags={tags.data?.items ?? []}
+            tagOptions={tags.data}
+            savedTags={source?.tags ?? []}
+            savedExcluded={source?.excluded ?? []}
             preview={previewData}
             previewError={previewError}
             now={now}

@@ -1827,6 +1827,14 @@
     "version": "number"
   },
   "offhoursTags": {
+    "harbormaster": [
+      {
+        "color": "string",
+        "id": "number",
+        "name": "string",
+        "services": "number"
+      }
+    ],
     "items": [
       {
         "key": "string",

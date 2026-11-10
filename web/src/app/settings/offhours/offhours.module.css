@@ -27,6 +27,7 @@
 .editor { display: grid; gap: 10px; }
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .field { display: grid; gap: 4px; min-width: 0; }
+.wide { grid-column: 1 / -1; }
 .field > span { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .ctl { width: 100%; min-height: 30px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
 .check { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; font-weight: 500; }
