@@ -11,7 +11,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { LinkSSODialog } from '../shell/LinkSSODialog'
 import { usePins } from '../shell/pins'
-import { pinStatus } from '../shell/pinStatus'
+import { missingPinHint, pinStatus } from '../shell/pinStatus'
 import { useShellCounts } from '../shell/useShellCounts'
 import { useShellState } from '../shell/ShellState'
 import { toggleTheme, useIsDark } from '../theme'
@@ -83,7 +83,7 @@ export function MorePage() {
   const counts = useShellCounts()
   const authOptions = useAuthOptions()
   const allClusters = useClusters()
-  const { pins } = usePins()
+  const { pins, remove } = usePins()
   const dark = useIsDark()
   const [linking, setLinking] = useState(false)
   useCrumbs([['More']])
@@ -156,20 +156,33 @@ export function MorePage() {
         {pins.map((pin) => {
           const status = pinStatus(pin, allClusters.data?.items)
           const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
+          const label = `${pin.name} · ${status.text} · ${detail}${status.missing ? ` · ${missingPinHint}` : ''}`
           return (
-            <Link
-              key={`${pin.kind}:${pin.id}`}
-              to={pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`}
-              className={styles.row}
-              aria-label={`${pin.name} · ${status.text} · ${detail}`}
-            >
-              <StatusDot bare kind={status.kind} />
-              <span className={`${styles.label} ${styles.mono}`}>{pin.name}</span>
-              <span className={styles.right}>
-                <span className={styles.detail}>{detail}</span>
-                <Icon name="chev" size={16} />
-              </span>
-            </Link>
+            <div key={`${pin.kind}:${pin.id}`} className={styles.pinRow}>
+              <Link
+                to={pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`}
+                className={styles.row}
+                aria-label={label}
+              >
+                <StatusDot bare kind={status.kind} />
+                <span className={`${styles.label} ${styles.mono}`}>{pin.name}</span>
+                <span className={styles.right}>
+                  <span className={styles.detail}>{detail}</span>
+                  <Icon name="chev" size={16} />
+                </span>
+              </Link>
+              {status.missing && (
+                <button
+                  type="button"
+                  className={styles.pinRemove}
+                  aria-label={`Remove pin ${pin.name}`}
+                  title="Remove from pinned"
+                  onClick={() => remove(pin.kind, pin.id)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           )
         })}
       </Panel>
