@@ -1,6 +1,23 @@
 .wrap { position: relative; }
+.block { display: grid; gap: 6px; }
 .button { height: 30px; max-width: 220px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; display: inline-flex; align-items: center; }
+.fullWidth { max-width: none; width: 100%; justify-content: flex-start; color: var(--muted); }
 .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.popover { position: absolute; left: 0; top: 34px; min-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); z-index: 30; padding: 4px; display: grid; }
+.popover { position: absolute; left: 0; top: 34px; min-width: 100%; max-width: calc(100vw - 32px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); z-index: 30; padding: 4px; display: grid; gap: 4px; }
+.search { width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; }
+.list { display: grid; max-height: 280px; overflow-y: auto; }
+.group { display: grid; }
+.groupName { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
 .option:hover { background: var(--hover); }
+.optionLabel { overflow: hidden; text-overflow: ellipsis; }
+.hint { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--muted); }
+.none { margin: 0; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+.create { text-align: left; padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--accent); font: inherit; font-weight: 500; cursor: pointer; }
+.create:hover { background: var(--hover); }
+.swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 0 2px 0 8px; min-height: 24px; border: 1px solid var(--border-strong); border-radius: var(--radius-chip); background: var(--raised); font-size: 12px; }
+.chipLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chipRemove { border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; min-width: 24px; min-height: 24px; border-radius: 50%; }
+.chipRemove:hover { color: var(--text); background: var(--hover); }

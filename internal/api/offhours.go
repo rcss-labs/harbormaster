@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/cost"
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -94,31 +96,133 @@ func (s *Server) getOffHoursSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
+const (
+	maxOffHoursTags     = 50
+	maxOffHoursExcluded = 1000
+)
+
+// selectorsFromInput validates the tags of a request. Harbormaster tags must exist. With allowEmpty (preview) an
+// empty list is not an error.
+func (s *Server) selectorsFromInput(ctx context.Context, in []OffHoursSelectorInput, allowEmpty bool) ([]store.OffHoursSelector, error) {
+	if len(in) == 0 && !allowEmpty {
+		return nil, invalid("Pick at least one tag.")
+	}
+	if len(in) > maxOffHoursTags {
+		return nil, invalid(fmt.Sprintf("A schedule can select by at most %d tags.", maxOffHoursTags))
+	}
+	var existing map[authz.TagID]TagDTO
+	seen := map[store.OffHoursSelector]bool{}
+	out := make([]store.OffHoursSelector, 0, len(in))
+	for _, tag := range in {
+		var sel store.OffHoursSelector
+		switch tag.Kind {
+		case store.OffHoursSelectorAWS:
+			if err := offhours.ValidateAWSTag(tag.Key, tag.Value); err != nil {
+				return nil, invalid(err.Error())
+			}
+			sel = store.OffHoursSelector{Kind: tag.Kind, Key: tag.Key, Value: tag.Value}
+		case store.OffHoursSelectorHarbormaster:
+			if existing == nil {
+				var err error
+				if existing, err = s.tagDTOs(ctx); err != nil {
+					return nil, err
+				}
+			}
+			if _, ok := existing[authz.TagID(tag.TagID)]; !ok {
+				return nil, invalid("That Harbormaster tag no longer exists.")
+			}
+			sel = store.OffHoursSelector{Kind: tag.Kind, TagID: authz.TagID(tag.TagID)}
+		default:
+			return nil, invalid(`The tag kind must be "aws" or "harbormaster".`)
+		}
+		if seen[sel] {
+			return nil, invalid("The same tag is listed twice.")
+		}
+		seen[sel] = true
+		out = append(out, sel)
+	}
+	return out, nil
+}
+
+// exclusionsFromInput parses the excluded service ids, dropping repeats.
+func exclusionsFromInput(ids []string) ([]model.ServiceKey, error) {
+	if len(ids) > maxOffHoursExcluded {
+		return nil, invalid(fmt.Sprintf("A schedule can exclude at most %d services.", maxOffHoursExcluded))
+	}
+	seen := make(map[model.ServiceKey]bool, len(ids))
+	out := make([]model.ServiceKey, 0, len(ids))
+	for _, id := range ids {
+		key, err := model.ParseServiceID(id)
+		if err != nil {
+			return nil, invalid("One of the excluded services is not a valid service.")
+		}
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, key)
+		}
+	}
+	return out, nil
+}
+
 // scheduleFromInput validates a body (D1: tag names are used exactly, only the schedule name is trimmed).
-func scheduleFromInput(in OffHoursScheduleInput) (store.OffHoursSchedule, error) {
+func (s *Server) scheduleFromInput(ctx context.Context, in OffHoursScheduleInput) (store.OffHoursSchedule, error) {
 	name := strings.TrimSpace(in.Name)
 	week := offhours.WeekFromRows(in.Awake)
-	if _, err := offhours.Validate(name, in.TagKey, in.TagValue, in.Timezone, week); err != nil {
+	if _, err := offhours.Validate(name, in.Timezone, week); err != nil {
 		return store.OffHoursSchedule{}, invalid(err.Error())
 	}
-	return store.OffHoursSchedule{Name: name, Enabled: in.Enabled, TagKey: in.TagKey, TagValue: in.TagValue,
+	selectors, err := s.selectorsFromInput(ctx, in.Tags, false)
+	if err != nil {
+		return store.OffHoursSchedule{}, err
+	}
+	exclusions, err := exclusionsFromInput(in.ExcludedServiceIDs)
+	if err != nil {
+		return store.OffHoursSchedule{}, err
+	}
+	return store.OffHoursSchedule{Name: name, Enabled: in.Enabled, Selectors: selectors, Exclusions: exclusions,
 		Timezone: in.Timezone, Awake: week.String()}, nil
 }
 
-func scheduleAuditView(sc store.OffHoursSchedule) map[string]any {
-	return map[string]any{"name": sc.Name, "enabled": sc.Enabled, "tag": sc.TagKey + "=" + sc.TagValue,
+// scheduleAuditView is the audit snapshot of a schedule; tagNames resolves its Harbormaster tags.
+func scheduleAuditView(sc store.OffHoursSchedule, tagNames map[authz.TagID]string) map[string]any {
+	tags := make([]string, len(sc.Selectors))
+	for i, sel := range sc.Selectors {
+		if sel.Kind == store.OffHoursSelectorHarbormaster {
+			tags[i] = "Harbormaster tag " + tagNames[sel.TagID]
+		} else {
+			tags[i] = sel.Key + "=" + sel.Value
+		}
+	}
+	excluded := make([]string, len(sc.Exclusions))
+	for i, key := range sc.Exclusions {
+		excluded[i] = key.Cluster + "/" + key.Service
+	}
+	return map[string]any{"name": sc.Name, "enabled": sc.Enabled, "tags": tags, "excluded": excluded,
 		"timezone": sc.Timezone, "awake": sc.Awake, "version": sc.Version}
 }
 
-// checkScheduleFree runs the uniqueness and overlap rules for a schedule that would be saved as sc.
+// auditView renders sc for the audit log with the current Harbormaster tag names.
+func (s *Server) auditView(ctx context.Context, sc store.OffHoursSchedule) map[string]any {
+	names := map[authz.TagID]string{}
+	if tags, err := s.tagDTOs(ctx); err == nil {
+		for id, tag := range tags {
+			names[id] = tag.Name
+		}
+	}
+	return scheduleAuditView(sc, names)
+}
+
+// checkScheduleFree runs the name and overlap rules for a schedule that would be saved as sc. The overlap is computed
+// on the services left after the exclusions.
 func (s *Server) checkScheduleFree(b *offHoursBuilder, selfID int64, sc store.OffHoursSchedule) error {
-	if err := b.uniqueError(selfID, sc.Name, sc.TagKey, sc.TagValue); err != nil {
+	if err := b.uniqueError(selfID, sc.Name); err != nil {
 		return err
 	}
-	matched, err := s.Store.OffHoursMatches(b.ctx, sc.TagKey, sc.TagValue)
+	matched, err := s.Store.OffHoursMatches(b.ctx, sc.Selectors)
 	if err != nil {
 		return err
 	}
+	matched, _ = store.SplitExcluded(matched, sc.Exclusions)
 	overlaps, err := b.overlaps(selfID, matched)
 	if err != nil {
 		return err
@@ -132,7 +236,7 @@ func (s *Server) createOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
-	sc, err := scheduleFromInput(in)
+	sc, err := s.scheduleFromInput(r.Context(), in)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -148,7 +252,7 @@ func (s *Server) createOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 	actor, _ := auth.UserFrom(r.Context())
 	created, err := s.Store.CreateOffHoursSchedule(r.Context(), sc, actor.ID)
 	if errors.Is(err, store.ErrConflict) {
-		s.fail(w, offHoursConflict("A schedule with that name or tag already exists."))
+		s.fail(w, offHoursConflict("A schedule with that name already exists."))
 		return
 	}
 	if err != nil {
@@ -156,7 +260,7 @@ func (s *Server) createOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.auditAdmin(r, "offhours_schedule_create", "offhours:"+strconv.FormatInt(created.ID, 10),
-		"Created off-hours schedule "+strconv.Quote(created.Name)+".", map[string]any{"before": nil, "after": scheduleAuditView(created)})
+		"Created off-hours schedule "+strconv.Quote(created.Name)+".", map[string]any{"before": nil, "after": s.auditView(r.Context(), created)})
 	s.kickOffHours()
 	dto, err := s.offHoursScheduleDetail(r, created.ID)
 	if err != nil {
@@ -191,7 +295,7 @@ func (s *Server) updateOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, offHoursConflict(staleScheduleMessage))
 		return
 	}
-	sc, err := scheduleFromInput(in)
+	sc, err := s.scheduleFromInput(r.Context(), in)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -212,7 +316,7 @@ func (s *Server) updateOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 		if current, getErr := s.Store.GetOffHoursSchedule(ctx, id); getErr == nil && current.Version != before.Version {
 			s.fail(w, offHoursConflict(staleScheduleMessage))
 		} else {
-			s.fail(w, offHoursConflict("A schedule with that name or tag already exists."))
+			s.fail(w, offHoursConflict("A schedule with that name already exists."))
 		}
 		return
 	}
@@ -222,7 +326,7 @@ func (s *Server) updateOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 	}
 	s.auditAdmin(r, "offhours_schedule_update", "offhours:"+strconv.FormatInt(id, 10),
 		"Updated off-hours schedule "+strconv.Quote(updated.Name)+".",
-		map[string]any{"before": scheduleAuditView(before), "after": scheduleAuditView(updated)})
+		map[string]any{"before": s.auditView(ctx, before), "after": s.auditView(ctx, updated)})
 	s.kickOffHours()
 	dto, err := s.offHoursScheduleDetail(r, id)
 	if err != nil {
@@ -247,7 +351,7 @@ func (s *Server) deleteOffHoursSchedule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.auditAdmin(r, "offhours_schedule_delete", "offhours:"+strconv.FormatInt(id, 10),
-		"Deleted off-hours schedule "+strconv.Quote(before.Name)+".", map[string]any{"before": scheduleAuditView(before), "after": nil})
+		"Deleted off-hours schedule "+strconv.Quote(before.Name)+".", map[string]any{"before": s.auditView(r.Context(), before), "after": nil})
 	s.kickOffHours()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -271,15 +375,30 @@ func (s *Server) previewOffHours(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	week := offhours.WeekFromRows(req.Awake)
-	preview := OffHoursPreviewDTO{Services: []OffHoursServiceDTO{}, Overlaps: []OverlapDTO{}, AwakeHoursPerWeek: week.AwakeHours()}
-	if req.TagKey == "" {
-		writeJSON(w, http.StatusOK, preview)
-		return
-	}
-	matched, err := s.Store.OffHoursMatches(r.Context(), req.TagKey, req.TagValue)
+	preview := OffHoursPreviewDTO{Services: []OffHoursServiceDTO{}, Excluded: []OffHoursServiceDTO{}, Overlaps: []OverlapDTO{},
+		AwakeHoursPerWeek: week.AwakeHours()}
+	selectors, err := s.selectorsFromInput(r.Context(), req.Tags, true)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	exclusions, err := exclusionsFromInput(req.ExcludedServiceIDs)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if len(selectors) == 0 {
+		writeJSON(w, http.StatusOK, preview)
+		return
+	}
+	tagMatches, err := s.Store.OffHoursMatches(r.Context(), selectors)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	matched, removed := store.SplitExcluded(tagMatches, exclusions)
+	for _, m := range removed {
+		preview.Excluded = append(preview.Excluded, b.baseService(m, offHoursState{State: "not_managed", Reason: offHoursExcludedReason}, m.Desired))
 	}
 	for _, m := range matched {
 		var st offHoursState
@@ -339,7 +458,16 @@ func (s *Server) listOffHoursTags(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, OffHoursTagOptionDTO{Key: v.Key, Value: v.Value, Services: v.Services})
 	}
-	writeJSON(w, http.StatusOK, ItemsResponse[OffHoursTagOptionDTO]{Items: items})
+	counts, err := s.Store.OffHoursHarbormasterTags(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	harbormaster := make([]OffHoursHarbormasterTagDTO, 0, len(counts))
+	for _, tag := range counts {
+		harbormaster = append(harbormaster, OffHoursHarbormasterTagDTO{ID: int64(tag.ID), Name: tag.Name, Color: tag.Color, Services: tag.Services})
+	}
+	writeJSON(w, http.StatusOK, OffHoursTagsDTO{Items: items, Harbormaster: harbormaster})
 }
 
 func (s *Server) getServiceOffHours(w http.ResponseWriter, r *http.Request) {
@@ -366,11 +494,12 @@ func (s *Server) getServiceOffHours(w http.ResponseWriter, r *http.Request) {
 		if !candidate.Enabled {
 			continue
 		}
-		matched, err := s.Store.OffHoursMatches(ctx, candidate.TagKey, candidate.TagValue)
+		tagMatches, err := s.Store.OffHoursMatches(ctx, candidate.Selectors)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
+		matched, _ := store.SplitExcluded(tagMatches, candidate.Exclusions)
 		for _, m := range matched {
 			if m.Key == key {
 				matching = append(matching, candidate)

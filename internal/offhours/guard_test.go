@@ -48,7 +48,7 @@ func (h *guardHarness) enrol(t *testing.T, state string, registeredTarget bool, 
 		}
 	}
 	sc, err := h.store.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{
-		Name: "staging nights", Enabled: !h.disabled, TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: string(awake)}, user.ID)
+		Name: "staging nights", Enabled: !h.disabled, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}}, Timezone: "Europe/Berlin", Awake: string(awake)}, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

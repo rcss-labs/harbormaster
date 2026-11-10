@@ -176,10 +176,11 @@ func (r *Reconciler) members(ctx context.Context, schedules []store.OffHoursSche
 		if !sc.Enabled {
 			continue
 		}
-		matches, err := r.Store.OffHoursMatches(ctx, sc.TagKey, sc.TagValue)
+		matched, err := r.Store.OffHoursMatches(ctx, sc.Selectors)
 		if err != nil {
 			return nil, err
 		}
+		matches, _ := store.SplitExcluded(matched, sc.Exclusions)
 		for _, m := range matches {
 			if !enabledAccounts[m.Key.AccountID] {
 				continue

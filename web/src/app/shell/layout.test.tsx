@@ -194,7 +194,7 @@ describe('pinned services and clusters', () => {
     expect(link).toHaveAttribute('aria-label', 'core-services · Deploying · homelab-admin · 482109375512')
   })
 
-  it('uses a muted dot when the pinned item is not visible', async () => {
+  it('marks a pin as Unavailable once the list loads without it, and offers to remove it', async () => {
     localStorage.setItem(
       'harbormaster-pinned:sam',
       JSON.stringify([
@@ -207,8 +207,30 @@ describe('pinned services and clusters', () => {
     const service = await within(pinned).findByRole('link', { name: /edge-nginx/ })
     expect(service).toHaveAttribute('href', '/services/abc/overview')
     await waitFor(() => expect(service.querySelector('[data-kind]')).toHaveAttribute('data-kind', 'mute'))
-    expect(service).toHaveAttribute('aria-label', 'edge-nginx · Status unknown · edge-proxy')
+    await waitFor(() => expect(service).toHaveAttribute('aria-label', 'edge-nginx · Unavailable · edge-proxy · No longer exists or you no longer have access'))
     expect(within(pinned).getByRole('link', { name: /old-cluster/ }).querySelector('[data-kind]')).toHaveAttribute('data-kind', 'mute')
+  })
+
+  it('removes a missing pin from the sidebar and from storage with its remove button', async () => {
+    localStorage.setItem(
+      'harbormaster-pinned:sam',
+      JSON.stringify([
+        { id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' },
+        { kind: 'service', id: SERVICE_PAYMENTS.id, name: 'payments-api', cluster: 'core-services' },
+      ]),
+    )
+    renderApp('/')
+    const user = userEvent.setup()
+    const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
+    const remove = await within(pinned).findByRole('button', { name: 'Remove pin edge-nginx' })
+    expect(remove).toHaveAttribute('title', 'Remove from pinned')
+    expect(within(pinned).queryByRole('button', { name: 'Remove pin payments-api' })).not.toBeInTheDocument()
+    await user.click(remove)
+    expect(within(pinned).queryByRole('link', { name: /edge-nginx/ })).not.toBeInTheDocument()
+    expect(within(pinned).queryByRole('button', { name: /^Remove pin/ })).not.toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)).toEqual([
+      { kind: 'service', id: SERVICE_PAYMENTS.id, name: 'payments-api', cluster: 'core-services' },
+    ])
   })
 
   it('offers the empty hint when nothing is pinned', async () => {

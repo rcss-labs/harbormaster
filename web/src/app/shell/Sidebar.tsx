@@ -13,7 +13,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { LinkSSODialog } from './LinkSSODialog'
 import type { Pin } from './pins'
 import { usePins } from './pins'
-import { pinStatus } from './pinStatus'
+import { missingPinHint, pinStatus } from './pinStatus'
 import { useShellState } from './ShellState'
 import { useFilters } from './useFilters'
 import styles from './shell.module.css'
@@ -69,24 +69,35 @@ function NavItem({ to, label, icon, count, bad, badges = [], alsoActiveFor = [],
 interface PinnedItemProps {
   pin: Pin
   clusters: ClusterCardDTO[] | undefined
+  onRemove: () => void
 }
 
-/** Two lines: status mark and full name, then the cluster (service) or account (cluster). The mark follows the live status. */
-function PinnedItem({ pin, clusters }: PinnedItemProps) {
-  const { kind, text: statusText } = pinStatus(pin, clusters)
+/**
+ * Two lines: status mark and full name, then the cluster (service) or account (cluster). The mark follows the live status.
+ * A missing pin gets a remove button beside the link, since its page can no longer be opened to unpin it there.
+ */
+function PinnedItem({ pin, clusters, onRemove }: PinnedItemProps) {
+  const { kind, text: statusText, missing } = pinStatus(pin, clusters)
   const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
-  const description = `${pin.name} · ${statusText} · ${detail}`
+  const description = `${pin.name} · ${statusText} · ${detail}${missing ? ` · ${missingPinHint}` : ''}`
   const to = pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`
   return (
-    <NavLink to={to} title={description} aria-label={description}>
-      <span className={styles.pinTop}>
-        <span className={styles.pinMark} data-kind={kind} aria-hidden="true">
-          <StatusDot bare kind={kind} />
+    <div className={styles.pinItem}>
+      <NavLink to={to} title={description} aria-label={description}>
+        <span className={styles.pinTop}>
+          <span className={styles.pinMark} data-kind={kind} aria-hidden="true">
+            <StatusDot bare kind={kind} />
+          </span>
+          <span className={styles.pinName}>{pin.name}</span>
         </span>
-        <span className={styles.pinName}>{pin.name}</span>
-      </span>
-      <span className={styles.pinDetail}>{detail}</span>
-    </NavLink>
+        <span className={styles.pinDetail}>{detail}</span>
+      </NavLink>
+      {missing && (
+        <button type="button" className={styles.pinRemove} aria-label={`Remove pin ${pin.name}`} title="Remove from pinned" onClick={onRemove}>
+          ×
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -106,7 +117,7 @@ export function Sidebar() {
   const settings = useSettings()
   const authOptions = useAuthOptions()
   const poller = usePollerStatus()
-  const { pins } = usePins()
+  const { pins, remove } = usePins()
   // Unfiltered, so a pin outside the current scope filter still shows its status.
   const allClusters = useClusters()
   const [linking, setLinking] = useState(false)
@@ -169,7 +180,12 @@ export function Sidebar() {
         <div className={styles.navSection}>Pinned</div>
         {pins.length === 0 && <div className={styles.pinnedEmpty}>Pin a service or cluster from its page.</div>}
         {pins.map((pin) => (
-          <PinnedItem key={`${pin.kind}:${pin.id}`} pin={pin} clusters={allClusters.data?.items} />
+          <PinnedItem
+            key={`${pin.kind}:${pin.id}`}
+            pin={pin}
+            clusters={allClusters.data?.items}
+            onRemove={() => remove(pin.kind, pin.id)}
+          />
         ))}
       </nav>
       <div className={styles.sideFoot}>

@@ -31,7 +31,7 @@ func TestSupervisor_StartsOffHoursOnlyWhileLeading(t *testing.T) {
 		Raw: []byte(`{"Tags":[{"Key":"env","Value":"staging"}]}`), PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "always", Enabled: true, TagKey: "env", TagValue: "staging",
+	if _, err := st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "always", Enabled: true, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}},
 		Timezone: "UTC", Awake: strings.Repeat("1", 168)}, 0); err != nil {
 		t.Fatal(err)
 	}

@@ -89,5 +89,6 @@ export function usePins() {
       write(isPinned(pin.kind, pin.id) ? pinned.filter((p) => !(p.kind === pin.kind && p.id === pin.id)) : [...pinned, pin]),
     [pinned, isPinned, write],
   )
-  return { pins: pinned, isPinned, toggle }
+  const remove = useCallback((kind: PinKind, id: string) => write(pinned.filter((p) => !(p.kind === kind && p.id === id))), [pinned, write])
+  return { pins: pinned, isPinned, toggle, remove }
 }

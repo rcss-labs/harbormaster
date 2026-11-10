@@ -40,4 +40,53 @@ describe('MultiSelect', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('group', { name: 'Tag filter options' })).not.toBeInTheDocument()
   })
+
+  describe('searchable', () => {
+    const tagOptions = [
+      { value: 'hm:2', label: 'Staging', group: 'Harbormaster tags', hint: '4 services' },
+      { value: 'aws:env=prod', label: 'env=prod', group: 'AWS tags', keywords: 'production' },
+    ]
+    const renderSearchable = (props = {}) => {
+      const onChange = vi.fn()
+      render(<MultiSelect label="Tags" placeholder="Search" options={tagOptions} value={[]} onChange={onChange} searchable {...props} />)
+      return onChange
+    }
+
+    it('filters by label and keywords, under group headings', async () => {
+      renderSearchable()
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Tags' }))
+      expect(screen.getByText('Harbormaster tags')).toBeInTheDocument()
+      expect(screen.getByText('AWS tags')).toBeInTheDocument()
+      await user.type(screen.getByRole('searchbox', { name: 'Search Tags' }), 'production')
+      expect(screen.getByRole('checkbox', { name: 'env=prod' })).toBeInTheDocument()
+      expect(screen.queryByRole('checkbox', { name: /Staging/ })).not.toBeInTheDocument()
+      expect(screen.queryByText('Harbormaster tags')).not.toBeInTheDocument()
+    })
+
+    it('says so when nothing matches', async () => {
+      renderSearchable()
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Tags' }))
+      await user.type(screen.getByRole('searchbox', { name: 'Search Tags' }), 'zzz')
+      expect(screen.getByText('Nothing matches.')).toBeInTheDocument()
+    })
+
+    it('offers to add what was typed and reports its value', async () => {
+      const onChange = renderSearchable({ creatable: (q: string) => ({ value: `aws:${q}`, label: q }) })
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Tags' }))
+      await user.type(screen.getByRole('searchbox', { name: 'Search Tags' }), 'a=b')
+      await user.click(screen.getByRole('button', { name: 'Add a=b' }))
+      expect(onChange).toHaveBeenCalledWith(['aws:a=b'])
+    })
+
+    it('shows the selection as removable chips', async () => {
+      const onChange = renderSearchable({ chips: true, value: ['hm:2', 'aws:env=prod'] })
+      const user = userEvent.setup()
+      expect(screen.getByRole('button', { name: 'Tags' })).toHaveTextContent('Search')
+      await user.click(screen.getByRole('button', { name: 'Remove Staging' }))
+      expect(onChange).toHaveBeenCalledWith(['aws:env=prod'])
+    })
+  })
 })

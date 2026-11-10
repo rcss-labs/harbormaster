@@ -136,7 +136,7 @@ export function ScheduleServices({ services, timezone, now }: ScheduleServicesPr
         rowKey={(row) => row.service_id}
         minWidth={720}
         phoneSort
-        empty={<span className={styles.muted}>No services carry this tag.</span>}
+        empty={<span className={styles.muted}>No services match these tags.</span>}
       />
     </Panel>
   )

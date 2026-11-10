@@ -44,19 +44,16 @@ func TestParseWeekRoundTrip(t *testing.T) {
 func TestValidate(t *testing.T) {
 	valid := weekdaysWeek(monToFri, 7, 20)
 	cases := []struct {
-		name, tagKey, tagValue, tz string
-		w                          Week
-		wantErr                    string
+		name, tz string
+		w        Week
+		wantErr  string
 	}{
-		{"empty grid", "env", "dev", "UTC", Week{}, "Paint at least one awake hour. To stop a service for good, set its desired count to 0."},
-		{"local zone", "env", "dev", "Local", valid, "timezone"},
-		{"empty zone", "env", "dev", "", valid, "timezone"},
-		{"unknown zone", "env", "dev", "Mars/Phobos", valid, "timezone"},
-		{"aws tag key", "aws:foo", "dev", "UTC", valid, "aws:"},
-		{"empty tag key", "", "dev", "UTC", valid, "tag key"},
-		{"long tag value", "env", strings.Repeat("v", 257), "UTC", valid, "tag value"},
-		{"blank name", "env", "dev", "UTC", valid, "name"},
-		{"long name", "env", "dev", "UTC", valid, "name"},
+		{"empty grid", "UTC", Week{}, "Paint at least one awake hour. To stop a service for good, set its desired count to 0."},
+		{"local zone", "Local", valid, "timezone"},
+		{"empty zone", "", valid, "timezone"},
+		{"unknown zone", "Mars/Phobos", valid, "timezone"},
+		{"blank name", "UTC", valid, "name"},
+		{"long name", "UTC", valid, "name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,7 +64,7 @@ func TestValidate(t *testing.T) {
 			case "long name":
 				name = strings.Repeat("n", 81)
 			}
-			loc, err := Validate(name, tc.tagKey, tc.tagValue, tc.tz, tc.w)
+			loc, err := Validate(name, tc.tz, tc.w)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
 			}
@@ -77,7 +74,7 @@ func TestValidate(t *testing.T) {
 		})
 	}
 	t.Run("valid", func(t *testing.T) {
-		loc, err := Validate("nightly", "env", "dev", "Asia/Jerusalem", valid)
+		loc, err := Validate("nightly", "Asia/Jerusalem", valid)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,8 +82,24 @@ func TestValidate(t *testing.T) {
 			t.Fatalf("loc = %v", loc)
 		}
 	})
-	t.Run("empty tag value allowed", func(t *testing.T) {
-		if _, err := Validate("nightly", "env", "", "UTC", valid); err != nil {
+}
+
+func TestValidateAWSTag(t *testing.T) {
+	cases := []struct{ name, key, value, wantErr string }{
+		{"aws prefix", "aws:foo", "dev", "aws:"},
+		{"empty key", "", "dev", "tag key"},
+		{"long key", strings.Repeat("k", 129), "dev", "tag key"},
+		{"long value", "env", strings.Repeat("v", 257), "tag value"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateAWSTag(tc.key, tc.value); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+			}
+		})
+	}
+	t.Run("empty value allowed", func(t *testing.T) {
+		if err := ValidateAWSTag("env", ""); err != nil {
 			t.Fatal(err)
 		}
 	})

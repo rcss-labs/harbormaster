@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { installPhoneMedia } from '../../../test/phone'
 import { renderApp } from '../../../test/renderApp'
@@ -47,9 +48,22 @@ describe('OffHoursPage on a phone', () => {
     const name = await screen.findByLabelText('Name')
     const fields = name.closest('.fields')
     expect(fields).not.toBeNull()
-    for (const label of ['Name', 'Services tagged', 'Timezone']) expect(fields).toContainElement(screen.getByLabelText(label))
+    for (const label of ['Name', 'Services tagged', 'Exclude services', 'Timezone']) expect(fields).toContainElement(screen.getByLabelText(label))
     // The phone block of the stylesheet is the only place the single column is defined.
     const phoneBlock = css.slice(css.indexOf('@media (max-width: 700px)'))
     expect(phoneBlock).toMatch(/\.fields\s*{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
+  })
+
+  it('tag and exclude pickers work with chips, and their lists scroll rather than grow the page', async () => {
+    renderApp('/settings/offhours')
+    await userEvent.click(await screen.findByRole('button', { name: 'Services tagged' }))
+    const list = screen.getByRole('group', { name: 'Services tagged options' })
+    await userEvent.type(within(list).getByRole('searchbox', { name: 'Search Services tagged' }), 'prod')
+    await userEvent.click(within(list).getByRole('checkbox', { name: /^Prod/ }))
+    expect(screen.getByRole('button', { name: 'Remove Prod' })).toBeInTheDocument()
+    const multiSelectCss = readFileSync(resolve(process.cwd(), 'src/components/MultiSelect.module.css'), 'utf8')
+    expect(multiSelectCss).toMatch(/\.list\s*{[^}]*overflow-y:\s*auto/)
+    expect(multiSelectCss).toMatch(/\.popover\s*{[^}]*max-width:\s*calc\(100vw/)
+    expect(css).toMatch(/\.wide\s*{\s*grid-column:\s*1\s*\/\s*-1/)
   })
 })

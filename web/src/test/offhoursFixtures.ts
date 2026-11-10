@@ -4,9 +4,10 @@ import { http, HttpResponse } from 'msw'
 import type {
   OffHoursList,
   OffHoursPreview,
+  OffHoursSelector,
+  OffHoursTags,
   OffHoursSchedule,
   OffHoursService,
-  OffHoursTagOption,
   ServiceOffHours,
   WakeResponse,
 } from '../api/offhours'
@@ -94,8 +95,19 @@ export const OFFHOURS_NOT_MANAGED = service({
   monthly_always_on: null,
 })
 
-function schedule(fields: Partial<OffHoursSchedule> & Pick<OffHoursSchedule, 'id' | 'name' | 'tag_key' | 'tag_value'>): OffHoursSchedule {
+export const awsSelector = (key: string, value: string): OffHoursSelector => ({ kind: 'aws', key, value, tag_id: 0, name: '', color: '' })
+export const harbormasterSelector = (tagId: number, name: string, color: string): OffHoursSelector => ({
+  kind: 'harbormaster',
+  key: '',
+  value: '',
+  tag_id: tagId,
+  name,
+  color,
+})
+
+function schedule(fields: Partial<OffHoursSchedule> & Pick<OffHoursSchedule, 'id' | 'name' | 'tags'>): OffHoursSchedule {
   return {
+    excluded: [],
     enabled: true,
     timezone: 'Europe/Berlin',
     awake: WEEKDAY_GRID,
@@ -116,8 +128,7 @@ function schedule(fields: Partial<OffHoursSchedule> & Pick<OffHoursSchedule, 'id
 export const OFFHOURS_STAGING = schedule({
   id: 1,
   name: 'Staging nights and weekends',
-  tag_key: 'env',
-  tag_value: 'staging',
+  tags: [awsSelector('env', 'staging')],
   service_count: 4,
   asleep_count: 1,
   blocked_count: 1,
@@ -126,8 +137,7 @@ export const OFFHOURS_STAGING = schedule({
 export const OFFHOURS_PREVIEW_ENVS = schedule({
   id: 2,
   name: 'Preview environments',
-  tag_key: 'env',
-  tag_value: 'preview',
+  tags: [awsSelector('env', 'preview')],
   enabled: false,
   awake_hours_per_week: 45,
   monthly_saving: null,
@@ -144,8 +154,7 @@ export const OFFHOURS_STAGING_DETAIL: OffHoursSchedule = {
 export const OFFHOURS_UNPRICED_DETAIL: OffHoursSchedule = schedule({
   id: 3,
   name: 'Edge and staging',
-  tag_key: 'team',
-  tag_value: 'web',
+  tags: [awsSelector('team', 'web')],
   service_count: 2,
   unpriced_services: 1,
   services: [OFFHOURS_ASLEEP, OFFHOURS_UNPRICED],
@@ -163,6 +172,7 @@ export const OFFHOURS_LIST_EMPTY: OffHoursList = { items: [], monthly_saving_tot
 /** The editor preview for env=prod: it warns, and still lets the person save. */
 export const OFFHOURS_PREVIEW_PRODUCTION: OffHoursPreview = {
   services: [OFFHOURS_PRODUCTION],
+  excluded: [],
   overlaps: [{ schedule_id: 1, schedule_name: 'Staging nights and weekends', services: ['core-services/payments-api'] }],
   sleep_now: 0,
   monthly_saving: 33.5,
@@ -171,13 +181,18 @@ export const OFFHOURS_PREVIEW_PRODUCTION: OffHoursPreview = {
 
 export const OFFHOURS_PREVIEW_STAGING: OffHoursPreview = {
   services: [OFFHOURS_ASLEEP, OFFHOURS_WOKEN],
+  excluded: [],
   overlaps: [],
   sleep_now: 1,
   monthly_saving: 24.7,
   awake_hours_per_week: 65,
 }
 
-export const OFFHOURS_TAGS: { items: OffHoursTagOption[] } = {
+export const OFFHOURS_TAGS: OffHoursTags = {
+  harbormaster: [
+    { id: 2, name: 'Staging', color: 'amber', services: 4 },
+    { id: 3, name: 'Prod', color: 'red', services: 4 },
+  ],
   items: [
     { key: 'env', value: 'dev', services: 3 },
     { key: 'env', value: 'prod', services: 4 },
