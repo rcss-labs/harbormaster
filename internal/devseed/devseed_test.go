@@ -2,6 +2,7 @@ package devseed_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -374,10 +375,10 @@ func TestDevseed_OffHoursSchedules(t *testing.T) {
 	if !staging.Enabled {
 		t.Error("staging schedule is disabled with the demo flag on; want enabled")
 	}
-	if staging.TagKey != "env" || staging.TagValue != "staging" || staging.Timezone != "Asia/Jerusalem" || staging.Awake != awakeWeekdays(7, 20) {
+	if !reflect.DeepEqual(staging.Selectors, []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}}) || staging.Timezone != "Asia/Jerusalem" || staging.Awake != awakeWeekdays(7, 20) {
 		t.Errorf("staging = %+v; want env=staging, Asia/Jerusalem, weekdays 07-20", staging)
 	}
-	if preview.Enabled || preview.TagKey != "env" || preview.TagValue != "preview" || preview.Timezone != "Asia/Jerusalem" || preview.Awake != awakeWeekdays(9, 18) {
+	if preview.Enabled || !reflect.DeepEqual(preview.Selectors, []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "preview"}}) || preview.Timezone != "Asia/Jerusalem" || preview.Awake != awakeWeekdays(9, 18) {
 		t.Errorf("preview = %+v; want disabled, env=preview, Asia/Jerusalem, weekdays 09-18", preview)
 	}
 
@@ -392,7 +393,7 @@ func TestDevseed_OffHoursSchedules(t *testing.T) {
 			t.Fatalf("poll %v: %v", target, err)
 		}
 	}
-	matches, err := st.OffHoursMatches(ctx, "env", "staging")
+	matches, err := st.OffHoursMatches(ctx, []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}})
 	if err != nil || len(matches) == 0 {
 		t.Fatalf("staging matches = %d, %v; want the staging-web services", len(matches), err)
 	}
@@ -401,7 +402,7 @@ func TestDevseed_OffHoursSchedules(t *testing.T) {
 			t.Errorf("staging matched %s in cluster %s; want only staging-web", m.Key.Service, m.Key.Cluster)
 		}
 	}
-	if previewMatches, err := st.OffHoursMatches(ctx, "env", "preview"); err != nil || len(previewMatches) != 0 {
+	if previewMatches, err := st.OffHoursMatches(ctx, []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "preview"}}); err != nil || len(previewMatches) != 0 {
 		t.Errorf("preview matches = %d, %v; want none", len(previewMatches), err)
 	}
 

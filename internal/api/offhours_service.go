@@ -22,6 +22,7 @@ import (
 const (
 	offHoursZeroCapacityReason = "Not managed: already at 0 tasks."
 	offHoursScheduleOffReason  = "Not managed: the schedule is turned off."
+	offHoursExcludedReason     = "Excluded from this schedule."
 	hoursPerWeek               = 168
 	maxOverlapNames            = 10
 )
@@ -214,10 +215,11 @@ func (b *offHoursBuilder) matchesOf(sc store.OffHoursSchedule) ([]store.OffHours
 	if matched, ok := b.matches[sc.ID]; ok {
 		return matched, nil
 	}
-	matched, err := b.s.Store.OffHoursMatches(b.ctx, sc.TagKey, sc.TagValue)
+	tagMatches, err := b.s.Store.OffHoursMatches(b.ctx, sc.Selectors)
 	if err != nil {
 		return nil, err
 	}
+	matched, _ := store.SplitExcluded(tagMatches, sc.Exclusions)
 	b.matches[sc.ID] = matched
 	return matched, nil
 }
@@ -356,6 +358,30 @@ func totalSaving(services []OffHoursServiceDTO, awakeHours int) (saving *float64
 	return &sum, unpriced
 }
 
+// selectorDTOs lists the tags of sc with the name and colour of its Harbormaster tags.
+func (b *offHoursBuilder) selectorDTOs(sc store.OffHoursSchedule) []OffHoursSelectorDTO {
+	out := make([]OffHoursSelectorDTO, 0, len(sc.Selectors))
+	for _, sel := range sc.Selectors {
+		dto := OffHoursSelectorDTO{Kind: sel.Kind, Key: sel.Key, Value: sel.Value, TagID: int64(sel.TagID)}
+		if sel.Kind == store.OffHoursSelectorHarbormaster {
+			tag := b.tags[sel.TagID]
+			dto.Name, dto.Color = tag.Name, tag.Color
+		}
+		out = append(out, dto)
+	}
+	return out
+}
+
+// excludedDTOs lists the excluded services of sc from their stored keys, so a service that is gone still shows.
+func (b *offHoursBuilder) excludedDTOs(sc store.OffHoursSchedule) []OffHoursExcludedDTO {
+	out := make([]OffHoursExcludedDTO, 0, len(sc.Exclusions))
+	for _, key := range sc.Exclusions {
+		out = append(out, OffHoursExcludedDTO{ServiceID: key.ID(), Service: key.Service, Cluster: key.Cluster,
+			Region: key.Region, AccountName: b.accountName(key.AccountID)})
+	}
+	return out
+}
+
 // scheduleDTO builds a schedule view; withServices adds the rows (detail) instead of an empty array (list).
 func (b *offHoursBuilder) scheduleDTO(sc store.OffHoursSchedule, withServices bool) (OffHoursScheduleDTO, error) {
 	week, err := offhours.ParseWeek(sc.Awake)
@@ -367,7 +393,7 @@ func (b *offHoursBuilder) scheduleDTO(sc store.OffHoursSchedule, withServices bo
 		return OffHoursScheduleDTO{}, err
 	}
 	dto := OffHoursScheduleDTO{
-		ID: sc.ID, Name: sc.Name, Enabled: sc.Enabled, TagKey: sc.TagKey, TagValue: sc.TagValue, Timezone: sc.Timezone,
+		ID: sc.ID, Name: sc.Name, Enabled: sc.Enabled, Tags: b.selectorDTOs(sc), Excluded: b.excludedDTOs(sc), Timezone: sc.Timezone,
 		Awake: week.Rows(), AwakeHoursPerWeek: week.AwakeHours(), ServiceCount: len(services),
 		Version: sc.Version, UpdatedAt: sc.UpdatedAt, Services: []OffHoursServiceDTO{},
 	}
@@ -453,14 +479,11 @@ func overlapError(overlaps []overlap) error {
 		first.Schedule.Name, len(first.Keys), overlapNames(first.Keys)))
 }
 
-// uniqueError is the 409 for a name or selector another schedule already uses, or nil.
-func (b *offHoursBuilder) uniqueError(selfID int64, name, tagKey, tagValue string) error {
+// uniqueError is the 409 for a name another schedule already uses, or nil.
+func (b *offHoursBuilder) uniqueError(selfID int64, name string) error {
 	for _, other := range b.schedules {
 		if other.ID == selfID {
 			continue
-		}
-		if other.TagKey == tagKey && other.TagValue == tagValue {
-			return offHoursConflict(fmt.Sprintf("A schedule for %s=%s already exists: %q.", tagKey, tagValue, other.Name))
 		}
 		if other.Name == name {
 			return offHoursConflict(fmt.Sprintf("A schedule called %q already exists.", name))

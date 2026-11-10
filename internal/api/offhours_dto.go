@@ -6,11 +6,55 @@ import "time"
 type OffHoursScheduleInput struct {
 	Name     string      `json:"name"`
 	Enabled  bool        `json:"enabled"`
-	TagKey   string      `json:"tag_key"`
-	TagValue string      `json:"tag_value"`
 	Timezone string      `json:"timezone"`
 	Awake    [7][24]bool `json:"awake"`
 	Version  *int        `json:"version,omitempty"`
+	// Tags select services (a service with any of them is selected); ExcludedServiceIDs never match.
+	Tags               []OffHoursSelectorInput `json:"tags"`
+	ExcludedServiceIDs []string                `json:"excluded_service_ids"`
+}
+
+// OffHoursSelectorInput is one tag in a request: kind "aws" uses Key and Value, kind "harbormaster" uses TagID.
+type OffHoursSelectorInput struct {
+	Kind  string `json:"kind"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	TagID int64  `json:"tag_id"`
+}
+
+// OffHoursSelectorDTO is a tag of a schedule. Every field is always present: TagID is 0 and Name and Color are ""
+// for an AWS tag; Key and Value are "" for a Harbormaster tag.
+type OffHoursSelectorDTO struct {
+	Kind  string `json:"kind"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	TagID int64  `json:"tag_id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// OffHoursExcludedDTO is a service a schedule never selects. It is derived from the stored key, so it is present
+// even when the service no longer exists.
+type OffHoursExcludedDTO struct {
+	ServiceID   string `json:"service_id"`
+	Service     string `json:"service"`
+	Cluster     string `json:"cluster"`
+	Region      string `json:"region"`
+	AccountName string `json:"account_name"`
+}
+
+// OffHoursTagsDTO is GET /api/offhours/tags: the AWS tags seen on active services and the Harbormaster tags.
+type OffHoursTagsDTO struct {
+	Items        []OffHoursTagOptionDTO       `json:"items"`
+	Harbormaster []OffHoursHarbormasterTagDTO `json:"harbormaster"`
+}
+
+// OffHoursHarbormasterTagDTO is a Harbormaster tag with the number of active services whose effective tag it is.
+type OffHoursHarbormasterTagDTO struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Color    string `json:"color"`
+	Services int    `json:"services"`
 }
 
 // OffHoursPreviewRequest is the body of POST /api/offhours/preview. ScheduleID names the schedule being edited, so
@@ -30,23 +74,23 @@ type OffHoursListDTO struct {
 
 // OffHoursScheduleDTO is a schedule. The list carries counts and an empty services array; the detail carries the rows.
 type OffHoursScheduleDTO struct {
-	ID                int64                `json:"id"`
-	Name              string               `json:"name"`
-	Enabled           bool                 `json:"enabled"`
-	TagKey            string               `json:"tag_key"`
-	TagValue          string               `json:"tag_value"`
-	Timezone          string               `json:"timezone"`
-	Awake             [7][24]bool          `json:"awake"`
-	AwakeHoursPerWeek int                  `json:"awake_hours_per_week"`
-	MonthlySaving     *float64             `json:"monthly_saving"`
-	UnpricedServices  int                  `json:"unpriced_services"`
-	ServiceCount      int                  `json:"service_count"`
-	AsleepCount       int                  `json:"asleep_count"`
-	BlockedCount      int                  `json:"blocked_count"`
-	Version           int                  `json:"version"`
-	UpdatedAt         time.Time            `json:"updated_at"`
-	UpdatedBy         string               `json:"updated_by"`
-	Services          []OffHoursServiceDTO `json:"services"`
+	ID                int64                 `json:"id"`
+	Name              string                `json:"name"`
+	Enabled           bool                  `json:"enabled"`
+	Tags              []OffHoursSelectorDTO `json:"tags"`
+	Excluded          []OffHoursExcludedDTO `json:"excluded"`
+	Timezone          string                `json:"timezone"`
+	Awake             [7][24]bool           `json:"awake"`
+	AwakeHoursPerWeek int                   `json:"awake_hours_per_week"`
+	MonthlySaving     *float64              `json:"monthly_saving"`
+	UnpricedServices  int                   `json:"unpriced_services"`
+	ServiceCount      int                   `json:"service_count"`
+	AsleepCount       int                   `json:"asleep_count"`
+	BlockedCount      int                   `json:"blocked_count"`
+	Version           int                   `json:"version"`
+	UpdatedAt         time.Time             `json:"updated_at"`
+	UpdatedBy         string                `json:"updated_by"`
+	Services          []OffHoursServiceDTO  `json:"services"`
 }
 
 // OffHoursServiceDTO is one service a schedule matches. State is asleep, awake, woken, blocked, pending,
@@ -70,7 +114,9 @@ type OffHoursServiceDTO struct {
 
 // OffHoursPreviewDTO is the editor preview: nothing is written.
 type OffHoursPreviewDTO struct {
-	Services          []OffHoursServiceDTO `json:"services"`
+	Services []OffHoursServiceDTO `json:"services"`
+	// Excluded are the services the tags match that the exclusions remove, in the same shape as Services.
+	Excluded          []OffHoursServiceDTO `json:"excluded"`
 	Overlaps          []OverlapDTO         `json:"overlaps"`
 	SleepNow          int                  `json:"sleep_now"`
 	MonthlySaving     *float64             `json:"monthly_saving"`

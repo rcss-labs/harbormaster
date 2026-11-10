@@ -19,7 +19,7 @@ func enrolPaymentsAsleep(t *testing.T, st *store.Store) {
 		t.Fatal(err)
 	}
 	sc, err := st.CreateOffHoursSchedule(t.Context(), store.OffHoursSchedule{
-		Name: "never awake", Enabled: true, TagKey: "env", TagValue: "prod", Timezone: "UTC", Awake: strings.Repeat("0", 168)}, user.ID)
+		Name: "never awake", Enabled: true, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "prod"}}, Timezone: "UTC", Awake: strings.Repeat("0", 168)}, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

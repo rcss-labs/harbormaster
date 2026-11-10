@@ -64,6 +64,18 @@ describe('MorePage', () => {
     expect((await section('Signed in')).getByText(/Signed in as/)).toHaveTextContent('Signed in as omer · User')
   })
 
+  it('removes a pin whose service is gone from the More page', async () => {
+    localStorage.setItem('harbormaster-pinned:sam', JSON.stringify([{ id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' }]))
+    renderApp('/more')
+    const user = userEvent.setup()
+    const pinned = await section('Pinned')
+    const remove = await pinned.findByRole('button', { name: 'Remove pin edge-nginx' })
+    await waitFor(() => expect(pinned.getByRole('link', { name: /edge-nginx/ })).toHaveAttribute('aria-label', expect.stringContaining('Unavailable')))
+    await user.click(remove)
+    expect(pinned.queryByRole('link', { name: /edge-nginx/ })).not.toBeInTheDocument()
+    expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)).toEqual([])
+  })
+
   it('Change password only with has_password', async () => {
     renderApp('/more')
     expect((await section('Account')).getByRole('link', { name: 'Change password' })).toHaveAttribute('href', '/password')

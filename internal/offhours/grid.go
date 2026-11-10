@@ -76,19 +76,24 @@ func (w Week) Rows() [7][24]bool {
 	return rows
 }
 
-// Validate checks a schedule's user-supplied fields and returns its location.
-func Validate(name, tagKey, tagValue, timezone string, w Week) (*time.Location, error) {
-	if n := utf8.RuneCountInString(strings.TrimSpace(name)); n < 1 || n > 80 {
-		return nil, errors.New("The schedule name must be 1 to 80 characters.")
-	}
+// ValidateAWSTag checks an AWS tag key/value a schedule selects by. An empty value is allowed.
+func ValidateAWSTag(tagKey, tagValue string) error {
 	if n := utf8.RuneCountInString(tagKey); n < 1 || n > 128 {
-		return nil, errors.New("The tag key must be 1 to 128 characters.")
+		return errors.New("The tag key must be 1 to 128 characters.")
 	}
 	if strings.HasPrefix(tagKey, "aws:") {
-		return nil, errors.New("The tag key must not start with aws: because AWS reserves that prefix.")
+		return errors.New("The tag key must not start with aws: because AWS reserves that prefix.")
 	}
 	if utf8.RuneCountInString(tagValue) > 256 {
-		return nil, errors.New("The tag value must be at most 256 characters.")
+		return errors.New("The tag value must be at most 256 characters.")
+	}
+	return nil
+}
+
+// Validate checks a schedule's name, timezone and grid and returns its location.
+func Validate(name, timezone string, w Week) (*time.Location, error) {
+	if n := utf8.RuneCountInString(strings.TrimSpace(name)); n < 1 || n > 80 {
+		return nil, errors.New("The schedule name must be 1 to 80 characters.")
 	}
 	if timezone == "" || timezone == "Local" {
 		return nil, errors.New("Pick an IANA timezone such as Europe/Berlin.")

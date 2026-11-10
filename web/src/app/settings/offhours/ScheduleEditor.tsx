@@ -1,17 +1,27 @@
-import { useId, useMemo } from 'react'
-import type { AwakeGrid, OffHoursOverlap, OffHoursPreview, OffHoursTagOption } from '../../../api/offhours'
+import { useMemo } from 'react'
+import type {
+  AwakeGrid,
+  OffHoursExcludedService,
+  OffHoursOverlap,
+  OffHoursPreview,
+  OffHoursSelector,
+  OffHoursSelectorInput,
+  OffHoursTags,
+} from '../../../api/offhours'
 import { Banner } from '../../../components/Banner'
+import { MultiSelect, type MultiSelectOption } from '../../../components/MultiSelect'
 import { Panel } from '../../../components/Panel'
 import { Pill } from '../../../components/Pill'
-import { PRESETS, presetGrid, stateKind, stateLabel } from './offhours'
+import { PRESETS, parseAddableAwsTag, presetGrid, selectorFromKey, selectorKey, stateKind, stateLabel } from './offhours'
 import { WeekGrid } from './WeekGrid'
 import styles from './offhours.module.css'
 
-/** What the form edits; the tag is typed as `key=value`. */
+/** What the form edits. */
 export interface ScheduleDraft {
   name: string
   enabled: boolean
-  tag: string
+  tags: OffHoursSelectorInput[]
+  excluded: string[]
   timezone: string
   awake: AwakeGrid
 }
@@ -20,7 +30,11 @@ interface ScheduleEditorProps {
   draft: ScheduleDraft
   onChange: (patch: Partial<ScheduleDraft>) => void
   isNew: boolean
-  tags: OffHoursTagOption[]
+  /** The tags that can be picked; undefined while loading. */
+  tagOptions: OffHoursTags | undefined
+  /** The saved schedule's tags and exclusions: names for choices the lists no longer offer. */
+  savedTags: OffHoursSelector[]
+  savedExcluded: OffHoursExcludedService[]
   /** The preview of the current edits; null before the first answer. */
   preview: OffHoursPreview | null
   previewError: string | null
@@ -64,7 +78,9 @@ function Preview({ preview, error, now, timezone }: { preview: OffHoursPreview |
   return (
     <div className={styles.preview} data-preview="">
       <h3 className={styles.previewTitle}>
-        {`Before you save: ${preview.services.length} ${plural(preview.services.length, 'service matches', 'services match')} this tag`}
+        {`Before you save: ${preview.services.length} ${plural(preview.services.length, 'service matches', 'services match')} these tags${
+          preview.excluded.length > 0 ? ` (${preview.excluded.length} excluded)` : ''
+        }`}
       </h3>
       {preview.services.length > 0 && (
         <ul className={styles.matched}>
@@ -102,11 +118,70 @@ function Preview({ preview, error, now, timezone }: { preview: OffHoursPreview |
   )
 }
 
+const sectionAws = 'AWS tags'
+const sectionHarbormaster = 'Harbormaster tags'
+
+/** The pickable tags, plus any selected tag the lists no longer offer (so its chip still has a name). */
+function tagChoices(tagOptions: OffHoursTags | undefined, selected: OffHoursSelectorInput[], saved: OffHoursSelector[]): MultiSelectOption[] {
+  const count = (n: number) => `${n} ${plural(n, 'service', 'services')}`
+  const options: MultiSelectOption[] = [
+    ...(tagOptions?.harbormaster ?? []).map((tag) => ({
+      value: selectorKey({ kind: 'harbormaster', tag_id: tag.id }),
+      label: tag.name,
+      swatch: tag.color,
+      hint: count(tag.services),
+      group: sectionHarbormaster,
+    })),
+    ...(tagOptions?.items ?? []).map((tag) => ({
+      value: selectorKey({ kind: 'aws', key: tag.key, value: tag.value }),
+      label: `${tag.key}=${tag.value}`,
+      hint: count(tag.services),
+      group: sectionAws,
+    })),
+  ]
+  for (const tag of selected) {
+    const value = selectorKey(tag)
+    if (options.some((option) => option.value === value)) continue
+    if (tag.kind === 'aws') {
+      options.push({ value, label: `${tag.key}=${tag.value}`, group: sectionAws })
+    } else {
+      const known = saved.find((s) => s.kind === 'harbormaster' && s.tag_id === tag.tag_id)
+      options.push({ value, label: known?.name ?? `Tag ${tag.tag_id}`, swatch: known?.color, group: sectionHarbormaster })
+    }
+  }
+  return options
+}
+
+/** The services the tags match (kept and excluded), plus excluded ids the tags no longer match. */
+function excludeChoices(preview: OffHoursPreview | null, excluded: string[], saved: OffHoursExcludedService[]): MultiSelectOption[] {
+  const known = preview ? [...preview.services, ...preview.excluded] : []
+  const options: MultiSelectOption[] = known.map((service) => ({
+    value: service.service_id,
+    label: `${service.cluster}/${service.service}`,
+    hint: `${service.account_name} · ${service.region}`,
+    keywords: `${service.service} ${service.cluster} ${service.account_name} ${service.region}`,
+  }))
+  for (const id of excluded) {
+    if (known.some((service) => service.service_id === id)) continue
+    const old = saved.find((service) => service.service_id === id)
+    options.push({
+      value: id,
+      label: old ? `${old.cluster}/${old.service}` : id,
+      // Without a preview answer yet, nothing can be said about whether the tags still match it.
+      hint: preview ? 'no longer matched' : old ? `${old.account_name} · ${old.region}` : undefined,
+      keywords: old ? `${old.service} ${old.cluster} ${old.account_name} ${old.region}` : id,
+    })
+  }
+  return options
+}
+
 export function ScheduleEditor({
   draft,
   onChange,
   isNew,
-  tags,
+  tagOptions,
+  savedTags,
+  savedExcluded,
   preview,
   previewError,
   now,
@@ -117,7 +192,8 @@ export function ScheduleEditor({
   onDiscard,
   onDelete,
 }: ScheduleEditorProps) {
-  const tagListId = useId()
+  const tagPickerOptions = useMemo(() => tagChoices(tagOptions, draft.tags, savedTags), [tagOptions, draft.tags, savedTags])
+  const excludeOptions = useMemo(() => excludeChoices(preview, draft.excluded, savedExcluded), [preview, draft.excluded, savedExcluded])
   const zones = useMemo(() => (supportedZones().includes(draft.timezone) ? supportedZones() : [draft.timezone, ...supportedZones()]), [draft.timezone])
   return (
     <Panel
@@ -136,26 +212,6 @@ export function ScheduleEditor({
             <input className={styles.ctl} value={draft.name} onChange={(event) => onChange({ name: event.target.value })} />
           </label>
           <label className={styles.field}>
-            <span>Services tagged</span>
-            <input
-              className={styles.ctl}
-              list={tagListId}
-              role="combobox"
-              placeholder="key=value"
-              autoComplete="off"
-              spellCheck={false}
-              value={draft.tag}
-              onChange={(event) => onChange({ tag: event.target.value })}
-            />
-          </label>
-          <datalist id={tagListId}>
-            {tags.map((option) => (
-              <option key={`${option.key}=${option.value}`} value={`${option.key}=${option.value}`}>
-                {`${option.services} ${plural(option.services, 'service', 'services')}`}
-              </option>
-            ))}
-          </datalist>
-          <label className={styles.field}>
             <span>Timezone</span>
             <select className={styles.ctl} value={draft.timezone} onChange={(event) => onChange({ timezone: event.target.value })}>
               {zones.map((zone) => (
@@ -165,6 +221,44 @@ export function ScheduleEditor({
               ))}
             </select>
           </label>
+          <div className={`${styles.field} ${styles.wide}`}>
+            <span>Services tagged</span>
+            <MultiSelect
+              label="Services tagged"
+              placeholder="Search tags"
+              options={tagPickerOptions}
+              value={draft.tags.map(selectorKey)}
+              searchable
+              chips
+              creatable={(query) => {
+                const parsed = parseAddableAwsTag(query)
+                return parsed ? { value: selectorKey({ kind: 'aws', ...parsed }), label: `${parsed.key}=${parsed.value}`, group: 'AWS tags' } : null
+              }}
+              onChange={(values) =>
+                onChange({
+                  tags: values.flatMap((value) => {
+                    const kept = draft.tags.find((tag) => selectorKey(tag) === value)
+                    const parsed = kept ?? selectorFromKey(value)
+                    return parsed ? [parsed] : []
+                  }),
+                })
+              }
+            />
+            <span className={`${styles.muted} ${styles.small}`}>Services with any of these tags.</span>
+          </div>
+          <div className={`${styles.field} ${styles.wide}`}>
+            <span>Exclude services</span>
+            <MultiSelect
+              label="Exclude services"
+              placeholder="Search services to leave out"
+              options={excludeOptions}
+              value={draft.excluded}
+              searchable
+              chips
+              onChange={(excluded) => onChange({ excluded })}
+            />
+            <span className={`${styles.muted} ${styles.small}`}>These services are left alone even when a tag above matches them.</span>
+          </div>
         </div>
         <div className={styles.noteRow}>
           <span className={`${styles.muted} ${styles.small} ${styles.note}`}>

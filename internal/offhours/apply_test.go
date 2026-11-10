@@ -69,7 +69,7 @@ func newApplierHarness(t *testing.T) *applierHarness {
 		}
 	}
 	h.schedule, err = st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{
-		Name: "staging nights", Enabled: true, TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: string(awake)}, user.ID)
+		Name: "staging nights", Enabled: true, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}}, Timezone: "Europe/Berlin", Awake: string(awake)}, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

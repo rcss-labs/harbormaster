@@ -104,8 +104,18 @@ func weekdayGrid() [7][24]bool {
 	return grid
 }
 
+func awsTagBody(key, value string) map[string]any {
+	return map[string]any{"kind": "aws", "key": key, "value": value}
+}
+
+func hmTagBody(id int64) map[string]any { return map[string]any{"kind": "harbormaster", "tag_id": id} }
+
 func scheduleBody(name, tagKey, tagValue string) map[string]any {
-	return map[string]any{"name": name, "enabled": true, "tag_key": tagKey, "tag_value": tagValue,
+	return scheduleBodyWithTags(name, awsTagBody(tagKey, tagValue))
+}
+
+func scheduleBodyWithTags(name string, tags ...map[string]any) map[string]any {
+	return map[string]any{"name": name, "enabled": true, "tags": tags, "excluded_service_ids": []string{},
 		"timezone": "Europe/Berlin", "awake": weekdayGrid()}
 }
 
@@ -222,12 +232,20 @@ func TestOffHoursSchedules_OverlapListsServices(t *testing.T) {
 		t.Errorf("overlap = %s %q", code, msg)
 	}
 
+	// The same tag on another schedule is fine in itself; the services it selects are what must not overlap.
 	resp = c.post("/api/offhours/schedules", scheduleBody("again", "env", "staging"))
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("identical selector = %d, want 409", resp.StatusCode)
 	}
-	if _, msg := errorCode(t, resp); msg != `A schedule for env=staging already exists: "staging nights".` {
-		t.Errorf("identical selector message = %q", msg)
+	if _, msg := errorCode(t, resp); !strings.HasPrefix(msg, `Schedule "staging nights" already matches `) {
+		t.Errorf("identical selector message = %q, want the overlap sentence", msg)
+	}
+	resp = c.post("/api/offhours/schedules", scheduleBody("staging nights", "env", "nothing-has-this"))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate name = %d, want 409", resp.StatusCode)
+	}
+	if _, msg := errorCode(t, resp); msg != `A schedule called "staging nights" already exists.` {
+		t.Errorf("duplicate name message = %q", msg)
 	}
 }
 
@@ -407,7 +425,7 @@ func (e *offHoursEnv) enrolStagingWeb(t *testing.T, state, blockedReason string)
 	t.Helper()
 	ctx := context.Background()
 	sc, err := e.st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "staging nights", Enabled: true,
-		TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: offhours.WeekFromRows(weekdayGrid()).String()}, 0)
+		Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}}, Timezone: "Europe/Berlin", Awake: offhours.WeekFromRows(weekdayGrid()).String()}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
