@@ -101,11 +101,18 @@ export async function desiredTasks(request: APIRequestContext, id: string) {
   return (await (await request.get(`/api/services/${id}`)).json()).desired as number
 }
 
-/** Opens the new-schedule editor and fills name, tag and UTC. Leaves the grid empty. */
+/** Opens the new-schedule editor and fills name, one AWS tag (`key=value`) and UTC. Leaves the grid empty. */
 export async function startSchedule(page: Page, name: string, tag: string) {
   await page.goto('/settings/offhours')
   await page.getByRole('button', { name: 'Add schedule' }).first().click()
   await page.getByLabel('Name', { exact: true }).fill(name)
-  await page.getByLabel('Services tagged').fill(tag)
+  await page.getByRole('button', { name: 'Services tagged', exact: true }).click()
+  const options = page.getByRole('group', { name: 'Services tagged options' })
+  await options.getByRole('searchbox', { name: 'Search Services tagged' }).fill(tag)
+  // The tag is ticked from the list when a service carries it, else added as typed.
+  const listed = options.getByRole('checkbox', { name: new RegExp(`^${tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`) })
+  const add = options.getByRole('button', { name: `Add ${tag}` })
+  await listed.or(add).first().click()
+  await page.keyboard.press('Escape')
   await page.getByLabel('Timezone').selectOption('UTC')
 }
