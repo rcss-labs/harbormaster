@@ -11,10 +11,12 @@ import {
   OFFHOURS_PREVIEW_PRODUCTION,
   OFFHOURS_PREVIEW_STAGING,
   OFFHOURS_STAGING,
+  OFFHOURS_WOKEN,
   OFFHOURS_STAGING_DETAIL,
   OFFHOURS_UNPRICED_DETAIL,
   WAKE_RESPONSE,
 } from '../../../test/offhoursFixtures'
+import { awsSelector, harbormasterSelector } from '../../../test/offhoursFixtures'
 import { renderApp } from '../../../test/renderApp'
 
 beforeEach(() => {
@@ -33,6 +35,18 @@ const rowOf = async (service: string) => {
     .find((candidate) => within(candidate).queryByText(service, { exact: true }))
   if (!row) throw new Error(`no row for ${service}`)
   return row
+}
+const openPicker = async (name: string) => {
+  // The list stays open while options are ticked, so a second call must not toggle it shut.
+  const open = screen.queryByRole('group', { name: `${name} options` })
+  if (open) return open
+  await userEvent.click(await screen.findByRole('button', { name }))
+  return screen.findByRole('group', { name: `${name} options` })
+}
+/** Opens Services tagged and ticks the option whose name matches. */
+const pickTag = async (option: RegExp) => {
+  const group = await openPicker('Services tagged')
+  await userEvent.click(await within(group).findByRole('checkbox', { name: option }))
 }
 const servePreview = (preview: OffHoursPreview | ((body: OffHoursPreviewRequest) => OffHoursPreview)) =>
   server.use(
@@ -90,7 +104,7 @@ describe('OffHoursPage', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Weekdays 08–18' }))
     expect(within(kpis).getByText('Awake a week on this schedule (of 168)').parentElement).toHaveTextContent('50 h')
     await waitFor(() => expect(within(kpis).getByText('Saving a month on this schedule').parentElement).toHaveTextContent('$40'), SLOW)
-    expect(bodies.at(-1)).toMatchObject({ schedule_id: 1, tag_key: 'env', tag_value: 'staging', timezone: 'Europe/Berlin' })
+    expect(bodies.at(-1)).toMatchObject({ schedule_id: 1, tags: [{ kind: 'aws', key: 'env', value: 'staging' }], excluded_service_ids: [], timezone: 'Europe/Berlin' })
     expect(await screen.findByRole('button', { name: 'Mon 8:00 awake' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Mon 7:00 asleep' })).toBeInTheDocument()
   })
@@ -116,7 +130,7 @@ describe('OffHoursPage', () => {
     expect(save).toBeEnabled()
     await userEvent.click(save)
     await waitFor(() => expect(puts).toHaveLength(1))
-    expect(puts[0]).toMatchObject({ name: 'Staging nights and weekends', version: 1, tag_key: 'env', tag_value: 'staging', enabled: true })
+    expect(puts[0]).toMatchObject({ name: 'Staging nights and weekends', version: 1, tags: [{ kind: 'aws', key: 'env', value: 'staging' }], excluded_service_ids: [], enabled: true })
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   })
 
@@ -173,11 +187,11 @@ describe('OffHoursPage', () => {
     await waitFor(() => expect(within(kpis).getByText('Estimated saving a month, all schedules').parentElement).toHaveTextContent('$25'))
   })
 
-  it('drops the preview when the tag stops being a valid key=value', async () => {
+  it('drops the preview when the last tag is removed', async () => {
     servePreview({ ...OFFHOURS_PREVIEW_STAGING, sleep_now: 3 })
     renderApp('/settings/offhours')
     expect(await screen.findByText('3 services will go to sleep when you save.', undefined, SLOW)).toBeInTheDocument()
-    await userEvent.clear(screen.getByLabelText('Services tagged'))
+    await userEvent.click(screen.getByRole('button', { name: 'Remove env=staging' }))
     await waitFor(() => expect(screen.queryByText('3 services will go to sleep when you save.')).not.toBeInTheDocument())
   })
 
@@ -295,7 +309,7 @@ describe('OffHoursPage', () => {
   it('shows the empty state when no service carries the tag', async () => {
     serveDetailServices([])
     renderApp('/settings/offhours')
-    expect(await screen.findByText('No services carry this tag.')).toBeInTheDocument()
+    expect(await screen.findByText('No services match these tags.')).toBeInTheDocument()
   })
 
   it('opens a blank editor for Add schedule and creates the schedule', async () => {
@@ -312,20 +326,12 @@ describe('OffHoursPage', () => {
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
     await userEvent.type(screen.getByLabelText('Name'), 'Dev nights')
-    await userEvent.type(screen.getByLabelText('Services tagged'), 'env=dev')
+    await pickTag(/^env=dev/)
     await userEvent.click(screen.getByRole('button', { name: 'Weekdays 07–20' }))
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(posts).toHaveLength(1))
-    expect(posts[0]).toMatchObject({ name: 'Dev nights', tag_key: 'env', tag_value: 'dev', enabled: true })
+    expect(posts[0]).toMatchObject({ name: 'Dev nights', tags: [{ kind: 'aws', key: 'env', value: 'dev' }], excluded_service_ids: [], enabled: true })
     expect(posts[0].version).toBeUndefined()
-  })
-
-  it('offers the tags as options and accepts a typed key=value', async () => {
-    renderApp('/settings/offhours')
-    const tag = await screen.findByLabelText('Services tagged')
-    expect(tag).toHaveValue('env=staging')
-    await waitFor(() => expect(document.querySelectorAll('datalist option')).toHaveLength(3))
-    expect(document.querySelector('datalist option[value="env=prod"]')).not.toBeNull()
   })
 
   it('asks before deleting, then deletes', async () => {
@@ -364,5 +370,187 @@ describe('OffHoursPage', () => {
     renderApp('/settings/offhours')
     expect(await screen.findByText('Only admins can manage off-hours schedules.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add schedule' })).not.toBeInTheDocument()
+  })
+
+  describe('tags and exclusions', () => {
+    const puts: OffHoursScheduleInput[] = []
+    beforeEach(() => {
+      puts.length = 0
+      server.use(
+        http.put('/api/offhours/schedules/:id', async ({ request }) => {
+          puts.push((await request.json()) as OffHoursScheduleInput)
+          return HttpResponse.json(OFFHOURS_STAGING_DETAIL)
+        }),
+      )
+    })
+
+    it('sends a Harbormaster tag and an AWS tag together', async () => {
+      renderApp('/settings/offhours')
+      await screen.findByRole('button', { name: 'Remove env=staging' })
+      await pickTag(/^Staging/)
+      await pickTag(/^env=prod/)
+      expect(screen.getByRole('button', { name: 'Remove Staging' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Remove env=prod' })).toBeInTheDocument()
+      expect(screen.getByText('Services with any of these tags.')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(puts).toHaveLength(1))
+      expect(puts[0].tags).toEqual([
+        { kind: 'aws', key: 'env', value: 'staging' },
+        { kind: 'harbormaster', tag_id: 2 },
+        { kind: 'aws', key: 'env', value: 'prod' },
+      ])
+      expect(puts[0]).not.toHaveProperty('tag_key')
+    })
+
+    it('lists both groups and filters them by the search text', async () => {
+      renderApp('/settings/offhours')
+      const group = await openPicker('Services tagged')
+      expect(await within(group).findByText('Harbormaster tags')).toBeInTheDocument()
+      expect(within(group).getByText('AWS tags')).toBeInTheDocument()
+      expect(await within(group).findByRole('checkbox', { name: /^Prod.*4 services/ })).toBeInTheDocument()
+      expect(within(group).getByRole('checkbox', { name: /^env=dev.*3 services/ })).toBeInTheDocument()
+      await userEvent.type(screen.getByRole('searchbox', { name: 'Search Services tagged' }), 'prod')
+      expect(within(group).getByRole('checkbox', { name: /^Prod/ })).toBeInTheDocument()
+      expect(within(group).getByRole('checkbox', { name: /^env=prod/ })).toBeInTheDocument()
+      expect(within(group).queryByRole('checkbox', { name: /^env=dev/ })).not.toBeInTheDocument()
+      expect(within(group).queryByRole('checkbox', { name: /^Staging/ })).not.toBeInTheDocument()
+    })
+
+    it('adds a typed key=value that is not in the list, and refuses aws: keys', async () => {
+      renderApp('/settings/offhours')
+      const group = await openPicker('Services tagged')
+      const search = screen.getByRole('searchbox', { name: 'Search Services tagged' })
+      await userEvent.type(search, 'aws:foo=bar')
+      expect(within(group).queryByRole('button', { name: /^Add/ })).not.toBeInTheDocument()
+      await userEvent.clear(search)
+      await userEvent.type(search, 'team=web=1')
+      await userEvent.click(await within(group).findByRole('button', { name: 'Add team=web=1' }))
+      expect(screen.getByRole('button', { name: 'Remove team=web=1' })).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(puts).toHaveLength(1))
+      expect(puts[0].tags).toContainEqual({ kind: 'aws', key: 'team', value: 'web=1' })
+    })
+
+    it('does not offer to add a tag that is already an option', async () => {
+      renderApp('/settings/offhours')
+      const group = await openPicker('Services tagged')
+      await userEvent.type(screen.getByRole('searchbox', { name: 'Search Services tagged' }), 'env=prod')
+      expect(await within(group).findByRole('checkbox', { name: /^env=prod/ })).toBeInTheDocument()
+      expect(within(group).queryByRole('button', { name: /^Add/ })).not.toBeInTheDocument()
+    })
+
+    it('removes a tag with its chip and keeps the others', async () => {
+      renderApp('/settings/offhours')
+      await screen.findByRole('button', { name: 'Remove env=staging' })
+      await pickTag(/^Prod/)
+      await userEvent.click(screen.getByRole('button', { name: 'Remove env=staging' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(puts).toHaveLength(1))
+      expect(puts[0].tags).toEqual([{ kind: 'harbormaster', tag_id: 3 }])
+    })
+
+    it('refuses to save with no tag', async () => {
+      renderApp('/settings/offhours')
+      await userEvent.click(await screen.findByRole('button', { name: 'Remove env=staging' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Pick at least one tag.')
+      expect(puts).toHaveLength(0)
+    })
+
+    it('excludes a matched service: the id is sent and the preview counts it as excluded', async () => {
+      const bodies: OffHoursPreviewRequest[] = []
+      servePreview((body) => {
+        bodies.push(body)
+        const dropped = OFFHOURS_PREVIEW_STAGING.services.filter((s) => body.excluded_service_ids.includes(s.service_id))
+        return {
+          ...OFFHOURS_PREVIEW_STAGING,
+          services: OFFHOURS_PREVIEW_STAGING.services.filter((s) => !dropped.includes(s)),
+          excluded: dropped,
+        }
+      })
+      renderApp('/settings/offhours')
+      expect(await screen.findByText('Before you save: 2 services match these tags', undefined, SLOW)).toBeInTheDocument()
+      const group = await openPicker('Exclude services')
+      await userEvent.type(screen.getByRole('searchbox', { name: 'Search Exclude services' }), 'api')
+      expect(within(group).queryByRole('checkbox', { name: /staging-web\/web/ })).not.toBeInTheDocument()
+      await userEvent.click(await within(group).findByRole('checkbox', { name: /staging-web\/api/ }))
+      expect(screen.getByRole('button', { name: 'Remove staging-web/api' })).toBeInTheDocument()
+      expect(await screen.findByText('Before you save: 1 service matches these tags (1 excluded)', undefined, SLOW)).toBeInTheDocument()
+      expect(bodies.at(-1)?.excluded_service_ids).toEqual(['staging-web-api'])
+      // The excluded service stays selectable, so it can be put back.
+      expect(within(group).getByRole('checkbox', { name: /staging-web\/api/ })).toBeChecked()
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(puts).toHaveLength(1))
+      expect(puts[0].excluded_service_ids).toEqual(['staging-web-api'])
+    })
+
+    it('searches the exclude list by cluster, account and region', async () => {
+      servePreview({
+        ...OFFHOURS_PREVIEW_STAGING,
+        services: [OFFHOURS_ASLEEP, { ...OFFHOURS_WOKEN, account_name: 'other-acct', region: 'eu-west-1' }],
+      })
+      renderApp('/settings/offhours')
+      await screen.findByText('Before you save: 2 services match these tags', undefined, SLOW)
+      const group = await openPicker('Exclude services')
+      const search = screen.getByRole('searchbox', { name: 'Search Exclude services' })
+      await userEvent.type(search, 'other-acct')
+      expect(within(group).getAllByRole('checkbox')).toHaveLength(1)
+      await userEvent.clear(search)
+      await userEvent.type(search, 'eu-west-1')
+      expect(within(group).getAllByRole('checkbox')).toHaveLength(1)
+      await userEvent.clear(search)
+      await userEvent.type(search, 'staging-web')
+      expect(within(group).getAllByRole('checkbox')).toHaveLength(2)
+    })
+
+    describe('editing a saved schedule', () => {
+      const batch = { service_id: 'staging-web-batch', service: 'batch', cluster: 'staging-web', region: 'us-east-1', account_name: 'staging-example' }
+      const saved = {
+        ...OFFHOURS_STAGING_DETAIL,
+        tags: [harbormasterSelector(2, 'Staging', 'amber'), awsSelector('env', 'qa')],
+        excluded: [batch],
+      }
+      beforeEach(() => {
+        server.use(http.get('/api/offhours/schedules/1', () => HttpResponse.json(saved)))
+      })
+
+      it('loads the tags and exclusions as chips and sends them back unchanged', async () => {
+        renderApp('/settings/offhours')
+        expect(await screen.findByRole('button', { name: 'Remove Staging' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Remove env=qa' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Remove staging-web/batch' })).toBeInTheDocument()
+        await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(puts).toHaveLength(1))
+        expect(puts[0].tags).toEqual([
+          { kind: 'harbormaster', tag_id: 2 },
+          { kind: 'aws', key: 'env', value: 'qa' },
+        ])
+        expect(puts[0].excluded_service_ids).toEqual(['staging-web-batch'])
+      })
+
+      it('flags a saved exclusion the tags no longer match, and lets it be removed', async () => {
+        renderApp('/settings/offhours')
+        await screen.findByRole('button', { name: 'Remove staging-web/batch' })
+        const group = await openPicker('Exclude services')
+        expect(await within(group).findByRole('checkbox', { name: /staging-web\/batch.*no longer matched/ })).toBeChecked()
+        await userEvent.click(screen.getByRole('button', { name: 'Remove staging-web/batch' }))
+        await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(puts).toHaveLength(1))
+        expect(puts[0].excluded_service_ids).toEqual([])
+      })
+    })
+
+    it('summarises the tags and exclusions in the schedule list', async () => {
+      const many = {
+        ...OFFHOURS_STAGING,
+        tags: [harbormasterSelector(2, 'Staging', 'amber'), awsSelector('env', 'qa'), awsSelector('a', 'b'), awsSelector('c', 'd'), awsSelector('e', 'f')],
+        excluded: [1, 2].map((i) => ({ service_id: `s${i}`, service: `s${i}`, cluster: 'c', region: 'r', account_name: 'a' })),
+      }
+      server.use(http.get('/api/offhours/schedules', () => HttpResponse.json({ ...OFFHOURS_LIST, items: [many, OFFHOURS_LIST.items[1]] })))
+      renderApp('/settings/offhours')
+      const list = await screen.findByRole('list', { name: 'Schedules' })
+      expect(within(list).getByText('Staging, env=qa, a=b, +2 more · 2 excluded · 65 h awake a week')).toBeInTheDocument()
+      expect(within(list).getByText('env=preview · 45 h awake a week')).toBeInTheDocument()
+    })
   })
 })

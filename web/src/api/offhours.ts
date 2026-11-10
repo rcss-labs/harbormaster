@@ -30,12 +30,36 @@ export interface OffHoursService {
   can_operate: boolean
 }
 
+/** A tag a schedule follows: an AWS tag (key, value) or a Harbormaster tag (tag_id, name, color). */
+export interface OffHoursSelector {
+  kind: 'aws' | 'harbormaster'
+  /** AWS rows only; empty for Harbormaster rows. */
+  key: string
+  value: string
+  /** Harbormaster rows only; 0 for AWS rows. */
+  tag_id: number
+  name: string
+  color: string
+}
+
+export type OffHoursSelectorInput = { kind: 'aws'; key: string; value: string } | { kind: 'harbormaster'; tag_id: number }
+
+export interface OffHoursExcludedService {
+  service_id: string
+  service: string
+  cluster: string
+  region: string
+  account_name: string
+}
+
 export interface OffHoursSchedule {
   id: number
   name: string
   enabled: boolean
-  tag_key: string
-  tag_value: string
+  /** The tags the schedule follows; a service matches when it has any of them. */
+  tags: OffHoursSelector[]
+  /** Services the tags match that the schedule leaves alone. */
+  excluded: OffHoursExcludedService[]
   timezone: string
   awake: AwakeGrid
   awake_hours_per_week: number
@@ -61,8 +85,8 @@ export interface OffHoursList {
 export interface OffHoursScheduleInput {
   name: string
   enabled: boolean
-  tag_key: string
-  tag_value: string
+  tags: OffHoursSelectorInput[]
+  excluded_service_ids: string[]
   timezone: string
   awake: AwakeGrid
   /** Required on update. */
@@ -81,7 +105,10 @@ export interface OffHoursOverlap {
 }
 
 export interface OffHoursPreview {
+  /** The services the schedule would manage, after exclusions. */
   services: OffHoursService[]
+  /** Services the tags match that the exclusions remove. */
+  excluded: OffHoursService[]
   overlaps: OffHoursOverlap[]
   sleep_now: number
   monthly_saving: number | null
@@ -92,6 +119,18 @@ export interface OffHoursTagOption {
   key: string
   value: string
   services: number
+}
+
+export interface OffHoursHarbormasterTag {
+  id: number
+  name: string
+  color: string
+  services: number
+}
+
+export interface OffHoursTags {
+  items: OffHoursTagOption[]
+  harbormaster: OffHoursHarbormasterTag[]
 }
 
 export interface ServiceOffHours {
@@ -127,7 +166,7 @@ export function useOffHoursSchedule(id: number | null) {
 export function useOffHoursTags() {
   return useQuery({
     queryKey: ['offhours', 'tags'],
-    queryFn: () => api.get<{ items: OffHoursTagOption[] }>('/api/offhours/tags'),
+    queryFn: () => api.get<OffHoursTags>('/api/offhours/tags'),
   })
 }
 

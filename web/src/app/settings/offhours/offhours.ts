@@ -1,5 +1,5 @@
 // Pure helpers for the Off-hours page: presets, grid maths and zone-aware time labels.
-import type { AwakeGrid, OffHoursService } from '../../../api/offhours'
+import type { AwakeGrid, OffHoursSelector, OffHoursSelectorInput, OffHoursService } from '../../../api/offhours'
 
 export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
 
@@ -129,6 +129,44 @@ export function parseTagSelector(text: string): TagSelector | null {
   const key = text.slice(0, at).trim()
   const value = text.slice(at + 1).trim()
   return key ? { key, value } : null
+}
+
+/** A stable string for a tag choice, used as the option value in the pickers. */
+export function selectorKey(selector: OffHoursSelectorInput): string {
+  return selector.kind === 'harbormaster' ? `hm:${selector.tag_id}` : `aws:${selector.key}=${selector.value}`
+}
+
+/** The inverse of `selectorKey`; null for text it did not produce. */
+export function selectorFromKey(text: string): OffHoursSelectorInput | null {
+  if (text.startsWith('hm:')) {
+    const tagId = Number(text.slice(3))
+    return Number.isInteger(tagId) ? { kind: 'harbormaster', tag_id: tagId } : null
+  }
+  if (text.startsWith('aws:')) {
+    const parsed = parseTagSelector(text.slice(4))
+    return parsed ? { kind: 'aws', key: parsed.key, value: parsed.value } : null
+  }
+  return null
+}
+
+/** The request form of a tag a saved schedule returned. */
+export function selectorInputOf(selector: OffHoursSelector): OffHoursSelectorInput {
+  return selector.kind === 'harbormaster' ? { kind: 'harbormaster', tag_id: selector.tag_id } : { kind: 'aws', key: selector.key, value: selector.value }
+}
+
+/** A typed `key=value` the picker may add as an AWS tag: AWS reserves the `aws:` key prefix, so such keys are refused. */
+export function parseAddableAwsTag(text: string): TagSelector | null {
+  const parsed = parseTagSelector(text)
+  return parsed && !parsed.key.toLowerCase().startsWith('aws:') ? parsed : null
+}
+
+const SUMMARY_TAGS = 3
+
+/** The one-line subtitle of a schedule in the list: its tags (three, then "+N more") and how many services it excludes. */
+export function tagSummary(tags: OffHoursSelector[], excludedCount: number): string {
+  const names = tags.slice(0, SUMMARY_TAGS).map((tag) => (tag.kind === 'harbormaster' ? tag.name : `${tag.key}=${tag.value}`))
+  if (tags.length > SUMMARY_TAGS) names.push(`+${tags.length - SUMMARY_TAGS} more`)
+  return excludedCount > 0 ? `${names.join(', ')} · ${excludedCount} excluded` : names.join(', ')
 }
 
 export function browserTimezone(): string {

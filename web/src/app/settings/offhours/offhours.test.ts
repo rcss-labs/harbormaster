@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { OFFHOURS_ASLEEP, OFFHOURS_BLOCKED, OFFHOURS_NOT_MANAGED, OFFHOURS_PRODUCTION, OFFHOURS_UNPRICED, OFFHOURS_WOKEN } from '../../../test/offhoursFixtures'
-import { PRESETS, awakeHours, currentCell, parseTagSelector, presetGrid, stateLabel, wallClock } from './offhours'
+import { awsSelector, harbormasterSelector, OFFHOURS_ASLEEP, OFFHOURS_BLOCKED, OFFHOURS_NOT_MANAGED, OFFHOURS_PRODUCTION, OFFHOURS_UNPRICED, OFFHOURS_WOKEN } from '../../../test/offhoursFixtures'
+import { PRESETS, awakeHours, currentCell, parseAddableAwsTag, parseTagSelector, presetGrid, selectorFromKey, selectorKey, stateLabel, tagSummary, wallClock } from './offhours'
 
 describe('parseTagSelector', () => {
   it('accepts key=value and key= with an empty value, as the server does', () => {
@@ -55,5 +55,36 @@ describe('wall clock', () => {
     expect(wallClock(NOW, 'Europe/Berlin')).toEqual({ weekday: 'Sat', day: 5, hour: 22, minute: 0, time: '22:00' })
     expect(currentCell(NOW, 'Asia/Jerusalem')).toEqual({ day: 5, hour: 23 })
     expect(currentCell('2026-11-08T22:30:00Z', 'Asia/Jerusalem')).toEqual({ day: 0, hour: 0 })
+  })
+})
+
+describe('tag choices', () => {
+  it('round-trip through their option keys', () => {
+    for (const input of [
+      { kind: 'harbormaster', tag_id: 7 } as const,
+      { kind: 'aws', key: 'env', value: 'a=b' } as const,
+      { kind: 'aws', key: 'env', value: '' } as const,
+    ]) {
+      expect(selectorFromKey(selectorKey(input))).toEqual(input)
+    }
+    expect(selectorFromKey('nonsense')).toBeNull()
+  })
+
+  it('refuses aws: keys when adding a typed tag', () => {
+    expect(parseAddableAwsTag('team=web')).toEqual({ key: 'team', value: 'web' })
+    expect(parseAddableAwsTag('aws:cloudformation:stack-name=x')).toBeNull()
+    expect(parseAddableAwsTag('team')).toBeNull()
+  })
+})
+
+describe('tagSummary', () => {
+  const [a, b, c, d] = [harbormasterSelector(1, 'QA', 'blue'), awsSelector('env', 'staging'), awsSelector('a', 'b'), awsSelector('c', 'd')]
+  it('lists up to three tags then counts the rest', () => {
+    expect(tagSummary([b, a], 0)).toBe('env=staging, QA')
+    expect(tagSummary([a, b, c], 0)).toBe('QA, env=staging, a=b')
+    expect(tagSummary([a, b, c, d], 0)).toBe('QA, env=staging, a=b, +1 more')
+  })
+  it('adds the excluded count only when there are exclusions', () => {
+    expect(tagSummary([b], 2)).toBe('env=staging · 2 excluded')
   })
 })

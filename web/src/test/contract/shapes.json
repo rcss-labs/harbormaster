@@ -1615,6 +1615,15 @@
         "awake_hours_per_week": "number",
         "blocked_count": "number",
         "enabled": "boolean",
+        "excluded": [
+          {
+            "account_name": "string",
+            "cluster": "string",
+            "region": "string",
+            "service": "string",
+            "service_id": "string"
+          }
+        ],
         "id": "number",
         "monthly_saving": {
           "$null": "number"
@@ -1650,8 +1659,16 @@
             }
           }
         ],
-        "tag_key": "string",
-        "tag_value": "string",
+        "tags": [
+          {
+            "color": "string",
+            "key": "string",
+            "kind": "string",
+            "name": "string",
+            "tag_id": "number",
+            "value": "string"
+          }
+        ],
         "timezone": "string",
         "unpriced_services": "number",
         "updated_at": "time",
@@ -1667,6 +1684,35 @@
   },
   "offhoursPreview": {
     "awake_hours_per_week": "number",
+    "excluded": [
+      {
+        "account_name": "string",
+        "awake_tasks": "number",
+        "can_operate": "boolean",
+        "cluster": "string",
+        "current_tasks": "number",
+        "looks_like_production": [
+          "string"
+        ],
+        "monthly_always_on": {
+          "$null": "number"
+        },
+        "reason": "string",
+        "region": "string",
+        "service": "string",
+        "service_id": "string",
+        "state": "string",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "until": {
+          "$null": "time"
+        }
+      }
+    ],
     "monthly_saving": {
       "$null": "number"
     },
@@ -1720,6 +1766,15 @@
     "awake_hours_per_week": "number",
     "blocked_count": "number",
     "enabled": "boolean",
+    "excluded": [
+      {
+        "account_name": "string",
+        "cluster": "string",
+        "region": "string",
+        "service": "string",
+        "service_id": "string"
+      }
+    ],
     "id": "number",
     "monthly_saving": {
       "$null": "number"
@@ -1755,8 +1810,16 @@
         }
       }
     ],
-    "tag_key": "string",
-    "tag_value": "string",
+    "tags": [
+      {
+        "color": "string",
+        "key": "string",
+        "kind": "string",
+        "name": "string",
+        "tag_id": "number",
+        "value": "string"
+      }
+    ],
     "timezone": "string",
     "unpriced_services": "number",
     "updated_at": "time",
@@ -1764,6 +1827,14 @@
     "version": "number"
   },
   "offhoursTags": {
+    "harbormaster": [
+      {
+        "color": "string",
+        "id": "number",
+        "name": "string",
+        "services": "number"
+      }
+    ],
     "items": [
       {
         "key": "string",
