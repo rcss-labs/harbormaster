@@ -14,11 +14,18 @@ async function writeHeaders(request: APIRequestContext) {
   return { 'X-CSRF-Token': me.csrf_token }
 }
 
+export interface ScheduleTag {
+  kind: 'aws' | 'harbormaster'
+  key?: string
+  value?: string
+  tag_id?: number
+}
+
 export interface SavedSchedule {
   name: string
   enabled: boolean
-  tag_key: string
-  tag_value: string
+  tags: ScheduleTag[]
+  excluded_service_ids: string[]
   timezone: string
   awake: boolean[][]
 }
@@ -29,21 +36,30 @@ async function deleteSchedule(request: APIRequestContext, id: number, headers: R
 }
 
 /**
- * Takes aside the schedules that would collide with an e2e one (a tag allows one schedule, and the demo estate seeds
- * "Staging nights and weekends" on env=staging, disabled): deletes the e2e schedule by name and any other schedule on
- * the tag. What it removed is pushed onto `aside` as it goes, so a caller whose `finally` runs `restoreSchedules`
- * gets back everything collected even if a later request throws.
+ * Takes aside the schedules that would collide with an e2e one (a service belongs to one schedule, and the demo estate
+ * seeds "Staging nights and weekends" on env=staging, disabled): deletes the e2e schedule by name and any other
+ * schedule that selects the AWS tag. What it removed is pushed onto `aside` as it goes, so a caller whose `finally`
+ * runs `restoreSchedules` gets back everything collected even if a later request throws.
  */
 export async function clearScheduleSlot(request: APIRequestContext, name: string, tag: string, aside: SavedSchedule[]) {
   const [tagKey, tagValue] = tag.split('=')
   const headers = await writeHeaders(request)
   const list = await (await request.get('/api/offhours/schedules')).json()
-  for (const item of (list.items ?? []) as { id: number; name: string; tag_key: string; tag_value: string }[]) {
-    const onTag = item.tag_key === tagKey && item.tag_value === tagValue
+  for (const item of (list.items ?? []) as { id: number; name: string; tags: ScheduleTag[] }[]) {
+    const onTag = item.tags.some((t) => t.kind === 'aws' && t.key === tagKey && t.value === tagValue)
     if (item.name !== name && !onTag) continue
     if (item.name !== name) {
       const d = await (await request.get(`/api/offhours/schedules/${item.id}`)).json()
-      aside.push({ name: d.name, enabled: d.enabled, tag_key: d.tag_key, tag_value: d.tag_value, timezone: d.timezone, awake: d.awake })
+      aside.push({
+        name: d.name,
+        enabled: d.enabled,
+        tags: d.tags.map((t: { kind: 'aws' | 'harbormaster'; key: string; value: string; tag_id: number }) =>
+          t.kind === 'aws' ? { kind: 'aws', key: t.key, value: t.value } : { kind: 'harbormaster', tag_id: t.tag_id },
+        ),
+        excluded_service_ids: d.excluded.map((e: { service_id: string }) => e.service_id),
+        timezone: d.timezone,
+        awake: d.awake,
+      })
     }
     await deleteSchedule(request, item.id, headers)
   }
@@ -67,7 +83,14 @@ export async function createSchedule(request: APIRequestContext, name: string, t
   const [tagKey, tagValue] = tag.split('=')
   const response = await request.post('/api/offhours/schedules', {
     headers: await writeHeaders(request),
-    data: { name, enabled: true, tag_key: tagKey, tag_value: tagValue, timezone: 'UTC', awake: gridAwakeOnlyAt(awakeHourUtc()) },
+    data: {
+      name,
+      enabled: true,
+      tags: [{ kind: 'aws', key: tagKey, value: tagValue }],
+      excluded_service_ids: [],
+      timezone: 'UTC',
+      awake: gridAwakeOnlyAt(awakeHourUtc()),
+    },
   })
   expect(response.ok(), await response.text()).toBe(true)
   return (await response.json()).id as number

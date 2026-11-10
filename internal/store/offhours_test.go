@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +21,24 @@ import (
 func allAwake() string { return strings.Repeat("1", 168) }
 
 func newSchedule(name, key, value string) store.OffHoursSchedule {
-	return store.OffHoursSchedule{Name: name, Enabled: true, TagKey: key, TagValue: value, Timezone: "Europe/Berlin", Awake: allAwake()}
+	return store.OffHoursSchedule{Name: name, Enabled: true, Selectors: awsSelectors(key, value), Timezone: "Europe/Berlin", Awake: allAwake()}
+}
+
+func awsSelectors(key, value string) []store.OffHoursSelector {
+	return []store.OffHoursSelector{{Kind: "aws", Key: key, Value: value}}
+}
+
+func matchedServices(t *testing.T, s *store.Store, selectors ...store.OffHoursSelector) []string {
+	t.Helper()
+	got, err := s.OffHoursMatches(context.Background(), selectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, m := range got {
+		names = append(names, m.Key.Service)
+	}
+	return names
 }
 
 // seedTaggedService stores an ACTIVE service whose AWS tags are written straight into raw.
@@ -79,25 +100,235 @@ func TestOffHoursSchedule_CRUDAndVersion(t *testing.T) {
 	}
 }
 
-func TestOffHoursSchedule_DuplicateSelectorConflicts(t *testing.T) {
+func TestOffHoursSchedule_DuplicateNameConflictsButSelectorsMayRepeat(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	if _, err := s.CreateOffHoursSchedule(ctx, newSchedule("one", "env", "staging"), 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateOffHoursSchedule(ctx, newSchedule("two", "env", "staging"), 0); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("same selector = %v, want ErrConflict", err)
-	}
 	if _, err := s.CreateOffHoursSchedule(ctx, newSchedule("one", "env", "dev"), 0); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("same name = %v, want ErrConflict", err)
 	}
-	other, err := s.CreateOffHoursSchedule(ctx, newSchedule("three", "env", "dev"), 0)
+	if _, err := s.CreateOffHoursSchedule(ctx, newSchedule("two", "env", "staging"), 0); err != nil {
+		t.Fatalf("same selector on another schedule = %v, want it allowed", err)
+	}
+}
+
+func TestOffHoursSchedule_RoundTripsSelectorsAndExclusions(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	qa, err := s.CreateTag(ctx, "QA", "blue")
 	if err != nil {
 		t.Fatal(err)
 	}
-	clash := other
-	clash.TagValue = "staging"
-	if _, err := s.UpdateOffHoursSchedule(ctx, clash, 0); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("update onto an existing selector = %v, want ErrConflict", err)
+	sc := newSchedule("mixed", "env", "staging")
+	sc.Selectors = append(sc.Selectors, store.OffHoursSelector{Kind: "harbormaster", TagID: qa.ID})
+	sc.Exclusions = []model.ServiceKey{serviceKey("core-services", "db")}
+	created, err := s.CreateOffHoursSchedule(ctx, sc, 0)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !reflect.DeepEqual(created.Selectors, sc.Selectors) || !reflect.DeepEqual(created.Exclusions, sc.Exclusions) {
+		t.Fatalf("created = %+v, want the selectors and exclusions back", created)
+	}
+	if _, err := s.CreateOffHoursSchedule(ctx, newSchedule("plain", "team", "web"), 0); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListOffHoursSchedules(ctx)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list = %+v err=%v", list, err)
+	}
+	byName := map[string]store.OffHoursSchedule{list[0].Name: list[0], list[1].Name: list[1]}
+	if !reflect.DeepEqual(byName["mixed"].Selectors, sc.Selectors) || !reflect.DeepEqual(byName["mixed"].Exclusions, sc.Exclusions) {
+		t.Fatalf("listed mixed = %+v", byName["mixed"])
+	}
+	if len(byName["plain"].Exclusions) != 0 || len(byName["plain"].Selectors) != 1 {
+		t.Fatalf("listed plain = %+v", byName["plain"])
+	}
+
+	edit := created
+	edit.Selectors = awsSelectors("env", "dev")
+	edit.Exclusions = nil
+	updated, err := s.UpdateOffHoursSchedule(ctx, edit, 0)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !reflect.DeepEqual(updated.Selectors, edit.Selectors) || len(updated.Exclusions) != 0 {
+		t.Fatalf("updated = %+v, want the children replaced", updated)
+	}
+	// A stale version must not touch the children.
+	stale := created
+	stale.Selectors = awsSelectors("x", "y")
+	if _, err := s.UpdateOffHoursSchedule(ctx, stale, 0); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale update = %v, want ErrConflict", err)
+	}
+	got, err := s.GetOffHoursSchedule(ctx, created.ID)
+	if err != nil || !reflect.DeepEqual(got.Selectors, edit.Selectors) {
+		t.Fatalf("after stale update = %+v err=%v", got, err)
+	}
+}
+
+func TestDeleteTag_RemovesItsSelectors(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	qa, err := s.CreateTag(ctx, "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := newSchedule("mixed", "env", "staging")
+	sc.Selectors = append(sc.Selectors, store.OffHoursSelector{Kind: "harbormaster", TagID: qa.ID})
+	created, err := s.CreateOffHoursSchedule(ctx, sc, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteTag(ctx, qa.ID); err != nil {
+		t.Fatalf("delete tag: %v", err)
+	}
+	got, err := s.GetOffHoursSchedule(ctx, created.ID)
+	if err != nil || !reflect.DeepEqual(got.Selectors, awsSelectors("env", "staging")) {
+		t.Fatalf("selectors after tag delete = %+v err=%v, want only the AWS one", got.Selectors, err)
+	}
+}
+
+func TestOffHoursMatches_OrAcrossKindsWithoutDuplicates(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	qa, err := s.CreateTag(ctx, "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	both := seedTaggedService(t, s, "both", "ACTIVE", `[{"Key":"env","Value":"staging"}]`, "", "")
+	seedTaggedService(t, s, "aws-only", "ACTIVE", `[{"Key":"team","Value":"web"}]`, "", "")
+	seedTaggedService(t, s, "hm-only", "ACTIVE", `[]`, "", "")
+	seedTaggedService(t, s, "neither", "ACTIVE", `[]`, "", "")
+	seedTaggedService(t, s, "inactive", "INACTIVE", `[{"Key":"team","Value":"web"}]`, "", "")
+	if err := s.SetServiceTag(ctx, both, &qa.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetServiceTag(ctx, serviceKey("core-services", "hm-only"), &qa.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	got := matchedServices(t, s,
+		store.OffHoursSelector{Kind: "aws", Key: "env", Value: "staging"},
+		store.OffHoursSelector{Kind: "aws", Key: "team", Value: "web"},
+		store.OffHoursSelector{Kind: "harbormaster", TagID: qa.ID})
+	want := []string{"aws-only", "both", "hm-only"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("matches = %v, want %v (each service once, ordered)", got, want)
+	}
+	if none := matchedServices(t, s); len(none) != 0 {
+		t.Fatalf("no selectors matched %v, want nothing", none)
+	}
+}
+
+func TestOffHoursMatches_HarbormasterTagUsesEffectiveTag(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	qa, err := s.CreateTag(ctx, "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedTaggedService(t, s, "inherits", "ACTIVE", `[]`, "", "")
+	seedTaggedService(t, s, "direct", "ACTIVE", `[]`, "", "")
+	if err := s.SetClusterTag(ctx, clusterKey("core-services"), qa.ID); err != nil {
+		t.Fatal(err)
+	}
+	dev, err := s.DevTag(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetServiceTag(ctx, serviceKey("core-services", "direct"), &dev.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := matchedServices(t, s, store.OffHoursSelector{Kind: "harbormaster", TagID: qa.ID})
+	if !reflect.DeepEqual(got, []string{"inherits"}) {
+		t.Fatalf("QA matches = %v, want only the service inheriting QA from its cluster", got)
+	}
+}
+
+func TestSplitExcluded(t *testing.T) {
+	a, b, c := serviceKey("c", "a"), serviceKey("c", "b"), serviceKey("c", "c")
+	matches := []store.OffHoursMatch{{Key: a}, {Key: b}, {Key: c}}
+	kept, excluded := store.SplitExcluded(matches, []model.ServiceKey{b, serviceKey("c", "gone")})
+	if len(kept) != 2 || kept[0].Key != a || kept[1].Key != c || len(excluded) != 1 || excluded[0].Key != b {
+		t.Fatalf("kept = %+v excluded = %+v", kept, excluded)
+	}
+	if kept, excluded := store.SplitExcluded(nil, nil); len(kept) != 0 || len(excluded) != 0 {
+		t.Fatalf("empty split = %v %v", kept, excluded)
+	}
+}
+
+func TestOffHoursHarbormasterTags_CountsActiveServices(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	qa, err := s.CreateTag(ctx, "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTag(ctx, "Empty", "green"); err != nil {
+		t.Fatal(err)
+	}
+	seedTaggedService(t, s, "one", "ACTIVE", `[]`, "", "")
+	seedTaggedService(t, s, "two", "ACTIVE", `[]`, "", "")
+	seedTaggedService(t, s, "gone", "INACTIVE", `[]`, "", "")
+	seedTaggedService(t, s, "dev", "ACTIVE", `[]`, "", "")
+	for _, name := range []string{"one", "two", "gone"} {
+		if err := s.SetServiceTag(ctx, serviceKey("core-services", name), &qa.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.OffHoursHarbormasterTags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, tag := range got {
+		counts[tag.Name] = tag.Services
+	}
+	if counts["QA"] != 2 || counts["Empty"] != 0 || counts["Dev"] != 1 || len(got) != 3 {
+		t.Fatalf("counts = %v (%+v), want QA 2, Empty 0, Dev 1", counts, got)
+	}
+}
+
+// Migration 0180 turns the single tag_key/tag_value of an existing schedule into one AWS selector.
+func TestMigrate_OffHoursSelectorsCarryExistingSchedules(t *testing.T) {
+	s, ctx := storetest.OpenEmpty(t), context.Background()
+	files, err := filepath.Glob("migrations/*.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+	if _, err := s.Pool.Exec(ctx, `create table schema_migrations (version int primary key, applied_at timestamptz not null default now())`); err != nil {
+		t.Fatal(err)
+	}
+	apply := func(file string) {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Pool.Exec(ctx, string(body)); err != nil {
+			t.Fatalf("apply %s: %v", file, err)
+		}
+		version, _ := strconv.Atoi(strings.SplitN(filepath.Base(file), "_", 2)[0])
+		if _, err := s.Pool.Exec(ctx, `insert into schema_migrations (version) values ($1)`, version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const target = "migrations/0180_offhours_selectors.up.sql"
+	for _, f := range files {
+		if f < target {
+			apply(f)
+		}
+	}
+	if _, err := s.Pool.Exec(ctx, `insert into offhours_schedules (name, tag_key, tag_value, timezone, awake)
+		values ('legacy', 'env', 'staging', 'UTC', $1), ('flag', 'flag', '', 'UTC', $1)`, allAwake()); err != nil {
+		t.Fatal(err)
+	}
+	apply(target)
+
+	list, err := s.ListOffHoursSchedules(ctx)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list = %+v err=%v", list, err)
+	}
+	byName := map[string]store.OffHoursSchedule{list[0].Name: list[0], list[1].Name: list[1]}
+	if !reflect.DeepEqual(byName["legacy"].Selectors, awsSelectors("env", "staging")) ||
+		!reflect.DeepEqual(byName["flag"].Selectors, awsSelectors("flag", "")) {
+		t.Fatalf("carried selectors = %+v", byName)
 	}
 }
 
@@ -109,7 +340,7 @@ func TestOffHoursMatches_ExactTagOnly(t *testing.T) {
 	seedTaggedService(t, s, "inactive", "INACTIVE", `[{"Key":"env","Value":"staging"}]`, "", "")
 	seedTaggedService(t, s, "untagged", "ACTIVE", `[]`, "", "")
 
-	got, err := s.OffHoursMatches(ctx, "env", "staging")
+	got, err := s.OffHoursMatches(ctx, awsSelectors("env", "staging"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,11 +365,11 @@ func TestOffHoursMatches_EmptyValueMatchesNullAndEmpty(t *testing.T) {
 	seedTaggedService(t, s, "empty-value", "ACTIVE", `[{"Key":"flag","Value":""}]`, "", "")
 	seedTaggedService(t, s, "set-value", "ACTIVE", `[{"Key":"flag","Value":"on"}]`, "", "")
 
-	got, err := s.OffHoursMatches(ctx, "flag", "")
+	got, err := s.OffHoursMatches(ctx, awsSelectors("flag", ""))
 	if err != nil || len(got) != 2 || got[0].Key.Service != "empty-value" || got[1].Key.Service != "null-value" {
 		t.Fatalf("matches for empty value = %+v err=%v, want empty-value and null-value", got, err)
 	}
-	if got, err := s.OffHoursMatches(ctx, "flag", "on"); err != nil || len(got) != 1 {
+	if got, err := s.OffHoursMatches(ctx, awsSelectors("flag", "on")); err != nil || len(got) != 1 {
 		t.Fatalf("matches for on = %+v err=%v, want only set-value", got, err)
 	}
 }
@@ -157,7 +388,7 @@ func TestOffHoursMatches_ReturnsPricingFacts(t *testing.T) {
 	seedTaggedService(t, s, "web", "ACTIVE", `[{"Key":"env","Value":"staging"}]`,
 		`,"CapacityProviderStrategy":[{"CapacityProvider":"FARGATE_SPOT","Weight":1}]`, arn)
 
-	got, err := s.OffHoursMatches(ctx, "env", "staging")
+	got, err := s.OffHoursMatches(ctx, awsSelectors("env", "staging"))
 	if err != nil || len(got) != 1 {
 		t.Fatalf("matches = %+v err=%v", got, err)
 	}

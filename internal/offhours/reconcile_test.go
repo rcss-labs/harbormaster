@@ -202,6 +202,57 @@ func TestReconcile_TagRemovedReleases(t *testing.T) {
 	h.requireRange(t, 2, 6)
 }
 
+// Excluding an enrolled service takes it out of the membership, so the reconciler restores it exactly as it does
+// when the service stops matching.
+func TestReconcile_ExcludedEnrolledServiceIsRestored(t *testing.T) {
+	h := newReconcilerHarness(t) // Saturday 23:00: asleep
+	h.cycle(t)
+	h.requireRange(t, 0, 0)
+
+	h.saveSchedule(t, func(sc *store.OffHoursSchedule) { sc.Exclusions = []model.ServiceKey{paymentsKey} })
+	h.cycle(t)
+
+	h.noEnrolment(t)
+	h.requireRange(t, 2, 6)
+	h.requireActions(t, "nightly-batch")
+}
+
+// Dropping the tag that matched a service from the schedule releases it as well.
+func TestReconcile_SelectorDroppedReleases(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 10, 0)
+	h.cycle(t)
+
+	h.saveSchedule(t, func(sc *store.OffHoursSchedule) {
+		sc.Selectors = []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "dev"}}
+	})
+	h.cycle(t)
+
+	h.noEnrolment(t)
+	h.requireActions(t, "nightly-batch")
+}
+
+// A schedule selects a service through ANY of its tags, including a Harbormaster tag.
+func TestReconcile_HarbormasterTagSelectorEnrols(t *testing.T) {
+	h := newReconcilerHarness(t)
+	h.at(9, 10, 0)
+	qa, err := h.store.CreateTag(t.Context(), "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SetServiceTag(t.Context(), paymentsKey, &qa.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.saveSchedule(t, func(sc *store.OffHoursSchedule) {
+		sc.Selectors = []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "nothing"}, {Kind: "harbormaster", TagID: qa.ID}}
+	})
+	h.cycle(t)
+
+	if e := h.enrolment(t); e.State != "active" {
+		t.Fatalf("enrolment = %+v, want active through the Harbormaster tag", e)
+	}
+}
+
 func TestReconcile_DeleteRestoresCapacity(t *testing.T) {
 	h := newReconcilerHarness(t) // asleep
 	h.cycle(t)
@@ -497,7 +548,7 @@ func TestReconcile_DoubleMatchStaysOnExistingSchedule(t *testing.T) {
 	h := newReconcilerHarness(t)
 	h.tagService(t, paymentsKey, `[{"Key":"env","Value":"staging"},{"Key":"tier","Value":"web"}]`, "ACTIVE")
 	second, err := h.store.CreateOffHoursSchedule(t.Context(), store.OffHoursSchedule{Name: "web hours", Enabled: true,
-		TagKey: "tier", TagValue: "web", Timezone: "Europe/Berlin", Awake: weekdayGrid(9, 17)}, h.userID)
+		Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "tier", Value: "web"}}, Timezone: "Europe/Berlin", Awake: weekdayGrid(9, 17)}, h.userID)
 	if err != nil {
 		t.Fatal(err)
 	}

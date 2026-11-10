@@ -23,7 +23,7 @@ func enrolPaymentsInState(t *testing.T, h *harness, awakeAllWeek, registeredTarg
 		grid = strings.Repeat("1", 168)
 	}
 	sc, err := h.store.CreateOffHoursSchedule(t.Context(), store.OffHoursSchedule{
-		Name: "always", Enabled: true, TagKey: "env", TagValue: "prod", Timezone: "UTC", Awake: grid}, h.sam.UserID)
+		Name: "always", Enabled: true, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "prod"}}, Timezone: "UTC", Awake: grid}, h.sam.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}

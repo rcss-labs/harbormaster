@@ -72,8 +72,8 @@ func seedOffHours(ctx context.Context, st *store.Store, enabled bool, samID int6
 		present[sc.Name] = true
 	}
 	demos := []store.OffHoursSchedule{
-		{Name: stagingScheduleName, Enabled: enabled, TagKey: "env", TagValue: "staging", Timezone: "Asia/Jerusalem", Awake: weekdaysAwake(7, 20)},
-		{Name: previewScheduleName, Enabled: false, TagKey: "env", TagValue: "preview", Timezone: "Asia/Jerusalem", Awake: weekdaysAwake(9, 18)},
+		{Name: stagingScheduleName, Enabled: enabled, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}}, Timezone: "Asia/Jerusalem", Awake: weekdaysAwake(7, 20)},
+		{Name: previewScheduleName, Enabled: false, Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "preview"}}, Timezone: "Asia/Jerusalem", Awake: weekdaysAwake(9, 18)},
 	}
 	for _, sc := range demos {
 		if present[sc.Name] {

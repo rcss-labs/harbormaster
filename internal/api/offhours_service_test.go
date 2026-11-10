@@ -95,12 +95,12 @@ func TestServiceOffHours_AlsoMatchesNamesTheKeptSchedule(t *testing.T) {
 	env.tagService(t, stagingWebKey, "team", "web")
 	grid := offhours.WeekFromRows(weekdayGrid()).String()
 	first, err := env.st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "staging nights", Enabled: true,
-		TagKey: "env", TagValue: "staging", Timezone: "Europe/Berlin", Awake: grid}, 0)
+		Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "env", Value: "staging"}}, Timezone: "Europe/Berlin", Awake: grid}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second, err := env.st.CreateOffHoursSchedule(ctx, store.OffHoursSchedule{Name: "web team", Enabled: true,
-		TagKey: "team", TagValue: "web", Timezone: "Europe/Berlin", Awake: grid}, 0)
+		Selectors: []store.OffHoursSelector{{Kind: "aws", Key: "team", Value: "web"}}, Timezone: "Europe/Berlin", Awake: grid}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
