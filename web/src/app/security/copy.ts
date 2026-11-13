@@ -51,6 +51,9 @@ export const SECURITY_COPY = {
     `${name} accepted until ${date} for ${services} ${services === 1 ? 'service' : 'services'}. Each vulnerability returns to the list when that ends.`,
   vulnerabilityCount: (count: number) => `${count} ${count === 1 ? 'vulnerability' : 'vulnerabilities'}`,
   withoutFix: (count: number) => `${count} without a fix`,
+  packageKindFilterLabel: 'Package kind',
+  packageKindFilter: { all: 'All', os: 'OS packages', app: 'App dependencies' },
+  noFilteredPackages: { os: 'No OS packages have known vulnerabilities.', app: 'No app dependencies have known vulnerabilities.' },
   packageKind: { os: 'OS package', app: 'App dependency' },
   packageKindTitle: {
     os: 'Guessed from the package type: OS packages usually come from the base image, unless the Dockerfile installs them.',

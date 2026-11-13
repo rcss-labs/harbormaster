@@ -157,4 +157,15 @@ describe('MorePage on desktop', () => {
     renderApp('/more')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/))
   })
+
+  it('reorders pins with move buttons on the phone More page', async () => {
+    const svc = (id: string, name: string) => ({ kind: 'service', id, name, cluster: 'core-services' })
+    localStorage.setItem('harbormaster-pinned:sam', JSON.stringify([svc('a', 'alpha-api'), svc('b', 'bravo-api')]))
+    renderApp('/more')
+    const pinned = await section('Pinned')
+    expect(await pinned.findByRole('button', { name: 'Move alpha-api up' })).toBeDisabled()
+    expect(pinned.getByRole('button', { name: 'Move bravo-api down' })).toBeDisabled()
+    await userEvent.setup().click(pinned.getByRole('button', { name: 'Move alpha-api down' }))
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!).map((p: { id: string }) => p.id)).toEqual(['b', 'a']))
+  })
 })

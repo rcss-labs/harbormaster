@@ -90,5 +90,17 @@ export function usePins() {
     [pinned, isPinned, write],
   )
   const remove = useCallback((kind: PinKind, id: string) => write(pinned.filter((p) => !(p.kind === kind && p.id === id))), [pinned, write])
-  return { pins: pinned, isPinned, toggle, remove }
+  /** Moves one pin to `toIndex` (0-based, in the full list); an unknown pin or an out-of-range index changes nothing. */
+  const move = useCallback(
+    (kind: PinKind, id: string, toIndex: number) => {
+      const from = pinned.findIndex((p) => p.kind === kind && p.id === id)
+      if (from < 0 || toIndex < 0 || toIndex >= pinned.length || toIndex === from) return
+      const next = [...pinned]
+      const [moved] = next.splice(from, 1)
+      next.splice(toIndex, 0, moved)
+      write(next)
+    },
+    [pinned, write],
+  )
+  return { pins: pinned, isPinned, toggle, remove, move }
 }

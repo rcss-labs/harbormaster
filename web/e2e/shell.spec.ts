@@ -160,3 +160,24 @@ test('at 390 the top bar is one row and every other control is reachable from Mo
   await expect(page.getByRole('button', { name: /^Theme/ })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
 })
+
+test('pinned items reorder with the move buttons and keep their order after a reload', async ({ page }) => {
+  await page.addInitScript(() => {
+    // Only seed once, so the reordered list survives the reload below.
+    if (localStorage.getItem('harbormaster-pinned:sam')) return
+    const pin = (id: string, name: string) => ({ kind: 'service', id, name, cluster: 'core-services' })
+    localStorage.setItem('harbormaster-pinned:sam', JSON.stringify([pin('pin-a', 'alpha-api'), pin('pin-b', 'bravo-api')]))
+  })
+  await page.goto('/')
+  const pinned = page.getByRole('navigation', { name: 'Pinned' })
+  const order = () => pinned.getByRole('link').evaluateAll((links) => links.map((link) => link.getAttribute('aria-label')?.split(' · ')[0]))
+  await expect.poll(order).toEqual(['alpha-api', 'bravo-api'])
+  await expect(pinned.getByRole('button', { name: 'Move alpha-api up' })).toBeDisabled()
+
+  await pinned.getByRole('link', { name: /^alpha-api/ }).hover()
+  await pinned.getByRole('button', { name: 'Move alpha-api down' }).click()
+  await expect.poll(order).toEqual(['bravo-api', 'alpha-api'])
+
+  await page.reload()
+  await expect.poll(order).toEqual(['bravo-api', 'alpha-api'])
+})
