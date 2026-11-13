@@ -12,12 +12,12 @@
 .bannerAction { margin-left: 10px; }
 .logs { background: var(--bg); font-family: var(--mono); font-size: 12px; line-height: 22px; padding: 4px 0; margin: 8px var(--pad) var(--pad); border: 1px solid var(--border); border-radius: var(--radius); }
 .older { display: block; margin: 0 12px 8px; }
-/* One line per row: fixed time and stream tracks that never wrap, and a message cut with an ellipsis. */
-.ln { display: grid; grid-template-columns: 64px 176px minmax(0, 1fr); gap: 12px; padding: 0 12px; white-space: nowrap; }
+/* One row per line: fixed time and stream tracks that never wrap, and a message that wraps so long lines stay readable. */
+.ln { display: grid; grid-template-columns: 64px 176px minmax(0, 1fr); gap: 12px; padding: 0 12px; align-items: start; }
 .ln:hover { background: var(--hover); }
-.ts { color: var(--dim); }
+.ts { color: var(--dim); white-space: nowrap; }
 .ct { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.msg { overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+.msg { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
 .ln[data-level="warn"] { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .ln[data-level="warn"]:hover { background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .ln[data-level="warn"] .msg { color: var(--warning); }
