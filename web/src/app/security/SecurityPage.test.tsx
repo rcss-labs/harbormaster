@@ -136,6 +136,64 @@ describe('SecurityPage', () => {
     expect(within(row('node-forge')).getByText('App dependency')).toBeInTheDocument()
   })
 
+  describe('package kind filter', () => {
+    const withMixedPackages = () => {
+      const [critical, ...rest] = SECURITY_IMAGE_EDGE.findings
+      const npm = { ...critical, vuln_id: 'GHSA-xxxx', package: 'node-forge', version: '1.3.1', type: 'npm', severity: 'critical' as const, acceptances: [] }
+      serveDetail({ ...SECURITY_IMAGE_EDGE, findings: [critical, npm, ...rest] })
+    }
+    const packageNames = async () => (await packageRows()).map((row) => (within(row).getAllByRole('button')[0].textContent ?? '').replace('▸', ''))
+
+    it('shows every package by default and narrows to OS packages or app dependencies', async () => {
+      withMixedPackages()
+      const user = userEvent.setup()
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const group = await screen.findByRole('radiogroup', { name: 'Package kind' })
+      expect(within(group).getByRole('radio', { name: /^All/ })).toHaveAttribute('aria-checked', 'true')
+      expect(await packageNames()).toEqual(expect.arrayContaining(['openssl', 'node-forge', 'libxml2']))
+
+      await user.click(within(group).getByRole('radio', { name: /^App dependencies/ }))
+      expect(await packageNames()).toEqual(['node-forge'])
+      expect(screen.getByTestId('search')).toHaveTextContent('pkgs=app')
+
+      await user.click(within(group).getByRole('radio', { name: /^OS packages/ }))
+      expect(await packageNames()).not.toContain('node-forge')
+      expect(await packageNames()).toContain('openssl')
+
+      await user.click(within(group).getByRole('radio', { name: /^All/ }))
+      expect(await packageNames()).toContain('node-forge')
+      expect(screen.getByTestId('search')).not.toHaveTextContent('pkgs=')
+    })
+
+    it('restores the filter from the URL and shows a count per kind', async () => {
+      withMixedPackages()
+      renderApp(`/security?image=${DIGEST_EDGE}&pkgs=app`)
+      const group = await screen.findByRole('radiogroup', { name: 'Package kind' })
+      expect(within(group).getByRole('radio', { name: /^App dependencies/ })).toHaveAttribute('aria-checked', 'true')
+      expect(within(group).getByRole('radio', { name: /^App dependencies/ })).toHaveTextContent('1')
+      expect(within(group).getByRole('radio', { name: /^OS packages/ })).toHaveTextContent('3')
+      expect(await packageNames()).toEqual(['node-forge'])
+    })
+
+    it('explains an empty result and keeps the control to switch back', async () => {
+      renderApp(`/security?image=${DIGEST_EDGE}&pkgs=app`)
+      expect(await screen.findByText('No app dependencies have known vulnerabilities.')).toBeInTheDocument()
+      const group = screen.getByRole('radiogroup', { name: 'Package kind' })
+      await userEvent.click(within(group).getByRole('radio', { name: /^All/ }))
+      expect(await packageRows()).not.toHaveLength(0)
+    })
+
+    it('moves between the options with the arrow keys', async () => {
+      withMixedPackages()
+      const user = userEvent.setup()
+      renderApp(`/security?image=${DIGEST_EDGE}`)
+      const group = await screen.findByRole('radiogroup', { name: 'Package kind' })
+      within(group).getByRole('radio', { name: /^All/ }).focus()
+      await user.keyboard('{ArrowRight}')
+      expect(within(group).getByRole('radio', { name: /^OS packages/ })).toHaveAttribute('aria-checked', 'true')
+    })
+  })
+
   it('accepts the risk of a whole package', async () => {
     const bodies: unknown[] = []
     server.use(

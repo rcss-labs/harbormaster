@@ -1,14 +1,16 @@
 import { useMemo, useState, type MouseEvent } from 'react'
+import { useSearchParams } from 'react-router'
 import type { SecurityAcceptance, SecurityFinding, SecurityImageDetail, Severity } from '../../api/security'
 import { useRevokeAcceptance } from '../../api/security'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 import { Pill, type PillKind } from '../../components/Pill'
+import { SegmentedFilter } from '../../components/Seg'
 import { useToast } from '../../components/Toast'
 import { AcceptRiskDialog, servicesToAccept, servicesToAcceptPackage, type AcceptTarget } from './AcceptRiskDialog'
 import { SECURITY_COPY } from './copy'
 import { formatDate } from './freshness'
-import { groupByPackage, packageOrigin, type PackageGroup } from './packages'
+import { groupByPackage, packageOrigin, type PackageGroup, type PackageKind } from './packages'
 import styles from './security.module.css'
 
 const SEVERITY_KIND: Record<Severity, PillKind> = {
@@ -27,6 +29,10 @@ const earliestExpiry = (acceptances: SecurityAcceptance[]) => acceptances.map((a
 /** One line per service: who accepted it, until when and why. */
 const acceptanceTitle = (acceptances: SecurityAcceptance[]) =>
   acceptances.map((a) => SECURITY_COPY.acceptanceLine(a.service, a.by, formatDate(a.expires_at), a.reason)).join('\n')
+
+type KindFilter = 'all' | PackageKind
+const KIND_FILTERS: KindFilter[] = ['all', 'os', 'app']
+const KIND_PARAM = 'pkgs'
 
 const INTERACTIVE = 'a, button, input, select, textarea'
 
@@ -52,6 +58,22 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
   const revoke = useRevokeAcceptance()
   const requestingServices = new Set(image.requests.map((request) => request.service_id)).size
   const groups = useMemo(() => groupByPackage(image.findings), [image.findings])
+  const [params, setParams] = useSearchParams()
+  const rawKind = params.get(KIND_PARAM)
+  const kindFilter: KindFilter = KIND_FILTERS.includes(rawKind as KindFilter) ? (rawKind as KindFilter) : 'all'
+  const setKindFilter = (value: KindFilter) =>
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (value === 'all') next.delete(KIND_PARAM)
+        else next.set(KIND_PARAM, value)
+        return next
+      },
+      { replace: true },
+    )
+  // Counts stay per image, not per filter, so each option says what choosing it would show.
+  const kindCounts = { all: groups.length, os: groups.filter((g) => g.kind === 'os').length, app: groups.filter((g) => g.kind === 'app').length }
+  const shownGroups = kindFilter === 'all' ? groups : groups.filter((group) => group.kind === kindFilter)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const [accepting, setAccepting] = useState<AcceptTarget | null>(null)
   const [revoking, setRevoking] = useState<PendingRevoke | null>(null)
@@ -156,7 +178,18 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
 
   return (
     <>
-      <div className={styles.packages}>
+      <div className={styles.findingsToolbar}>
+        <SegmentedFilter
+          label={SECURITY_COPY.packageKindFilterLabel}
+          value={kindFilter}
+          onChange={setKindFilter}
+          options={KIND_FILTERS.map((value) => ({ value, label: SECURITY_COPY.packageKindFilter[value], count: kindCounts[value] }))}
+        />
+      </div>
+      {shownGroups.length === 0 && kindFilter !== 'all' ? (
+        <p className={styles.empty}>{SECURITY_COPY.noFilteredPackages[kindFilter]}</p>
+      ) : (
+        <div className={styles.packages}>
         <div className={styles.packageHead} aria-hidden="true">
           <span>Severity</span>
           <span>Package</span>
@@ -165,7 +198,7 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
           <span />
         </div>
         <div role="list" aria-label={SECURITY_COPY.findingsLabel}>
-          {groups.map((group) => {
+          {shownGroups.map((group) => {
             const open = expanded.has(group.name)
             const bodyId = `package-${group.name.replace(/[^A-Za-z0-9_-]/g, '_')}`
             const note = packageNote(group)
@@ -223,7 +256,8 @@ export function FindingsTable({ image }: { image: SecurityImageDetail }) {
             )
           })}
         </div>
-      </div>
+        </div>
+      )}
       {accepting && <AcceptRiskDialog digest={image.digest} target={accepting} requests={image.requests} onClose={() => setAccepting(null)} />}
       {revoking && (
         <ConfirmDialog
