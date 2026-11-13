@@ -64,4 +64,42 @@ describe('usePins', () => {
     const other = renderHook(() => usePins())
     expect(other.result.current.pins).toEqual([])
   })
+
+  describe('move', () => {
+    const second: Pin = { ...service, id: 's2', name: 'orders-api' }
+    const seed = () => {
+      const hook = renderHook(() => usePins())
+      act(() => hook.result.current.toggle(service))
+      act(() => hook.result.current.toggle(cluster))
+      act(() => hook.result.current.toggle(second))
+      return hook
+    }
+    const stored = () => JSON.parse(localStorage.getItem('harbormaster-pinned:sam')!)
+
+    it('moves a pin to a new index across kinds and persists the order', () => {
+      const { result } = seed()
+      act(() => result.current.move('service', 's2', 0))
+      expect(result.current.pins).toEqual([second, service, cluster])
+      expect(stored()).toEqual([second, service, cluster])
+      act(() => result.current.move('service', 's1', 2))
+      expect(result.current.pins).toEqual([second, cluster, service])
+    })
+
+    it('keeps the order when moved to its own place, out of range or for an unknown pin', () => {
+      const { result } = seed()
+      act(() => result.current.move('cluster', 'c1', 1))
+      act(() => result.current.move('cluster', 'c1', -1))
+      act(() => result.current.move('cluster', 'c1', 3))
+      act(() => result.current.move('cluster', 'missing', 0))
+      expect(result.current.pins).toEqual([service, cluster, second])
+    })
+
+    it('identifies the pin by kind as well as id', () => {
+      const { result } = renderHook(() => usePins())
+      act(() => result.current.toggle({ ...service, id: 'same' }))
+      act(() => result.current.toggle({ ...cluster, id: 'same' }))
+      act(() => result.current.move('cluster', 'same', 0))
+      expect(result.current.pins.map((p) => p.kind)).toEqual(['cluster', 'service'])
+    })
+  })
 })

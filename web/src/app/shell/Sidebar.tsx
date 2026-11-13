@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
 import { useAuthOptions, useClusters, usePollerStatus, useServicesList, useSettings, useTasks } from '../../api/hooks'
@@ -70,19 +70,56 @@ interface PinnedItemProps {
   pin: Pin
   clusters: ClusterCardDTO[] | undefined
   onRemove: () => void
+  index: number
+  count: number
+  /** Moves this pin to a new index. */
+  onMove: (toIndex: number) => void
+  /** Another pin, identified by its drag data key, was dropped on this one. */
+  onDropFrom: (draggedKey: string) => void
 }
+
+const PIN_DRAG_TYPE = 'application/x-harbormaster-pin'
+const pinKey = (pin: Pin) => `${pin.kind}:${pin.id}`
 
 /**
  * Two lines: status mark and full name, then the cluster (service) or account (cluster). The mark follows the live status.
  * A missing pin gets a remove button beside the link, since its page can no longer be opened to unpin it there.
  */
-function PinnedItem({ pin, clusters, onRemove }: PinnedItemProps) {
+function PinnedItem({ pin, clusters, onRemove, index, count, onMove, onDropFrom }: PinnedItemProps) {
+  const [dragOver, setDragOver] = useState(false)
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+    event.preventDefault()
+    onMove(index + (event.key === 'ArrowUp' ? -1 : 1))
+  }
+  const onDrop = (event: DragEvent) => {
+    event.preventDefault()
+    setDragOver(false)
+    const draggedKey = event.dataTransfer.getData(PIN_DRAG_TYPE)
+    if (draggedKey) onDropFrom(draggedKey)
+  }
   const { kind, text: statusText, missing } = pinStatus(pin, clusters)
   const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
   const description = `${pin.name} · ${statusText} · ${detail}${missing ? ` · ${missingPinHint}` : ''}`
   const to = pin.kind === 'cluster' ? `/clusters/${pin.id}` : `/services/${pin.id}/overview`
   return (
-    <div className={styles.pinItem}>
+    <div
+      className={`${styles.pinItem} ${dragOver ? styles.pinDropTarget : ''}`}
+      draggable
+      onKeyDown={onKeyDown}
+      onDragStart={(event) => {
+        event.dataTransfer.setData(PIN_DRAG_TYPE, pinKey(pin))
+        event.dataTransfer.effectAllowed = 'move'
+      }}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setDragOver(true)
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      onDragEnd={() => setDragOver(false)}
+    >
       <NavLink to={to} title={description} aria-label={description}>
         <span className={styles.pinTop}>
           <span className={styles.pinMark} data-kind={kind} aria-hidden="true">
@@ -92,6 +129,14 @@ function PinnedItem({ pin, clusters, onRemove }: PinnedItemProps) {
         </span>
         <span className={styles.pinDetail}>{detail}</span>
       </NavLink>
+      <span className={styles.pinMoves}>
+        <button type="button" className={styles.pinMove} aria-label={`Move ${pin.name} up`} title="Move up (Alt+↑)" disabled={index === 0} onClick={() => onMove(index - 1)}>
+          ↑
+        </button>
+        <button type="button" className={styles.pinMove} aria-label={`Move ${pin.name} down`} title="Move down (Alt+↓)" disabled={index === count - 1} onClick={() => onMove(index + 1)}>
+          ↓
+        </button>
+      </span>
       {missing && (
         <button type="button" className={styles.pinRemove} aria-label={`Remove pin ${pin.name}`} title="Remove from pinned" onClick={onRemove}>
           ×
@@ -117,13 +162,19 @@ export function Sidebar() {
   const settings = useSettings()
   const authOptions = useAuthOptions()
   const poller = usePollerStatus()
-  const { pins, remove } = usePins()
+  const { pins, remove, move } = usePins()
+  const [pinAnnouncement, setPinAnnouncement] = useState('')
   // Unfiltered, so a pin outside the current scope filter still shows its status.
   const allClusters = useClusters()
   const [linking, setLinking] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   if (!me) return null
 
+  const movePin = (pin: Pin, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= pins.length) return
+    move(pin.kind, pin.id, toIndex)
+    setPinAnnouncement(`${pin.name} moved to position ${toIndex + 1} of ${pins.length}`)
+  }
   const canLinkSSO = authOptions.data?.sso != null && me.has_password && !me.sso_linked
   const unhealthy = running.data?.summary.by_status.running_unhealthy ?? 0
   const stoppedErrors = running.data?.counts.stopped_error ?? 0
@@ -179,12 +230,22 @@ export function Sidebar() {
       <nav className={styles.pinned} aria-label="Pinned">
         <div className={styles.navSection}>Pinned</div>
         {pins.length === 0 && <div className={styles.pinnedEmpty}>Pin a service or cluster from its page.</div>}
-        {pins.map((pin) => (
+        <div className={styles.srOnly} role="status" aria-live="polite">
+          {pinAnnouncement}
+        </div>
+        {pins.map((pin, index) => (
           <PinnedItem
-            key={`${pin.kind}:${pin.id}`}
+            key={pinKey(pin)}
             pin={pin}
+            index={index}
+            count={pins.length}
             clusters={allClusters.data?.items}
             onRemove={() => remove(pin.kind, pin.id)}
+            onMove={(toIndex) => movePin(pin, toIndex)}
+            onDropFrom={(draggedKey) => {
+              const dragged = pins.find((p) => pinKey(p) === draggedKey)
+              if (dragged) movePin(dragged, index)
+            }}
           />
         ))}
       </nav>

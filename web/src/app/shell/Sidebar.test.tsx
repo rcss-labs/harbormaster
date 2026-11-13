@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -299,5 +299,68 @@ describe('Sidebar groups', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/services'))
     await user.keyboard('?')
     expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+  })
+})
+
+describe('Sidebar pinned order', () => {
+  const PINS_KEY = 'harbormaster-pinned:sam'
+  const pin = (id: string, name: string) => ({ kind: 'service', id, name, cluster: 'core-services' })
+  const seedPins = () =>
+    localStorage.setItem(PINS_KEY, JSON.stringify([pin('a', 'alpha-api'), pin('b', 'bravo-api'), pin('c', 'charlie-api')]))
+  const pinned = () => screen.findByRole('navigation', { name: 'Pinned' })
+  const names = async () =>
+    within(await pinned())
+      .getAllByRole('link')
+      .map((link) => link.getAttribute('aria-label')?.split(' · ')[0])
+  const storedIds = () => JSON.parse(localStorage.getItem(PINS_KEY)!).map((p: { id: string }) => p.id)
+
+  it('moves a pin down and up with its buttons and persists the order', async () => {
+    seedPins()
+    renderApp('/')
+    const user = userEvent.setup()
+    const bar = within(await pinned())
+    await user.click(await bar.findByRole('button', { name: 'Move alpha-api down' }))
+    await waitFor(async () => expect(await names()).toEqual(['bravo-api', 'alpha-api', 'charlie-api']))
+    expect(storedIds()).toEqual(['b', 'a', 'c'])
+    await user.click(bar.getByRole('button', { name: 'Move charlie-api up' }))
+    await waitFor(async () => expect(await names()).toEqual(['bravo-api', 'charlie-api', 'alpha-api']))
+    expect(await screen.findByText('charlie-api moved to position 2 of 3')).toBeInTheDocument()
+  })
+
+  it('disables moving the first pin up and the last pin down', async () => {
+    seedPins()
+    renderApp('/')
+    const bar = within(await pinned())
+    expect(await bar.findByRole('button', { name: 'Move alpha-api up' })).toBeDisabled()
+    expect(bar.getByRole('button', { name: 'Move charlie-api down' })).toBeDisabled()
+    expect(bar.getByRole('button', { name: 'Move bravo-api up' })).toBeEnabled()
+  })
+
+  it('moves the focused pin with Alt+ArrowDown and Alt+ArrowUp', async () => {
+    seedPins()
+    renderApp('/')
+    const user = userEvent.setup()
+    const link = (await within(await pinned()).findByText('alpha-api')).closest('a')!
+    link.focus()
+    await user.keyboard('{Alt>}{ArrowDown}{/Alt}')
+    await waitFor(() => expect(storedIds()).toEqual(['b', 'a', 'c']))
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
+    await waitFor(() => expect(storedIds()).toEqual(['a', 'b', 'c']))
+    expect(link).toHaveFocus()
+  })
+
+  it('reorders by dragging a pin onto another', async () => {
+    seedPins()
+    renderApp('/')
+    const bar = within(await pinned())
+    const items = (await bar.findAllByRole('link')).map((a) => a.parentElement!)
+    expect(items[0]).toHaveAttribute('draggable', 'true')
+    const data = new Map<string, string>()
+    const dataTransfer = { setData: (k: string, v: string) => data.set(k, v), getData: (k: string) => data.get(k) ?? '', effectAllowed: '', dropEffect: '' }
+    fireEvent.dragStart(items[0], { dataTransfer })
+    fireEvent.dragOver(items[2], { dataTransfer })
+    fireEvent.drop(items[2], { dataTransfer })
+    fireEvent.dragEnd(items[0], { dataTransfer })
+    await waitFor(() => expect(storedIds()).toEqual(['b', 'c', 'a']))
   })
 })

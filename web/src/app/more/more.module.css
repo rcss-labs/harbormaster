@@ -20,6 +20,8 @@
   .pinRow { display: flex; align-items: center; border-bottom: 1px solid var(--row-border); }
   .pinRow:last-child { border-bottom: 0; }
   .pinRow > .row { flex: 1; min-width: 0; border-bottom: 0; }
+  .pinMove { flex: none; width: 44px; min-height: 44px; border: 0; border-radius: var(--r); background: none; color: var(--muted); font: 18px/1 var(--sans); cursor: pointer; }
+  .pinMove:disabled { opacity: 0.3; cursor: default; }
   .pinRemove { flex: none; margin-right: 8px; padding: 4px 8px; border: 0; border-radius: var(--r); background: none; color: var(--muted); font: 18px/1 var(--sans); cursor: pointer; opacity: 0.7; }
   .pinRemove:hover, .pinRemove:focus-visible { opacity: 1; color: var(--text); background: var(--hover); }
   .empty { padding: 14px 12px; font-size: 13px; color: var(--muted); }

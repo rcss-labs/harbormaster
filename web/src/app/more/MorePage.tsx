@@ -83,7 +83,7 @@ export function MorePage() {
   const counts = useShellCounts()
   const authOptions = useAuthOptions()
   const allClusters = useClusters()
-  const { pins, remove } = usePins()
+  const { pins, remove, move } = usePins()
   const dark = useIsDark()
   const [linking, setLinking] = useState(false)
   useCrumbs([['More']])
@@ -153,7 +153,7 @@ export function MorePage() {
 
       <Panel label="Pinned" heading="Pinned">
         {pins.length === 0 && <div className={styles.empty}>Pin a service or cluster from its page.</div>}
-        {pins.map((pin) => {
+        {pins.map((pin, index) => {
           const status = pinStatus(pin, allClusters.data?.items)
           const detail = pin.kind === 'cluster' ? `${pin.account_name} · ${pin.account_id}` : pin.cluster
           const label = `${pin.name} · ${status.text} · ${detail}${status.missing ? ` · ${missingPinHint}` : ''}`
@@ -171,6 +171,12 @@ export function MorePage() {
                   <Icon name="chev" size={16} />
                 </span>
               </Link>
+              <button type="button" className={styles.pinMove} aria-label={`Move ${pin.name} up`} disabled={index === 0} onClick={() => move(pin.kind, pin.id, index - 1)}>
+                ↑
+              </button>
+              <button type="button" className={styles.pinMove} aria-label={`Move ${pin.name} down`} disabled={index === pins.length - 1} onClick={() => move(pin.kind, pin.id, index + 1)}>
+                ↓
+              </button>
               {status.missing && (
                 <button
                   type="button"
