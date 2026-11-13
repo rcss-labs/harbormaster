@@ -16,8 +16,11 @@
 .note { margin-left: auto; color: var(--muted); font-size: 12px; }
 /* The wrap takes the leftover height; the terminal host inside it is what xterm fits to. */
 .termWrap { flex: 1 1 0; min-height: 300px; display: flex; padding: var(--pad); min-width: 0; }
-.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 12px 14px; box-sizing: border-box; }
-.term :global(.xterm) { height: 100%; }
+.term { background: var(--term-bg); color: var(--term-text); font-family: var(--mono); font-size: 12px; line-height: 1.5; border-radius: var(--radius); outline: 1px solid var(--border); outline-offset: -1px; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; padding: 0; box-sizing: border-box; }
+/* xterm's fit addon sizes cols and rows from the host's computed box and ignores the host's own padding and border, so the
+   host has none (the border is an inset outline) and the inset lives on .xterm, which fit subtracts. Otherwise the terminal gets
+   columns that do not fit and long lines are cut off instead of wrapping. */
+.term :global(.xterm) { height: 100%; box-sizing: border-box; padding: 12px 14px; }
 
 /* Below 1180px the layout is one column in normal flow: the fixed-height grid would squeeze the rows and paint the terminal over the Session panel. */
 @media (max-width: 1179px) {
