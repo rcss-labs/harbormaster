@@ -2,7 +2,7 @@
 // contract/contract.test.ts.
 import { http, HttpResponse } from 'msw'
 import type { ListDTO } from '../api/types'
-import type { LogSearchResultDTO, LogSearchServiceDTO, SavedLogSearchDTO } from '../api/logSearch'
+import type { LogSearchEstimateDTO, LogSearchResultDTO, LogSearchServiceDTO, SavedLogSearchDTO } from '../api/logSearch'
 import { FIXTURE_NOW } from './fixtures'
 
 export const LOG_SEARCH_SERVICES: ListDTO<LogSearchServiceDTO> = {
@@ -16,6 +16,8 @@ export const LOG_SEARCH_SERVICES: ListDTO<LogSearchServiceDTO> = {
 
 const okTarget = { account_id: 'acc-1', account_name: 'admin', region: 'eu-west-1', state: 'ok' as const, message: '', bytes_scanned: 1_503_238_553, records_matched: 3 }
 
+const GIB = 1024 ** 3
+
 export const LOG_SEARCH_RESULT: LogSearchResultDTO = {
   rows: [
     { t: '2026-11-08T10:00:03.250Z', service_id: 'svc-payments', container: 'app', task_id: 'a1b2c3d4e5f6', message: 'ERROR card declined', message_truncated: false },
@@ -25,6 +27,8 @@ export const LOG_SEARCH_RESULT: LogSearchResultDTO = {
   records_matched: 3,
   bytes_scanned: 1_503_238_553,
   capped: false,
+  scan_limit_reached: false,
+  scan_limit_bytes: GIB * 10,
   cost_usd: 0.007,
   duration_ms: 2400,
   from: '2026-11-08T09:00:00Z',
@@ -40,6 +44,25 @@ export const LOG_SEARCH_RESULT_CAPPED: LogSearchResultDTO = {
   ...LOG_SEARCH_RESULT,
   capped: true,
   records_matched: 48_210,
+}
+
+const SCAN_LIMIT_MESSAGE = 'Stopped at the 10 GB scan limit; the results are partial.'
+
+export const LOG_SEARCH_RESULT_SCAN_LIMIT: LogSearchResultDTO = {
+  ...LOG_SEARCH_RESULT,
+  scan_limit_reached: true,
+  bytes_scanned: Math.round(GIB * 10.2),
+  cost_usd: 0.051,
+  targets: [{ ...okTarget, state: 'scan_limit', message: SCAN_LIMIT_MESSAGE, bytes_scanned: Math.round(GIB * 10.2) }],
+}
+
+export const LOG_SEARCH_ESTIMATE: LogSearchEstimateDTO = {
+  stored_bytes: GIB * 4,
+  cost_usd: 0.02,
+  groups: 1,
+  unknown_groups: 0,
+  scan_limit_bytes: GIB * 10,
+  exceeds_scan_limit: false,
 }
 
 const NO_PERMISSION_MESSAGE =
@@ -90,6 +113,7 @@ export const SAVED_LOG_SEARCHES: ListDTO<SavedLogSearchDTO> = {
 export const logSearchHandlers = [
   http.get('/api/log-search/services', () => HttpResponse.json(LOG_SEARCH_SERVICES)),
   http.post('/api/log-search', () => HttpResponse.json(LOG_SEARCH_RESULT)),
+  http.post('/api/log-search/estimate', () => HttpResponse.json(LOG_SEARCH_ESTIMATE)),
   http.get('/api/log-search/saved', () => HttpResponse.json(SAVED_LOG_SEARCHES)),
   http.post('/api/log-search/saved', async ({ request }) => {
     const body = (await request.json()) as Omit<SavedLogSearchDTO, 'id' | 'hidden_services' | 'updated_at'>

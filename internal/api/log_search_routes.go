@@ -7,6 +7,8 @@ func (s *Server) logSearchRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/log-search/services", s.listLogSearchServices, routeOptions{})
 	// A search answers with a fresh result each time; a conditional GET makes no sense for it.
 	s.handle(mux, "POST /api/log-search", s.postLogSearch, routeOptions{NoETag: true})
+	// The estimate reads log group sizes only and changes with the groups, so it is never cached either.
+	s.handle(mux, "POST /api/log-search/estimate", s.postLogSearchEstimate, routeOptions{NoETag: true})
 	s.handle(mux, "GET /api/log-search/saved", s.listSavedLogSearches, routeOptions{})
 	s.handle(mux, "POST /api/log-search/saved", s.saveLogSearch, routeOptions{})
 	s.handle(mux, "DELETE /api/log-search/saved/{id}", s.deleteSavedLogSearch, routeOptions{})

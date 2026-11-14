@@ -124,7 +124,7 @@ func New(s Server) *Server {
 		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
 	}
 	if s.LogSearch == nil {
-		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, Timeout: s.Cfg.LogSearchTimeout}
+		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, Timeout: s.Cfg.LogSearchTimeout, MaxBytes: int64(s.Cfg.LogSearchMaxGB) * logs.BytesPerGiB}
 	}
 	if s.SearchLimiter == nil {
 		s.SearchLimiter = logs.NewTailLimiter(1)

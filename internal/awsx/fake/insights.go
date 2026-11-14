@@ -162,7 +162,9 @@ func (c *logsClient) GetQueryResults(_ context.Context, in *cloudwatchlogs.GetQu
 	}
 	q.polls++
 	if q.polls < 2 {
-		return &cloudwatchlogs.GetQueryResultsOutput{Status: logstypes.QueryStatusRunning, Statistics: &logstypes.QueryStatistics{}}, nil
+		// A running query reports the bytes it has scanned so far (the scan cap relies on it); the fake
+		// has done all of its scanning by the first poll.
+		return &cloudwatchlogs.GetQueryResultsOutput{Status: logstypes.QueryStatusRunning, Statistics: &logstypes.QueryStatistics{BytesScanned: q.stats.BytesScanned}}, nil
 	}
 	q.done = true
 	stats := q.stats

@@ -78,6 +78,7 @@ type Estate struct {
 	LogPools          map[string][][2]string // service name (or "default") -> [level, message]
 	ContainerInsights map[model.ClusterKey]string
 	LogLines          map[string][]LogLine // log group -> explicit lines (SetLogLines)
+	LogGroupBytes     map[string]int64     // log group -> storedBytes override (SetLogGroupStoredBytes)
 
 	// Plan 05 (networks and storage) state; see estate_network.go. Guarded by Mu.
 	Network NetworkEstate
