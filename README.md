@@ -495,6 +495,20 @@ The UI shows two banners per account and region:
 
 The AWS API limits Harbormaster works within, and how the estate size affects them, are in [`docs/ops/ecs-api-budget.md`](docs/ops/ecs-api-budget.md).
 
+### AWS costs
+
+Harbormaster itself is cheap to run, but it reads AWS constantly, and some of what it triggers is billed in the connected accounts, not in the Harbormaster account. Check these before connecting a large estate.
+
+- **CloudTrail.** Every poll is an AWS API call, and every call is a CloudTrail management event in the account and region polled. The first trail that copies management events to S3 is free, but each additional copy is billed per event ($2 per 100,000), as are events delivered to CloudWatch Logs (per GB ingested) and CloudTrail Lake or Security Lake (per GB ingested). An organisation trail plus a per-account trail, or a trail feeding CloudWatch Logs, can turn polling into a large bill.
+  - Harbormaster only reads, so on any trail you pay for, record write-only management events (`ReadWriteType: WriteOnly` on the event selector, or `readOnly = false` in an advanced selector). That drops almost all of Harbormaster's events while keeping every change.
+  - Call volume grows with clusters, services (10 per `DescribeServices`), target groups (one `DescribeTargetHealth` each) and with every account and region you connect.
+- **Polling cadence.** The defaults ([Polling intervals](#polling-intervals)) are tuned for a UI someone is looking at: 30 s for services and running tasks, 60 s for stopped tasks and target health, 5 min for the rest. When nobody has the UI open for `HM_POLL_IDLE_AFTER` (10 min), every tier slows to `HM_POLL_IDLE_INTERVAL` (5 min). Only a visible browser tab counts as activity, since background tabs stop polling, but a dashboard left open on a screen keeps Harbormaster at full speed. Raise the intervals, or lower `HM_POLL_IDLE_AFTER`, through the module's extra environment variables if that is still too much.
+- **Logs Insights.** Log search is billed at $0.005 per GB scanned. Each search is stopped at `HM_LOG_SEARCH_MAX_GB` (10 GB, about $0.05) and starts on a 1 hour range; see [Log search](#log-search).
+- **Live tail.** CloudWatch Logs Live Tail is billed per session-minute. Each user can hold `HM_LOG_TAILS_PER_USER` (2) tails, and an unwatched tail closes after `HM_LOG_TAIL_IDLE` (30 min).
+- **Metrics.** Charts call `GetMetricData`, billed per metric requested. Results are cached for `HM_METRICS_CACHE_TTL` (60 s) and shared by every viewer, and the daily utilisation rollup makes one batch per account and region a day.
+
+**Measure it.** `harbormaster_aws_api_calls_total` on `/metrics` counts every AWS call by account, region, service and operation, and `harbormaster_poller_idle` is `1` while the poller is idle. In the billed account, Cost Explorer filtered to CloudTrail and CloudWatch and grouped by usage type shows which of the charges above you are paying.
+
 ### Terminal
 
 The Terminal tab on a service page opens an interactive shell in a running task through ECS Exec (`ecs:ExecuteCommand` plus the SSM Session Manager data channel). Harbormaster checks the user's Terminal permission before it opens a session.
