@@ -84,6 +84,12 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 			p.cfg.OffHours.Run(ctx)
 		}()
 	}
+	// Idle detection only matters while polling, so it runs with the supervisor, on the leader.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.runIdleMonitor(ctx)
+	}()
 	p.runRollups(ctx)
 	p.runRetention(ctx)
 	for {

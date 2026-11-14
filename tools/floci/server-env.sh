@@ -17,7 +17,12 @@ export HM_BASE_URL="http://127.0.0.1:${HM_FLOCI_PORT}"
 export HM_DATABASE_URL="postgres://postgres:hm@127.0.0.1:55433/postgres?sslmode=disable"
 export HM_COOKIE_SECURE=false
 export HM_SESSION_KEY=floci
-# Short observe tiers so the checks do not wait a minute for the first figures.
+# Fast tiers and no idle slowdown so the checks do not wait on the (slower) defaults.
+export HM_POLL_SERVICES=5s
+export HM_POLL_RUNNING_TASKS=5s
+export HM_POLL_STOPPED_TASKS=15s
+export HM_POLL_FULL_TASKS=30s
+export HM_POLL_IDLE_AFTER=0
 export HM_POLL_SCALING=10s
 export HM_POLL_TARGET_HEALTH=10s
 export HM_POLL_NETWORK=20s

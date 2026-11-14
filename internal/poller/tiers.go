@@ -45,13 +45,17 @@ func newTier(name string, base time.Duration) *tier {
 	return &tier{name: name, base: base, cur: base}
 }
 
-// nextDelay is cur plus a uniform random offset in [-jitter, +jitter].
-func (t *tier) nextDelay(jitter time.Duration) time.Duration {
+// nextDelay is max(cur, floor) plus a uniform random offset in [-jitter, +jitter]. A zero floor
+// leaves cur as is; floored reports whether the floor raised the delay above cur.
+func (t *tier) nextDelay(jitter, floor time.Duration) (delay time.Duration, floored bool) {
 	t.mu.Lock()
-	delay := t.cur
+	delay = t.cur
 	t.mu.Unlock()
+	if floor > delay {
+		delay, floored = floor, true
+	}
 	if jitter > 0 {
 		delay += time.Duration(rand.Int64N(int64(2*jitter)+1)) - jitter
 	}
-	return max(delay, minTickInterval)
+	return max(delay, minTickInterval), floored
 }

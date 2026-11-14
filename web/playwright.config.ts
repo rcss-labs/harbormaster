@@ -30,6 +30,12 @@ degradedDatabaseURL.search += `${degradedDatabaseURL.search ? '&' : '?'}options=
 const serverEnv = {
   HM_COOKIE_SECURE: 'false',
   HM_SESSION_KEY: 'e2e-session-key', // plan 07: SAML request state and SP key encryption
+  // The previous 5s/15s/30s intervals (defaults are now slower) and no idle slowdown keep the specs quick.
+  HM_POLL_SERVICES: '5s',
+  HM_POLL_RUNNING_TASKS: '5s',
+  HM_POLL_STOPPED_TASKS: '15s',
+  HM_POLL_FULL_TASKS: '30s',
+  HM_POLL_IDLE_AFTER: '0',
   // Short observe tiers keep the observe specs from waiting a minute for their first figures.
   HM_POLL_SCALING: '5s',
   HM_POLL_TARGET_HEALTH: '5s',

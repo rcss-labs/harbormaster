@@ -24,6 +24,10 @@ type PollConfig struct {
 	Scaling       time.Duration
 	Network       time.Duration // plan 05
 	Storage       time.Duration // plan 05
+	// IdleAfter is how long without session activity before polling goes idle; 0 disables idle mode.
+	IdleAfter time.Duration
+	// IdleInterval is the minimum wait between runs of every poller tier while idle.
+	IdleInterval time.Duration
 }
 
 // RetentionConfig holds how long each kind of recorded data is kept.
@@ -216,19 +220,21 @@ func Load(getenv func(string) string) (Config, error) {
 		LoginMaxPerIP:           reader.integer("HM_LOGIN_MAX_PER_IP", 30),
 		LoginWindow:             reader.duration("HM_LOGIN_WINDOW", 15*time.Minute),
 		Poll: PollConfig{
-			Services:      reader.duration("HM_POLL_SERVICES", 5*time.Second),
-			RunningTasks:  reader.duration("HM_POLL_RUNNING_TASKS", 5*time.Second),
-			FullTasks:     reader.duration("HM_POLL_FULL_TASKS", 30*time.Second),
-			StoppedTasks:  reader.duration("HM_POLL_STOPPED_TASKS", 15*time.Second),
+			Services:      reader.duration("HM_POLL_SERVICES", 30*time.Second),
+			RunningTasks:  reader.duration("HM_POLL_RUNNING_TASKS", 30*time.Second),
+			FullTasks:     reader.duration("HM_POLL_FULL_TASKS", 5*time.Minute),
+			StoppedTasks:  reader.duration("HM_POLL_STOPPED_TASKS", 60*time.Second),
 			Clusters:      reader.duration("HM_POLL_CLUSTERS", 60*time.Second),
 			ServiceList:   reader.duration("HM_POLL_SERVICE_LIST", 60*time.Second),
 			CountsHistory: reader.duration("HM_POLL_COUNTS_HISTORY", 5*time.Minute),
 			MaxInFlight:   reader.integer("HM_POLL_MAX_INFLIGHT", 8),
 			Jitter:        reader.duration("HM_POLL_JITTER", 500*time.Millisecond),
-			TargetHealth:  reader.duration("HM_POLL_TARGET_HEALTH", 15*time.Second),
-			Scaling:       reader.duration("HM_POLL_SCALING", 60*time.Second),
+			TargetHealth:  reader.duration("HM_POLL_TARGET_HEALTH", 60*time.Second),
+			Scaling:       reader.duration("HM_POLL_SCALING", 5*time.Minute),
 			Network:       reader.duration("HM_POLL_NETWORK", 5*time.Minute), // plan 05
 			Storage:       reader.duration("HM_POLL_STORAGE", 5*time.Minute), // plan 05
+			IdleAfter:     reader.duration("HM_POLL_IDLE_AFTER", 10*time.Minute),
+			IdleInterval:  reader.duration("HM_POLL_IDLE_INTERVAL", 5*time.Minute),
 		},
 		Retention: RetentionConfig{
 			StoppedTasks:      reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),
@@ -303,6 +309,12 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
 		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")
+	}
+	if cfg.Poll.IdleAfter < 0 {
+		return Config{}, errors.New("HM_POLL_IDLE_AFTER: must be 0 (disabled) or positive")
+	}
+	if cfg.Poll.IdleAfter > 0 && cfg.Poll.IdleInterval < time.Second {
+		return Config{}, errors.New("HM_POLL_IDLE_INTERVAL: must be at least 1s when idle mode is enabled")
 	}
 	if cfg.OffHours.Interval < time.Second {
 		return Config{}, errors.New("HM_OFFHOURS_INTERVAL: must be at least 1s")

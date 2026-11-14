@@ -214,20 +214,62 @@ func (l *Loop) countsLoop(ctx context.Context, every time.Duration) {
 	}
 }
 
+// tierDelay is how long the tier sleeps before its next run: its interval (including throttle
+// backoff), raised to the idle interval while idle. wake is non-nil only when idle raised the delay;
+// it closes when activity resumes, so such a sleep can be cut short. Tiers already slower than the
+// idle interval keep their cadence and never wake early.
+func (l *Loop) tierDelay(t *tier) (delay time.Duration, wake <-chan struct{}) {
+	idle, wakeCh := l.p.idle.snapshot()
+	var floor time.Duration
+	if idle {
+		floor = l.p.cfg.IdleInterval
+	}
+	delay, floored := t.nextDelay(l.p.cfg.Jitter, floor)
+	if floored {
+		return delay, wakeCh
+	}
+	return delay, nil
+}
+
 // tickTier repeats a tier until ctx ends, sleeping its jittered interval between runs.
 func (l *Loop) tickTier(ctx context.Context, d tierDef, runImmediately bool) {
 	if runImmediately {
 		_ = l.runTier(ctx, d)
 	}
-	for {
-		timer := time.NewTimer(d.tier.nextDelay(l.p.cfg.Jitter))
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
+	for l.waitNextRun(ctx, d.tier) {
 		_ = l.runTier(ctx, d)
+	}
+}
+
+// waitNextRun sleeps until the tier is due, or until activity resumes while the tier was held back
+// by idle mode. It returns false when ctx ended.
+func (l *Loop) waitNextRun(ctx context.Context, t *tier) bool {
+	delay, wake := l.tierDelay(t)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	case <-wake:
+		// Spread the woken tiers like a fresh start so they do not hit ECS's rate buckets together.
+		return sleepCtx(ctx, l.startDelays()[t.name])
+	}
+}
+
+// sleepCtx waits d and reports false if ctx ended first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
