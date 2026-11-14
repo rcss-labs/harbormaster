@@ -279,19 +279,21 @@ All settings are environment variables, read by `internal/config`. Durations use
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `HM_POLL_SERVICES` | `5s` | Service poll interval |
-| `HM_POLL_RUNNING_TASKS` | `5s` | Running-task poll interval |
-| `HM_POLL_FULL_TASKS` | `30s` | Full task poll interval |
-| `HM_POLL_STOPPED_TASKS` | `15s` | Stopped-task poll interval |
+| `HM_POLL_SERVICES` | `30s` | Service poll interval |
+| `HM_POLL_RUNNING_TASKS` | `30s` | Running-task poll interval |
+| `HM_POLL_FULL_TASKS` | `5m` | Full task poll interval |
+| `HM_POLL_STOPPED_TASKS` | `60s` | Stopped-task poll interval |
 | `HM_POLL_CLUSTERS` | `60s` | Cluster poll interval |
 | `HM_POLL_SERVICE_LIST` | `60s` | Service list poll interval |
 | `HM_POLL_COUNTS_HISTORY` | `5m` | Task-count history sampling interval |
-| `HM_POLL_TARGET_HEALTH` | `15s` | Load balancer target health poll interval |
-| `HM_POLL_SCALING` | `60s` | Application Auto Scaling poll interval |
+| `HM_POLL_TARGET_HEALTH` | `60s` | Load balancer target health poll interval |
+| `HM_POLL_SCALING` | `5m` | Application Auto Scaling poll interval |
 | `HM_POLL_NETWORK` | `5m` | Networking poll interval (VPCs, subnets, gateways, endpoints, security groups) |
 | `HM_POLL_STORAGE` | `5m` | EFS storage poll interval |
 | `HM_POLL_JITTER` | `500ms` | Random jitter added to poll schedules |
 | `HM_POLL_MAX_INFLIGHT` | `8` | Maximum concurrent AWS calls |
+| `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen) for this long puts the poller in idle mode. `0` disables idle mode |
+| `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
 | `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled; applies only when the demo schedule is first seeded, not to an existing one |
 

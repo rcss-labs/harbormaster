@@ -38,19 +38,21 @@ func TestLoad_Defaults(t *testing.T) {
 		LoginMaxPerIP:           30,
 		LoginWindow:             15 * time.Minute,
 		Poll: PollConfig{
-			Services:      5 * time.Second,
-			RunningTasks:  5 * time.Second,
-			FullTasks:     30 * time.Second,
-			StoppedTasks:  15 * time.Second,
+			Services:      30 * time.Second,
+			RunningTasks:  30 * time.Second,
+			FullTasks:     5 * time.Minute,
+			StoppedTasks:  60 * time.Second,
 			Clusters:      60 * time.Second,
 			ServiceList:   60 * time.Second,
 			CountsHistory: 5 * time.Minute,
 			MaxInFlight:   8,
 			Jitter:        500 * time.Millisecond,
-			TargetHealth:  15 * time.Second,
-			Scaling:       60 * time.Second,
+			TargetHealth:  60 * time.Second,
+			Scaling:       5 * time.Minute,
 			Network:       5 * time.Minute,
 			Storage:       5 * time.Minute,
+			IdleAfter:     10 * time.Minute,
+			IdleInterval:  5 * time.Minute,
 		},
 		Retention: RetentionConfig{
 			StoppedTasks:      168 * time.Hour,
@@ -168,8 +170,8 @@ func TestConfig_ObserveDefaults(t *testing.T) {
 		want any
 	}{
 		{"MetricsCacheTTL", cfg.MetricsCacheTTL, 60 * time.Second},
-		{"Poll.TargetHealth", cfg.Poll.TargetHealth, 15 * time.Second},
-		{"Poll.Scaling", cfg.Poll.Scaling, 60 * time.Second},
+		{"Poll.TargetHealth", cfg.Poll.TargetHealth, 60 * time.Second},
+		{"Poll.Scaling", cfg.Poll.Scaling, 5 * time.Minute},
 		{"LogTailIdle", cfg.LogTailIdle, 30 * time.Minute},
 		{"LogTailsPerUser", cfg.LogTailsPerUser, 2},
 		{"LogHistoryLimit", cfg.LogHistoryLimit, 500},
@@ -560,6 +562,49 @@ func TestConfig_LogSearchDefaults(t *testing.T) {
 		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", name: value}))
 		if err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s=%s: error %v, want one naming %s", name, value, err, name)
+		}
+	}
+}
+
+func TestLoad_PollIdleSettings(t *testing.T) {
+	base := map[string]string{"HM_DATABASE_URL": "postgres://example"}
+	with := func(extra map[string]string) map[string]string {
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		return env
+	}
+
+	cfg, err := Load(envFromMap(with(map[string]string{"HM_POLL_IDLE_AFTER": "2m", "HM_POLL_IDLE_INTERVAL": "90s"})))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Poll.IdleAfter != 2*time.Minute || cfg.Poll.IdleInterval != 90*time.Second {
+		t.Errorf("idle = %v/%v, want 2m/90s", cfg.Poll.IdleAfter, cfg.Poll.IdleInterval)
+	}
+
+	// 0 disables idle mode, and then the interval is not validated.
+	if _, err := Load(envFromMap(with(map[string]string{"HM_POLL_IDLE_AFTER": "0", "HM_POLL_IDLE_INTERVAL": "0s"}))); err != nil {
+		t.Errorf("idle disabled: Load: %v", err)
+	}
+
+	rejected := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"negative after", map[string]string{"HM_POLL_IDLE_AFTER": "-1m"}, "HM_POLL_IDLE_AFTER"},
+		{"interval under 1s", map[string]string{"HM_POLL_IDLE_INTERVAL": "500ms"}, "HM_POLL_IDLE_INTERVAL"},
+		{"bad after", map[string]string{"HM_POLL_IDLE_AFTER": "soon"}, "HM_POLL_IDLE_AFTER"},
+	}
+	for _, tc := range rejected {
+		_, err := Load(envFromMap(with(tc.env)))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want mention of %s", tc.name, err, tc.want)
 		}
 	}
 }
