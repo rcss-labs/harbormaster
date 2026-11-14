@@ -295,6 +295,17 @@ func (e *Estate) SetLogLines(group string, lines []LogLine) {
 	e.LogLines[group] = append([]LogLine(nil), lines...)
 }
 
+// SetLogGroupStoredBytes makes DescribeLogGroups report this storedBytes for the group, and makes the
+// group exist even when it has no lines.
+func (e *Estate) SetLogGroupStoredBytes(group string, bytes int64) {
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	if e.LogGroupBytes == nil {
+		e.LogGroupBytes = map[string]int64{}
+	}
+	e.LogGroupBytes[group] = bytes
+}
+
 type targetGroupEntry struct {
 	key   model.ServiceKey
 	group TargetGroup

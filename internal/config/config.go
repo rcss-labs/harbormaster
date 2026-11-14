@@ -109,6 +109,7 @@ type Config struct {
 	LogSearchTimeout        time.Duration
 	LogSearchMaxServices    int
 	LogSearchMaxRange       time.Duration
+	LogSearchMaxGB          int // scan cap per search in GiB; 0 = no cap
 	MaxDesiredCount         int
 
 	// SAML: how long a sign-in request (and its binding cookie) stays valid
@@ -274,6 +275,7 @@ func Load(getenv func(string) string) (Config, error) {
 		LogSearchTimeout:     reader.duration("HM_LOG_SEARCH_TIMEOUT", 60*time.Second),
 		LogSearchMaxServices: reader.integer("HM_LOG_SEARCH_MAX_SERVICES", 20),
 		LogSearchMaxRange:    reader.duration("HM_LOG_SEARCH_MAX_RANGE", 168*time.Hour),
+		LogSearchMaxGB:       reader.integer("HM_LOG_SEARCH_MAX_GB", 10),
 		MaxDesiredCount:      reader.integer("HM_MAX_DESIRED_COUNT", 50),
 		SAMLRequestTTL:       reader.duration("HM_SAML_REQUEST_TTL", 10*time.Minute),
 
@@ -300,6 +302,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.LogSearchMaxRange <= 0 {
 		return Config{}, errors.New("HM_LOG_SEARCH_MAX_RANGE: must be positive")
+	}
+	if cfg.LogSearchMaxGB < 0 {
+		return Config{}, errors.New("HM_LOG_SEARCH_MAX_GB: must be 0 (no cap) or positive")
 	}
 	if cfg.SAMLRequestTTL < time.Minute || cfg.SAMLRequestTTL > 30*time.Minute {
 		return Config{}, errors.New("HM_SAML_REQUEST_TTL: must be between 1m and 30m")

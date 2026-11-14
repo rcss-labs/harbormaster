@@ -87,6 +87,7 @@ func TestLoad_Defaults(t *testing.T) {
 		LogSearchTimeout:     60 * time.Second,
 		LogSearchMaxServices: 20,
 		LogSearchMaxRange:    168 * time.Hour,
+		LogSearchMaxGB:       10,
 		MaxDesiredCount:      50,
 		SAMLRequestTTL:       10 * time.Minute,
 		// plan 04: terminal
@@ -561,5 +562,30 @@ func TestConfig_LogSearchDefaults(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s=%s: error %v, want one naming %s", name, value, err, name)
 		}
+	}
+}
+
+func TestConfig_LogSearchMaxGB(t *testing.T) {
+	load := func(value string) (Config, error) {
+		env := map[string]string{"HM_DATABASE_URL": "postgres://example"}
+		if value != "" {
+			env["HM_LOG_SEARCH_MAX_GB"] = value
+		}
+		return Load(envFromMap(env))
+	}
+	cfg, err := load("")
+	if err != nil || cfg.LogSearchMaxGB != 10 {
+		t.Fatalf("default = %d, %v; want 10", cfg.LogSearchMaxGB, err)
+	}
+	cfg, err = load("0")
+	if err != nil || cfg.LogSearchMaxGB != 0 {
+		t.Fatalf("0 = %d, %v; want 0 (no cap)", cfg.LogSearchMaxGB, err)
+	}
+	cfg, err = load("25")
+	if err != nil || cfg.LogSearchMaxGB != 25 {
+		t.Fatalf("25 = %d, %v", cfg.LogSearchMaxGB, err)
+	}
+	if _, err := load("-1"); err == nil || !strings.Contains(err.Error(), "HM_LOG_SEARCH_MAX_GB") {
+		t.Errorf("-1: error %v, want one naming HM_LOG_SEARCH_MAX_GB", err)
 	}
 }
