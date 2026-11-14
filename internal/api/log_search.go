@@ -84,16 +84,19 @@ type LogSearchTargetDTO struct {
 }
 
 type LogSearchResultDTO struct {
-	Rows           []LogSearchRowDTO          `json:"rows"`
-	RecordsMatched int64                      `json:"records_matched"`
-	BytesScanned   int64                      `json:"bytes_scanned"`
-	Capped         bool                       `json:"capped"`
-	CostUSD        float64                    `json:"cost_usd"`
-	DurationMS     int64                      `json:"duration_ms"`
-	From           time.Time                  `json:"from"`
-	To             time.Time                  `json:"to"`
-	Services       []LogSearchServiceStateDTO `json:"services"`
-	Targets        []LogSearchTargetDTO       `json:"targets"`
+	Rows           []LogSearchRowDTO `json:"rows"`
+	RecordsMatched int64             `json:"records_matched"`
+	BytesScanned   int64             `json:"bytes_scanned"`
+	Capped         bool              `json:"capped"`
+	// ScanLimitReached is true when a query was stopped at the scan cap (ScanLimitBytes); the rows are partial.
+	ScanLimitReached bool                       `json:"scan_limit_reached"`
+	ScanLimitBytes   int64                      `json:"scan_limit_bytes"`
+	CostUSD          float64                    `json:"cost_usd"`
+	DurationMS       int64                      `json:"duration_ms"`
+	From             time.Time                  `json:"from"`
+	To               time.Time                  `json:"to"`
+	Services         []LogSearchServiceStateDTO `json:"services"`
+	Targets          []LogSearchTargetDTO       `json:"targets"`
 }
 
 var (
@@ -211,44 +214,14 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ids := dedupe(req.ServiceIDs)
-	from, to, err := s.checkLogSearchRequest(ids, req.Range, req.From, req.To, req.Query)
-	if err != nil {
-		s.fail(w, err)
+	plan, ok := s.planLogSearch(w, r, req)
+	if !ok {
 		return
 	}
-
-	// 2. Each service the caller may search.
-	subject := auth.SubjectFrom(ctx)
+	from, to, queried, searchServices := plan.from, plan.to, plan.queried, plan.searchServices
 	user, _ := auth.UserFrom(ctx)
-	services, err := s.resolveSearchServices(ctx, subject, ids)
-	var forbidden errLogsForbidden
-	if errors.As(err, &forbidden) {
-		forbiddenAction(w, authz.Logs, forbidden.tag)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-
-	// 3. Services with nothing in CloudWatch are reported, not queried.
-	result := LogSearchResultDTO{Rows: []LogSearchRowDTO{}, From: from, To: to, Services: []LogSearchServiceStateDTO{}, Targets: []LogSearchTargetDTO{}}
+	result := LogSearchResultDTO{Rows: []LogSearchRowDTO{}, From: from, To: to, Services: plan.states, Targets: []LogSearchTargetDTO{}}
 	stateByService := map[string]*LogSearchServiceStateDTO{}
-	var queried []searchedService
-	var searchServices []logs.SearchService
-	for _, svc := range services {
-		state := LogSearchServiceStateDTO{ID: svc.key.ID(), Name: svc.key.Service, State: "ok"}
-		if svc.sel.group == "" {
-			state.State, state.Message = "no_awslogs", "This service has no container that logs to CloudWatch (awslogs)."
-		} else {
-			queried = append(queried, svc)
-			searchServices = append(searchServices, logs.SearchService{
-				ID: svc.key.ID(), AccountID: svc.key.AccountID, LogRegion: svc.sel.region, Group: svc.sel.group, Prefixes: svc.sel.prefixes,
-			})
-		}
-		result.Services = append(result.Services, state)
-	}
 	for i := range result.Services {
 		stateByService[result.Services[i].ID] = &result.Services[i]
 	}
@@ -308,6 +281,7 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	result.RecordsMatched, result.BytesScanned, result.Capped = found.RecordsMatched, found.BytesScanned, found.Capped
+	result.ScanLimitReached, result.ScanLimitBytes = found.ScanLimitReached, s.LogSearch.MaxBytes
 	result.CostUSD = float64(found.BytesScanned) / (1 << 30) * logInsightsUSDPerGiB
 	result.DurationMS = found.Duration.Milliseconds()
 	targetStates := make([]map[string]any, 0, len(found.Targets))
@@ -320,8 +294,8 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 			BytesScanned: target.BytesScanned, RecordsMatched: target.RecordsMatched,
 		})
 		targetStates = append(targetStates, map[string]any{"account_id": target.Target.AccountID, "region": target.Target.Region, "state": string(target.State)})
-		if target.State == logs.StateOK {
-			continue
+		if target.State == logs.StateOK || target.State == logs.StateScanLimit {
+			continue // a query stopped at the scan cap still returned its partial rows
 		}
 		for _, id := range target.ServiceIDs {
 			if state := stateByService[id]; state != nil {
@@ -344,6 +318,100 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, result)
 	}
+}
+
+// logSearchPlan is a validated, authorized search request: the window, the services the caller may search and
+// how each fared before any query (no_awslogs ones are reported, not queried).
+type logSearchPlan struct {
+	from, to       time.Time
+	queried        []searchedService
+	searchServices []logs.SearchService
+	states         []LogSearchServiceStateDTO
+}
+
+// planLogSearch validates the request and authorizes its services, for a search and for its estimate alike, so
+// the two can never resolve log groups differently. On failure it has already answered and returns false.
+func (s *Server) planLogSearch(w http.ResponseWriter, r *http.Request, req LogSearchRequest) (logSearchPlan, bool) {
+	ctx := r.Context()
+	var plan logSearchPlan
+	ids := dedupe(req.ServiceIDs)
+	var err error
+	plan.from, plan.to, err = s.checkLogSearchRequest(ids, req.Range, req.From, req.To, req.Query)
+	if err != nil {
+		s.fail(w, err)
+		return plan, false
+	}
+
+	// Each service the caller may search.
+	services, err := s.resolveSearchServices(ctx, auth.SubjectFrom(ctx), ids)
+	var forbidden errLogsForbidden
+	if errors.As(err, &forbidden) {
+		forbiddenAction(w, authz.Logs, forbidden.tag)
+		return plan, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return plan, false
+	}
+
+	// Services with nothing in CloudWatch are reported, not queried.
+	plan.states = []LogSearchServiceStateDTO{}
+	for _, svc := range services {
+		state := LogSearchServiceStateDTO{ID: svc.key.ID(), Name: svc.key.Service, State: "ok"}
+		if svc.sel.group == "" {
+			state.State, state.Message = "no_awslogs", "This service has no container that logs to CloudWatch (awslogs)."
+		} else {
+			plan.queried = append(plan.queried, svc)
+			plan.searchServices = append(plan.searchServices, logs.SearchService{
+				ID: svc.key.ID(), AccountID: svc.key.AccountID, LogRegion: svc.sel.region, Group: svc.sel.group, Prefixes: svc.sel.prefixes,
+			})
+		}
+		plan.states = append(plan.states, state)
+	}
+	return plan, true
+}
+
+// LogSearchEstimateDTO is the answer of POST /api/log-search/estimate: an upper bound, not a prediction.
+// StoredBytes is the stored size of every log group the search would query. Logs Insights scans only the
+// time range, so the real scan is usually much smaller; the bound ignores the range on purpose because
+// CloudWatch does not report how the stored bytes spread over time.
+type LogSearchEstimateDTO struct {
+	StoredBytes      int64   `json:"stored_bytes"`
+	CostUSD          float64 `json:"cost_usd"`
+	Groups           int     `json:"groups"`
+	UnknownGroups    int     `json:"unknown_groups"`
+	ScanLimitBytes   int64   `json:"scan_limit_bytes"`
+	ExceedsScanLimit bool    `json:"exceeds_scan_limit"`
+}
+
+// postLogSearchEstimate answers POST /api/log-search/estimate with the same body as a search. It runs the same
+// validation and authorization as the search and reads only the stored size of the log groups the search would
+// query; it starts no query, takes no search slot and costs nothing.
+func (s *Server) postLogSearchEstimate(w http.ResponseWriter, r *http.Request) {
+	var req LogSearchRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		s.fail(w, err)
+		return
+	}
+	plan, ok := s.planLogSearch(w, r, req)
+	if !ok {
+		return
+	}
+	var est logs.Estimate
+	if len(plan.searchServices) > 0 {
+		var err error
+		est, err = s.LogSearch.Estimate(r.Context(), logs.SearchRequest{Services: plan.searchServices, From: plan.from, To: plan.to})
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	limit := s.LogSearch.MaxBytes
+	writeJSON(w, http.StatusOK, LogSearchEstimateDTO{
+		StoredBytes: est.StoredBytes, CostUSD: float64(est.StoredBytes) / logs.BytesPerGiB * logInsightsUSDPerGiB,
+		Groups: est.Groups, UnknownGroups: est.UnknownGroups,
+		ScanLimitBytes: limit, ExceedsScanLimit: limit > 0 && est.StoredBytes > limit,
+	})
 }
 
 // checkLogSearchRequest is the validation both log search endpoints share, all of it before any service is

@@ -1377,6 +1377,14 @@
     "total": "number",
     "truncated": "boolean"
   },
+  "logSearchEstimate": {
+    "cost_usd": "number",
+    "exceeds_scan_limit": "boolean",
+    "groups": "number",
+    "scan_limit_bytes": "number",
+    "stored_bytes": "number",
+    "unknown_groups": "number"
+  },
   "logSearchResult": {
     "bytes_scanned": "number",
     "capped": "boolean",
@@ -1394,6 +1402,8 @@
         "task_id": "string"
       }
     ],
+    "scan_limit_bytes": "number",
+    "scan_limit_reached": "boolean",
     "services": [
       {
         "id": "string",

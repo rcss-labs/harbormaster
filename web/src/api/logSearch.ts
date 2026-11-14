@@ -42,7 +42,7 @@ export interface LogSearchServiceResultDTO {
   message: string
 }
 
-export type LogSearchTargetState = 'ok' | 'no_permission' | 'throttled' | 'timeout' | 'cancelled' | 'error'
+export type LogSearchTargetState = 'ok' | 'no_permission' | 'throttled' | 'timeout' | 'cancelled' | 'error' | 'scan_limit'
 
 export interface LogSearchTargetDTO {
   account_id: string
@@ -60,12 +60,28 @@ export interface LogSearchResultDTO {
   bytes_scanned: number
   /** True when the row cap cut the result; more records matched than rows returned. */
   capped: boolean
+  /** True when a query was stopped at the scan limit; the rows are partial. */
+  scan_limit_reached: boolean
+  /** The scan limit in bytes; 0 means there is none. */
+  scan_limit_bytes: number
   cost_usd: number
   duration_ms: number
   from: string
   to: string
   services: LogSearchServiceResultDTO[]
   targets: LogSearchTargetDTO[]
+}
+
+/** An upper bound on what a search may scan, from the stored size of its log groups (not the time range). */
+export interface LogSearchEstimateDTO {
+  stored_bytes: number
+  cost_usd: number
+  groups: number
+  /** Log groups whose size could not be read; they are not in `stored_bytes`. */
+  unknown_groups: number
+  /** The scan limit in bytes; 0 means there is none. */
+  scan_limit_bytes: number
+  exceeds_scan_limit: boolean
 }
 
 export interface SavedLogSearchDTO {
@@ -149,6 +165,22 @@ export function useKeptLogSearch(request: LogSearchRequest): LastLogSearch | und
     gcTime: Infinity,
   })
   return data && JSON.stringify(data.request) === JSON.stringify(request) ? data : undefined
+}
+
+/**
+ * The scan estimate for a request. It reads only log group sizes on the server (no query, no cost), so it
+ * runs as the form changes; `enabled` keeps it off while the form is incomplete. The query text does not
+ * change the bound, so it is left out of the request and of the cache key.
+ */
+export function useLogSearchEstimate(request: LogSearchRequest, enabled: boolean) {
+  const body: LogSearchRequest = { ...request, query: '' }
+  return useQuery({
+    queryKey: ['log-search', 'estimate', body],
+    queryFn: ({ signal }) => apiFetch<LogSearchEstimateDTO>('/api/log-search/estimate', { method: 'POST', body: JSON.stringify(body), signal }),
+    enabled,
+    staleTime: SERVICES_STALE_MS,
+    retry: false,
+  })
 }
 
 export function useSavedLogSearches() {

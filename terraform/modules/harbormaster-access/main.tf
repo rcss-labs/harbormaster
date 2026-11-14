@@ -62,6 +62,7 @@ data "aws_iam_policy_document" "read" {
       "logs:StartQuery",
       "logs:GetQueryResults",
       "logs:StopQuery",
+      "logs:DescribeLogGroups",
       "ecr:DescribeImages",
       "ecr:DescribeRepositories",
     ]

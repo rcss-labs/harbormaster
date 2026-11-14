@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router'
 import {
   useDeleteSavedLogSearch,
+  useLogSearchEstimate,
   useLogSearchServices,
   useRunLogSearch,
   useSaveLogSearch,
@@ -24,6 +25,7 @@ import { usePhone } from '../../components/usePhone'
 import { useCrumbs } from '../shell/crumbs'
 import { HitsByService } from './HitsByService'
 import { HitsHistogram } from './HitsHistogram'
+import { ScanEstimate } from './ScanEstimate'
 import { formFromParams, paramsFromForm, RANGES, validateForm, type SearchForm } from './model'
 import { ResultLines } from './ResultLines'
 import { ResultsHeader } from './ResultsHeader'
@@ -102,6 +104,7 @@ export function LogSearchPage() {
   const kept = useKeptLogSearch(requestFrom(form))
   const shown = run.data ? { result: run.data, key: run.submittedAt } : kept ? { result: kept.result, key: kept.submittedAt } : null
   const invalid = validateForm(form, now)
+  const estimate = useLogSearchEstimate(requestFrom(form), invalid === null)
   const running = run.isPending
   const failure = run.error && run.error.name !== 'AbortError' ? run.error : null
   const savedItems = saved.data?.items ?? []
@@ -239,6 +242,7 @@ export function LogSearchPage() {
                 </button>
               )}
             </div>
+            {invalid === null && !running && estimate.data && <ScanEstimate estimate={estimate.data} />}
             {invalid && !running && (
               <p id="log-search-invalid" className={styles.invalid}>
                 {invalid}
