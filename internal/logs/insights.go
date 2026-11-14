@@ -67,6 +67,8 @@ const (
 	StateTimeout      TargetState = "timeout"
 	StateCancelled    TargetState = "cancelled"
 	StateError        TargetState = "error"
+	// StateScanLimit means the query was stopped because the search passed its scan cap; rows are partial.
+	StateScanLimit TargetState = "scan_limit"
 )
 
 // TargetResult is the outcome for one account and log region.
@@ -83,8 +85,10 @@ type SearchResult struct {
 	RecordsMatched int64
 	BytesScanned   int64
 	Capped         bool
-	Targets        []TargetResult
-	Duration       time.Duration
+	// ScanLimitReached is true when at least one query was stopped at Searcher.MaxBytes.
+	ScanLimitReached bool
+	Targets          []TargetResult
+	Duration         time.Duration
 }
 
 // Searcher runs one Logs Insights search across accounts and log regions.
@@ -92,6 +96,7 @@ type Searcher struct {
 	Clients   awsx.Clients
 	Now       func() time.Time
 	Timeout   time.Duration                              // default 60 s
+	MaxBytes  int64                                      // stop the search once it has scanned this many bytes; 0 = no cap
 	PollEvery time.Duration                              // default 1 s
 	Sleep     func(context.Context, time.Duration) error // injectable; default waits on a timer or ctx
 }
@@ -158,6 +163,7 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 	defer cancel()
 
 	outcomes := make([]batchOutcome, len(batches))
+	budget := newScanBudget(s.MaxBytes, len(batches))
 	var (
 		wg       sync.WaitGroup
 		queryErr error
@@ -176,6 +182,7 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 			run := &batchRun{
 				s: s, parent: ctx, ctx: runCtx, b: batches[i], query: queries[i],
 				from: req.From, to: req.To, maxRows: maxRows, pollEvery: pollEvery, sleep: sleep,
+				index: i, budget: budget, maxBytes: s.MaxBytes,
 			}
 			outcomes[i] = run.do()
 			var qe *QueryError
@@ -226,6 +233,9 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 		result.Targets = append(result.Targets, tr)
 		result.RecordsMatched += tr.RecordsMatched
 		result.BytesScanned += tr.BytesScanned
+		if tr.State == StateScanLimit {
+			result.ScanLimitReached = true
+		}
 	}
 	slices.SortStableFunc(result.Rows, func(a, b SearchRow) int {
 		if c := b.T.Compare(a.T); c != 0 {
@@ -309,6 +319,9 @@ type batchRun struct {
 	maxRows   int
 	pollEvery time.Duration
 	sleep     func(context.Context, time.Duration) error
+	index     int // position in the search, for the shared scan budget
+	budget    *scanBudget
+	maxBytes  int64
 }
 
 func (r *batchRun) do() batchOutcome {
@@ -359,6 +372,12 @@ func (r *batchRun) do() batchOutcome {
 			return out
 		}
 		last = outcomeOf(res)
+		if r.budget.record(r.index, last.bytes) && res.Status == logstypes.QueryStatusRunning {
+			// Over the cap: StopQuery ends the billing; what the query found so far is kept.
+			r.stop(api, queryID)
+			last.state, last.message = StateScanLimit, scanLimitMessage(r.maxBytes)
+			return last
+		}
 		switch res.Status {
 		case logstypes.QueryStatusComplete:
 			last.state = StateOK
