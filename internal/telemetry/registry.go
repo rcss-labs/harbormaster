@@ -28,6 +28,7 @@ type Registry struct {
 	loopInterval map[string]time.Duration
 	snapshotRows map[string]uint64
 	leader       bool
+	idle         bool
 	buildVersion string
 	buildInfoSet bool
 }
@@ -108,6 +109,13 @@ func (r *Registry) SetLeader(leader bool) {
 	r.leader = leader
 }
 
+// SetPollerIdle records whether the poller is in idle mode (no recent UI activity, slowed polling).
+func (r *Registry) SetPollerIdle(idle bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.idle = idle
+}
+
 // SetBuildInfo records the build version exposed via harbormaster_build_info.
 func (r *Registry) SetBuildInfo(version string) {
 	r.mu.Lock()
@@ -121,6 +129,7 @@ type Snapshot struct {
 	AWSCalls     map[string]uint64        // key "account|region|service|operation|result"
 	LoopInterval map[string]time.Duration // key "account|region|tier"
 	Leader       bool
+	Idle         bool
 }
 
 // Snapshot returns a deep copy of the current state.
@@ -131,6 +140,7 @@ func (r *Registry) Snapshot() Snapshot {
 		AWSCalls:     make(map[string]uint64, len(r.awsCalls)),
 		LoopInterval: make(map[string]time.Duration, len(r.loopInterval)),
 		Leader:       r.leader,
+		Idle:         r.idle,
 	}
 	for k, v := range r.awsCalls {
 		s.AWSCalls[k] = v

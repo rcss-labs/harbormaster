@@ -40,7 +40,10 @@ type Intervals struct {
 
 // Config is the poller's runtime configuration.
 type Config struct {
-	Intervals                                              Intervals
+	Intervals Intervals
+	// IdleAfter is how long without session activity before polling goes idle; 0 disables idle mode.
+	// While idle every tier waits at least IdleInterval between runs.
+	IdleAfter, IdleInterval                                time.Duration
 	CountsHistory, Jitter, RetentionEvery, AccountsRefresh time.Duration
 	MaxInFlight                                            int
 	Retention                                              store.Retention
@@ -73,6 +76,8 @@ func ConfigFrom(c config.Config) Config {
 			Network:      c.Poll.Network, // plan 05
 			Storage:      c.Poll.Storage, // plan 05
 		},
+		IdleAfter:     c.Poll.IdleAfter,
+		IdleInterval:  c.Poll.IdleInterval,
 		CountsHistory: c.Poll.CountsHistory,
 		Jitter:        c.Poll.Jitter,
 		MaxInFlight:   c.Poll.MaxInFlight,
@@ -106,6 +111,13 @@ type Poller struct {
 
 	leader atomic.Bool
 
+	// idle slows every tier while nobody uses the UI; the leader's idle monitor maintains it.
+	idle *idleState
+	// sessionActivity reads the newest activity of unexpired sessions; tests replace it.
+	sessionActivity func(ctx context.Context, now time.Time) (time.Time, bool, error)
+	now             func() time.Time
+	idleCheckEvery  time.Duration
+
 	// Unexported so tests can isolate themselves from other lanes sharing one Postgres.
 	lockKey       int64
 	retryInterval time.Duration
@@ -127,6 +139,10 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 	p := &Poller{
 		store: st, clients: clients, cfg: cfg, log: log,
 		lockKey: LockKey, retryInterval: defaultRetryInterval,
+		idle: newIdleState(), now: time.Now, idleCheckEvery: defaultIdleCheckEvery,
+	}
+	p.sessionActivity = func(ctx context.Context, now time.Time) (time.Time, bool, error) {
+		return p.store.LastSessionActivity(ctx, now)
 	}
 	p.loopFactory = p.defaultLoopFactory
 	p.rollups = &rollup.Runner{

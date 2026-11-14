@@ -67,6 +67,13 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	}
 	writeSample(bw, "harbormaster_poller_leader", nil, "", "", leader)
 
+	writeHeader(bw, "harbormaster_poller_idle", "1 if polling is slowed because no one has used the UI recently.", "gauge")
+	idle := "0"
+	if r.idle {
+		idle = "1"
+	}
+	writeSample(bw, "harbormaster_poller_idle", nil, "", "", idle)
+
 	writeHeader(bw, "harbormaster_snapshot_rows_written_total", "Snapshot rows written by table.", "counter")
 	for _, k := range sortedKeys(r.snapshotRows) {
 		writeSample(bw, "harbormaster_snapshot_rows_written_total", []string{"table"}, k, "", utoa(r.snapshotRows[k]))
