@@ -4,8 +4,10 @@ import { formatBytes, formatCost } from './model'
 import styles from './logsearch.module.css'
 
 /**
- * What the search may scan, shown before it runs. It is an upper bound: the stored size of every selected log
- * group, which covers all the retained logs and not just the chosen time range.
+ * A rough guide to what the search may scan, shown before it runs: the stored size of every selected log group.
+ * It is not a bound either way. It covers all retained logs, not just the time range (usually an overestimate),
+ * but storedBytes is compressed while Insights bills the uncompressed bytes it scans (an underestimate). The scan
+ * limit is the hard guard.
  */
 export function ScanEstimate({ estimate }: { estimate: LogSearchEstimateDTO }) {
   const limit = formatBytes(estimate.scan_limit_bytes)
@@ -13,7 +15,7 @@ export function ScanEstimate({ estimate }: { estimate: LogSearchEstimateDTO }) {
   return (
     <>
       <p className={styles.hint} role="status" aria-label="Scan estimate">
-        {`This search will scan at most ${formatBytes(estimate.stored_bytes)} (${formatCost(estimate.stored_bytes)}). That is the stored size of the selected log groups, not just the time range, so the real scan is usually smaller.`}
+        {`The selected log groups store about ${formatBytes(estimate.stored_bytes)} (${formatCost(estimate.stored_bytes)} if all of it were scanned). Treat it as a rough guide: the search reads only the chosen time range, but CloudWatch bills the uncompressed size, which can be larger than the stored size.`}
         {unknown > 0 && ` ${unknown === 1 ? '1 log group' : `${unknown} log groups`} could not be sized and ${unknown === 1 ? 'is' : 'are'} not counted.`}
       </p>
       {estimate.exceeds_scan_limit && (

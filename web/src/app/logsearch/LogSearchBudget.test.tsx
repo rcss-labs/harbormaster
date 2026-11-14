@@ -34,13 +34,15 @@ describe('Log search budget', () => {
     expect(within(range).getByRole('button', { name: '24 hours' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('shows an upper-bound estimate before the search is run', async () => {
+  it('shows a rough estimate, not a guaranteed upper bound, before the search is run', async () => {
     const bodies = estimateReturns(LOG_SEARCH_ESTIMATE)
     renderApp(PAYMENTS)
     const estimate = await screen.findByRole('status', { name: 'Scan estimate' })
-    expect(estimate).toHaveTextContent('at most 4 GB')
+    // storedBytes is compressed and Insights scans uncompressed data, so the copy must not promise a bound.
+    expect(estimate).not.toHaveTextContent('at most')
+    expect(estimate).toHaveTextContent('store about 4 GB')
     expect(estimate).toHaveTextContent('about $0.02')
-    expect(estimate).toHaveTextContent('not just the time range')
+    expect(estimate).toHaveTextContent('rough guide')
     expect(bodies).toHaveLength(1)
     expect(bodies[0].service_ids).toEqual(['svc-payments'])
     // Not run: no result and no run request.
