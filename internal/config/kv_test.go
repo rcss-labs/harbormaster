@@ -23,7 +23,7 @@ func TestConfig_KVDefaults(t *testing.T) {
 
 func TestConfig_KVAcceptsFourSchemes(t *testing.T) {
 	for _, scheme := range []string{"redis", "rediss", "valkey", "valkeys"} {
-		url := scheme + "://user:pw@cache.example:6379/1"
+		url := scheme + "://user:pw@cache.example:6379/0"
 		cfg, err := loadWithKV(t, map[string]string{"HM_KV_URL": url})
 		if err != nil {
 			t.Fatalf("%s: %v", scheme, err)
@@ -56,5 +56,25 @@ func TestConfig_KVRejectsBadPrefix(t *testing.T) {
 	}
 	if _, err := loadWithKV(t, map[string]string{"HM_KV_PREFIX": "lane-1_a"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConfig_KVRejectsDatabaseOtherThanZero(t *testing.T) {
+	_, err := loadWithKV(t, map[string]string{"HM_KV_URL": "redis://user:s3cret@cache.internal:6379/3"})
+	if err == nil {
+		t.Fatal("expected an error for database 3")
+	}
+	if err.Error() != "HM_KV_URL must use database 0" {
+		t.Fatalf("error = %q", err)
+	}
+	for _, leak := range []string{"s3cret", "cache.internal"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("error leaks %q", leak)
+		}
+	}
+	for _, ok := range []string{"redis://cache.internal", "redis://cache.internal/", "redis://cache.internal/0", "valkeys://u:p@cache.internal:6380/0"} {
+		if _, err := loadWithKV(t, map[string]string{"HM_KV_URL": ok}); err != nil {
+			t.Fatalf("%s: %v", ok, err)
+		}
 	}
 }

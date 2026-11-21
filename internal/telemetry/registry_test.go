@@ -179,3 +179,14 @@ func TestPrometheus_KVSeries(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistry_ClearKVRemovesTheSeries(t *testing.T) {
+	r := New()
+	r.SetKVUp(true)
+	r.CountKVError("get")
+	r.ObserveKVCommand("get", time.Millisecond)
+	r.ClearKV()
+	if out := render(t, r); strings.Contains(out, "harbormaster_kv_") {
+		t.Fatalf("kv series should be gone:\n%s", out)
+	}
+}

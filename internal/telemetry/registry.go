@@ -161,6 +161,16 @@ func (r *Registry) SetKVUp(up bool) {
 	r.kvUpSet = true
 }
 
+// ClearKV forgets every kv series, as if no store had been configured. Closing the store calls it so a later
+// run in the same process (tests) starts clean.
+func (r *Registry) ClearKV() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.kvUp, r.kvUpSet = false, false
+	r.kvErrors = map[string]uint64{}
+	r.kvDuration = map[string]*histogram{}
+}
+
 // CountKVError records one failed store command; op is the lower-case command name.
 func (r *Registry) CountKVError(op string) {
 	r.mu.Lock()

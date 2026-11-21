@@ -453,6 +453,16 @@ func validateKV(kv KVConfig) error {
 			return errors.New("HM_KV_URL: scheme must be redis, rediss, valkey or valkeys")
 		}
 	}
+	// A database number would make the client send SELECT, which is not in the command allow-list.
+	if kv.URL != "" {
+		_, rest, _ := strings.Cut(kv.URL, "://")
+		if _, afterHost, found := strings.Cut(rest, "/"); found {
+			path, _, _ := strings.Cut(afterHost, "?")
+			if path != "" && path != "0" {
+				return errors.New("HM_KV_URL must use database 0")
+			}
+		}
+	}
 	if !kvPrefixPattern.MatchString(kv.Prefix) {
 		return errors.New("HM_KV_PREFIX: use 1 to 32 lowercase letters, digits, - or _")
 	}

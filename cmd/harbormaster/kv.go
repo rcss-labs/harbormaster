@@ -42,5 +42,6 @@ func startKV(ctx context.Context, cfg config.KVConfig, opts kv.Options, log *slo
 		stopHealth()
 		<-done
 		client.Close()
+		telemetry.Default.ClearKV()
 	}, nil
 }

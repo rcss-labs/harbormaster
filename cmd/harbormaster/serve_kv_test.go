@@ -13,8 +13,8 @@ import (
 )
 
 // startServeWithKV runs `serve --fake-aws` on a private schema with extra settings and returns its base URL. The
-// process stops with the test. The kv metrics live in the process-wide registry, so TestServe_KVUnsetStartsWithoutStore
-// must stay the first test here that sets HM_KV_URL.
+// process stops with the test. The kv metrics live in the process-wide registry; stopping the store clears them, so the tests
+// do not depend on order.
 func startServeWithKV(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	dbURL := os.Getenv("HM_TEST_DATABASE_URL")
