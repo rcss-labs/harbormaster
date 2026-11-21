@@ -40,8 +40,13 @@ type LeaseRow struct {
 	AcquiredAt, RenewedAt *time.Time
 }
 
-// lockTimeout bounds how long a claim or a release waits for the row lock behind another transaction's writes.
+// lockTimeout bounds how long a claim or a release waits for one row lock behind another transaction's writes.
 const lockTimeout = "3s"
+
+// ClaimDeadline bounds a whole ClaimLease call. A lock wait can repeat (the row lock, then each transaction that shares
+// it), so lock_timeout alone does not bound the call; a claim that runs out of time reports false and is retried by
+// the caller's next tick. Callers give their context more than this so the claim ends itself.
+const ClaimDeadline = 5 * time.Second
 
 // pgLockNotAvailable is the SQLSTATE of a lock_timeout expiry.
 const pgLockNotAvailable = "55P03"
@@ -109,6 +114,17 @@ func (s *Store) EnsureCoordinatorLease(ctx context.Context) error {
 // itself selects the row FOR UPDATE: a plain UPDATE of owner_id and epoch would only take FOR NO KEY UPDATE, which does
 // not conflict with the FOR KEY SHARE the owner's fenced writes hold, and a takeover must wait for those writes.
 func (s *Store) ClaimLease(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration) (Lease, bool, error) {
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, ClaimDeadline)
+	defer cancel()
+	l, ok, err := s.claimLease(ctx, key, owner, ttl)
+	if err != nil && parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return Lease{}, false, nil // out of time behind a lock: not claimed, try again later
+	}
+	return l, ok, err
+}
+
+func (s *Store) claimLease(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration) (Lease, bool, error) {
 	var live bool
 	err := s.Pool.QueryRow(ctx,
 		`select owner_id is not null and expires_at >= now() from poll_leases

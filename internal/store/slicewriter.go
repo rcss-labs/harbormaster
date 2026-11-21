@@ -54,12 +54,28 @@ func (w *SliceWriter) own(accountID, region string) error {
 	return nil
 }
 
+// fenceIdleTimeout and fenceStatementTimeout bound a fenced write transaction on the server. They are variables so tests can shorten them.
+var (
+	fenceIdleTimeout      = 10 * time.Second
+	fenceStatementTimeout = 30 * time.Second
+)
+
 // fenceSQL is the design's check. FOR KEY SHARE lets many writes of one owner run in parallel and does not conflict with
 // the owner's renewal (a non-key update), but conflicts with a takeover's FOR UPDATE: the takeover waits for these
 // transactions, and every write that starts after it finds a different owner or epoch.
+//
+// The lease must also be unexpired by the database clock. An owner that stopped renewing may not start new writes, so
+// overlapping writes of an expired owner cannot keep the row share-locked for ever and starve the takeover.
 const fenceSQL = `select 1 from poll_leases
  where kind = 'slice' and account_id = $1 and region = $2 and owner_id = $3 and epoch = $4
+   and expires_at > now()
  for key share`
+
+// fenceTimeoutsSQL bounds this transaction on the server, whatever its client does: a frozen or partitioned owner that
+// leaves the transaction open (holding the fence lock) is cut off by the server after fenceIdleTimeout, so a takeover
+// always gets through.
+const fenceTimeoutsSQL = `select set_config('idle_in_transaction_session_timeout', $1, true),
+  set_config('statement_timeout', $2, true)`
 
 // fencedDo runs fn in one transaction that starts with the fence. The transaction holds the lease row's key-share lock
 // until it commits, which is what makes the epoch check, not the clock, the arbiter. fn gets the transaction as its db,
@@ -68,6 +84,9 @@ func fencedDo[T any](ctx context.Context, w *SliceWriter, fn func(q db) (T, erro
 	var result T
 	err := pgx.BeginFunc(ctx, w.s.Pool, func(tx pgx.Tx) error {
 		k := w.lease.Key
+		if _, err := tx.Exec(ctx, fenceTimeoutsSQL, fmt.Sprintf("%dms", fenceIdleTimeout.Milliseconds()), fmt.Sprintf("%dms", fenceStatementTimeout.Milliseconds())); err != nil {
+			return fmt.Errorf("set write timeouts: %w", err)
+		}
 		var one int
 		err := tx.QueryRow(ctx, fenceSQL, k.AccountID, k.Region, w.lease.OwnerID, w.lease.Epoch).Scan(&one)
 		if errors.Is(err, pgx.ErrNoRows) {
