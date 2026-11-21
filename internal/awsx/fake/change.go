@@ -260,7 +260,7 @@ func (c *ecrClient) DescribeImages(ctx context.Context, in *ecr.DescribeImagesIn
 			ImageDigest:            aws.String(digest),
 			ImageTags:              []string{tag},
 			ImagePushedAt:          aws.Time(now.Add(-time.Duration(i+1) * 24 * time.Hour)),
-			ImageManifestMediaType: aws.String(fakeImageMediaType),
+			ImageManifestMediaType: aws.String(e.mediaTypeFor(repository)),
 			ImageSizeInBytes:       aws.Int64(fakeImageSize(digest)),
 		})
 	}
@@ -269,6 +269,106 @@ func (c *ecrClient) DescribeImages(ctx context.Context, in *ecr.DescribeImagesIn
 			"The image requested does not exist in the specified repository '" + repository + "'")}
 	}
 	return out, nil
+}
+
+// BatchGetImage returns the manifest of each named image, as ECR does, with a failure entry (not an error) for an image that
+// does not exist. A repository marked with SetImageIndex answers an OCI index listing amd64, arm64 when it has it, and an
+// unknown/unknown attestation; every other repository answers a small single manifest.
+func (c *ecrClient) BatchGetImage(ctx context.Context, in *ecr.BatchGetImageInput, _ ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error) {
+	done, err := c.f.begin(c.target, "ecr", "BatchGetImage")
+	defer done()
+	if err != nil {
+		return nil, err
+	}
+	e := c.f.Estate
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	repository := aws.ToString(in.RepositoryName)
+	tags, ok := e.Repositories[repository]
+	if !ok || !c.pullsFrom(repository) {
+		return nil, &ecrtypes.RepositoryNotFoundException{Message: aws.String(
+			"The repository with name '" + repository + "' does not exist in the registry with id '" + c.target.AccountID + "'")}
+	}
+	out := &ecr.BatchGetImageOutput{}
+	for _, id := range in.ImageIds {
+		found := false
+		for _, tag := range tags {
+			digest := e.digestFor(repository + ":" + tag)
+			if !imageIdentified([]ecrtypes.ImageIdentifier{id}, tag, digest) {
+				continue
+			}
+			found = true
+			body, mediaType := e.manifestFor(repository, tag)
+			out.Images = append(out.Images, ecrtypes.Image{
+				RegistryId: aws.String(c.target.AccountID), RepositoryName: aws.String(repository),
+				ImageId:                &ecrtypes.ImageIdentifier{ImageDigest: aws.String(digest), ImageTag: aws.String(tag)},
+				ImageManifest:          aws.String(string(body)),
+				ImageManifestMediaType: aws.String(mediaType),
+			})
+			break
+		}
+		if !found {
+			id := id
+			out.Failures = append(out.Failures, ecrtypes.ImageFailure{
+				ImageId: &id, FailureCode: ecrtypes.ImageFailureCodeImageNotFound, FailureReason: aws.String("Requested image not found")})
+		}
+	}
+	return out, nil
+}
+
+const (
+	// ociIndexMediaType is the manifest type of a multi-architecture image.
+	ociIndexMediaType    = "application/vnd.oci.image.index.v1+json"
+	ociManifestMediaType = "application/vnd.oci.image.manifest.v1+json"
+)
+
+// ImageIndexSpec marks a repository whose images are OCI indexes.
+type ImageIndexSpec struct{ ARM64 bool }
+
+// SetImageIndex makes every image of the repository a multi-architecture index (with an arm64 entry when arm64 is set).
+func (e *Estate) SetImageIndex(repository string, arm64 bool) {
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	e.setImageIndex(repository, arm64)
+}
+
+// setImageIndex is SetImageIndex for a caller that holds Mu.
+func (e *Estate) setImageIndex(repository string, arm64 bool) {
+	if e.ImageIndexes == nil {
+		e.ImageIndexes = map[string]ImageIndexSpec{}
+	}
+	e.ImageIndexes[repository] = ImageIndexSpec{ARM64: arm64}
+}
+
+// manifestFor is the manifest body and media type of repository:tag. Caller holds Mu.
+func (e *Estate) manifestFor(repository, tag string) ([]byte, string) {
+	spec, isIndex := e.ImageIndexes[repository]
+	if !isIndex {
+		return []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"config":{"mediaType":"application/vnd.docker.container.image.v1+json","size":1469,"digest":"sha256:%x"},"layers":[]}`,
+			fakeImageMediaType, sha256.Sum256([]byte(repository+":"+tag+"/config")))), fakeImageMediaType
+	}
+	image := repository + ":" + tag
+	child := func(platform string) string {
+		return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(image+"/"+platform)))
+	}
+	entries := []string{
+		fmt.Sprintf(`{"mediaType":%q,"digest":%q,"size":1234,"platform":{"architecture":"amd64","os":"linux"}}`, ociManifestMediaType, child("amd64")),
+	}
+	if spec.ARM64 {
+		entries = append(entries, fmt.Sprintf(`{"mediaType":%q,"digest":%q,"size":1234,"platform":{"architecture":"arm64","os":"linux"}}`, ociManifestMediaType, child("arm64")))
+	}
+	entries = append(entries, fmt.Sprintf(`{"mediaType":%q,"digest":%q,"size":566,"annotations":{"vnd.docker.reference.type":"attestation-manifest"},"platform":{"architecture":"unknown","os":"unknown"}}`, ociManifestMediaType, child("attestation")))
+	// The move counter keeps a moved tag's body, and so its digest, different from before.
+	return []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":%q,"manifests":[%s],"annotations":{"org.opencontainers.image.ref.name":"%s#%d"}}`,
+		ociIndexMediaType, strings.Join(entries, ","), image, e.tagMoves[image])), ociIndexMediaType
+}
+
+// mediaTypeFor is the manifest type of the repository's images. Caller holds Mu.
+func (e *Estate) mediaTypeFor(repository string) string {
+	if _, isIndex := e.ImageIndexes[repository]; isIndex {
+		return ociIndexMediaType
+	}
+	return fakeImageMediaType
 }
 
 // fakeImageMediaType is the manifest type every fake image reports.
@@ -302,6 +402,13 @@ func (e *Estate) ImageDigestFor(image string) string {
 
 // digestFor is ImageDigestFor for a caller that holds Mu.
 func (e *Estate) digestFor(image string) string {
+	if repository, tag, ok := strings.Cut(image, ":"); ok {
+		if _, isIndex := e.ImageIndexes[repository]; isIndex {
+			// A real index is addressed by the digest of its own body.
+			body, _ := e.manifestFor(repository, tag)
+			return fmt.Sprintf("sha256:%x", sha256.Sum256(body))
+		}
+	}
 	if moved, ok := e.movedTags[image]; ok {
 		return moved
 	}

@@ -96,6 +96,8 @@ type serviceSpec struct {
 	ec2 bool
 	// spot runs the tasks on the FARGATE_SPOT capacity provider.
 	spot bool
+	// multiArch makes the repository's images OCI indexes; arm64 gives the index a linux/arm64 entry.
+	multiArch, arm64 bool
 	// sidecarMemoryReservation, when above zero, is the soft memory limit (MiB) of the ecrSidecar container.
 	sidecarMemoryReservation int32
 	// awsTags are the ECS service tags, as the off-hours selectors read them.
@@ -662,6 +664,9 @@ func (s *seeder) addService(sp serviceSpec) {
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
 		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
 	s.addRepository(sp.repo, ecrTagsFor(sp))
+	if sp.multiArch {
+		s.e.setImageIndex(sp.repo, sp.arm64)
+	}
 	s.addRunningTag(sp.repo, sp.tag)
 	if sp.ecrSidecar != "" {
 		s.addRepository(sp.ecrSidecar, repositoryTags(sp.ecrSidecarTag, "", sp.ecrSidecarTags))

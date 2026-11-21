@@ -177,6 +177,10 @@ func (o oldestFirstECR) ECR(context.Context, awsx.Target) (awsx.ECRAPI, error) {
 
 type pagedImages struct{}
 
+func (pagedImages) BatchGetImage(context.Context, *ecr.BatchGetImageInput, ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error) {
+	return nil, errors.New("not used by the image tag tests")
+}
+
 func (pagedImages) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
 	start := 0
 	if in.NextToken != nil {
@@ -238,6 +242,10 @@ type repoECR struct {
 }
 
 func (r repoECR) ECR(context.Context, awsx.Target) (awsx.ECRAPI, error) { return r.api, nil }
+
+func (r *repoImages) BatchGetImage(context.Context, *ecr.BatchGetImageInput, ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error) {
+	return nil, errors.New("not used by the image tag tests")
+}
 
 func (r *repoImages) DescribeImages(_ context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
 	r.calls++
