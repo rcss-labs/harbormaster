@@ -41,6 +41,12 @@ func TestAllowed(t *testing.T) {
 		{"172.16.0.1", Policy{AllowedPrivate: ten}, false},
 		{"fd12::1", Policy{}, false},
 		{"fd12::1", Policy{AllowPrivate: true}, true},
+		// Special-use IPv4 ranges (RFC 6890) that are neither public nor covered by the checks above.
+		{"0.1.2.3", Policy{AllowPrivate: true}, false},         // "this network"
+		{"192.0.0.8", Policy{AllowPrivate: true}, false},       // IETF protocol assignments
+		{"198.18.0.1", Policy{AllowPrivate: true}, false},      // benchmarking
+		{"240.0.0.1", Policy{AllowPrivate: true}, false},       // reserved
+		{"255.255.255.255", Policy{AllowPrivate: true}, false}, // broadcast
 		{"8.8.8.8", Policy{}, true},
 		{"2606:4700::1", Policy{}, true},
 	}
