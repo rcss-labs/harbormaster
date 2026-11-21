@@ -1109,3 +1109,35 @@ func TestNotificationRoutes_ReportSettleSeconds(t *testing.T) {
 		t.Errorf("settle_seconds = %d, want 0 when the wait is off", got)
 	}
 }
+
+// A route keeps the selector of a Harbormaster tag that was deleted (it is reported as missing). Saving the route
+// again must not fail on it, the same as for a deleted cluster or service; a tag id the route never had is refused.
+func TestNotificationRoutes_DeletedTagSelectorIsKeptOnSave(t *testing.T) {
+	e := newNotifyEnv(t)
+	qa, err := e.st.CreateTag(t.Context(), "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagScope := map[string]any{"kind": "harbormaster", "tag_id": int64(qa.ID)}
+	created := e.create(e.webhookInput("tagged", func(in map[string]any) { in["scope"] = []any{tagScope} }))
+	if err := e.st.DeleteTag(t.Context(), qa.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	stored := e.list().Items[0]
+	if len(stored.Scope) != 1 || !stored.Scope[0].Missing || !stored.MatchesNothing {
+		t.Fatalf("route after its tag was deleted = %+v, want the selector kept, missing, and the route matching nothing", stored)
+	}
+	resp := e.put(created.ID, e.webhookInput("tagged renamed", func(in map[string]any) { in["scope"] = []any{tagScope}; delete(in, "url"); in["version"] = created.Version }))
+	if resp.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, resp)
+		t.Fatalf("saving a route that keeps its deleted tag = %d %s %s, want 200", resp.StatusCode, code, msg)
+	}
+
+	unknown := map[string]any{"kind": "harbormaster", "tag_id": int64(qa.ID) + 1000}
+	e.invalidFor(e.webhookInput("new", func(in map[string]any) { in["scope"] = []any{unknown} }), "scope entries is not valid")
+	resp = e.put(created.ID, e.webhookInput("tagged renamed", func(in map[string]any) { in["scope"] = []any{tagScope, unknown}; delete(in, "url"); in["version"] = created.Version + 1 }))
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("adding a tag id the route never had = %d, want 422", resp.StatusCode)
+	}
+}

@@ -82,8 +82,10 @@ func (s *Server) openRouteSecret(route store.NotificationRoute) (secret notify.S
 func needsSecret(destination string) bool { return destination != notify.DestEmail }
 
 // scopeFromInput validates the scope entries. A target that does not exist right now is accepted (it is reported
-// as missing); only a malformed entry is refused. Repeats are dropped.
-func (s *Server) scopeFromInput(ctx context.Context, in []NotificationSelectorDTO) ([]store.NotificationSelector, error) {
+// as missing); only a malformed entry is refused. A Harbormaster tag that no longer exists is kept when the stored
+// route already has it (stored), the same as a deleted cluster or service, but a tag id that was never there is
+// refused. Repeats are dropped.
+func (s *Server) scopeFromInput(ctx context.Context, in []NotificationSelectorDTO, stored []store.NotificationSelector) ([]store.NotificationSelector, error) {
 	if len(in) > maxNotificationScope {
 		return nil, invalid(fmt.Sprintf("A route can have at most %d scope entries.", maxNotificationScope))
 	}
@@ -138,7 +140,9 @@ func (s *Server) scopeFromInput(ctx context.Context, in []NotificationSelectorDT
 					return nil, err
 				}
 			}
-			if _, ok := tags[authz.TagID(entry.TagID)]; !ok {
+			if _, ok := tags[authz.TagID(entry.TagID)]; !ok && !slices.ContainsFunc(stored, func(sel store.NotificationSelector) bool {
+				return sel.Kind == store.NotificationSelectorHarbormaster && sel.TagID == authz.TagID(entry.TagID)
+			}) {
 				return nil, invalid(invalidScopeMessage)
 			}
 			sel = store.NotificationSelector{Kind: entry.Kind, TagID: authz.TagID(entry.TagID)}
@@ -198,7 +202,11 @@ func (s *Server) buildRoute(ctx context.Context, in NotificationRouteInput, exis
 	if utf8.RuneCountInString(label) > 80 {
 		return route, false, invalid("The label can be at most 80 characters.")
 	}
-	scope, err := s.scopeFromInput(ctx, in.Scope)
+	var storedScope []store.NotificationSelector
+	if existing != nil {
+		storedScope = existing.Scope
+	}
+	scope, err := s.scopeFromInput(ctx, in.Scope, storedScope)
 	if err != nil {
 		return route, false, err
 	}
