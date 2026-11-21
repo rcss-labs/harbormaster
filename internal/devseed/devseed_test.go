@@ -385,7 +385,7 @@ func TestDevseed_SpotDemoHasEveryCase(t *testing.T) {
 			TerminalSessions7d: fact.TerminalSessions7d, ExpectedStops7d: fact.ExpectedStops7d, KilledStops7d: fact.KilledStops7d,
 		}
 		if onSpot {
-			input.SpotTasks = fact.Desired
+			input.OnDemandTasks, input.SpotTasks = 0, fact.Desired
 		}
 		verdicts[fact.Key.Service] = cost.EvaluateSpot(input)
 	}

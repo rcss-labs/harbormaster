@@ -67,7 +67,7 @@ test.describe('analytics as sam', () => {
     await expect(certRenewer).toBeVisible()
     await expect(certRenewer).not.toContainText('$')
 
-    await page.getByRole('button', { name: 'Draft change sets' }).click()
+    await page.getByRole('region', { name: /^Rightsizing/ }).getByRole('button', { name: 'Draft change sets' }).click()
     const draft = page.getByRole('dialog')
     await expect(draft.getByText(/Nothing deploys yet\./)).toBeVisible()
     const [deployPage] = await Promise.all([

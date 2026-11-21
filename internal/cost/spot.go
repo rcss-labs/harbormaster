@@ -97,6 +97,11 @@ func gateSpot(in SpotInput) SpotStatus {
 	if !hasList || !hasSpot || in.CPUUnits <= 0 || in.MemoryMiB <= 0 {
 		return SpotNoPrice
 	}
+	// A service already on Spot has no running on-demand task, so this gate comes before the running check: "already uses
+	// Fargate Spot" is the true reason, "no running on-demand tasks" would hide it.
+	if slices.Contains(in.Strategy, "FARGATE_SPOT") {
+		return SpotAlreadySpot
+	}
 	if in.OnDemandTasks == 0 {
 		return SpotNotRunning
 	}
@@ -105,9 +110,6 @@ func gateSpot(in SpotInput) SpotStatus {
 	}
 	if slices.ContainsFunc(in.Strategy, func(provider string) bool { return provider != "FARGATE" && provider != "FARGATE_SPOT" }) {
 		return SpotCustomCapacity
-	}
-	if slices.Contains(in.Strategy, "FARGATE_SPOT") {
-		return SpotAlreadySpot
 	}
 	if !in.NonProduction {
 		return SpotProduction

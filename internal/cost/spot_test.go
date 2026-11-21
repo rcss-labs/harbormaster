@@ -48,6 +48,17 @@ func TestEvaluateSpot_GateOrder(t *testing.T) {
 	}
 }
 
+func TestEvaluateSpot_ServiceEntirelyOnSpotIsAlreadySpot(t *testing.T) {
+	// Every task is on Spot, so there is no running on-demand task; saying so would hide that the service is already there.
+	in := candidateInput()
+	in.LaunchType = ""
+	in.Strategy = []string{"FARGATE_SPOT"}
+	in.OnDemandTasks, in.SpotTasks = 0, 3
+	if got := EvaluateSpot(in).Status; got != SpotAlreadySpot {
+		t.Fatalf("status = %q, want already_spot", got)
+	}
+}
+
 func TestEvaluateSpot_FirstFailingGateWins(t *testing.T) {
 	in := candidateInput()
 	in.RequiresFargate = false
