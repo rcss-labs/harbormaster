@@ -323,15 +323,21 @@ func TestVerify_ZeroSkewIsStrict(t *testing.T) {
 	h.wantReason(h.respond(fakeidp.Tamper{NotOnOrAfter: at(-5 * time.Second)}), saml.ReasonExpired)
 }
 
+// lenientEdit isolates the second layer: the library layer only decodes, and
+// edit changes the assertion's XML (the second layer reads the XML).
+func (h *harness) lenientEdit(edit func(assertion *etree.Element)) string {
+	h.t.Helper()
+	h.v.SetFirstLayerForTest(lenientLayer())
+	return mutate(h.t, h.respond(fakeidp.Tamper{}), func(root *etree.Element) { edit(kids(root, "Assertion")[0]) })
+}
+
 func TestVerify_SubjectConfirmationExpiryIsChecked(t *testing.T) {
 	h := newHarness(t)
-	lenient := lenientLayer()
-	h.v.SetFirstLayerForTest(func(raw []byte) (*crewjam.Assertion, error) {
-		a, err := lenient(raw)
-		a.Subject.SubjectConfirmations[0].SubjectConfirmationData.NotOnOrAfter = time.Now().Add(-200 * time.Second)
-		return a, err
+	b64 := h.lenientEdit(func(a *etree.Element) {
+		sc := kids(kids(a, "Subject")[0], "SubjectConfirmation")[0]
+		kids(sc, "SubjectConfirmationData")[0].CreateAttr("NotOnOrAfter", time.Now().Add(-200*time.Second).UTC().Format(time.RFC3339))
 	})
-	h.wantReason(h.respond(fakeidp.Tamper{}), saml.ReasonExpired)
+	h.wantReason(b64, saml.ReasonExpired)
 }
 
 func TestVerify_RejectsStaleIssueInstant(t *testing.T) {
@@ -457,25 +463,30 @@ func TestVerify_ValidatorDisagreement(t *testing.T) {
 }
 
 func TestVerify_SecondLayerRequiresWhatLibraryTreatsAsOptional(t *testing.T) {
-	h := newHarness(t)
-	edit := func(f func(a *crewjam.Assertion)) {
-		lenient := lenientLayer()
-		h.v.SetFirstLayerForTest(func(raw []byte) (*crewjam.Assertion, error) {
-			a, err := lenient(raw)
-			f(a)
-			return a, err
+	cases := []struct {
+		name   string
+		edit   func(a *etree.Element)
+		reason string
+	}{
+		{"no_audience_restriction", func(a *etree.Element) {
+			c := kids(a, "Conditions")[0]
+			c.RemoveChild(kids(c, "AudienceRestriction")[0])
+		}, saml.ReasonAudience},
+		{"confirmation_not_bearer", func(a *etree.Element) {
+			kids(kids(a, "Subject")[0], "SubjectConfirmation")[0].CreateAttr("Method", "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key")
+		}, saml.ReasonRecipient},
+		{"no_confirmation", func(a *etree.Element) {
+			s := kids(a, "Subject")[0]
+			s.RemoveChild(kids(s, "SubjectConfirmation")[0])
+		}, saml.ReasonRecipient},
+		{"no_conditions", func(a *etree.Element) { a.RemoveChild(kids(a, "Conditions")[0]) }, saml.ReasonExpired},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.wantReason(h.lenientEdit(c.edit), c.reason)
 		})
 	}
-	edit(func(a *crewjam.Assertion) { a.Conditions.AudienceRestrictions = nil })
-	h.wantReason(h.respond(fakeidp.Tamper{}), saml.ReasonAudience)
-	edit(func(a *crewjam.Assertion) {
-		a.Subject.SubjectConfirmations[0].Method = "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key"
-	})
-	h.wantReason(h.respond(fakeidp.Tamper{}), saml.ReasonRecipient)
-	edit(func(a *crewjam.Assertion) { a.Subject.SubjectConfirmations = nil })
-	h.wantReason(h.respond(fakeidp.Tamper{}), saml.ReasonRecipient)
-	edit(func(a *crewjam.Assertion) { a.Conditions = nil })
-	h.wantReason(h.respond(fakeidp.Tamper{}), saml.ReasonExpired)
 }
 
 func TestVerify_UnsignedResponseWithoutDestinationIsRefused(t *testing.T) {
@@ -496,16 +507,17 @@ func TestVerify_LibraryPanicBecomesMalformed(t *testing.T) {
 
 func TestVerify_AttributesIndexedByFriendlyName(t *testing.T) {
 	h := newHarness(t)
-	lenient := lenientLayer()
-	h.v.SetFirstLayerForTest(func(raw []byte) (*crewjam.Assertion, error) {
-		a, err := lenient(raw)
-		a.AttributeStatements = []crewjam.AttributeStatement{{Attributes: []crewjam.Attribute{{
-			FriendlyName: "mail", Name: "urn:oid:0.9.2342.19200300.100.1.3",
-			Values: []crewjam.AttributeValue{{Value: "a@b.test"}},
-		}}}}
-		return a, err
+	b64 := h.lenientEdit(func(a *etree.Element) {
+		st := kids(a, "AttributeStatement")[0]
+		attr := etree.NewElement("saml:Attribute")
+		attr.CreateAttr("FriendlyName", "mail")
+		attr.CreateAttr("Name", "urn:oid:0.9.2342.19200300.100.1.3")
+		val := etree.NewElement("saml:AttributeValue")
+		val.SetText("a@b.test")
+		attr.AddChild(val)
+		st.AddChild(attr)
 	})
-	id, err := h.verify(h.respond(fakeidp.Tamper{}))
+	id, err := h.verify(b64)
 	if err != nil {
 		t.Fatal(err)
 	}
