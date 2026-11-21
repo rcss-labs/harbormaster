@@ -39,6 +39,7 @@ func (p *Poller) holdSlice(ctx context.Context, l store.Lease) {
 	defer cancel()
 	var once sync.Once
 	w.OnRejected(func() {
+		p.cfg.Telemetry.CountFencedWriteRejected()
 		once.Do(func() {
 			p.log.Warn("poller: lease lost, stopping slice", "account", t.AccountID, "region", t.Region, "epoch", l.Epoch)
 		})

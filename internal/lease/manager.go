@@ -91,6 +91,9 @@ type Manager struct {
 	lastGiveBack time.Time
 	targets      map[awsx.Target]bool // nil until the first successful refresh
 	weights      map[awsx.Target]int
+	// priorOwner remembers, per lease, that the row was owned but expired when it was planned, so the claim that
+	// follows is counted as a takeover.
+	priorOwner map[store.LeaseKey]bool
 }
 
 // holding is one lease this process holds and the holder running under it.
@@ -180,10 +183,12 @@ func (m *Manager) Run(ctx context.Context) error {
 			gateChanged = m.Gate.Changed() // taken before the tick, so a change during it is not missed
 		}
 		m.tick(ctx)
+		m.publish()
 		m.lastTick.Store(time.Now().UnixNano())
 		select {
 		case <-ctx.Done():
 			m.shutdown()
+			m.publish()
 			<-watchdogDone
 			return nil
 		case <-timer.C:
@@ -284,7 +289,36 @@ func (m *Manager) release(ctx context.Context, l store.Lease, why string) {
 			"region", l.Key.Region, "epoch", l.Epoch, "err", err)
 		return
 	}
+	m.event(l.Key.Kind, "released")
 	m.Log.Info("lease: released", "why", why, "kind", l.Key.Kind, "account", l.Key.AccountID, "region", l.Key.Region, "epoch", l.Epoch)
+}
+
+// event counts a lease event in the registry, when there is one.
+func (m *Manager) event(kind, event string) {
+	if m.Telemetry != nil {
+		m.Telemetry.CountLeaseEvent(kind, event)
+	}
+}
+
+// publish mirrors what this process holds into the registry: the slice gauges, the coordinator gauge and the old
+// poller_leader series (1 on the holder of the coordinator lease).
+func (m *Manager) publish() {
+	if m.Telemetry == nil {
+		return
+	}
+	slicesHeld, weight, coordinator := 0, 0, false
+	for _, h := range m.snapshotHeld() {
+		switch h.lease.Key.Kind {
+		case store.LeaseSlice:
+			slicesHeld++
+			weight += max(m.weights[awsx.Target{AccountID: h.lease.Key.AccountID, Region: h.lease.Key.Region}], 1)
+		case store.LeaseCoordinator:
+			coordinator = true
+		}
+	}
+	m.Telemetry.SetLeaseOwned(slicesHeld, weight)
+	m.Telemetry.SetCoordinatorActive(coordinator)
+	m.Telemetry.SetLeader(coordinator)
 }
 
 // stopAll stops every holder and releases every lease.
@@ -329,10 +363,14 @@ func (m *Manager) renewAll(ctx context.Context) {
 		case errors.Is(err, store.ErrLeaseLost):
 			m.Log.Warn("lease: lost", "kind", h.lease.Key.Kind, "account", h.lease.Key.AccountID,
 				"region", h.lease.Key.Region, "epoch", h.lease.Epoch)
+			m.event(h.lease.Key.Kind, "lost")
 			m.stopHolder(h)
 			m.forget(h)
 		default:
 			if ctx.Err() == nil {
+				if m.Telemetry != nil {
+					m.Telemetry.CountLeaseRenewFailure(h.lease.Key.Kind)
+				}
 				m.Log.Warn("lease: renewal failed, will retry", "kind", h.lease.Key.Kind,
 					"account", h.lease.Key.AccountID, "region", h.lease.Key.Region, "epoch", h.lease.Epoch, "err", err)
 			}
@@ -368,6 +406,17 @@ func (m *Manager) heartbeat(ctx context.Context) {
 		return
 	}
 	m.lastBeat = time.Now()
+	if m.Telemetry != nil {
+		if members, err := m.store().LiveMembers(cctx, m.Timing.MemberLive); err == nil {
+			byRole := map[string]int{}
+			for _, mem := range members {
+				for _, role := range mem.Roles {
+					byRole[role]++
+				}
+			}
+			m.Telemetry.SetPollMembers(byRole)
+		}
+	}
 	if _, err := m.store().DeleteStaleMembers(cctx, memberStaleAfter); err != nil && ctx.Err() == nil {
 		m.Log.Warn("lease: delete stale members", "err", err)
 	}
@@ -425,6 +474,14 @@ func (m *Manager) refreshTargets(ctx context.Context) {
 	}
 }
 
+// notePrior remembers that a free row still names an owner (an expired lease, not a released one).
+func (m *Manager) notePrior(r store.LeaseRow) {
+	if m.priorOwner == nil {
+		m.priorOwner = map[store.LeaseKey]bool{}
+	}
+	m.priorOwner[r.Key] = r.OwnerID != uuid.Nil
+}
+
 func (m *Manager) isHeld(k store.LeaseKey) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -443,6 +500,11 @@ func (m *Manager) start(holder Holder, l store.Lease, claimStart time.Time) {
 		defer cancel()
 		holder.Hold(hctx, l)
 	}()
+	m.event(l.Key.Kind, "acquired")
+	if m.priorOwner[l.Key] {
+		m.event(l.Key.Kind, "takeover")
+	}
+	delete(m.priorOwner, l.Key)
 	m.Log.Info("lease: acquired", "kind", l.Key.Kind, "account", l.Key.AccountID, "region", l.Key.Region, "epoch", l.Epoch)
 }
 
@@ -488,6 +550,7 @@ func (m *Manager) claimSlices(ctx context.Context) {
 			}
 			owner := r.OwnerID
 			if r.Free {
+				m.notePrior(r)
 				owner = uuid.Nil
 			}
 			if m.isHeld(r.Key) {
@@ -553,6 +616,7 @@ func (m *Manager) claimCoordinator(ctx context.Context) {
 	for _, r := range rows {
 		if r.Key == key && r.Free {
 			free = true
+			m.notePrior(r)
 		}
 	}
 	if !free {

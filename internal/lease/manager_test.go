@@ -1,8 +1,10 @@
 package lease
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 // testTiming is the design's timing scaled down about 20 times, keeping its ratios: self-fence is two thirds of the TTL.
@@ -618,5 +621,107 @@ func TestGuardFor_FailsAfterTakeoverAndNearExpiry(t *testing.T) {
 	}
 	if err := GuardFor(st, l, 0)(ctx); err == nil {
 		t.Fatal("guard of the old owner passed after a takeover")
+	}
+}
+
+func metricsText(t testing.TB, reg *telemetry.Registry) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := reg.WritePrometheus(&buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func hasLine(text, line string) bool {
+	for _, l := range strings.Split(text, "\n") {
+		if l == line {
+			return true
+		}
+	}
+	return false
+}
+
+func TestManager_ReportsLeaseEvents(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	reg := telemetry.New()
+	rec := newRecorder(newExclusivity())
+	coord := newRecorder(newExclusivity())
+	m := newManager(st, managerOpts{roles: []string{"poller", "coordinator"}, slices: rec, coordinator: coord, targets: newTargets(sliceNames(2)...)})
+	m.Telemetry = reg
+	stop := start(t, m)
+
+	waitFor(t, 5*time.Second, "3 leases", func() bool { return len(m.Held()) == 3 })
+	waitFor(t, 5*time.Second, "the gauges", func() bool {
+		text := metricsText(t, reg)
+		return hasLine(text, "harbormaster_lease_slices_owned 2") && hasLine(text, "harbormaster_coordinator_active 1") &&
+			hasLine(text, `harbormaster_poll_members{role="poller"} 1`) && hasLine(text, `harbormaster_poll_members{role="coordinator"} 1`)
+	})
+	text := metricsText(t, reg)
+	for _, want := range []string{
+		`harbormaster_lease_events_total{kind="slice",event="acquired"} 2`,
+		`harbormaster_lease_events_total{kind="coordinator",event="acquired"} 1`,
+		"harbormaster_lease_weight_owned 2", // two slices without clusters weigh 1 each
+		"harbormaster_poller_leader 1",      // follows the coordinator lease
+	} {
+		if !hasLine(text, want) {
+			t.Errorf("metrics lack %q:\n%s", want, text)
+		}
+	}
+
+	// A lease taken away is counted as lost, and only that slice leaves the gauge.
+	victim := sliceKeyOf("acct01")
+	expireLease(t, st, victim)
+	if _, ok, err := st.ClaimLease(ctx, victim, uuid.New(), time.Hour); err != nil || !ok {
+		t.Fatalf("thief claim: %v %v", ok, err)
+	}
+	waitFor(t, 5*time.Second, "the loss to be counted", func() bool {
+		return hasLine(metricsText(t, reg), `harbormaster_lease_events_total{kind="slice",event="lost"} 1`)
+	})
+	waitFor(t, 5*time.Second, "the gauge to drop", func() bool { return hasLine(metricsText(t, reg), "harbormaster_lease_slices_owned 1") })
+
+	// A graceful stop releases what is left and the coordinator gauges go to zero.
+	stop()
+	text = metricsText(t, reg)
+	for _, want := range []string{
+		`harbormaster_lease_events_total{kind="slice",event="released"} 1`,
+		`harbormaster_lease_events_total{kind="coordinator",event="released"} 1`,
+		"harbormaster_coordinator_active 0",
+		"harbormaster_poller_leader 0",
+		"harbormaster_lease_slices_owned 0",
+	} {
+		if !hasLine(text, want) {
+			t.Errorf("after the stop, metrics lack %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestManager_CountsATakeoverOfAnExpiredOwner(t *testing.T) {
+	st := storetest.Open(t)
+	reg := telemetry.New()
+	excl := newExclusivity()
+	targets := newTargets("acct00")
+	a := newManager(st, managerOpts{roles: []string{"poller"}, slices: newRecorder(excl), targets: targets})
+	a.crash = true
+	stopA := start(t, a)
+	waitFor(t, 5*time.Second, "a to hold the slice", func() bool { return len(a.Held()) == 1 })
+	b := newManager(st, managerOpts{roles: []string{"poller"}, slices: newRecorder(excl), targets: targets})
+	b.Telemetry = reg
+	start(t, b)
+	waitFor(t, 5*time.Second, "b to be a live member", func() bool {
+		ms, _ := st.LiveMembers(context.Background(), time.Minute)
+		return len(ms) == 2
+	})
+	stopA()
+	waitFor(t, 10*time.Second, "b to take over", func() bool { return len(b.Held()) == 1 })
+	text := metricsText(t, reg)
+	for _, want := range []string{
+		`harbormaster_lease_events_total{kind="slice",event="acquired"} 1`,
+		`harbormaster_lease_events_total{kind="slice",event="takeover"} 1`,
+	} {
+		if !hasLine(text, want) {
+			t.Errorf("metrics lack %q:\n%s", want, text)
+		}
 	}
 }

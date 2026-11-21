@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"bytes"
 	"context"
 	"go/ast"
 	"go/parser"
@@ -19,6 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 // fencedWrites are the 19 poller writes that must go through a store.SliceWriter.
@@ -115,7 +117,8 @@ func TestPoller_PausedOwnerCannotOverwriteAfterTakeover(t *testing.T) {
 
 	clients := &pausedClients{Clients: fake.New(fake.MockupEstate(time.Now)), entered: make(chan struct{}), release: make(chan struct{})}
 	clients.armed.Store(true)
-	a := newTestPoller(st, Config{MaxInFlight: 4, AccountsRefresh: 50 * time.Millisecond}, randomLockKey())
+	reg := telemetry.New()
+	a := newTestPoller(st, Config{MaxInFlight: 4, AccountsRefresh: 50 * time.Millisecond, Telemetry: reg}, randomLockKey())
 	a.clients = clients
 	loopDone := make(chan struct{})
 	a.loopFactory = func(ctx context.Context, tg awsx.Target, w *store.SliceWriter) {
@@ -170,6 +173,13 @@ func TestPoller_PausedOwnerCannotOverwriteAfterTakeover(t *testing.T) {
 	}
 	if strings.Join(got, ",") != "new-owner-1,new-owner-2" {
 		t.Fatalf("clusters = %v, want the new owner's two (the old owner's stale delete must not commit)", got)
+	}
+	var metrics bytes.Buffer
+	if err := reg.WritePrometheus(&metrics); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(metrics.String(), "harbormaster_fenced_writes_rejected_total 0\n") || !strings.Contains(metrics.String(), "harbormaster_fenced_writes_rejected_total ") {
+		t.Fatalf("the rejected write was not counted:\n%s", metrics.String())
 	}
 	var pollRows int
 	if err := st.Pool.QueryRow(ctx, `select count(*) from poll_loops`).Scan(&pollRows); err != nil || pollRows != 0 {
