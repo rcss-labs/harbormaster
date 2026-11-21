@@ -248,8 +248,8 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 		return
 	}
 
-	release, ok := s.ExecLimiter.Acquire(subject.UserID)
-	if !ok {
+	release, ok, err := s.Limits.Acquire(ctx, limitExec, subject.UserID, s.Cfg.ExecMaxSessionsPerUser)
+	if err != nil || !ok {
 		sock.reject(wsCloseRefused, "session_limit",
 			fmt.Sprintf("You already have %d open terminal sessions.", s.Cfg.ExecMaxSessionsPerUser))
 		return

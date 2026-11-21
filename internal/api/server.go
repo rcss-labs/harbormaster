@@ -2,7 +2,7 @@
 package api
 
 import (
-	"cmp"
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -13,7 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
-	"github.com/rcss-labs/harbormaster/internal/execbridge"
+	"github.com/rcss-labs/harbormaster/internal/limits"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/notify"
@@ -42,24 +42,22 @@ type Server struct {
 	// LogErrors counts error lines per bucket for the service timeline; New builds the one counter every
 	// request shares, since the CloudWatch pacing only holds process-wide through a single counter.
 	LogErrors *logs.ErrorCounter
-	// TailLimiter caps concurrent live tails per user; New defaults it from Cfg.LogTailsPerUser.
-	TailLimiter *logs.TailLimiter
+	// Limits counts the per-user terminal sessions ("exec"), live tails ("tail") and running log searches ("search");
+	// New defaults it to a per-task counter, and serve wires the estate-wide one when a store is configured.
+	Limits limits.Concurrency
+	// Rates holds the token buckets behind log search, the notification test button and the SAML login start
+	// ("logsearch", "notifytest", "samllogin"); New defaults it to per-task buckets on Now.
+	Rates limits.Rate
 	// LogSearch runs Logs Insights searches across services; New defaults it from Clients and Cfg.
 	LogSearch *logs.Searcher
-	// SearchLimiter caps concurrent log searches per user (one); New creates it when nil.
-	SearchLimiter *logs.TailLimiter
 	// draining is closed by BeginDrain when the process starts shutting down; running log searches watch it
 	// so they stop their Insights queries and audit inside the shutdown drain.
 	draining      chan struct{}
 	beginDrainOne *sync.Once
-	// searchBucket rate-limits log searches per user.
-	searchBucket *ipBucket
 	// Deploy runs the change path (plan 02).
 	Deploy *deploy.Service
 
 	// plan 04: terminal
-	// ExecLimiter caps concurrent terminal sessions per user; New creates it from Cfg when nil.
-	ExecLimiter *execbridge.Limiter
 	// ExecStartTimeout is how long a new terminal socket may take to send its start frame (default 5s).
 	ExecStartTimeout time.Duration
 	// ExecPingInterval and ExecPingTimeout drive the keepalive ping on the browser socket
@@ -100,10 +98,29 @@ type Server struct {
 	// KickNotify wakes the notification dispatcher after a route change; nil is a no-op. Like KickOffHours it reaches
 	// only the dispatcher in this process, so on another task a change waits at most HM_NOTIFY_INTERVAL.
 	KickNotify func()
-	// notifyTestBucket limits the Send test button per user.
-	notifyTestBucket *ipBucket
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
+}
+
+// Names of the per-user limits in Server.Limits (also the key segment and metric label).
+const (
+	limitExec   = "exec"
+	limitTail   = "tail"
+	limitSearch = "search"
+)
+
+// Names of the token buckets in Server.Rates.
+const (
+	rateLogSearch  = "logsearch"
+	rateNotifyTest = "notifytest"
+	rateSAMLLogin  = "samllogin"
+)
+
+// allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
+// tried the per-task bucket, and a store problem must never block sign-in or a search.
+func (s *Server) allowRate(ctx context.Context, name, key string, capacity int, refillPerSecond float64) bool {
+	ok, err := s.Rates.Allow(ctx, name, key, capacity, refillPerSecond)
+	return err != nil || ok
 }
 
 // ScanKicker wakes the scan loop so a request does not wait for the next interval. Kick reaches only the loop in the
@@ -133,18 +150,16 @@ func New(s Server) *Server {
 	}
 	if s.LogErrors == nil {
 		s.LogErrors = logs.NewErrorCounter(s.Clients, s.Now)
+		s.LogErrors.Pacer = s.Rates // the regional FilterLogEvents quota is shared by every task
 	}
-	if s.TailLimiter == nil {
-		s.TailLimiter = logs.NewTailLimiter(cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
+	if s.Rates == nil {
+		s.Rates = limits.NewMemoryRate(s.Now)
+	}
+	if s.Limits == nil {
+		s.Limits = limits.NewMemoryConcurrency()
 	}
 	if s.LogSearch == nil {
 		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, Timeout: s.Cfg.LogSearchTimeout, MaxBytes: int64(s.Cfg.LogSearchMaxGB) * logs.BytesPerGiB}
-	}
-	if s.SearchLimiter == nil {
-		s.SearchLimiter = logs.NewTailLimiter(1)
-	}
-	if s.searchBucket == nil {
-		s.searchBucket = newIPBucket(searchBucketCapacity, searchBucketRefillPerSecond, s.Now)
 	}
 	if s.Notify == nil {
 		s.Notify = &notify.Senders{BaseURL: s.Cfg.BaseURL, SMTP: s.Cfg.Notify.SMTP,
@@ -153,9 +168,6 @@ func New(s Server) *Server {
 	if s.NotifyBox == nil && s.Cfg.SessionKey != "" {
 		s.NotifyBox, _ = secretbox.New(s.Cfg.SessionKey, secretbox.PurposeNotifySecret)
 	}
-	if s.notifyTestBucket == nil {
-		s.notifyTestBucket = newIPBucket(notifyTestBucketCapacity, notifyTestBucketRefillPerSecond, s.Now)
-	}
 	// plan 06
 	if s.Telemetry == nil {
 		s.Telemetry = telemetry.Default
@@ -163,9 +175,6 @@ func New(s Server) *Server {
 	// plan 07
 	s.SAML = newSAMLService(s.SAML, &s)
 	// plan 04: terminal
-	if s.ExecLimiter == nil {
-		s.ExecLimiter = execbridge.NewLimiter(s.Cfg.ExecMaxSessionsPerUser)
-	}
 	if s.ExecStartTimeout <= 0 {
 		s.ExecStartTimeout = 5 * time.Second
 	}

@@ -347,7 +347,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_SESSION_KEY` | | Secret key mixed into session id hashes, and the key the SSO signing key is encrypted under. Set a long random value in production. Required before single sign-on can be configured (see Single sign-on) |
 | `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` | | Secrets Manager secret with the initial `admin` password (see First run) |
 | `HM_METRICS_TOKEN` | | Bearer token for `GET /metrics`. Empty disables the endpoint (it returns 404) |
-| `HM_KV_URL` | | Optional Valkey or Redis store: a `redis://`, `rediss://`, `valkey://` or `valkeys://` URL with an optional user, password and database number. Empty is the default and means no store. This release step only connects and reports `harbormaster_kv_up`; nothing reads or writes the store yet. An unreachable store never stops the server from starting. The URL can hold a password and is never logged. It must use database 0 (the default); another database number is rejected at start, because selecting one needs a command outside the supported subset |
+| `HM_KV_URL` | | Optional Valkey or Redis store: a `redis://`, `rediss://`, `valkey://` or `valkeys://` URL with an optional user, password and database number. Empty is the default and means no store. This release uses it for the estate-wide limits only (terminal, live-tail and log-search limits, three rate limits and log error-count pacing) and reports `harbormaster_kv_up`. An unreachable store never stops the server from starting. The URL can hold a password and is never logged. It must use database 0 (the default); another database number is rejected at start, because selecting one needs a command outside the supported subset |
 | `HM_KV_PREFIX` | `hm` | Key and channel prefix on the store, 1 to 32 lowercase letters, digits, `-` or `_`. Installs or tests sharing one server use different prefixes |
 | `HM_COOKIE_SECURE` | `true` | Set the Secure flag on cookies. Use `false` only for plain-HTTP local runs. It does not relax SSO metadata fetching: only `HM_FAKE_AWS` allows `http` and private addresses there |
 | `HM_FAKE_AWS` | `false` | Local demo only, same as `serve --fake-aws`. Seeds demo users (admin `sam` with a published password) and refuses to run against a database that already has users or accounts. Never set in production |
@@ -462,7 +462,7 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks, groupe
 | `HM_MAX_DESIRED_COUNT` | `50` | Highest desired count Harbormaster will set on a service (must be at least 1) |
 | `HM_METRICS_CACHE_TTL` | `60s` | How long metric query results are reused before AWS is asked again |
 | `HM_LOG_TAIL_IDLE` | `30m` | Close a live log tail after this long without activity |
-| `HM_LOG_TAILS_PER_USER` | `2` | Concurrent live log tails per user |
+| `HM_LOG_TAILS_PER_USER` | `2` | Concurrent live log tails per user, across all tasks when `HM_KV_URL` is set, otherwise per task |
 | `HM_LOG_HISTORY_LIMIT` | `500` | Maximum log events returned by one history query |
 | `HM_LOG_SEARCH_TIMEOUT` | `60s` | How long one Logs Insights log search may run before it is stopped |
 | `HM_LOG_SEARCH_MAX_SERVICES` | `20` | Maximum services one log search may cover |
@@ -470,7 +470,7 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks, groupe
 | `HM_LOG_SEARCH_MAX_GB` | `10` | Most GiB one log search may scan before its queries are stopped and the partial result is returned; `0` removes the limit |
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
-| `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, enforced per Harbormaster task (see Running more than one task) |
+| `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, across all tasks when `HM_KV_URL` is set, otherwise per task (see Running more than one task) |
 
 ### Single sign-on (SAML)
 
@@ -580,6 +580,8 @@ Settings → Single sign-on → "Test sign-in" opens a sign-in in a new tab and 
 
   Lease series: `harbormaster_lease_slices_owned` and `harbormaster_lease_weight_owned` (what this task owns), `harbormaster_lease_events_total{kind,event}` (`kind` is `slice` or `coordinator`; `event` is `acquired`, `released`, `lost` or `takeover`, the last for a lease taken from an owner that stopped renewing), `harbormaster_lease_renew_failures_total{kind}`, `harbormaster_fenced_writes_rejected_total` (poller writes refused because the lease was lost; a rising value means a task was paused or partitioned), `harbormaster_coordinator_active` (1 on the task running the background jobs) and `harbormaster_poll_members{role}` (live tasks per role). `harbormaster_poller_leader` stays and is 1 on the task holding the coordinator lease.
 
+  `harbormaster_limit_decisions_total{limit,result,backend}` counts shared-limit decisions: `result` is `allowed` or `refused`, `backend` is `kv` or `memory` (the per-task fallback while the store is down).
+
 ### Running more than one task
 
 The service is designed to run with desired count 1 or more (design spec §4.3):
@@ -592,7 +594,7 @@ The service is designed to run with desired count 1 or more (design spec §4.3):
 - All other state (sessions, snapshots, permissions) is in Postgres, so any task can serve any API request.
 - Terminal and live-log WebSockets are served by whichever task receives the connection, so the ALB needs no stickiness.
 
-The module runs desired count 1 by default, with deployment settings that allow a short overlap; the leases make overlap safe. `HM_EXEC_MAX_SESSIONS_PER_USER` is enforced per task, so with more than one task a user can open up to the limit on each.
+The module runs desired count 1 by default, with deployment settings that allow a short overlap; the leases make overlap safe. With a store (`HM_KV_URL`) the terminal, live-tail and log-search limits, the log-search, notification-test and SSO login-start rate limits and the log error-count pacing are counted across all tasks. Without a store, or while it is down, they are counted per task, so with more than one task a user can open up to the limit on each.
 
 ### Throttling and stale banners
 

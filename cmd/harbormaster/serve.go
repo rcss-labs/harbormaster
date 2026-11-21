@@ -223,7 +223,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		log.Info("applied migrations", "versions", applied)
 	}
 
-	// The shared store is optional and nothing reads it yet; later phases pass kvHealth on.
+	// The shared store is optional; without it every limit stays per task.
 	var kvHealth *kv.Health
 	if kvConfigured {
 		health, stopKV, err := startKV(ctx, cfg.KV, kvOpts, log)
@@ -233,7 +233,6 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		defer stopKV()
 		kvHealth = health
 	}
-	_ = kvHealth
 
 	// Route secrets are sealed under the session key; without one only secretless routes (email) can exist.
 	var notifyBox *secretbox.Box
@@ -336,6 +335,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,
 			Guard: &offhours.Guard{Store: st, Now: time.Now}},
 		ExecAllowInsecureStream: execInsecureStream,
+		Limits:                  buildConcurrency(kvHealth),
+		Rates:                   buildRates(kvHealth),
 		FakeIdP:                 fakeIdP,
 		FakeNotify:              fakeNotify,
 		MetricsToken:            cfg.MetricsToken, // plan 06

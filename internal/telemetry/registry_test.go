@@ -95,6 +95,23 @@ func TestPrometheus_NotificationCounter(t *testing.T) {
 	}
 }
 
+func TestPrometheus_LimitDecisionCounter(t *testing.T) {
+	r := New()
+	r.CountLimitDecision("exec", "allowed", "kv")
+	r.CountLimitDecision("exec", "allowed", "kv")
+	r.CountLimitDecision("exec", "refused", "memory")
+	out := render(t, r)
+	for _, want := range []string{
+		"# TYPE harbormaster_limit_decisions_total counter",
+		`harbormaster_limit_decisions_total{limit="exec",result="allowed",backend="kv"} 2`,
+		`harbormaster_limit_decisions_total{limit="exec",result="refused",backend="memory"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestWritePrometheus_DeterministicOrder(t *testing.T) {
 	r := New()
 	r.SetBuildInfo("1.2.3")

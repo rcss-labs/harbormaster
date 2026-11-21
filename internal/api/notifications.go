@@ -858,7 +858,7 @@ func (s *Server) testNotificationRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := auth.UserFrom(ctx)
-	if !s.notifyTestBucket.Allow(strconv.FormatInt(actor.ID, 10)) {
+	if !s.allowRate(ctx, rateNotifyTest, strconv.FormatInt(actor.ID, 10), notifyTestBucketCapacity, notifyTestBucketRefillPerSecond) {
 		s.fail(w, errRateLimited)
 		return
 	}

@@ -25,17 +25,16 @@ import (
 )
 
 type logSearchEnv struct {
-	srv     *httptest.Server
-	fk      *fake.Fake
-	st      *store.Store
-	limiter *logs.TailLimiter
-	api     *Server
+	srv *httptest.Server
+	fk  *fake.Fake
+	st  *store.Store
+	api *Server
 }
 
 // newLogSearchEnv builds a server whose searcher polls fast, so a search over the fake takes milliseconds.
 func newLogSearchEnv(t *testing.T, prepare func(*fake.Estate), wrap ...func(awsx.Clients) awsx.Clients) *logSearchEnv {
 	t.Helper()
-	env := &logSearchEnv{limiter: logs.NewTailLimiter(1)}
+	env := &logSearchEnv{}
 	var srv *httptest.Server
 	srv, env.api, env.fk, env.st, _ = newServerCustomAPI(t, true, func(s *Server) {
 		if prepare != nil {
@@ -45,7 +44,6 @@ func newLogSearchEnv(t *testing.T, prepare func(*fake.Estate), wrap ...func(awsx
 			s.Clients = w(s.Clients)
 		}
 		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, PollEvery: 5 * time.Millisecond, Timeout: 3 * time.Second}
-		s.SearchLimiter = env.limiter
 	})
 	env.srv = srv
 	seedMockupTags(t, env.st)
@@ -522,7 +520,7 @@ func TestLogSearch_AbortReleasesSlotAndAudits(t *testing.T) {
 	}
 	waitFor(t, "the slot to be released", func() bool {
 		user, err := env.st.GetUserByUsername(t.Context(), "sam")
-		return err == nil && env.limiter.Count(user.ID) == 0
+		return err == nil && searchesHeld(t, env.api, user.ID) == 0
 	})
 	row := auditRows(t, env.st, "log_search")[0]
 	if row.Details["query"] != "filter @message like /needle/" {
@@ -616,11 +614,21 @@ func TestLogSearch_DrainStopsRunningSearch(t *testing.T) {
 	}
 	waitFor(t, "the slot to be released", func() bool {
 		user, err := env.st.GetUserByUsername(t.Context(), "sam")
-		return err == nil && env.limiter.Count(user.ID) == 0
+		return err == nil && searchesHeld(t, env.api, user.ID) == 0
 	})
 	waitFor(t, "the audit row", func() bool { return len(auditRows(t, env.st, "log_search")) == 1 })
 	time.Sleep(50 * time.Millisecond)
 	if n := len(auditRows(t, env.st, "log_search")); n != 1 {
 		t.Errorf("%d log_search audit rows, want exactly 1", n)
 	}
+}
+
+// searchesHeld is how many log searches the user has running on this task's limiter.
+func searchesHeld(t *testing.T, api *Server, userID int64) int {
+	t.Helper()
+	n, err := api.Limits.Count(t.Context(), limitSearch, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
