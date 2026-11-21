@@ -90,11 +90,9 @@ func parseTerm(token string) (Term, error) {
 		rest = rest[1:]
 	}
 	value := rest
-	typedPrefix := ""
 	if i := strings.Index(rest, ":"); i >= 0 {
 		if field, ok := fieldAliases[strings.ToLower(rest[:i])]; ok {
 			term.Field = field
-			typedPrefix = strings.ToLower(rest[:i])
 			value = rest[i+1:]
 		}
 	}
@@ -107,7 +105,7 @@ func parseTerm(token string) (Term, error) {
 	}
 	if value == "" {
 		if term.Field != FieldAny {
-			return Term{}, parseErr("Add a value after " + typedPrefix + ":")
+			return Term{}, parseErr("Add a value after " + string(term.Field) + ":")
 		}
 		return Term{}, parseErr("Search terms need at least 2 characters.")
 	}
@@ -116,6 +114,7 @@ func parseTerm(token string) (Term, error) {
 		if err != nil || n < 1 || n > 65535 {
 			return Term{}, parseErr("port: needs a number from 1 to 65535.")
 		}
+		value = strconv.Itoa(n) // port:080 and port:+80 mean port 80
 	}
 	if term.Field == FieldAny && utf8.RuneCountInString(value) < MinFreeTextChars {
 		return Term{}, parseErr("Search terms need at least 2 characters.")

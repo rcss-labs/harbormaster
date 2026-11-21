@@ -87,7 +87,7 @@ func (s *Store) ConfigSearchRows(ctx context.Context, f TargetFilter, vis Visibi
 	           with ordinality as e(c, ord)
 	  ) cs on true
 	  where ` + where + `
-	  order by sv.account_id, sv.region, sv.cluster_name, sv.service_name, rv.is_primary desc, rv.revision desc`
+	  order by sv.account_id, sv.region, sv.cluster_name, sv.service_name, rv.is_primary desc, rv.revision desc nulls last`
 	rows, err := s.Pool.Query(ctx, sql, q.values...)
 	if err != nil {
 		return nil, fmt.Errorf("config search rows: %w", err)

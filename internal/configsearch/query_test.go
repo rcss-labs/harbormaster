@@ -69,6 +69,8 @@ func TestParse_Errors(t *testing.T) {
 		{"port:70000", "port: needs a number from 1 to 65535."},
 		{"port:0", "port: needs a number from 1 to 65535."},
 		{"env:", "Add a value after env:"},
+		{"log:", "Add a value after loggroup:"},
+		{"task-role:", "Add a value after taskrole:"},
 		{`env:"PORT`, `Close the quote in env:"PORT.`},
 	}
 	for _, c := range cases {

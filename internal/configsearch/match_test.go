@@ -75,6 +75,21 @@ func TestMatch_PortIsExact(t *testing.T) {
 	}
 }
 
+func TestMatch_PortIsNormalised(t *testing.T) {
+	d := sampleDoc()
+	for _, q := range []string{"port:080", "port:+80", "ports:0080"} {
+		if !matches(t, q, d) {
+			t.Errorf("%q should match port 80", q)
+		}
+	}
+	if matches(t, "-port:080", d) {
+		t.Error("-port:080 must exclude a service with port 80")
+	}
+	if !matches(t, "env:PORT -port:0443", d) {
+		t.Error("-port:0443 must not exclude a service without port 443")
+	}
+}
+
 func TestMatch_TermsAreAndedAcrossContainers(t *testing.T) {
 	d := sampleDoc()
 	if !matches(t, "image:nginx env:PORT secret:API_KEY", d) {
