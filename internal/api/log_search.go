@@ -238,13 +238,13 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Guardrails: one running search per user, then a token bucket. The slot comes first so a user
 	// pressing Run during a running search gets 409 without burning tokens into a 429.
-	release, acquired := s.SearchLimiter.Acquire(user.ID)
-	if !acquired {
+	release, acquired, err := s.Limits.Acquire(ctx, limitSearch, user.ID, 1)
+	if err != nil || !acquired {
 		s.fail(w, errSearchRunning)
 		return
 	}
 	defer release()
-	if !s.searchBucket.Allow(strconv.FormatInt(user.ID, 10)) {
+	if !s.allowRate(ctx, rateLogSearch, strconv.FormatInt(user.ID, 10), searchBucketCapacity, searchBucketRefillPerSecond) {
 		s.fail(w, errSearchRateLimited)
 		return
 	}

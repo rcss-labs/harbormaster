@@ -41,7 +41,6 @@ const (
 type samlService struct {
 	now    func() time.Time
 	cipher *saml.KeyCipher // nil when HM_SESSION_KEY is empty
-	bucket *ipBucket
 	verify func(v *saml.Verifier, in saml.VerifyInput) (saml.Identity, error)
 	// fetcher downloads IdP metadata. The default is https-only with the private/link-local address
 	// filter; only the local demo mode (HM_FAKE_AWS) relaxes it. Cookie flags never decide SSRF protection.
@@ -59,9 +58,6 @@ func newSAMLService(svc *samlService, s *Server) *samlService {
 		if cipher, err := saml.NewKeyCipher(s.Cfg.SessionKey); err == nil {
 			svc.cipher = cipher
 		}
-	}
-	if svc.bucket == nil {
-		svc.bucket = newIPBucket(loginBucketSize, 1, s.Now)
 	}
 	if svc.fetcher == nil {
 		svc.fetcher = &saml.MetadataFetcher{AllowInsecure: s.Cfg.FakeAWS}
@@ -219,7 +215,7 @@ func sha256Hex(value string) string {
 }
 
 func (s *Server) rateLimited(w http.ResponseWriter, r *http.Request) bool {
-	if s.SAML.bucket.Allow(s.clientIP(r)) {
+	if s.allowRate(r.Context(), rateSAMLLogin, s.clientIP(r), loginBucketSize, 1) {
 		return false
 	}
 	s.fail(w, errRateLimited)

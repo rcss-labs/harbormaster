@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/limits"
 )
 
 // ErrorTermsPattern is a CloudWatch OR filter that matches a superset of the error-level lines;
@@ -79,12 +80,14 @@ type ErrorCounter struct {
 	Now     func() time.Time
 	// Sleep waits for d or until ctx ends; nil waits on a real timer.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Pacer books the call slots of an account and region across all tasks; nil paces within this process only.
+	Pacer limits.Rate
 
 	scans singleflight.Group
 
-	mu       sync.Mutex
-	cache    map[bucketKey]cachedBucket
-	nextSlot map[awsx.Target]time.Time
+	mu    sync.Mutex
+	cache map[bucketKey]cachedBucket
+	local limits.Rate // this process's own pacer: the default, and the fallback when Pacer fails
 }
 
 type bucketKey struct {
@@ -105,7 +108,9 @@ func NewErrorCounter(clients awsx.Clients, now func() time.Time) *ErrorCounter {
 	if now == nil {
 		now = time.Now
 	}
-	return &ErrorCounter{Clients: clients, Now: now, cache: map[bucketKey]cachedBucket{}, nextSlot: map[awsx.Target]time.Time{}}
+	c := &ErrorCounter{Clients: clients, Now: now, cache: map[bucketKey]cachedBucket{}}
+	c.local = limits.NewMemoryRate(func() time.Time { return c.Now() })
+	return c
 }
 
 // Count returns the error count of every bucket covering [From, To]. Concurrent identical requests
@@ -330,17 +335,19 @@ func truncateRunes(s string, limit int) string {
 	return string(runes[:limit])
 }
 
-// pace reserves the next call slot of the target, 500 ms after the previous one, and waits for it.
+// pace books the next call slot of the target's account and region, 500 ms after the previous one, and waits for it.
+// The slot comes from the shared pacer when there is one, so tasks together stay under the regional quota; if that
+// fails the call is paced by this process alone, as before.
 func (c *ErrorCounter) pace(ctx context.Context, target awsx.Target) error {
-	c.mu.Lock()
-	now := c.Now()
-	slot := now
-	if next := c.nextSlot[target]; next.After(now) {
-		slot = next
+	key := target.AccountID + "|" + target.Region
+	var wait time.Duration
+	err := errors.New("no shared pacer")
+	if c.Pacer != nil {
+		wait, err = c.Pacer.Reserve(ctx, "errorcount", key, callInterval)
 	}
-	c.nextSlot[target] = slot.Add(callInterval)
-	c.mu.Unlock()
-	wait := slot.Sub(now)
+	if err != nil {
+		wait, _ = c.local.Reserve(ctx, "errorcount", key, callInterval)
+	}
 	if wait <= 0 {
 		return ctx.Err()
 	}

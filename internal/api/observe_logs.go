@@ -364,8 +364,8 @@ func (s *Server) tailLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, _ := auth.UserFrom(r.Context())
-	release, acquired := s.TailLimiter.Acquire(user.ID)
-	if !acquired {
+	release, acquired, err := s.Limits.Acquire(ctx, limitTail, user.ID, cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser))
+	if err != nil || !acquired {
 		closeWith(conn, closeTailLimit, fmt.Sprintf("You already have %d live tails open.", cmp.Or(s.Cfg.LogTailsPerUser, defaultTailsPerUser)))
 		return
 	}

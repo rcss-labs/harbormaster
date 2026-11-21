@@ -531,14 +531,14 @@ func TestLogsTail_ClientCloseReleasesSlot(t *testing.T) {
 	if ready, err := readFrame(conn, 3*time.Second); err != nil || ready["type"] != "ready" {
 		t.Fatalf("ready = %v, %v", ready, err)
 	}
-	if got := api.TailLimiter.Count(user.ID); got != 1 {
+	if got := tailsHeld(t, api, user.ID); got != 1 {
 		t.Fatalf("slots while open = %d, want 1", got)
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 	deadline := time.Now().Add(3 * time.Second)
-	for api.TailLimiter.Count(user.ID) != 0 {
+	for tailsHeld(t, api, user.ID) != 0 {
 		if time.Now().After(deadline) {
-			t.Fatalf("slot still held after client close: %d", api.TailLimiter.Count(user.ID))
+			t.Fatalf("slot still held after client close: %d", tailsHeld(t, api, user.ID))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -598,4 +598,14 @@ func TestLogs_LimitParamCapsLines(t *testing.T) {
 			t.Fatalf("limit=%s: status %d, want 422", bad, status)
 		}
 	}
+}
+
+// tailsHeld is how many live tails the user holds on this task's limiter.
+func tailsHeld(t *testing.T, api *Server, userID int64) int {
+	t.Helper()
+	n, err := api.Limits.Count(t.Context(), limitTail, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
