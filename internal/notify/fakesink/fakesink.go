@@ -4,6 +4,7 @@
 package fakesink
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -40,7 +41,7 @@ func New() *Sink { return &Sink{SlowDelay: 15 * time.Second} }
 // record keeps the last `keep` entries. A JSON body is embedded as JSON so a search for `"event":"alert.raised"`
 // finds it; anything else is kept as a JSON string.
 func (s *Sink) record(path string, headers map[string]string, body []byte) {
-	raw := json.RawMessage(body)
+	raw := json.RawMessage(redactSecrets(body))
 	if !json.Valid(body) {
 		raw, _ = json.Marshal(string(body))
 	}
@@ -49,6 +50,43 @@ func (s *Sink) record(path string, headers map[string]string, body []byte) {
 	s.entries = append(s.entries, entry{Time: time.Now().UTC(), Path: path, Headers: headers, Body: raw})
 	if len(s.entries) > keep {
 		s.entries = s.entries[len(s.entries)-keep:]
+	}
+}
+
+// secretFields are body fields that carry a credential (the PagerDuty integration key, a signing secret, a bot
+// token). They are replaced before anything is stored or served by /fake-notify/received.
+var secretFields = map[string]bool{"routing_key": true, "signing_secret": true, "bot_token": true, "token": true, "secret": true}
+
+// redactSecrets blanks the values of secretFields anywhere in a JSON body; a body that is not JSON is returned as is.
+func redactSecrets(body []byte) []byte {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return body
+	}
+	redactValue(value)
+	out, err := json.Marshal(value)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func redactValue(value any) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, inner := range v {
+			if secretFields[key] {
+				v[key] = "***"
+				continue
+			}
+			redactValue(inner)
+		}
+	case []any:
+		for _, inner := range v {
+			redactValue(inner)
+		}
 	}
 }
 

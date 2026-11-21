@@ -151,3 +151,21 @@ func TestFakeSink_IgnoresNonJSONBodies(t *testing.T) {
 	}
 	_ = io.Discard
 }
+
+// The PagerDuty body carries the integration key; like the Telegram token it must never be kept or served back.
+func TestFakeSink_RedactsSecretBodyFields(t *testing.T) {
+	const key = "R0uTingKeyR0uTingKeyR0uTingKey0001"
+	h := New().Handler()
+	post(t, h, "/fake-notify/pagerduty", `{"routing_key":"`+key+`","event_action":"trigger","dedup_key":"d1","payload":{"summary":"s","routing_key":"`+key+`"}}`)
+	post(t, h, "/fake-notify/webhook/x", `{"event":"alert.raised","signing_secret":"`+key+`","bot_token":"`+key+`"}`)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fake-notify/received", nil))
+	if strings.Contains(rec.Body.String(), key) {
+		t.Fatalf("the receiver kept a secret:\n%s", rec.Body)
+	}
+	got := received(t, h)
+	if len(got) != 2 || !strings.Contains(string(got[0].Body), `"event_action":"trigger"`) || !strings.Contains(string(got[0].Body), `"dedup_key":"d1"`) {
+		t.Fatalf("the rest of the body must stay readable: %+v", got)
+	}
+}
