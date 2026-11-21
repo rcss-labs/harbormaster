@@ -476,6 +476,20 @@ func TestRetryNotificationDelivery_OnlyFailedWithLiveRoute(t *testing.T) {
 	}
 }
 
+func TestGetNotificationDelivery(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	row := mustPlan(t, s, delivery(route, incident, "opened", 0))
+	got, err := s.GetNotificationDelivery(ctx, row.ID)
+	if err != nil || got.ID != row.ID || got.Event != "opened" || got.Key != incident.Key {
+		t.Fatalf("get = %+v err=%v", got, err)
+	}
+	if _, err := s.GetNotificationDelivery(ctx, 999999); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown id = %v, want ErrNotFound", err)
+	}
+}
+
 func TestDeleteNotificationRoute_KeepsItsLogRows(t *testing.T) {
 	s := storetest.Open(t)
 	incident, route := seedIncidentAndRoute(t, s)

@@ -324,6 +324,18 @@ func prefixColumns(alias, columns string) string {
 	return out
 }
 
+// GetNotificationDelivery returns one delivery row, or ErrNotFound.
+func (s *Store) GetNotificationDelivery(ctx context.Context, id int64) (NotificationDelivery, error) {
+	d, err := scanNotificationDelivery(s.Pool.QueryRow(ctx, `select `+notificationDeliveryColumns+` from notification_deliveries where id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotificationDelivery{}, ErrNotFound
+	}
+	if err != nil {
+		return NotificationDelivery{}, fmt.Errorf("get notification delivery: %w", err)
+	}
+	return d, nil
+}
+
 // DeliveryOutcome is the result of one send attempt. Delivered settles the row; otherwise Retryable puts it back
 // to pending at RetryAt and anything else fails it.
 type DeliveryOutcome struct {

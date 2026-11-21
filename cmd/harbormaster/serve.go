@@ -315,6 +315,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		Scan:                    scanKicker,
 		OffHours:                offHoursApplier,
 		KickOffHours:            offHoursReconciler.Kick,
+		Notify:                  notifySenders,
+		NotifyBox:               notifyBox,
+		KickNotify:              notifyDispatcher.Kick,
 	})
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and

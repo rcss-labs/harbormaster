@@ -1613,6 +1613,189 @@
     ],
     "polled_at": "time"
   },
+  "notificationDelivery": {
+    "alert": "string",
+    "at": "time",
+    "attempts": "number",
+    "can_retry": "boolean",
+    "cluster": "string",
+    "destination": "string",
+    "event": "string",
+    "finished_at": {
+      "$null": "time"
+    },
+    "held_until": {
+      "$null": "time"
+    },
+    "id": "number",
+    "note": "string",
+    "route": "string",
+    "route_id": {
+      "$null": "number"
+    },
+    "service": "string",
+    "service_id": "string",
+    "status": "string",
+    "target": "string"
+  },
+  "notificationPreview": {
+    "body": "string",
+    "destination": "string",
+    "json": "string",
+    "match_count": "number",
+    "matches": [
+      {
+        "cluster": "string",
+        "kind": "string",
+        "service": "string",
+        "severity": "string",
+        "title": "string"
+      }
+    ],
+    "sample": "boolean",
+    "title": "string"
+  },
+  "notificationRoute": {
+    "chat_id": "string",
+    "destination": "string",
+    "enabled": "boolean",
+    "failing": "boolean",
+    "fallback": "boolean",
+    "id": "number",
+    "kinds": [
+      "string"
+    ],
+    "label": "string",
+    "matches_nothing": "boolean",
+    "min_severity": "string",
+    "name": "string",
+    "notify_resolved": "boolean",
+    "pagerduty_region": "string",
+    "quiet_enabled": "boolean",
+    "quiet_timezone": "string",
+    "recipients": [
+      "string"
+    ],
+    "repeat_seconds": "number",
+    "scope": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "cluster": "string",
+        "cluster_id": "string",
+        "key": "string",
+        "kind": "string",
+        "missing": "boolean",
+        "region": "string",
+        "service": "string",
+        "service_id": "string",
+        "tag_id": "number",
+        "tag_name": "string",
+        "value": "string"
+      }
+    ],
+    "secret_set": "boolean",
+    "secret_unreadable": "boolean",
+    "signed": "boolean",
+    "target": "string",
+    "thread_id": {
+      "$null": "number"
+    },
+    "updated_at": "time",
+    "version": "number"
+  },
+  "notificationRoutes": {
+    "email_available": "boolean",
+    "items": [
+      {
+        "chat_id": "string",
+        "destination": "string",
+        "enabled": "boolean",
+        "failing": "boolean",
+        "fallback": "boolean",
+        "id": "number",
+        "kinds": [
+          "string"
+        ],
+        "label": "string",
+        "matches_nothing": "boolean",
+        "min_severity": "string",
+        "name": "string",
+        "notify_resolved": "boolean",
+        "pagerduty_region": "string",
+        "quiet_enabled": "boolean",
+        "quiet_timezone": "string",
+        "recipients": [
+          "string"
+        ],
+        "repeat_seconds": "number",
+        "scope": [
+          {
+            "account_id": "string",
+            "account_name": "string",
+            "cluster": "string",
+            "cluster_id": "string",
+            "key": "string",
+            "kind": "string",
+            "missing": "boolean",
+            "region": "string",
+            "service": "string",
+            "service_id": "string",
+            "tag_id": "number",
+            "tag_name": "string",
+            "value": "string"
+          }
+        ],
+        "secret_set": "boolean",
+        "secret_unreadable": "boolean",
+        "signed": "boolean",
+        "target": "string",
+        "thread_id": {
+          "$null": "number"
+        },
+        "updated_at": "time",
+        "version": "number"
+      }
+    ],
+    "kinds": [
+      {
+        "kind": "string",
+        "label": "string"
+      }
+    ],
+    "secrets_available": "boolean"
+  },
+  "notificationTargets": {
+    "accounts": [
+      {
+        "account_id": "string",
+        "name": "string",
+        "regions": [
+          "string"
+        ]
+      }
+    ],
+    "clusters": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "id": "string",
+        "name": "string",
+        "region": "string"
+      }
+    ],
+    "services": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "cluster": "string",
+        "cluster_id": "string",
+        "id": "string",
+        "name": "string",
+        "region": "string"
+      }
+    ]
+  },
   "offhoursList": {
     "items": [
       {

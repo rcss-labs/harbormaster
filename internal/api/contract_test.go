@@ -165,6 +165,12 @@ func contractShapes() map[string]any {
 		"logSearchResult":   shapeOf(reflect.TypeFor[LogSearchResultDTO]()),
 		"logSearchEstimate": shapeOf(reflect.TypeFor[LogSearchEstimateDTO]()),
 		"logSearchSaved":    shapeOf(reflect.TypeFor[ListResponse[SavedLogSearchDTO]]()),
+		// alert notifications
+		"notificationRoutes":   shapeOf(reflect.TypeFor[NotificationRoutesDTO]()),
+		"notificationRoute":    shapeOf(reflect.TypeFor[NotificationRouteDTO]()),
+		"notificationPreview":  shapeOf(reflect.TypeFor[NotificationPreviewDTO]()),
+		"notificationDelivery": shapeOf(reflect.TypeFor[NotificationDeliveryDTO]()),
+		"notificationTargets":  shapeOf(reflect.TypeFor[NotificationTargetsDTO]()),
 	}
 }
 
