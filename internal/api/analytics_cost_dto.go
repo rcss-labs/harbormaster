@@ -18,6 +18,50 @@ type CostDTO struct {
 	ByTag          []CostGroupDTO     `json:"by_tag"`
 	Rightsizing    CostRightsizingDTO `json:"rightsizing"`
 	Spot           CostSpotDTO        `json:"spot"`
+	ARM64          CostARM64DTO       `json:"arm64"`
+}
+
+// CostARM64DTO is the ARM64 (Graviton) advisor. It lists only services that are ready, blocked or unknown; the others are
+// already explained by the rightsizing and Spot panels, and AlreadyARM64 counts the ones that run on ARM64.
+type CostARM64DTO struct {
+	CheckEnabled bool                  `json:"check_enabled"` // HM_ARM64_CHECK
+	AlreadyARM64 int                   `json:"already_arm64"`
+	Services     []CostARM64ServiceDTO `json:"services"` // never null
+}
+
+// CostARM64ServiceDTO is one x86 Fargate service and what the image check found.
+type CostARM64ServiceDTO struct {
+	ServiceID string `json:"service_id"`
+	Service   string `json:"service"`
+	Cluster   string `json:"cluster"`
+	Region    string `json:"region"`
+	Tag       TagDTO `json:"tag"`
+	// Status is ready, blocked or unknown.
+	Status    string `json:"status"`
+	Tasks     int    `json:"tasks"`
+	SpotTasks int    `json:"spot_tasks"`
+	// SavingMonthly is at list price per task class; it is not additive with the other advisors.
+	SavingMonthly *float64        `json:"saving_monthly"`
+	Images        []ARM64ImageDTO `json:"images"`
+	AutoScaled    bool            `json:"auto_scaled"`
+	CanEdit       bool            `json:"can_edit"`
+}
+
+// ARM64ImageDTO is the verdict on one container image. State is arm64, no_arm64 or unchecked. Account is the account name
+// for no_permission and not_connected, never its id when it has a name.
+type ARM64ImageDTO struct {
+	Container string `json:"container"`
+	Image     string `json:"image"`
+	State     string `json:"state"`
+	Reason    string `json:"reason"`
+	Account   string `json:"account"`
+}
+
+// ARM64ReadinessDTO is GET /api/services/{id}/arm64-readiness, for the Deploy tab's banner.
+type ARM64ReadinessDTO struct {
+	Status    string          `json:"status"` // ready, blocked or unknown
+	Images    []ARM64ImageDTO `json:"images"`
+	CheckedAt *time.Time      `json:"checked_at"`
 }
 
 // CostSpotDTO is the Fargate Spot advisor. It lists every visible service, never null, because the reason a

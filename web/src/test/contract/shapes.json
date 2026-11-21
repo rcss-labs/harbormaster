@@ -301,6 +301,42 @@
     }
   },
   "analyticsCost": {
+    "arm64": {
+      "already_arm64": "number",
+      "check_enabled": "boolean",
+      "services": [
+        {
+          "auto_scaled": "boolean",
+          "can_edit": "boolean",
+          "cluster": "string",
+          "images": [
+            {
+              "account": "string",
+              "container": "string",
+              "image": "string",
+              "reason": "string",
+              "state": "string"
+            }
+          ],
+          "region": "string",
+          "saving_monthly": {
+            "$null": "number"
+          },
+          "service": "string",
+          "service_id": "string",
+          "spot_tasks": "number",
+          "status": "string",
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string",
+            "non_production": "boolean"
+          },
+          "tasks": "number"
+        }
+      ]
+    },
     "by_account": [
       {
         "key": "string",
@@ -988,6 +1024,21 @@
       "used": "string"
     }
   },
+  "arm64Readiness": {
+    "checked_at": {
+      "$null": "time"
+    },
+    "images": [
+      {
+        "account": "string",
+        "container": "string",
+        "image": "string",
+        "reason": "string",
+        "state": "string"
+      }
+    ],
+    "status": "string"
+  },
   "audit": {
     "items": [
       {
@@ -1337,7 +1388,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "tag_inherited": "boolean",
         "task_role": "string"

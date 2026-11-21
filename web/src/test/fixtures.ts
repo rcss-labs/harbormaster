@@ -52,6 +52,7 @@ import type {
   UsersDTO,
 } from '../api/types'
 import type {
+  Arm64Readiness,
   ChangeSetResponse,
   DeploySettingsResponse,
   RevisionDefinitionResponse,
@@ -2069,6 +2070,57 @@ export const ANALYTICS_COST: AnalyticsCost = {
       },
     ],
   },
+  arm64: {
+    check_enabled: true,
+    already_arm64: 1,
+    services: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        region: 'us-east-1',
+        tag: TAG_PROD,
+        status: 'ready',
+        tasks: 3,
+        spot_tasks: 0,
+        saving_monthly: 32.5,
+        images: [
+          { container: 'payments-api', image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2', state: 'arm64', reason: '', account: '' },
+          { container: 'otel-collector', image: 'public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0', state: 'arm64', reason: '', account: '' },
+        ],
+        auto_scaled: true,
+        can_edit: true,
+      },
+      {
+        service_id: serviceId('482109375512', 'eu-central-1', 'edge-proxy', 'edge-nginx'),
+        service: 'edge-nginx',
+        cluster: 'edge-proxy',
+        region: 'eu-central-1',
+        tag: TAG_DEV,
+        status: 'blocked',
+        tasks: 2,
+        spot_tasks: 1,
+        saving_monthly: 4.2,
+        images: [{ container: 'edge-nginx', image: '482109375512.dkr.ecr.eu-central-1.amazonaws.com/edge-nginx:1.27.2', state: 'no_arm64', reason: 'single_architecture', account: '' }],
+        auto_scaled: false,
+        can_edit: true,
+      },
+      {
+        service_id: serviceId('482109375512', 'eu-west-1', 'eu-apps', 'catalog-api'),
+        service: 'catalog-api',
+        cluster: 'eu-apps',
+        region: 'eu-west-1',
+        tag: TAG_DEV,
+        status: 'unknown',
+        tasks: 2,
+        spot_tasks: 0,
+        saving_monthly: 7.4,
+        images: [{ container: 'catalog-api', image: '482109375512.dkr.ecr.eu-west-1.amazonaws.com/catalog-api:4.1.0', state: 'unchecked', reason: 'no_permission', account: 'homelab-admin' }],
+        auto_scaled: false,
+        can_edit: false,
+      },
+    ],
+  },
   spot: {
     lookback_days: 7,
     min_tasks: 2,
@@ -2195,6 +2247,13 @@ export const ANALYTICS_COST: AnalyticsCost = {
       },
     ],
   },
+}
+
+/** What the image check says about a service whose image has no arm64 build. */
+export const ARM64_READINESS_BLOCKED: Arm64Readiness = {
+  status: 'blocked',
+  images: [{ container: 'payments-api', image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2', state: 'no_arm64', reason: 'single_architecture', account: '' }],
+  checked_at: '2026-11-21T10:00:00Z',
 }
 
 /** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */

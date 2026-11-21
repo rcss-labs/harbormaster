@@ -6,6 +6,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import { refetchWhileSettling } from './change'
+import type { Arm64Image } from './analytics'
 import type { ScanGate, ScanGateRequest } from './security'
 import type { ControllerRefDTO, ImageTagsResponse, PartialErrorDTO } from './types'
 
@@ -61,6 +62,13 @@ export interface DeployCapacity {
   editable: boolean
   /** Why the capacity cannot be edited; empty when editable. */
   lock_reason: string
+}
+
+/** What the image check says about the images of a service's current task definition, for the ARM64 banner. */
+export interface Arm64Readiness {
+  status: 'ready' | 'blocked' | 'unknown'
+  images: Arm64Image[]
+  checked_at: string | null
 }
 
 export interface DeploySettingsResponse {

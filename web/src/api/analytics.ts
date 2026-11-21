@@ -426,6 +426,56 @@ export interface CostSpot {
   services: CostSpotService[]
 }
 
+/** What the image check found for one container image. */
+export type Arm64ImageState = 'arm64' | 'no_arm64' | 'unchecked'
+export type Arm64ImageReason =
+  | ''
+  | 'no_arm64_in_index'
+  | 'single_architecture'
+  | 'pending'
+  | 'registry_not_checked'
+  | 'no_permission'
+  | 'not_connected'
+  | 'not_found'
+  | 'denied'
+  | 'error'
+
+export interface Arm64Image {
+  container: string
+  image: string
+  state: Arm64ImageState
+  reason: Arm64ImageReason
+  /** The account name for no_permission and not_connected; empty otherwise. */
+  account: string
+}
+
+export type Arm64Status = 'ready' | 'blocked' | 'unknown'
+
+export interface Arm64Service {
+  service_id: string
+  service: string
+  cluster: string
+  region: string
+  tag: TagDTO
+  status: Arm64Status
+  tasks: number
+  spot_tasks: number
+  /** At list price per task class. Savings of the three advisors are not additive. */
+  saving_monthly: number | null
+  images: Arm64Image[]
+  auto_scaled: boolean
+  can_edit: boolean
+}
+
+export interface CostArm64 {
+  /** HM_ARM64_CHECK. */
+  check_enabled: boolean
+  /** Services that already run on ARM64. */
+  already_arm64: number
+  /** Only ready, blocked and unknown services; never null. */
+  services: Arm64Service[]
+}
+
 export interface AnalyticsCost extends Envelope<'cost'> {
   /** List price publication date, YYYY-MM-DD. */
   prices_as_of: string
@@ -437,6 +487,7 @@ export interface AnalyticsCost extends Envelope<'cost'> {
   by_tag: CostGroup[]
   rightsizing: CostRightsizing
   spot: CostSpot
+  arm64: CostArm64
 }
 
 export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations | AnalyticsCost

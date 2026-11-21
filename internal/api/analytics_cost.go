@@ -85,7 +85,8 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 			DefaultHeadroomPct: cost.DefaultHeadroomPct,
 			Services:           []CostServiceDTO{},
 		},
-		Spot: CostSpotDTO{LookbackDays: cost.SpotLookbackDays, MinTasks: cost.SpotMinTasks, Services: []CostSpotServiceDTO{}},
+		ARM64: CostARM64DTO{CheckEnabled: s.Cfg.ARM64.Check, Services: []CostARM64ServiceDTO{}},
+		Spot:  CostSpotDTO{LookbackDays: cost.SpotLookbackDays, MinTasks: cost.SpotMinTasks, Services: []CostSpotServiceDTO{}},
 	}
 	today := history.from.AddDate(0, 0, dailyPanelDays-1)
 	byCluster, byAccount, byTag := groupTotals{}, groupTotals{}, groupTotals{}
@@ -118,6 +119,12 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		byTag.add(strconv.FormatInt(int64(fact.TagID), 10), tags[fact.TagID].Name, totals)
 	}
 	sortSpotServices(dto.Spot.Services)
+	arm64, err := s.arm64Section(ctx, facts, spend, tags, accountMap, sc.Subject)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	dto.ARM64 = arm64
 	dto.KPIs.UnpricedRegions = sortedKeys(unpricedRegions)
 	dto.ByCluster, dto.ByAccount, dto.ByTag = byCluster.sorted(), byAccount.sorted(), byTag.sorted()
 	writeJSON(w, http.StatusOK, dto)
@@ -132,6 +139,7 @@ func (s *Server) costSources() []AnalyticsSourceDTO {
 		prunedTableSource("service_util_daily",
 			"Daily CPU and memory use as a share of what each service reserves, for the rightsizing suggestions",
 			s.Cfg.Retention.UtilDaily, "HM_RETENTION_UTIL_DAILY"),
+		{Table: "image_refs", Reads: "Which CPU architectures the images of x86 Fargate services support, read in the background from ECR and three public registries, for the ARM64 suggestions", Kept: "7 days"},
 		prunedTableSource("operation_log",
 			"Terminal sessions opened through Harbormaster in the last 7 days, for the Fargate Spot suggestions. Sessions opened with the AWS CLI are not recorded",
 			s.Cfg.Retention.OperationLog, "HM_RETENTION_OPERATION_LOG"),
@@ -159,9 +167,10 @@ func (s *Server) rightsizingState() string {
 type serviceSpend struct {
 	monthly, spotMonthly float64
 	priced, spot         int
-	unpriced             int // all tasks without a price
-	notFargate           int // unpriced because they are not Fargate tasks with a numeric size
-	noRateTasks          int // Fargate tasks in a region or architecture without a rate
+	unpriced             int               // all tasks without a price
+	notFargate           int               // unpriced because they are not Fargate tasks with a numeric size
+	noRateTasks          int               // Fargate tasks in a region or architecture without a rate
+	taskList             []cost.PricedTask // the priced running tasks, for the ARM64 saving
 }
 
 func (t *serviceSpend) tasks() int { return t.priced + t.unpriced }
@@ -210,6 +219,7 @@ func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostService
 		price := rate.Monthly(cpu, memory)
 		totals.monthly += price
 		totals.priced++
+		totals.taskList = append(totals.taskList, cost.PricedTask{Class: class, CPUUnits: cpu, MemoryMiB: memory})
 		if class == cost.Spot {
 			totals.spot++
 			totals.spotMonthly += price
