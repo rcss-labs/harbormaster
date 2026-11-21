@@ -82,6 +82,17 @@ func (s *Store) EnsureSliceLeases(ctx context.Context, targets []awsx.Target) er
 	return nil
 }
 
+// EnsureSliceLease inserts the lease row of one slice when missing and deletes nothing. It is for callers that act on
+// a single slice (a one-shot poll) and must not reconcile the whole set.
+func (s *Store) EnsureSliceLease(ctx context.Context, t awsx.Target) error {
+	if _, err := s.Pool.Exec(ctx,
+		`insert into poll_leases (kind, account_id, region) values ('slice', $1, $2) on conflict do nothing`,
+		t.AccountID, t.Region); err != nil {
+		return fmt.Errorf("ensure slice lease: %w", err)
+	}
+	return nil
+}
+
 // EnsureCoordinatorLease inserts the coordinator row when missing.
 func (s *Store) EnsureCoordinatorLease(ctx context.Context) error {
 	if _, err := s.Pool.Exec(ctx,

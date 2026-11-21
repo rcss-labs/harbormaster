@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -37,6 +38,7 @@ type serviceSignature struct {
 // against the database so unchanged rows are never rewritten.
 type Loop struct {
 	p      *Poller
+	w      *store.SliceWriter // every write of this loop goes through the slice's lease
 	target awsx.Target
 	log    *slog.Logger
 	// sem bounds concurrent ECS calls (cfg.MaxInFlight).
@@ -69,13 +71,13 @@ type tierDef struct {
 	run  func(context.Context) error
 }
 
-func newLoop(p *Poller, t awsx.Target) *Loop {
+func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	inFlight := p.cfg.MaxInFlight
 	if inFlight <= 0 {
 		inFlight = defaultMaxInFlight
 	}
 	l := &Loop{
-		p: p, target: t,
+		p: p, w: w, target: t,
 		log:             p.log.With("account", t.AccountID, "region", t.Region),
 		sem:             make(chan struct{}, inFlight),
 		tiers:           map[string]*tier{},
@@ -99,16 +101,16 @@ func newLoop(p *Poller, t awsx.Target) *Loop {
 	add(tierRunningTasks, in.RunningTasks, l.syncRunningTasks)
 	add(tierStoppedTasks, in.StoppedTasks, l.syncStoppedTasks)
 	add(tierFullTasks, in.FullTasks, l.syncFullTasks)
-	targetHealth := &TargetHealthLoop{Store: p.store, Clients: p.clients, Every: in.TargetHealth}
+	targetHealth := &TargetHealthLoop{Store: p.store, Writer: w, Clients: p.clients, Every: in.TargetHealth}
 	add(tierTargetHealth, in.TargetHealth, l.gated(func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) }))
-	scaling := &ScalingLoop{Store: p.store, Clients: p.clients, Every: in.Scaling}
+	scaling := &ScalingLoop{Store: p.store, Writer: w, Clients: p.clients, Every: in.Scaling}
 	add(tierScaling, in.Scaling, l.gated(func(ctx context.Context) error { return scaling.Run(ctx, l.target) }))
 	// plan 05
-	network := &NetworkLoop{Store: p.store, Clients: p.clients, Every: in.Network}
+	network := &NetworkLoop{Store: p.store, Writer: w, Clients: p.clients, Every: in.Network}
 	add(tierNetwork, in.Network, l.gated(func(ctx context.Context) error { return network.Run(ctx, l.target) }))
-	storage := &StorageLoop{Store: p.store, Clients: p.clients, Every: in.Storage}
+	storage := &StorageLoop{Writer: w, Clients: p.clients, Every: in.Storage}
 	add(tierStorage, in.Storage, l.gated(func(ctx context.Context) error { return storage.Run(ctx, l.target) }))
-	alerts := &AlertsLoop{Store: p.store, Every: in.Alerts}
+	alerts := &AlertsLoop{Store: p.store, Writer: w, Every: in.Alerts}
 	add(tierAlerts, in.Alerts, func(ctx context.Context) error { return alerts.Run(ctx, l.target) })
 	return l
 }
@@ -128,15 +130,51 @@ func (l *Loop) gated(run func(context.Context) error) func(context.Context) erro
 }
 
 // PollOnce runs every tier once, in order, for one target. API tests use it to fill the store from a fake estate.
+// It claims the target's slice lease under a throwaway owner and releases it afterwards, so its writes are fenced like
+// the real loops' and no unfenced way to write exists; it fails when a live owner holds the slice.
 func PollOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Config, t awsx.Target) error {
-	return newLoop(New(st, clients, cfg, slog.Default()), t).runOnce(ctx)
+	w, release, err := claimOnce(ctx, st, t)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return newLoop(New(st, clients, cfg, slog.Default()), t, w).runOnce(ctx)
+}
+
+// claimOnce takes the slice's lease for one throwaway owner and returns its writer and a release function.
+func claimOnce(ctx context.Context, st *store.Store, t awsx.Target) (*store.SliceWriter, func(), error) {
+	if err := st.EnsureSliceLease(ctx, t); err != nil {
+		return nil, nil, err
+	}
+	l, ok, err := st.ClaimLease(ctx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: t.AccountID, Region: t.Region}, uuid.New(), time.Minute)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
+		return nil, nil, fmt.Errorf("poll once: slice %s/%s is held by a live owner", t.AccountID, t.Region)
+	}
+	w, err := st.SliceWriter(l)
+	if err != nil {
+		return nil, nil, err
+	}
+	release := func() {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = st.ReleaseLease(rctx, l)
+	}
+	return w, release, nil
 }
 
 // PollCountsOnce is PollOnce followed by one counts-history tick: the sample the counts loop takes every few
 // minutes, which also folds the cluster's running capacity into today's cluster_capacity_daily row.
 func PollCountsOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Config, t awsx.Target) error {
-	l := newLoop(New(st, clients, cfg, slog.Default()), t)
-	err := l.runOnce(ctx)
+	w, release, err := claimOnce(ctx, st, t)
+	if err != nil {
+		return err
+	}
+	defer release()
+	l := newLoop(New(st, clients, cfg, slog.Default()), t, w)
+	err = l.runOnce(ctx)
 	l.recordCounts(ctx)
 	return err
 }
@@ -462,7 +500,7 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 		}
 	}
 
-	res, err := l.p.store.UpsertClusters(ctx, rows)
+	res, err := l.w.UpsertClusters(ctx, rows)
 	if err != nil {
 		return err
 	}
@@ -473,7 +511,7 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	for _, arn := range arns {
 		keys = append(keys, model.ClusterKey{AccountID: l.target.AccountID, Region: l.target.Region, Cluster: clusterNameFromARN(arn)})
 	}
-	if _, err := l.p.store.DeleteClustersNotIn(ctx, l.target, keys); err != nil {
+	if _, err := l.w.DeleteClustersNotIn(ctx, l.target, keys); err != nil {
 		return err
 	}
 
@@ -515,7 +553,7 @@ func (l *Loop) syncServiceList(ctx context.Context) error {
 			}
 			in.NextToken = out.NextToken
 		}
-		if _, err := l.p.store.DeleteServicesNotIn(ctx, k, names); err != nil {
+		if _, err := l.w.DeleteServicesNotIn(ctx, k, names); err != nil {
 			return err
 		}
 		l.mu.Lock()
@@ -580,12 +618,12 @@ func (l *Loop) syncServices(ctx context.Context) error {
 			}
 		}
 
-		res, err := l.p.store.UpsertServices(ctx, services)
+		res, err := l.w.UpsertServices(ctx, services)
 		if err != nil {
 			return err
 		}
 		l.recordWrite("services", res)
-		if _, err := l.p.store.InsertServiceEvents(ctx, events); err != nil {
+		if _, err := l.w.InsertServiceEvents(ctx, events); err != nil {
 			return err
 		}
 		l.markChangedServicesDirty(services)
@@ -794,13 +832,13 @@ func (l *Loop) describeAndStoreTasks(ctx context.Context, api awsx.ECSAPI, k mod
 			}
 		}
 	}
-	res, err := l.p.store.UpsertTasks(ctx, rows)
+	res, err := l.w.UpsertTasks(ctx, rows)
 	if err != nil {
 		return err
 	}
 	l.recordWrite("tasks", res)
 	if markMissing {
-		if err := l.p.store.MarkTasksMissing(ctx, k, missing, now); err != nil {
+		if err := l.w.MarkTasksMissing(ctx, k, missing, now); err != nil {
 			return err
 		}
 	}
@@ -857,7 +895,7 @@ func (l *Loop) cacheTaskDefinition(ctx context.Context, api awsx.ECSAPI, arn str
 	if out.TaskDefinition == nil {
 		return errors.New("describe task definition: empty response")
 	}
-	return l.p.store.UpsertTaskDefinition(ctx, normalizeTaskDefinition(l.target, *out.TaskDefinition, time.Now().UTC()))
+	return l.w.UpsertTaskDefinition(ctx, normalizeTaskDefinition(l.target, *out.TaskDefinition, time.Now().UTC()))
 }
 
 func toSet(xs []string) map[string]bool {

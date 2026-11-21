@@ -40,7 +40,8 @@ type networkStore interface {
 
 // NetworkLoop is the 5 min tier that copies EC2 network descriptions into the cache tables.
 type NetworkLoop struct {
-	Store   *store.Store
+	Store   readStore
+	Writer  *store.SliceWriter
 	Clients awsx.Clients
 	Every   time.Duration
 	Now     func() time.Time
@@ -55,7 +56,7 @@ func (l *NetworkLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
-	return pollNetwork(ctx, t, api, l.Store, observeNow(l.Now))
+	return pollNetwork(ctx, t, api, fencedNetwork{readStore: l.Store, w: l.Writer}, observeNow(l.Now))
 }
 
 // pollNetwork reads the target's network and replaces the cached copy in one write.

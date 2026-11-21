@@ -273,6 +273,26 @@ func TestEnsureSliceLeases_AddsMissingAndDropsOnlyFreeVanished(t *testing.T) {
 	}
 }
 
+func TestEnsureSliceLease_AddsOnlyThatRowAndDropsNothing(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	other := awsx.Target{AccountID: "222222222222", Region: "us-east-1"}
+	if err := s.EnsureSliceLeases(ctx, []awsx.Target{other}); err != nil {
+		t.Fatal(err)
+	}
+	one := awsx.Target{AccountID: "111111111111", Region: "eu-west-1"}
+	for range 2 { // idempotent
+		if err := s.EnsureSliceLease(ctx, one); err != nil {
+			t.Fatalf("EnsureSliceLease: %v", err)
+		}
+	}
+	rows, _ := s.ListLeases(ctx)
+	want := []string{"slice|111111111111|eu-west-1", "slice|222222222222|us-east-1"}
+	if got := leaseKeys(rows); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rows = %v, want %v (the other free row must stay)", got, want)
+	}
+}
+
 func TestEnsureSliceLeases_NeverTouchesTheCoordinatorRow(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

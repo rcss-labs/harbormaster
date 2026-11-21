@@ -22,7 +22,8 @@ const targetGroupDescribeLimit = 20
 
 // TargetHealthLoop is the 15 s tier that stores each attached target group's target health.
 type TargetHealthLoop struct {
-	Store   *store.Store
+	Store   readStore
+	Writer  *store.SliceWriter
 	Clients awsx.Clients
 	Every   time.Duration
 	Now     func() time.Time
@@ -82,10 +83,10 @@ func (l *TargetHealthLoop) Run(ctx context.Context, t awsx.Target) error {
 		rows = append(rows, normalizeTargetHealth(a.key, a.groupARN, loadBalancerARN, out, now))
 	}
 
-	if err := l.Store.UpsertTargetHealth(ctx, rows); err != nil {
+	if err := l.Writer.UpsertTargetHealth(ctx, rows); err != nil {
 		return err
 	}
-	return l.Store.DeleteTargetHealthNotIn(ctx, t, attached)
+	return l.Writer.DeleteTargetHealthNotIn(ctx, t, attached)
 }
 
 // describeTargetGroupLoadBalancers maps each existing target group ARN to its load balancer ARN.

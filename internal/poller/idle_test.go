@@ -71,7 +71,7 @@ func TestCheckIdle_ErrorWhileIdleReturnsToActive(t *testing.T) {
 func TestTierDelay_IdleFloorsAtIdleInterval(t *testing.T) {
 	p := newIdlePoller(t, activityAt(time.Time{}, false, nil))
 	p.cfg.Jitter = 0
-	l := newLoop(p, loopTarget)
+	l := newLoop(p, loopTarget, nil)
 	fast := newTier("fast", 10*time.Second)
 	slow := newTier("slow", 20*time.Minute)
 	backedOff := newTier("backedOff", 10*time.Second)
@@ -96,7 +96,7 @@ func TestTickTier_WakesPromptlyWhenActivityReturns(t *testing.T) {
 	p := newIdlePoller(t, activityAt(time.Time{}, false, nil))
 	p.cfg.Jitter = 0
 	p.cfg.StartStagger = 0
-	l := newLoop(p, loopTarget)
+	l := newLoop(p, loopTarget, nil)
 	p.checkIdle(context.Background()) // idle
 
 	ctx, cancel := context.WithCancel(context.Background())

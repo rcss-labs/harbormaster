@@ -24,7 +24,7 @@ type storageStore interface {
 // StorageLoop is the 5 min tier that copies EFS file systems, mount targets and access points into the cache tables.
 // plan 05
 type StorageLoop struct {
-	Store   *store.Store
+	Writer  *store.SliceWriter
 	Clients awsx.Clients
 	Every   time.Duration
 	Now     func() time.Time
@@ -39,7 +39,7 @@ func (l *StorageLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
-	return pollStorage(ctx, t, api, l.Store, observeNow(l.Now))
+	return pollStorage(ctx, t, api, fencedStorage{w: l.Writer}, observeNow(l.Now))
 }
 
 // pollStorage reads the target's EFS estate and replaces the cached copy in one write.

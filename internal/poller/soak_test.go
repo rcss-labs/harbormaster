@@ -266,7 +266,7 @@ func TestSoak_DiffWritesNearZeroWhenStatic(t *testing.T) {
 
 	const otherTableBudget = 100 // any table without its own budget
 	loops := int64(len(env.targets))
-	tiers := int64(len(newLoop(env.newPoller(env.cfg), env.targets[0]).defs))
+	tiers := int64(len(newLoop(env.newPoller(env.cfg), env.targets[0], testWriter(t, env.st, env.targets[0])).defs))
 	budgets := map[string]int64{
 		"service_status_runs": 60, // 1 % of 6 000 services; unchanged statuses write nothing
 		// poll_loops records one cycle per loop and tier: every tier cycle in the window, plus one spare each.
@@ -375,8 +375,8 @@ func TestSoak_BackoffUnderThrottle(t *testing.T) {
 	t.Fatalf("services interval %v did not return to %v", registry.Snapshot().LoopInterval[key(slow)], base)
 }
 
-func TestSoak_SingleLeaderAcrossTwoPollers(t *testing.T) {
-	// One loop is enough to see which poller polls; the target scale is not the point here.
+func TestSoak_OneOwnerPerSliceAcrossTwoPollers(t *testing.T) {
+	// One slice is enough to see which poller owns it; the target scale is not the point here.
 	scale := fake.TargetScale
 	scale.Accounts, scale.RegionsPerAccount = 1, 1
 	env := newSoakEnv(t, scale)
@@ -398,35 +398,35 @@ func TestSoak_SingleLeaderAcrossTwoPollers(t *testing.T) {
 		instances = append(instances, &instance{name: name, reg: cfg.Telemetry, cancel: cancel, done: done})
 	}
 
-	leaderOf := func() (leader, follower *instance) {
+	// The owner of the slice is the instance whose loops report intervals; the other must stay silent.
+	polling := func() (owner, other *instance) {
 		for i, in := range instances {
-			if in.reg.Snapshot().Leader {
-				if leader != nil {
-					return nil, nil // two leaders: caller treats as not settled and the final check fails
+			if len(in.reg.Snapshot().LoopInterval) > 0 {
+				if owner != nil {
+					return nil, nil // two owners: the caller treats it as not settled and the final check fails
 				}
-				leader, follower = in, instances[1-i]
+				owner, other = in, instances[1-i]
 			}
 		}
-		return leader, follower
+		return owner, other
 	}
-	waitFor(t, 30*time.Second, "one leader polling", func() bool {
-		leader, _ := leaderOf()
-		return leader != nil && len(leader.reg.Snapshot().LoopInterval) > 0
+	waitFor(t, 60*time.Second, "one owner polling", func() bool {
+		owner, _ := polling()
+		return owner != nil
 	})
-	leader, follower := leaderOf()
-	if leader == nil {
-		t.Fatal("want exactly one leader")
+	owner, other := polling()
+	if owner == nil {
+		t.Fatal("want exactly one owner of the slice")
 	}
-	t.Logf("leader %s (loop entries %d), follower %s (loop entries %d)", leader.name,
-		len(leader.reg.Snapshot().LoopInterval), follower.name, len(follower.reg.Snapshot().LoopInterval))
-	if got := follower.reg.Snapshot().LoopInterval; len(got) != 0 {
-		t.Errorf("follower recorded loop runs: %v", got)
+	t.Logf("owner %s (loop entries %d), other %s (loop entries %d)", owner.name,
+		len(owner.reg.Snapshot().LoopInterval), other.name, len(other.reg.Snapshot().LoopInterval))
+	if got := other.reg.Snapshot().LoopInterval; len(got) != 0 {
+		t.Errorf("the other poller recorded loop runs: %v", got)
 	}
 
 	start := time.Now()
-	leader.cancel()
-	<-leader.done
-	waitFor(t, 10*time.Second, "the follower to become leader", func() bool { return follower.reg.Snapshot().Leader })
-	t.Logf("failover took %v", time.Since(start))
-	waitFor(t, 30*time.Second, "the new leader polling", func() bool { return len(follower.reg.Snapshot().LoopInterval) > 0 })
+	owner.cancel()
+	<-owner.done
+	waitFor(t, 30*time.Second, "the other poller to take the slice over", func() bool { return len(other.reg.Snapshot().LoopInterval) > 0 })
+	t.Logf("hand-over took %v", time.Since(start))
 }

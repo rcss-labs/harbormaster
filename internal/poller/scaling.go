@@ -21,7 +21,8 @@ const scalingActivityLimit = 10
 
 // ScalingLoop is the 60 s tier that stores each service's Application Auto Scaling state.
 type ScalingLoop struct {
-	Store   *store.Store
+	Store   readStore
+	Writer  *store.SliceWriter
 	Clients awsx.Clients
 	Every   time.Duration
 	Now     func() time.Time
@@ -98,7 +99,7 @@ func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {
 		}
 		rows = append(rows, row)
 	}
-	if err := l.Store.UpsertScaling(ctx, rows); err != nil {
+	if err := l.Writer.UpsertScaling(ctx, rows); err != nil {
 		return err
 	}
 	return errors.Join(failed...)

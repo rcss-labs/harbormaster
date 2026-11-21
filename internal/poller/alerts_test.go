@@ -16,7 +16,7 @@ import (
 // alertsLoop returns the harness's one AlertsLoop, so its in-memory poll counts persist across runs like the real tier's.
 func (h *observeHarness) alertsLoop() *AlertsLoop {
 	if h.alerts == nil {
-		h.alerts = &AlertsLoop{Store: h.store, Every: 5 * time.Second, Now: func() time.Time { return loopNow }}
+		h.alerts = &AlertsLoop{Store: h.store, Writer: h.writer(), Every: 5 * time.Second, Now: func() time.Time { return loopNow }}
 	}
 	return h.alerts
 }
@@ -275,7 +275,7 @@ func (h *observeHarness) alertRowVersions(t *testing.T) map[string]string {
 func TestAlertsLoop_StandingAlertsAreNotRewrittenWhileUnchanged(t *testing.T) {
 	h := newObserveHarness(t, loopTarget)
 	clock := loopNow
-	h.alerts = &AlertsLoop{Store: h.store, Every: 5 * time.Second, Now: func() time.Time { clock = clock.Add(5 * time.Second); return clock }}
+	h.alerts = &AlertsLoop{Store: h.store, Writer: h.writer(), Every: 5 * time.Second, Now: func() time.Time { clock = clock.Add(5 * time.Second); return clock }}
 	h.runAlerts(t)
 	before := h.alertRowVersions(t)
 	if len(before) < 2 {

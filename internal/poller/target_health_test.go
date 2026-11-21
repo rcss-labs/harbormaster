@@ -22,12 +22,24 @@ type observeHarness struct {
 	estate *fake.Estate
 	target awsx.Target
 	alerts *AlertsLoop // lazily created by alertsLoop
+
+	t *testing.T
+	w *store.SliceWriter // the slice's lease under a throwaway owner, claimed on first use
+}
+
+// writer returns the fenced writer of the harness's slice, claiming the lease on first use and keeping it for the
+// harness's life, so loops built earlier keep a valid writer across polls.
+func (h *observeHarness) writer() *store.SliceWriter {
+	if h.w == nil {
+		h.w = testWriter(h.t, h.store, h.target)
+	}
+	return h.w
 }
 
 func newObserveHarness(t *testing.T, target awsx.Target) *observeHarness {
 	t.Helper()
 	estate := fake.MockupEstate(func() time.Time { return loopNow })
-	h := &observeHarness{store: storetest.Open(t), fake: fake.New(estate), estate: estate, target: target}
+	h := &observeHarness{store: storetest.Open(t), fake: fake.New(estate), estate: estate, target: target, t: t}
 	h.poll(t)
 	return h
 }
@@ -35,14 +47,14 @@ func newObserveHarness(t *testing.T, target awsx.Target) *observeHarness {
 // poll runs every tier once so the store reflects the estate's current services.
 func (h *observeHarness) poll(t *testing.T) {
 	t.Helper()
-	cfg := Config{MaxInFlight: 4}
-	if err := PollOnce(context.Background(), h.store, h.fake, cfg, h.target); err != nil {
-		t.Fatalf("PollOnce: %v", err)
+	p := New(h.store, h.fake, Config{MaxInFlight: 4}, discardLogger())
+	if err := newLoop(p, h.target, h.writer()).runOnce(context.Background()); err != nil {
+		t.Fatalf("poll: %v", err)
 	}
 }
 
 func (h *observeHarness) targetHealthLoop() *TargetHealthLoop {
-	return &TargetHealthLoop{Store: h.store, Clients: h.fake, Every: 15 * time.Second, Now: func() time.Time { return loopNow }}
+	return &TargetHealthLoop{Store: h.store, Writer: h.writer(), Clients: h.fake, Every: 15 * time.Second, Now: func() time.Time { return loopNow }}
 }
 
 func serviceKey(target awsx.Target, cluster, service string) model.ServiceKey {
@@ -92,7 +104,7 @@ func TestTargetHealthLoop_TwoGroupsOneService(t *testing.T) {
 	estate.AddTargetGroup(key, fake.TargetGroup{ARN: extraARN, Healthy: 1})
 	st := storetest.Open(t)
 	f := fake.New(estate)
-	h := &observeHarness{store: st, fake: f, estate: estate, target: target}
+	h := &observeHarness{store: st, fake: f, estate: estate, target: target, t: t}
 	h.poll(t)
 	loop := h.targetHealthLoop()
 	ctx := context.Background()

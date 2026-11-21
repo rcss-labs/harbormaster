@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/rcss-labs/harbormaster/internal/scan"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // freeAddr returns a loopback address that was free a moment ago.
@@ -220,6 +223,69 @@ func TestServe_FakeAWSHasImageScanningOn(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Enabled {
 		t.Fatalf("GET /api/security enabled = %v, err = %v; want true in fake mode", out.Enabled, err)
 	}
+}
+
+// A single process (role=all) holds every slice lease and the coordinator lease, and the jobs behind the coordinator
+// lease still do their work: the demo's failing services produce a delivered notification, a requested scan produces
+// a run, and every account x region has a poll row and an owner.
+func TestServe_SingleProcessStillSendsNotificationsAndScans(t *testing.T) {
+	env := map[string]string{"HM_FAKE_AWS": "1", "HM_NOTIFY_INTERVAL": "1s", "HM_NOTIFY_SETTLE": "0s", "HM_SESSION_KEY": "test-session-key", "HM_SCAN_INTERVAL": "1s"}
+	_, stop := serveUnderTest(t, env)
+	defer stop()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, env["HM_DATABASE_URL"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+
+	count := func(query string) int {
+		var n int
+		if err := conn.QueryRow(ctx, query).Scan(&n); err != nil {
+			return -1
+		}
+		return n
+	}
+	waitUntil := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(60 * time.Second)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s", what)
+	}
+
+	waitUntil("every slice to be owned and polled", func() bool {
+		slices := count(`select count(*) from poll_leases where kind = 'slice'`)
+		return slices > 0 && count(`select count(*) from poll_leases where kind = 'slice' and owner_id is not null`) == slices &&
+			count(`select count(*) from poll_loops where tier = 'services' and last_ok_at is not null`) >= slices
+	})
+	waitUntil("the coordinator lease", func() bool {
+		return count(`select count(*) from poll_leases where kind = 'coordinator' and owner_id is not null`) == 1
+	})
+	waitUntil("a delivered notification", func() bool {
+		return count(`select count(*) from notification_deliveries where status = 'delivered'`) > 0
+	})
+
+	// Ask for a scan of an image of the demo's homelab account; the coordinator's scan runner launches it.
+	var account string
+	if err := conn.QueryRow(ctx, `select account_id from aws_accounts where enabled order by id limit 1`).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, env["HM_DATABASE_URL"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	digest := "sha256:" + fmt.Sprintf("%064x", 42)
+	if _, _, err := st.UpsertRequestedScanImage(ctx, store.ScanImage{Digest: digest, ImageRef: account + ".dkr.ecr.us-east-1.amazonaws.com/edge-nginx",
+		Tag: "1.0", RegistryKind: scan.KindECR, RegistryAccountID: account, RegistryRegion: "us-east-1", Repository: "edge-nginx"}, time.Now()); err != nil {
+		t.Fatalf("request a scan: %v", err)
+	}
+	waitUntil("a scan run", func() bool { return count(`select count(*) from scan_runs`) > 0 })
 }
 
 // Shutdown must not cancel in-flight requests: other handlers (deploys, writes, exec) keep the full drain.
