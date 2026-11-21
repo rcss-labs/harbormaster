@@ -563,6 +563,7 @@ Settings → Single sign-on → "Test sign-in" opens a sign-in in a new tab and 
 - **No IdP-initiated sign-in.** Sign-in must start from Harbormaster. Use the login URLs above for app tiles and launchers.
 - **No group mapping.** Permissions are granted per user in Users and permissions.
 - **Sign-in time limit.** A sign-in must complete within `HM_SAML_REQUEST_TTL` (10 minutes by default). If it takes longer, start again.
+- **Known library advisory.** GO-2026-6909 (`github.com/crewjam/saml` v0.5.1, no fixed release yet) is mitigated in Harbormaster's own checks until upstream ships a fix. The library matches many element and attribute names in any XML namespace, so Harbormaster reads these fields itself from the single verified assertion, in the SAML assertion namespace only (decrypting an encrypted assertion with the same key and elements the library used): the Issuer (exactly one) and IssueInstant, the NameID and its Format, the SubjectConfirmation and its data (Recipient, InResponseTo, NotOnOrAfter), the Conditions timestamps, every AudienceRestriction (each must name this Harbormaster), the AuthnStatement and its SessionNotOnOrAfter, and the attributes. Where the library's parse differs from that read, the sign-in is refused (reason `validator_disagreement`); a missing or foreign-namespace NameID gives `no_nameid`, and a response that makes the library panic fails the sign-in cleanly.
 
 ## Operating
 
