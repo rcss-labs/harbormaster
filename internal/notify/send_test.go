@@ -410,3 +410,16 @@ func TestValidateDestination(t *testing.T) {
 		t.Error("fake mode treats email as available")
 	}
 }
+
+// A send cut off by a shutdown is neither a timeout nor a network fault; it must not be logged as one.
+func TestTransportResult_ACancelledSendIsNamedAsSuch(t *testing.T) {
+	var logged strings.Builder
+	s := &Senders{Log: slog.New(slog.NewTextHandler(&logged, nil))}
+	res := s.transportResult(context.Canceled)
+	if res.Note != "Cancelled" || !res.Retryable || res.Delivered {
+		t.Fatalf("result = %+v, want a retryable, non-delivered Cancelled", res)
+	}
+	if strings.Contains(logged.String(), "network") {
+		t.Fatalf("a cancelled send was logged as a network failure: %s", logged.String())
+	}
+}

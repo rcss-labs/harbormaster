@@ -303,7 +303,6 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 
-	_ = fakeNotify                          // mounted by the API server (delivery log task)
 	telemetry.Default.SetBuildInfo(version) // plan 06
 	var scanKicker api.ScanKicker           // stays a nil interface when scanning is off
 	if scanRunner != nil {

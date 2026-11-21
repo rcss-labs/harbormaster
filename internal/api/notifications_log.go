@@ -15,6 +15,7 @@ const (
 	defaultDeliveryPage       = 50
 	onlyFailedRetryMessage    = "Only failed deliveries can be retried."
 	routeDeletedRetryMessage  = "The route was deleted."
+	alertResolvedRetryMessage = "That alert has resolved, so there is nothing left to send."
 	invalidDeliveryCursorText = "Invalid cursor."
 )
 
@@ -109,6 +110,17 @@ func (s *Server) retryNotificationDelivery(w http.ResponseWriter, r *http.Reques
 	if row.RouteID == nil {
 		s.fail(w, notifyConflict(routeDeletedRetryMessage))
 		return
+	}
+	if row.IncidentID != nil && row.Event != "resolved" && row.Event != "test" {
+		incident, err := s.Store.GetNotificationIncident(ctx, *row.IncidentID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			s.fail(w, err)
+			return
+		}
+		if err == nil && incident.ResolvedAt != nil {
+			s.fail(w, notifyConflict(alertResolvedRetryMessage))
+			return
+		}
 	}
 	retried, err := s.Store.RetryNotificationDelivery(ctx, id, s.now())
 	if errors.Is(err, store.ErrConflict) {

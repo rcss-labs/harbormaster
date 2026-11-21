@@ -373,6 +373,9 @@ type DeliveryDetails struct {
 	Failing   int              `json:"failing"`
 	Total     int              `json:"total"`
 	Members   []IncidentMember `json:"members"`
+	// Generation is the group generation the message shows: the plan-time one, replaced by the one actually rendered
+	// when the message is sent (a held message is rendered when it is released).
+	Generation int `json:"generation"`
 }
 
 const notificationDeliveryColumns = `id, route_id, route_name, destination, target, incident_id, event, seq, severity,
@@ -497,6 +500,8 @@ func (s *Store) ClaimNotificationDeliveries(ctx context.Context, now time.Time, 
 		due as (
 			select d.id from notification_deliveries d join ranked using (id)
 			where ($4 <= 0 or ranked.n <= $4)
+			  -- repeated on the locked row: a claim that committed after the ranking must make this one skip the row
+			  and d.status = 'pending' and d.next_attempt_at <= $1 and (d.claimed_until is null or d.claimed_until <= $1)
 			order by d.next_attempt_at, d.id limit $3 for update of d skip locked)
 		update notification_deliveries d set claimed_until = $1::timestamptz + $2::interval
 		from due where d.id = due.id returning `+prefixColumns("d", notificationDeliveryColumns),
@@ -558,10 +563,15 @@ func (s *Store) GetNotificationDelivery(ctx context.Context, id int64) (Notifica
 // to pending at RetryAt and anything else fails it.
 type DeliveryOutcome struct {
 	Delivered, Retryable bool
-	RetryAt              time.Time
-	StatusCode           int
-	DurationMS           int
-	Note                 string
+	// Cancelled settles the row as cancelled (not failed): the send was refused for a reason that is not a
+	// destination failure, such as a route that was switched off.
+	Cancelled bool
+	// Generation, when above 0, is recorded as the group generation the sent message showed.
+	Generation int
+	RetryAt    time.Time
+	StatusCode int
+	DurationMS int
+	Note       string
 }
 
 // FinishNotificationDelivery records one attempt and clears the lease. It does nothing unless the row is still
@@ -571,6 +581,8 @@ func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, lease 
 	switch {
 	case o.Delivered:
 		status = "delivered"
+	case o.Cancelled:
+		status = "cancelled"
 	case o.Retryable:
 		status, next, finished = "pending", &o.RetryAt, nil
 	}
@@ -582,9 +594,10 @@ func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, lease 
 		duration = &o.DurationMS
 	}
 	_, err := s.Pool.Exec(ctx, `update notification_deliveries set status = $2, attempts = $3, next_attempt_at = $4,
-		claimed_until = null, status_code = $5, duration_ms = $6, note = $7, finished_at = $8
+		claimed_until = null, status_code = $5, duration_ms = $6, note = $7, finished_at = $8,
+		details = case when $10::int > 0 then jsonb_set(details, '{generation}', to_jsonb($10::int)) else details end
 		where id = $1 and status = 'pending' and claimed_until is not distinct from $9`,
-		id, status, attempts, next, code, duration, o.Note, finished, lease)
+		id, status, attempts, next, code, duration, o.Note, finished, lease, o.Generation)
 	if err != nil {
 		return fmt.Errorf("finish notification delivery: %w", err)
 	}
@@ -611,6 +624,31 @@ func (s *Store) ExpireStaleNotificationTests(ctx context.Context, now time.Time)
 		return 0, fmt.Errorf("expire notification tests: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// GetNotificationIncident returns one incident (alert or group), or ErrNotFound.
+func (s *Store) GetNotificationIncident(ctx context.Context, id int64) (NotificationIncident, error) {
+	i, err := scanNotificationIncident(s.Pool.QueryRow(ctx, `select `+notificationIncidentColumns+` from notification_incidents where id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return NotificationIncident{}, ErrNotFound
+	}
+	if err != nil {
+		return NotificationIncident{}, fmt.Errorf("get notification incident: %w", err)
+	}
+	return i, nil
+}
+
+// MaxRenderedGeneration is the highest group generation a delivered message of this route and incident showed
+// (0 when none did). An update at or below it adds nothing and is not sent.
+func (s *Store) MaxRenderedGeneration(ctx context.Context, routeID, incidentID int64) (int, error) {
+	var generation int
+	err := s.Pool.QueryRow(ctx, `select coalesce(max((details->>'generation')::int), 0) from notification_deliveries
+		where route_id = $1 and incident_id = $2 and status = 'delivered' and event in ('opened', 'update', 'repeat')`,
+		routeID, incidentID).Scan(&generation)
+	if err != nil {
+		return 0, fmt.Errorf("max rendered generation: %w", err)
+	}
+	return generation, nil
 }
 
 // ReleaseHeldNotificationDeliveries turns held rows whose held_until passed into pending (incident still open) or

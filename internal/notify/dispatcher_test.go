@@ -102,6 +102,7 @@ type env struct {
 	d       *Dispatcher
 	clock   time.Time
 	sleepMu sync.Mutex
+	clockMu sync.Mutex // guards clock for the tests whose send workers outlive a cycle
 	sleeps  []time.Duration
 	targets map[awsx.Target][]model.Alert
 }
@@ -129,7 +130,11 @@ func newEnv(t *testing.T) *env {
 func (e *env) newDispatcher() *Dispatcher {
 	return &Dispatcher{
 		Store: e.st, Senders: e.sender, Box: e.box, BaseURL: "https://hm.example.com", Interval: time.Hour,
-		Now: func() time.Time { return e.clock },
+		Now: func() time.Time {
+			e.clockMu.Lock()
+			defer e.clockMu.Unlock()
+			return e.clock
+		},
 		Sleep: func(_ context.Context, d time.Duration) error {
 			e.sleepMu.Lock()
 			e.sleeps = append(e.sleeps, d)
@@ -140,13 +145,18 @@ func (e *env) newDispatcher() *Dispatcher {
 	}
 }
 
-func (e *env) advance(d time.Duration) { e.clock = e.clock.Add(d) }
+func (e *env) advance(d time.Duration) {
+	e.clockMu.Lock()
+	defer e.clockMu.Unlock()
+	e.clock = e.clock.Add(d)
+}
 
 func (e *env) cycle() {
 	e.t.Helper()
 	if err := e.d.Cycle(context.Background()); err != nil {
 		e.t.Fatalf("cycle: %v", err)
 	}
+	e.d.Wait()
 }
 
 func key(account, region, cluster, service string) model.ServiceKey {
@@ -750,6 +760,8 @@ func TestDispatcher_TwoDispatchersSendOnce(t *testing.T) {
 		}
 	}
 	wg.Wait()
+	e.d.Wait()
+	second.Wait()
 	seen := map[int64]int{}
 	for _, rec := range e.sender.records() {
 		seen[rec.DeliveryID]++
@@ -816,7 +828,7 @@ func TestDispatcher_UndecryptableSecretFailsWithFixedNote(t *testing.T) {
 	}
 }
 
-func TestDispatcher_DeletedOrDisabledRouteFailsPendingDelivery(t *testing.T) {
+func TestDispatcher_DeletedOrDisabledRouteCancelsPendingDelivery(t *testing.T) {
 	e := newEnv(t)
 	e.sender.reply = func(string, Event, int) Result { return Result{Retryable: true, Note: "HTTP 503", StatusCode: 503} }
 	deleted := e.route("deleted")
@@ -831,8 +843,8 @@ func TestDispatcher_DeletedOrDisabledRouteFailsPendingDelivery(t *testing.T) {
 	e.cycle()
 	notes := map[string]string{}
 	for _, d := range e.deliveries() {
-		if d.Status != "failed" {
-			t.Errorf("delivery %+v, want failed", d)
+		if d.Status != "cancelled" {
+			t.Errorf("delivery %+v, want cancelled (a switched-off or deleted route is not a failure)", d)
 		}
 		notes[d.RouteName] = d.Note
 	}
@@ -880,6 +892,7 @@ func TestDispatcher_ScopeErrorSkipsPlanningNotSending(t *testing.T) {
 	e.d.Tags = failingTags{}
 	e.advance(time.Minute)
 	err := e.d.Cycle(context.Background())
+	e.d.Wait()
 	if err == nil || !strings.Contains(err.Error(), "scope") {
 		t.Fatalf("err = %v, want the scope error returned", err)
 	}
@@ -1260,6 +1273,8 @@ func TestDispatcher_TwoDispatchersOpenOneGroup(t *testing.T) {
 		}
 	}
 	wg.Wait()
+	e.d.Wait()
+	second.Wait()
 	var open int
 	if err := e.st.Pool.QueryRow(context.Background(), `select count(*) from notification_incidents where group_route_id <> 0 and resolved_at is null`).Scan(&open); err != nil || open != 1 {
 		t.Fatalf("open group incidents = %d err=%v, want 1", open, err)
@@ -1354,5 +1369,253 @@ func TestDispatcher_RetentionDoesNotReAnnounceAnOpenIncident(t *testing.T) {
 	}
 	if rows := e.deliveries(); len(rows) != 0 {
 		t.Fatalf("deliveries of a resolved incident must be pruned: %+v", rows)
+	}
+}
+
+// ctxSender blocks the routes named in hang until the send's context ends, as a real HTTP client does when the
+// destination never answers, and delegates the rest.
+type ctxSender struct {
+	inner   Sender
+	hang    map[string]bool
+	started chan string
+	release chan struct{}
+}
+
+func (c *ctxSender) Send(ctx context.Context, r store.NotificationRoute, secret Secret, m Message) Result {
+	if c.hang[r.Name] {
+		select {
+		case c.started <- r.Name:
+		default:
+		}
+		select {
+		case <-ctx.Done():
+		case <-c.release:
+		}
+		return Result{Retryable: true, Note: "Network error"}
+	}
+	return c.inner.Send(ctx, r, secret, m)
+}
+
+func (e *env) hangingSender(routes ...string) *ctxSender {
+	c := &ctxSender{inner: e.sender, hang: map[string]bool{}, started: make(chan string, 16), release: make(chan struct{})}
+	for _, r := range routes {
+		c.hang[r] = true
+	}
+	e.t.Cleanup(func() { close(c.release) })
+	e.d.Senders = c
+	return c
+}
+
+// cycleReturns runs one cycle and fails when it does not return within wait.
+func (e *env) cycleReturns(wait time.Duration) {
+	e.t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- e.d.Cycle(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			e.t.Fatalf("cycle: %v", err)
+		}
+	case <-time.After(wait):
+		e.t.Fatalf("a cycle did not return within %v: one hanging destination stalls everything", wait)
+	}
+}
+
+func TestDispatcher_AHangingDestinationDoesNotStallOtherRoutes(t *testing.T) {
+	e := newEnv(t)
+	e.d.Lease = 2 * time.Second // the send budget is then 1.5 s
+	hang := e.hangingSender("slow")
+	e.route("slow")
+	e.route("fast")
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning))
+	e.cycleReturns(time.Second)
+	e.eventually(time.Second, "the fast route gets its message while the slow one hangs", func() bool { return len(e.sender.to("fast")) == 1 })
+	select {
+	case <-hang.started:
+	case <-time.After(time.Second):
+		t.Fatal("the slow route was never tried")
+	}
+
+	// Planning and the other routes go on while the slow send is still running.
+	e.advance(10 * time.Second)
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning), alert(svcY, "restart_loop", model.AlertWarning))
+	e.cycleReturns(time.Second)
+	e.eventually(time.Second, "the fast route gets both alerts", func() bool { return len(e.sender.to("fast")) == 2 })
+	if e.sender.calls["slow"] != 0 {
+		t.Fatalf("the slow route's backlog was sent while the first send was still running")
+	}
+	planned := 0
+	for _, d := range e.deliveries() {
+		if d.RouteName == "slow" {
+			planned++
+		}
+	}
+	if planned != 2 {
+		t.Fatalf("%d rows planned for the slow route, want 2 (planning must not wait for its send)", planned)
+	}
+
+	// The send is cut off by its budget, well inside the lease, and its row is given back without an attempt.
+	finished := make(chan struct{})
+	go func() { e.d.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the slow send outlived its lease")
+	}
+	for _, d := range e.deliveries() {
+		if d.RouteName == "slow" && (d.Status != "pending" || d.Attempts != 0 || d.ClaimedUntil != nil) {
+			t.Fatalf("slow row after the budget = %+v, want pending, unleased, no attempt counted", d)
+		}
+	}
+}
+
+func TestDispatcher_AtMostAFewRowsPerRouteEachCycle(t *testing.T) {
+	e := newEnv(t)
+	e.route("one")
+	var alerts []model.Alert
+	for i := range 12 {
+		alerts = append(alerts, alert(svc(acctA, "us-east-1", "core", "s"+string(rune('a'+i))), "restart_loop", model.AlertWarning))
+	}
+	e.setAlerts(alerts...)
+	e.cycle()
+	if got := len(e.sender.to("one")); got != routeCycleLimit {
+		t.Fatalf("one cycle sent %d to one route, want %d", got, routeCycleLimit)
+	}
+	e.cycle()
+	e.cycle()
+	if got := len(e.sender.to("one")); got != 12 {
+		t.Fatalf("after three cycles %d were sent, want all 12", got)
+	}
+}
+
+// A shutdown in the middle of a send is not the destination's fault: no attempt is counted and the row is claimable
+// at once.
+func TestDispatcher_ACancelledSendIsNotAnAttempt(t *testing.T) {
+	e := newEnv(t)
+	hang := e.hangingSender("one")
+	e.route("one")
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning))
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := e.d.Cycle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-hang.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the send never started")
+	}
+	cancel()
+	e.d.Wait()
+	rows := e.deliveries()
+	if len(rows) != 1 || rows[0].Status != "pending" || rows[0].Attempts != 0 || rows[0].ClaimedUntil != nil || rows[0].Note != "" {
+		t.Fatalf("row after a shutdown = %+v, want pending, no attempt, no lease, no failure note", rows)
+	}
+}
+
+// A route that was switched off is not a failing route: its leftover rows are cancelled, not failed.
+func TestDispatcher_RouteOffIsCancelledNotFailed(t *testing.T) {
+	e := newEnv(t)
+	e.sender.reply = func(string, Event, int) Result { return Result{Retryable: true, StatusCode: 503, Note: "HTTP 503"} }
+	route := e.route("one")
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning))
+	e.cycle() // fails retryably: the row is pending for a retry
+	e.update(route, func(r *store.NotificationRoute) { r.Enabled = false })
+	e.advance(5 * time.Minute)
+	e.cycle()
+	rows := e.deliveries()
+	if len(rows) != 1 || rows[0].Status != "cancelled" || rows[0].Note != "The route is off." {
+		t.Fatalf("rows = %+v, want one cancelled row", rows)
+	}
+	sum, err := e.st.NotificationSummary(context.Background(), e.clock)
+	if err != nil || sum.Failed24h != 0 || len(sum.FailingRouteIDs) != 0 {
+		t.Fatalf("summary = %+v err=%v, want no failures", sum, err)
+	}
+}
+
+// A manual retry of an alert that has resolved since must not send "opened" for something that is no longer open
+// (a PagerDuty incident would stay open for good).
+func TestDispatcher_RetryOfAResolvedAlertIsNotSent(t *testing.T) {
+	e := newEnv(t)
+	e.sender.reply = func(string, Event, int) Result { return Result{StatusCode: 400, Note: "HTTP 400"} }
+	e.route("one")
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning))
+	e.cycle() // opened fails
+	e.setAlerts()
+	e.advance(30 * time.Second)
+	e.cycle()
+	e.advance(3 * time.Minute)
+	e.cycle()
+	e.advance(2 * time.Hour) // far outside the window in which planning cancels unsent rows
+	e.cycle()
+	rows := e.deliveries()
+	if len(rows) != 1 || rows[0].Status != "failed" {
+		t.Fatalf("rows = %+v, want the one failed opened row", rows)
+	}
+	if _, err := e.st.RetryNotificationDelivery(context.Background(), rows[0].ID, e.clock); err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.sender.records())
+	e.cycle()
+	if len(e.sender.records()) != before {
+		t.Fatal("a retry sent opened for an alert that has resolved")
+	}
+	if got := e.deliveries()[0]; got.Status != "cancelled" || got.Note != "Resolved before it was sent." {
+		t.Fatalf("retried row = %+v, want cancelled with the resolved note", got)
+	}
+}
+
+// A held aggregate is rendered when it is sent, not from the plan-time snapshot, and an update that the first
+// message already covers is not sent after it.
+func TestDispatcher_HeldAggregateRendersCurrentStateAndSkipsCoveredUpdate(t *testing.T) {
+	e := newEnv(t)
+	e.clock = time.Date(2026, 11, 20, 23, 0, 0, 0, time.UTC)
+	e.seedServices(a1, a2, a3)
+	e.route("night", scoped(clusterSel(dispCluster, 1)), func(r *store.NotificationRoute) { r.QuietEnabled = true })
+	e.setAlerts(alert(a1, "restart_loop", model.AlertWarning))
+	e.cycle()
+	e.advance(time.Minute)
+	e.setAlerts(alert(a1, "restart_loop", model.AlertWarning), alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle() // the group got worse: an update is planned, also held
+	if len(e.sender.records()) != 0 {
+		t.Fatalf("sent during quiet hours: %+v", e.sender.records())
+	}
+	e.clock = time.Date(2026, 11, 21, 8, 1, 0, 0, time.UTC)
+	e.cycle()
+	if got := e.sender.groups("night"); len(got) != 1 || got[0] != "opened:cluster:2/3" {
+		t.Fatalf("got %v, want one opened message with the current 2 of 3 (not the planned 1 of 3, and no update after it)", got)
+	}
+	for _, d := range e.deliveries() {
+		if d.Event == "update" && d.Status != "cancelled" {
+			t.Errorf("update row = %+v, want cancelled as covered by the opened message", d)
+		}
+	}
+}
+
+// A test row whose API task died between the insert and the finish does not stay pending for good.
+func TestDispatcher_FailsAnAbandonedTestRow(t *testing.T) {
+	e := newEnv(t)
+	route := e.route("one")
+	lease := e.clock.Add(-time.Minute)
+	if _, err := e.st.InsertNotificationTest(context.Background(), store.NotificationDelivery{
+		RouteID: &route.ID, RouteName: route.Name, Destination: route.Destination, Target: "hooks.example", Severity: "warning",
+		AlertTitle: "test", Status: "pending", ClaimedUntil: &lease, CreatedAt: e.clock.Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.cycle()
+	rows := e.deliveries()
+	if len(rows) != 1 || rows[0].Status != "failed" {
+		t.Fatalf("rows = %+v, want the abandoned test failed", rows)
+	}
+}
+
+func (e *env) eventually(wait time.Duration, what string, ok func() bool) {
+	e.t.Helper()
+	deadline := time.Now().Add(wait)
+	for !ok() {
+		if time.Now().After(deadline) {
+			e.t.Fatalf("timed out waiting until %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

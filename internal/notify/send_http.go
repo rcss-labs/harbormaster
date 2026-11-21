@@ -111,6 +111,8 @@ func (s *Senders) transportResult(err error) Result {
 	case errors.As(err, &unknownAuthority), errors.As(err, &hostname), errors.As(err, &invalid),
 		errors.As(err, &verification), errors.As(err, &recordHeader), errors.As(err, &alert):
 		class, res = "tls", Result{Note: "TLS error"}
+	case errors.Is(err, context.Canceled):
+		class, res = "canceled", Result{Retryable: true, Note: "Cancelled"} // a shutdown, not the destination's fault
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
 		class, res = "timeout", Result{Retryable: true, Note: fmt.Sprintf("Timed out after %d s", int(s.timeout().Seconds()))}
 	default:

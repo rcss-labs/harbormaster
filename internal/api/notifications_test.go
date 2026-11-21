@@ -1010,6 +1010,7 @@ func TestNotificationPreview_MatchesWhatTheDispatcherSends(t *testing.T) {
 	if err := dispatcher.Cycle(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	dispatcher.Wait()
 	rows, _, err := e.st.ListNotificationDeliveries(t.Context(), store.DeliveryFilter{Limit: 100})
 	if err != nil {
 		t.Fatal(err)

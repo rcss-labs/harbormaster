@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/notify/fakesink"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -335,5 +336,50 @@ func TestNotificationDeliveries_AggregatedRowHasScopeAndClusterID(t *testing.T) 
 	}
 	if perAlert.Scope != "service" || perAlert.ServiceID != nxKey.ID() || perAlert.ClusterID != nxKey.ClusterKey.ID() {
 		t.Errorf("per-alert row = %+v, want scope service with its ids", perAlert)
+	}
+}
+
+// Retrying the opened message of an alert that has resolved since would announce something that is no longer open
+// (and leave a PagerDuty incident open for good), so it is refused with a sentence that says why.
+func TestNotificationDeliveries_RetryOfAResolvedAlertIsRefused(t *testing.T) {
+	e := newNotifyEnv(t)
+	route := e.create(e.webhookInput("hook"))
+	stored, _ := e.st.GetNotificationRoute(t.Context(), route.ID)
+	e.seedOnlyAlert()
+	open, err := e.st.ListOpenNotificationIncidents(t.Context())
+	if err != nil || len(open) != 1 {
+		t.Fatalf("open incidents = %+v err=%v", open, err)
+	}
+	routeID, incidentID := stored.ID, open[0].ID
+	if _, err := e.st.PlanNotificationDelivery(t.Context(), store.NotificationDelivery{
+		RouteID: &routeID, RouteName: stored.Name, Destination: "webhook", Target: "example.com", IncidentID: &incidentID, Event: "opened",
+		Severity: "warning", AlertTitle: "x", Key: open[0].Key, Kind: open[0].Kind, Status: "failed", Attempts: 3, Note: "HTTP 503 after 3 attempts",
+		CreatedAt: time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows := e.deliveries("").Items
+	if len(rows) != 1 || !rows[0].CanRetry {
+		t.Fatalf("rows = %+v, want one failed row that can be retried while the alert is open", rows)
+	}
+
+	// The alert goes away and, after the grace, the incident resolves.
+	if err := e.st.ReplaceAlerts(t.Context(), awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{time.Now().Add(-10 * time.Minute), time.Now()} {
+		if _, _, err := e.st.SyncNotificationIncidents(t.Context(), at, 2*time.Minute, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp := e.admin.post("/api/notifications/deliveries/"+strconv.FormatInt(rows[0].ID, 10)+"/retry", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("retry of a resolved alert = %d, want 409", resp.StatusCode)
+	}
+	if _, msg := errorCode(t, resp); msg != "That alert has resolved, so there is nothing left to send." {
+		t.Errorf("message = %q", msg)
+	}
+	if got := e.deliveries("").Items[0]; got.Status != "failed" {
+		t.Errorf("the refused retry changed the row: %+v", got)
 	}
 }

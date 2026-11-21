@@ -21,13 +21,16 @@ const (
 	recentlyResolvedWindow = time.Hour
 	leaseDuration          = 2 * time.Minute
 	claimLimit             = 50
-	maxInFlight            = 4
+	routeCycleLimit        = 5 // rows one route may send per cycle: with the pacing, a cycle's work for a route stays short
 	maxAttempts            = 3
 	routePacing            = time.Second
 	writeTimeout           = 5 * time.Second
 	defaultInterval        = 10 * time.Second
 
 	noteResolvedBeforeSent = "Resolved before it was sent."
+	noteRouteOff           = "The route is off."
+	noteRouteDeleted       = "The route was deleted."
+	noteCovered            = "Already covered by the message before it."
 	noteResolvedQuiet      = "Resolved during quiet hours; not sent."
 	noteEnterAgain         = "Enter the destination again."
 )
@@ -54,6 +57,8 @@ type Dispatcher struct {
 	Now       func() time.Time
 	Log       *slog.Logger
 	Telemetry *telemetry.Registry
+	// Lease is how long a claimed row is held (leaseDuration by default); sends are cut off before it ends.
+	Lease time.Duration
 	// Sleep paces sends to one route; injectable for tests.
 	Sleep func(context.Context, time.Duration) error
 	// Jitter returns [0, 1); it adds up to 10% to a retry delay. Injectable for tests.
@@ -61,6 +66,52 @@ type Dispatcher struct {
 
 	kickOnce sync.Once
 	kickCh   chan struct{}
+
+	// busy holds the routes whose previous send is still running; workers is the wait group of those sends.
+	busyMu  sync.Mutex
+	busy    map[int64]bool
+	workers sync.WaitGroup
+}
+
+// Wait blocks until the send workers of earlier cycles are done.
+func (d *Dispatcher) Wait() { d.workers.Wait() }
+
+func (d *Dispatcher) lease() time.Duration {
+	if d.Lease > 0 {
+		return d.Lease
+	}
+	return leaseDuration
+}
+
+// sendBudget is how long one route's sends may run: the lease less a margin for the write that records the last
+// attempt, so no row is still being worked on after its lease expired and another task may have taken it.
+func (d *Dispatcher) sendBudget() time.Duration {
+	lease := d.lease()
+	return lease - min(lease/4, 20*time.Second)
+}
+
+// busyRoutes lists the routes whose send is still running.
+func (d *Dispatcher) busyRoutes() []int64 {
+	d.busyMu.Lock()
+	defer d.busyMu.Unlock()
+	out := make([]int64, 0, len(d.busy))
+	for id := range d.busy {
+		out = append(out, id)
+	}
+	return out
+}
+
+func (d *Dispatcher) setBusy(id int64, busy bool) {
+	d.busyMu.Lock()
+	defer d.busyMu.Unlock()
+	if d.busy == nil {
+		d.busy = map[int64]bool{}
+	}
+	if busy {
+		d.busy[id] = true
+	} else {
+		delete(d.busy, id)
+	}
 }
 
 func (d *Dispatcher) now() time.Time {
@@ -140,6 +191,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 		}
 		select {
 		case <-ctx.Done():
+			d.Wait()
 			return
 		case <-ticker.C:
 		case <-d.kicks():
@@ -172,6 +224,9 @@ func (d *Dispatcher) Cycle(ctx context.Context) error {
 	}
 
 	if err := d.Store.ReleaseHeldNotificationDeliveries(ctx, now, noteResolvedQuiet); err != nil {
+		errs = append(errs, err)
+	}
+	if _, err := d.Store.ExpireStaleNotificationTests(ctx, now); err != nil {
 		errs = append(errs, err)
 	}
 	if err := d.sendDue(ctx, now, names); err != nil {
@@ -363,7 +418,7 @@ func (d *Dispatcher) planDelivery(ctx context.Context, now time.Time, r store.No
 	}
 	if subject.Scope != "" {
 		row.Details = store.DeliveryDetails{Scope: subject.Scope, Threshold: subject.Threshold, Failing: subject.Failing,
-			Total: subject.Total, Members: subject.Members}
+			Total: subject.Total, Members: subject.Members, Generation: incident.Generation}
 	}
 	if event != EventResolved {
 		if until, held := HeldUntil(r, subject.Severity, now); held {
@@ -374,10 +429,12 @@ func (d *Dispatcher) planDelivery(ctx context.Context, now time.Time, r store.No
 	return err
 }
 
-// sendDue claims due deliveries and sends them, at most maxInFlight routes at a time, one route's sends in
-// order and at least routePacing apart.
+// sendDue claims due deliveries and starts one worker per route; it does not wait for them, so a destination that
+// hangs delays only its own route. A route is claimed at most routeCycleLimit rows at a time and not at all while
+// its previous worker is still running. Tests and shutdown use Wait.
 func (d *Dispatcher) sendDue(ctx context.Context, now time.Time, names map[string]string) error {
-	rows, err := d.Store.ClaimDueNotificationDeliveries(ctx, now, leaseDuration, claimLimit)
+	rows, err := d.Store.ClaimNotificationDeliveries(ctx, now, d.lease(), store.ClaimFilter{
+		Limit: claimLimit, PerRoute: routeCycleLimit, Exclude: d.busyRoutes()})
 	if err != nil || len(rows) == 0 {
 		return err
 	}
@@ -394,47 +451,66 @@ func (d *Dispatcher) sendDue(ctx context.Context, now time.Time, names map[strin
 		}
 		groups[*row.RouteID] = append(groups[*row.RouteID], row)
 	}
-	var batches [][]store.NotificationDelivery
 	for _, id := range order {
-		batches = append(batches, groups[id])
-	}
-	for _, row := range routeless {
-		batches = append(batches, []store.NotificationDelivery{row})
-	}
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var errs []error
-	slots := make(chan struct{}, maxInFlight)
-	for _, batch := range batches {
-		slots <- struct{}{}
-		wg.Add(1)
+		d.setBusy(id, true)
+		d.workers.Add(1)
 		go func() {
-			defer func() { <-slots; wg.Done() }()
-			for i, row := range batch {
-				if i > 0 {
-					if err := d.sleep(ctx, routePacing); err != nil {
-						return // shutting down; the leases expire and the rows are claimed again
-					}
-				}
-				if err := d.deliver(ctx, row, names); err != nil {
-					mu.Lock()
-					errs = append(errs, err)
-					mu.Unlock()
-				}
-			}
+			defer d.workers.Done()
+			defer d.setBusy(id, false)
+			d.work(ctx, groups[id], names)
 		}()
 	}
-	wg.Wait()
-	return errors.Join(errs...)
+	for _, row := range routeless {
+		d.workers.Add(1)
+		go func() {
+			defer d.workers.Done()
+			d.work(ctx, []store.NotificationDelivery{row}, names)
+		}()
+	}
+	return nil
 }
 
-// deliver sends one claimed row and records the attempt. The write is detached from ctx so a shutdown in the
-// middle of a send still records what happened.
-func (d *Dispatcher) deliver(ctx context.Context, row store.NotificationDelivery, names map[string]string) error {
+// work sends one route's claimed rows in order, at least routePacing apart, within the send budget. Rows it did not
+// get to, and a send the budget or a shutdown cut off, are given back without an attempt counted.
+func (d *Dispatcher) work(ctx context.Context, batch []store.NotificationDelivery, names map[string]string) {
+	budget, cancel := context.WithTimeout(ctx, d.sendBudget())
+	defer cancel()
+	for i, row := range batch {
+		if i > 0 {
+			if d.sleep(budget, routePacing) != nil {
+				d.release(ctx, batch[i:]...)
+				return
+			}
+		}
+		if budget.Err() != nil {
+			d.release(ctx, batch[i:]...)
+			return
+		}
+		if err := d.deliver(budget, ctx, row, names); err != nil {
+			d.log().Error("notify: deliver", "err", err)
+			d.release(ctx, row) // a no-op when the row was finished; otherwise it is claimable at once
+		}
+	}
+}
+
+// release gives claimed rows back. The write is detached from ctx so it also happens during a shutdown.
+func (d *Dispatcher) release(ctx context.Context, rows ...store.NotificationDelivery) {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	for _, row := range rows {
+		if err := d.Store.ReleaseNotificationDelivery(writeCtx, row.ID, row.ClaimedUntil); err != nil {
+			d.log().Error("notify: release", "err", err)
+		}
+	}
+}
+
+// deliver sends one claimed row and records the attempt. sendCtx bounds the send; the write is detached from
+// parent so a shutdown in the middle of a send still records what happened. A send that sendCtx cut off (a
+// shutdown, or the budget) is not an attempt and not a failure: the row is given back.
+func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.NotificationDelivery, names map[string]string) error {
 	attempts := row.Attempts + 1
 	finish := func(o store.DeliveryOutcome) error {
-		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), writeTimeout)
 		defer cancel()
 		return d.Store.FinishNotificationDelivery(writeCtx, row.ID, row.ClaimedUntil, attempts, o, d.now())
 	}
@@ -442,20 +518,58 @@ func (d *Dispatcher) deliver(ctx context.Context, row store.NotificationDelivery
 		d.registry().CountNotification(row.Destination, "failed")
 		return finish(store.DeliveryOutcome{Note: note})
 	}
+	cancelRow := func(note string) error { return finish(store.DeliveryOutcome{Cancelled: true, Note: note}) }
 
 	if row.RouteID == nil {
-		return fail("The route was deleted.")
+		return cancelRow(noteRouteDeleted)
 	}
-	route, err := d.Store.GetNotificationRoute(ctx, *row.RouteID)
+	route, err := d.Store.GetNotificationRoute(sendCtx, *row.RouteID)
 	if errors.Is(err, store.ErrNotFound) {
-		return fail("The route was deleted.")
+		return cancelRow(noteRouteDeleted)
 	}
 	if err != nil {
 		return err // the lease expires and the row is claimed again
 	}
 	if !route.Enabled && row.Event != string(EventTest) {
-		return fail("The route is off.")
+		return cancelRow(noteRouteOff)
 	}
+
+	// An incident row is rendered from the incident as it is now: an alert that resolved while the row waited (a
+	// held row, a manual retry) is not announced, and an aggregate shows its current services, not the plan-time
+	// snapshot. An update that an earlier message already covers is not sent.
+	subject := Subject{Key: row.Key, Kind: row.Kind, Severity: row.Severity, Title: row.AlertTitle, Text: row.AlertText, At: row.CreatedAt,
+		Scope: row.Details.Scope, RouteID: *row.RouteID, Threshold: row.Details.Threshold, Failing: row.Details.Failing,
+		Total: row.Details.Total, Members: row.Details.Members}
+	rendered := 0
+	if row.IncidentID != nil && row.Event != string(EventResolved) && row.Event != string(EventTest) {
+		incident, err := d.Store.GetNotificationIncident(sendCtx, *row.IncidentID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			if incident.ResolvedAt != nil {
+				return cancelRow(noteResolvedBeforeSent)
+			}
+			if row.Details.Scope != "" {
+				if row.Event == string(EventUpdate) {
+					covered, err := d.Store.MaxRenderedGeneration(sendCtx, *row.RouteID, *row.IncidentID)
+					if err != nil {
+						return err
+					}
+					if covered >= row.Seq {
+						return cancelRow(noteCovered)
+					}
+				}
+				if severity, ok := SeverityName(incident.Severity); ok {
+					subject.Severity = severity
+				}
+				subject.Title, subject.Text = incident.Title, incident.Text
+				subject.Threshold, subject.Failing, subject.Total, subject.Members = incident.Threshold, incident.Failing, incident.Total, incident.Members
+				rendered = incident.Generation
+			}
+		}
+	}
+
 	var secret Secret
 	if len(route.SecretEnc) > 0 {
 		if d.Box == nil {
@@ -471,18 +585,19 @@ func (d *Dispatcher) deliver(ctx context.Context, row store.NotificationDelivery
 	if name == "" {
 		name = row.Key.AccountID
 	}
-	message := Message{
-		Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName,
-		Subject: Subject{Key: row.Key, Kind: row.Kind, Severity: row.Severity, Title: row.AlertTitle, Text: row.AlertText, At: row.CreatedAt, AccountName: name,
-			Scope: row.Details.Scope, RouteID: *row.RouteID, Threshold: row.Details.Threshold, Failing: row.Details.Failing,
-			Total: row.Details.Total, Members: row.Details.Members},
-	}
-	result := d.Senders.Send(ctx, route, secret, message)
+	subject.AccountName = name
+	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject}
+	result := d.Senders.Send(sendCtx, route, secret, message)
 
+	if sendCtx.Err() != nil && !result.Delivered {
+		d.release(parent, row)
+		return nil
+	}
 	outcome := store.DeliveryOutcome{StatusCode: result.StatusCode, DurationMS: int(result.Duration.Milliseconds()), Note: result.Note}
 	switch {
 	case result.Delivered:
 		outcome.Delivered = true
+		outcome.Generation = rendered
 		if row.Retries > 0 {
 			outcome.Note = fmt.Sprintf("Delivered on retry in %d ms", result.Duration.Milliseconds())
 		}
