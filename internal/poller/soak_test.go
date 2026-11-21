@@ -302,6 +302,9 @@ func TestSoak_DiffWritesNearZeroWhenStatic(t *testing.T) {
 
 func TestSoak_WritesTrackMutations(t *testing.T) {
 	env := newSoakEnv(t, fake.TargetScale)
+	// The default full-task pass is 5 minutes now (it was 30 s when this test was written); the test needs the pass that
+	// re-describes every task to run inside its window.
+	env.cfg.Intervals.FullTasks = 30 * time.Second
 	stop := env.startPoller(t)
 	sleep(t, warmUp+pgStatSettle, "warm-up and stats flush")
 	before := env.tableWrites(t)
@@ -370,10 +373,11 @@ func TestSoak_BackoffUnderThrottle(t *testing.T) {
 		}
 	}
 	env.fake.SetRateLimit(slow, 0, 0)
-	recoveredBy := time.Now().Add(5 * time.Minute)
+	// Recovery takes five clean cycles per halving; at the 30 s default that is longer than the 5 minutes it was written for.
+	recoveredBy := time.Now().Add(9 * time.Minute)
 	for time.Now().Before(recoveredBy) {
 		if registry.Snapshot().LoopInterval[key(slow)] == base {
-			t.Logf("services interval back to %v after %v", base, 5*time.Minute-time.Until(recoveredBy))
+			t.Logf("services interval back to %v after %v", base, 9*time.Minute-time.Until(recoveredBy))
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
