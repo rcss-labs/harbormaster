@@ -80,7 +80,8 @@ type CostSpotServiceDTO struct {
 	Region    string `json:"region"`
 	Tag       TagDTO `json:"tag"`
 	// Status is candidate, no_cluster_spot, production, single_task, already_spot, custom_capacity,
-	// unsupported_controller, not_running, no_price, windows or not_fargate.
+	// unsupported_controller, not_running, no_price, windows, not_fargate or untagged (no tag of its own or its cluster's,
+	// only the Dev fallback, which counts as production).
 	Status        string `json:"status"`
 	DesiredTasks  int    `json:"desired_tasks"`
 	OnDemandTasks int    `json:"on_demand_tasks"`

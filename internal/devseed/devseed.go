@@ -189,6 +189,14 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	if err := st.SetClusterTag(ctx, model.ClusterKey{AccountID: accountIDByName(estate, "staging-example"), Region: "us-east-1", Cluster: "staging-web"}, staging.ID); err != nil {
 		return fmt.Errorf("tag staging-web: %w", err)
 	}
+	// The Fargate Spot advisor only suggests services someone tagged non-production on purpose, so the two demo candidates
+	// carry an explicit Dev tag; every other untagged service is shown as untagged.
+	for _, tagged := range []struct{ region, cluster, service string }{{"eu-west-1", "eu-apps", "catalog-api"}, {"eu-central-1", "edge-proxy", "edge-nginx"}} {
+		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: tagged.region, Cluster: tagged.cluster}, Service: tagged.service}
+		if err := st.SetServiceTag(ctx, key, &dev.ID); err != nil {
+			return fmt.Errorf("tag %s: %w", tagged.service, err)
+		}
+	}
 	// An explicit service tag on an otherwise Dev cluster exercises the cluster-matching rule.
 	artifactProxy := model.ServiceKey{
 		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "us-east-1", Cluster: "ci-tools"},

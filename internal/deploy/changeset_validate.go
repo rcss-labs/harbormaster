@@ -260,7 +260,11 @@ func validateAgainst(cs ChangeSet, st DeploySettings) error {
 				return invalid("%s", st.Capacity.LockReason)
 			}
 			usesSpot := slices.ContainsFunc(svc.CapacityProviderStrategy, func(item CapacityItem) bool { return item.Provider == ProviderFargateSpot })
-			if usesSpot && st.Capacity.ClusterProvidersKnown && !slices.Contains(st.Capacity.ClusterProviders, ProviderFargateSpot) {
+			switch {
+			case usesSpot && !st.Capacity.ClusterProvidersKnown:
+				// Nothing says FARGATE_SPOT is associated, and AWS would only fail after a partial write: refuse, do not guess.
+				return invalid("Harbormaster could not read the capacity providers of cluster %s, so it cannot check that FARGATE_SPOT is associated. Try again in a minute.", st.Capacity.ClusterName)
+			case usesSpot && !slices.Contains(st.Capacity.ClusterProviders, ProviderFargateSpot):
 				return invalid("%s", ClusterNoSpotMessage(st.Capacity.ClusterName))
 			}
 		}

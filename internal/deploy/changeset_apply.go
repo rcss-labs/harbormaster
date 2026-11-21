@@ -518,7 +518,7 @@ func (r *changeSetRun) scale(ctx context.Context) error {
 // cluster without FARGATE_SPOT that the stored snapshot did not show yet, and the raw text does not say what to do.
 func (r *changeSetRun) capacityError(err error) error {
 	var awsErr *AWSError
-	if r.plan.capacity != nil && errors.As(err, &awsErr) && awsErr.Validation && strings.Contains(strings.ToLower(awsErr.Error()), "capacity provider") {
+	if r.plan.capacity != nil && errors.As(err, &awsErr) && awsErr.Validation && strings.Contains(strings.ToLower(awsErr.Error()), "not associated with the cluster") {
 		return invalid("%s", ClusterNoSpotMessage(r.key.Cluster))
 	}
 	return err

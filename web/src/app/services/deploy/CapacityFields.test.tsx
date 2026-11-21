@@ -56,6 +56,18 @@ describe('CapacityFields', () => {
     expect(screen.getByLabelText('Spot weight')).toBeEnabled()
   })
 
+  it('warns that tasks are replaced whenever the capacity changed, Spot or not', () => {
+    const live = capacityDraftFromSettings(DEPLOY_SETTINGS_PAYMENTS)
+    show(DEPLOY_SETTINGS_PAYMENTS, { ...live, onDemandBase: 1 })
+    expect(screen.getByRole('status')).toHaveTextContent('Applying this starts a new deployment that replaces every task')
+    expect(screen.getByRole('status')).not.toHaveTextContent('Spot tasks can be stopped')
+  })
+
+  it('shows no warning for the live capacity', () => {
+    show(DEPLOY_SETTINGS_PAYMENTS)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('warns once the draft puts tasks on Spot, and not for the live strategy', () => {
     show(DEPLOY_SETTINGS_PAYMENTS, spotCapacityDraft(1))
     expect(screen.getByRole('status')).toHaveTextContent('ECS does not fall back to on-demand')

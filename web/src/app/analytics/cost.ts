@@ -72,16 +72,17 @@ export const draftTitle = (count: number) => `Draft ${count} change ${count === 
 export const spotCandidates = (spot: CostSpot): CostSpotService[] => spot.services.filter((service) => service.status === 'candidate')
 
 /**
- * A candidate is ticked unless it carries a caution (terminal sessions or killed stops), and never without Deploy. `toggled`
- * holds the ids the user flipped from that default, so a refetch that changes a caution does not undo a choice.
+ * A candidate is ticked unless it carries a caution (terminal sessions or killed stops), and never without Deploy. `choices`
+ * holds what the user explicitly chose per service; only a row they did not touch follows the default, so a refetch that
+ * changes a caution never undoes a choice.
  */
-export function isSpotTicked(service: CostSpotService, toggled: ReadonlySet<string>): boolean {
+export function isSpotTicked(service: CostSpotService, choices: ReadonlyMap<string, boolean>): boolean {
   if (!service.can_deploy) return false
-  return !service.caution !== toggled.has(service.service_id)
+  return choices.get(service.service_id) ?? !service.caution
 }
 
-export const selectedSpot = (spot: CostSpot, toggled: ReadonlySet<string>): CostSpotService[] =>
-  spotCandidates(spot).filter((service) => isSpotTicked(service, toggled))
+export const selectedSpot = (spot: CostSpot, choices: ReadonlyMap<string, boolean>): CostSpotService[] =>
+  spotCandidates(spot).filter((service) => isSpotTicked(service, choices))
 
 /** The sentences under "Why it qualifies": what the server returned, worded. */
 export function spotReasons(service: CostSpotService, lookbackDays: number): { text: string; title?: string }[] {
@@ -115,7 +116,9 @@ export function spotNotCandidateReason(service: CostSpotService, minTasks: numbe
     case 'windows':
       return 'Windows tasks cannot run on Fargate Spot'
     case 'no_price':
-      return 'No Spot price for this region'
+      return 'Cannot be priced: no list or Spot price for this region, or the task size is not a plain number'
+    case 'untagged':
+      return 'Untagged, so it counts as production. Give it a tag marked non-production in Admin, Tags.'
     case 'not_running':
       return 'No running on-demand tasks'
     case 'custom_capacity':

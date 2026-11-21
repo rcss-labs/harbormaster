@@ -357,7 +357,7 @@ func spotServiceDTO(sc scope, fact store.CostServiceFact, totals *serviceSpend, 
 		Strategy: fact.StrategyProviders, LaunchType: fact.LaunchType,
 		Desired: fact.Desired, OnDemandTasks: totals.priced - totals.spot, SpotTasks: totals.spot, UnpricedTasks: totals.notFargate,
 		CPUUnits: valueOrZeroInt(fact.CPUUnits), MemoryMiB: valueOrZeroInt(fact.MemoryMiB),
-		NonProduction: fact.NonProduction, ClusterHasSpot: slices.Contains(fact.ClusterProviders, "FARGATE_SPOT"),
+		NonProduction: fact.NonProduction, Untagged: !fact.TagExplicit, SpotWeightZero: fact.SpotWeightZero, ClusterHasSpot: slices.Contains(fact.ClusterProviders, "FARGATE_SPOT"),
 		TerminalSessions7d: fact.TerminalSessions7d, ExpectedStops7d: fact.ExpectedStops7d, KilledStops7d: fact.KilledStops7d,
 		StopTimeoutSeconds: fact.StopTimeoutSeconds,
 	})

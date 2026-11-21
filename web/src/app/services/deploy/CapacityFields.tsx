@@ -16,6 +16,8 @@ interface CapacityFieldsProps {
 export const SPOT_WARNING =
   "Spot tasks can be stopped with two minutes' notice, and ECS does not fall back to on-demand when Spot capacity runs out. Applying this starts a new deployment that replaces every task."
 
+export const REPLACE_WARNING = 'Applying this starts a new deployment that replaces every task.'
+
 const parseNumber = (text: string): number | null => {
   if (text.trim() === '') return null
   const value = Number(text)
@@ -35,7 +37,8 @@ export function CapacityFields({ settings, draft, onChange, tagName, clusterName
   const usesSpot = capacityDraftFromSettings(settings).spotWeight !== 0
   const clusterLock = capacity.cluster_providers.includes('FARGATE_SPOT') || usesSpot ? undefined : clusterNoSpotMessage(clusterName)
   const spotLock = lock ?? clusterLock
-  const warns = (draft.spotWeight ?? 0) > 0 && capacityChanged(settings, draft)
+  const changed = capacityChanged(settings, draft)
+  const putsTasksOnSpot = (draft.spotWeight ?? 0) > 0
 
   return (
     <div className={styles.group}>
@@ -79,9 +82,9 @@ export function CapacityFields({ settings, draft, onChange, tagName, clusterName
       </div>
       <LockNote kind="why">{lock === undefined ? clusterLock : undefined}</LockNote>
       <p className={styles.hint}>The base stays on demand; the weights split the tasks above it. A Spot weight of 0 means on demand only.</p>
-      {warns && (
+      {changed && (
         <p className={styles.warn} role="status">
-          {SPOT_WARNING}
+          {putsTasksOnSpot ? SPOT_WARNING : REPLACE_WARNING}
         </p>
       )}
     </div>

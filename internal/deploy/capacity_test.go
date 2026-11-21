@@ -275,6 +275,54 @@ func TestApplyChangeSet_CapacityNeedsClusterProvider(t *testing.T) {
 	}
 }
 
+func TestApplyChangeSet_SpotRefusedWhenClusterProvidersAreUnknown(t *testing.T) {
+	h := newHarness(t)
+	cs := baseChangeSet(t, h, paymentsKey)
+	cs.Service = &deploy.ServiceChange{CapacityProviderStrategy: spotStrategy(1)}
+	// The stored cluster cannot be read, so nothing says FARGATE_SPOT is associated: refuse, do not guess.
+	if _, err := h.store.Pool.Exec(t.Context(), `delete from clusters where cluster_name = 'core-services'`); err != nil {
+		t.Fatal(err)
+	}
+	requireInvalid(t, h, paymentsKey, cs, "capacity providers")
+	if calls := h.fake.Calls()["UpdateService"]; calls != 0 {
+		t.Fatalf("UpdateService calls = %d, want none", calls)
+	}
+	// On-demand only never needs Spot, so it is still allowed.
+	onDemand := baseChangeSet(t, h, paymentsKey)
+	onDemand.Service = &deploy.ServiceChange{CapacityProviderStrategy: []deploy.CapacityItem{{Provider: "FARGATE", Weight: 1}}}
+	if _, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, onDemand); err != nil {
+		t.Fatalf("on-demand strategy refused: %v", err)
+	}
+}
+
+func TestApplyChangeSet_OnlyTheNotAssociatedErrorGetsTheClusterCopy(t *testing.T) {
+	cases := map[string]struct {
+		message string
+		cluster bool
+	}{
+		"association":   {"The specified capacity provider FARGATE_SPOT is not associated with the cluster.", true},
+		"another cause": {"The capacity provider weight must be between 0 and 1000.", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.fake.FailNext("UpdateService", &ecstypes.InvalidParameterException{Message: aws.String(tc.message)})
+			cs := baseChangeSet(t, h, paymentsKey)
+			cs.Service = &deploy.ServiceChange{CapacityProviderStrategy: spotStrategy(1)}
+			_, err := h.svc.ApplyChangeSet(t.Context(), h.sam, paymentsKey, cs)
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if got := strings.Contains(err.Error(), "aws_ecs_cluster_capacity_providers"); got != tc.cluster {
+				t.Fatalf("err = %q, cluster copy = %v, want %v", err, got, tc.cluster)
+			}
+			if !tc.cluster && !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("err = %q, want the AWS text kept", err)
+			}
+		})
+	}
+}
+
 func TestApplyChangeSet_CapacityRefusedWhenNotEditable(t *testing.T) {
 	h := newHarness(t)
 	editService(h, paymentsKey, func(s *ecstypes.Service) { s.LaunchType = ecstypes.LaunchTypeEc2 })

@@ -23,11 +23,11 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
   const [headroomPct, setHeadroomPct] = useState(rightsizing.default_headroom_pct)
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
-  const [spotToggled, setSpotToggled] = useState<ReadonlySet<string>>(new Set())
+  const [spotChoices, setSpotChoices] = useState<ReadonlyMap<string, boolean>>(new Map())
   const [spotOpened, setSpotOpened] = useState<ReadonlySet<string>>(new Set())
   const [drafting, setDrafting] = useState<'rightsizing' | 'spot' | null>(null)
   const suggested = selectedSuggestions(rightsizing, headroomPct, excluded)
-  const spotSelected = selectedSpot(spot, spotToggled)
+  const spotSelected = selectedSpot(spot, spotChoices)
   // The dialog follows the live selection; with nothing left to draft it closes.
   if (drafting === 'rightsizing' && suggested.length === 0) setDrafting(null)
   if (drafting === 'spot' && spotSelected.length === 0) setDrafting(null)
@@ -140,8 +140,8 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
           <SpotPanel
             spot={spot}
             pricesAsOf={data.spot_prices_as_of}
-            toggled={spotToggled}
-            onToggle={(serviceId) => setSpotToggled((previous) => toggleIn(previous, serviceId))}
+            choices={spotChoices}
+            onChoose={(serviceId, ticked) => setSpotChoices((previous) => new Map(previous).set(serviceId, ticked))}
             onDraft={() => setDrafting('spot')}
           />
         </div>

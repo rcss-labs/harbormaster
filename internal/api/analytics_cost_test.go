@@ -648,8 +648,11 @@ func TestAnalyticsCost_SpotCandidatesRankedBySaving(t *testing.T) {
 			t.Errorf("%s is a candidate listed after the non-candidates", svc.Service)
 		}
 	}
-	if single := spotService(t, got, "report-worker"); single.Status != "single_task" || single.SavingMonthly != nil {
-		t.Errorf("report-worker = %+v, want single_task with no saving", single)
+	if untagged := spotService(t, got, "report-worker"); untagged.Status != "untagged" || untagged.SavingMonthly != nil {
+		t.Errorf("report-worker = %+v, want untagged (only the Dev fallback) with no saving", untagged)
+	}
+	if single := spotService(t, got, "api"); single.Status != "single_task" || single.SavingMonthly != nil {
+		t.Errorf("staging api = %+v, want single_task with no saving (Staging is non-production)", single)
 	}
 	if ec2 := spotService(t, got, "cert-renewer"); ec2.Status != "not_fargate" {
 		t.Errorf("cert-renewer status %q, want not_fargate", ec2.Status)
@@ -684,6 +687,25 @@ func TestAnalyticsCost_SpotNeverListsProductionAsCandidate(t *testing.T) {
 	}
 	if catalog := spotService(t, got, "catalog-api"); catalog.Status != "production" || catalog.Tag.NonProduction {
 		t.Errorf("catalog-api = %+v, want production under the unmarked Dev tag", catalog)
+	}
+}
+
+func TestAnalyticsCost_SpotUntaggedServiceIsNotACandidate(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	sam := login(t, srv, "sam", testPassword)
+	if got := spotService(t, getCost(t, sam, ""), "catalog-api"); got.Status != "candidate" || !got.Tag.NonProduction {
+		t.Fatalf("catalog-api = %+v, want a candidate while it is explicitly tagged Dev", got)
+	}
+	// Without a tag of its own it only falls back to Dev, which nobody chose for it.
+	if err := st.SetServiceTag(t.Context(), catalogAPIKey, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := spotService(t, getCost(t, sam, ""), "catalog-api")
+	if got.Status != "untagged" || got.SavingMonthly != nil {
+		t.Fatalf("catalog-api = %+v, want untagged with no proposal", got)
 	}
 }
 

@@ -11,19 +11,20 @@ interface SpotPanelProps {
   spot: CostSpot
   /** The day the Fargate Spot prices were read, YYYY-MM-DD. */
   pricesAsOf: string
-  /** Ids the user flipped from the default selection. */
-  toggled: ReadonlySet<string>
-  onToggle: (serviceId: string) => void
+  /** What the user explicitly ticked or unticked, by service id; rows not in it follow the default. */
+  choices: ReadonlyMap<string, boolean>
+  /** Sets the choice for a service to ticked or not. */
+  onChoose: (serviceId: string, ticked: boolean) => void
   onDraft: () => void
 }
 
 const CAUTION_TITLE = 'A terminal session or a stop that was killed in the last days: check that the service tolerates Spot before applying.'
 
 /** Services that could run on Fargate Spot, by monthly saving, with the reasons each qualifies, and why the others do not. */
-export function SpotPanel({ spot, pricesAsOf, toggled, onToggle, onDraft }: SpotPanelProps) {
+export function SpotPanel({ spot, pricesAsOf, choices, onChoose, onDraft }: SpotPanelProps) {
   const candidates = spotCandidates(spot)
   const others = spot.services.filter((service) => service.status !== 'candidate')
-  const selected = selectedSpot(spot, toggled)
+  const selected = selectedSpot(spot, choices)
   const saving = selected.reduce((total, service) => total + (service.saving_monthly ?? 0), 0)
   const sub = `candidates by monthly saving · Spot prices as of ${priceDate(pricesAsOf)}`
 
@@ -37,10 +38,10 @@ export function SpotPanel({ spot, pricesAsOf, toggled, onToggle, onDraft }: Spot
         <input
           type="checkbox"
           aria-label={`Select ${service.service}`}
-          checked={isSpotTicked(service, toggled)}
+          checked={isSpotTicked(service, choices)}
           disabled={!service.can_deploy}
           title={service.can_deploy ? undefined : `You need Deploy on ${service.tag.name}`}
-          onChange={() => onToggle(service.service_id)}
+          onChange={() => onChoose(service.service_id, !isSpotTicked(service, choices))}
         />
       ),
     },

@@ -30,10 +30,14 @@ type CostServiceFact struct {
 	LaunchType        string
 	StrategyProviders []string // providers of the service's capacity provider strategy; empty = a launch type
 	// Controller is ECS for the rolling controller, BLUE_GREEN for ECS blue/green, else CODE_DEPLOY or EXTERNAL.
-	Controller         string
-	ClusterProviders   []string
-	NonProduction      bool // the effective tag's non-production flag
-	TerminalSessions7d int  // sessions opened through Harbormaster since the lookback start
+	Controller       string
+	ClusterProviders []string
+	NonProduction    bool // the effective tag's non-production flag
+	// TagExplicit is true when the service or its cluster has a tag; false when the tag is only the Dev fallback.
+	TagExplicit bool
+	// SpotWeightZero is true when the strategy lists FARGATE_SPOT with weight 0, which places no task on Spot.
+	SpotWeightZero     bool
+	TerminalSessions7d int // sessions opened through Harbormaster since the lookback start
 	// ExpectedStops7d counts the service's deployment and scale-in stops since the lookback start; KilledStops7d
 	// counts those that ended in exit 137, a container that did not stop within its stop timeout.
 	ExpectedStops7d, KilledStops7d int
@@ -72,6 +76,10 @@ func (s *Store) AnalyticsCostServices(ctx context.Context, f TargetFilter, vis V
 		     where o.account_id = s.account_id and o.region = s.region and o.cluster_name = s.cluster_name
 		       and o.service_name = s.service_name and o.source = 'harbormaster' and o.details ->> 'op' = 'terminal'
 		       and o.ts >= `+sinceArg+`),
+		   (`+v.TagExplicit+`),
+		   exists (select 1 from jsonb_array_elements(
+		     case when jsonb_typeof(s.raw -> 'CapacityProviderStrategy') = 'array' then s.raw -> 'CapacityProviderStrategy' else '[]'::jsonb end) e
+		     where e ->> 'CapacityProvider' = 'FARGATE_SPOT' and coalesce((e ->> 'Weight')::int, 0) = 0),
 		   stops.expected, stops.killed,
 		   (select max((e ->> 'StopTimeout')::int) from jsonb_array_elements(
 		     case when jsonb_typeof(td.raw -> 'ContainerDefinitions') = 'array' then td.raw -> 'ContainerDefinitions' else '[]'::jsonb end) e)
@@ -110,7 +118,7 @@ func (s *Store) AnalyticsCostServices(ctx context.Context, f TargetFilter, vis V
 			&fact.CPUUnits, &fact.MemoryMiB, &fact.RequiresFargate, &fact.Architecture, &fact.OSFamily,
 			&fact.ContainerDefinitions, &fact.UsedCPUUnits, &fact.UsedMemMiB, &fact.HistoryDays, &fact.LatestDay,
 			&fact.AutoScaled, &fact.RecentOOM, &fact.Desired, &fact.LaunchType, &fact.StrategyProviders, &fact.Controller,
-			&fact.ClusterProviders, &fact.NonProduction, &fact.TerminalSessions7d, &fact.ExpectedStops7d, &fact.KilledStops7d,
+			&fact.ClusterProviders, &fact.NonProduction, &fact.TerminalSessions7d, &fact.TagExplicit, &fact.SpotWeightZero, &fact.ExpectedStops7d, &fact.KilledStops7d,
 			&fact.StopTimeoutSeconds); err != nil {
 			return nil, fmt.Errorf("scan cost service: %w", err)
 		}

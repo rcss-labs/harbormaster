@@ -124,7 +124,8 @@ describe('Fargate Spot panel', () => {
     ['single_task', 'Runs 1 task; Spot needs at least 2'],
     ['not_fargate', 'Not on Fargate'],
     ['windows', 'Windows tasks cannot run on Fargate Spot'],
-    ['no_price', 'No Spot price for this region'],
+    ['no_price', 'Cannot be priced: no list or Spot price for this region, or the task size is not a plain number'],
+    ['untagged', 'Untagged, so it counts as production. Give it a tag marked non-production in Admin, Tags.'],
     ['not_running', 'No running on-demand tasks'],
     ['custom_capacity', 'Uses a capacity provider Harbormaster does not edit'],
   ] as const)('explains the %s status', async (status, text) => {
@@ -164,6 +165,29 @@ describe('Fargate Spot panel', () => {
     expect(rightsizing.getByRole('checkbox', { name: 'Select payments-api' })).not.toBeChecked()
     expect(spot.getByRole('checkbox', { name: 'Select report-worker' })).toBeChecked()
     expect(spot.getByRole('checkbox', { name: 'Select catalog-api' })).not.toBeChecked()
+  })
+
+  it('keeps a choice when a refetch changes the caution of the row', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const spot = await spotPanel(ANALYTICS_COST, queryClient)
+    // catalog-api starts ticked; the user unticks it. report-worker starts unticked; the user leaves it.
+    await userEvent.click(spot.getByRole('checkbox', { name: 'Select catalog-api' }))
+    expect(spot.getByRole('checkbox', { name: 'Select catalog-api' })).not.toBeChecked()
+
+    // A new poll finds a terminal session on catalog-api (caution) and none on report-worker: the defaults flip.
+    const flipped = withSpot(ANALYTICS_COST.spot.services.map((svc) => (svc.service === 'catalog-api' ? { ...svc, caution: true } : svc.service === 'report-worker' ? { ...svc, caution: false } : svc)))
+    server.use(http.get('/api/analytics/cost', () => HttpResponse.json(flipped)))
+    await queryClient.invalidateQueries({ queryKey: ['analytics'] })
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0))
+    expect(spot.getByRole('checkbox', { name: 'Select catalog-api' })).not.toBeChecked() // still the user's choice
+    expect(spot.getByRole('checkbox', { name: 'Select report-worker' })).toBeChecked() // untouched, so it follows the new default
+
+    // The choice sticks the other way round too.
+    await userEvent.click(spot.getByRole('checkbox', { name: 'Select catalog-api' }))
+    server.use(http.get('/api/analytics/cost', () => HttpResponse.json(ANALYTICS_COST)))
+    await queryClient.invalidateQueries({ queryKey: ['analytics'] })
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0))
+    expect(spot.getByRole('checkbox', { name: 'Select catalog-api' })).toBeChecked()
   })
 
   it('does not add the savings of different advisors together', async () => {

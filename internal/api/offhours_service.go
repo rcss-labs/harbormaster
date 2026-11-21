@@ -99,21 +99,56 @@ func (s *Server) unenrolledState(ctx context.Context, key model.ServiceKey, desi
 // alwaysOnMonthly prices tasks running all month, or nil when the service has no Fargate price (EC2, external,
 // unknown size, a region or architecture without a rate).
 func alwaysOnMonthly(m store.OffHoursMatch, tasks int) *float64 {
-	class := cost.Classify(m.CapacityProvider, m.LaunchType, m.CPU, m.Memory)
-	if class != cost.OnDemand && class != cost.Spot {
-		return nil
-	}
-	rate, ok := cost.RateForClass(m.Key.Region, m.Architecture, class)
-	if !ok {
-		return nil
-	}
 	cpu, cpuErr := strconv.Atoi(m.CPU)
 	memory, memoryErr := strconv.Atoi(m.Memory)
 	if cpuErr != nil || memoryErr != nil {
 		return nil
 	}
-	monthly := float64(tasks) * rate.Monthly(cpu, memory)
+	// A mixed strategy (an on-demand base and Spot above it) is priced per provider, not by its first item.
+	var monthly float64
+	for provider, count := range splitByStrategy(m, tasks) {
+		class := cost.Classify(provider, m.LaunchType, m.CPU, m.Memory)
+		if class != cost.OnDemand && class != cost.Spot {
+			return nil
+		}
+		rate, ok := cost.RateForClass(m.Key.Region, m.Architecture, class)
+		if !ok {
+			return nil
+		}
+		monthly += float64(count) * rate.Monthly(cpu, memory)
+	}
 	return &monthly
+}
+
+// splitByStrategy says how many of tasks run on each capacity provider: the base of each item first, in order, then the
+// rest by weight (each task to the provider furthest below its share). A service without a strategy has one provider.
+func splitByStrategy(m store.OffHoursMatch, tasks int) map[string]int {
+	if len(m.Strategy) == 0 {
+		return map[string]int{m.CapacityProvider: tasks}
+	}
+	placed := map[string]int{}
+	left := tasks
+	for _, item := range m.Strategy {
+		take := min(item.Base, left)
+		placed[item.Provider] += take
+		left -= take
+	}
+	for ; left > 0; left-- {
+		best, bestRatio := "", 0.0
+		for _, item := range m.Strategy {
+			if item.Weight <= 0 {
+				continue
+			}
+			if ratio := float64(placed[item.Provider]) / float64(item.Weight); best == "" || ratio < bestRatio {
+				best, bestRatio = item.Provider, ratio
+			}
+		}
+		if best == "" { // every weight is 0: nothing says where the rest goes, so price them with the first provider
+			best = m.Strategy[0].Provider
+		}
+		placed[best]++
+	}
+	return placed
 }
 
 // savingOf is the part of an always-on cost that sleeping saves.

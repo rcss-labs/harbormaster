@@ -33,6 +33,7 @@ func TestEvaluateSpot_GateOrder(t *testing.T) {
 		{"foreign controller", func(in *SpotInput) { in.ControllerSupported = false }, SpotUnsupportedController},
 		{"custom provider", func(in *SpotInput) { in.LaunchType = ""; in.Strategy = []string{"FARGATE", "my-asg"} }, SpotCustomCapacity},
 		{"already on Spot", func(in *SpotInput) { in.LaunchType = ""; in.Strategy = []string{"FARGATE", "FARGATE_SPOT"} }, SpotAlreadySpot},
+		{"untagged, only the Dev fallback", func(in *SpotInput) { in.Untagged = true }, SpotUntagged},
 		{"production tag", func(in *SpotInput) { in.NonProduction = false }, SpotProduction},
 		{"single task", func(in *SpotInput) { in.Desired = 1; in.OnDemandTasks = 1 }, SpotSingleTask},
 		{"cluster without Spot", func(in *SpotInput) { in.ClusterHasSpot = false }, SpotNoClusterSpot},
@@ -59,6 +60,31 @@ func TestEvaluateSpot_ServiceEntirelyOnSpotIsAlreadySpot(t *testing.T) {
 	}
 }
 
+func TestEvaluateSpot_SpotEntryWithWeightZeroIsNotAlreadySpot(t *testing.T) {
+	in := candidateInput()
+	in.LaunchType = ""
+	in.Strategy = []string{"FARGATE", "FARGATE_SPOT"}
+	in.SpotWeightZero = true
+	if got := EvaluateSpot(in).Status; got != SpotCandidate {
+		t.Fatalf("status = %q, want candidate: a Spot entry with weight 0 places nothing on Spot", got)
+	}
+}
+
+func TestEvaluateSpot_SavingNeverCountsMoreTasksThanRun(t *testing.T) {
+	// Desired 10 but only 2 running (a scale-up in progress, or a service that cannot place its tasks): the saving
+	// is for the two that run, so it cannot exceed what the service is shown to spend.
+	in := candidateInput()
+	in.Desired, in.OnDemandTasks = 10, 2
+	result := EvaluateSpot(in)
+	want := 1 * (18.02 - 6.60)
+	if math.Abs(result.SavingMonthly-want) > 0.01 || result.SpotTasks != 1 {
+		t.Fatalf("saving %.2f with %d Spot tasks, want %.2f and 1", result.SavingMonthly, result.SpotTasks, want)
+	}
+	if spend := 2 * 18.02; result.SavingMonthly > spend {
+		t.Fatalf("saving %.2f exceeds the %.2f the service spends", result.SavingMonthly, spend)
+	}
+}
+
 func TestEvaluateSpot_FirstFailingGateWins(t *testing.T) {
 	in := candidateInput()
 	in.RequiresFargate = false
@@ -72,6 +98,18 @@ func TestEvaluateSpot_FirstFailingGateWins(t *testing.T) {
 	in.ClusterHasSpot = false
 	if got := EvaluateSpot(in).Status; got != SpotProduction {
 		t.Fatalf("status = %q, want production before the cluster check", got)
+	}
+}
+
+func TestEvaluateSpot_UntaggedServiceIsNotACandidateButAnExplicitDevTagIs(t *testing.T) {
+	in := candidateInput()
+	in.Untagged = true // the Dev tag is non-production, but this service only fell back to it
+	if got := EvaluateSpot(in); got.Status != SpotUntagged || got.SavingMonthly != 0 || got.SpotTasks != 0 {
+		t.Fatalf("result = %+v, want untagged with no proposal", got)
+	}
+	in.Untagged = false // explicitly tagged Dev, which an admin marked non-production
+	if got := EvaluateSpot(in).Status; got != SpotCandidate {
+		t.Fatalf("status = %q, want candidate", got)
 	}
 }
 

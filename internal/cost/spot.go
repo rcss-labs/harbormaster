@@ -9,6 +9,7 @@ const (
 	SpotCandidate             SpotStatus = "candidate"
 	SpotNoClusterSpot         SpotStatus = "no_cluster_spot"
 	SpotProduction            SpotStatus = "production"
+	SpotUntagged              SpotStatus = "untagged"
 	SpotSingleTask            SpotStatus = "single_task"
 	SpotAlreadySpot           SpotStatus = "already_spot"
 	SpotCustomCapacity        SpotStatus = "custom_capacity"
@@ -50,6 +51,12 @@ type SpotInput struct {
 	UnpricedTasks                  int
 	CPUUnits, MemoryMiB            int
 	NonProduction, ClusterHasSpot  bool
+	// Untagged is true when the service has no tag of its own and neither does its cluster, so it only falls back to
+	// the built-in Dev tag. That fallback is not a decision anyone made, so it never makes a service a candidate.
+	Untagged bool
+	// SpotWeightZero is true when the strategy lists FARGATE_SPOT with weight 0: it places no task on Spot, so the
+	// service is not already on Spot.
+	SpotWeightZero                 bool
 	TerminalSessions7d             int
 	ExpectedStops7d, KilledStops7d int  // deployment and scale-in stops; killed is exit 137 among them
 	StopTimeoutSeconds             *int // highest container stopTimeout; nil = the default. Information only.
@@ -78,7 +85,8 @@ func EvaluateSpot(in SpotInput) SpotResult {
 	list, _ := RateFor(in.Region, in.Architecture)
 	spot, _ := SpotRateFor(in.Region, in.Architecture)
 	result.OnDemandBase = SpotOnDemandBase
-	result.SpotTasks = in.Desired - SpotOnDemandBase
+	// Only tasks that run can move: with desired 10 and 2 running the saving is for the two, never above the spend shown.
+	result.SpotTasks = max(0, min(in.Desired, in.OnDemandTasks)-SpotOnDemandBase)
 	result.SavingMonthly = float64(result.SpotTasks) * (list.Monthly(in.CPUUnits, in.MemoryMiB) - spot.Monthly(in.CPUUnits, in.MemoryMiB))
 	return result
 }
@@ -99,7 +107,7 @@ func gateSpot(in SpotInput) SpotStatus {
 	}
 	// A service already on Spot has no running on-demand task, so this gate comes before the running check: "already uses
 	// Fargate Spot" is the true reason, "no running on-demand tasks" would hide it.
-	if slices.Contains(in.Strategy, "FARGATE_SPOT") {
+	if slices.Contains(in.Strategy, "FARGATE_SPOT") && !in.SpotWeightZero {
 		return SpotAlreadySpot
 	}
 	if in.OnDemandTasks == 0 {
@@ -110,6 +118,9 @@ func gateSpot(in SpotInput) SpotStatus {
 	}
 	if slices.ContainsFunc(in.Strategy, func(provider string) bool { return provider != "FARGATE" && provider != "FARGATE_SPOT" }) {
 		return SpotCustomCapacity
+	}
+	if in.Untagged {
+		return SpotUntagged
 	}
 	if !in.NonProduction {
 		return SpotProduction

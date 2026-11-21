@@ -386,6 +386,7 @@ export type CostSpotStatus =
   | 'no_price'
   | 'windows'
   | 'not_fargate'
+  | 'untagged'
 
 /** What the last 7 days of deployment and scale-in stops say about stopping on SIGTERM. */
 export type CostStopEvidence = 'graceful' | 'killed' | 'unknown'

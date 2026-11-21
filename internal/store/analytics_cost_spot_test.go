@@ -118,6 +118,24 @@ func TestAnalyticsCostServices_SpotFacts(t *testing.T) {
 	if !facts["batch"].NonProduction {
 		t.Error("batch falls back to the built-in Dev tag, which starts non-production")
 	}
+	// Only an explicit tag, the service's own or its cluster's, is a decision; the Dev fallback is not.
+	if !got.TagExplicit || !ledger.TagExplicit || facts["batch"].TagExplicit {
+		t.Errorf("tag explicit payments/ledger/batch = %v/%v/%v, want true/true/false (batch is untagged)", got.TagExplicit, ledger.TagExplicit, facts["batch"].TagExplicit)
+	}
+	if got.SpotWeightZero {
+		t.Error("payments has FARGATE_SPOT with weight 1, not 0")
+	}
+}
+
+func TestAnalyticsCostServices_SpotEntryWithWeightZeroIsFlagged(t *testing.T) {
+	fx := newReliabilityFixture(t)
+	raw := json.RawMessage(`{"CapacityProviderStrategy":[{"CapacityProvider":"FARGATE","Base":0,"Weight":1},{"CapacityProvider":"FARGATE_SPOT","Base":0,"Weight":0}]}`)
+	if _, err := fx.s.UpsertServices(context.Background(), []model.Service{{Key: fx.payments, Desired: 3, Running: 3, Raw: raw, PolledAt: time.Now().UTC()}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := costFacts(t, fx, fx.adminVis)["payments"]; !got.SpotWeightZero {
+		t.Fatalf("payments = %+v, want the zero-weight Spot entry flagged", got)
+	}
 }
 
 func TestAnalyticsCostServices_SpotFactsRespectVisibility(t *testing.T) {

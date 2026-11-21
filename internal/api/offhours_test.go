@@ -383,6 +383,22 @@ func TestOffHours_AlwaysOnUsesSpotRateForSpotServices(t *testing.T) {
 	}
 }
 
+func TestOffHours_AlwaysOnSplitsAMixedStrategyByBaseAndWeight(t *testing.T) {
+	match := store.OffHoursMatch{Key: model.ServiceKey{ClusterKey: model.ClusterKey{Region: "us-east-1"}}, CPU: "512", Memory: "1024"}
+	match.CapacityProvider = "FARGATE" // the first item, which used to price every task
+	match.Strategy = []store.CapacityStrategyItem{{Provider: "FARGATE", Base: 1}, {Provider: "FARGATE_SPOT", Weight: 1}}
+	got := alwaysOnMonthly(match, 3)
+	want := 18.02 + 2*6.60 // one task on demand (the base), the other two on Spot
+	if got == nil || abs(*got-want) > 0.02 {
+		t.Fatalf("always-on = %v, want %.2f: one on-demand task and two Spot tasks, not three on demand", got, want)
+	}
+	// Equal weights without a base split the tasks evenly (the odd one goes to the first provider).
+	match.Strategy = []store.CapacityStrategyItem{{Provider: "FARGATE", Weight: 1}, {Provider: "FARGATE_SPOT", Weight: 1}}
+	if got := alwaysOnMonthly(match, 4); got == nil || abs(*got-(2*18.02+2*6.60)) > 0.02 {
+		t.Fatalf("even split = %v, want %.2f", got, 2*18.02+2*6.60)
+	}
+}
+
 func abs(f float64) float64 {
 	if f < 0 {
 		return -f

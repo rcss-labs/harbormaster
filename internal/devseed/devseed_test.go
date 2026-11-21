@@ -381,7 +381,7 @@ func TestDevseed_SpotDemoHasEveryCase(t *testing.T) {
 			RequiresFargate: fact.RequiresFargate, ControllerSupported: fact.Controller == "ECS",
 			Strategy: fact.StrategyProviders, LaunchType: fact.LaunchType, Desired: fact.Desired, OnDemandTasks: fact.Desired,
 			CPUUnits: valueOr(fact.CPUUnits), MemoryMiB: valueOr(fact.MemoryMiB),
-			NonProduction: fact.NonProduction, ClusterHasSpot: slices.Contains(fact.ClusterProviders, "FARGATE_SPOT"),
+			NonProduction: fact.NonProduction, Untagged: !fact.TagExplicit, ClusterHasSpot: slices.Contains(fact.ClusterProviders, "FARGATE_SPOT"),
 			TerminalSessions7d: fact.TerminalSessions7d, ExpectedStops7d: fact.ExpectedStops7d, KilledStops7d: fact.KilledStops7d,
 		}
 		if onSpot {
@@ -398,8 +398,9 @@ func TestDevseed_SpotDemoHasEveryCase(t *testing.T) {
 		"auth-service":       cost.SpotProduction,
 		"notifications":      cost.SpotAlreadySpot,
 		"cert-renewer":       cost.SpotNotFargate,
-		"report-worker":      cost.SpotSingleTask,
-		"jenkins-controller": cost.SpotSingleTask,
+		"report-worker":      cost.SpotUntagged,
+		"jenkins-controller": cost.SpotUntagged,
+		"api":                cost.SpotSingleTask,
 	}
 	for service, status := range want {
 		if got := verdicts[service].Status; got != status {
