@@ -149,3 +149,33 @@ func TestWritePrometheus_SlowWriterDoesNotBlockRecording(t *testing.T) {
 		t.Fatal("CountAWSCall blocked while a client write was stalled")
 	}
 }
+
+func TestPrometheus_KVSeries(t *testing.T) {
+	r := New()
+	if out := render(t, r); strings.Contains(out, "harbormaster_kv_") {
+		t.Fatalf("kv series must be absent until a store is configured:\n%s", out)
+	}
+	r.SetKVUp(false)
+	r.CountKVError("get")
+	r.CountKVError("get")
+	r.ObserveKVCommand("get", 3*time.Millisecond)
+	r.ObserveKVCommand("get", 400*time.Millisecond)
+	r.SetKVUp(true)
+	out := render(t, r)
+	for _, want := range []string{
+		"# TYPE harbormaster_kv_up gauge",
+		"harbormaster_kv_up 1",
+		"# TYPE harbormaster_kv_errors_total counter",
+		`harbormaster_kv_errors_total{op="get"} 2`,
+		"# TYPE harbormaster_kv_command_duration_seconds histogram",
+		`harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.001"} 0`,
+		`harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.005"} 1`,
+		`harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.25"} 1`,
+		`harbormaster_kv_command_duration_seconds_bucket{op="get",le="+Inf"} 2`,
+		`harbormaster_kv_command_duration_seconds_count{op="get"} 2`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+}

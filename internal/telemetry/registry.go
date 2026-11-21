@@ -11,6 +11,9 @@ import (
 // loopBuckets are the upper bounds (seconds) of the poll loop histogram.
 var loopBuckets = []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
 
+// kvBuckets are the upper bounds (seconds) of the Valkey/Redis command histogram: 1, 5, 25, 100 and 250 ms.
+var kvBuckets = []float64{0.001, 0.005, 0.025, 0.1, 0.25}
+
 const keySep = "|"
 
 type histogram struct {
@@ -33,6 +36,10 @@ type Registry struct {
 	idle             bool
 	buildVersion     string
 	buildInfoSet     bool
+	kvUp             bool
+	kvUpSet          bool
+	kvErrors         map[string]uint64
+	kvDuration       map[string]*histogram
 }
 
 // Default is the process-wide registry.
@@ -48,6 +55,8 @@ func New() *Registry {
 		snapshotRows:     map[string]uint64{},
 		registryRequests: map[string]uint64{},
 		notifyCounts:     map[string]uint64{},
+		kvErrors:         map[string]uint64{},
+		kvDuration:       map[string]*histogram{},
 	}
 }
 
@@ -141,6 +150,44 @@ func (r *Registry) SetBuildInfo(version string) {
 	defer r.mu.Unlock()
 	r.buildVersion = version
 	r.buildInfoSet = true
+}
+
+// SetKVUp records whether the Valkey/Redis store is reachable. The kv series appear once it has been called, so an
+// install without a store exposes none of them.
+func (r *Registry) SetKVUp(up bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.kvUp = up
+	r.kvUpSet = true
+}
+
+// CountKVError records one failed store command; op is the lower-case command name.
+func (r *Registry) CountKVError(op string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.kvErrors[op]++
+}
+
+// ObserveKVCommand records how long one store command took.
+func (r *Registry) ObserveKVCommand(op string, d time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.kvDuration[op]
+	if h == nil {
+		h = &histogram{buckets: make([]uint64, len(kvBuckets)+1)}
+		r.kvDuration[op] = h
+	}
+	secs := d.Seconds()
+	idx := len(kvBuckets)
+	for i, upper := range kvBuckets {
+		if secs <= upper {
+			idx = i
+			break
+		}
+	}
+	h.buckets[idx]++
+	h.sum += secs
+	h.count++
 }
 
 // Snapshot is a copy of selected registry state for tests and the soak test.
