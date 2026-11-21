@@ -4,6 +4,7 @@ import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { Toggle } from '../../../components/Toggle'
 import stepperStyles from '../HeaderActions.module.css'
+import { CapacityFields } from './CapacityFields'
 import { isValidDesiredCount, type ServiceDraft } from './serviceDraft'
 import styles from './editors.module.css'
 
@@ -13,6 +14,8 @@ interface ServicePanelProps {
   onChange: (draft: ServiceDraft) => void
   /** Name of the service's tag, for the "You need Operate on ..." lock titles. */
   tagName: string
+  /** Name of the service's cluster, for the message about a cluster without FARGATE_SPOT. */
+  clusterName?: string
   /** The image scanning setting, which saves at once and so is not part of the draft. Absent when the panel is shown without it. */
   scanSetting?: ReactNode
 }
@@ -35,7 +38,7 @@ function LockedToggle({ lock, ...props }: { lock?: string; checked: boolean; onC
 }
 
 /** Desired count, ECS Exec, rollout safety and force-new-deployment, edited as a draft (nothing is sent from here). */
-export function ServicePanel({ settings, draft, onChange, tagName, scanSetting }: ServicePanelProps) {
+export function ServicePanel({ settings, draft, onChange, tagName, clusterName = 'This cluster', scanSetting }: ServicePanelProps) {
   const update = (patch: Partial<ServiceDraft>) => onChange({ ...draft, ...patch })
   const operateLock = settings.can.operate ? undefined : `You need Operate on ${tagName}`
   const deployLock = settings.can.deploy ? undefined : `You need Deploy on ${tagName}`
@@ -162,6 +165,8 @@ export function ServicePanel({ settings, draft, onChange, tagName, scanSetting }
             <p className={styles.error}>Maximum percent must be between 100 and 200.</p>
           )}
         </div>
+
+        <CapacityFields settings={settings} draft={draft.capacity} onChange={(capacity) => update({ capacity })} tagName={tagName} clusterName={clusterName} />
 
         <div className={styles.group}>
           <LockedToggle lock={operateLock} checked={draft.forceNewDeployment} onChange={(checked) => update({ forceNewDeployment: checked })}>

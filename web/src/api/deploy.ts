@@ -131,6 +131,8 @@ export interface ChangeSetRequest {
     deployment_configuration?: DeploymentConfigurationDTO
     health_check_grace_period_seconds?: number
     force_new_deployment?: boolean
+    /** Replaces the strategy (or launch type). Absent leaves it alone; the server refuses an empty list. */
+    capacity_provider_strategy?: CapacityItem[]
   }
   scaling?: {
     target?: { min: number; max: number }

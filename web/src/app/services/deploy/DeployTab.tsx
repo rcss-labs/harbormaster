@@ -29,9 +29,10 @@ import { TaskSizePanel } from './TaskSizePanel'
 import { buildChangeSetRequest, buildRetryRequest, countSections, pendingRows, scalingLines, serviceRows, type ChangeSections } from './changeSummary'
 import { definitionErrors, isDefinitionChanged, setTaskSize } from './draft'
 import { rebaseScalingDraft, rebaseServiceDraft } from './rebase'
+import { CAPACITY_PARAMS, parseCapacityParams, spotReason } from './capacityParams'
 import { parseRightsizeParams, RIGHTSIZE_PARAMS, rightsizeReason } from './rightsizeParams'
 import { scalingDraftErrors, scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
-import { serviceDraftErrors, serviceDraftFromSettings, serviceDraftToChange, type ServiceDraft } from './serviceDraft'
+import { capacityChanged, serviceDraftErrors, serviceDraftFromSettings, serviceDraftToChange, spotCapacityDraft, type ServiceDraft } from './serviceDraft'
 import { scanGateOf, useGatedSubmit } from './useGatedSubmit'
 import styles from './DeployTab.module.css'
 
@@ -116,7 +117,16 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const suggestedDefinition = suggested && liveDefinition ? setTaskSize(liveDefinition, suggested) : undefined
   // Null until the user edits: the draft then follows the current task definition (including a refetch after a write).
   const definitionDraft = editedDefinition ?? preloaded ?? suggestedDefinition ?? liveDefinition
-  const serviceDraft = settings ? (editedService ?? serviceDraftFromSettings(settings)) : null
+  // A Fargate Spot suggestion from the Cost tab (?capacity=spot) starts the capacity of the service draft. It is ignored without
+  // Deploy, when the service's capacity cannot be edited and when the cluster has no FARGATE_SPOT: the server would refuse it.
+  const capacityParams = parseCapacityParams(searchParams)
+  const capacitySuggestion =
+    capacityParams !== null && settings !== undefined && settings.can.deploy && settings.capacity.editable && settings.capacity.cluster_providers.includes('FARGATE_SPOT')
+      ? spotCapacityDraft(capacityParams.onDemandBase)
+      : null
+  const serviceDraft = settings
+    ? (editedService ?? (capacitySuggestion ? { ...serviceDraftFromSettings(settings), capacity: capacitySuggestion } : serviceDraftFromSettings(settings)))
+    : null
   const scalingDraft = settings ? (editedScaling ?? scalingDraftFromSettings(settings)) : null
   const tagName = service.data?.tag.name ?? 'this service'
   const serviceName = service.data?.name ?? 'this service'
@@ -126,7 +136,12 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     suggested !== null && liveDefinition !== undefined && definitionDraft !== undefined &&
     String(definitionDraft.cpu) === suggested.cpu && String(definitionDraft.memory) === suggested.memory &&
     isDefinitionChanged(setTaskSize(liveDefinition, suggested), liveDefinition)
-  const shownReason = reason ?? (suggested && suggestionHolds ? rightsizeReason(suggested.headroomPct) : '')
+  // Likewise the Spot reason, while the capacity draft still holds the suggested strategy.
+  const capacityHolds =
+    capacityParams !== null && capacitySuggestion !== null && settings !== undefined && serviceDraft !== null &&
+    JSON.stringify(serviceDraft.capacity) === JSON.stringify(capacitySuggestion) && capacityChanged(settings, capacitySuggestion)
+  const suggestedReasons = [suggested && suggestionHolds ? rightsizeReason(suggested.headroomPct) : '', capacityParams && capacityHolds ? spotReason(capacityParams.onDemandBase) : '']
+  const shownReason = reason ?? suggestedReasons.filter(Boolean).join('; ')
   // A revision (rollback) is never blocked by the client-side container floor check.
   const definitionProblems = definitionDraft ? definitionErrors(definitionDraft, revisionParam === null ? liveDefinition : undefined) : []
   const oomHint = definitionDraft
@@ -164,7 +179,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     }
 
   const clearPresetParams = () => {
-    const presets = ['revision', ...RIGHTSIZE_PARAMS]
+    const presets = ['revision', ...RIGHTSIZE_PARAMS, ...CAPACITY_PARAMS]
     if (presets.some((name) => searchParams.has(name))) setSearchParams((previous) => { presets.forEach((name) => previous.delete(name)); return previous }, { replace: true })
   }
 
@@ -246,6 +261,16 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   // Without the deployed revision there is nothing to guard the change set with, so Review waits for it.
   const reviewable = (changes > 0 || partial !== null) && problems.length === 0 && deployedRevision !== undefined
 
+  // What the Cost tab suggested and the draft holds: a task size, a Fargate Spot strategy, or both.
+  const suggestionNotes = [
+    suggested && suggestedDefinition && liveDefinition
+      ? isDefinitionChanged(suggestedDefinition, liveDefinition) ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.'
+      : '',
+    capacityParams && capacitySuggestion && settings
+      ? capacityChanged(settings, capacitySuggestion) ? `Fargate Spot with ${capacityParams.onDemandBase} on-demand is suggested from Cost` : 'This service already uses this capacity strategy.'
+      : '',
+  ].filter(Boolean)
+
   const asideProps = {
     count: changes,
     rows,
@@ -256,12 +281,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
           dismissLabel: `Dismiss :${revisionParam}`,
           onDismiss: clearPresetParams,
         }
-      : suggested && suggestedDefinition && liveDefinition
-        ? {
-            text: isDefinitionChanged(suggestedDefinition, liveDefinition) ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.',
-            dismissLabel: 'Dismiss suggestion',
-            onDismiss: clearPresetParams,
-          }
+      : suggestionNotes.length > 0
+        ? { text: suggestionNotes.join(' · '), dismissLabel: 'Dismiss suggestion', onDismiss: clearPresetParams }
         : undefined,
     discardDisabled: changes === 0 && partial === null,
     reviewDisabled: !reviewable,
@@ -350,6 +371,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
                 draft={serviceDraft}
                 onChange={edit(setEditedService)}
                 tagName={tagName}
+                clusterName={service.data?.cluster.name}
                 scanSetting={<ScanSettingToggle serviceId={serviceId} serviceName={serviceName} tagName={tagName} />}
               />
               <ScalingPanel

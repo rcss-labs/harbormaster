@@ -11,7 +11,8 @@ export function rebaseServiceDraft(draft: ServiceDraft, before: DeploySettingsRe
   const next = serviceDraftFromSettings(after)
   const rebased: Record<string, unknown> = { ...draft }
   for (const key of Object.keys(old) as (keyof ServiceDraft)[]) {
-    if (draft[key] === old[key]) rebased[key] = next[key]
+    // The capacity is an object, so it is compared by value.
+    if (JSON.stringify(draft[key]) === JSON.stringify(old[key])) rebased[key] = next[key]
   }
   return rebased as unknown as ServiceDraft
 }

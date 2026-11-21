@@ -2,7 +2,7 @@ import type { ChangeSetRequest, ChangeSetResponse, DeploySettingsResponse } from
 import { containersOf, imageTagOf, type Definition } from '../task-definition/mainContainer'
 import { containerNames, readArgv, readEnvironment, readHealthCheck, readSecrets, type HealthCheck } from './draft'
 import type { ScalingChange } from './scalingDraft'
-import type { ServiceChange } from './serviceDraft'
+import { describeLiveCapacity, describeStrategy, type ServiceChange } from './serviceDraft'
 import { plural } from './format'
 
 /** What the change set does to the task definition: register the edited draft, or roll out an already registered revision. */
@@ -93,6 +93,9 @@ export function serviceRows(settings: DeploySettingsResponse, change: ServiceCha
   if (change.health_check_grace_period_seconds !== undefined) {
     const before = settings.health_check_grace_period_seconds
     rows.push({ label: 'Health check grace period', before: before === null ? 'none' : `${before} s`, after: `${change.health_check_grace_period_seconds} s` })
+  }
+  if (change.capacity_provider_strategy) {
+    rows.push({ label: 'Capacity providers', before: describeLiveCapacity(settings), after: describeStrategy(change.capacity_provider_strategy) })
   }
   if (change.force_new_deployment) rows.push({ label: 'Restart tasks', before: 'no', after: 'yes' })
   return rows
