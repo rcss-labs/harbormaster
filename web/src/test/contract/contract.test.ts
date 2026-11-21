@@ -87,6 +87,22 @@ import {
   LOG_SEARCH_SERVICES,
   SAVED_LOG_SEARCHES,
 } from '../logSearchFixtures'
+import {
+  NOTIFICATION_DELIVERIES,
+  NOTIFICATION_DELIVERIES_EMPTY,
+  NOTIFICATION_DELIVERY_TEST,
+  NOTIFICATION_SUMMARY,
+  NOTIFICATION_PREVIEW,
+  NOTIFICATION_PREVIEW_EMPTY,
+  NOTIFICATION_PREVIEW_GROUPS,
+  NOTIFICATION_PREVIEW_WEBHOOK,
+  NOTIFICATION_ROUTES,
+  NOTIFICATION_ROUTES_EMPTY,
+  NOTIFICATION_TARGETS,
+  ROUTE_CATCH_ALL,
+  ROUTE_RESIZER_TELEGRAM,
+  ROUTE_WEBHOOK_SIGNED,
+} from '../notificationsFixtures'
 import { CONFIG_SEARCH_EMPTY, CONFIG_SEARCH_NODE, CONFIG_SEARCH_TRUNCATED, CONFIG_SEARCH_UNINDEXED } from '../configSearchFixtures'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
@@ -244,6 +260,28 @@ describe('API contract', () => {
     expect(shapeProblems(LOG_ERRORS_OK, contract.timelineLogErrors, 'log errors ok')).toEqual([])
     expect(shapeProblems(LOG_ERRORS_UNAVAILABLE, contract.timelineLogErrors, 'log errors unavailable')).toEqual([])
     expect(shapeProblems(LOG_ERRORS_NO_LOGS, contract.timelineLogErrors, 'log errors no logs')).toEqual([])
+  })
+
+  it('the notification fixtures match the backend shape', () => {
+    const cases: [string, unknown, string][] = [
+      ['routes', NOTIFICATION_ROUTES, 'notificationRoutes'],
+      ['no routes', NOTIFICATION_ROUTES_EMPTY, 'notificationRoutes'],
+      ['telegram route', ROUTE_RESIZER_TELEGRAM, 'notificationRoute'],
+      ['catch-all route', ROUTE_CATCH_ALL, 'notificationRoute'],
+      ['webhook route with a missing selector', ROUTE_WEBHOOK_SIGNED, 'notificationRoute'],
+      ['preview', NOTIFICATION_PREVIEW, 'notificationPreview'],
+      ['empty preview', NOTIFICATION_PREVIEW_EMPTY, 'notificationPreview'],
+      ['webhook preview', NOTIFICATION_PREVIEW_WEBHOOK, 'notificationPreview'],
+      ['group preview', NOTIFICATION_PREVIEW_GROUPS, 'notificationPreview'],
+      ['test delivery', NOTIFICATION_DELIVERY_TEST, 'notificationDelivery'],
+      ['targets', NOTIFICATION_TARGETS, 'notificationTargets'],
+      ['deliveries', NOTIFICATION_DELIVERIES, 'notificationDeliveries'],
+      ['no deliveries', NOTIFICATION_DELIVERIES_EMPTY, 'notificationDeliveries'],
+      ['summary', NOTIFICATION_SUMMARY, 'notificationSummary'],
+    ]
+    for (const [name, value, shape] of cases) {
+      expect(shapeProblems(value, contract[shape], name), name).toEqual([])
+    }
   })
 
   it('the off-hours fixtures match the backend shape', () => {

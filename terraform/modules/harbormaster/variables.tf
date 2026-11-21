@@ -103,6 +103,12 @@ variable "bootstrap_admin_password_secret_arn" {
   default     = null
 }
 
+variable "smtp_password_secret_arn" {
+  description = "Optional Secrets Manager ARN holding the SMTP password for email notifications. When set it is injected as HM_SMTP_PASSWORD (a container secret, never plain text) and the execution role may read exactly this secret. The other HM_SMTP_* values go through extra_env."
+  type        = string
+  default     = null
+}
+
 variable "enable_metrics" {
   description = "Create the metrics token secret and inject HM_METRICS_TOKEN."
   type        = bool
@@ -120,8 +126,8 @@ variable "extra_env" {
   }
 
   validation {
-    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
-    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY or HM_METRICS_TOKEN (the module injects them from Secrets Manager), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
+    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_SMTP_PASSWORD", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
+    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY, HM_METRICS_TOKEN or HM_SMTP_PASSWORD (the module injects them from Secrets Manager), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
   }
 
   validation {

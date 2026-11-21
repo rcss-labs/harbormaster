@@ -42,12 +42,26 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('Only global admins create tags and assign them.')).toBeInTheDocument()
   })
 
-  it('has a Single sign-on tab after Off-hours', async () => {
+  it('non-admins see the admin-only sentence on the Notifications tab', async () => {
+    server.use(http.get('/api/me', () => HttpResponse.json(ME_OMER)))
+    renderApp('/settings/notifications')
+    expect(await screen.findByText('Only admins can manage notification routes.')).toBeInTheDocument()
+  })
+
+  it('shows the Notifications tab after Off-hours', async () => {
+    renderApp('/settings/notifications')
+    expect(await screen.findByRole('link', { name: 'Notifications' })).toBeInTheDocument()
+    expect(location()).toHaveTextContent('/settings/notifications')
+    const labels = screen.getAllByRole('link').map((link) => link.textContent)
+    expect(labels.indexOf('Notifications')).toBe(labels.indexOf('Off-hours') + 1)
+  })
+
+  it('has a Single sign-on tab after Notifications', async () => {
     renderApp('/settings/sso')
     expect(await screen.findByRole('link', { name: 'Single sign-on' })).toBeInTheDocument()
     expect(location()).toHaveTextContent('/settings/sso')
     const labels = screen.getAllByRole('link').map((link) => link.textContent)
-    expect(labels.indexOf('Single sign-on')).toBe(labels.indexOf('Off-hours') + 1)
+    expect(labels.indexOf('Single sign-on')).toBe(labels.indexOf('Notifications') + 1)
   })
 
   it('tabs switch content', async () => {

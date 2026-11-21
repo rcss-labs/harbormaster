@@ -16,7 +16,10 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/execbridge"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
+	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
+	"github.com/rcss-labs/harbormaster/internal/safedial"
+	"github.com/rcss-labs/harbormaster/internal/secretbox"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 	"github.com/rcss-labs/harbormaster/internal/web"
@@ -88,6 +91,17 @@ type Server struct {
 	// KickOffHours wakes the off-hours reconciler after a schedule change; nil is a no-op. Like Scan it reaches only
 	// the reconciler in this process, so on another task a change waits at most HM_OFFHOURS_INTERVAL.
 	KickOffHours func()
+	// FakeNotify is the in-process notification receiver, mounted at /fake-notify/ when non-nil; only fake AWS mode sets it.
+	FakeNotify http.Handler
+	// Notify sends the test message and validates destinations; New builds it from Cfg when nil.
+	Notify *notify.Senders
+	// NotifyBox seals and opens route secrets; New builds it from Cfg.SessionKey when nil, and it stays nil without a key.
+	NotifyBox *secretbox.Box
+	// KickNotify wakes the notification dispatcher after a route change; nil is a no-op. Like KickOffHours it reaches
+	// only the dispatcher in this process, so on another task a change waits at most HM_NOTIFY_INTERVAL.
+	KickNotify func()
+	// notifyTestBucket limits the Send test button per user.
+	notifyTestBucket *ipBucket
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
 }
@@ -131,6 +145,16 @@ func New(s Server) *Server {
 	}
 	if s.searchBucket == nil {
 		s.searchBucket = newIPBucket(searchBucketCapacity, searchBucketRefillPerSecond, s.Now)
+	}
+	if s.Notify == nil {
+		s.Notify = &notify.Senders{BaseURL: s.Cfg.BaseURL, SMTP: s.Cfg.Notify.SMTP,
+			Guard: safedial.Policy{AllowedPrivate: s.Cfg.Notify.AllowedPrivateCIDRs}, Log: s.Log}
+	}
+	if s.NotifyBox == nil && s.Cfg.SessionKey != "" {
+		s.NotifyBox, _ = secretbox.New(s.Cfg.SessionKey, secretbox.PurposeNotifySecret)
+	}
+	if s.notifyTestBucket == nil {
+		s.notifyTestBucket = newIPBucket(notifyTestBucketCapacity, notifyTestBucketRefillPerSecond, s.Now)
 	}
 	// plan 06
 	if s.Telemetry == nil {
@@ -219,6 +243,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	if s.FakeIdP != nil {
 		mux.Handle("/fake-idp/", s.FakeIdP)
 	}
+	if s.FakeNotify != nil {
+		mux.Handle("/fake-notify/", s.FakeNotify)
+	}
 	s.handle(mux, "POST /api/auth/logout", s.logout, routeOptions{})
 	s.handle(mux, "POST /api/auth/password", s.changePassword, routeOptions{})
 	s.handle(mux, "GET /api/me", s.me, routeOptions{})
@@ -272,13 +299,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/settings", s.getSettings, routeOptions{})
 	s.handle(mux, "PUT /api/settings", s.putSettings, routeOptions{Admin: true})
 	s.observeRoutes(mux)
-	s.networkRoutes(mux)   // plan 05
-	s.storageRoutes(mux)   // plan 05
-	s.analyticsRoutes(mux) // analytics
-	s.securityRoutes(mux)  // image security
-	s.timelineRoutes(mux)  // service timeline
-	s.offHoursRoutes(mux)  // off-hours schedules
-	s.logSearchRoutes(mux) // cross-service log search
+	s.networkRoutes(mux)      // plan 05
+	s.storageRoutes(mux)      // plan 05
+	s.analyticsRoutes(mux)    // analytics
+	s.securityRoutes(mux)     // image security
+	s.timelineRoutes(mux)     // service timeline
+	s.offHoursRoutes(mux)     // off-hours schedules
+	s.logSearchRoutes(mux)    // cross-service log search
+	s.notificationRoutes(mux) // alert notifications
 
 	s.configSearchRoutes(mux) // estate-wide config search
 

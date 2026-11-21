@@ -31,6 +31,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 - [Tags](screens/tags.png): the tags that drive permissions
 - [AWS accounts](screens/aws-accounts.png): connected accounts, their regions and connection status
 - [Audit log](screens/audit-log.png): sign-ins and changes made in Harbormaster
+- Notifications (`/settings/notifications`): routes that send failure alerts to Slack, Telegram, PagerDuty, a webhook or email, and the delivery log; see Alert notifications below
 
 ## How it runs
 
@@ -205,6 +206,59 @@ An off-hours schedule puts the ECS services that carry an AWS tag to sleep on a 
 
 Daylight saving: an action at an hour that does not exist or repeats follows AWS's timezone handling, and the reconciler repairs the result after the grace period.
 
+## Alert notifications
+
+Harbormaster can send the failure alerts it already shows to Slack, Telegram, PagerDuty, a webhook or email. It is under **Settings > Notifications** (`/settings/notifications`, global admin only). Alert derivation is unchanged: notifications read the same alerts as the Overview.
+
+### What is sent and when
+
+- **Opened**: when a failure alert opens.
+- **Update**: for a cluster or account entry, when more services fail or the severity rises (see Scope). Nothing is sent when it gets better.
+- **Repeat**: while it stays open, at the route's repeat interval (`Do not repeat`, 30 minutes or 2 hours). A repeat lists the current services.
+- **Resolved**: when it has been gone for 2 minutes (a flap shorter than that is one incident), if the route has `Notify when resolved` and its opened message was delivered.
+
+A failure is any of the seven alert types a route can choose: service failing, service degraded, restart loop, unhealthy tasks or targets, deployment failed, cannot place tasks and account unreachable. A deployment in progress, a service scaled to zero and scaling in are not failures and raise no alert. `info` alerts are never sent.
+
+### Destinations
+
+One route is one channel. For two Slack channels or two Telegram chats, add two routes.
+
+- **Slack**: paste an incoming webhook URL (`https://hooks.slack.com/...`) from a Slack app. It posts to the channel that webhook belongs to.
+- **Telegram**: create a bot with BotFather and paste its token, add the bot to the chat (for a channel, make it an administrator), and enter the chat ID (a number, negative for groups and channels, or `@channelname`). For a group topic, enter its topic ID. To find a chat ID, send the bot a message and open `https://api.telegram.org/bot<token>/getUpdates`, or forward a message to a bot such as `@userinfobot`. Messages use HTML formatting with every alert text escaped.
+- **PagerDuty**: paste an Events API v2 integration key and pick the US or EU region. Opened and updates trigger an incident, resolved resolves it, and the dedup key keeps one incident per alert.
+- **Webhook**: Harbormaster POSTs one JSON object per notification (`event`, `scope`, `severity`, `title`, `text`, `service`, `cluster`, `account_id`, `region`, `url`, and for a cluster or account entry `threshold`, `failing`, `total` and `services`). An optional signing secret adds `X-Harbormaster-Signature: sha256=<HMAC of the body>`. `X-Harbormaster-Delivery` is a stable id for each delivery.
+- **Email**: set `HM_SMTP_HOST` (and `HM_SMTP_FROM`, `HM_SMTP_USERNAME`, `HM_SMTP_PASSWORD`; see Configuration). STARTTLS is required unless `HM_SMTP_TLS=implicit`. Without `HM_SMTP_HOST` the Email option is disabled.
+
+### Scope: services and tags, clusters and accounts
+
+`Send alerts from` is a list of entries; an alert goes to the route when any entry takes it. An empty list is every failure, everywhere.
+
+- **Service and tag entries** (an AWS tag `key=value` or a Harbormaster tag) send **one notification for each failure alert** of those services.
+- **Cluster and account entries** (an account for all regions or for one region) carry a number N (default 1) and send **one aggregated notification when N or more of their services are failing**. It lists up to 10 failing services with their most severe alert. Failing services are counted once however many alerts they have, and only alerts that pass the route's severity and alert types count. A third service failing sends one update; a recovery that stays at or above N sends nothing; below N it resolves. An unreachable account opens an account entry whatever N is.
+
+Two routes are independent. With cluster A holding three services and only service 2 failing: a route on cluster A with N=1 plus a route on service 2 send two notifications (one aggregate, one for the alert), and with N=2 on the cluster only the service route sends one, until a second service fails.
+
+A cluster, service or account that no longer exists keeps its entry, marked `No longer exists`; it matches nothing until it is removed or comes back. A route whose every entry is gone shows `Matches nothing`. A cluster or account can appear once per route.
+
+**Catch-all.** `Only when no other route matches` makes a route a safety net: it gets an alert only when no other enabled, non-catch-all route notifies about it (per alert, or inside an open aggregate). A cluster below its threshold covers nothing. A catch-all that already opened an alert keeps repeating it if a specific route starts covering it later, which can send one extra message rather than miss one.
+
+### Scaling is not a failure
+
+A service scaled up from zero is `failing`, and a scale-out is `degraded`, until the new tasks run (the off-hours wake does this every morning). `HM_NOTIFY_SETTLE` (default 3 minutes) makes `service_failing` and `service_degraded` wait that long before they are notified or counted toward a threshold. Restart loops, failed deployments and the other kinds notify at once. The trade-off: a service that is simply down is reported up to 3 minutes late through those two kinds (a crashing service usually also raises a restart loop at once). Set it to `0` to notify immediately.
+
+### Quiet hours, the delivery log and retries
+
+`Hold warnings 22:00-08:00` holds warnings in the route's time zone and sends them at 08:00 if the alert is still open; critical alerts are never held, and a warning that resolves overnight is never sent. Every delivery is recorded in the **Delivery log** (kept 30 days, `HM_RETENTION_NOTIFICATION_LOG`): three attempts (at once, after 30 seconds, after 2 minutes, honouring `Retry-After`), then `Failed`, which you can retry from the log. `Send test` sends one message from the task serving the request. A route whose last three deliveries all failed shows a warning on Settings.
+
+### Security and limits
+
+- **Secrets** (webhook and Slack URLs, routing keys, bot tokens, signing secrets) are sealed in the database under `HM_SESSION_KEY` and are write-only: they are never returned by the API or written to logs, audit rows or delivery notes. Rotating `HM_SESSION_KEY` makes stored route secrets unreadable; the routes show `Enter the destination again.` and their deliveries fail until you do.
+- **Outbound policy.** Destinations must be `https` and are checked when connecting, not only when saved: public addresses only. Loopback, link-local (including the metadata endpoint) and other special ranges are never allowed, nothing follows redirects, and no proxy is used. To reach an internal receiver, list its private range in `HM_NOTIFY_ALLOWED_PRIVATE_CIDRS`. The task needs a route to the internet for Slack, Telegram and PagerDuty (`api.telegram.org`).
+- Delivery is at-least-once: a crash between sending and recording can send one message twice. PagerDuty dedupes by key and webhook receivers get a stable `X-Harbormaster-Delivery`.
+- At most 50 routes, 100 scope entries and 10 email addresses per route.
+- **Detection follows the poller.** Alerts are derived on the poller's schedule, so with idle mode (`HM_POLL_IDLE_INTERVAL`, 5 minutes by default) a night-time alert can be up to that late. Set `HM_POLL_IDLE_AFTER=0` to turn idle mode off if that matters more than the polling cost.
+- `make run` (fake AWS) seeds demo routes and delivers to an in-process receiver; open `/fake-notify/received` to see what was sent. `HM_FAKE_NOTIFY_DEMO=false` turns the demo routes off.
+
 ## Log search
 
 The **Log search** page (`/logs`, under Insights in the navigation; under More on a phone) runs one CloudWatch Logs Insights query over the logs of up to 20 services at once, for a range of 15 minutes, 1 hour, 24 hours or a custom range of up to 7 days. Results show the matching lines, hits over time and hits by service. Selecting a line opens that service's Logs tab at that second (`Showing logs up to`). Times are in your browser's time zone. Saved queries are kept per user. A search URL fills in the form but never runs it.
@@ -322,6 +376,15 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen) for this long puts the poller in idle mode. `0` disables idle mode |
 | `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
+| `HM_NOTIFY_INTERVAL` | `10s` | How often the leader plans and sends alert notifications. Minimum 1s |
+| `HM_NOTIFY_SETTLE` | `3m` | How long a service must stay failing or degraded before it is notified or counted toward a threshold, so scale-ups and the off-hours wake do not notify. `0` disables the wait. At most 30m |
+| `HM_NOTIFY_ALLOWED_PRIVATE_CIDRS` | none | Comma-separated private ranges (inside 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 or fc00::/7) that notification destinations may reach, for example an internal webhook receiver. Public destinations need no setting; loopback, link-local and metadata addresses are never allowed |
+| `HM_SMTP_HOST` | none | Mail server for email notifications. Email routes are unavailable until it is set |
+| `HM_SMTP_PORT` | `587` | Mail server port |
+| `HM_SMTP_TLS` | `starttls` | `starttls` (the server must offer it) or `implicit` (TLS from the first byte, usually port 465) |
+| `HM_SMTP_USERNAME`, `HM_SMTP_PASSWORD` | none | Mail server login; set both or neither. On AWS the Terraform module injects the password from Secrets Manager (`smtp_password_secret_arn`) |
+| `HM_SMTP_FROM` | none | Sender address, required with `HM_SMTP_HOST` (for example `Harbormaster <harbormaster@example.com>`) |
+| `HM_FAKE_NOTIFY_DEMO` | `true` | `--fake-aws` only: seed demo notification routes that deliver to the built-in fake receiver |
 | `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled; applies only when the demo schedule is first seeded, not to an existing one |
 
 ### Retention
@@ -340,6 +403,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_RETENTION_UTIL_DAILY` | `2160h` | How long daily service utilisation rollups are kept |
 | `HM_RETENTION_SCAN_IMAGES` | `168h` | How long a scan result is kept after the image was last requested |
 | `HM_RETENTION_SCAN_RUNS` | `720h` | How long image scan run records are kept |
+| `HM_RETENTION_NOTIFICATION_LOG` | `720h` | How long the notification delivery log and resolved alert incidents are kept |
 
 ### Image security
 
@@ -511,6 +575,8 @@ The service is designed to run with desired count 1 or more (design spec §4.3):
 - All other state (sessions, snapshots, permissions) is in Postgres, so any task can serve any API request.
 - Terminal and live-log WebSockets are served by whichever task receives the connection, so the ALB needs no stickiness.
 
+- **Notifications** are planned and sent by the poller leader only, so a failover never sends twice. `Send test` and a retry are handled by the task that serves the request.
+
 The module runs desired count 1 by default, with deployment settings that allow a short overlap; the lock makes overlap safe. `HM_EXEC_MAX_SESSIONS_PER_USER` is enforced per task, so with more than one task a user can open up to the limit on each.
 
 ### Throttling and stale banners
@@ -562,6 +628,7 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 - Server-side authorization on every endpoint and every WebSocket; list endpoints filter by visibility; IDs of invisible resources return 404, not 403.
 - Secrets (DB password, signing key) only from Secrets Manager; never logged. Environment variable values from task definitions are shown to users with View (they are visible in the ECS console to the same people); values from `secrets` (SSM/Secrets Manager references) are shown as references only, never resolved. The Deploy tab's secrets editor writes references only; Harbormaster never reads secret values, so the access role needs no secret-read permission. The task's execution role does need `secretsmanager:GetSecretValue`, `ssm:GetParameters` and `kms:Decrypt` for the secrets a container uses.
 - Security headers: CSP (self + fonts), HSTS, `X-Frame-Options: DENY`.
+- Notification routes are global-admin only. Their secrets are sealed under `HM_SESSION_KEY`, write-only and never logged. Outbound notification requests go only to `https` destinations on public addresses (plus the ranges in `HM_NOTIFY_ALLOWED_PRIVATE_CIDRS`), checked at connect time, with no redirects and no proxy. Email is the one exception to the outbound guard: Harbormaster connects directly to the SMTP server named by `HM_SMTP_HOST`, which only the operator sets (an admin cannot choose it), so it may be an internal mail relay.
 - Single sign-on accepts only assertions signed by a configured IdP certificate and addressed to this Harbormaster. Unsigned responses and responses to sign-ins Harbormaster did not start are rejected.
 - Each sign-in request is single use and expires after `HM_SAML_REQUEST_TTL`. Assertion and response IDs are recorded, so a captured response cannot be replayed. A binding cookie must match the request, so a response from another browser is refused.
 - The SP private key is stored encrypted in the database under `HM_SESSION_KEY`. SAML messages, certificate PEM and private keys are never written to logs. Audit entries carry fingerprints and field names only.

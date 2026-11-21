@@ -46,6 +46,11 @@ const serverEnv = {
   // Off-hours: the demo staging schedule is off so the wall clock cannot put staging to sleep under the read-only specs.
   HM_FAKE_OFFHOURS_DEMO: 'false',
   HM_OFFHOURS_INTERVAL: '2s', // the reconciler picks up a schedule change within seconds
+  // Notifications: the demo routes are off so only the specs' own routes send; the dispatcher cycles every 2s; and the
+  // settle time is 0 so the seeded failures notify at once (the wait is covered by unit tests).
+  HM_FAKE_NOTIFY_DEMO: 'false',
+  HM_NOTIFY_INTERVAL: '2s',
+  HM_NOTIFY_SETTLE: '0s',
 }
 
 export default defineConfig({

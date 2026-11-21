@@ -58,7 +58,12 @@ type Config struct {
 	Scan *scanjob.Runner
 	// OffHours reconciles off-hours scheduled actions and capacity; nil leaves it off. It runs only while this instance leads.
 	OffHours *offhours.Reconciler
+	// Notify plans and sends alert notifications; nil leaves it off. It runs only while this instance leads.
+	Notify Runner
 }
+
+// Runner is a leader-only background loop that runs until its context is cancelled.
+type Runner interface{ Run(context.Context) }
 
 // ConfigFrom derives the poller configuration from the server configuration.
 func ConfigFrom(c config.Config) Config {
@@ -92,6 +97,7 @@ func ConfigFrom(c config.Config) Config {
 			AvailabilityDaily: c.Retention.AvailabilityDaily,
 			CapacityDaily:     c.Retention.CapacityDaily,
 			UtilDaily:         c.Retention.UtilDaily,
+			NotificationLog:   c.Retention.NotificationLog,
 		},
 		AnalyticsUtil:   c.Analytics.Util,
 		StartStagger:    defaultStartStagger,

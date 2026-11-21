@@ -46,6 +46,8 @@ type RetentionConfig struct {
 	// Image scan results and the runs that produced them.
 	ScanImages time.Duration
 	ScanRuns   time.Duration
+	// Alert notification delivery log and resolved incidents.
+	NotificationLog time.Duration
 }
 
 // AnalyticsConfig toggles optional analytics collection.
@@ -103,6 +105,7 @@ type Config struct {
 	Retention               RetentionConfig
 	Scan                    ScanConfig
 	OffHours                OffHoursConfig
+	Notify                  NotifyConfig
 	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
@@ -250,6 +253,7 @@ func Load(getenv func(string) string) (Config, error) {
 			UtilDaily:         reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
 			ScanImages:        reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
 			ScanRuns:          reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
+			NotificationLog:   reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
 		},
 		Scan: ScanConfig{
 			Enabled:           reader.boolean("HM_SCAN_ENABLED", false),
@@ -271,6 +275,7 @@ func Load(getenv func(string) string) (Config, error) {
 			Interval: reader.duration("HM_OFFHOURS_INTERVAL", 60*time.Second),
 			FakeDemo: reader.boolean("HM_FAKE_OFFHOURS_DEMO", true),
 		},
+		Notify:               readNotify(reader),
 		Analytics:            AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault:      reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:          reader.integer("HM_PAGE_SIZE_MAX", 500),
@@ -323,6 +328,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.OffHours.Interval < time.Second {
 		return Config{}, errors.New("HM_OFFHOURS_INTERVAL: must be at least 1s")
+	}
+	if err := validateNotify(cfg.Notify); err != nil {
+		return Config{}, err
 	}
 	if err := validateScan(cfg.Scan); err != nil {
 		return Config{}, err

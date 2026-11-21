@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link, Navigate } from 'react-router'
 import { useAuthOptions, useClusters } from '../../api/hooks'
+import { useNotificationSummary } from '../../api/notifications'
 import { Icon } from '../../components/Icon'
 import type { IconName } from '../../components/icons'
 import { Pill } from '../../components/Pill'
@@ -81,6 +82,7 @@ export function MorePage() {
   const toast = useToast()
   const { toggleRail } = useShellState()
   const counts = useShellCounts()
+  const notifications = useNotificationSummary(me?.admin ?? false)
   const authOptions = useAuthOptions()
   const allClusters = useClusters()
   const { pins, remove, move } = usePins()
@@ -147,6 +149,12 @@ export function MorePage() {
           />
           <Row icon="user" label="Users & permissions" to="/settings/users" />
           <Row icon="tag" label="Tags" to="/settings/tags" />
+          <Row
+            icon="bell"
+            label="Notifications"
+            to="/settings/notifications"
+            right={(notifications.data?.failing_routes ?? 0) > 0 ? <Pill kind="warn">{`${notifications.data?.failing_routes} failing`}</Pill> : undefined}
+          />
           <Row icon="shield" label="Single sign-on" to="/settings/sso" right={authOptions.data ? (sso?.enabled ? 'On' : 'Off') : undefined} />
           <Row icon="history" label="Audit log" to="/settings/audit" />
         </Panel>
