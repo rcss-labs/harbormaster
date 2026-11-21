@@ -116,6 +116,8 @@ Harbormaster reads and changes resources in other accounts by assuming a role in
 
 Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, change auto scaling or alarms, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
 
+Roles created before `ecr:BatchGetImage` was added to `harbormaster-access` cannot read image manifests. The ARM64 (Graviton) advisor shows a per-account message for them, and nothing else is affected, until the access module is re-applied in that account.
+
 Roles created before the Logs Insights actions were added to `harbormaster-access` lack `logs:StartQuery`, `logs:GetQueryResults` and `logs:StopQuery`. Log search shows a message for that account until the access module is re-applied in it; the rest of Harbormaster works without the re-apply.
 
 ### Same account
@@ -172,7 +174,7 @@ The per-service setting is stored in Harbormaster's database, keyed by account, 
 
 Terraform details, variables and the full permission tables are in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md#image-scanning) and [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md#image-scanning). Configuration variables are under Configuration > Image security.
 
-**Permissions, in short.** In the Harbormaster account, the server task role starts and stops the scanner task, passes its two roles, and reads and writes the scan bucket (it also writes the vulnerability database there). In each connected account, the `harbormaster-scan` role lets only the scanner task role pull images from ECR; resolving a tag to a digest uses the existing `ecr:DescribeImages` of `harbormaster-access`, which `read_only` keeps. `harbormaster-access` is not widened.
+**Permissions, in short.** In the Harbormaster account, the server task role starts and stops the scanner task, passes its two roles, and reads and writes the scan bucket (it also writes the vulnerability database there). In each connected account, the `harbormaster-scan` role lets only the scanner task role pull images from ECR; resolving a tag to a digest uses the existing `ecr:DescribeImages` of `harbormaster-access`, which `read_only` keeps. `harbormaster-access` now also reads image manifests (`ecr:BatchGetImage`, to see which CPU architectures an image supports); it still cannot pull layers.
 
 **Network.** The scanner reaches ECR, S3 and STS over 443 through NAT. The server reaches `grype.anchore.io` only for an on-demand vulnerability data refresh.
 
