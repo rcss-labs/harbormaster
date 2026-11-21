@@ -954,3 +954,53 @@ func TestDeployByRevision_FailedActiveDeploymentOfANeverRunRevisionIsGated(t *te
 
 	wantGate(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision, "interrupt": true}))
 }
+
+// armPlatform is the runtime platform of an ARM64 Linux definition: the same image string is a different image there.
+func armPlatform() map[string]any {
+	return map[string]any{"cpuArchitecture": "ARM64", "operatingSystemFamily": "LINUX"}
+}
+
+func TestScanGate_ArchitectureChangeRejudgesAllImages(t *testing.T) {
+	env := newSecurityEnv(t)
+	def, revision := definitionOf(t, env.dana, edgeNginxKey)
+	def["runtimePlatform"] = armPlatform() // every image string is unchanged from the base revision
+
+	rows := wantGate(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", gateBody(revision, def, nil)))
+	if row, ok := rows["edge-nginx"]; !ok || row.State == gateStatePass {
+		t.Fatalf("rows = %+v, want the unchanged container judged again and not passed until scanned or acknowledged", rows)
+	}
+	if env.fk.Calls()["RegisterTaskDefinition"] != 0 {
+		t.Fatal("a task definition was registered while the gate paused the apply")
+	}
+}
+
+func TestScanGate_SamePlatformStillJudgesOnlyChangedImages(t *testing.T) {
+	env := newSecurityEnv(t)
+	env.setting(t, stagingAPIKey, true)
+
+	rows := wantGate(t, applyImages(t, env.dana, stagingAPIKey, nil, "api", ecrImage(stagingAPIKey, "api", "1.19.1-rc.2")))
+	if len(rows) != 1 || rows["api"].State == "" {
+		t.Fatalf("rows = %+v, want only the changed container while the platform is the same", rows)
+	}
+}
+
+func TestRevisionGate_ArchitectureChangeRejudgesAllImages(t *testing.T) {
+	env := newSecurityEnv(t)
+	env.setting(t, edgeNginxKey, false)
+	editor := env.addUser(t, "editor", map[string]authz.ActionSet{"Dev": authz.ActionSet(authz.View | authz.Edit)})
+	def, base := definitionOf(t, editor, edgeNginxKey)
+	def["runtimePlatform"] = armPlatform() // a never-run revision with the running image strings and another architecture
+	out := wantApplied(t, editor.post("/api/services/"+edgeNginxKey.ID()+"/changeset", gateBody(base, def, nil)))
+	if out.Status != "registered_only" || out.RegisteredRevision == nil {
+		t.Fatalf("registration = %+v, want registered_only", out)
+	}
+	env.setting(t, edgeNginxKey, true)
+
+	rows := wantGate(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/changeset", deployRevisionBody(base, *out.RegisteredRevision, nil)))
+	if row, ok := rows["edge-nginx"]; !ok || row.State == gateStatePass {
+		t.Fatalf("rows = %+v, want the container judged again for the new architecture", rows)
+	}
+	if env.fk.Calls()["UpdateService"] != 0 {
+		t.Fatal("the service was updated while the gate paused the deploy")
+	}
+}
