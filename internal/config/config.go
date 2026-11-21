@@ -150,6 +150,11 @@ type Config struct {
 
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
+
+	// Role selects which parts this process runs (HM_ROLE, default all). The serve flag --role overrides it.
+	Role Role
+	// DBMaxConns caps the database pool (HM_DB_MAX_CONNS); 0 means the role's default (see PoolSize).
+	DBMaxConns int
 }
 
 // KVConfig holds the shared store settings. The URL can carry a password, so
@@ -341,6 +346,18 @@ func Load(getenv func(string) string) (Config, error) {
 
 	if reader.err != nil {
 		return Config{}, reader.err
+	}
+	role, err := ParseRole(reader.text("HM_ROLE", ""))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Role = role
+	cfg.DBMaxConns = reader.integer("HM_DB_MAX_CONNS", 0)
+	if reader.err != nil {
+		return Config{}, reader.err
+	}
+	if cfg.DBMaxConns != 0 && cfg.DBMaxConns < minDBMaxConns {
+		return Config{}, errors.New("HM_DB_MAX_CONNS: must be 0 (the role's default) or at least 3")
 	}
 	if cfg.MaxDesiredCount < 1 {
 		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
