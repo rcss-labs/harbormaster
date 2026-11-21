@@ -165,6 +165,8 @@ func contractShapes() map[string]any {
 		"logSearchResult":   shapeOf(reflect.TypeFor[LogSearchResultDTO]()),
 		"logSearchEstimate": shapeOf(reflect.TypeFor[LogSearchEstimateDTO]()),
 		"logSearchSaved":    shapeOf(reflect.TypeFor[ListResponse[SavedLogSearchDTO]]()),
+		// config search
+		"configSearch": shapeOf(reflect.TypeFor[ConfigSearchResponse]()),
 	}
 }
 

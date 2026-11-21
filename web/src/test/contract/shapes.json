@@ -1291,6 +1291,65 @@
       }
     }
   },
+  "configSearch": {
+    "items": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "cluster": {
+          "id": "string",
+          "name": "string"
+        },
+        "containers": [
+          {
+            "base_image": "string",
+            "env_names": [
+              "string"
+            ],
+            "image": "string",
+            "log_group": "string",
+            "name": "string",
+            "ports": [
+              "number"
+            ],
+            "secret_names": [
+              "string"
+            ],
+            "tag": "string"
+          }
+        ],
+        "execution_role": "string",
+        "family": "string",
+        "id": "string",
+        "matched_revision": "number",
+        "matches": [
+          {
+            "container": "string",
+            "field": "string",
+            "value": "string"
+          }
+        ],
+        "name": "string",
+        "previous": "boolean",
+        "region": "string",
+        "revision": "number",
+        "tag": {
+          "color": "string",
+          "id": "number",
+          "inherited": "boolean",
+          "name": "string"
+        },
+        "tag_inherited": "boolean",
+        "task_role": "string"
+      }
+    ],
+    "polled_at": "time",
+    "query": "string",
+    "searched": "number",
+    "total": "number",
+    "truncated": "boolean",
+    "unindexed": "number"
+  },
   "createUser": {
     "temporary_password": "string",
     "user": {

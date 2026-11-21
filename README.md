@@ -18,6 +18,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 - [Service scaling](screens/service-scaling.png): desired count and a read-only auto scaling summary; edited on the Deploy tab
 - [Service logs](screens/service-logs.png): CloudWatch log history and live tail
 - Log search (`/logs`): one CloudWatch Logs Insights query across the logs of several services; see Log search below
+- Config search (`/config`): find services by image, base image, environment variable or secret name, port, role or log group; see Config search below
 - [Service terminal](screens/service-terminal.png): an interactive shell in a running task through ECS Exec
 - [Service operations log](screens/service-operations-log.png): who changed or opened what, and when
 - Image security (`/security`): the images someone asked to scan, their open findings by severity, how fresh the vulnerability data is, and risk acceptances; see Image security below
@@ -217,6 +218,32 @@ The **Log search** page (`/logs`, under Insights in the navigation; under More o
 - **Cost.** Logs Insights charges $0.005 per GB scanned (GB = 2^30 bytes). A new search starts on a 1 hour range. Before you run, the page shows a rough guide (`store about X GB, about $Y`): the stored size of the selected log groups from `DescribeLogGroups`, counted once per group, for every service you can search and no others. It is not a bound: it covers all the logs the groups retain, not only the time range, but it is the compressed size while Insights bills uncompressed bytes. Log groups whose size cannot be read are listed as not counted. The scan limit below is the hard guard. While a search runs, Harbormaster stops every query with `StopQuery` once the search has scanned more than `HM_LOG_SEARCH_MAX_GB` (default 10 GB, `0` means no limit, shared across all the accounts and regions of one search) and returns the rows found so far, marked as partial; when the estimate is already above the limit the page warns that the search will stop at it. After each run it shows the bytes scanned and the cost; a search stopped at the limit may scan somewhat more than the limit, because CloudWatch reports progress only when polled (about once a second).
 - **Audit.** Every run is written to the audit log as `log_search` with the query text. It is not written to the operations log. Query text can contain identifiers, so it is kept for `HM_RETENTION_AUDIT_LOG`.
 - **Under `make run`.** The fake AWS supports `filter @message like /regex/`, `like "text"`, `not like` and `limit`. Other allowed commands are accepted and ignored.
+
+## Config search
+
+The **Config search** page (`/config`, under Insights in the navigation; under More on a phone) answers questions such as "which services still run node:18?" by searching the task definition of every service you can see: image and tag, configured base image, environment variable names, secret names, container ports, task and execution roles and log group. It reads the stored task definitions, so it makes no AWS call and adds no polling. The query lives in the URL, so a shared link shows results.
+
+| Term | Matches |
+|---|---|
+| `image:` | the whole image string (a digest reference is found with `image:sha256:...`) |
+| `tag:` | the image tag |
+| `base:` | the repository's configured base image |
+| `env:` | environment variable names |
+| `secret:` (`secrets:`) | secret names |
+| `port:` (`ports:`) | a container port, exactly (1 to 65535) |
+| `role:` | either role ARN; `taskrole:` (`task-role:`) and `execrole:` (`exec-role:`, `executionrole:`) match one |
+| `loggroup:` (`log:`, `log-group:`) | the awslogs log group |
+| text with no field | any of the above (a number matches a port exactly); never a service, cluster or container name |
+
+Terms are separated by spaces and must all hold for the same service. Text such as `node:18` is free text, because an unknown prefix is never an error. Values match as a case-insensitive substring; wrap one in double quotes (`env:"PORT"`) to match the whole value. A leading `-` excludes (`-secret:API_KEY`). A query can have up to 500 characters and 10 terms, and free text needs at least 2 characters.
+
+- **Permissions.** A service appears only when you can see it, in rows, counts and exports. The shell's account, region and tag filters narrow the search and never widen it. The page says how many services it searched.
+- **Names only.** Environment variable and secret values, and secret references, are never searched, shown, returned or exported: the names are read out of the stored task definition inside Postgres and the values never reach Harbormaster's process on this path.
+- **Base image.** It is the base set for the repository on the Security page. It is empty for images outside ECR and for repositories with no base set, and it is not checked against the image here.
+- **Rollouts.** A service in the middle of a rollout is also matched on the revision that still has running tasks and is labelled `Previous revision :N is still running`.
+- **Limits.** Services only (standalone tasks are not searched). At most 2,000 rows are returned. Services whose task definition is not cached yet are counted and not searched. Names from environment files are not known, since only the task definition is read.
+- **CSV.** Export CSV is built in your browser from the rows shown (or the ticked rows), one line per container, with the columns `service, cluster, account_id, account_name, region, permission_tag, family, revision, matched_revision, previous_revision, container, image, image_tag, base_image, ports, env_names, secret_names, task_role, execution_role, log_group, matched, service_id`. Cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not run them.
+- **Use with scripts and Bulk changes.** `GET /api/config-search?q=` returns stable service `id`s and is evaluated with the caller's permissions each time. Nothing is stored.
 
 ## Terraform and Harbormaster deploys
 

@@ -82,8 +82,9 @@ type serviceSpec struct {
 	public, standalone    bool
 	efs                   *seedEFS
 	env                   []envVar
-	deployingTag          string // a newer revision is rolling out
-	oom                   bool   // tasks are OOM-killed (image-resizer)
+	secrets               []envVar // name and Secrets Manager secret name; the ARN is built from the service's account and region
+	deployingTag          string   // a newer revision is rolling out
+	oom                   bool     // tasks are OOM-killed (image-resizer)
 	unhealthy             int
 	// ecrTagCount, when above 5, gives the repository that many tags.
 	ecrTagCount int
@@ -107,7 +108,8 @@ var seedServices = []serviceSpec{
 	{cluster: "core-services", name: "web-frontend", awsTags: envTags("prod"), desired: 2, running: 2, rev: 87, repo: "web-frontend", tag: "3.4.0", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://payments-api.core.local:8080"}}},
 	{cluster: "core-services", name: "auth-service", awsTags: envTags("prod"), desired: 2, running: 2, rev: 15, repo: "auth-service", tag: "0.9.7", cpu: 256, memory: 512, port: 9000, lb: true, exec: true,
-		env: []envVar{{"TOKEN_TTL", "3600"}, {"ISSUER", "https://auth.rcss.local"}}},
+		env:     []envVar{{"TOKEN_TTL", "3600"}, {"ISSUER", "https://auth.rcss.local"}},
+		secrets: []envVar{{"DATABASE_URL", "prod/auth/database-url"}, {"JWT_SIGNING_KEY", "prod/auth/jwt-signing-key"}}},
 	// notifications is mid-rollout: one task on :10 (PRIMARY), one on :9 (ACTIVE).
 	{cluster: "core-services", name: "notifications", awsTags: envTags("prod"), desired: 2, running: 2, rev: 9, repo: "notifications", tag: "2.2.0", cpu: 256, memory: 512, port: 8081, exec: true, spot: true, deployingTag: "2.3.0",
 		env: []envVar{{"QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/482109375512/notify"}}},
@@ -134,7 +136,8 @@ var seedServices = []serviceSpec{
 		env: []envVar{{"API_URL", "http://api.staging.local:8080"}}},
 	{cluster: "staging-web", name: "api", awsTags: envTags("staging"), desired: 1, running: 1, rev: 21, repo: "api", tag: "1.19.0-rc.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true,
 		ecrSidecar: "migrator", ecrSidecarTag: "1.4.2", ecrSidecarTags: 6, sidecarMemoryReservation: 768,
-		env: []envVar{{"NODE_ENV", "staging"}}},
+		env:     []envVar{{"NODE_ENV", "staging"}},
+		secrets: []envVar{{"DATABASE_URL", "staging/api/database-url"}}},
 }
 
 var standaloneSpecs = []serviceSpec{
@@ -359,6 +362,10 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 	}
 	for _, ev := range sp.env {
 		main.Environment = append(main.Environment, ecstypes.KeyValuePair{Name: aws.String(ev.name), Value: aws.String(ev.value)})
+	}
+	for _, sec := range sp.secrets {
+		arn := "arn:aws:secretsmanager:" + c.region + ":" + c.accountID + ":secret:" + sec.value + "-AbCdEf"
+		main.Secrets = append(main.Secrets, ecstypes.Secret{Name: aws.String(sec.name), ValueFrom: aws.String(arn)})
 	}
 	td := ecstypes.TaskDefinition{
 		Family:                  aws.String(sp.name),
