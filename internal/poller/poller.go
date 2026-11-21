@@ -92,7 +92,10 @@ func ConfigFrom(c config.Config) Config {
 // Poller claims slice leases and runs one polling loop per slice it holds, plus the run-once jobs while it holds the
 // coordinator lease.
 type Poller struct {
+	// store is the concrete store: the lease machinery, the gate's connection and the slice writers come from it. The
+	// polling loops never touch it; they read through reads, which has no write methods.
 	store   *store.Store
+	reads   readStore
 	clients awsx.Clients
 	cfg     Config
 	log     *slog.Logger
@@ -123,7 +126,7 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 		cfg.Telemetry = telemetry.Default
 	}
 	p := &Poller{
-		store: st, clients: clients, cfg: cfg, log: log,
+		store: st, reads: st, clients: clients, cfg: cfg, log: log,
 		lockKey: lease.LegacyLockKey, retryInterval: defaultRetryInterval, timing: lease.DefaultTiming(),
 		idle: newIdleState(), now: time.Now, idleCheckEvery: defaultIdleCheckEvery,
 	}

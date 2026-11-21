@@ -406,14 +406,20 @@ func TestCoordinator_RunsRetention(t *testing.T) {
 	})
 }
 
-// holdFor runs the runner's Hold until the test ends, with a lease the guards can check (a runner with no guarded job
-// never reads it).
+// holdFor runs the runner's Hold until the test ends, under a real coordinator lease (retention checks it).
 func holdFor(t *testing.T, r *coordinator.Runner) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { defer wg.Done(); r.Hold(ctx, store.Lease{Key: store.LeaseKey{Kind: store.LeaseCoordinator}}) }()
+	if err := r.Store.EnsureCoordinatorLease(ctx); err != nil {
+		t.Fatal(err)
+	}
+	l, ok, err := r.Store.ClaimLease(ctx, store.LeaseKey{Kind: store.LeaseCoordinator}, uuid.New(), time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim the coordinator lease: %v %v", ok, err)
+	}
+	go func() { defer wg.Done(); r.Hold(ctx, l) }()
 	t.Cleanup(func() { cancel(); wg.Wait() })
 }
 

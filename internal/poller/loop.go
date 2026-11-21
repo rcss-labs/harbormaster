@@ -101,16 +101,16 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	add(tierRunningTasks, in.RunningTasks, l.syncRunningTasks)
 	add(tierStoppedTasks, in.StoppedTasks, l.syncStoppedTasks)
 	add(tierFullTasks, in.FullTasks, l.syncFullTasks)
-	targetHealth := &TargetHealthLoop{Store: p.store, Writer: w, Clients: p.clients, Every: in.TargetHealth}
+	targetHealth := &TargetHealthLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.TargetHealth}
 	add(tierTargetHealth, in.TargetHealth, l.gated(func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) }))
-	scaling := &ScalingLoop{Store: p.store, Writer: w, Clients: p.clients, Every: in.Scaling}
+	scaling := &ScalingLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Scaling}
 	add(tierScaling, in.Scaling, l.gated(func(ctx context.Context) error { return scaling.Run(ctx, l.target) }))
 	// plan 05
-	network := &NetworkLoop{Store: p.store, Writer: w, Clients: p.clients, Every: in.Network}
+	network := &NetworkLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Network}
 	add(tierNetwork, in.Network, l.gated(func(ctx context.Context) error { return network.Run(ctx, l.target) }))
 	storage := &StorageLoop{Writer: w, Clients: p.clients, Every: in.Storage}
 	add(tierStorage, in.Storage, l.gated(func(ctx context.Context) error { return storage.Run(ctx, l.target) }))
-	alerts := &AlertsLoop{Store: p.store, Writer: w, Every: in.Alerts}
+	alerts := &AlertsLoop{Store: p.reads, Writer: w, Every: in.Alerts}
 	add(tierAlerts, in.Alerts, func(ctx context.Context) error { return alerts.Run(ctx, l.target) })
 	return l
 }
@@ -143,10 +143,13 @@ func PollOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Co
 
 // claimOnce takes the slice's lease for one throwaway owner and returns its writer and a release function.
 func claimOnce(ctx context.Context, st *store.Store, t awsx.Target) (*store.SliceWriter, func(), error) {
-	if err := st.EnsureSliceLease(ctx, t); err != nil {
+	// A claim behind a stuck writer must not hang the caller: give up a little after the store's own deadline.
+	claimCtx, cancel := context.WithTimeout(ctx, store.ClaimDeadline+2*time.Second)
+	defer cancel()
+	if err := st.EnsureSliceLease(claimCtx, t); err != nil {
 		return nil, nil, err
 	}
-	l, ok, err := st.ClaimLease(ctx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: t.AccountID, Region: t.Region}, uuid.New(), time.Minute)
+	l, ok, err := st.ClaimLease(claimCtx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: t.AccountID, Region: t.Region}, uuid.New(), time.Minute)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -720,7 +723,7 @@ func (l *Loop) syncRunningTasks(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		known, err := l.p.store.KnownTaskARNs(ctx, k, "")
+		known, err := l.p.reads.KnownTaskARNs(ctx, k, "")
 		if err != nil {
 			return err
 		}
@@ -758,7 +761,7 @@ func (l *Loop) syncFullTasks(ctx context.Context) error {
 		return err
 	}
 	return l.forEachCluster(ctx, func(ctx context.Context, k model.ClusterKey) error {
-		known, err := l.p.store.KnownTaskARNs(ctx, k, "")
+		known, err := l.p.reads.KnownTaskARNs(ctx, k, "")
 		if err != nil {
 			return err
 		}
@@ -777,7 +780,7 @@ func (l *Loop) syncStoppedTasks(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		stored, err := l.p.store.KnownTaskARNs(ctx, k, "STOPPED")
+		stored, err := l.p.reads.KnownTaskARNs(ctx, k, "STOPPED")
 		if err != nil {
 			return err
 		}
@@ -884,7 +887,7 @@ func (l *Loop) ensureTaskDefinitions(ctx context.Context, api awsx.ECSAPI, arns 
 }
 
 func (l *Loop) cacheTaskDefinition(ctx context.Context, api awsx.ECSAPI, arn string) error {
-	stored, err := l.p.store.HasTaskDefinition(ctx, l.target.AccountID, l.target.Region, arn)
+	stored, err := l.p.reads.HasTaskDefinition(ctx, l.target.AccountID, l.target.Region, arn)
 	if err != nil || stored {
 		return err
 	}

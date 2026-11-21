@@ -78,6 +78,12 @@ func (g *Gate) set(held bool) {
 // opTimeout bounds each per-tick database call so a half-open connection cannot hide the loss of the lock.
 func (g *Gate) opTimeout() time.Duration { return min(g.retry, 3*time.Second) }
 
+// A lost connection (which drops the lock server-side) is noticed at the next retry tick, and the ping that finds it is
+// bounded by min(retry, 3 s): with the default 5 s retry the gate turns off up to 8 s after the loss, during which the
+// manager can still be acting while an old-version task could already hold the key exclusively. The window is accepted:
+// the fenced writes and the coordinator guards still decide what a stale holder can do, and pinging faster would only
+// narrow it.
+//
 // Run takes and keeps the shared lock until ctx ends, then unlocks. Every retry it either tries to take the lock or
 // pings the connection that holds it; a failed ping closes the connection (which drops the lock server-side) and
 // turns Held false.

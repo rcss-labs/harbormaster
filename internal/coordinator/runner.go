@@ -126,14 +126,14 @@ func (r *Runner) Hold(ctx context.Context, l store.Lease) {
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	r.runRollups(ctx)
-	r.runRetention(ctx)
+	r.runRetention(ctx, guard)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			r.runRollups(ctx)
-			r.runRetention(ctx)
+			r.runRetention(ctx, guard)
 		}
 	}
 }
@@ -151,8 +151,15 @@ func (r *Runner) runRollups(ctx context.Context) {
 	r.log().Debug("coordinator: rollups done", "rows", result)
 }
 
-// runRetention marks orphaned tags, then deletes expired rows. Errors are logged, never fatal.
-func (r *Runner) runRetention(ctx context.Context) {
+// runRetention marks orphaned tags, then deletes expired rows. Errors are logged, never fatal. It deletes, so a holder
+// that can no longer confirm the coordinator lease does not run it.
+func (r *Runner) runRetention(ctx context.Context, guard lease.Guard) {
+	if err := guard(ctx); err != nil {
+		if ctx.Err() == nil {
+			r.log().Warn("coordinator: lease not confirmed, skipping retention", "err", err)
+		}
+		return
+	}
 	now := time.Now()
 	if err := r.Store.MarkOrphanedTags(ctx, now); err != nil && ctx.Err() == nil {
 		r.log().Error("coordinator: mark orphaned tags", "err", err)

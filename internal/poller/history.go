@@ -74,7 +74,7 @@ func (l *Loop) recordCounts(ctx context.Context) {
 	if err := l.w.InsertCountsHistory(ctx, now, services); err != nil && ctx.Err() == nil {
 		l.log.Warn("poller: counts history", "err", err)
 	}
-	samples, err := l.p.store.RunningTaskCapacityByCluster(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region})
+	samples, err := l.p.reads.RunningTaskCapacityByCluster(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region})
 	if err == nil {
 		err = l.w.UpsertClusterCapacitySample(ctx, now, samples)
 	}
