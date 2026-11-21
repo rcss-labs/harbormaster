@@ -391,10 +391,13 @@ func (v *Verifier) findings(root *etree.Element, a *crewjam.Assertion, in Verify
 	}
 	*out = view
 
-	if a.Issuer.Value != v.Cfg.IdPEntityID {
+	if view.issuers != 1 {
+		return &finding{reason: ReasonIssuer, detail: "the assertion needs exactly one Issuer"}
+	}
+	if view.issuer != v.Cfg.IdPEntityID {
 		return &finding{reason: ReasonIssuer, shared: true, detail: "assertion issuer"}
 	}
-	if now.After(a.IssueInstant.Add(maxIssueDelay)) {
+	if now.After(view.issueInstant.Add(maxIssueDelay)) {
 		return &finding{reason: ReasonExpired, shared: true, detail: "assertion IssueInstant"}
 	}
 	if view.subjects == 0 || len(view.confirmations) == 0 {

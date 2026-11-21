@@ -21,7 +21,10 @@ const nsXMLEnc = "http://www.w3.org/2001/04/xmlenc#"
 // decision or the resulting identity depends on comes from crewjam's struct;
 // the struct is only compared against this view (see compareWithLibrary).
 type assertionView struct {
-	id string
+	id           string
+	issuers      int
+	issuer       string
+	issueInstant time.Time // zero when absent
 
 	subjects      int
 	nameIDs       int
@@ -106,6 +109,15 @@ func readAssertion(el *etree.Element) (*assertionView, *finding) {
 	}
 	v := &assertionView{}
 	v.id, _ = unprefixedAttr(el, "ID")
+	var err error
+	if v.issueInstant, err = timeAttr(el, "IssueInstant"); err != nil {
+		return malformed("Assertion: %v", err)
+	}
+	issuers := childrenNamed(el, nsAssertion, "Issuer")
+	v.issuers = len(issuers)
+	if len(issuers) == 1 {
+		v.issuer = strings.TrimSpace(charData(issuers[0]))
+	}
 
 	subjects := childrenNamed(el, nsAssertion, "Subject")
 	v.subjects = len(subjects)
@@ -192,6 +204,12 @@ func readAssertion(el *etree.Element) (*assertionView, *finding) {
 func (v *assertionView) compareWithLibrary(a *crewjam.Assertion) string {
 	if v.id != a.ID {
 		return "assertion ID"
+	}
+	if v.issuer != a.Issuer.Value {
+		return "Issuer"
+	}
+	if !v.issueInstant.Equal(a.IssueInstant) {
+		return "IssueInstant"
 	}
 	if (a.Subject == nil) != (v.subjects == 0) {
 		return "Subject"
