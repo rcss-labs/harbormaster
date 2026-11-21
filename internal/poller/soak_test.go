@@ -18,6 +18,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
@@ -89,6 +90,9 @@ func newSoakEnv(t *testing.T, scale fake.Scale) *soakEnv {
 		t.Fatal(err)
 	}
 	env := &soakEnv{st: st, fake: f, estate: estate, cfg: ConfigFrom(appCfg)}
+	// The soak measures normal-pace polling. With no signed-in user the idle monitor would slow every tier to 5 minutes
+	// (idle mode, added after this soak), and the measurements would be of a poller that does nothing.
+	env.cfg.IdleAfter = 0
 	env.cfg.Telemetry = telemetry.New()
 	for _, a := range estate.Accounts {
 		if _, err := st.CreateAccount(context.Background(), store.AWSAccount{
@@ -275,6 +279,8 @@ func TestSoak_DiffWritesNearZeroWhenStatic(t *testing.T) {
 		"scaling": otherTableBudget,
 		// service_counts_history samples every 5 min (HM_POLL_COUNTS_HISTORY), outside this window; allow one sample.
 		"service_counts_history": snapshotRowsAtTargetScale / 4,
+		// each owned slice's lease is renewed every 10 s; allow two spare renewals each.
+		"poll_leases": loops * (int64(window/lease.DefaultTiming().RenewEvery) + 2),
 	}
 	snapshot := map[string]bool{}
 	for _, table := range snapshotTables {
