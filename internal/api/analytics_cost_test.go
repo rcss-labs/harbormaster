@@ -614,6 +614,14 @@ func TestAnalyticsCost_SpotCandidatesRankedBySaving(t *testing.T) {
 	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
 	seedMockupTags(t, st)
 	forceProviders(fk, "FARGATE")
+	// The seeded edge-proxy cluster has no FARGATE_SPOT; give it one so two Dev services qualify and can be ranked.
+	fk.Estate.Mu.Lock()
+	for i := range fk.Estate.Clusters {
+		if aws.ToString(fk.Estate.Clusters[i].Cluster.ClusterName) == "edge-proxy" {
+			fk.Estate.Clusters[i].Cluster.CapacityProviders = []string{"FARGATE", "FARGATE_SPOT"}
+		}
+	}
+	fk.Estate.Mu.Unlock()
 	pollAll(t, st, fk)
 	got := getCost(t, login(t, srv, "sam", testPassword), "")
 

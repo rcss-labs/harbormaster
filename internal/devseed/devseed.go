@@ -35,7 +35,8 @@ var ErrDatabaseNotEmpty = errors.New("database already has users or accounts; re
 // Apply seeds the database, including the demo off-hours schedules and recent analytics history (see
 // SeedAnalyticsHistory). It is idempotent: existing tags, users, accounts, schedules, audit history and daily rows are
 // left alone, so applying twice changes nothing. offHoursDemoEnabled sets whether the staging schedule is enabled.
-// The schedules are seeded here rather than in ForceApply because the API tests call ForceApply and expect no schedules.
+// The schedules, and the terminal session the Fargate Spot advisor shows as a caution, are seeded here rather than in ForceApply
+// because the API tests call ForceApply and expect no schedules and no operations.
 func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool) error {
 	if err := requireSeedable(ctx, st); err != nil {
 		return err
@@ -48,6 +49,13 @@ func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool) error
 		return fmt.Errorf("find seeded admin: %w", err)
 	}
 	if err := seedOffHours(ctx, st, offHoursDemoEnabled, sam.ID); err != nil {
+		return err
+	}
+	dana, err := st.GetUserByUsername(ctx, "dana")
+	if err != nil {
+		return fmt.Errorf("find seeded user dana: %w", err)
+	}
+	if err := seedTerminalSession(ctx, st, fake.MockupEstate(time.Now), dana.ID); err != nil {
 		return err
 	}
 	return SeedAnalyticsHistory(ctx, st, time.Now())
@@ -199,9 +207,6 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		return fmt.Errorf("turn on pre-deploy scan for edge-nginx: %w", err)
 	}
 
-	if err := seedTerminalSession(ctx, st, estate, ids["dana"]); err != nil {
-		return err
-	}
 	return seedAudit(ctx, st, ids["sam"])
 }
 
