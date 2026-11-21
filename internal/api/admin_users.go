@@ -69,7 +69,7 @@ func (s *Server) buildUserDTOs(r *http.Request, users []store.User) ([]UserDTO, 
 		dto.SSO, dto.SSONameID, dto.PendingLinkExpiresAt = ssoState(u, s.Now())
 		for _, t := range tags {
 			if u.Admin || perms[u.ID][t.ID].Has(authz.View) {
-				dto.CanSee = append(dto.CanSee, TagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color})
+				dto.CanSee = append(dto.CanSee, TagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, NonProduction: t.NonProduction})
 			}
 		}
 		out = append(out, dto)

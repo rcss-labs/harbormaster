@@ -26,7 +26,7 @@ func newReliabilityFixture(t *testing.T) reliabilityFixture {
 	t.Helper()
 	s := storetest.Open(t)
 	ctx := context.Background()
-	prod, err := s.CreateTag(ctx, "Prod", "red")
+	prod, err := s.CreateTag(ctx, "Prod", "red", false)
 	if err != nil {
 		t.Fatal(err)
 	}

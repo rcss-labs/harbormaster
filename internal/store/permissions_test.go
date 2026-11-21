@@ -13,7 +13,7 @@ import (
 func TestSetPermission_ZeroDeletes(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	tag, _ := s.CreateTag(ctx, "Prod", "red", false)
 	u, _ := s.CreateUser(ctx, "alice", "h", false, false)
 
 	if err := s.SetPermission(ctx, u.ID, tag.ID, authz.ActionSet(authz.View|authz.Logs)); err != nil {
@@ -48,7 +48,7 @@ func TestSetPermission_ZeroDeletes(t *testing.T) {
 func TestAllPermissionsAndUsersWithView(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	tag, _ := s.CreateTag(ctx, "Prod", "red", false)
 	bob, _ := s.CreateUser(ctx, "bob", "h", false, false)
 	alice, _ := s.CreateUser(ctx, "alice", "h", false, false)
 	_ = s.SetPermission(ctx, bob.ID, tag.ID, authz.ActionSet(authz.View))
@@ -67,7 +67,7 @@ func TestAllPermissionsAndUsersWithView(t *testing.T) {
 func TestLoadSubject_HasPermsAndAdminFlag(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	tag, _ := s.CreateTag(ctx, "Prod", "red", false)
 	u, _ := s.CreateUser(ctx, "alice", "h", true, false)
 	_ = s.SetPermission(ctx, u.ID, tag.ID, authz.ActionSet(authz.View|authz.Operate))
 
@@ -96,7 +96,7 @@ func TestLoadSubject_HasPermsAndAdminFlag(t *testing.T) {
 func TestSetPermission_AcceptRiskBitIsStoredAndOldValuesKeepTheirValue(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	tag, _ := s.CreateTag(ctx, "Prod", "red", false)
 	u, _ := s.CreateUser(ctx, "alice", "h", false, false)
 
 	full := authz.Presets["Full"]

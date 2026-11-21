@@ -19,11 +19,12 @@ export function TagDialog({ existing, onClose }: TagDialogProps) {
   const toast = useToast()
   const [name, setName] = useState(existing?.name ?? '')
   const [color, setColor] = useState<TagColor>(existing?.color ?? 'blue')
+  const [nonProduction, setNonProduction] = useState(existing?.non_production ?? false)
   const [error, setError] = useState('')
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: name.trim(), color }
+      const body = { name: name.trim(), color, non_production: nonProduction }
       return existing ? api.patch<void>(`/api/tags/${existing.id}`, body) : api.post<void>('/api/tags', body)
     },
     onSuccess: () => {
@@ -52,7 +53,7 @@ export function TagDialog({ existing, onClose }: TagDialogProps) {
 
   return (
     <Dialog
-      title={existing ? `Rename tag ${existing.name}` : 'Create tag'}
+      title={existing ? `Edit tag ${existing.name}` : 'Create tag'}
       sub={
         existing
           ? 'Clusters, services and permissions keep pointing at it.'
@@ -76,6 +77,7 @@ export function TagDialog({ existing, onClose }: TagDialogProps) {
           placeholder="QA"
           autoComplete="off"
           value={name}
+          disabled={existing?.builtin}
           onChange={(event) => setName(event.target.value)}
         />
       </label>
@@ -90,6 +92,11 @@ export function TagDialog({ existing, onClose }: TagDialogProps) {
           ))}
         </div>
       </div>
+      <label className={styles.toolbar}>
+        <input type="checkbox" checked={nonProduction} onChange={(event) => setNonProduction(event.target.checked)} />
+        <span>Non-production</span>
+      </label>
+      <p className={styles.hint}>Services under this tag can be suggested for Fargate Spot.</p>
       <div className={styles.err} role="alert">
         {error}
       </div>

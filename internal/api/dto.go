@@ -11,6 +11,8 @@ type TagDTO struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Color string `json:"color"`
+	// NonProduction is the admin flag that makes services under the tag candidates for Fargate Spot.
+	NonProduction bool `json:"non_production"`
 	// Inherited is true when the resource has no tag of its own and shows its parent's (or Dev).
 	Inherited bool `json:"inherited"`
 }

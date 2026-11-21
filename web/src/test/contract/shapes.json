@@ -100,7 +100,8 @@
             "color": "string",
             "id": "number",
             "inherited": "boolean",
-            "name": "string"
+            "name": "string",
+            "non_production": "boolean"
           },
           "tasks": "number",
           "vcpu": "number"
@@ -159,7 +160,8 @@
                 "color": "string",
                 "id": "number",
                 "inherited": "boolean",
-                "name": "string"
+                "name": "string",
+                "non_production": "boolean"
               },
               "used_p95_mem_gib": "number",
               "used_p95_vcpu": "number",
@@ -384,7 +386,8 @@
             "color": "string",
             "id": "number",
             "inherited": "boolean",
-            "name": "string"
+            "name": "string",
+            "non_production": "boolean"
           },
           "tasks": "number"
         }
@@ -564,7 +567,8 @@
             "color": "string",
             "id": "number",
             "inherited": "boolean",
-            "name": "string"
+            "name": "string",
+            "non_production": "boolean"
           }
         }
       ],
@@ -652,7 +656,8 @@
             "color": "string",
             "id": "number",
             "inherited": "boolean",
-            "name": "string"
+            "name": "string",
+            "non_production": "boolean"
           }
         }
       ],
@@ -816,7 +821,8 @@
                 "color": "string",
                 "id": "number",
                 "inherited": "boolean",
-                "name": "string"
+                "name": "string",
+                "non_production": "boolean"
               }
             }
           ],
@@ -850,7 +856,8 @@
             "color": "string",
             "id": "number",
             "inherited": "boolean",
-            "name": "string"
+            "name": "string",
+            "non_production": "boolean"
           },
           "top_reason": {
             "$null": "string"
@@ -1049,7 +1056,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         }
       }
     ],
@@ -1066,7 +1074,8 @@
       "color": "string",
       "id": "number",
       "inherited": "boolean",
-      "name": "string"
+      "name": "string",
+      "non_production": "boolean"
     },
     "tasks_history_72h": [
       {
@@ -1191,7 +1200,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         }
       }
     ],
@@ -1247,7 +1257,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         }
       ],
       "display_name": {
@@ -1663,7 +1674,8 @@
               "color": "string",
               "id": "number",
               "inherited": "boolean",
-              "name": "string"
+              "name": "string",
+              "non_production": "boolean"
             },
             "until": {
               "$null": "time"
@@ -1717,7 +1729,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "until": {
           "$null": "time"
@@ -1758,7 +1771,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "until": {
           "$null": "time"
@@ -1814,7 +1828,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "until": {
           "$null": "time"
@@ -2211,7 +2226,8 @@
               "color": "string",
               "id": "number",
               "inherited": "boolean",
-              "name": "string"
+              "name": "string",
+              "non_production": "boolean"
             },
             "service": "string",
             "service_id": "string",
@@ -2303,7 +2319,8 @@
               "color": "string",
               "id": "number",
               "inherited": "boolean",
-              "name": "string"
+              "name": "string",
+              "non_production": "boolean"
             },
             "service": "string",
             "service_id": "string",
@@ -2419,7 +2436,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "service": "string",
         "service_id": "string",
@@ -2489,7 +2507,8 @@
               "color": "string",
               "id": "number",
               "inherited": "boolean",
-              "name": "string"
+              "name": "string",
+              "non_production": "boolean"
             },
             "service": "string",
             "service_id": "string",
@@ -2652,7 +2671,8 @@
       "color": "string",
       "id": "number",
       "inherited": "boolean",
-      "name": "string"
+      "name": "string",
+      "non_production": "boolean"
     },
     "task_definition": {
       "containers": [
@@ -2841,7 +2861,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "tag_inherited": "boolean"
       }
@@ -3022,7 +3043,8 @@
           "color": "string",
           "id": "number",
           "inherited": "boolean",
-          "name": "string"
+          "name": "string",
+          "non_production": "boolean"
         },
         "id": "string",
         "name": "string",
@@ -3033,7 +3055,8 @@
               "color": "string",
               "id": "number",
               "inherited": "boolean",
-              "name": "string"
+              "name": "string",
+              "non_production": "boolean"
             },
             "id": "string",
             "name": "string",
@@ -3073,6 +3096,7 @@
         "color": "string",
         "id": "number",
         "name": "string",
+        "non_production": "boolean",
         "services_direct": "number",
         "services_effective": "number",
         "users": [
@@ -3131,7 +3155,8 @@
       "color": "string",
       "id": "number",
       "inherited": "boolean",
-      "name": "string"
+      "name": "string",
+      "non_production": "boolean"
     },
     "tags": [
       {
@@ -3376,7 +3401,8 @@
             "color": "string",
             "id": "number",
             "inherited": "boolean",
-            "name": "string"
+            "name": "string",
+            "non_production": "boolean"
           }
         ],
         "display_name": {

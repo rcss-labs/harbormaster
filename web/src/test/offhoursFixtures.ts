@@ -13,9 +13,9 @@ import type {
 } from '../api/offhours'
 
 const NOW = '2026-11-07T21:00:00Z'
-const TAG_STAGING = { id: 2, name: 'Staging', color: 'amber' as const, inherited: false }
-const TAG_PROD = { id: 3, name: 'Prod', color: 'red' as const, inherited: false }
-const TAG_DEV = { id: 1, name: 'Dev', color: 'neutral' as const, inherited: false }
+const TAG_STAGING = { id: 2, name: 'Staging', color: 'amber' as const, inherited: false, non_production: false }
+const TAG_PROD = { id: 3, name: 'Prod', color: 'red' as const, inherited: false, non_production: false }
+const TAG_DEV = { id: 1, name: 'Dev', color: 'neutral' as const, inherited: false, non_production: false }
 
 /** Monday to Friday 07:00-20:00, 65 awake hours. */
 export const WEEKDAY_GRID: boolean[][] = Array.from({ length: 7 }, (_, day) => Array.from({ length: 24 }, (_, hour) => day < 5 && hour >= 7 && hour < 20))

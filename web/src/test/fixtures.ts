@@ -102,7 +102,7 @@ function hex(seed: string, length: number): string {
 
 // ---- tags, accounts, regions ----
 
-const tag = (id: number, name: string, color: TagColor, inherited = false): TagDTO => ({ id, name, color, inherited })
+const tag = (id: number, name: string, color: TagColor, inherited = false): TagDTO => ({ id, name, color, inherited, non_production: name === 'Dev' })
 export const TAG_DEV = tag(1, 'Dev', 'neutral')
 export const TAG_STAGING = tag(2, 'Staging', 'amber')
 export const TAG_PROD = tag(3, 'Prod', 'red')
@@ -922,9 +922,9 @@ export const PERMISSIONS: PermissionsDTO = {
 
 export const TAGS: TagsDTO = {
   items: [
-    { id: 1, name: 'Dev', color: 'neutral', builtin: true, clusters: 4, services_direct: 0, services_effective: servicesInEffect(1), users: [{ username: 'dana', preset: 'Full' }, { username: 'omer', preset: 'Operator' }] },
-    { id: 2, name: 'Staging', color: 'amber', builtin: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(2), users: [{ username: 'dana', preset: 'Deployer' }, { username: 'omer', preset: 'Viewer' }, { username: 'oncall', preset: 'Custom' }] },
-    { id: 3, name: 'Prod', color: 'red', builtin: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(3), users: [{ username: 'dana', preset: 'Custom' }, { username: 'oncall', preset: 'Custom' }] },
+    { id: 1, name: 'Dev', color: 'neutral', builtin: true, non_production: true, clusters: 4, services_direct: 0, services_effective: servicesInEffect(1), users: [{ username: 'dana', preset: 'Full' }, { username: 'omer', preset: 'Operator' }] },
+    { id: 2, name: 'Staging', color: 'amber', builtin: false, non_production: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(2), users: [{ username: 'dana', preset: 'Deployer' }, { username: 'omer', preset: 'Viewer' }, { username: 'oncall', preset: 'Custom' }] },
+    { id: 3, name: 'Prod', color: 'red', builtin: false, non_production: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(3), users: [{ username: 'dana', preset: 'Custom' }, { username: 'oncall', preset: 'Custom' }] },
   ],
 }
 

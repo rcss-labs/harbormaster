@@ -135,22 +135,22 @@ test.describe('admin pages as sam', () => {
     await page.getByRole('button', { name: 'Collapse all' }).click()
     await expect.poll(() => page.getByLabel(/^Tag for /).count()).toBe(collapsed)
 
-    // The Dev tag is built in: neither Rename nor Delete is available.
-    const dev = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Rename' }) }).filter({ hasText: /^Dev\s*default/ })
+    // The Dev tag is built in: it cannot be deleted, and its name is locked in the Edit dialog.
+    const dev = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Edit' }) }).filter({ hasText: /^Dev\s*default/ })
     await expect(dev.getByRole('button', { name: 'Delete' })).toBeDisabled()
-    await expect(dev.getByRole('button', { name: 'Rename' })).toBeDisabled()
+    await expect(dev.getByRole('button', { name: 'Edit' })).toBeEnabled()
 
     await page.getByRole('button', { name: 'Create tag' }).first().click()
     let dialog = page.getByRole('dialog')
     await dialog.getByLabel('Name').fill(tagName)
     await dialog.getByLabel('green').check()
     await dialog.getByRole('button', { name: 'Create tag' }).click()
-    const tagRows = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Rename' }) })
+    const tagRows = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Edit' }) })
     const row = tagRows.filter({ hasText: tagName })
     await expect(row).toBeVisible()
 
     // A name that differs only in case from an existing tag is a duplicate.
-    await row.getByRole('button', { name: 'Rename' }).click()
+    await row.getByRole('button', { name: 'Edit' }).click()
     dialog = page.getByRole('dialog')
     await dialog.getByLabel('Name').fill('prod')
     await dialog.getByRole('button', { name: 'Save' }).click()

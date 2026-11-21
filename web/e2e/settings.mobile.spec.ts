@@ -79,9 +79,10 @@ test('users: Add user opens a sheet', async ({ page }) => {
 test('tags: action sheet, create sheet and expanded assignments fit the screen', async ({ page }) => {
   await open(page, '/settings/tags')
   await page.getByRole('button', { name: 'Actions for tag Dev' }).click()
-  const rename = page.getByRole('menuitem', { name: /^Rename/ })
-  await expect(rename).toBeDisabled()
-  await expect(rename).toContainText('Dev is the default tag')
+  await expect(page.getByRole('menuitem', { name: /^Edit/ })).toBeEnabled()
+  const remove = page.getByRole('menuitem', { name: /^Delete/ })
+  await expect(remove).toBeDisabled()
+  await expect(remove).toContainText('Dev is the default tag')
   await expectSheetWithinViewport(page)
   await page.keyboard.press('Escape')
 

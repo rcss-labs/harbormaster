@@ -115,7 +115,7 @@ func TestOffHoursSchedule_DuplicateNameConflictsButSelectorsMayRepeat(t *testing
 
 func TestOffHoursSchedule_RoundTripsSelectorsAndExclusions(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestOffHoursSchedule_RoundTripsSelectorsAndExclusions(t *testing.T) {
 
 func TestDeleteTag_RemovesItsSelectors(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestDeleteTag_RemovesItsSelectors(t *testing.T) {
 
 func TestOffHoursMatches_OrAcrossKindsWithoutDuplicates(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestOffHoursMatches_OrAcrossKindsWithoutDuplicates(t *testing.T) {
 
 func TestOffHoursMatches_HarbormasterTagUsesEffectiveTag(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,11 +256,11 @@ func TestSplitExcluded(t *testing.T) {
 
 func TestOffHoursHarbormasterTags_CountsActiveServices(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateTag(ctx, "Empty", "green"); err != nil {
+	if _, err := s.CreateTag(ctx, "Empty", "green", false); err != nil {
 		t.Fatal(err)
 	}
 	seedTaggedService(t, s, "one", "ACTIVE", `[]`, "", "")

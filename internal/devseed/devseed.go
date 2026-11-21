@@ -270,7 +270,7 @@ func ensureTag(ctx context.Context, st *store.Store, name, color string) (store.
 			return t, nil
 		}
 	}
-	return st.CreateTag(ctx, name, color)
+	return st.CreateTag(ctx, name, color, false)
 }
 
 // seedAudit writes the mockup's activity history once.
