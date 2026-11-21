@@ -40,6 +40,7 @@ import {
   IMAGE_TAGS_PAYMENTS,
   DESIRED_COUNT_PAYMENTS,
   SETTINGS,
+  ARM64_READINESS_READY,
   DEPLOY_SETTINGS_PAYMENTS,
   REVISION_DEFINITION_PAYMENTS_41,
   CHANGESET_APPLIED,
@@ -183,6 +184,7 @@ export const handlers = [
   http.get('/api/services/:id/desired-count', () => HttpResponse.json(DESIRED_COUNT_PAYMENTS)),
   // Deploy tab (docs/deploy_tab/PLAN.md section 2)
   http.get('/api/services/:id/deploy-settings', () => HttpResponse.json(DEPLOY_SETTINGS_PAYMENTS)),
+  http.get('/api/services/:id/arm64-readiness', () => HttpResponse.json(ARM64_READINESS_READY)),
   http.get('/api/services/:id/revisions/:revision', ({ params }) =>
     Number(params.revision) === REVISION_DEFINITION_PAYMENTS_41.revision ? HttpResponse.json(REVISION_DEFINITION_PAYMENTS_41) : notFound(),
   ),

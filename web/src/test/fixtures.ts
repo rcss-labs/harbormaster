@@ -2249,6 +2249,13 @@ export const ANALYTICS_COST: AnalyticsCost = {
   },
 }
 
+/** What the image check says about a service whose images all have an arm64 build. */
+export const ARM64_READINESS_READY: Arm64Readiness = {
+  status: 'ready',
+  images: [{ container: 'payments-api', image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2', state: 'arm64', reason: '', account: '' }],
+  checked_at: '2026-11-21T10:00:00Z',
+}
+
 /** What the image check says about a service whose image has no arm64 build. */
 export const ARM64_READINESS_BLOCKED: Arm64Readiness = {
   status: 'blocked',

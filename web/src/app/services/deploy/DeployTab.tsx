@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { isApiError, useRevisions, useTaskDefinition } from '../../../api/change'
 import {
+  useArm64Readiness,
   useChangeSet,
   useDeploySettings,
   useRevisionDefinition,
@@ -15,7 +16,7 @@ import { Banner } from '../../../components/Banner'
 import { Panel } from '../../../components/Panel'
 import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
-import { oomMemoryHint, type Definition } from '../task-definition/mainContainer'
+import { containersOf, imageTagOf, oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
 import { isRolloutRunning } from '../rollout'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
@@ -30,6 +31,8 @@ import { buildChangeSetRequest, buildRetryRequest, countSections, pendingRows, s
 import { definitionErrors, isDefinitionChanged, setTaskSize } from './draft'
 import { rebaseScalingDraft, rebaseServiceDraft } from './rebase'
 import { CAPACITY_PARAMS, parseCapacityParams, spotReason } from './capacityParams'
+import { ARCH_PARAMS, ARM64_REASON, parseArchParams, readArchitecture, setArchitecture } from './archParams'
+import { Arm64Notes } from './Arm64Notes'
 import { parseRightsizeParams, RIGHTSIZE_PARAMS, rightsizeReason } from './rightsizeParams'
 import { scalingDraftErrors, scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
 import { capacityChanged, serviceDraftErrors, serviceDraftFromSettings, serviceDraftToChange, spotCapacityDraft, type ServiceDraft } from './serviceDraft'
@@ -114,7 +117,15 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const canEditDefinition = (taskDefinition.data?.can ?? settings?.can)?.edit ?? false
   // A task size from the Cost tab (?task_cpu=...) starts the draft unless a revision was asked for; it is only a draft until Review and apply.
   const suggested = revisionParam === null && canEditDefinition ? parseRightsizeParams(searchParams) : null
-  const suggestedDefinition = suggested && liveDefinition ? setTaskSize(liveDefinition, suggested) : undefined
+  // An ARM64 suggestion (?arch=ARM64) likewise starts the draft, on top of a size suggestion when both are present.
+  const archSuggested = revisionParam === null && canEditDefinition ? parseArchParams(searchParams) : null
+  const suggestedDefinition =
+    liveDefinition && (suggested || archSuggested)
+      ? [suggested ? (def: Definition) => setTaskSize(def, suggested) : null, archSuggested ? (def: Definition) => setArchitecture(def, archSuggested, liveDefinition) : null].reduce(
+          (def, step) => (step ? step(def) : def),
+          liveDefinition,
+        )
+      : undefined
   // Null until the user edits: the draft then follows the current task definition (including a refetch after a write).
   const definitionDraft = editedDefinition ?? preloaded ?? suggestedDefinition ?? liveDefinition
   // A Fargate Spot suggestion from the Cost tab (?capacity=spot) starts the capacity of the service draft. It is ignored without
@@ -132,6 +143,9 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const serviceName = service.data?.name ?? 'this service'
   const definitionChanged = definitionDraft !== undefined && liveDefinition !== undefined && isDefinitionChanged(definitionDraft, liveDefinition)
   // The Cost tab's reason is prefilled only while the draft still holds the suggested size.
+  const archHolds =
+    archSuggested !== null && liveDefinition !== undefined && definitionDraft !== undefined &&
+    readArchitecture(definitionDraft) === 'ARM64' && readArchitecture(liveDefinition) !== 'ARM64'
   const suggestionHolds =
     suggested !== null && liveDefinition !== undefined && definitionDraft !== undefined &&
     String(definitionDraft.cpu) === suggested.cpu && String(definitionDraft.memory) === suggested.memory &&
@@ -140,7 +154,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const capacityHolds =
     capacityParams !== null && capacitySuggestion !== null && settings !== undefined && serviceDraft !== null &&
     JSON.stringify(serviceDraft.capacity) === JSON.stringify(capacitySuggestion) && capacityChanged(settings, capacitySuggestion)
-  const suggestedReasons = [suggested && suggestionHolds ? rightsizeReason(suggested.headroomPct) : '', capacityParams && capacityHolds ? spotReason(capacityParams.onDemandBase) : '']
+  const suggestedReasons = [suggested && suggestionHolds ? rightsizeReason(suggested.headroomPct) : '', archSuggested && archHolds ? ARM64_REASON : '', capacityParams && capacityHolds ? spotReason(capacityParams.onDemandBase) : '']
   const shownReason = reason ?? suggestedReasons.filter(Boolean).join('; ')
   // A revision (rollback) is never blocked by the client-side container floor check.
   const definitionProblems = definitionDraft ? definitionErrors(definitionDraft, revisionParam === null ? liveDefinition : undefined) : []
@@ -152,6 +166,13 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
         draftCpu: definitionDraft.cpu,
       })
     : undefined
+
+  // The image check is read only while the draft moves an x86 service to ARM64.
+  const draftIsArm64 = definitionDraft !== undefined && liveDefinition !== undefined && readArchitecture(definitionDraft) === 'ARM64' && readArchitecture(liveDefinition) !== 'ARM64'
+  const readiness = useArm64Readiness(serviceId, draftIsArm64)
+  const imageTagChanged =
+    definitionDraft !== undefined && liveDefinition !== undefined &&
+    containersOf(definitionDraft).some((entry) => imageTagOf(entry?.image) !== imageTagOf(containersOf(liveDefinition).find((live) => live?.name === entry?.name)?.image))
 
   const sections: ChangeSections = {
     target: !definitionChanged || !definitionDraft ? null : editedDefinition ? { kind: 'definition', definition: editedDefinition } : preloaded ? { kind: 'revision', revision: revisionParam as number } : suggestedDefinition ? { kind: 'definition', definition: definitionDraft } : null,
@@ -179,7 +200,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
     }
 
   const clearPresetParams = () => {
-    const presets = ['revision', ...RIGHTSIZE_PARAMS, ...CAPACITY_PARAMS]
+    const presets = ['revision', ...RIGHTSIZE_PARAMS, ...CAPACITY_PARAMS, ...ARCH_PARAMS]
     if (presets.some((name) => searchParams.has(name))) setSearchParams((previous) => { presets.forEach((name) => previous.delete(name)); return previous }, { replace: true })
   }
 
@@ -264,7 +285,10 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   // What the Cost tab suggested and the draft holds: a task size, a Fargate Spot strategy, or both.
   const suggestionNotes = [
     suggested && suggestedDefinition && liveDefinition
-      ? isDefinitionChanged(suggestedDefinition, liveDefinition) ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.'
+      ? isDefinitionChanged(setTaskSize(liveDefinition, suggested), liveDefinition) ? `Task size ${suggested.cpu} / ${suggested.memory} is suggested from Cost` : 'This service already has this size.'
+      : '',
+    archSuggested && liveDefinition
+      ? readArchitecture(liveDefinition) === 'ARM64' ? 'This service already runs on ARM64.' : `${ARM64_REASON} is suggested from Cost`
       : '',
     capacityParams && capacitySuggestion && settings
       ? capacityChanged(settings, capacitySuggestion) ? `Fargate Spot with ${capacityParams.onDemandBase} on-demand is suggested from Cost` : 'This service already uses this capacity strategy.'
@@ -348,7 +372,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
                   <ScanImageStatus serviceId={serviceId} container={container} tag={tag} canDeploy={canDeploy} tagName={tagName} />
                 )}
               />
-              <TaskSizePanel definition={definitionDraft} onChange={edit(setEditedDefinition)} canEdit={canEditDefinition} tagName={tagName} oomHint={oomHint} />
+              <TaskSizePanel definition={definitionDraft} deployed={liveDefinition} onChange={edit(setEditedDefinition)} canEdit={canEditDefinition} tagName={tagName} oomHint={oomHint} />
+              <Arm64Notes readiness={readiness.data} tagChanged={imageTagChanged && draftIsArm64} />
             </>
           ) : (
             <>

@@ -179,6 +179,16 @@ export interface ChangeSetResponse {
   warning: string | null
 }
 
+/** What the image check says about the images of the service's current definition; `enabled` keeps it idle until ARM64 is drafted. */
+export function useArm64Readiness(serviceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['service', serviceId, 'arm64-readiness'],
+    queryFn: () => api.get<Arm64Readiness>(`/api/services/${serviceId}/arm64-readiness`),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
 export function useDeploySettings(serviceId: string) {
   return useQuery({
     queryKey: ['service', serviceId, 'deploy-settings'],

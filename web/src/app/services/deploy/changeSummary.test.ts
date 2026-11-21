@@ -130,6 +130,15 @@ describe('buildRetryRequest', () => {
   })
 })
 
+describe('the architecture row', () => {
+  it('shows the architecture row in pending changes', () => {
+    const live = { family: 'payments-api', cpu: '512', memory: '1024', containerDefinitions: [] }
+    const arm = { ...live, runtimePlatform: { cpuArchitecture: 'ARM64', operatingSystemFamily: 'LINUX' } }
+    const rows = pendingRows({ sections: { ...none, target: { kind: 'definition', definition: arm } }, liveDefinition: live, definitionAfter: arm }, DEPLOY_SETTINGS_PAYMENTS)
+    expect(rows).toEqual([{ group: 'Task size', label: 'CPU architecture', before: 'X86_64', after: 'ARM64' }])
+  })
+})
+
 describe('describing a change', () => {
   it('lists service rows as before and after', () => {
     expect(serviceRows(DEPLOY_SETTINGS_PAYMENTS, { desired_count: 5, enable_execute_command: false, force_new_deployment: true })).toEqual([
