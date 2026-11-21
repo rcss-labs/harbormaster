@@ -319,7 +319,7 @@ func TestFinishNotificationDelivery_RetryThenFail(t *testing.T) {
 	s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 10)
 
 	retryAt := notifyT0.Add(30 * time.Second)
-	if err := s.FinishNotificationDelivery(ctx, row.ID, 1, store.DeliveryOutcome{Retryable: true, RetryAt: retryAt, StatusCode: 503, Note: "HTTP 503"}, notifyT0); err != nil {
+	if err := finishLeased(s, ctx, row.ID, 1, store.DeliveryOutcome{Retryable: true, RetryAt: retryAt, StatusCode: 503, Note: "HTTP 503"}, notifyT0); err != nil {
 		t.Fatal(err)
 	}
 	got := listNotifDeliveries(t, s)[0]
@@ -327,7 +327,7 @@ func TestFinishNotificationDelivery_RetryThenFail(t *testing.T) {
 		t.Fatalf("after a retryable outcome: %+v", got)
 	}
 
-	if err := s.FinishNotificationDelivery(ctx, row.ID, 2, store.DeliveryOutcome{StatusCode: 400, Note: "HTTP 400"}, retryAt); err != nil {
+	if err := finishLeased(s, ctx, row.ID, 2, store.DeliveryOutcome{StatusCode: 400, Note: "HTTP 400"}, retryAt); err != nil {
 		t.Fatal(err)
 	}
 	got = listNotifDeliveries(t, s)[0]
@@ -336,7 +336,7 @@ func TestFinishNotificationDelivery_RetryThenFail(t *testing.T) {
 	}
 
 	// A late writer cannot undo a settled row.
-	if err := s.FinishNotificationDelivery(ctx, row.ID, 3, store.DeliveryOutcome{Delivered: true, Note: "late"}, retryAt); err != nil {
+	if err := finishLeased(s, ctx, row.ID, 3, store.DeliveryOutcome{Delivered: true, Note: "late"}, retryAt); err != nil {
 		t.Fatal(err)
 	}
 	if got = listNotifDeliveries(t, s)[0]; got.Status != "failed" || got.Note != "HTTP 400" {
@@ -350,10 +350,10 @@ func TestFinishNotificationDelivery_DeliveredRowIsFinal(t *testing.T) {
 	incident, route := seedIncidentAndRoute(t, s)
 	row := mustPlan(t, s, delivery(route, incident, "opened", 0))
 	s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 10)
-	if err := s.FinishNotificationDelivery(ctx, row.ID, 1, store.DeliveryOutcome{Delivered: true, StatusCode: 200, DurationMS: 42, Note: "Delivered in 42 ms"}, notifyT0); err != nil {
+	if err := finishLeased(s, ctx, row.ID, 1, store.DeliveryOutcome{Delivered: true, StatusCode: 200, DurationMS: 42, Note: "Delivered in 42 ms"}, notifyT0); err != nil {
 		t.Fatal(err)
 	}
-	s.FinishNotificationDelivery(ctx, row.ID, 2, store.DeliveryOutcome{StatusCode: 500, Note: "HTTP 500"}, notifyT0)
+	finishLeased(s, ctx, row.ID, 2, store.DeliveryOutcome{StatusCode: 500, Note: "HTTP 500"}, notifyT0)
 	got := listNotifDeliveries(t, s)[0]
 	if got.Status != "delivered" || got.Note != "Delivered in 42 ms" || got.StatusCode == nil || *got.StatusCode != 200 || got.DurationMS == nil || *got.DurationMS != 42 {
 		t.Fatalf("delivered row = %+v", got)
@@ -459,7 +459,7 @@ func TestRetryNotificationDelivery_OnlyFailedWithLiveRoute(t *testing.T) {
 		t.Fatalf("retry of an unknown id = %v, want ErrNotFound", err)
 	}
 	s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 10)
-	s.FinishNotificationDelivery(ctx, row.ID, 3, store.DeliveryOutcome{StatusCode: 503, Note: "HTTP 503 after 3 attempts"}, notifyT0)
+	finishLeased(s, ctx, row.ID, 3, store.DeliveryOutcome{StatusCode: 503, Note: "HTTP 503 after 3 attempts"}, notifyT0)
 
 	retried, err := s.RetryNotificationDelivery(ctx, row.ID, notifyT0.Add(time.Hour))
 	if err != nil || retried.Status != "pending" || retried.Attempts != 0 || retried.Retries != 1 || retried.FinishedAt != nil {
@@ -467,7 +467,7 @@ func TestRetryNotificationDelivery_OnlyFailedWithLiveRoute(t *testing.T) {
 	}
 
 	s.ClaimDueNotificationDeliveries(ctx, notifyT0.Add(time.Hour), 2*time.Minute, 10)
-	s.FinishNotificationDelivery(ctx, row.ID, 1, store.DeliveryOutcome{StatusCode: 400}, notifyT0.Add(time.Hour))
+	finishLeased(s, ctx, row.ID, 1, store.DeliveryOutcome{StatusCode: 400}, notifyT0.Add(time.Hour))
 	if err := s.DeleteNotificationRoute(ctx, route.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -639,3 +639,155 @@ func TestRunRetention_PrunesNotificationLog(t *testing.T) {
 		t.Fatalf("incidents left = %d, want the open one", incidents)
 	}
 }
+
+// finishLeased finishes a row under the lease it currently holds, for tests that do not care about ownership.
+func finishLeased(s *store.Store, ctx context.Context, id int64, attempts int, o store.DeliveryOutcome, now time.Time) error {
+	d, err := s.GetNotificationDelivery(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.FinishNotificationDelivery(ctx, id, d.ClaimedUntil, attempts, o, now)
+}
+
+func TestClaimNotificationDeliveries_CapsRowsPerRouteAndSkipsExcludedRoutes(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	slow, err := s.CreateNotificationRoute(ctx, newRoute("slow"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateNotificationRoute(ctx, newRoute("other"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Eight alerts for the slow route (they sort first), two for the other.
+	var alerts []model.Alert
+	for i := range 8 {
+		alerts = append(alerts, notifyAlert("s"+string(rune('a'+i)), "service_failing", model.AlertDanger))
+	}
+	for i := range 2 {
+		alerts = append(alerts, notifyAlert("t"+string(rune('a'+i)), "service_failing", model.AlertDanger))
+	}
+	setAlerts(t, s, alerts...)
+	open, _ := syncIncidents(t, s, notifyT0)
+	for _, incident := range open {
+		route := other
+		if incident.Key.Service[0] == 's' {
+			route = slow
+		}
+		mustPlan(t, s, delivery(route, incident, "opened", 0))
+	}
+
+	got, err := s.ClaimNotificationDeliveries(ctx, notifyT0, 2*time.Minute, store.ClaimFilter{Limit: 8, PerRoute: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perRoute := map[int64]int{}
+	for _, row := range got {
+		perRoute[*row.RouteID]++
+	}
+	if perRoute[slow.ID] != 3 || perRoute[other.ID] != 2 {
+		t.Fatalf("claimed %v, want 3 for the route with the backlog and both rows of the other (its rows must not starve)", perRoute)
+	}
+
+	rest, err := s.ClaimNotificationDeliveries(ctx, notifyT0.Add(time.Second), 2*time.Minute, store.ClaimFilter{Limit: 50, Exclude: []int64{slow.ID}})
+	if err != nil || len(rest) != 0 {
+		t.Fatalf("an excluded route's rows were claimed: %+v err=%v", rest, err)
+	}
+	rest, err = s.ClaimNotificationDeliveries(ctx, notifyT0.Add(time.Second), 2*time.Minute, store.ClaimFilter{Limit: 50, PerRoute: 3})
+	if err != nil || len(rest) != 3 {
+		t.Fatalf("second claim = %d rows err=%v, want the next 3 of the slow route", len(rest), err)
+	}
+}
+
+func TestFinishNotificationDelivery_RequiresTheClaimersLease(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	row := mustPlan(t, s, delivery(route, incident, "opened", 0))
+	first, err := s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 10)
+	if err != nil || len(first) != 1 || first[0].ClaimedUntil == nil {
+		t.Fatalf("first claim = %+v err=%v", first, err)
+	}
+	// The first worker hangs past its lease; another task claims the row.
+	second, err := s.ClaimDueNotificationDeliveries(ctx, notifyT0.Add(3*time.Minute), 2*time.Minute, 10)
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second claim = %+v err=%v", second, err)
+	}
+	if err := s.FinishNotificationDelivery(ctx, row.ID, first[0].ClaimedUntil, 1, store.DeliveryOutcome{Delivered: true, Note: "stale worker"}, notifyT0.Add(4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := listNotifDeliveries(t, s)[0]; got.Status != "pending" || got.Note == "stale worker" || got.ClaimedUntil == nil {
+		t.Fatalf("a worker that lost its lease changed the row: %+v", got)
+	}
+	if err := s.FinishNotificationDelivery(ctx, row.ID, second[0].ClaimedUntil, 1, store.DeliveryOutcome{Delivered: true, Note: "owner"}, notifyT0.Add(4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := listNotifDeliveries(t, s)[0]; got.Status != "delivered" || got.Note != "owner" {
+		t.Fatalf("the lease owner could not finish: %+v", got)
+	}
+}
+
+func TestReleaseNotificationDelivery_GivesTheRowBackWithoutAnAttempt(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	row := mustPlan(t, s, delivery(route, incident, "opened", 0))
+	claimed, _ := s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 10)
+	stale := notifyT0.Add(-time.Hour)
+	if err := s.ReleaseNotificationDelivery(ctx, row.ID, &stale); err != nil {
+		t.Fatal(err)
+	}
+	if got := listNotifDeliveries(t, s)[0]; got.ClaimedUntil == nil {
+		t.Fatal("a release with someone else's lease must do nothing")
+	}
+	if err := s.ReleaseNotificationDelivery(ctx, row.ID, claimed[0].ClaimedUntil); err != nil {
+		t.Fatal(err)
+	}
+	got := listNotifDeliveries(t, s)[0]
+	if got.Status != "pending" || got.ClaimedUntil != nil || got.Attempts != 0 {
+		t.Fatalf("released row = %+v, want pending, unleased, attempts 0", got)
+	}
+	if again, _ := s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 10); len(again) != 1 {
+		t.Fatal("a released row must be claimable at once")
+	}
+}
+
+func TestExpireStaleNotificationTests_FailsOnlyAbandonedTestRows(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	route, err := s.CreateNotificationRoute(ctx, newRoute("route"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := notifyT0.Add(time.Minute)
+	insert := func(until *time.Time) store.NotificationDelivery {
+		d, err := s.InsertNotificationTest(ctx, store.NotificationDelivery{
+			RouteID: &route.ID, RouteName: route.Name, Destination: "webhook", Target: "hooks.example",
+			Severity: "warning", AlertTitle: "t", Status: "pending", ClaimedUntil: until, CreatedAt: notifyT0,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	abandoned, live := insert(&lease), insert(ptrTime(notifyT0.Add(time.Hour)))
+	n, err := s.ExpireStaleNotificationTests(ctx, notifyT0.Add(5*time.Minute))
+	if err != nil || n != 1 {
+		t.Fatalf("expired %d err=%v, want 1", n, err)
+	}
+	for _, d := range listNotifDeliveries(t, s) {
+		switch d.ID {
+		case abandoned.ID:
+			if d.Status != "failed" || d.Note == "" {
+				t.Errorf("abandoned test row = %+v, want failed with a note", d)
+			}
+		case live.ID:
+			if d.Status != "pending" {
+				t.Errorf("a test still inside its lease was expired: %+v", d)
+			}
+		}
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }

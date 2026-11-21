@@ -436,7 +436,7 @@ func (d *Dispatcher) deliver(ctx context.Context, row store.NotificationDelivery
 	finish := func(o store.DeliveryOutcome) error {
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 		defer cancel()
-		return d.Store.FinishNotificationDelivery(writeCtx, row.ID, attempts, o, d.now())
+		return d.Store.FinishNotificationDelivery(writeCtx, row.ID, row.ClaimedUntil, attempts, o, d.now())
 	}
 	fail := func(note string) error {
 		d.registry().CountNotification(row.Destination, "failed")

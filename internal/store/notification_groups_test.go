@@ -187,7 +187,7 @@ func TestNotificationPlanStates_CountsUpdates(t *testing.T) {
 	s.ClaimDueNotificationDeliveries(ctx, notifyT0.Add(time.Hour), 2*time.Minute, 10)
 	for _, d := range listNotifDeliveries(t, s) {
 		if d.Status == "pending" {
-			s.FinishNotificationDelivery(ctx, d.ID, 1, store.DeliveryOutcome{Delivered: true}, notifyT0.Add(time.Hour))
+			finishLeased(s, ctx, d.ID, 1, store.DeliveryOutcome{Delivered: true}, notifyT0.Add(time.Hour))
 		}
 	}
 	states, err := s.NotificationPlanStates(ctx, []int64{incident.ID})

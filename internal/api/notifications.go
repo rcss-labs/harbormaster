@@ -854,11 +854,15 @@ func (s *Server) testNotificationRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The row exists before the send so its id can key a PagerDuty test event; it settles right after.
+	// The row exists before the send so its id can key a PagerDuty test event; it settles right after. It carries a
+	// lease that outlasts the send, so if this task dies in between, the dispatcher fails the row instead of
+	// leaving it pending for good.
 	routeID := route.ID
+	lease := s.now().Add(notificationTestTimeout + notificationWriteTime + 10*time.Second)
 	pending, err := s.Store.InsertNotificationTest(ctx, store.NotificationDelivery{
 		RouteID: &routeID, RouteName: route.Name, Destination: route.Destination, Target: notify.TargetLabel(route),
 		Severity: "warning", AlertTitle: notificationTestAlert, AlertText: notificationTestDetail, Status: "pending",
+		ClaimedUntil: &lease,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -873,7 +877,7 @@ func (s *Server) testNotificationRoute(w http.ResponseWriter, r *http.Request) {
 	writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), notificationWriteTime)
 	defer cancelWrite()
 	outcome := store.DeliveryOutcome{Delivered: result.Delivered, StatusCode: result.StatusCode, DurationMS: int(result.Duration.Milliseconds()), Note: result.Note}
-	if err := s.Store.FinishNotificationDelivery(writeCtx, pending.ID, 1, outcome, s.now()); err != nil {
+	if err := s.Store.FinishNotificationDelivery(writeCtx, pending.ID, pending.ClaimedUntil, 1, outcome, s.now()); err != nil {
 		s.fail(w, err)
 		return
 	}

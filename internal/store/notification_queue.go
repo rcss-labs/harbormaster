@@ -395,9 +395,9 @@ func scanNotificationDelivery(row pgx.Row) (NotificationDelivery, error) {
 const insertNotificationDeliverySQL = `insert into notification_deliveries
 	(route_id, route_name, destination, target, incident_id, event, seq, severity, alert_title, alert_text,
 	 account_id, region, cluster_name, service_name, kind, status, attempts, next_attempt_at, held_until,
-	 status_code, duration_ms, note, created_at, finished_at, details)
+	 status_code, duration_ms, note, created_at, finished_at, details, claimed_until)
 	values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-	        coalesce($23, now()), $24, $25)`
+	        coalesce($23, now()), $24, $25, $26)`
 
 func deliveryArgs(d NotificationDelivery) []any {
 	var created *time.Time
@@ -407,7 +407,7 @@ func deliveryArgs(d NotificationDelivery) []any {
 	details, _ := json.Marshal(d.Details) // plain fields only: cannot fail
 	return []any{d.RouteID, d.RouteName, d.Destination, d.Target, d.IncidentID, d.Event, d.Seq, d.Severity, d.AlertTitle, d.AlertText,
 		d.Key.AccountID, d.Key.Region, d.Key.Cluster, d.Key.Service, d.Kind, d.Status, d.Attempts, d.NextAttemptAt, d.HeldUntil,
-		d.StatusCode, d.DurationMS, d.Note, created, d.FinishedAt, details}
+		d.StatusCode, d.DurationMS, d.Note, created, d.FinishedAt, details, d.ClaimedUntil}
 }
 
 // PlanNotificationDelivery inserts d; it returns false when a row with the same route, incident, event and seq
@@ -473,16 +473,34 @@ func (s *Store) NotificationPlanStates(ctx context.Context, incidentIDs []int64)
 	return out, rows.Err()
 }
 
-// ClaimDueNotificationDeliveries takes up to limit pending rows that are due and have no live lease, using
-// FOR UPDATE SKIP LOCKED so concurrent claimers get disjoint rows, and leases them for lease.
+// ClaimFilter narrows what one claim takes: at most Limit rows, at most PerRoute of them for any one route
+// (0 = no cap, so one route with a long backlog cannot use the whole claim), and none for the routes in Exclude
+// (the ones whose previous sends are still running).
+type ClaimFilter struct {
+	Limit, PerRoute int
+	Exclude         []int64
+}
+
+// ClaimDueNotificationDeliveries takes up to limit pending rows that are due and have no live lease.
 func (s *Store) ClaimDueNotificationDeliveries(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]NotificationDelivery, error) {
-	rows, err := s.Pool.Query(ctx, `with due as (
-			select id from notification_deliveries
+	return s.ClaimNotificationDeliveries(ctx, now, lease, ClaimFilter{Limit: limit})
+}
+
+// ClaimNotificationDeliveries takes the pending rows that are due and have no live lease, within the filter, using
+// FOR UPDATE SKIP LOCKED so concurrent claimers get disjoint rows, and leases them for lease.
+func (s *Store) ClaimNotificationDeliveries(ctx context.Context, now time.Time, lease time.Duration, f ClaimFilter) ([]NotificationDelivery, error) {
+	rows, err := s.Pool.Query(ctx, `with ranked as (
+			select id, row_number() over (partition by coalesce(route_id, -id) order by next_attempt_at, id) as n
+			from notification_deliveries
 			where status = 'pending' and next_attempt_at <= $1 and (claimed_until is null or claimed_until <= $1)
-			order by next_attempt_at, id limit $3 for update skip locked)
+			  and (route_id is null or route_id <> all(coalesce($5::bigint[], '{}')))),
+		due as (
+			select d.id from notification_deliveries d join ranked using (id)
+			where ($4 <= 0 or ranked.n <= $4)
+			order by d.next_attempt_at, d.id limit $3 for update of d skip locked)
 		update notification_deliveries d set claimed_until = $1::timestamptz + $2::interval
 		from due where d.id = due.id returning `+prefixColumns("d", notificationDeliveryColumns),
-		now, fmt.Sprintf("%d microseconds", lease.Microseconds()), limit)
+		now, fmt.Sprintf("%d microseconds", lease.Microseconds()), f.Limit, f.PerRoute, f.Exclude)
 	if err != nil {
 		return nil, fmt.Errorf("claim notification deliveries: %w", err)
 	}
@@ -548,7 +566,7 @@ type DeliveryOutcome struct {
 
 // FinishNotificationDelivery records one attempt and clears the lease. It does nothing unless the row is still
 // pending, so a late writer cannot undo a newer state.
-func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, attempts int, o DeliveryOutcome, now time.Time) error {
+func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, lease *time.Time, attempts int, o DeliveryOutcome, now time.Time) error {
 	status, next, finished := "failed", (*time.Time)(nil), &now
 	switch {
 	case o.Delivered:
@@ -565,11 +583,34 @@ func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, attemp
 	}
 	_, err := s.Pool.Exec(ctx, `update notification_deliveries set status = $2, attempts = $3, next_attempt_at = $4,
 		claimed_until = null, status_code = $5, duration_ms = $6, note = $7, finished_at = $8
-		where id = $1 and status = 'pending'`, id, status, attempts, next, code, duration, o.Note, finished)
+		where id = $1 and status = 'pending' and claimed_until is not distinct from $9`,
+		id, status, attempts, next, code, duration, o.Note, finished, lease)
 	if err != nil {
 		return fmt.Errorf("finish notification delivery: %w", err)
 	}
 	return nil
+}
+
+// ReleaseNotificationDelivery gives a claimed row back without counting an attempt (a shutdown or a send budget
+// that ran out), under the same ownership rule as FinishNotificationDelivery.
+func (s *Store) ReleaseNotificationDelivery(ctx context.Context, id int64, lease *time.Time) error {
+	if _, err := s.Pool.Exec(ctx, `update notification_deliveries set claimed_until = null
+		where id = $1 and status = 'pending' and claimed_until is not distinct from $2`, id, lease); err != nil {
+		return fmt.Errorf("release notification delivery: %w", err)
+	}
+	return nil
+}
+
+// ExpireStaleNotificationTests fails the test rows an API task inserted and never finished (it crashed between the
+// insert and the finish): pending rows with no next attempt whose lease has passed.
+func (s *Store) ExpireStaleNotificationTests(ctx context.Context, now time.Time) (int, error) {
+	tag, err := s.Pool.Exec(ctx, `update notification_deliveries set status = 'failed', claimed_until = null, finished_at = $1,
+		note = 'The test did not finish.'
+		where event = 'test' and status = 'pending' and next_attempt_at is null and claimed_until <= $1`, now)
+	if err != nil {
+		return 0, fmt.Errorf("expire notification tests: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // ReleaseHeldNotificationDeliveries turns held rows whose held_until passed into pending (incident still open) or
