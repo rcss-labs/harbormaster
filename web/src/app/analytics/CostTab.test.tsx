@@ -60,7 +60,7 @@ describe('CostTab', () => {
 
   it('shows an em dash for savings when the rollup is off, with spend still visible', async () => {
     await renderTab({ ...ANALYTICS_COST, rightsizing: { ...ANALYTICS_COST.rightsizing, state: 'rollup_off' } })
-    expect(kpi(/possible monthly saving/)).toHaveTextContent('—')
+    expect(kpi(/possible monthly saving at/)).toHaveTextContent('—')
     expect(kpi(/reserved but not needed/)).toHaveTextContent('—')
     expect(kpi(/can use a smaller size/)).toHaveTextContent('—')
     expect(kpi(/estimated Fargate spend per month/)).toHaveTextContent('$68')
@@ -92,7 +92,7 @@ describe('CostTab edge cases', () => {
     const [payments, ...rest] = ANALYTICS_COST.rightsizing.services
     const spot = { ...payments, spot_tasks: 1 }
     await renderTab({ ...ANALYTICS_COST, rightsizing: { ...ANALYTICS_COST.rightsizing, services: [spot, ...rest] } })
-    expect(kpi(/possible monthly saving/)).toHaveTextContent('about $25')
+    expect(kpi(/possible monthly saving at/)).toHaveTextContent('about $25')
   })
 
   it('caps the not-needed share at 100% when savings exceed spend', async () => {

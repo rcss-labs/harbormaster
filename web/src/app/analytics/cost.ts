@@ -1,4 +1,4 @@
-import type { CostRightsizing, CostService, CostStep, CostSuggestion } from '../../api/analytics'
+import type { CostRightsizing, CostService, CostSpot, CostSpotService, CostStep, CostSuggestion } from '../../api/analytics'
 
 /** Whole US dollars. */
 export const money = (value: number) => `$${Math.round(value).toLocaleString('en-US')}`
@@ -63,4 +63,66 @@ export function suggestedServices(rightsizing: CostRightsizing, headroomPct: num
 /** The suggested services the user can edit and has not unticked. */
 export function selectedSuggestions(rightsizing: CostRightsizing, headroomPct: number, excluded: ReadonlySet<string>): SuggestedService[] {
   return suggestedServices(rightsizing, headroomPct).filter(({ service }) => service.can_edit && !excluded.has(service.service_id))
+}
+
+/** The title of a draft dialog: "Draft 2 change sets". */
+export const draftTitle = (count: number) => `Draft ${count} change ${count === 1 ? 'set' : 'sets'}`
+
+/** Services the server says can move to Fargate Spot, in the order it ranked them (by saving). */
+export const spotCandidates = (spot: CostSpot): CostSpotService[] => spot.services.filter((service) => service.status === 'candidate')
+
+/**
+ * A candidate is ticked unless it carries a caution (terminal sessions or killed stops), and never without Deploy. `toggled`
+ * holds the ids the user flipped from that default, so a refetch that changes a caution does not undo a choice.
+ */
+export function isSpotTicked(service: CostSpotService, toggled: ReadonlySet<string>): boolean {
+  if (!service.can_deploy) return false
+  return !service.caution !== toggled.has(service.service_id)
+}
+
+export const selectedSpot = (spot: CostSpot, toggled: ReadonlySet<string>): CostSpotService[] =>
+  spotCandidates(spot).filter((service) => isSpotTicked(service, toggled))
+
+/** The sentences under "Why it qualifies": what the server returned, worded. */
+export function spotReasons(service: CostSpotService, lookbackDays: number): { text: string; title?: string }[] {
+  const days = `${lookbackDays} days`
+  const reasons: { text: string; title?: string }[] = [
+    { text: `Non-production tag ${service.tag.name}` },
+    { text: `${service.desired_tasks} tasks; ${service.on_demand_base} stays on-demand` },
+    { text: service.terminal_sessions === 0 ? `No terminal sessions in ${days}` : `${service.terminal_sessions} terminal sessions in ${days}` },
+  ]
+  const timeout =
+    service.stop_timeout_seconds === null ? undefined : `Container stop timeout ${service.stop_timeout_seconds} s. It cannot show that the process handles SIGTERM.`
+  if (service.stop_evidence === 'graceful') reasons.push({ text: `Stops cleanly on SIGTERM (${service.expected_stops} stops in ${days})`, title: timeout })
+  else if (service.stop_evidence === 'killed') reasons.push({ text: `${service.killed_stops} of ${service.expected_stops} stops in ${days} were killed (exit 137)`, title: timeout })
+  else reasons.push({ text: `No deployment or scale-in stops in ${days} to judge SIGTERM handling`, title: timeout })
+  return reasons
+}
+
+/** Why a service is not offered for Fargate Spot. */
+export function spotNotCandidateReason(service: CostSpotService, minTasks: number): string {
+  switch (service.status) {
+    case 'production':
+      return `Production tag ${service.tag.name}`
+    case 'single_task':
+      return `Runs 1 task; Spot needs at least ${minTasks}`
+    case 'already_spot':
+      return 'Already uses Fargate Spot'
+    case 'no_cluster_spot':
+      return `Cluster ${service.cluster} has no FARGATE_SPOT capacity provider. Associate it with the cluster (in Terraform: aws_ecs_cluster_capacity_providers), then this service qualifies.`
+    case 'not_fargate':
+      return 'Not on Fargate'
+    case 'windows':
+      return 'Windows tasks cannot run on Fargate Spot'
+    case 'no_price':
+      return 'No Spot price for this region'
+    case 'not_running':
+      return 'No running on-demand tasks'
+    case 'custom_capacity':
+      return 'Uses a capacity provider Harbormaster does not edit'
+    case 'unsupported_controller':
+      return `Deployment controller ${service.controller_name} is not supported`
+    default:
+      return 'Not a candidate'
+  }
 }
