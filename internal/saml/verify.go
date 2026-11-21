@@ -13,7 +13,6 @@ import (
 
 	"github.com/beevik/etree"
 	crewjam "github.com/crewjam/saml"
-	"github.com/crewjam/saml/xmlenc"
 )
 
 const (
@@ -87,9 +86,10 @@ func (v *Verifier) Verify(in VerifyInput) (Identity, error) {
 		return Identity{}, err
 	}
 
+	usedKey := -1 // index into in.Keys of the key the library decrypted with
 	first := v.firstLayer
 	if first == nil {
-		first = func(raw []byte) (*crewjam.Assertion, error) { return v.libraryParse(raw, root, in) }
+		first = func(raw []byte) (*crewjam.Assertion, error) { return v.libraryParse(raw, root, in, &usedKey) }
 	}
 	assertion, err := runFirstLayer(first, raw)
 	if err != nil {
@@ -99,7 +99,7 @@ func (v *Verifier) Verify(in VerifyInput) (Identity, error) {
 		return Identity{}, newError(ReasonMalformed, "library returned no assertion")
 	}
 
-	id, rerr := v.recheck(root, assertion, in)
+	id, rerr := v.recheck(root, assertion, in, usedKey)
 	if rerr != nil {
 		return Identity{}, rerr
 	}
@@ -163,7 +163,7 @@ func runFirstLayer(f func([]byte) (*crewjam.Assertion, error), raw []byte) (a *c
 
 // libraryParse is layer 1: crewjam's ParseXMLResponse with the SP key tried in
 // order (active, then retired) when the assertion is encrypted.
-func (v *Verifier) libraryParse(raw []byte, root *etree.Element, in VerifyInput) (*crewjam.Assertion, error) {
+func (v *Verifier) libraryParse(raw []byte, root *etree.Element, in VerifyInput, usedKey *int) (*crewjam.Assertion, error) {
 	encrypted := len(childrenNamed(root, nsAssertion, "EncryptedAssertion")) > 0
 	if encrypted && len(in.Keys) == 0 {
 		return nil, newError(ReasonSPKeyUnavailable, "response is encrypted but no SP key is available")
@@ -180,7 +180,7 @@ func (v *Verifier) libraryParse(raw []byte, root *etree.Element, in VerifyInput)
 		keys = []SPKey{{}}
 	}
 	var lastErr error
-	for _, key := range keys {
+	for i, key := range keys {
 		sp := crewjam.ServiceProvider{
 			EntityID:          v.spEntityID(),
 			AcsURL:            *acs,
@@ -193,6 +193,9 @@ func (v *Verifier) libraryParse(raw []byte, root *etree.Element, in VerifyInput)
 		}
 		assertion, err := parseWithClock(&sp, raw, in)
 		if err == nil {
+			if encrypted {
+				*usedKey = i
+			}
 			return assertion, nil
 		}
 		mapped := mapLibraryError(err)
@@ -312,13 +315,26 @@ type finding struct {
 	reason string
 	shared bool
 	detail string
+	rule   string // the rule behind a ReasonValidatorDisagreement raised directly
 }
 
-func (v *Verifier) recheck(root *etree.Element, a *crewjam.Assertion, in VerifyInput) (Identity, error) {
-	var nid subjectNameID
-	f := v.findings(root, a, in, &nid)
+// disagreement is a finding where the library's parse and the namespace-exact
+// read of the same assertion differ.
+func disagreement(rule, detail string) *finding {
+	return &finding{reason: ReasonValidatorDisagreement, rule: rule, detail: detail}
+}
+
+func (v *Verifier) recheck(root *etree.Element, a *crewjam.Assertion, in VerifyInput, usedKey int) (Identity, error) {
+	var view *assertionView
+	f := v.findings(root, a, in, usedKey, &view)
 	if f == nil {
-		return v.identity(root, a, nid), nil
+		return v.identity(root, view), nil
+	}
+	if f.reason == ReasonValidatorDisagreement && !f.shared {
+		if v.Log != nil {
+			v.Log.Error("saml validator disagreement", "rule", f.rule, "detail", f.detail)
+		}
+		return Identity{}, newError(ReasonValidatorDisagreement, "library and namespace-exact read of the assertion differ (%s): %s", f.rule, f.detail)
 	}
 	if !f.shared {
 		return Identity{}, newError(f.reason, "%s", f.detail)
@@ -334,7 +350,7 @@ func (v *Verifier) recheck(root *etree.Element, a *crewjam.Assertion, in VerifyI
 // design (single assertion, required audience, required Destination, bearer
 // confirmation, the configured skew, NameID and AuthnStatement presence) fail
 // with their own reason; the rest are marked shared.
-func (v *Verifier) findings(root *etree.Element, a *crewjam.Assertion, in VerifyInput, nid *subjectNameID) *finding {
+func (v *Verifier) findings(root *etree.Element, a *crewjam.Assertion, in VerifyInput, usedKey int, out **assertionView) *finding {
 	now, skew := in.Now, v.skew()
 	acs := ACSURL(v.BaseURL)
 
@@ -363,192 +379,108 @@ func (v *Verifier) findings(root *etree.Element, a *crewjam.Assertion, in Verify
 		return &finding{reason: ReasonExpired, shared: true, detail: "response IssueInstant"}
 	}
 
-	// Assertion, as returned by the library from the validated element.
+	// The assertion the library validated, read again from its XML with exact
+	// namespace matching. Everything below uses this view, not crewjam's struct.
+	el, f := assertionElement(root, in.Keys, usedKey)
+	if f != nil {
+		return f
+	}
+	view, f := readAssertion(el)
+	if f != nil {
+		return f
+	}
+	*out = view
+
 	if a.Issuer.Value != v.Cfg.IdPEntityID {
 		return &finding{reason: ReasonIssuer, shared: true, detail: "assertion issuer"}
 	}
 	if now.After(a.IssueInstant.Add(maxIssueDelay)) {
 		return &finding{reason: ReasonExpired, shared: true, detail: "assertion IssueInstant"}
 	}
-	if a.Subject == nil || len(a.Subject.SubjectConfirmations) == 0 {
+	if view.subjects == 0 || len(view.confirmations) == 0 {
 		return &finding{reason: ReasonRecipient, detail: "no SubjectConfirmation"}
 	}
-	for _, sc := range a.Subject.SubjectConfirmations {
-		data := sc.SubjectConfirmationData
-		if sc.Method != confirmationBearer || data == nil {
-			return &finding{reason: ReasonRecipient, detail: "SubjectConfirmation is not bearer with data"}
+	for _, sc := range view.confirmations {
+		if sc.method != confirmationBearer || sc.dataElements != 1 {
+			return &finding{reason: ReasonRecipient, detail: "SubjectConfirmation is not bearer with exactly one data element"}
 		}
-		if data.Recipient != acs {
+		if sc.recipient != acs {
 			return &finding{reason: ReasonRecipient, shared: true, detail: "Recipient does not match the ACS URL"}
 		}
-		if data.InResponseTo != in.RequestID {
+		if sc.inResponseTo != in.RequestID {
 			return &finding{reason: ReasonInResponseTo, shared: true, detail: "SubjectConfirmationData InResponseTo"}
 		}
-		if !now.Before(data.NotOnOrAfter.Add(skew)) {
+		if !now.Before(sc.notOnOrAfter.Add(skew)) {
 			return &finding{reason: ReasonExpired, detail: "SubjectConfirmationData NotOnOrAfter"}
 		}
 	}
-	var cond crewjam.Conditions
-	if a.Conditions != nil {
-		cond = *a.Conditions
-	}
-	if !cond.NotBefore.IsZero() && now.Before(cond.NotBefore.Add(-skew)) {
+	if !view.notBefore.IsZero() && now.Before(view.notBefore.Add(-skew)) {
 		return &finding{reason: ReasonNotYetValid, detail: "Conditions NotBefore"}
 	}
-	if !now.Before(cond.NotOnOrAfter.Add(skew)) { // a missing NotOnOrAfter is the zero time: expired
+	if !now.Before(view.notOnOrAfter.Add(skew)) { // a missing NotOnOrAfter is the zero time: expired
 		return &finding{reason: ReasonExpired, detail: "Conditions NotOnOrAfter"}
 	}
-	if len(cond.AudienceRestrictions) == 0 {
+	if len(view.audienceSets) == 0 {
 		return &finding{reason: ReasonAudience, detail: "no AudienceRestriction"}
 	}
-	matched := false
-	for _, r := range cond.AudienceRestrictions {
-		if r.Audience.Value == v.spEntityID() {
-			matched = true
+	for _, set := range view.audienceSets { // every restriction must name this SP
+		named := false
+		for _, aud := range set {
+			if aud == v.spEntityID() {
+				named = true
+			}
+		}
+		if !named {
+			return &finding{reason: ReasonAudience, shared: true, detail: "an AudienceRestriction does not contain the SP entity ID"}
 		}
 	}
-	if !matched {
-		return &finding{reason: ReasonAudience, shared: true, detail: "audience does not contain the SP entity ID"}
-	}
-	found, f := v.assertionNameID(root, in)
-	if f != nil {
-		return f
-	}
-	*nid = found
 	switch {
-	case nid.value == "":
-		return &finding{reason: ReasonNoNameID, detail: "no NameID in the assertion namespace"}
-	case a.Subject == nil || a.Subject.NameID == nil || strings.TrimSpace(a.Subject.NameID.Value) != nid.value || a.Subject.NameID.Format != nid.format:
-		// crewjam matches NameID in any namespace; a differing value means a
-		// foreign-namespace element shadowed (or was shadowed by) the real one.
-		return &finding{reason: ReasonNoNameID, shared: true, detail: "library NameID differs from the assertion-namespace NameID"}
-	case nid.format == nameIDTransient:
+	case view.nameIDs == 0 || view.nameIDText == "" || (view.nameIDs == 1 && !view.nameIDClean):
+		return &finding{reason: ReasonNoNameID, detail: "no usable NameID in the assertion namespace"}
+	case view.nameIDs > 1:
+		return &finding{reason: ReasonNoNameID, detail: "more than one NameID"}
+	case a.Subject == nil || a.Subject.NameID == nil || strings.TrimSpace(a.Subject.NameID.Value) != view.nameIDText || a.Subject.NameID.Format != view.nameIDFormat:
+		// crewjam matches NameID in any namespace; a differing value or Format
+		// means a foreign-namespace element or prefixed attribute got into its struct.
+		return disagreement("nameid", "library NameID differs from the assertion-namespace NameID")
+	case view.nameIDFormat == nameIDTransient:
 		return &finding{reason: ReasonTransientNameID, detail: "transient NameID"}
 	}
-	if len(a.AuthnStatements) == 0 {
+	if len(view.authnStatements) == 0 {
 		return &finding{reason: ReasonNoAuthnStatement, detail: "no AuthnStatement"}
+	}
+	if field := view.compareWithLibrary(a); field != "" {
+		return disagreement("library_struct", "library parsed a different "+field)
 	}
 	return nil
 }
 
-func (v *Verifier) identity(root *etree.Element, a *crewjam.Assertion, nid subjectNameID) Identity {
+func (v *Verifier) identity(root *etree.Element, view *assertionView) Identity {
 	id := Identity{
-		NameID:       nid.value,
-		NameIDFormat: nid.format,
+		NameID:       view.nameIDText,
+		NameIDFormat: view.nameIDFormat,
 		Attributes:   map[string][]string{},
-		AssertionID:  a.ID,
+		AssertionID:  view.id,
 		ResponseID:   root.SelectAttrValue("ID", ""),
 	}
-	if a.Conditions != nil {
-		id.NotOnOrAfter = a.Conditions.NotOnOrAfter
-	}
-	for _, st := range a.AuthnStatements {
-		if st.SessionNotOnOrAfter != nil && (id.SessionNotOnOrAfter == nil || st.SessionNotOnOrAfter.Before(*id.SessionNotOnOrAfter)) {
-			t := *st.SessionNotOnOrAfter
+	id.NotOnOrAfter = view.notOnOrAfter // the replay entry lives at least this long
+	for _, st := range view.authnStatements {
+		if st.sessionNotOnOrAfter != nil && (id.SessionNotOnOrAfter == nil || st.sessionNotOnOrAfter.Before(*id.SessionNotOnOrAfter)) {
+			t := *st.sessionNotOnOrAfter
 			id.SessionNotOnOrAfter = &t
 		}
 	}
-	values := func(attr crewjam.Attribute) []string {
-		out := make([]string, 0, len(attr.Values))
-		for _, val := range attr.Values {
-			out = append(out, val.Value)
-		}
-		return out
-	}
-	for _, st := range a.AttributeStatements {
-		for _, attr := range st.Attributes {
-			if attr.Name != "" {
-				id.Attributes[attr.Name] = append(id.Attributes[attr.Name], values(attr)...)
-			}
+	for _, attr := range view.attributeEntries {
+		if attr.name != "" {
+			id.Attributes[attr.name] = append(id.Attributes[attr.name], attr.values...)
 		}
 	}
-	for _, st := range a.AttributeStatements { // FriendlyName never shadows a real Name
-		for _, attr := range st.Attributes {
-			if _, taken := id.Attributes[attr.FriendlyName]; attr.FriendlyName != "" && !taken {
-				id.Attributes[attr.FriendlyName] = values(attr)
-			}
+	for _, attr := range view.attributeEntries { // FriendlyName never shadows a real Name
+		if _, taken := id.Attributes[attr.friendlyName]; attr.friendlyName != "" && !taken {
+			id.Attributes[attr.friendlyName] = attr.values
 		}
 	}
 	return id
-}
-
-// subjectNameID is the NameID read from the XML in the assertion namespace.
-type subjectNameID struct {
-	value  string
-	format string
-}
-
-// assertionNameID reads Subject/NameID from the assertion element the library
-// validated (decrypting it when it was encrypted), matching the assertion
-// namespace exactly. crewjam's Subject tag matches NameID in any namespace
-// (GO-2026-6909), so its struct is never the source of the identity. An empty
-// value (with a nil finding) means no namespace-correct NameID exists.
-func (v *Verifier) assertionNameID(root *etree.Element, in VerifyInput) (subjectNameID, *finding) {
-	el, f := assertionElement(root, in.Keys)
-	if f != nil {
-		return subjectNameID{}, f
-	}
-	var found []*etree.Element
-	for _, subject := range childrenNamed(el, nsAssertion, "Subject") {
-		found = append(found, childrenNamed(subject, nsAssertion, "NameID")...)
-	}
-	if len(found) > 1 {
-		return subjectNameID{}, &finding{reason: ReasonNoNameID, detail: "more than one NameID"}
-	}
-	if len(found) == 0 {
-		return subjectNameID{}, nil
-	}
-	return subjectNameID{
-		value:  strings.TrimSpace(found[0].Text()),
-		format: found[0].SelectAttrValue("Format", ""),
-	}, nil
-}
-
-// assertionElement returns the single assertion's XML: the Assertion child of
-// the Response, or the decrypted EncryptedAssertion (the Response tree only
-// holds ciphertext for those). Verify only gets here for a response the
-// library accepted.
-func assertionElement(root *etree.Element, keys []SPKey) (*etree.Element, *finding) {
-	if as := childrenNamed(root, nsAssertion, "Assertion"); len(as) == 1 {
-		return as[0], nil
-	}
-	encrypted := childrenNamed(root, nsAssertion, "EncryptedAssertion")
-	if len(encrypted) != 1 {
-		return nil, &finding{reason: ReasonMalformed, detail: "no single assertion element"}
-	}
-	for _, key := range keys {
-		if key.Key == nil {
-			continue
-		}
-		if el, err := decryptElement(encrypted[0], key); err == nil {
-			return el, nil
-		}
-	}
-	return nil, &finding{reason: ReasonDecryptFailed, detail: "cannot decrypt the assertion for the NameID check"}
-}
-
-// decryptElement mirrors crewjam's EncryptedAssertion handling.
-func decryptElement(encryptedEl *etree.Element, key SPKey) (*etree.Element, error) {
-	dataEl := encryptedEl.FindElement("./EncryptedData")
-	if dataEl == nil {
-		return nil, errors.New("no EncryptedData")
-	}
-	var k interface{} = key.Key
-	if keyEl := encryptedEl.FindElement("./EncryptedKey"); keyEl != nil {
-		var err error
-		if k, err = xmlenc.Decrypt(key.Key, keyEl); err != nil {
-			return nil, err
-		}
-	}
-	plain, err := xmlenc.Decrypt(k, dataEl)
-	if err != nil {
-		return nil, err
-	}
-	doc := etree.NewDocument()
-	if err := doc.ReadFromBytes(plain); err != nil {
-		return nil, err
-	}
-	return doc.Root(), nil
 }
 
 func childrenNamed(el *etree.Element, ns, tag string) []*etree.Element {

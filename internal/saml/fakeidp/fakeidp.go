@@ -69,6 +69,11 @@ type Tamper struct {
 	ForeignNameID string
 	// OmitAssertionIssuer drops the assertion's Issuer element before signing.
 	OmitAssertionIssuer bool
+	// EditAssertion edits the assertion element before it is signed (and
+	// encrypted), so the edit is covered by the IdP signature.
+	EditAssertion func(assertion *etree.Element)
+	// OmitResponseSignature leaves only the Assertion signed.
+	OmitResponseSignature bool
 
 	OmitResponseIssuer bool   // drop the Response-level Issuer (the assertion keeps its own)
 	ResponseIssuer     string // replaces the Response-level Issuer; the assertion Issuer is unchanged
@@ -427,7 +432,7 @@ func (s *Server) Response(authnRequestXML []byte, user, acsURL string, t Tamper)
 		return el
 	}
 	responseEl := build()
-	if !t.OmitSignature {
+	if !t.OmitSignature && !t.OmitResponseSignature {
 		sc, err := signingContext(&idp)
 		if err != nil {
 			return "", err
@@ -498,7 +503,7 @@ func (s *Server) assertionElement(ir *crewjam.IdpAuthnRequest, t Tamper, freshID
 		return copied.Element(), nil
 	}
 	ir.AssertionEl = nil
-	if t.ForeignNameID != "" || t.OmitAssertionIssuer {
+	if t.ForeignNameID != "" || t.OmitAssertionIssuer || t.EditAssertion != nil {
 		return s.editedAssertionElement(ir, t)
 	}
 	if err := ir.MakeAssertionEl(); err != nil {
@@ -546,6 +551,9 @@ func (s *Server) editedAssertionElement(ir *crewjam.IdpAuthnRequest, t Tamper) (
 		}
 		subject.InsertChildAt(pos, foreign)
 	}
+	if t.EditAssertion != nil {
+		t.EditAssertion(el)
+	}
 	sc, err := signingContext(ir.IDP)
 	if err != nil {
 		return nil, err
@@ -554,9 +562,14 @@ func (s *Server) editedAssertionElement(ir *crewjam.IdpAuthnRequest, t Tamper) (
 	if err != nil {
 		return nil, err
 	}
-	kids := signed.ChildElements()
-	sig := kids[len(kids)-1]
-	signed.RemoveChild(sig)
+	// SignEnveloped appends the signature without setting its parent, so
+	// RemoveChild would be a no-op and leave two signatures.
+	sigTok := signed.Child[len(signed.Child)-1]
+	sig, ok := sigTok.(*etree.Element)
+	if !ok {
+		return nil, errors.New("fakeidp: signature is not the last child")
+	}
+	signed.RemoveChildAt(len(signed.Child) - 1)
 	pos := 0
 	if iss := signed.SelectElement("Issuer"); iss != nil {
 		pos = iss.Index() + 1
