@@ -14,6 +14,7 @@ type Member struct {
 	Roles                  []string
 	Version                string
 	StartedAt, HeartbeatAt time.Time
+	Age                    time.Duration // time since the last heartbeat by the database clock (LiveMembers only)
 	Slices, Weight         int
 	FocusObjects           int
 }
@@ -44,7 +45,8 @@ func (s *Store) HeartbeatMember(ctx context.Context, m Member) error {
 // LiveMembers returns the members whose heartbeat is newer than window, oldest process first.
 func (s *Store) LiveMembers(ctx context.Context, window time.Duration) ([]Member, error) {
 	rows, err := s.Pool.Query(ctx,
-		`select instance_id, roles, version, started_at, heartbeat_at, slices, weight, focus_objects
+		`select instance_id, roles, version, started_at, heartbeat_at, slices, weight, focus_objects,
+		   (extract(epoch from now() - heartbeat_at) * 1000)::bigint
 		 from poll_members where heartbeat_at > now() - $1 * interval '1 millisecond'
 		 order by started_at, instance_id`, window.Milliseconds())
 	if err != nil {
@@ -54,10 +56,12 @@ func (s *Store) LiveMembers(ctx context.Context, window time.Duration) ([]Member
 	out := []Member{}
 	for rows.Next() {
 		var m Member
+		var ageMS int64
 		if err := rows.Scan(&m.InstanceID, &m.Roles, &m.Version, &m.StartedAt, &m.HeartbeatAt,
-			&m.Slices, &m.Weight, &m.FocusObjects); err != nil {
+			&m.Slices, &m.Weight, &m.FocusObjects, &ageMS); err != nil {
 			return nil, fmt.Errorf("scan member: %w", err)
 		}
+		m.Age = time.Duration(ageMS) * time.Millisecond
 		out = append(out, m)
 	}
 	return out, rows.Err()

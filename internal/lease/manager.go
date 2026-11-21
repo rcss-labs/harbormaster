@@ -25,6 +25,10 @@ const (
 	releaseTimeout = 5 * time.Second
 	// maxClaimPasses bounds the re-plans within one tick after a claim lost a race to another member.
 	maxClaimPasses = 3
+	// slowClaim is how long a claim may take before it counts as blocked behind another transaction's lock; a blocked
+	// claim backs its lease off for a few ticks, and a tick makes at most maxSlowClaims of them.
+	slowClaim     = time.Second
+	maxSlowClaims = 2
 )
 
 // Holder runs the work of one held lease. Hold must return soon after ctx is cancelled, and only once its in-flight
@@ -80,17 +84,20 @@ type Manager struct {
 	crash bool       // stop without releasing anything, as a killed process would
 
 	runCtx   context.Context
-	mu       sync.Mutex
+	mu       sync.Mutex // guards held, its entries' fields, weights and lastBeat
 	held     map[store.LeaseKey]*holding
 	lastTick atomic.Int64
+	beatMu   sync.Mutex // serialises member heartbeats (the tick and the renewer both send one)
+	lastBeat time.Time
 
 	// owned by the tick goroutine
 	started      time.Time
-	lastBeat     time.Time
 	lastTargets  time.Time
 	lastGiveBack time.Time
 	targets      map[awsx.Target]bool // nil until the first successful refresh
-	weights      map[awsx.Target]int
+	weights      map[awsx.Target]int  // guarded by mu
+	// claimBackoff holds off claiming a lease whose last claim was blocked.
+	claimBackoff map[store.LeaseKey]time.Time
 	// priorOwner remembers, per lease, that the row was owned but expired when it was planned, so the claim that
 	// follows is counted as a takeover.
 	priorOwner map[store.LeaseKey]bool
@@ -105,6 +112,8 @@ type holding struct {
 	// guarded by Manager.mu
 	renewedAt time.Time // start of the last successful claim or renewal, monotonic
 	fenced    bool      // the self-fence cancelled the holder
+	lost      bool      // a renewal found the lease taken: the holder is cancelled and nothing is left to release
+	stopping  bool      // the tick is stopping this holder: do not renew it
 }
 
 func (m *Manager) store() leaseStore {
@@ -129,7 +138,9 @@ func (m *Manager) Held() []store.Lease {
 	defer m.mu.Unlock()
 	out := make([]store.Lease, 0, len(m.held))
 	for _, h := range m.held {
-		out = append(out, h.lease)
+		if !h.lost {
+			out = append(out, h.lease)
+		}
 	}
 	slices.SortFunc(out, func(a, b store.Lease) int { return compareKeys(a.Key, b.Key) })
 	return out
@@ -139,8 +150,8 @@ func (m *Manager) Held() []store.Lease {
 func (m *Manager) HoldsCoordinator() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	_, ok := m.held[store.LeaseKey{Kind: store.LeaseCoordinator}]
-	return ok
+	h, ok := m.held[store.LeaseKey{Kind: store.LeaseCoordinator}]
+	return ok && !h.lost
 }
 
 // dbTimeout bounds each database call of a tick, so a half-open connection cannot stall renewals for long.
@@ -174,6 +185,8 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	watchdogDone := make(chan struct{})
 	go func() { defer close(watchdogDone); m.watchdog(ctx) }()
+	renewerDone := make(chan struct{})
+	go func() { defer close(renewerDone); m.renewer(ctx) }()
 
 	timer := time.NewTicker(m.Timing.Tick)
 	defer timer.Stop()
@@ -187,6 +200,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.lastTick.Store(time.Now().UnixNano())
 		select {
 		case <-ctx.Done():
+			<-renewerDone // no renewal or heartbeat may race the release
 			m.shutdown()
 			m.publish()
 			<-watchdogDone
@@ -231,8 +245,7 @@ func (m *Manager) tick(ctx context.Context) {
 		return
 	}
 	m.reapFinished(ctx)
-	m.renewAll(ctx)
-	m.heartbeat(ctx)
+	m.heartbeat(ctx) // members must be visible before claims are planned
 	m.refreshTargets(ctx)
 	if m.Slices != nil {
 		m.claimSlices(ctx)
@@ -243,18 +256,23 @@ func (m *Manager) tick(ctx context.Context) {
 }
 
 // reapFinished forgets and releases leases whose holder has already returned (it decided to stop by itself, or the
-// self-fence cancelled it), so the slice is not left renewed with nobody working on it.
+// self-fence cancelled it), so the slice is not left renewed with nobody working on it. A lost lease has nothing to
+// release.
 func (m *Manager) reapFinished(ctx context.Context) {
 	for _, h := range m.snapshotHeld() {
 		select {
 		case <-h.done:
 			m.forget(h)
-			m.release(ctx, h.lease, "holder stopped")
+			m.mu.Lock()
+			lost := h.lost
+			m.mu.Unlock()
+			if !lost {
+				m.release(ctx, h.lease, "holder stopped")
+			}
 		default:
 		}
 	}
 }
-
 func (m *Manager) snapshotHeld() []*holding {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -274,10 +292,12 @@ func (m *Manager) forget(h *holding) {
 
 // stopHolder cancels a holder and waits for it to return, which is when its in-flight writes are done.
 func (m *Manager) stopHolder(h *holding) {
+	m.mu.Lock()
+	h.stopping = true
+	m.mu.Unlock()
 	h.cancel()
 	<-h.done
 }
-
 func (m *Manager) release(ctx context.Context, l store.Lease, why string) {
 	if m.crash {
 		return
@@ -306,16 +326,13 @@ func (m *Manager) publish() {
 	if m.Telemetry == nil {
 		return
 	}
-	slicesHeld, weight, coordinator := 0, 0, false
-	for _, h := range m.snapshotHeld() {
-		switch h.lease.Key.Kind {
-		case store.LeaseSlice:
-			slicesHeld++
-			weight += max(m.weights[awsx.Target{AccountID: h.lease.Key.AccountID, Region: h.lease.Key.Region}], 1)
-		case store.LeaseCoordinator:
-			coordinator = true
-		}
+	slicesHeld, weight := m.ownedGauges()
+	coordinator := false
+	m.mu.Lock()
+	if h, ok := m.held[store.LeaseKey{Kind: store.LeaseCoordinator}]; ok && !h.lost {
+		coordinator = true
 	}
+	m.mu.Unlock()
 	m.Telemetry.SetLeaseOwned(slicesHeld, weight)
 	m.Telemetry.SetCoordinatorActive(coordinator)
 	m.Telemetry.SetLeader(coordinator)
@@ -342,11 +359,32 @@ func (m *Manager) shutdown() {
 	}
 }
 
-// renewAll renews every lease whose last renewal is older than RenewEvery. A lost lease stops only its own holder.
-func (m *Manager) renewAll(ctx context.Context) {
+// renewer renews held leases and beats the member row on its own goroutine, so a tick that is busy (claims waiting on a
+// row lock, a holder that takes long to stop) never delays them: that is what keeps healthy slices from being
+// self-fenced.
+func (m *Manager) renewer(ctx context.Context) {
+	period := max(min(m.Timing.RenewEvery/3, m.Timing.MemberHeartbeat, m.Timing.Tick), time.Millisecond)
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	for {
+		if m.gateHeld() {
+			m.renewDue(ctx)
+			m.heartbeat(ctx)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// renewDue renews every lease whose last renewal is older than RenewEvery. A lost lease cancels only its own holder; the
+// tick forgets it once the holder has returned.
+func (m *Manager) renewDue(ctx context.Context) {
 	for _, h := range m.snapshotHeld() {
 		m.mu.Lock()
-		due := time.Since(h.renewedAt) >= m.Timing.RenewEvery
+		due := !h.lost && !h.fenced && !h.stopping && time.Since(h.renewedAt) >= m.Timing.RenewEvery
 		m.mu.Unlock()
 		if !due {
 			continue
@@ -361,11 +399,17 @@ func (m *Manager) renewAll(ctx context.Context) {
 			h.renewedAt = start
 			m.mu.Unlock()
 		case errors.Is(err, store.ErrLeaseLost):
+			m.mu.Lock()
+			already := h.lost || h.stopping
+			h.lost = true
+			m.mu.Unlock()
+			if already {
+				continue
+			}
 			m.Log.Warn("lease: lost", "kind", h.lease.Key.Kind, "account", h.lease.Key.AccountID,
 				"region", h.lease.Key.Region, "epoch", h.lease.Epoch)
 			m.event(h.lease.Key.Kind, "lost")
-			m.stopHolder(h)
-			m.forget(h)
+			h.cancel()
 		default:
 			if ctx.Err() == nil {
 				if m.Telemetry != nil {
@@ -377,18 +421,13 @@ func (m *Manager) renewAll(ctx context.Context) {
 		}
 	}
 }
-
 func (m *Manager) heartbeat(ctx context.Context) {
+	m.beatMu.Lock()
+	defer m.beatMu.Unlock()
 	if !m.lastBeat.IsZero() && time.Since(m.lastBeat) < m.Timing.MemberHeartbeat {
 		return
 	}
-	slicesHeld, weight := 0, 0
-	for _, h := range m.snapshotHeld() {
-		if h.lease.Key.Kind == store.LeaseSlice {
-			slicesHeld++
-			weight += max(m.weights[awsx.Target{AccountID: h.lease.Key.AccountID, Region: h.lease.Key.Region}], 1)
-		}
-	}
+	slicesHeld, weight := m.ownedGauges()
 	focus := 0
 	if m.Gauges != nil {
 		focus = m.Gauges()
@@ -420,6 +459,19 @@ func (m *Manager) heartbeat(ctx context.Context) {
 	if _, err := m.store().DeleteStaleMembers(cctx, memberStaleAfter); err != nil && ctx.Err() == nil {
 		m.Log.Warn("lease: delete stale members", "err", err)
 	}
+}
+
+// ownedGauges returns how many slices this process holds and their weight.
+func (m *Manager) ownedGauges() (slicesHeld, weight int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, h := range m.held {
+		if h.lease.Key.Kind == store.LeaseSlice && !h.lost {
+			slicesHeld++
+			weight += max(m.weights[awsx.Target{AccountID: h.lease.Key.AccountID, Region: h.lease.Key.Region}], 1)
+		}
+	}
+	return slicesHeld, weight
 }
 
 // refreshTargets reads the account x region set, gives up held slices whose target is gone and reconciles the rows.
@@ -482,6 +534,60 @@ func (m *Manager) notePrior(r store.LeaseRow) {
 	m.priorOwner[r.Key] = r.OwnerID != uuid.Nil
 }
 
+func (m *Manager) weightOf(t awsx.Target) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.weights[t]
+}
+
+// claimCall bounds a claim by the store's own deadline plus a margin, so a blocked claim ends with the database's
+// answer (or the store's deadline) rather than a cut-off by this context.
+func (m *Manager) claimCall(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, store.ClaimDeadline+2*time.Second)
+}
+
+// backedOff reports whether a recent blocked claim of k still holds it back.
+func (m *Manager) backedOff(k store.LeaseKey) bool {
+	until, ok := m.claimBackoff[k]
+	return ok && time.Now().Before(until)
+}
+
+// noteClaim records how long a claim took: a blocked one backs the lease off for a few ticks and counts against the
+// tick's budget of slow claims. It reports whether the budget is spent.
+func (m *Manager) noteClaim(k store.LeaseKey, took time.Duration, claimed bool, slow *int) (spent bool) {
+	if claimed || took < slowClaim {
+		return false
+	}
+	if m.claimBackoff == nil {
+		m.claimBackoff = map[store.LeaseKey]time.Time{}
+	}
+	m.claimBackoff[k] = time.Now().Add(4 * m.Timing.Tick)
+	*slow++
+	return *slow >= maxSlowClaims
+}
+
+// activePollers lists the live poller members for the fair share. A member whose heartbeat is older than two intervals
+// and that owns nothing is a crashed poller whose row has not aged out yet; counting it would stall the survivors.
+func (m *Manager) activePollers(members []store.Member, rows []store.LeaseRow) []uuid.UUID {
+	owners := map[uuid.UUID]bool{}
+	for _, r := range rows {
+		if !r.Free && r.OwnerID != uuid.Nil {
+			owners[r.OwnerID] = true
+		}
+	}
+	var out []uuid.UUID
+	for _, mem := range members {
+		if !slices.Contains(mem.Roles, "poller") {
+			continue
+		}
+		if mem.InstanceID != m.ID && mem.Age > 2*m.Timing.MemberHeartbeat && !owners[mem.InstanceID] {
+			continue
+		}
+		out = append(out, mem.InstanceID)
+	}
+	return out
+}
+
 func (m *Manager) isHeld(k store.LeaseKey) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -512,6 +618,7 @@ func (m *Manager) start(holder Holder, l store.Lease, claimStart time.Time) {
 // is re-planned against fresh state, a few times per tick.
 func (m *Manager) claimSlices(ctx context.Context) {
 	mayGiveBack := m.lastGiveBack.IsZero() || time.Since(m.lastGiveBack) >= m.Timing.GiveBackEvery
+	slowClaims := 0
 	for range maxClaimPasses {
 		cctx, cancel := m.call(ctx)
 		rows, err := m.store().ListLeases(cctx)
@@ -522,7 +629,9 @@ func (m *Manager) claimSlices(ctx context.Context) {
 		if err == nil {
 			var w map[awsx.Target]int
 			if w, err = m.store().SliceWeights(cctx); err == nil {
+				m.mu.Lock()
 				m.weights = w
+				m.mu.Unlock()
 			}
 		}
 		cancel()
@@ -533,12 +642,7 @@ func (m *Manager) claimSlices(ctx context.Context) {
 			return
 		}
 
-		var pollers []uuid.UUID
-		for _, mem := range members {
-			if slices.Contains(mem.Roles, "poller") {
-				pollers = append(pollers, mem.InstanceID)
-			}
-		}
+		pollers := m.activePollers(members, rows)
 		var states []SliceState
 		for _, r := range rows {
 			if r.Key.Kind != store.LeaseSlice {
@@ -556,7 +660,7 @@ func (m *Manager) claimSlices(ctx context.Context) {
 			if m.isHeld(r.Key) {
 				owner = m.ID // still ours (maybe late renewing); never plan to claim it
 			}
-			states = append(states, SliceState{Key: r.Key, Weight: max(m.weights[t], 1), Owner: owner})
+			states = append(states, SliceState{Key: r.Key, Weight: max(m.weightOf(t), 1), Owner: owner})
 		}
 
 		plan := Rebalance(m.ID, pollers, states, mayGiveBack)
@@ -574,11 +678,11 @@ func (m *Manager) claimSlices(ctx context.Context) {
 		}
 		lost := false
 		for _, k := range plan.Claim {
-			if m.isHeld(k) || !m.gateHeld() || ctx.Err() != nil {
+			if m.isHeld(k) || m.backedOff(k) || !m.gateHeld() || ctx.Err() != nil {
 				continue
 			}
 			start := time.Now()
-			cctx, cancel := m.call(ctx)
+			cctx, cancel := m.claimCall(ctx)
 			l, ok, err := m.store().ClaimLease(cctx, k, m.ID, m.Timing.TTL)
 			cancel()
 			switch {
@@ -591,6 +695,9 @@ func (m *Manager) claimSlices(ctx context.Context) {
 			default:
 				m.start(m.Slices, l, start)
 			}
+			if m.noteClaim(k, time.Since(start), ok, &slowClaims) {
+				return // enough blocked claims for one tick; the rest wait for the next
+			}
 		}
 		if !lost {
 			return
@@ -600,7 +707,7 @@ func (m *Manager) claimSlices(ctx context.Context) {
 
 func (m *Manager) claimCoordinator(ctx context.Context) {
 	key := store.LeaseKey{Kind: store.LeaseCoordinator}
-	if m.isHeld(key) || !m.gateHeld() {
+	if m.isHeld(key) || m.backedOff(key) || !m.gateHeld() {
 		return
 	}
 	cctx, cancel := m.call(ctx)
@@ -623,9 +730,11 @@ func (m *Manager) claimCoordinator(ctx context.Context) {
 		return
 	}
 	start := time.Now()
-	cctx, cancel = m.call(ctx)
+	cctx, cancel = m.claimCall(ctx)
 	l, ok, err := m.store().ClaimLease(cctx, key, m.ID, m.Timing.TTL)
 	cancel()
+	slow := 0
+	m.noteClaim(key, time.Since(start), ok, &slow)
 	if err != nil {
 		if ctx.Err() == nil {
 			m.Log.Warn("lease: claim coordinator failed", "err", err)
