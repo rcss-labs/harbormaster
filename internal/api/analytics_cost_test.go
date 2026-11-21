@@ -14,6 +14,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/cost"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -268,14 +269,61 @@ func TestAnalyticsCost_SpotIsReportedSeparately(t *testing.T) {
 	})
 	pollAll(t, st, fk)
 	got := getCost(t, login(t, srv, "sam", testPassword), "")
-	if got.KPIs.SpotTasks != 1 || !approx(got.KPIs.SpotMonthly, 10.36) {
-		t.Errorf("spot %d tasks %.4f/month, want 1 task at its list price 10.36", got.KPIs.SpotTasks, got.KPIs.SpotMonthly)
+	// 256/512 in eu-central-1: list 10.36 a month, Spot 3.78.
+	if got.KPIs.SpotTasks != 1 || !approx(got.KPIs.SpotMonthly, 3.78) {
+		t.Errorf("spot %d tasks %.4f/month, want 1 task at its Spot price 3.78", got.KPIs.SpotTasks, got.KPIs.SpotMonthly)
 	}
-	if !approx(costService(t, got, "edge-nginx").Monthly, 20.72) || got.KPIs.MonthlyTotal < got.KPIs.SpotMonthly {
-		t.Errorf("spot must stay inside the total: edge-nginx %.4f, total %.4f", costService(t, got, "edge-nginx").Monthly, got.KPIs.MonthlyTotal)
+	if edge := costService(t, got, "edge-nginx"); !approx(edge.Monthly, 10.36+3.78) || got.KPIs.MonthlyTotal < got.KPIs.SpotMonthly {
+		t.Errorf("spot must stay inside the total: edge-nginx %.4f, total %.4f", edge.Monthly, got.KPIs.MonthlyTotal)
 	}
 	if edge := costService(t, got, "edge-nginx"); edge.SpotTasks != 1 {
 		t.Errorf("edge-nginx spot_tasks %d, want 1", edge.SpotTasks)
+	}
+}
+
+func TestAnalyticsCost_SpotTasksUseSpotRate(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	editRunningTasks(fk, "payments-api", func(index int, task *ecstypes.Task) {
+		if index == 0 {
+			spot := "FARGATE_SPOT"
+			task.CapacityProviderName = &spot
+		}
+	})
+	pollAll(t, st, fk)
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+	// payments-api runs three 512/1024 tasks in us-east-1: two on demand at 18.02, one Spot at 6.60.
+	payments := costService(t, got, "payments-api")
+	if !approx(payments.Monthly, 2*18.02+6.60) || !approx(got.KPIs.SpotMonthly, 6.60) {
+		t.Errorf("payments-api %.4f/month, spot %.4f; want %.2f and 6.60", payments.Monthly, got.KPIs.SpotMonthly, 2*18.02+6.60)
+	}
+	if got.SpotPricesAsOf == "" || got.SpotPricesAsOf == got.PricesAsOf {
+		t.Errorf("spot_prices_as_of = %q (list %q), want its own date", got.SpotPricesAsOf, got.PricesAsOf)
+	}
+}
+
+func TestAnalyticsCost_SpotWithoutSpotRateIsUnpriced(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	editRunningTasks(fk, "payments-api", func(index int, task *ecstypes.Task) {
+		spot := "FARGATE_SPOT"
+		task.CapacityProviderName = &spot
+	})
+	pollAll(t, st, fk)
+	t.Cleanup(cost.DropSpotRateForTest("us-east-1"))
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+	payments := costService(t, got, "payments-api")
+	if payments.Monthly != 0 || payments.Tasks != 3 {
+		t.Errorf("payments-api %d tasks %.4f/month, want unpriced (no list price for a Spot task)", payments.Tasks, payments.Monthly)
+	}
+	found := false
+	for _, region := range got.KPIs.UnpricedRegions {
+		found = found || region == "us-east-1"
+	}
+	if !found || got.KPIs.UnpricedTasks < 3 {
+		t.Errorf("unpriced_regions %v, unpriced tasks %d; want us-east-1 and at least 3 tasks", got.KPIs.UnpricedRegions, got.KPIs.UnpricedTasks)
 	}
 }
 

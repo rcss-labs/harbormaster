@@ -46,13 +46,13 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
             value: (
               <>
                 {nothingPriced ? '—' : money(kpis.monthly_total)}
-                {!nothingPriced && kpis.spot_monthly > 0 && <KpiNote>{`includes ${money(kpis.spot_monthly)} of Spot tasks at list price`}</KpiNote>}
+                {!nothingPriced && kpis.spot_monthly > 0 && <KpiNote>{`includes ${money(kpis.spot_monthly)} of Spot tasks at Spot prices`}</KpiNote>}
               </>
             ),
           },
           {
             label: `possible monthly saving at ${headroomPct}% headroom`,
-            value: ready ? `${summary.upperBound ? 'up to ' : ''}${money(summary.saving)}` : '—',
+            value: ready ? `${summary.includesSpot ? 'about ' : ''}${money(summary.saving)}` : '—',
           },
           { label: 'of spend is reserved but not needed', value: ready ? `${notNeededPct}%` : '—' },
           { label: summary.services === 1 ? 'service can use a smaller size' : 'services can use a smaller size', value: ready ? whole(summary.services) : '—' },

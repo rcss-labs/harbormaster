@@ -10,16 +10,17 @@ type CostDTO struct {
 	PolledAt time.Time            `json:"polled_at"`
 	Sources  []AnalyticsSourceDTO `json:"sources"`
 
-	PricesAsOf  string             `json:"prices_as_of"` // list price publication date, YYYY-MM-DD
-	KPIs        CostKPIsDTO        `json:"kpis"`
-	ByCluster   []CostGroupDTO     `json:"by_cluster"`
-	ByAccount   []CostGroupDTO     `json:"by_account"`
-	ByTag       []CostGroupDTO     `json:"by_tag"`
-	Rightsizing CostRightsizingDTO `json:"rightsizing"`
+	PricesAsOf     string             `json:"prices_as_of"`      // list price publication date, YYYY-MM-DD
+	SpotPricesAsOf string             `json:"spot_prices_as_of"` // the day the Fargate Spot prices were read, YYYY-MM-DD
+	KPIs           CostKPIsDTO        `json:"kpis"`
+	ByCluster      []CostGroupDTO     `json:"by_cluster"`
+	ByAccount      []CostGroupDTO     `json:"by_account"`
+	ByTag          []CostGroupDTO     `json:"by_tag"`
+	Rightsizing    CostRightsizingDTO `json:"rightsizing"`
 }
 
-// CostKPIsDTO totals the priced running tasks. Spot tasks are priced at the on-demand list rate and also
-// reported separately; tasks without a Fargate price are counted but never given a dollar figure.
+// CostKPIsDTO totals the priced running tasks. Spot tasks are priced at Spot prices, are part of the total and
+// also reported separately; tasks without a Fargate price are counted but never given a dollar figure.
 type CostKPIsDTO struct {
 	MonthlyTotal    float64  `json:"monthly_total"`
 	SpotMonthly     float64  `json:"spot_monthly"`

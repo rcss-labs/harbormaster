@@ -372,6 +372,17 @@ func TestOffHoursList_SavingUsesCostPackage(t *testing.T) {
 	}
 }
 
+func TestOffHours_AlwaysOnUsesSpotRateForSpotServices(t *testing.T) {
+	match := store.OffHoursMatch{Key: model.ServiceKey{ClusterKey: model.ClusterKey{Region: "us-east-1"}}, CPU: "512", Memory: "1024"}
+	match.CapacityProvider = "FARGATE_SPOT"
+	spot := alwaysOnMonthly(match, 2)
+	match.CapacityProvider = "FARGATE"
+	onDemand := alwaysOnMonthly(match, 2)
+	if spot == nil || onDemand == nil || abs(*spot-2*6.60) > 0.02 || abs(*onDemand-2*18.02) > 0.02 {
+		t.Fatalf("spot %v on demand %v, want 13.20 and 36.04 (Spot tasks sleep at Spot prices)", spot, onDemand)
+	}
+}
+
 func abs(f float64) float64 {
 	if f < 0 {
 		return -f

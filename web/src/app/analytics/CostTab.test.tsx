@@ -26,7 +26,7 @@ describe('CostTab', () => {
   it('renders the KPIs and groups by cluster by default', async () => {
     const panel = within(await renderTab())
     expect(kpi(/estimated Fargate spend per month/)).toHaveTextContent('$68')
-    expect(kpi(/estimated Fargate spend per month/)).toHaveTextContent('includes $14 of Spot tasks at list price')
+    expect(kpi(/estimated Fargate spend per month/)).toHaveTextContent('includes $14 of Spot tasks at Spot prices')
     expect(kpi(/possible monthly saving at 30% headroom/)).toHaveTextContent('$25')
     expect(kpi(/possible monthly saving at 30% headroom/)).not.toHaveTextContent('up to')
     expect(kpi(/of spend is reserved but not needed/)).toHaveTextContent('36%')
@@ -88,11 +88,11 @@ describe('CostTab edge cases', () => {
     expect(panel.getByText('No services to show.')).toBeInTheDocument()
   })
 
-  it('prefixes the saving with "up to" when a Spot service has a suggestion', async () => {
+  it('labels a saving that includes Spot tasks as about', async () => {
     const [payments, ...rest] = ANALYTICS_COST.rightsizing.services
     const spot = { ...payments, spot_tasks: 1 }
     await renderTab({ ...ANALYTICS_COST, rightsizing: { ...ANALYTICS_COST.rightsizing, services: [spot, ...rest] } })
-    expect(kpi(/possible monthly saving/)).toHaveTextContent('up to $25')
+    expect(kpi(/possible monthly saving/)).toHaveTextContent('about $25')
   })
 
   it('caps the not-needed share at 100% when savings exceed spend', async () => {
@@ -104,10 +104,10 @@ describe('CostTab edge cases', () => {
 describe('costSummary', () => {
   const [payments] = ANALYTICS_COST.rightsizing.services
 
-  it('flags Spot rows with a suggestion as an upper bound and skips null steps', () => {
+  it('flags Spot rows with a suggestion as including Spot and skips null steps', () => {
     const spot = { ...payments, spot_tasks: 1 }
-    expect(costSummary([spot], 30)).toEqual({ saving: 24.6, services: 1, upperBound: true })
-    expect(costSummary([spot], 90)).toEqual({ saving: 0, services: 0, upperBound: false })
+    expect(costSummary([spot], 30)).toEqual({ saving: 24.6, services: 1, includesSpot: true })
+    expect(costSummary([spot], 90)).toEqual({ saving: 0, services: 0, includesSpot: false })
   })
 })
 
@@ -305,11 +305,11 @@ describe('Rightsizing panel', () => {
     expect(panel.getAllByText('Auto-scaled')).toHaveLength(1)
   })
 
-  it('marks a suggestion limited by containers and Spot savings as an upper bound', async () => {
+  it('marks a suggestion limited by containers and labels Spot savings as about', async () => {
     const limited = { ...orders, spot_tasks: 1, steps: [{ from_headroom_pct: 10, suggestion: { cpu_units: 512, memory_mib: 1024, saving_monthly: 10, limited_by_containers: true } }] }
     const panel = await panelOf(withServices([limited]))
     expect(panel.getByText('Limited by containers')).toBeInTheDocument()
     expect(panel.getByText('Spot')).toBeInTheDocument()
-    expect(panel.getByText('up to $10')).toBeInTheDocument()
+    expect(panel.getByText('about $10')).toBeInTheDocument()
   })
 })

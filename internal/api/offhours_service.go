@@ -103,7 +103,7 @@ func alwaysOnMonthly(m store.OffHoursMatch, tasks int) *float64 {
 	if class != cost.OnDemand && class != cost.Spot {
 		return nil
 	}
-	rate, ok := cost.RateFor(m.Key.Region, m.Architecture)
+	rate, ok := cost.RateForClass(m.Key.Region, m.Architecture, class)
 	if !ok {
 		return nil
 	}

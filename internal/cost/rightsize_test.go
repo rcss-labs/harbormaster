@@ -223,8 +223,30 @@ func TestEvaluate_SpotTasksCountInSaving(t *testing.T) {
 	in := baseInput()
 	in.SpotTasks = 1
 	_, steps := Evaluate(in)
-	if got := steps[1].Suggestion.SavingMonthly; math.Abs(got-2*36.04) > 0.02 {
-		t.Fatalf("saving = %.4f, want %.4f", got, 2*36.04)
+	// One on-demand task saves the list delta (36.04), one Spot task the smaller Spot delta (13.19).
+	if got := steps[1].Suggestion.SavingMonthly; math.Abs(got-(36.04+13.19)) > 0.02 {
+		t.Fatalf("saving = %.4f, want %.4f", got, 36.04+13.19)
+	}
+}
+
+func TestEvaluate_SavingUsesEachTaskClass(t *testing.T) {
+	in := baseInput()
+	in.OnDemandTasks, in.SpotTasks = 2, 2
+	_, steps := Evaluate(in)
+	want := 2*36.04 + 2*13.19
+	if got := steps[1].Suggestion.SavingMonthly; math.Abs(got-want) > 0.05 {
+		t.Fatalf("saving = %.4f, want %.4f (two class deltas, not four list deltas = %.4f)", got, want, 4*36.04)
+	}
+}
+
+func TestEvaluate_SpotTasksWithoutSpotRateHaveNoPrice(t *testing.T) {
+	saved := fargateSpotRates["us-east-1"]
+	delete(fargateSpotRates, "us-east-1")
+	defer func() { fargateSpotRates["us-east-1"] = saved }()
+	in := baseInput()
+	in.SpotTasks = 1
+	if status, _ := Evaluate(in); status != StatusNoPrice {
+		t.Fatalf("status = %q, want no_price (a Spot task never borrows the list price)", status)
 	}
 }
 

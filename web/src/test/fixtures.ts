@@ -1978,6 +1978,7 @@ export const ANALYTICS_COST: AnalyticsCost = {
   ],
   polled_at: FIXTURE_NOW,
   prices_as_of: '2026-10-19',
+  spot_prices_as_of: '2026-11-21',
   kpis: { monthly_total: 68.4, spot_monthly: 13.68, priced_tasks: 5, spot_tasks: 1, unpriced_tasks: 3, unpriced_regions: ['ap-south-1'] },
   by_cluster: [
     { key: analyticsCoreClusterId, label: 'core-services', monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },

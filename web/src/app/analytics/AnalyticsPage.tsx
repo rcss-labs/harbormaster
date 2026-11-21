@@ -19,6 +19,7 @@ import { DeliveryTab } from './DeliveryTab'
 import { retentionText, windowText } from './format'
 import { OperationsTab } from './OperationsTab'
 import { ReliabilityTab } from './ReliabilityTab'
+import { costNotice } from './cost'
 import { useAnalyticsPrefs } from './prefs'
 import { ANALYTICS_RANGES, ANALYTICS_TABS, useAnalyticsState } from './useAnalyticsState'
 import styles from './analytics.module.css'
@@ -39,8 +40,6 @@ const TAB_ITEMS: TabItem[] = ANALYTICS_TABS.map((tab) => ({
 
 const CAPACITY_NOTICE =
   "Breakdowns use the latest poll. The 7-day trend is estimated from task-count history and each service's current task definition, so the range filter does not apply."
-
-const COST_NOTICE = 'Estimate at list prices as of 19 Oct 2026. Excludes load balancers, data transfer, storage above 20 GB and Spot discounts.'
 
 /** `/analytics` goes to the first tab and keeps the filters in the query string. */
 export function AnalyticsRedirect() {
@@ -74,7 +73,9 @@ function AnalyticsView({ tab }: { tab: AnalyticsTab }) {
     tab === 'capacity'
       ? CAPACITY_NOTICE
       : tab === 'cost'
-        ? COST_NOTICE
+        ? data?.tab === 'cost'
+          ? costNotice(data.prices_as_of, data.spot_prices_as_of)
+          : null
         : data?.window.clamped
           ? `Showing the last ${windowText(data.window.used)}. Stopped tasks and task-count history are kept ${retentionText(data.window.retention)}.`
           : null

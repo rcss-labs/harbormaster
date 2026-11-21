@@ -13,19 +13,34 @@ export function stepAt(steps: CostStep[], headroomPct: number): CostSuggestion |
   return suggestion
 }
 
-/** Adds up the suggestions the server returned at one headroom. Spot tasks are priced at the on-demand list, so their saving is an upper bound. */
-export function costSummary(rows: CostService[], headroomPct: number): { saving: number; services: number; upperBound: boolean } {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `2026-10-19` as `19 Oct 2026`; anything else is shown as sent. */
+export function priceDate(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!match) return date
+  const month = MONTHS[Number(match[2]) - 1]
+  return month ? `${Number(match[3])} ${month} ${match[1]}` : date
+}
+
+/** The Cost tab banner. Both dates come from the API: the list table and the Spot table are refreshed separately. */
+export function costNotice(listDate: string, spotDate: string): string {
+  return `Estimate at list prices as of ${priceDate(listDate)}. Spot tasks use Spot prices as of ${priceDate(spotDate)}; Spot prices change. Excludes load balancers, data transfer and storage above 20 GB.`
+}
+
+/** Adds up the suggestions the server returned at one headroom. A saving that includes Spot tasks is an estimate at Spot prices, so it reads "about". */
+export function costSummary(rows: CostService[], headroomPct: number): { saving: number; services: number; includesSpot: boolean } {
   let saving = 0
   let services = 0
-  let upperBound = false
+  let includesSpot = false
   for (const row of rows) {
     const suggestion = stepAt(row.steps, headroomPct)
     if (suggestion === null) continue
     saving += suggestion.saving_monthly
     services += 1
-    if (row.spot_tasks > 0) upperBound = true
+    if (row.spot_tasks > 0) includesSpot = true
   }
-  return { saving, services, upperBound }
+  return { saving, services, includesSpot }
 }
 
 /** A service row with the suggestion in force at the chosen headroom. */

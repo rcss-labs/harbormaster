@@ -404,6 +404,7 @@
         }
       }
     ],
+    "spot_prices_as_of": "string",
     "tab": "string",
     "window": {
       "bucket": "string",

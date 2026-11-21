@@ -297,7 +297,7 @@ export interface AnalyticsOperations extends Envelope<'operations'> {
 // ---- cost ----
 
 export interface CostKpis {
-  /** USD per month at list prices; Spot is included at the on-demand list price. */
+  /** USD per month; on-demand tasks at list prices and Spot tasks at Spot prices. */
   monthly_total: number
   spot_monthly: number
   priced_tasks: number
@@ -377,6 +377,8 @@ export interface CostRightsizing {
 export interface AnalyticsCost extends Envelope<'cost'> {
   /** List price publication date, YYYY-MM-DD. */
   prices_as_of: string
+  /** The day the Fargate Spot prices were read, YYYY-MM-DD. */
+  spot_prices_as_of: string
   kpis: CostKpis
   by_cluster: CostGroup[]
   by_account: CostGroup[]

@@ -114,6 +114,15 @@ describe('Analytics notices', () => {
     expect(screen.queryByText(/Showing the last/)).not.toBeInTheDocument()
   })
 
+  it('builds the cost notice from both price dates', async () => {
+    renderApp('/analytics/cost')
+    expect(
+      await screen.findByText(
+        'Estimate at list prices as of 19 Oct 2026. Spot tasks use Spot prices as of 21 Nov 2026; Spot prices change. Excludes load balancers, data transfer and storage above 20 GB.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('capacity dims the range filter, always shows the fixed notice and explains a click with a toast', async () => {
     renderApp('/analytics/capacity?range=24h')
     const user = userEvent.setup()

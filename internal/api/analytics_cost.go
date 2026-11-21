@@ -76,7 +76,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		Window:     win.dto(retention, false),
 		PolledAt:   polledAt,
 		Sources:    s.costSources(),
-		PricesAsOf: cost.PricesAsOf,
+		PricesAsOf: cost.PricesAsOf, SpotPricesAsOf: cost.SpotPricesAsOf,
 		Rightsizing: CostRightsizingDTO{
 			State:              s.rightsizingState(),
 			MinHistoryDays:     cost.MinHistoryDays,
@@ -121,7 +121,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) costSources() []AnalyticsSourceDTO {
 	latest := "latest poll"
 	return []AnalyticsSourceDTO{
-		{Table: "tasks", Reads: "Running tasks: CPU, memory and capacity provider of each task, priced at list rates", Kept: latest},
+		{Table: "tasks", Reads: "Running tasks: CPU, memory and capacity provider of each task, priced at list rates (on demand) or Spot prices", Kept: latest},
 		{Table: "services", Reads: "The services you can see and their current task definition", Kept: latest},
 		{Table: "task_definitions", Reads: "Task definition size, CPU architecture and container minimums", Kept: latest},
 		prunedTableSource("service_util_daily",
@@ -188,7 +188,7 @@ func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostService
 			totals.notFargate++
 			continue
 		}
-		rate, ok := cost.RateFor(task.Cluster.Region, service.architecture)
+		rate, ok := cost.RateForClass(task.Cluster.Region, service.architecture, class)
 		if !ok {
 			totals.unpriced++
 			totals.noRateTasks++
