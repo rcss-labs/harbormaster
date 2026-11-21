@@ -115,6 +115,22 @@ describe('scope options', () => {
   })
 })
 
+describe('a deleted Harbormaster tag', () => {
+  const deleted = selector({ kind: 'harbormaster', tag_id: 99, tag_name: '', missing: true })
+
+  it('is labelled "Deleted tag" instead of an empty name', () => {
+    expect(scopeLabel(deleted)).toBe('Deleted tag')
+    expect(scopeLabel(selector({ kind: 'harbormaster', tag_id: 2, tag_name: 'Staging' }))).toBe('Staging')
+  })
+
+  it('is kept in the picker and marked missing, while a present or AWS tag is not', () => {
+    const options = scopeOptions(NOTIFICATION_TARGETS, OFFHOURS_TAGS, [deleted])
+    expect(options.find((option) => option.key === scopeKey(deleted))).toMatchObject({ group: 'Harbormaster tags', missing: true, label: 'Deleted tag' })
+    const aws = selector({ kind: 'aws', key: 'team', value: 'gone' })
+    expect(scopeOptions(NOTIFICATION_TARGETS, OFFHOURS_TAGS, [aws]).find((option) => option.key === scopeKey(aws))?.missing).toBeFalsy()
+  })
+})
+
 describe('scope summary and thresholds', () => {
   it('summarises a scope as Everything or its first labels', () => {
     expect(scopeSummary({ ...ROUTE_CORE_SLACK, scope: [] })).toBe('Everything')

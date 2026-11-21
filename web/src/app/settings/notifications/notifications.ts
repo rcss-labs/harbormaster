@@ -100,7 +100,7 @@ export function scopeLabel(selector: NotificationSelector): string {
     case 'aws':
       return `${selector.key}=${selector.value}`
     case 'harbormaster':
-      return selector.tag_name
+      return selector.tag_name || 'Deleted tag'
   }
 }
 
@@ -185,8 +185,9 @@ export function scopeOptions(targets: NotificationTargets, tags: OffHoursTags, s
     const key = scopeKey(selector)
     if (known.has(key)) continue
     known.add(key)
-    // A tag is never "missing": an AWS tag that no service carries today is still a valid entry.
-    const missing = selector.kind !== 'aws' && selector.kind !== 'harbormaster'
+    // An AWS tag that no service carries today is still a valid entry; a Harbormaster tag is missing when the server
+    // says its tag was deleted.
+    const missing = selector.kind === 'aws' ? false : selector.kind === 'harbormaster' ? selector.missing : true
     options.push({ key, group: groupOf(selector.kind), label: scopeLabel(selector), sub: '', ...(missing ? { missing: true } : {}) })
   }
   return SCOPE_GROUPS.flatMap((group) => options.filter((option) => option.group === group))
