@@ -2,6 +2,7 @@ import { useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { useAlerts } from '../../api/observe'
 import { useAuthOptions, useClusters, usePollerStatus, useServicesList, useSettings, useTasks } from '../../api/hooks'
+import { useNotificationSummary } from '../../api/notifications'
 import type { ClusterCardDTO } from '../../api/types'
 import { Brand } from '../../components/Brand'
 import { Icon } from '../../components/Icon'
@@ -162,6 +163,7 @@ export function Sidebar() {
   const settings = useSettings()
   const authOptions = useAuthOptions()
   const poller = usePollerStatus()
+  const notifications = useNotificationSummary(isAdmin)
   const { pins, remove, move } = usePins()
   const [pinAnnouncement, setPinAnnouncement] = useState('')
   // Unfiltered, so a pin outside the current scope filter still shows its status.
@@ -186,7 +188,15 @@ export function Sidebar() {
     taskBadges.push({ count: stoppedErrors, kind: 'bad', label: `${stoppedErrors} stopped with errors${within}` })
   }
   const accountIssues = (poller.data?.items ?? []).filter((entry) => entry.failing || entry.throttled).length
-  const settingsBadges: NavBadge[] = accountIssues > 0 ? [{ count: accountIssues, kind: 'warn', label: `${accountIssues} account issues` }] : []
+  const failingRoutes = isAdmin ? (notifications.data?.failing_routes ?? 0) : 0
+  const settingsIssues = accountIssues + failingRoutes
+  const settingsLabel =
+    accountIssues > 0 && failingRoutes > 0
+      ? `${settingsIssues} settings issues`
+      : failingRoutes > 0
+        ? `${failingRoutes} failing notification ${failingRoutes === 1 ? 'route' : 'routes'}`
+        : `${accountIssues} account issues`
+  const settingsBadges: NavBadge[] = settingsIssues > 0 ? [{ count: settingsIssues, kind: 'warn', label: settingsLabel }] : []
   const dangerAlerts = alerts.data?.counts.danger ?? 0
   const signOut = async () => {
     setMenuOpen(false)

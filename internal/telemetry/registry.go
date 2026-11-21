@@ -28,6 +28,7 @@ type Registry struct {
 	loopInterval     map[string]time.Duration
 	snapshotRows     map[string]uint64
 	registryRequests map[string]uint64
+	notifyCounts     map[string]uint64
 	leader           bool
 	idle             bool
 	buildVersion     string
@@ -46,6 +47,7 @@ func New() *Registry {
 		loopInterval:     map[string]time.Duration{},
 		snapshotRows:     map[string]uint64{},
 		registryRequests: map[string]uint64{},
+		notifyCounts:     map[string]uint64{},
 	}
 }
 
@@ -110,6 +112,13 @@ func (r *Registry) CountSnapshotWrites(table string, n int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.snapshotRows[table] += uint64(n)
+}
+
+// CountNotification records one notification attempt outcome; result is "delivered", "failed" or "retried".
+func (r *Registry) CountNotification(destination, result string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notifyCounts[joinKey(destination, result)]++
 }
 
 // SetLeader records whether this process currently holds poller leadership.

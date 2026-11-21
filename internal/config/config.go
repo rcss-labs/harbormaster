@@ -46,6 +46,8 @@ type RetentionConfig struct {
 	// Image scan results and the runs that produced them.
 	ScanImages time.Duration
 	ScanRuns   time.Duration
+	// Alert notification delivery log and resolved incidents.
+	NotificationLog time.Duration
 }
 
 // AnalyticsConfig toggles optional analytics collection.
@@ -116,6 +118,7 @@ type Config struct {
 	Scan                    ScanConfig
 	OffHours                OffHoursConfig
 	ARM64                   ARM64Config
+	Notify                  NotifyConfig
 	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
@@ -263,6 +266,7 @@ func Load(getenv func(string) string) (Config, error) {
 			UtilDaily:         reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
 			ScanImages:        reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
 			ScanRuns:          reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
+			NotificationLog:   reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
 		},
 		Scan: ScanConfig{
 			Enabled:           reader.boolean("HM_SCAN_ENABLED", false),
@@ -290,6 +294,7 @@ func Load(getenv func(string) string) (Config, error) {
 			Recheck:          reader.duration("HM_ARM64_RECHECK", 24*time.Hour),
 			PublicRegistries: reader.boolean("HM_ARM64_PUBLIC_REGISTRIES", true),
 		},
+		Notify:               readNotify(reader),
 		Analytics:            AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault:      reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:          reader.integer("HM_PAGE_SIZE_MAX", 500),
@@ -348,6 +353,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.ARM64.Recheck <= 0 {
 		return Config{}, errors.New("HM_ARM64_RECHECK: must be positive")
+	}
+	if err := validateNotify(cfg.Notify); err != nil {
+		return Config{}, err
 	}
 	if err := validateScan(cfg.Scan); err != nil {
 		return Config{}, err

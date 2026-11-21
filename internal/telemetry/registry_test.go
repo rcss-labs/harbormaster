@@ -76,6 +76,25 @@ func TestWritePrometheus_EscapesLabelValues(t *testing.T) {
 	}
 }
 
+func TestPrometheus_NotificationCounter(t *testing.T) {
+	r := New()
+	r.CountNotification("slack", "delivered")
+	r.CountNotification("slack", "delivered")
+	r.CountNotification("telegram", "failed")
+	r.CountNotification("webhook", "retried")
+	out := render(t, r)
+	for _, want := range []string{
+		"# TYPE harbormaster_notification_deliveries_total counter",
+		`harbormaster_notification_deliveries_total{destination="slack",result="delivered"} 2`,
+		`harbormaster_notification_deliveries_total{destination="telegram",result="failed"} 1`,
+		`harbormaster_notification_deliveries_total{destination="webhook",result="retried"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestWritePrometheus_DeterministicOrder(t *testing.T) {
 	r := New()
 	r.SetBuildInfo("1.2.3")

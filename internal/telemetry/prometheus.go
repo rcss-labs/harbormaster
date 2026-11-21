@@ -35,6 +35,11 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		writeSample(bw, "harbormaster_build_info", []string{"version"}, r.buildVersion, "", "1")
 	}
 
+	writeHeader(bw, "harbormaster_notification_deliveries_total", "Notification delivery attempts by destination and result.", "counter")
+	for _, k := range sortedKeys(r.notifyCounts) {
+		writeSample(bw, "harbormaster_notification_deliveries_total", []string{"destination", "result"}, k, "", utoa(r.notifyCounts[k]))
+	}
+
 	writeHeader(bw, "harbormaster_poll_loop_duration_seconds", "Poll loop run duration in seconds.", "histogram")
 	for _, k := range sortedKeys(r.loopDuration) {
 		h := r.loopDuration[k]

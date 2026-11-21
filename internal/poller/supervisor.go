@@ -95,6 +95,14 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 			p.cfg.ImagePlatforms.Run(ctx)
 		}()
 	}
+	if p.cfg.Notify != nil {
+		// Same reason: only the leader plans and sends notifications, so a failover never sends twice.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.cfg.Notify.Run(ctx)
+		}()
+	}
 	// Idle detection only matters while polling, so it runs with the supervisor, on the leader.
 	wg.Add(1)
 	go func() {

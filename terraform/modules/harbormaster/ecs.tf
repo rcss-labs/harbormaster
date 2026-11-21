@@ -19,6 +19,7 @@ locals {
       HM_SESSION_KEY  = aws_secretsmanager_secret.session_key.arn
     },
     var.enable_metrics ? { HM_METRICS_TOKEN = aws_secretsmanager_secret.metrics_token[0].arn } : {},
+    var.smtp_password_secret_arn == null ? {} : { HM_SMTP_PASSWORD = var.smtp_password_secret_arn },
   )
 
   # Map keys iterate in sorted order, so the rendered lists are stable.

@@ -32,6 +32,7 @@ data "aws_iam_policy_document" "execution_secrets" {
         aws_secretsmanager_secret.session_key.arn,
       ],
       aws_secretsmanager_secret.metrics_token[*].arn,
+      var.smtp_password_secret_arn == null ? [] : [var.smtp_password_secret_arn],
     )
   }
 
