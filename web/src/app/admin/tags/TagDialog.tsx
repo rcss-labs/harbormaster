@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { api } from '../../../api/client'
 import type { TagColor, TagItemDTO } from '../../../api/types'
 import { Dialog } from '../../../components/Dialog'
+import { Toggle } from '../../../components/Toggle'
 import { useToast } from '../../../components/Toast'
 import styles from './tags.module.css'
 import { TAG_COLORS, TAG_NAME_MESSAGE, TAG_NAME_PATTERN, invalidateTagQueries } from './tagApi'
@@ -92,10 +93,9 @@ export function TagDialog({ existing, onClose }: TagDialogProps) {
           ))}
         </div>
       </div>
-      <label className={styles.toolbar}>
-        <input type="checkbox" checked={nonProduction} onChange={(event) => setNonProduction(event.target.checked)} />
-        <span>Non-production</span>
-      </label>
+      <Toggle checked={nonProduction} onChange={setNonProduction}>
+        Non-production
+      </Toggle>
       <p className={styles.hint}>Services under this tag can be suggested for Fargate Spot.</p>
       <div className={styles.err} role="alert">
         {error}

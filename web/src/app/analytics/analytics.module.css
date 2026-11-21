@@ -58,6 +58,7 @@
 .pills { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 .whyList { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
 .reasonList { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.reasonList .dimMono { min-width: 0; overflow-wrap: anywhere; }
 .reasonList li { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: 12px; align-items: center; }
 .draftNote { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
 .draftList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
