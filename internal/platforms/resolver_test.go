@@ -3,11 +3,14 @@ package platforms_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -46,6 +49,7 @@ type countingReader struct {
 	digests   atomic.Int32
 	manifests atomic.Int32
 	failWith  error
+	tamper    bool // the manifest body no longer hashes to its digest
 }
 
 func (c *countingReader) Digest(ctx context.Context, ref registry.Ref) (string, error) {
@@ -61,7 +65,11 @@ func (c *countingReader) Manifest(ctx context.Context, ref registry.Ref) ([]byte
 	if c.failWith != nil {
 		return nil, "", c.failWith
 	}
-	return c.inner.Manifest(ctx, ref)
+	body, mediaType, err := c.inner.Manifest(ctx, ref)
+	if c.tamper && err == nil {
+		body = append(slices.Clone(body), ' ')
+	}
+	return body, mediaType, err
 }
 
 // newEnv builds the seeded estate in a test database, polls it once so services and task definitions are stored, and
@@ -216,6 +224,62 @@ func TestResolver_DescribeImagesDeniedIsNoPermission(t *testing.T) {
 	}
 }
 
+// tamperingClients returns ECR manifest bodies that do not hash to the digest they were asked for.
+type tamperingClients struct{ awsx.Clients }
+
+func (c tamperingClients) ECR(ctx context.Context, t awsx.Target) (awsx.ECRAPI, error) {
+	api, err := c.Clients.ECR(ctx, t)
+	return tamperingECR{api}, err
+}
+
+type tamperingECR struct{ awsx.ECRAPI }
+
+func (c tamperingECR) BatchGetImage(ctx context.Context, in *ecr.BatchGetImageInput, opts ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error) {
+	out, err := c.ECRAPI.BatchGetImage(ctx, in, opts...)
+	if err == nil {
+		for i := range out.Images {
+			body := aws.ToString(out.Images[i].ImageManifest) + " "
+			out.Images[i].ImageManifest = aws.String(body)
+		}
+	}
+	return out, err
+}
+
+// imageManifestRows counts the manifests stored for a repository.
+func (e *env) imageManifestRows(repository string) int {
+	e.t.Helper()
+	var n int
+	if err := e.st.Pool.QueryRow(e.t.Context(), `select count(*) from image_manifests where repository = $1`, repository).Scan(&n); err != nil {
+		e.t.Fatal(err)
+	}
+	return n
+}
+
+func TestResolver_ECRDigestMismatchIsError(t *testing.T) {
+	e := newEnv(t)
+	e.fk.Estate.SetImageIndex("catalog-api", true)
+	e.r.Clients = tamperingClients{e.fk}
+	e.cycle()
+	if got := e.ref(catalogImage); got.Status != "error" || got.Known {
+		t.Fatalf("image = %+v, want error and no stored manifest: the body does not hash to its digest", got)
+	}
+	if n := e.imageManifestRows("catalog-api"); n != 0 {
+		t.Fatalf("%d image_manifests rows for catalog-api, want none", n)
+	}
+}
+
+func TestResolver_PublicDigestMismatchIsError(t *testing.T) {
+	e := newEnv(t)
+	e.counting.tamper = true
+	e.cycle()
+	if got := e.ref(otelImage); got.Status != "error" || got.Known {
+		t.Fatalf("image = %+v, want error and no stored manifest: the body does not hash to the reported digest", got)
+	}
+	if n := e.imageManifestRows("aws-observability/aws-otel-collector"); n != 0 {
+		t.Fatalf("%d image_manifests rows for the public image, want none", n)
+	}
+}
+
 func TestResolver_MissingTagIsNotFound(t *testing.T) {
 	e := newEnv(t)
 	missing := homelab + ".dkr.ecr.us-east-1.amazonaws.com/image-resizer:9.9.9"
@@ -309,8 +373,31 @@ func TestResolver_RateLimitBacksOffOneHour(t *testing.T) {
 	if got.Status != "error" {
 		t.Fatalf("image = %+v, want error", got)
 	}
-	if next := e.nextCheck(otelImage); !next.Equal(e.now.Add(time.Hour)) {
-		t.Fatalf("next check = %v, want an hour from now", next)
+	if next := e.nextCheck(otelImage); next.Before(e.now.Add(time.Hour)) || next.After(e.now.Add(time.Hour+6*time.Minute)) {
+		t.Fatalf("next check = %v, want an hour from now plus at most 10 percent", next)
+	}
+}
+
+func TestResolver_FailureRetriesSpreadOut(t *testing.T) {
+	e := newEnv(t)
+	e.counting.failWith = errors.New("boom")
+	var images []string
+	for i := 0; i < 20; i++ {
+		image := fmt.Sprintf("%s.dkr.ecr.us-east-1.amazonaws.com/image-resizer:missing-%d", homelab, i)
+		images = append(images, image)
+		e.track(image)
+	}
+	e.cycle()
+	seen := map[time.Time]bool{}
+	for _, image := range images {
+		next := e.nextCheck(image)
+		if next.Before(e.now.Add(time.Hour)) || next.After(e.now.Add(time.Hour+6*time.Minute)) {
+			t.Fatalf("%s: next check = %v, want an hour from now plus at most 10 percent", image, next)
+		}
+		seen[next] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("%d distinct retry times for %d failures, want them spread out so a registry outage does not return as one burst", len(seen), len(images))
 	}
 }
 
@@ -318,8 +405,8 @@ func TestResolver_FailureRetriesHourlyThenFallsBackToRecheck(t *testing.T) {
 	e := newEnv(t)
 	e.counting.failWith = errors.New("boom")
 	e.cycle()
-	if next := e.nextCheck(otelImage); !next.Equal(e.now.Add(time.Hour)) {
-		t.Fatalf("first failure: next check = %v, want an hour from now", next)
+	if next := e.nextCheck(otelImage); next.Before(e.now.Add(time.Hour)) || next.After(e.now.Add(time.Hour+6*time.Minute)) {
+		t.Fatalf("first failure: next check = %v, want an hour from now plus at most 10 percent", next)
 	}
 	for i := 0; i < 30; i++ { // a day of failing hourly checks
 		e.now = e.now.Add(time.Hour)

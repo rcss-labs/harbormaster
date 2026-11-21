@@ -343,8 +343,8 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.OffHours.Interval < time.Second {
 		return Config{}, errors.New("HM_OFFHOURS_INTERVAL: must be at least 1s")
 	}
-	if cfg.ARM64.CheckInterval <= 0 {
-		return Config{}, errors.New("HM_ARM64_CHECK_INTERVAL: must be positive")
+	if cfg.ARM64.CheckInterval < time.Second {
+		return Config{}, errors.New("HM_ARM64_CHECK_INTERVAL: must be at least 1s")
 	}
 	if cfg.ARM64.Recheck <= 0 {
 		return Config{}, errors.New("HM_ARM64_RECHECK: must be positive")

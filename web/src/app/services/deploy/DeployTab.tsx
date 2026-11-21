@@ -16,7 +16,7 @@ import { Banner } from '../../../components/Banner'
 import { Panel } from '../../../components/Panel'
 import { usePhone } from '../../../components/usePhone'
 import { showWarning, useToast } from '../../../components/Toast'
-import { containersOf, imageTagOf, oomMemoryHint, type Definition } from '../task-definition/mainContainer'
+import { containersOf, oomMemoryHint, type Definition } from '../task-definition/mainContainer'
 import { ContainersPanel } from './ContainersPanel'
 import { isRolloutRunning } from '../rollout'
 import { RolloutProgress, shouldShowProgress } from './RolloutProgress'
@@ -31,7 +31,7 @@ import { buildChangeSetRequest, buildRetryRequest, countSections, pendingRows, s
 import { definitionErrors, isDefinitionChanged, setTaskSize } from './draft'
 import { rebaseScalingDraft, rebaseServiceDraft } from './rebase'
 import { CAPACITY_PARAMS, parseCapacityParams, spotReason } from './capacityParams'
-import { ARCH_PARAMS, ARM64_REASON, parseArchParams, readArchitecture, setArchitecture } from './archParams'
+import { ARCH_PARAMS, ARM64_REASON, parseArchParams, readArchitecture, setArchitecture, showArchitecture } from './archParams'
 import { Arm64Notes } from './Arm64Notes'
 import { parseRightsizeParams, RIGHTSIZE_PARAMS, rightsizeReason } from './rightsizeParams'
 import { scalingDraftErrors, scalingDraftFromSettings, scalingDraftToChange, type ScalingDraft } from './scalingDraft'
@@ -118,7 +118,8 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   // A task size from the Cost tab (?task_cpu=...) starts the draft unless a revision was asked for; it is only a draft until Review and apply.
   const suggested = revisionParam === null && canEditDefinition ? parseRightsizeParams(searchParams) : null
   // An ARM64 suggestion (?arch=ARM64) likewise starts the draft, on top of a size suggestion when both are present.
-  const archSuggested = revisionParam === null && canEditDefinition ? parseArchParams(searchParams) : null
+  // It applies only to a definition that has an architecture to pick (an EC2 or Windows one does not).
+  const archSuggested = revisionParam === null && canEditDefinition && liveDefinition !== undefined && showArchitecture(liveDefinition) ? parseArchParams(searchParams) : null
   const suggestedDefinition =
     liveDefinition && (suggested || archSuggested)
       ? [suggested ? (def: Definition) => setTaskSize(def, suggested) : null, archSuggested ? (def: Definition) => setArchitecture(def, archSuggested, liveDefinition) : null].reduce(
@@ -172,7 +173,7 @@ export function DeployTab({ serviceId }: { serviceId: string }) {
   const readiness = useArm64Readiness(serviceId, draftIsArm64)
   const imageTagChanged =
     definitionDraft !== undefined && liveDefinition !== undefined &&
-    containersOf(definitionDraft).some((entry) => imageTagOf(entry?.image) !== imageTagOf(containersOf(liveDefinition).find((live) => live?.name === entry?.name)?.image))
+    containersOf(definitionDraft).some((entry) => entry?.image !== containersOf(liveDefinition).find((live) => live?.name === entry?.name)?.image)
 
   const sections: ChangeSections = {
     target: !definitionChanged || !definitionDraft ? null : editedDefinition ? { kind: 'definition', definition: editedDefinition } : preloaded ? { kind: 'revision', revision: revisionParam as number } : suggestedDefinition ? { kind: 'definition', definition: definitionDraft } : null,

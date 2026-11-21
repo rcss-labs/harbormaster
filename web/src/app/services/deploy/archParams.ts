@@ -22,6 +22,17 @@ const platformOf = (def: Definition | undefined): RuntimePlatform | undefined =>
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as RuntimePlatform) : undefined
 }
 
+/**
+ * Whether the definition has a CPU architecture to pick: Fargate and not Windows. A definition that says nothing about its
+ * compatibilities is treated as Fargate.
+ */
+export function showArchitecture(def: Definition): boolean {
+  const compatibilities = Array.isArray(def.requiresCompatibilities) ? (def.requiresCompatibilities as unknown[]) : null
+  const family = platformOf(def)?.operatingSystemFamily
+  const isWindows = typeof family === 'string' && family.startsWith('WINDOWS')
+  return (compatibilities === null || compatibilities.includes('FARGATE')) && !isWindows
+}
+
 /** A definition without a runtime platform, or without a CPU architecture, is x86. */
 export function readArchitecture(def: Definition): Architecture {
   return platformOf(def)?.cpuArchitecture === 'ARM64' ? 'ARM64' : 'X86_64'

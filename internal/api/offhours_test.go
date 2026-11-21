@@ -392,6 +392,11 @@ func TestOffHours_AlwaysOnSplitsAMixedStrategyByBaseAndWeight(t *testing.T) {
 	if got == nil || abs(*got-want) > 0.02 {
 		t.Fatalf("always-on = %v, want %.2f: one on-demand task and two Spot tasks, not three on demand", got, want)
 	}
+	// Weights apply only to the tasks above the bases: base 2 leaves two tasks to split 1:1.
+	match.Strategy = []store.CapacityStrategyItem{{Provider: "FARGATE", Base: 2, Weight: 1}, {Provider: "FARGATE_SPOT", Weight: 1}}
+	if got := alwaysOnMonthly(match, 4); got == nil || abs(*got-(3*18.02+6.60)) > 0.02 {
+		t.Fatalf("base 2 = %v, want %.2f: three on demand and one Spot", got, 3*18.02+6.60)
+	}
 	// Equal weights without a base split the tasks evenly (the odd one goes to the first provider).
 	match.Strategy = []store.CapacityStrategyItem{{Provider: "FARGATE", Weight: 1}, {Provider: "FARGATE_SPOT", Weight: 1}}
 	if got := alwaysOnMonthly(match, 4); got == nil || abs(*got-(2*18.02+2*6.60)) > 0.02 {

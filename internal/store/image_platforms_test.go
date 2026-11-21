@@ -72,9 +72,9 @@ func TestTrackImages_OnlyX86FargateLinuxServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"123.dkr.ecr.eu-west-1.amazonaws.com/side:2", "nginx:1"}
-	if got := refImages(t, s); !reflect.DeepEqual(got, want) || added != 2 {
-		t.Fatalf("tracked %v (added %d), want %v: EC2, mixed-compat, Windows, ARM64 and inactive services contribute nothing and a shared image is one row", got, added, want)
+	want := []string{"123.dkr.ecr.eu-west-1.amazonaws.com/side:2", "both-image:1", "nginx:1"}
+	if got := refImages(t, s); !reflect.DeepEqual(got, want) || added != 3 {
+		t.Fatalf("tracked %v (added %d), want %v: EC2-only, Windows, ARM64 and inactive services contribute nothing and a shared image is one row, and a definition that lists FARGATE next to EC2 counts as Fargate like the Cost advisors say", got, added, want)
 	}
 	var status string
 	var due time.Time

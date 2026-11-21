@@ -69,6 +69,18 @@ describe('DeployTab: ARM64', () => {
     expect(pendingRegion().queryByText(/suggested from Cost/)).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['an EC2', { requiresCompatibilities: ['EC2'] }],
+    ['a Windows', { runtimePlatform: { operatingSystemFamily: 'WINDOWS_SERVER_2022_CORE', cpuArchitecture: 'X86_64' } }],
+  ])('ignores the link for %s definition', async (_name, patch) => {
+    serveDefinition({ ...TASK_DEFINITION_EDITABLE.definition, ...patch })
+    renderApp(`${route}?arch=ARM64`)
+    await screen.findByRole('combobox', { name: 'Task CPU' }) // the definition has loaded
+    expect(screen.queryByRole('combobox', { name: 'CPU architecture' })).not.toBeInTheDocument()
+    expect(pendingRegion().queryAllByRole('listitem')).toHaveLength(0)
+    expect(pendingRegion().queryByText(/suggested from Cost/)).not.toBeInTheDocument()
+  })
+
   it('lets the revision parameter win over the link', async () => {
     renderApp(`${route}?revision=41&arch=ARM64`)
     expect(await archSelect()).toHaveValue('X86_64')

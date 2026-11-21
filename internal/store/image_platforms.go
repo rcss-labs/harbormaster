@@ -34,7 +34,7 @@ func (s *Store) TrackX86FargateImages(ctx context.Context, now time.Time) (int, 
 		   from jsonb_array_elements(case when jsonb_typeof(td.raw -> 'ContainerDefinitions') = 'array'
 		                                  then td.raw -> 'ContainerDefinitions' else '[]'::jsonb end) e) c
 		 where s.status = 'ACTIVE'
-		   and td.requires_compatibilities = array['FARGATE']::text[]
+		   and coalesce('FARGATE' = any(td.requires_compatibilities), false)
 		   and upper(coalesce(td.raw #>> '{RuntimePlatform,OperatingSystemFamily}', '')) not like 'WINDOWS%'
 		   and coalesce(td.raw #>> '{RuntimePlatform,CpuArchitecture}', '') <> 'ARM64'
 		   and coalesce(c.image, '') <> ''

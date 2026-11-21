@@ -149,7 +149,7 @@ func (r *Resolver) resolve(ctx context.Context, ref store.ImageRef, now time.Tim
 	next := now.Add(r.Recheck + time.Duration(rand.Int64N(int64(r.Recheck)/jitterFraction+1)))
 	if out.status != "ok" && out.status != "registry_not_checked" && out.status != "invalid" {
 		if out.rateLimited || now.Sub(checked) < failureWindow {
-			next = now.Add(failureBackoff)
+			next = now.Add(failureBackoff + time.Duration(rand.Int64N(int64(failureBackoff)/jitterFraction+1))) // spread, so a registry outage does not return as one burst
 		} else {
 			next = now.Add(r.Recheck)
 		}

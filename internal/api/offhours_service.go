@@ -127,6 +127,7 @@ func splitByStrategy(m store.OffHoursMatch, tasks int) map[string]int {
 		return map[string]int{m.CapacityProvider: tasks}
 	}
 	placed := map[string]int{}
+	aboveBase := map[string]int{} // the weights share only what the bases leave
 	left := tasks
 	for _, item := range m.Strategy {
 		take := min(item.Base, left)
@@ -139,7 +140,7 @@ func splitByStrategy(m store.OffHoursMatch, tasks int) map[string]int {
 			if item.Weight <= 0 {
 				continue
 			}
-			if ratio := float64(placed[item.Provider]) / float64(item.Weight); best == "" || ratio < bestRatio {
+			if ratio := float64(aboveBase[item.Provider]) / float64(item.Weight); best == "" || ratio < bestRatio {
 				best, bestRatio = item.Provider, ratio
 			}
 		}
@@ -147,6 +148,7 @@ func splitByStrategy(m store.OffHoursMatch, tasks int) map[string]int {
 			best = m.Strategy[0].Provider
 		}
 		placed[best]++
+		aboveBase[best]++
 	}
 	return placed
 }
