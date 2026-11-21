@@ -34,6 +34,13 @@ type Registry struct {
 	notifyCounts     map[string]uint64
 	limitDecisions   map[string]uint64
 	leader           bool
+	leaseSlices      int
+	leaseWeight      int
+	leaseEvents      map[string]uint64
+	leaseRenewFails  map[string]uint64
+	fencedRejected   uint64
+	coordinatorOn    bool
+	pollMembers      map[string]int
 	idle             bool
 	buildVersion     string
 	buildInfoSet     bool
@@ -56,6 +63,9 @@ func New() *Registry {
 		snapshotRows:     map[string]uint64{},
 		registryRequests: map[string]uint64{},
 		notifyCounts:     map[string]uint64{},
+		leaseEvents:      map[string]uint64{},
+		leaseRenewFails:  map[string]uint64{},
+		pollMembers:      map[string]int{},
 		limitDecisions:   map[string]uint64{},
 		kvErrors:         map[string]uint64{},
 		kvDuration:       map[string]*histogram{},
@@ -152,6 +162,51 @@ func (r *Registry) SetPollerIdle(idle bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.idle = idle
+}
+
+// SetLeaseOwned records the slices this process owns and their total weight (clusters).
+func (r *Registry) SetLeaseOwned(slices, weight int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.leaseSlices, r.leaseWeight = slices, weight
+}
+
+// CountLeaseEvent records a lease event: kind is "slice" or "coordinator"; event is acquired, released, lost or takeover.
+func (r *Registry) CountLeaseEvent(kind, event string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.leaseEvents[joinKey(kind, event)]++
+}
+
+// CountLeaseRenewFailure records a renewal that failed for a reason other than losing the lease.
+func (r *Registry) CountLeaseRenewFailure(kind string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.leaseRenewFails[kind]++
+}
+
+// CountFencedWriteRejected records a poller write rejected because its lease epoch was gone.
+func (r *Registry) CountFencedWriteRejected() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fencedRejected++
+}
+
+// SetCoordinatorActive records whether this process holds the coordinator lease.
+func (r *Registry) SetCoordinatorActive(active bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.coordinatorOn = active
+}
+
+// SetPollMembers replaces the live member counts per role.
+func (r *Registry) SetPollMembers(byRole map[string]int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pollMembers = make(map[string]int, len(byRole))
+	for role, n := range byRole {
+		r.pollMembers[role] = n
+	}
 }
 
 // SetBuildInfo records the build version exposed via harbormaster_build_info.

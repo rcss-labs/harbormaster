@@ -132,6 +132,10 @@ type Config struct {
 	LogSearchMaxRange       time.Duration
 	LogSearchMaxGB          int // scan cap per search in GiB; 0 = no cap
 	MaxDesiredCount         int
+	// LegacyLeaderGate makes a task that polls or coordinates take the old leader's advisory key in shared mode before
+	// claiming any lease (HM_LEGACY_LEADER_GATE, default true). It keeps old and new versions from both acting during an
+	// upgrade or a rollback. It is removed, with its pinned connection, in the release after the one that ships leases.
+	LegacyLeaderGate bool
 
 	// SAML: how long a sign-in request (and its binding cookie) stays valid
 	SAMLRequestTTL time.Duration
@@ -318,6 +322,7 @@ func Load(getenv func(string) string) (Config, error) {
 		LogSearchMaxRange:    reader.duration("HM_LOG_SEARCH_MAX_RANGE", 168*time.Hour),
 		LogSearchMaxGB:       reader.integer("HM_LOG_SEARCH_MAX_GB", 10),
 		MaxDesiredCount:      reader.integer("HM_MAX_DESIRED_COUNT", 50),
+		LegacyLeaderGate:     reader.boolean("HM_LEGACY_LEADER_GATE", true),
 		SAMLRequestTTL:       reader.duration("HM_SAML_REQUEST_TTL", 10*time.Minute),
 
 		// plan 04: terminal

@@ -44,7 +44,7 @@ func (l *Loop) recordCycle(ctx context.Context, tr *tier, err error) {
 	row.Interval = tr.cur
 	tr.mu.Unlock()
 
-	if dbErr := l.p.store.UpsertPollLoop(ctx, row); dbErr != nil && ctx.Err() == nil {
+	if dbErr := l.w.UpsertPollLoop(ctx, row); dbErr != nil && ctx.Err() == nil {
 		l.log.Warn("poller: poll loop status", "tier", tr.name, "err", dbErr)
 	}
 	if flipped {
@@ -55,7 +55,7 @@ func (l *Loop) recordCycle(ctx context.Context, tr *tier, err error) {
 			lastError = row.LastError
 		}
 		okAt := row.LastOKAt
-		if dbErr := l.p.store.SetAccountHealth(ctx, l.target.AccountID, okAt, lastError); dbErr != nil && ctx.Err() == nil {
+		if dbErr := l.w.SetAccountHealth(ctx, l.target.AccountID, okAt, lastError); dbErr != nil && ctx.Err() == nil {
 			l.log.Warn("poller: account health", "err", dbErr)
 		}
 	}
@@ -71,12 +71,12 @@ func (l *Loop) recordCounts(ctx context.Context) {
 	}
 	l.mu.Unlock()
 	now := time.Now().UTC()
-	if err := l.p.store.InsertCountsHistory(ctx, now, services); err != nil && ctx.Err() == nil {
+	if err := l.w.InsertCountsHistory(ctx, now, services); err != nil && ctx.Err() == nil {
 		l.log.Warn("poller: counts history", "err", err)
 	}
-	samples, err := l.p.store.RunningTaskCapacityByCluster(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region})
+	samples, err := l.p.reads.RunningTaskCapacityByCluster(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region})
 	if err == nil {
-		err = l.p.store.UpsertClusterCapacitySample(ctx, now, samples)
+		err = l.w.UpsertClusterCapacitySample(ctx, now, samples)
 	}
 	if err != nil && ctx.Err() == nil {
 		l.log.Warn("poller: cluster capacity sample", "err", err)
@@ -95,7 +95,7 @@ func (l *Loop) recordDeployments(ctx context.Context, services []model.Service) 
 			if seen {
 				continue
 			}
-			_, err := l.p.store.InsertDeploymentIfNew(ctx, store.DeploymentRecord{
+			_, err := l.w.InsertDeploymentIfNew(ctx, store.DeploymentRecord{
 				Key: s.Key, DeploymentID: d.ID, TaskDefinitionARN: d.TaskDefinitionARN,
 				Revision: d.Revision, Kind: "deploy", StartedAt: d.CreatedAt,
 			})

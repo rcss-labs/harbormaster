@@ -95,6 +95,7 @@ func TestLoad_Defaults(t *testing.T) {
 		LogSearchMaxRange:    168 * time.Hour,
 		LogSearchMaxGB:       10,
 		MaxDesiredCount:      50,
+		LegacyLeaderGate:     true,
 		SAMLRequestTTL:       10 * time.Minute,
 		// plan 04: terminal
 		ExecIdleTimeout:        20 * time.Minute,
@@ -126,6 +127,23 @@ func TestLoad_ParsesDurationsAndBools(t *testing.T) {
 	}
 	if cfg.Listen != "127.0.0.1:9000" {
 		t.Errorf("Listen = %q, want 127.0.0.1:9000", cfg.Listen)
+	}
+}
+
+func TestConfig_LegacyLeaderGateDefaultsTrue(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.LegacyLeaderGate {
+		t.Error("LegacyLeaderGate = false by default, want true")
+	}
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_LEGACY_LEADER_GATE": "false"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LegacyLeaderGate {
+		t.Error("LegacyLeaderGate = true with HM_LEGACY_LEADER_GATE=false")
 	}
 }
 

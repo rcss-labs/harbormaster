@@ -12,7 +12,7 @@ import (
 func TestScalingLoop_WritesTargetPoliciesScheduledActivities(t *testing.T) {
 	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
 	h := newObserveHarness(t, target)
-	loop := &ScalingLoop{Store: h.store, Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
+	loop := &ScalingLoop{Store: h.store, Writer: h.writer(), Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
 	ctx := context.Background()
 
 	if err := loop.Run(ctx, target); err != nil {
@@ -116,7 +116,7 @@ func TestScalingLoop_StoresReadablePartsWhenScheduledActionsFail(t *testing.T) {
 
 	t.Run("never read before: target and policies stored, scheduled actions flagged unreadable", func(t *testing.T) {
 		h := newObserveHarness(t, target)
-		loop := &ScalingLoop{Store: h.store, Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
+		loop := &ScalingLoop{Store: h.store, Writer: h.writer(), Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
 		if _, err := h.store.Pool.Exec(ctx, "delete from scaling"); err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +140,7 @@ func TestScalingLoop_StoresReadablePartsWhenScheduledActionsFail(t *testing.T) {
 
 	t.Run("known scheduled actions are kept, not wiped", func(t *testing.T) {
 		h := newObserveHarness(t, target)
-		loop := &ScalingLoop{Store: h.store, Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
+		loop := &ScalingLoop{Store: h.store, Writer: h.writer(), Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
 		if err := loop.Run(ctx, target); err != nil {
 			t.Fatal(err)
 		}

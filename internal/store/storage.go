@@ -12,7 +12,11 @@ import (
 // ReplaceStorage upserts the EFS file systems and access points of one account and region,
 // then deletes the rows of that scope that were not in the input. It runs in one transaction.
 func (s *Store) ReplaceStorage(ctx context.Context, accountID, region string, fileSystems []model.FileSystem, accessPoints []model.AccessPoint) error {
-	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+	return replaceStorage(ctx, s.Pool, accountID, region, fileSystems, accessPoints)
+}
+
+func replaceStorage(ctx context.Context, q db, accountID, region string, fileSystems []model.FileSystem, accessPoints []model.AccessPoint) error {
+	return pgx.BeginFunc(ctx, q, func(tx pgx.Tx) error {
 		if err := upsertFileSystems(ctx, tx, fileSystems); err != nil {
 			return err
 		}

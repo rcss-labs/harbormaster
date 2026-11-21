@@ -12,6 +12,10 @@ import (
 
 // UpsertScaling stores each service's scaling state, replacing the row for the same key.
 func (s *Store) UpsertScaling(ctx context.Context, rows []model.Scaling) error {
+	return upsertScaling(ctx, s.Pool, rows)
+}
+
+func upsertScaling(ctx context.Context, q db, rows []model.Scaling) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -34,7 +38,7 @@ func (s *Store) UpsertScaling(ctx context.Context, rows []model.Scaling) error {
 			row.Min, row.Max, jsonArray(row.Policies), jsonArray(row.Scheduled), jsonArray(row.Activities),
 			jsonArray(row.Unreadable), row.PolledAt)
 	}
-	if err := s.execBatch(ctx, batch); err != nil {
+	if err := execBatchOn(ctx, q, batch); err != nil {
 		return fmt.Errorf("upsert scaling: %w", err)
 	}
 	return nil

@@ -12,6 +12,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -34,6 +35,9 @@ type Runner struct {
 	Cfg      config.ScanConfig
 	Now      func() time.Time
 	Log      *slog.Logger
+	// Guard is checked before a run is recorded and again right before the scanner task starts, so a coordinator that
+	// lost its lease does not launch. Nil means always allowed.
+	Guard lease.Guard
 
 	kickOnce sync.Once
 	kickCh   chan struct{}
@@ -42,6 +46,14 @@ type Runner struct {
 	archiveCap     int64
 	refreshTimeout time.Duration
 	afterCycle     func()
+}
+
+// guard returns nil when no guard is set or the coordinator lease is still held.
+func (r *Runner) guard(ctx context.Context) error {
+	if r.Guard == nil {
+		return nil
+	}
+	return r.Guard(ctx)
 }
 
 func (r *Runner) now() time.Time {

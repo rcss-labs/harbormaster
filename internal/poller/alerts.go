@@ -18,9 +18,10 @@ const alertEventLimit = 50
 // AlertsLoop is the 5 s tier that derives each service's status run and the target's alerts
 // from the stored snapshots. It makes no AWS calls.
 type AlertsLoop struct {
-	Store *store.Store
-	Every time.Duration
-	Now   func() time.Time
+	Store  readStore
+	Writer *store.SliceWriter
+	Every  time.Duration
+	Now    func() time.Time
 
 	// consecutive counts polls in the current status per service. It lives in memory so an unchanged status
 	// writes nothing; the stored run keeps only the status and when it began. After a restart or failover the
@@ -117,7 +118,7 @@ func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {
 	if err != nil {
 		return err
 	}
-	if err := l.Store.ReplaceAlertsAndStatusRuns(ctx, t, alerts, changed); err != nil {
+	if err := l.Writer.ReplaceAlertsAndStatusRuns(ctx, t, alerts, changed); err != nil {
 		return err
 	}
 	l.consecutive = counts

@@ -26,7 +26,11 @@ type DeploymentRecord struct {
 // InsertDeploymentIfNew records a deployment unless its ID is already known.
 // It reports whether a row was written.
 func (s *Store) InsertDeploymentIfNew(ctx context.Context, r DeploymentRecord) (bool, error) {
-	tag, err := s.Pool.Exec(ctx,
+	return insertDeploymentIfNew(ctx, s.Pool, r)
+}
+
+func insertDeploymentIfNew(ctx context.Context, q db, r DeploymentRecord) (bool, error) {
+	tag, err := q.Exec(ctx,
 		`insert into deployment_history (account_id, region, cluster_name, service_name, deployment_id,
 		   task_definition_arn, revision, kind, started_at, finished_at, outcome, started_by_user_id)
 		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, nullif($11, ''), $12)

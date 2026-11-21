@@ -133,7 +133,11 @@ func (s *Store) ListAccounts(ctx context.Context) ([]AWSAccount, error) {
 // SetAccountHealth records the outcome of the latest poll: a nil okAt stores NULL
 // and an empty lastError stores NULL. Returns ErrNotFound if the account is absent.
 func (s *Store) SetAccountHealth(ctx context.Context, accountID string, okAt *time.Time, lastError string) error {
-	return s.execExpectOne(ctx,
+	return setAccountHealth(ctx, s.Pool, accountID, okAt, lastError)
+}
+
+func setAccountHealth(ctx context.Context, q db, accountID string, okAt *time.Time, lastError string) error {
+	return execExpectOne(ctx, q,
 		`update aws_accounts set last_ok_at = $2, last_error = nullif($3, '') where account_id = $1`,
 		accountID, okAt, lastError)
 }

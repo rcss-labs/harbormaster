@@ -36,6 +36,12 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		writeSample(bw, "harbormaster_build_info", []string{"version"}, r.buildVersion, "", "1")
 	}
 
+	writeHeader(bw, "harbormaster_coordinator_active", "1 if this process holds the coordinator lease.", "gauge")
+	writeSample(bw, "harbormaster_coordinator_active", nil, "", "", boolValue(r.coordinatorOn))
+
+	writeHeader(bw, "harbormaster_fenced_writes_rejected_total", "Poller writes rejected because the slice lease was lost.", "counter")
+	writeSample(bw, "harbormaster_fenced_writes_rejected_total", nil, "", "", utoa(r.fencedRejected))
+
 	if r.kvUpSet {
 		writeHeader(bw, "harbormaster_kv_command_duration_seconds", "Valkey/Redis command duration in seconds.", "histogram")
 		for _, k := range sortedKeys(r.kvDuration) {
@@ -63,6 +69,22 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		}
 		writeSample(bw, "harbormaster_kv_up", nil, "", "", kvUp)
 	}
+
+	writeHeader(bw, "harbormaster_lease_events_total", "Lease events by kind (slice, coordinator) and event (acquired, released, lost, takeover).", "counter")
+	for _, k := range sortedKeys(r.leaseEvents) {
+		writeSample(bw, "harbormaster_lease_events_total", []string{"kind", "event"}, k, "", utoa(r.leaseEvents[k]))
+	}
+
+	writeHeader(bw, "harbormaster_lease_renew_failures_total", "Lease renewals that failed for a reason other than losing the lease.", "counter")
+	for _, k := range sortedKeys(r.leaseRenewFails) {
+		writeSample(bw, "harbormaster_lease_renew_failures_total", []string{"kind"}, k, "", utoa(r.leaseRenewFails[k]))
+	}
+
+	writeHeader(bw, "harbormaster_lease_slices_owned", "Account x region slices this process owns.", "gauge")
+	writeSample(bw, "harbormaster_lease_slices_owned", nil, "", "", strconv.Itoa(r.leaseSlices))
+
+	writeHeader(bw, "harbormaster_lease_weight_owned", "Total weight (clusters) of the slices this process owns.", "gauge")
+	writeSample(bw, "harbormaster_lease_weight_owned", nil, "", "", strconv.Itoa(r.leaseWeight))
 
 	writeHeader(bw, "harbormaster_limit_decisions_total", "Shared-limit decisions by limit, result and backend.", "counter")
 	for _, k := range sortedKeys(r.limitDecisions) {
@@ -99,12 +121,13 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		writeSample(bw, "harbormaster_poll_loop_runs_total", loopRunLabels, k, "", utoa(r.loopRuns[k]))
 	}
 
-	writeHeader(bw, "harbormaster_poller_leader", "1 if this process holds poller leadership.", "gauge")
-	leader := "0"
-	if r.leader {
-		leader = "1"
+	writeHeader(bw, "harbormaster_poll_members", "Live members (processes) by role, from the member heartbeats.", "gauge")
+	for _, role := range sortedKeys(r.pollMembers) {
+		writeSample(bw, "harbormaster_poll_members", []string{"role"}, role, "", strconv.Itoa(r.pollMembers[role]))
 	}
-	writeSample(bw, "harbormaster_poller_leader", nil, "", "", leader)
+
+	writeHeader(bw, "harbormaster_poller_leader", "1 if this process holds the coordinator lease (kept under its old name for existing alerts).", "gauge")
+	writeSample(bw, "harbormaster_poller_leader", nil, "", "", boolValue(r.leader))
 
 	writeHeader(bw, "harbormaster_poller_idle", "1 if polling is slowed because no one has used the UI recently.", "gauge")
 	idle := "0"
@@ -164,6 +187,13 @@ func writeSample(bw *bufio.Writer, name string, labels []string, key, extra, val
 var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 
 func escapeLabel(v string) string { return labelEscaper.Replace(v) }
+
+func boolValue(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
 
 func utoa(n uint64) string { return strconv.FormatUint(n, 10) }
 

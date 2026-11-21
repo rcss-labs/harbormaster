@@ -24,15 +24,18 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/coordinator"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/kv"
+	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/notify/fakesink"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/platforms"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/registry"
+	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
@@ -355,21 +358,30 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	}
 
 	pollerConfig := poller.ConfigFrom(cfg)
-	pollerConfig.Scan = scanRunner
-	pollerConfig.OffHours = offHoursReconciler
-	pollerConfig.ImagePlatforms = imagePlatformResolver(cfg, st, clients, fakeAWS, log)
-	pollerConfig.Notify = notifyDispatcher
+	pollerConfig.Version = version
+	// The jobs that must have one active instance run under the coordinator lease; the deployment outcome logger is
+	// one of them (its claim in FinishDeployment already prevents duplicate lines, so a handover loses nothing).
+	coordinatorRunner := &coordinator.Runner{
+		Store: st, Timing: lease.DefaultTiming(),
+		Scan: scanRunner, OffHours: offHoursReconciler, ImagePlatforms: imagePlatformResolver(cfg, st, clients, fakeAWS, log),
+		Notify: notifyDispatcher,
+		Rollups: &rollup.Runner{Store: st, Clients: clients, Now: time.Now, UtilEnabled: cfg.Analytics.Util,
+			SampleInterval: cfg.Poll.CountsHistory, CountsRetention: cfg.Retention.CountsHistory, Log: log},
+		Retention: coordinator.RetentionFrom(cfg), RetentionEvery: coordinator.DefaultRetentionEvery,
+		Outcomes: deploy.NewOutcomeLogger(st, 5*time.Second),
+		Log:      log,
+	}
+	pollerConfig.Coordinator = coordinatorRunner
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
+	pollerInstance := poller.New(st, clients, pollerConfig, log)
+	coordinatorRunner.Idle = pollerInstance.IsIdle
 	go func() {
 		defer close(pollerDone)
-		if err := poller.New(st, clients, pollerConfig, log).Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := pollerInstance.Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("poller stopped", "error", err)
 		}
 	}()
-
-	// Every task runs the outcome logger; the atomic claim in FinishDeployment prevents duplicate lines.
-	go deploy.NewOutcomeLogger(st, 5*time.Second).Run(ctx)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()

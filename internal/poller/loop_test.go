@@ -33,6 +33,7 @@ type loopHarness struct {
 	fake   *fake.Fake
 	estate *fake.Estate
 	store  *store.Store
+	writer *store.SliceWriter
 }
 
 func newHarness(t *testing.T, estate *fake.Estate) *loopHarness {
@@ -40,7 +41,8 @@ func newHarness(t *testing.T, estate *fake.Estate) *loopHarness {
 	st := storetest.Open(t)
 	f := fake.New(estate)
 	p := New(st, f, Config{MaxInFlight: 4}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return &loopHarness{loop: newLoop(p, loopTarget), fake: f, estate: estate, store: st}
+	w := testWriter(t, st, loopTarget)
+	return &loopHarness{loop: newLoop(p, loopTarget, w), fake: f, estate: estate, store: st, writer: w}
 }
 
 func mockupHarness(t *testing.T) *loopHarness {
@@ -360,7 +362,7 @@ func TestLoop_ReportsTelemetry(t *testing.T) {
 	st := storetest.Open(t)
 	f := fake.New(fake.MockupEstate(func() time.Time { return loopNow }))
 	p := New(st, f, Config{MaxInFlight: 4, Telemetry: reg}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := newLoop(p, loopTarget).runOnce(context.Background()); err != nil {
+	if err := newLoop(p, loopTarget, testWriter(t, st, loopTarget)).runOnce(context.Background()); err != nil {
 		t.Fatalf("runOnce: %v", err)
 	}
 	var out bytes.Buffer
@@ -456,7 +458,7 @@ func TestLoop_AllAWSCallsShareTheInFlightLimit(t *testing.T) {
 		Intervals: Intervals{Services: tick, RunningTasks: tick, FullTasks: tick, StoppedTasks: tick, Clusters: tick,
 			ServiceList: tick, TargetHealth: tick, Scaling: tick, Alerts: tick, Network: tick, Storage: tick},
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	loop := newLoop(p, loopTarget)
+	loop := newLoop(p, loopTarget, testWriter(t, st, loopTarget))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -481,7 +483,8 @@ func TestLoop_AllAWSCallsShareTheInFlightLimit(t *testing.T) {
 
 func TestServicesTier_StoresAWSTags(t *testing.T) {
 	h := mockupHarness(t)
-	staging := newLoop(h.loop.p, awsx.Target{AccountID: "731022849906", Region: "us-east-1"})
+	stagingTarget := awsx.Target{AccountID: "731022849906", Region: "us-east-1"}
+	staging := newLoop(h.loop.p, stagingTarget, testWriter(t, h.store, stagingTarget))
 	if err := staging.runOnce(context.Background()); err != nil {
 		t.Fatalf("staging runOnce: %v", err)
 	}
@@ -499,7 +502,7 @@ func TestServicesTier_FallsBackToNoTagsOnInvalidParameter(t *testing.T) {
 	f := fake.New(fake.MockupEstate(func() time.Time { return loopNow }))
 	var logs bytes.Buffer
 	p := New(st, f, Config{MaxInFlight: 4}, slog.New(slog.NewTextHandler(&logs, nil)))
-	loop := newLoop(p, loopTarget)
+	loop := newLoop(p, loopTarget, testWriter(t, st, loopTarget))
 	f.FailNext("DescribeServices", &ecstypes.InvalidParameterException{Message: aws.String("short ARN")})
 
 	if err := loop.runOnce(context.Background()); err != nil {

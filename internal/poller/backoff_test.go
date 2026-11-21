@@ -83,7 +83,7 @@ func fastConfig() Config {
 func newFastLoop(t *testing.T, clients awsx.Clients, st *store.Store, cfg Config) *Loop {
 	t.Helper()
 	p := New(st, clients, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return newLoop(p, loopTarget)
+	return newLoop(p, loopTarget, testWriter(t, st, loopTarget))
 }
 
 func (l *Loop) tierDef(t *testing.T, name string) tierDef {

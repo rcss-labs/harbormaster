@@ -83,7 +83,12 @@ func (s *Store) pruneMetricsCacheBefore(ctx context.Context, cutoff time.Time) (
 
 // execBatch sends batch and returns the first failing statement's error, if any.
 func (s *Store) execBatch(ctx context.Context, batch *pgx.Batch) error {
-	results := s.Pool.SendBatch(ctx, batch)
+	return execBatchOn(ctx, s.Pool, batch)
+}
+
+// execBatchOn is execBatch on a pool or a transaction.
+func execBatchOn(ctx context.Context, q db, batch *pgx.Batch) error {
+	results := q.SendBatch(ctx, batch)
 	for range batch.Len() {
 		if _, err := results.Exec(); err != nil {
 			results.Close()
