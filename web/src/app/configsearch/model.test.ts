@@ -50,7 +50,7 @@ describe('config search model', () => {
     expect(csv).not.toMatch(/(^|,)=cmd/)
     const quoted = toCSV([{ ...CONFIG_SEARCH_NODE.items[0], name: 'a,"b"\nc', containers: [] }])
     expect(quoted).toContain('"a,""b""\nc"')
-    for (const first of ['+', '-', '@']) {
+    for (const first of ['+', '-', '@', '\t', '\r']) {
       const guarded = toCSV([{ ...CONFIG_SEARCH_NODE.items[0], family: `${first}x`, containers: [] }])
       expect(guarded).toContain(`'${first}x`)
     }

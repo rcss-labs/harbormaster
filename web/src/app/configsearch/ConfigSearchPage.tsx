@@ -161,7 +161,8 @@ export function ConfigSearchPage() {
     )
   } else if (result.isError) {
     body = null // the message is shown under the input
-  } else if (result.isPending) {
+  } else if (result.isPending || result.isPlaceholderData) {
+    // Placeholder data is the previous query's result; it must not be shown or exported under the new query.
     body = <Panel title="Results" loading>{null}</Panel>
   } else {
     const data = result.data

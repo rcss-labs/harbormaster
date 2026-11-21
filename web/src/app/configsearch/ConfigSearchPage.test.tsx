@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConfigSearchResponse } from '../../api/configSearch'
 import {
@@ -197,6 +197,25 @@ describe('ConfigSearchPage', () => {
     expect(text).toContain('notifications,core-services')
     expect(text).not.toContain('payments-api,')
     expect(text.split('\r\n')[0]).toMatch(/^service,cluster,/)
+  })
+
+  it('does not offer the previous query\'s rows while a new query loads', async () => {
+    server.use(
+      http.get('/api/config-search', async ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q')
+        if (q === 'port:8080') await delay(400)
+        return HttpResponse.json(CONFIG_SEARCH_NODE)
+      }),
+    )
+    const user = userEvent.setup()
+    renderApp(NODE)
+    await resultsTable()
+    const input = screen.getByRole('textbox', { name: 'Config search query' })
+    await user.clear(input)
+    await user.type(input, 'port:8080{Enter}')
+    await waitFor(() => expect(screen.queryByRole('table', { name: 'Config search results' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Export CSV' })).not.toBeInTheDocument()
+    await resultsTable()
   })
 
   it('exports every row when none is ticked', async () => {

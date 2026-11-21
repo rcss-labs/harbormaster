@@ -46,7 +46,7 @@ const CSV_HEADER = [
 
 /** A leading = + - @ is neutralised with an apostrophe so a spreadsheet never runs it as a formula. */
 function guard(text: string): string {
-  return /^[=+\-@]/.test(text) ? `'${text}` : text
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
 }
 
 /** Guards each element of a list cell, so a name like =cmd is safe wherever it sits in the cell. */
