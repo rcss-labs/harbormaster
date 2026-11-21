@@ -133,6 +133,12 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	if err != nil {
 		return err
 	}
+	// Staging is where a service may be tried on Fargate Spot; Dev starts non-production, Prod never is.
+	if !staging.NonProduction {
+		if err := st.UpdateTag(ctx, staging.ID, staging.Name, staging.Color, true); err != nil {
+			return fmt.Errorf("mark Staging non-production: %w", err)
+		}
+	}
 	dev, err := st.DevTag(ctx)
 	if err != nil {
 		return err
@@ -193,7 +199,34 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		return fmt.Errorf("turn on pre-deploy scan for edge-nginx: %w", err)
 	}
 
+	if err := seedTerminalSession(ctx, st, estate, ids["dana"]); err != nil {
+		return err
+	}
 	return seedAudit(ctx, st, ids["sam"])
+}
+
+// seedTerminalSession records that dana opened a terminal on catalog-api two days ago. It is the soft signal that makes the
+// Fargate Spot advisor list catalog-api with "Check first" instead of a plain suggestion.
+func seedTerminalSession(ctx context.Context, st *store.Store, estate *fake.Estate, userID int64) error {
+	account := accountIDByName(estate, "homelab-admin")
+	var seeded bool
+	if err := st.Pool.QueryRow(ctx,
+		`select exists (select 1 from operation_log where account_id = $1 and region = 'eu-west-1' and cluster_name = 'eu-apps'
+		   and service_name = 'catalog-api' and details ->> 'op' = 'terminal')`, account).Scan(&seeded); err != nil {
+		return fmt.Errorf("check seeded terminal session: %w", err)
+	}
+	if seeded {
+		return nil
+	}
+	_, err := st.Pool.Exec(ctx,
+		`insert into operation_log (ts, account_id, region, cluster_name, service_name, actor_user_id, actor_username, source, text, details)
+		 values ($1, $2, 'eu-west-1', 'eu-apps', 'catalog-api', $3, (select username from users where id = $3), 'harbormaster',
+		   'Opened a terminal session in catalog-api.', '{"op":"terminal"}'::jsonb)`,
+		time.Now().Add(-48*time.Hour), account, userID)
+	if err != nil {
+		return fmt.Errorf("seed terminal session: %w", err)
+	}
+	return nil
 }
 
 // requireSeedable allows seeding only into an empty database or one this package already seeded

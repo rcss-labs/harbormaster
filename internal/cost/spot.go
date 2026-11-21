@@ -106,7 +106,7 @@ func gateSpot(in SpotInput) SpotStatus {
 	if slices.ContainsFunc(in.Strategy, func(provider string) bool { return provider != "FARGATE" && provider != "FARGATE_SPOT" }) {
 		return SpotCustomCapacity
 	}
-	if slices.Contains(in.Strategy, "FARGATE_SPOT") || in.SpotTasks > 0 {
+	if slices.Contains(in.Strategy, "FARGATE_SPOT") {
 		return SpotAlreadySpot
 	}
 	if !in.NonProduction {

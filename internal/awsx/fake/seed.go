@@ -62,7 +62,7 @@ var seedClusters = []seedCluster{
 	{"edge-proxy", homelabAccountID, "eu-central-1", false, []seedSubnet{
 		{"subnet-0d2e5a77", "10.40.1.0/24", "eu-central-1a", false},
 		{"subnet-0f61c3b8", "10.40.101.0/24", "eu-central-1a", true},
-	}, false},
+	}, true},
 	{"staging-web", stagingAccountID, "us-east-1", true, []seedSubnet{
 		{"subnet-01f8a2d4", "10.50.1.0/24", "us-east-1a", false},
 		{"subnet-0e7c3b19", "10.50.2.0/24", "us-east-1b", false},
@@ -643,6 +643,11 @@ func (s *seeder) addService(sp serviceSpec) {
 	}
 	if sp.ec2 {
 		svc.PlatformVersion = nil
+	}
+	if sp.spot {
+		// A service whose tasks run on Spot uses a capacity provider strategy, not a launch type.
+		svc.LaunchType = ""
+		svc.CapacityProviderStrategy = []ecstypes.CapacityProviderStrategyItem{{CapacityProvider: aws.String("FARGATE_SPOT"), Weight: 1}}
 	}
 	for _, key := range slices.Sorted(maps.Keys(sp.awsTags)) {
 		svc.Tags = append(svc.Tags, ecstypes.Tag{Key: aws.String(key), Value: aws.String(sp.awsTags[key])})
