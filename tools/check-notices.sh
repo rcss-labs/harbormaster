@@ -51,6 +51,7 @@ requiredNoticeStrings=(
 	"golang-jwt/jwt"
 	"anchore/syft"
 	"anchore/grype"
+	"valkey-io/valkey-go"
 )
 if [[ ! -f "$notices" ]]; then
 	fail "$notices is missing"
