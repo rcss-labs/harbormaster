@@ -5,11 +5,13 @@ import { KpiStrip } from '../../components/KpiStrip'
 import { SegmentedFilter } from '../../components/Seg'
 import { AnalyticsPanel } from './AnalyticsPanel'
 import { rightsizeHref } from '../services/deploy/rightsizeParams'
+import { arm64Href, ARM64_REASON } from '../services/deploy/archParams'
 import { spotHref, spotReason } from '../services/deploy/capacityParams'
 import { DraftChangeSetsDialog, draftNote, type DraftRow } from './DraftChangeSetsDialog'
 import { RightsizingPanel } from './RightsizingPanel'
+import { Arm64Panel } from './Arm64Panel'
 import { SpotPanel } from './SpotPanel'
-import { costSummary, draftTitle, money, selectedSpot, selectedSuggestions } from './cost'
+import { costSummary, draftTitle, money, selectedArm64, selectedSpot, selectedSuggestions } from './cost'
 import { COLOR, sourceFor, whole } from './format'
 import { KpiNote, SourcesPanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
@@ -17,7 +19,7 @@ import styles from './analytics.module.css'
 type Grouping = 'cluster' | 'account' | 'tag'
 
 export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
-  const { kpis, rightsizing, spot } = data
+  const { kpis, rightsizing, spot, arm64 } = data
   const [grouping, setGrouping] = useState<Grouping>('cluster')
   // Kept here, not in the panel, so a refetch does not reset the slider, the selection or the opened marks.
   const [headroomPct, setHeadroomPct] = useState(rightsizing.default_headroom_pct)
@@ -25,12 +27,24 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
   const [spotChoices, setSpotChoices] = useState<ReadonlyMap<string, boolean>>(new Map())
   const [spotOpened, setSpotOpened] = useState<ReadonlySet<string>>(new Set())
-  const [drafting, setDrafting] = useState<'rightsizing' | 'spot' | null>(null)
+  const [armChoices, setArmChoices] = useState<ReadonlyMap<string, boolean>>(new Map())
+  const [armOpened, setArmOpened] = useState<ReadonlySet<string>>(new Set())
+  const [drafting, setDrafting] = useState<'rightsizing' | 'spot' | 'arm64' | null>(null)
   const suggested = selectedSuggestions(rightsizing, headroomPct, excluded)
   const spotSelected = selectedSpot(spot, spotChoices)
   // The dialog follows the live selection; with nothing left to draft it closes.
   if (drafting === 'rightsizing' && suggested.length === 0) setDrafting(null)
   if (drafting === 'spot' && spotSelected.length === 0) setDrafting(null)
+  const armSelected = selectedArm64(arm64, armChoices)
+  if (drafting === 'arm64' && armSelected.length === 0) setDrafting(null)
+  const armRows: DraftRow[] = armSelected.map((service) => ({
+    serviceId: service.service_id,
+    name: service.service,
+    now: 'X86_64',
+    proposed: 'ARM64',
+    href: arm64Href(service.service_id),
+  }))
+  const armSaving = armSelected.reduce((total, service) => total + (service.saving_monthly ?? 0), 0)
   const rightsizingRows: DraftRow[] = suggested.map(({ service, suggestion }) => ({
     serviceId: service.service_id,
     name: service.service,
@@ -85,6 +99,7 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
           { label: 'of spend is reserved but not needed', value: ready ? `${notNeededPct}%` : '—' },
           { label: summary.services === 1 ? 'service can use a smaller size' : 'services can use a smaller size', value: ready ? whole(summary.services) : '—' },
           // Savings are measured against how services run today, so this one is never added to the rightsizing figure.
+          { label: 'possible monthly saving on ARM64', value: arm64.check_enabled && arm64.services.some((service) => service.status === 'ready') ? `${armSelected.some((service) => service.spot_tasks > 0) ? 'about ' : ''}${money(armSaving)}` : '—' },
           { label: 'possible monthly saving on Fargate Spot', value: spotCandidateCount > 0 ? `about ${money(spotSaving)}` : '—' },
         ]}
       />
@@ -145,6 +160,14 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
             onDraft={() => setDrafting('spot')}
           />
         </div>
+        <div className={styles.full}>
+          <Arm64Panel
+            arm64={arm64}
+            choices={armChoices}
+            onChoose={(serviceId, ticked) => setArmChoices((previous) => new Map(previous).set(serviceId, ticked))}
+            onDraft={() => setDrafting('arm64')}
+          />
+        </div>
         <SourcesPanel sources={data.sources} {...common} />
       </div>
       {drafting === 'rightsizing' && (
@@ -155,6 +178,17 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
           rows={rightsizingRows}
           opened={opened}
           onOpened={(serviceId) => setOpened((previous) => new Set(previous).add(serviceId))}
+          onClose={() => setDrafting(null)}
+        />
+      )}
+      {drafting === 'arm64' && (
+        <DraftChangeSetsDialog
+          title={draftTitle(armRows.length)}
+          sub="CPU architecture"
+          note={draftNote('the CPU architecture', ARM64_REASON)}
+          rows={armRows}
+          opened={armOpened}
+          onOpened={(serviceId) => setArmOpened((previous) => new Set(previous).add(serviceId))}
           onClose={() => setDrafting(null)}
         />
       )}

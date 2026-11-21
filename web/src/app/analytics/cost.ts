@@ -1,4 +1,4 @@
-import type { CostRightsizing, CostService, CostSpot, CostSpotService, CostStep, CostSuggestion } from '../../api/analytics'
+import type { Arm64Service, CostArm64, CostRightsizing, CostService, CostSpot, CostSpotService, CostStep, CostSuggestion } from '../../api/analytics'
 
 /** Whole US dollars. */
 export const money = (value: number) => `$${Math.round(value).toLocaleString('en-US')}`
@@ -129,3 +129,18 @@ export function spotNotCandidateReason(service: CostSpotService, minTasks: numbe
       return 'Not a candidate'
   }
 }
+
+/** ARM64 rows: ready services first, then by saving, largest first; the order of the server breaks ties. */
+export function arm64Rows(arm64: CostArm64): Arm64Service[] {
+  const rank = (service: Arm64Service) => (service.status === 'ready' ? 0 : 1)
+  return [...arm64.services].sort((a, b) => rank(a) - rank(b) || (b.saving_monthly ?? 0) - (a.saving_monthly ?? 0))
+}
+
+/** Only a ready service the user may edit can be ticked; it starts ticked until the user chooses otherwise. */
+export function isArm64Ticked(service: Arm64Service, choices: ReadonlyMap<string, boolean>): boolean {
+  if (service.status !== 'ready' || !service.can_edit) return false
+  return choices.get(service.service_id) ?? true
+}
+
+export const selectedArm64 = (arm64: CostArm64, choices: ReadonlyMap<string, boolean>): Arm64Service[] =>
+  arm64Rows(arm64).filter((service) => isArm64Ticked(service, choices))
