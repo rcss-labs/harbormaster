@@ -105,7 +105,7 @@ type serviceSpec struct {
 }
 
 var seedServices = []serviceSpec{
-	{cluster: "core-services", name: "payments-api", awsTags: envTags("prod"), desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
+	{cluster: "core-services", name: "payments-api", multiArch: true, arm64: true, awsTags: envTags("prod"), desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
 		env: []envVar{{"NODE_ENV", "production"}, {"PAYMENTS_PROVIDER", "stripe"}, {"DB_POOL_SIZE", "20"}}},
 	{cluster: "core-services", name: "web-frontend", awsTags: envTags("prod"), desired: 2, running: 2, rev: 87, repo: "web-frontend", tag: "3.4.0", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://payments-api.core.local:8080"}}},
@@ -126,11 +126,11 @@ var seedServices = []serviceSpec{
 		env: []envVar{{"JAVA_OPTS", "-Xmx3g"}}},
 	{cluster: "ci-tools", name: "artifact-proxy", awsTags: envTags("dev"), desired: 1, running: 1, rev: 7, repo: "artifact-proxy", tag: "1.0.4", cpu: 512, memory: 1024, port: 8081, exec: true,
 		env: []envVar{{"UPSTREAM", "https://registry.npmjs.org"}}},
-	{cluster: "eu-apps", name: "catalog-api", desired: 2, running: 2, rev: 23, repo: "catalog-api", tag: "4.1.0", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, unhealthy: 1,
+	{cluster: "eu-apps", name: "catalog-api", multiArch: true, arm64: true, desired: 2, running: 2, rev: 23, repo: "catalog-api", tag: "4.1.0", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, unhealthy: 1,
 		env: []envVar{{"CACHE_TTL", "300"}}},
 	{cluster: "eu-apps", name: "search-indexer", desired: 1, running: 1, rev: 14, repo: "search-indexer", tag: "2.0.3", cpu: 1024, memory: 4096, exec: true, efs: &efsSearch,
 		env: []envVar{{"BATCH_SIZE", "500"}}},
-	{cluster: "edge-proxy", name: "edge-nginx", desired: 2, running: 2, rev: 19, repo: "edge-nginx", tag: "1.27.2", cpu: 256, memory: 512, port: 443, lb: true, exec: true, public: true, efs: &efsNginx,
+	{cluster: "edge-proxy", name: "edge-nginx", multiArch: true, desired: 2, running: 2, rev: 19, repo: "edge-nginx", tag: "1.27.2", cpu: 256, memory: 512, port: 443, lb: true, exec: true, public: true, efs: &efsNginx,
 		env: []envVar{{"WORKER_PROCESSES", "auto"}}},
 	{cluster: "edge-proxy", name: "cert-renewer", desired: 1, running: 1, rev: 4, repo: "cert-renewer", tag: "0.2.1", cpu: 256, memory: 512, ec2: true, efs: &efsCerts,
 		env: []envVar{{"ACME_EMAIL", "ops@rcss.local"}}},

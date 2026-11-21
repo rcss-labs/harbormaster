@@ -42,6 +42,7 @@ const serverEnv = {
   HM_POLL_NETWORK: '5s', // plan 05
   HM_POLL_STORAGE: '5s', // plan 05
   HM_METRICS_TOKEN: 'e2e-metrics-token', // plan 06
+  HM_ARM64_CHECK_INTERVAL: '3s', // the image platform check fills the ARM64 panel within seconds
   HM_SCAN_INTERVAL: '3s', // image security: the scan loop picks a requested scan up within seconds
   // Off-hours: the demo staging schedule is off so the wall clock cannot put staging to sleep under the read-only specs.
   HM_FAKE_OFFHOURS_DEMO: 'false',

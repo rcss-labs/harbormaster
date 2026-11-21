@@ -41,6 +41,16 @@ test('capacity keeps the range filter disabled and explains a tap with the toast
   await expect(page).toHaveURL(/range=24h/)
 })
 
+test('the ARM64 panel renders as cards without scrolling sideways', async ({ page }) => {
+  watchPage(page)
+  await page.goto('/analytics/cost')
+  const panel = page.getByRole('region', { name: /^ARM64 \(Graviton\)/ })
+  await expect(panel).toBeVisible({ timeout: 15_000 })
+  await expect(panel.getByRole('row').filter({ hasText: 'edge-nginx' })).toBeVisible()
+  await expect(panel.getByRole('columnheader')).toHaveCount(0)
+  await expectPhoneLayoutClean(page)
+})
+
 test('the Fargate Spot panel renders as cards without scrolling sideways', async ({ page }) => {
   watchPage(page)
   await page.goto('/analytics/cost')

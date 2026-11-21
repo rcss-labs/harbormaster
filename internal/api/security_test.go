@@ -252,7 +252,7 @@ func TestScanRequest_ResolvesTagAndQueues(t *testing.T) {
 		t.Fatalf("%d manual scan_requests rows for the digest, want 1", n)
 	}
 
-	if n := countRows(t, env.st, `select count(*) from scan_images where digest = $1 and manifest_media_type = 'application/vnd.docker.distribution.manifest.v2+json'`, wantDigest); n != 1 {
+	if n := countRows(t, env.st, `select count(*) from scan_images where digest = $1 and manifest_media_type = 'application/vnd.oci.image.index.v1+json'`, wantDigest); n != 1 {
 		t.Fatal("the manifest media type reported by ECR was not stored with the image")
 	}
 

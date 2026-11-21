@@ -427,6 +427,11 @@ func (e *Estate) MoveTag(repository, tag string) string {
 	}
 	e.tagMoves[image]++
 	digest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(fmt.Sprintf("%s#%d", image, e.tagMoves[image]))))
+	if _, isIndex := e.ImageIndexes[repository]; isIndex {
+		// An index is addressed by the digest of its own body, which carries the move counter.
+		body, _ := e.manifestFor(repository, tag)
+		digest = fmt.Sprintf("sha256:%x", sha256.Sum256(body))
+	}
 	e.movedTags[image] = digest
 	return digest
 }

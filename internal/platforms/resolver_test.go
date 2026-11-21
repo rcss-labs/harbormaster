@@ -75,6 +75,10 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.fk = fake.New(fake.MockupEstate(func() time.Time { return e.now }))
+	// Each test sets the indexes it needs; the demo estate's own would add BatchGetImage calls to every count.
+	e.fk.Estate.Mu.Lock()
+	clear(e.fk.Estate.ImageIndexes)
+	e.fk.Estate.Mu.Unlock()
 	for _, account := range e.fk.Estate.Accounts {
 		for _, region := range account.Regions {
 			if err := poller.PollOnce(ctx, st, e.fk, poller.Config{MaxInFlight: 4}, awsx.Target{AccountID: account.ID, Region: region}); err != nil {

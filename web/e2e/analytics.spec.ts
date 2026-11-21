@@ -86,6 +86,33 @@ test.describe('analytics as sam', () => {
     await deployPage.close()
   })
 
+  test('ARM64 suggestions say which images block a move and fill the Deploy tab', async ({ page, context }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/analytics/cost')
+    const panel = page.getByRole('region', { name: /^ARM64 \(Graviton\)/ })
+    const table = panel.getByRole('table', { name: 'ARM64 suggestions' })
+    // The image platform check runs on the leader every few seconds; wait for it to read the seeded indexes.
+    const payments = table.getByRole('row', { name: /payments-api/ })
+    await expect(payments.getByText(/images? have an arm64 build/)).toContainText('of', { timeout: 30_000 })
+    await expect(async () => {
+      await page.reload()
+      await expect(payments.getByRole('checkbox', { name: 'Select payments-api' })).toBeEnabled({ timeout: 2_000 })
+    }).toPass({ timeout: 45_000 })
+    const edge = table.getByRole('row', { name: /edge-nginx/ })
+    await expect(edge.getByText('Blocked')).toBeVisible()
+    await expect(edge.getByRole('checkbox', { name: 'Select edge-nginx' })).toBeDisabled()
+
+    await panel.getByRole('button', { name: 'Draft change sets' }).click()
+    const draft = page.getByRole('dialog')
+    await expect(draft.getByText(/Nothing deploys yet\./)).toContainText('"Move to ARM64 (Graviton)"')
+    const link = draft.getByRole('listitem').filter({ hasText: 'payments-api' }).getByRole('link', { name: 'Open in Deploy' })
+    expect((await link.getAttribute('href')) ?? '').toContain('arch=ARM64')
+    const [deployPage] = await Promise.all([context.waitForEvent('page'), link.click()])
+    const pending = deployPage.getByRole('region', { name: 'Pending changes' })
+    await expect(pending.getByRole('listitem', { name: 'CPU architecture' })).toContainText('ARM64', { timeout: 15_000 })
+    await deployPage.close()
+  })
+
   // Mutating: the apply changes catalog-api's capacity providers on the shared estate, which is why this runs in the flows project.
   test('Fargate Spot suggestions fill the Deploy tab and apply as one forced deployment', async ({ page, context }) => {
     await page.setViewportSize({ width: 1440, height: 900 })

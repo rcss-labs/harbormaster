@@ -106,6 +106,22 @@ func TestMockupEstate_SpotShape(t *testing.T) {
 	}
 }
 
+// The ARM64 advisor needs a ready service, a blocked one (an index without arm64) and single-manifest images for the rest.
+func TestMockupEstate_ImageIndexes(t *testing.T) {
+	f := newFake()
+	f.Estate.Mu.Lock()
+	defer f.Estate.Mu.Unlock()
+	want := map[string]ImageIndexSpec{"payments-api": {ARM64: true}, "catalog-api": {ARM64: true}, "edge-nginx": {ARM64: false}}
+	if len(f.Estate.ImageIndexes) != len(want) {
+		t.Fatalf("index repositories = %v, want %v", f.Estate.ImageIndexes, want)
+	}
+	for repository, spec := range want {
+		if got, ok := f.Estate.ImageIndexes[repository]; !ok || got != spec {
+			t.Errorf("%s = %+v (marked %v), want %+v", repository, got, ok, spec)
+		}
+	}
+}
+
 func TestFakeECS_ListTasksPaginates(t *testing.T) {
 	f := newFake()
 	api := ecsFor(t, f, homelabID, "us-east-1")
