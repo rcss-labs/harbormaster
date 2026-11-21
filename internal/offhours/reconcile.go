@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -41,6 +42,10 @@ type Reconciler struct {
 	Log      *slog.Logger
 	// ServiceTimeout bounds the work on one service; zero means 30 s.
 	ServiceTimeout time.Duration
+	// Guard is checked inside each service's transaction, after its locks are held and before anything is changed in
+	// AWS, so a coordinator that lost its lease changes nothing. Nil means always allowed. Manual wake and sleep from
+	// the API use the Applier directly and are not guarded.
+	Guard lease.Guard
 
 	kickOnce sync.Once
 	kickCh   chan struct{}
@@ -224,6 +229,8 @@ func (r *Reconciler) handle(ctx context.Context, err error, key model.ServiceKey
 	case err == nil:
 	case ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)):
 		r.log().Debug("offhours: stopped while reconciling", "service", key.Service, "cluster", key.Cluster)
+	case errors.Is(err, errNotCoordinator):
+		r.log().Info("offhours: coordinator lease not confirmed, changed nothing", "service", key.Service, "cluster", key.Cluster, "err", err)
 	case errors.Is(err, ErrNeedsAttention):
 		attentionNow[key] = true
 		r.noteAttention(context.Background(), key)
@@ -277,6 +284,20 @@ func (r *Reconciler) pruneAttention(current map[model.ServiceKey]bool) {
 	}
 }
 
+// errNotCoordinator means the guard could not confirm the coordinator lease: nothing was written to AWS or the database.
+var errNotCoordinator = errors.New("offhours: coordinator lease not held")
+
+// guard returns nil when no guard is set or the coordinator lease is still held with time left.
+func (r *Reconciler) guard(ctx context.Context) error {
+	if r.Guard == nil {
+		return nil
+	}
+	if err := r.Guard(ctx); err != nil {
+		return fmt.Errorf("%w: %v", errNotCoordinator, err)
+	}
+	return nil
+}
+
 // inService runs fn in one transaction. If fn fails after the enrolment row exists the transaction is committed
 // with last_error (or the blocked state) recorded: the Applier stamps the row before it writes to AWS, so a row
 // means AWS may be partly changed and a rollback would lose track of it. The transaction is rolled back only when
@@ -294,6 +315,10 @@ func (r *Reconciler) inService(ctx context.Context, key model.ServiceKey, fn fun
 	// The transaction itself (begin, commit) has no deadline: only the work and the failure record do.
 	err := r.Store.InTx(base, func(tx store.Tx) error {
 		workCtx, cancel := context.WithTimeout(base, timeout)
+		if err := r.guard(workCtx); err != nil {
+			cancel()
+			return err
+		}
 		fnErr := fn(workCtx, tx)
 		cancel()
 		if fnErr == nil {
@@ -318,7 +343,7 @@ func (r *Reconciler) inService(ctx context.Context, key model.ServiceKey, fn fun
 
 // isRefusal reports errors that mean nothing was written to AWS or the database.
 func isRefusal(err error) bool {
-	return errors.Is(err, ErrZeroCapacity) || errors.Is(err, ErrMinZero) || errors.Is(err, ErrNeedsAttention) || errors.Is(err, ErrServiceGone)
+	return errors.Is(err, errNotCoordinator) || errors.Is(err, ErrZeroCapacity) || errors.Is(err, ErrMinZero) || errors.Is(err, ErrNeedsAttention) || errors.Is(err, ErrServiceGone)
 }
 
 // recordFailure stores the outcome of a failed attempt on the existing row. It fails when there is no row.
@@ -372,6 +397,10 @@ func (r *Reconciler) enrolNew(ctx context.Context, c candidate) error {
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
+		// The locks may have been waited for behind another coordinator: check the lease again before acting.
+		if err := r.guard(ctx); err != nil {
+			return err
+		}
 		live, err := r.Applier.ReadLive(ctx, c.match.Key)
 		if err != nil {
 			return err
@@ -416,6 +445,9 @@ func (r *Reconciler) reconcileEnrolled(ctx context.Context, key model.ServiceKey
 			return nil // released by someone else since the cycle began
 		}
 		if err != nil {
+			return err
+		}
+		if err := r.guard(ctx); err != nil {
 			return err
 		}
 		if member == nil {

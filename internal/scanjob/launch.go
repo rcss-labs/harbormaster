@@ -149,6 +149,10 @@ func (r *Runner) connectedImages(ctx context.Context, due []store.ScanImage) (ma
 // launchBatch records one run for the batch, writes its job and starts the task. Any failure after the run exists ends
 // the run and requeues the batch with a counted attempt.
 func (r *Runner) launchBatch(ctx context.Context, state store.ScanDBState, batch []store.ScanImage, accounts map[string]store.AWSAccount) error {
+	// A coordinator that lost its lease records nothing: the next holder plans the batch again.
+	if err := r.guard(ctx); err != nil {
+		return err
+	}
 	now := r.now()
 	digests := make([]string, len(batch))
 	large := false
@@ -190,6 +194,15 @@ func (r *Runner) launchBatch(ctx context.Context, state store.ScanDBState, batch
 	}
 	if err := r.Bucket.Put(ctx, scan.JobKey(runID), body); err != nil {
 		return fail(fmt.Errorf("write the job: %w", err))
+	}
+	// The job upload took time; the lease may be gone. The run row is the arbiter against a second launch, this check
+	// stops a paused holder from starting a task it no longer owns the decision for.
+	if err := r.guard(ctx); err != nil {
+		r.log().Warn("scan: coordinator lease not confirmed, not launching", "run", runID, "err", err)
+		if deferErr := r.Store.DeferScanImages(ctx, digests, now.Add(r.interval()), "", ""); deferErr != nil {
+			r.log().Error("scan: defer images", "err", deferErr)
+		}
+		return r.finishRun(ctx, runID, "failed", store.ScanRunPatch{Error: "coordinator lease lost", ImagesFailed: len(batch)})
 	}
 	taskARN, err := r.Launcher.RunTask(ctx, awsx.LaunchSpec{RunID: runID, Mode: scan.ModeScan, Large: large})
 	if err != nil {

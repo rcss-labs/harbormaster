@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/secretbox"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
@@ -63,6 +64,9 @@ type Dispatcher struct {
 	Sleep func(context.Context, time.Duration) error
 	// Jitter returns [0, 1); it adds up to 10% to a retry delay. Injectable for tests.
 	Jitter func() float64
+	// Guard is checked right before each send: a holder that lost the coordinator lease while a send was pending must
+	// not send. Nil means always allowed. The coordinator sets it while it holds the lease.
+	Guard lease.Guard
 
 	kickOnce sync.Once
 	kickCh   chan struct{}
@@ -616,6 +620,15 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 	}
 	subject.AccountName = name
 	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject}
+	if d.Guard != nil {
+		// The lease may have been lost while this row waited, rendered or slept between sends. The unique delivery key
+		// and the claim keep a send from happening twice; this stops a paused holder from sending at all.
+		if err := d.Guard(sendCtx); err != nil {
+			d.log().Warn("notify: coordinator lease not confirmed, not sending", "delivery", row.ID, "err", err)
+			d.release(parent, row)
+			return nil
+		}
+	}
 	result := d.Senders.Send(sendCtx, route, secret, message)
 
 	if sendCtx.Err() != nil && !result.Delivered {
