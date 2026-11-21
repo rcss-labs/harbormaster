@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { delay, http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -29,6 +29,16 @@ function serveIncident(fields: Record<string, unknown> | null, events: unknown[]
 const banner = async (name: RegExp) => (await screen.findByText(name)).closest('[data-hm-banner]') as HTMLElement
 
 describe('TimelineBanner', () => {
+  // The fixtures fail on 2026-11-07. Pin "now" to that day so the banner keeps its same-day time format
+  // (HH:MM) instead of switching to a date once the fixtures are more than 24 hours old.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-07T12:00:00Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('names the change, the delay and the top reason', async () => {
     serveRevisions()
     renderApp(route)
