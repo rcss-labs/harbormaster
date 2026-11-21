@@ -1128,7 +1128,11 @@ func TestNotificationRoutes_DeletedTagSelectorIsKeptOnSave(t *testing.T) {
 	if len(stored.Scope) != 1 || !stored.Scope[0].Missing || !stored.MatchesNothing {
 		t.Fatalf("route after its tag was deleted = %+v, want the selector kept, missing, and the route matching nothing", stored)
 	}
-	resp := e.put(created.ID, e.webhookInput("tagged renamed", func(in map[string]any) { in["scope"] = []any{tagScope}; delete(in, "url"); in["version"] = created.Version }))
+	resp := e.put(created.ID, e.webhookInput("tagged renamed", func(in map[string]any) {
+		in["scope"] = []any{tagScope}
+		delete(in, "url")
+		in["version"] = created.Version
+	}))
 	if resp.StatusCode != http.StatusOK {
 		code, msg := errorCode(t, resp)
 		t.Fatalf("saving a route that keeps its deleted tag = %d %s %s, want 200", resp.StatusCode, code, msg)
@@ -1136,8 +1140,33 @@ func TestNotificationRoutes_DeletedTagSelectorIsKeptOnSave(t *testing.T) {
 
 	unknown := map[string]any{"kind": "harbormaster", "tag_id": int64(qa.ID) + 1000}
 	e.invalidFor(e.webhookInput("new", func(in map[string]any) { in["scope"] = []any{unknown} }), "scope entries is not valid")
-	resp = e.put(created.ID, e.webhookInput("tagged renamed", func(in map[string]any) { in["scope"] = []any{tagScope, unknown}; delete(in, "url"); in["version"] = created.Version + 1 }))
+	resp = e.put(created.ID, e.webhookInput("tagged renamed", func(in map[string]any) {
+		in["scope"] = []any{tagScope, unknown}
+		delete(in, "url")
+		in["version"] = created.Version + 1
+	}))
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("adding a tag id the route never had = %d, want 422", resp.StatusCode)
+	}
+}
+
+// The editor previews the draft of a route that still holds a deleted tag; that must work as saving it does.
+func TestNotificationPreview_DraftKeepsADeletedTagOfTheRoute(t *testing.T) {
+	e := newNotifyEnv(t)
+	qa, err := e.st.CreateTag(t.Context(), "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagScope := map[string]any{"kind": "harbormaster", "tag_id": int64(qa.ID)}
+	created := e.create(e.webhookInput("tagged", func(in map[string]any) { in["scope"] = []any{tagScope} }))
+	if err := e.st.DeleteTag(t.Context(), qa.ID); err != nil {
+		t.Fatal(err)
+	}
+	body := e.webhookInput("tagged", func(in map[string]any) { in["scope"] = []any{tagScope} })
+	body["route_id"] = created.ID
+	resp := e.admin.post("/api/notifications/preview", body)
+	if resp.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, resp)
+		t.Fatalf("preview = %d %s %s, want 200", resp.StatusCode, code, msg)
 	}
 }

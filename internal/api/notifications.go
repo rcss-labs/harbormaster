@@ -607,7 +607,13 @@ func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	draft, _, err := s.buildRoute(ctx, req.NotificationRouteInput, nil, true)
+	var editing *store.NotificationRoute
+	if req.RouteID != nil {
+		if route, err := s.Store.GetNotificationRoute(ctx, *req.RouteID); err == nil {
+			editing = &route
+		}
+	}
+	draft, _, err := s.buildRoute(ctx, req.NotificationRouteInput, editing, true)
 	if err != nil {
 		s.fail(w, err)
 		return
