@@ -233,6 +233,17 @@ describe('Sidebar Analytics', () => {
     expect(names.indexOf('Log search')).toBe(names.indexOf('Security') + 1)
   })
 
+  it('shows Config search under Insights, right after Log search', async () => {
+    renderApp('/')
+    const link = await screen.findByRole('link', { name: /^Config search/ })
+    expect(link).toHaveAttribute('href', '/config')
+    expect(link.querySelector('svg')).not.toBeNull()
+    const names = within(screen.getByRole('navigation', { name: 'Main' }))
+      .getAllByRole('link')
+      .map((item) => item.textContent?.replace(/\d+$/, ''))
+    expect(names.indexOf('Config search')).toBe(names.indexOf('Log search') + 1)
+  })
+
   it('shows Analytics between Storage and Settings', async () => {
     renderApp('/')
     await screen.findByRole('link', { name: /^Analytics/ })
@@ -240,7 +251,7 @@ describe('Sidebar Analytics', () => {
       .getAllByRole('link')
       .map((link) => link.textContent?.replace(/\d+$/, ''))
     expect(names.indexOf('Analytics')).toBe(names.indexOf('Storage') + 1)
-    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 3)
+    expect(names.indexOf('Settings')).toBe(names.indexOf('Analytics') + 4)
   })
 
   it('is active on every analytics tab', async () => {
@@ -268,6 +279,7 @@ describe('Sidebar groups', () => {
       'Analytics',
       'Security',
       'Log search',
+      'Config search',
       'Settings',
     ])
     // Every nav item carries an icon.
