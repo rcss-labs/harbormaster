@@ -55,6 +55,8 @@ test.describe('sam', () => {
 
     // The stored URL is write-only: after a reload the field is empty and the page does not contain it.
     await page.reload()
+    // The view is kept in the URL, so the reload lands on the delivery log.
+    await page.getByRole('button', { name: 'Routes', exact: true }).click()
     await routeRow(page, 'e2e hook').click()
     await expect(page.getByLabel('Webhook URL')).toHaveValue('')
     await expect(page.getByLabel('Webhook URL')).toHaveAttribute('placeholder', 'Saved. Type to replace.')
