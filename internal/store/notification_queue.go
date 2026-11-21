@@ -237,7 +237,7 @@ func (s *Store) InsertNotificationTest(ctx context.Context, d NotificationDelive
 // DeliveryPlanState is what planning needs to know about one route x incident.
 type DeliveryPlanState struct {
 	OpenedStatus         string     // "" when no opened row exists
-	LastSentAt           *time.Time // created_at of the newest opened/repeat row that is delivered or failed
+	LastSentAt           *time.Time // created_at of the newest opened/repeat row that is pending (being sent), delivered or failed
 	MaxRepeatSeq         int
 	HasHeld, HasResolved bool
 }
@@ -251,7 +251,7 @@ func (s *Store) NotificationPlanStates(ctx context.Context, incidentIDs []int64)
 	}
 	rows, err := s.Pool.Query(ctx, `select route_id, incident_id,
 		coalesce(max(status) filter (where event = 'opened'), ''),
-		max(created_at) filter (where event in ('opened', 'repeat') and status in ('delivered', 'failed')),
+		max(created_at) filter (where event in ('opened', 'repeat') and status in ('pending', 'delivered', 'failed')),
 		coalesce(max(seq) filter (where event = 'repeat'), 0),
 		coalesce(bool_or(status = 'held' and event in ('opened', 'repeat')), false),
 		coalesce(bool_or(event = 'resolved'), false)
@@ -381,14 +381,15 @@ func (s *Store) ReleaseHeldNotificationDeliveries(ctx context.Context, now time.
 }
 
 // CancelUnsentNotificationDeliveries cancels the opened and repeat rows of the given incidents that are still
-// pending or held and not under a live lease (a row being sent is left to finish).
-func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incidentIDs []int64, note string, now time.Time) error {
+// pending (with pendingNote) or held (with heldNote) and not under a live lease: a row being sent is left to finish.
+func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incidentIDs []int64, pendingNote, heldNote string, now time.Time) error {
 	if len(incidentIDs) == 0 {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx, `update notification_deliveries set status = 'cancelled', note = $2, finished_at = $3, claimed_until = null
+	_, err := s.Pool.Exec(ctx, `update notification_deliveries
+		set status = 'cancelled', note = case when status = 'held' then $3 else $2 end, finished_at = $4, claimed_until = null
 		where incident_id = any($1) and event in ('opened', 'repeat') and status in ('pending', 'held')
-		  and (claimed_until is null or claimed_until <= $3)`, incidentIDs, note, now)
+		  and (claimed_until is null or claimed_until <= $4)`, incidentIDs, pendingNote, heldNote, now)
 	if err != nil {
 		return fmt.Errorf("cancel unsent notifications: %w", err)
 	}

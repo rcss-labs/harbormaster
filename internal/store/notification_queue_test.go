@@ -417,23 +417,31 @@ func TestCancelUnsentNotificationDeliveries_SkipsLeasedAndSentRows(t *testing.T)
 	mustPlan(t, s, delivery(route, incident, "opened", 0))
 	repeat := delivery(route, incident, "repeat", 1)
 	mustPlan(t, s, repeat)
+	held := delivery(route, incident, "repeat", 2)
+	releaseAt := notifyT0.Add(8 * time.Hour)
+	held.Status, held.NextAttemptAt, held.HeldUntil = "held", nil, &releaseAt
+	mustPlan(t, s, held)
 	// Lease only the opened row (it is the oldest by id).
 	claimed, _ := s.ClaimDueNotificationDeliveries(ctx, notifyT0, 2*time.Minute, 1)
 	if len(claimed) != 1 {
 		t.Fatal("expected one claimed row")
 	}
-	if err := s.CancelUnsentNotificationDeliveries(ctx, []int64{incident.ID}, "Resolved before it was sent.", notifyT0); err != nil {
+	if err := s.CancelUnsentNotificationDeliveries(ctx, []int64{incident.ID}, "Resolved before it was sent.", "Resolved during quiet hours; not sent.", notifyT0); err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range listNotifDeliveries(t, s) {
-		switch d.Event {
-		case "opened":
+		switch {
+		case d.Event == "opened":
 			if d.Status != "pending" {
 				t.Errorf("leased row changed to %s", d.Status)
 			}
-		case "repeat":
+		case d.Seq == 1:
 			if d.Status != "cancelled" || d.Note != "Resolved before it was sent." {
-				t.Errorf("repeat row = %+v, want cancelled", d)
+				t.Errorf("pending repeat row = %+v, want cancelled with the pending note", d)
+			}
+		case d.Seq == 2:
+			if d.Status != "cancelled" || d.Note != "Resolved during quiet hours; not sent." {
+				t.Errorf("held repeat row = %+v, want cancelled with the quiet hours note", d)
 			}
 		}
 	}

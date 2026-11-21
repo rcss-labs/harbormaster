@@ -26,10 +26,14 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/notify"
+	"github.com/rcss-labs/harbormaster/internal/notify/fakesink"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/poller"
+	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
+	"github.com/rcss-labs/harbormaster/internal/secretbox"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -216,6 +220,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		execInsecureStream bool
 		// plan 07: the fake IdP exists only in fake AWS mode; nil leaves /fake-idp/ unrouted.
 		fakeIdP http.Handler
+		// the in-process notification receiver exists only in fake AWS mode; nil leaves /fake-notify/ unrouted.
+		fakeNotify http.Handler
 		// scanRunner is the image scan loop; nil when scanning is off.
 		scanRunner *scanjob.Runner
 	)
@@ -263,11 +269,35 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// through the same code under the same per-service lock.
 	offHoursApplier := &offhours.Applier{Store: st, Clients: clients, Now: time.Now, Log: log}
 	offHoursReconciler := &offhours.Reconciler{Applier: offHoursApplier, Store: st, Interval: cfg.OffHours.Interval, Now: time.Now, Log: log}
+	// Notifications: the guarded senders and the leader-only dispatcher. Route secrets are sealed under the session
+	// key; without one, only secretless routes (email) can exist and the dispatcher fails any other delivery with a
+	// clear note. In fake mode an in-process receiver at /fake-notify/ takes every delivery.
+	var notifyBox *secretbox.Box
+	if cfg.SessionKey != "" {
+		if notifyBox, err = secretbox.New(cfg.SessionKey, secretbox.PurposeNotifySecret); err != nil {
+			return fmt.Errorf("notification secret box: %w", err)
+		}
+	}
+	notifySenders := &notify.Senders{
+		BaseURL: cfg.BaseURL, Version: version, SMTP: cfg.Notify.SMTP, Log: log,
+		Guard: safedial.Policy{AllowedPrivate: cfg.Notify.AllowedPrivateCIDRs},
+	}
+	if fakeAWS {
+		fakeNotifySink := fakesink.New()
+		fakeNotify = fakeNotifySink.Handler()
+		notifySenders.Guard.AllowLoopback = true
+		notifySenders.FakeBase = strings.TrimRight(cfg.BaseURL, "/") + "/fake-notify"
+		notifySenders.TelegramBase = notifySenders.FakeBase + "/telegram"
+		notifySenders.FakeMail = fakeNotifySink.Mail
+	}
+	notifyDispatcher := &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
+		Interval: cfg.Notify.Interval, Now: time.Now, Log: log, Telemetry: telemetry.Default}
 	setup, err := auth.NewSetup(ctx, st, log)
 	if err != nil {
 		return err
 	}
 
+	_ = fakeNotify                          // mounted by the API server (delivery log task)
 	telemetry.Default.SetBuildInfo(version) // plan 06
 	var scanKicker api.ScanKicker           // stays a nil interface when scanning is off
 	if scanRunner != nil {
@@ -298,6 +328,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	pollerConfig := poller.ConfigFrom(cfg)
 	pollerConfig.Scan = scanRunner
 	pollerConfig.OffHours = offHoursReconciler
+	pollerConfig.Notify = notifyDispatcher
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
 	go func() {
