@@ -164,6 +164,23 @@ test.describe('sam', () => {
     expect((await receivedAt(request, '/fake-notify/webhook/covers', since)).every((entry) => entry.body.service === covered.service)).toBe(true)
   })
 
+  test("a service-scoped route receives only its service's alerts", async ({ request, baseURL }) => {
+    const failing = await failingServices(request)
+    expect(failing.length, 'the seeded estate has failing services').toBeGreaterThanOrEqual(2)
+    const chosen = failing[0]
+    const targets = (await (await request.get('/api/notifications/targets')).json()) as { services: { id: string; name: string; cluster: string }[] }
+    const service = targets.services.find((s) => s.name === chosen.service && s.cluster === chosen.cluster)
+    expect(service).toBeDefined()
+    const since = new Date()
+    await createRoute(request, webhookBody('e2e one service', hookUrl(baseURL, 'only'), { scope: [{ kind: 'service', service_id: service!.id }] }))
+
+    await expect.poll(async () => (await receivedAt(request, '/fake-notify/webhook/only', since)).length, { timeout: 15_000 }).toBe(chosen.alerts)
+    await new Promise((resolve) => setTimeout(resolve, 5_000)) // two more dispatcher cycles: nothing else may arrive
+    const got = await receivedAt(request, '/fake-notify/webhook/only', since)
+    expect(got).toHaveLength(chosen.alerts)
+    for (const entry of got) expect(entry.body).toMatchObject({ scope: 'service', service: chosen.service, cluster: chosen.cluster })
+  })
+
   test('Telegram: a route sends a test with the token only in the secret, and a refused chat fails clearly', async ({ page, request }) => {
     const token = '123456789:' + 'Ab-_'.repeat(9)
     const since = new Date()
