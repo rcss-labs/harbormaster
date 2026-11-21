@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test test-db test-kv e2e lint run
+.PHONY: build test test-db test-kv e2e lint run run-split
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
@@ -48,6 +48,10 @@ test-kv:
 
 run:
 	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
+
+# run-split runs web (8480), poller (8482) and coordinator (8483) as three processes on fake AWS data; see tools/run-split.sh.
+run-split:
+	tools/run-split.sh
 
 # e2e builds the binary, recreates the dedicated schema (tools/e2eschema; HM_E2E_SCHEMA, default hm_e2e) so each
 # run starts empty, then runs the Playwright smoke and flow specs against `serve --fake-aws`. Playwright wipes
