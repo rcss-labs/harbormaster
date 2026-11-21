@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -142,6 +143,16 @@ type Config struct {
 
 	// plan 06: metrics endpoint token; empty disables /metrics
 	MetricsToken string
+
+	// KV selects the shared Valkey or Redis store; an empty URL means none
+	KV KVConfig
+}
+
+// KVConfig holds the shared store settings. The URL can carry a password, so
+// it is never put in an error or a log line.
+type KVConfig struct {
+	URL    string
+	Prefix string
 }
 
 // envReader reads HM_* variables and remembers the first parse error, so Load
@@ -316,6 +327,11 @@ func Load(getenv func(string) string) (Config, error) {
 
 		// plan 06: metrics endpoint token
 		MetricsToken: strings.TrimSpace(reader.text("HM_METRICS_TOKEN", "")),
+
+		KV: KVConfig{
+			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
+			Prefix: reader.text("HM_KV_PREFIX", "hm"),
+		},
 	}
 
 	if reader.err != nil {
@@ -358,6 +374,9 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	if err := validateScan(cfg.Scan); err != nil {
+		return Config{}, err
+	}
+	if err := validateKV(cfg.KV); err != nil {
 		return Config{}, err
 	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
@@ -415,6 +434,27 @@ func validateScan(scan ScanConfig) error {
 	}
 	if scan.DBMaxAge < time.Hour {
 		return errors.New("HM_SCAN_DB_MAX_AGE: must be at least 1h")
+	}
+	return nil
+}
+
+var kvPrefixPattern = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
+
+// validateKV never echoes the URL: it can hold a password.
+func validateKV(kv KVConfig) error {
+	if kv.URL != "" {
+		scheme, _, found := strings.Cut(kv.URL, "://")
+		switch strings.ToLower(scheme) {
+		case "redis", "rediss", "valkey", "valkeys":
+			if !found {
+				return errors.New("HM_KV_URL: scheme must be redis, rediss, valkey or valkeys")
+			}
+		default:
+			return errors.New("HM_KV_URL: scheme must be redis, rediss, valkey or valkeys")
+		}
+	}
+	if !kvPrefixPattern.MatchString(kv.Prefix) {
+		return errors.New("HM_KV_PREFIX: use 1 to 32 lowercase letters, digits, - or _")
 	}
 	return nil
 }
