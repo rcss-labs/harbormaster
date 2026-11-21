@@ -149,7 +149,9 @@ func claimOnce(ctx context.Context, st *store.Store, t awsx.Target) (*store.Slic
 	if err := st.EnsureSliceLease(claimCtx, t); err != nil {
 		return nil, nil, err
 	}
-	l, ok, err := st.ClaimLease(claimCtx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: t.AccountID, Region: t.Region}, uuid.New(), time.Minute)
+	// Nothing renews this lease, and the fence also checks expiry, so a helper that runs past the TTL would get
+	// ErrLeaseLost halfway through. Ten minutes outlasts any one-shot poll; release returns it as soon as the helper ends.
+	l, ok, err := st.ClaimLease(claimCtx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: t.AccountID, Region: t.Region}, uuid.New(), 10*time.Minute)
 	if err != nil {
 		return nil, nil, err
 	}
