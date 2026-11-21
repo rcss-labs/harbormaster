@@ -41,11 +41,18 @@ describe('MorePage', () => {
       'AWS accounts': '/settings/accounts',
       'Users & permissions': '/settings/users',
       Tags: '/settings/tags',
+      Notifications: '/settings/notifications',
       'Single sign-on': '/settings/sso',
       'Audit log': '/settings/audit',
     }
     for (const [name, href] of Object.entries(hrefs)) expect(admin.getByRole('link', { name: new RegExp(`^${name}`) })).toHaveAttribute('href', href)
     await waitFor(() => expect(admin.getByRole('link', { name: /^Single sign-on/ })).toHaveTextContent('Off'))
+  })
+
+  it('flags failing notification routes on the Notifications row', async () => {
+    renderApp('/more')
+    const admin = await section('Admin')
+    await waitFor(() => expect(admin.getByRole('link', { name: /^Notifications/ })).toHaveTextContent('1 failing'))
   })
 
   it('shows On for single sign-on when it is enabled', async () => {

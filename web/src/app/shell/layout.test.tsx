@@ -121,8 +121,29 @@ describe('collapsible sidebar', () => {
     expect(within(main).getByRole('link', { name: /Settings/ })).toBeInTheDocument()
   })
 
+  it('adds failing notification routes to the Settings badge', async () => {
+    // The default summary has one failing route and the default poller status no account issues.
+    renderApp('/')
+    const settings = await within(await screen.findByRole('navigation', { name: 'Main' })).findByRole('link', { name: /Settings/ })
+    expect(await within(settings).findByLabelText('1 failing notification route')).toBeInTheDocument()
+  })
+
+  it('counts account issues and failing routes together as settings issues', async () => {
+    server.use(
+      http.get('/api/poller', () =>
+        HttpResponse.json({
+          items: [{ account_id: '1', account_name: 'a', region: 'us-east-1', throttled: false, failing: true, last_error: 'x', last_ok_at: null, tiers: [] }],
+        }),
+      ),
+    )
+    renderApp('/')
+    const settings = await within(await screen.findByRole('navigation', { name: 'Main' })).findByRole('link', { name: /Settings/ })
+    expect(await within(settings).findByLabelText('2 settings issues')).toBeInTheDocument()
+  })
+
   it('shows an amber account-issue count on Settings from the poller status', async () => {
     server.use(
+      http.get('/api/notifications/summary', () => HttpResponse.json({ failed_24h: 0, failing_routes: 0 })),
       http.get('/api/poller', () =>
         HttpResponse.json({
           items: [

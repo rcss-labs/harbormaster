@@ -9,12 +9,13 @@ import { Users } from '../admin/users/Users'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { HeaderActionSlot } from './HeaderAction'
+import { NotificationsPage } from './notifications/NotificationsPage'
 import { OffHoursPage } from './offhours/OffHoursPage'
 import { SSOPage } from './sso/SSOPage'
 import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
 
-export type SettingsTab = 'general' | 'accounts' | 'users' | 'tags' | 'offhours' | 'sso' | 'audit'
+export type SettingsTab = 'general' | 'accounts' | 'users' | 'tags' | 'offhours' | 'notifications' | 'sso' | 'audit'
 
 export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['general', 'General'],
@@ -22,6 +23,7 @@ export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['users', 'Users & permissions'],
   ['tags', 'Tags'],
   ['offhours', 'Off-hours'],
+  ['notifications', 'Notifications'],
   ['sso', 'Single sign-on'],
   ['audit', 'Audit log'],
 ]
@@ -36,6 +38,8 @@ function TabPanel({ tab }: { tab: SettingsTab }) {
       return <Tags />
     case 'offhours':
       return <OffHoursPage />
+    case 'notifications':
+      return <NotificationsPage />
     case 'accounts':
       return <Accounts />
     case 'users':
