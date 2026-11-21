@@ -59,8 +59,8 @@ type SelectorInfo struct {
 }
 
 // DescribeScope names each selector and flags the ones whose target no longer exists. The order is stable:
-// accounts, clusters, services, Harbormaster tags, AWS tags, each by display name. Tag selectors are never missing
-// (deleting a Harbormaster tag removes its selector). A disabled account is present, not missing.
+// accounts, clusters, services, Harbormaster tags, AWS tags, each by display name. A Harbormaster tag that was
+// deleted is missing and matches nothing; an AWS tag is never missing. A disabled account is present, not missing.
 func DescribeScope(selectors []store.NotificationSelector, targets store.NotificationTargets, tags []store.Tag) []SelectorInfo {
 	accounts := map[string]store.AWSAccount{}
 	for _, a := range targets.Accounts {
@@ -94,7 +94,8 @@ func DescribeScope(selectors []store.NotificationSelector, targets store.Notific
 			info.AccountName = accounts[sel.AccountID].Name
 			info.Missing = !services[model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sel.AccountID, Region: sel.Region, Cluster: sel.Cluster}, Service: sel.Service}]
 		case store.NotificationSelectorHarbormaster:
-			info.TagName = tagNames[int64(sel.TagID)]
+			name, ok := tagNames[int64(sel.TagID)]
+			info.TagName, info.Missing = name, !ok
 		}
 		out = append(out, info)
 	}

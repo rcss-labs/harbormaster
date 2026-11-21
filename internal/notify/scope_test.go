@@ -220,6 +220,11 @@ func TestDescribeScope_NamesOrderAndMissing(t *testing.T) {
 	check(selectors[7], true, "prod")
 	check(selectors[8], false, "staging") // disabled is present, not missing
 	check(selectors[1], false, "Payments")
+	// A Harbormaster tag that no longer exists is kept and flagged, like any other missing target.
+	gone := DescribeScope([]store.NotificationSelector{{Kind: "harbormaster", TagID: authz.TagID(8)}}, targets, []store.Tag{{ID: 7, Name: "Payments"}})
+	if len(gone) != 1 || !gone[0].Missing {
+		t.Errorf("a deleted Harbormaster tag must be Missing: %+v", gone)
+	}
 	check(selectors[0], false, "")
 
 	// Order: accounts, clusters, services, Harbormaster tags, AWS tags.

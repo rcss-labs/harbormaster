@@ -1268,3 +1268,33 @@ func TestDispatcher_TwoDispatchersOpenOneGroup(t *testing.T) {
 		t.Fatalf("got %v, want exactly one opened", got)
 	}
 }
+
+// Deleting the only Harbormaster tag of a route must not turn it into "everything": the selector stays, its tag is
+// gone, and the route matches nothing (D27).
+func TestDispatcher_RouteWhoseTagWasDeletedMatchesNothing(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	qa, err := e.st.CreateTag(ctx, "QA", "blue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.UpsertServices(ctx, []model.Service{
+		{Key: svcX, Status: "ACTIVE", Raw: []byte(`{"Tags":[]}`), PolledAt: time.Now()},
+		{Key: svcY, Status: "ACTIVE", Raw: []byte(`{"Tags":[]}`), PolledAt: time.Now()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetServiceTag(ctx, svcY, &qa.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.route("hm-tag", scoped(store.NotificationSelector{Kind: "harbormaster", TagID: qa.ID}))
+	if err := e.st.DeleteTag(ctx, qa.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning), alert(svcY, "restart_loop", model.AlertWarning))
+	e.cycle()
+	e.cycle()
+	if got := e.sender.to("hm-tag"); len(got) != 0 {
+		t.Fatalf("a route whose only tag was deleted widened to everything: %v", got)
+	}
+}

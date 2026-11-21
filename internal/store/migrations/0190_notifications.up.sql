@@ -32,8 +32,9 @@ create table notification_route_scopes (
   -- Cluster and account entries are threshold entries (D35): one aggregated notification when at least this many
   -- of their services are failing. Service and tag entries notify per alert and have none.
   threshold int check (threshold between 1 and 500),
-  -- Deleting a Harbormaster tag removes the selector; the route then matches one tag fewer.
-  tag_id bigint references tags on delete cascade,
+  -- No foreign key, like the other natural keys: deleting a Harbormaster tag keeps the selector, which then matches
+  -- nothing and is reported as missing (D27). Cascading it away would turn a tag-only route into "everything".
+  tag_id bigint,
   check ((kind in ('account', 'cluster')) = (threshold is not null)),
   check (
     (kind = 'account' and account_id is not null and cluster_name is null and service_name is null

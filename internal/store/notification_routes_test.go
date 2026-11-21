@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
@@ -182,27 +183,35 @@ func TestNotificationRoute_LimitIs50(t *testing.T) {
 	}
 }
 
-func TestDeleteTag_RemovesNotificationSelectors(t *testing.T) {
+// A deleted tag leaves its selector in the route, so the route can say the tag is gone and never widens to
+// "everything" (D27).
+func TestDeleteTag_KeepsNotificationSelectors(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	qa, err := s.CreateTag(ctx, "QA", "blue")
 	if err != nil {
 		t.Fatal(err)
 	}
+	prod, err := s.CreateTag(ctx, "Prod", "red")
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := newRoute("tagged")
-	r.Scope = []store.NotificationSelector{{Kind: "aws", Key: "env", Value: "staging"}, {Kind: "harbormaster", TagID: qa.ID}}
+	r.Scope = []store.NotificationSelector{{Kind: "aws", Key: "env", Value: "staging"}, {Kind: "harbormaster", TagID: qa.ID}, {Kind: "harbormaster", TagID: prod.ID}}
 	created, err := s.CreateNotificationRoute(ctx, r, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteTag(ctx, qa.ID); err != nil {
-		t.Fatal(err)
+	for _, id := range []authz.TagID{qa.ID, prod.ID} { // two deleted tags on one route must not collide
+		if err := s.DeleteTag(ctx, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 	got, err := s.GetNotificationRoute(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("the route must survive its tag: %v", err)
 	}
-	if len(got.Scope) != 1 || got.Scope[0].Kind != "aws" {
-		t.Fatalf("scope after tag delete = %+v, want only the AWS selector", got.Scope)
+	if len(got.Scope) != 3 {
+		t.Fatalf("scope after tag delete = %+v, want all three selectors kept", got.Scope)
 	}
 }
 
