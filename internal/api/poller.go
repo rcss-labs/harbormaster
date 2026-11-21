@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
 
@@ -94,6 +95,10 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	var owners map[pollTarget]store.LeaseRow
+	if sc.Vis.Admin {
+		owners = s.sliceOwners(ctx)
+	}
 
 	// The services tier decides last_error first, so order it ahead of the others (stable).
 	sort.SliceStable(loops, func(i, j int) bool { return loops[i].Tier == "services" && loops[j].Tier != "services" })
@@ -132,6 +137,10 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 	items := make([]PollerItemDTO, 0, len(order))
 	for _, target := range order {
 		item := *byTarget[target]
+		if row, ok := owners[target]; ok {
+			instance, epoch := row.OwnerID.String(), row.Epoch
+			item.OwnerInstance, item.OwnerEpoch = &instance, &epoch
+		}
 		// AWS error text can name resources the caller cannot see; only admins, or anyone once the target fails, get it.
 		if !sc.Vis.Admin && !item.Failing {
 			item.LastError = ""
@@ -145,5 +154,33 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, http.StatusOK, ItemsResponse[PollerItemDTO]{Items: items})
+	writeJSON(w, http.StatusOK, PollerResponse{Items: items, Store: s.storeState()})
+}
+
+// storeState names the shared store's state for the poller status.
+func (s *Server) storeState() string {
+	switch {
+	case s.KVHealth == nil:
+		return "none"
+	case s.KVHealth.Up():
+		return "up"
+	}
+	return "down"
+}
+
+// sliceOwners maps each slice that a live process holds to its lease row. A lease that expired or was released has no
+// owner worth showing. A database error only means no owner is shown: the status page must not fail over it.
+func (s *Server) sliceOwners(ctx context.Context) map[pollTarget]store.LeaseRow {
+	rows, err := s.Store.ListLeases(ctx)
+	if err != nil {
+		s.log().Debug("poller status: leases unavailable", "error", err)
+		return nil
+	}
+	out := map[pollTarget]store.LeaseRow{}
+	for _, row := range rows {
+		if row.Key.Kind == store.LeaseSlice && !row.Free {
+			out[pollTarget{row.Key.AccountID, row.Key.Region}] = row
+		}
+	}
+	return out
 }

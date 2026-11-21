@@ -1009,7 +1009,17 @@ export const POLLER: PollerDTO = {
   items: [
     ...REGIONS.map((region) => ({ account_id: ACCOUNT_HOMELAB.account_id, account_name: ACCOUNT_HOMELAB.name, region })),
     { account_id: ACCOUNT_STAGING.account_id, account_name: ACCOUNT_STAGING.name, region: 'us-east-1' },
-  ].map((entry) => ({ ...entry, throttled: false, failing: false, last_error: '', last_ok_at: minutesAgo(0), tiers: pollerTiers() })),
+  ].map((entry) => ({
+    ...entry,
+    throttled: false,
+    failing: false,
+    last_error: '',
+    last_ok_at: minutesAgo(0),
+    tiers: pollerTiers(),
+    owner_instance: null,
+    owner_epoch: null,
+  })),
+  store: 'none',
 }
 
 /** One region whose Auto scaling tier fails while every core tier is current: failing/throttled stay false. */
@@ -1026,8 +1036,11 @@ export const POLLER_TIERS: PollerDTO = {
       tiers: pollerTiers({
         scaling: { failing: true, last_ok_at: null, last_error: 'DescribeScheduledActions: UnsupportedOperation: not supported by this endpoint' },
       }),
+      owner_instance: '5b0c5f0e-8d0e-4a52-9d3b-7a1f0c2d3e4f',
+      owner_epoch: 3,
     },
   ],
+  store: 'up',
 }
 
 // ---- observe (plan 03): metrics, target health, scaling, alerts, log history ----

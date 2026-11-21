@@ -479,6 +479,17 @@ type PollerItemDTO struct {
 	LastOKAt    *time.Time `json:"last_ok_at"`
 	// Tiers lists every data type, core or not; failing/throttled/last_error above aggregate core tiers only.
 	Tiers []PollerTierDTO `json:"tiers"`
+	// OwnerInstance and OwnerEpoch name the process that holds the slice's lease and the lease's epoch. Admins only; null
+	// for everyone else and for a slice nobody holds.
+	OwnerInstance *string `json:"owner_instance"`
+	OwnerEpoch    *int64  `json:"owner_epoch"`
+}
+
+// PollerResponse is the body of GET /api/poller.
+type PollerResponse struct {
+	Items []PollerItemDTO `json:"items"`
+	// Store is the shared Valkey or Redis store: "up", "down", or "none" when the install has no store.
+	Store string `json:"store"`
 }
 
 // ItemsResponse is the body of the unpaginated list endpoints: {"items": [...]}.

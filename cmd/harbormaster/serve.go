@@ -367,6 +367,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		if cfg.Scan.Enabled {
 			scanKicker = kicks
 		}
+		var storeHealth interface{ Up() bool } // stays a nil interface when there is no shared store
+		if kvHealth != nil {
+			storeHealth = kvHealth
+		}
 		apiServer = api.New(api.Server{
 			Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 			Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
@@ -383,6 +387,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			OffHours:                offHoursApplier,
 			Notify:                  notifySenders,
 			NotifyBox:               notifyBox,
+			KVHealth:                storeHealth,
 			KickOffHours:            kicks.KickOffHours,
 			KickNotify:              kicks.KickNotify,
 		})

@@ -102,7 +102,7 @@ func contractShapes() map[string]any {
 		"settings":           shapeOf(reflect.TypeFor[SettingsDTO]()),
 		"operations":         shapeOf(reflect.TypeFor[ListResponse[EventDTO]]()),
 		"search":             shapeOf(reflect.TypeFor[ItemsResponse[SearchItemDTO]]()),
-		"poller":             shapeOf(reflect.TypeFor[ItemsResponse[PollerItemDTO]]()),
+		"poller":             shapeOf(reflect.TypeFor[PollerResponse]()),
 		"users":              shapeOf(reflect.TypeFor[ItemsResponse[UserDTO]]()),
 		"createUser":         shapeOf(reflect.TypeFor[CreateUserResponse]()),
 		"permissions":        shapeOf(reflect.TypeFor[PermissionsResponse]()),
