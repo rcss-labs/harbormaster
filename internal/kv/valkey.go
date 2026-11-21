@@ -65,9 +65,11 @@ func (c *client) clientOption() valkey.ClientOption {
 		ClientName:  c.opts.ClientName,
 		// Only the common command subset reaches the server: no client-side caching or tracking, no CLIENT
 		// SETINFO, and RESP3 (HELLO 3) so pub/sub shares the connection pool's protocol.
-		DisableCache:  true,
-		ClientSetInfo: valkey.DisableClientSetInfo,
-		Dialer:        net.Dialer{Timeout: dialTimeout},
+		ForceSingleClient: true, // no CLUSTER SLOTS probe: the cluster commands are outside the allow-list
+		DisableCache:      true,
+		ClientSetInfo:     valkey.DisableClientSetInfo,
+
+		Dialer: net.Dialer{Timeout: dialTimeout},
 		// Keep the command set small and predictable.
 		DisableRetry: true,
 		ShuffleInit:  false,
@@ -442,8 +444,10 @@ func (c *client) subscribeOnce(ctx context.Context, channel string, onMessage fu
 	if err != nil {
 		return false, err
 	}
-	dc, release := inner.Dedicate()
-	defer release()
+	dc, _ := inner.Dedicate()
+	// Close the connection instead of handing it back: returning a subscribed connection to the pool makes the
+	// library send PUNSUBSCRIBE, SUNSUBSCRIBE and DISCARD, which are outside the allow-list.
+	defer dc.Close()
 
 	acked := make(chan struct{}, 1)
 	dropped := dc.SetPubSubHooks(valkey.PubSubHooks{
@@ -473,10 +477,6 @@ func (c *client) subscribeOnce(ctx context.Context, channel string, onMessage fu
 	case err := <-dropped:
 		return true, err
 	case <-ctx.Done():
-		c.observe("UNSUBSCRIBE")
-		uctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = dc.Do(uctx, dc.B().Unsubscribe().Channel(channel).Build()).Error()
 		return true, ctx.Err()
 	}
 }
