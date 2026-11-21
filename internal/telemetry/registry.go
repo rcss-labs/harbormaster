@@ -32,6 +32,7 @@ type Registry struct {
 	snapshotRows     map[string]uint64
 	registryRequests map[string]uint64
 	notifyCounts     map[string]uint64
+	limitDecisions   map[string]uint64
 	leader           bool
 	idle             bool
 	buildVersion     string
@@ -55,6 +56,7 @@ func New() *Registry {
 		snapshotRows:     map[string]uint64{},
 		registryRequests: map[string]uint64{},
 		notifyCounts:     map[string]uint64{},
+		limitDecisions:   map[string]uint64{},
 		kvErrors:         map[string]uint64{},
 		kvDuration:       map[string]*histogram{},
 	}
@@ -128,6 +130,14 @@ func (r *Registry) CountNotification(destination, result string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.notifyCounts[joinKey(destination, result)]++
+}
+
+// CountLimitDecision records one shared-limit decision; result is "allowed" or "refused" and backend is "kv" or
+// "memory" (the per-task fallback).
+func (r *Registry) CountLimitDecision(limit, result, backend string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.limitDecisions[joinKey(limit, result, backend)]++
 }
 
 // SetLeader records whether this process currently holds poller leadership.

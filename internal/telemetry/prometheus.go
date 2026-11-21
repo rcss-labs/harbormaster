@@ -64,6 +64,11 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		writeSample(bw, "harbormaster_kv_up", nil, "", "", kvUp)
 	}
 
+	writeHeader(bw, "harbormaster_limit_decisions_total", "Shared-limit decisions by limit, result and backend.", "counter")
+	for _, k := range sortedKeys(r.limitDecisions) {
+		writeSample(bw, "harbormaster_limit_decisions_total", []string{"limit", "result", "backend"}, k, "", utoa(r.limitDecisions[k]))
+	}
+
 	writeHeader(bw, "harbormaster_notification_deliveries_total", "Notification delivery attempts by destination and result.", "counter")
 	for _, k := range sortedKeys(r.notifyCounts) {
 		writeSample(bw, "harbormaster_notification_deliveries_total", []string{"destination", "result"}, k, "", utoa(r.notifyCounts[k]))
