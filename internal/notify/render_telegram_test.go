@@ -33,6 +33,18 @@ func TestTelegramText_EscapesEveryDynamicString(t *testing.T) {
 	}
 }
 
+func TestTelegramText_GroupMemberTitlesAreEscapedAndUpdateHeadline(t *testing.T) {
+	m := groupMessage(EventUpdate)
+	m.Subject.Text = "web <b>bold</b> & more\nNotifies when 2 or more services are failing."
+	got := TelegramText(m)
+	if !strings.HasPrefix(got, "<b>Update: 🔴 core: 3 of 5 services failing</b>") && !strings.HasPrefix(got, "<b>🔴 Update: core: 3 of 5 services failing</b>") {
+		t.Errorf("headline: %s", got)
+	}
+	if strings.Count(got, "<b>") != 1 || !strings.Contains(got, "web &lt;b&gt;bold&lt;/b&gt; &amp; more") {
+		t.Errorf("member text not escaped:\n%s", got)
+	}
+}
+
 func TestTelegramText_TitlesPerEvent(t *testing.T) {
 	warn := testMessage(EventOpened)
 	warn.Subject.Severity = "warning"

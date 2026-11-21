@@ -77,9 +77,9 @@ func TelegramText(m Message) string {
 	case m.Event == EventResolved:
 		title = "✅ Resolved: " + m.Subject.Title
 	case m.Subject.Severity == "critical":
-		title = "🔴 " + m.Subject.Title
+		title = "🔴 " + m.updatePrefix() + m.Subject.Title
 	default:
-		title = "🟠 " + m.Subject.Title
+		title = "🟠 " + m.updatePrefix() + m.Subject.Title
 	}
 	head := "<b>" + telegramEscape.Replace(cutRunes(title, telegramMaxTitle)) + "</b>"
 	tail := "\n" + telegramEscape.Replace(cutRunes(m.where(), telegramMaxTitle)) +

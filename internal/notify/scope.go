@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -17,29 +16,23 @@ type TagMatcher interface {
 	OffHoursMatches(ctx context.Context, selectors []store.OffHoursSelector) ([]store.OffHoursMatch, error)
 }
 
-// ResolveScope turns a route's selectors into sets. No selectors means everything. Account, cluster and service
-// selectors are natural keys and need no database read: a key that does not exist simply never equals an alert's
-// key. The two tag kinds go together to one OffHoursMatches call and add the services they select. A failed lookup
-// returns an error and an empty scope: callers must not treat it as "matches nothing".
+// ResolveScope turns a route's entries into a Scope. No entries means everything, per alert. Service entries are
+// natural keys and need no database read: a key that does not exist simply never equals an alert's key. The two tag
+// kinds go together to one OffHoursMatches call and add the services they select (per alert, like service
+// entries). Cluster and account entries become group selectors with their threshold (at least 1): they never take
+// an alert per alert (D35). A failed lookup returns an error and an empty scope: callers must not treat it as
+// "matches nothing".
 func ResolveScope(ctx context.Context, tags TagMatcher, selectors []store.NotificationSelector) (Scope, error) {
 	if len(selectors) == 0 {
 		return Scope{All: true}, nil
 	}
-	scope := Scope{
-		Accounts: map[string]bool{}, Targets: map[awsx.Target]bool{},
-		Clusters: map[model.ClusterKey]bool{}, Services: map[model.ServiceKey]bool{},
-	}
+	scope := Scope{Services: map[model.ServiceKey]bool{}}
 	var tagSelectors []store.OffHoursSelector
 	for _, sel := range selectors {
 		switch sel.Kind {
-		case store.NotificationSelectorAccount:
-			if sel.Region == "" {
-				scope.Accounts[sel.AccountID] = true
-			} else {
-				scope.Targets[awsx.Target{AccountID: sel.AccountID, Region: sel.Region}] = true
-			}
-		case store.NotificationSelectorCluster:
-			scope.Clusters[model.ClusterKey{AccountID: sel.AccountID, Region: sel.Region, Cluster: sel.Cluster}] = true
+		case store.NotificationSelectorAccount, store.NotificationSelectorCluster:
+			scope.Groups = append(scope.Groups, GroupSelector{Kind: sel.Kind, AccountID: sel.AccountID, Region: sel.Region,
+				Cluster: sel.Cluster, Threshold: max(sel.Threshold, 1)})
 		case store.NotificationSelectorService:
 			scope.Services[model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sel.AccountID, Region: sel.Region, Cluster: sel.Cluster}, Service: sel.Service}] = true
 		case store.NotificationSelectorAWS, store.NotificationSelectorHarbormaster:

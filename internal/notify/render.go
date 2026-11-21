@@ -8,22 +8,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"mime"
+	"net/url"
 	"strings"
 	"time"
 )
 
-// Link is where the message points: the service page, or the accounts page for an account-level alert.
+// Link is where the message points: the cluster page or the account's overview for a group, the service page for an
+// alert, or the accounts page for an account-level alert.
 func (m Message) Link() string {
 	base := strings.TrimRight(m.BaseURL, "/")
+	switch m.Subject.Scope {
+	case "cluster":
+		return base + "/clusters/" + m.Subject.Key.ClusterKey.ID()
+	case "account":
+		link := base + "/?account=" + url.QueryEscape(m.Subject.Key.AccountID)
+		if m.Subject.Key.Region != "" {
+			link += "&region=" + url.QueryEscape(m.Subject.Key.Region)
+		}
+		return link
+	}
 	if m.Subject.Key.Service == "" {
 		return base + "/settings/accounts"
 	}
 	return base + "/services/" + m.Subject.Key.ID()
 }
 
-// DedupKey identifies one alert across opened, repeat and resolved events.
+// DedupKey identifies one alert, or one route's group, across opened, repeat, update and resolved events. A group
+// key carries the route: two routes on one cluster are two incidents, and one resolving must not close the other.
 func DedupKey(s Subject) string {
 	k := s.Key
+	if s.Scope != "" {
+		return fmt.Sprintf("hm/route-%d/%s/%s/%s/%s", s.RouteID, s.Scope, k.AccountID, k.Region, k.Cluster)
+	}
 	return fmt.Sprintf("hm/%s/%s/%s/%s/%s", k.AccountID, k.Region, k.Cluster, k.Service, s.Kind)
 }
 
@@ -37,7 +53,10 @@ func (m Message) accountName() string {
 // where is the cluster and account part shared by the human-readable renderings.
 func (m Message) where() string {
 	k := m.Subject.Key
-	place := m.accountName() + " / " + k.Region
+	place := m.accountName()
+	if k.Region != "" {
+		place += " / " + k.Region
+	}
 	if k.Cluster == "" {
 		return place
 	}
@@ -49,10 +68,20 @@ func (m Message) plainHeadline() string {
 	switch m.Event {
 	case EventResolved:
 		return "Resolved: " + m.Subject.Title
+	case EventUpdate:
+		return "Update: " + m.Subject.Title
 	case EventTest:
 		return "Test message from Harbormaster"
 	}
 	return m.Subject.Title
+}
+
+// updatePrefix marks an update to an incident that is already open.
+func (m Message) updatePrefix() string {
+	if m.Event == EventUpdate {
+		return "Update: "
+	}
+	return ""
 }
 
 // slackEscape applies Slack's escaping so alert text cannot inject links, mentions or formatting entities.
@@ -67,9 +96,9 @@ func SlackBody(m Message) ([]byte, error) {
 	case m.Event == EventResolved:
 		title = ":white_check_mark: Resolved: " + slackEscape.Replace(m.Subject.Title)
 	case m.Subject.Severity == "critical":
-		title = ":red_circle: *" + slackEscape.Replace(m.Subject.Title) + "*"
+		title = ":red_circle: *" + slackEscape.Replace(m.updatePrefix()+m.Subject.Title) + "*"
 	default:
-		title = ":large_orange_circle: *" + slackEscape.Replace(m.Subject.Title) + "*"
+		title = ":large_orange_circle: *" + slackEscape.Replace(m.updatePrefix()+m.Subject.Title) + "*"
 	}
 	section := title
 	if m.Subject.Text != "" {
@@ -103,8 +132,19 @@ func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
 		summary = summary[:pagerDutySummaryMax]
 	}
 	source := s.Key.Cluster + "/" + s.Key.Service
-	if s.Key.Cluster == "" {
+	switch {
+	case s.Scope == "cluster":
+		source = s.Key.Cluster
+	case s.Key.Cluster == "":
 		source = s.Key.AccountID + "/" + s.Key.Region
+	}
+	details := map[string]any{"text": s.Text, "account_id": s.Key.AccountID, "region": s.Key.Region}
+	if s.Scope != "" {
+		names := make([]string, len(s.Members))
+		for i, member := range s.Members {
+			names[i] = member.Service
+		}
+		details["failing_services"], details["failing"], details["total"], details["threshold"] = names, s.Failing, s.Total, s.Threshold
 	}
 	severity := s.Severity
 	if severity != "critical" {
@@ -115,16 +155,14 @@ func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
 		"event_action": action,
 		"dedup_key":    dedup,
 		"payload": map[string]any{
-			"summary":   string(summary),
-			"source":    source,
-			"severity":  severity,
-			"timestamp": s.At.UTC().Format(time.RFC3339),
-			"component": s.Key.Service,
-			"group":     s.Key.Cluster,
-			"class":     s.Kind,
-			"custom_details": map[string]any{
-				"text": s.Text, "account_id": s.Key.AccountID, "region": s.Key.Region,
-			},
+			"summary":        string(summary),
+			"source":         source,
+			"severity":       severity,
+			"timestamp":      s.At.UTC().Format(time.RFC3339),
+			"component":      s.Key.Service,
+			"group":          s.Key.Cluster,
+			"class":          s.Kind,
+			"custom_details": details,
 		},
 		"links":  []any{map[string]any{"href": m.Link(), "text": "Open in Harbormaster"}},
 		"client": "Harbormaster",
@@ -134,12 +172,29 @@ func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
 // WebhookBody renders the flat JSON object posted to a webhook.
 func WebhookBody(m Message) ([]byte, error) {
 	s := m.Subject
-	event := map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventResolved: "alert.resolved", EventTest: "test"}[m.Event]
-	return json.Marshal(map[string]any{
-		"event": event, "delivery_id": m.DeliveryID, "kind": s.Kind, "severity": s.Severity,
+	event := map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventUpdate: "alert.updated",
+		EventResolved: "alert.resolved", EventTest: "test"}[m.Event]
+	scope := s.Scope
+	switch {
+	case scope != "":
+	case s.Key.Service != "":
+		scope = "service"
+	default:
+		scope = "account" // an account-level alert (the account is unreachable)
+	}
+	body := map[string]any{
+		"event": event, "delivery_id": m.DeliveryID, "scope": scope, "kind": s.Kind, "severity": s.Severity,
 		"title": s.Title, "text": s.Text, "service": s.Key.Service, "cluster": s.Key.Cluster,
 		"account_id": s.Key.AccountID, "region": s.Key.Region, "at": s.At.UTC().Format(time.RFC3339), "url": m.Link(),
-	})
+	}
+	if s.Scope != "" {
+		services := make([]map[string]any, len(s.Members))
+		for i, member := range s.Members {
+			services[i] = map[string]any{"service": member.Service, "cluster": member.Cluster, "kind": member.Kind, "title": member.Title}
+		}
+		body["threshold"], body["failing"], body["total"], body["services"] = s.Threshold, s.Failing, s.Total, services
+	}
+	return json.Marshal(body)
 }
 
 // Sign returns the X-Harbormaster-Signature value for body.
@@ -171,7 +226,10 @@ func emailText(m Message) string {
 		b.WriteString("Cluster: " + k.Cluster + "\r\n")
 	}
 	b.WriteString("Account: " + m.accountName() + " (" + k.AccountID + ")\r\n")
-	b.WriteString("Region: " + k.Region + "\r\n\r\n")
+	if k.Region != "" {
+		b.WriteString("Region: " + k.Region + "\r\n")
+	}
+	b.WriteString("\r\n")
 	b.WriteString("Open in Harbormaster: " + m.Link() + "\r\n")
 	return b.String()
 }

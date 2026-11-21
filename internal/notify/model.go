@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // Destinations a route can send to.
@@ -61,7 +62,13 @@ type Secret struct {
 	BotToken      string `json:"bot_token,omitempty"`
 }
 
-// Subject is what a message is about.
+// Kinds of a group incident: an aggregated notification for a cluster or account entry.
+const (
+	KindClusterFailing = "cluster_failing"
+	KindAccountFailing = "account_failing"
+)
+
+// Subject is what a message is about: one alert, or (Scope "cluster" or "account") a group of failing services.
 type Subject struct {
 	Key         model.ServiceKey
 	Kind        string
@@ -69,6 +76,11 @@ type Subject struct {
 	Title, Text string
 	At          time.Time
 	AccountName string
+	// Scope is "" for an alert, "cluster" or "account" for a group. The fields below are for groups only.
+	Scope                     string
+	RouteID                   int64
+	Threshold, Failing, Total int
+	Members                   []store.IncidentMember
 }
 
 // Event says why a message is sent.
@@ -77,6 +89,7 @@ type Event string
 const (
 	EventOpened   Event = "opened"
 	EventRepeat   Event = "repeat"
+	EventUpdate   Event = "update"
 	EventResolved Event = "resolved"
 	EventTest     Event = "test"
 )

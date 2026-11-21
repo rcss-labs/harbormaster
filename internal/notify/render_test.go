@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 func testMessage(event Event) Message {
@@ -185,7 +186,7 @@ func TestPagerDutyBody_TruncatesSummary(t *testing.T) {
 }
 
 func TestWebhookBody_ShapeAndEventNames(t *testing.T) {
-	for event, want := range map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventResolved: "alert.resolved", EventTest: "test"} {
+	for event, want := range map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventResolved: "alert.resolved", EventTest: "test", EventUpdate: "alert.updated"} {
 		body, err := WebhookBody(testMessage(event))
 		if err != nil {
 			t.Fatal(err)
@@ -210,8 +211,11 @@ func TestWebhookBody_ShapeAndEventNames(t *testing.T) {
 			t.Errorf("%s = %v, want %v", key, out[key], want)
 		}
 	}
-	if len(out) != 12 {
-		t.Errorf("payload has %d fields, want the 12 documented: %v", len(out), out)
+	if out["scope"] != "service" {
+		t.Errorf("scope = %v, want service", out["scope"])
+	}
+	if len(out) != 13 {
+		t.Errorf("payload has %d fields, want the 13 documented: %v", len(out), out)
 	}
 }
 
@@ -290,5 +294,134 @@ func TestRenderPreview_UsesTheSenderBodies(t *testing.T) {
 	}
 	if _, err := RenderPreview("pager", m); err == nil {
 		t.Error("an unknown destination must be an error")
+	}
+}
+
+func groupMessage(event Event) Message {
+	cluster := model.ClusterKey{AccountID: "111111111111", Region: "us-east-1", Cluster: "core"}
+	return Message{
+		Event: event, DeliveryID: 9, BaseURL: "https://hm.example.com", RouteName: "Half of core",
+		Subject: Subject{
+			Key: model.ServiceKey{ClusterKey: cluster}, Kind: KindClusterFailing, Severity: "critical", Scope: "cluster", RouteID: 7,
+			Title: "core: 3 of 5 services failing", Text: "api is failing\nweb is failing\nand 1 more\nNotifies when 2 or more services are failing.",
+			At: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC), AccountName: "prod-account", Threshold: 2, Failing: 3, Total: 5,
+			Members: []store.IncidentMember{
+				{Cluster: "core", Service: "api", Kind: "service_failing", Title: "api is failing", Critical: true},
+				{Cluster: "core", Service: "web", Kind: "restart_loop", Title: "web is failing"},
+			},
+		},
+	}
+}
+
+func TestMessage_LinkForGroups(t *testing.T) {
+	m := groupMessage(EventOpened)
+	if got, want := m.Link(), "https://hm.example.com/clusters/"+m.Subject.Key.ClusterKey.ID(); got != want {
+		t.Errorf("cluster link = %q, want %q", got, want)
+	}
+	m.Subject.Scope = "account"
+	m.Subject.Key = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111"}}
+	if got, want := m.Link(), "https://hm.example.com/?account=111111111111"; got != want {
+		t.Errorf("account link = %q, want %q", got, want)
+	}
+	m.Subject.Key.Region = "eu-west-1"
+	if got, want := m.Link(), "https://hm.example.com/?account=111111111111&region=eu-west-1"; got != want {
+		t.Errorf("account x region link = %q, want %q", got, want)
+	}
+}
+
+func TestDedupKey_GroupIsPerRoute(t *testing.T) {
+	a := groupMessage(EventOpened).Subject
+	if got, want := DedupKey(a), "hm/route-7/cluster/111111111111/us-east-1/core"; got != want {
+		t.Errorf("DedupKey = %q, want %q", got, want)
+	}
+	b := a
+	b.RouteID = 8
+	if DedupKey(a) == DedupKey(b) {
+		t.Error("two routes on one cluster share a dedup key: one would resolve the other's incident")
+	}
+	if DedupKey(groupMessage(EventOpened).Subject) != DedupKey(groupMessage(EventResolved).Subject) {
+		t.Error("opened and resolved of one group must share the key")
+	}
+}
+
+func TestWebhookBody_GroupShapeAndUpdatedEvent(t *testing.T) {
+	body, err := WebhookBody(groupMessage(EventUpdate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["event"] != "alert.updated" || out["scope"] != "cluster" || out["service"] != "" || out["cluster"] != "core" ||
+		out["threshold"] != float64(2) || out["failing"] != float64(3) || out["total"] != float64(5) {
+		t.Errorf("group body = %v", out)
+	}
+	services, _ := out["services"].([]any)
+	if len(services) != 2 || services[0].(map[string]any)["service"] != "api" || services[0].(map[string]any)["title"] != "api is failing" {
+		t.Errorf("services = %v", out["services"])
+	}
+	// An alert-level body carries no group fields; an account-level alert under an empty scope is scope account.
+	alert, _ := WebhookBody(testMessage(EventOpened))
+	var plain map[string]any
+	_ = json.Unmarshal(alert, &plain)
+	for _, group := range []string{"threshold", "failing", "total", "services"} {
+		if _, present := plain[group]; present {
+			t.Errorf("an alert body carries %q", group)
+		}
+	}
+	accountLevel := testMessage(EventOpened)
+	accountLevel.Subject.Key = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111", Region: "us-east-1"}}
+	accountBody, _ := WebhookBody(accountLevel)
+	var acct map[string]any
+	_ = json.Unmarshal(accountBody, &acct)
+	if acct["scope"] != "account" {
+		t.Errorf("account-level alert scope = %v, want account", acct["scope"])
+	}
+}
+
+func TestPagerDutyBody_UpdateIsATriggerWithTheSameKey(t *testing.T) {
+	decode := func(m Message) map[string]any {
+		body, err := PagerDutyBody(m, "key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]any
+		_ = json.Unmarshal(body, &out)
+		return out
+	}
+	opened, update, resolved := decode(groupMessage(EventOpened)), decode(groupMessage(EventUpdate)), decode(groupMessage(EventResolved))
+	if update["event_action"] != "trigger" || resolved["event_action"] != "resolve" || update["dedup_key"] != opened["dedup_key"] || update["dedup_key"] != resolved["dedup_key"] {
+		t.Errorf("update %v opened %v resolved %v", update, opened["dedup_key"], resolved["event_action"])
+	}
+	payload := update["payload"].(map[string]any)
+	if payload["source"] != "core" || payload["component"] != "" || !strings.HasPrefix(payload["summary"].(string), "Update: ") {
+		t.Errorf("payload = %v", payload)
+	}
+	details := payload["custom_details"].(map[string]any)
+	names, _ := details["failing_services"].([]any)
+	if details["failing"] != float64(3) || details["total"] != float64(5) || details["threshold"] != float64(2) || len(names) != 2 || names[0] != "api" {
+		t.Errorf("custom_details = %v", details)
+	}
+}
+
+func TestSlackBody_UpdateHeadline(t *testing.T) {
+	body, err := SlackBody(groupMessage(EventUpdate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Blocks []struct {
+			Text struct {
+				Text string `json:"text"`
+			} `json:"text"`
+		} `json:"blocks"`
+	}
+	_ = json.Unmarshal(body, &decoded)
+	if got := decoded.Blocks[0].Text.Text; !strings.HasPrefix(got, ":red_circle: *Update: core: 3 of 5 services failing*") {
+		t.Errorf("section = %q", got)
+	}
+	if subject, _ := Email(groupMessage(EventUpdate), "hm@example.com", []string{"a@example.com"}); !strings.Contains(subject, "Update: core: 3 of 5") {
+		t.Errorf("email subject = %q", subject)
 	}
 }
