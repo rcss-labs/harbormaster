@@ -37,7 +37,10 @@ func weightOf(s SliceState) int { return max(s.Weight, 1) }
 //   - If free slices would still remain and every live member is at or above its share, the lightest member (ties by
 //     lowest instance id) takes them all, so nothing stays unowned.
 //   - Give back at most one slice, the lightest self holds, only when mayGiveBack, the weight left after giving it back
-//     still exceeds the share, and another live member is below its share.
+//     is still at least the share, and another live member is below its share. (At least, not more than: with "more
+//     than", four equal slices over two pollers would stop at three and one. Every give-back still strictly reduces the
+//     sum of squares of the held weights, so it cannot oscillate; the design says "exceeds by more than the lightest
+//     slice", this settles one slice earlier.)
 //
 // A slice owned by an id that is not in livePollers is not free: its lease expiry decides, never membership.
 func Rebalance(self uuid.UUID, livePollers []uuid.UUID, all []SliceState, mayGiveBack bool) Plan {
@@ -89,7 +92,7 @@ func Rebalance(self uuid.UUID, livePollers []uuid.UUID, all []SliceState, mayGiv
 	lightest := slices.MinFunc(mine, func(a, b SliceState) int {
 		return cmp.Or(cmp.Compare(weightOf(a), weightOf(b)), compareKeys(a.Key, b.Key))
 	})
-	if mineHeld-weightOf(lightest) <= share {
+	if mineHeld-weightOf(lightest) < share {
 		return plan
 	}
 	for id := range members {
