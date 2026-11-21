@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test test-db e2e lint run
+.PHONY: build test test-db test-kv e2e lint run
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
@@ -32,6 +32,19 @@ test-db:
 		docker run -d --name hm-test-pg -e POSTGRES_PASSWORD=hm -p 54329:5432 postgres:16.4-alpine && \
 		echo "export HM_TEST_DATABASE_URL=postgres://postgres:hm@127.0.0.1:54329/postgres?sslmode=disable"; \
 	fi
+
+# test-kv starts (or reuses) one Valkey and one Redis container, pinned to the floor versions the design supports,
+# so a command added in a newer release fails locally. Ports are fixed so HM_TEST_KV_URLS is stable.
+test-kv:
+	@for spec in "hm-test-valkey valkey/valkey:7.2.5-alpine 63791" "hm-test-redis redis:7.0.15-alpine 63792"; do \
+		set -- $$spec; \
+		if docker inspect $$1 >/dev/null 2>&1; then \
+			docker start $$1 >/dev/null; \
+		else \
+			docker run -d --name $$1 -p 127.0.0.1:$$3:6379 $$2 >/dev/null; \
+		fi; \
+	done
+	@echo "export HM_TEST_KV_URLS=redis://127.0.0.1:63791,redis://127.0.0.1:63792"
 
 run:
 	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve

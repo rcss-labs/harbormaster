@@ -347,6 +347,8 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_SESSION_KEY` | | Secret key mixed into session id hashes, and the key the SSO signing key is encrypted under. Set a long random value in production. Required before single sign-on can be configured (see Single sign-on) |
 | `HM_BOOTSTRAP_ADMIN_PASSWORD_SECRET_ARN` | | Secrets Manager secret with the initial `admin` password (see First run) |
 | `HM_METRICS_TOKEN` | | Bearer token for `GET /metrics`. Empty disables the endpoint (it returns 404) |
+| `HM_KV_URL` | | Optional Valkey or Redis store: a `redis://`, `rediss://`, `valkey://` or `valkeys://` URL with an optional user, password and database number. Empty is the default and means no store. This release step only connects and reports `harbormaster_kv_up`; nothing reads or writes the store yet. An unreachable store never stops the server from starting. The URL can hold a password and is never logged. It must use database 0 (the default); another database number is rejected at start, because selecting one needs a command outside the supported subset |
+| `HM_KV_PREFIX` | `hm` | Key and channel prefix on the store, 1 to 32 lowercase letters, digits, `-` or `_`. Installs or tests sharing one server use different prefixes |
 | `HM_COOKIE_SECURE` | `true` | Set the Secure flag on cookies. Use `false` only for plain-HTTP local runs. It does not relax SSO metadata fetching: only `HM_FAKE_AWS` allows `http` and private addresses there |
 | `HM_FAKE_AWS` | `false` | Local demo only, same as `serve --fake-aws`. Seeds demo users (admin `sam` with a published password) and refuses to run against a database that already has users or accounts. Never set in production |
 | `HM_TRUSTED_PROXY` | `false` | Trust the rightmost `X-Forwarded-For` entry as the client IP. Enable only behind a proxy that appends the real client address (the Terraform module sets it for the ALB) |
@@ -666,10 +668,11 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 ### Make targets
 
 - `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` binary
-- `make test`: run Go tests, plus web tests (Vitest) when the web app exists. Go tests need `HM_TEST_DATABASE_URL`
+- `make test`: run Go tests, plus web tests (Vitest) when the web app exists. Go tests need `HM_TEST_DATABASE_URL`; export `HM_TEST_KV_URLS` (see `make test-kv`) to include the Valkey and Redis tests
 - `make lint`: check gofmt, run `go vet`, run web lint and typecheck, and check third-party notices
 - `make vulncheck`: scan all packages with `govulncheck` against the Go vulnerability database (needs network access). `make release` runs it
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
+- `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free
 - `make soak`: soak test at target estate scale. Requires `HM_TEST_DATABASE_URL`

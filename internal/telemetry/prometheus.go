@@ -13,6 +13,7 @@ var (
 	awsCallLabels = []string{"account", "region", "service", "operation", "result"}
 	loopLabels    = []string{"account", "region", "tier"}
 	loopRunLabels = []string{"account", "region", "tier", "result"}
+	kvLabels      = []string{"op"}
 )
 
 // WritePrometheus renders all families in the Prometheus text exposition
@@ -33,6 +34,34 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	writeHeader(bw, "harbormaster_build_info", "Build information; value is always 1.", "gauge")
 	if r.buildInfoSet {
 		writeSample(bw, "harbormaster_build_info", []string{"version"}, r.buildVersion, "", "1")
+	}
+
+	if r.kvUpSet {
+		writeHeader(bw, "harbormaster_kv_command_duration_seconds", "Valkey/Redis command duration in seconds.", "histogram")
+		for _, k := range sortedKeys(r.kvDuration) {
+			h := r.kvDuration[k]
+			var cum uint64
+			for i, upper := range kvBuckets {
+				cum += h.buckets[i]
+				writeSample(bw, "harbormaster_kv_command_duration_seconds_bucket", kvLabels, k,
+					`le="`+strconv.FormatFloat(upper, 'g', -1, 64)+`"`, utoa(cum))
+			}
+			writeSample(bw, "harbormaster_kv_command_duration_seconds_bucket", kvLabels, k, `le="+Inf"`, utoa(h.count))
+			writeSample(bw, "harbormaster_kv_command_duration_seconds_sum", kvLabels, k, "", strconv.FormatFloat(h.sum, 'g', -1, 64))
+			writeSample(bw, "harbormaster_kv_command_duration_seconds_count", kvLabels, k, "", utoa(h.count))
+		}
+
+		writeHeader(bw, "harbormaster_kv_errors_total", "Failed Valkey/Redis commands by command.", "counter")
+		for _, k := range sortedKeys(r.kvErrors) {
+			writeSample(bw, "harbormaster_kv_errors_total", kvLabels, k, "", utoa(r.kvErrors[k]))
+		}
+
+		writeHeader(bw, "harbormaster_kv_up", "1 if the Valkey/Redis store is reachable.", "gauge")
+		kvUp := "0"
+		if r.kvUp {
+			kvUp = "1"
+		}
+		writeSample(bw, "harbormaster_kv_up", nil, "", "", kvUp)
 	}
 
 	writeHeader(bw, "harbormaster_notification_deliveries_total", "Notification delivery attempts by destination and result.", "counter")
