@@ -374,6 +374,58 @@ export interface CostRightsizing {
   services: CostService[]
 }
 
+export type CostSpotStatus =
+  | 'candidate'
+  | 'no_cluster_spot'
+  | 'production'
+  | 'single_task'
+  | 'already_spot'
+  | 'custom_capacity'
+  | 'unsupported_controller'
+  | 'not_running'
+  | 'no_price'
+  | 'windows'
+  | 'not_fargate'
+
+/** What the last 7 days of deployment and scale-in stops say about stopping on SIGTERM. */
+export type CostStopEvidence = 'graceful' | 'killed' | 'unknown'
+
+export interface CostSpotService {
+  service_id: string
+  service: string
+  cluster: string
+  region: string
+  tag: TagDTO
+  status: CostSpotStatus
+  desired_tasks: number
+  on_demand_tasks: number
+  cpu_units: number | null
+  memory_mib: number | null
+  /** The proposal; zero unless the status is candidate or no_cluster_spot. */
+  on_demand_base: number
+  spot_tasks: number
+  /** Null unless the status is candidate or no_cluster_spot. Savings of the three advisors are not additive. */
+  saving_monthly: number | null
+  terminal_sessions: number
+  expected_stops: number
+  killed_stops: number
+  stop_evidence: CostStopEvidence
+  stop_timeout_seconds: number | null
+  /** Names a deployment controller Harbormaster does not deploy; empty otherwise. */
+  controller_name: string
+  /** Terminal sessions or killed stops: listed with a Check first pill and unticked by default. */
+  caution: boolean
+  auto_scaled: boolean
+  can_deploy: boolean
+}
+
+export interface CostSpot {
+  lookback_days: number
+  min_tasks: number
+  /** Every visible service, never null: candidates by saving, then the rest by name. */
+  services: CostSpotService[]
+}
+
 export interface AnalyticsCost extends Envelope<'cost'> {
   /** List price publication date, YYYY-MM-DD. */
   prices_as_of: string
@@ -384,6 +436,7 @@ export interface AnalyticsCost extends Envelope<'cost'> {
   by_account: CostGroup[]
   by_tag: CostGroup[]
   rightsizing: CostRightsizing
+  spot: CostSpot
 }
 
 export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations | AnalyticsCost

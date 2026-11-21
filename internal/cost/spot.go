@@ -93,7 +93,8 @@ func gateSpot(in SpotInput) SpotStatus {
 	}
 	_, hasList := RateFor(in.Region, in.Architecture)
 	_, hasSpot := SpotRateFor(in.Region, in.Architecture)
-	if !hasList || !hasSpot {
+	// A task size that is not a plain number cannot be priced either.
+	if !hasList || !hasSpot || in.CPUUnits <= 0 || in.MemoryMiB <= 0 {
 		return SpotNoPrice
 	}
 	if in.OnDemandTasks == 0 {

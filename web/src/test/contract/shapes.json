@@ -407,6 +407,50 @@
         }
       }
     ],
+    "spot": {
+      "lookback_days": "number",
+      "min_tasks": "number",
+      "services": [
+        {
+          "auto_scaled": "boolean",
+          "can_deploy": "boolean",
+          "caution": "boolean",
+          "cluster": "string",
+          "controller_name": "string",
+          "cpu_units": {
+            "$null": "number"
+          },
+          "desired_tasks": "number",
+          "expected_stops": "number",
+          "killed_stops": "number",
+          "memory_mib": {
+            "$null": "number"
+          },
+          "on_demand_base": "number",
+          "on_demand_tasks": "number",
+          "region": "string",
+          "saving_monthly": {
+            "$null": "number"
+          },
+          "service": "string",
+          "service_id": "string",
+          "spot_tasks": "number",
+          "status": "string",
+          "stop_evidence": "string",
+          "stop_timeout_seconds": {
+            "$null": "number"
+          },
+          "tag": {
+            "color": "string",
+            "id": "number",
+            "inherited": "boolean",
+            "name": "string",
+            "non_production": "boolean"
+          },
+          "terminal_sessions": "number"
+        }
+      ]
+    },
     "spot_prices_as_of": "string",
     "tab": "string",
     "window": {

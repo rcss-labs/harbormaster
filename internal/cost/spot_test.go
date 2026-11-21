@@ -28,6 +28,7 @@ func TestEvaluateSpot_GateOrder(t *testing.T) {
 		{"unpriced tasks", func(in *SpotInput) { in.UnpricedTasks = 1 }, SpotNotFargate},
 		{"windows", func(in *SpotInput) { in.OSFamily = "WINDOWS_SERVER_2019_CORE" }, SpotWindows},
 		{"no list price", func(in *SpotInput) { in.Region = "ap-south-1" }, SpotNoPrice},
+		{"unknown task size", func(in *SpotInput) { in.CPUUnits = 0 }, SpotNoPrice},
 		{"no running on-demand task", func(in *SpotInput) { in.OnDemandTasks = 0 }, SpotNotRunning},
 		{"foreign controller", func(in *SpotInput) { in.ControllerSupported = false }, SpotUnsupportedController},
 		{"custom provider", func(in *SpotInput) { in.LaunchType = ""; in.Strategy = []string{"FARGATE", "my-asg"} }, SpotCustomCapacity},

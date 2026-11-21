@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -596,4 +597,123 @@ func TestWarnUnreadableFloorsWithoutNewDoesNotPanic(t *testing.T) {
 		ContainerDefinitions: []byte(`[{`),
 	}
 	s.warnUnreadableFloors(fact, errors.New("unexpected end of JSON input"))
+}
+
+func spotService(t *testing.T, dto CostDTO, name string) CostSpotServiceDTO {
+	t.Helper()
+	for _, svc := range dto.Spot.Services {
+		if svc.Service == name {
+			return svc
+		}
+	}
+	t.Fatalf("service %q missing from spot.services", name)
+	return CostSpotServiceDTO{}
+}
+
+func TestAnalyticsCost_SpotCandidatesRankedBySaving(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+
+	if got.Spot.LookbackDays != 7 || got.Spot.MinTasks != 2 || len(got.Spot.Services) != 15 {
+		t.Fatalf("spot = lookback %d, min tasks %d, %d services; want 7, 2 and every visible service", got.Spot.LookbackDays, got.Spot.MinTasks, len(got.Spot.Services))
+	}
+	// catalog-api (eu-west-1, 512/1024) and edge-nginx (eu-central-1, 256/512) are the Dev services with two tasks.
+	catalog, edge := spotService(t, got, "catalog-api"), spotService(t, got, "edge-nginx")
+	if catalog.Status != "candidate" || edge.Status != "candidate" {
+		t.Fatalf("catalog-api %q, edge-nginx %q; want both candidates", catalog.Status, edge.Status)
+	}
+	if catalog.SavingMonthly == nil || edge.SavingMonthly == nil || !approx(*catalog.SavingMonthly, 18.02-5.41) || !approx(*edge.SavingMonthly, 10.36-3.78) {
+		t.Errorf("savings = %v and %v, want %.2f and %.2f (one task kept on demand)", catalog.SavingMonthly, edge.SavingMonthly, 18.02-5.41, 10.36-3.78)
+	}
+	if catalog.OnDemandBase != 1 || catalog.SpotTasks != 1 || catalog.DesiredTasks != 2 || catalog.OnDemandTasks != 2 {
+		t.Errorf("catalog-api proposal = %+v", catalog)
+	}
+	first, second := got.Spot.Services[0], got.Spot.Services[1]
+	if first.Service != "catalog-api" || second.Service != "edge-nginx" {
+		t.Errorf("first services = %s, %s; want the candidates by saving, catalog-api then edge-nginx", first.Service, second.Service)
+	}
+	for _, svc := range got.Spot.Services[2:] {
+		if svc.Status == "candidate" {
+			t.Errorf("%s is a candidate listed after the non-candidates", svc.Service)
+		}
+	}
+	if single := spotService(t, got, "report-worker"); single.Status != "single_task" || single.SavingMonthly != nil {
+		t.Errorf("report-worker = %+v, want single_task with no saving", single)
+	}
+	if ec2 := spotService(t, got, "cert-renewer"); ec2.Status != "not_fargate" {
+		t.Errorf("cert-renewer status %q, want not_fargate", ec2.Status)
+	}
+}
+
+func TestAnalyticsCost_SpotNeverListsProductionAsCandidate(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+	sam := login(t, srv, "sam", testPassword)
+
+	// A tag that is merely unmarked (Prod) is production.
+	got := getCost(t, sam, "")
+	if payments := spotService(t, got, "payments-api"); payments.Status != "production" || payments.SavingMonthly != nil {
+		t.Errorf("payments-api = %+v, want production and no saving", payments)
+	}
+	// And so is a tag an admin marked production again: Dev is non-production only while the flag says so.
+	dev, err := st.DevTag(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateTag(t.Context(), dev.ID, dev.Name, dev.Color, false); err != nil {
+		t.Fatal(err)
+	}
+	got = getCost(t, sam, "")
+	for _, svc := range got.Spot.Services {
+		if svc.Status == "candidate" || svc.Status == "no_cluster_spot" {
+			t.Errorf("%s is %q with no non-production tag; want no Spot proposal at all", svc.Service, svc.Status)
+		}
+	}
+	if catalog := spotService(t, got, "catalog-api"); catalog.Status != "production" || catalog.Tag.NonProduction {
+		t.Errorf("catalog-api = %+v, want production under the unmarked Dev tag", catalog)
+	}
+}
+
+func TestAnalyticsCost_SpotExplainsClusterWithoutProvider(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	fk.Estate.Mu.Lock()
+	for i := range fk.Estate.Clusters {
+		if aws.ToString(fk.Estate.Clusters[i].Cluster.ClusterName) == "edge-proxy" {
+			fk.Estate.Clusters[i].Cluster.CapacityProviders = []string{"FARGATE"}
+		}
+	}
+	fk.Estate.Mu.Unlock()
+	pollAll(t, st, fk)
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+	edge := spotService(t, got, "edge-nginx")
+	if edge.Status != "no_cluster_spot" || edge.SavingMonthly == nil || !approx(*edge.SavingMonthly, 10.36-3.78) || edge.Cluster != "edge-proxy" {
+		t.Fatalf("edge-nginx = %+v, want no_cluster_spot with the saving it would have", edge)
+	}
+	if catalog := spotService(t, got, "catalog-api"); catalog.Status != "candidate" {
+		t.Errorf("catalog-api status %q, want candidate (its cluster has FARGATE_SPOT)", catalog.Status)
+	}
+}
+
+func TestAnalyticsCost_SpotCanDeployFollowsPermission(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	setPassword(t, st, "dana")
+	forceProviders(fk, "FARGATE")
+	pollAll(t, st, fk)
+
+	if dana := spotService(t, getCost(t, login(t, srv, "dana", testPassword), ""), "catalog-api"); !dana.CanDeploy {
+		t.Errorf("dana (Full on Dev) can_deploy = false, want true")
+	}
+	operator := authz.Presets["Operator"]
+	omer := spotService(t, getCost(t, login(t, srv, "omer", testPassword), ""), "catalog-api")
+	if omer.CanDeploy != operator.Has(authz.Deploy) {
+		t.Errorf("omer (Operator on Dev) can_deploy = %v, want %v from authz.Can(Deploy)", omer.CanDeploy, operator.Has(authz.Deploy))
+	}
 }

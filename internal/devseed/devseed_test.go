@@ -269,7 +269,7 @@ func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 			t.Fatalf("poll %v: %v", target, err)
 		}
 	}
-	facts, err := st.AnalyticsCostServices(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, time.Now().UTC().AddDate(0, 0, -90))
+	facts, err := st.AnalyticsCostServices(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, time.Now().UTC().AddDate(0, 0, -90), time.Now().UTC().AddDate(0, 0, -7))
 	if err != nil {
 		t.Fatal(err)
 	}

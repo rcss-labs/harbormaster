@@ -17,6 +17,47 @@ type CostDTO struct {
 	ByAccount      []CostGroupDTO     `json:"by_account"`
 	ByTag          []CostGroupDTO     `json:"by_tag"`
 	Rightsizing    CostRightsizingDTO `json:"rightsizing"`
+	Spot           CostSpotDTO        `json:"spot"`
+}
+
+// CostSpotDTO is the Fargate Spot advisor. It lists every visible service, never null, because the reason a
+// service is not offered is part of the answer.
+type CostSpotDTO struct {
+	LookbackDays int                  `json:"lookback_days"`
+	MinTasks     int                  `json:"min_tasks"`
+	Services     []CostSpotServiceDTO `json:"services"` // candidates by saving, then the rest by name
+}
+
+// CostSpotServiceDTO is one service's Spot verdict, the proposal when it has one, and the evidence behind it.
+type CostSpotServiceDTO struct {
+	ServiceID string `json:"service_id"`
+	Service   string `json:"service"`
+	Cluster   string `json:"cluster"`
+	Region    string `json:"region"`
+	Tag       TagDTO `json:"tag"`
+	// Status is candidate, no_cluster_spot, production, single_task, already_spot, custom_capacity,
+	// unsupported_controller, not_running, no_price, windows or not_fargate.
+	Status        string `json:"status"`
+	DesiredTasks  int    `json:"desired_tasks"`
+	OnDemandTasks int    `json:"on_demand_tasks"`
+	CPUUnits      *int   `json:"cpu_units"`
+	MemoryMiB     *int   `json:"memory_mib"`
+	// OnDemandBase and SpotTasks are the proposal; zero unless the status is candidate or no_cluster_spot.
+	OnDemandBase int `json:"on_demand_base"`
+	SpotTasks    int `json:"spot_tasks"`
+	// SavingMonthly is null unless the status is candidate or no_cluster_spot. It is not additive with the
+	// other advisors.
+	SavingMonthly      *float64 `json:"saving_monthly"`
+	TerminalSessions   int      `json:"terminal_sessions"`
+	ExpectedStops      int      `json:"expected_stops"`
+	KilledStops        int      `json:"killed_stops"`
+	StopEvidence       string   `json:"stop_evidence"` // graceful, killed or unknown
+	StopTimeoutSeconds *int     `json:"stop_timeout_seconds"`
+	// ControllerName names a deployment controller Harbormaster does not deploy; empty otherwise.
+	ControllerName string `json:"controller_name"`
+	Caution        bool   `json:"caution"`
+	AutoScaled     bool   `json:"auto_scaled"`
+	CanDeploy      bool   `json:"can_deploy"`
 }
 
 // CostKPIsDTO totals the priced running tasks. Spot tasks are priced at Spot prices, are part of the total and

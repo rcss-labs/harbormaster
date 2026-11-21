@@ -45,6 +45,20 @@ func Controller(svc ecstypes.Service) ControllerInfo {
 	return info
 }
 
+// ControllerNameOf is the name shown for a controller type as the cost facts report it: ECS, BLUE_GREEN (ECS
+// blue/green), CODE_DEPLOY or EXTERNAL. The rolling ECS controller has no name to show.
+func ControllerNameOf(controller string) string {
+	switch controller {
+	case "BLUE_GREEN":
+		return "ECS blue/green"
+	case string(ecstypes.DeploymentControllerTypeCodeDeploy):
+		return "CodeDeploy"
+	case string(ecstypes.DeploymentControllerTypeExternal):
+		return "an external controller"
+	}
+	return ""
+}
+
 // ControllerBanner is the notice shown for a service whose controller Harbormaster cannot deploy.
 func ControllerBanner(name string) string {
 	return "This service is deployed by " + name + ". Harbormaster shows it but can't deploy it yet."

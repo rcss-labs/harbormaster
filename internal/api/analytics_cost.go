@@ -3,6 +3,7 @@ package api
 import (
 	"hash/fnv"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/cost"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -50,7 +52,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	group.Go(func() (err error) {
-		facts, err = s.Store.AnalyticsCostServices(gctx, sc.Filter, sc.Vis, history.from)
+		facts, err = s.Store.AnalyticsCostServices(gctx, sc.Filter, sc.Vis, history.from, s.now().AddDate(0, 0, -cost.SpotLookbackDays))
 		return err
 	})
 	group.Go(func() (err error) {
@@ -83,6 +85,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 			DefaultHeadroomPct: cost.DefaultHeadroomPct,
 			Services:           []CostServiceDTO{},
 		},
+		Spot: CostSpotDTO{LookbackDays: cost.SpotLookbackDays, MinTasks: cost.SpotMinTasks, Services: []CostSpotServiceDTO{}},
 	}
 	today := history.from.AddDate(0, 0, dailyPanelDays-1)
 	byCluster, byAccount, byTag := groupTotals{}, groupTotals{}, groupTotals{}
@@ -93,6 +96,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 			totals = &serviceSpend{}
 		}
 		dto.Rightsizing.Services = append(dto.Rightsizing.Services, s.costServiceDTO(sc, fact, totals, tags, today))
+		dto.Spot.Services = append(dto.Spot.Services, spotServiceDTO(sc, fact, totals, tags))
 
 		dto.KPIs.MonthlyTotal += totals.monthly
 		dto.KPIs.SpotMonthly += totals.spotMonthly
@@ -113,6 +117,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		byAccount.add(fact.Key.AccountID, accountLabel, totals)
 		byTag.add(strconv.FormatInt(int64(fact.TagID), 10), tags[fact.TagID].Name, totals)
 	}
+	sortSpotServices(dto.Spot.Services)
 	dto.KPIs.UnpricedRegions = sortedKeys(unpricedRegions)
 	dto.ByCluster, dto.ByAccount, dto.ByTag = byCluster.sorted(), byAccount.sorted(), byTag.sorted()
 	writeJSON(w, http.StatusOK, dto)
@@ -127,6 +132,12 @@ func (s *Server) costSources() []AnalyticsSourceDTO {
 		prunedTableSource("service_util_daily",
 			"Daily CPU and memory use as a share of what each service reserves, for the rightsizing suggestions",
 			s.Cfg.Retention.UtilDaily, "HM_RETENTION_UTIL_DAILY"),
+		prunedTableSource("operation_log",
+			"Terminal sessions opened through Harbormaster in the last 7 days, for the Fargate Spot suggestions. Sessions opened with the AWS CLI are not recorded",
+			s.Cfg.Retention.OperationLog, "HM_RETENTION_OPERATION_LOG"),
+		prunedTableSource("tasks",
+			"Stopped tasks of the last 7 days: deployment and scale-in stops that ended in exit 137 say a service may not stop cleanly on SIGTERM",
+			s.Cfg.Retention.StoppedTasks, "HM_RETENTION_STOPPED_TASKS"),
 	}
 }
 
@@ -326,4 +337,62 @@ func (s *Server) warnUnreadableFloors(fact store.CostServiceFact, err error) {
 		}
 	}
 	s.Log.Warn("cost: cannot read container minimums", "service", fact.Key.ID(), "err", err)
+}
+
+// spotServiceDTO evaluates one service for Fargate Spot from the polled facts. Nothing here calls AWS.
+func spotServiceDTO(sc scope, fact store.CostServiceFact, totals *serviceSpend, tags map[authz.TagID]TagDTO) CostSpotServiceDTO {
+	result := cost.EvaluateSpot(cost.SpotInput{
+		Region: fact.Key.Region, Architecture: fact.Architecture, OSFamily: fact.OSFamily,
+		RequiresFargate: fact.RequiresFargate, ControllerSupported: fact.Controller == "ECS",
+		Strategy: fact.StrategyProviders, LaunchType: fact.LaunchType,
+		Desired: fact.Desired, OnDemandTasks: totals.priced - totals.spot, SpotTasks: totals.spot, UnpricedTasks: totals.notFargate,
+		CPUUnits: valueOrZeroInt(fact.CPUUnits), MemoryMiB: valueOrZeroInt(fact.MemoryMiB),
+		NonProduction: fact.NonProduction, ClusterHasSpot: slices.Contains(fact.ClusterProviders, "FARGATE_SPOT"),
+		TerminalSessions7d: fact.TerminalSessions7d, ExpectedStops7d: fact.ExpectedStops7d, KilledStops7d: fact.KilledStops7d,
+		StopTimeoutSeconds: fact.StopTimeoutSeconds,
+	})
+	dto := CostSpotServiceDTO{
+		ServiceID: fact.Key.ID(), Service: fact.Key.Service, Cluster: fact.Key.Cluster, Region: fact.Key.Region,
+		Tag: inheritedTag(tags, fact.TagID, fact.TagInherited), Status: string(result.Status),
+		DesiredTasks: fact.Desired, OnDemandTasks: totals.priced - totals.spot, CPUUnits: fact.CPUUnits, MemoryMiB: fact.MemoryMiB,
+		OnDemandBase: result.OnDemandBase, SpotTasks: result.SpotTasks,
+		TerminalSessions: fact.TerminalSessions7d, ExpectedStops: fact.ExpectedStops7d, KilledStops: fact.KilledStops7d,
+		StopEvidence: string(result.StopEvidence), StopTimeoutSeconds: fact.StopTimeoutSeconds,
+		Caution: result.Caution, AutoScaled: fact.AutoScaled, CanDeploy: authz.Can(sc.Subject, authz.Deploy, fact.TagID),
+	}
+	if result.Status == cost.SpotUnsupportedController {
+		dto.ControllerName = deploy.ControllerNameOf(fact.Controller)
+	}
+	if result.Status == cost.SpotCandidate || result.Status == cost.SpotNoClusterSpot {
+		saving := result.SavingMonthly
+		dto.SavingMonthly = &saving
+	}
+	return dto
+}
+
+// sortSpotServices puts candidates first by saving, then services whose cluster only lacks FARGATE_SPOT by the
+// saving they would have, then everything else by name.
+func sortSpotServices(services []CostSpotServiceDTO) {
+	rank := func(svc CostSpotServiceDTO) int {
+		switch svc.Status {
+		case string(cost.SpotCandidate):
+			return 0
+		case string(cost.SpotNoClusterSpot):
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(services, func(i, j int) bool {
+		a, b := services[i], services[j]
+		if rank(a) != rank(b) {
+			return rank(a) < rank(b)
+		}
+		if rank(a) < 2 && *a.SavingMonthly != *b.SavingMonthly {
+			return *a.SavingMonthly > *b.SavingMonthly
+		}
+		if a.Service != b.Service {
+			return a.Service < b.Service
+		}
+		return a.ServiceID < b.ServiceID
+	})
 }

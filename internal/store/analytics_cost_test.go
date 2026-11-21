@@ -13,7 +13,7 @@ import (
 
 func costFacts(t *testing.T, fx reliabilityFixture, vis store.Visibility) map[string]store.CostServiceFact {
 	t.Helper()
-	rows, err := fx.s.AnalyticsCostServices(context.Background(), store.TargetFilter{}, vis, readDay.AddDate(0, 0, -90))
+	rows, err := fx.s.AnalyticsCostServices(context.Background(), store.TargetFilter{}, vis, readDay.AddDate(0, 0, -90), spotSince())
 	if err != nil {
 		t.Fatal(err)
 	}
