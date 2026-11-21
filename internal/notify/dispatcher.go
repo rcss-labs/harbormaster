@@ -90,6 +90,21 @@ func (d *Dispatcher) sendBudget() time.Duration {
 	return lease - min(lease/4, 20*time.Second)
 }
 
+// budgetFor is how long the send may still run for a claimed batch: until the earliest lease, less the margin.
+// It counts from the lease the database granted, not from when the worker started, so time spent between the
+// claim and the first send is not added to it.
+func (d *Dispatcher) budgetFor(batch []store.NotificationDelivery) time.Duration {
+	margin := d.lease() - d.sendBudget()
+	now := d.now()
+	budget := d.sendBudget()
+	for _, row := range batch {
+		if row.ClaimedUntil != nil {
+			budget = min(budget, row.ClaimedUntil.Sub(now)-margin)
+		}
+	}
+	return max(budget, 0)
+}
+
 // busyRoutes lists the routes whose send is still running.
 func (d *Dispatcher) busyRoutes() []int64 {
 	d.busyMu.Lock()
@@ -318,6 +333,8 @@ func (d *Dispatcher) plan(ctx context.Context, now time.Time, routes []store.Not
 			switch {
 			case state.OpenedStatus == "":
 				errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventOpened, 0))
+			case state.OpenedStatus == "cancelled":
+				errs = append(errs, d.reviveOpened(ctx, now, r, incident, subject))
 			case repeatDue(r, state, now):
 				errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventRepeat, state.MaxRepeatSeq+1))
 			}
@@ -335,6 +352,8 @@ func (d *Dispatcher) plan(ctx context.Context, now time.Time, routes []store.Not
 		switch {
 		case state.OpenedStatus == "":
 			errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventOpened, 0))
+		case state.OpenedStatus == "cancelled":
+			errs = append(errs, d.reviveOpened(ctx, now, r, incident, subject))
 		case incident.Generation > state.MaxUpdateSeq:
 			errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventUpdate, incident.Generation))
 		case repeatDue(r, state, now):
@@ -406,6 +425,16 @@ func hasEntry(r store.NotificationRoute, incident store.NotificationIncident) bo
 	return false
 }
 
+// reviveOpened brings back the cancelled opened row of an incident that is still open and that an enabled route
+// takes: the route was switched off while the row waited, and the unique key blocks planning another.
+func (d *Dispatcher) reviveOpened(ctx context.Context, now time.Time, r store.NotificationRoute, incident store.NotificationIncident, subject Subject) error {
+	status, next, heldUntil := "pending", &now, (*time.Time)(nil)
+	if until, held := HeldUntil(r, subject.Severity, now); held {
+		status, next, heldUntil = "held", nil, &until
+	}
+	return d.Store.ReviveCancelledOpenedDelivery(ctx, r.ID, incident.ID, status, next, heldUntil)
+}
+
 // planDelivery inserts the row; a row that already exists (another replica, a repeated cycle) is a no-op. A
 // group's row carries the snapshot its message is rendered from.
 func (d *Dispatcher) planDelivery(ctx context.Context, now time.Time, r store.NotificationRoute, incident store.NotificationIncident, subject Subject, event Event, seq int) error {
@@ -473,7 +502,7 @@ func (d *Dispatcher) sendDue(ctx context.Context, now time.Time, names map[strin
 // work sends one route's claimed rows in order, at least routePacing apart, within the send budget. Rows it did not
 // get to, and a send the budget or a shutdown cut off, are given back without an attempt counted.
 func (d *Dispatcher) work(ctx context.Context, batch []store.NotificationDelivery, names map[string]string) {
-	budget, cancel := context.WithTimeout(ctx, d.sendBudget())
+	budget, cancel := context.WithTimeout(ctx, d.budgetFor(batch))
 	defer cancel()
 	for i, row := range batch {
 		if i > 0 {

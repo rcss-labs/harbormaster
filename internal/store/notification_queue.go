@@ -651,6 +651,18 @@ func (s *Store) MaxRenderedGeneration(ctx context.Context, routeID, incidentID i
 	return generation, nil
 }
 
+// ReviveCancelledOpenedDelivery brings back the cancelled opened row of a route and an incident that is still open
+// (the route was switched off while the row waited, then on again). The unique key would otherwise block planning a
+// new one, and the alert would never be announced on that route. status is "pending" or "held" (quiet hours).
+func (s *Store) ReviveCancelledOpenedDelivery(ctx context.Context, routeID, incidentID int64, status string, next, heldUntil *time.Time) error {
+	if _, err := s.Pool.Exec(ctx, `update notification_deliveries set status = $3, attempts = 0, next_attempt_at = $4, held_until = $5,
+		finished_at = null, claimed_until = null, note = ''
+		where route_id = $1 and incident_id = $2 and event = 'opened' and status = 'cancelled'`, routeID, incidentID, status, next, heldUntil); err != nil {
+		return fmt.Errorf("revive opened delivery: %w", err)
+	}
+	return nil
+}
+
 // ReleaseHeldNotificationDeliveries turns held rows whose held_until passed into pending (incident still open) or
 // cancelled with resolvedNote (incident resolved).
 func (s *Store) ReleaseHeldNotificationDeliveries(ctx context.Context, now time.Time, resolvedNote string) error {

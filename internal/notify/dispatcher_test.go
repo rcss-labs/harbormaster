@@ -1619,3 +1619,63 @@ func (e *env) eventually(wait time.Duration, what string, ok func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// An alert that is still open must be announced on a route that was switched off while its opened row waited and
+// then switched on again: the cancelled row is brought back, not blocked by its unique key. Repeats work after it.
+func TestDispatcher_ReenabledRouteAnnouncesAnAlertThatIsStillOpen(t *testing.T) {
+	e := newEnv(t)
+	fail := true
+	e.sender.reply = func(string, Event, int) Result {
+		if fail {
+			return Result{Retryable: true, StatusCode: 503, Note: "HTTP 503"}
+		}
+		return Result{Delivered: true, StatusCode: 200, Note: "Delivered in 5 ms"}
+	}
+	route := e.route("r", func(r *store.NotificationRoute) { r.RepeatSeconds = 1800 })
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning))
+	e.cycle() // attempt 1 fails; a retry is pending
+	route = e.update(route, func(r *store.NotificationRoute) { r.Enabled = false })
+	e.advance(40 * time.Second)
+	e.cycle() // the retry meets a route that is off: cancelled
+	fail = false
+	e.update(route, func(r *store.NotificationRoute) { r.Enabled = true })
+	e.advance(20 * time.Second)
+	e.cycle()
+	e.cycle()
+	delivered := func(event string) int {
+		n := 0
+		for _, d := range e.deliveries() {
+			if d.Event == event && d.Status == "delivered" {
+				n++
+			}
+		}
+		return n
+	}
+	if got := delivered("opened"); got != 1 {
+		t.Fatalf("%d opened messages delivered after the route was switched on again, want exactly 1: %+v", got, e.deliveries())
+	}
+	e.advance(31 * time.Minute)
+	e.cycle()
+	if got := delivered("repeat"); got != 1 {
+		t.Fatalf("%d repeats delivered, want 1: repeats must work after the revived opened", got)
+	}
+}
+
+// The send budget ends before the earliest lease the batch holds, whatever time passed between the claim and the
+// worker's start.
+func TestDispatcher_SendBudgetEndsBeforeTheLeaseNotWhenTheWorkerStarted(t *testing.T) {
+	e := newEnv(t)
+	at := func(d time.Duration) *time.Time { v := e.clock.Add(d); return &v }
+	fresh := store.NotificationDelivery{ClaimedUntil: at(leaseDuration)}
+	if got := e.d.budgetFor([]store.NotificationDelivery{fresh}); got != leaseDuration-20*time.Second {
+		t.Fatalf("a fresh claim has budget %v, want %v", got, leaseDuration-20*time.Second)
+	}
+	late := store.NotificationDelivery{ClaimedUntil: at(30 * time.Second)} // claimed 90 s ago
+	if got := e.d.budgetFor([]store.NotificationDelivery{fresh, late}); got != 10*time.Second {
+		t.Fatalf("a claim with 30 s of lease left has budget %v, want 10s (the earliest lease decides)", got)
+	}
+	gone := store.NotificationDelivery{ClaimedUntil: at(-time.Second)}
+	if got := e.d.budgetFor([]store.NotificationDelivery{gone}); got != 0 {
+		t.Fatalf("an expired lease has budget %v, want 0", got)
+	}
+}
