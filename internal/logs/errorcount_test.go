@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/kv"
+	"github.com/rcss-labs/harbormaster/internal/kv/kvtest"
+	"github.com/rcss-labs/harbormaster/internal/limits"
 )
 
 const errorStreamPrefix = "ecs/payments-api"
@@ -478,5 +482,70 @@ func TestErrorCounter_BudgetStopWithNothingKnownReturnsBudgetError(t *testing.T)
 	}
 	if calls := f.Calls()["FilterLogEvents"]; calls != 0 {
 		t.Errorf("FilterLogEvents calls = %d, want 0", calls)
+	}
+}
+
+// recordSleeps collects the waits a counter asks for without waiting, so a shared pacer's bookings can be compared.
+type recordSleeps struct {
+	mu     sync.Mutex
+	sleeps []time.Duration
+}
+
+func (r *recordSleeps) Sleep(_ context.Context, d time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sleeps = append(r.sleeps, d)
+	return nil
+}
+
+func TestErrorCounter_PacingIsSharedAcrossCounters(t *testing.T) {
+	kvtest.Each(t, func(t *testing.T, client kv.Client) {
+		now := testNow.Add(3 * time.Hour)
+		var rec recordSleeps
+		for i := 0; i < 2; i++ { // two web tasks, each with its own counter and cache, one pacer in the store
+			counter, f, _ := newTestErrorCounter(now)
+			f.Estate.SetLogLines(paymentsGroup, []fake.LogLine{errorLine(testNow.Add(time.Minute), "ERROR x")})
+			counter.Sleep = rec.Sleep
+			counter.Pacer = limits.NewKVRate(client)
+			// 19 minutes in 5-minute buckets: four calls per counter, eight in all for one target.
+			if _, err := counter.Count(context.Background(), baseErrorRequest(testNow, testNow.Add(19*time.Minute))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got := append([]time.Duration(nil), rec.sleeps...)
+		slices.Sort(got)
+		if len(got) != 7 {
+			t.Fatalf("sleeps = %v, want 7 (eight calls, the first is not delayed)", got)
+		}
+		for i := 1; i < len(got); i++ {
+			if gap := got[i] - got[i-1]; gap < 450*time.Millisecond || gap > 600*time.Millisecond {
+				t.Fatalf("sleeps %v: consecutive bookings %v apart, want 500ms across both counters", got, gap)
+			}
+		}
+	})
+}
+
+// failingPacer is a shared pacer whose store is broken.
+type failingPacer struct{ limits.Rate }
+
+func (failingPacer) Reserve(context.Context, string, string, time.Duration) (time.Duration, error) {
+	return 0, errors.New("store unreachable")
+}
+
+func TestErrorCounter_PacerErrorFallsBackToLocalPacing(t *testing.T) {
+	counter, f, clock := newTestErrorCounter(testNow.Add(3 * time.Hour))
+	f.Estate.SetLogLines(paymentsGroup, []fake.LogLine{errorLine(testNow.Add(time.Minute), "ERROR x")})
+	counter.Pacer = failingPacer{}
+	if _, err := counter.Count(context.Background(), baseErrorRequest(testNow, testNow.Add(14*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	sleeps := clock.Sleeps()
+	if len(sleeps) != 2 {
+		t.Fatalf("sleeps = %v, want 2: a broken store must leave today's per-task pacing in place", sleeps)
+	}
+	for i, d := range sleeps {
+		if d < 500*time.Millisecond {
+			t.Errorf("sleep %d = %v, want at least 500ms", i, d)
+		}
 	}
 }
