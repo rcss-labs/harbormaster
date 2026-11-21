@@ -24,6 +24,9 @@ type NotifyConfig struct {
 	Interval time.Duration
 	// AllowedPrivateCIDRs are private ranges notification destinations may reach (HM_NOTIFY_ALLOWED_PRIVATE_CIDRS).
 	AllowedPrivateCIDRs []netip.Prefix
+	// Settle is how long a service must stay failing or degraded before it is notified or counted toward a threshold
+	// (HM_NOTIFY_SETTLE), so a scale-up or the off-hours wake does not notify. 0 turns the wait off.
+	Settle time.Duration
 	// FakeDemo seeds demo routes in fake AWS mode (HM_FAKE_NOTIFY_DEMO).
 	FakeDemo bool
 	SMTP     SMTPConfig
@@ -41,6 +44,7 @@ var privateRanges = []netip.Prefix{
 func readNotify(r *envReader) NotifyConfig {
 	n := NotifyConfig{
 		Interval: r.duration("HM_NOTIFY_INTERVAL", 10*time.Second),
+		Settle:   r.duration("HM_NOTIFY_SETTLE", 3*time.Minute),
 		FakeDemo: r.boolean("HM_FAKE_NOTIFY_DEMO", true),
 		SMTP: SMTPConfig{
 			Host:     r.text("HM_SMTP_HOST", ""),
@@ -77,6 +81,9 @@ func readNotify(r *envReader) NotifyConfig {
 func validateNotify(n NotifyConfig) error {
 	if n.Interval < time.Second {
 		return errors.New("HM_NOTIFY_INTERVAL: must be at least 1s")
+	}
+	if n.Settle < 0 || n.Settle > 30*time.Minute {
+		return errors.New("HM_NOTIFY_SETTLE: must be between 0 and 30m")
 	}
 	s := n.SMTP
 	if !s.Enabled() {

@@ -24,6 +24,9 @@ func TestConfig_NotifyDefaults(t *testing.T) {
 	if n.Interval != 10*time.Second || !n.FakeDemo || len(n.AllowedPrivateCIDRs) != 0 {
 		t.Errorf("notify defaults = %+v", n)
 	}
+	if n.Settle != 3*time.Minute {
+		t.Errorf("Settle = %v, want 3m", n.Settle)
+	}
 	if n.SMTP.Enabled() || n.SMTP.Port != 587 || n.SMTP.TLS != "starttls" {
 		t.Errorf("smtp defaults = %+v", n.SMTP)
 	}
@@ -116,5 +119,20 @@ func TestConfig_NotificationLogRetentionDefault(t *testing.T) {
 	}
 	if cfg.Retention.NotificationLog != 720*time.Hour {
 		t.Errorf("NotificationLog = %v, want 720h", cfg.Retention.NotificationLog)
+	}
+}
+
+func TestConfig_NotifySettleBounds(t *testing.T) {
+	for in, want := range map[string]time.Duration{"0s": 0, "90s": 90 * time.Second, "30m": 30 * time.Minute} {
+		cfg, err := loadWith(map[string]string{"HM_NOTIFY_SETTLE": in})
+		if err != nil || cfg.Notify.Settle != want {
+			t.Errorf("%s: settle = %v err=%v, want %v", in, cfg.Notify.Settle, err, want)
+		}
+	}
+	for _, bad := range []string{"-1s", "31m"} {
+		_, err := loadWith(map[string]string{"HM_NOTIFY_SETTLE": bad})
+		if err == nil || !strings.Contains(err.Error(), "HM_NOTIFY_SETTLE") {
+			t.Errorf("%s: err = %v, want one naming HM_NOTIFY_SETTLE", bad, err)
+		}
 	}
 }

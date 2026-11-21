@@ -80,7 +80,7 @@ func TestLoad_Defaults(t *testing.T) {
 			MaxImageMB:  4096,
 		},
 		OffHours:             OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
-		Notify:               NotifyConfig{Interval: 10 * time.Second, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
+		Notify:               NotifyConfig{Interval: 10 * time.Second, Settle: 3 * time.Minute, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
 		Analytics:            AnalyticsConfig{Util: true},
 		PageSizeDefault:      100,
 		PageSizeMax:          500,

@@ -296,6 +296,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
 | `HM_NOTIFY_INTERVAL` | `10s` | How often the leader plans and sends alert notifications. Minimum 1s |
+| `HM_NOTIFY_SETTLE` | `3m` | How long a service must stay failing or degraded before it is notified or counted toward a threshold, so scale-ups and the off-hours wake do not notify. `0` disables the wait. At most 30m |
 | `HM_NOTIFY_ALLOWED_PRIVATE_CIDRS` | none | Comma-separated private ranges (inside 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 or fc00::/7) that notification destinations may reach, for example an internal webhook receiver. Public destinations need no setting; loopback, link-local and metadata addresses are never allowed |
 | `HM_SMTP_HOST` | none | Mail server for email notifications. Email routes are unavailable until it is set |
 | `HM_SMTP_PORT` | `587` | Mail server port |
