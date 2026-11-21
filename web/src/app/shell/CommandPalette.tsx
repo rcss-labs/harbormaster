@@ -4,6 +4,7 @@ import { useClusters, useSearch } from '../../api/hooks'
 import { useAlerts } from '../../api/observe'
 import type { SearchResultDTO } from '../../api/types'
 import { useAuth } from '../auth/AuthProvider'
+import { FIELDS } from '../configsearch/model'
 import { toggleTheme } from '../theme'
 import { usePhone } from '../../components/usePhone'
 import { useShellState } from './ShellState'
@@ -15,6 +16,8 @@ const LIMIT_EMPTY = 4
 const LIMIT_FILTERING = 6
 const TASKS_MIN_QUERY = 3
 const SEARCH_MIN_QUERY = 2
+/** Text that starts with a config search field and a colon, such as env:PORT. */
+const CONFIG_FIELD_PREFIX = new RegExp(`^(${FIELDS.map((f) => f.field).join('|')}):.`, 'i')
 
 interface PaletteItem {
   key: string
@@ -100,7 +103,13 @@ export function CommandPalette() {
       { key: 'act:theme', tag: 'ACT', label: 'Toggle theme', sub: 'Light / dark', run: act(() => void toggleTheme()) },
       { key: 'act:sidebar', tag: 'ACT', label: 'Toggle sidebar', sub: '[', run: act(toggleSidebar) },
       { key: 'act:activity', tag: 'ACT', label: 'Toggle activity', sub: 'Rail', run: act(toggleRail) },
-    ].filter((a) => matches(query, a.label, a.sub) && !(phone && a.key === 'act:sidebar'))
+    ]
+    // Typed field syntax such as env:PORT offers a config search for exactly that text.
+    const typed = text.trim()
+    if (CONFIG_FIELD_PREFIX.test(typed)) {
+      actions.push({ key: 'act:config-search', tag: 'ACT', label: `Search config for ${typed}`, sub: 'Config search', run: go(`/config?q=${encodeURIComponent(typed)}`) })
+    }
+    const visibleActions = actions.filter((a) => matches(query, a.label, a.sub) && !(phone && a.key === 'act:sidebar'))
 
     const pages: [string, string][] = [
       ['Overview', '/'],
@@ -111,13 +120,14 @@ export function CommandPalette() {
       ['Storage', '/storage'],
       ['Analytics', '/analytics/delivery'],
       ['Log search', '/logs'],
+      ['Config search', '/config'],
       me?.admin ? ['Settings', '/settings/general'] : ['My access', '/me/access'],
     ]
     const goTo: PaletteItem[] = pages.map(([label, href]) => ({ key: `nav:${href}`, tag: 'NAV', label, sub: href, run: go(href) })).filter((p) => matches(query, p.label))
 
     const limit = filtering ? LIMIT_FILTERING : LIMIT_EMPTY
     return [
-      { name: 'Actions', items: actions },
+      { name: 'Actions', items: visibleActions },
       { name: 'Services', items: services },
       { name: 'Clusters', items: clusterList },
       { name: 'Tasks', items: tasks },
@@ -125,7 +135,7 @@ export function CommandPalette() {
     ]
       .map((g) => ({ ...g, items: g.items.slice(0, limit) }))
       .filter((g) => g.items.length > 0)
-  }, [query, searchItems, alerts.data, clusters.data, me, phone, closePalette, navigate, toggleSidebar, toggleRail])
+  }, [query, text, searchItems, alerts.data, clusters.data, me, phone, closePalette, navigate, toggleSidebar, toggleRail])
 
   const flat = groups.flatMap((g) => g.items)
   const foundIndex = flat.findIndex((item) => item.key === activeKey)

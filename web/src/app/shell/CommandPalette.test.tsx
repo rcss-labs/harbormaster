@@ -96,6 +96,30 @@ describe('command palette', () => {
     expect(within(goTo).getByRole('option', { name: /Log search/ })).toBeInTheDocument()
   })
 
+  it('offers Config search under Go to', async () => {
+    const { user, dialog } = await openPalette()
+    await user.type(within(dialog).getByRole('combobox'), 'config s')
+    const goTo = await waitFor(() => groupOf(dialog, 'Go to'))
+    expect(within(goTo).getByRole('option', { name: /Config search/ })).toBeInTheDocument()
+  })
+
+  it('offers to search config when a field filter is typed', async () => {
+    const { user, dialog } = await openPalette()
+    await user.type(within(dialog).getByRole('combobox'), 'env:PORT')
+    const actions = await waitFor(() => groupOf(dialog, 'Actions'))
+    const option = within(actions).getByRole('option', { name: /Search config for env:PORT/ })
+    await user.click(option)
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/config'))
+    expect(decodeURIComponent(screen.getByTestId('search').textContent ?? '')).toContain('q=env:PORT')
+  })
+
+  it('does not offer a config search for plain text', async () => {
+    const { user, dialog } = await openPalette()
+    await user.type(within(dialog).getByRole('combobox'), 'nginx')
+    await waitFor(() => expect(optionsIn(dialog).length).toBeGreaterThan(0))
+    expect(within(dialog).queryByRole('option', { name: /Search config for/ })).not.toBeInTheDocument()
+  })
+
   it('opens the highlighted item with Enter and closes', async () => {
     const { user, dialog } = await openPalette()
     await user.type(within(dialog).getByRole('combobox'), 'Tasks')
