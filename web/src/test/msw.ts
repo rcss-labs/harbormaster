@@ -50,6 +50,7 @@ import {
 } from './fixtures'
 import { timelineHandlers } from './timelineFixtures'
 import { offhoursHandlers } from './offhoursFixtures'
+import { notificationsHandlers } from './notificationsFixtures'
 import type { SearchResultDTO } from '../api/types'
 import { securityHandlers } from './securityFixtures'
 import { logSearchHandlers } from './logSearchFixtures'
@@ -78,6 +79,7 @@ export const handlers = [
   // Registered first so :id/timeline is not read as the service id route.
   ...timelineHandlers,
   ...offhoursHandlers,
+  ...notificationsHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),
   http.get('/api/auth/setup', () => HttpResponse.json({ needed: false })),
   http.get('/api/overview', () => HttpResponse.json(OVERVIEW)),
