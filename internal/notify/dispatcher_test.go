@@ -1324,3 +1324,35 @@ func TestDispatcher_RepeatedShortScaleOutsNeverSettle(t *testing.T) {
 		t.Fatalf("a scale-out that stays degraded past the settle time must notify once, got %v", got)
 	}
 }
+
+// Retention must not prune the deliveries of an incident that is still open: the planner reads them to know the
+// incident was announced, and without them it would announce it again every retention window.
+func TestDispatcher_RetentionDoesNotReAnnounceAnOpenIncident(t *testing.T) {
+	e := newEnv(t)
+	e.route("all", func(r *store.NotificationRoute) { r.NotifyResolved = true })
+	e.setAlerts(alert(svcX, "restart_loop", model.AlertWarning))
+	e.cycle()
+	e.advance(31 * 24 * time.Hour)
+	if _, err := e.st.RunRetention(context.Background(), e.clock, store.Retention{NotificationLog: 30 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	e.cycle()
+	if got := e.sender.to("all"); len(got) != 1 {
+		t.Fatalf("an incident open longer than the retention window was announced again: %v", got)
+	}
+	e.setAlerts()
+	e.cycle()
+	e.advance(3 * time.Minute)
+	e.cycle()
+	if got := e.sender.to("all"); len(got) != 2 || got[1] != "resolved:x" {
+		t.Fatalf("resolve must still work after retention, got %v", got)
+	}
+	// A resolved incident's old deliveries are pruned as before.
+	e.advance(31 * 24 * time.Hour)
+	if _, err := e.st.RunRetention(context.Background(), e.clock, store.Retention{NotificationLog: 30 * 24 * time.Hour}); err != nil {
+		t.Fatal(err)
+	}
+	if rows := e.deliveries(); len(rows) != 0 {
+		t.Fatalf("deliveries of a resolved incident must be pruned: %+v", rows)
+	}
+}
