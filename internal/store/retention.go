@@ -13,6 +13,8 @@ type Retention struct {
 	AvailabilityDaily, CapacityDaily, UtilDaily time.Duration
 	// ScanRuns prunes finished scanner runs; ScanImages deletes scan results not requested for that long.
 	ScanRuns, ScanImages time.Duration
+	// NotificationLog prunes the notification delivery log and long-resolved alert incidents.
+	NotificationLog time.Duration
 }
 
 // RetentionResult maps a table key ("tasks", "service_events", ...) to rows deleted.
@@ -46,6 +48,9 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		{"service_util_daily", `delete from service_util_daily where day < $1::date`, r.UtilDaily},
 		// Deleting a run cascades to its scan_run_images batch.
 		{"scan_runs", `delete from scan_runs where finished_at < $1 and status not in ('launching', 'running')`, r.ScanRuns},
+		// Deliveries first: an incident delete cascades to the deliveries that still reference it.
+		{"notification_deliveries", `delete from notification_deliveries where created_at < $1`, r.NotificationLog},
+		{"notification_incidents", `delete from notification_incidents where resolved_at < $1`, r.NotificationLog},
 	}
 	for _, step := range timed {
 		if step.age <= 0 {
