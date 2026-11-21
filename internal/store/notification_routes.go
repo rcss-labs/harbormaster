@@ -40,6 +40,9 @@ type NotificationSelector struct {
 	AccountID, Region, Cluster, Service string
 	Key, Value                          string
 	TagID                               authz.TagID
+	// Threshold is the number of failing services that makes a cluster or account entry notify (1 to 500). It is 0
+	// for service and tag entries, which notify per alert.
+	Threshold int
 }
 
 // NotificationRoute is one channel: where to send, which alerts, and when.
@@ -96,7 +99,7 @@ func loadNotificationScopes(ctx context.Context, q offHoursQuerier, routes []Not
 		routes[i].Scope = []NotificationSelector{}
 	}
 	rows, err := q.Query(ctx, `select route_id, kind, coalesce(account_id, ''), coalesce(region, ''), coalesce(cluster_name, ''),
-		coalesce(service_name, ''), coalesce(aws_key, ''), coalesce(aws_value, ''), coalesce(tag_id, 0)
+		coalesce(service_name, ''), coalesce(aws_key, ''), coalesce(aws_value, ''), coalesce(tag_id, 0), coalesce(threshold, 0)
 		from notification_route_scopes where route_id = any($1)
 		order by route_id, kind, account_id, region, cluster_name, service_name, aws_key, aws_value, tag_id`, ids)
 	if err != nil {
@@ -106,7 +109,7 @@ func loadNotificationScopes(ctx context.Context, q offHoursQuerier, routes []Not
 	for rows.Next() {
 		var id int64
 		var sel NotificationSelector
-		if err := rows.Scan(&id, &sel.Kind, &sel.AccountID, &sel.Region, &sel.Cluster, &sel.Service, &sel.Key, &sel.Value, &sel.TagID); err != nil {
+		if err := rows.Scan(&id, &sel.Kind, &sel.AccountID, &sel.Region, &sel.Cluster, &sel.Service, &sel.Key, &sel.Value, &sel.TagID, &sel.Threshold); err != nil {
 			return fmt.Errorf("scan notification scope: %w", err)
 		}
 		route := &routes[index[id]]
@@ -121,10 +124,10 @@ func replaceNotificationScope(ctx context.Context, tx pgx.Tx, routeID int64, sco
 	}
 	for _, sel := range scope {
 		_, err := tx.Exec(ctx, `insert into notification_route_scopes
-			(route_id, kind, account_id, region, cluster_name, service_name, aws_key, aws_value, tag_id)
-			values ($1, $2, nullif($3, ''), nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), case when $2 = 'aws' then $8 else nullif($8, '') end, nullif($9, 0::bigint))
+			(route_id, kind, account_id, region, cluster_name, service_name, aws_key, aws_value, tag_id, threshold)
+			values ($1, $2, nullif($3, ''), nullif($4, ''), nullif($5, ''), nullif($6, ''), nullif($7, ''), case when $2 = 'aws' then $8 else nullif($8, '') end, nullif($9, 0::bigint), nullif($10, 0))
 			on conflict do nothing`,
-			routeID, sel.Kind, sel.AccountID, sel.Region, sel.Cluster, sel.Service, sel.Key, sel.Value, int64(sel.TagID))
+			routeID, sel.Kind, sel.AccountID, sel.Region, sel.Cluster, sel.Service, sel.Key, sel.Value, int64(sel.TagID), sel.Threshold)
 		if err != nil {
 			return fmt.Errorf("store notification scope: %w", err)
 		}

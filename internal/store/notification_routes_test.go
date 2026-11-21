@@ -71,9 +71,9 @@ func TestNotificationRoute_RoundTripsScopeConfigAndKinds(t *testing.T) {
 	r.Config = store.NotificationConfig{ChatID: "-1001234567890", ThreadID: 7, Label: "ops"}
 	r.Fallback = true
 	r.Scope = []store.NotificationSelector{
-		{Kind: "account", AccountID: "111111111111"},
-		{Kind: "account", AccountID: "222222222222", Region: "eu-west-1"},
-		{Kind: "cluster", AccountID: "111111111111", Region: "us-east-1", Cluster: "core-services"},
+		{Kind: "account", AccountID: "111111111111", Threshold: 1},
+		{Kind: "account", AccountID: "222222222222", Region: "eu-west-1", Threshold: 3},
+		{Kind: "cluster", AccountID: "111111111111", Region: "us-east-1", Cluster: "core-services", Threshold: 2},
 		{Kind: "service", AccountID: "111111111111", Region: "us-east-1", Cluster: "core-services", Service: "api"},
 		{Kind: "aws", Key: "env", Value: "staging"},
 		{Kind: "harbormaster", TagID: qa.ID},
@@ -114,7 +114,7 @@ func TestNotificationRoute_RoundTripsScopeConfigAndKinds(t *testing.T) {
 func TestNotificationRoute_DuplicateSelectorIsStoredOnce(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	r := newRoute("dupes")
-	sel := store.NotificationSelector{Kind: "account", AccountID: "111111111111"}
+	sel := store.NotificationSelector{Kind: "account", AccountID: "111111111111", Threshold: 1}
 	r.Scope = []store.NotificationSelector{sel, sel}
 	created, err := s.CreateNotificationRoute(ctx, r, 0)
 	if err != nil || len(created.Scope) != 1 {
@@ -139,6 +139,11 @@ func TestMigrate_NotificationScopeShapeIsChecked(t *testing.T) {
 		"aws without a value":          `insert into notification_route_scopes (route_id, kind, aws_key) values ($1, 'aws', 'env')`,
 		"unknown kind":                 `insert into notification_route_scopes (route_id, kind, account_id) values ($1, 'region', '111111111111')`,
 		"harbormaster without tag id":  `insert into notification_route_scopes (route_id, kind) values ($1, 'harbormaster')`,
+		"cluster without a threshold":  `insert into notification_route_scopes (route_id, kind, account_id, region, cluster_name) values ($1, 'cluster', '111111111111', 'r', 'c')`,
+		"service with a threshold":     `insert into notification_route_scopes (route_id, kind, account_id, region, cluster_name, service_name, threshold) values ($1, 'service', '111111111111', 'r', 'c', 's', 2)`,
+		"aws with a threshold":         `insert into notification_route_scopes (route_id, kind, aws_key, aws_value, threshold) values ($1, 'aws', 'env', 'x', 1)`,
+		"threshold of zero":            `insert into notification_route_scopes (route_id, kind, account_id, threshold) values ($1, 'account', '111111111111', 0)`,
+		"threshold of 501":             `insert into notification_route_scopes (route_id, kind, account_id, threshold) values ($1, 'account', '111111111111', 501)`,
 		"harbormaster with an account": `insert into notification_route_scopes (route_id, kind, account_id, tag_id) values ($1, 'harbormaster', '111111111111', ` + strconv.FormatInt(int64(tag.ID), 10) + `)`,
 	} {
 		if _, err := s.Pool.Exec(ctx, sql, created.ID); err == nil {

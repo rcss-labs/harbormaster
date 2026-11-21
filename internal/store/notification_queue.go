@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -12,8 +14,18 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
-// NotificationIncident is one continuous period during which an alert was present. A flap shorter than the
-// resolve grace stays one incident.
+// IncidentMember is one failing service in a group incident, with its most severe counted alert.
+type IncidentMember struct {
+	Cluster  string `json:"cluster"`
+	Service  string `json:"service"`
+	Kind     string `json:"kind"`
+	Title    string `json:"title"`
+	Critical bool   `json:"critical"`
+}
+
+// NotificationIncident is one continuous period during which an alert was present (an alert incident), or during
+// which a route's cluster or account entry met its threshold (a group incident, GroupRouteID set). A flap shorter
+// than the resolve grace stays one incident.
 type NotificationIncident struct {
 	ID                       int64
 	Key                      model.ServiceKey
@@ -22,17 +34,31 @@ type NotificationIncident struct {
 	Title, Text              string
 	OpenedAt                 time.Time
 	MissingSince, ResolvedAt *time.Time
+	// GroupRouteID is 0 for an alert incident, else the route that owns this group; ScopeKind is "alert",
+	// "cluster" or "account".
+	GroupRouteID              int64
+	ScopeKind                 string
+	Threshold, Failing, Total int
+	Members                   []IncidentMember
+	// Generation rises each time a group gets worse (a service joins, or the severity rises), never when it improves.
+	Generation int
 }
 
 const notificationIncidentColumns = `id, account_id, region, cluster_name, service_name, kind, severity, title, text,
-	opened_at, missing_since, resolved_at`
+	opened_at, missing_since, resolved_at, group_route_id, scope_kind, coalesce(threshold, 0), coalesce(failing, 0),
+	coalesce(total, 0), members, generation`
 
 func scanNotificationIncident(row pgx.Row) (NotificationIncident, error) {
 	var i NotificationIncident
 	var severity string
+	var members []byte
 	err := row.Scan(&i.ID, &i.Key.AccountID, &i.Key.Region, &i.Key.Cluster, &i.Key.Service, &i.Kind, &severity,
-		&i.Title, &i.Text, &i.OpenedAt, &i.MissingSince, &i.ResolvedAt)
+		&i.Title, &i.Text, &i.OpenedAt, &i.MissingSince, &i.ResolvedAt, &i.GroupRouteID, &i.ScopeKind, &i.Threshold,
+		&i.Failing, &i.Total, &members, &i.Generation)
 	i.Severity = model.AlertSeverity(severity)
+	if err == nil {
+		err = json.Unmarshal(members, &i.Members)
+	}
 	return i, err
 }
 
@@ -76,7 +102,7 @@ func (s *Store) SyncNotificationIncidents(ctx context.Context, now time.Time, gr
 		return nil, nil, fmt.Errorf("sync notification incidents: read alerts: %w", err)
 	}
 
-	openRows, err := tx.Query(ctx, `select `+notificationIncidentColumns+` from notification_incidents where resolved_at is null`)
+	openRows, err := tx.Query(ctx, `select `+notificationIncidentColumns+` from notification_incidents where resolved_at is null and group_route_id = 0`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("sync notification incidents: read incidents: %w", err)
 	}
@@ -131,11 +157,11 @@ func (s *Store) SyncNotificationIncidents(ctx context.Context, now time.Time, gr
 		}
 	}
 
-	open, err = queryNotificationIncidents(ctx, tx, `where resolved_at is null`)
+	open, err = queryNotificationIncidents(ctx, tx, `where resolved_at is null and group_route_id = 0`)
 	if err != nil {
 		return nil, nil, err
 	}
-	resolved, err = queryNotificationIncidents(ctx, tx, `where resolved_at >= $1`, now.Add(-recentResolved))
+	resolved, err = queryNotificationIncidents(ctx, tx, `where resolved_at >= $1 and group_route_id = 0`, now.Add(-recentResolved))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,6 +188,158 @@ func queryNotificationIncidents(ctx context.Context, tx pgx.Tx, where string, ar
 	return out, rows.Err()
 }
 
+// ListOpenNotificationIncidents returns the open alert incidents without changing anything; the preview reads
+// them. Group incidents are not included.
+func (s *Store) ListOpenNotificationIncidents(ctx context.Context) ([]NotificationIncident, error) {
+	rows, err := s.Pool.Query(ctx, `select `+notificationIncidentColumns+` from notification_incidents
+		where resolved_at is null and group_route_id = 0 order by id`)
+	if err != nil {
+		return nil, fmt.Errorf("list open notification incidents: %w", err)
+	}
+	defer rows.Close()
+	out := []NotificationIncident{}
+	for rows.Next() {
+		incident, err := scanNotificationIncident(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list open notification incidents: %w", err)
+		}
+		out = append(out, incident)
+	}
+	return out, rows.Err()
+}
+
+// GroupState is a group incident that should be open now, as the planner computed it.
+type GroupState struct {
+	RouteID                   int64
+	ScopeKind                 string // "cluster" | "account"
+	Key                       model.ServiceKey
+	Kind                      string
+	Severity                  model.AlertSeverity
+	Title, Text               string
+	Threshold, Failing, Total int
+	Members                   []IncidentMember
+}
+
+type groupIdentity struct {
+	route                                   int64
+	account, region, cluster, service, kind string
+}
+
+// SyncNotificationGroups makes the open group incidents equal to desired, in one transaction under the same
+// advisory lock as SyncNotificationIncidents. A new group inserts an incident (opened_at = now, generation 0). A
+// present one clears missing_since and updates severity, title, text, threshold, failing, total and members when
+// any changed; its generation rises by one when a {cluster, service} joined its members or the severity rose from
+// warning to danger, and never when it improves (D36). An absent one gets missing_since = now once and resolved_at
+// once it has been absent for grace. It writes only on a change. It returns the open group incidents and those
+// resolved within recentResolved.
+func (s *Store) SyncNotificationGroups(ctx context.Context, now time.Time, grace, recentResolved time.Duration, desired []GroupState) (open, resolved []NotificationIncident, err error) {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("sync notification groups: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('notification_incidents'))`); err != nil {
+		return nil, nil, fmt.Errorf("sync notification groups: %w", err)
+	}
+	current, err := queryNotificationIncidents(ctx, tx, `where resolved_at is null and group_route_id <> 0`)
+	if err != nil {
+		return nil, nil, err
+	}
+	existing := map[groupIdentity]NotificationIncident{}
+	for _, incident := range current {
+		existing[groupIdentity{incident.GroupRouteID, incident.Key.AccountID, incident.Key.Region, incident.Key.Cluster, incident.Key.Service, incident.Kind}] = incident
+	}
+
+	batch := &pgx.Batch{}
+	wanted := map[groupIdentity]bool{}
+	for _, g := range desired {
+		id := groupIdentity{g.RouteID, g.Key.AccountID, g.Key.Region, g.Key.Cluster, g.Key.Service, g.Kind}
+		wanted[id] = true
+		members, err := json.Marshal(nonNilMembers(g.Members))
+		if err != nil {
+			return nil, nil, err
+		}
+		old, found := existing[id]
+		if !found {
+			batch.Queue(`insert into notification_incidents (account_id, region, cluster_name, service_name, kind, severity, title, text,
+					opened_at, group_route_id, scope_kind, threshold, failing, total, members)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) on conflict do nothing`,
+				g.Key.AccountID, g.Key.Region, g.Key.Cluster, g.Key.Service, g.Kind, string(g.Severity), g.Title, g.Text,
+				now, g.RouteID, g.ScopeKind, g.Threshold, g.Failing, g.Total, members)
+			continue
+		}
+		oldMembers, _ := json.Marshal(nonNilMembers(old.Members))
+		changed := old.MissingSince != nil || old.Severity != g.Severity || old.Title != g.Title || old.Text != g.Text ||
+			old.Threshold != g.Threshold || old.Failing != g.Failing || old.Total != g.Total || !bytes.Equal(oldMembers, members)
+		if !changed {
+			continue
+		}
+		generation := old.Generation
+		if joined(old.Members, g.Members) || (old.Severity != model.AlertDanger && g.Severity == model.AlertDanger) {
+			generation++
+		}
+		batch.Queue(`update notification_incidents set missing_since = null, severity = $2, title = $3, text = $4, threshold = $5,
+				failing = $6, total = $7, members = $8, generation = $9 where id = $1`,
+			old.ID, string(g.Severity), g.Title, g.Text, g.Threshold, g.Failing, g.Total, members, generation)
+	}
+	for id, incident := range existing {
+		if wanted[id] {
+			continue
+		}
+		switch {
+		case incident.MissingSince == nil:
+			batch.Queue(`update notification_incidents set missing_since = $2 where id = $1`, incident.ID, now)
+		case now.Sub(*incident.MissingSince) >= grace:
+			batch.Queue(`update notification_incidents set resolved_at = $2 where id = $1`, incident.ID, now)
+		}
+	}
+	if batch.Len() > 0 {
+		results := tx.SendBatch(ctx, batch)
+		for range batch.Len() {
+			if _, err := results.Exec(); err != nil {
+				results.Close()
+				return nil, nil, fmt.Errorf("sync notification groups: write: %w", err)
+			}
+		}
+		if err := results.Close(); err != nil {
+			return nil, nil, fmt.Errorf("sync notification groups: write: %w", err)
+		}
+	}
+	open, err = queryNotificationIncidents(ctx, tx, `where resolved_at is null and group_route_id <> 0`)
+	if err != nil {
+		return nil, nil, err
+	}
+	resolved, err = queryNotificationIncidents(ctx, tx, `where resolved_at >= $1 and group_route_id <> 0`, now.Add(-recentResolved))
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("sync notification groups: %w", err)
+	}
+	return open, resolved, nil
+}
+
+func nonNilMembers(m []IncidentMember) []IncidentMember {
+	if m == nil {
+		return []IncidentMember{}
+	}
+	return m
+}
+
+// joined reports whether next holds a {cluster, service} that old did not.
+func joined(old, next []IncidentMember) bool {
+	known := make(map[[2]string]bool, len(old))
+	for _, m := range old {
+		known[[2]string{m.Cluster, m.Service}] = true
+	}
+	for _, m := range next {
+		if !known[[2]string{m.Cluster, m.Service}] {
+			return true
+		}
+	}
+	return false
+}
+
 // NotificationDelivery is one row of the queue and of the delivery log. Route name, destination and target are
 // snapshots so the log survives a deleted or edited route.
 type NotificationDelivery struct {
@@ -180,36 +358,52 @@ type NotificationDelivery struct {
 	StatusCode, DurationMS                             *int
 	Note                                               string
 	CreatedAt                                          time.Time
+	// Details is the snapshot a group message is rendered from; zero for a per-alert message.
+	Details DeliveryDetails
+}
+
+// DeliveryDetails is what a group delivery's message needs, so a retry or a late send renders what was planned.
+type DeliveryDetails struct {
+	Scope     string           `json:"scope"`
+	Threshold int              `json:"threshold"`
+	Failing   int              `json:"failing"`
+	Total     int              `json:"total"`
+	Members   []IncidentMember `json:"members"`
 }
 
 const notificationDeliveryColumns = `id, route_id, route_name, destination, target, incident_id, event, seq, severity,
 	alert_title, alert_text, account_id, region, cluster_name, service_name, kind, status, attempts, retries,
-	next_attempt_at, held_until, claimed_until, status_code, duration_ms, note, created_at, finished_at`
+	next_attempt_at, held_until, claimed_until, status_code, duration_ms, note, created_at, finished_at, details`
 
 func scanNotificationDelivery(row pgx.Row) (NotificationDelivery, error) {
 	var d NotificationDelivery
+	var details []byte
 	err := row.Scan(&d.ID, &d.RouteID, &d.RouteName, &d.Destination, &d.Target, &d.IncidentID, &d.Event, &d.Seq, &d.Severity,
 		&d.AlertTitle, &d.AlertText, &d.Key.AccountID, &d.Key.Region, &d.Key.Cluster, &d.Key.Service, &d.Kind, &d.Status,
 		&d.Attempts, &d.Retries, &d.NextAttemptAt, &d.HeldUntil, &d.ClaimedUntil, &d.StatusCode, &d.DurationMS, &d.Note,
-		&d.CreatedAt, &d.FinishedAt)
+		&d.CreatedAt, &d.FinishedAt, &details)
+	if err == nil && len(details) > 0 {
+		err = json.Unmarshal(details, &d.Details)
+	}
 	return d, err
 }
 
 const insertNotificationDeliverySQL = `insert into notification_deliveries
 	(route_id, route_name, destination, target, incident_id, event, seq, severity, alert_title, alert_text,
 	 account_id, region, cluster_name, service_name, kind, status, attempts, next_attempt_at, held_until,
-	 status_code, duration_ms, note, created_at, finished_at)
+	 status_code, duration_ms, note, created_at, finished_at, details)
 	values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-	        coalesce($23, now()), $24)`
+	        coalesce($23, now()), $24, $25)`
 
 func deliveryArgs(d NotificationDelivery) []any {
 	var created *time.Time
 	if !d.CreatedAt.IsZero() {
 		created = &d.CreatedAt
 	}
+	details, _ := json.Marshal(d.Details) // plain fields only: cannot fail
 	return []any{d.RouteID, d.RouteName, d.Destination, d.Target, d.IncidentID, d.Event, d.Seq, d.Severity, d.AlertTitle, d.AlertText,
 		d.Key.AccountID, d.Key.Region, d.Key.Cluster, d.Key.Service, d.Kind, d.Status, d.Attempts, d.NextAttemptAt, d.HeldUntil,
-		d.StatusCode, d.DurationMS, d.Note, created, d.FinishedAt}
+		d.StatusCode, d.DurationMS, d.Note, created, d.FinishedAt, details}
 }
 
 // PlanNotificationDelivery inserts d; it returns false when a row with the same route, incident, event and seq
@@ -237,8 +431,9 @@ func (s *Store) InsertNotificationTest(ctx context.Context, d NotificationDelive
 // DeliveryPlanState is what planning needs to know about one route x incident.
 type DeliveryPlanState struct {
 	OpenedStatus         string     // "" when no opened row exists
-	LastSentAt           *time.Time // created_at of the newest opened/repeat row that is pending (being sent), delivered or failed
+	LastSentAt           *time.Time // created_at of the newest opened/repeat/update row that is pending (being sent), delivered or failed
 	MaxRepeatSeq         int
+	MaxUpdateSeq         int
 	HasHeld, HasResolved bool
 }
 
@@ -251,9 +446,10 @@ func (s *Store) NotificationPlanStates(ctx context.Context, incidentIDs []int64)
 	}
 	rows, err := s.Pool.Query(ctx, `select route_id, incident_id,
 		coalesce(max(status) filter (where event = 'opened'), ''),
-		max(created_at) filter (where event in ('opened', 'repeat') and status in ('pending', 'delivered', 'failed')),
+		max(created_at) filter (where event in ('opened', 'repeat', 'update') and status in ('pending', 'delivered', 'failed')),
 		coalesce(max(seq) filter (where event = 'repeat'), 0),
-		coalesce(bool_or(status = 'held' and event in ('opened', 'repeat')), false),
+		coalesce(max(seq) filter (where event = 'update'), 0),
+		coalesce(bool_or(status = 'held' and event in ('opened', 'repeat', 'update')), false),
 		coalesce(bool_or(event = 'resolved'), false)
 		from notification_deliveries
 		where incident_id = any($1) and route_id is not null
@@ -265,7 +461,7 @@ func (s *Store) NotificationPlanStates(ctx context.Context, incidentIDs []int64)
 	for rows.Next() {
 		var routeID, incidentID int64
 		var st DeliveryPlanState
-		if err := rows.Scan(&routeID, &incidentID, &st.OpenedStatus, &st.LastSentAt, &st.MaxRepeatSeq, &st.HasHeld, &st.HasResolved); err != nil {
+		if err := rows.Scan(&routeID, &incidentID, &st.OpenedStatus, &st.LastSentAt, &st.MaxRepeatSeq, &st.MaxUpdateSeq, &st.HasHeld, &st.HasResolved); err != nil {
 			return nil, fmt.Errorf("notification plan states: %w", err)
 		}
 		out[[2]int64{routeID, incidentID}] = st
@@ -392,7 +588,7 @@ func (s *Store) ReleaseHeldNotificationDeliveries(ctx context.Context, now time.
 	return tx.Commit(ctx)
 }
 
-// CancelUnsentNotificationDeliveries cancels the opened and repeat rows of the given incidents that are still
+// CancelUnsentNotificationDeliveries cancels the opened, repeat and update rows of the given incidents that are still
 // pending (with pendingNote) or held (with heldNote) and not under a live lease: a row being sent is left to finish.
 func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incidentIDs []int64, pendingNote, heldNote string, now time.Time) error {
 	if len(incidentIDs) == 0 {
@@ -400,7 +596,7 @@ func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incident
 	}
 	_, err := s.Pool.Exec(ctx, `update notification_deliveries
 		set status = 'cancelled', note = case when status = 'held' then $3 else $2 end, finished_at = $4, claimed_until = null
-		where incident_id = any($1) and event in ('opened', 'repeat') and status in ('pending', 'held')
+		where incident_id = any($1) and event in ('opened', 'repeat', 'update') and status in ('pending', 'held')
 		  and (claimed_until is null or claimed_until <= $4)`, incidentIDs, pendingNote, heldNote, now)
 	if err != nil {
 		return fmt.Errorf("cancel unsent notifications: %w", err)
