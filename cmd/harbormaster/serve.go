@@ -284,7 +284,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		log.Info("fake AWS mode: demo data loaded; sign in as sam / " + devseed.Password +
 			"; fake IdP at " + strings.TrimRight(cfg.BaseURL, "/") + "/fake-idp/metadata")
 	} else {
-		real := awsx.NewReal(base, storeRoles{st})
+		real := awsx.NewReal(base, accessRoles(cfg.Role, storeRoles{st}))
 		clients, prober = real, real
 		if cfg.Scan.Enabled {
 			// The scan loop uses the server's own AWS config, never an access role.
