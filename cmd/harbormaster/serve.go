@@ -213,6 +213,18 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		log.Info("applied migrations", "versions", applied)
 	}
 
+	// Route secrets are sealed under the session key; without one only secretless routes (email) can exist.
+	var notifyBox *secretbox.Box
+	if cfg.SessionKey != "" {
+		if notifyBox, err = secretbox.New(cfg.SessionKey, secretbox.PurposeNotifySecret); err != nil {
+			return fmt.Errorf("notification secret box: %w", err)
+		}
+	}
+	var notifyDemo []devseed.Option
+	if cfg.Notify.FakeDemo {
+		notifyDemo = []devseed.Option{devseed.WithNotifyDemo(notifyBox, cfg.BaseURL)}
+	}
+
 	var (
 		clients awsx.Clients
 		prober  awsx.Prober
@@ -240,7 +252,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		scanRunner = &scanjob.Runner{Store: st, Launcher: fakeScanner, Bucket: fakeScanner, DB: fakeScanner, Cfg: cfg.Scan, Now: time.Now, Log: log}
 		clients, prober = f, f
 		go estate.RunRollouts(ctx, fakeRolloutStep)
-		if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo); err != nil {
+		if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, notifyDemo...); err != nil {
 			return fmt.Errorf("seed demo data: %w", err)
 		}
 		idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
@@ -269,15 +281,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// through the same code under the same per-service lock.
 	offHoursApplier := &offhours.Applier{Store: st, Clients: clients, Now: time.Now, Log: log}
 	offHoursReconciler := &offhours.Reconciler{Applier: offHoursApplier, Store: st, Interval: cfg.OffHours.Interval, Now: time.Now, Log: log}
-	// Notifications: the guarded senders and the leader-only dispatcher. Route secrets are sealed under the session
-	// key; without one, only secretless routes (email) can exist and the dispatcher fails any other delivery with a
-	// clear note. In fake mode an in-process receiver at /fake-notify/ takes every delivery.
-	var notifyBox *secretbox.Box
-	if cfg.SessionKey != "" {
-		if notifyBox, err = secretbox.New(cfg.SessionKey, secretbox.PurposeNotifySecret); err != nil {
-			return fmt.Errorf("notification secret box: %w", err)
-		}
-	}
+	// Notifications: the guarded senders and the leader-only dispatcher. Without a session key the dispatcher fails
+	// any delivery that needs a secret with a clear note. In fake mode an in-process receiver at /fake-notify/ takes
+	// every delivery.
 	notifySenders := &notify.Senders{
 		BaseURL: cfg.BaseURL, Version: version, SMTP: cfg.Notify.SMTP, Log: log,
 		Guard: safedial.Policy{AllowedPrivate: cfg.Notify.AllowedPrivateCIDRs},
@@ -310,6 +316,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			Guard: &offhours.Guard{Store: st, Now: time.Now}},
 		ExecAllowInsecureStream: execInsecureStream,
 		FakeIdP:                 fakeIdP,
+		FakeNotify:              fakeNotify,
 		MetricsToken:            cfg.MetricsToken, // plan 06
 		Telemetry:               telemetry.Default,
 		Scan:                    scanKicker,

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"net"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -70,9 +71,17 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		s.log().Info("request", "method", r.Method, "path", r.URL.Path, "status", status,
+		s.log().Info("request", "method", r.Method, "path", loggedPath(r.URL.Path), "status", status,
 			"duration_ms", s.now().Sub(start).Milliseconds(), "ip", s.clientIP(r))
 	})
+}
+
+// fakeTelegramPath matches the fake Telegram receiver's path, which carries the bot token like the real Bot API URL.
+var fakeTelegramPath = regexp.MustCompile(`^(/fake-notify/telegram/bot)[^/]*(/.*)?$`)
+
+// loggedPath is the path as the request log may show it: a bot token in the fake receiver's path is replaced.
+func loggedPath(path string) string {
+	return fakeTelegramPath.ReplaceAllString(path, "${1}***${2}")
 }
 
 // routeOptions selects the per-route middleware.

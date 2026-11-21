@@ -142,6 +142,18 @@ export interface NotificationTargetService {
   region: string
 }
 
+export interface NotificationDeliveries {
+  items: NotificationDelivery[]
+  next: string | null
+  polled_at: string
+}
+
+/** What the failed-deliveries banner and the Settings badge show. */
+export interface NotificationSummary {
+  failed_24h: number
+  failing_routes: number
+}
+
 /** Everything the scope picker offers except tags (those come from the off-hours tags endpoint). */
 export interface NotificationTargets {
   accounts: NotificationTargetAccount[]

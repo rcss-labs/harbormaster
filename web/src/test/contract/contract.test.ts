@@ -88,7 +88,10 @@ import {
   SAVED_LOG_SEARCHES,
 } from '../logSearchFixtures'
 import {
+  NOTIFICATION_DELIVERIES,
+  NOTIFICATION_DELIVERIES_EMPTY,
   NOTIFICATION_DELIVERY_TEST,
+  NOTIFICATION_SUMMARY,
   NOTIFICATION_PREVIEW,
   NOTIFICATION_PREVIEW_EMPTY,
   NOTIFICATION_PREVIEW_WEBHOOK,
@@ -269,6 +272,9 @@ describe('API contract', () => {
       ['webhook preview', NOTIFICATION_PREVIEW_WEBHOOK, 'notificationPreview'],
       ['test delivery', NOTIFICATION_DELIVERY_TEST, 'notificationDelivery'],
       ['targets', NOTIFICATION_TARGETS, 'notificationTargets'],
+      ['deliveries', NOTIFICATION_DELIVERIES, 'notificationDeliveries'],
+      ['no deliveries', NOTIFICATION_DELIVERIES_EMPTY, 'notificationDeliveries'],
+      ['summary', NOTIFICATION_SUMMARY, 'notificationSummary'],
     ]
     for (const [name, value, shape] of cases) {
       expect(shapeProblems(value, contract[shape], name), name).toEqual([])

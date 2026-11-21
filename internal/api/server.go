@@ -91,6 +91,8 @@ type Server struct {
 	// KickOffHours wakes the off-hours reconciler after a schedule change; nil is a no-op. Like Scan it reaches only
 	// the reconciler in this process, so on another task a change waits at most HM_OFFHOURS_INTERVAL.
 	KickOffHours func()
+	// FakeNotify is the in-process notification receiver, mounted at /fake-notify/ when non-nil; only fake AWS mode sets it.
+	FakeNotify http.Handler
 	// Notify sends the test message and validates destinations; New builds it from Cfg when nil.
 	Notify *notify.Senders
 	// NotifyBox seals and opens route secrets; New builds it from Cfg.SessionKey when nil, and it stays nil without a key.
@@ -240,6 +242,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET "+samlACSPath, postOnly, routeOptions{Public: true, NoETag: true})
 	if s.FakeIdP != nil {
 		mux.Handle("/fake-idp/", s.FakeIdP)
+	}
+	if s.FakeNotify != nil {
+		mux.Handle("/fake-notify/", s.FakeNotify)
 	}
 	s.handle(mux, "POST /api/auth/logout", s.logout, routeOptions{})
 	s.handle(mux, "POST /api/auth/password", s.changePassword, routeOptions{})

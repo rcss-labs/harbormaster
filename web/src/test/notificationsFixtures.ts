@@ -1,7 +1,9 @@
 // Fixtures for the alert notification endpoints. The contract test checks them against the backend shape; the
 // types live in api/notifications.ts.
 import type {
+  NotificationDeliveries,
   NotificationDelivery,
+  NotificationSummary,
   NotificationPreview,
   NotificationRoute,
   NotificationRoutes,
@@ -242,6 +244,76 @@ export const NOTIFICATION_DELIVERY_TEST: NotificationDelivery = {
   attempts: 1,
   can_retry: false,
 }
+
+function delivery(fields: Partial<NotificationDelivery> & Pick<NotificationDelivery, 'id' | 'status'>): NotificationDelivery {
+  return {
+    at: '2026-11-21T09:30:00Z',
+    finished_at: '2026-11-21T09:30:01Z',
+    event: 'opened',
+    alert: 'payments-api: service failing',
+    service: 'payments-api',
+    cluster: 'core-services',
+    service_id: 'core-services-payments-api',
+    route_id: 2,
+    route: 'core-services to #core-alerts',
+    destination: 'slack',
+    target: 'hooks.slack.com',
+    note: '',
+    held_until: null,
+    attempts: 1,
+    can_retry: false,
+    ...fields,
+  }
+}
+
+export const DELIVERY_DELIVERED = delivery({ id: 110, status: 'delivered', note: 'Delivered in 128 ms' })
+export const DELIVERY_FAILED = delivery({
+  id: 109,
+  status: 'failed',
+  at: '2026-11-21T09:20:00Z',
+  alert: 'image-resizer: restart loop',
+  service: 'image-resizer',
+  cluster: 'background-jobs',
+  service_id: IMAGE_RESIZER_SERVICE.service_id,
+  route_id: 3,
+  route: 'image-resizer to Telegram',
+  destination: 'telegram',
+  target: '-1001234567890',
+  note: 'HTTP 503 after 3 attempts',
+  attempts: 3,
+  can_retry: true,
+})
+export const DELIVERY_HELD = delivery({
+  id: 108,
+  status: 'held',
+  at: '2026-11-21T01:10:00Z',
+  finished_at: null,
+  alert: 'auth: service degraded',
+  service: 'auth',
+  held_until: '2026-11-21T07:00:00Z',
+  attempts: 0,
+})
+export const DELIVERY_PENDING = delivery({ id: 111, status: 'pending', finished_at: null, event: 'repeat', attempts: 1, note: 'HTTP 503' })
+export const DELIVERY_CANCELLED = delivery({
+  id: 107,
+  status: 'cancelled',
+  at: '2026-11-21T00:50:00Z',
+  alert: 'auth: service degraded',
+  service: 'auth',
+  note: 'Resolved during quiet hours; not sent.',
+  attempts: 0,
+})
+
+export const NOTIFICATION_DELIVERIES: NotificationDeliveries = {
+  items: [DELIVERY_PENDING, DELIVERY_DELIVERED, NOTIFICATION_DELIVERY_TEST, DELIVERY_FAILED, DELIVERY_HELD, DELIVERY_CANCELLED],
+  next: null,
+  polled_at: '2026-11-21T10:10:00Z',
+}
+export const NOTIFICATION_DELIVERIES_FAILED: NotificationDeliveries = { ...NOTIFICATION_DELIVERIES, items: [DELIVERY_FAILED] }
+export const NOTIFICATION_DELIVERIES_EMPTY: NotificationDeliveries = { ...NOTIFICATION_DELIVERIES, items: [] }
+
+export const NOTIFICATION_SUMMARY: NotificationSummary = { failed_24h: 2, failing_routes: 1 }
+export const NOTIFICATION_SUMMARY_CLEAN: NotificationSummary = { failed_24h: 0, failing_routes: 0 }
 
 export const NOTIFICATION_TARGETS: NotificationTargets = {
   accounts: [

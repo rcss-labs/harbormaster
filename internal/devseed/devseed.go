@@ -35,8 +35,13 @@ var ErrDatabaseNotEmpty = errors.New("database already has users or accounts; re
 // Apply seeds the database, including the demo off-hours schedules and recent analytics history (see
 // SeedAnalyticsHistory). It is idempotent: existing tags, users, accounts, schedules, audit history and daily rows are
 // left alone, so applying twice changes nothing. offHoursDemoEnabled sets whether the staging schedule is enabled.
+// WithNotifyDemo adds the demo notification routes.
 // The schedules are seeded here rather than in ForceApply because the API tests call ForceApply and expect no schedules.
-func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool) error {
+func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool, opts ...Option) error {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if err := requireSeedable(ctx, st); err != nil {
 		return err
 	}
@@ -48,6 +53,9 @@ func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool) error
 		return fmt.Errorf("find seeded admin: %w", err)
 	}
 	if err := seedOffHours(ctx, st, offHoursDemoEnabled, sam.ID); err != nil {
+		return err
+	}
+	if err := seedNotifications(ctx, st, o); err != nil {
 		return err
 	}
 	return SeedAnalyticsHistory(ctx, st, time.Now())

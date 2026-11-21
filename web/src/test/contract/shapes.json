@@ -1613,6 +1613,39 @@
     ],
     "polled_at": "time"
   },
+  "notificationDeliveries": {
+    "items": [
+      {
+        "alert": "string",
+        "at": "time",
+        "attempts": "number",
+        "can_retry": "boolean",
+        "cluster": "string",
+        "destination": "string",
+        "event": "string",
+        "finished_at": {
+          "$null": "time"
+        },
+        "held_until": {
+          "$null": "time"
+        },
+        "id": "number",
+        "note": "string",
+        "route": "string",
+        "route_id": {
+          "$null": "number"
+        },
+        "service": "string",
+        "service_id": "string",
+        "status": "string",
+        "target": "string"
+      }
+    ],
+    "next": {
+      "$null": "string"
+    },
+    "polled_at": "time"
+  },
   "notificationDelivery": {
     "alert": "string",
     "at": "time",
@@ -1764,6 +1797,10 @@
       }
     ],
     "secrets_available": "boolean"
+  },
+  "notificationSummary": {
+    "failed_24h": "number",
+    "failing_routes": "number"
   },
   "notificationTargets": {
     "accounts": [
