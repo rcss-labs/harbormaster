@@ -217,6 +217,8 @@ func RenderPreview(destination string, m Message) (Preview, error) {
 		}
 		p.Title = m.plainHeadline()
 		p.Body = strings.TrimSpace(m.Subject.Text + "\n" + m.where())
+	case DestTelegram:
+		return telegramPreview(m), nil
 	case DestWebhook:
 		body, err := WebhookBody(m)
 		if err != nil {

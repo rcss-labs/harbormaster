@@ -102,6 +102,44 @@ func TestFakeSink_KeepsTheLast200(t *testing.T) {
 	}
 }
 
+func TestFakeSink_RedactsTelegramToken(t *testing.T) {
+	const token = "123456789:AAHsecretsecretsecretsecretsecretsecret"
+	sink := New()
+	h := sink.Handler()
+	path := "/fake-notify/telegram/bot" + token + "/sendMessage"
+
+	ok := post(t, h, path, `{"chat_id":"-1001","text":"hi","parse_mode":"HTML"}`)
+	if ok.Code != 200 || !strings.Contains(ok.Body.String(), `"ok":true`) || !strings.Contains(ok.Body.String(), `"message_id"`) {
+		t.Errorf("ok answer = %d %s", ok.Code, ok.Body)
+	}
+	for chat, want := range map[string]int{"-429": 429, "-403": 403, "-400": 400} {
+		rec := post(t, h, path, `{"chat_id":"`+chat+`","text":"hi"}`)
+		if rec.Code != want || !strings.Contains(rec.Body.String(), `"ok":false`) {
+			t.Errorf("chat %s answered %d %s, want %d", chat, rec.Code, rec.Body, want)
+		}
+		if strings.Contains(rec.Body.String(), token) {
+			t.Errorf("chat %s: the answer echoes the token", chat)
+		}
+	}
+	if rec := post(t, h, "/fake-notify/telegram/bot"+token+"/getMe", `{}`); rec.Code != 404 {
+		t.Errorf("an unknown bot method = %d, want 404", rec.Code)
+	}
+	if !strings.Contains(post(t, h, path, `{"chat_id":"-429"}`).Body.String(), `"retry_after":1`) {
+		t.Error("the 429 answer must carry parameters.retry_after")
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fake-notify/received", nil))
+	dump := rec.Body.String()
+	if strings.Contains(dump, token) || strings.Contains(dump, "123456789") {
+		t.Fatalf("the receiver kept the token:\n%s", dump)
+	}
+	got := received(t, h)
+	if len(got) == 0 || got[0].Path != "/fake-notify/telegram/bot***/sendMessage" || !strings.Contains(string(got[0].Body), `"chat_id":"-1001"`) {
+		t.Errorf("first entry = %+v, want the redacted path and the JSON body", got[0])
+	}
+}
+
 func TestFakeSink_IgnoresNonJSONBodies(t *testing.T) {
 	sink := New()
 	h := sink.Handler()

@@ -90,6 +90,8 @@ func (s *Sink) Handler() http.Handler {
 			default:
 				w.WriteHeader(http.StatusOK)
 			}
+		case len(parts) == 3 && parts[0] == "telegram" && strings.HasPrefix(parts[1], "bot") && parts[2] == "sendMessage":
+			s.telegram(w, r)
 		case len(parts) == 1 && parts[0] == "pagerduty":
 			s.receive(w, r, r.URL.Path)
 			w.WriteHeader(http.StatusAccepted)
@@ -97,6 +99,43 @@ func (s *Sink) Handler() http.Handler {
 			http.NotFound(w, r)
 		}
 	})
+}
+
+// telegram answers like the Bot API's sendMessage. The recorded path has the token replaced by bot***, and the
+// token is not kept: it is never stored, only the redacted path and the JSON body are. A chat_id of -429, -403 or
+// -400 answers that error, so the failure paths can be exercised without a real bot.
+func (s *Sink) telegram(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+	var request struct {
+		ChatID string `json:"chat_id"`
+	}
+	_ = json.Unmarshal(body, &request)
+	s.record("/fake-notify/telegram/bot***/sendMessage", telegramHeaders(r), body)
+
+	w.Header().Set("Content-Type", "application/json")
+	switch request.ChatID {
+	case "-429":
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":1}}`)
+	case "-403":
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, `{"ok":false,"error_code":403,"description":"Forbidden"}`)
+	case "-400":
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"ok":false,"error_code":400,"description":"Bad Request"}`)
+	default:
+		io.WriteString(w, `{"ok":true,"result":{"message_id":1}}`)
+	}
+}
+
+func telegramHeaders(r *http.Request) map[string]string {
+	headers := map[string]string{}
+	for _, name := range headersOfInterest {
+		if v := r.Header.Get(name); v != "" {
+			headers[name] = v
+		}
+	}
+	return headers
 }
 
 // receive records the request. It must run before the response is written.

@@ -56,6 +56,7 @@ type destination struct {
 // destinations is the dispatch table; adding a destination is one entry here and one file.
 var destinations = map[string]destination{
 	DestSlack:     {(*Senders).sendSlack, (*Senders).validateSlack},
+	DestTelegram:  {(*Senders).sendTelegram, (*Senders).validateTelegram},
 	DestPagerDuty: {(*Senders).sendPagerDuty, (*Senders).validatePagerDuty},
 	DestWebhook:   {(*Senders).sendWebhook, (*Senders).validateWebhook},
 	DestEmail:     {(*Senders).sendEmail, (*Senders).validateEmail},
