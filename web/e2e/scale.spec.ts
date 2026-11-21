@@ -144,12 +144,13 @@ test.describe('at 150 %', () => {
       const row = document.querySelector('.xterm-rows > div')!
       return { host: hostElement.getBoundingClientRect().toJSON(), screen: screen.getBoundingClientRect().toJSON(), row: row.getBoundingClientRect().height }
     })
-    // One column of the 150 % layout is about 8 viewport px; allow a column plus the scrollbar.
-    const slack = 8 * 1.5 + 20
+    // The host has no padding; the 14 px side inset lives on .xterm, which the fit addon subtracts, so the screen sits
+    // inside the host by that inset on both sides. Beyond it allow a column (about 8 css px) plus the scrollbar.
+    const slack = 2 * 14 * 1.5 + 8 * 1.5 + 20
     expect(read.screen.width, JSON.stringify(read)).toBeLessThanOrEqual(read.host.width + 1)
     expect(read.host.width - read.screen.width, JSON.stringify(read)).toBeLessThanOrEqual(slack)
-    // Rows fill the host height within one row.
-    expect(read.host.height - read.screen.height, JSON.stringify(read)).toBeLessThanOrEqual(read.row + 1)
+    // Rows fill the host height within one row, past the 12 px top and bottom inset on .xterm.
+    expect(read.host.height - read.screen.height, JSON.stringify(read)).toBeLessThanOrEqual(2 * 12 * 1.5 + read.row + 1)
     expect(read.screen.height).toBeLessThanOrEqual(read.host.height + 1)
   })
 
