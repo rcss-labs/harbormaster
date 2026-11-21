@@ -23,7 +23,11 @@ func Notifiable(i store.NotificationIncident, now time.Time, settle time.Duratio
 		return false
 	}
 	if (i.Kind == "service_failing" || i.Kind == "service_degraded") && settle > 0 {
-		return now.Sub(i.OpenedAt) >= settle
+		since := i.PresentSince
+		if since.IsZero() {
+			since = i.OpenedAt
+		}
+		return now.Sub(since) >= settle
 	}
 	return true
 }

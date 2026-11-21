@@ -60,6 +60,7 @@ create table notification_incidents (
   account_id text not null, region text not null, cluster_name text not null, service_name text not null default '',
   kind text not null, severity text not null, title text not null, text text not null,
   opened_at timestamptz not null,
+  present_since timestamptz not null default now(),  -- last time the alert came back after being absent; settle counts from it
   missing_since timestamptz,        -- set while the alert is absent, cleared when it is back
   resolved_at timestamptz,
   -- Group incidents (D43): one per route and cluster or account entry, open while the entry's threshold is met.

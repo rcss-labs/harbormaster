@@ -27,12 +27,15 @@ type IncidentMember struct {
 // which a route's cluster or account entry met its threshold (a group incident, GroupRouteID set). A flap shorter
 // than the resolve grace stays one incident.
 type NotificationIncident struct {
-	ID                       int64
-	Key                      model.ServiceKey
-	Kind                     string
-	Severity                 model.AlertSeverity
-	Title, Text              string
-	OpenedAt                 time.Time
+	ID          int64
+	Key         model.ServiceKey
+	Kind        string
+	Severity    model.AlertSeverity
+	Title, Text string
+	OpenedAt    time.Time
+	// PresentSince is when the alert was last absent-then-back (or opened); the settle time counts from it, so a
+	// scale-out that flaps inside the resolve grace does not add up to a notification.
+	PresentSince             time.Time
 	MissingSince, ResolvedAt *time.Time
 	// GroupRouteID is 0 for an alert incident, else the route that owns this group; ScopeKind is "alert",
 	// "cluster" or "account".
@@ -45,7 +48,7 @@ type NotificationIncident struct {
 }
 
 const notificationIncidentColumns = `id, account_id, region, cluster_name, service_name, kind, severity, title, text,
-	opened_at, missing_since, resolved_at, group_route_id, scope_kind, coalesce(threshold, 0), coalesce(failing, 0),
+	opened_at, present_since, missing_since, resolved_at, group_route_id, scope_kind, coalesce(threshold, 0), coalesce(failing, 0),
 	coalesce(total, 0), members, generation`
 
 func scanNotificationIncident(row pgx.Row) (NotificationIncident, error) {
@@ -53,7 +56,7 @@ func scanNotificationIncident(row pgx.Row) (NotificationIncident, error) {
 	var severity string
 	var members []byte
 	err := row.Scan(&i.ID, &i.Key.AccountID, &i.Key.Region, &i.Key.Cluster, &i.Key.Service, &i.Kind, &severity,
-		&i.Title, &i.Text, &i.OpenedAt, &i.MissingSince, &i.ResolvedAt, &i.GroupRouteID, &i.ScopeKind, &i.Threshold,
+		&i.Title, &i.Text, &i.OpenedAt, &i.PresentSince, &i.MissingSince, &i.ResolvedAt, &i.GroupRouteID, &i.ScopeKind, &i.Threshold,
 		&i.Failing, &i.Total, &members, &i.Generation)
 	i.Severity = model.AlertSeverity(severity)
 	if err == nil {
@@ -125,12 +128,13 @@ func (s *Store) SyncNotificationIncidents(ctx context.Context, now time.Time, gr
 		incident, found := existing[id]
 		switch {
 		case !found:
-			batch.Queue(`insert into notification_incidents (account_id, region, cluster_name, service_name, kind, severity, title, text, opened_at)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict do nothing`,
+			batch.Queue(`insert into notification_incidents (account_id, region, cluster_name, service_name, kind, severity, title, text, opened_at, present_since)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) on conflict do nothing`,
 				id.account, id.region, id.cluster, id.service, id.kind, alert.severity, alert.title, alert.text, now)
 		case incident.MissingSince != nil || string(incident.Severity) != alert.severity || incident.Title != alert.title || incident.Text != alert.text:
-			batch.Queue(`update notification_incidents set missing_since = null, severity = $2, title = $3, text = $4 where id = $1`,
-				incident.ID, alert.severity, alert.title, alert.text)
+			batch.Queue(`update notification_incidents set present_since = case when missing_since is not null then $5 else present_since end,
+					missing_since = null, severity = $2, title = $3, text = $4 where id = $1`,
+				incident.ID, alert.severity, alert.title, alert.text, now)
 		}
 	}
 	for id, incident := range existing {

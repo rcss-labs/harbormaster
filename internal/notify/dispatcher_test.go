@@ -1298,3 +1298,29 @@ func TestDispatcher_RouteWhoseTagWasDeletedMatchesNothing(t *testing.T) {
 		t.Fatalf("a route whose only tag was deleted widened to everything: %v", got)
 	}
 }
+
+// Repeated short scale-outs must not add up to a notification: the settle time counts from when the alert came back,
+// not from the first time it opened.
+func TestDispatcher_RepeatedShortScaleOutsNeverSettle(t *testing.T) {
+	e := newEnv(t)
+	e.d.Settle = 3 * time.Minute
+	e.route("service", scoped(serviceSel(a2)))
+	e.setAlerts(alert(a2, "service_degraded", model.AlertWarning))
+	e.cycle()
+	e.advance(60 * time.Second)
+	e.setAlerts() // the tasks came up
+	e.cycle()
+	e.advance(100 * time.Second) // inside the resolve grace, so it is still one incident
+	e.setAlerts(alert(a2, "service_degraded", model.AlertWarning))
+	e.cycle()
+	e.advance(25 * time.Second) // degraded for 25 s this time; 185 s after the first scale-out began
+	e.cycle()
+	if got := e.sender.records(); len(got) != 0 {
+		t.Fatalf("repeated short scale-outs notified: %+v", got)
+	}
+	e.advance(3 * time.Minute) // and one that stays degraded still notifies
+	e.cycle()
+	if got := e.sender.to("service"); len(got) != 1 {
+		t.Fatalf("a scale-out that stays degraded past the settle time must notify once, got %v", got)
+	}
+}
