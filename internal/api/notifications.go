@@ -39,6 +39,9 @@ const (
 	duplicateRouteMessage  = "A route with this name already exists."
 	routeLimitMessage      = "You can have up to 50 routes. Delete one first."
 	invalidScopeMessage    = "One of the scope entries is not valid."
+	thresholdMessage       = "A threshold must be between 1 and 500."
+	onceMessage            = "A cluster or account can appear once per route."
+	maxThreshold           = 500
 	notificationTestAlert  = "Test message"
 	notificationTestDetail = "This is a test from the Notifications page."
 )
@@ -89,18 +92,34 @@ func (s *Server) scopeFromInput(ctx context.Context, in []NotificationSelectorDT
 	out := make([]store.NotificationSelector, 0, len(in))
 	for _, entry := range in {
 		var sel store.NotificationSelector
+		threshold := 0
+		switch entry.Kind {
+		case store.NotificationSelectorAccount, store.NotificationSelectorCluster:
+			// A cluster or account entry is a threshold entry: N failing services send one aggregated message.
+			threshold = 1
+			if entry.Threshold != nil {
+				threshold = *entry.Threshold
+			}
+			if threshold < 1 || threshold > maxThreshold {
+				return nil, invalid(thresholdMessage)
+			}
+		default:
+			if entry.Threshold != nil {
+				return nil, invalid(invalidScopeMessage)
+			}
+		}
 		switch entry.Kind {
 		case store.NotificationSelectorAccount:
 			if !accountIDPattern.MatchString(entry.AccountID) || (entry.Region != "" && !regionPattern.MatchString(entry.Region)) {
 				return nil, invalid(invalidScopeMessage)
 			}
-			sel = store.NotificationSelector{Kind: entry.Kind, AccountID: entry.AccountID, Region: entry.Region}
+			sel = store.NotificationSelector{Kind: entry.Kind, AccountID: entry.AccountID, Region: entry.Region, Threshold: threshold}
 		case store.NotificationSelectorCluster:
 			key, err := model.ParseClusterID(entry.ClusterID)
 			if err != nil {
 				return nil, invalid(invalidScopeMessage)
 			}
-			sel = store.NotificationSelector{Kind: entry.Kind, AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster}
+			sel = store.NotificationSelector{Kind: entry.Kind, AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Threshold: threshold}
 		case store.NotificationSelectorService:
 			key, err := model.ParseServiceID(entry.ServiceID)
 			if err != nil {
@@ -126,10 +145,16 @@ func (s *Server) scopeFromInput(ctx context.Context, in []NotificationSelectorDT
 		default:
 			return nil, invalid(invalidScopeMessage)
 		}
-		if !seen[sel] {
-			seen[sel] = true
-			out = append(out, sel)
+		identity := sel
+		identity.Threshold = 0
+		if seen[identity] {
+			if threshold > 0 {
+				return nil, invalid(onceMessage) // the same cluster or account twice is a mistake, not a repeat
+			}
+			continue
 		}
+		seen[identity] = true
+		out = append(out, sel)
 	}
 	return out, nil
 }
@@ -290,6 +315,10 @@ func urlHost(raw string) string {
 func selectorDTO(info notify.SelectorInfo) NotificationSelectorDTO {
 	sel := info.Selector
 	dto := NotificationSelectorDTO{Kind: sel.Kind, AccountID: sel.AccountID, Region: sel.Region, Missing: info.Missing}
+	if sel.Threshold > 0 {
+		threshold := sel.Threshold
+		dto.Threshold = &threshold
+	}
 	if sel.AccountID != "" {
 		dto.AccountName = info.AccountName
 		if dto.AccountName == "" {
@@ -387,7 +416,8 @@ func (s *Server) listNotificationRoutes(w http.ResponseWriter, r *http.Request) 
 	for i, k := range notify.Kinds {
 		kinds[i] = NotificationKindDTO{Kind: k.Kind, Label: k.Label}
 	}
-	writeJSON(w, http.StatusOK, NotificationRoutesDTO{Items: items, EmailAvailable: s.Notify.EmailAvailable(), SecretsAvailable: s.NotifyBox != nil, Kinds: kinds})
+	writeJSON(w, http.StatusOK, NotificationRoutesDTO{Items: items, EmailAvailable: s.Notify.EmailAvailable(), SecretsAvailable: s.NotifyBox != nil, Kinds: kinds,
+		SettleSeconds: int(s.Cfg.Notify.Settle.Seconds())})
 }
 
 // routeAuditView is the audit snapshot of a route: its non-secret fields, never a URL, key or token.
@@ -396,9 +426,9 @@ func routeAuditView(route store.NotificationRoute) map[string]any {
 	for i, sel := range route.Scope {
 		switch sel.Kind {
 		case store.NotificationSelectorAccount:
-			scope[i] = "account:" + sel.AccountID + "/" + sel.Region
+			scope[i] = "account:" + sel.AccountID + "/" + sel.Region + ">=" + strconv.Itoa(sel.Threshold)
 		case store.NotificationSelectorCluster:
-			scope[i] = "cluster:" + sel.Cluster
+			scope[i] = "cluster:" + sel.Cluster + ">=" + strconv.Itoa(sel.Threshold)
 		case store.NotificationSelectorService:
 			scope[i] = "service:" + sel.Cluster + "/" + sel.Service
 		case store.NotificationSelectorAWS:
@@ -558,9 +588,10 @@ func (s *Server) notificationTargets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// previewNotification renders the message a draft route would send and counts the open alerts it would take, with
-// the code the senders use. It validates everything except the destination and its secret, and never receives or
-// returns one.
+// previewNotification renders the message a draft route would send and counts what it would send right now, with
+// the code the dispatcher uses: the same planner (BuildPlan) over the same open incidents, with the draft standing
+// in for the stored route it edits. It validates everything except the destination and its secret, and never
+// receives or returns one.
 func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 	var req NotificationPreviewRequest
 	if err := decodeStrictJSON(w, r, &req); err != nil {
@@ -573,101 +604,114 @@ func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	scope, err := notify.ResolveScope(ctx, s.Store, draft.Scope)
+	draft.Enabled = true
+	if req.RouteID != nil {
+		draft.ID = *req.RouteID
+	}
+	stored, err := s.Store.ListNotificationRoutes(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	alerts, err := s.Store.ListAlerts(ctx, store.AlertFilter{})
+	routes := []store.NotificationRoute{draft}
+	for _, other := range stored {
+		if req.RouteID == nil || other.ID != *req.RouteID {
+			routes = append(routes, other)
+		}
+	}
+	scopes := map[int64]notify.Scope{}
+	needTotals := false
+	for _, route := range routes {
+		if !route.Enabled {
+			continue
+		}
+		scope, err := notify.ResolveScope(ctx, s.Store, route.Scope)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		scopes[route.ID] = scope
+		needTotals = needTotals || len(scope.Groups) > 0
+	}
+	targets, err := s.Store.NotificationTargets(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	accounts, err := s.Store.ListAccounts(ctx)
+	totals := notify.Totals{}
+	if needTotals {
+		totals = notify.TotalsFrom(targets)
+	}
+	incidents, err := s.Store.ListOpenNotificationIncidents(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	names := map[string]string{}
-	for _, a := range accounts {
+	for _, a := range targets.Accounts {
 		names[a.AccountID] = a.Name
 	}
 
-	// A catch-all draft takes only what no other enabled, non-fallback stored route already takes.
-	type coverage struct {
-		route store.NotificationRoute
-		scope notify.Scope
+	now := s.now()
+	plan := notify.BuildPlan(routes, scopes, incidents, totals, names, now, s.Cfg.Notify.Settle)
+	immediate := notify.BuildPlan(routes, scopes, incidents, totals, names, now, 0)
+	share := func(p notify.Plan) (matches []store.NotificationIncident, open []store.GroupState, below []notify.GroupPreview) {
+		for _, incident := range incidents {
+			if slices.Contains(p.PerAlert[incident.ID], draft.ID) {
+				matches = append(matches, incident)
+			}
+		}
+		for _, g := range p.Groups {
+			if g.RouteID == draft.ID {
+				open = append(open, g)
+			}
+		}
+		for _, g := range p.Below {
+			if g.State.RouteID == draft.ID {
+				below = append(below, g)
+			}
+		}
+		return
 	}
-	var others []coverage
-	if draft.Fallback {
-		routes, err := s.Store.ListNotificationRoutes(ctx)
-		if err != nil {
-			s.fail(w, err)
-			return
+	matches, openGroups, below := share(plan)
+	allMatches, allOpen, allBelow := share(immediate)
+	counted := func(open []store.GroupState, below []notify.GroupPreview) int {
+		n := 0
+		for _, g := range open {
+			n += g.Failing
 		}
-		for _, other := range routes {
-			if !other.Enabled || other.Fallback || (req.RouteID != nil && other.ID == *req.RouteID) {
-				continue
-			}
-			otherScope, err := notify.ResolveScope(ctx, s.Store, other.Scope)
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
-			others = append(others, coverage{other, otherScope})
+		for _, g := range below {
+			n += g.State.Failing
 		}
+		return n
 	}
 
-	var matches []notify.Subject
-	for _, alert := range alerts {
-		severity, ok := notify.SeverityName(alert.Severity)
-		if !ok {
-			continue
-		}
-		name := names[alert.Key.AccountID]
-		if name == "" {
-			name = alert.Key.AccountID
-		}
-		subject := notify.Subject{Key: alert.Key, Kind: alert.Kind, Severity: severity, Title: alert.Title, Text: alert.Text, At: alert.At, AccountName: name}
-		if !notify.Matches(draft, subject, scope) {
-			continue
-		}
-		covered := false
-		for _, other := range others {
-			if notify.Matches(other.route, subject, other.scope) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
-			matches = append(matches, subject)
-		}
-	}
 	sort.SliceStable(matches, func(i, j int) bool {
-		if (matches[i].Severity == "critical") != (matches[j].Severity == "critical") {
-			return matches[i].Severity == "critical"
+		if (matches[i].Severity == model.AlertDanger) != (matches[j].Severity == model.AlertDanger) {
+			return matches[i].Severity == model.AlertDanger
 		}
-		return matches[i].At.After(matches[j].At)
+		return matches[i].OpenedAt.After(matches[j].OpenedAt)
 	})
-
-	out := NotificationPreviewDTO{Matches: []NotificationMatchDTO{}, MatchCount: len(matches)}
+	out := NotificationPreviewDTO{
+		Matches: []NotificationMatchDTO{}, MatchCount: len(matches), Groups: []NotificationGroupPreviewDTO{},
+		NotificationCount: len(matches) + len(openGroups),
+		Pending:           (len(allMatches) - len(matches)) + (counted(allOpen, allBelow) - counted(openGroups, below)),
+	}
 	for i, m := range matches {
 		if i == maxPreviewMatches {
 			break
 		}
-		out.Matches = append(out.Matches, NotificationMatchDTO{Service: m.Key.Service, Cluster: m.Key.Cluster, Kind: m.Kind, Severity: m.Severity, Title: m.Title})
+		out.Matches = append(out.Matches, NotificationMatchDTO{Service: m.Key.Service, Cluster: m.Key.Cluster, Kind: m.Kind, Severity: severityName(m.Severity), Title: m.Title})
 	}
-	var subject notify.Subject
-	if len(matches) > 0 {
-		subject = matches[0]
-	} else {
-		out.Sample = true
-		subject = notify.Subject{
-			Key:  model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "123456789012", Region: "us-east-1", Cluster: "background-jobs"}, Service: "image-resizer"},
-			Kind: "restart_loop", Severity: "warning", Title: "image-resizer: restart loop", Text: "3 tasks stopped with an error in the last hour.",
-			At: s.now(), AccountName: "example-account",
-		}
+	for _, g := range openGroups {
+		out.Groups = append(out.Groups, groupPreviewDTO(g, true, names))
 	}
+	for _, g := range below {
+		out.Groups = append(out.Groups, groupPreviewDTO(g.State, false, names))
+	}
+
+	subject, message := s.previewSubject(draft, matches, openGroups, names, now)
+	out.Sample = message == previewSample
 	rendered, err := notify.RenderPreview(draft.Destination, notify.Message{Event: notify.EventOpened, Subject: subject, BaseURL: s.Cfg.BaseURL, RouteName: draft.Name})
 	if err != nil {
 		s.fail(w, err)
@@ -675,6 +719,88 @@ func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Destination, out.Title, out.Body, out.JSON = rendered.Destination, rendered.Title, rendered.Body, rendered.JSON
 	writeJSON(w, http.StatusOK, out)
+}
+
+const (
+	previewSample = "sample"
+	previewReal   = "real"
+)
+
+func severityName(s model.AlertSeverity) string {
+	name, _ := notify.SeverityName(s)
+	return name
+}
+
+func groupPreviewDTO(g store.GroupState, open bool, names map[string]string) NotificationGroupPreviewDTO {
+	dto := NotificationGroupPreviewDTO{
+		Kind: g.ScopeKind, AccountID: g.Key.AccountID, Region: g.Key.Region, Threshold: g.Threshold, Failing: g.Failing, Total: g.Total,
+		Open: open, Unreachable: strings.HasSuffix(g.Title, ": unreachable"), Services: []string{},
+	}
+	account := names[g.Key.AccountID]
+	if account == "" {
+		account = g.Key.AccountID
+	}
+	if g.ScopeKind == store.NotificationSelectorCluster {
+		dto.Label, dto.ClusterID = g.Key.Cluster, g.Key.ClusterKey.ID()
+	} else if g.Key.Region != "" {
+		dto.Label = account + " / " + g.Key.Region
+	} else {
+		dto.Label = account
+	}
+	for i, member := range g.Members {
+		if i == maxPreviewMatches/2 {
+			break
+		}
+		dto.Services = append(dto.Services, member.Service)
+	}
+	return dto
+}
+
+// previewSubject picks what the editor renders: the first open group, else the first per-alert match, else a
+// built-in sample (an aggregated one when the draft has only cluster or account entries).
+func (s *Server) previewSubject(draft store.NotificationRoute, matches []store.NotificationIncident, groups []store.GroupState, names map[string]string, now time.Time) (notify.Subject, string) {
+	accountName := func(id string) string {
+		if names[id] != "" {
+			return names[id]
+		}
+		return id
+	}
+	if len(groups) > 0 {
+		g := groups[0]
+		severity := severityName(g.Severity)
+		return notify.Subject{
+			Key: g.Key, Kind: g.Kind, Severity: severity, Title: g.Title, Text: g.Text, At: now, AccountName: accountName(g.Key.AccountID),
+			Scope: g.ScopeKind, RouteID: draft.ID, Threshold: g.Threshold, Failing: g.Failing, Total: g.Total, Members: g.Members,
+		}, previewReal
+	}
+	if len(matches) > 0 {
+		m := matches[0]
+		return notify.Subject{Key: m.Key, Kind: m.Kind, Severity: severityName(m.Severity), Title: m.Title, Text: m.Text, At: m.OpenedAt, AccountName: accountName(m.Key.AccountID)}, previewReal
+	}
+	cluster := model.ClusterKey{AccountID: "123456789012", Region: "us-east-1", Cluster: "background-jobs"}
+	onlyThresholds := len(draft.Scope) > 0
+	for _, sel := range draft.Scope {
+		if sel.Kind != store.NotificationSelectorCluster && sel.Kind != store.NotificationSelectorAccount {
+			onlyThresholds = false
+		}
+	}
+	if onlyThresholds {
+		cluster.Cluster = "core-services"
+		members := []store.IncidentMember{
+			{Cluster: "core-services", Service: "payments-api", Kind: "service_failing", Title: "payments-api: 0 of 3 tasks running", Critical: true},
+			{Cluster: "core-services", Service: "auth", Kind: "restart_loop", Title: "auth: restart loop"},
+		}
+		return notify.Subject{
+			Key: model.ServiceKey{ClusterKey: cluster}, Kind: notify.KindClusterFailing, Severity: "critical", At: now, AccountName: "example-account",
+			Title: "core-services: 2 of 5 services failing", Text: members[0].Title + "\n" + members[1].Title + "\nNotifies when 2 or more services are failing.",
+			Scope: "cluster", RouteID: draft.ID, Threshold: 2, Failing: 2, Total: 5, Members: members,
+		}, previewSample
+	}
+	return notify.Subject{
+		Key:  model.ServiceKey{ClusterKey: cluster, Service: "image-resizer"},
+		Kind: "restart_loop", Severity: "warning", Title: "image-resizer: restart loop", Text: "3 tasks stopped with an error in the last hour.",
+		At: now, AccountName: "example-account",
+	}, previewSample
 }
 
 // deliveryDTO renders a log row.
@@ -686,6 +812,19 @@ func deliveryDTO(d store.NotificationDelivery) NotificationDeliveryDTO {
 	}
 	if d.Key.Service != "" {
 		dto.ServiceID = d.Key.ID()
+	}
+	dto.AccountID, dto.Region = d.Key.AccountID, d.Key.Region
+	if d.Key.Cluster != "" {
+		dto.ClusterID = d.Key.ClusterKey.ID()
+	}
+	switch {
+	case d.Details.Scope != "":
+		dto.Scope = d.Details.Scope
+	case d.Event == "test":
+	case d.Key.Service != "":
+		dto.Scope = "service"
+	case d.Key.AccountID != "":
+		dto.Scope = "account" // an account-level alert (the account is unreachable)
 	}
 	return dto
 }

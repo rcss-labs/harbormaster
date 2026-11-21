@@ -37,7 +37,7 @@ const (
 	demoTelegramBot  = "123456789:AAHdemo-token-for-fake-mode-only-0001"
 )
 
-// seedNotifications creates the five demo routes (a channel per cluster, service and account, a Telegram chat and
+// seedNotifications creates the six demo routes (a channel per cluster, service and account, a Telegram chat and
 // a catch-all), unless routes exist already. Keys come from the mockup estate, never from literals.
 func seedNotifications(ctx context.Context, st *store.Store, o options) error {
 	if !o.notifyDemo || o.notifyBox == nil {
@@ -73,7 +73,7 @@ func seedNotifications(ctx context.Context, st *store.Store, o options) error {
 			Name: "core-services to #core-alerts", Enabled: true, Destination: notify.DestSlack,
 			Config:      store.NotificationConfig{Label: "#core-alerts", URLHost: hostOf(o.notifyBaseURL)},
 			MinSeverity: "warning", Kinds: allKinds, QuietEnabled: true,
-			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: homelab, Region: "us-east-1", Cluster: "core-services"}},
+			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: homelab, Region: "us-east-1", Cluster: "core-services", Threshold: 1}},
 		}, ptr(hook("core-alerts"))},
 		{store.NotificationRoute{
 			Name: "image-resizer to Telegram", Enabled: true, Destination: notify.DestTelegram,
@@ -85,8 +85,14 @@ func seedNotifications(ctx context.Context, st *store.Store, o options) error {
 			Name: "Staging account by email", Enabled: false, Destination: notify.DestEmail,
 			Config:      store.NotificationConfig{Recipients: []string{"platform@example.com"}},
 			MinSeverity: "warning", Kinds: allKinds,
-			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorAccount, AccountID: staging}},
+			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorAccount, AccountID: staging, Threshold: 2}},
 		}, nil},
+		{store.NotificationRoute{
+			Name: "Half of core-services down", Enabled: true, Destination: notify.DestPagerDuty,
+			Config:      store.NotificationConfig{Label: "On-call", PagerDutyRegion: "us"},
+			MinSeverity: "critical", Kinds: allKinds,
+			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: homelab, Region: "us-east-1", Cluster: "core-services", Threshold: 2}},
+		}, &notify.Secret{RoutingKey: demoPagerDutyKey}},
 		{store.NotificationRoute{
 			Name: "Everything else", Enabled: true, Destination: notify.DestSlack, Fallback: true,
 			Config:      store.NotificationConfig{Label: "#catch-all", URLHost: hostOf(o.notifyBaseURL)},

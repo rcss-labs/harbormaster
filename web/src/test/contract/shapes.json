@@ -1616,11 +1616,13 @@
   "notificationDeliveries": {
     "items": [
       {
+        "account_id": "string",
         "alert": "string",
         "at": "time",
         "attempts": "number",
         "can_retry": "boolean",
         "cluster": "string",
+        "cluster_id": "string",
         "destination": "string",
         "event": "string",
         "finished_at": {
@@ -1631,10 +1633,12 @@
         },
         "id": "number",
         "note": "string",
+        "region": "string",
         "route": "string",
         "route_id": {
           "$null": "number"
         },
+        "scope": "string",
         "service": "string",
         "service_id": "string",
         "status": "string",
@@ -1647,11 +1651,13 @@
     "polled_at": "time"
   },
   "notificationDelivery": {
+    "account_id": "string",
     "alert": "string",
     "at": "time",
     "attempts": "number",
     "can_retry": "boolean",
     "cluster": "string",
+    "cluster_id": "string",
     "destination": "string",
     "event": "string",
     "finished_at": {
@@ -1662,10 +1668,12 @@
     },
     "id": "number",
     "note": "string",
+    "region": "string",
     "route": "string",
     "route_id": {
       "$null": "number"
     },
+    "scope": "string",
     "service": "string",
     "service_id": "string",
     "status": "string",
@@ -1674,6 +1682,23 @@
   "notificationPreview": {
     "body": "string",
     "destination": "string",
+    "groups": [
+      {
+        "account_id": "string",
+        "cluster_id": "string",
+        "failing": "number",
+        "kind": "string",
+        "label": "string",
+        "open": "boolean",
+        "region": "string",
+        "services": [
+          "string"
+        ],
+        "threshold": "number",
+        "total": "number",
+        "unreachable": "boolean"
+      }
+    ],
     "json": "string",
     "match_count": "number",
     "matches": [
@@ -1685,6 +1710,8 @@
         "title": "string"
       }
     ],
+    "notification_count": "number",
+    "pending": "number",
     "sample": "boolean",
     "title": "string"
   },
@@ -1724,6 +1751,9 @@
         "service_id": "string",
         "tag_id": "number",
         "tag_name": "string",
+        "threshold": {
+          "$null": "number"
+        },
         "value": "string"
       }
     ],
@@ -1776,6 +1806,9 @@
             "service_id": "string",
             "tag_id": "number",
             "tag_name": "string",
+            "threshold": {
+              "$null": "number"
+            },
             "value": "string"
           }
         ],
@@ -1796,7 +1829,8 @@
         "label": "string"
       }
     ],
-    "secrets_available": "boolean"
+    "secrets_available": "boolean",
+    "settle_seconds": "number"
   },
   "notificationSummary": {
     "failed_24h": "number",

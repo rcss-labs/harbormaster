@@ -1,10 +1,12 @@
 // Fixtures for the alert notification endpoints. The contract test checks them against the backend shape; the
 // types live in api/notifications.ts.
+import { http, HttpResponse } from 'msw'
 import type {
   NotificationDeliveries,
   NotificationDelivery,
   NotificationSummary,
   NotificationPreview,
+  NotificationRouteInput,
   NotificationRoute,
   NotificationRoutes,
   NotificationSelector,
@@ -38,6 +40,7 @@ export function selector(fields: Partial<NotificationSelector> & Pick<Notificati
     value: '',
     tag_id: 0,
     tag_name: '',
+    threshold: null,
     missing: false,
     ...fields,
   }
@@ -77,6 +80,7 @@ export const CORE_SERVICES_CLUSTER = selector({
   region: 'us-east-1',
   cluster_id: 'NDgyMTA5Mzc1NTEyfHVzLWVhc3QtMXxjb3JlLXNlcnZpY2Vz',
   cluster: 'core-services',
+  threshold: 2,
 })
 
 export const IMAGE_RESIZER_SERVICE = selector({
@@ -126,7 +130,7 @@ export const ROUTE_STAGING_EMAIL = route({
   recipients: ['platform@example.com'],
   secret_set: false,
   enabled: false,
-  scope: [selector({ kind: 'account', account_id: '731022849906', account_name: 'staging-example' })],
+  scope: [selector({ kind: 'account', account_id: '731022849906', account_name: 'staging-example', threshold: 1 })],
 })
 export const ROUTE_CATCH_ALL = route({
   id: 5,
@@ -188,6 +192,7 @@ export const NOTIFICATION_ROUTES: NotificationRoutes = {
   email_available: true,
   secrets_available: true,
   kinds: NOTIFICATION_KINDS,
+  settle_seconds: 180,
 }
 
 export const NOTIFICATION_ROUTES_NO_SMTP: NotificationRoutes = { ...NOTIFICATION_ROUTES, email_available: false }
@@ -205,6 +210,9 @@ export const NOTIFICATION_PREVIEW: NotificationPreview = {
   title: 'payments-api: service failing',
   body: '0 of 3 tasks are running.\ncore-services · homelab-admin / us-east-1',
   json: '',
+  groups: [],
+  notification_count: 2,
+  pending: 0,
 }
 
 export const NOTIFICATION_PREVIEW_EMPTY: NotificationPreview = {
@@ -215,6 +223,50 @@ export const NOTIFICATION_PREVIEW_EMPTY: NotificationPreview = {
   title: 'image-resizer: restart loop',
   body: '3 tasks stopped with an error in the last hour.\nbackground-jobs · example-account / us-east-1',
   json: '',
+  groups: [],
+  notification_count: 0,
+  pending: 0,
+}
+
+/** A cluster draft: one entry open at its threshold, one below it, and one alert still inside the settle time. */
+export const NOTIFICATION_PREVIEW_GROUPS: NotificationPreview = {
+  matches: [],
+  match_count: 0,
+  sample: false,
+  destination: 'slack',
+  title: 'Update: core-services: 2 of 5 services failing',
+  body: 'payments-api: 0 of 3 tasks running\nauth: restart loop\nNotifies when 2 or more services are failing.',
+  json: '',
+  groups: [
+    {
+      kind: 'cluster',
+      label: 'core-services',
+      cluster_id: 'NDgyMTA5Mzc1NTEyfHVzLWVhc3QtMXxjb3JlLXNlcnZpY2Vz',
+      account_id: '482109375512',
+      region: 'us-east-1',
+      threshold: 2,
+      failing: 2,
+      total: 5,
+      open: true,
+      unreachable: false,
+      services: ['payments-api', 'auth'],
+    },
+    {
+      kind: 'account',
+      label: 'staging-example',
+      cluster_id: '',
+      account_id: '731022849906',
+      region: '',
+      threshold: 3,
+      failing: 1,
+      total: 4,
+      open: false,
+      unreachable: false,
+      services: ['web'],
+    },
+  ],
+  notification_count: 1,
+  pending: 1,
 }
 
 export const NOTIFICATION_PREVIEW_WEBHOOK: NotificationPreview = {
@@ -243,6 +295,10 @@ export const NOTIFICATION_DELIVERY_TEST: NotificationDelivery = {
   held_until: null,
   attempts: 1,
   can_retry: false,
+  scope: '',
+  cluster_id: '',
+  account_id: '',
+  region: '',
 }
 
 function delivery(fields: Partial<NotificationDelivery> & Pick<NotificationDelivery, 'id' | 'status'>): NotificationDelivery {
@@ -262,6 +318,10 @@ function delivery(fields: Partial<NotificationDelivery> & Pick<NotificationDeliv
     held_until: null,
     attempts: 1,
     can_retry: false,
+    scope: 'service',
+    cluster_id: 'NDgyMTA5Mzc1NTEyfHVzLWVhc3QtMXxjb3JlLXNlcnZpY2Vz',
+    account_id: '482109375512',
+    region: 'us-east-1',
     ...fields,
   }
 }
@@ -304,8 +364,43 @@ export const DELIVERY_CANCELLED = delivery({
   attempts: 0,
 })
 
+export const DELIVERY_UPDATE = delivery({
+  id: 112,
+  status: 'delivered',
+  event: 'update',
+  at: '2026-11-21T09:40:00Z',
+  alert: 'core-services: 3 of 5 services failing',
+  service: '',
+  service_id: '',
+  note: 'Delivered in 94 ms',
+  scope: 'cluster',
+})
+export const DELIVERY_AGGREGATED = delivery({
+  id: 113,
+  status: 'delivered',
+  event: 'opened',
+  at: '2026-11-21T09:35:00Z',
+  alert: 'staging-example: 3 of 4 services failing',
+  service: '',
+  service_id: '',
+  cluster: '',
+  cluster_id: '',
+  account_id: '731022849906',
+  scope: 'account',
+  note: 'Delivered in 101 ms',
+})
+
 export const NOTIFICATION_DELIVERIES: NotificationDeliveries = {
-  items: [DELIVERY_PENDING, DELIVERY_DELIVERED, NOTIFICATION_DELIVERY_TEST, DELIVERY_FAILED, DELIVERY_HELD, DELIVERY_CANCELLED],
+  items: [
+    DELIVERY_PENDING,
+    DELIVERY_UPDATE,
+    DELIVERY_AGGREGATED,
+    DELIVERY_DELIVERED,
+    NOTIFICATION_DELIVERY_TEST,
+    DELIVERY_FAILED,
+    DELIVERY_HELD,
+    DELIVERY_CANCELLED,
+  ],
   next: null,
   polled_at: '2026-11-21T10:10:00Z',
 }
@@ -355,3 +450,26 @@ export const NOTIFICATION_TARGETS: NotificationTargets = {
     },
   ],
 }
+
+/** Default handlers for the notification routes; msw.ts merges them. Override per test with `server.use`. */
+export const notificationsHandlers = [
+  http.get('/api/notifications/routes', () => HttpResponse.json(NOTIFICATION_ROUTES)),
+  http.get('/api/notifications/targets', () => HttpResponse.json(NOTIFICATION_TARGETS)),
+  http.get('/api/notifications/summary', () => HttpResponse.json(NOTIFICATION_SUMMARY)),
+  http.get('/api/notifications/deliveries', ({ request }) =>
+    HttpResponse.json(new URL(request.url).searchParams.get('status') === 'failed' ? NOTIFICATION_DELIVERIES_FAILED : NOTIFICATION_DELIVERIES),
+  ),
+  http.post('/api/notifications/preview', () => HttpResponse.json(NOTIFICATION_PREVIEW)),
+  http.post('/api/notifications/routes/:id/test', () => HttpResponse.json(NOTIFICATION_DELIVERY_TEST)),
+  http.post('/api/notifications/routes', async ({ request }) => {
+    const body = (await request.json()) as NotificationRouteInput
+    return HttpResponse.json({ ...ROUTE_PROD_PAGERDUTY, id: 99, name: body.name, enabled: body.enabled, destination: body.destination, version: 1 })
+  }),
+  http.put('/api/notifications/routes/:id', async ({ request, params }) => {
+    const body = (await request.json()) as NotificationRouteInput
+    const saved = NOTIFICATION_ROUTES.items.find((route) => String(route.id) === params.id) ?? ROUTE_PROD_PAGERDUTY
+    return HttpResponse.json({ ...saved, name: body.name, enabled: body.enabled, version: saved.version + 1 })
+  }),
+  http.delete('/api/notifications/routes/:id', () => new HttpResponse(null, { status: 204 })),
+  http.post('/api/notifications/deliveries/:id/retry', () => HttpResponse.json({ ...DELIVERY_FAILED, status: 'pending', attempts: 0, can_retry: false, note: '' })),
+]

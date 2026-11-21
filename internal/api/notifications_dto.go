@@ -18,6 +18,9 @@ type NotificationSelectorDTO struct {
 	Value       string `json:"value"`
 	TagID       int64  `json:"tag_id"`
 	TagName     string `json:"tag_name"`
+	// Threshold is the number of failing services that makes a cluster or account entry notify (1 to 500); null for
+	// service and tag entries, which notify per alert.
+	Threshold *int `json:"threshold"`
 	// Missing: the account is not connected (or lacks the region), or the cluster or service is not in the snapshot.
 	// The selector is kept and matches nothing until the target returns or the entry is removed.
 	Missing bool `json:"missing"`
@@ -67,6 +70,8 @@ type NotificationRoutesDTO struct {
 	EmailAvailable   bool                   `json:"email_available"`
 	SecretsAvailable bool                   `json:"secrets_available"`
 	Kinds            []NotificationKindDTO  `json:"kinds"`
+	// SettleSeconds is how long service_failing and service_degraded must stay open before they notify or count.
+	SettleSeconds int `json:"settle_seconds"`
 }
 
 // NotificationRouteInput is the body of create, update and preview. A secret that is nil keeps the stored one on
@@ -111,6 +116,22 @@ type NotificationMatchDTO struct {
 	Title    string `json:"title"`
 }
 
+// NotificationGroupPreviewDTO is one cluster or account entry of the draft: open when its threshold is met, else
+// listed with the services that are failing.
+type NotificationGroupPreviewDTO struct {
+	Kind        string   `json:"kind"` // cluster | account
+	Label       string   `json:"label"`
+	ClusterID   string   `json:"cluster_id"`
+	AccountID   string   `json:"account_id"`
+	Region      string   `json:"region"`
+	Threshold   int      `json:"threshold"`
+	Failing     int      `json:"failing"`
+	Total       int      `json:"total"`
+	Open        bool     `json:"open"`
+	Unreachable bool     `json:"unreachable"`
+	Services    []string `json:"services"` // failing service names, at most 10
+}
+
 // NotificationPreviewDTO is the server-rendered message and the open alerts the draft would take. Sample is true
 // when no open alert matched and the built-in sample was rendered.
 type NotificationPreviewDTO struct {
@@ -121,6 +142,12 @@ type NotificationPreviewDTO struct {
 	Title       string                 `json:"title"`
 	Body        string                 `json:"body"`
 	JSON        string                 `json:"json"`
+	// Groups lists the draft's cluster and account entries: open ones first, then those below their threshold.
+	Groups []NotificationGroupPreviewDTO `json:"groups"`
+	// NotificationCount is what the route would send right now: per-alert matches plus open groups.
+	NotificationCount int `json:"notification_count"`
+	// Pending counts alerts still inside the settle time that would otherwise match or count.
+	Pending int `json:"pending"`
 }
 
 // NotificationDeliveryDTO is one row of the delivery log.
@@ -142,6 +169,12 @@ type NotificationDeliveryDTO struct {
 	HeldUntil   *time.Time `json:"held_until"`
 	Attempts    int        `json:"attempts"`
 	CanRetry    bool       `json:"can_retry"`
+	// Scope is service, cluster or account; empty for a test message. ClusterID, AccountID and Region link a row to
+	// its cluster or account (an aggregated row has no service).
+	Scope     string `json:"scope"`
+	ClusterID string `json:"cluster_id"`
+	AccountID string `json:"account_id"`
+	Region    string `json:"region"`
 }
 
 // NotificationTargetAccountDTO is a connected account the scope picker can offer.

@@ -39,6 +39,7 @@ type notifyEnv struct {
 type notifyEnvOptions struct {
 	noSessionKey bool
 	smtp         bool
+	settle       time.Duration
 }
 
 func newNotifyEnv(t *testing.T, opts ...notifyEnvOptions) *notifyEnv {
@@ -65,6 +66,7 @@ func newNotifyEnv(t *testing.T, opts ...notifyEnvOptions) *notifyEnv {
 		if opt.noSessionKey {
 			s.Cfg.SessionKey = ""
 		}
+		s.Cfg.Notify.Settle = opt.settle
 	})
 	seedAccounts(t, e.st)
 	e.admin = login(t, e.srv, "sam", testPassword)
@@ -136,7 +138,11 @@ var (
 	nwKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: stagingAccountID, Region: "us-east-1", Cluster: "staging-web"}, Service: "web"}
 )
 
-func (e *notifyEnv) seedAlerts() {
+func (e *notifyEnv) seedAlerts() { e.seedAlertsAged(0) }
+
+// seedAlertsAged seeds the alerts and syncs them into incidents as if they had been open for age, which is what
+// the preview reads.
+func (e *notifyEnv) seedAlertsAged(age time.Duration) {
 	e.t.Helper()
 	at := time.Now()
 	mk := func(k model.ServiceKey, kind string, sev model.AlertSeverity, title string) model.Alert {
@@ -156,7 +162,39 @@ func (e *notifyEnv) seedAlerts() {
 	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: stagingAccountID, Region: "us-east-1"}, staging); err != nil {
 		e.t.Fatal(err)
 	}
+	e.syncIncidents(age)
 }
+
+func (e *notifyEnv) syncIncidents(age time.Duration) {
+	e.t.Helper()
+	if _, _, err := e.st.SyncNotificationIncidents(e.t.Context(), time.Now().Add(-age), 2*time.Minute, time.Hour); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// seedOnlyAlert leaves exactly one open alert: payments-api failing in core-services (a restart loop, so no settle).
+func (e *notifyEnv) seedOnlyAlert() {
+	e.t.Helper()
+	alert := model.Alert{Key: nxKey, Kind: "restart_loop", Severity: model.AlertWarning, Title: "payments-api: restart loop", Text: "t", At: time.Now(), Tab: "overview"}
+	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}, []model.Alert{alert}); err != nil {
+		e.t.Fatal(err)
+	}
+	e.syncIncidents(0)
+}
+
+// seedActiveServices puts the cluster's services in the snapshot, so a group message can say "of M".
+func (e *notifyEnv) seedActiveServices(keys ...model.ServiceKey) {
+	e.t.Helper()
+	var rows []model.Service
+	for _, k := range keys {
+		rows = append(rows, model.Service{Key: k, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()})
+	}
+	if _, err := e.st.UpsertServices(e.t.Context(), rows); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+var nExtraKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "ledger"}
 
 func (e *notifyEnv) preview(body map[string]any) NotificationPreviewDTO {
 	e.t.Helper()
@@ -174,12 +212,20 @@ func serviceScope(k model.ServiceKey) map[string]any {
 	return map[string]any{"kind": "service", "service_id": k.ID()}
 }
 
-func clusterScope(k model.ClusterKey) map[string]any {
-	return map[string]any{"kind": "cluster", "cluster_id": k.ID()}
+func clusterScope(k model.ClusterKey, threshold ...int) map[string]any {
+	entry := map[string]any{"kind": "cluster", "cluster_id": k.ID()}
+	if len(threshold) > 0 {
+		entry["threshold"] = threshold[0]
+	}
+	return entry
 }
 
-func accountScope(id string) map[string]any {
-	return map[string]any{"kind": "account", "account_id": id}
+func accountScope(id string, threshold ...int) map[string]any {
+	entry := map[string]any{"kind": "account", "account_id": id}
+	if len(threshold) > 0 {
+		entry["threshold"] = threshold[0]
+	}
+	return entry
 }
 
 func matchTitles(p NotificationPreviewDTO) string {
@@ -627,50 +673,67 @@ func TestNotificationRoutes_ScopeRoundTripsWithNamesAndMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	gone := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "deleted-svc"}
+	goneCluster := model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "retired"}
 	scope := []any{
-		accountScope(homelabAccountID),
-		map[string]any{"kind": "account", "account_id": stagingAccountID, "region": "us-east-1"},
-		clusterScope(nxKey.ClusterKey),
+		accountScope(homelabAccountID, 2),
+		map[string]any{"kind": "account", "account_id": stagingAccountID, "region": "us-east-1", "threshold": 1},
+		clusterScope(nxKey.ClusterKey, 3),
+		clusterScope(goneCluster, 4),
 		serviceScope(nxKey),
 		serviceScope(gone),
 		map[string]any{"kind": "harbormaster", "tag_id": int64(qa.ID)},
 		map[string]any{"kind": "aws", "key": "env", "value": "staging"},
-		serviceScope(nxKey), // a repeat is dropped
+		serviceScope(nxKey), // a repeat of a service entry is dropped
 	}
 	created := e.create(e.webhookInput("scoped", func(in map[string]any) { in["scope"] = scope }))
-	if len(created.Scope) != 7 || created.MatchesNothing {
-		t.Fatalf("scope = %+v (matches_nothing %v), want 7 selectors", created.Scope, created.MatchesNothing)
+	if len(created.Scope) != 8 || created.MatchesNothing {
+		t.Fatalf("scope = %+v (matches_nothing %v), want 8 selectors", created.Scope, created.MatchesNothing)
 	}
 	kinds := make([]string, len(created.Scope))
 	for i, sel := range created.Scope {
 		kinds[i] = sel.Kind
 	}
-	if got := strings.Join(kinds, ","); got != "account,account,cluster,service,service,harbormaster,aws" {
+	if got := strings.Join(kinds, ","); got != "account,account,cluster,cluster,service,service,harbormaster,aws" {
 		t.Fatalf("selector order = %s", got)
+	}
+	threshold := func(sel NotificationSelectorDTO) int {
+		if sel.Threshold == nil {
+			return -1
+		}
+		return *sel.Threshold
+	}
+	if a, b := created.Scope[0], created.Scope[1]; threshold(a) != 2 || threshold(b) != 1 || a.AccountName != "homelab-admin" || a.Missing {
+		t.Errorf("account entries = %+v %+v", a, b)
+	}
+	present, missing := created.Scope[2], created.Scope[3]
+	if present.ClusterID != nxKey.ClusterKey.ID() || present.Cluster != "core-services" || threshold(present) != 3 || present.Missing || present.AccountName != "homelab-admin" || present.Region != "us-east-1" {
+		t.Errorf("cluster = %+v", present)
+	}
+	if !missing.Missing || threshold(missing) != 4 || missing.Cluster != "retired" {
+		t.Errorf("a missing cluster must keep its threshold: %+v", missing)
 	}
 	byKind := map[string][]NotificationSelectorDTO{}
 	for _, sel := range created.Scope {
 		byKind[sel.Kind] = append(byKind[sel.Kind], sel)
 	}
-	if a := byKind["account"][0]; a.AccountID != homelabAccountID || a.AccountName != "homelab-admin" || a.Missing {
-		t.Errorf("account = %+v", a)
-	}
-	if c := byKind["cluster"][0]; c.ClusterID != nxKey.ClusterKey.ID() || c.Cluster != "core-services" || c.AccountName != "homelab-admin" || c.Region != "us-east-1" || c.Missing {
-		t.Errorf("cluster = %+v", c)
-	}
-	var present, absent NotificationSelectorDTO
-	for _, sel := range byKind["service"] {
-		if sel.Service == "payments-api" {
-			present = sel
-		} else {
-			absent = sel
+	for _, sel := range append(append(byKind["service"], byKind["harbormaster"]...), byKind["aws"]...) {
+		if sel.Threshold != nil {
+			t.Errorf("a %s entry has a threshold: %+v", sel.Kind, sel)
 		}
 	}
-	if present.ServiceID != nxKey.ID() || present.Missing || present.Cluster != "core-services" {
-		t.Errorf("present service = %+v", present)
+	var presentService, absentService NotificationSelectorDTO
+	for _, sel := range byKind["service"] {
+		if sel.Service == "payments-api" {
+			presentService = sel
+		} else {
+			absentService = sel
+		}
 	}
-	if !absent.Missing || absent.Service != "deleted-svc" || absent.Cluster != "core-services" || absent.ServiceID != gone.ID() {
-		t.Errorf("missing service = %+v, want it kept, flagged and named from its key", absent)
+	if presentService.ServiceID != nxKey.ID() || presentService.Missing || presentService.Cluster != "core-services" {
+		t.Errorf("present service = %+v", presentService)
+	}
+	if !absentService.Missing || absentService.Service != "deleted-svc" || absentService.ServiceID != gone.ID() {
+		t.Errorf("missing service = %+v, want it kept, flagged and named from its key", absentService)
 	}
 	if tag := byKind["harbormaster"][0]; tag.TagID != int64(qa.ID) || tag.TagName != "QA" {
 		t.Errorf("tag = %+v", tag)
@@ -679,9 +742,15 @@ func TestNotificationRoutes_ScopeRoundTripsWithNamesAndMissing(t *testing.T) {
 		t.Errorf("aws tag = %+v", tag)
 	}
 
-	only := e.create(e.webhookInput("only missing", func(in map[string]any) { in["scope"] = []any{serviceScope(gone)} }))
-	if !only.MatchesNothing || len(only.Scope) != 1 || !only.Scope[0].Missing {
+	only := e.create(e.webhookInput("only missing", func(in map[string]any) { in["scope"] = []any{serviceScope(gone), clusterScope(goneCluster, 2)} }))
+	if !only.MatchesNothing || len(only.Scope) != 2 || !only.Scope[0].Missing || !only.Scope[1].Missing {
 		t.Fatalf("only-missing route = %+v, want matches_nothing", only)
+	}
+
+	// A cluster or account entry without a threshold defaults to 1.
+	defaulted := e.create(e.webhookInput("default threshold", func(in map[string]any) { in["scope"] = []any{clusterScope(nxKey.ClusterKey)} }))
+	if len(defaulted.Scope) != 1 || threshold(defaulted.Scope[0]) != 1 {
+		t.Errorf("default threshold = %+v", defaulted.Scope)
 	}
 }
 
@@ -691,28 +760,40 @@ func TestNotificationRoutes_ScopeValidation(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = map[string]any{"kind": "aws", "key": "k" + strconv.Itoa(i), "value": "v"}
 	}
-	for name, scope := range map[string][]any{
-		"101 selectors":       tooMany,
-		"bad cluster id":      {map[string]any{"kind": "cluster", "cluster_id": "not-a-cluster-id"}},
-		"bad service id":      {map[string]any{"kind": "service", "service_id": "%%%"}},
-		"unknown tag":         {map[string]any{"kind": "harbormaster", "tag_id": 987654}},
-		"aws prefix":          {map[string]any{"kind": "aws", "key": "aws:cloudformation:stack-name", "value": "x"}},
-		"short account id":    {map[string]any{"kind": "account", "account_id": "1234"}},
-		"unknown kind":        {map[string]any{"kind": "region", "account_id": "123456789012"}},
-		"account with a name": {map[string]any{"kind": "account", "account_id": "123456789012", "region": "not a region!"}},
+	for name, tc := range map[string]struct {
+		scope   []any
+		message string // "" = any 422
+	}{
+		"101 selectors":          {tooMany, ""},
+		"bad cluster id":         {[]any{map[string]any{"kind": "cluster", "cluster_id": "not-a-cluster-id", "threshold": 1}}, "One of the scope entries is not valid."},
+		"bad service id":         {[]any{map[string]any{"kind": "service", "service_id": "%%%"}}, "One of the scope entries is not valid."},
+		"unknown tag":            {[]any{map[string]any{"kind": "harbormaster", "tag_id": 987654}}, "One of the scope entries is not valid."},
+		"aws prefix":             {[]any{map[string]any{"kind": "aws", "key": "aws:cloudformation:stack-name", "value": "x"}}, "One of the scope entries is not valid."},
+		"short account id":       {[]any{map[string]any{"kind": "account", "account_id": "1234", "threshold": 1}}, "One of the scope entries is not valid."},
+		"unknown kind":           {[]any{map[string]any{"kind": "region", "account_id": "123456789012"}}, "One of the scope entries is not valid."},
+		"bad region":             {[]any{map[string]any{"kind": "account", "account_id": "123456789012", "region": "not a region!", "threshold": 1}}, "One of the scope entries is not valid."},
+		"threshold 0":            {[]any{clusterScope(nxKey.ClusterKey, 0)}, "A threshold must be between 1 and 500."},
+		"threshold 501":          {[]any{accountScope(homelabAccountID, 501)}, "A threshold must be between 1 and 500."},
+		"negative threshold":     {[]any{clusterScope(nxKey.ClusterKey, -3)}, "A threshold must be between 1 and 500."},
+		"threshold on a service": {[]any{map[string]any{"kind": "service", "service_id": nxKey.ID(), "threshold": 2}}, "One of the scope entries is not valid."},
+		"threshold on a tag":     {[]any{map[string]any{"kind": "aws", "key": "env", "value": "x", "threshold": 2}}, "One of the scope entries is not valid."},
+		"same cluster twice":     {[]any{clusterScope(nxKey.ClusterKey, 1), clusterScope(nxKey.ClusterKey, 2)}, "A cluster or account can appear once per route."},
+		"same account twice":     {[]any{accountScope(homelabAccountID, 1), accountScope(homelabAccountID, 3)}, "A cluster or account can appear once per route."},
 	} {
-		in := e.webhookInput("scope", func(in map[string]any) { in["scope"] = scope })
+		in := e.webhookInput("scope", func(in map[string]any) { in["scope"] = tc.scope })
 		resp := e.admin.post("/api/notifications/routes", in)
 		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Errorf("%s: status %d, want 422", name, resp.StatusCode)
 			continue
 		}
-		if name == "101 selectors" {
-			continue
+		if _, msg := errorCode(t, resp); tc.message != "" && msg != tc.message {
+			t.Errorf("%s: message %q, want %q", name, msg, tc.message)
 		}
-		if _, msg := errorCode(t, resp); msg != "One of the scope entries is not valid." && !strings.Contains(msg, "aws:") {
-			t.Errorf("%s: message %q", name, msg)
-		}
+	}
+	// The same account as all regions and as one region are two entries, and may both be saved.
+	both := []any{accountScope(homelabAccountID, 1), map[string]any{"kind": "account", "account_id": homelabAccountID, "region": "eu-west-1", "threshold": 2}}
+	if resp := e.admin.post("/api/notifications/routes", e.webhookInput("regions", func(in map[string]any) { in["scope"] = both })); resp.StatusCode != http.StatusOK {
+		t.Errorf("all regions plus one region = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -789,31 +870,48 @@ func TestNotificationPreview_CountsOpenAlertsAndRenders(t *testing.T) {
 func TestNotificationPreview_ScopeIsExact(t *testing.T) {
 	e := newNotifyEnv(t)
 	e.seedAlerts()
-	all := func(scope ...any) NotificationPreviewDTO {
+	e.seedActiveServices(nxKey, nyKey, nExtraKey, nzKey, nwKey)
+	draft := func(scope ...any) NotificationPreviewDTO {
 		return e.preview(e.webhookInput("draft", func(in map[string]any) {
 			in["scope"] = scope
 			in["kinds"] = []string{"service_failing", "service_degraded", "restart_loop", "account_unreachable"}
 		}))
 	}
-	if got := all(serviceScope(nxKey)); matchTitles(got) != "payments-api: failing" {
-		t.Errorf("service scope = %q, want only that service", matchTitles(got))
+	if got := draft(serviceScope(nxKey)); matchTitles(got) != "payments-api: failing" || got.MatchCount != 1 || len(got.Groups) != 0 || got.NotificationCount != 1 {
+		t.Errorf("service scope = %q groups %d, want only that service per alert", matchTitles(got), len(got.Groups))
 	}
-	if got := all(clusterScope(nxKey.ClusterKey)); got.MatchCount != 2 || strings.Contains(matchTitles(got), "unreachable") || strings.Contains(matchTitles(got), "image-resizer") {
-		t.Errorf("cluster scope = %q, want payments-api and auth only", matchTitles(got))
+
+	cluster := draft(clusterScope(nxKey.ClusterKey, 1))
+	if cluster.MatchCount != 0 || len(cluster.Matches) != 0 || len(cluster.Groups) != 1 || cluster.NotificationCount != 1 {
+		t.Fatalf("cluster scope = %+v, want no per-alert match and one aggregated notification", cluster)
 	}
-	acct := all(accountScope(homelabAccountID))
-	if acct.MatchCount != 4 || !strings.Contains(matchTitles(acct), "homelab unreachable") || strings.Contains(matchTitles(acct), "web: failing") {
-		t.Errorf("account scope = %q, want homelab's services and its account alert", matchTitles(acct))
+	g := cluster.Groups[0]
+	if g.Kind != "cluster" || g.Label != "core-services" || g.Failing != 2 || g.Total != 3 || g.Threshold != 1 || !g.Open || g.Unreachable || g.ClusterID != nxKey.ClusterKey.ID() ||
+		strings.Join(g.Services, ",") != "payments-api,auth" {
+		t.Errorf("cluster group = %+v", g)
 	}
-	if got := all(map[string]any{"kind": "account", "account_id": homelabAccountID, "region": "eu-west-1"}); got.MatchCount != 0 {
-		t.Errorf("another region's account scope = %q, want nothing", matchTitles(got))
+	if !strings.Contains(cluster.JSON, `"scope": "cluster"`) || !strings.Contains(cluster.JSON, `"failing": 2`) {
+		t.Errorf("the rendered message must be the aggregated one: %s", cluster.JSON)
+	}
+
+	account := draft(accountScope(homelabAccountID, 1))
+	if len(account.Groups) != 1 || account.MatchCount != 0 || !account.Groups[0].Unreachable || account.Groups[0].Kind != "account" || account.Groups[0].Label != "homelab-admin" {
+		t.Errorf("account scope = %+v, want one group opened by the unreachable account", account.Groups)
+	}
+	if got := draft(map[string]any{"kind": "account", "account_id": homelabAccountID, "region": "eu-west-1", "threshold": 1}); got.NotificationCount != 0 || len(got.Groups) != 0 {
+		t.Errorf("another region's account scope = %+v, want nothing", got.Groups)
+	}
+	// A cluster entry never receives the account-level alert per alert.
+	if got := draft(clusterScope(nxKey.ClusterKey, 1)); strings.Contains(matchTitles(got), "unreachable") {
+		t.Errorf("a cluster entry listed the account alert: %q", matchTitles(got))
 	}
 }
 
 func TestNotificationPreview_FallbackCountsOnlyUncoveredAlerts(t *testing.T) {
 	e := newNotifyEnv(t)
 	e.seedAlerts()
-	specific := e.create(e.webhookInput("payments", func(in map[string]any) { in["enabled"] = true; in["scope"] = []any{serviceScope(nxKey)} }))
+	e.seedActiveServices(nxKey, nyKey, nExtraKey, nzKey, nwKey)
+	specific := e.create(e.webhookInput("payments", func(in map[string]any) { in["enabled"] = true; in["scope"] = []any{clusterScope(nxKey.ClusterKey, 1)} }))
 	draft := func(routeID *int64) NotificationPreviewDTO {
 		return e.preview(e.webhookInput("catch-all", func(in map[string]any) {
 			in["fallback"] = true
@@ -822,22 +920,104 @@ func TestNotificationPreview_FallbackCountsOnlyUncoveredAlerts(t *testing.T) {
 			}
 		}))
 	}
+	// The cluster route notifies about payments-api (1 of 3 at N=1), so the catch-all counts only the rest.
 	if got := draft(nil); got.MatchCount != 2 || strings.Contains(matchTitles(got), "payments-api") {
-		t.Errorf("fallback preview = %q, want what the specific route does not cover", matchTitles(got))
+		t.Errorf("fallback preview = %q, want what the cluster route does not cover", matchTitles(got))
 	}
 	// Editing the specific route itself: it no longer counts as covering.
 	if got := draft(&specific.ID); got.MatchCount != 3 {
 		t.Errorf("preview excluding the edited route = %d, want all 3", got.MatchCount)
 	}
+	// Raise the threshold past the failing count: a cluster below its threshold covers nothing (D41).
+	update := e.webhookInput("payments", func(in map[string]any) {
+		in["enabled"], in["scope"], in["version"] = true, []any{clusterScope(nxKey.ClusterKey, 2)}, specific.Version
+	})
+	if resp := e.put(specific.ID, update); resp.StatusCode != http.StatusOK {
+		t.Fatalf("update = %d", resp.StatusCode)
+	}
+	if got := draft(nil); got.MatchCount != 3 {
+		t.Errorf("preview with the cluster route below its threshold = %d, want 3", got.MatchCount)
+	}
 	// A disabled route does not cover.
-	update := e.webhookInput("payments", func(in map[string]any) { in["scope"] = []any{serviceScope(nxKey)}; in["version"] = specific.Version })
+	update["enabled"], update["version"] = false, specific.Version+1
 	e.put(specific.ID, update)
 	if got := draft(nil); got.MatchCount != 3 {
 		t.Errorf("preview with the specific route disabled = %d, want 3", got.MatchCount)
 	}
 }
 
-// ---- test button ----
+func TestNotificationPreview_OwnerExample(t *testing.T) {
+	e := newNotifyEnv(t)
+	e.seedOnlyAlert()
+	e.seedActiveServices(nxKey, nyKey, nExtraKey)
+	clusterDraft := func(n int) NotificationPreviewDTO {
+		return e.preview(e.webhookInput("draft", func(in map[string]any) {
+			in["scope"] = []any{clusterScope(nxKey.ClusterKey, n)}
+			in["kinds"] = []string{"restart_loop"}
+		}))
+	}
+	one := clusterDraft(1)
+	if one.NotificationCount != 1 || len(one.Groups) != 1 || !one.Groups[0].Open || one.Groups[0].Failing != 1 || one.Groups[0].Total != 3 {
+		t.Errorf("N=1: %+v", one)
+	}
+	two := clusterDraft(2)
+	if two.NotificationCount != 0 || len(two.Groups) != 1 || two.Groups[0].Open || two.Groups[0].Failing != 1 || two.Groups[0].Threshold != 2 {
+		t.Errorf("N=2: %+v, want the entry listed below its threshold and nothing sent", two)
+	}
+	for _, n := range []int{1, 2} {
+		service := e.preview(e.webhookInput("draft", func(in map[string]any) {
+			in["scope"] = []any{serviceScope(nxKey), clusterScope(nxKey.ClusterKey, n)}
+			in["kinds"] = []string{"restart_loop"}
+		}))
+		if service.MatchCount != 1 {
+			t.Errorf("service entry beside a cluster entry at N=%d: %d matches, want 1", n, service.MatchCount)
+		}
+	}
+}
+
+func TestNotificationPreview_PendingCountsUnsettledAlerts(t *testing.T) {
+	e := newNotifyEnv(t, notifyEnvOptions{settle: 3 * time.Minute})
+	e.seedAlertsAged(90 * time.Second) // service_failing is 90 s old; restart_loop does not wait
+	e.seedActiveServices(nxKey, nyKey, nzKey, nwKey)
+	got := e.preview(e.webhookInput("draft"))
+	if got.MatchCount != 1 || !strings.Contains(matchTitles(got), "image-resizer") {
+		t.Fatalf("matches = %q, want only the restart loop", matchTitles(got))
+	}
+	if got.Pending != 2 {
+		t.Errorf("pending = %d, want the two service_failing alerts still inside the settle time", got.Pending)
+	}
+	cluster := e.preview(e.webhookInput("draft", func(in map[string]any) { in["scope"] = []any{clusterScope(nxKey.ClusterKey, 1)} }))
+	if cluster.NotificationCount != 0 || cluster.Pending != 1 {
+		t.Errorf("cluster draft: count %d pending %d, want 0 and 1 (payments-api is unsettled)", cluster.NotificationCount, cluster.Pending)
+	}
+}
+
+// The preview and the dispatcher run the same planner; this pins that they agree on one dataset.
+func TestNotificationPreview_MatchesWhatTheDispatcherSends(t *testing.T) {
+	e := newNotifyEnv(t)
+	e.seedAlerts()
+	e.seedActiveServices(nxKey, nyKey, nExtraKey, nzKey, nwKey)
+	body := e.webhookInput("both modes", func(in map[string]any) {
+		in["enabled"] = true
+		in["kinds"] = []string{"service_failing", "service_degraded", "restart_loop", "account_unreachable"}
+		in["scope"] = []any{clusterScope(nxKey.ClusterKey, 2), serviceScope(nzKey), accountScope(stagingAccountID, 1)}
+	})
+	route := e.create(body)
+	body["route_id"] = route.ID
+	preview := e.preview(body)
+
+	dispatcher := &notify.Dispatcher{Store: e.st, Senders: e.api.Notify, Box: e.api.NotifyBox, BaseURL: "https://hm.example.com", Now: time.Now, Log: e.api.Log}
+	if err := dispatcher.Cycle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rows, _, err := e.st.ListNotificationDeliveries(t.Context(), store.DeliveryFilter{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != preview.NotificationCount || preview.NotificationCount != 3 {
+		t.Fatalf("dispatcher planned %d notifications, preview said %d (want 3: the cluster aggregate, image-resizer and the staging account)", len(rows), preview.NotificationCount)
+	}
+}
 
 func TestNotificationTest_SendsOnceAndLogs(t *testing.T) {
 	e := newNotifyEnv(t)
@@ -917,3 +1097,14 @@ func TestNotificationTest_UnreadableSecretIs422(t *testing.T) {
 }
 
 var _ = authz.TagID(0)
+
+func TestNotificationRoutes_ReportSettleSeconds(t *testing.T) {
+	e := newNotifyEnv(t, notifyEnvOptions{settle: 3 * time.Minute})
+	if got := e.list().SettleSeconds; got != 180 {
+		t.Errorf("settle_seconds = %d, want 180", got)
+	}
+	off := newNotifyEnv(t)
+	if got := off.list().SettleSeconds; got != 0 {
+		t.Errorf("settle_seconds = %d, want 0 when the wait is off", got)
+	}
+}

@@ -37,8 +37,8 @@ func TestApply_SeedsDemoRoutesOnce(t *testing.T) {
 		}
 	}
 	routes, err := st.ListNotificationRoutes(ctx)
-	if err != nil || len(routes) != 5 {
-		t.Fatalf("routes = %d err=%v, want 5 after two applies", len(routes), err)
+	if err != nil || len(routes) != 6 {
+		t.Fatalf("routes = %d err=%v, want 6 after two applies", len(routes), err)
 	}
 	byName := map[string]store.NotificationRoute{}
 	for _, r := range routes {
@@ -51,7 +51,7 @@ func TestApply_SeedsDemoRoutesOnce(t *testing.T) {
 	}
 	core := byName["core-services to #core-alerts"]
 	if core.Destination != "slack" || !core.Enabled || !core.QuietEnabled || len(core.Scope) != 1 ||
-		core.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("homelab-admin"), Region: "us-east-1", Cluster: "core-services"}) {
+		core.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("homelab-admin"), Region: "us-east-1", Cluster: "core-services", Threshold: 1}) {
 		t.Errorf("core route = %+v", core)
 	}
 	telegram := byName["image-resizer to Telegram"]
@@ -61,8 +61,13 @@ func TestApply_SeedsDemoRoutesOnce(t *testing.T) {
 	}
 	email := byName["Staging account by email"]
 	if email.Destination != "email" || email.Enabled || len(email.Config.Recipients) != 1 || email.Config.Recipients[0] != "platform@example.com" || len(email.Scope) != 1 ||
-		email.Scope[0] != (store.NotificationSelector{Kind: "account", AccountID: accountID("staging-example")}) {
+		email.Scope[0] != (store.NotificationSelector{Kind: "account", AccountID: accountID("staging-example"), Threshold: 2}) {
 		t.Errorf("email route = %+v", email)
+	}
+	half := byName["Half of core-services down"]
+	if half.Destination != "pagerduty" || half.MinSeverity != "critical" || !half.Enabled || len(half.Scope) != 1 ||
+		half.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("homelab-admin"), Region: "us-east-1", Cluster: "core-services", Threshold: 2}) {
+		t.Errorf("half route = %+v, want the same cluster as the first route with a threshold of 2", half)
 	}
 	catchAll := byName["Everything else"]
 	if catchAll.Destination != "slack" || !catchAll.Fallback || !catchAll.Enabled || catchAll.MinSeverity != "warning" {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/notify/fakesink"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -280,5 +281,59 @@ func TestServer_FakeNotifyUnroutedByDefault(t *testing.T) {
 	withSink, _, _, _ := newServerCustom(t, true, func(s *Server) { s.FakeNotify = fakesink.New().Handler() })
 	if status, contentType := received(withSink); status != http.StatusOK || !strings.HasPrefix(contentType, "application/json") {
 		t.Errorf("/fake-notify/received with the receiver = %d %q, want a JSON list", status, contentType)
+	}
+}
+
+func TestNotificationDeliveries_AggregatedRowHasScopeAndClusterID(t *testing.T) {
+	e := newNotifyEnv(t)
+	route := e.create(e.webhookInput("hook"))
+	stored, _ := e.st.GetNotificationRoute(t.Context(), route.ID)
+	incident := e.openIncident("payments-api")
+	clusterKey := model.ServiceKey{ClusterKey: nxKey.ClusterKey}
+	due := time.Now()
+	group := store.NotificationDelivery{
+		RouteID: &stored.ID, RouteName: "hook", Destination: "webhook", Target: "x", IncidentID: &incident, Event: "update", Seq: 1,
+		Severity: "warning", AlertTitle: "core-services: 2 of 3 services failing", AlertText: "t", Key: clusterKey, Kind: "cluster_failing",
+		Status: "pending", NextAttemptAt: &due, CreatedAt: due,
+		Details: store.DeliveryDetails{Scope: "cluster", Threshold: 2, Failing: 2, Total: 3},
+	}
+	if ok, err := e.st.PlanNotificationDelivery(t.Context(), group); err != nil || !ok {
+		t.Fatalf("plan: %v %v", ok, err)
+	}
+	secondIncident := e.openIncident("auth")
+	alertRow := store.NotificationDelivery{
+		RouteID: &stored.ID, RouteName: "hook", Destination: "webhook", Target: "x", IncidentID: &secondIncident, Event: "opened",
+		Severity: "warning", AlertTitle: "payments-api: failing", AlertText: "t", Key: nxKey, Kind: "service_failing",
+		Status: "delivered", NextAttemptAt: &due, CreatedAt: due,
+	}
+	if ok, err := e.st.PlanNotificationDelivery(t.Context(), alertRow); err != nil || !ok {
+		t.Fatalf("plan: %v %v", ok, err)
+	}
+	e.seedDelivery(nil, "delivered", 2*time.Minute, "a test message")
+
+	byID := map[int64]NotificationDeliveryDTO{}
+	for _, d := range e.deliveries("").Items {
+		byID[d.ID] = d
+	}
+	var agg, perAlert NotificationDeliveryDTO
+	var testRow NotificationDeliveryDTO
+	for _, d := range byID {
+		switch d.Event {
+		case "update":
+			agg = d
+		case "opened":
+			perAlert = d
+		case "test":
+			testRow = d
+		}
+	}
+	if testRow.Scope != "" {
+		t.Errorf("a test message has scope %q, want none", testRow.Scope)
+	}
+	if agg.Scope != "cluster" || agg.ClusterID != nxKey.ClusterKey.ID() || agg.AccountID != homelabAccountID || agg.Region != "us-east-1" || agg.Service != "" || agg.ServiceID != "" || agg.Alert != group.AlertTitle {
+		t.Errorf("aggregated row = %+v", agg)
+	}
+	if perAlert.Scope != "service" || perAlert.ServiceID != nxKey.ID() || perAlert.ClusterID != nxKey.ClusterKey.ID() {
+		t.Errorf("per-alert row = %+v, want scope service with its ids", perAlert)
 	}
 }
