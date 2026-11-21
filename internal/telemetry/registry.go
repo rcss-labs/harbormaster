@@ -44,6 +44,9 @@ type Registry struct {
 	idle             bool
 	buildVersion     string
 	buildInfoSet     bool
+	roleName         string
+	roleVersion      string
+	roleInfoSet      bool
 	kvUp             bool
 	kvUpSet          bool
 	kvErrors         map[string]uint64
@@ -215,6 +218,13 @@ func (r *Registry) SetBuildInfo(version string) {
 	defer r.mu.Unlock()
 	r.buildVersion = version
 	r.buildInfoSet = true
+}
+
+// SetRoleInfo records the role this process runs, exposed via harbormaster_role_info.
+func (r *Registry) SetRoleInfo(role, version string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.roleName, r.roleVersion, r.roleInfoSet = role, version, true
 }
 
 // SetKVUp records whether the Valkey/Redis store is reachable. The kv series appear once it has been called, so an

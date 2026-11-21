@@ -51,6 +51,10 @@ type Config struct {
 	// coordinate (role=poller).
 	Coordinator lease.Holder
 
+	// NoSlices builds a manager that owns no slices (role=coordinator): it keeps its member row and competes for the
+	// coordinator lease only. The zero value polls slices.
+	NoSlices bool
+
 	// InstanceID identifies this process in poll_leases and poll_members; zero means a new one per Run.
 	InstanceID uuid.UUID
 	// Version is reported in poll_members.
@@ -178,8 +182,11 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	m := &lease.Manager{
 		Store: p.store, ID: id, Roles: roles, Version: p.cfg.Version, Timing: p.timing, Gate: gate,
-		Slices: lease.HolderFunc(p.holdSlice), Coordinator: p.cfg.Coordinator,
-		Targets: p.targets, TargetsEvery: p.cfg.AccountsRefresh, Telemetry: p.cfg.Telemetry, Log: p.log,
+		Coordinator: p.cfg.Coordinator,
+		Targets:     p.targets, TargetsEvery: p.cfg.AccountsRefresh, Telemetry: p.cfg.Telemetry, Log: p.log,
+	}
+	if !p.cfg.NoSlices {
+		m.Slices = lease.HolderFunc(p.holdSlice)
 	}
 	p.mgrMu.Lock()
 	p.manager = m
