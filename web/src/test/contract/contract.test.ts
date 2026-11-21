@@ -103,6 +103,7 @@ import {
   ROUTE_RESIZER_TELEGRAM,
   ROUTE_WEBHOOK_SIGNED,
 } from '../notificationsFixtures'
+import { CONFIG_SEARCH_EMPTY, CONFIG_SEARCH_NODE, CONFIG_SEARCH_TRUNCATED, CONFIG_SEARCH_UNINDEXED } from '../configSearchFixtures'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
 type Shape = string | Shape[] | { [key: string]: Shape }
@@ -313,6 +314,14 @@ describe('API contract', () => {
     expect(shapeProblems(await body('/api/log-search/services'), contract.logSearchServices, 'msw log search services')).toEqual([])
     expect(shapeProblems(SAVED_LOG_SEARCHES, contract.logSearchSaved, 'saved log searches')).toEqual([])
     expect(shapeProblems(await body('/api/log-search/saved'), contract.logSearchSaved, 'msw saved log searches')).toEqual([])
+  })
+
+  it('the config search fixtures match the backend shape', async () => {
+    const fixtures = { node: CONFIG_SEARCH_NODE, empty: CONFIG_SEARCH_EMPTY, truncated: CONFIG_SEARCH_TRUNCATED, unindexed: CONFIG_SEARCH_UNINDEXED }
+    for (const [label, fixture] of Object.entries(fixtures)) {
+      expect(shapeProblems(fixture, contract.configSearch, `config search ${label}`)).toEqual([])
+    }
+    expect(shapeProblems(await body('/api/config-search?q=env:NODE_ENV'), contract.configSearch, 'msw config search')).toEqual([])
   })
 
   it('every task fixture matches the backend task shape', () => {

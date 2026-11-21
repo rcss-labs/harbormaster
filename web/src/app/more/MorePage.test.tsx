@@ -34,6 +34,7 @@ describe('MorePage', () => {
     const insights = await section('Insights')
     expect(insights.getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/analytics/delivery')
     expect(insights.getByRole('link', { name: 'Log search' })).toHaveAttribute('href', '/logs')
+    expect(insights.getByRole('link', { name: 'Config search' })).toHaveAttribute('href', '/config')
 
     const admin = await section('Admin')
     const hrefs: Record<string, string> = {

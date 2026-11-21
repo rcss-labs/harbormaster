@@ -173,6 +173,8 @@ func contractShapes() map[string]any {
 		"notificationTargets":    shapeOf(reflect.TypeFor[NotificationTargetsDTO]()),
 		"notificationDeliveries": shapeOf(reflect.TypeFor[ListResponse[NotificationDeliveryDTO]]()),
 		"notificationSummary":    shapeOf(reflect.TypeFor[NotificationSummaryDTO]()),
+		// config search
+		"configSearch": shapeOf(reflect.TypeFor[ConfigSearchResponse]()),
 	}
 }
 

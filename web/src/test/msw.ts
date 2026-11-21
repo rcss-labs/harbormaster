@@ -54,6 +54,7 @@ import { notificationsHandlers } from './notificationsFixtures'
 import type { SearchResultDTO } from '../api/types'
 import { securityHandlers } from './securityFixtures'
 import { logSearchHandlers } from './logSearchFixtures'
+import { configSearchHandlers } from './configSearchFixtures'
 
 const notFound = () => HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
 
@@ -218,6 +219,7 @@ export const handlers = [
   }),
   ...securityHandlers,
   ...logSearchHandlers,
+  ...configSearchHandlers,
 ]
 
 export const server = setupServer(...handlers)

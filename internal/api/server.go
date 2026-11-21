@@ -308,6 +308,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.logSearchRoutes(mux)    // cross-service log search
 	s.notificationRoutes(mux) // alert notifications
 
+	s.configSearchRoutes(mux) // estate-wide config search
+
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/revisions", s.getRevisions, routeOptions{})

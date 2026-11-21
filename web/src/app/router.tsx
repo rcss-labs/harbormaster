@@ -9,6 +9,7 @@ import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
 import { Clusters } from './clusters/Clusters'
 import { LogSearchPage } from './logsearch/LogSearchPage'
+import { ConfigSearchPage } from './configsearch/ConfigSearchPage'
 import { MorePage } from './more/MorePage'
 import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
@@ -94,6 +95,7 @@ export function AppRoutes() {
           <Route path="analytics/:tab" element={<AnalyticsPage />} />
           <Route path="security" element={<SecurityPage />} />
           <Route path="logs" element={<LogSearchPage />} />
+          <Route path="config" element={<ConfigSearchPage />} />
           <Route path="*" element={<p>Page not found.</p>} />
         </Route>
       </Route>

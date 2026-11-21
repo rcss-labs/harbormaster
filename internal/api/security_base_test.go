@@ -57,7 +57,7 @@ func TestSetBaseImage_ValidatesTheReference(t *testing.T) {
 	} {
 		wantStatus(t, env.dana.do(http.MethodPut, baseImagePath(digest), SetBaseImageRequest{BaseRef: ref}, nil), http.StatusUnprocessableEntity)
 	}
-	if n := countRows(t, env.st, `select count(*) from scan_base_images`); n != 0 {
+	if n := countRows(t, env.st, `select count(*) from scan_base_images where repository = 'edge-nginx'`); n != 0 {
 		t.Fatalf("%d bases stored after invalid refs", n)
 	}
 	for _, ref := range []string{
@@ -76,7 +76,7 @@ func TestSetBaseImage_VisibilityPermissionsStoreAuditAndQueue(t *testing.T) {
 
 	wantStatus(t, env.omer.do(http.MethodPut, baseImagePath(digest), body, nil), http.StatusForbidden)
 	wantStatus(t, env.addUser(t, "nobody", nil).do(http.MethodPut, baseImagePath(digest), body, nil), http.StatusNotFound)
-	if n := countRows(t, env.st, `select count(*) from scan_base_images`); n != 0 {
+	if n := countRows(t, env.st, `select count(*) from scan_base_images where repository = 'edge-nginx'`); n != 0 {
 		t.Fatal("a refused request stored a base")
 	}
 	if detail := imageDetail(t, env.omer, digest); detail.Can.SetBase || !imageDetail(t, env.dana, digest).Can.SetBase {
@@ -197,7 +197,7 @@ func TestBaseImage_ClearingGivesNoneAndNoOrigin(t *testing.T) {
 			t.Fatalf("finding %s has origin %q with no base", f.Package, f.Origin)
 		}
 	}
-	if n := countRows(t, env.st, `select count(*) from scan_base_images`); n != 0 {
+	if n := countRows(t, env.st, `select count(*) from scan_base_images where repository = 'edge-nginx'`); n != 0 {
 		t.Fatalf("%d bases stored after clearing", n)
 	}
 }

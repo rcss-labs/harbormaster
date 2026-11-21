@@ -201,6 +201,19 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		return fmt.Errorf("turn on pre-deploy scan for edge-nginx: %w", err)
 	}
 
+	// Configured base images so `base:` config searches have results; web-frontend and web are the node:18 repos.
+	stagingAccount := accountIDByName(estate, "staging-example")
+	homelabAccount := accountIDByName(estate, "homelab-admin")
+	for key, base := range map[store.RepoKey]string{
+		{AccountID: homelabAccount, Region: "us-east-1", Repository: "web-frontend"}: "node:18-alpine",
+		{AccountID: stagingAccount, Region: "us-east-1", Repository: "web"}:          "node:18-alpine",
+		{AccountID: homelabAccount, Region: "us-east-1", Repository: "auth-service"}: "node:20-alpine",
+	} {
+		if err := st.SetRepoBase(ctx, key, base, 0, time.Now()); err != nil {
+			return fmt.Errorf("seed base image for %s: %w", key.Repository, err)
+		}
+	}
+
 	return seedAudit(ctx, st, ids["sam"])
 }
 
