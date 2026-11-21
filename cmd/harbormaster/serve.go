@@ -297,7 +297,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		notifySenders.FakeMail = fakeNotifySink.Mail
 	}
 	notifyDispatcher := &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
-		Interval: cfg.Notify.Interval, Now: time.Now, Log: log, Telemetry: telemetry.Default}
+		Interval: cfg.Notify.Interval, Settle: cfg.Notify.Settle, Now: time.Now, Log: log, Telemetry: telemetry.Default}
 	setup, err := auth.NewSetup(ctx, st, log)
 	if err != nil {
 		return err

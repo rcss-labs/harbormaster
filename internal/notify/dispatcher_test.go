@@ -35,6 +35,11 @@ type sentRecord struct {
 	Severity   string
 	Title      string
 	Secret     Secret
+	// Group messages (cluster or account entries).
+	Scope                     string
+	Text                      string
+	Threshold, Failing, Total int
+	Members                   []store.IncidentMember
 }
 
 // recordingSender stands in for Senders. reply decides each result; the default delivers.
@@ -49,7 +54,8 @@ func (r *recordingSender) Send(_ context.Context, route store.NotificationRoute,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sent = append(r.sent, sentRecord{route.Name, m.Event, m.DeliveryID, m.Subject.Key.Service, m.Subject.Key.Cluster, m.Subject.Key.AccountID,
-		m.Subject.Kind, m.Subject.Severity, m.Subject.Title, secret})
+		m.Subject.Kind, m.Subject.Severity, m.Subject.Title, secret,
+		m.Subject.Scope, m.Subject.Text, m.Subject.Threshold, m.Subject.Failing, m.Subject.Total, m.Subject.Members})
 	if r.calls == nil {
 		r.calls = map[string]int{}
 	}
@@ -228,8 +234,35 @@ func serviceSel(k model.ServiceKey) store.NotificationSelector {
 	return store.NotificationSelector{Kind: "service", AccountID: k.AccountID, Region: k.Region, Cluster: k.Cluster, Service: k.Service}
 }
 
-func clusterSel(k model.ClusterKey) store.NotificationSelector {
-	return store.NotificationSelector{Kind: "cluster", AccountID: k.AccountID, Region: k.Region, Cluster: k.Cluster}
+func clusterSel(k model.ClusterKey, threshold int) store.NotificationSelector {
+	return store.NotificationSelector{Kind: "cluster", AccountID: k.AccountID, Region: k.Region, Cluster: k.Cluster, Threshold: threshold}
+}
+
+func accountSel(account, region string, threshold int) store.NotificationSelector {
+	return store.NotificationSelector{Kind: "account", AccountID: account, Region: region, Threshold: threshold}
+}
+
+// seedServices makes the services ACTIVE in the snapshot, so a group message can say "of M".
+func (e *env) seedServices(keys ...model.ServiceKey) {
+	e.t.Helper()
+	var rows []model.Service
+	for _, k := range keys {
+		rows = append(rows, model.Service{Key: k, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()})
+	}
+	if _, err := e.st.UpsertServices(context.Background(), rows); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// groups returns what one route received as group messages, "event:scope:failing/total".
+func (r *recordingSender) groups(route string) []string {
+	var out []string
+	for _, rec := range r.records() {
+		if rec.Route == route && rec.Scope != "" {
+			out = append(out, fmt.Sprintf("%s:%s:%d/%d", rec.Event, rec.Scope, rec.Failing, rec.Total))
+		}
+	}
+	return out
 }
 
 var (
@@ -317,37 +350,45 @@ func TestDispatcher_SelectorsMatchAWSAndHarbormasterTags(t *testing.T) {
 
 func TestDispatcher_ScopedRoutesGetOnlyTheirAlerts(t *testing.T) {
 	e := newEnv(t)
+	e.seedServices(svcX, svcY, svcZ, svcW)
 	accountAlert := alert(model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: acctB, Region: "us-east-1"}}, "account_unreachable", model.AlertDanger)
 	accountAlert.Title = "staging unreachable"
 	e.route("svc-x", scoped(serviceSel(svcX)))
-	e.route("cluster-core", scoped(clusterSel(svcX.ClusterKey)))
-	e.route("account-b", scoped(store.NotificationSelector{Kind: "account", AccountID: acctB}))
+	e.route("cluster-core", scoped(clusterSel(svcX.ClusterKey, 1)))
+	e.route("account-b", scoped(accountSel(acctB, "", 1)))
 	e.route("everything")
 	e.setAlerts(
 		alert(svcX, "service_failing", model.AlertDanger), alert(svcY, "service_failing", model.AlertDanger),
 		alert(svcZ, "service_failing", model.AlertDanger), alert(svcW, "service_failing", model.AlertDanger), accountAlert)
 	e.cycle()
-	want := map[string]string{
-		"svc-x":        "opened:x",
-		"cluster-core": "opened:x,opened:y",
-		"account-b":    "opened:,opened:w", // the account-level alert has no service
-		"everything":   "opened:,opened:w,opened:x,opened:y,opened:z",
+	// Service entries and the empty scope take alerts one by one; cluster and account entries send one aggregate.
+	if got := strings.Join(e.sender.to("svc-x"), ","); got != "opened:x" {
+		t.Errorf("svc-x got %q, want only x (never y)", got)
 	}
-	for route, expected := range want {
-		if got := strings.Join(e.sender.to(route), ","); got != expected {
-			t.Errorf("route %s got %q, want %q", route, got, expected)
-		}
+	if got := strings.Join(e.sender.to("everything"), ","); got != "opened:,opened:w,opened:x,opened:y,opened:z" {
+		t.Errorf("everything got %q, want every alert one by one", got)
+	}
+	if got := e.sender.groups("cluster-core"); len(got) != 1 || got[0] != "opened:cluster:2/2" {
+		t.Errorf("cluster-core got %v, want one aggregate of its two failing services (never z or w)", got)
+	}
+	if got := e.sender.groups("account-b"); len(got) != 1 || got[0] != "opened:account:1/1" {
+		t.Errorf("account-b got %v, want one aggregate for the staging account", got)
+	}
+	if n := len(e.sender.to("cluster-core")); n != 1 {
+		t.Errorf("cluster-core sent %d messages, want 1", n)
 	}
 }
 
 func TestDispatcher_AccountRegionSelector(t *testing.T) {
 	e := newEnv(t)
 	us, eu := key(acctA, "us-east-1", "core", "us-svc"), key(acctA, "eu-west-1", "core", "eu-svc")
-	e.route("eu-only", scoped(store.NotificationSelector{Kind: "account", AccountID: acctA, Region: "eu-west-1"}))
+	e.seedServices(us, eu)
+	e.route("eu-only", scoped(accountSel(acctA, "eu-west-1", 1)))
 	e.setAlerts(alert(us, "service_failing", model.AlertDanger), alert(eu, "service_failing", model.AlertDanger))
 	e.cycle()
-	if got := strings.Join(e.sender.to("eu-only"), ","); got != "opened:eu-svc" {
-		t.Fatalf("got %q, want only the eu service", got)
+	got := e.sender.records()
+	if len(got) != 1 || got[0].Scope != "account" || got[0].Failing != 1 || got[0].Total != 1 || len(got[0].Members) != 1 || got[0].Members[0].Service != "eu-svc" {
+		t.Fatalf("sent = %+v, want one aggregate holding only the eu service", got)
 	}
 }
 
@@ -891,5 +932,339 @@ func TestDispatcher_CountsOutcomes(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("metrics lack %q:\n%s", want, out.String())
 		}
+	}
+}
+
+// ---- round 2: thresholds, aggregated incidents, settle ----
+
+var (
+	dispCluster = model.ClusterKey{AccountID: acctA, Region: "us-east-1", Cluster: "A"}
+	a1          = model.ServiceKey{ClusterKey: dispCluster, Service: "a1"}
+	a2          = model.ServiceKey{ClusterKey: dispCluster, Service: "a2"}
+	a3          = model.ServiceKey{ClusterKey: dispCluster, Service: "a3"}
+)
+
+func TestDispatcher_OwnerExample_ClusterOneAndServiceRouteSendTwo(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 1)))
+	e.route("service", scoped(serviceSel(a2)))
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle()
+	records := e.sender.records()
+	if len(records) != 2 {
+		t.Fatalf("sent %d messages, want exactly two: %+v", len(records), records)
+	}
+	if got := e.sender.groups("cluster"); len(got) != 1 || got[0] != "opened:cluster:1/3" {
+		t.Errorf("cluster route got %v, want one aggregate, 1 of 3", got)
+	}
+	for _, rec := range records {
+		switch rec.Route {
+		case "cluster":
+			if len(rec.Members) != 1 || rec.Members[0].Service != "a2" || !strings.Contains(rec.Title, "1 of 3 services failing") {
+				t.Errorf("cluster message = %+v", rec)
+			}
+		case "service":
+			if rec.Scope != "" || rec.Service != "a2" || rec.Title != "a2 restart_loop" {
+				t.Errorf("service message = %+v, want the per-alert message for a2", rec)
+			}
+		}
+	}
+}
+
+func TestDispatcher_OwnerExample_ClusterTwoAndServiceRouteSendOne(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 2)))
+	e.route("service", scoped(serviceSel(a2)))
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle()
+	records := e.sender.records()
+	if len(records) != 1 || records[0].Route != "service" || records[0].Scope != "" {
+		t.Fatalf("sent = %+v, want exactly one message, the service route's", records)
+	}
+	// A second service fails: now the cluster route opens with 2 of 3.
+	e.advance(time.Minute)
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning), alert(a3, "restart_loop", model.AlertWarning))
+	e.cycle()
+	if got := e.sender.groups("cluster"); len(got) != 1 || got[0] != "opened:cluster:2/3" {
+		t.Fatalf("cluster route got %v, want one opened at 2 of 3", got)
+	}
+}
+
+func TestDispatcher_GroupUpdateOnGrowthSilentOnShrink(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 2)), func(r *store.NotificationRoute) { r.RepeatSeconds = 1800 })
+	e.setAlerts(alert(a1, "restart_loop", model.AlertWarning), alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle()
+	if got := e.sender.groups("cluster"); len(got) != 1 || got[0] != "opened:cluster:2/3" {
+		t.Fatalf("after two failing: %v", got)
+	}
+
+	e.advance(time.Minute)
+	e.setAlerts(alert(a1, "restart_loop", model.AlertWarning), alert(a2, "restart_loop", model.AlertWarning), alert(a3, "restart_loop", model.AlertWarning))
+	e.cycle()
+	got := e.sender.groups("cluster")
+	if len(got) != 2 || got[1] != "update:cluster:3/3" {
+		t.Fatalf("a third failing must send one update: %v", got)
+	}
+	last := e.sender.records()[len(e.sender.records())-1]
+	if !strings.Contains(last.Text, "a3 restart_loop") {
+		t.Errorf("the update lists all three: %q", last.Text)
+	}
+	e.cycle()
+	if len(e.sender.groups("cluster")) != 2 {
+		t.Fatal("an update was repeated within the interval")
+	}
+
+	// One recovers: nothing is sent, even after its grace passes.
+	e.advance(time.Minute)
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning), alert(a3, "restart_loop", model.AlertWarning))
+	e.cycle()
+	e.advance(3 * time.Minute)
+	e.cycle()
+	if n := len(e.sender.groups("cluster")); n != 2 {
+		t.Fatalf("a recovery that stays at or above the threshold sent something: %v", e.sender.groups("cluster"))
+	}
+
+	// The next repeat carries the current list: two.
+	e.advance(31 * time.Minute)
+	e.cycle()
+	got = e.sender.groups("cluster")
+	if len(got) != 3 || got[2] != "repeat:cluster:2/3" {
+		t.Fatalf("the repeat must list the current two: %v", got)
+	}
+}
+
+func TestDispatcher_GroupResolvesBelowThresholdAfterGrace(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 2)))
+	both := []model.Alert{alert(a1, "restart_loop", model.AlertWarning), alert(a2, "restart_loop", model.AlertWarning)}
+	e.setAlerts(both...)
+	e.cycle()
+	var firstID int64
+	for _, d := range e.deliveries() {
+		if d.Event == "opened" {
+			firstID = *d.IncidentID
+		}
+	}
+
+	// A dip shorter than the grace sends nothing and keeps the incident.
+	e.advance(10 * time.Second)
+	e.setAlerts(both[0])
+	e.cycle()
+	e.advance(60 * time.Second)
+	e.setAlerts(both...)
+	e.cycle()
+	e.advance(10 * time.Minute)
+	e.cycle()
+	if got := e.sender.groups("cluster"); len(got) != 1 {
+		t.Fatalf("a short dip sent %v, want only the opened", got)
+	}
+	for _, d := range e.deliveries() {
+		if *d.IncidentID != firstID {
+			t.Errorf("the dip created a new incident: %+v", d)
+		}
+	}
+
+	// A real drop: nothing for the grace, then a resolved.
+	e.setAlerts(both[0])
+	e.cycle()
+	e.advance(90 * time.Second)
+	e.cycle()
+	if len(e.sender.groups("cluster")) != 1 {
+		t.Fatal("resolved before the grace")
+	}
+	e.advance(60 * time.Second)
+	e.cycle()
+	e.cycle()
+	got := e.sender.groups("cluster")
+	if len(got) != 2 || !strings.HasPrefix(got[1], "resolved:cluster") {
+		t.Fatalf("got %v, want a resolved after the grace", got)
+	}
+}
+
+func TestDispatcher_GroupIsOneIncidentHoweverManyAlerts(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 2)))
+	e.setAlerts(
+		alert(a1, "restart_loop", model.AlertWarning), alert(a1, "unhealthy_task", model.AlertWarning),
+		alert(a2, "restart_loop", model.AlertWarning), alert(a2, "cannot_place", model.AlertDanger))
+	for range 3 {
+		e.cycle()
+		e.advance(10 * time.Second)
+	}
+	if got := e.sender.groups("cluster"); len(got) != 1 || got[0] != "opened:cluster:2/3" {
+		t.Fatalf("got %v, want one message for two services however many alerts", got)
+	}
+}
+
+func TestDispatcher_ScaleUpThatSettlesSendsNothing(t *testing.T) {
+	e := newEnv(t)
+	e.d.Settle = 3 * time.Minute
+	e.seedServices(a1, a2, a3)
+	e.route("service", scoped(serviceSel(a2)))
+	e.route("cluster", scoped(clusterSel(dispCluster, 1)))
+	e.route("catch-all", func(r *store.NotificationRoute) { r.Fallback = true })
+	e.setAlerts(alert(a2, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.advance(90 * time.Second)
+	e.cycle()
+	e.setAlerts() // the tasks came up
+	e.advance(30 * time.Second)
+	e.cycle()
+	e.advance(5 * time.Minute)
+	e.cycle()
+	if got := e.sender.records(); len(got) != 0 {
+		t.Fatalf("a scale-up that settled notified: %+v", got)
+	}
+	if rows := e.deliveries(); len(rows) != 0 {
+		t.Fatalf("deliveries were planned for a scale-up: %+v", rows)
+	}
+}
+
+func TestDispatcher_ServiceStillFailingAfterSettleIsSent(t *testing.T) {
+	e := newEnv(t)
+	e.d.Settle = 3 * time.Minute
+	e.seedServices(a1, a2, a3)
+	e.route("service", scoped(serviceSel(a2)))
+	e.route("cluster", scoped(clusterSel(dispCluster, 1)))
+	e.setAlerts(alert(a2, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.advance(2*time.Minute + 59*time.Second)
+	e.cycle()
+	if len(e.sender.records()) != 0 {
+		t.Fatal("notified before the settle time")
+	}
+	e.advance(2 * time.Second)
+	e.cycle()
+	e.cycle()
+	if len(e.sender.to("service")) != 1 || len(e.sender.groups("cluster")) != 1 {
+		t.Fatalf("after the settle time each route sends once: %+v", e.sender.records())
+	}
+
+	// A catch-all alone gets it too.
+	only := newEnv(t)
+	only.d.Settle = 3 * time.Minute
+	only.route("catch-all", func(r *store.NotificationRoute) { r.Fallback = true })
+	only.setAlerts(alert(a2, "service_failing", model.AlertDanger))
+	only.cycle()
+	only.advance(3*time.Minute + time.Second)
+	only.cycle()
+	if got := only.sender.to("catch-all"); len(got) != 1 {
+		t.Fatalf("catch-all got %v", got)
+	}
+	// Other kinds do not wait.
+	quick := newEnv(t)
+	quick.d.Settle = 3 * time.Minute
+	quick.route("everything")
+	quick.setAlerts(alert(a2, "restart_loop", model.AlertWarning))
+	quick.cycle()
+	if len(quick.sender.to("everything")) != 1 {
+		t.Fatal("a restart loop must notify at once")
+	}
+}
+
+func TestDispatcher_UnreachableAccountOpensTheAccountRoute(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("account", scoped(accountSel(acctA, "", 5)))
+	unreachable := alert(model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: acctA, Region: "us-east-1"}}, "account_unreachable", model.AlertDanger)
+	unreachable.Text = "The role cannot be assumed."
+	e.setAlerts(unreachable)
+	e.cycle()
+	records := e.sender.records()
+	if len(records) != 1 || records[0].Scope != "account" || !strings.Contains(records[0].Title, "unreachable") || !strings.Contains(records[0].Text, "The role cannot be assumed.") {
+		t.Fatalf("sent = %+v", records)
+	}
+}
+
+func TestDispatcher_RemovedEntryResolvesSilently(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	route := e.route("cluster", scoped(clusterSel(dispCluster, 1)))
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle()
+	if len(e.sender.groups("cluster")) != 1 {
+		t.Fatal("the group did not open")
+	}
+	e.update(route, func(r *store.NotificationRoute) { r.Scope = []store.NotificationSelector{serviceSel(a1)} })
+	e.advance(10 * time.Second)
+	e.cycle()
+	e.advance(3 * time.Minute)
+	e.cycle()
+	e.cycle()
+	if got := e.sender.groups("cluster"); len(got) != 1 {
+		t.Fatalf("got %v, want no resolved message for an entry that no longer exists", got)
+	}
+}
+
+func TestDispatcher_ThresholdRaisedWhileOpenResolves(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	route := e.route("cluster", scoped(clusterSel(dispCluster, 1)))
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle()
+	e.update(route, func(r *store.NotificationRoute) { r.Scope = []store.NotificationSelector{clusterSel(dispCluster, 2)} })
+	e.advance(10 * time.Second)
+	e.cycle()
+	e.advance(3 * time.Minute)
+	e.cycle()
+	e.cycle()
+	got := e.sender.groups("cluster")
+	if len(got) != 2 || !strings.HasPrefix(got[1], "resolved:cluster") {
+		t.Fatalf("got %v, want the group resolved after the threshold was raised past it", got)
+	}
+}
+
+func TestDispatcher_CatchAllAndThreshold(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 2)))
+	e.route("catch-all", func(r *store.NotificationRoute) { r.Fallback = true })
+	e.setAlerts(alert(a1, "restart_loop", model.AlertWarning))
+	e.cycle()
+	if got := e.sender.to("catch-all"); len(got) != 1 {
+		t.Fatalf("the first failing service goes to the catch-all: %v", got)
+	}
+	e.advance(time.Minute)
+	e.setAlerts(alert(a1, "restart_loop", model.AlertWarning), alert(a2, "restart_loop", model.AlertWarning))
+	e.cycle()
+	if got := e.sender.groups("cluster"); len(got) != 1 {
+		t.Fatalf("the second opens the cluster route: %v", got)
+	}
+	if got := e.sender.to("catch-all"); len(got) != 1 {
+		t.Fatalf("the second must not also go to the catch-all: %v", got)
+	}
+}
+
+func TestDispatcher_TwoDispatchersOpenOneGroup(t *testing.T) {
+	e := newEnv(t)
+	e.seedServices(a1, a2, a3)
+	e.route("cluster", scoped(clusterSel(dispCluster, 1)))
+	e.setAlerts(alert(a2, "restart_loop", model.AlertWarning))
+	second := e.newDispatcher()
+	var wg sync.WaitGroup
+	for range 10 {
+		for _, d := range []*Dispatcher{e.d, second} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := d.Cycle(context.Background()); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	var open int
+	if err := e.st.Pool.QueryRow(context.Background(), `select count(*) from notification_incidents where group_route_id <> 0 and resolved_at is null`).Scan(&open); err != nil || open != 1 {
+		t.Fatalf("open group incidents = %d err=%v, want 1", open, err)
+	}
+	if got := e.sender.groups("cluster"); len(got) != 1 {
+		t.Fatalf("got %v, want exactly one opened", got)
 	}
 }

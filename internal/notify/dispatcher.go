@@ -47,8 +47,10 @@ type Dispatcher struct {
 	Box     *secretbox.Box // nil when HM_SESSION_KEY is empty
 	BaseURL string
 	// Tags resolves tag selectors; nil uses Store.
-	Tags      TagMatcher
-	Interval  time.Duration
+	Tags     TagMatcher
+	Interval time.Duration
+	// Settle is how long service_failing and service_degraded must stay open before they notify or count (0 = no wait).
+	Settle    time.Duration
 	Now       func() time.Time
 	Log       *slog.Logger
 	Telemetry *telemetry.Registry
@@ -190,12 +192,16 @@ func subjectOf(i store.NotificationIncident, names map[string]string) (Subject, 
 	return Subject{Key: i.Key, Kind: i.Kind, Severity: severity, Title: i.Title, Text: i.Text, At: i.OpenedAt, AccountName: name}, true
 }
 
-// plan makes the delivery rows that should exist. If any route's scope fails to resolve it plans nothing: a
-// partial picture could send an alert to a catch-all that a specific route covers.
+// plan makes the delivery rows that should exist. It builds the shared plan (BuildPlan, which the preview uses
+// too), syncs the group incidents it wants, and plans opened, update, repeat and resolved rows for alert incidents
+// and group incidents alike. If any route's scope fails to resolve it plans nothing: a partial picture could send
+// an alert to a catch-all that a specific route covers.
 func (d *Dispatcher) plan(ctx context.Context, now time.Time, routes []store.NotificationRoute, open, resolved []store.NotificationIncident, names map[string]string) error {
 	scopes := map[int64]Scope{}
-	var enabled []store.NotificationRoute
+	needTotals := false
+	routeByID := map[int64]store.NotificationRoute{}
 	for _, r := range routes {
+		routeByID[r.ID] = r
 		if !r.Enabled {
 			continue
 		}
@@ -204,15 +210,28 @@ func (d *Dispatcher) plan(ctx context.Context, now time.Time, routes []store.Not
 			return fmt.Errorf("notification route scope: %w", err)
 		}
 		scopes[r.ID] = scope
-		enabled = append(enabled, r)
+		needTotals = needTotals || len(scope.Groups) > 0
+	}
+	var totals Totals
+	if needTotals {
+		targets, err := d.Store.NotificationTargets(ctx)
+		if err != nil {
+			return err
+		}
+		totals = TotalsFrom(targets)
 	}
 
-	ids := make([]int64, 0, len(open)+len(resolved))
-	for _, i := range open {
-		ids = append(ids, i.ID)
+	built := BuildPlan(routes, scopes, open, totals, names, now, d.Settle)
+	openGroups, resolvedGroups, err := d.Store.SyncNotificationGroups(ctx, now, resolveGrace, recentlyResolvedWindow, built.Groups)
+	if err != nil {
+		return err
 	}
-	for _, i := range resolved {
-		ids = append(ids, i.ID)
+
+	var ids []int64
+	for _, list := range [][]store.NotificationIncident{open, resolved, openGroups, resolvedGroups} {
+		for _, i := range list {
+			ids = append(ids, i.ID)
+		}
 	}
 	states, err := d.Store.NotificationPlanStates(ctx, ids)
 	if err != nil {
@@ -225,39 +244,56 @@ func (d *Dispatcher) plan(ctx context.Context, now time.Time, routes []store.Not
 		if !ok {
 			continue
 		}
-		matches := map[int64]bool{}
-		covered := false
-		for _, r := range enabled {
-			if Matches(r, subject, scopes[r.ID]) {
-				matches[r.ID] = true
-				if !r.Fallback {
-					covered = true
-				}
+		taking := map[int64]bool{}
+		for _, id := range built.PerAlert[incident.ID] {
+			taking[id] = true
+		}
+		// A catch-all that already opened this incident keeps repeating it, even after a specific route started
+		// covering it (it never gets a second opened).
+		for _, r := range routes {
+			if r.Enabled && r.Fallback && states[[2]int64{r.ID, incident.ID}].OpenedStatus != "" && Matches(r, subject, scopes[r.ID]) {
+				taking[r.ID] = true
 			}
 		}
-		for _, r := range enabled {
-			if !matches[r.ID] {
+		for _, r := range routes {
+			if !taking[r.ID] {
 				continue
 			}
 			state := states[[2]int64{r.ID, incident.ID}]
-			if r.Fallback && covered && state.OpenedStatus == "" {
-				continue // a specific route covers it; a fallback that already opened it keeps going
-			}
 			switch {
 			case state.OpenedStatus == "":
 				errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventOpened, 0))
-			case r.RepeatSeconds > 0 && (state.OpenedStatus == "delivered" || state.OpenedStatus == "failed") && !state.HasHeld &&
-				state.LastSentAt != nil && now.Sub(*state.LastSentAt) >= time.Duration(r.RepeatSeconds)*time.Second:
+			case repeatDue(r, state, now):
 				errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventRepeat, state.MaxRepeatSeq+1))
 			}
 		}
 	}
 
-	if len(resolved) > 0 {
-		resolvedIDs := make([]int64, len(resolved))
-		for i, incident := range resolved {
-			resolvedIDs[i] = incident.ID
+	for _, incident := range openGroups {
+		r, ok := routeByID[incident.GroupRouteID]
+		subject, subjectOK := subjectOf(incident, names)
+		if !ok || !r.Enabled || !subjectOK {
+			continue
 		}
+		subject = groupSubject(subject, incident)
+		state := states[[2]int64{r.ID, incident.ID}]
+		switch {
+		case state.OpenedStatus == "":
+			errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventOpened, 0))
+		case incident.Generation > state.MaxUpdateSeq:
+			errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventUpdate, incident.Generation))
+		case repeatDue(r, state, now):
+			errs = append(errs, d.planDelivery(ctx, now, r, incident, subject, EventRepeat, state.MaxRepeatSeq+1))
+		}
+	}
+
+	var resolvedIDs []int64
+	for _, list := range [][]store.NotificationIncident{resolved, resolvedGroups} {
+		for _, incident := range list {
+			resolvedIDs = append(resolvedIDs, incident.ID)
+		}
+	}
+	if len(resolvedIDs) > 0 {
 		if err := d.Store.CancelUnsentNotificationDeliveries(ctx, resolvedIDs, noteResolvedBeforeSent, noteResolvedQuiet, now); err != nil {
 			errs = append(errs, err)
 		}
@@ -275,10 +311,48 @@ func (d *Dispatcher) plan(ctx context.Context, now time.Time, routes []store.Not
 			}
 		}
 	}
+	for _, incident := range resolvedGroups {
+		r, ok := routeByID[incident.GroupRouteID]
+		subject, subjectOK := subjectOf(incident, names)
+		if !ok || !subjectOK || !hasEntry(r, incident) {
+			continue // the route or the entry is gone: it resolves without a message
+		}
+		state := states[[2]int64{r.ID, incident.ID}]
+		if r.Enabled && r.NotifyResolved && state.OpenedStatus == "delivered" && !state.HasResolved {
+			errs = append(errs, d.planDelivery(ctx, now, r, incident, groupSubject(subject, incident), EventResolved, 0))
+		}
+	}
 	return errors.Join(errs...)
 }
 
-// planDelivery inserts the row; a row that already exists (another replica, a repeated cycle) is a no-op.
+// repeatDue reports whether the route's repeat interval has passed since its last message about the incident.
+func repeatDue(r store.NotificationRoute, state store.DeliveryPlanState, now time.Time) bool {
+	return r.RepeatSeconds > 0 && (state.OpenedStatus == "delivered" || state.OpenedStatus == "failed") && !state.HasHeld &&
+		state.LastSentAt != nil && now.Sub(*state.LastSentAt) >= time.Duration(r.RepeatSeconds)*time.Second
+}
+
+// groupSubject adds a group incident's facts to its subject.
+func groupSubject(subject Subject, incident store.NotificationIncident) Subject {
+	subject.Scope, subject.RouteID = incident.ScopeKind, incident.GroupRouteID
+	subject.Threshold, subject.Failing, subject.Total, subject.Members = incident.Threshold, incident.Failing, incident.Total, incident.Members
+	return subject
+}
+
+// hasEntry reports whether the route still has the cluster or account entry a group incident was opened for.
+func hasEntry(r store.NotificationRoute, incident store.NotificationIncident) bool {
+	for _, sel := range r.Scope {
+		if sel.Kind != incident.ScopeKind || sel.AccountID != incident.Key.AccountID || sel.Region != incident.Key.Region {
+			continue
+		}
+		if sel.Kind != store.NotificationSelectorCluster || sel.Cluster == incident.Key.Cluster {
+			return true
+		}
+	}
+	return false
+}
+
+// planDelivery inserts the row; a row that already exists (another replica, a repeated cycle) is a no-op. A
+// group's row carries the snapshot its message is rendered from.
 func (d *Dispatcher) planDelivery(ctx context.Context, now time.Time, r store.NotificationRoute, incident store.NotificationIncident, subject Subject, event Event, seq int) error {
 	routeID, incidentID := r.ID, incident.ID
 	row := store.NotificationDelivery{
@@ -286,6 +360,10 @@ func (d *Dispatcher) planDelivery(ctx context.Context, now time.Time, r store.No
 		IncidentID: &incidentID, Event: string(event), Seq: seq, Severity: subject.Severity,
 		AlertTitle: incident.Title, AlertText: incident.Text, Key: incident.Key, Kind: incident.Kind,
 		Status: "pending", NextAttemptAt: &now, CreatedAt: now,
+	}
+	if subject.Scope != "" {
+		row.Details = store.DeliveryDetails{Scope: subject.Scope, Threshold: subject.Threshold, Failing: subject.Failing,
+			Total: subject.Total, Members: subject.Members}
 	}
 	if event != EventResolved {
 		if until, held := HeldUntil(r, subject.Severity, now); held {
@@ -395,7 +473,9 @@ func (d *Dispatcher) deliver(ctx context.Context, row store.NotificationDelivery
 	}
 	message := Message{
 		Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName,
-		Subject: Subject{Key: row.Key, Kind: row.Kind, Severity: row.Severity, Title: row.AlertTitle, Text: row.AlertText, At: row.CreatedAt, AccountName: name},
+		Subject: Subject{Key: row.Key, Kind: row.Kind, Severity: row.Severity, Title: row.AlertTitle, Text: row.AlertText, At: row.CreatedAt, AccountName: name,
+			Scope: row.Details.Scope, RouteID: *row.RouteID, Threshold: row.Details.Threshold, Failing: row.Details.Failing,
+			Total: row.Details.Total, Members: row.Details.Members},
 	}
 	result := d.Senders.Send(ctx, route, secret, message)
 
