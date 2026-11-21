@@ -31,6 +31,7 @@ import (
 
 	"github.com/beevik/etree"
 	crewjam "github.com/crewjam/saml"
+	"github.com/crewjam/saml/xmlenc"
 	dsig "github.com/russellhaering/goxmldsig"
 
 	"github.com/rcss-labs/harbormaster/internal/saml"
@@ -63,6 +64,11 @@ type Tamper struct {
 	DuplicateAssertion bool // two separately signed assertions with distinct IDs
 	OmitAuthnStatement bool
 	OmitNameID         bool
+	// ForeignNameID adds a signed <x:NameID> in a foreign namespace inside
+	// Subject. Combine with OmitNameID for a foreign-only Subject.
+	ForeignNameID string
+	// OmitAssertionIssuer drops the assertion's Issuer element before signing.
+	OmitAssertionIssuer bool
 
 	OmitResponseIssuer bool   // drop the Response-level Issuer (the assertion keeps its own)
 	ResponseIssuer     string // replaces the Response-level Issuer; the assertion Issuer is unchanged
@@ -492,6 +498,9 @@ func (s *Server) assertionElement(ir *crewjam.IdpAuthnRequest, t Tamper, freshID
 		return copied.Element(), nil
 	}
 	ir.AssertionEl = nil
+	if t.ForeignNameID != "" || t.OmitAssertionIssuer {
+		return s.editedAssertionElement(ir, t)
+	}
 	if err := ir.MakeAssertionEl(); err != nil {
 		return nil, err
 	}
@@ -510,4 +519,67 @@ func signingContext(idp *crewjam.IdentityProvider) (*dsig.SigningContext, error)
 		return nil, err
 	}
 	return sc, nil
+}
+
+const foreignNamespace = "urn:example:foreign"
+
+// editedAssertionElement builds, edits, signs and (optionally) encrypts the
+// assertion by hand, so the edits are covered by the signature.
+func (s *Server) editedAssertionElement(ir *crewjam.IdpAuthnRequest, t Tamper) (*etree.Element, error) {
+	el := ir.Assertion.Element()
+	if t.OmitAssertionIssuer {
+		if iss := el.SelectElement("Issuer"); iss != nil {
+			el.RemoveChild(iss)
+		}
+	}
+	if t.ForeignNameID != "" {
+		subject := el.SelectElement("Subject")
+		if subject == nil {
+			return nil, errors.New("fakeidp: assertion has no Subject")
+		}
+		foreign := etree.NewElement("x:NameID")
+		foreign.CreateAttr("xmlns:x", foreignNamespace)
+		foreign.SetText(t.ForeignNameID)
+		pos := 0 // after the real NameID, so the library (last match wins) reads the foreign one
+		if real := subject.SelectElement("NameID"); real != nil {
+			pos = real.Index() + 1
+		}
+		subject.InsertChildAt(pos, foreign)
+	}
+	sc, err := signingContext(ir.IDP)
+	if err != nil {
+		return nil, err
+	}
+	signed, err := sc.SignEnveloped(el)
+	if err != nil {
+		return nil, err
+	}
+	kids := signed.ChildElements()
+	sig := kids[len(kids)-1]
+	signed.RemoveChild(sig)
+	pos := 0
+	if iss := signed.SelectElement("Issuer"); iss != nil {
+		pos = iss.Index() + 1
+	}
+	signed.InsertChildAt(pos, sig)
+	if t.EncryptFor == nil {
+		return signed, nil
+	}
+	doc := etree.NewDocument()
+	doc.SetRoot(signed)
+	buf, err := doc.WriteToBytes()
+	if err != nil {
+		return nil, err
+	}
+	enc := xmlenc.OAEP()
+	enc.BlockCipher = xmlenc.AES128CBC
+	enc.DigestMethod = &xmlenc.SHA1
+	dataEl, err := enc.Encrypt(t.EncryptFor, buf, nil)
+	if err != nil {
+		return nil, err
+	}
+	dataEl.CreateAttr("Type", "http://www.w3.org/2001/04/xmlenc#Element")
+	out := etree.NewElement("saml:EncryptedAssertion")
+	out.AddChild(dataEl)
+	return out, nil
 }
