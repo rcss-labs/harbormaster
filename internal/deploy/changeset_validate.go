@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -57,8 +58,13 @@ func validateShape(cs ChangeSet) error {
 
 func validateServiceShape(svc ServiceChange) error {
 	if svc.DesiredCount == nil && svc.EnableExecuteCommand == nil && svc.DeploymentConfiguration == nil &&
-		svc.HealthCheckGracePeriodSeconds == nil && !svc.ForceNewDeployment {
+		svc.HealthCheckGracePeriodSeconds == nil && !svc.ForceNewDeployment && svc.CapacityProviderStrategy == nil {
 		return invalid("The service section changes nothing")
+	}
+	if svc.CapacityProviderStrategy != nil {
+		if err := validateStrategyShape(svc.CapacityProviderStrategy); err != nil {
+			return err
+		}
 	}
 	if svc.DesiredCount != nil && *svc.DesiredCount < 0 {
 		return invalid("Desired count must be 0 or more")
@@ -75,6 +81,48 @@ func validateServiceShape(svc ServiceChange) error {
 		case config.CircuitBreakerRollback && !config.CircuitBreakerEnable:
 			return invalid("Circuit breaker rollback needs the circuit breaker enabled")
 		}
+	}
+	return nil
+}
+
+// Limits of a capacity provider strategy item, from the ECS API.
+const (
+	maxCapacityBase   = 100000
+	maxCapacityWeight = 1000
+)
+
+// validateStrategyShape checks a strategy Harbormaster is willing to write: one or two items, FARGATE and
+// FARGATE_SPOT only, a base only on FARGATE, and at least one weight above zero.
+func validateStrategyShape(items []CapacityItem) error {
+	if len(items) < 1 || len(items) > 2 {
+		return invalid("A capacity strategy needs 1 or 2 providers")
+	}
+	seen := map[string]bool{}
+	anyWeight := false
+	for _, item := range items {
+		if item.Provider != ProviderFargate && item.Provider != ProviderFargateSpot {
+			return invalid("Capacity providers must be FARGATE or FARGATE_SPOT")
+		}
+		if seen[item.Provider] {
+			return invalid("Capacity provider %s can be listed once", item.Provider)
+		}
+		seen[item.Provider] = true
+		if item.Base < 0 || item.Base > maxCapacityBase {
+			return invalid("The base of %s must be between 0 and %d", item.Provider, maxCapacityBase)
+		}
+		if item.Base > 0 && item.Provider != ProviderFargate {
+			return invalid("Only FARGATE can have a base")
+		}
+		if item.Weight < 0 || item.Weight > maxCapacityWeight {
+			return invalid("The weight of %s must be between 0 and %d", item.Provider, maxCapacityWeight)
+		}
+		if item.Provider == ProviderFargateSpot && item.Weight == 0 {
+			return invalid("FARGATE_SPOT needs a weight above 0")
+		}
+		anyWeight = anyWeight || item.Weight > 0
+	}
+	if !anyWeight {
+		return invalid("At least one capacity provider needs a weight above 0")
 	}
 	return nil
 }
@@ -206,6 +254,15 @@ func validateAgainst(cs ChangeSet, st DeploySettings) error {
 		}
 		if svc.HealthCheckGracePeriodSeconds != nil && !st.HasLoadBalancer {
 			return invalid("A health check grace period needs a load balancer, and this service has none")
+		}
+		if svc.CapacityProviderStrategy != nil {
+			if !st.Capacity.Editable {
+				return invalid("%s", st.Capacity.LockReason)
+			}
+			usesSpot := slices.ContainsFunc(svc.CapacityProviderStrategy, func(item CapacityItem) bool { return item.Provider == ProviderFargateSpot })
+			if usesSpot && st.Capacity.ClusterProvidersKnown && !slices.Contains(st.Capacity.ClusterProviders, ProviderFargateSpot) {
+				return invalid("%s", ClusterNoSpotMessage(st.Capacity.ClusterName))
+			}
 		}
 	}
 	scaling := cs.Scaling

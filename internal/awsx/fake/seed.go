@@ -28,6 +28,8 @@ type seedCluster struct {
 	name, accountID, region string
 	insights                bool
 	subnets                 []seedSubnet
+	// noSpot leaves FARGATE_SPOT out of the cluster's capacity providers; no task of the cluster then runs on Spot.
+	noSpot bool
 }
 
 type seedEFS struct{ name, fsID, accessPointID, path string }
@@ -47,24 +49,24 @@ var mainVPCSubnets = []seedSubnet{
 }
 
 var seedClusters = []seedCluster{
-	{"core-services", homelabAccountID, "us-east-1", true, mainVPCSubnets},
-	{"background-jobs", homelabAccountID, "us-east-1", true, mainVPCSubnets},
+	{"core-services", homelabAccountID, "us-east-1", true, mainVPCSubnets, false},
+	{"background-jobs", homelabAccountID, "us-east-1", true, mainVPCSubnets, false},
 	{"ci-tools", homelabAccountID, "us-east-1", true, []seedSubnet{
 		{"subnet-0e1c88a1", "10.21.1.0/24", "us-east-1a", false},
 		{"subnet-02aa71f3", "10.21.3.0/24", "us-east-1c", false},
-	}},
+	}, false},
 	{"eu-apps", homelabAccountID, "eu-west-1", true, []seedSubnet{
 		{"subnet-0a90f7c1", "10.30.1.0/24", "eu-west-1a", false},
 		{"subnet-0c6b1e92", "10.30.2.0/24", "eu-west-1b", false},
-	}},
+	}, false},
 	{"edge-proxy", homelabAccountID, "eu-central-1", false, []seedSubnet{
 		{"subnet-0d2e5a77", "10.40.1.0/24", "eu-central-1a", false},
 		{"subnet-0f61c3b8", "10.40.101.0/24", "eu-central-1a", true},
-	}},
+	}, false},
 	{"staging-web", stagingAccountID, "us-east-1", true, []seedSubnet{
 		{"subnet-01f8a2d4", "10.50.1.0/24", "us-east-1a", false},
 		{"subnet-0e7c3b19", "10.50.2.0/24", "us-east-1b", false},
-	}},
+	}, false},
 }
 
 type envVar struct{ name, value string }
@@ -318,6 +320,13 @@ func MockupEstate(now func() time.Time) *Estate {
 	return e
 }
 
+func capacityProvidersFor(c seedCluster) []string {
+	if c.noSpot {
+		return []string{"FARGATE"}
+	}
+	return []string{"FARGATE", "FARGATE_SPOT"}
+}
+
 func (s *seeder) addCluster(c seedCluster) {
 	insights := "disabled"
 	if c.insights {
@@ -327,7 +336,7 @@ func (s *seeder) addCluster(c seedCluster) {
 		ClusterArn:        aws.String(clusterARN(c.region, c.accountID, c.name)),
 		ClusterName:       aws.String(c.name),
 		Status:            aws.String("ACTIVE"),
-		CapacityProviders: []string{"FARGATE", "FARGATE_SPOT"},
+		CapacityProviders: capacityProvidersFor(c),
 		Settings:          []ecstypes.ClusterSetting{{Name: ecstypes.ClusterSettingNameContainerInsights, Value: aws.String(insights)}},
 	}})
 }
@@ -413,6 +422,7 @@ type taskOptions struct {
 	deploymentID      string
 	group, startedBy  string // overrides for standalone tasks
 	agentPending      bool   // the ExecuteCommandAgent is PENDING instead of RUNNING (plan 04)
+	capacityProvider  string // placed by the service's capacity provider strategy; "" keeps the seeded choice
 }
 
 func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
@@ -442,6 +452,12 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 	}
 	if sp.spot {
 		capacity = "FARGATE_SPOT"
+	}
+	if o.capacityProvider != "" {
+		capacity = o.capacityProvider // the service's capacity provider strategy decides
+	}
+	if clusterSeed(sp.cluster).noSpot {
+		capacity = "FARGATE"
 	}
 
 	details := []ecstypes.KeyValuePair{

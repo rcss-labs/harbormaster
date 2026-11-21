@@ -28,6 +28,9 @@ type ServiceChange struct {
 	DeploymentConfiguration       *DeploymentConfigChange
 	HealthCheckGracePeriodSeconds *int
 	ForceNewDeployment            bool
+	// CapacityProviderStrategy replaces the service's strategy (or launch type). Nil leaves it alone; an empty
+	// slice is refused.
+	CapacityProviderStrategy []CapacityItem
 }
 
 // DeploymentConfigChange replaces the service's deployment configuration as a whole.

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -33,7 +35,8 @@ func RequiredActions(cs ChangeSet) []authz.Action {
 		if svc.DesiredCount != nil || svc.ForceNewDeployment {
 			need[authz.Operate] = true
 		}
-		if svc.EnableExecuteCommand != nil || svc.DeploymentConfiguration != nil || svc.HealthCheckGracePeriodSeconds != nil {
+		if svc.EnableExecuteCommand != nil || svc.DeploymentConfiguration != nil || svc.HealthCheckGracePeriodSeconds != nil ||
+			svc.CapacityProviderStrategy != nil {
 			need[authz.Deploy] = true
 		}
 	}
@@ -57,6 +60,7 @@ type changePlan struct {
 	exec           *bool
 	config         *DeploymentConfigChange
 	grace          *int
+	capacity       []CapacityItem // the strategy to set, nil when it already matches
 	forceNew       bool
 	scaling        *ScalingChange
 }
@@ -84,8 +88,15 @@ func buildPlan(cs ChangeSet, st DeploySettings, canDeploy bool) changePlan {
 		if grace := svc.HealthCheckGracePeriodSeconds; grace != nil && (st.HealthCheckGracePeriodSeconds == nil || *grace != *st.HealthCheckGracePeriodSeconds) {
 			plan.grace = grace
 		}
+		if svc.CapacityProviderStrategy != nil {
+			requested := sortedStrategy(svc.CapacityProviderStrategy)
+			if !slices.Equal(requested, st.Capacity.Strategy) {
+				plan.capacity = requested
+			}
+		}
 		// A new revision replaces the tasks anyway; the exec flag only reaches existing tasks through a new deployment.
-		plan.forceNew = !plan.deployRevision && (svc.ForceNewDeployment || plan.exec != nil)
+		// A capacity strategy never starts a deployment by itself, so it forces one even together with a new revision.
+		plan.forceNew = plan.capacity != nil || (!plan.deployRevision && (svc.ForceNewDeployment || plan.exec != nil))
 	}
 	plan.scaling = cs.Scaling
 	return plan
@@ -93,12 +104,12 @@ func buildPlan(cs ChangeSet, st DeploySettings, canDeploy bool) changePlan {
 
 // updatesService reports whether the plan needs the single UpdateService call.
 func (p changePlan) updatesService() bool {
-	return p.deployRevision || p.desired != nil || p.exec != nil || p.config != nil || p.grace != nil || p.forceNew
+	return p.deployRevision || p.desired != nil || p.exec != nil || p.config != nil || p.grace != nil || p.capacity != nil || p.forceNew
 }
 
 // replacesTasks reports whether the plan changes how tasks roll out, which the controller and rollout gates guard.
 func (p changePlan) replacesTasks() bool {
-	return p.deployRevision || p.exec != nil || p.config != nil || p.grace != nil || p.forceNew
+	return p.deployRevision || p.exec != nil || p.config != nil || p.grace != nil || p.capacity != nil || p.forceNew
 }
 
 func (p changePlan) empty() bool { return !p.register && !p.updatesService() && p.scaling == nil }
@@ -339,10 +350,16 @@ func (r *changeSetRun) updateService(ctx context.Context) error {
 	if r.plan.grace != nil {
 		input.HealthCheckGracePeriodSeconds = aws.Int32(int32(*r.plan.grace))
 	}
+	if r.plan.capacity != nil {
+		for _, item := range r.plan.capacity {
+			input.CapacityProviderStrategy = append(input.CapacityProviderStrategy, ecstypes.CapacityProviderStrategyItem{
+				CapacityProvider: aws.String(item.Provider), Base: int32(item.Base), Weight: int32(item.Weight)})
+		}
+	}
 	input.ForceNewDeployment = r.plan.forceNew
 	out, err := r.ecsAPI.UpdateService(ctx, input)
 	if err != nil {
-		return wrapAWS(err)
+		return r.capacityError(wrapAWS(err))
 	}
 	r.wrote = true
 
@@ -413,6 +430,10 @@ func (r *changeSetRun) recordServiceStep(ctx context.Context, svc *ecstypes.Serv
 			verb = "Enabled"
 		}
 		line("exec", verb+" ECS Exec.", nil)
+	}
+	if r.plan.capacity != nil {
+		line("capacity", fmt.Sprintf("Changed capacity providers from %s to %s.", describeCapacity(r.st.Capacity), describeStrategy(r.plan.capacity)),
+			map[string]any{"from": describeCapacity(r.st.Capacity), "to": describeStrategy(r.plan.capacity)})
 	}
 	if text := rolloutSettingsText(r.plan); text != "" {
 		line("rollout_settings", text, nil)
@@ -491,4 +512,45 @@ func (r *changeSetRun) scale(ctx context.Context) error {
 		r.warn(warning)
 	}
 	return scaleErr
+}
+
+// capacityError replaces an AWS rejection that is about the capacity provider with the cluster copy: the usual cause is a
+// cluster without FARGATE_SPOT that the stored snapshot did not show yet, and the raw text does not say what to do.
+func (r *changeSetRun) capacityError(err error) error {
+	var awsErr *AWSError
+	if r.plan.capacity != nil && errors.As(err, &awsErr) && awsErr.Validation && strings.Contains(strings.ToLower(awsErr.Error()), "capacity provider") {
+		return invalid("%s", ClusterNoSpotMessage(r.key.Cluster))
+	}
+	return err
+}
+
+// sortedStrategy returns a copy ordered by provider, the order settings report.
+func sortedStrategy(items []CapacityItem) []CapacityItem {
+	out := append([]CapacityItem(nil), items...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Provider < out[j].Provider })
+	return out
+}
+
+// describeStrategy reads like "FARGATE base 1, FARGATE_SPOT weight 1".
+func describeStrategy(items []CapacityItem) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		text := item.Provider
+		if item.Base > 0 {
+			text += fmt.Sprintf(" base %d", item.Base)
+		}
+		if item.Weight > 0 {
+			text += fmt.Sprintf(" weight %d", item.Weight)
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// describeCapacity is the current strategy, or the launch type as "FARGATE (launch type)".
+func describeCapacity(c CapacitySettings) string {
+	if len(c.Strategy) == 0 {
+		return c.LaunchType + " (launch type)"
+	}
+	return describeStrategy(c.Strategy)
 }

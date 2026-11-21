@@ -43,6 +43,26 @@ export interface DeploymentConfigurationDTO {
   maximum_percent: number
 }
 
+/** One capacity provider of a strategy. Harbormaster edits only FARGATE (which may have a base) and FARGATE_SPOT. */
+export interface CapacityItem {
+  provider: string
+  base: number
+  weight: number
+}
+
+/** How the service picks its capacity: a launch type, or a strategy. */
+export interface DeployCapacity {
+  /** Empty when a strategy is set. */
+  launch_type: string
+  /** Never null; empty for a service on a launch type. */
+  strategy: CapacityItem[]
+  /** The providers associated with the cluster (from the stored snapshot). */
+  cluster_providers: string[]
+  editable: boolean
+  /** Why the capacity cannot be edited; empty when editable. */
+  lock_reason: string
+}
+
 export interface DeploySettingsResponse {
   /** sha256 of the canonical live settings; sent back as `base_version` on the change set. */
   version: string
@@ -66,6 +86,7 @@ export interface DeploySettingsResponse {
     policies: DeployPolicyDTO[]
     scheduled_actions: DeployScheduledActionDTO[]
   }
+  capacity: DeployCapacity
   can: ChangeCanDTO
   /** Parts that could not be read (task_role, target_groups, scaling_target, scaling_policies, scheduled_actions); empty when complete. */
   partial: PartialErrorDTO[]

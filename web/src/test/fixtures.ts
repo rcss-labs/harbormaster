@@ -1394,6 +1394,7 @@ export const DEPLOY_SETTINGS_PAYMENTS: DeploySettingsResponse = {
   deployment_configuration: { circuit_breaker: { enable: true, rollback: true }, minimum_healthy_percent: 100, maximum_percent: 200 },
   health_check_grace_period_seconds: 60,
   has_load_balancer: true,
+  capacity: { launch_type: 'FARGATE', strategy: [], cluster_providers: ['FARGATE', 'FARGATE_SPOT'], editable: true, lock_reason: '' },
   target_groups: [
     {
       arn: `arn:aws:elasticloadbalancing:us-east-1:${ACCOUNT_HOMELAB.account_id}:targetgroup/payments-api/0123456789abcdef`,

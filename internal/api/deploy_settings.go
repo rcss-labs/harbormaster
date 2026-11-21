@@ -56,6 +56,23 @@ type DeployScalingDTO struct {
 	ScheduledActions []DeployScheduledActionDTO `json:"scheduled_actions"`
 }
 
+// CapacityItemDTO is one capacity provider of a strategy, also used in change-set requests.
+type CapacityItemDTO struct {
+	Provider string `json:"provider"`
+	Base     int    `json:"base"`
+	Weight   int    `json:"weight"`
+}
+
+// DeployCapacityDTO is how the service picks its capacity. LaunchType is "" when a strategy is set; Strategy is never
+// null. LockReason says why the capacity cannot be edited and is "" when Editable.
+type DeployCapacityDTO struct {
+	LaunchType       string            `json:"launch_type"`
+	Strategy         []CapacityItemDTO `json:"strategy"`
+	ClusterProviders []string          `json:"cluster_providers"`
+	Editable         bool              `json:"editable"`
+	LockReason       string            `json:"lock_reason"`
+}
+
 // DeploySettingsResponse is GET /api/services/{id}/deploy-settings. Version goes back as base_version on the change set.
 type DeploySettingsResponse struct {
 	Version                       string                     `json:"version"`
@@ -72,6 +89,7 @@ type DeploySettingsResponse struct {
 	HasLoadBalancer               bool                       `json:"has_load_balancer"`
 	TargetGroups                  []DeployTargetGroupDTO     `json:"target_groups"`
 	Scaling                       DeployScalingDTO           `json:"scaling"`
+	Capacity                      DeployCapacityDTO          `json:"capacity"`
 	Can                           ChangeCanDTO               `json:"can"`
 	Partial                       []PartialErrorDTO          `json:"partial"`
 }
@@ -103,7 +121,15 @@ func deploySettingsDTO(st deploy.DeploySettings, can ChangeCanDTO) DeploySetting
 			Policies:         make([]DeployPolicyDTO, 0, len(st.Scaling.Policies)),
 			ScheduledActions: make([]DeployScheduledActionDTO, 0, len(st.Scaling.ScheduledActions)),
 		},
+		Capacity: DeployCapacityDTO{
+			LaunchType: st.Capacity.LaunchType, Strategy: make([]CapacityItemDTO, 0, len(st.Capacity.Strategy)),
+			ClusterProviders: append([]string{}, st.Capacity.ClusterProviders...),
+			Editable:         st.Capacity.Editable, LockReason: st.Capacity.LockReason,
+		},
 		Can: can,
+	}
+	for _, item := range st.Capacity.Strategy {
+		out.Capacity.Strategy = append(out.Capacity.Strategy, CapacityItemDTO{Provider: item.Provider, Base: item.Base, Weight: item.Weight})
 	}
 	for _, part := range st.Partial {
 		out.Partial = append(out.Partial, PartialErrorDTO{Part: part.Part, Code: "aws_error", Message: partialMessage(part)})

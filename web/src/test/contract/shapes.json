@@ -1290,6 +1290,21 @@
       "edit": "boolean",
       "operate": "boolean"
     },
+    "capacity": {
+      "cluster_providers": [
+        "string"
+      ],
+      "editable": "boolean",
+      "launch_type": "string",
+      "lock_reason": "string",
+      "strategy": [
+        {
+          "base": "number",
+          "provider": "string",
+          "weight": "number"
+        }
+      ]
+    },
     "controller": {
       "name": "string",
       "supported": "boolean",
