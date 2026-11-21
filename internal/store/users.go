@@ -169,7 +169,11 @@ func (s *Store) LockUser(ctx context.Context, id int64, until time.Time) error {
 
 // execExpectOne runs a single-row write and maps "no rows affected" to ErrNotFound.
 func (s *Store) execExpectOne(ctx context.Context, sql string, args ...any) error {
-	tag, err := s.Pool.Exec(ctx, sql, args...)
+	return execExpectOne(ctx, s.Pool, sql, args...)
+}
+
+func execExpectOne(ctx context.Context, q execer, sql string, args ...any) error {
+	tag, err := q.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("exec: %w", err)
 	}

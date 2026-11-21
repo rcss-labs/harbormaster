@@ -34,11 +34,15 @@ func (p PollLoop) Failing() bool { return p.Failures >= failingThreshold }
 // UpsertPollLoop stores a loop's status, replacing any previous status for the same
 // account, region and tier. A zero UpdatedAt stores the current time.
 func (s *Store) UpsertPollLoop(ctx context.Context, p PollLoop) error {
+	return upsertPollLoop(ctx, s.Pool, p)
+}
+
+func upsertPollLoop(ctx context.Context, q db, p PollLoop) error {
 	var updatedAt *time.Time
 	if !p.UpdatedAt.IsZero() {
 		updatedAt = &p.UpdatedAt
 	}
-	_, err := s.Pool.Exec(ctx,
+	_, err := q.Exec(ctx,
 		`insert into poll_loops (account_id, region, tier, last_ok_at, last_error, interval_ms,
 		   base_interval_ms, failures, updated_at)
 		 values ($1, $2, $3, $4, nullif($5, ''), $6, $7, $8, coalesce($9, now()))

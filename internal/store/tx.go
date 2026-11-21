@@ -15,6 +15,16 @@ type execer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
+// db is what a poller write needs. *pgxpool.Pool and pgx.Tx both satisfy it; Begin on a Tx opens a savepoint, so a
+// write that opens its own transaction still runs atomically inside the fenced transaction of a SliceWriter.
+type db interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
+}
+
 // Tx is the set of writes that can run inside one transaction (see InTx).
 // Each method is the same statement as the Store method of the same name.
 type Tx struct{ tx pgx.Tx }

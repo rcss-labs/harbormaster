@@ -42,7 +42,11 @@ func sameAlertContent(a, b model.Alert) bool {
 // against the stored rows: unchanged ones are not written, changed ones are updated in place (keeping their
 // id), new ones are inserted and resolved ones deleted. A static estate with standing alerts writes nothing.
 func (s *Store) ReplaceAlertsAndStatusRuns(ctx context.Context, t awsx.Target, alerts []model.Alert, runs []StatusRun) error {
-	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	return replaceAlertsAndStatusRuns(ctx, s.Pool, t, alerts, runs)
+}
+
+func replaceAlertsAndStatusRuns(ctx context.Context, q db, t awsx.Target, alerts []model.Alert, runs []StatusRun) error {
+	tx, err := q.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("replace alerts: %w", err)
 	}

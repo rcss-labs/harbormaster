@@ -16,7 +16,11 @@ const scopeWhere = `($1 = '' or account_id = $1) and ($2 = '' or region = $2)`
 // ReplaceNetwork upserts the VPCs, subnets, edges and security groups of one account and region,
 // then deletes the rows of that scope that were not in the input. It runs in one transaction.
 func (s *Store) ReplaceNetwork(ctx context.Context, accountID, region string, vpcs []model.VPC, subnets []model.Subnet, edges []model.VPCEdge, sgs []model.SecurityGroup) error {
-	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+	return replaceNetwork(ctx, s.Pool, accountID, region, vpcs, subnets, edges, sgs)
+}
+
+func replaceNetwork(ctx context.Context, q db, accountID, region string, vpcs []model.VPC, subnets []model.Subnet, edges []model.VPCEdge, sgs []model.SecurityGroup) error {
+	return pgx.BeginFunc(ctx, q, func(tx pgx.Tx) error {
 		if err := upsertVPCs(ctx, tx, vpcs); err != nil {
 			return err
 		}

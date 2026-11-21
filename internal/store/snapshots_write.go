@@ -92,12 +92,12 @@ func polledAtOrNow(t time.Time) time.Time {
 
 // upsertBatch runs every statement in one transaction. Each statement must end
 // in RETURNING (xmax = 0): a row means inserted/updated, no row means unchanged.
-func (s *Store) upsertBatch(ctx context.Context, what string, statements []batchStatement) (WriteResult, error) {
+func upsertBatch(ctx context.Context, q db, what string, statements []batchStatement) (WriteResult, error) {
 	var result WriteResult
 	if len(statements) == 0 {
 		return result, nil
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := q.Begin(ctx)
 	if err != nil {
 		return result, fmt.Errorf("upsert %s: %w", what, err)
 	}
@@ -151,6 +151,10 @@ returning (xmax = 0) as inserted`
 
 // UpsertClusters writes clusters whose content changed; identical rows are left untouched.
 func (s *Store) UpsertClusters(ctx context.Context, rows []model.Cluster) (WriteResult, error) {
+	return upsertClusters(ctx, s.Pool, rows)
+}
+
+func upsertClusters(ctx context.Context, q db, rows []model.Cluster) (WriteResult, error) {
 	statements := make([]batchStatement, 0, len(rows))
 	for _, c := range rows {
 		statements = append(statements, batchStatement{upsertClusterSQL, []any{
@@ -159,19 +163,23 @@ func (s *Store) UpsertClusters(ctx context.Context, rows []model.Cluster) (Write
 			nonNilStrings(c.CapacityProviders), ContentHash(c), rawOrEmpty(c.Raw), polledAtOrNow(c.PolledAt),
 		}})
 	}
-	return s.upsertBatch(ctx, "clusters", statements)
+	return upsertBatch(ctx, q, "clusters", statements)
 }
 
 // DeleteClustersNotIn removes the account+region's clusters missing from keep,
 // together with their services, tasks, service events, counts history and observe rows.
 func (s *Store) DeleteClustersNotIn(ctx context.Context, t awsx.Target, keep []model.ClusterKey) (int64, error) {
+	return deleteClustersNotIn(ctx, s.Pool, t, keep)
+}
+
+func deleteClustersNotIn(ctx context.Context, q db, t awsx.Target, keep []model.ClusterKey) (int64, error) {
 	names := make([]string, 0, len(keep))
 	for _, k := range keep {
 		if k.AccountID == t.AccountID && k.Region == t.Region {
 			names = append(names, k.Cluster)
 		}
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := q.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("delete clusters not in: %w", err)
 	}
@@ -233,6 +241,10 @@ returning (xmax = 0) as inserted`
 
 // UpsertServices writes services whose content changed; identical rows are left untouched.
 func (s *Store) UpsertServices(ctx context.Context, rows []model.Service) (WriteResult, error) {
+	return upsertServices(ctx, s.Pool, rows)
+}
+
+func upsertServices(ctx context.Context, q db, rows []model.Service) (WriteResult, error) {
 	statements := make([]batchStatement, 0, len(rows))
 	for _, v := range rows {
 		statements = append(statements, batchStatement{upsertServiceSQL, []any{
@@ -245,16 +257,20 @@ func (s *Store) UpsertServices(ctx context.Context, rows []model.Service) (Write
 			nullTime(v.CreatedAt), ContentHash(v), rawOrEmpty(v.Raw), polledAtOrNow(v.PolledAt),
 		}})
 	}
-	return s.upsertBatch(ctx, "services", statements)
+	return upsertBatch(ctx, q, "services", statements)
 }
 
 // DeleteServicesNotIn removes the cluster's services missing from keep, with their target health,
 // scaling, status-run and alert rows. Their tasks stay so stopped history survives.
 func (s *Store) DeleteServicesNotIn(ctx context.Context, k model.ClusterKey, keep []string) (int64, error) {
+	return deleteServicesNotIn(ctx, s.Pool, k, keep)
+}
+
+func deleteServicesNotIn(ctx context.Context, q db, k model.ClusterKey, keep []string) (int64, error) {
 	if keep == nil {
 		keep = []string{}
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := q.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("delete services not in: %w", err)
 	}
@@ -283,10 +299,14 @@ func (s *Store) DeleteServicesNotIn(ctx context.Context, k model.ClusterKey, kee
 
 // InsertServiceEvents stores events not seen before and returns how many were new.
 func (s *Store) InsertServiceEvents(ctx context.Context, rows []model.ServiceEvent) (int, error) {
+	return insertServiceEvents(ctx, s.Pool, rows)
+}
+
+func insertServiceEvents(ctx context.Context, q db, rows []model.ServiceEvent) (int, error) {
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := q.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("insert service events: %w", err)
 	}
@@ -346,6 +366,10 @@ returning (xmax = 0) as inserted`
 // STOPPED tasks) stop_reason_group, stop_kind and stop_cause. Tasks absent from rows are never deleted. STOPPED is
 // terminal: a non-STOPPED snapshot never replaces a STOPPED row (counted as unchanged).
 func (s *Store) UpsertTasks(ctx context.Context, rows []model.Task) (WriteResult, error) {
+	return upsertTasks(ctx, s.Pool, rows)
+}
+
+func upsertTasks(ctx context.Context, q db, rows []model.Task) (WriteResult, error) {
 	statements := make([]batchStatement, 0, len(rows))
 	for _, t := range rows {
 		var stopGroup *string
@@ -366,7 +390,7 @@ func (s *Store) UpsertTasks(ctx context.Context, rows []model.Task) (WriteResult
 			stopKind, stopCause,
 		}})
 	}
-	return s.upsertBatch(ctx, "tasks", statements)
+	return upsertBatch(ctx, q, "tasks", statements)
 }
 
 // KnownTaskARNs lists the cluster's task ARNs with the given last_status. An empty
@@ -398,10 +422,14 @@ func (s *Store) KnownTaskARNs(ctx context.Context, k model.ClusterKey, lastStatu
 // (RUNNING, PENDING, ACTIVATING, STOPPING ... tasks ECS no longer reports):
 // STOPPED, stop_code 'Unknown', stopped_at = now if unset. content_hash is replaced so the row counts as changed.
 func (s *Store) MarkTasksMissing(ctx context.Context, k model.ClusterKey, arns []string, now time.Time) error {
+	return markTasksMissing(ctx, s.Pool, k, arns, now)
+}
+
+func markTasksMissing(ctx context.Context, q db, k model.ClusterKey, arns []string, now time.Time) error {
 	if len(arns) == 0 {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx,
+	_, err := q.Exec(ctx,
 		`update tasks set last_status = 'STOPPED', desired_status = 'STOPPED', stop_code = 'Unknown',
 		   stopped_at = coalesce(stopped_at, $4), content_hash = 'missing:' || $4::text, polled_at = $4
 		 where account_id = $1 and region = $2 and cluster_name = $3
@@ -449,10 +477,14 @@ func (s *Store) HasTaskDefinition(ctx context.Context, accountID, region, arn st
 
 // InsertCountsHistory records one (running, desired, pending) sample per service at ts.
 func (s *Store) InsertCountsHistory(ctx context.Context, ts time.Time, rows []model.Service) error {
+	return insertCountsHistory(ctx, s.Pool, ts, rows)
+}
+
+func insertCountsHistory(ctx context.Context, q db, ts time.Time, rows []model.Service) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	tx, err := s.Pool.Begin(ctx)
+	tx, err := q.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("insert counts history: %w", err)
 	}

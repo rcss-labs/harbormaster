@@ -12,6 +12,10 @@ import (
 
 // UpsertTargetHealth stores each target group's health, replacing the row for the same key.
 func (s *Store) UpsertTargetHealth(ctx context.Context, rows []model.TargetHealth) error {
+	return upsertTargetHealth(ctx, s.Pool, rows)
+}
+
+func upsertTargetHealth(ctx context.Context, q db, rows []model.TargetHealth) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -28,7 +32,7 @@ func (s *Store) UpsertTargetHealth(ctx context.Context, rows []model.TargetHealt
 			row.Key.AccountID, row.Key.Region, row.Key.Cluster, row.Key.Service, row.TargetGroupARN,
 			row.LoadBalancerARN, row.Healthy, row.Unhealthy, jsonArray(row.Targets), rawOrEmpty(row.Raw), row.PolledAt)
 	}
-	if err := s.execBatch(ctx, batch); err != nil {
+	if err := execBatchOn(ctx, q, batch); err != nil {
 		return fmt.Errorf("upsert target health: %w", err)
 	}
 	return nil
@@ -36,10 +40,14 @@ func (s *Store) UpsertTargetHealth(ctx context.Context, rows []model.TargetHealt
 
 // DeleteTargetHealthNotIn removes the target's rows whose target group ARN is not in keep.
 func (s *Store) DeleteTargetHealthNotIn(ctx context.Context, t awsx.Target, keep []string) error {
+	return deleteTargetHealthNotIn(ctx, s.Pool, t, keep)
+}
+
+func deleteTargetHealthNotIn(ctx context.Context, q db, t awsx.Target, keep []string) error {
 	if keep == nil {
 		keep = []string{} // a nil slice would bind NULL and match nothing
 	}
-	_, err := s.Pool.Exec(ctx,
+	_, err := q.Exec(ctx,
 		`delete from target_health where account_id = $1 and region = $2 and not (target_group_arn = any($3))`,
 		t.AccountID, t.Region, keep)
 	if err != nil {
