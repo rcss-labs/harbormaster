@@ -40,3 +40,15 @@ test('capacity keeps the range filter disabled and explains a tap with the toast
   await expect(page.getByText('This page does not use the range filter')).toBeVisible()
   await expect(page).toHaveURL(/range=24h/)
 })
+
+test('the Fargate Spot panel renders as cards without scrolling sideways', async ({ page }) => {
+  watchPage(page)
+  await page.goto('/analytics/cost')
+  const panel = page.getByRole('region', { name: /^Fargate Spot/ })
+  await expect(panel).toBeVisible({ timeout: 15_000 })
+  const card = panel.getByRole('row').filter({ hasText: 'catalog-api' })
+  await expect(card).toContainText('Check first')
+  await expect(card).toContainText('Non-production tag Dev')
+  await expect(panel.getByRole('columnheader')).toHaveCount(0)
+  await expectPhoneLayoutClean(page)
+})

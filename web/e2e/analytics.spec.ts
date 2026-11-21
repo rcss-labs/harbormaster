@@ -85,4 +85,57 @@ test.describe('analytics as sam', () => {
     await expect(review).toBeHidden()
     await deployPage.close()
   })
+
+  // Mutating: the apply changes catalog-api's capacity providers on the shared estate, which is why this runs in the flows project.
+  test('Fargate Spot suggestions fill the Deploy tab and apply as one forced deployment', async ({ page, context }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/analytics/cost')
+    const panel = page.getByRole('region', { name: /^Fargate Spot/ })
+    const table = panel.getByRole('table', { name: 'Fargate Spot candidates' })
+    const catalogRow = table.getByRole('row', { name: /catalog-api/ })
+    await expect(catalogRow).toBeVisible({ timeout: 15_000 })
+    // The seeded terminal session two days ago makes it a candidate with a caution: shown, unticked.
+    await expect(catalogRow.getByText('Check first')).toBeVisible()
+    const box = catalogRow.getByRole('checkbox', { name: 'Select catalog-api' })
+    await expect(box).not.toBeChecked()
+    await expect(catalogRow.getByText('1 terminal sessions in 7 days')).toBeVisible()
+
+    // edge-nginx would qualify, but its cluster was never associated with FARGATE_SPOT: said, with the saving it would have.
+    const notCandidates = page.getByRole('region', { name: 'Not candidates' })
+    const edge = notCandidates.getByRole('listitem').filter({ hasText: 'edge-nginx' })
+    await expect(edge).toContainText('has no FARGATE_SPOT capacity provider')
+    await expect(edge).toContainText('It would save about')
+    await expect(notCandidates.getByRole('listitem').filter({ hasText: 'payments-api' })).toContainText('Production tag Prod')
+    await expect(notCandidates.getByRole('listitem').filter({ hasText: 'notifications' })).toContainText('Already uses Fargate Spot')
+
+    await box.check()
+    await panel.getByRole('button', { name: 'Draft change sets' }).click()
+    const draft = page.getByRole('dialog')
+    await expect(draft.getByText(/Nothing deploys yet\./)).toContainText('"Move to Fargate Spot, 1 on-demand"')
+    const link = draft.getByRole('listitem').filter({ hasText: 'catalog-api' }).getByRole('link', { name: 'Open in Deploy' })
+    const href = (await link.getAttribute('href')) ?? ''
+    expect(href).toContain('capacity=spot')
+    const [deployPage] = await Promise.all([context.waitForEvent('page'), link.click()])
+
+    const pending = deployPage.getByRole('region', { name: 'Pending changes' })
+    await expect(pending.getByRole('listitem', { name: 'Capacity providers' })).toContainText('FARGATE (launch type)', { timeout: 15_000 })
+    await expect(pending.getByRole('listitem', { name: 'Capacity providers' })).toContainText('FARGATE base 1, FARGATE_SPOT weight 1')
+    await expect(deployPage.getByText(/Spot tasks can be stopped with two minutes' notice/)).toBeVisible()
+    await pending.getByRole('button', { name: 'Review…' }).click()
+    const review = deployPage.getByRole('dialog')
+    await expect(review.getByRole('textbox', { name: 'Reason' })).toHaveValue('Move to Fargate Spot, 1 on-demand')
+    await review.getByRole('button', { name: 'Apply changes' }).click()
+    await expect(deployPage.getByText(/^(Deploying catalog-api to :\d+|Applied the changes to catalog-api)\.$/)).toBeVisible()
+
+    const id = /\/services\/([^/]+)\/deploy/.exec(href)?.[1] ?? ''
+    await expect
+      .poll(async () => {
+        const response = await deployPage.request.get(`/api/services/${id}/deploy-settings`)
+        return ((await response.json()) as { capacity: { launch_type: string; strategy: { provider: string }[] } }).capacity
+      })
+      .toMatchObject({ launch_type: '', strategy: [{ provider: 'FARGATE' }, { provider: 'FARGATE_SPOT' }] })
+    await deployPage.goto(`/services/${id}/operations`)
+    await expect(deployPage.getByText('Changed capacity providers from FARGATE (launch type) to FARGATE base 1, FARGATE_SPOT weight 1.')).toBeVisible()
+    await deployPage.close()
+  })
 })

@@ -341,3 +341,19 @@ test.describe('omer on staging web (Viewer only)', () => {
     await expect(page.getByRole('combobox', { name: 'Image tag' })).toHaveCount(0)
   })
 })
+
+test.describe('sam on a cluster without FARGATE_SPOT', () => {
+  test.use(asUser('sam'))
+
+  // Read-only: the link is opened but never applied. edge-proxy was never associated with FARGATE_SPOT.
+  test('locks Spot with the cluster message and ignores the Spot link', async ({ page }) => {
+    await page.goto(`${serviceUrl(...SVC.edgeNginx, 'deploy')}?capacity=spot&on_demand_base=1`)
+    const spot = page.getByRole('spinbutton', { name: 'Spot weight' })
+    await expect(spot).toBeDisabled({ timeout: 15_000 })
+    await expect(spot.locator('xpath=ancestor::label')).toHaveAttribute('title', /Cluster edge-proxy has no FARGATE_SPOT capacity provider/)
+    await expect(spot).toHaveValue('0')
+    const pending = page.getByRole('region', { name: 'Pending changes' })
+    await expect(pending.getByRole('listitem')).toHaveCount(0)
+    await expect(pending.getByText(/suggested from Cost/)).toHaveCount(0)
+  })
+})
