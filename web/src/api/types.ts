@@ -89,6 +89,8 @@ export interface TagDTO {
   name: string
   color: TagColor
   inherited: boolean
+  /** Set by an admin: services under this tag may be suggested for Fargate Spot. */
+  non_production?: boolean
 }
 export interface ClusterRef {
   id: string
@@ -476,6 +478,7 @@ export interface TagItemDTO {
   name: string
   color: TagColor
   builtin: boolean
+  non_production: boolean
   clusters: number
   services_direct: number
   services_effective: number

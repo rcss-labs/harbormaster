@@ -1,4 +1,4 @@
-import type { CostRightsizing, CostService, CostStep, CostSuggestion } from '../../api/analytics'
+import type { Arm64Service, CostArm64, CostRightsizing, CostService, CostSpot, CostSpotService, CostStep, CostSuggestion } from '../../api/analytics'
 
 /** Whole US dollars. */
 export const money = (value: number) => `$${Math.round(value).toLocaleString('en-US')}`
@@ -13,19 +13,34 @@ export function stepAt(steps: CostStep[], headroomPct: number): CostSuggestion |
   return suggestion
 }
 
-/** Adds up the suggestions the server returned at one headroom. Spot tasks are priced at the on-demand list, so their saving is an upper bound. */
-export function costSummary(rows: CostService[], headroomPct: number): { saving: number; services: number; upperBound: boolean } {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `2026-10-19` as `19 Oct 2026`; anything else is shown as sent. */
+export function priceDate(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!match) return date
+  const month = MONTHS[Number(match[2]) - 1]
+  return month ? `${Number(match[3])} ${month} ${match[1]}` : date
+}
+
+/** The Cost tab banner. Both dates come from the API: the list table and the Spot table are refreshed separately. */
+export function costNotice(listDate: string, spotDate: string): string {
+  return `Estimate at list prices as of ${priceDate(listDate)}. Spot tasks use Spot prices as of ${priceDate(spotDate)}; Spot prices change. Excludes load balancers, data transfer and storage above 20 GB.`
+}
+
+/** Adds up the suggestions the server returned at one headroom. A saving that includes Spot tasks is an estimate at Spot prices, so it reads "about". */
+export function costSummary(rows: CostService[], headroomPct: number): { saving: number; services: number; includesSpot: boolean } {
   let saving = 0
   let services = 0
-  let upperBound = false
+  let includesSpot = false
   for (const row of rows) {
     const suggestion = stepAt(row.steps, headroomPct)
     if (suggestion === null) continue
     saving += suggestion.saving_monthly
     services += 1
-    if (row.spot_tasks > 0) upperBound = true
+    if (row.spot_tasks > 0) includesSpot = true
   }
-  return { saving, services, upperBound }
+  return { saving, services, includesSpot }
 }
 
 /** A service row with the suggestion in force at the chosen headroom. */
@@ -49,3 +64,83 @@ export function suggestedServices(rightsizing: CostRightsizing, headroomPct: num
 export function selectedSuggestions(rightsizing: CostRightsizing, headroomPct: number, excluded: ReadonlySet<string>): SuggestedService[] {
   return suggestedServices(rightsizing, headroomPct).filter(({ service }) => service.can_edit && !excluded.has(service.service_id))
 }
+
+/** The title of a draft dialog: "Draft 2 change sets". */
+export const draftTitle = (count: number) => `Draft ${count} change ${count === 1 ? 'set' : 'sets'}`
+
+/** Services the server says can move to Fargate Spot, in the order it ranked them (by saving). */
+export const spotCandidates = (spot: CostSpot): CostSpotService[] => spot.services.filter((service) => service.status === 'candidate')
+
+/**
+ * A candidate is ticked unless it carries a caution (terminal sessions or killed stops), and never without Deploy. `choices`
+ * holds what the user explicitly chose per service; only a row they did not touch follows the default, so a refetch that
+ * changes a caution never undoes a choice.
+ */
+export function isSpotTicked(service: CostSpotService, choices: ReadonlyMap<string, boolean>): boolean {
+  if (!service.can_deploy) return false
+  return choices.get(service.service_id) ?? !service.caution
+}
+
+export const selectedSpot = (spot: CostSpot, choices: ReadonlyMap<string, boolean>): CostSpotService[] =>
+  spotCandidates(spot).filter((service) => isSpotTicked(service, choices))
+
+/** The sentences under "Why it qualifies": what the server returned, worded. */
+export function spotReasons(service: CostSpotService, lookbackDays: number): { text: string; title?: string }[] {
+  const days = `${lookbackDays} days`
+  const reasons: { text: string; title?: string }[] = [
+    { text: `Non-production tag ${service.tag.name}` },
+    { text: `${service.desired_tasks} tasks; ${service.on_demand_base} stays on-demand` },
+    { text: service.terminal_sessions === 0 ? `No terminal sessions in ${days}` : `${service.terminal_sessions} terminal sessions in ${days}` },
+  ]
+  const timeout =
+    service.stop_timeout_seconds === null ? undefined : `Container stop timeout ${service.stop_timeout_seconds} s. It cannot show that the process handles SIGTERM.`
+  if (service.stop_evidence === 'graceful') reasons.push({ text: `Stops cleanly on SIGTERM (${service.expected_stops} stops in ${days})`, title: timeout })
+  else if (service.stop_evidence === 'killed') reasons.push({ text: `${service.killed_stops} of ${service.expected_stops} stops in ${days} were killed (exit 137)`, title: timeout })
+  else reasons.push({ text: `No deployment or scale-in stops in ${days} to judge SIGTERM handling`, title: timeout })
+  return reasons
+}
+
+/** Why a service is not offered for Fargate Spot. */
+export function spotNotCandidateReason(service: CostSpotService, minTasks: number): string {
+  switch (service.status) {
+    case 'production':
+      return `Production tag ${service.tag.name}`
+    case 'single_task':
+      return `Runs 1 task; Spot needs at least ${minTasks}`
+    case 'already_spot':
+      return 'Already uses Fargate Spot'
+    case 'no_cluster_spot':
+      return `Cluster ${service.cluster} has no FARGATE_SPOT capacity provider. Associate it with the cluster (in Terraform: aws_ecs_cluster_capacity_providers), then this service qualifies.`
+    case 'not_fargate':
+      return 'Not on Fargate'
+    case 'windows':
+      return 'Windows tasks cannot run on Fargate Spot'
+    case 'no_price':
+      return 'Cannot be priced: no list or Spot price for this region, or the task size is not a plain number'
+    case 'untagged':
+      return 'Untagged, so it counts as production. Give it a tag marked non-production in Admin, Tags.'
+    case 'not_running':
+      return 'No running on-demand tasks'
+    case 'custom_capacity':
+      return 'Uses a capacity provider Harbormaster does not edit'
+    case 'unsupported_controller':
+      return `Deployment controller ${service.controller_name} is not supported`
+    default:
+      return 'Not a candidate'
+  }
+}
+
+/** ARM64 rows: ready services first, then by saving, largest first; the order of the server breaks ties. */
+export function arm64Rows(arm64: CostArm64): Arm64Service[] {
+  const rank = (service: Arm64Service) => (service.status === 'ready' ? 0 : 1)
+  return [...arm64.services].sort((a, b) => rank(a) - rank(b) || (b.saving_monthly ?? 0) - (a.saving_monthly ?? 0))
+}
+
+/** Only a ready service the user may edit can be ticked; it starts ticked until the user chooses otherwise. */
+export function isArm64Ticked(service: Arm64Service, choices: ReadonlyMap<string, boolean>): boolean {
+  if (service.status !== 'ready' || !service.can_edit) return false
+  return choices.get(service.service_id) ?? true
+}
+
+export const selectedArm64 = (arm64: CostArm64, choices: ReadonlyMap<string, boolean>): Arm64Service[] =>
+  arm64Rows(arm64).filter((service) => isArm64Ticked(service, choices))

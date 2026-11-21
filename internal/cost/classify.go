@@ -8,7 +8,7 @@ type TaskClass int
 const (
 	// OnDemand is a Fargate task billed at the on-demand rate.
 	OnDemand TaskClass = iota
-	// Spot is a Fargate Spot task. It is priced at list rates here, without the Spot discount.
+	// Spot is a Fargate Spot task, priced at the dated Spot table (RateForClass), never at the list rate.
 	Spot
 	// Unpriced is any task without a Fargate price, such as EC2 or external.
 	Unpriced

@@ -65,6 +65,14 @@ type OffHoursMatch struct {
 	EffectiveTagName                                        string
 	AWSTags                                                 map[string]string
 	LaunchType, CapacityProvider, CPU, Memory, Architecture string
+	// Strategy is the service's capacity provider strategy; empty for a service on a launch type.
+	Strategy []CapacityStrategyItem
+}
+
+// CapacityStrategyItem is one entry of a service's capacity provider strategy.
+type CapacityStrategyItem struct {
+	Provider     string
+	Base, Weight int
 }
 
 // OffHoursTagValue is one AWS tag key/value seen on active services and how many carry it.
@@ -352,7 +360,7 @@ func (s *Store) OffHoursMatches(ctx context.Context, selectors []OffHoursSelecto
 	rows, err := s.Pool.Query(ctx,
 		`select s.account_id, s.region, s.cluster_name, s.service_name, coalesce(s.desired, 0), `+v.Effective+`,
 		   (select name from tags where id = `+v.Effective+`), s.raw -> 'Tags', coalesce(s.launch_type, ''),
-		   coalesce(s.raw #>> '{CapacityProviderStrategy,0,CapacityProvider}', ''),
+		   coalesce(s.raw #>> '{CapacityProviderStrategy,0,CapacityProvider}', ''), s.raw -> 'CapacityProviderStrategy',
 		   coalesce(td.cpu, ''), coalesce(td.memory, ''), coalesce(td.raw #>> '{RuntimePlatform,CpuArchitecture}', '')
 		 from services s`+v.Joins+`
 		 left join task_definitions td on td.account_id = s.account_id and td.region = s.region and td.arn = s.task_definition_arn
@@ -365,10 +373,19 @@ func (s *Store) OffHoursMatches(ctx context.Context, selectors []OffHoursSelecto
 	out := []OffHoursMatch{}
 	for rows.Next() {
 		var m OffHoursMatch
-		var tagsJSON []byte
+		var tagsJSON, strategyJSON []byte
 		if err := rows.Scan(&m.Key.AccountID, &m.Key.Region, &m.Key.Cluster, &m.Key.Service, &m.Desired, &m.EffectiveTagID,
-			&m.EffectiveTagName, &tagsJSON, &m.LaunchType, &m.CapacityProvider, &m.CPU, &m.Memory, &m.Architecture); err != nil {
+			&m.EffectiveTagName, &tagsJSON, &m.LaunchType, &m.CapacityProvider, &strategyJSON, &m.CPU, &m.Memory, &m.Architecture); err != nil {
 			return nil, fmt.Errorf("scan off-hours match: %w", err)
+		}
+		var strategy []struct {
+			CapacityProvider string
+			Base, Weight     int
+		}
+		if len(strategyJSON) > 0 && json.Unmarshal(strategyJSON, &strategy) == nil {
+			for _, item := range strategy {
+				m.Strategy = append(m.Strategy, CapacityStrategyItem{Provider: item.CapacityProvider, Base: item.Base, Weight: item.Weight})
+			}
 		}
 		var tags []struct{ Key, Value string }
 		if err := json.Unmarshal(tagsJSON, &tags); err != nil {

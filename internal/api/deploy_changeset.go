@@ -33,6 +33,8 @@ type ChangeSetService struct {
 	DeploymentConfiguration       *DeploymentConfigurationDTO `json:"deployment_configuration"`
 	HealthCheckGracePeriodSeconds *int                        `json:"health_check_grace_period_seconds"`
 	ForceNewDeployment            bool                        `json:"force_new_deployment"`
+	// CapacityProviderStrategy replaces the strategy or launch type. Absent leaves it alone; an empty list is refused.
+	CapacityProviderStrategy []CapacityItemDTO `json:"capacity_provider_strategy"`
 }
 
 // ChangeSetScaling is the auto scaling section.
@@ -115,6 +117,12 @@ func (body ChangeSetRequest) toChangeSet() (deploy.ChangeSet, error) {
 		change := &deploy.ServiceChange{
 			DesiredCount: svc.DesiredCount, EnableExecuteCommand: svc.EnableExecuteCommand,
 			HealthCheckGracePeriodSeconds: svc.HealthCheckGracePeriodSeconds, ForceNewDeployment: svc.ForceNewDeployment,
+		}
+		if svc.CapacityProviderStrategy != nil {
+			change.CapacityProviderStrategy = make([]deploy.CapacityItem, 0, len(svc.CapacityProviderStrategy))
+			for _, item := range svc.CapacityProviderStrategy {
+				change.CapacityProviderStrategy = append(change.CapacityProviderStrategy, deploy.CapacityItem{Provider: item.Provider, Base: item.Base, Weight: item.Weight})
+			}
 		}
 		if dc := svc.DeploymentConfiguration; dc != nil {
 			change.DeploymentConfiguration = &deploy.DeploymentConfigChange{

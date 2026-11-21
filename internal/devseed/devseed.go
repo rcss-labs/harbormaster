@@ -36,7 +36,8 @@ var ErrDatabaseNotEmpty = errors.New("database already has users or accounts; re
 // SeedAnalyticsHistory). It is idempotent: existing tags, users, accounts, schedules, audit history and daily rows are
 // left alone, so applying twice changes nothing. offHoursDemoEnabled sets whether the staging schedule is enabled.
 // WithNotifyDemo adds the demo notification routes.
-// The schedules are seeded here rather than in ForceApply because the API tests call ForceApply and expect no schedules.
+// The schedules, and the terminal session the Fargate Spot advisor shows as a caution, are seeded here rather than in ForceApply
+// because the API tests call ForceApply and expect no schedules and no operations.
 func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool, opts ...Option) error {
 	var o options
 	for _, opt := range opts {
@@ -53,6 +54,13 @@ func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool, opts 
 		return fmt.Errorf("find seeded admin: %w", err)
 	}
 	if err := seedOffHours(ctx, st, offHoursDemoEnabled, sam.ID); err != nil {
+		return err
+	}
+	dana, err := st.GetUserByUsername(ctx, "dana")
+	if err != nil {
+		return fmt.Errorf("find seeded user dana: %w", err)
+	}
+	if err := seedTerminalSession(ctx, st, fake.MockupEstate(time.Now), dana.ID); err != nil {
 		return err
 	}
 	if err := seedNotifications(ctx, st, o); err != nil {
@@ -141,6 +149,12 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	if err != nil {
 		return err
 	}
+	// Staging is where a service may be tried on Fargate Spot; Dev starts non-production, Prod never is.
+	if !staging.NonProduction {
+		if err := st.UpdateTag(ctx, staging.ID, staging.Name, staging.Color, true); err != nil {
+			return fmt.Errorf("mark Staging non-production: %w", err)
+		}
+	}
 	dev, err := st.DevTag(ctx)
 	if err != nil {
 		return err
@@ -183,6 +197,14 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	if err := st.SetClusterTag(ctx, model.ClusterKey{AccountID: accountIDByName(estate, "staging-example"), Region: "us-east-1", Cluster: "staging-web"}, staging.ID); err != nil {
 		return fmt.Errorf("tag staging-web: %w", err)
 	}
+	// The Fargate Spot advisor only suggests services someone tagged non-production on purpose, so the two demo candidates
+	// carry an explicit Dev tag; every other untagged service is shown as untagged.
+	for _, tagged := range []struct{ region, cluster, service string }{{"eu-west-1", "eu-apps", "catalog-api"}, {"eu-central-1", "edge-proxy", "edge-nginx"}} {
+		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: tagged.region, Cluster: tagged.cluster}, Service: tagged.service}
+		if err := st.SetServiceTag(ctx, key, &dev.ID); err != nil {
+			return fmt.Errorf("tag %s: %w", tagged.service, err)
+		}
+	}
 	// An explicit service tag on an otherwise Dev cluster exercises the cluster-matching rule.
 	artifactProxy := model.ServiceKey{
 		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "us-east-1", Cluster: "ci-tools"},
@@ -215,6 +237,30 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	}
 
 	return seedAudit(ctx, st, ids["sam"])
+}
+
+// seedTerminalSession records that dana opened a terminal on catalog-api two days ago. It is the soft signal that makes the
+// Fargate Spot advisor list catalog-api with "Check first" instead of a plain suggestion.
+func seedTerminalSession(ctx context.Context, st *store.Store, estate *fake.Estate, userID int64) error {
+	account := accountIDByName(estate, "homelab-admin")
+	var seeded bool
+	if err := st.Pool.QueryRow(ctx,
+		`select exists (select 1 from operation_log where account_id = $1 and region = 'eu-west-1' and cluster_name = 'eu-apps'
+		   and service_name = 'catalog-api' and details ->> 'op' = 'terminal')`, account).Scan(&seeded); err != nil {
+		return fmt.Errorf("check seeded terminal session: %w", err)
+	}
+	if seeded {
+		return nil
+	}
+	_, err := st.Pool.Exec(ctx,
+		`insert into operation_log (ts, account_id, region, cluster_name, service_name, actor_user_id, actor_username, source, text, details)
+		 values ($1, $2, 'eu-west-1', 'eu-apps', 'catalog-api', $3, (select username from users where id = $3), 'harbormaster',
+		   'Opened a terminal session in catalog-api.', '{"op":"terminal"}'::jsonb)`,
+		time.Now().Add(-48*time.Hour), account, userID)
+	if err != nil {
+		return fmt.Errorf("seed terminal session: %w", err)
+	}
+	return nil
 }
 
 // requireSeedable allows seeding only into an empty database or one this package already seeded
@@ -291,7 +337,7 @@ func ensureTag(ctx context.Context, st *store.Store, name, color string) (store.
 			return t, nil
 		}
 	}
-	return st.CreateTag(ctx, name, color)
+	return st.CreateTag(ctx, name, color, false)
 }
 
 // seedAudit writes the mockup's activity history once.

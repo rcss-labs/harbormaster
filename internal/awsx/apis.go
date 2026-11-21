@@ -38,6 +38,8 @@ type ECSAPI interface {
 // ECRAPI lists only the ECR calls Harbormaster makes.
 type ECRAPI interface {
 	DescribeImages(ctx context.Context, in *ecr.DescribeImagesInput, opts ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error)
+	// BatchGetImage returns image manifests, not layers; the ARM64 advisor reads which architectures an image index holds.
+	BatchGetImage(ctx context.Context, in *ecr.BatchGetImageInput, opts ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error)
 }
 
 // SSMAPI lists only the SSM calls Harbormaster makes (plan 04).

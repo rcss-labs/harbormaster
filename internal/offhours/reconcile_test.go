@@ -236,7 +236,7 @@ func TestReconcile_SelectorDroppedReleases(t *testing.T) {
 func TestReconcile_HarbormasterTagSelectorEnrols(t *testing.T) {
 	h := newReconcilerHarness(t)
 	h.at(9, 10, 0)
-	qa, err := h.store.CreateTag(t.Context(), "QA", "blue")
+	qa, err := h.store.CreateTag(t.Context(), "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}

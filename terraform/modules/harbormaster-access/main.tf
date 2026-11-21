@@ -65,6 +65,7 @@ data "aws_iam_policy_document" "read" {
       "logs:DescribeLogGroups",
       "ecr:DescribeImages",
       "ecr:DescribeRepositories",
+      "ecr:BatchGetImage",
     ]
     resources = ["*"]
   }

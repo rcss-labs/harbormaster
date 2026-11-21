@@ -48,13 +48,15 @@ Every statement is in `main.tf`; this table lists the same actions and condition
 
 | Policy | Statement | Actions | Resource | Condition |
 |---|---|---|---|---|
-| `harbormaster-access-read` | `ReadOnlyInspection` | `ecs:List*`, `ecs:Describe*`, `ecs:ListTagsForResource`, `ec2:Describe{Vpcs,Subnets,SecurityGroups,NatGateways,InternetGateways,VpcEndpoints,NetworkInterfaces}`, `elasticfilesystem:Describe{FileSystems,AccessPoints,MountTargets}`, `elasticloadbalancing:Describe{TargetGroups,TargetHealth}`, `application-autoscaling:Describe*`, `cloudwatch:GetMetricData`, `logs:{FilterLogEvents,GetLogEvents,StartLiveTail,StopLiveTail,StartQuery,GetQueryResults,StopQuery}`, `ecr:Describe{Images,Repositories}` | `*` | none |
+| `harbormaster-access-read` | `ReadOnlyInspection` | `ecs:List*`, `ecs:Describe*`, `ecs:ListTagsForResource`, `ec2:Describe{Vpcs,Subnets,SecurityGroups,NatGateways,InternetGateways,VpcEndpoints,NetworkInterfaces}`, `elasticfilesystem:Describe{FileSystems,AccessPoints,MountTargets}`, `elasticloadbalancing:Describe{TargetGroups,TargetHealth}`, `application-autoscaling:Describe*`, `cloudwatch:GetMetricData`, `logs:{FilterLogEvents,GetLogEvents,StartLiveTail,StopLiveTail,StartQuery,GetQueryResults,StopQuery}`, `ecr:{DescribeImages,DescribeRepositories,BatchGetImage}` | `*` | none |
 | `harbormaster-access-write` (omitted when `read_only`) | `EcsOperations` | `ecs:RegisterTaskDefinition`, `ecs:TagResource`, `ecs:UpdateService`, `ecs:StopTask`, `ecs:ExecuteCommand`, `ssm:TerminateSession` | `*` | none |
 | | `PassTaskRolesToEcs` | `iam:PassRole` | `pass_role_arns` | `iam:PassedToService` = `ecs-tasks.amazonaws.com` |
 | | `AutoScalingWrites` | `application-autoscaling:RegisterScalableTarget`, `DeregisterScalableTarget`, `PutScalingPolicy`, `DeleteScalingPolicy`, `PutScheduledAction`, `DeleteScheduledAction` | `*` | `application-autoscaling:service-namespace` = `ecs` |
 | | `TargetTrackingAlarms` | `cloudwatch:PutMetricAlarm`, `cloudwatch:DeleteAlarms` | `arn:aws:cloudwatch:*:<this account>:alarm:TargetTracking-service/*` | none |
 | | `TargetTrackingAlarmsDescribe` | `cloudwatch:DescribeAlarms` | `*` | none |
 | | `AutoScalingServiceLinkedRole` | `iam:CreateServiceLinkedRole` | `arn:aws:iam::<this account>:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService` | `iam:AWSServiceName` = `ecs.application-autoscaling.amazonaws.com` |
+
+`ecr:BatchGetImage` returns image manifests, not layers; it is used to read which CPU architectures an image index holds. The server still cannot pull layers or read image configuration: `ecr:GetDownloadUrlForLayer` stays on the `harbormaster-scan` role only.
 
 Notes:
 

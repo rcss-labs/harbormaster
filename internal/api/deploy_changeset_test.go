@@ -262,3 +262,65 @@ func TestDeploySettings_CanFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestChangeSet_CapacityViewerWithoutDeployIs403(t *testing.T) {
+	env := newWriteEnv(t)
+	settings := liveSettings(t, env.login("sam"))
+	body := map[string]any{
+		"base_version": settings.Version,
+		"service": map[string]any{"capacity_provider_strategy": []map[string]any{
+			{"provider": "FARGATE", "base": 1, "weight": 0}, {"provider": "FARGATE_SPOT", "base": 0, "weight": 1}}},
+	}
+	for _, user := range []string{"operator", "editor", "viewer"} {
+		resp := env.login(user).post(changesetPath(), body)
+		wantStatus(t, resp, http.StatusForbidden)
+		if _, msg := errorCode(t, resp); msg != "You need Deploy on Prod" {
+			t.Errorf("%s: message = %q, want the Deploy requirement", user, msg)
+		}
+	}
+	assertNoChangesetWrites(t, env)
+}
+
+func TestChangeSet_CapacityEmptyListIs422AndAbsentLeavesItAlone(t *testing.T) {
+	env := newWriteEnv(t)
+	deployer := env.login("deployer")
+	settings := liveSettings(t, deployer)
+	resp := deployer.post(changesetPath(), map[string]any{
+		"base_version": settings.Version, "service": map[string]any{"capacity_provider_strategy": []map[string]any{}}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	assertNoChangesetWrites(t, env)
+
+	// A service section without the field changes only what it names.
+	resp = deployer.post(changesetPath(), map[string]any{
+		"base_version": settings.Version, "service": map[string]any{"desired_count": 4}})
+	wantStatus(t, resp, http.StatusOK)
+	after := liveSettings(t, deployer)
+	if after.Capacity.LaunchType != settings.Capacity.LaunchType || len(after.Capacity.Strategy) != 0 {
+		t.Errorf("capacity changed to %+v, want it left alone", after.Capacity)
+	}
+}
+
+func TestDeploySettings_CapacityIsReportedAndAppliedFromTheAPI(t *testing.T) {
+	env := newWriteEnv(t)
+	deployer := env.login("deployer")
+	settings := liveSettings(t, deployer)
+	capacity := settings.Capacity
+	if capacity.LaunchType != "FARGATE" || !capacity.Editable || capacity.LockReason != "" || len(capacity.ClusterProviders) != 2 || capacity.Strategy == nil {
+		t.Fatalf("capacity = %+v, want an editable launch type service on a cluster with both providers and a never-null strategy", capacity)
+	}
+	resp := deployer.post(changesetPath(), map[string]any{
+		"base_version": settings.Version,
+		"service": map[string]any{"capacity_provider_strategy": []map[string]any{
+			{"provider": "FARGATE", "base": 1, "weight": 0}, {"provider": "FARGATE_SPOT", "base": 0, "weight": 1}}},
+	})
+	wantStatus(t, resp, http.StatusOK)
+	var out ChangeSetResponse
+	decode(t, resp, &out)
+	if out.Status != "applied" || out.Kind != "restart" || out.DeploymentID == "" {
+		t.Fatalf("response = %+v, want an applied restart", out)
+	}
+	after := liveSettings(t, deployer)
+	if after.Capacity.LaunchType != "" || len(after.Capacity.Strategy) != 2 || after.Capacity.Strategy[0].Provider != "FARGATE" || after.Capacity.Strategy[0].Base != 1 {
+		t.Fatalf("capacity after = %+v", after.Capacity)
+	}
+}

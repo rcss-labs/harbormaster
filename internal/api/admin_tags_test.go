@@ -19,6 +19,7 @@ type testTagItem struct {
 	Name              string `json:"name"`
 	Color             string `json:"color"`
 	Builtin           bool   `json:"builtin"`
+	NonProduction     bool   `json:"non_production"`
 	Clusters          int    `json:"clusters"`
 	ServicesDirect    int    `json:"services_direct"`
 	ServicesEffective int    `json:"services_effective"`
@@ -445,4 +446,48 @@ func mustClusterKey(t *testing.T, id string) model.ClusterKey {
 		t.Fatal(err)
 	}
 	return k
+}
+
+func TestAdminTags_SetsAndAuditsNonProduction(t *testing.T) {
+	srv, _, st := newTestServer(t)
+	sam := login(t, srv, "sam", testPassword)
+	var qa testTagItem
+	decode(t, sam.post("/api/tags", map[string]any{"name": "QA", "color": "violet", "non_production": true}), &qa)
+	if !qa.NonProduction {
+		t.Fatalf("created = %+v, want non_production", qa)
+	}
+	tagPath := "/api/tags/" + itoa(qa.ID)
+
+	var cleared testTagItem
+	decode(t, sam.do("PATCH", tagPath, map[string]any{"name": "QA", "color": "violet", "non_production": false}, nil), &cleared)
+	if cleared.NonProduction {
+		t.Fatalf("updated = %+v, want the flag cleared", cleared)
+	}
+	if a := lastAudit(t, st); a.Action != "tag_update" || a.Summary != "Marked tag QA as production." {
+		t.Fatalf("audit = %+v", a)
+	}
+	sam.do("PATCH", tagPath, map[string]any{"name": "QA", "color": "violet", "non_production": true}, nil).Body.Close()
+	if a := lastAudit(t, st); a.Summary != "Marked tag QA as non-production." {
+		t.Fatalf("audit = %+v", a)
+	}
+	if got := tagByName(t, sam, "QA"); !got.NonProduction {
+		t.Fatalf("listed = %+v, want non_production", got)
+	}
+}
+
+func TestAdminTags_OmittedFlagKeepsValueOnUpdate(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	sam := login(t, srv, "sam", testPassword)
+	var plain testTagItem
+	decode(t, sam.post("/api/tags", map[string]any{"name": "Plain", "color": "red"}), &plain)
+	if plain.NonProduction {
+		t.Fatalf("created without the flag = %+v, want production", plain)
+	}
+	var qa testTagItem
+	decode(t, sam.post("/api/tags", map[string]any{"name": "QA", "color": "violet", "non_production": true}), &qa)
+	var recoloured testTagItem
+	decode(t, sam.do("PATCH", "/api/tags/"+itoa(qa.ID), map[string]any{"name": "QA", "color": "green"}, nil), &recoloured)
+	if !recoloured.NonProduction || recoloured.Color != "green" {
+		t.Fatalf("updated without the flag = %+v, want the flag kept", recoloured)
+	}
 }

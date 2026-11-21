@@ -365,7 +365,7 @@ func TestServiceMetrics_TwoTargetGroupsSumRequestsAndAverageP95(t *testing.T) {
 func TestClusterMetrics_OnlyVisibleServices(t *testing.T) {
 	h := newMetricsHarness(t, 0)
 	// Hide notifications from dana with a tag she has no permission on.
-	secret, err := h.store.CreateTag(t.Context(), "Secret", "red")
+	secret, err := h.store.CreateTag(t.Context(), "Secret", "red", false)
 	if err != nil {
 		t.Fatal(err)
 	}

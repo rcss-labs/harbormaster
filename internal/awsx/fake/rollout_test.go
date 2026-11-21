@@ -119,6 +119,56 @@ func TestRollout_DeployCompletesAfterDesiredSteps(t *testing.T) {
 	}
 }
 
+func TestUpdateService_StrategyPlacesTasksByBaseThenWeight(t *testing.T) {
+	f := newFake()
+	api := ecsFor(t, f, homelabID, "us-east-1")
+	before := describe(t, f, "core-services", "payments-api")
+	if _, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
+		Cluster: aws.String("core-services"), Service: aws.String("payments-api"), ForceNewDeployment: true,
+		CapacityProviderStrategy: []ecstypes.CapacityProviderStrategyItem{
+			{CapacityProvider: aws.String("FARGATE"), Base: 1},
+			{CapacityProvider: aws.String("FARGATE_SPOT"), Weight: 1},
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	advance(f, 8)
+	after := describe(t, f, "core-services", "payments-api")
+	if after.LaunchType != "" || len(after.CapacityProviderStrategy) != 2 {
+		t.Fatalf("service has launch type %q and strategy %v, want the strategy only", after.LaunchType, after.CapacityProviderStrategy)
+	}
+	if aws.ToString(primaryOf(after).Id) == aws.ToString(primaryOf(before).Id) || primaryOf(after).RolloutState != ecstypes.DeploymentRolloutStateCompleted {
+		t.Fatalf("deployment %+v, want a new completed one", primaryOf(after))
+	}
+	counts := map[string]int{}
+	for _, task := range tasksOf(f, "payments-api", "RUNNING") {
+		counts[aws.ToString(task.CapacityProviderName)]++
+	}
+	if counts["FARGATE"] != 1 || counts["FARGATE_SPOT"] != 2 {
+		t.Fatalf("tasks by provider = %v, want 1 on demand (the base) and 2 on Spot", counts)
+	}
+}
+
+func TestUpdateService_RejectsProviderTheClusterLacks(t *testing.T) {
+	f := newFake()
+	f.Estate.Mu.Lock()
+	for i := range f.Estate.Clusters {
+		if aws.ToString(f.Estate.Clusters[i].Cluster.ClusterName) == "core-services" {
+			f.Estate.Clusters[i].Cluster.CapacityProviders = []string{"FARGATE"}
+		}
+	}
+	f.Estate.Mu.Unlock()
+	_, err := ecsFor(t, f, homelabID, "us-east-1").UpdateService(context.Background(), &ecs.UpdateServiceInput{
+		Cluster: aws.String("core-services"), Service: aws.String("payments-api"),
+		CapacityProviderStrategy: []ecstypes.CapacityProviderStrategyItem{{CapacityProvider: aws.String("FARGATE_SPOT"), Weight: 1}}})
+	var invalid *ecstypes.InvalidParameterException
+	if !errors.As(err, &invalid) || !strings.Contains(strings.ToLower(err.Error()), "capacity provider") {
+		t.Fatalf("err = %v, want InvalidParameterException naming the capacity provider", err)
+	}
+	if got := describe(t, f, "core-services", "payments-api"); got.LaunchType == "" {
+		t.Fatal("a refused call changed the service")
+	}
+}
+
 func TestRollout_ForceNewDeploymentKeepsRevision(t *testing.T) {
 	f := newFake()
 	api := ecsFor(t, f, homelabID, "us-east-1")

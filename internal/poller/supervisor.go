@@ -84,6 +84,17 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 			p.cfg.OffHours.Run(ctx)
 		}()
 	}
+	if p.cfg.ImagePlatforms != nil {
+		// Same reason: only the leader reads image manifests. It stays quiet while polling is idle.
+		if p.cfg.ImagePlatforms.Idle == nil {
+			p.cfg.ImagePlatforms.Idle = p.idle.isIdle
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.cfg.ImagePlatforms.Run(ctx)
+		}()
+	}
 	if p.cfg.Notify != nil {
 		// Same reason: only the leader plans and sends notifications, so a failover never sends twice.
 		wg.Add(1)

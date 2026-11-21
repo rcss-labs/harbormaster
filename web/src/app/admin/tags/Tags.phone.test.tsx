@@ -23,21 +23,21 @@ describe('Tags on a phone', () => {
     expect(dev).toBeDefined()
   })
 
-  it('the Dev actions are disabled with the reason inside the row', async () => {
+  it('Delete is disabled for Dev with the reason inside the row, Edit stays available', async () => {
     renderApp('/settings/tags')
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for tag Dev' }))
     const menu = screen.getByRole('menu', { name: 'Actions for tag Dev' })
-    const rename = within(menu).getByRole('menuitem', { name: /^Rename/ })
-    expect(rename).toBeDisabled()
-    expect(rename).toHaveTextContent('Dev is the default tag')
-    expect(within(menu).getByRole('menuitem', { name: /^Delete/ })).toBeDisabled()
+    expect(within(menu).getByRole('menuitem', { name: /^Edit/ })).toBeEnabled()
+    const remove = within(menu).getByRole('menuitem', { name: /^Delete/ })
+    expect(remove).toBeDisabled()
+    expect(remove).toHaveTextContent('Dev is the default tag')
   })
 
-  it('Rename opens the dialog as a sheet', async () => {
+  it('Edit opens the dialog as a sheet', async () => {
     renderApp('/settings/tags')
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for tag Prod' }))
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Rename' }))
-    expect(await screen.findByRole('dialog', { name: 'Rename tag Prod' })).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Edit' }))
+    expect(await screen.findByRole('dialog', { name: 'Edit tag Prod' })).toBeInTheDocument()
   })
 
   it('assignments stay editable: expanding a cluster shows its services with tag selects', async () => {

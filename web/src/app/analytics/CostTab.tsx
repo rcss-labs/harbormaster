@@ -4,9 +4,14 @@ import { Banner } from '../../components/Banner'
 import { KpiStrip } from '../../components/KpiStrip'
 import { SegmentedFilter } from '../../components/Seg'
 import { AnalyticsPanel } from './AnalyticsPanel'
-import { DraftChangeSetsDialog } from './DraftChangeSetsDialog'
+import { rightsizeHref } from '../services/deploy/rightsizeParams'
+import { arm64Href, ARM64_REASON } from '../services/deploy/archParams'
+import { spotHref, spotReason } from '../services/deploy/capacityParams'
+import { DraftChangeSetsDialog, draftNote, type DraftRow } from './DraftChangeSetsDialog'
 import { RightsizingPanel } from './RightsizingPanel'
-import { costSummary, money, selectedSuggestions } from './cost'
+import { Arm64Panel } from './Arm64Panel'
+import { SpotPanel } from './SpotPanel'
+import { costSummary, draftTitle, money, selectedArm64, selectedSpot, selectedSuggestions } from './cost'
 import { COLOR, sourceFor, whole } from './format'
 import { KpiNote, SourcesPanel, type TabProps } from './parts'
 import styles from './analytics.module.css'
@@ -14,16 +19,53 @@ import styles from './analytics.module.css'
 type Grouping = 'cluster' | 'account' | 'tag'
 
 export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
-  const { kpis, rightsizing } = data
+  const { kpis, rightsizing, spot, arm64 } = data
   const [grouping, setGrouping] = useState<Grouping>('cluster')
   // Kept here, not in the panel, so a refetch does not reset the slider, the selection or the opened marks.
   const [headroomPct, setHeadroomPct] = useState(rightsizing.default_headroom_pct)
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set())
-  const [drafting, setDrafting] = useState(false)
-  const draftRows = selectedSuggestions(rightsizing, headroomPct, excluded)
+  const [spotChoices, setSpotChoices] = useState<ReadonlyMap<string, boolean>>(new Map())
+  const [spotOpened, setSpotOpened] = useState<ReadonlySet<string>>(new Set())
+  const [armChoices, setArmChoices] = useState<ReadonlyMap<string, boolean>>(new Map())
+  const [armOpened, setArmOpened] = useState<ReadonlySet<string>>(new Set())
+  const [drafting, setDrafting] = useState<'rightsizing' | 'spot' | 'arm64' | null>(null)
+  const suggested = selectedSuggestions(rightsizing, headroomPct, excluded)
+  const spotSelected = selectedSpot(spot, spotChoices)
   // The dialog follows the live selection; with nothing left to draft it closes.
-  if (drafting && draftRows.length === 0) setDrafting(false)
+  if (drafting === 'rightsizing' && suggested.length === 0) setDrafting(null)
+  if (drafting === 'spot' && spotSelected.length === 0) setDrafting(null)
+  const armSelected = selectedArm64(arm64, armChoices)
+  if (drafting === 'arm64' && armSelected.length === 0) setDrafting(null)
+  const armRows: DraftRow[] = armSelected.map((service) => ({
+    serviceId: service.service_id,
+    name: service.service,
+    now: 'X86_64',
+    proposed: 'ARM64',
+    href: arm64Href(service.service_id),
+  }))
+  const armSaving = armSelected.reduce((total, service) => total + (service.saving_monthly ?? 0), 0)
+  const rightsizingRows: DraftRow[] = suggested.map(({ service, suggestion }) => ({
+    serviceId: service.service_id,
+    name: service.service,
+    now: `${service.cpu_units} / ${service.memory_mib}`,
+    proposed: `${suggestion.cpu_units} / ${suggestion.memory_mib}`,
+    href: rightsizeHref(service.service_id, { cpuUnits: suggestion.cpu_units, memoryMib: suggestion.memory_mib }, headroomPct),
+  }))
+  const spotRows: DraftRow[] = spotSelected.map((service) => ({
+    serviceId: service.service_id,
+    name: service.service,
+    now: 'FARGATE',
+    proposed: `FARGATE base ${service.on_demand_base}, FARGATE_SPOT weight 1`,
+    href: spotHref(service.service_id, service.on_demand_base),
+  }))
+  const toggleIn = (set: ReadonlySet<string>, id: string) => {
+    const next = new Set(set)
+    if (!next.delete(id)) next.add(id)
+    return next
+  }
+  const spotSaving = spotSelected.reduce((total, service) => total + (service.saving_monthly ?? 0), 0)
+  const spotCandidateCount = spot.services.filter((service) => service.status === 'candidate').length
   const common = { window: data.window, showSources }
 
   const ready = rightsizing.state === 'ok'
@@ -46,16 +88,19 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
             value: (
               <>
                 {nothingPriced ? '—' : money(kpis.monthly_total)}
-                {!nothingPriced && kpis.spot_monthly > 0 && <KpiNote>{`includes ${money(kpis.spot_monthly)} of Spot tasks at list price`}</KpiNote>}
+                {!nothingPriced && kpis.spot_monthly > 0 && <KpiNote>{`includes ${money(kpis.spot_monthly)} of Spot tasks at Spot prices`}</KpiNote>}
               </>
             ),
           },
           {
             label: `possible monthly saving at ${headroomPct}% headroom`,
-            value: ready ? `${summary.upperBound ? 'up to ' : ''}${money(summary.saving)}` : '—',
+            value: ready ? `${summary.includesSpot ? 'about ' : ''}${money(summary.saving)}` : '—',
           },
           { label: 'of spend is reserved but not needed', value: ready ? `${notNeededPct}%` : '—' },
           { label: summary.services === 1 ? 'service can use a smaller size' : 'services can use a smaller size', value: ready ? whole(summary.services) : '—' },
+          // Savings are measured against how services run today, so this one is never added to the rightsizing figure.
+          { label: 'possible monthly saving on ARM64', value: arm64.check_enabled && arm64.services.some((service) => service.status === 'ready') ? `${armSelected.some((service) => service.spot_tasks > 0) ? 'about ' : ''}${money(armSaving)}` : '—' },
+          { label: 'possible monthly saving on Fargate Spot', value: spotCandidateCount > 0 ? `about ${money(spotSaving)}` : '—' },
         ]}
       />
       {kpis.unpriced_tasks > 0 && <Banner kind="warn">{`${kpis.unpriced_tasks === 1 ? '1 task is' : `${kpis.unpriced_tasks} tasks are`} not priced (EC2, other non-Fargate capacity, or a region without a price table).`}</Banner>}
@@ -102,25 +147,60 @@ export function CostTab({ data, showSources }: TabProps<AnalyticsCost>) {
             headroomPct={headroomPct}
             onHeadroomChange={setHeadroomPct}
             excluded={excluded}
-            onToggle={(serviceId) =>
-              setExcluded((previous) => {
-                const next = new Set(previous)
-                if (!next.delete(serviceId)) next.add(serviceId)
-                return next
-              })
-            }
-            onDraft={() => setDrafting(true)}
+            onToggle={(serviceId) => setExcluded((previous) => toggleIn(previous, serviceId))}
+            onDraft={() => setDrafting('rightsizing')}
+          />
+        </div>
+        <div className={styles.full}>
+          <SpotPanel
+            spot={spot}
+            pricesAsOf={data.spot_prices_as_of}
+            choices={spotChoices}
+            onChoose={(serviceId, ticked) => setSpotChoices((previous) => new Map(previous).set(serviceId, ticked))}
+            onDraft={() => setDrafting('spot')}
+          />
+        </div>
+        <div className={styles.full}>
+          <Arm64Panel
+            arm64={arm64}
+            choices={armChoices}
+            onChoose={(serviceId, ticked) => setArmChoices((previous) => new Map(previous).set(serviceId, ticked))}
+            onDraft={() => setDrafting('arm64')}
           />
         </div>
         <SourcesPanel sources={data.sources} {...common} />
       </div>
-      {drafting && (
+      {drafting === 'rightsizing' && (
         <DraftChangeSetsDialog
-          rows={draftRows}
-          headroomPct={headroomPct}
+          title={draftTitle(rightsizingRows.length)}
+          sub="CPU units, memory MiB"
+          note={draftNote('the size', `Rightsizing at ${headroomPct}% headroom`)}
+          rows={rightsizingRows}
           opened={opened}
           onOpened={(serviceId) => setOpened((previous) => new Set(previous).add(serviceId))}
-          onClose={() => setDrafting(false)}
+          onClose={() => setDrafting(null)}
+        />
+      )}
+      {drafting === 'arm64' && (
+        <DraftChangeSetsDialog
+          title={draftTitle(armRows.length)}
+          sub="CPU architecture"
+          note={draftNote('the CPU architecture', ARM64_REASON)}
+          rows={armRows}
+          opened={armOpened}
+          onOpened={(serviceId) => setArmOpened((previous) => new Set(previous).add(serviceId))}
+          onClose={() => setDrafting(null)}
+        />
+      )}
+      {drafting === 'spot' && (
+        <DraftChangeSetsDialog
+          title={draftTitle(spotRows.length)}
+          sub="Capacity providers"
+          note={draftNote('the capacity providers', spotReason(spotSelected[0]?.on_demand_base ?? 1))}
+          rows={spotRows}
+          opened={spotOpened}
+          onOpened={(serviceId) => setSpotOpened((previous) => new Set(previous).add(serviceId))}
+          onClose={() => setDrafting(null)}
         />
       )}
     </>

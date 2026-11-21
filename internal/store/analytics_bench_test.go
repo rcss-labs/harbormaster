@@ -16,7 +16,7 @@ import (
 func seedAnalyticsScale(b *testing.B, s *store.Store) (prod int64) {
 	b.Helper()
 	ctx := context.Background()
-	tag, err := s.CreateTag(ctx, "Prod", "red")
+	tag, err := s.CreateTag(ctx, "Prod", "red", false)
 	if err != nil {
 		b.Fatal(err)
 	}

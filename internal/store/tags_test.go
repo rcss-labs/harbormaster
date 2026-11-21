@@ -43,11 +43,59 @@ func serviceKey(cluster, name string) model.ServiceKey {
 func TestCreateTag_CaseInsensitiveClash(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if _, err := s.CreateTag(ctx, "Prod", "red"); err != nil {
+	if _, err := s.CreateTag(ctx, "Prod", "red", false); err != nil {
 		t.Fatalf("CreateTag Prod: %v", err)
 	}
-	if _, err := s.CreateTag(ctx, "prod", "blue"); !errors.Is(err, store.ErrConflict) {
+	if _, err := s.CreateTag(ctx, "prod", "blue", false); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("CreateTag prod error = %v, want ErrConflict", err)
+	}
+}
+
+func TestTags_NonProductionRoundTrip(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	qa, err := s.CreateTag(ctx, "QA", "blue", true)
+	if err != nil || !qa.NonProduction {
+		t.Fatalf("CreateTag = %+v, %v; want a non-production tag", qa, err)
+	}
+	if got, err := s.GetTag(ctx, qa.ID); err != nil || !got.NonProduction {
+		t.Fatalf("GetTag = %+v, %v; want the flag stored", got, err)
+	}
+	prod, err := s.CreateTag(ctx, "Prod", "red", false)
+	if err != nil || prod.NonProduction {
+		t.Fatalf("CreateTag = %+v, %v; want a production tag", prod, err)
+	}
+	if err := s.UpdateTag(ctx, qa.ID, "QA", "blue", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetTag(ctx, qa.ID); got.NonProduction {
+		t.Fatalf("after update = %+v, want the flag cleared", got)
+	}
+	listed, err := s.ListTags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range listed {
+		if tag.Name == "Prod" && tag.NonProduction {
+			t.Fatalf("ListTags returned %+v, want Prod unmarked", tag)
+		}
+	}
+}
+
+func TestMigration_DevTagIsNonProduction(t *testing.T) {
+	s := storetest.Open(t)
+	dev, err := s.DevTag(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dev.NonProduction {
+		t.Fatalf("Dev = %+v, want the built-in tag marked non-production", dev)
+	}
+	if err := s.UpdateTag(context.Background(), dev.ID, dev.Name, dev.Color, false); err != nil {
+		t.Fatalf("the built-in tag's flag must be editable: %v", err)
+	}
+	if again, _ := s.DevTag(context.Background()); again.NonProduction {
+		t.Fatalf("Dev = %+v, want the flag cleared", again)
 	}
 }
 
@@ -61,13 +109,13 @@ func TestDeleteTag_DevIsBuiltin(t *testing.T) {
 	if err := s.DeleteTag(ctx, dev.ID); !errors.Is(err, store.ErrBuiltin) {
 		t.Fatalf("DeleteTag(Dev) error = %v, want ErrBuiltin", err)
 	}
-	if err := s.UpdateTag(ctx, dev.ID, "Development", "neutral"); !errors.Is(err, store.ErrBuiltin) {
+	if err := s.UpdateTag(ctx, dev.ID, "Development", "neutral", false); !errors.Is(err, store.ErrBuiltin) {
 		t.Fatalf("UpdateTag rename Dev error = %v, want ErrBuiltin", err)
 	}
-	if err := s.UpdateTag(ctx, dev.ID, "Dev", "blue"); err != nil {
+	if err := s.UpdateTag(ctx, dev.ID, "Dev", "blue", false); err != nil {
 		t.Fatalf("UpdateTag recolour Dev: %v", err)
 	}
-	if err := s.UpdateTag(ctx, 99999, "x", "blue"); !errors.Is(err, store.ErrNotFound) {
+	if err := s.UpdateTag(ctx, 99999, "x", "blue", false); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("UpdateTag unknown error = %v, want ErrNotFound", err)
 	}
 }
@@ -75,7 +123,7 @@ func TestDeleteTag_DevIsBuiltin(t *testing.T) {
 func TestDeleteTag_CascadesAssignmentsAndPermissions(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	tag, _ := s.CreateTag(ctx, "Prod", "red", false)
 	u, _ := s.CreateUser(ctx, "alice", "h", false, false)
 	if err := s.SetClusterTag(ctx, clusterKey("c"), tag.ID); err != nil {
 		t.Fatal(err)
@@ -108,7 +156,7 @@ func TestDeleteTag_CascadesAssignmentsAndPermissions(t *testing.T) {
 func TestTagImpact_ListsClustersServicesUsers(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	tag, _ := s.CreateTag(ctx, "Prod", "red")
+	tag, _ := s.CreateTag(ctx, "Prod", "red", false)
 	bob, _ := s.CreateUser(ctx, "bob", "h", false, false)
 	alice, _ := s.CreateUser(ctx, "alice", "h", false, false)
 	carol, _ := s.CreateUser(ctx, "carol", "h", false, false)
@@ -142,7 +190,7 @@ func TestTagImpact_ListsClustersServicesUsers(t *testing.T) {
 func TestTagsSnapshot_InheritAndUntagged(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	prod, _ := s.CreateTag(ctx, "Prod", "red")
+	prod, _ := s.CreateTag(ctx, "Prod", "red", false)
 	dev, _ := s.DevTag(ctx)
 	_ = s.SetClusterTag(ctx, clusterKey("tagged"), prod.ID)
 
@@ -173,8 +221,8 @@ func TestTagsSnapshot_InheritAndUntagged(t *testing.T) {
 func TestTagCounts_EffectiveUsesCoalesce(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	prod, _ := s.CreateTag(ctx, "Prod", "red")
-	staging, _ := s.CreateTag(ctx, "Staging", "amber")
+	prod, _ := s.CreateTag(ctx, "Prod", "red", false)
+	staging, _ := s.CreateTag(ctx, "Staging", "amber", false)
 	dev, _ := s.DevTag(ctx)
 	_ = s.SetClusterTag(ctx, clusterKey("c"), prod.ID)
 	insertCluster(t, s, clusterKey("c"))
@@ -207,7 +255,7 @@ func TestTagCounts_EffectiveUsesCoalesce(t *testing.T) {
 func TestMarkOrphanedTags_SetsAndClears(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	prod, _ := s.CreateTag(ctx, "Prod", "red")
+	prod, _ := s.CreateTag(ctx, "Prod", "red", false)
 	ck, sk := clusterKey("gone"), serviceKey("gone", "web")
 	_ = s.SetClusterTag(ctx, ck, prod.ID)
 	id := prod.ID
@@ -261,7 +309,7 @@ func TestClearClusterTag_FallsBackToUntagged(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	k := model.ClusterKey{AccountID: "111", Region: "us-east-1", Cluster: "c1"}
-	prod, err := s.CreateTag(ctx, "Prod", "red")
+	prod, err := s.CreateTag(ctx, "Prod", "red", false)
 	if err != nil {
 		t.Fatal(err)
 	}

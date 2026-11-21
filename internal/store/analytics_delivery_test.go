@@ -73,7 +73,7 @@ func TestAnalyticsDeployments_WindowAndScope(t *testing.T) {
 func TestAnalyticsDeployments_VisibilityHidesOtherTags(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	prod, _ := s.CreateTag(ctx, "Prod", "red")
+	prod, _ := s.CreateTag(ctx, "Prod", "red", false)
 	if err := s.SetClusterTag(ctx, clusterKey("prod-cluster"), prod.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestAnalyticsDeployments_VisibilityHidesOtherTags(t *testing.T) {
 func TestAnalyticsDeployments_TagFilterNarrowsAdmin(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	prod, _ := s.CreateTag(ctx, "Prod", "red")
+	prod, _ := s.CreateTag(ctx, "Prod", "red", false)
 	if err := s.SetClusterTag(ctx, clusterKey("prod-cluster"), prod.ID); err != nil {
 		t.Fatal(err)
 	}

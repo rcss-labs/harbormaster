@@ -29,6 +29,9 @@ const metricsCacheRetention = 10 * time.Minute
 // samlRetiredKeyRetention is fixed: SP metadata advertises a retired key for 7 days (spec D4).
 const samlRetiredKeyRetention = 7 * 24 * time.Hour
 
+// imagePlatformsRetention is fixed: an image no task definition has mentioned for a week is not tracked any more.
+const imagePlatformsRetention = 7 * 24 * time.Hour
+
 // RunRetention deletes rows older than the configured ages, measured from now.
 func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (RetentionResult, error) {
 	result := RetentionResult{}
@@ -79,6 +82,14 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 			return result, fmt.Errorf("retention scan_acceptances_pruned: %w", err)
 		}
 		result["scan_acceptances_pruned"] = tag.RowsAffected()
+	}
+
+	pruned, err := s.PruneImagePlatforms(ctx, now.Add(-imagePlatformsRetention))
+	if err != nil {
+		return result, fmt.Errorf("retention image_platforms: %w", err)
+	}
+	if pruned > 0 {
+		result["image_platforms"] = pruned
 	}
 
 	n, err := s.DeleteExpiredSessions(ctx)

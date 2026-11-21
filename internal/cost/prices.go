@@ -49,11 +49,62 @@ var fargateRates = map[string]regionRates{
 	},
 }
 
+// SpotPricesAsOf is the day the Fargate Spot table below was read. It is independent of PricesAsOf.
+//
+// Fargate Spot prices are not in the AWS bulk price offer. Source: the public feed
+//
+//	https://dftu77xade0tc.cloudfront.net/fargate-spot-prices.json
+//
+// whose metadata says "This file is intended for use only on aws.amazon.com. We do not guarantee its
+// availability or accuracy." It is therefore read by hand, never at runtime. To refresh: read the four
+// units per region (vCPU-Hours, GB-Hours, ARM-vCPU-Hours, ARM-GB-Hours), update fargateSpotRates and
+// change SpotPricesAsOf to the day you read it. Spot prices change; the list and Spot dates move
+// independently.
+const SpotPricesAsOf = "2026-11-21"
+
+var fargateSpotRates = map[string]regionRates{
+	"us-east-1": {
+		x86: Rate{VCPUHour: 0.0148185, GBHour: 0.00162718},
+		arm: Rate{VCPUHour: 0.01185334, GBHour: 0.00130321},
+	},
+	"eu-west-1": {
+		x86: Rate{VCPUHour: 0.01216278, GBHour: 0.00133556},
+		arm: Rate{VCPUHour: 0.00972902, GBHour: 0.00106965},
+	},
+	"eu-central-1": {
+		x86: Rate{VCPUHour: 0.01697019, GBHour: 0.00186249},
+		arm: Rate{VCPUHour: 0.01357688, GBHour: 0.00149072},
+	},
+}
+
+// SpotRateFor returns the Fargate Spot rate for a region and an ECS CPU architecture, with the same
+// architecture rules as RateFor. It returns false for a region without a Spot price.
+func SpotRateFor(region, architecture string) (Rate, bool) {
+	return lookupRate(fargateSpotRates, region, architecture)
+}
+
+// RateForClass returns the rate a task of the given class is billed at. A Spot task in a region without a
+// Spot price has no rate: it never falls back to the list price.
+func RateForClass(region, architecture string, class TaskClass) (Rate, bool) {
+	switch class {
+	case OnDemand:
+		return RateFor(region, architecture)
+	case Spot:
+		return SpotRateFor(region, architecture)
+	default:
+		return Rate{}, false
+	}
+}
+
 // RateFor returns the Fargate rate for a region and an ECS CPU architecture.
 // An empty architecture means x86. It returns false for any region or
 // architecture without a price.
 func RateFor(region, architecture string) (Rate, bool) {
-	rates, ok := fargateRates[region]
+	return lookupRate(fargateRates, region, architecture)
+}
+
+func lookupRate(table map[string]regionRates, region, architecture string) (Rate, bool) {
+	rates, ok := table[region]
 	if !ok {
 		return Rate{}, false
 	}

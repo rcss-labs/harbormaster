@@ -51,6 +51,23 @@ func TestWritePrometheus_Format(t *testing.T) {
 	}
 }
 
+func TestWritePrometheus_RegistryRequestsByHostAndOutcome(t *testing.T) {
+	r := New()
+	r.CountRegistryRequest("ghcr.io", "ok")
+	r.CountRegistryRequest("ghcr.io", "ok")
+	r.CountRegistryRequest("registry-1.docker.io", "rate_limited")
+	out := render(t, r)
+	for _, want := range []string{
+		"# TYPE harbormaster_registry_requests_total counter",
+		`harbormaster_registry_requests_total{host="ghcr.io",outcome="ok"} 2`,
+		`harbormaster_registry_requests_total{host="registry-1.docker.io",outcome="rate_limited"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+}
+
 func TestWritePrometheus_EscapesLabelValues(t *testing.T) {
 	r := New()
 	r.CountAWSCall("a", "r", "s", `a"b\c`, "ok")

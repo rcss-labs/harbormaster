@@ -52,6 +52,8 @@ type visibilitySQL struct {
 	Effective string
 	// Inherited is true when the row has no service tag of its own.
 	Inherited string
+	// TagExplicit is true when the service or its cluster has a tag, false when the tag is only the Dev fallback.
+	TagExplicit string
 	// Predicate is "$admin OR effective = ANY($tagIDs)".
 	Predicate string
 	// Args are the values for the two placeholders $start and $start+1. Append
@@ -74,10 +76,11 @@ func visibilityFor(alias string, vis Visibility, start int) visibilitySQL {
 			` left join cluster_tags %[2]s on %[2]s.account_id = %[1]s.account_id and %[2]s.region = %[1]s.region and %[2]s.cluster_name = %[1]s.cluster_name`+
 				` left join service_tags %[3]s on %[3]s.account_id = %[1]s.account_id and %[3]s.region = %[1]s.region and %[3]s.cluster_name = %[1]s.cluster_name and %[3]s.service_name = %[1]s.service_name`,
 			alias, ct, st),
-		Effective: effective,
-		Inherited: st + ".tag_id is null",
-		Predicate: fmt.Sprintf("($%d::bool or %s = any($%d::bigint[]))", start, effective, start+1),
-		Args:      []any{vis.Admin, ids},
+		Effective:   effective,
+		Inherited:   st + ".tag_id is null",
+		TagExplicit: st + ".tag_id is not null or " + ct + ".tag_id is not null",
+		Predicate:   fmt.Sprintf("($%d::bool or %s = any($%d::bigint[]))", start, effective, start+1),
+		Args:        []any{vis.Admin, ids},
 	}
 }
 

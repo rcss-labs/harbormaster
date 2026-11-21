@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChangeSetResponse } from '../../../api/deploy'
 import { CHANGESET_APPLIED, CHANGESET_PARTIAL, DEPLOY_SETTINGS_PAYMENTS } from '../../../test/fixtures'
-import { buildChangeSetRequest, buildRetryRequest, primaryLabel, scalingLines, serviceRows, summarySentence, type ChangeSections } from './changeSummary'
+import { buildChangeSetRequest, buildRetryRequest, pendingRows, primaryLabel, scalingLines, serviceRows, summarySentence, type ChangeSections } from './changeSummary'
 
 const definition = { family: 'payments-api', cpu: '512', memory: '1024', containerDefinitions: [] }
 const none: ChangeSections = { target: null, service: null, scaling: null }
@@ -130,6 +130,15 @@ describe('buildRetryRequest', () => {
   })
 })
 
+describe('the architecture row', () => {
+  it('shows the architecture row in pending changes', () => {
+    const live = { family: 'payments-api', cpu: '512', memory: '1024', containerDefinitions: [] }
+    const arm = { ...live, runtimePlatform: { cpuArchitecture: 'ARM64', operatingSystemFamily: 'LINUX' } }
+    const rows = pendingRows({ sections: { ...none, target: { kind: 'definition', definition: arm } }, liveDefinition: live, definitionAfter: arm }, DEPLOY_SETTINGS_PAYMENTS)
+    expect(rows).toEqual([{ group: 'Task size', label: 'CPU architecture', before: 'X86_64', after: 'ARM64' }])
+  })
+})
+
 describe('describing a change', () => {
   it('lists service rows as before and after', () => {
     expect(serviceRows(DEPLOY_SETTINGS_PAYMENTS, { desired_count: 5, enable_execute_command: false, force_new_deployment: true })).toEqual([
@@ -137,6 +146,27 @@ describe('describing a change', () => {
       { label: 'ECS Exec', before: 'on', after: 'off' },
       { label: 'Restart tasks', before: 'no', after: 'yes' },
     ])
+  })
+
+  it('shows the capacity row in pending changes', () => {
+    const change = {
+      capacity_provider_strategy: [
+        { provider: 'FARGATE', base: 1, weight: 0 },
+        { provider: 'FARGATE_SPOT', base: 0, weight: 1 },
+      ],
+    }
+    expect(serviceRows(DEPLOY_SETTINGS_PAYMENTS, change)).toEqual([
+      { label: 'Capacity providers', before: 'FARGATE (launch type)', after: 'FARGATE base 1, FARGATE_SPOT weight 1' },
+    ])
+    expect(pendingRows({ sections: { ...none, service: change } }, DEPLOY_SETTINGS_PAYMENTS)).toEqual([
+      { group: 'Service', label: 'Capacity providers', before: 'FARGATE (launch type)', after: 'FARGATE base 1, FARGATE_SPOT weight 1' },
+    ])
+    const onSpot = { ...DEPLOY_SETTINGS_PAYMENTS, capacity: { ...DEPLOY_SETTINGS_PAYMENTS.capacity, launch_type: '', strategy: change.capacity_provider_strategy } }
+    expect(serviceRows(onSpot, { capacity_provider_strategy: [{ provider: 'FARGATE', base: 0, weight: 1 }] })[0]).toEqual({
+      label: 'Capacity providers',
+      before: 'FARGATE base 1, FARGATE_SPOT weight 1',
+      after: 'FARGATE weight 1',
+    })
   })
 
   it('lists scaling changes', () => {

@@ -29,7 +29,9 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/notify/fakesink"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
+	"github.com/rcss-labs/harbormaster/internal/platforms"
 	"github.com/rcss-labs/harbormaster/internal/poller"
+	"github.com/rcss-labs/harbormaster/internal/registry"
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
@@ -337,6 +339,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	pollerConfig := poller.ConfigFrom(cfg)
 	pollerConfig.Scan = scanRunner
 	pollerConfig.OffHours = offHoursReconciler
+	pollerConfig.ImagePlatforms = imagePlatformResolver(cfg, st, clients, fakeAWS, log)
 	pollerConfig.Notify = notifyDispatcher
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
@@ -370,4 +373,24 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		result = nil
 	}
 	return result
+}
+
+// imagePlatformResolver builds the leader job behind the ARM64 advisor, or nil when HM_ARM64_CHECK is off. With --fake-aws
+// the public registries are answered from memory and no socket is opened. Otherwise they are read anonymously through
+// the dial-time address guard (public addresses only), and HM_ARM64_PUBLIC_REGISTRIES=false leaves them unchecked.
+func imagePlatformResolver(cfg config.Config, st *store.Store, clients awsx.Clients, fakeAWS bool, log *slog.Logger) *platforms.Resolver {
+	if !cfg.ARM64.Check {
+		return nil
+	}
+	resolver := &platforms.Resolver{
+		Store: st, Clients: clients, Interval: cfg.ARM64.CheckInterval, Recheck: cfg.ARM64.Recheck, Now: time.Now, Log: log,
+		OnPublicRead: telemetry.Default.CountRegistryRequest,
+	}
+	switch {
+	case fakeAWS:
+		resolver.Public = fake.NewRegistry()
+	case cfg.ARM64.PublicRegistries:
+		resolver.Public = &registry.Client{HTTP: registry.NewHTTPClient(safedial.Policy{}, nil)}
+	}
+	return resolver
 }

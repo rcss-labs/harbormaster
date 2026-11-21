@@ -4,8 +4,8 @@ import { http, HttpResponse } from 'msw'
 import type { ConfigContainerDTO, ConfigSearchItemDTO, ConfigSearchResponse } from '../api/configSearch'
 import { FIXTURE_NOW } from './fixtures'
 
-const PROD_TAG = { id: 3, name: 'Prod', color: 'red' as const, inherited: false }
-const STAGING_TAG = { id: 2, name: 'Staging', color: 'amber' as const, inherited: false }
+const PROD_TAG = { id: 3, name: 'Prod', color: 'red' as const, inherited: false, non_production: false }
+const STAGING_TAG = { id: 2, name: 'Staging', color: 'amber' as const, inherited: false, non_production: false }
 
 function container(partial: Partial<ConfigContainerDTO> & Pick<ConfigContainerDTO, 'name' | 'image' | 'tag'>): ConfigContainerDTO {
   return { base_image: '', log_group: '', ports: [], env_names: [], secret_names: [], ...partial }

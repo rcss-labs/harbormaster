@@ -63,7 +63,7 @@ func TestNotificationRoute_CRUDAndVersion(t *testing.T) {
 
 func TestNotificationRoute_RoundTripsScopeConfigAndKinds(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestMigrate_NotificationScopeShapeIsChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tag, err := s.CreateTag(ctx, "QA", "blue")
+	tag, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +187,11 @@ func TestNotificationRoute_LimitIs50(t *testing.T) {
 // "everything" (D27).
 func TestDeleteTag_KeepsNotificationSelectors(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
-	qa, err := s.CreateTag(ctx, "QA", "blue")
+	qa, err := s.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prod, err := s.CreateTag(ctx, "Prod", "red")
+	prod, err := s.CreateTag(ctx, "Prod", "red", false)
 	if err != nil {
 		t.Fatal(err)
 	}

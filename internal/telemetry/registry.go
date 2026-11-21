@@ -21,17 +21,18 @@ type histogram struct {
 
 // Registry holds all Harbormaster process metrics.
 type Registry struct {
-	mu           sync.Mutex
-	awsCalls     map[string]uint64
-	loopDuration map[string]*histogram
-	loopRuns     map[string]uint64
-	loopInterval map[string]time.Duration
-	snapshotRows map[string]uint64
-	notifyCounts map[string]uint64
-	leader       bool
-	idle         bool
-	buildVersion string
-	buildInfoSet bool
+	mu               sync.Mutex
+	awsCalls         map[string]uint64
+	loopDuration     map[string]*histogram
+	loopRuns         map[string]uint64
+	loopInterval     map[string]time.Duration
+	snapshotRows     map[string]uint64
+	registryRequests map[string]uint64
+	notifyCounts     map[string]uint64
+	leader           bool
+	idle             bool
+	buildVersion     string
+	buildInfoSet     bool
 }
 
 // Default is the process-wide registry.
@@ -40,12 +41,13 @@ var Default = New()
 // New returns an empty registry.
 func New() *Registry {
 	return &Registry{
-		awsCalls:     map[string]uint64{},
-		loopDuration: map[string]*histogram{},
-		loopRuns:     map[string]uint64{},
-		loopInterval: map[string]time.Duration{},
-		snapshotRows: map[string]uint64{},
-		notifyCounts: map[string]uint64{},
+		awsCalls:         map[string]uint64{},
+		loopDuration:     map[string]*histogram{},
+		loopRuns:         map[string]uint64{},
+		loopInterval:     map[string]time.Duration{},
+		snapshotRows:     map[string]uint64{},
+		registryRequests: map[string]uint64{},
+		notifyCounts:     map[string]uint64{},
 	}
 }
 
@@ -56,6 +58,14 @@ func (r *Registry) CountAWSCall(account, region, service, operation, result stri
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.awsCalls[joinKey(account, region, service, operation, result)]++
+}
+
+// CountRegistryRequest records one read of a public image registry; outcome is ok, not_found, denied, rate_limited,
+// blocked or error. The host is one of the few allow-listed registry hosts, never a value from a task definition.
+func (r *Registry) CountRegistryRequest(host, outcome string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.registryRequests[joinKey(host, outcome)]++
 }
 
 // ObserveLoop records one poll loop run's duration and outcome.

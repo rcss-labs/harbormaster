@@ -66,6 +66,8 @@ type Estate struct {
 	// repository name. A repository is visible to a target that has a task
 	// definition with a container image from it (see ecrClient.DescribeImages).
 	Repositories map[string][]string
+	// ImageIndexes marks the repositories whose images are multi-architecture indexes (see SetImageIndex).
+	ImageIndexes map[string]ImageIndexSpec
 	// RunningTags is the tag each repository's service ran when the estate was
 	// seeded; the fake scanner measures how far a tag is ahead of it.
 	RunningTags map[string]string

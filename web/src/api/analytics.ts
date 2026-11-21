@@ -297,7 +297,7 @@ export interface AnalyticsOperations extends Envelope<'operations'> {
 // ---- cost ----
 
 export interface CostKpis {
-  /** USD per month at list prices; Spot is included at the on-demand list price. */
+  /** USD per month; on-demand tasks at list prices and Spot tasks at Spot prices. */
   monthly_total: number
   spot_monthly: number
   priced_tasks: number
@@ -374,14 +374,121 @@ export interface CostRightsizing {
   services: CostService[]
 }
 
+export type CostSpotStatus =
+  | 'candidate'
+  | 'no_cluster_spot'
+  | 'production'
+  | 'single_task'
+  | 'already_spot'
+  | 'custom_capacity'
+  | 'unsupported_controller'
+  | 'not_running'
+  | 'no_price'
+  | 'windows'
+  | 'not_fargate'
+  | 'untagged'
+
+/** What the last 7 days of deployment and scale-in stops say about stopping on SIGTERM. */
+export type CostStopEvidence = 'graceful' | 'killed' | 'unknown'
+
+export interface CostSpotService {
+  service_id: string
+  service: string
+  cluster: string
+  region: string
+  tag: TagDTO
+  status: CostSpotStatus
+  desired_tasks: number
+  on_demand_tasks: number
+  cpu_units: number | null
+  memory_mib: number | null
+  /** The proposal; zero unless the status is candidate or no_cluster_spot. */
+  on_demand_base: number
+  spot_tasks: number
+  /** Null unless the status is candidate or no_cluster_spot. Savings of the three advisors are not additive. */
+  saving_monthly: number | null
+  terminal_sessions: number
+  expected_stops: number
+  killed_stops: number
+  stop_evidence: CostStopEvidence
+  stop_timeout_seconds: number | null
+  /** Names a deployment controller Harbormaster does not deploy; empty otherwise. */
+  controller_name: string
+  /** Terminal sessions or killed stops: listed with a Check first pill and unticked by default. */
+  caution: boolean
+  auto_scaled: boolean
+  can_deploy: boolean
+}
+
+export interface CostSpot {
+  lookback_days: number
+  min_tasks: number
+  /** Every visible service, never null: candidates by saving, then the rest by name. */
+  services: CostSpotService[]
+}
+
+/** What the image check found for one container image. */
+export type Arm64ImageState = 'arm64' | 'no_arm64' | 'unchecked'
+export type Arm64ImageReason =
+  | ''
+  | 'no_arm64_in_index'
+  | 'single_architecture'
+  | 'pending'
+  | 'registry_not_checked'
+  | 'no_permission'
+  | 'not_connected'
+  | 'not_found'
+  | 'denied'
+  | 'error'
+
+export interface Arm64Image {
+  container: string
+  image: string
+  state: Arm64ImageState
+  reason: Arm64ImageReason
+  /** The account name for no_permission and not_connected; empty otherwise. */
+  account: string
+}
+
+export type Arm64Status = 'ready' | 'blocked' | 'unknown'
+
+export interface Arm64Service {
+  service_id: string
+  service: string
+  cluster: string
+  region: string
+  tag: TagDTO
+  status: Arm64Status
+  tasks: number
+  spot_tasks: number
+  /** At list price per task class. Savings of the three advisors are not additive. */
+  saving_monthly: number | null
+  images: Arm64Image[]
+  auto_scaled: boolean
+  can_edit: boolean
+}
+
+export interface CostArm64 {
+  /** HM_ARM64_CHECK. */
+  check_enabled: boolean
+  /** Services that already run on ARM64. */
+  already_arm64: number
+  /** Only ready, blocked and unknown services; never null. */
+  services: Arm64Service[]
+}
+
 export interface AnalyticsCost extends Envelope<'cost'> {
   /** List price publication date, YYYY-MM-DD. */
   prices_as_of: string
+  /** The day the Fargate Spot prices were read, YYYY-MM-DD. */
+  spot_prices_as_of: string
   kpis: CostKpis
   by_cluster: CostGroup[]
   by_account: CostGroup[]
   by_tag: CostGroup[]
   rightsizing: CostRightsizing
+  spot: CostSpot
+  arm64: CostArm64
 }
 
 export type AnalyticsResponse = AnalyticsDelivery | AnalyticsReliability | AnalyticsCapacity | AnalyticsOperations | AnalyticsCost

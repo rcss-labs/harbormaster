@@ -72,9 +72,12 @@ func Evaluate(in Input) (Status, []Step) {
 		return status, nil
 	}
 	rate, _ := RateFor(in.Region, in.Architecture)
+	spotRate, _ := SpotRateFor(in.Region, in.Architecture)
+	// Sizes stay ordered by the list rate: the Spot table is close enough to proportional that a second
+	// ordering would add nothing.
 	sizes := sortedSizes(rate)
-	tasks := float64(in.OnDemandTasks + in.SpotTasks)
-	currentCost := rate.Monthly(in.CPUUnits, in.MemoryMiB)
+	onDemandTasks, spotTasks := float64(in.OnDemandTasks), float64(in.SpotTasks)
+	currentCost := onDemandTasks*rate.Monthly(in.CPUUnits, in.MemoryMiB) + spotTasks*spotRate.Monthly(in.CPUUnits, in.MemoryMiB)
 
 	var steps []Step
 	anySuggestion := false
@@ -89,7 +92,7 @@ func Evaluate(in Input) (Status, []Step) {
 
 		var suggestion *Suggestion
 		if best, ok := cheapest(sizes, neededCPU, neededMem, float64(in.Floors.CPUUnits), float64(in.Floors.MemoryMiB), oomMem); ok {
-			saving := tasks * (currentCost - rate.Monthly(best[0], best[1]))
+			saving := currentCost - onDemandTasks*rate.Monthly(best[0], best[1]) - spotTasks*spotRate.Monthly(best[0], best[1])
 			if saving > MinSavingMonthly {
 				unconstrained, found := cheapest(sizes, neededCPU, neededMem, 0, 0, oomMem)
 				suggestion = &Suggestion{
@@ -133,6 +136,9 @@ func gate(in Input) Status {
 		return StatusNotFargate
 	}
 	if _, ok := RateFor(in.Region, in.Architecture); !ok {
+		return StatusNoPrice
+	}
+	if _, ok := SpotRateFor(in.Region, in.Architecture); !ok && in.SpotTasks > 0 {
 		return StatusNoPrice
 	}
 	switch {

@@ -3,6 +3,7 @@ package fake
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,48 @@ func TestMockupEstate_Counts(t *testing.T) {
 			if aws.ToString(td.Definition.Cpu) != "256" || aws.ToString(td.Definition.Memory) != "512" {
 				t.Fatalf("image-resizer size = %s/%s, want 256/512", aws.ToString(td.Definition.Cpu), aws.ToString(td.Definition.Memory))
 			}
+		}
+	}
+}
+
+// The Spot advisor needs one cluster that never got FARGATE_SPOT, and a service that already runs on it.
+func TestMockupEstate_SpotShape(t *testing.T) {
+	f := newFake()
+	f.Estate.Mu.Lock()
+	defer f.Estate.Mu.Unlock()
+	for _, cluster := range f.Estate.Clusters {
+		name := aws.ToString(cluster.Cluster.ClusterName)
+		hasSpot := slices.Contains(cluster.Cluster.CapacityProviders, "FARGATE_SPOT")
+		if want := name != "edge-proxy"; hasSpot != want {
+			t.Errorf("cluster %s lists FARGATE_SPOT = %v, want %v", name, hasSpot, want)
+		}
+	}
+	for _, task := range f.Estate.Tasks {
+		if task.ClusterName == "edge-proxy" && aws.ToString(task.Task.CapacityProviderName) == "FARGATE_SPOT" {
+			t.Errorf("task %s of a cluster without FARGATE_SPOT runs on Spot", aws.ToString(task.Task.TaskArn))
+		}
+	}
+	for _, service := range f.Estate.Services {
+		strategy := service.Service.CapacityProviderStrategy
+		onSpot := len(strategy) == 1 && aws.ToString(strategy[0].CapacityProvider) == "FARGATE_SPOT" && service.Service.LaunchType == ""
+		if name := aws.ToString(service.Service.ServiceName); onSpot != (name == "notifications") {
+			t.Errorf("service %s on a Spot strategy = %v, want only notifications to be", name, onSpot)
+		}
+	}
+}
+
+// The ARM64 advisor needs a ready service, a blocked one (an index without arm64) and single-manifest images for the rest.
+func TestMockupEstate_ImageIndexes(t *testing.T) {
+	f := newFake()
+	f.Estate.Mu.Lock()
+	defer f.Estate.Mu.Unlock()
+	want := map[string]ImageIndexSpec{"payments-api": {ARM64: true}, "catalog-api": {ARM64: true}, "edge-nginx": {ARM64: false}}
+	if len(f.Estate.ImageIndexes) != len(want) {
+		t.Fatalf("index repositories = %v, want %v", f.Estate.ImageIndexes, want)
+	}
+	for repository, spec := range want {
+		if got, ok := f.Estate.ImageIndexes[repository]; !ok || got != spec {
+			t.Errorf("%s = %+v (marked %v), want %+v", repository, got, ok, spec)
 		}
 	}
 }

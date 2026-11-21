@@ -1,8 +1,9 @@
 import type { ChangeSetRequest, ChangeSetResponse, DeploySettingsResponse } from '../../../api/deploy'
 import { containersOf, imageTagOf, type Definition } from '../task-definition/mainContainer'
+import { readArchitecture } from './archParams'
 import { containerNames, readArgv, readEnvironment, readHealthCheck, readSecrets, type HealthCheck } from './draft'
 import type { ScalingChange } from './scalingDraft'
-import type { ServiceChange } from './serviceDraft'
+import { describeLiveCapacity, describeStrategy, type ServiceChange } from './serviceDraft'
 import { plural } from './format'
 
 /** What the change set does to the task definition: register the edited draft, or roll out an already registered revision. */
@@ -94,6 +95,9 @@ export function serviceRows(settings: DeploySettingsResponse, change: ServiceCha
     const before = settings.health_check_grace_period_seconds
     rows.push({ label: 'Health check grace period', before: before === null ? 'none' : `${before} s`, after: `${change.health_check_grace_period_seconds} s` })
   }
+  if (change.capacity_provider_strategy) {
+    rows.push({ label: 'Capacity providers', before: describeLiveCapacity(settings), after: describeStrategy(change.capacity_provider_strategy) })
+  }
   if (change.force_new_deployment) rows.push({ label: 'Restart tasks', before: 'no', after: 'yes' })
   return rows
 }
@@ -179,7 +183,9 @@ const without = (source: Record<string, unknown>, keys: string[]) => Object.from
 /** Everything the dedicated rows already cover is removed, so what is left differing is a change the aside has no row for. */
 function uncoveredDefinition(definition: Definition): unknown {
   return {
-    ...without(definition, ['cpu', 'memory']),
+    ...without(definition, ['cpu', 'memory', 'runtimePlatform']),
+    // The CPU architecture has its own row, and LINUX is the default OS family; any other runtime platform change is still compared.
+    runtimePlatform: Object.fromEntries(Object.entries((definition.runtimePlatform as Record<string, unknown> | undefined) ?? {}).filter(([key, value]) => key !== 'cpuArchitecture' && !(key === 'operatingSystemFamily' && value === 'LINUX'))),
     containerDefinitions: containersOf(definition).map((entry) => {
       const text = typeof entry.image === 'string' ? entry.image : ''
       return { ...without(entry, ['image', 'environment', 'secrets', 'command', 'entryPoint', 'healthCheck']), image: text.slice(0, text.length - imageTagOf(text).length) }
@@ -194,6 +200,7 @@ function definitionRows(before: Definition, after: Definition): PendingRow[] {
   }
   task('Task CPU', before.cpu ?? '', after.cpu ?? '', ' units')
   task('Task memory', before.memory ?? '', after.memory ?? '', ' MiB')
+  if (readArchitecture(before) !== readArchitecture(after)) rows.push({ group: 'Task size', label: 'CPU architecture', before: readArchitecture(before), after: readArchitecture(after) })
 
   const wasNames = containerNames(before)
   const nowNames = containerNames(after)

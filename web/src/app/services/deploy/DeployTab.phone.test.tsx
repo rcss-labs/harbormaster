@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { CHANGESET_APPLIED, SERVICE_PAYMENTS } from '../../../test/fixtures'
+import { CHANGESET_APPLIED, DEPLOY_SETTINGS_PAYMENTS, SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { imageTagsHandler } from '../../../test/imageTags'
 import { server } from '../../../test/msw'
 import { installPhoneMedia } from '../../../test/phone'
@@ -95,6 +95,25 @@ describe('DeployTab on a phone', () => {
     expect(document.documentElement).toHaveAttribute('data-hm-bar')
     unmount()
     expect(document.documentElement).not.toHaveAttribute('data-hm-bar')
+  })
+
+  it('stacks the capacity fields', async () => {
+    await openDeployTab()
+    const fields = ['On-demand tasks kept (base)', 'On-demand weight', 'Spot weight'].map((name) => screen.getByLabelText(name))
+    // One field row holds all three; its CSS puts them in a single column below 700 px.
+    const rows = new Set(fields.map((field) => field.closest('div')))
+    expect(rows.size).toBe(1)
+    expect([...rows][0]?.className).toMatch(/fieldRow/)
+  })
+
+  it('states why the capacity is locked in a note, since a phone has no tooltips', async () => {
+    server.use(
+      http.get('/api/services/:id/deploy-settings', () =>
+        HttpResponse.json({ ...DEPLOY_SETTINGS_PAYMENTS, capacity: { ...DEPLOY_SETTINGS_PAYMENTS.capacity, editable: false, lock_reason: 'This service does not run on Fargate.' } }),
+      ),
+    )
+    await openDeployTab()
+    expect(await screen.findByText('This service does not run on Fargate.')).toBeInTheDocument()
   })
 
   it('a long tag list opens a tall sheet with its own search; picking a tag edits the draft', async () => {

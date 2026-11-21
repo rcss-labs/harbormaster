@@ -18,7 +18,27 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/poller"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
+
+// CapacityItem is one entry of a capacity provider strategy.
+type CapacityItem struct {
+	Provider     string
+	Base, Weight int
+}
+
+// CapacitySettings is how the service picks its capacity: a launch type, or a capacity provider strategy.
+type CapacitySettings struct {
+	LaunchType string         // "" when a strategy is set
+	Strategy   []CapacityItem // sorted by provider; empty when the service uses a launch type
+	// ClusterProviders are the capacity providers associated with the cluster, from the stored snapshot.
+	ClusterProviders []string
+	// ClusterProvidersKnown is false when the stored cluster could not be read, so a missing provider is not a verdict.
+	ClusterProvidersKnown bool
+	ClusterName           string
+	Editable              bool
+	LockReason            string // user-facing; "" when Editable
+}
 
 // DeploySettings is the live service and scaling configuration the Deploy tab edits.
 type DeploySettings struct {
@@ -36,6 +56,7 @@ type DeploySettings struct {
 	HasLoadBalancer                        bool
 	TargetGroups                           []TargetGroupSetting
 	Scaling                                ScalingSettings
+	Capacity                               CapacitySettings
 
 	// Partial lists the parts that could not be read. Each stays at its zero value and is left out
 	// of Version (see version).
@@ -118,9 +139,11 @@ func (s *Service) settingsFrom(ctx context.Context, key model.ServiceKey, live e
 	}
 	// The live service, its primary deployment and the clients stay fatal. The parts below read other
 	// APIs, so one failing must not hide the rest; a cancelled request is not a part failure.
-	if out.TaskRoleARN, err = s.taskRoleOf(ctx, key, aws.ToString(primary.TaskDefinition)); err != nil {
+	var windows bool
+	if out.TaskRoleARN, windows, err = s.taskRoleOf(ctx, key, aws.ToString(primary.TaskDefinition)); err != nil {
 		out.Partial = append(out.Partial, PartError{Part: PartTaskRole, Err: err})
 	}
+	out.Capacity = s.capacityOf(ctx, key, live, out.Controller, windows)
 	if out.TargetGroups, err = s.targetGroupsOf(ctx, key, live); err != nil {
 		out.TargetGroups = nil
 		out.Partial = append(out.Partial, PartError{Part: PartTargetGroups, Err: err})
@@ -157,17 +180,79 @@ func deploymentSettingsOf(live ecstypes.Service) DeploymentSettings {
 	return settings
 }
 
-// taskRoleOf is the task role of a task definition revision, "" when it has none.
-func (s *Service) taskRoleOf(ctx context.Context, key model.ServiceKey, arn string) (string, error) {
+// taskRoleOf is the task role of a task definition revision, "" when it has none, and whether the revision
+// targets Windows.
+func (s *Service) taskRoleOf(ctx context.Context, key model.ServiceKey, arn string) (role string, windows bool, err error) {
 	ref, err := s.loadTaskDefinition(ctx, key, arn)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var described ecstypes.TaskDefinition
 	if err := json.Unmarshal(ref.Raw, &described); err != nil {
-		return "", fmt.Errorf("decode task definition %s: %w", arn, err)
+		return "", false, fmt.Errorf("decode task definition %s: %w", arn, err)
 	}
-	return aws.ToString(described.TaskRoleArn), nil
+	platform := described.RuntimePlatform
+	windows = platform != nil && strings.HasPrefix(strings.ToUpper(string(platform.OperatingSystemFamily)), "WINDOWS")
+	return aws.ToString(described.TaskRoleArn), windows, nil
+}
+
+// Capacity provider names Harbormaster edits. It never edits any other provider and never sends an empty strategy.
+const (
+	ProviderFargate     = "FARGATE"
+	ProviderFargateSpot = "FARGATE_SPOT"
+)
+
+// ClusterNoSpotMessage is the user-facing sentence for a cluster that cannot run Fargate Spot tasks. Harbormaster
+// never changes a cluster's capacity providers; it only says how to.
+func ClusterNoSpotMessage(cluster string) string {
+	return fmt.Sprintf("Cluster %s has no FARGATE_SPOT capacity provider. Associate it with the cluster (in Terraform: aws_ecs_cluster_capacity_providers), then this service qualifies.", cluster)
+}
+
+// capacityOf reads how the live service chooses its capacity and whether Harbormaster may change it. The cluster's
+// providers come from the stored snapshot; a failed read is not fatal and only leaves them unknown.
+func (s *Service) capacityOf(ctx context.Context, key model.ServiceKey, live ecstypes.Service, controller ControllerInfo, windows bool) CapacitySettings {
+	out := CapacitySettings{ClusterName: key.Cluster}
+	for _, item := range live.CapacityProviderStrategy {
+		out.Strategy = append(out.Strategy, CapacityItem{Provider: aws.ToString(item.CapacityProvider), Base: int(item.Base), Weight: int(item.Weight)})
+	}
+	sort.Slice(out.Strategy, func(i, j int) bool { return out.Strategy[i].Provider < out.Strategy[j].Provider })
+	if len(out.Strategy) == 0 {
+		out.LaunchType = string(live.LaunchType)
+	}
+	if cluster, err := s.Store.GetCluster(ctx, key.ClusterKey, store.Visibility{Admin: true}); err == nil {
+		out.ClusterProviders, out.ClusterProvidersKnown = append([]string{}, cluster.CapacityProviders...), true
+		sort.Strings(out.ClusterProviders)
+	}
+	switch {
+	case !runsOnFargate(out):
+		out.LockReason = "This service does not run on Fargate."
+		if len(out.Strategy) > 0 {
+			out.LockReason = "This service uses a capacity provider Harbormaster does not edit."
+		}
+	case windows:
+		out.LockReason = "Windows tasks cannot run on Fargate Spot."
+	case !controller.Supported:
+		out.LockReason = (&UnsupportedControllerError{Name: controller.Name}).Error()
+	}
+	out.Editable = out.LockReason == ""
+	return out
+}
+
+// runsOnFargate is true for the FARGATE launch type, or for a strategy of only FARGATE and FARGATE_SPOT with no
+// base on Spot (a base Harbormaster could not write back).
+func runsOnFargate(c CapacitySettings) bool {
+	if len(c.Strategy) == 0 {
+		return c.LaunchType == string(ecstypes.LaunchTypeFargate)
+	}
+	for _, item := range c.Strategy {
+		switch {
+		case item.Provider == ProviderFargate:
+		case item.Provider == ProviderFargateSpot && item.Base == 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // targetGroupsOf describes the service's target groups. The ALB resource label is
@@ -270,7 +355,7 @@ var versionSegments = [...]string{"core", PartTargetGroups, poller.PartScalingTa
 const unreadableSegment = "-"
 
 // version hashes the configuration a client edits against, one hash per part joined by ".":
-// ECS Exec, deployment configuration, grace period and load balancer presence ("core"), then target
+// ECS Exec, deployment configuration, grace period, load balancer presence, launch type and capacity strategy ("core"), then target
 // groups, the scalable target, scaling policies and scheduled actions. A part listed in Partial is
 // "-". It leaves out what is observation or is guarded elsewhere: desired count (autoscaling moves
 // it; last writer wins), running count, max desired (server config), task role, family, controller
@@ -285,7 +370,9 @@ func (d DeploySettings) version() string {
 		DeploymentConfiguration DeploymentSettings
 		HealthCheckGrace        *int
 		HasLoadBalancer         bool
-	}{d.EnableExecuteCommand, d.DeploymentConfiguration, d.HealthCheckGracePeriodSeconds, d.HasLoadBalancer}
+		LaunchType              string
+		Strategy                []CapacityItem
+	}{d.EnableExecuteCommand, d.DeploymentConfiguration, d.HealthCheckGracePeriodSeconds, d.HasLoadBalancer, d.Capacity.LaunchType, d.Capacity.Strategy}
 	target := struct {
 		HasTarget bool
 		Min, Max  int

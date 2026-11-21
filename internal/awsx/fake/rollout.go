@@ -3,6 +3,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,8 @@ const (
 	failedDeploymentLingerSteps = 6
 )
 
-// UpdateService supports TaskDefinition, ForceNewDeployment, DesiredCount,
+// UpdateService supports TaskDefinition, ForceNewDeployment, DesiredCount, CapacityProviderStrategy (which, as in AWS,
+// starts no deployment by itself and must name providers the cluster has),
 // EnableExecuteCommand, DeploymentConfiguration and HealthCheckGracePeriodSeconds
 // (the last only for services behind a load balancer). Settings changes alone
 // start no deployment; tasks started later follow the new exec flag, running
@@ -73,6 +75,12 @@ func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput,
 	if in.HealthCheckGracePeriodSeconds != nil && len(svc.LoadBalancers) == 0 {
 		return nil, invalidParameter("Health check grace period is only valid for services configured to use load balancers.")
 	}
+	for _, item := range in.CapacityProviderStrategy {
+		provider := aws.ToString(item.CapacityProvider)
+		if !e.clusterHasProvider(e.Services[si].AccountID, e.Services[si].Region, cluster, provider) {
+			return nil, invalidParameter("The specified capacity provider " + provider + " is not associated with the cluster. Specify a capacity provider that is associated with the cluster and try again.")
+		}
+	}
 	var deploymentConfig *ecstypes.DeploymentConfiguration
 	if in.DeploymentConfiguration != nil {
 		merged, err := mergeDeploymentConfiguration(svc.DeploymentConfiguration, *in.DeploymentConfiguration)
@@ -86,6 +94,10 @@ func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput,
 	}
 	if in.EnableExecuteCommand != nil {
 		svc.EnableExecuteCommand = *in.EnableExecuteCommand
+	}
+	if len(in.CapacityProviderStrategy) > 0 {
+		svc.LaunchType = ""
+		svc.CapacityProviderStrategy = deepCopy(in.CapacityProviderStrategy)
 	}
 	if in.HealthCheckGracePeriodSeconds != nil {
 		svc.HealthCheckGracePeriodSeconds = aws.Int32(*in.HealthCheckGracePeriodSeconds)
@@ -306,7 +318,8 @@ func (e *Estate) newTask(si int, definitionARN, deploymentID string, failure boo
 	}
 	spec.exec = s.Service.EnableExecuteCommand // tasks follow the service's current setting
 	now := e.now()
-	options := taskOptions{taskDefinitionARN: definitionARN, slot: len(e.Tasks), startedAt: now, deploymentID: deploymentID}
+	options := taskOptions{taskDefinitionARN: definitionARN, slot: len(e.Tasks), startedAt: now, deploymentID: deploymentID,
+		capacityProvider: e.placeByStrategy(si, deploymentID)}
 	if failure {
 		options.startedAt = now.Add(-40 * time.Second)
 		options.stoppedAt = now
@@ -317,6 +330,47 @@ func (e *Estate) newTask(si int, definitionARN, deploymentID string, failure boo
 	}
 	sd.addTask(spec, options)
 	return id12(aws.ToString(e.Tasks[len(e.Tasks)-1].Task.TaskArn))
+}
+
+// placeByStrategy picks the capacity provider of the next task of a deployment the way ECS does: base first, then
+// by weight. It returns "" for a service on a launch type. Caller holds Mu.
+func (e *Estate) placeByStrategy(si int, deploymentID string) string {
+	strategy := e.Services[si].Service.CapacityProviderStrategy
+	if len(strategy) == 0 {
+		return ""
+	}
+	placed := map[string]int{}
+	for _, ti := range e.serviceTaskIndexes(si, "RUNNING") {
+		if aws.ToString(e.Tasks[ti].Task.StartedBy) == deploymentID {
+			placed[aws.ToString(e.Tasks[ti].Task.CapacityProviderName)]++
+		}
+	}
+	for _, item := range strategy {
+		if provider := aws.ToString(item.CapacityProvider); item.Base > 0 && int32(placed[provider]) < item.Base {
+			return provider
+		}
+	}
+	best, bestRatio := "", 0.0
+	for _, item := range strategy {
+		if item.Weight <= 0 {
+			continue
+		}
+		provider := aws.ToString(item.CapacityProvider)
+		if ratio := float64(placed[provider]) / float64(item.Weight); best == "" || ratio < bestRatio {
+			best, bestRatio = provider, ratio
+		}
+	}
+	return best
+}
+
+// clusterHasProvider reports whether the cluster lists the capacity provider. Caller holds Mu.
+func (e *Estate) clusterHasProvider(account, region, cluster, provider string) bool {
+	for _, c := range e.Clusters {
+		if c.AccountID == account && c.Region == region && aws.ToString(c.Cluster.ClusterName) == cluster {
+			return slices.Contains(c.Cluster.CapacityProviders, provider)
+		}
+	}
+	return false
 }
 
 // stopRunningTask stops e.Tasks[ti] by the scheduler. Caller holds Mu.

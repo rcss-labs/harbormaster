@@ -102,14 +102,17 @@ func (s *Server) scanGate(ctx context.Context, key model.ServiceKey, baseRevisio
 	if err != nil {
 		return passed, nil
 	}
-	baseline := s.baselineImages(ctx, key, baseRevision, family)
+	baseline, baselinePlatform := s.baselineImages(ctx, key, baseRevision, family)
 
+	// The same image string is a different image on another platform, so a changed platform puts every container back in front
+	// of the gate. An unreadable baseline already counts every container as changed.
+	platformChanged := baseline != nil && baselinePlatform != platform
 	changed := map[string]string{}
 	for name, image := range submitted {
 		if name == "" || image == "" {
 			continue // Prepare refuses a container without a name or an image; the apply answers 422
 		}
-		if previous, known := baseline[name]; !known || previous != image {
+		if previous, known := baseline[name]; platformChanged || !known || previous != image {
 			changed[name] = image
 		}
 	}
@@ -223,15 +226,18 @@ func (s *Server) scanGateForRevision(ctx context.Context, key model.ServiceKey, 
 	}
 	// The running images are the baseline. When they cannot be read every container counts as changed.
 	var running map[string]string
+	var runningPlatform string
 	if deployedErr == nil {
-		running, _, _ = deploy.DefinitionImages(deployed.Definition)
+		running, runningPlatform, _ = deploy.DefinitionImages(deployed.Definition)
 	}
+	// Another architecture than the running one puts every container back in front of the gate, as for a definition.
+	platformChanged := running != nil && runningPlatform != platform
 	changed := map[string]string{}
 	for name, image := range images {
 		if name == "" || image == "" {
 			continue
 		}
-		if previous, known := running[name]; !known || previous != image {
+		if previous, known := running[name]; platformChanged || !known || previous != image {
 			changed[name] = image
 		}
 	}
@@ -271,29 +277,29 @@ func allAcknowledged(rows []ScanGateImageDTO, acks []ScanGateAck) bool {
 	return true
 }
 
-// baselineImages is the images of the definition the request was edited from. When it cannot be read every container
-// counts as changed: the gate then pauses where it could have passed, and never the other way round.
+// baselineImages is the images and the platform of the definition the request was edited from. When it cannot be read every
+// container counts as changed: the gate then pauses where it could have passed, and never the other way round.
 //
 // The revision is looked up in the family of the polled snapshot, which can lag the live service. A baseline whose family
 // is not the submitted definition's family is not the definition being edited, so it counts as unreadable too.
-func (s *Server) baselineImages(ctx context.Context, key model.ServiceKey, baseRevision int, family string) map[string]string {
+func (s *Server) baselineImages(ctx context.Context, key model.ServiceKey, baseRevision int, family string) (images map[string]string, platform string) {
 	revision, err := s.Deploy.RevisionDefinition(ctx, key, baseRevision)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
 			s.log().Warn("gate: base revision unreadable, gating every image", "service", key.ID(), "revision", baseRevision, "error", err)
 		}
-		return nil
+		return nil, ""
 	}
 	if baseFamily, _ := revision.Definition["family"].(string); baseFamily != family {
 		s.log().Warn("gate: base revision is of another family, gating every image", "service", key.ID(), "revision", baseRevision)
-		return nil
+		return nil, ""
 	}
-	images, _, err := deploy.DefinitionImages(revision.Definition)
+	images, platform, err = deploy.DefinitionImages(revision.Definition)
 	if err != nil {
 		s.log().Warn("gate: base revision undecodable, gating every image", "service", key.ID(), "revision", baseRevision, "error", err)
-		return nil
+		return nil, ""
 	}
-	return images
+	return images, platform
 }
 
 // gateRow resolves one changed image now and judges the digest it resolves to (D22). Every image that resolves records a

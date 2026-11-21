@@ -662,7 +662,7 @@ func TestNotificationRoutes_TelegramFields(t *testing.T) {
 
 func TestNotificationRoutes_ScopeRoundTripsWithNamesAndMissing(t *testing.T) {
 	e := newNotifyEnv(t)
-	qa, err := e.st.CreateTag(t.Context(), "QA", "blue")
+	qa, err := e.st.CreateTag(t.Context(), "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1114,7 +1114,7 @@ func TestNotificationRoutes_ReportSettleSeconds(t *testing.T) {
 // again must not fail on it, the same as for a deleted cluster or service; a tag id the route never had is refused.
 func TestNotificationRoutes_DeletedTagSelectorIsKeptOnSave(t *testing.T) {
 	e := newNotifyEnv(t)
-	qa, err := e.st.CreateTag(t.Context(), "QA", "blue")
+	qa, err := e.st.CreateTag(t.Context(), "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1153,7 +1153,7 @@ func TestNotificationRoutes_DeletedTagSelectorIsKeptOnSave(t *testing.T) {
 // The editor previews the draft of a route that still holds a deleted tag; that must work as saving it does.
 func TestNotificationPreview_DraftKeepsADeletedTagOfTheRoute(t *testing.T) {
 	e := newNotifyEnv(t)
-	qa, err := e.st.CreateTag(t.Context(), "QA", "blue")
+	qa, err := e.st.CreateTag(t.Context(), "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
+	"github.com/rcss-labs/harbormaster/internal/platforms"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -58,6 +59,9 @@ type Config struct {
 	Scan *scanjob.Runner
 	// OffHours reconciles off-hours scheduled actions and capacity; nil leaves it off. It runs only while this instance leads.
 	OffHours *offhours.Reconciler
+	// ImagePlatforms resolves which CPU architectures the images of x86 Fargate services support; nil leaves it off. It runs
+	// only while this instance leads.
+	ImagePlatforms *platforms.Resolver
 	// Notify plans and sends alert notifications; nil leaves it off. It runs only while this instance leads.
 	Notify Runner
 }

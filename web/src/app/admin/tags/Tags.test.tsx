@@ -73,16 +73,41 @@ describe('Tags', () => {
     expect(deleteButtons[1]).toBeEnabled()
   })
 
-  it('Rename disabled for Dev, enabled for other tags (spec 6.9: Dev cannot be renamed)', async () => {
+  it('Dev can be edited but not renamed (spec 6.9: Dev cannot be renamed)', async () => {
     renderApp('/settings/tags')
-    const renameButtons = await screen.findAllByRole('button', {
-      name: 'Rename',
-    })
-    const devRow = renameButtons[0].closest('tr') as HTMLElement
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' })
+    const devRow = editButtons[0].closest('tr') as HTMLElement
     expect(within(devRow).getByText('Dev')).toBeInTheDocument()
-    expect(renameButtons[0]).toBeDisabled()
-    expect(renameButtons[0]).toHaveAttribute('title', 'Dev is the default tag')
-    expect(renameButtons[1]).toBeEnabled()
+    expect(editButtons[0]).toBeEnabled()
+    fireEvent.click(editButtons[0])
+    expect(within(screen.getByRole('dialog')).getByLabelText('Name')).toBeDisabled()
+  })
+
+  it('shows a Non-production pill on tags the admin marked', async () => {
+    renderApp('/settings/tags')
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' })
+    expect(within(editButtons[0].closest('tr') as HTMLElement).getByText('Non-production')).toBeInTheDocument()
+    expect(within(editButtons[2].closest('tr') as HTMLElement).queryByText('Non-production')).not.toBeInTheDocument()
+  })
+
+  it('marks a tag as non-production from the edit dialog', async () => {
+    const patches: unknown[] = []
+    server.use(
+      http.patch('/api/tags/3', async ({ request }) => {
+        patches.push(await request.json())
+        return HttpResponse.json({})
+      }),
+    )
+    renderApp('/settings/tags')
+    const editButtons = await screen.findAllByRole('button', { name: 'Edit' })
+    fireEvent.click(editButtons[2])
+    const dialog = screen.getByRole('dialog')
+    const flag = within(dialog).getByLabelText('Non-production')
+    expect(flag).not.toBeChecked()
+    expect(within(dialog).getByText('Services under this tag can be suggested for Fargate Spot.')).toBeInTheDocument()
+    fireEvent.click(flag)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patches).toEqual([{ name: 'Prod', color: 'red', non_production: true }]))
   })
 })
 
@@ -121,6 +146,23 @@ describe('TagDialog', () => {
       await within(dialog).findByText('Use 1–24 letters, digits, spaces, hyphens or underscores, starting with a letter.'),
     ).toBeInTheDocument()
     expect(posts).toEqual([])
+  })
+
+  it('creates a tag as production unless the box is ticked', async () => {
+    const posts: unknown[] = []
+    server.use(
+      http.post('/api/tags', async ({ request }) => {
+        posts.push(await request.json())
+        return HttpResponse.json({}, { status: 201 })
+      }),
+    )
+    renderApp('/settings/tags')
+    fireEvent.click(await screen.findByRole('button', { name: 'Create tag' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'QA' } })
+    fireEvent.click(within(dialog).getByLabelText('Non-production'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create tag' }))
+    await waitFor(() => expect(posts).toEqual([{ name: 'QA', color: 'blue', non_production: true }]))
   })
 })
 

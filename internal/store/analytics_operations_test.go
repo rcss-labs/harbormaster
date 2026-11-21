@@ -97,7 +97,7 @@ func TestAnalyticsOperations_VisibilityAndWindow(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	user := mustUser(t, s, "sam")
-	prod, _ := s.CreateTag(ctx, "Prod", "red")
+	prod, _ := s.CreateTag(ctx, "Prod", "red", false)
 	if err := s.SetClusterTag(ctx, clusterKey("prod-cluster"), prod.ID); err != nil {
 		t.Fatal(err)
 	}

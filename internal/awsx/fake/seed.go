@@ -28,6 +28,8 @@ type seedCluster struct {
 	name, accountID, region string
 	insights                bool
 	subnets                 []seedSubnet
+	// noSpot leaves FARGATE_SPOT out of the cluster's capacity providers; no task of the cluster then runs on Spot.
+	noSpot bool
 }
 
 type seedEFS struct{ name, fsID, accessPointID, path string }
@@ -47,24 +49,24 @@ var mainVPCSubnets = []seedSubnet{
 }
 
 var seedClusters = []seedCluster{
-	{"core-services", homelabAccountID, "us-east-1", true, mainVPCSubnets},
-	{"background-jobs", homelabAccountID, "us-east-1", true, mainVPCSubnets},
+	{"core-services", homelabAccountID, "us-east-1", true, mainVPCSubnets, false},
+	{"background-jobs", homelabAccountID, "us-east-1", true, mainVPCSubnets, false},
 	{"ci-tools", homelabAccountID, "us-east-1", true, []seedSubnet{
 		{"subnet-0e1c88a1", "10.21.1.0/24", "us-east-1a", false},
 		{"subnet-02aa71f3", "10.21.3.0/24", "us-east-1c", false},
-	}},
+	}, false},
 	{"eu-apps", homelabAccountID, "eu-west-1", true, []seedSubnet{
 		{"subnet-0a90f7c1", "10.30.1.0/24", "eu-west-1a", false},
 		{"subnet-0c6b1e92", "10.30.2.0/24", "eu-west-1b", false},
-	}},
+	}, false},
 	{"edge-proxy", homelabAccountID, "eu-central-1", false, []seedSubnet{
 		{"subnet-0d2e5a77", "10.40.1.0/24", "eu-central-1a", false},
 		{"subnet-0f61c3b8", "10.40.101.0/24", "eu-central-1a", true},
-	}},
+	}, true},
 	{"staging-web", stagingAccountID, "us-east-1", true, []seedSubnet{
 		{"subnet-01f8a2d4", "10.50.1.0/24", "us-east-1a", false},
 		{"subnet-0e7c3b19", "10.50.2.0/24", "us-east-1b", false},
-	}},
+	}, false},
 }
 
 type envVar struct{ name, value string }
@@ -94,6 +96,8 @@ type serviceSpec struct {
 	ec2 bool
 	// spot runs the tasks on the FARGATE_SPOT capacity provider.
 	spot bool
+	// multiArch makes the repository's images OCI indexes; arm64 gives the index a linux/arm64 entry.
+	multiArch, arm64 bool
 	// sidecarMemoryReservation, when above zero, is the soft memory limit (MiB) of the ecrSidecar container.
 	sidecarMemoryReservation int32
 	// awsTags are the ECS service tags, as the off-hours selectors read them.
@@ -101,7 +105,7 @@ type serviceSpec struct {
 }
 
 var seedServices = []serviceSpec{
-	{cluster: "core-services", name: "payments-api", awsTags: envTags("prod"), desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
+	{cluster: "core-services", name: "payments-api", multiArch: true, arm64: true, awsTags: envTags("prod"), desired: 3, running: 3, rev: 42, repo: "payments-api", tag: "1.18.2", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, sidecar: true, ecrTagCount: 24,
 		env: []envVar{{"NODE_ENV", "production"}, {"PAYMENTS_PROVIDER", "stripe"}, {"DB_POOL_SIZE", "20"}}},
 	{cluster: "core-services", name: "web-frontend", awsTags: envTags("prod"), desired: 2, running: 2, rev: 87, repo: "web-frontend", tag: "3.4.0", cpu: 256, memory: 512, port: 3000, lb: true, exec: true,
 		env: []envVar{{"API_URL", "http://payments-api.core.local:8080"}}},
@@ -122,11 +126,11 @@ var seedServices = []serviceSpec{
 		env: []envVar{{"JAVA_OPTS", "-Xmx3g"}}},
 	{cluster: "ci-tools", name: "artifact-proxy", awsTags: envTags("dev"), desired: 1, running: 1, rev: 7, repo: "artifact-proxy", tag: "1.0.4", cpu: 512, memory: 1024, port: 8081, exec: true,
 		env: []envVar{{"UPSTREAM", "https://registry.npmjs.org"}}},
-	{cluster: "eu-apps", name: "catalog-api", desired: 2, running: 2, rev: 23, repo: "catalog-api", tag: "4.1.0", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, unhealthy: 1,
+	{cluster: "eu-apps", name: "catalog-api", multiArch: true, arm64: true, desired: 2, running: 2, rev: 23, repo: "catalog-api", tag: "4.1.0", cpu: 512, memory: 1024, port: 8080, lb: true, exec: true, unhealthy: 1,
 		env: []envVar{{"CACHE_TTL", "300"}}},
 	{cluster: "eu-apps", name: "search-indexer", desired: 1, running: 1, rev: 14, repo: "search-indexer", tag: "2.0.3", cpu: 1024, memory: 4096, exec: true, efs: &efsSearch,
 		env: []envVar{{"BATCH_SIZE", "500"}}},
-	{cluster: "edge-proxy", name: "edge-nginx", desired: 2, running: 2, rev: 19, repo: "edge-nginx", tag: "1.27.2", cpu: 256, memory: 512, port: 443, lb: true, exec: true, public: true, efs: &efsNginx,
+	{cluster: "edge-proxy", name: "edge-nginx", multiArch: true, desired: 2, running: 2, rev: 19, repo: "edge-nginx", tag: "1.27.2", cpu: 256, memory: 512, port: 443, lb: true, exec: true, public: true, efs: &efsNginx,
 		env: []envVar{{"WORKER_PROCESSES", "auto"}}},
 	{cluster: "edge-proxy", name: "cert-renewer", desired: 1, running: 1, rev: 4, repo: "cert-renewer", tag: "0.2.1", cpu: 256, memory: 512, ec2: true, efs: &efsCerts,
 		env: []envVar{{"ACME_EMAIL", "ops@rcss.local"}}},
@@ -321,6 +325,13 @@ func MockupEstate(now func() time.Time) *Estate {
 	return e
 }
 
+func capacityProvidersFor(c seedCluster) []string {
+	if c.noSpot {
+		return []string{"FARGATE"}
+	}
+	return []string{"FARGATE", "FARGATE_SPOT"}
+}
+
 func (s *seeder) addCluster(c seedCluster) {
 	insights := "disabled"
 	if c.insights {
@@ -330,7 +341,7 @@ func (s *seeder) addCluster(c seedCluster) {
 		ClusterArn:        aws.String(clusterARN(c.region, c.accountID, c.name)),
 		ClusterName:       aws.String(c.name),
 		Status:            aws.String("ACTIVE"),
-		CapacityProviders: []string{"FARGATE", "FARGATE_SPOT"},
+		CapacityProviders: capacityProvidersFor(c),
 		Settings:          []ecstypes.ClusterSetting{{Name: ecstypes.ClusterSettingNameContainerInsights, Value: aws.String(insights)}},
 	}})
 }
@@ -420,6 +431,7 @@ type taskOptions struct {
 	deploymentID      string
 	group, startedBy  string // overrides for standalone tasks
 	agentPending      bool   // the ExecuteCommandAgent is PENDING instead of RUNNING (plan 04)
+	capacityProvider  string // placed by the service's capacity provider strategy; "" keeps the seeded choice
 }
 
 func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
@@ -449,6 +461,12 @@ func (s *seeder) addTask(sp serviceSpec, o taskOptions) {
 	}
 	if sp.spot {
 		capacity = "FARGATE_SPOT"
+	}
+	if o.capacityProvider != "" {
+		capacity = o.capacityProvider // the service's capacity provider strategy decides
+	}
+	if clusterSeed(sp.cluster).noSpot {
+		capacity = "FARGATE"
 	}
 
 	details := []ecstypes.KeyValuePair{
@@ -635,12 +653,20 @@ func (s *seeder) addService(sp serviceSpec) {
 	if sp.ec2 {
 		svc.PlatformVersion = nil
 	}
+	if sp.spot {
+		// A service whose tasks run on Spot uses a capacity provider strategy, not a launch type.
+		svc.LaunchType = ""
+		svc.CapacityProviderStrategy = []ecstypes.CapacityProviderStrategyItem{{CapacityProvider: aws.String("FARGATE_SPOT"), Weight: 1}}
+	}
 	for _, key := range slices.Sorted(maps.Keys(sp.awsTags)) {
 		svc.Tags = append(svc.Tags, ecstypes.Tag{Key: aws.String(key), Value: aws.String(sp.awsTags[key])})
 	}
 	s.e.Services = append(s.e.Services, Service{AccountID: c.accountID, Region: c.region, ClusterName: sp.cluster, Service: svc,
 		OOMBelowMiB: oomBelowMiB(sp), TaskDefinitionTags: deepCopy(seedTaskDefinitionTags)})
 	s.addRepository(sp.repo, ecrTagsFor(sp))
+	if sp.multiArch {
+		s.e.setImageIndex(sp.repo, sp.arm64)
+	}
 	s.addRunningTag(sp.repo, sp.tag)
 	if sp.ecrSidecar != "" {
 		s.addRepository(sp.ecrSidecar, repositoryTags(sp.ecrSidecarTag, "", sp.ecrSidecarTags))

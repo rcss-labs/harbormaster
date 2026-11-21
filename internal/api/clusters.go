@@ -110,7 +110,7 @@ func (s *Server) tagDTOs(ctx context.Context) (map[authz.TagID]TagDTO, error) {
 	}
 	out := make(map[authz.TagID]TagDTO, len(tags))
 	for _, t := range tags {
-		out[t.ID] = TagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color}
+		out[t.ID] = TagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, NonProduction: t.NonProduction}
 	}
 	return out, nil
 }

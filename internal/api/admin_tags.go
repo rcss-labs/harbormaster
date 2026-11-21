@@ -36,6 +36,7 @@ type TagItemDTO struct {
 	Name              string       `json:"name"`
 	Color             string       `json:"color"`
 	Builtin           bool         `json:"builtin"`
+	NonProduction     bool         `json:"non_production"`
 	Clusters          int          `json:"clusters"`
 	ServicesDirect    int          `json:"services_direct"`
 	ServicesEffective int          `json:"services_effective"`
@@ -71,7 +72,7 @@ func (s *Server) buildTagItems(r *http.Request) ([]TagItemDTO, error) {
 	items := make([]TagItemDTO, 0, len(tags))
 	for _, t := range tags {
 		c := counts[t.ID]
-		item := TagItemDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, Builtin: t.Builtin,
+		item := TagItemDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, Builtin: t.Builtin, NonProduction: t.NonProduction,
 			Clusters: c.Clusters, ServicesDirect: c.ServicesDirect, ServicesEffective: c.ServicesEffective, Users: []TagUserDTO{}}
 		for _, u := range users {
 			if set, ok := perms[u.ID][t.ID]; ok && !u.Admin {
@@ -105,23 +106,25 @@ func (s *Server) listTagItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ItemsResponse[TagItemDTO]{Items: items})
 }
 
-// decodeTagBody reads and validates {name, color}; the name is returned trimmed.
-func decodeTagBody(w http.ResponseWriter, r *http.Request) (name, color string, err error) {
+// decodeTagBody reads and validates {name, color, non_production}; the name is returned trimmed. An absent
+// non_production is nil so an update can keep the stored value and a create can default to production.
+func decodeTagBody(w http.ResponseWriter, r *http.Request) (name, color string, nonProduction *bool, err error) {
 	var body struct {
-		Name  string `json:"name"`
-		Color string `json:"color"`
+		Name          string `json:"name"`
+		Color         string `json:"color"`
+		NonProduction *bool  `json:"non_production"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	name = strings.TrimSpace(body.Name)
 	if !tagNamePattern.MatchString(name) {
-		return "", "", invalid(tagNameMessage)
+		return "", "", nil, invalid(tagNameMessage)
 	}
 	if !tagColors[body.Color] {
-		return "", "", invalid(tagColorMessage)
+		return "", "", nil, invalid(tagColorMessage)
 	}
-	return name, body.Color, nil
+	return name, body.Color, body.NonProduction, nil
 }
 
 func tagConflict(name string) *APIError {
@@ -129,12 +132,12 @@ func tagConflict(name string) *APIError {
 }
 
 func (s *Server) createTag(w http.ResponseWriter, r *http.Request) {
-	name, color, err := decodeTagBody(w, r)
+	name, color, nonProduction, err := decodeTagBody(w, r)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	tag, err := s.Store.CreateTag(r.Context(), name, color)
+	tag, err := s.Store.CreateTag(r.Context(), name, color, nonProduction != nil && *nonProduction)
 	if errors.Is(err, store.ErrConflict) {
 		s.fail(w, tagConflict(name))
 		return
@@ -143,7 +146,7 @@ func (s *Server) createTag(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	s.auditAdmin(r, "tag_create", "tag:"+tag.Name, "Created tag "+tag.Name+".", map[string]any{"color": tag.Color})
+	s.auditAdmin(r, "tag_create", "tag:"+tag.Name, "Created tag "+tag.Name+".", map[string]any{"color": tag.Color, "non_production": tag.NonProduction})
 	item, err := s.tagItem(r, int64(tag.ID))
 	if err != nil {
 		s.fail(w, err)
@@ -158,7 +161,7 @@ func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	name, color, err := decodeTagBody(w, r)
+	name, color, requested, err := decodeTagBody(w, r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -168,7 +171,11 @@ func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	switch err := s.Store.UpdateTag(r.Context(), before.ID, name, color); {
+	nonProduction := before.NonProduction
+	if requested != nil {
+		nonProduction = *requested
+	}
+	switch err := s.Store.UpdateTag(r.Context(), before.ID, name, color, nonProduction); {
 	case errors.Is(err, store.ErrBuiltin):
 		s.fail(w, invalid(devDefaultMessage))
 		return
@@ -186,6 +193,13 @@ func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
 	case before.Color != color:
 		s.auditAdmin(r, "tag_update", "tag:"+name, "Changed the colour of tag "+name+".",
 			map[string]any{"old_color": before.Color, "color": color})
+	}
+	if before.NonProduction != nonProduction {
+		summary := "Marked tag " + name + " as production."
+		if nonProduction {
+			summary = "Marked tag " + name + " as non-production."
+		}
+		s.auditAdmin(r, "tag_update", "tag:"+name, summary, map[string]any{"non_production": nonProduction})
 	}
 	item, err := s.tagItem(r, id)
 	if err != nil {

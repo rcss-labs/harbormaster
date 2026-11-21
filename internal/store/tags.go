@@ -20,13 +20,15 @@ type Tag struct {
 	Name    string
 	Color   string
 	Builtin bool
+	// NonProduction marks the services under the tag as candidates for Fargate Spot. Unmarked means production.
+	NonProduction bool
 }
 
-const tagColumns = `id, name, color, builtin`
+const tagColumns = `id, name, color, builtin, non_production`
 
 func scanTag(row pgx.Row) (Tag, error) {
 	var t Tag
-	err := row.Scan(&t.ID, &t.Name, &t.Color, &t.Builtin)
+	err := row.Scan(&t.ID, &t.Name, &t.Color, &t.Builtin, &t.NonProduction)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Tag{}, ErrNotFound
 	}
@@ -64,10 +66,10 @@ func (s *Store) DevTag(ctx context.Context) (Tag, error) {
 	return scanTag(s.Pool.QueryRow(ctx, `select `+tagColumns+` from tags where builtin order by id limit 1`))
 }
 
-// CreateTag adds a tag. Names that differ only in case return ErrConflict.
-func (s *Store) CreateTag(ctx context.Context, name, color string) (Tag, error) {
+// CreateTag adds a tag; nonProduction marks it as safe for Fargate Spot suggestions. Names that differ only in case return ErrConflict.
+func (s *Store) CreateTag(ctx context.Context, name, color string, nonProduction bool) (Tag, error) {
 	t, err := scanTag(s.Pool.QueryRow(ctx,
-		`insert into tags (name, color) values ($1, $2) returning `+tagColumns, name, color))
+		`insert into tags (name, color, non_production) values ($1, $2, $3) returning `+tagColumns, name, color, nonProduction))
 	if isUniqueViolation(err) {
 		return Tag{}, ErrConflict
 	}
@@ -77,9 +79,9 @@ func (s *Store) CreateTag(ctx context.Context, name, color string) (Tag, error) 
 	return t, nil
 }
 
-// UpdateTag changes a tag's name and colour. The built-in tag may only be
+// UpdateTag changes a tag's name, colour and non-production flag. The built-in tag may only be
 // recoloured; renaming it returns ErrBuiltin.
-func (s *Store) UpdateTag(ctx context.Context, id authz.TagID, name, color string) error {
+func (s *Store) UpdateTag(ctx context.Context, id authz.TagID, name, color string, nonProduction bool) error {
 	current, err := s.GetTag(ctx, id)
 	if err != nil {
 		return err
@@ -87,7 +89,7 @@ func (s *Store) UpdateTag(ctx context.Context, id authz.TagID, name, color strin
 	if current.Builtin && current.Name != name {
 		return ErrBuiltin
 	}
-	err = s.execExpectOne(ctx, `update tags set name = $2, color = $3 where id = $1`, int64(id), name, color)
+	err = s.execExpectOne(ctx, `update tags set name = $2, color = $3, non_production = $4 where id = $1`, int64(id), name, color, nonProduction)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}

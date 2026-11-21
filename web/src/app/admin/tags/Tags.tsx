@@ -5,6 +5,7 @@ import { BottomSheet, SheetAction } from '../../../components/BottomSheet'
 import { DataTable, type DataTableColumn } from '../../../components/DataTable'
 import { Icon } from '../../../components/Icon'
 import { Panel } from '../../../components/Panel'
+import { Pill } from '../../../components/Pill'
 import { Table, tableClass } from '../../../components/Table'
 import { usePhone } from '../../../components/usePhone'
 import { TagChip } from '../../../components/TagChip'
@@ -91,6 +92,7 @@ function PhoneTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
         <span className={styles.tagTitle}>
           <TagChip tag={{ id: tag.id, name: tag.name, color: tag.color, inherited: false }} />
           {tag.builtin && <span className={`${styles.muted} ${styles.small}`}>default</span>}
+          {tag.non_production && <Pill kind="info">Non-production</Pill>}
         </span>
       ),
     },
@@ -115,9 +117,7 @@ function PhoneTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
       {menuTag && (
         <BottomSheet open onClose={() => setMenuFor(null)} label={`Actions for tag ${menuTag.name}`} title={menuTag.name} role="menu">
           <SheetAction
-            label="Rename"
-            disabled={menuTag.builtin}
-            why={menuTag.builtin ? DEFAULT_TAG_REASON : undefined}
+            label="Edit"
             onClick={() => {
               setMenuFor(null)
               onRename(menuTag)
@@ -177,6 +177,12 @@ function DesktopTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
                     <span className={`${styles.muted} ${styles.small}`}>default</span>
                   </>
                 )}
+                {tag.non_production && (
+                  <>
+                    {' '}
+                    <Pill kind="info">Non-production</Pill>
+                  </>
+                )}
               </td>
               <td className={tableClass.num}>{tag.clusters}</td>
               <td className={tableClass.num}>{tag.services_direct}</td>
@@ -195,14 +201,8 @@ function DesktopTagsTable({ tags, onRename, onDelete }: TagsTableProps) {
                 )}
               </td>
               <td className={tableClass.num}>
-                <button
-                  type="button"
-                  className={`${styles.btn} ${styles.sm}`}
-                  disabled={tag.builtin}
-                  title={tag.builtin ? 'Dev is the default tag' : undefined}
-                  onClick={() => onRename(tag)}
-                >
-                  Rename
+                <button type="button" className={`${styles.btn} ${styles.sm}`} onClick={() => onRename(tag)}>
+                  Edit
                 </button>{' '}
                 <button
                   type="button"

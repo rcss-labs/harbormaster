@@ -3,6 +3,7 @@ package devseed_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -269,7 +270,7 @@ func TestDevseed_CostDemoHasEveryCase(t *testing.T) {
 			t.Fatalf("poll %v: %v", target, err)
 		}
 	}
-	facts, err := st.AnalyticsCostServices(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, time.Now().UTC().AddDate(0, 0, -90))
+	facts, err := st.AnalyticsCostServices(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, time.Now().UTC().AddDate(0, 0, -90), time.Now().UTC().AddDate(0, 0, -7))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,6 +349,88 @@ func awakeWeekdays(from, to int) string {
 
 // TestDevseed_OffHoursSchedules checks the demo schedules: the staging one is enabled only when the demo flag is on,
 // both are seeded once by name with one audit row, and the staging selector matches the staging-web services.
+// TestDevseed_SpotDemoHasEveryCase checks that `make run` shows the Fargate Spot advisor with a service for each verdict
+// the estate can produce without changing any task count.
+func TestDevseed_SpotDemoHasEveryCase(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	if err := devseed.Apply(ctx, st, true); err != nil {
+		t.Fatal(err)
+	}
+	clients := fake.New(fake.MockupEstate(time.Now))
+	for _, target := range []awsx.Target{
+		{AccountID: "482109375512", Region: "us-east-1"},
+		{AccountID: "482109375512", Region: "eu-west-1"},
+		{AccountID: "482109375512", Region: "eu-central-1"},
+		{AccountID: "731022849906", Region: "us-east-1"},
+	} {
+		if err := poller.PollOnce(ctx, st, clients, poller.Config{MaxInFlight: 4}, target); err != nil {
+			t.Fatalf("poll %v: %v", target, err)
+		}
+	}
+	facts, err := st.AnalyticsCostServices(ctx, store.TargetFilter{}, store.Visibility{Admin: true}, time.Now().UTC().AddDate(0, 0, -90), time.Now().UTC().AddDate(0, 0, -cost.SpotLookbackDays))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdicts := map[string]cost.SpotResult{}
+	for _, fact := range facts {
+		// Every seeded service runs its desired count on demand unless it is on a Spot strategy.
+		onSpot := len(fact.StrategyProviders) > 0 && fact.StrategyProviders[0] == "FARGATE_SPOT"
+		input := cost.SpotInput{
+			Region: fact.Key.Region, Architecture: fact.Architecture, OSFamily: fact.OSFamily,
+			RequiresFargate: fact.RequiresFargate, ControllerSupported: fact.Controller == "ECS",
+			Strategy: fact.StrategyProviders, LaunchType: fact.LaunchType, Desired: fact.Desired, OnDemandTasks: fact.Desired,
+			CPUUnits: valueOr(fact.CPUUnits), MemoryMiB: valueOr(fact.MemoryMiB),
+			NonProduction: fact.NonProduction, Untagged: !fact.TagExplicit, ClusterHasSpot: slices.Contains(fact.ClusterProviders, "FARGATE_SPOT"),
+			TerminalSessions7d: fact.TerminalSessions7d, ExpectedStops7d: fact.ExpectedStops7d, KilledStops7d: fact.KilledStops7d,
+		}
+		if onSpot {
+			input.OnDemandTasks, input.SpotTasks = 0, fact.Desired
+		}
+		verdicts[fact.Key.Service] = cost.EvaluateSpot(input)
+	}
+
+	want := map[string]cost.SpotStatus{
+		"catalog-api":        cost.SpotCandidate,
+		"edge-nginx":         cost.SpotNoClusterSpot,
+		"payments-api":       cost.SpotProduction,
+		"web-frontend":       cost.SpotProduction,
+		"auth-service":       cost.SpotProduction,
+		"notifications":      cost.SpotAlreadySpot,
+		"cert-renewer":       cost.SpotNotFargate,
+		"report-worker":      cost.SpotUntagged,
+		"jenkins-controller": cost.SpotUntagged,
+		"api":                cost.SpotSingleTask,
+	}
+	for service, status := range want {
+		if got := verdicts[service].Status; got != status {
+			t.Errorf("%s = %q, want %q", service, got, status)
+		}
+	}
+	if catalog := verdicts["catalog-api"]; !catalog.Caution || catalog.SavingMonthly <= 0 {
+		t.Errorf("catalog-api = %+v, want a candidate with a saving and the caution of its recent terminal session", catalog)
+	}
+	if edge := verdicts["edge-nginx"]; edge.SavingMonthly <= 0 {
+		t.Errorf("edge-nginx = %+v, want the saving it would have", edge)
+	}
+	staging, err := st.ListTags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range staging {
+		if want := tag.Name == "Dev" || tag.Name == "Staging"; tag.NonProduction != want {
+			t.Errorf("tag %s non-production = %v, want %v", tag.Name, tag.NonProduction, want)
+		}
+	}
+}
+
+func valueOr(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 func TestDevseed_OffHoursSchedules(t *testing.T) {
 	ctx := t.Context()
 	const stagingName, previewName = "Staging nights and weekends", "Preview environments"

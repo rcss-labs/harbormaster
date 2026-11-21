@@ -6,6 +6,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import { refetchWhileSettling } from './change'
+import type { Arm64Image } from './analytics'
 import type { ScanGate, ScanGateRequest } from './security'
 import type { ControllerRefDTO, ImageTagsResponse, PartialErrorDTO } from './types'
 
@@ -43,6 +44,33 @@ export interface DeploymentConfigurationDTO {
   maximum_percent: number
 }
 
+/** One capacity provider of a strategy. Harbormaster edits only FARGATE (which may have a base) and FARGATE_SPOT. */
+export interface CapacityItem {
+  provider: string
+  base: number
+  weight: number
+}
+
+/** How the service picks its capacity: a launch type, or a strategy. */
+export interface DeployCapacity {
+  /** Empty when a strategy is set. */
+  launch_type: string
+  /** Never null; empty for a service on a launch type. */
+  strategy: CapacityItem[]
+  /** The providers associated with the cluster (from the stored snapshot). */
+  cluster_providers: string[]
+  editable: boolean
+  /** Why the capacity cannot be edited; empty when editable. */
+  lock_reason: string
+}
+
+/** What the image check says about the images of a service's current task definition, for the ARM64 banner. */
+export interface Arm64Readiness {
+  status: 'ready' | 'blocked' | 'unknown'
+  images: Arm64Image[]
+  checked_at: string | null
+}
+
 export interface DeploySettingsResponse {
   /** sha256 of the canonical live settings; sent back as `base_version` on the change set. */
   version: string
@@ -66,6 +94,7 @@ export interface DeploySettingsResponse {
     policies: DeployPolicyDTO[]
     scheduled_actions: DeployScheduledActionDTO[]
   }
+  capacity: DeployCapacity
   can: ChangeCanDTO
   /** Parts that could not be read (task_role, target_groups, scaling_target, scaling_policies, scheduled_actions); empty when complete. */
   partial: PartialErrorDTO[]
@@ -110,6 +139,8 @@ export interface ChangeSetRequest {
     deployment_configuration?: DeploymentConfigurationDTO
     health_check_grace_period_seconds?: number
     force_new_deployment?: boolean
+    /** Replaces the strategy (or launch type). Absent leaves it alone; the server refuses an empty list. */
+    capacity_provider_strategy?: CapacityItem[]
   }
   scaling?: {
     target?: { min: number; max: number }
@@ -146,6 +177,16 @@ export interface ChangeSetResponse {
   to_revision: number | null
   kind: string
   warning: string | null
+}
+
+/** What the image check says about the images of the service's current definition; `enabled` keeps it idle until ARM64 is drafted. */
+export function useArm64Readiness(serviceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['service', serviceId, 'arm64-readiness'],
+    queryFn: () => api.get<Arm64Readiness>(`/api/services/${serviceId}/arm64-readiness`),
+    enabled,
+    staleTime: 60_000,
+  })
 }
 
 export function useDeploySettings(serviceId: string) {

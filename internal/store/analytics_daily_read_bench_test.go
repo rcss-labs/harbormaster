@@ -22,7 +22,7 @@ func BenchmarkAnalytics_DailyReads_Year(b *testing.B) {
 	}
 	s := storetest.Open(b)
 	ctx := context.Background()
-	tag, err := s.CreateTag(ctx, "Prod", "red")
+	tag, err := s.CreateTag(ctx, "Prod", "red", false)
 	if err != nil {
 		b.Fatal(err)
 	}

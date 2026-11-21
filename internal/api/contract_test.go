@@ -126,6 +126,7 @@ func contractShapes() map[string]any {
 		"imageTags":          shapeOf(reflect.TypeFor[ImageTagsResponse]()),
 		"deploySettings":     shapeOf(reflect.TypeFor[DeploySettingsResponse]()),
 		"changeset":          shapeOf(reflect.TypeFor[ChangeSetResponse]()),
+		"arm64Readiness":     shapeOf(reflect.TypeFor[ARM64ReadinessDTO]()),
 		"desiredCount":       shapeOf(reflect.TypeFor[DesiredCountResponse]()),
 		// redesign v4
 		"servicesList":    shapeOf(reflect.TypeFor[ServiceListDTO]()),

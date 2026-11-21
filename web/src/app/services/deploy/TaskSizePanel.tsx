@@ -2,6 +2,7 @@ import { Banner } from '../../../components/Banner'
 import { LockNote } from '../../../components/LockNote'
 import { Panel } from '../../../components/Panel'
 import { FARGATE_CPU_VALUES, fargateMemoryOptions, type Definition, type OomHint } from '../task-definition/mainContainer'
+import { readArchitecture, setArchitecture, showArchitecture, type Architecture } from './archParams'
 import { setTaskSize } from './draft'
 import styles from './containers.module.css'
 import form from './editors.module.css'
@@ -13,12 +14,14 @@ interface TaskSizePanelProps {
   /** Name of the service's tag, for the "You need Edit on ..." lock title. */
   tagName: string
   oomHint?: OomHint
+  /** The deployed definition: choosing its architecture again restores its runtime platform exactly. */
+  deployed?: Definition
 }
 
 const asText = (value: unknown): string => (typeof value === 'number' ? String(value) : typeof value === 'string' ? value : '')
 
 /** Task-level CPU and memory. Memory choices follow the CPU, as Fargate only allows certain pairs. */
-export function TaskSizePanel({ definition, onChange, canEdit, tagName, oomHint }: TaskSizePanelProps) {
+export function TaskSizePanel({ definition, onChange, canEdit, tagName, oomHint, deployed }: TaskSizePanelProps) {
   const cpu = asText(definition.cpu)
   const memory = asText(definition.memory)
   const lock = canEdit ? undefined : `You need Edit on ${tagName}`
@@ -27,6 +30,8 @@ export function TaskSizePanel({ definition, onChange, canEdit, tagName, oomHint 
   const cpuOptions = cpu === '' || FARGATE_CPU_VALUES.includes(cpu) ? FARGATE_CPU_VALUES : [...FARGATE_CPU_VALUES, cpu]
   const validMemory = fargateMemoryOptions(cpu).map(String)
   const memoryOptions = memory === '' || validMemory.includes(memory) ? validMemory : [memory, ...validMemory]
+  const architecture = readArchitecture(definition)
+  const canPickArchitecture = showArchitecture(definition)
   const memoryMismatch = memory !== '' && validMemory.length > 0 && !validMemory.includes(memory)
 
   return (
@@ -52,6 +57,23 @@ export function TaskSizePanel({ definition, onChange, canEdit, tagName, oomHint 
               </select>
             </label>
           </div>
+          {canPickArchitecture && (
+            <div className={form.fieldRow}>
+              <label className={form.field}>
+                CPU architecture
+                <select
+                  className={form.select}
+                  aria-label="CPU architecture"
+                  value={architecture}
+                  onChange={(event) => onChange(setArchitecture(definition, event.target.value as Architecture, deployed))}
+                >
+                  <option>X86_64</option>
+                  <option>ARM64</option>
+                </select>
+              </label>
+            </div>
+          )}
+          {canPickArchitecture && architecture === 'ARM64' && <p className={form.hint}>ARM64 tasks cost about 20% less. Every image must have an arm64 build.</p>}
           {memoryMismatch && <p className={form.warn}>{`${memory} MiB is not available with ${cpu} CPU units. Pick one of the listed sizes.`}</p>}
           {oomHint && <Banner kind="warn">{`Tasks of this service stop with OutOfMemoryError (exit 137) at ${oomHint.memory} MiB. Try ${oomHint.suggested} MiB.`}</Banner>}
         </div>

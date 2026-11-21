@@ -115,7 +115,7 @@ export function RightsizingPanel({
     (total, row) => total + row.suggestion.saving_monthly,
     0,
   )
-  const upperBound = selected.some((row) => row.service.spot_tasks > 0)
+  const includesSpot = selected.some((row) => row.service.spot_tasks > 0)
 
   const columns: DataTableColumn<SuggestedService>[] = [
     {
@@ -215,7 +215,7 @@ export function RightsizingPanel({
       render: ({ service, suggestion }) => (
         <span
           className={styles.mono}
-        >{`${service.spot_tasks > 0 ? 'up to ' : ''}${money(suggestion.saving_monthly)}`}</span>
+        >{`${service.spot_tasks > 0 ? 'about ' : ''}${money(suggestion.saving_monthly)}`}</span>
       ),
     },
   ]
@@ -240,7 +240,7 @@ export function RightsizingPanel({
         />
         {suggested.length > 0 && (
           <div className={styles.more}>
-            <span>{`${selected.length} selected · ${upperBound ? 'up to ' : ''}${money(saving)} per month`}</span>
+            <span>{`${selected.length} selected · ${includesSpot ? 'about ' : ''}${money(saving)} per month`}</span>
             <button
               type="button"
               disabled={selected.length === 0}

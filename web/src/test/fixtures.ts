@@ -52,6 +52,7 @@ import type {
   UsersDTO,
 } from '../api/types'
 import type {
+  Arm64Readiness,
   ChangeSetResponse,
   DeploySettingsResponse,
   RevisionDefinitionResponse,
@@ -102,7 +103,7 @@ function hex(seed: string, length: number): string {
 
 // ---- tags, accounts, regions ----
 
-const tag = (id: number, name: string, color: TagColor, inherited = false): TagDTO => ({ id, name, color, inherited })
+const tag = (id: number, name: string, color: TagColor, inherited = false): TagDTO => ({ id, name, color, inherited, non_production: name === 'Dev' })
 export const TAG_DEV = tag(1, 'Dev', 'neutral')
 export const TAG_STAGING = tag(2, 'Staging', 'amber')
 export const TAG_PROD = tag(3, 'Prod', 'red')
@@ -922,9 +923,9 @@ export const PERMISSIONS: PermissionsDTO = {
 
 export const TAGS: TagsDTO = {
   items: [
-    { id: 1, name: 'Dev', color: 'neutral', builtin: true, clusters: 4, services_direct: 0, services_effective: servicesInEffect(1), users: [{ username: 'dana', preset: 'Full' }, { username: 'omer', preset: 'Operator' }] },
-    { id: 2, name: 'Staging', color: 'amber', builtin: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(2), users: [{ username: 'dana', preset: 'Deployer' }, { username: 'omer', preset: 'Viewer' }, { username: 'oncall', preset: 'Custom' }] },
-    { id: 3, name: 'Prod', color: 'red', builtin: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(3), users: [{ username: 'dana', preset: 'Custom' }, { username: 'oncall', preset: 'Custom' }] },
+    { id: 1, name: 'Dev', color: 'neutral', builtin: true, non_production: true, clusters: 4, services_direct: 0, services_effective: servicesInEffect(1), users: [{ username: 'dana', preset: 'Full' }, { username: 'omer', preset: 'Operator' }] },
+    { id: 2, name: 'Staging', color: 'amber', builtin: false, non_production: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(2), users: [{ username: 'dana', preset: 'Deployer' }, { username: 'omer', preset: 'Viewer' }, { username: 'oncall', preset: 'Custom' }] },
+    { id: 3, name: 'Prod', color: 'red', builtin: false, non_production: false, clusters: 1, services_direct: 0, services_effective: servicesInEffect(3), users: [{ username: 'dana', preset: 'Custom' }, { username: 'oncall', preset: 'Custom' }] },
   ],
 }
 
@@ -1394,6 +1395,7 @@ export const DEPLOY_SETTINGS_PAYMENTS: DeploySettingsResponse = {
   deployment_configuration: { circuit_breaker: { enable: true, rollback: true }, minimum_healthy_percent: 100, maximum_percent: 200 },
   health_check_grace_period_seconds: 60,
   has_load_balancer: true,
+  capacity: { launch_type: 'FARGATE', strategy: [], cluster_providers: ['FARGATE', 'FARGATE_SPOT'], editable: true, lock_reason: '' },
   target_groups: [
     {
       arn: `arn:aws:elasticloadbalancing:us-east-1:${ACCOUNT_HOMELAB.account_id}:targetgroup/payments-api/0123456789abcdef`,
@@ -1978,6 +1980,7 @@ export const ANALYTICS_COST: AnalyticsCost = {
   ],
   polled_at: FIXTURE_NOW,
   prices_as_of: '2026-10-19',
+  spot_prices_as_of: '2026-11-21',
   kpis: { monthly_total: 68.4, spot_monthly: 13.68, priced_tasks: 5, spot_tasks: 1, unpriced_tasks: 3, unpriced_regions: ['ap-south-1'] },
   by_cluster: [
     { key: analyticsCoreClusterId, label: 'core-services', monthly: 41.04, spot_monthly: 0, unpriced_tasks: 0 },
@@ -2067,6 +2070,197 @@ export const ANALYTICS_COST: AnalyticsCost = {
       },
     ],
   },
+  arm64: {
+    check_enabled: true,
+    already_arm64: 1,
+    services: [
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        region: 'us-east-1',
+        tag: TAG_PROD,
+        status: 'ready',
+        tasks: 3,
+        spot_tasks: 0,
+        saving_monthly: 32.5,
+        images: [
+          { container: 'payments-api', image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2', state: 'arm64', reason: '', account: '' },
+          { container: 'otel-collector', image: 'public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0', state: 'arm64', reason: '', account: '' },
+        ],
+        auto_scaled: true,
+        can_edit: true,
+      },
+      {
+        service_id: serviceId('482109375512', 'eu-central-1', 'edge-proxy', 'edge-nginx'),
+        service: 'edge-nginx',
+        cluster: 'edge-proxy',
+        region: 'eu-central-1',
+        tag: TAG_DEV,
+        status: 'blocked',
+        tasks: 2,
+        spot_tasks: 1,
+        saving_monthly: 4.2,
+        images: [{ container: 'edge-nginx', image: '482109375512.dkr.ecr.eu-central-1.amazonaws.com/edge-nginx:1.27.2', state: 'no_arm64', reason: 'single_architecture', account: '' }],
+        auto_scaled: false,
+        can_edit: true,
+      },
+      {
+        service_id: serviceId('482109375512', 'eu-west-1', 'eu-apps', 'catalog-api'),
+        service: 'catalog-api',
+        cluster: 'eu-apps',
+        region: 'eu-west-1',
+        tag: TAG_DEV,
+        status: 'unknown',
+        tasks: 2,
+        spot_tasks: 0,
+        saving_monthly: 7.4,
+        images: [{ container: 'catalog-api', image: '482109375512.dkr.ecr.eu-west-1.amazonaws.com/catalog-api:4.1.0', state: 'unchecked', reason: 'no_permission', account: 'homelab-admin' }],
+        auto_scaled: false,
+        can_edit: false,
+      },
+    ],
+  },
+  spot: {
+    lookback_days: 7,
+    min_tasks: 2,
+    services: [
+      {
+        service_id: serviceId('482109375512', 'us-east-1', 'background-jobs', 'report-worker'),
+        service: 'report-worker',
+        cluster: 'background-jobs',
+        region: 'us-east-1',
+        tag: TAG_DEV,
+        status: 'candidate',
+        desired_tasks: 3,
+        on_demand_tasks: 3,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        on_demand_base: 1,
+        spot_tasks: 2,
+        saving_monthly: 41.2,
+        terminal_sessions: 2,
+        expected_stops: 3,
+        killed_stops: 1,
+        stop_evidence: 'killed',
+        stop_timeout_seconds: 30,
+        controller_name: '',
+        caution: true,
+        auto_scaled: false,
+        can_deploy: true,
+      },
+      {
+        service_id: serviceId('482109375512', 'eu-west-1', 'eu-apps', 'catalog-api'),
+        service: 'catalog-api',
+        cluster: 'eu-apps',
+        region: 'eu-west-1',
+        tag: TAG_DEV,
+        status: 'candidate',
+        desired_tasks: 2,
+        on_demand_tasks: 2,
+        cpu_units: 512,
+        memory_mib: 1024,
+        on_demand_base: 1,
+        spot_tasks: 1,
+        saving_monthly: 12.6,
+        terminal_sessions: 0,
+        expected_stops: 4,
+        killed_stops: 0,
+        stop_evidence: 'graceful',
+        stop_timeout_seconds: null,
+        controller_name: '',
+        caution: false,
+        auto_scaled: true,
+        can_deploy: true,
+      },
+      {
+        service_id: serviceId('482109375512', 'eu-central-1', 'edge-proxy', 'edge-nginx'),
+        service: 'edge-nginx',
+        cluster: 'edge-proxy',
+        region: 'eu-central-1',
+        tag: TAG_DEV,
+        status: 'no_cluster_spot',
+        desired_tasks: 2,
+        on_demand_tasks: 2,
+        cpu_units: 256,
+        memory_mib: 512,
+        on_demand_base: 1,
+        spot_tasks: 1,
+        saving_monthly: 6.58,
+        terminal_sessions: 0,
+        expected_stops: 0,
+        killed_stops: 0,
+        stop_evidence: 'unknown',
+        stop_timeout_seconds: null,
+        controller_name: '',
+        caution: false,
+        auto_scaled: false,
+        can_deploy: true,
+      },
+      {
+        service_id: analyticsPaymentsId,
+        service: 'payments-api',
+        cluster: 'core-services',
+        region: 'us-east-1',
+        tag: TAG_PROD,
+        status: 'production',
+        desired_tasks: 3,
+        on_demand_tasks: 3,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        on_demand_base: 0,
+        spot_tasks: 0,
+        saving_monthly: null,
+        terminal_sessions: 0,
+        expected_stops: 0,
+        killed_stops: 0,
+        stop_evidence: 'unknown',
+        stop_timeout_seconds: null,
+        controller_name: '',
+        caution: false,
+        auto_scaled: true,
+        can_deploy: false,
+      },
+      {
+        service_id: serviceId('731022849906', 'us-east-1', 'staging-web', 'web-frontend'),
+        service: 'web-frontend',
+        cluster: 'staging-web',
+        region: 'us-east-1',
+        tag: TAG_STAGING,
+        status: 'already_spot',
+        desired_tasks: 3,
+        on_demand_tasks: 2,
+        cpu_units: 1024,
+        memory_mib: 2048,
+        on_demand_base: 0,
+        spot_tasks: 0,
+        saving_monthly: null,
+        terminal_sessions: 0,
+        expected_stops: 0,
+        killed_stops: 0,
+        stop_evidence: 'unknown',
+        stop_timeout_seconds: null,
+        controller_name: '',
+        caution: false,
+        auto_scaled: false,
+        can_deploy: true,
+      },
+    ],
+  },
+}
+
+/** What the image check says about a service whose images all have an arm64 build. */
+export const ARM64_READINESS_READY: Arm64Readiness = {
+  status: 'ready',
+  images: [{ container: 'payments-api', image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2', state: 'arm64', reason: '', account: '' }],
+  checked_at: '2026-11-21T10:00:00Z',
+}
+
+/** What the image check says about a service whose image has no arm64 build. */
+export const ARM64_READINESS_BLOCKED: Arm64Readiness = {
+  status: 'blocked',
+  images: [{ container: 'payments-api', image: '482109375512.dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.2', state: 'no_arm64', reason: 'single_architecture', account: '' }],
+  checked_at: '2026-11-21T10:00:00Z',
 }
 
 /** Capacity once cluster_capacity_daily and service_util_daily have 30 days of rows. */

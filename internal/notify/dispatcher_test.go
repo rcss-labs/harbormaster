@@ -332,7 +332,7 @@ func TestDispatcher_SkipsDisabledAndNonMatchingRoutes(t *testing.T) {
 func TestDispatcher_SelectorsMatchAWSAndHarbormasterTags(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	qa, err := e.st.CreateTag(ctx, "QA", "blue")
+	qa, err := e.st.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1289,7 +1289,7 @@ func TestDispatcher_TwoDispatchersOpenOneGroup(t *testing.T) {
 func TestDispatcher_RouteWhoseTagWasDeletedMatchesNothing(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	qa, err := e.st.CreateTag(ctx, "QA", "blue")
+	qa, err := e.st.CreateTag(ctx, "QA", "blue", false)
 	if err != nil {
 		t.Fatal(err)
 	}

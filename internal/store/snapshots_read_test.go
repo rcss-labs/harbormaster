@@ -49,9 +49,9 @@ func newReadFixture(t *testing.T) readFixture {
 	}
 	dev, err := s.DevTag(ctx)
 	must(err)
-	prod, err := s.CreateTag(ctx, "Prod", "red")
+	prod, err := s.CreateTag(ctx, "Prod", "red", false)
 	must(err)
-	staging, err := s.CreateTag(ctx, "Staging", "blue")
+	staging, err := s.CreateTag(ctx, "Staging", "blue", false)
 	must(err)
 	now := time.Now().UTC().Truncate(time.Second)
 
