@@ -73,6 +73,18 @@ type ScanConfig struct {
 	MaxImageMB        int
 }
 
+// ARM64Config holds the settings of the image platform check behind the ARM64 advisor.
+type ARM64Config struct {
+	// Check turns the leader job on (HM_ARM64_CHECK).
+	Check bool
+	// CheckInterval is how often a cycle looks for new and due images (HM_ARM64_CHECK_INTERVAL).
+	CheckInterval time.Duration
+	// Recheck is how often a known image is resolved again (HM_ARM64_RECHECK).
+	Recheck time.Duration
+	// PublicRegistries lets the job read Docker Hub, public ECR and GHCR anonymously (HM_ARM64_PUBLIC_REGISTRIES).
+	PublicRegistries bool
+}
+
 // OffHoursConfig holds the off-hours reconciler settings.
 type OffHoursConfig struct {
 	// Interval is how often the leader reconciles scheduled actions and capacity (HM_OFFHOURS_INTERVAL).
@@ -103,6 +115,7 @@ type Config struct {
 	Retention               RetentionConfig
 	Scan                    ScanConfig
 	OffHours                OffHoursConfig
+	ARM64                   ARM64Config
 	Analytics               AnalyticsConfig
 	PageSizeDefault         int
 	PageSizeMax             int
@@ -271,6 +284,12 @@ func Load(getenv func(string) string) (Config, error) {
 			Interval: reader.duration("HM_OFFHOURS_INTERVAL", 60*time.Second),
 			FakeDemo: reader.boolean("HM_FAKE_OFFHOURS_DEMO", true),
 		},
+		ARM64: ARM64Config{
+			Check:            reader.boolean("HM_ARM64_CHECK", true),
+			CheckInterval:    reader.duration("HM_ARM64_CHECK_INTERVAL", 15*time.Minute),
+			Recheck:          reader.duration("HM_ARM64_RECHECK", 24*time.Hour),
+			PublicRegistries: reader.boolean("HM_ARM64_PUBLIC_REGISTRIES", true),
+		},
 		Analytics:            AnalyticsConfig{Util: reader.boolean("HM_ANALYTICS_UTIL", true)},
 		PageSizeDefault:      reader.integer("HM_PAGE_SIZE_DEFAULT", 100),
 		PageSizeMax:          reader.integer("HM_PAGE_SIZE_MAX", 500),
@@ -323,6 +342,12 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.OffHours.Interval < time.Second {
 		return Config{}, errors.New("HM_OFFHOURS_INTERVAL: must be at least 1s")
+	}
+	if cfg.ARM64.CheckInterval <= 0 {
+		return Config{}, errors.New("HM_ARM64_CHECK_INTERVAL: must be positive")
+	}
+	if cfg.ARM64.Recheck <= 0 {
+		return Config{}, errors.New("HM_ARM64_RECHECK: must be positive")
 	}
 	if err := validateScan(cfg.Scan); err != nil {
 		return Config{}, err

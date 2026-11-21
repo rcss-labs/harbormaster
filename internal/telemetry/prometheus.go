@@ -74,6 +74,11 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	}
 	writeSample(bw, "harbormaster_poller_idle", nil, "", "", idle)
 
+	writeHeader(bw, "harbormaster_registry_requests_total", "Reads of public image registries by host and outcome.", "counter")
+	for _, k := range sortedKeys(r.registryRequests) {
+		writeSample(bw, "harbormaster_registry_requests_total", []string{"host", "outcome"}, k, "", utoa(r.registryRequests[k]))
+	}
+
 	writeHeader(bw, "harbormaster_snapshot_rows_written_total", "Snapshot rows written by table.", "counter")
 	for _, k := range sortedKeys(r.snapshotRows) {
 		writeSample(bw, "harbormaster_snapshot_rows_written_total", []string{"table"}, k, "", utoa(r.snapshotRows[k]))

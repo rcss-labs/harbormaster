@@ -84,6 +84,17 @@ func (p *Poller) runSupervisor(ctx context.Context) {
 			p.cfg.OffHours.Run(ctx)
 		}()
 	}
+	if p.cfg.ImagePlatforms != nil {
+		// Same reason: only the leader reads image manifests. It stays quiet while polling is idle.
+		if p.cfg.ImagePlatforms.Idle == nil {
+			p.cfg.ImagePlatforms.Idle = p.idle.isIdle
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.cfg.ImagePlatforms.Run(ctx)
+		}()
+	}
 	// Idle detection only matters while polling, so it runs with the supervisor, on the leader.
 	wg.Add(1)
 	go func() {

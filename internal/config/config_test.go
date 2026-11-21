@@ -79,6 +79,7 @@ func TestLoad_Defaults(t *testing.T) {
 			MaxImageMB:  4096,
 		},
 		OffHours:             OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
+		ARM64:                ARM64Config{Check: true, CheckInterval: 15 * time.Minute, Recheck: 24 * time.Hour, PublicRegistries: true},
 		Analytics:            AnalyticsConfig{Util: true},
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
@@ -520,6 +521,31 @@ func TestLoad_ScanLimitBounds(t *testing.T) {
 				t.Fatalf("err = %v, want one naming %s", err, tt.key)
 			}
 		})
+	}
+}
+
+func TestConfig_ARM64Defaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ARM64Config{Check: true, CheckInterval: 15 * time.Minute, Recheck: 24 * time.Hour, PublicRegistries: true}
+	if cfg.ARM64 != want {
+		t.Fatalf("ARM64 = %+v, want %+v", cfg.ARM64, want)
+	}
+	cfg, err = Load(envFromMap(map[string]string{
+		"HM_DATABASE_URL": "postgres://example", "HM_ARM64_CHECK": "false", "HM_ARM64_CHECK_INTERVAL": "1m",
+		"HM_ARM64_RECHECK": "48h", "HM_ARM64_PUBLIC_REGISTRIES": "false"}))
+	if err != nil || cfg.ARM64 != (ARM64Config{CheckInterval: time.Minute, Recheck: 48 * time.Hour}) {
+		t.Fatalf("ARM64 = %+v, %v; want every setting read", cfg.ARM64, err)
+	}
+	for _, key := range []string{"HM_ARM64_CHECK_INTERVAL", "HM_ARM64_RECHECK"} {
+		for _, value := range []string{"0s", "-1m"} {
+			_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", key: value}))
+			if err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("%s=%s: err = %v, want one naming the setting", key, value, err)
+			}
+		}
 	}
 }
 
