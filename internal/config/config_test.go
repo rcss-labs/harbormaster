@@ -83,6 +83,7 @@ func TestLoad_Defaults(t *testing.T) {
 		ARM64:                ARM64Config{Check: true, CheckInterval: 15 * time.Minute, Recheck: 24 * time.Hour, PublicRegistries: true},
 		Notify:               NotifyConfig{Interval: 10 * time.Second, Settle: 3 * time.Minute, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
 		Analytics:            AnalyticsConfig{Util: true},
+		KV:                   KVConfig{Prefix: "hm"},
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,

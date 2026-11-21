@@ -31,8 +31,8 @@
 # ghcr.io/sigstore/cosign/cosign:v2.6.5 (verifier only; never in the final image)
 FROM --platform=$BUILDPLATFORM ghcr.io/sigstore/cosign/cosign:v2.6.5@sha256:ad281047f85c5e1fc6ffbc30c2b55be3b07b4032bef715a12122ce5829619aca AS cosign
 
-# golang:1.27.3-alpine3.24
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS fetch
+# golang:1.27.4-alpine3.24
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS fetch
 ARG TARGETARCH
 ARG SYFT_VERSION=1.57.0
 ARG GRYPE_VERSION=0.121.2
@@ -53,8 +53,8 @@ RUN set -eu; \
     scanner-verify.sh grype "${GRYPE_VERSION}" "${GRYPE_CHECKSUMS_SHA256}" "${GRYPE_IDENTITY}" "${TARGETARCH}" /out/bin; \
     mkdir /out/work
 
-# golang:1.27.3-alpine3.24
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS go-build
+# golang:1.27.4-alpine3.24
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS go-build
 ARG VERSION=dev
 ARG COMMIT=none
 ARG TARGETARCH

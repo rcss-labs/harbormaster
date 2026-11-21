@@ -264,6 +264,13 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 - Source: https://github.com/golang-jwt/jwt (licence file: `LICENSE` at tag v4.5.2)
 - Note: required by the module graph (via crewjam/saml's `samlsp` package); Harbormaster does not import it.
 
+### github.com/valkey-io/valkey-go
+
+- Version: v1.0.80
+- Licence: Apache-2.0
+- Source: https://github.com/valkey-io/valkey-go (licence file: `LICENSE` at tag v1.0.80)
+- Note: the client for the optional Valkey or Redis store; imported only by `internal/kv/valkey.go`.
+
 ### Syft
 
 - Version: v1.57.0

@@ -27,6 +27,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/coordinator"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/notify/fakesink"
@@ -195,6 +196,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
+	kvOpts, kvConfigured, err := kvOptions(cfg.KV)
+	if err != nil {
+		return err
+	}
 
 	var base aws.Config
 	if !fakeAWS {
@@ -217,6 +222,18 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	} else if len(applied) > 0 {
 		log.Info("applied migrations", "versions", applied)
 	}
+
+	// The shared store is optional and nothing reads it yet; later phases pass kvHealth on.
+	var kvHealth *kv.Health
+	if kvConfigured {
+		health, stopKV, err := startKV(ctx, cfg.KV, kvOpts, log)
+		if err != nil {
+			return err
+		}
+		defer stopKV()
+		kvHealth = health
+	}
+	_ = kvHealth
 
 	// Route secrets are sealed under the session key; without one only secretless routes (email) can exist.
 	var notifyBox *secretbox.Box
