@@ -355,19 +355,17 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// What each role serves: the API and web app (all, web), or only /healthz and /metrics (poller, coordinator).
 	// handler is built after the background parts so a poller's health can read its lease manager.
 	var apiServer *api.Server
-	// The jobs run in this process only when it coordinates, so only then can a request wake them directly.
-	var kickOffHours, kickNotify func()
-	if role.Coordinates() {
-		kickOffHours, kickNotify = offHoursReconciler.Kick, notifyDispatcher.Kick
-	}
+	// Kicks cross tasks on the signal bus: a web task publishes, the coordinator that holds the lease listens. In a single
+	// task (role all, no shared store) the bus is memory and both sides are this process.
+	kicks := &kickPublisher{bus: newKickBus(kvHealth), log: log}
 	if role.ServesAPI() {
 		setup, err := auth.NewSetup(ctx, st, log)
 		if err != nil {
 			return err
 		}
-		var scanKicker api.ScanKicker // stays a nil interface when scanning is off, and on a web task
-		if scanRunner != nil {
-			scanKicker = scanRunner
+		var scanKicker api.ScanKicker // stays a nil interface when scanning is off
+		if cfg.Scan.Enabled {
+			scanKicker = kicks
 		}
 		apiServer = api.New(api.Server{
 			Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
@@ -385,8 +383,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			OffHours:                offHoursApplier,
 			Notify:                  notifySenders,
 			NotifyBox:               notifyBox,
-			KickOffHours:            kickOffHours,
-			KickNotify:              kickNotify,
+			KickOffHours:            kicks.KickOffHours,
+			KickNotify:              kicks.KickNotify,
 		})
 	}
 	listener, err := net.Listen("tcp", cfg.Listen)
@@ -421,6 +419,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 					SampleInterval: cfg.Poll.CountsHistory, CountsRetention: cfg.Retention.CountsHistory, Log: log},
 				Retention: coordinator.RetentionFrom(cfg), RetentionEvery: coordinator.DefaultRetentionEvery,
 				Outcomes: deploy.NewOutcomeLogger(st, 5*time.Second),
+				Bus:      kicks.bus,
 				Log:      log,
 			}
 			pollerConfig.Coordinator = coordinatorRunner
