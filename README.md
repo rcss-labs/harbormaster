@@ -295,6 +295,14 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen) for this long puts the poller in idle mode. `0` disables idle mode |
 | `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the leader reconciles off-hours schedules. Minimum 1s |
+| `HM_NOTIFY_INTERVAL` | `10s` | How often the leader plans and sends alert notifications. Minimum 1s |
+| `HM_NOTIFY_ALLOWED_PRIVATE_CIDRS` | none | Comma-separated private ranges (inside 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 or fc00::/7) that notification destinations may reach, for example an internal webhook receiver. Public destinations need no setting; loopback, link-local and metadata addresses are never allowed |
+| `HM_SMTP_HOST` | none | Mail server for email notifications. Email routes are unavailable until it is set |
+| `HM_SMTP_PORT` | `587` | Mail server port |
+| `HM_SMTP_TLS` | `starttls` | `starttls` (the server must offer it) or `implicit` (TLS from the first byte, usually port 465) |
+| `HM_SMTP_USERNAME`, `HM_SMTP_PASSWORD` | none | Mail server login; set both or neither. On AWS the Terraform module injects the password from Secrets Manager (`smtp_password_secret_arn`) |
+| `HM_SMTP_FROM` | none | Sender address, required with `HM_SMTP_HOST` (for example `Harbormaster <harbormaster@example.com>`) |
+| `HM_FAKE_NOTIFY_DEMO` | `true` | `--fake-aws` only: seed demo notification routes that deliver to the built-in fake receiver |
 | `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled; applies only when the demo schedule is first seeded, not to an existing one |
 
 ### Retention
@@ -313,6 +321,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_RETENTION_UTIL_DAILY` | `2160h` | How long daily service utilisation rollups are kept |
 | `HM_RETENTION_SCAN_IMAGES` | `168h` | How long a scan result is kept after the image was last requested |
 | `HM_RETENTION_SCAN_RUNS` | `720h` | How long image scan run records are kept |
+| `HM_RETENTION_NOTIFICATION_LOG` | `720h` | How long the notification delivery log and resolved alert incidents are kept |
 
 ### Image security
 

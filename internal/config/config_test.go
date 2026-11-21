@@ -67,6 +67,7 @@ func TestLoad_Defaults(t *testing.T) {
 			UtilDaily:         2160 * time.Hour,
 			ScanImages:        168 * time.Hour,
 			ScanRuns:          720 * time.Hour,
+			NotificationLog:   720 * time.Hour,
 		},
 		Scan: ScanConfig{
 			RoleName:    "harbormaster-scan",
@@ -79,6 +80,7 @@ func TestLoad_Defaults(t *testing.T) {
 			MaxImageMB:  4096,
 		},
 		OffHours:             OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
+		Notify:               NotifyConfig{Interval: 10 * time.Second, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
 		Analytics:            AnalyticsConfig{Util: true},
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
