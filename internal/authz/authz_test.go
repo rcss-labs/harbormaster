@@ -85,6 +85,33 @@ func TestCan_RequiresViewAndAction(t *testing.T) {
 	}
 }
 
+func TestCan_ReadOnlySubject(t *testing.T) {
+	all := ActionSet(View | Logs | Operate | Deploy | Edit | Terminal | AcceptRisk)
+	subjects := map[string]Subject{
+		"non-admin with every bit": {ReadOnly: true, Perms: map[TagID]ActionSet{tagProd: all}},
+		"admin":                    {ReadOnly: true, Admin: true},
+	}
+	for name, s := range subjects {
+		t.Run(name, func(t *testing.T) {
+			for _, a := range []Action{View, Logs} {
+				if !Can(s, a, tagProd) {
+					t.Errorf("read-only subject denied read action %d", a)
+				}
+			}
+			for _, a := range []Action{Operate, Deploy, Edit, Terminal, AcceptRisk} {
+				if Can(s, a, tagProd) {
+					t.Errorf("read-only subject allowed action %d", a)
+				}
+			}
+		})
+	}
+	// View and Logs still follow the permissions of a non-admin.
+	viewOnly := Subject{ReadOnly: true, Perms: map[TagID]ActionSet{tagProd: ActionSet(View)}}
+	if !Can(viewOnly, View, tagProd) || Can(viewOnly, Logs, tagProd) || Can(viewOnly, View, tagDev) {
+		t.Error("read-only subject's View/Logs do not follow its permissions")
+	}
+}
+
 var (
 	clusterA = model.ClusterKey{AccountID: "1", Region: "us-east-1", Cluster: "a"}
 	svcA     = model.ServiceKey{ClusterKey: clusterA, Service: "web"}

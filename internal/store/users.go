@@ -377,7 +377,7 @@ func (s *Store) ClearPendingLink(ctx context.Context, id int64) error {
 		 where id = $1 and pending_link_name_id is not null`, id)
 }
 
-// UnlinkSSO detaches the user's SSO identity and ends their SSO sessions. When the user has no
+// UnlinkSSO detaches the user's SSO identity and ends their SSO sessions and SSO-created access tokens. When the user has no
 // password it sets newHash with must_change_password so they keep a credential (passwordSet).
 // ErrNotLinked when no identity is bound; ErrNotFound when the user is absent.
 func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwordSet bool, sessionsEnded int64, err error) {
@@ -412,6 +412,9 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 	tag, err := tx.Exec(ctx, `delete from sessions where user_id = $1 and auth_source = 'saml'`, id)
 	if err != nil {
 		return false, 0, fmt.Errorf("end saml sessions: %w", err)
+	}
+	if _, err := deleteAPITokensForUser(ctx, tx, id, "saml"); err != nil {
+		return false, 0, err
 	}
 	return !hasPassword, tag.RowsAffected(), tx.Commit(ctx)
 }

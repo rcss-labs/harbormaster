@@ -65,13 +65,18 @@ func (s *Store) TouchSession(ctx context.Context, idHash string, lastSeen, expir
 		idHash, lastSeen, expires)
 }
 
-// LastSessionActivity returns the most recent last_seen_at over unexpired sessions, and false when
-// there are none. Authenticated requests refresh last_seen_at at most once a minute, so it lags real
-// activity by up to that.
+// LastSessionActivity returns the most recent sign of a person or agent using Harbormaster: the newer of the
+// latest last_seen_at over unexpired sessions and the latest last_used_at over unexpired access tokens (owner's
+// decision 15: a token call wakes polling like a UI session). It returns false when neither exists. Authenticated
+// requests refresh both at most once a minute, so it lags real activity by up to that.
 func (s *Store) LastSessionActivity(ctx context.Context, now time.Time) (time.Time, bool, error) {
 	var last *time.Time
 	err := s.Pool.QueryRow(ctx,
-		`select max(last_seen_at) from sessions where expires_at >= $1`, now).Scan(&last)
+		`select max(seen) from (
+		   select max(last_seen_at) as seen from sessions where expires_at >= $1
+		   union all
+		   select max(last_used_at) as seen from api_tokens where expires_at >= $1
+		 ) activity`, now).Scan(&last)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("last session activity: %w", err)
 	}

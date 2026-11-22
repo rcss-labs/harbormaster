@@ -122,6 +122,11 @@ type Server struct {
 	// targetKeys and memberLines hold short-lived copies of reads that every list request or metrics scrape repeats.
 	targetKeys  *ttlCache[[]store.TargetFilter]
 	memberLines *ttlCache[string]
+	// routeLog records the routes Routes asks for; New creates it.
+	routeLog *routeRecorder
+	// testTokenRoutes marks extra routes for tokens, by pattern. TEST ONLY: it exists so a test can prove that the
+	// read-only subject alone refuses a write route that was marked by mistake. Production code never sets it.
+	testTokenRoutes map[string]auth.Scope
 }
 
 // Names of the per-user limits in Server.Limits (also the key segment and metric label).
@@ -137,6 +142,14 @@ const (
 	rateNotifyTest = "notifytest"
 	rateSAMLLogin  = "samllogin"
 	rateFocusOpen  = "focusopen"
+	rateAPIToken   = "apitoken"
+)
+
+// The per-user bucket for requests authenticated by an access token (design: "Authentication"). Constants, not
+// settings.
+const (
+	apiTokenBurst     = 120
+	apiTokenPerSecond = 2
 )
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
@@ -158,6 +171,7 @@ func New(s Server) *Server {
 		s.rateForClass = cost.RateForClass
 	}
 	s.focusOpens = &focusOpens{}
+	s.routeLog = &routeRecorder{byMux: map[*http.ServeMux][]routeInfo{}}
 	s.targetKeys, s.memberLines = &ttlCache[[]store.TargetFilter]{}, &ttlCache[string]{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
@@ -220,11 +234,12 @@ func (s *Server) log() *slog.Logger { return s.Log }
 func (s *Server) now() time.Time { return s.Now() }
 
 // Handler builds the mux and wraps it:
-// recover -> request log -> security headers -> auth.Middleware (for /api).
+// recover -> request log -> security headers -> auth.Middleware (for /api) -> token rate limit.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
 	var h http.Handler = mux
+	h = s.tokenRequests(h)
 	h = onlyAPI(s.Auth.Middleware, h)
 	h = withTagsMemo(h)
 	h = SecurityHeaders(h)
@@ -252,7 +267,54 @@ func onlyAPI(mw func(http.Handler) http.Handler, next http.Handler) http.Handler
 
 // handle registers pattern with the per-route middleware chain from opts.
 func (s *Server) handle(mux *http.ServeMux, pattern string, h http.HandlerFunc, opts routeOptions) {
+	if scope, ok := s.testTokenRoutes[pattern]; ok {
+		opts.Token = scope
+	}
+	s.routeLog.record(mux, routeInfo{Pattern: pattern, Opts: opts})
 	mux.Handle(pattern, protect(h, opts))
+}
+
+// routeInfo is one route registered through handle, with its options.
+type routeInfo struct {
+	Pattern string
+	Opts    routeOptions
+}
+
+// routeRecorder collects the routes handle registers on the muxes Routes is building. Handler's mux is never
+// recorded.
+type routeRecorder struct {
+	mu    sync.Mutex
+	byMux map[*http.ServeMux][]routeInfo
+}
+
+func (rr *routeRecorder) record(mux *http.ServeMux, info routeInfo) {
+	if rr == nil {
+		return
+	}
+	rr.mu.Lock()
+	defer rr.mu.Unlock()
+	if list, ok := rr.byMux[mux]; ok {
+		rr.byMux[mux] = append(list, info)
+	}
+}
+
+// Routes lists every route registered through handle, with its options, in registration order. Routes registered
+// directly on the mux (healthz, metrics, the dev fakes, the /api/ catch-all and the SPA) are not included. The token
+// route tests and the MCP gateway's route table check use it.
+func (s *Server) Routes() []routeInfo {
+	if s.routeLog == nil {
+		s.routeLog = &routeRecorder{byMux: map[*http.ServeMux][]routeInfo{}}
+	}
+	mux := http.NewServeMux()
+	s.routeLog.mu.Lock()
+	s.routeLog.byMux[mux] = []routeInfo{}
+	s.routeLog.mu.Unlock()
+	s.routes(mux)
+	s.routeLog.mu.Lock()
+	defer s.routeLog.mu.Unlock()
+	list := s.routeLog.byMux[mux]
+	delete(s.routeLog.byMux, mux)
+	return list
 }
 
 // routes registers every route. Plans 02-05 append their handlers here.
@@ -286,18 +348,18 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "POST /api/auth/logout", s.logout, routeOptions{})
 	s.handle(mux, "POST /api/auth/password", s.changePassword, routeOptions{})
 	s.handle(mux, "GET /api/me", s.me, routeOptions{})
-	s.handle(mux, "GET /api/overview", s.overview, routeOptions{})
-	s.handle(mux, "GET /api/clusters", s.listClusters, routeOptions{})
-	s.handle(mux, "GET /api/clusters/{clusterId}", s.getCluster, routeOptions{})
-	s.handle(mux, "GET /api/services", s.listServicesFlat, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}", s.getService, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}/tasks", s.listServiceTasks, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}/operations", s.serviceOperations, routeOptions{})
+	s.handle(mux, "GET /api/overview", s.overview, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/clusters", s.listClusters, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/clusters/{clusterId}", s.getCluster, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/services", s.listServicesFlat, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/services/{serviceId}", s.getService, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/services/{serviceId}/tasks", s.listServiceTasks, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/services/{serviceId}/operations", s.serviceOperations, routeOptions{Token: auth.ScopeRead})
 	// Live page refresh: a heartbeat from a page that is open in a visible tab, and its release.
 	s.handle(mux, "POST /api/focus", s.postFocus, routeOptions{NoETag: true})
 	s.handle(mux, "DELETE /api/focus", s.deleteFocus, routeOptions{NoETag: true})
-	s.handle(mux, "GET /api/tasks", s.listTasks, routeOptions{})
-	s.handle(mux, "GET /api/search", s.search, routeOptions{})
+	s.handle(mux, "GET /api/tasks", s.listTasks, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/search", s.search, routeOptions{Token: auth.ScopeRead})
 	s.handle(mux, "GET /api/poller", s.pollerStatus, routeOptions{})
 	// plan 04: terminal
 	s.handle(mux, "GET /api/tasks/{taskId}/exec-targets", s.execTargets, routeOptions{})
@@ -349,15 +411,18 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.notificationRoutes(mux) // alert notifications
 
 	s.configSearchRoutes(mux) // estate-wide config search
+	if s.Cfg.APITokens {
+		s.tokenRoutes(mux) // access tokens: absent (404) while HM_API_TOKENS is off
+	}
 
 	// Change-path reads (plan 02).
-	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}/revisions", s.getRevisions, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}/revisions/{revision}", s.getRevisionDefinition, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/services/{serviceId}/revisions", s.getRevisions, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/services/{serviceId}/revisions/{revision}", s.getRevisionDefinition, routeOptions{Token: auth.ScopeRead})
 	s.handle(mux, "GET /api/services/{serviceId}/image-tags", s.getImageTags, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}/desired-count", s.getDesiredCount, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/desired-count", s.getDesiredCount, routeOptions{Token: auth.ScopeRead})
 	s.handle(mux, "GET /api/services/{serviceId}/deploy-settings", s.getDeploySettings, routeOptions{})
-	s.handle(mux, "GET /api/services/{serviceId}/arm64-readiness", s.getARM64Readiness, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/arm64-readiness", s.getARM64Readiness, routeOptions{Token: auth.ScopeRead})
 
 	// Change-path writes (plan 02).
 	s.handle(mux, "POST /api/services/{serviceId}/revisions", s.registerRevision, routeOptions{})
@@ -368,10 +433,11 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "POST /api/tasks/{taskId}/stop", s.stopTask, routeOptions{})
 
 	// Unknown API paths are JSON 404s and never fall through to the SPA. RequirePasswordChanged
-	// still applies so a user with a pending password change sees password_change_required.
-	mux.Handle("/api/", auth.RequirePasswordChanged(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// still applies so a user with a pending password change sees password_change_required. An access
+	// token is refused here like on any unmarked route, so it cannot probe which paths exist.
+	mux.Handle("/api/", auth.RequireTokenScope("")(auth.RequirePasswordChanged(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
-	})))
+	}))))
 
 	mux.Handle("/", web.Handler())
 }

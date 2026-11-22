@@ -79,15 +79,17 @@ func TestLoad_Defaults(t *testing.T) {
 			BatchSize:   25,
 			MaxImageMB:  4096,
 		},
-		OffHours:             OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
-		ARM64:                ARM64Config{Check: true, CheckInterval: 15 * time.Minute, Recheck: 24 * time.Hour, PublicRegistries: true},
-		Notify:               NotifyConfig{Interval: 10 * time.Second, Settle: 3 * time.Minute, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
-		Analytics:            AnalyticsConfig{Util: true},
-		KV:                   KVConfig{Prefix: "hm"},
-		Role:                 RoleAll,
-		Focus:                FocusConfig{Interval: 5 * time.Second, TTL: 30 * time.Second, MaxObjects: 50, MaxPerUser: 5, MaxCallsPerSec: 5},
-		SnapshotCache:        true,
-		SnapshotCacheTTL:     30 * time.Second,
+		OffHours:         OffHoursConfig{Interval: 60 * time.Second, FakeDemo: true},
+		ARM64:            ARM64Config{Check: true, CheckInterval: 15 * time.Minute, Recheck: 24 * time.Hour, PublicRegistries: true},
+		Notify:           NotifyConfig{Interval: 10 * time.Second, Settle: 3 * time.Minute, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
+		Analytics:        AnalyticsConfig{Util: true},
+		KV:               KVConfig{Prefix: "hm"},
+		Role:             RoleAll,
+		Focus:            FocusConfig{Interval: 5 * time.Second, TTL: 30 * time.Second, MaxObjects: 50, MaxPerUser: 5, MaxCallsPerSec: 5},
+		SnapshotCache:    true,
+		SnapshotCacheTTL: 30 * time.Second,
+		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
+		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,
@@ -729,5 +731,74 @@ func TestConfig_LogSearchMaxGB(t *testing.T) {
 	}
 	if _, err := load("-1"); err == nil || !strings.Contains(err.Error(), "HM_LOG_SEARCH_MAX_GB") {
 		t.Errorf("-1: error %v, want one naming HM_LOG_SEARCH_MAX_GB", err)
+	}
+}
+
+func tokenEnv(extra map[string]string) func(string) string {
+	values := map[string]string{"HM_DATABASE_URL": "postgres://example"}
+	for k, v := range extra {
+		values[k] = v
+	}
+	return envFromMap(values)
+}
+
+func TestLoad_TokenDefaults(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APITokens || cfg.TokenRedactEnv || cfg.MCPPublicURL != "" {
+		t.Errorf("flags/url not off by default: %+v", cfg)
+	}
+	if cfg.TokenMaxTTL != 90*24*time.Hour || cfg.TokenMaxTTLSSO != 7*24*time.Hour {
+		t.Errorf("ttl = %v / %v, want 90d / 7d", cfg.TokenMaxTTL, cfg.TokenMaxTTLSSO)
+	}
+	if cfg.TokenMaxPerUser != 10 || cfg.TokenLogSearchMaxGB != 2 || cfg.TokenLogSearchDailyGB != 20 {
+		t.Errorf("limits = %d, %d, %d; want 10, 2, 20", cfg.TokenMaxPerUser, cfg.TokenLogSearchMaxGB, cfg.TokenLogSearchDailyGB)
+	}
+}
+
+func TestLoad_TokenOverrides(t *testing.T) {
+	cfg, err := Load(tokenEnv(map[string]string{
+		"HM_API_TOKENS": "true", "HM_TOKEN_MAX_TTL": "48h", "HM_TOKEN_MAX_TTL_SSO": "24h", "HM_TOKEN_MAX_PER_USER": "3",
+		"HM_TOKEN_LOG_SEARCH_MAX_GB": "0", "HM_TOKEN_LOG_SEARCH_DAILY_GB": "0", "HM_TOKEN_REDACT_ENV": "true",
+		"HM_MCP_PUBLIC_URL": "https://mcp.example.com",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.APITokens || !cfg.TokenRedactEnv || cfg.TokenMaxTTL != 48*time.Hour || cfg.TokenMaxTTLSSO != 24*time.Hour ||
+		cfg.TokenMaxPerUser != 3 || cfg.TokenLogSearchMaxGB != 0 || cfg.TokenLogSearchDailyGB != 0 ||
+		cfg.MCPPublicURL != "https://mcp.example.com" {
+		t.Errorf("cfg = %+v", cfg)
+	}
+}
+
+func TestLoad_TokenValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"zero ttl", map[string]string{"HM_TOKEN_MAX_TTL": "0s"}, "HM_TOKEN_MAX_TTL"},
+		{"negative ttl", map[string]string{"HM_TOKEN_MAX_TTL": "-1h"}, "HM_TOKEN_MAX_TTL"},
+		{"zero sso ttl", map[string]string{"HM_TOKEN_MAX_TTL_SSO": "0s"}, "HM_TOKEN_MAX_TTL_SSO"},
+		{"sso above long", map[string]string{"HM_TOKEN_MAX_TTL": "24h", "HM_TOKEN_MAX_TTL_SSO": "48h"}, "HM_TOKEN_MAX_TTL_SSO"},
+		{"per user zero", map[string]string{"HM_TOKEN_MAX_PER_USER": "0"}, "HM_TOKEN_MAX_PER_USER"},
+		{"max gb negative", map[string]string{"HM_TOKEN_LOG_SEARCH_MAX_GB": "-1"}, "HM_TOKEN_LOG_SEARCH_MAX_GB"},
+		{"daily gb negative", map[string]string{"HM_TOKEN_LOG_SEARCH_DAILY_GB": "-1"}, "HM_TOKEN_LOG_SEARCH_DAILY_GB"},
+		{"url http", map[string]string{"HM_MCP_PUBLIC_URL": "http://mcp.example.com"}, "HM_MCP_PUBLIC_URL"},
+		{"url path", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com/mcp"}, "HM_MCP_PUBLIC_URL"},
+		{"url trailing slash", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com/"}, "HM_MCP_PUBLIC_URL"},
+		{"url query", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com?a=b"}, "HM_MCP_PUBLIC_URL"},
+		{"url no host", map[string]string{"HM_MCP_PUBLIC_URL": "https://"}, "HM_MCP_PUBLIC_URL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(tokenEnv(tc.env))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to name %s", err, tc.want)
+			}
+		})
 	}
 }

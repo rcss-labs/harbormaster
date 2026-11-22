@@ -137,3 +137,40 @@ func TestSearcher_EstimateFailedTargetIsUnknownNotAnError(t *testing.T) {
 type errAssume struct{}
 
 func (errAssume) Error() string { return "assume role failed" }
+
+func TestSearch_PerRequestMaxBytesLowersTheCap(t *testing.T) {
+	// The scripted query always reports 2000 bytes scanned while running.
+	tests := []struct {
+		name         string
+		searcherCap  int64
+		requestCap   int64
+		wantStopped  bool
+		scannedBytes float64
+	}{
+		{"request cap below the searcher's stops the search", 10_000, 1_000, true, 2000},
+		{"request cap above the searcher's does not raise it", 1_000, 100_000, true, 2000},
+		{"no request cap leaves the searcher's cap", 1_000, 0, true, 2000},
+		{"no searcher cap, request cap applies", 0, 1_000, true, 2000},
+		{"both above what was scanned", 10_000, 5_000, false, 2000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, spy := newSearcher(newSearchFake())
+			s.MaxBytes = tc.searcherCap
+			status := logstypes.QueryStatusRunning
+			if !tc.wantStopped {
+				status = logstypes.QueryStatusComplete
+			}
+			spy.scripted = scriptedResults(status, tc.scannedBytes)
+			req := searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/"))
+			req.MaxBytes = tc.requestCap
+			res, err := s.Search(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.ScanLimitReached != tc.wantStopped {
+				t.Fatalf("ScanLimitReached = %v, want %v", res.ScanLimitReached, tc.wantStopped)
+			}
+		})
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -88,7 +89,7 @@ type StorageDTO struct {
 
 // storageRoutes registers the plan 05 storage read route.
 func (s *Server) storageRoutes(mux *http.ServeMux) {
-	s.handle(mux, "GET /api/storage", s.listStorage, routeOptions{})
+	s.handle(mux, "GET /api/storage", s.listStorage, routeOptions{Token: auth.ScopeRead})
 }
 
 // mountIndexFor maps file system IDs to the caller's visible services that mount them. Only services the
