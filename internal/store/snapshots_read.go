@@ -16,15 +16,16 @@ import (
 // ServiceRow is a service plus the tag that decides who may see it.
 type ServiceRow struct {
 	model.Service
-	EffectiveTagID authz.TagID
-	TagInherited   bool // true when the service has no tag of its own and uses its cluster's (or Dev)
+	// The tag fields are never serialised: the snapshot cache stores rows without them and fills them per request.
+	EffectiveTagID authz.TagID `json:"-"`
+	TagInherited   bool        `json:"-"` // true when the service has no tag of its own and uses its cluster's (or Dev)
 }
 
 // TaskRow is a task plus its effective tag and the columns derived at write time.
 // ExitCode shadows the embedded model.Task.ExitCode method with the stored value.
 type TaskRow struct {
 	model.Task
-	EffectiveTagID    authz.TagID
+	EffectiveTagID    authz.TagID `json:"-"`
 	ExitCode          *int
 	StopReasonGroup   string
 	StopKind          string // "error", "expected" or "" (see status.StopKind)
@@ -35,8 +36,8 @@ type TaskRow struct {
 // ClusterRow is a cluster plus the tag assigned to it.
 type ClusterRow struct {
 	model.Cluster
-	TagID  authz.TagID
-	TagSet bool // false = untagged, TagID is the Dev tag
+	TagID  authz.TagID `json:"-"`
+	TagSet bool        `json:"-"` // false = untagged, TagID is the Dev tag
 }
 
 // ---- visibility SQL helper -------------------------------------------------
@@ -507,13 +508,7 @@ func (s *Store) ListTasks(ctx context.Context, tq TaskQuery) ([]TaskRow, int, er
 
 // RunningTasks returns visible non-STOPPED tasks without raw and containers.
 func (s *Store) RunningTasks(ctx context.Context, f TargetFilter, vis Visibility) ([]TaskRow, error) {
-	var q queryArgs
-	target := q.target("t", f)
-	v := q.visibility("t", vis)
-	sql := `select ` + taskColumns("t", true) + `, ` + v.Effective + `, ` + coalesceBool("ts", "enable_execute_command") +
-		taskFrom(v) + ` where ` + target + ` and ` + v.Predicate + ` and ` + runningSQL +
-		` order by t.account_id, t.region, t.cluster_name, t.task_arn`
-	return s.queryTaskRows(ctx, sql, q.values)
+	return s.RunningTasksIn(ctx, f, "", vis)
 }
 
 // TaskSummary aggregates visible tasks for the dashboard.
