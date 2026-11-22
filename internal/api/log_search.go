@@ -102,7 +102,10 @@ type LogSearchResultDTO struct {
 var (
 	errSearchRateLimited = &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "You are searching too fast. Try again in a few seconds."}
 	errSearchRunning     = &APIError{Status: http.StatusConflict, Code: "conflict", Message: "You already have a log search running."}
+	errTokenSearchOff    = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Log search is turned off for access tokens."}
 )
+
+const budgetExhaustedMessage = "Today's log search budget for access tokens is used up. It resets at 00:00 UTC."
 
 // validLogSearchRange reports whether name is a range a log search or a saved search may use.
 // The saved-searches API calls it so both accept exactly the same values.
@@ -248,6 +251,16 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errSearchRateLimited)
 		return
 	}
+	// 5b. Access tokens search against a daily scan budget. It is read after the slot is taken, so two searches of
+	// one user cannot both pass the check; the cap of this search is whatever the budget has left.
+	viaToken := auth.IsToken(ctx)
+	searchMaxBytes := int64(0)
+	if viaToken {
+		var allowed bool
+		if searchMaxBytes, allowed = s.tokenSearchCap(w, r, user.ID); !allowed {
+			return
+		}
+	}
 
 	// 6. Search. r.Context() ends when the client goes away, which stops the queries; so does BeginDrain
 	// (Shutdown), so a running search sends StopQuery and audits inside the shutdown drain. Only the search
@@ -261,7 +274,7 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 		case <-searchCtx.Done():
 		}
 	}()
-	found, searchErr := s.LogSearch.Search(searchCtx, logs.SearchRequest{Services: searchServices, Query: req.Query, From: from, To: to})
+	found, searchErr := s.LogSearch.Search(searchCtx, logs.SearchRequest{Services: searchServices, Query: req.Query, From: from, To: to, MaxBytes: searchMaxBytes})
 
 	// 7. Map the outcome.
 	names := s.accountNamesFor(ctx, found.Targets)
@@ -282,6 +295,9 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	result.RecordsMatched, result.BytesScanned, result.Capped = found.RecordsMatched, found.BytesScanned, found.Capped
 	result.ScanLimitReached, result.ScanLimitBytes = found.ScanLimitReached, s.LogSearch.MaxBytes
+	if viaToken {
+		result.ScanLimitBytes = searchMaxBytes
+	}
 	result.CostUSD = float64(found.BytesScanned) / (1 << 30) * logInsightsUSDPerGiB
 	result.DurationMS = found.Duration.Milliseconds()
 	targetStates := make([]map[string]any, 0, len(found.Targets))
@@ -307,6 +323,9 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	// 8. Audit every run that reached AWS, including a stopped or failed one. The request context may
 	// already be cancelled (that is why we are here), so the write detaches from it.
 	s.auditLogSearch(r, user, queried, req.Range, req.Query, from, to, found, targetStates)
+	if viaToken {
+		s.chargeTokenLogScan(r, user.ID, found.BytesScanned)
+	}
 
 	var queryErr *logs.QueryError
 	switch {
@@ -382,6 +401,10 @@ type LogSearchEstimateDTO struct {
 	UnknownGroups    int     `json:"unknown_groups"`
 	ScanLimitBytes   int64   `json:"scan_limit_bytes"`
 	ExceedsScanLimit bool    `json:"exceeds_scan_limit"`
+	// BudgetBytes and BudgetRemainingBytes are set for access token callers only: the day's scan budget and what is
+	// left of it.
+	BudgetBytes          *int64 `json:"budget_bytes,omitempty"`
+	BudgetRemainingBytes *int64 `json:"budget_remaining_bytes,omitempty"`
 }
 
 // postLogSearchEstimate answers POST /api/log-search/estimate with the same body as a search. It runs the same
@@ -407,11 +430,61 @@ func (s *Server) postLogSearchEstimate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	limit := s.LogSearch.MaxBytes
+	var budget, remaining *int64
+	if auth.IsToken(r.Context()) {
+		user, _ := auth.UserFrom(r.Context())
+		state, err := s.tokenLogSearchState(r.Context(), user.ID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		limit = s.tokenCapBytes()
+		left := max(state.DailyBytes-state.UsedBytes, 0)
+		budget, remaining = &state.DailyBytes, &left
+	}
 	writeJSON(w, http.StatusOK, LogSearchEstimateDTO{
 		StoredBytes: est.StoredBytes, CostUSD: float64(est.StoredBytes) / logs.BytesPerGiB * logInsightsUSDPerGiB,
 		Groups: est.Groups, UnknownGroups: est.UnknownGroups,
 		ScanLimitBytes: limit, ExceedsScanLimit: limit > 0 && est.StoredBytes > limit,
+		BudgetBytes: budget, BudgetRemainingBytes: remaining,
 	})
+}
+
+// tokenSearchCap decides whether a token-initiated search may run and with what scan cap: the smaller of the token
+// cap, the global cap and what the day's budget has left. When it may not, it has already answered (403 with the
+// budget at 0, 429 with Retry-After when the day's budget is used up) and returns false.
+func (s *Server) tokenSearchCap(w http.ResponseWriter, r *http.Request, userID int64) (int64, bool) {
+	state, err := s.tokenLogSearchState(r.Context(), userID)
+	if err != nil {
+		s.fail(w, err)
+		return 0, false
+	}
+	if state.DailyBytes == 0 {
+		s.fail(w, errTokenSearchOff)
+		return 0, false
+	}
+	remaining := state.DailyBytes - state.UsedBytes
+	if remaining <= 0 {
+		retry := max(int(state.ResetsAt.Sub(s.now()).Seconds()), 1)
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		writeError(w, http.StatusTooManyRequests, "log_search_budget_exhausted", budgetExhaustedMessage)
+		return 0, false
+	}
+	capBytes := state.MaxBytesPerSearch
+	if capBytes == 0 || remaining < capBytes {
+		capBytes = remaining
+	}
+	return capBytes, true
+}
+
+// chargeTokenLogScan adds what a token-initiated search scanned to the user's day. It runs on a context detached
+// from the request, like the audit write, so a search the client abandoned is charged all the same.
+func (s *Server) chargeTokenLogScan(r *http.Request, userID, bytesScanned int64) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), auditWriteTimeout)
+	defer cancel()
+	if err := s.Store.AddTokenLogScanUsage(ctx, userID, s.now(), bytesScanned); err != nil {
+		s.log().Error("token log scan usage write failed", "error", err)
+	}
 }
 
 // checkLogSearchRequest is the validation both log search endpoints share, all of it before any service is
@@ -504,16 +577,21 @@ func (s *Server) auditLogSearch(r *http.Request, user store.User, queried []sear
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), auditWriteTimeout)
 	defer cancel()
+	details := map[string]any{
+		"service_ids": ids, "service_names": names, "range": rangeName,
+		"from": from, "to": to, "query": query,
+		"bytes_scanned": found.BytesScanned, "records_matched": found.RecordsMatched, "target_states": targetStates,
+	}
+	if cred, ok := auth.CredentialFrom(r.Context()); ok && cred.Kind == auth.CredentialToken {
+		details["via"] = "token"
+		details["token_id"] = cred.TokenPublicID
+	}
 	err := s.Store.Audit(ctx, store.AuditEntry{
 		ActorUserID: &user.ID, ActorUsername: user.Username,
 		Action: "log_search", Target: target,
 		Summary: fmt.Sprintf("Searched logs of %d %s", len(names), plural(len(names), "service", "services")),
-		Details: map[string]any{
-			"service_ids": ids, "service_names": names, "range": rangeName,
-			"from": from, "to": to, "query": query,
-			"bytes_scanned": found.BytesScanned, "records_matched": found.RecordsMatched, "target_states": targetStates,
-		},
-		IP: s.clientIP(r),
+		Details: details,
+		IP:      s.clientIP(r),
 	})
 	if err != nil {
 		s.log().Error("audit write failed", "action", "log_search", "error", err)

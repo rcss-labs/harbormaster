@@ -50,6 +50,9 @@ type SearchRequest struct {
 	Query    string
 	From, To time.Time
 	MaxRows  int // default 10000
+	// MaxBytes caps this search's scan. 0 means the Searcher's MaxBytes; otherwise the smaller of the two non-zero
+	// values applies, so a request can lower the cap but never raise it.
+	MaxBytes int64
 }
 
 type SearchRow struct {
@@ -138,6 +141,10 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 	if sleep == nil {
 		sleep = sleepCtx
 	}
+	maxBytes := s.MaxBytes
+	if req.MaxBytes > 0 && (maxBytes == 0 || req.MaxBytes < maxBytes) {
+		maxBytes = req.MaxBytes
+	}
 	maxRows := req.MaxRows
 	if maxRows <= 0 || maxRows > defaultMaxRows { // Insights returns at most 10,000 rows
 		maxRows = defaultMaxRows
@@ -163,7 +170,7 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 	defer cancel()
 
 	outcomes := make([]batchOutcome, len(batches))
-	budget := newScanBudget(s.MaxBytes, len(batches))
+	budget := newScanBudget(maxBytes, len(batches))
 	var (
 		wg       sync.WaitGroup
 		queryErr error
@@ -182,7 +189,7 @@ func (s *Searcher) Search(ctx context.Context, req SearchRequest) (SearchResult,
 			run := &batchRun{
 				s: s, parent: ctx, ctx: runCtx, b: batches[i], query: queries[i],
 				from: req.From, to: req.To, maxRows: maxRows, pollEvery: pollEvery, sleep: sleep,
-				index: i, budget: budget, maxBytes: s.MaxBytes,
+				index: i, budget: budget, maxBytes: maxBytes,
 			}
 			outcomes[i] = run.do()
 			var qe *QueryError

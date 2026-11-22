@@ -133,7 +133,11 @@ func (s *Server) tokenLogSearchState(ctx context.Context, userID int64) (WhoAmIL
 		MaxBytesPerSearch: s.tokenCapBytes(),
 		ResetsAt:          nextUTCMidnight(now),
 	}
-	// Task 8 reads the day's usage here; until then it is zero.
+	used, _, err := s.Store.TokenLogScanUsage(ctx, userID, now)
+	if err != nil {
+		return dto, err
+	}
+	dto.UsedBytes = used
 	return dto, nil
 }
 
