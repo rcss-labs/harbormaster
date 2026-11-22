@@ -1,14 +1,18 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/rcss-labs/harbormaster/internal/auth"
+)
 
 // logSearchRoutes registers the cross-service log search routes.
 func (s *Server) logSearchRoutes(mux *http.ServeMux) {
-	s.handle(mux, "GET /api/log-search/services", s.listLogSearchServices, routeOptions{})
+	s.handle(mux, "GET /api/log-search/services", s.listLogSearchServices, routeOptions{Token: auth.ScopeRead})
 	// A search answers with a fresh result each time; a conditional GET makes no sense for it.
-	s.handle(mux, "POST /api/log-search", s.postLogSearch, routeOptions{NoETag: true})
+	s.handle(mux, "POST /api/log-search", s.postLogSearch, routeOptions{NoETag: true, Token: auth.ScopeRead})
 	// The estimate reads log group sizes only and changes with the groups, so it is never cached either.
-	s.handle(mux, "POST /api/log-search/estimate", s.postLogSearchEstimate, routeOptions{NoETag: true})
+	s.handle(mux, "POST /api/log-search/estimate", s.postLogSearchEstimate, routeOptions{NoETag: true, Token: auth.ScopeRead})
 	s.handle(mux, "GET /api/log-search/saved", s.listSavedLogSearches, routeOptions{})
 	s.handle(mux, "POST /api/log-search/saved", s.saveLogSearch, routeOptions{})
 	s.handle(mux, "DELETE /api/log-search/saved/{id}", s.deleteSavedLogSearch, routeOptions{})

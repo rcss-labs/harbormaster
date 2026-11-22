@@ -122,7 +122,8 @@ type Poller struct {
 
 	// idle slows every tier while nobody uses the UI; the idle monitor maintains it.
 	idle *idleState
-	// sessionActivity reads the newest activity of unexpired sessions; tests replace it.
+	// sessionActivity reads the newest activity of unexpired sessions and of access tokens in use (a token call wakes
+	// polling like a UI session, owner decision 15); tests replace it.
 	sessionActivity func(ctx context.Context, now time.Time) (time.Time, bool, error)
 	now             func() time.Time
 	idleCheckEvery  time.Duration

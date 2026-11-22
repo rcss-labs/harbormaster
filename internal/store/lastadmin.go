@@ -118,7 +118,10 @@ func (s *Store) SetBreakGlassChecked(ctx context.Context, id int64, on bool) (ch
 
 // SetAdminChecked grants or revokes the admin flag and reports whether the flag changed.
 // Revoking the last admin returns ErrLastAdmin; a revoke also ends that user's sessions in the
-// same transaction. Returns ErrNotFound if the user is absent.
+// same transaction. Either change ends the user's access tokens in the same transaction: a demoted
+// admin's tokens go with their sessions, and a promoted user's tokens go so that none created under
+// the longer non-admin maximum lifetime outlives the admin cap (sessions survive a promotion).
+// Returns ErrNotFound if the user is absent.
 func (s *Store) SetAdminChecked(ctx context.Context, id int64, admin bool) (changed bool, err error) {
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -158,6 +161,9 @@ func (s *Store) SetAdminChecked(ctx context.Context, id int64, admin bool) (chan
 		if _, err := tx.Exec(ctx, `delete from sessions where user_id = $1`, id); err != nil {
 			return false, fmt.Errorf("end sessions: %w", err)
 		}
+	}
+	if _, err := deleteAPITokensForUser(ctx, tx, id, ""); err != nil {
+		return false, err
 	}
 	return true, tx.Commit(ctx)
 }

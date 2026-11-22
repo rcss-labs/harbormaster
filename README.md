@@ -333,6 +333,20 @@ Terms are separated by spaces and must all hold for the same service. Text such 
 - **CSV.** Export CSV is built in your browser from the rows shown (or the ticked rows), one line per container, with the columns `service, cluster, account_id, account_name, region, permission_tag, family, revision, matched_revision, previous_revision, container, image, image_tag, base_image, ports, env_names, secret_names, task_role, execution_role, log_group, matched, service_id`. Cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not run them.
 - **Use with scripts and Bulk changes.** `GET /api/config-search?q=` returns stable service `id`s and is evaluated with the caller's permissions each time. Nothing is stored.
 
+## Access tokens
+
+An access token lets a script or an AI tool read Harbormaster as you, over the API, without a browser session. Tokens are off until `HM_API_TOKENS=true`; with it unset the token routes answer 404 and an `Authorization` header is ignored.
+
+- **What a token is.** An opaque secret that starts with `hmp_`, created on the My access page. The secret is shown once when you create it; Harbormaster stores only a hash, so a lost token is replaced, never recovered. Token names and ids appear in the audit log (`token_create`, `token_revoke`), never the secret.
+- **Read-only.** A token sees what its user sees and nothing more: the same tags, and Logs only where the user has Logs. It can call only an explicit list of read routes (overview, clusters, services, tasks, metrics, alerts, analytics, security, timeline, off-hours, networks, storage, log search, config search and whoami). Every other route, writes and every admin screen included, answers `403 token_not_allowed`, an admin's token too. A token cannot create, list or revoke tokens.
+- **Lifetimes.** The longest lifetime is `HM_TOKEN_MAX_TTL` (90 days by default). A user who is linked to single sign-on, and any global admin, is capped at `HM_TOKEN_MAX_TTL_SSO` (7 days). Each user holds at most `HM_TOKEN_MAX_PER_USER` tokens (10).
+- **Revocation.** Tokens end wherever sessions end: a password change or reset, removing or granting global admin, unlinking single sign-on (SSO tokens only) and turning single sign-on off (every user's SSO tokens). An admin can also revoke any user's token on the Users screen, and you can revoke your own at any time. A locked account does not stop tokens; removing the user or revoking the token does.
+- **Log search budget.** Searches made with a token share a daily scan budget per user, `HM_TOKEN_LOG_SEARCH_DAILY_GB` (20 GiB per UTC day; `0` turns token log search off), and one search may scan at most `HM_TOKEN_LOG_SEARCH_MAX_GB` (2 GiB, and never above `HM_LOG_SEARCH_MAX_GB`). A search's cap is also limited to what is left of the day's budget; when it is used up the answer is `429 log_search_budget_exhausted` until 00:00 UTC. What a search scanned is charged even when the caller gave up on it. Searches made in the browser are not charged.
+- **Environment values.** Task definition and revision answers show environment values to a token just as the UI shows them to its user. `HM_TOKEN_REDACT_ENV=true` replaces every environment value with `[redacted]` for tokens (names and secret references stay) and marks the answer `environment_redacted`.
+- **Polling.** A token call counts as activity like an open browser session: it keeps the poller at full pace (see `HM_POLL_IDLE_AFTER`). An unattended agent that calls at least every `HM_POLL_IDLE_AFTER` therefore holds polling at full pace until its token expires or is revoked. The audit log and `GET /api/tokens/current` show which token it is.
+- **Rate limit.** 120 requests in a burst, then 2 per second per user (HTTP 429 with `Retry-After`).
+- **Retention.** An expired token is deleted a day after it expires; the daily search ledger is kept 35 days.
+
 ## Terraform and Harbormaster deploys
 
 AWS is the source of truth, and Terraform will see a revision registered here as
@@ -421,7 +435,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_FOCUS_MAX_OBJECTS` | `50` | Most clusters and services read at the focus interval across the whole install; a page over the cap stays at the normal pace and says so |
 | `HM_FOCUS_MAX_PER_USER` | `5` | Most pages one user can have read at the focus interval at once |
 | `HM_FOCUS_MAX_CALLS_PER_SEC` | `5` | AWS calls a slice's focus reads may make per second in each rate category (burst is twice that). When more pages are open than this allows, each page's interval stretches and the page shows it |
-| `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen) for this long puts the poller in idle mode. `0` disables idle mode |
+| `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen and no access token used) for this long puts the poller in idle mode. `0` disables idle mode |
 | `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the coordinator reconciles off-hours schedules. Minimum 1s |
 | `HM_NOTIFY_INTERVAL` | `10s` | How often the coordinator plans and sends alert notifications. Minimum 1s |
@@ -528,6 +542,19 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks, groupe
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
 | `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, across all tasks when `HM_KV_URL` is set, otherwise per task (see Running more than one task) |
+
+### Access tokens (settings)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_API_TOKENS` | `false` | Turns access tokens on: bearer authentication and the token routes. Off, nothing changes |
+| `HM_TOKEN_MAX_TTL` | `2160h` | Longest lifetime of a new token (90 days) |
+| `HM_TOKEN_MAX_TTL_SSO` | `168h` | Longest lifetime for a user linked to single sign-on and for global admins (7 days); not above `HM_TOKEN_MAX_TTL` |
+| `HM_TOKEN_MAX_PER_USER` | `10` | Unexpired tokens one user may hold (at least 1) |
+| `HM_TOKEN_LOG_SEARCH_MAX_GB` | `2` | Most GiB one token-initiated log search may scan |
+| `HM_TOKEN_LOG_SEARCH_DAILY_GB` | `20` | GiB one user's tokens may scan per UTC day; `0` turns log search off for tokens |
+| `HM_TOKEN_REDACT_ENV` | `false` | Replace environment values with `[redacted]` in task definition answers to tokens |
+| `HM_MCP_PUBLIC_URL` | empty | Public `https://` base URL of the MCP gateway, shown in the connect instructions |
 
 ### Single sign-on (SAML)
 
@@ -794,15 +821,20 @@ make run                            # http://127.0.0.1:8480, in-memory fake AWS 
 
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 
+### Run the gateway locally
+
+`harbormaster-mcp` is the separate, read-only MCP gateway (`cmd/harbormaster-mcp`). It holds no credentials and forwards each tool call to Harbormaster's API with the caller's own token. To try it, start Harbormaster with tokens on (`HM_API_TOKENS=true make run`), create a token on the "My access" page, then run `make run-mcp` in a second terminal. The gateway listens on `http://127.0.0.1:8481/mcp` and forwards to `http://127.0.0.1:8480`. Add it to Claude Code with `claude mcp add --transport http harbormaster-local http://127.0.0.1:8481/mcp --header "Authorization: Bearer <token>"`, and remove it afterwards with `claude mcp remove harbormaster-local`. `make e2e` also uses port 8481, so stop the gateway first. The binary's commands are `serve`, `healthcheck` (exit 0 when the local `/healthz` answers) and `version`.
+
 ### Make targets
 
-- `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` binary
+- `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` and `bin/harbormaster-mcp` binaries
 - `make test`: run Go tests, plus web tests (Vitest) when the web app exists. Go tests need `HM_TEST_DATABASE_URL`; export `HM_TEST_KV_URLS` (see `make test-kv`) to include the Valkey and Redis tests
 - `make lint`: check gofmt, run `go vet`, run web lint and typecheck, and check third-party notices
 - `make vulncheck`: scan all packages with `govulncheck` against the Go vulnerability database (needs network access). `make release` runs it
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
 - `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
+- `make run-mcp`: run the MCP gateway on 127.0.0.1:8481 against a local `make run`; see Run the gateway locally
 - `make run-split`: run the web, poller and coordinator roles as three local processes (ports 8480, 8482, 8483); see Run it locally
 - `make split-smoke [ENGINE=valkey|redis]`: run web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a private Valkey or Redis container that the script starts and removes (ports 8580 to 8583, schema `hm_split_smoke_<engine>`). It checks health, lease ownership, a kick crossing processes, live focus, the snapshot cache, a poller taking over and a store outage, and exits 1 naming the first check that failed. Needs `HM_TEST_DATABASE_URL`, Docker, `curl`, `jq`, `python3` and `go`; about two minutes
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free

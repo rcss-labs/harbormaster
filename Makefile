@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test lint test-db test-kv run run-split split-smoke e2e tf-check test-it-exec staticcheck \
+.PHONY: build test lint test-db test-kv run run-mcp run-split split-smoke e2e tf-check test-it-exec staticcheck \
 	image check-image release release-check scanner-image check-scanner-image vulncheck icons check-notices soak \
 	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
 
@@ -16,6 +16,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
 	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster ./cmd/harbormaster
+	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster-mcp ./cmd/harbormaster-mcp
 
 test:
 	go test -timeout 30m ./...
@@ -52,6 +53,10 @@ test-kv:
 
 run:
 	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
+
+# run-mcp runs the MCP gateway against a local `make run` (Harbormaster on 8480); see README "Run the gateway locally".
+run-mcp:
+	HM_MCP_LISTEN=127.0.0.1:8481 HM_MCP_UPSTREAM_URL=http://127.0.0.1:8480 HM_MCP_PUBLIC_URL=http://127.0.0.1:8481 HM_MCP_TRUSTED_PROXY=false go run ./cmd/harbormaster-mcp serve
 
 # run-split runs web (8480), poller (8482) and coordinator (8483) as three processes on fake AWS data; see tools/run-split.sh.
 run-split:
