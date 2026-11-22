@@ -56,7 +56,7 @@ func isLockTimeout(err error) bool {
 	return errors.As(err, &pe) && pe.Code == pgLockNotAvailable
 }
 
-// EnsureSliceLeases inserts a lease row for every target that has none, and deletes free rows of slices that no
+// EnsureSliceLeases inserts a lease row for every target of an account that still exists and has none, and deletes free rows of slices that no
 // longer exist. A held row of a removed target stays until its owner releases it. Epochs restart at 0 for a
 // recreated row, which is safe because owner ids are new on every process start and a manager never re-claims
 // a key whose previous holder is still running.
@@ -71,6 +71,7 @@ func (s *Store) EnsureSliceLeases(ctx context.Context, targets []awsx.Target) er
 		if _, err := tx.Exec(ctx,
 			`insert into poll_leases (kind, account_id, region)
 			 select 'slice', a, r from unnest($1::text[], $2::text[]) as t(a, r)
+			 where exists (select 1 from aws_accounts where account_id = t.a)
 			 on conflict do nothing`, accounts, regions); err != nil {
 			return err
 		}

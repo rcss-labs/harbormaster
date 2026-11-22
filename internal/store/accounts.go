@@ -82,6 +82,12 @@ func (s *Store) DeleteAccount(ctx context.Context, id int64) error {
 		return fmt.Errorf("delete account: %w", err)
 	}
 
+	// The slice leases go first. The delete waits for the fenced writes the owner has in flight (they hold FOR KEY SHARE
+	// on the row) and every later write of that owner fails its fence, so the poller that still has this account in its
+	// target list cannot put rows back before its next target refresh drops it.
+	if _, err := tx.Exec(ctx, `delete from poll_leases where kind = 'slice' and account_id = $1`, accountID); err != nil {
+		return fmt.Errorf("delete account leases: %w", err)
+	}
 	for _, table := range []string{"clusters", "services", "service_events", "tasks",
 		"service_counts_history", "task_definitions", "poll_loops",
 		"alerts", "target_health", "scaling", "service_status_runs", "metrics_cache"} {

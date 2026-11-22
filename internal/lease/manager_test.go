@@ -182,7 +182,11 @@ func newManager(st *store.Store, o managerOpts) *Manager {
 		Slices: o.slices, Coordinator: o.coordinator, TargetsEvery: 100 * time.Millisecond, Log: discardLogger(),
 	}
 	if o.targets != nil {
-		m.Targets = o.targets.fn
+		m.Targets = func(ctx context.Context) ([]awsx.Target, error) {
+			list, err := o.targets.fn(ctx)
+			ensureAccounts(st, list...)
+			return list, err
+		}
 	}
 	return m
 }
@@ -783,5 +787,17 @@ func TestManager_CountsATakeoverOfAnExpiredOwner(t *testing.T) {
 		if !hasLine(text, want) {
 			t.Errorf("metrics lack %q:\n%s", want, text)
 		}
+	}
+}
+
+// ensureAccounts creates the account rows of the targets: a slice lease exists only for a connected account.
+func ensureAccounts(st *store.Store, targets ...awsx.Target) {
+	ctx := context.Background()
+	for _, tg := range targets {
+		if _, err := st.GetAccountByAccountID(ctx, tg.AccountID); err == nil {
+			continue
+		}
+		_, _ = st.CreateAccount(ctx, store.AWSAccount{Name: "t" + tg.AccountID, AccountID: tg.AccountID,
+			RoleARN: "arn:aws:iam::" + tg.AccountID + ":role/x", ExternalID: "e", Regions: []string{tg.Region}, Enabled: true})
 	}
 }
