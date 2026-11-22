@@ -97,7 +97,7 @@ export function AccessTokensCard() {
               <div key={token.id} className={styles.tokenRow}>
                 <div className={styles.tokenMain}>
                   <span className={styles.tokenName}>{token.name}</span>
-                  <span className={`${styles.tokenMeta} ${styles.mono}`}>{`hmp_${token.public_id}`}</span>
+                  <span className={`${styles.tokenMeta} ${styles.mono}`}>{token.public_id}</span>
                   <span className={styles.tokenMeta}>
                     Created {new Date(token.created_at).toLocaleDateString()} · <ExpiryText expiresAt={token.expires_at} />
                   </span>
