@@ -77,7 +77,10 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("HM_MCP_AUTHORIZE_VIA_GATEWAY must be true or false, got %q", raw)
 		}
-		cfg.AuthorizeViaGateway = via && cfg.AuthorizeURL != ""
+		if via && cfg.AuthorizeURL == "" {
+			return Config{}, fmt.Errorf("HM_MCP_AUTHORIZE_VIA_GATEWAY=true needs HM_MCP_AUTHORIZE_URL: the gateway's authorize redirect has no target")
+		}
+		cfg.AuthorizeViaGateway = via
 	}
 
 	for _, origin := range strings.Split(getenv("HM_MCP_ALLOWED_ORIGINS"), ",") {

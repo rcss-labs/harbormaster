@@ -180,10 +180,15 @@ func TestLoadConfig_Authorize(t *testing.T) {
 	if err != nil || cfg.AuthorizeURL != "https://hm.example.com" || !cfg.OAuthEnabled() {
 		t.Errorf("authorize url: %+v %v", cfg, err)
 	}
-	// The gateway redirect needs a target: the switch alone changes nothing.
-	cfg, err = load(map[string]string{"HM_MCP_AUTHORIZE_VIA_GATEWAY": "true"})
-	if err != nil || cfg.AuthorizeViaGateway {
-		t.Errorf("via gateway without a url: %+v %v", cfg, err)
+	// The gateway redirect needs a target: the switch alone is a misconfiguration, refused at start rather than
+	// silently ignored, and the error names the missing setting.
+	if _, err = load(map[string]string{"HM_MCP_AUTHORIZE_VIA_GATEWAY": "true"}); err == nil ||
+		!strings.Contains(err.Error(), "HM_MCP_AUTHORIZE_URL") {
+		t.Errorf("via gateway without a url: err = %v, want an error naming HM_MCP_AUTHORIZE_URL", err)
+	}
+	// Switched off explicitly without a URL is fine.
+	if cfg, err = load(map[string]string{"HM_MCP_AUTHORIZE_VIA_GATEWAY": "false"}); err != nil || cfg.AuthorizeViaGateway {
+		t.Errorf("via gateway off without a url: %+v %v", cfg, err)
 	}
 	cfg, err = load(map[string]string{"HM_MCP_AUTHORIZE_URL": "https://hm.example.com", "HM_MCP_AUTHORIZE_VIA_GATEWAY": "true"})
 	if err != nil || !cfg.AuthorizeViaGateway {
