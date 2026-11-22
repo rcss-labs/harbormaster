@@ -6,7 +6,7 @@ import type { NetworksResponse, RegionVpcsResponse, VpcTreeResponse } from '../.
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 import { installPhoneMedia } from '../../test/phone'
-import { buildTree } from './treeFixture'
+import { buildTree } from '../../test/treeFixture'
 
 const HOMELAB = '482109375512'
 const STAGING = '731022849906'

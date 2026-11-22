@@ -5,8 +5,7 @@ import { useFilters } from '../app/shell/useFilters'
 import { api } from './client'
 import { queryString } from './hooks'
 
-const METRICS_REFETCH_MS = 60_000
-const metricsPolling = { refetchInterval: METRICS_REFETCH_MS, refetchIntervalInBackground: false } as const
+import { metricsPolling } from './polling'
 
 export interface StoragePoint {
   t: string

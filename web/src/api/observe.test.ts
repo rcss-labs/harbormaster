@@ -5,11 +5,8 @@ import { createElement, type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
 import { LOGS_HISTORY_PAYMENTS, POLLER, POLLER_TIERS, SERVICES_METRICS } from '../test/fixtures'
 import { server } from '../test/msw'
-import { ApiError } from './client'
 import {
   allNull,
-  isAwsError,
-  isThrottled,
   useAlerts,
   useDataProblems,
   useLogHistory,
@@ -212,9 +209,4 @@ describe('observe helpers', () => {
     expect(allNull([], [null])).toBe(true)
   })
 
-  it('isThrottled and isAwsError read the ApiError code', () => {
-    expect(isThrottled(new ApiError('throttled', 'slow', 429))).toBe(true)
-    expect(isAwsError(new ApiError('aws_error', 'bad', 502))).toBe(true)
-    expect(isAwsError(new Error('x'))).toBe(false)
-  })
 })

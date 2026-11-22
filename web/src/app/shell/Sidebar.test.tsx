@@ -7,7 +7,7 @@ import { AUTH_OPTIONS_ON, ME_ADMIN, ME_SSO_USER, SERVICE_PAYMENTS, TASKS } from 
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 import { navigateExternal } from './navigateExternal'
-import { openAccountMenu } from './testUtils'
+import { openAccountMenu } from '../../test/shellUtils'
 
 vi.mock('./navigateExternal', () => ({ navigateExternal: vi.fn() }))
 

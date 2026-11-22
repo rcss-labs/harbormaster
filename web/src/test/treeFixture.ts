@@ -1,6 +1,6 @@
 // Shared fixture for the network tree tests (Tree.test.tsx, useTreeState.test.ts) and the VPC page tests.
 // Shape: 2 AZs, 3 subnets (one empty), a standalone-tasks node and one unhealthy task.
-import type { TreeNode } from '../../api/networks'
+import type { TreeNode } from '../api/networks'
 
 export const KEYS = {
   vpc: 'vpc:vpc-0a1',
@@ -19,8 +19,6 @@ export const KEYS = {
   standalone: 'sn:subnet-ccc:cl-ci/standalone',
   taskStandalone: 'task:44444444dddd',
 } as const
-
-export const SERVICE_KEYS = [KEYS.payments, KEYS.orders, KEYS.standalone]
 
 export function buildTree(): TreeNode {
   return {

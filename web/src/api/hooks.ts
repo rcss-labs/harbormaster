@@ -1,5 +1,7 @@
 import { keepPreviousData, useMutation, useQueryClient, useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import { api } from './client'
+import { useIsLiveFocused } from './focusRegistry'
+import { livePolling } from './polling'
 import type {
   AccountsDTO,
   AuditDTO,
@@ -55,9 +57,6 @@ export function queryString(
   return text ? `?${text}` : ''
 }
 
-// Live data refreshes every 5 s, but not while the tab is in the background.
-const live = { refetchInterval: 5000, refetchIntervalInBackground: false } as const
-
 type Options<T> = Partial<Pick<UseQueryOptions<T>, 'enabled'>>
 
 export function useMe() {
@@ -68,7 +67,7 @@ export function useOverview(filters: Filters = {}) {
   return useQuery({
     queryKey: ['overview', filters],
     queryFn: () => api.get<OverviewDTO>(`/api/overview${queryString({ ...filters })}`),
-    ...live,
+    ...livePolling,
   })
 }
 
@@ -76,7 +75,7 @@ export function useClusters(filters: Filters = {}) {
   return useQuery({
     queryKey: ['clusters', filters],
     queryFn: () => api.get<ListDTO<ClusterCardDTO>>(`/api/clusters${queryString({ ...filters })}`),
-    ...live,
+    ...livePolling,
   })
 }
 
@@ -85,23 +84,28 @@ export function useServicesList(filters: Filters = {}) {
   return useQuery({
     queryKey: ['services', filters],
     queryFn: () => api.get<ServiceListDTO>(`/api/services${queryString({ ...filters })}`),
-    ...live,
+    ...livePolling,
   })
 }
 
+/** While the open page holds a live focus the server polls it fast; fast-follow and heartbeat refetches replace the timer. */
+const focusedPolling = { refetchInterval: false, refetchIntervalInBackground: false } as const
+
 export function useCluster(id: string) {
+  const focused = useIsLiveFocused('cluster', id)
   return useQuery({
     queryKey: ['cluster', id],
     queryFn: () => api.get<ClusterDTO>(`/api/clusters/${id}`),
-    ...live,
+    ...(focused ? focusedPolling : livePolling),
   })
 }
 
 export function useService(id: string) {
+  const focused = useIsLiveFocused('service', id)
   return useQuery({
     queryKey: ['service', id],
     queryFn: () => api.get<ServiceDTO>(`/api/services/${id}`),
-    ...live,
+    ...(focused ? focusedPolling : livePolling),
   })
 }
 
@@ -110,7 +114,7 @@ export function useServiceTasks(id: string, cursor?: string) {
   return useQuery({
     queryKey: ['service', id, 'tasks', cursor],
     queryFn: () => api.get<TasksListDTO>(`/api/services/${id}/tasks${queryString({ filter: 'all', cursor })}`),
-    ...live,
+    ...livePolling,
   })
 }
 
@@ -118,7 +122,7 @@ export function useTasks(params: TasksParams = {}) {
   return useQuery({
     queryKey: ['tasks', params],
     queryFn: () => api.get<TasksListDTO>(`/api/tasks${queryString({ ...params })}`),
-    ...live,
+    ...livePolling,
   })
 }
 
@@ -137,12 +141,12 @@ export function useOperations(id: string, includeEcs: boolean, cursor?: string) 
     queryKey: ['operations', id, includeEcs, cursor],
     queryFn: () =>
       api.get<OperationsDTO>(`/api/services/${id}/operations${queryString({ include_ecs: includeEcs, cursor })}`),
-    ...live,
+    ...livePolling,
   })
 }
 
 export function usePollerStatus() {
-  return useQuery({ queryKey: ['poller'], queryFn: () => api.get<PollerDTO>('/api/poller'), ...live })
+  return useQuery({ queryKey: ['poller'], queryFn: () => api.get<PollerDTO>('/api/poller'), ...livePolling })
 }
 
 // ---- Admin ----

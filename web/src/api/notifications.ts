@@ -1,6 +1,7 @@
 // Types and hooks for the alert notification endpoints. They mirror internal/api/notifications_dto.go.
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
+import { LIVE_REFETCH_MS, METRICS_REFETCH_MS } from './polling'
 
 export type Destination = 'slack' | 'telegram' | 'pagerduty' | 'webhook' | 'email'
 export type Severity = 'warning' | 'critical'
@@ -315,7 +316,7 @@ export function useNotificationDeliveries(status: 'all' | 'failed', enabled = tr
     initialPageParam: '',
     getNextPageParam: (last) => last.next ?? undefined,
     enabled,
-    refetchInterval: enabled ? 5000 : false,
+    refetchInterval: enabled ? LIVE_REFETCH_MS : false,
   })
 }
 
@@ -337,6 +338,6 @@ export function useNotificationSummary(enabled: boolean) {
     queryKey: ['notifications', 'summary'],
     queryFn: () => api.get<NotificationSummary>('/api/notifications/summary'),
     enabled,
-    refetchInterval: 60_000,
+    refetchInterval: METRICS_REFETCH_MS,
   })
 }

@@ -1,5 +1,5 @@
-import type { ServiceListDTO } from '../../api/types'
-import { SERVICES_LIST } from '../../test/fixtures'
+import type { ServiceListDTO } from '../api/types'
+import { SERVICES_LIST } from './fixtures'
 
 type ServiceListItem = ServiceListDTO['items'][number]
 

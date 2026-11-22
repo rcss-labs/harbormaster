@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, apiFetch } from './client'
 import { refetchFastFollow } from './change'
+import { markLiveFocused } from './focusRegistry'
 
 export type FocusKind = 'cluster' | 'service'
 export type FocusState = 'live' | 'capped' | 'user_capped' | 'throttled' | 'unavailable'
@@ -37,6 +38,10 @@ function pendingOrNot(dto: FocusDTO, openedAt: number): FocusDTO {
   return dto
 }
 
+function sameFocus(a: FocusDTO, b: FocusDTO): boolean {
+  return a.state === b.state && a.interval_seconds === b.interval_seconds && a.refreshed_at === b.refreshed_at && a.message === b.message && a.failed === b.failed
+}
+
 const isVisible = () => document.visibilityState === 'visible'
 
 /**
@@ -57,12 +62,26 @@ export function useFocus(kind: FocusKind, id: string, refetch: () => Promise<unk
     let timer: ReturnType<typeof setInterval> | undefined
     let cancelFastFollow: (() => void) | undefined
     let openedAt = 0
+    let lastRefreshedAt: string | null | undefined
 
     const send = (open: boolean) => {
       api
         .post<FocusDTO>('/api/focus', { kind, id, open })
-        .then((dto) => active && setFocus(pendingOrNot(dto, openedAt)))
-        .catch(() => active && setFocus(UNAVAILABLE))
+        .then((dto) => {
+          if (!active) return
+          // The server read the object again since the last answer: pull the new data now. The 5 s query timer is off
+          // while the page is live, and the fast-follow refetches cover only the first seconds after an open.
+          if (lastRefreshedAt !== undefined && dto.refreshed_at !== null && dto.refreshed_at !== lastRefreshedAt) void refetchRef.current()
+          lastRefreshedAt = dto.refreshed_at
+          setFocus((previous) => {
+            const next = pendingOrNot(dto, openedAt)
+            return previous && sameFocus(previous, next) ? previous : next
+          })
+        })
+        .catch(() => {
+          if (!active) return
+          setFocus((previous) => (previous && sameFocus(previous, UNAVAILABLE) ? previous : UNAVAILABLE))
+        })
     }
     const release = () => {
       apiFetch('/api/focus', { method: 'DELETE', body: JSON.stringify({ kind, id, open: false }), keepalive: true }).catch(() => undefined)
@@ -101,6 +120,10 @@ export function useFocus(kind: FocusKind, id: string, refetch: () => Promise<unk
       if (timer !== undefined) stop()
     }
   }, [kind, id])
+
+  // Only a confirmed live read counts: while the first read is still pending the page keeps its own timer.
+  const live = focus?.state === 'live' && focus.refreshed_at !== null
+  useEffect(() => (live ? markLiveFocused(kind, id) : undefined), [kind, id, live])
 
   return focus
 }
