@@ -35,37 +35,29 @@ func NewToken(epoch int64, now time.Time) string {
 	return strconv.FormatInt(epoch, 10) + "-" + strconv.FormatInt(now.UnixMilli(), 10)
 }
 
+// Entry is one model read by GetMany. OK is false for a miss.
+type Entry struct {
+	Body []byte
+	OK   bool
+}
+
 // Cache is the store side of the snapshot cache. Every method may fail; callers treat a failure as a miss.
 type Cache interface {
-	// Bump sets the key's token (ten minute life).
-	Bump(ctx context.Context, k GenKey, token string) error
-	// Touch sets the token only when there is none; when one exists it keeps the value and refreshes its life.
-	Touch(ctx context.Context, k GenKey, token string) error
-	// BumpAll and TouchAll are Bump and Touch for several keys in one round trip, so a slice-wide write is one command
+	// BumpAll sets the tokens of all keys (ten minute life) in one round trip, so a slice-wide write is one command
 	// with one bound and a slow store cannot drop the later keys.
 	BumpAll(ctx context.Context, ks []GenKey, token string) error
+	// TouchAll sets a token only where there is none; where one exists it keeps the value and refreshes its life.
 	TouchAll(ctx context.Context, ks []GenKey, token string) error
 	// Tokens reads the tokens of all keys in one round trip; "" where one is missing.
 	Tokens(ctx context.Context, ks ...GenKey) ([]string, error)
+	// Lookup reads the token of gk and, when there is one, the model stored for id under it, in one round trip.
+	// token is "" when none is set (then there is no body).
+	Lookup(ctx context.Context, m Model, id string, gk GenKey) (token string, body []byte, ok bool, err error)
+	// GetMany returns the models stored for ids[i] under tokens[i], in one round trip; an empty token is not asked for
+	// and is reported as a miss.
+	GetMany(ctx context.Context, m Model, ids, tokens []string) ([]Entry, error)
 	// Get returns the model stored for id under token.
 	Get(ctx context.Context, m Model, id, token string) (body []byte, ok bool, err error)
 	// Put stores a model for ttl without overwriting an existing one; losing that race is not an error.
 	Put(ctx context.Context, m Model, id, token string, body []byte, ttl time.Duration) error
-}
-
-type off struct{}
-
-// Off is the cache used when no store is configured or the cache is switched off: it never hits and stores nothing.
-func Off() Cache { return off{} }
-
-func (off) Bump(context.Context, GenKey, string) error       { return nil }
-func (off) Touch(context.Context, GenKey, string) error      { return nil }
-func (off) BumpAll(context.Context, []GenKey, string) error  { return nil }
-func (off) TouchAll(context.Context, []GenKey, string) error { return nil }
-func (off) Tokens(_ context.Context, ks ...GenKey) ([]string, error) {
-	return make([]string, len(ks)), nil
-}
-func (off) Get(context.Context, Model, string, string) ([]byte, bool, error) { return nil, false, nil }
-func (off) Put(context.Context, Model, string, string, []byte, time.Duration) error {
-	return nil
 }

@@ -88,31 +88,22 @@ func read[T any](ctx context.Context, r *Reader, m Model, id string, gk GenKey, 
 		r.count(m, "bypass")
 		return load(ctx)
 	}
-	tokens, err := r.Cache.Tokens(ctx, gk)
+	token, body, ok, err := r.Cache.Lookup(ctx, m, id, gk)
 	if err != nil {
-		r.warn("snapshot cache token read failed; reading Postgres", err)
+		r.warn("snapshot cache read failed; reading Postgres", err)
 		r.count(m, "error")
 		return load(ctx)
 	}
-	token := ""
-	if len(tokens) > 0 {
-		token = tokens[0]
-	}
-	return readAt(ctx, r, m, id, token, load)
+	return resolve(ctx, r, m, id, token, body, ok, load)
 }
 
-// readAt is read once the token is known: "" means the poller has not marked it.
-func readAt[T any](ctx context.Context, r *Reader, m Model, id, token string, load func(context.Context) (T, error)) (T, error) {
+// resolve finishes a read once the token and the cached body (if any) are known: "" means the poller has not marked
+// the key.
+func resolve[T any](ctx context.Context, r *Reader, m Model, id, token string, body []byte, ok bool, load func(context.Context) (T, error)) (T, error) {
 	var zero T
 	if token == "" {
 		// The poller has not marked this cluster (yet): nothing says which model is current, so nothing is stored.
 		r.count(m, "bypass")
-		return load(ctx)
-	}
-	body, ok, err := r.Cache.Get(ctx, m, id, token)
-	if err != nil {
-		r.warn("snapshot cache read failed; reading Postgres", err)
-		r.count(m, "error")
 		return load(ctx)
 	}
 	if ok {
@@ -162,39 +153,44 @@ func (r *Reader) Slices(ctx context.Context, ts []awsx.Target) ([]SliceSummary, 
 	loader := func(t awsx.Target) func(context.Context) (SliceSummary, error) {
 		return func(ctx context.Context) (SliceSummary, error) { return load(ctx, r.Store, t) }
 	}
-	tokens := make([]string, len(ts))
-	tokensKnown := false
-	switch {
-	case len(ts) == 0:
+	if len(ts) == 0 {
 		return out, nil
-	case r.Up != nil && !r.Up():
+	}
+	if r.Up != nil && !r.Up() {
 		// A store that is down is not asked.
-	default:
-		keys := make([]GenKey, len(ts))
 		for i, t := range ts {
-			keys[i] = GenKey{AccountID: t.AccountID, Region: t.Region}
+			r.count(ModelSlice, "bypass")
+			var err error
+			if out[i], err = load(ctx, r.Store, t); err != nil {
+				return nil, err
+			}
 		}
-		got, err := r.Cache.Tokens(ctx, keys...)
-		if err != nil {
-			r.warn("snapshot cache token read failed; reading Postgres", err)
-		} else {
-			tokens, tokensKnown = got, true
-		}
+		return out, nil
+	}
+	keys := make([]GenKey, len(ts))
+	ids := make([]string, len(ts))
+	for i, t := range ts {
+		keys[i] = GenKey{AccountID: t.AccountID, Region: t.Region}
+		ids[i] = t.AccountID + ":" + t.Region
+	}
+	// Two round trips whatever the count: all tokens, then all the models they name.
+	tokens, err := r.Cache.Tokens(ctx, keys...)
+	var entries []Entry
+	if err != nil {
+		r.warn("snapshot cache token read failed; reading Postgres", err)
+	} else if entries, err = r.Cache.GetMany(ctx, ModelSlice, ids, tokens); err != nil {
+		r.warn("snapshot cache read failed; reading Postgres", err)
 	}
 	for i, t := range ts {
-		var err error
-		if tokensKnown {
-			out[i], err = readAt(ctx, r, ModelSlice, t.AccountID+":"+t.Region, tokens[i], loader(t))
-		} else {
-			if r.Up != nil && !r.Up() {
-				r.count(ModelSlice, "bypass")
-			} else {
-				r.count(ModelSlice, "error")
-			}
-			out[i], err = load(ctx, r.Store, t)
-		}
+		var err2 error
 		if err != nil {
-			return nil, err
+			r.count(ModelSlice, "error")
+			out[i], err2 = load(ctx, r.Store, t)
+		} else {
+			out[i], err2 = resolve(ctx, r, ModelSlice, ids[i], tokens[i], entries[i].Body, entries[i].OK, loader(t))
+		}
+		if err2 != nil {
+			return nil, err2
 		}
 	}
 	return out, nil

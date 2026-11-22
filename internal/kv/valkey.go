@@ -250,12 +250,6 @@ func (c *client) PExpire(ctx context.Context, key string, ttl time.Duration) err
 	}).Error()
 }
 
-func (c *client) ZAdd(ctx context.Context, key string, score float64, member string) error {
-	return c.do(ctx, "ZADD", func(b valkey.Builder) valkey.Completed {
-		return b.Zadd().Key(key).ScoreMember().ScoreMember(score, member).Build()
-	}).Error()
-}
-
 func (c *client) ZRem(ctx context.Context, key string, members ...string) error {
 	if len(members) == 0 {
 		return nil
@@ -263,10 +257,6 @@ func (c *client) ZRem(ctx context.Context, key string, members ...string) error 
 	return c.do(ctx, "ZREM", func(b valkey.Builder) valkey.Completed {
 		return b.Zrem().Key(key).Member(members...).Build()
 	}).Error()
-}
-
-func (c *client) ZCard(ctx context.Context, key string) (int64, error) {
-	return c.do(ctx, "ZCARD", func(b valkey.Builder) valkey.Completed { return b.Zcard().Key(key).Build() }).AsInt64()
 }
 
 // scoreArg formats a score bound the way ZRANGEBYSCORE reads it, including the infinities.
@@ -284,25 +274,6 @@ func (c *client) ZRangeByScore(ctx context.Context, key string, min, max float64
 	return c.do(ctx, "ZRANGEBYSCORE", func(b valkey.Builder) valkey.Completed {
 		return b.Zrangebyscore().Key(key).Min(scoreArg(min)).Max(scoreArg(max)).Build()
 	}).AsStrSlice()
-}
-
-func (c *client) ZRemRangeByScore(ctx context.Context, key string, min, max float64) error {
-	return c.do(ctx, "ZREMRANGEBYSCORE", func(b valkey.Builder) valkey.Completed {
-		return b.Zremrangebyscore().Key(key).Min(scoreArg(min)).Max(scoreArg(max)).Build()
-	}).Error()
-}
-
-func (c *client) HSet(ctx context.Context, key string, fields map[string]string) error {
-	if len(fields) == 0 {
-		return nil
-	}
-	return c.do(ctx, "HSET", func(b valkey.Builder) valkey.Completed {
-		h := b.Hset().Key(key).FieldValue()
-		for f, v := range fields {
-			h = h.FieldValue(f, v)
-		}
-		return h.Build()
-	}).Error()
 }
 
 func (c *client) HMGet(ctx context.Context, key string, fields ...string) ([]Value, error) {

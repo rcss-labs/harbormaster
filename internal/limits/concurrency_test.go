@@ -2,7 +2,6 @@ package limits
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -10,23 +9,13 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/kv/kvtest"
 )
 
-// engineLabel names a subtest after the server port, which tells the engines apart without printing credentials.
-func engineLabel(rawURL string) string {
-	o, err := kv.ParseURL(rawURL)
-	if err != nil {
-		return "bad-url"
-	}
-	_, port, _ := net.SplitHostPort(o.Address)
-	return "port" + port
-}
-
 // eachConcurrency runs fn against the in-memory implementation and every configured store.
 func eachConcurrency(t *testing.T, fn func(t *testing.T, c Concurrency)) {
 	t.Helper()
 	t.Run("memory", func(t *testing.T) { fn(t, NewMemoryConcurrency()) })
 	for _, u := range kvtest.URLs() {
 		u := u
-		t.Run("kv-"+engineLabel(u), func(t *testing.T) {
+		t.Run("kv-"+kvtest.Label(u), func(t *testing.T) {
 			k := NewKVConcurrency(kvtest.Open(t, u))
 			t.Cleanup(k.Close)
 			fn(t, k)

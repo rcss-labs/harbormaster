@@ -16,22 +16,6 @@ type focusMetrics struct {
 	pollNowLatency *histogram
 }
 
-func (h *histogram) observe(d time.Duration) {
-	secs := d.Seconds()
-	idx := len(loopBuckets) // overflow (+Inf only)
-	for i, upper := range loopBuckets {
-		if secs <= upper {
-			idx = i
-			break
-		}
-	}
-	h.buckets[idx]++
-	h.sum += secs
-	h.count++
-}
-
-func newLoopHistogram() *histogram { return &histogram{buckets: make([]uint64, len(loopBuckets)+1)} }
-
 // CountFocusAdmission records the result of one focus heartbeat: admitted, refreshed, capped, user_capped,
 // unavailable or not_found.
 func (r *Registry) CountFocusAdmission(result string) {
@@ -82,7 +66,7 @@ func (r *Registry) ObserveFocusCycle(kind string, d time.Duration) {
 	}
 	h := r.focusM.cycleDuration[kind]
 	if h == nil {
-		h = newLoopHistogram()
+		h = newHistogram(loopBuckets)
 		r.focusM.cycleDuration[kind] = h
 	}
 	h.observe(d)
@@ -93,7 +77,7 @@ func (r *Registry) ObservePollNowLatency(d time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.focusM.pollNowLatency == nil {
-		r.focusM.pollNowLatency = newLoopHistogram()
+		r.focusM.pollNowLatency = newHistogram(loopBuckets)
 	}
 	r.focusM.pollNowLatency.observe(d)
 }
@@ -126,15 +110,4 @@ func (r *Registry) writeFocusFamilies(bw *bufio.Writer) {
 	for _, k := range sortedKeys(f.pollNow) {
 		writeSample(bw, "harbormaster_pollnow_signals_total", []string{"result"}, k, "", utoa(f.pollNow[k]))
 	}
-}
-
-func writeHistogram(bw *bufio.Writer, name string, labels []string, key string, h *histogram) {
-	var cum uint64
-	for i, upper := range loopBuckets {
-		cum += h.buckets[i]
-		writeSample(bw, name+"_bucket", labels, key, `le="`+strconv.FormatFloat(upper, 'g', -1, 64)+`"`, utoa(cum))
-	}
-	writeSample(bw, name+"_bucket", labels, key, `le="+Inf"`, utoa(h.count))
-	writeSample(bw, name+"_sum", labels, key, "", strconv.FormatFloat(h.sum, 'g', -1, 64))
-	writeSample(bw, name+"_count", labels, key, "", utoa(h.count))
 }

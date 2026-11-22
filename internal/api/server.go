@@ -15,6 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/focus"
+	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/limits"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
@@ -104,7 +105,7 @@ type Server struct {
 	KickNotify func()
 	// KVHealth reports whether the shared Valkey or Redis store is reachable, for the poller status; nil means there is
 	// no store.
-	KVHealth interface{ Up() bool }
+	KVHealth kv.Upper
 	// Focus is the set of pages open in a visible tab, and Bus carries the poll-now signal to the poller that owns the
 	// slice. A nil Focus turns live refresh off: the focus endpoint answers "unavailable".
 	Focus focus.Registry

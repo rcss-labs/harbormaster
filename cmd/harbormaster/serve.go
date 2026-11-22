@@ -399,7 +399,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		if cfg.Scan.Enabled {
 			scanKicker = kicks
 		}
-		var storeHealth interface{ Up() bool } // stays a nil interface when there is no shared store
+		var storeHealth kv.Upper // stays a nil interface when there is no shared store
 		if kvHealth != nil {
 			storeHealth = kvHealth
 		}
