@@ -16,6 +16,10 @@ type fallbackConcurrency struct {
 
 // WithFallback uses primary while the store is up and memory while it is down, or for any single call where the
 // store returns an error, so an outage never blocks or errors a user. A release goes to the backend that granted.
+//
+// Known and accepted: an Acquire whose Eval timed out on the client but still ran on the server takes a slot there
+// that nobody holds or releases, and the caller falls back to memory. The slot over-counts until its Expiry (45 s)
+// lapses.
 func WithFallback(primary, memory Concurrency, health kv.Upper, reg *telemetry.Registry) Concurrency {
 	return &fallbackConcurrency{primary: primary, memory: memory, health: health, reg: reg}
 }

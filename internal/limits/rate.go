@@ -30,7 +30,7 @@ type memoryRate struct {
 	slots   map[string]time.Time
 }
 
-// NewMemoryRate keeps the buckets and pacer slots in this process, which is the per-task behaviour of today.
+// NewMemoryRate keeps the buckets and pacer slots in this process, which is the backend used when no HM_KV_URL is set or the store is down.
 func NewMemoryRate(now func() time.Time) Rate {
 	if now == nil {
 		now = time.Now
