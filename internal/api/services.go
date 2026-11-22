@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -96,12 +97,29 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	row, err := s.Store.GetServiceView(ctx, key, sc.Vis)
-	if err != nil {
-		s.fail(w, err)
-		return
+	var row store.ServiceRow
+	var snap *serviceSnapshot
+	if s.Snap != nil {
+		m, err := s.Snap.Service(ctx, key)
+		if err == nil {
+			var ok bool
+			if m, ok = snapcache.FilterService(m, sc.Subject, sc.Tags, sc.TagFilter); !ok {
+				err = store.ErrNotFound
+			}
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		row, snap = m.Service, &serviceSnapshot{tasks: m.Tasks, unhealthy: m.Unhealthy}
+	} else {
+		var err error
+		if row, err = s.Store.GetServiceView(ctx, key, sc.Vis); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
-	dto, err := s.serviceDTO(ctx, sc, row)
+	dto, err := s.serviceDTO(ctx, sc, row, snap)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -109,18 +127,32 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow) (ServiceDTO, error) {
+// serviceSnapshot is what the service page reads about AWS when the cache supplies it: the service's running tasks and
+// whether one of its target groups has an unhealthy target, both already filtered for this request.
+type serviceSnapshot struct {
+	tasks     []store.TaskRow
+	unhealthy bool
+}
+
+func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow, snap *serviceSnapshot) (ServiceDTO, error) {
 	key := row.Key
 	filter := store.TargetFilter{AccountID: key.AccountID, Region: key.Region}
 	now := s.now()
 
-	tasks, err := s.serviceTasks(ctx, key, sc.Vis)
-	if err != nil {
-		return ServiceDTO{}, err
-	}
-	unhealthy, err := s.Store.UnhealthyTargets(ctx, filter)
-	if err != nil {
-		return ServiceDTO{}, err
+	var tasks []store.TaskRow
+	var targetUnhealthy bool
+	if snap != nil {
+		tasks, targetUnhealthy = snap.tasks, snap.unhealthy
+	} else {
+		var err error
+		if tasks, err = s.serviceTasks(ctx, key, sc.Vis); err != nil {
+			return ServiceDTO{}, err
+		}
+		unhealthy, err := s.Store.UnhealthyTargets(ctx, filter)
+		if err != nil {
+			return ServiceDTO{}, err
+		}
+		targetUnhealthy = unhealthy[key]
 	}
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
@@ -152,7 +184,7 @@ func (s *Server) serviceDTO(ctx context.Context, sc scope, row store.ServiceRow)
 	}
 
 	serviceStatus := status.Service(status.Inputs{
-		Service: row.Service, RunningTasks: modelTasks(tasks), TargetUnhealthy: unhealthy[key],
+		Service: row.Service, RunningTasks: modelTasks(tasks), TargetUnhealthy: targetUnhealthy,
 	})
 	ref := ServiceRef{ID: key.ID(), Name: key.Service, Status: serviceStatus}
 	dto := ServiceDTO{

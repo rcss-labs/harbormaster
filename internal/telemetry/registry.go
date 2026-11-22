@@ -52,6 +52,7 @@ type Registry struct {
 	kvErrors         map[string]uint64
 	kvDuration       map[string]*histogram
 	focusM           focusMetrics
+	snapCache        map[string]uint64 // by joinKey(model, result)
 }
 
 // Default is the process-wide registry.

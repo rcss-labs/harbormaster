@@ -10,6 +10,8 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/signal"
 	"github.com/rcss-labs/harbormaster/internal/snapcache"
+	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 // kickPublishTimeout bounds one publish: a request that saves a schedule must not wait on a slow store.
@@ -61,4 +63,14 @@ func buildSnapshotCache(health *kv.Health, cfg config.Config) snapcache.Cache {
 		return nil
 	}
 	return snapcache.NewKV(health.Client())
+}
+
+// buildSnapshotReader is the web side of the snapshot cache, or nil when there is no cache (the handlers then read
+// Postgres as they always did).
+func buildSnapshotReader(health *kv.Health, cfg config.Config, st *store.Store, log *slog.Logger) *snapcache.Reader {
+	cache := buildSnapshotCache(health, cfg)
+	if cache == nil {
+		return nil
+	}
+	return &snapcache.Reader{Cache: cache, Store: st, TTL: cfg.SnapshotCacheTTL, Telemetry: telemetry.Default, Log: log, Up: health.Up}
 }

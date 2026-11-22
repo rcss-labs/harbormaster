@@ -400,6 +400,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			KickNotify:              kicks.KickNotify,
 			Focus:                   focusRegistry,
 			Bus:                     kicks.bus,
+			Snap:                    buildSnapshotReader(kvHealth, cfg, st, log),
 		})
 	}
 	listener, err := net.Listen("tcp", cfg.Listen)
