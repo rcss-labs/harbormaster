@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -334,7 +335,7 @@ func (s *Server) warnUnreadableFloors(fact store.CostServiceFact, err error) {
 	hash.Write(fact.ContainerDefinitions) //nolint:errcheck // hash writes never fail
 	key := fact.Key.ID() + "/" + strconv.FormatUint(hash.Sum64(), 16)
 	if s.costWarned != nil {
-		if _, seen := s.costWarned.LoadOrStore(key, struct{}{}); seen {
+		if !s.costWarned.add(key) {
 			return
 		}
 	}
@@ -397,4 +398,29 @@ func sortSpotServices(services []CostSpotServiceDTO) {
 		}
 		return a.ServiceID < b.ServiceID
 	})
+}
+
+// maxWarnedKeys bounds warnedSet. Keys include a hash of the container definitions, so a service whose definition
+// keeps changing would otherwise add a key per revision for the life of the process.
+const maxWarnedKeys = 4096
+
+// warnedSet remembers which warnings were already logged. When it fills up it starts over, which can repeat a warning
+// once; that is cheaper than growing without a bound.
+type warnedSet struct {
+	mu   sync.Mutex
+	keys map[string]struct{}
+}
+
+// add records key and reports whether it was new.
+func (w *warnedSet) add(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, seen := w.keys[key]; seen {
+		return false
+	}
+	if w.keys == nil || len(w.keys) >= maxWarnedKeys {
+		w.keys = make(map[string]struct{})
+	}
+	w.keys[key] = struct{}{}
+	return true
 }

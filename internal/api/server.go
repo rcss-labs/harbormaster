@@ -112,7 +112,7 @@ type Server struct {
 	// means the cache is off and the handlers read Postgres as they always did.
 	Snap *snapcache.Reader
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
-	costWarned *sync.Map
+	costWarned *warnedSet
 	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.
 	focusOpens *focusOpens
 }
@@ -146,7 +146,7 @@ type ScanKicker interface{ Kick() }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
-	s.costWarned = &sync.Map{}
+	s.costWarned = &warnedSet{}
 	s.focusOpens = &focusOpens{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {

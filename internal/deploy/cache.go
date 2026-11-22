@@ -5,7 +5,11 @@ import (
 	"time"
 )
 
-// ttlCache is a small in-process cache whose entries expire after ttl.
+// maxCacheEntries bounds a ttlCache: keys come from request input (service and task definition names), so an entry
+// that is never read again would otherwise stay for the life of the process.
+const maxCacheEntries = 1024
+
+// ttlCache is a small in-process cache whose entries expire after ttl and that holds at most maxCacheEntries.
 // Time comes from the caller so tests control it with Service.Now.
 type ttlCache[V any] struct {
 	mu      sync.Mutex
@@ -37,6 +41,22 @@ func (c *ttlCache[V]) get(key string, now time.Time) (V, bool) {
 func (c *ttlCache[V]) put(key string, value V, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for k, entry := range c.entries {
+		if !now.Before(entry.expires) {
+			delete(c.entries, k)
+		}
+	}
+	if _, replacing := c.entries[key]; !replacing && len(c.entries) >= maxCacheEntries {
+		// Still full of live entries: drop the one closest to expiry (entries share one ttl, so the oldest).
+		var oldest string
+		var oldestExpires time.Time
+		for k, entry := range c.entries {
+			if oldest == "" || entry.expires.Before(oldestExpires) {
+				oldest, oldestExpires = k, entry.expires
+			}
+		}
+		delete(c.entries, oldest)
+	}
 	c.entries[key] = ttlEntry[V]{value: value, expires: now.Add(c.ttl)}
 }
 
