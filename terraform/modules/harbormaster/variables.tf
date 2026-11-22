@@ -279,7 +279,7 @@ variable "scanner_egress_cidrs" {
 # Everything below defaults to today's single service. See the upgrade runbook in README.md.
 
 variable "split_services" {
-  description = "Create the web, poller and coordinator ECS services next to (or instead of) the single harbormaster-server service. Needs a cache (cache_mode) unless allow_split_without_cache is set."
+  description = "Create the web, poller and coordinator ECS services next to (or instead of) the single harbormaster-server service. Needs a cache (cache_mode \"create\" or \"external\")."
   type        = bool
   default     = false
 }
@@ -423,7 +423,7 @@ variable "metrics_ingress_security_group_ids" {
 # ---- Cache (Valkey or Redis) -------------------------------------------------------------------------------------
 
 variable "cache_mode" {
-  description = "\"create\" builds an ElastiCache replication group, \"external\" uses the endpoint in the secret cache_url_secret_arn (an endpoint you run yourself), \"none\" uses no store: shared limits and live page refresh stay per task and the split services need allow_split_without_cache."
+  description = "\"create\" builds an ElastiCache replication group, \"external\" uses the endpoint in the secret cache_url_secret_arn (an endpoint you run yourself), \"none\" uses no store: shared limits and live page refresh stay per task and split_services cannot be used."
   type        = string
   default     = "none"
 
@@ -480,7 +480,12 @@ variable "cache_alarm_actions" {
 }
 
 variable "allow_split_without_cache" {
-  description = "Allow split_services = true with cache_mode = \"none\". Without a store, limits and focus stay per task and a poll-now or kick reaches only the task that received it, so this is for tests only."
+  description = "Deprecated, must stay false. The web, poller and coordinator roles refuse to start without a store (HM_KV_URL), so split_services always needs a cache_mode of \"create\" or \"external\"."
   type        = bool
   default     = false
+
+  validation {
+    condition     = !var.allow_split_without_cache
+    error_message = "allow_split_without_cache is no longer supported: the split roles exit at start without HM_KV_URL. Set cache_mode to \"create\" or \"external\" instead."
+  }
 }

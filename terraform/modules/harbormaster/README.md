@@ -50,7 +50,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `scan_role_name` | string | `"harbormaster-scan"` | Role name in each account; becomes `HM_SCAN_ROLE_NAME`. Must match the access module's `scan_role_name`. |
 | `scan_role_arns` | list(string) | `null` | What the scanner task role may assume. Null resolves to `arn:aws:iam::*:role/<scan_role_name>`; tighten it like `access_role_arns`. |
 | `scanner_egress_cidrs` | list(string) | `["0.0.0.0/0"]` | Scanner egress, tcp 443 only (ECR, S3, STS). |
-| `split_services` | bool | `false` | Create the web, poller and coordinator services. Needs a cache unless `allow_split_without_cache`. |
+| `split_services` | bool | `false` | Create the web, poller and coordinator services. Needs a cache (`cache_mode` `create` or `external`). |
 | `keep_legacy_service` | bool | `true` | Keep the single `harbormaster-server` service, its task definition and its two roles. `false` needs `split_services = true`. |
 | `web_desired_count` / `web_min_count` / `web_max_count` | number | `2` / `2` / `6` | Each at least 1; desired within min and max. Autoscaling owns the count after the first apply. |
 | `poller_desired_count` / `poller_min_count` / `poller_max_count` | number | `2` / `2` / `4` | As for web. |
@@ -67,7 +67,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `cache_replicas` | number | `0` | 0 to 5. `1` or more adds replicas with Multi-AZ automatic failover. |
 | `cache_url_secret_arn` | string | `null` | Required with `cache_mode = "external"`, null otherwise: a Secrets Manager secret holding the full store URL. |
 | `cache_alarm_actions` | list(string) | `[]` | Notified when the created cache evicts keys. |
-| `allow_split_without_cache` | bool | `false` | Lets `split_services = true` run with `cache_mode = "none"`. Tests only. |
+| `allow_split_without_cache` | bool | `false` | Deprecated; must stay `false`. The split roles refuse to start without a store, so `split_services` always needs a cache. |
 
 ## Outputs
 
