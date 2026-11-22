@@ -58,6 +58,9 @@ func Tools() []Tool {
 	var all []Tool
 	all = append(all, estateTools()...)
 	all = append(all, serviceTools()...)
+	all = append(all, troubleshootTools()...)
+	all = append(all, securityTools()...)
+	all = append(all, insightTools()...)
 	return all
 }
 
@@ -175,6 +178,12 @@ func (t Tool) BuildCall(args map[string]any) (Call, error) {
 				return Call{}, argErrorf("argument %q must not be empty", p.Name)
 			}
 		case InBody:
+			if text, isString := value.(string); isString && text == "" {
+				if p.Required {
+					return Call{}, argErrorf("argument %q must not be empty", p.Name)
+				}
+				continue
+			}
 			body[p.Name] = value
 		default:
 			return Call{}, fmt.Errorf("tool %s parameter %s has unknown placement %q", t.Name, p.Name, p.In)
