@@ -48,17 +48,26 @@ test('opening a service page reads AWS at once and keeps it live', async ({ page
 })
 
 test('hiding the tab returns the service to normal pace', async ({ page, request }) => {
+  test.setTimeout(100_000)
   const before = await focusCalls(request, 'DescribeServices')
   await page.goto(serviceUrl(...SVC.notifications, 'overview'))
   await expect(page.getByRole('heading', { name: 'notifications', level: 1 })).toBeVisible()
   await expect.poll(() => focusCalls(request, 'DescribeServices'), { timeout: 4000 }).toBeGreaterThan(before)
 
   await setVisibility(page, 'hidden')
-  // The release shortens the registration to 12 s; a cycle may still be running after that.
-  await page.waitForTimeout(16_000)
+  // Polling returns to normal within the TTL: this page's registration is shortened to 12 s by the release, and pages
+  // that earlier specs closed without releasing expire after HM_FOCUS_TTL (30 s). Wait for a quiet 11 s window.
+  await expect
+    .poll(
+      async () => {
+        const first = await focusCalls(request, 'DescribeServices')
+        await page.waitForTimeout(11_000)
+        return (await focusCalls(request, 'DescribeServices')) - first
+      },
+      { timeout: 60_000, intervals: [0] },
+    )
+    .toBe(0)
   const settled = await focusCalls(request, 'DescribeServices')
-  await page.waitForTimeout(10_000)
-  expect(await focusCalls(request, 'DescribeServices')).toBe(settled)
 
   // Showing the tab again opens it again.
   await setVisibility(page, 'visible')
