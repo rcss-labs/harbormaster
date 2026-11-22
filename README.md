@@ -391,6 +391,11 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_POLL_JITTER` | `500ms` | Random jitter added to poll schedules |
 | `HM_LEGACY_LEADER_GATE` | `true` | Make a task that polls or coordinates take the old leader's Postgres advisory lock in shared mode before it claims any lease, so old and new versions never both act during an upgrade or rollback (see Running more than one task). Set `false` only once no older version runs |
 | `HM_POLL_MAX_INFLIGHT` | `8` | Maximum concurrent AWS calls |
+| `HM_FOCUS_INTERVAL` | `5s` | How often the page that is open in a visible tab is read from AWS. Minimum 2s. A throttle in the slice doubles it (up to the services interval) and five clean cycles halve it again |
+| `HM_FOCUS_TTL` | `30s` | How long an open page stays registered without a heartbeat (a page sends one every 10s). Must be longer than 12s |
+| `HM_FOCUS_MAX_OBJECTS` | `50` | Most clusters and services read at the focus interval across the whole install; a page over the cap stays at the normal pace and says so |
+| `HM_FOCUS_MAX_PER_USER` | `5` | Most pages one user can have read at the focus interval at once |
+| `HM_FOCUS_MAX_CALLS_PER_SEC` | `5` | AWS calls a slice's focus reads may make per second in each rate category (burst is twice that). When more pages are open than this allows, each page's interval stretches and the page shows it |
 | `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen) for this long puts the poller in idle mode. `0` disables idle mode |
 | `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the coordinator reconciles off-hours schedules. Minimum 1s |
@@ -404,6 +409,20 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_SMTP_FROM` | none | Sender address, required with `HM_SMTP_HOST` (for example `Harbormaster <harbormaster@example.com>`) |
 | `HM_FAKE_NOTIFY_DEMO` | `true` | `--fake-aws` only: seed demo notification routes that deliver to the built-in fake receiver |
 | `HM_FAKE_OFFHOURS_DEMO` | `true` | `--fake-aws` only: whether the seeded staging off-hours schedule is enabled; applies only when the demo schedule is first seeded, not to an existing one |
+
+#### Live pages
+
+The cluster page and the service page (every tab) are read from AWS the moment you open them, and then every `HM_FOCUS_INTERVAL` (5 s) while the tab is visible. The page sends a heartbeat every 10 s; hiding the tab or leaving the page releases it, and a page that vanishes without saying so expires after `HM_FOCUS_TTL`. However many people view an object it is read once per interval, by the poller that owns its account and region, through the same fenced write path as the normal polling, so an unchanged object writes nothing. Only the object on screen is polled faster; the normal tiers are not touched.
+
+The header shows how old the data is (`Updated 3s ago`, the newer of the last poll and the last live read) and a pill that says what is happening:
+
+- **Live, every 5 s**: the object is being read at the focus interval. It appears after the first live read lands.
+- **Refreshing every N s**: more pages are open in this account and region than `HM_FOCUS_MAX_CALLS_PER_SEC` allows, so every page's interval is stretched fairly.
+- **Slowed by AWS throttling**: AWS throttled the slice, so the focus interval is backed off until it recovers.
+- **Normal pace (live limit reached)**: the install or the user is at `HM_FOCUS_MAX_OBJECTS` or `HM_FOCUS_MAX_PER_USER`. The page still gets its immediate read when it opens.
+- **Live refresh unavailable**: nothing proves a poller is reading the page, for example the shared store is down or no poller holds the slice. Normal polling continues.
+
+A user can only focus what they may see; asking for anything else is the same 404 as the page itself. With a shared store (`HM_KV_URL`) the registry and the poll-now signal travel through it, so a web task and the poller that owns the slice can be different tasks; without one they work inside the single task. Focus never raises the normal polling pace and is not affected by idle mode: a visible page keeps its session active.
 
 ### Retention
 
@@ -627,11 +646,12 @@ Harbormaster itself is cheap to run, but it reads AWS constantly, and some of wh
   - Harbormaster only reads, so on any trail you pay for, record write-only management events (`ReadWriteType: WriteOnly` on the event selector, or `readOnly = false` in an advanced selector). That drops almost all of Harbormaster's events while keeping every change.
   - Call volume grows with clusters, services (10 per `DescribeServices`), target groups (one `DescribeTargetHealth` each) and with every account and region you connect.
 - **Polling cadence.** The defaults ([Polling intervals](#polling-intervals)) are tuned for a UI someone is looking at: 30 s for services and running tasks, 60 s for stopped tasks and target health, 5 min for the rest. When nobody has the UI open for `HM_POLL_IDLE_AFTER` (10 min), every tier slows to `HM_POLL_IDLE_INTERVAL` (5 min). Only a visible browser tab counts as activity, since background tabs stop polling, but a dashboard left open on a screen keeps Harbormaster at full speed. Raise the intervals, or lower `HM_POLL_IDLE_AFTER`, through the module's extra environment variables if that is still too much.
+- **Live pages.** A cluster or service page left open in a visible tab is read every 5 s (`HM_FOCUS_INTERVAL`): about 3 to 4 AWS calls per cycle, which is about 75,000 read events a day, or about $1.50 a day per always-open page on a trail that bills management events. Pages in a hidden tab cost nothing, and `HM_FOCUS_MAX_OBJECTS` and `HM_FOCUS_MAX_PER_USER` bound the total. The `source` label on `harbormaster_aws_api_calls_total` (`tier`, `focus`, `request`, `job`) shows what each call was for.
 - **Logs Insights.** Log search is billed at $0.005 per GB scanned. Each search is stopped at `HM_LOG_SEARCH_MAX_GB` (10 GB, about $0.05) and starts on a 1 hour range; see [Log search](#log-search).
 - **Live tail.** CloudWatch Logs Live Tail is billed per session-minute. Each user can hold `HM_LOG_TAILS_PER_USER` (2) tails, and an unwatched tail closes after `HM_LOG_TAIL_IDLE` (30 min).
 - **Metrics.** Charts call `GetMetricData`, billed per metric requested. Results are cached for `HM_METRICS_CACHE_TTL` (60 s) and shared by every viewer, and the daily utilisation rollup makes one batch per account and region a day.
 
-**Measure it.** `harbormaster_aws_api_calls_total` on `/metrics` counts every AWS call by account, region, service and operation, and `harbormaster_poller_idle` is `1` while the poller is idle. In the billed account, Cost Explorer filtered to CloudTrail and CloudWatch and grouped by usage type shows which of the charges above you are paying.
+**Measure it.** `harbormaster_aws_api_calls_total` on `/metrics` counts every AWS call by account, region, service, operation, result and source, and `harbormaster_poller_idle` is `1` while the poller is idle. In the billed account, Cost Explorer filtered to CloudTrail and CloudWatch and grouped by usage type shows which of the charges above you are paying.
 
 ### Terminal
 
