@@ -160,18 +160,11 @@ func (a *Service) ChangePassword(ctx context.Context, userID int64, current, nex
 	if err != nil {
 		return err
 	}
-	if err := a.store.SetPassword(ctx, userID, hash, false); err != nil {
-		return err
-	}
+	keep := ""
 	if sess, ok := SessionFrom(ctx); ok && sess.UserID == userID {
-		err = a.store.DeleteSessionsForUserExcept(ctx, userID, sess.IDHash)
-	} else {
-		err = a.store.DeleteSessionsForUser(ctx, userID)
+		keep = sess.IDHash
 	}
-	if err != nil {
-		return err
-	}
-	if _, err := a.store.DeleteAPITokensForUser(ctx, userID, ""); err != nil {
+	if err := a.store.SetPasswordEndingCredentials(ctx, userID, hash, false, keep); err != nil {
 		return err
 	}
 	a.audit(ctx, &user, "password_change", "Changed password.", "")
@@ -186,13 +179,7 @@ func (a *Service) AdminResetPassword(ctx context.Context, userID int64) (string,
 	if err != nil {
 		return "", err
 	}
-	if err := a.store.SetPassword(ctx, userID, hash, true); err != nil {
-		return "", err
-	}
-	if err := a.store.DeleteSessionsForUser(ctx, userID); err != nil {
-		return "", err
-	}
-	if _, err := a.store.DeleteAPITokensForUser(ctx, userID, ""); err != nil {
+	if err := a.store.SetPasswordEndingCredentials(ctx, userID, hash, true, ""); err != nil {
 		return "", err
 	}
 	return temp, nil

@@ -505,3 +505,57 @@ func TestMiddleware_StoreErrorIs500NotAnonymous(t *testing.T) {
 		t.Fatalf("store failure not logged with path: %q", logs.String())
 	}
 }
+
+// failTokenDeletes makes every delete from api_tokens fail, standing in for a crash or error after the password
+// update in a password change.
+func failTokenDeletes(t *testing.T, st *store.Store) {
+	t.Helper()
+	for _, stmt := range []string{
+		`create function hm_test_fail_token_delete() returns trigger language plpgsql as $$ begin raise exception 'forced failure'; end $$`,
+		`create trigger hm_test_fail_token_delete before delete on api_tokens for each row execute function hm_test_fail_token_delete()`,
+	} {
+		if _, err := st.Pool.Exec(context.Background(), stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Whatever fails after the password update, the password must not change while tokens or sessions survive.
+func TestPasswordChange_FailureNeverLeavesNewPasswordWithLiveCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(svc *Service, id int64) error
+	}{
+		{"change", func(svc *Service, id int64) error {
+			return svc.ChangePassword(context.Background(), id, testPassword, "new-password-123")
+		}},
+		{"admin reset", func(svc *Service, id int64) error {
+			_, err := svc.AdminResetPassword(context.Background(), id)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, st := newTestService(t)
+			ctx := context.Background()
+			u := mustUser(t, st, "gina", false)
+			mustLogin(t, svc, "gina", testPassword, "10.0.0.4", "ua")
+			_, tok := issueToken(t, st, u.ID, time.Now().Add(time.Hour))
+			failTokenDeletes(t, st)
+
+			if err := tc.run(svc, u.ID); err == nil {
+				t.Fatal("want the forced failure to surface")
+			}
+			after, err := st.GetUser(ctx, u.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			passwordChanged := after.PasswordHash != u.PasswordHash
+			if _, err := st.GetAPITokenByPublicID(ctx, tok.PublicID); passwordChanged && err == nil {
+				t.Fatal("password changed but the access token survived")
+			}
+			if passwordChanged {
+				t.Fatal("expected the whole change to roll back")
+			}
+		})
+	}
+}
