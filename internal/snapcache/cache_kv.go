@@ -95,6 +95,9 @@ func (k kvCache) Get(ctx context.Context, m Model, id, token string) ([]byte, bo
 }
 
 func (k kvCache) Put(ctx context.Context, m Model, id, token string, body []byte, ttl time.Duration) error {
+	if ttl <= 0 {
+		ttl = TokenTTL // a model with no life would outlive every token that could ask for it
+	}
 	_, err := k.c.Set(ctx, k.modelKey(m, id, token), string(body), kv.SetOptions{TTL: ttl, NX: true})
 	return err
 }
