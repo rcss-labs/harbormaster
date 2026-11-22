@@ -212,16 +212,28 @@ focus_answer() {
 	api POST /api/focus "{\"kind\":\"service\",\"id\":\"$service_id\",\"open\":$open}"
 }
 
-# focus_live_since T succeeds when a heartbeat answers live with a read time after T (epoch seconds).
+# now_ms prints the current time in epoch milliseconds.
+now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+
+# iso_ms converts an RFC 3339 time to epoch milliseconds (0 when it cannot be read).
+iso_ms() {
+	python3 -c 'import sys, datetime
+try:
+    t = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+    print(int(t.timestamp() * 1000))
+except ValueError:
+    print(0)' "$1"
+}
+
+# focus_live_since T succeeds when a heartbeat answers live with a read time strictly after T (epoch milliseconds, taken
+# after the event that is being waited out), so a read made before the kill or the outage never counts.
 focus_live_since() {
 	local since="$1" answer state at
 	answer="$(focus_answer)"
 	state="$(jq -r '.state // empty' <<<"$answer" 2>/dev/null || true)"
 	at="$(jq -r '.refreshed_at // empty' <<<"$answer" 2>/dev/null || true)"
 	[[ "$state" == "live" && -n "$at" ]] || return 1
-	local at_epoch
-	at_epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "${at%%.*}" +%s 2>/dev/null || date -u -d "${at%%.*}Z" +%s 2>/dev/null || echo 0)"
-	((at_epoch >= since))
+	(($(iso_ms "$at") > since))
 }
 
 focus_unavailable() { [[ "$(jq -r '.state // empty' <<<"$(focus_answer)" 2>/dev/null || true)" == "unavailable" ]]; }
@@ -307,7 +319,7 @@ pass "harbormaster_kv_up 1 on all three ($engine)"
 # 4. Focus: the open on web reaches the poller through the store, and the poller's read comes back as live.
 
 current_check="4 focus"
-opened_at="$(date -u +%s)"
+opened_at="$(now_ms)"
 focus_answer open >/dev/null
 status_is 200 || fail "POST /api/focus answered $(cat "$workdir/status")"
 wait_until 15 "a live heartbeat with a read time" focus_live_since "$opened_at"
@@ -349,8 +361,8 @@ pass "the schedule saved on web was reconciled by the coordinator within 5 s"
 current_check="7 takeover"
 start_role poller "$poller2_addr" poller2
 wait_until 60 "second poller /healthz" healthz_ok "$poller2_addr"
-killed_at="$(date -u +%s)"
 kill -TERM "$poller1_pid"
+killed_at="$(now_ms)"
 poller2_owns_all() { [[ "$(metric_sum "$poller2_addr" harbormaster_lease_slices_owned)" == "$slice_count" ]]; }
 wait_until 10 "the second poller to own all $slice_count slices" poller2_owns_all
 wait_until 15 "the focused service to answer live again" focus_live_since "$killed_at"
@@ -369,8 +381,8 @@ loop_runs() { metric_sum "$poller2_addr" harbormaster_poll_loop_runs_total 'tier
 runs_before="$(loop_runs)"
 cycled() { [[ "$(loop_runs)" != "$runs_before" ]]; }
 wait_until 15 "the poller's services tier to keep cycling" cycled
-restored_at="$(date -u +%s)"
 docker start "$container" >/dev/null || fail "could not start the store container"
+restored_at="$(now_ms)"
 wait_until 20 "harbormaster_kv_up 1 on web" kv_up_is "$web_addr" 1
 wait_until 20 "the focused service to answer live again" focus_live_since "$restored_at"
 pass "pages stayed up, focus said unavailable, polling continued; everything came back with the store"

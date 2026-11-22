@@ -645,15 +645,15 @@ Settings → Single sign-on → "Test sign-in" opens a sign-in in a new tab and 
   | Series | Labels | Reported by |
   | --- | --- | --- |
   | `harbormaster_build_info` | `version` | every role |
-| `harbormaster_role_info` | `role`, `version` | every role |
+  | `harbormaster_role_info` | `role`, `version` | every role |
   | `harbormaster_kv_up`, `harbormaster_kv_errors_total`, `harbormaster_kv_command_duration_seconds` | `op` (the last two) | every role, only when `HM_KV_URL` is set |
   | `harbormaster_limit_decisions_total` | `limit`, `result`, `backend` | web (where the limits are taken) |
   | `harbormaster_focus_admissions_total` | `result` | web |
   | `harbormaster_snapshot_cache_requests_total` | `model`, `result` | web (the page reads) |
-| `harbormaster_snapshot_cache_token_write_failures_total` | | poller (a generation token write that failed and is retried) |
+  | `harbormaster_snapshot_cache_token_write_failures_total` | | poller (a generation token write that failed and is retried) |
   | `harbormaster_lease_slices_owned`, `harbormaster_lease_weight_owned`, `harbormaster_lease_events_total`, `harbormaster_lease_renew_failures_total`, `harbormaster_fenced_writes_rejected_total` | `kind`, `event` where noted above | poller; the lease events and renew failures also on the coordinator (`kind="coordinator"`) |
   | `harbormaster_coordinator_active`, `harbormaster_poller_leader` | | coordinator |
-| `harbormaster_poller_idle` | | poller and coordinator |
+  | `harbormaster_poller_idle` | | poller and coordinator |
   | `harbormaster_poll_members` | `role` | poller and coordinator (the roles that heartbeat into the member table) |
   | `harbormaster_focus_objects`, `harbormaster_focus_interval_seconds`, `harbormaster_focus_cycle_duration_seconds`, `harbormaster_pollnow_signals_total`, `harbormaster_pollnow_latency_seconds` | `kind`; `account`, `region`; `kind`; `result`; none | poller |
   | `harbormaster_poll_loop_duration_seconds`, `harbormaster_poll_loop_interval_seconds`, `harbormaster_poll_loop_runs_total` | `account`, `region`, `tier` (and `result` on runs) | poller |
@@ -804,7 +804,7 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 - `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
 - `make run-split`: run the web, poller and coordinator roles as three local processes (ports 8480, 8482, 8483); see Run it locally
-- `make split-smoke [ENGINE=valkey|redis]`: run web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a private Valkey or Redis container that the script starts and removes (ports 8580 to 8583, schema `hm_split_smoke_<engine>`). It checks health, lease ownership, a kick crossing processes, live focus, the snapshot cache, a poller taking over and a store outage, and exits 1 naming the first check that failed. Needs `HM_TEST_DATABASE_URL`, Docker, `curl` and `jq`; about two minutes
+- `make split-smoke [ENGINE=valkey|redis]`: run web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a private Valkey or Redis container that the script starts and removes (ports 8580 to 8583, schema `hm_split_smoke_<engine>`). It checks health, lease ownership, a kick crossing processes, live focus, the snapshot cache, a poller taking over and a store outage, and exits 1 naming the first check that failed. Needs `HM_TEST_DATABASE_URL`, Docker, `curl`, `jq`, `python3` and `go`; about two minutes
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free
 - `make soak`: soak tests at target estate scale, about 35 minutes: one poller's call budget, back-off and write volume, and, at the split's 12-slice, 300-cluster estate, three pollers sharing the slices (graceful stop and kill), the cycle time of the largest slice, and the AWS call rates with 10 and 50 pages focused. Requires `HM_TEST_DATABASE_URL`
 - `make tf-check`: validate every Terraform root under `terraform/` locally (fmt, init without a backend, validate, and tflint if installed). It never plans or applies

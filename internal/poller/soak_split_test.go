@@ -420,7 +420,10 @@ func TestSoak_ThreePollersOneOwnerPerSlice(t *testing.T) {
 	if stopBTook > timing.Tick+10*time.Second {
 		t.Errorf("takeover after a graceful stop took %v, want within about one tick (%v)", stopBTook, timing.Tick)
 	}
-	t.Logf("fenced writes rejected across the pollers over the whole run (a takeover happened): %v; samples %d", fencedRejected(t, all...), samples)
+	// Not a fencing result: the killed poller is partitioned from the database and cannot attempt a write, so a count of
+	// zero after the kill says nothing about the fence. A paused owner that resumes with database access is covered by
+	// TestPoller_PausedOwnerCannotOverwriteAfterTakeover.
+	t.Logf("samples %d", samples)
 }
 
 // durationBuckets returns the cumulative bucket counts (upper bound -> count) of the services tier histogram of one
