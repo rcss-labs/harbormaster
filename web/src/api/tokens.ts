@@ -15,6 +15,17 @@ export interface TokenDTO {
   last_used_ip: string
 }
 
+/** An OAuth connection ("connected app"). It never carries a token. */
+export interface GrantDTO {
+  id: number
+  client_id: string
+  client_name: string
+  scope: string
+  created_at: string
+  expires_at: string
+  last_used_at: string | null
+}
+
 export interface TokenPolicyDTO {
   max_ttl_days: number
   max_tokens: number
@@ -22,6 +33,8 @@ export interface TokenPolicyDTO {
   admin: boolean
   /** The MCP gateway's public URL; empty when no gateway is set up. */
   mcp_url: string
+  /** Whether connectors may sign in with OAuth (HM_OAUTH). */
+  oauth: boolean
   log_search_daily_bytes: number
   log_search_used_bytes: number
   log_search_max_bytes_per_search: number
@@ -29,7 +42,14 @@ export interface TokenPolicyDTO {
 
 export interface TokenListDTO {
   items: TokenDTO[]
+  /** Connected apps; empty while OAuth is off. */
+  grants: GrantDTO[]
   policy: TokenPolicyDTO
+}
+
+export interface UserTokensDTO {
+  items: TokenDTO[]
+  grants: GrantDTO[]
 }
 
 export interface CreateTokenBody {
@@ -87,7 +107,7 @@ export function useRevokeToken() {
 export function useUserTokens(userId: number) {
   return useQuery({
     queryKey: userTokensKey(userId),
-    queryFn: () => api.get<{ items: TokenDTO[] }>(`/api/users/${userId}/tokens`),
+    queryFn: () => api.get<UserTokensDTO>(`/api/users/${userId}/tokens`),
     retry: false,
   })
 }

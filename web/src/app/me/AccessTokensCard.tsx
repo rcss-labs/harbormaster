@@ -66,6 +66,17 @@ export function AccessTokensCard() {
     policy.log_search_daily_bytes > 0
       ? `Log search by tokens today: ${formatBytes(policy.log_search_used_bytes)} of ${formatBytes(policy.log_search_daily_bytes)}.`
       : null
+  const connect =
+    policy.mcp_url && policy.oauth
+      ? `In claude.ai: Settings, Connectors, Add custom connector, paste ${policy.mcp_url}/mcp. Approve from a device on the company network.`
+      : null
+  const footer =
+    budget || connect ? (
+      <>
+        {connect && <div>{connect}</div>}
+        {budget && <div>{budget}</div>}
+      </>
+    ) : undefined
 
   const confirmRevoke = () => {
     if (!revoking) return
@@ -87,7 +98,7 @@ export function AccessTokensCard() {
             Create token
           </button>
         }
-        footer={budget ?? undefined}
+        footer={footer}
       >
         {items.length === 0 ? (
           <div className={styles.empty}>No tokens. Create one to let Claude Code or another client read what you can see.</div>
