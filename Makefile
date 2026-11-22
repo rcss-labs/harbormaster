@@ -8,7 +8,10 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test test-db test-kv e2e lint run run-split split-smoke
+.PHONY: build test lint test-db test-kv run run-split split-smoke e2e tf-check test-it-exec \
+	image check-image release release-check scanner-image check-scanner-image vulncheck icons check-notices soak \
+	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
+
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
@@ -33,15 +36,15 @@ test-db:
 		echo "export HM_TEST_DATABASE_URL=postgres://postgres:hm@127.0.0.1:54329/postgres?sslmode=disable"; \
 	fi
 
-# test-kv starts (or reuses) one Valkey and one Redis container, pinned to the floor versions the design supports,
-# so a command added in a newer release fails locally. Ports are fixed so HM_TEST_KV_URLS is stable.
+# test-kv starts (or reuses) one Valkey and one Redis container, pinned to the floor versions the design supports
+# (tools/kv-images.txt, also read by tools/split-smoke.sh), so a command added in a newer release fails locally. Ports
+# are fixed so HM_TEST_KV_URLS is stable.
 test-kv:
-	@for spec in "hm-test-valkey valkey/valkey:7.2.5-alpine 63791" "hm-test-redis redis:7.0.15-alpine 63792"; do \
-		set -- $$spec; \
-		if docker inspect $$1 >/dev/null 2>&1; then \
-			docker start $$1 >/dev/null; \
+	@grep -v '^#' tools/kv-images.txt | while read -r engine name image port; do \
+		if docker inspect "$$name" >/dev/null 2>&1; then \
+			docker start "$$name" >/dev/null; \
 		else \
-			docker run -d --name $$1 -p 127.0.0.1:$$3:6379 $$2 >/dev/null; \
+			docker run -d --name "$$name" -p "127.0.0.1:$$port:6379" "$$image" >/dev/null; \
 		fi; \
 	done
 	@echo "export HM_TEST_KV_URLS=redis://127.0.0.1:63791,redis://127.0.0.1:63792"
@@ -80,11 +83,9 @@ e2e:
 				&& echo "make e2e: failure artifacts kept in web/$$keep" >&2; \
 		fi; exit $$status; }
 
-.PHONY: tf-check
 tf-check:
 	tools/tf-check.sh
 
-.PHONY: test-it-exec
 # Real-AWS ECS Exec integration test. Export the HM_IT_* variables first (see README "Terminal").
 test-it-exec:
 	HM_IT_AWS=1 go test ./internal/execbridge/ -run TestIntegration -v
@@ -93,7 +94,6 @@ test-it-exec:
 # ARCH is the image architecture. The default matches the module's cpu_architecture = "X86_64"; pass ARCH=arm64
 # together with cpu_architecture = "ARM64". check-image runs the image as built (emulated on a different host arch).
 ARCH ?= amd64
-.PHONY: image check-image release release-check scanner-image check-scanner-image
 image:
 	docker build --platform linux/$(ARCH) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster:$(VERSION) .
 
@@ -138,9 +138,8 @@ release: lint test vulncheck build image check-image scanner-image check-scanner
 	bin/harbormaster version
 
 # vulncheck scans the call graph of every package against the Go vulnerability database (needs network access).
-.PHONY: vulncheck
 vulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
 # release-check refuses an untagged HEAD and a -dirty VERSION.
 release-check:
@@ -148,18 +147,15 @@ release-check:
 	@case "$(VERSION)" in *-dirty) echo "release-check: VERSION $(VERSION) is dirty; commit or stash changes" >&2; exit 1;; esac
 
 # plan 06
-.PHONY: icons
 icons:
 	node web/scripts/render-icons.mjs
 
-.PHONY: check-notices
 check-notices:
 	tools/check-notices.sh
 
 # plan 06
 # soak runs the rate-limit / back-off soak tests at target estate scale, and the split-service soaks (three pollers, cycle
 # time, focus call rates): about 35 minutes. Needs HM_TEST_DATABASE_URL; see 'make test-db'.
-.PHONY: soak
 soak:
 	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
 		echo "make soak: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
@@ -170,7 +166,6 @@ soak:
 # Floci harness (tools/floci): a local AWS emulator plus Postgres, so Harbormaster's real AWS code path is checked
 # against an ECS estate. Every script sources tools/floci/env.sh, which refuses (exit 2) any non-local endpoint.
 # Typical run: make floci-up floci-seed floci-check floci-down
-.PHONY: floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
 FLOCI_COMPOSE := docker compose -f tools/floci/docker-compose.yml
 
 floci-selfcheck:
@@ -192,6 +187,10 @@ floci-serve:
 # server and its setup project runs connect.sh). Set HM_E2E_SCREENSHOT_DIR to keep a screenshot per route, width and theme.
 floci-check:
 	tools/floci/env.sh >/dev/null
+	@if ! git diff --quiet -- internal/web/dist/index.html; then \
+		echo "make floci-check: internal/web/dist/index.html has local edits; commit or stash them (the build overwrites the file and this target restores it)" >&2; \
+		exit 2; \
+	fi
 	$(MAKE) build
 	git checkout -- internal/web/dist/index.html
 	tools/floci/prepare.sh

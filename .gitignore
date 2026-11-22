@@ -16,3 +16,7 @@ web/e2e/.auth/
 
 # Project docs are kept locally, not in the repository
 docs/
+
+# Local OS and tool state
+**/.DS_Store
+.claude/
