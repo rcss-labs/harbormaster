@@ -80,7 +80,6 @@ func (r *Reader) warn(msg string, err error) {
 }
 
 func read[T any](ctx context.Context, r *Reader, m Model, id string, gk GenKey, load func(context.Context) (T, error)) (T, error) {
-	var zero T
 	if r.Up != nil && !r.Up() {
 		r.count(m, "bypass")
 		return load(ctx)
@@ -95,6 +94,12 @@ func read[T any](ctx context.Context, r *Reader, m Model, id string, gk GenKey, 
 	if len(tokens) > 0 {
 		token = tokens[0]
 	}
+	return readAt(ctx, r, m, id, token, load)
+}
+
+// readAt is read once the token is known: "" means the poller has not marked it.
+func readAt[T any](ctx context.Context, r *Reader, m Model, id, token string, load func(context.Context) (T, error)) (T, error) {
+	var zero T
 	if token == "" {
 		// The poller has not marked this cluster (yet): nothing says which model is current, so nothing is stored.
 		r.count(m, "bypass")
@@ -141,4 +146,52 @@ func read[T any](ctx context.Context, r *Reader, m Model, id string, gk GenKey, 
 	}
 	r.count(m, "miss")
 	return v.(T), nil
+}
+
+// Slices returns the summaries of several slices, in the order given, with one round trip for all their tokens.
+func (r *Reader) Slices(ctx context.Context, ts []awsx.Target) ([]SliceSummary, error) {
+	load := r.loadSlice
+	if load == nil {
+		load = LoadSlice
+	}
+	out := make([]SliceSummary, len(ts))
+	loader := func(t awsx.Target) func(context.Context) (SliceSummary, error) {
+		return func(ctx context.Context) (SliceSummary, error) { return load(ctx, r.Store, t) }
+	}
+	tokens := make([]string, len(ts))
+	tokensKnown := false
+	switch {
+	case len(ts) == 0:
+		return out, nil
+	case r.Up != nil && !r.Up():
+		// A store that is down is not asked.
+	default:
+		keys := make([]GenKey, len(ts))
+		for i, t := range ts {
+			keys[i] = GenKey{AccountID: t.AccountID, Region: t.Region}
+		}
+		got, err := r.Cache.Tokens(ctx, keys...)
+		if err != nil {
+			r.warn("snapshot cache token read failed; reading Postgres", err)
+		} else {
+			tokens, tokensKnown = got, true
+		}
+	}
+	for i, t := range ts {
+		var err error
+		if tokensKnown {
+			out[i], err = readAt(ctx, r, ModelSlice, t.AccountID+":"+t.Region, tokens[i], loader(t))
+		} else {
+			if r.Up != nil && !r.Up() {
+				r.count(ModelSlice, "bypass")
+			} else {
+				r.count(ModelSlice, "error")
+			}
+			out[i], err = load(ctx, r.Store, t)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

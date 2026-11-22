@@ -198,16 +198,12 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	rows, err := s.Store.ListClusters(ctx, sc.Filter, sc.Vis)
+	in, err := s.estateInputs(ctx, sc, true)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	view, err := s.loadEstate(ctx, sc.Filter, sc.Vis, "", rows)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	rows, view := in.clusters, in.view
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
 		s.fail(w, err)
@@ -218,7 +214,7 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	lastChange, err := s.Store.LastEventAtByCluster(ctx, sc.Filter, sc.Vis)
+	lastChange, err := s.lastChange(ctx, sc, in)
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -231,6 +231,73 @@ func TestRead_UndecodableEntryReadsPostgres(t *testing.T) {
 	})
 }
 
+// countingTokens counts the token reads that reach the store.
+type countingTokens struct {
+	Cache
+	calls atomic.Int64
+	keys  atomic.Int64
+}
+
+func (c *countingTokens) Tokens(ctx context.Context, ks ...GenKey) ([]string, error) {
+	c.calls.Add(1)
+	c.keys.Add(int64(len(ks)))
+	return c.Cache.Tokens(ctx, ks...)
+}
+
+func TestSlices_OneTokenReadForAllSlicesAndEachLoadedOnce(t *testing.T) {
+	kvtest.Each(t, func(t *testing.T, c kv.Client) {
+		r := newReaderRig(t, c)
+		counting := &countingTokens{Cache: r.cache}
+		r.reader.Cache = counting
+		targets := []awsx.Target{{AccountID: acctA, Region: "us-east-1"}, {AccountID: acctA, Region: "eu-west-1"}, {AccountID: acctB, Region: "us-east-1"}}
+		for _, tg := range targets {
+			if err := r.cache.Bump(context.Background(), GenKey{AccountID: tg.AccountID, Region: tg.Region}, "1-1"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := 0; i < 2; i++ {
+			got, err := r.reader.Slices(context.Background(), targets)
+			if err != nil || len(got) != 3 {
+				t.Fatalf("Slices = %d summaries, err %v", len(got), err)
+			}
+			if len(got[0].Clusters) == 0 || len(got[2].Clusters) == 0 {
+				t.Fatal("a summary came back empty")
+			}
+		}
+		if got := counting.calls.Load(); got != 2 {
+			t.Fatalf("two Slices calls made %d token reads, want 2 (one each)", got)
+		}
+		if got := counting.keys.Load(); got != 6 {
+			t.Fatalf("token reads carried %d keys, want 6", got)
+		}
+		if got := r.loads.Load(); got != 3 {
+			t.Fatalf("Postgres was read %d times for 3 slices read twice, want 3", got)
+		}
+		r.requireCount(t, "slice", "miss", 3)
+		r.requireCount(t, "slice", "hit", 3)
+	})
+}
+
+func TestSlices_StoreDownOrTokenErrorReadsEverySliceFromPostgres(t *testing.T) {
+	kvtest.Each(t, func(t *testing.T, c kv.Client) {
+		r := newReaderRig(t, c)
+		targets := []awsx.Target{{AccountID: acctA, Region: "us-east-1"}, {AccountID: acctB, Region: "us-east-1"}}
+		r.reader.Cache = failingCache{r.cache}
+		if got, err := r.reader.Slices(context.Background(), targets); err != nil || len(got) != 2 || len(got[0].Clusters) == 0 {
+			t.Fatalf("a failing store broke Slices: %v", err)
+		}
+		r.requireCount(t, "slice", "error", 2)
+		r.reader.Up = func() bool { return false }
+		if _, err := r.reader.Slices(context.Background(), targets); err != nil {
+			t.Fatal(err)
+		}
+		r.requireCount(t, "slice", "bypass", 2)
+		if got := r.loads.Load(); got != 4 {
+			t.Fatalf("Postgres reads = %d, want 4", got)
+		}
+	})
+}
+
 // A model outlives its generation by at most the configured TTL: that bounds how stale a vanished cluster's page can be.
 func TestRead_StoredModelExpiresAfterTheConfiguredTTL(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
