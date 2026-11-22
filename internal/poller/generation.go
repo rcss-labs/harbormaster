@@ -18,16 +18,14 @@ const generationWriteBound = 250 * time.Millisecond
 // long as it stays quiet. Every cycle that writes calls it after its commit, so a reader that finds the new token
 // finds the new rows.
 //
-// It never fails a cycle: a store that is down or slow costs the cache, and readers fall back to Postgres.
+// It never fails a cycle: a store that is down or slow costs the cache, and readers fall back to Postgres. A bump that
+// fails is not forgotten: the key is remembered as owed a bump, and the next call that covers it (every pass over the
+// cluster does, and every call covers the slice) bumps it even when AWS shows nothing new.
 func (l *Loop) markGeneration(ctx context.Context, cluster string, changed bool) {
 	cache := l.p.cfg.Cache
 	if cache == nil {
 		return
 	}
-	// The write must outlive a cycle that is being cancelled: its rows are already committed.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), generationWriteBound)
-	defer cancel()
-
 	keys := []snapcache.GenKey{l.genKey("")}
 	switch {
 	case cluster == "":
@@ -37,33 +35,67 @@ func (l *Loop) markGeneration(ctx context.Context, cluster string, changed bool)
 	default:
 		keys = append(keys, l.genKey(cluster))
 	}
-	token := l.nextToken()
+	var bump, touch []snapcache.GenKey
+	l.genMu.Lock()
 	for _, k := range keys {
-		var err error
-		if changed {
-			err = cache.Bump(ctx, k, token)
+		if changed || l.genOwed[k] {
+			bump = append(bump, k)
 		} else {
-			err = cache.Touch(ctx, k, token)
+			touch = append(touch, k)
 		}
+	}
+	l.genMu.Unlock()
+	token := l.nextToken()
+	// The write must outlive a cycle that is being cancelled: its rows are already committed.
+	ctx = context.WithoutCancel(ctx)
+	if len(bump) > 0 {
+		l.bumpKeys(ctx, bump, token)
+	}
+	if len(touch) > 0 {
+		wctx, cancel := context.WithTimeout(ctx, generationWriteBound)
+		err := cache.TouchAll(wctx, touch, token)
+		cancel()
 		if err != nil {
-			l.log.Debug("poller: snapshot cache token not written", "cluster", k.Cluster, "err", err)
-			return // the store is failing: the other keys would fail the same way
+			l.p.cfg.Telemetry.CountSnapshotTokenFailure()
+			l.log.Debug("poller: snapshot cache touch failed", "keys", len(touch), "err", err)
 		}
 	}
 }
 
-// markSliceGone is markGeneration for a slice whose clusters were removed: only the slice's summary changed (a
-// removed cluster's own token just expires).
-func (l *Loop) markSliceGone(ctx context.Context) {
-	cache := l.p.cfg.Cache
-	if cache == nil {
+// bumpKeys writes one new token to all the keys in one command, and remembers them as owed a bump when it fails.
+func (l *Loop) bumpKeys(ctx context.Context, keys []snapcache.GenKey, token string) {
+	wctx, cancel := context.WithTimeout(ctx, generationWriteBound)
+	err := l.p.cfg.Cache.BumpAll(wctx, keys, token)
+	cancel()
+	l.genMu.Lock()
+	for _, k := range keys {
+		if err == nil {
+			delete(l.genOwed, k)
+			continue
+		}
+		if l.genOwed == nil {
+			l.genOwed = map[snapcache.GenKey]bool{}
+		}
+		l.genOwed[k] = true
+	}
+	l.genMu.Unlock()
+	if err != nil {
+		l.p.cfg.Telemetry.CountSnapshotTokenFailure()
+		l.log.Debug("poller: snapshot cache bump failed; it will be retried", "keys", len(keys), "err", err)
+	}
+}
+
+// markSliceGone is markGeneration for a slice whose clusters were removed: the slice's summary changed, and so did the
+// page of each removed cluster, which readers learn from its own token.
+func (l *Loop) markSliceGone(ctx context.Context, clusters []string) {
+	if l.p.cfg.Cache == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), generationWriteBound)
-	defer cancel()
-	if err := cache.Bump(ctx, l.genKey(""), l.nextToken()); err != nil {
-		l.log.Debug("poller: snapshot cache token not written", "err", err)
+	keys := []snapcache.GenKey{l.genKey("")}
+	for _, name := range clusters {
+		keys = append(keys, l.genKey(name))
 	}
+	l.bumpKeys(context.WithoutCancel(ctx), keys, l.nextToken())
 }
 
 func (l *Loop) genKey(cluster string) snapcache.GenKey {

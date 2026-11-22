@@ -3,6 +3,7 @@ package snapcache
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -166,6 +167,110 @@ func TestCache_ModelKindsDoNotCollide(t *testing.T) {
 			t.Fatal("a service read found the cluster model")
 		}
 	})
+}
+
+// A model is stored under a key that names its schema, so an entry written by a task with another row shape is never read.
+func TestCache_ModelKeysCarryTheSchemaVersion(t *testing.T) {
+	eachCache(t, func(t *testing.T, c Cache, raw kv.Client) {
+		if err := c.Put(ctx, ModelCluster, "c1", "1-1", []byte("new shape"), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		v, err := raw.Get(ctx, raw.Key("snap", "cluster", ModelSchema, "c1", "1-1"))
+		if err != nil || !v.OK || v.S != "new shape" {
+			t.Fatalf("the model is not under the schema-versioned key: %+v %v", v, err)
+		}
+		// An entry in the layout an older release wrote (no schema segment) must not be served.
+		if _, err := raw.Set(ctx, raw.Key("snap", "service", "s1", "1-1"), "old shape", kv.SetOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := c.Get(ctx, ModelService, "s1", "1-1"); ok {
+			t.Fatal("an entry without a schema version was served")
+		}
+	})
+}
+
+// slowKV delays every command and counts them, like a store that answers slowly.
+type slowKV struct {
+	kv.Client
+	delay time.Duration
+	cmds  atomic.Int64
+}
+
+func (s *slowKV) pause() { s.cmds.Add(1); time.Sleep(s.delay) }
+func (s *slowKV) Get(c context.Context, k string) (kv.Value, error) {
+	s.pause()
+	return s.Client.Get(c, k)
+}
+func (s *slowKV) Set(c context.Context, k, v string, o kv.SetOptions) (bool, error) {
+	s.pause()
+	return s.Client.Set(c, k, v, o)
+}
+func (s *slowKV) PExpire(c context.Context, k string, d time.Duration) error {
+	s.pause()
+	return s.Client.PExpire(c, k, d)
+}
+func (s *slowKV) Eval(c context.Context, sc *kv.Script, keys, args []string) (kv.Reply, error) {
+	s.pause()
+	return s.Client.Eval(c, sc, keys, args)
+}
+
+// A slice-wide write is one command: with a store that takes 70 ms per command and a 250 ms bound, four keys written
+// one at a time would not all fit; written together they do.
+func TestCache_BumpAllAndTouchAllAreOneCommand(t *testing.T) {
+	kvtest.Each(t, func(t *testing.T, raw kv.Client) {
+		slow := &slowKV{Client: raw, delay: 70 * time.Millisecond}
+		c := NewKV(slow)
+		keys := []GenKey{sliceK, clusterK, {AccountID: "111111111111", Region: "us-east-1", Cluster: "b"}, {AccountID: "111111111111", Region: "us-east-1", Cluster: "c"}}
+		bounded, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer cancel()
+		if err := c.BumpAll(bounded, keys, "3-1"); err != nil {
+			t.Fatalf("BumpAll: %v", err)
+		}
+		if got := slow.cmds.Load(); got != 1 {
+			t.Fatalf("BumpAll of 4 keys sent %d commands, want 1", got)
+		}
+		got := mustTokens(t, c, keys...)
+		for i, token := range got {
+			if token != "3-1" {
+				t.Fatalf("key %d token = %q, want 3-1 (every key must be written)", i, token)
+			}
+		}
+
+		// TouchAll: keeps the tokens that exist, sets the one that is missing, refreshes every life, in one command.
+		missing := GenKey{AccountID: "111111111111", Region: "us-east-1", Cluster: "new"}
+		for _, k := range keys {
+			if err := raw.PExpire(ctx, raw.Key("gen", k.AccountID, k.Region, k.Cluster), 1500*time.Millisecond); err != nil && k.Cluster != "" {
+				t.Fatal(err)
+			}
+		}
+		if err := raw.PExpire(ctx, raw.Key("gen", sliceK.AccountID, sliceK.Region), 1500*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		before := slow.cmds.Load()
+		if err := c.TouchAll(bounded2(t), append(keys, missing), "3-2"); err != nil {
+			t.Fatalf("TouchAll: %v", err)
+		}
+		if got := slow.cmds.Load() - before; got != 1 {
+			t.Fatalf("TouchAll of 5 keys sent %d commands, want 1", got)
+		}
+		time.Sleep(2 * time.Second)
+		now := mustTokens(t, c, append(keys, missing)...)
+		for i := range keys {
+			if now[i] != "3-1" {
+				t.Fatalf("key %d token = %q after TouchAll and its old life, want the original 3-1 still there", i, now[i])
+			}
+		}
+		if now[len(keys)] != "3-2" {
+			t.Fatalf("the missing key = %q, want TouchAll to set 3-2", now[len(keys)])
+		}
+	})
+}
+
+func bounded2(t *testing.T) context.Context {
+	t.Helper()
+	c, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	t.Cleanup(cancel)
+	return c
 }
 
 func TestOff_NeverHits(t *testing.T) {

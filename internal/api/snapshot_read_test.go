@@ -431,6 +431,52 @@ func TestServiceRead_UnhealthyTargetReachesTheStatusThroughTheCache(t *testing.T
 	})
 }
 
+// Disconnecting an account deletes its rows from the web task, not the poller: the cluster pages of that account must stop
+// being served from the cache at once, not after the TTL.
+func TestClusterRead_DisconnectedAccountIsNotServedFromAWarmCache(t *testing.T) {
+	kvtest.Each(t, func(t *testing.T, c kv.Client) {
+		p := newSnapPair(t, c)
+		accounts, err := p.st.ListAccounts(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var account store.AWSAccount
+		for _, a := range accounts {
+			if a.AccountID == homelabAccountID {
+				account = a
+			}
+		}
+		if account.ID == 0 {
+			t.Fatal("the seeded estate has no homelab account row")
+		}
+		cluster := model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
+		admin := login(t, p.on, "sam", snapUserPassword)
+		for i := 0; i < 2; i++ {
+			if status, _ := body(t, admin, "/api/clusters/"+cluster); status != http.StatusOK {
+				t.Fatalf("status %d before the disconnect", status)
+			}
+		}
+		if p.count(t, "cluster", "hit") == 0 {
+			t.Fatal("the cache was not warm: the test proves nothing")
+		}
+		resp := admin.do(http.MethodDelete, "/api/accounts/"+strconv.FormatInt(account.ID, 10), nil, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("disconnect = %d", resp.StatusCode)
+		}
+		if status, text := body(t, admin, "/api/clusters/"+cluster); status != http.StatusNotFound {
+			t.Fatalf("after the disconnect the cluster page answered %d %.120s, want 404", status, text)
+		}
+		var services ServiceListDTO
+		decode(t, admin.get("/api/services"), &services)
+		for _, item := range services.Items {
+			if item.AccountID == homelabAccountID {
+				t.Fatalf("the service list still shows %s of the disconnected account", item.Name)
+			}
+		}
+	})
+}
+
 // failingTokens is a store that cannot be reached.
 type failingTokens struct{ snapcache.Cache }
 

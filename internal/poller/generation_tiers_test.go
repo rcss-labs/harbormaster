@@ -115,6 +115,39 @@ func TestGeneration_RemovedTargetGroupBumpsTheSliceFromTheTargetHealthTier(t *te
 	}
 }
 
+// The page of a removed cluster is told by its own token, or a direct link would keep serving it until the TTL.
+func TestGeneration_RemovedClusterBumpsItsOwnToken(t *testing.T) {
+	cache := newRecordingCache()
+	h := genHarness(t, cache)
+	h.runOnce(t)
+	before := cache.snapshot()
+	h.estate.Mu.Lock()
+	kept := h.estate.Clusters[:0]
+	for _, c := range h.estate.Clusters {
+		if aws.ToString(c.Cluster.ClusterName) != "ci-tools" || c.AccountID != loopTarget.AccountID || c.Region != loopTarget.Region {
+			kept = append(kept, c)
+		}
+	}
+	h.estate.Clusters = kept
+	h.estate.Mu.Unlock()
+	// A loop that has just started knows nothing about what it stored before: it must ask the database.
+	h.loop.mu.Lock()
+	h.loop.clusters = nil
+	h.loop.mu.Unlock()
+	if err := h.loop.syncClusters(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	moved := changedKeys(before, cache.snapshot())
+	if !hasKey(moved, genKeyOf("ci-tools")) || !hasKey(moved, sliceGenKey) {
+		t.Fatalf("removing ci-tools moved %v, want its own token and the slice's", moved)
+	}
+	for _, k := range moved {
+		if k != genKeyOf("ci-tools") && k != sliceGenKey {
+			t.Errorf("removing ci-tools also moved %+v", k)
+		}
+	}
+}
+
 func TestGeneration_RemovedClusterBumpsTheSlice(t *testing.T) {
 	cache := newRecordingCache()
 	h := genHarness(t, cache)

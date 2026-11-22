@@ -12,6 +12,11 @@ import (
 // TokenTTL is how long a generation token lives; every poller cycle refreshes it.
 const TokenTTL = 10 * time.Minute
 
+// ModelSchema names the shape of the cached rows. It is part of every model key, so a release that changes a cached
+// row (a field added or renamed in store.ServiceRow, say) bumps it and never reads what an older task stored: during a
+// rolling deploy the two versions simply use different entries.
+const ModelSchema = "m1"
+
 // GenKey names a generation token: a cluster's, or (with Cluster empty) its slice's.
 type GenKey struct{ AccountID, Region, Cluster string }
 
@@ -36,6 +41,10 @@ type Cache interface {
 	Bump(ctx context.Context, k GenKey, token string) error
 	// Touch sets the token only when there is none; when one exists it keeps the value and refreshes its life.
 	Touch(ctx context.Context, k GenKey, token string) error
+	// BumpAll and TouchAll are Bump and Touch for several keys in one round trip, so a slice-wide write is one command
+	// with one bound and a slow store cannot drop the later keys.
+	BumpAll(ctx context.Context, ks []GenKey, token string) error
+	TouchAll(ctx context.Context, ks []GenKey, token string) error
 	// Tokens reads the tokens of all keys in one round trip; "" where one is missing.
 	Tokens(ctx context.Context, ks ...GenKey) ([]string, error)
 	// Get returns the model stored for id under token.
@@ -49,8 +58,10 @@ type off struct{}
 // Off is the cache used when no store is configured or the cache is switched off: it never hits and stores nothing.
 func Off() Cache { return off{} }
 
-func (off) Bump(context.Context, GenKey, string) error  { return nil }
-func (off) Touch(context.Context, GenKey, string) error { return nil }
+func (off) Bump(context.Context, GenKey, string) error       { return nil }
+func (off) Touch(context.Context, GenKey, string) error      { return nil }
+func (off) BumpAll(context.Context, []GenKey, string) error  { return nil }
+func (off) TouchAll(context.Context, []GenKey, string) error { return nil }
 func (off) Tokens(_ context.Context, ks ...GenKey) ([]string, error) {
 	return make([]string, len(ks)), nil
 }

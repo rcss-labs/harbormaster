@@ -2,6 +2,7 @@ package snapcache
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/kv"
@@ -20,21 +21,56 @@ func (k kvCache) genKey(g GenKey) string {
 }
 
 func (k kvCache) modelKey(m Model, id, token string) string {
-	return k.c.Key("snap", string(m), id, token)
+	return k.c.Key("snap", string(m), ModelSchema, id, token)
 }
 
 func (k kvCache) Bump(ctx context.Context, g GenKey, token string) error {
-	_, err := k.c.Set(ctx, k.genKey(g), token, kv.SetOptions{TTL: TokenTTL})
-	return err
+	return k.BumpAll(ctx, []GenKey{g}, token)
 }
 
 func (k kvCache) Touch(ctx context.Context, g GenKey, token string) error {
-	key := k.genKey(g)
-	stored, err := k.c.Set(ctx, key, token, kv.SetOptions{TTL: TokenTTL, NX: true})
-	if err != nil || stored {
-		return err
+	return k.TouchAll(ctx, []GenKey{g}, token)
+}
+
+// The scripts write every key in one round trip. They use only redis.call and no clock: the life is an argument.
+// KEYS: the token keys. ARGV: token, life in ms.
+var bumpAllScript = kv.NewScript(`
+for _, key in ipairs(KEYS) do
+  redis.call('SET', key, ARGV[1], 'PX', tonumber(ARGV[2]))
+end
+return #KEYS`)
+
+// Same arguments; a key that exists keeps its token and only gets its life back.
+var touchAllScript = kv.NewScript(`
+for _, key in ipairs(KEYS) do
+  if not redis.call('SET', key, ARGV[1], 'NX', 'PX', tonumber(ARGV[2])) then
+    redis.call('PEXPIRE', key, tonumber(ARGV[2]))
+  end
+end
+return #KEYS`)
+
+func (k kvCache) genKeys(gs []GenKey) []string {
+	keys := make([]string, len(gs))
+	for i, g := range gs {
+		keys[i] = k.genKey(g)
 	}
-	return k.c.PExpire(ctx, key, TokenTTL)
+	return keys
+}
+
+func (k kvCache) BumpAll(ctx context.Context, gs []GenKey, token string) error {
+	if len(gs) == 0 {
+		return nil
+	}
+	_, err := k.c.Eval(ctx, bumpAllScript, k.genKeys(gs), []string{token, strconv.FormatInt(TokenTTL.Milliseconds(), 10)})
+	return err
+}
+
+func (k kvCache) TouchAll(ctx context.Context, gs []GenKey, token string) error {
+	if len(gs) == 0 {
+		return nil
+	}
+	_, err := k.c.Eval(ctx, touchAllScript, k.genKeys(gs), []string{token, strconv.FormatInt(TokenTTL.Milliseconds(), 10)})
+	return err
 }
 
 func (k kvCache) Tokens(ctx context.Context, gs ...GenKey) ([]string, error) {

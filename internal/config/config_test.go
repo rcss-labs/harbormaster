@@ -175,6 +175,21 @@ func TestConfig_SnapshotCacheTTLMustBeAtLeastOneSecond(t *testing.T) {
 	}
 }
 
+// A cached model must not outlive the generation token that names it by more than the token's own life (ten minutes):
+// the TTL is the bound on how stale a deleted cluster's page can be, so it is capped there.
+func TestConfig_SnapshotCacheTTLIsCappedAtTheTokenLife(t *testing.T) {
+	for _, ttl := range []string{"10m1s", "11m", "1h"} {
+		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE_TTL": ttl}))
+		if err == nil || !strings.Contains(err.Error(), "HM_SNAPSHOT_CACHE_TTL") {
+			t.Errorf("TTL %s: error = %v, want one naming HM_SNAPSHOT_CACHE_TTL", ttl, err)
+		}
+	}
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE_TTL": "10m"}))
+	if err != nil || cfg.SnapshotCacheTTL != 10*time.Minute {
+		t.Fatalf("TTL 10m = %v, %v; want it accepted", cfg.SnapshotCacheTTL, err)
+	}
+}
+
 func TestLoad_RequiresDatabase(t *testing.T) {
 	_, err := Load(envFromMap(map[string]string{}))
 	if err == nil {

@@ -3,6 +3,7 @@ package snapcache
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -35,6 +36,9 @@ type Reader struct {
 	loadSlice   func(context.Context, *store.Store, awsx.Target) (SliceSummary, error)
 
 	group singleflight.Group
+
+	tokenMu          sync.Mutex
+	lastInvalidateMS int64
 }
 
 // Cluster returns the cluster model, or store.ErrNotFound.
@@ -194,4 +198,25 @@ func (r *Reader) Slices(ctx context.Context, ts []awsx.Target) ([]SliceSummary, 
 		}
 	}
 	return out, nil
+}
+
+// invalidateEpoch marks the tokens a web task writes. The poller's epochs are the lease epochs, which start at 1, so a
+// token that begins with 0 can never equal one of theirs.
+const invalidateEpoch = 0
+
+// Invalidate moves the tokens of the given keys, for a change the poller does not make: a web task that deleted rows
+// (disconnecting an account) tells the readers at once, instead of leaving the old models to be served until the TTL.
+// A failure is returned for the caller to log; the models then expire by TTL.
+func (r *Reader) Invalidate(ctx context.Context, keys []GenKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	r.tokenMu.Lock()
+	ms := time.Now().UnixMilli()
+	if ms <= r.lastInvalidateMS {
+		ms = r.lastInvalidateMS + 1
+	}
+	r.lastInvalidateMS = ms
+	r.tokenMu.Unlock()
+	return r.Cache.BumpAll(ctx, keys, NewToken(invalidateEpoch, time.UnixMilli(ms)))
 }

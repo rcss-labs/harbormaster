@@ -28,33 +28,50 @@ type recordingCache struct {
 	bumps  []snapcache.GenKey
 	touchs []snapcache.GenKey
 	fail   error
+	// failBumps makes BumpAll fail while Touch and reads still work.
+	failBumps bool
 }
 
 func newRecordingCache() *recordingCache {
 	return &recordingCache{tokens: map[snapcache.GenKey]string{}}
 }
 
-func (c *recordingCache) Bump(_ context.Context, k snapcache.GenKey, token string) error {
+func (c *recordingCache) Bump(ctx context.Context, k snapcache.GenKey, token string) error {
+	return c.BumpAll(ctx, []snapcache.GenKey{k}, token)
+}
+
+func (c *recordingCache) Touch(ctx context.Context, k snapcache.GenKey, token string) error {
+	return c.TouchAll(ctx, []snapcache.GenKey{k}, token)
+}
+
+func (c *recordingCache) BumpAll(_ context.Context, ks []snapcache.GenKey, token string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.fail != nil {
 		return c.fail
 	}
-	c.tokens[k] = token
-	c.bumps = append(c.bumps, k)
+	if c.failBumps {
+		return errors.New("bumps are failing")
+	}
+	for _, k := range ks {
+		c.tokens[k] = token
+		c.bumps = append(c.bumps, k)
+	}
 	return nil
 }
 
-func (c *recordingCache) Touch(_ context.Context, k snapcache.GenKey, token string) error {
+func (c *recordingCache) TouchAll(_ context.Context, ks []snapcache.GenKey, token string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.fail != nil {
 		return c.fail
 	}
-	if _, ok := c.tokens[k]; !ok {
-		c.tokens[k] = token
+	for _, k := range ks {
+		if _, ok := c.tokens[k]; !ok {
+			c.tokens[k] = token
+		}
+		c.touchs = append(c.touchs, k)
 	}
-	c.touchs = append(c.touchs, k)
 	return nil
 }
 
@@ -101,11 +118,19 @@ var sliceGenKey = genKeyOf("")
 // genHarness runs the mockup estate's slice through one full cycle with a cache.
 func genHarness(t *testing.T, cache snapcache.Cache) *loopHarness {
 	t.Helper()
+	return genHarnessWith(t, cache, nil)
+}
+
+func genHarnessWith(t *testing.T, cache snapcache.Cache, mutate func(*Config)) *loopHarness {
+	t.Helper()
 	estate := fake.MockupEstate(func() time.Time { return loopNow })
 	st := storetest.Open(t)
 	f := fake.New(estate)
 	cfg := focusConfig()
 	cfg.Cache = cache
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	p := New(st, f, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	w := testWriter(t, st, loopTarget)
 	return &loopHarness{loop: newLoop(p, loopTarget, w), fake: f, estate: estate, store: st, writer: w}

@@ -17,6 +17,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -95,6 +96,8 @@ type Loop struct {
 	genMu         sync.Mutex
 	genLastMS     int64
 	clusterHashes map[model.ClusterKey]string
+	// genOwed holds the token keys whose last bump failed; the next call that covers one bumps it again.
+	genOwed map[snapcache.GenKey]bool
 }
 
 // tierDef pairs a tier with its work function.
@@ -554,12 +557,26 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	for _, arn := range arns {
 		keys = append(keys, model.ClusterKey{AccountID: l.target.AccountID, Region: l.target.Region, Cluster: clusterNameFromARN(arn)})
 	}
+	// Which clusters are about to go: the ones stored now that are not listed. Their own tokens must move too, or their
+	// pages would be served from the cache until the TTL. A failed read only costs that: the slice token still moves.
+	var gone []string
+	if stored, err := l.p.reads.ListClusters(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region}, store.Visibility{Admin: true}); err == nil {
+		listed := make(map[string]bool, len(keys))
+		for _, k := range keys {
+			listed[k.Cluster] = true
+		}
+		for _, c := range stored {
+			if !listed[c.Key.Cluster] {
+				gone = append(gone, c.Key.Cluster)
+			}
+		}
+	}
 	deleted, err := l.w.DeleteClustersNotIn(ctx, l.target, keys)
 	if err != nil {
 		return err
 	}
 	if deleted > 0 {
-		l.markSliceGone(ctx)
+		l.markSliceGone(ctx, gone)
 	}
 	l.forgetClusterHashes(keys)
 

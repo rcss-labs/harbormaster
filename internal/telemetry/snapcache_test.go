@@ -25,3 +25,18 @@ func TestPrometheus_SnapshotCacheRequests(t *testing.T) {
 		}
 	}
 }
+
+func TestPrometheus_SnapshotCacheTokenWriteFailures(t *testing.T) {
+	r := New()
+	r.CountSnapshotTokenFailure()
+	r.CountSnapshotTokenFailure()
+	out := render(t, r)
+	for _, want := range []string{
+		"# TYPE harbormaster_snapshot_cache_token_write_failures_total counter",
+		"harbormaster_snapshot_cache_token_write_failures_total 2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+}

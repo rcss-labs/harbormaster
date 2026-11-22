@@ -165,6 +165,10 @@ type Config struct {
 	SnapshotCacheTTL time.Duration
 }
 
+// maxSnapshotCacheTTL mirrors snapcache.TokenTTL: a model should not outlive the token that names it by more than the
+// token's own life.
+const maxSnapshotCacheTTL = 10 * time.Minute
+
 // FocusConfig holds the live page refresh settings (HM_FOCUS_*).
 type FocusConfig struct {
 	Interval, TTL                          time.Duration
@@ -385,8 +389,8 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := validateFocus(cfg.Focus); err != nil {
 		return Config{}, err
 	}
-	if cfg.SnapshotCacheTTL < time.Second {
-		return Config{}, errors.New("HM_SNAPSHOT_CACHE_TTL: must be at least 1s")
+	if cfg.SnapshotCacheTTL < time.Second || cfg.SnapshotCacheTTL > maxSnapshotCacheTTL {
+		return Config{}, errors.New("HM_SNAPSHOT_CACHE_TTL: must be between 1s and 10m (the life of a generation token)")
 	}
 	if cfg.MaxDesiredCount < 1 {
 		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
