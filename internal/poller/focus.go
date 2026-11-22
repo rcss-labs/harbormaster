@@ -19,8 +19,9 @@ const (
 	pollNowCoalesce = time.Second
 	// maxOneOffQueue is how many one-off cycles may wait for a free slot; further requests are dropped.
 	maxOneOffQueue = 4
-	// focusSchedulerTick is how often a slice looks for due focus cycles.
-	focusSchedulerTick = 50 * time.Millisecond
+	// focusSchedulerMaxWait bounds how long the scheduler sleeps while work is pending, so a change of the effective
+	// interval that sends no wake-up is still noticed.
+	focusSchedulerMaxWait = time.Second
 	// focusWarnEvery limits the log line for a failing object to once a minute.
 	focusWarnEvery = time.Minute
 	// recentCycles is how many cycles an object's average cost covers.
@@ -224,15 +225,6 @@ func (l *Loop) focusEntries() int {
 	return len(l.focusSet)
 }
 
-func (l *Loop) focusCycles(o focus.Object) int {
-	l.focusMu.Lock()
-	defer l.focusMu.Unlock()
-	if e := l.focusSet[o.Member()]; e != nil {
-		return e.cycles
-	}
-	return 0
-}
-
 func (l *Loop) focusKindCounts() map[string]int {
 	l.focusMu.Lock()
 	defer l.focusMu.Unlock()
@@ -320,13 +312,18 @@ func (l *Loop) startOnceLocked(r *onceRequest) {
 
 // runFocus starts the due focus cycles of the slice, most overdue first and at most maxFocusInFlight at once, until
 // ctx ends. An object is due one effective interval after its last cycle started, or at once when a poll-now asked.
+// With nothing focused and nothing queued it blocks until focusWake; otherwise it sleeps until the next object is due.
+// Loop.Run sets focusCtx before starting it, so a poll-now that arrives early already ends with the loop.
 func (l *Loop) runFocus(ctx context.Context) {
-	l.focusMu.Lock()
-	l.focusCtx = ctx
-	l.focusMu.Unlock()
-	ticker := time.NewTicker(focusSchedulerTick)
-	defer ticker.Stop()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 	for {
+		wait, pending := l.startDueFocusCycles(ctx)
+		var tick <-chan time.Time
+		if pending {
+			timer.Reset(wait)
+			tick = timer.C
+		}
 		select {
 		case <-ctx.Done():
 			l.focusMu.Lock()
@@ -334,22 +331,27 @@ func (l *Loop) runFocus(ctx context.Context) {
 			l.focusMu.Unlock()
 			l.focusRunning.Wait()
 			return
-		case <-ticker.C:
+		case <-tick:
 		case <-l.focusWake:
+			if pending && !timer.Stop() {
+				<-timer.C
+			}
 		}
-		l.startDueFocusCycles(ctx)
 	}
 }
 
-func (l *Loop) startDueFocusCycles(ctx context.Context) {
+// startDueFocusCycles starts what is due now. pending is false when nothing is focused or queued; otherwise wait is
+// how long until the next object is due (at most focusSchedulerMaxWait).
+func (l *Loop) startDueFocusCycles(ctx context.Context) (wait time.Duration, pending bool) {
 	l.focusMu.Lock()
 	defer l.focusMu.Unlock()
 	if len(l.focusSet) == 0 && len(l.onceQueue) == 0 {
-		return
+		return 0, false
 	}
 	interval := l.focusIntervalExact()
 	now := time.Now()
 	inFlight := l.onceRunning
+	wait = focusSchedulerMaxWait
 	var due []*focusEntry
 	for _, e := range l.focusSet {
 		switch {
@@ -357,6 +359,9 @@ func (l *Loop) startDueFocusCycles(ctx context.Context) {
 			inFlight++
 		case e.triggered || e.lastStart.IsZero() || now.Sub(e.lastStart) >= interval:
 			due = append(due, e)
+		}
+		if !e.running && !e.triggered && !e.lastStart.IsZero() {
+			wait = min(wait, e.lastStart.Add(interval).Sub(now))
 		}
 	}
 	sort.Slice(due, func(i, j int) bool {
@@ -367,12 +372,13 @@ func (l *Loop) startDueFocusCycles(ctx context.Context) {
 	})
 	for _, e := range due {
 		if inFlight >= maxFocusInFlight {
-			break
+			break // a finishing cycle wakes the scheduler
 		}
 		inFlight++
 		cycle, trigAt, wasTriggered := e.cycles, e.trigAt, e.triggered
 		e.running, e.triggered, e.lastStart = true, false, now
 		e.cycles++
+		wait = min(wait, interval)
 		l.focusRunning.Add(1)
 		go func() {
 			defer l.focusRunning.Done()
@@ -386,6 +392,7 @@ func (l *Loop) startDueFocusCycles(ctx context.Context) {
 		l.startOnceLocked(next)
 		inFlight++
 	}
+	return max(wait, time.Millisecond), true
 }
 
 // runFocusCycle reads one object, records what it cost and, on success, leaves the evidence the page shows.
@@ -412,6 +419,7 @@ func (l *Loop) runFocusCycle(ctx context.Context, e *focusEntry, cycle int, requ
 		l.updateFocusRoundLocked()
 	}
 	l.focusMu.Unlock()
+	l.wakeFocus() // the slot is free, and the interval may have changed
 
 	tel.ObserveFocusCycle(string(e.obj.Kind), finished.Sub(started))
 	if byPollNow {
