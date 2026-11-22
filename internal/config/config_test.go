@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -762,7 +763,7 @@ func TestLoad_TokenOverrides(t *testing.T) {
 	cfg, err := Load(tokenEnv(map[string]string{
 		"HM_API_TOKENS": "true", "HM_TOKEN_MAX_TTL": "48h", "HM_TOKEN_MAX_TTL_SSO": "24h", "HM_TOKEN_MAX_PER_USER": "3",
 		"HM_TOKEN_LOG_SEARCH_MAX_GB": "0", "HM_TOKEN_LOG_SEARCH_DAILY_GB": "0", "HM_TOKEN_REDACT_ENV": "true",
-		"HM_MCP_PUBLIC_URL": "https://mcp.example.com",
+		"HM_MCP_PUBLIC_URL": "https://mcp.example.com", "HM_MCP_GATEWAY_CIDRS": "10.0.8.0/22, 10.1.0.0/24",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -771,6 +772,19 @@ func TestLoad_TokenOverrides(t *testing.T) {
 		cfg.TokenMaxPerUser != 3 || cfg.TokenLogSearchMaxGB != 0 || cfg.TokenLogSearchDailyGB != 0 ||
 		cfg.MCPPublicURL != "https://mcp.example.com" {
 		t.Errorf("cfg = %+v", cfg)
+	}
+	if got := fmt.Sprint(cfg.MCPGatewayCIDRs); got != "[10.0.8.0/22 10.1.0.0/24]" {
+		t.Errorf("MCPGatewayCIDRs = %s", got)
+	}
+}
+
+func TestLoad_GatewayCIDRsDefaultEmpty(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MCPGatewayCIDRs) != 0 {
+		t.Errorf("MCPGatewayCIDRs = %v, want none", cfg.MCPGatewayCIDRs)
 	}
 }
 
@@ -791,6 +805,10 @@ func TestLoad_TokenValidation(t *testing.T) {
 		{"url path", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com/mcp"}, "HM_MCP_PUBLIC_URL"},
 		{"url trailing slash", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com/"}, "HM_MCP_PUBLIC_URL"},
 		{"url query", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com?a=b"}, "HM_MCP_PUBLIC_URL"},
+		{"cidr not a prefix", map[string]string{"HM_MCP_GATEWAY_CIDRS": "10.0.0.1"}, "HM_MCP_GATEWAY_CIDRS"},
+		{"cidr garbage", map[string]string{"HM_MCP_GATEWAY_CIDRS": "10.0.0.0/24,nope"}, "HM_MCP_GATEWAY_CIDRS"},
+		{"cidr match-all v4", map[string]string{"HM_MCP_GATEWAY_CIDRS": "0.0.0.0/0"}, "HM_MCP_GATEWAY_CIDRS"},
+		{"cidr match-all v6", map[string]string{"HM_MCP_GATEWAY_CIDRS": "::/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"url no host", map[string]string{"HM_MCP_PUBLIC_URL": "https://"}, "HM_MCP_PUBLIC_URL"},
 	}
 	for _, tc := range cases {

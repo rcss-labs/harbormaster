@@ -2,12 +2,14 @@ package api
 
 import (
 	"net/http"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/auth"
+	"github.com/rcss-labs/harbormaster/internal/config"
 )
 
 func TestBearer_ValidTokenIsAuthenticated(t *testing.T) {
@@ -273,5 +275,31 @@ func TestRequestLog_CarriesTokenIDNeverTheSecret(t *testing.T) {
 	}
 	if strings.Contains(out, apitoken.Hash(parsed.Secret)) {
 		t.Error("log contains the secret hash")
+	}
+}
+
+// Behind the gateway the internal ALB appends the gateway task's address; the entry to its left is the client the
+// public ALB saw. last_used_ip must record that client, not the gateway.
+func TestBearer_LastUsedIPIsTheForwardedClientBehindTheGateway(t *testing.T) {
+	srv, _, st, _ := newServerCustom(t, true, withTokens(func(c *config.Config) {
+		c.TrustedProxy = true
+		c.MCPGatewayCIDRs = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}
+	}, nil))
+	c := tokenClient(t, srv, st, "sam")
+	resp := c.do("GET", "/api/overview", nil, map[string]string{"X-Forwarded-For": "6.6.6.6, 203.0.113.7, 127.0.0.1"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	user, err := st.GetUserByUsername(t.Context(), "sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, err := st.ListAPITokensForUser(t.Context(), user.ID)
+	if err != nil || len(tokens) != 1 {
+		t.Fatalf("tokens = %v, %v", tokens, err)
+	}
+	if tokens[0].LastUsedIP != "203.0.113.7" {
+		t.Errorf("last_used_ip = %q, want 203.0.113.7", tokens[0].LastUsedIP)
 	}
 }

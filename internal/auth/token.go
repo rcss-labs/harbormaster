@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -139,7 +140,7 @@ func writeTokenUnauthenticated(w http.ResponseWriter) {
 // serveToken is the token path of Middleware. The cookie is never read: a token that does not resolve ends the
 // request with 401, on every route, and never continues as anonymous or as a session.
 func (a *Service) serveToken(w http.ResponseWriter, r *http.Request, next http.Handler, raw string) {
-	tok, user, err := a.AuthenticateToken(r.Context(), raw, ClientIP(r, a.cfg.TrustedProxy))
+	tok, user, err := a.AuthenticateToken(r.Context(), raw, ClientIP(r, a.cfg.TrustedProxy, a.cfg.MCPGatewayCIDRs))
 	if errors.Is(err, ErrUnauthenticated) {
 		writeTokenUnauthenticated(w)
 		return
@@ -175,13 +176,24 @@ func (a *Service) serveToken(w http.ResponseWriter, r *http.Request, next http.H
 
 // ClientIP is the peer address, unless trustedProxy says exactly one trusted proxy (the load balancer) sits in front,
 // in which case it is the rightmost X-Forwarded-For entry, the one that proxy appended.
-func ClientIP(r *http.Request, trustedProxy bool) string {
+//
+// When that entry lies inside gatewayCIDRs the request came through the MCP gateway: the gateway forwards the chain
+// the public load balancer built, so the entry to its left is the real client. Exactly one such extra hop is read,
+// and only from a configured gateway address; anything further left is client-controlled and never used.
+func ClientIP(r *http.Request, trustedProxy bool, gatewayCIDRs []netip.Prefix) string {
 	if trustedProxy {
 		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 		for i := len(hops) - 1; i >= 0; i-- {
-			if hop := strings.TrimSpace(hops[i]); hop != "" {
-				return hop
+			hop := strings.TrimSpace(hops[i])
+			if hop == "" {
+				continue
 			}
+			if i > 0 && inPrefixes(hop, gatewayCIDRs) {
+				if client, err := netip.ParseAddr(strings.TrimSpace(hops[i-1])); err == nil {
+					return client.String()
+				}
+			}
+			return hop
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -189,4 +201,18 @@ func ClientIP(r *http.Request, trustedProxy bool) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+func inPrefixes(addr string, prefixes []netip.Prefix) bool {
+	parsed, err := netip.ParseAddr(addr)
+	if err != nil {
+		return false
+	}
+	parsed = parsed.Unmap()
+	for _, prefix := range prefixes {
+		if prefix.Contains(parsed) {
+			return true
+		}
+	}
+	return false
 }
