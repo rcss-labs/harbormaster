@@ -16,7 +16,27 @@ var kvBuckets = []float64{0.001, 0.005, 0.025, 0.1, 0.25}
 
 const keySep = "|"
 
+func newHistogram(bounds []float64) *histogram {
+	return &histogram{bounds: bounds, buckets: make([]uint64, len(bounds)+1)}
+}
+
+func (h *histogram) observe(d time.Duration) {
+	secs := d.Seconds()
+	idx := len(h.bounds) // overflow (+Inf only)
+	for i, upper := range h.bounds {
+		if secs <= upper {
+			idx = i
+			break
+		}
+	}
+	h.buckets[idx]++
+	h.sum += secs
+	h.count++
+}
+
+// histogram counts observations against fixed upper bounds (seconds).
 type histogram struct {
+	bounds  []float64
 	buckets []uint64 // non-cumulative per-bucket counts; last slot is +Inf overflow
 	sum     float64
 	count   uint64
@@ -102,20 +122,10 @@ func (r *Registry) ObserveLoop(account, region, tier string, d time.Duration, ok
 	key := joinKey(account, region, tier)
 	h := r.loopDuration[key]
 	if h == nil {
-		h = &histogram{buckets: make([]uint64, len(loopBuckets)+1)}
+		h = newHistogram(loopBuckets)
 		r.loopDuration[key] = h
 	}
-	secs := d.Seconds()
-	idx := len(loopBuckets) // overflow (+Inf only)
-	for i, upper := range loopBuckets {
-		if secs <= upper {
-			idx = i
-			break
-		}
-	}
-	h.buckets[idx]++
-	h.sum += secs
-	h.count++
+	h.observe(d)
 
 	result := "ok"
 	if !ok {
@@ -262,20 +272,10 @@ func (r *Registry) ObserveKVCommand(op string, d time.Duration) {
 	defer r.mu.Unlock()
 	h := r.kvDuration[op]
 	if h == nil {
-		h = &histogram{buckets: make([]uint64, len(kvBuckets)+1)}
+		h = newHistogram(kvBuckets)
 		r.kvDuration[op] = h
 	}
-	secs := d.Seconds()
-	idx := len(kvBuckets)
-	for i, upper := range kvBuckets {
-		if secs <= upper {
-			idx = i
-			break
-		}
-	}
-	h.buckets[idx]++
-	h.sum += secs
-	h.count++
+	h.observe(d)
 }
 
 // Snapshot is a copy of selected registry state for tests and the soak test.
