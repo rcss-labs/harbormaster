@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { server } from '../test/msw'
 import { FOCUS_LIVE } from '../test/focusFixtures'
-import { FOCUS_HEARTBEAT_MS, useFocus } from './focus'
+import { FOCUS_HEARTBEAT_MS, useFocus, type FocusDTO } from './focus'
 
 interface Seen {
   method: string
@@ -23,7 +23,7 @@ beforeEach(() => {
   seen = []
   visibility = 'visible'
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
   server.use(
     http.post('/api/focus', async ({ request }) => {
       seen.push({ method: 'POST', body: (await request.json()) as Seen['body'] })
@@ -144,6 +144,18 @@ describe('useFocus', () => {
       ['svc-1', true],
       ['svc-2', true],
     ])
+  })
+
+  it('shows no warning while the first live read is still pending, then reports unavailable', async () => {
+    const waiting: FocusDTO = { state: 'unavailable', interval_seconds: 30, refreshed_at: null, message: 'Live refresh unavailable' }
+    server.use(http.post('/api/focus', () => HttpResponse.json(waiting)))
+    const { result } = renderHook(() => useFocus('service', 'svc-1', vi.fn().mockResolvedValue(undefined)))
+    await tick(3000) // the recheck: nothing is wrong yet
+    expect(result.current?.state).not.toBe('unavailable')
+    expect(result.current?.refreshed_at).toBeNull()
+    expect(result.current?.message).toBe('')
+    await tick(2 * FOCUS_HEARTBEAT_MS) // well past the open, still no evidence: now it is a fault
+    expect(result.current?.state).toBe('unavailable')
   })
 
   it('reports unavailable when the request fails, and keeps heartbeating', async () => {

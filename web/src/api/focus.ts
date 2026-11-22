@@ -19,8 +19,18 @@ export interface FocusDTO {
 export const FOCUS_HEARTBEAT_MS = 10_000
 
 const RECHECK_AFTER_OPEN_MS = 3000
+/** How long after an open a missing live read is only pending: the poller's first read takes a few seconds to land. */
+const PENDING_AFTER_OPEN_MS = 12_000
 
 const UNAVAILABLE: FocusDTO = { state: 'unavailable', interval_seconds: 0, refreshed_at: null, message: 'Live refresh unavailable' }
+
+/** Soon after an open, "unavailable" with no read yet only means the first read has not landed: show it as live, no pill. */
+function pendingOrNot(dto: FocusDTO, openedAt: number): FocusDTO {
+  if (dto.state === 'unavailable' && dto.refreshed_at === null && Date.now() - openedAt < PENDING_AFTER_OPEN_MS) {
+    return { ...dto, state: 'live', message: '' }
+  }
+  return dto
+}
 
 const isVisible = () => document.visibilityState === 'visible'
 
@@ -41,17 +51,19 @@ export function useFocus(kind: FocusKind, id: string, refetch: () => Promise<unk
     let active = true
     let timer: ReturnType<typeof setInterval> | undefined
     let cancelFastFollow: (() => void) | undefined
+    let openedAt = 0
 
     const send = (open: boolean) => {
       api
         .post<FocusDTO>('/api/focus', { kind, id, open })
-        .then((dto) => active && setFocus(dto))
+        .then((dto) => active && setFocus(pendingOrNot(dto, openedAt)))
         .catch(() => active && setFocus(UNAVAILABLE))
     }
     const release = () => {
       apiFetch('/api/focus', { method: 'DELETE', body: JSON.stringify({ kind, id, open: false }), keepalive: true }).catch(() => undefined)
     }
     const start = () => {
+      openedAt = Date.now()
       send(true)
       const cancelRefetches = refetchFastFollow(() => refetchRef.current())
       // The first live read lands a moment after the open; ask again then, so the pill does not wait for the next heartbeat.
