@@ -84,6 +84,9 @@ type Loop struct {
 	focusWake    chan struct{}
 	focusCtx     context.Context
 	focusRunning sync.WaitGroup
+	// onceQueue holds one-off cycles waiting for a free slot; onceRunning counts the ones running.
+	onceQueue   []*onceRequest
+	onceRunning int
 }
 
 // tierDef pairs a tier with its work function.
@@ -237,15 +240,21 @@ const syncStartTiers = 3
 // Run polls until ctx is cancelled. The first syncStartTiers tiers run first, synchronously;
 // then each tier ticks in its own goroutine.
 func (l *Loop) Run(ctx context.Context) {
-	for _, d := range l.defs[:syncStartTiers] {
-		_ = l.runTier(ctx, d)
-	}
+	// Focus does not wait for the first pass: after a restart or a takeover on a large slice that pass takes a while,
+	// and the pages that are open must keep their short interval meanwhile. Setting the context first also means a
+	// poll-now during the pass ends with the loop.
+	l.focusMu.Lock()
+	l.focusCtx = ctx
+	l.focusMu.Unlock()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		l.runFocus(ctx)
 	}()
+	for _, d := range l.defs[:syncStartTiers] {
+		_ = l.runTier(ctx, d)
+	}
 	if every := l.p.cfg.CountsHistory; every > 0 {
 		wg.Add(1)
 		go func() {

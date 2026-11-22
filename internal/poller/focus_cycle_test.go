@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -92,6 +93,7 @@ func (h *loopHarness) callDelta(fn func()) map[string]int {
 
 func TestFocusCluster_MakesExactlyTheTableCalls(t *testing.T) {
 	h := focusHarness(t)
+	spy := h.spy()
 	for cycle := 0; cycle <= 6; cycle++ {
 		delta := h.callDelta(func() {
 			if _, err := h.loop.focusCluster(context.Background(), coreServices(), cycle); err != nil {
@@ -115,6 +117,35 @@ func TestFocusCluster_MakesExactlyTheTableCalls(t *testing.T) {
 				t.Errorf("cycle %d: %s = %d, want none (%v)", cycle, op, delta[op], delta)
 			}
 		}
+	}
+	// Whatever the counts, every read names this cluster and no other.
+	for _, c := range spy.ecs.describeServices {
+		if c.cluster != "core-services" {
+			t.Errorf("DescribeServices for cluster %q", c.cluster)
+		}
+	}
+	for _, c := range spy.ecs.listTasks {
+		if c.cluster != "core-services" || c.service != "" || c.desired != ecstypes.DesiredStatusRunning {
+			t.Errorf("ListTasks %+v, want RUNNING for core-services only", c)
+		}
+	}
+	for _, cluster := range spy.ecs.describeTasks {
+		if cluster != "core-services" {
+			t.Errorf("DescribeTasks for cluster %q", cluster)
+		}
+	}
+	for _, c := range spy.ecs.describeClusters {
+		if len(c) != 1 || c[0] != "core-services" {
+			t.Errorf("DescribeClusters named %v, want [core-services]", c)
+		}
+	}
+	for _, cluster := range spy.ecs.listServices {
+		if cluster != "core-services" {
+			t.Errorf("ListServices for cluster %q", cluster)
+		}
+	}
+	if len(spy.ecs.describeServices) == 0 {
+		t.Error("the spy saw no DescribeServices: it is not wired to the cycle")
 	}
 }
 

@@ -17,6 +17,8 @@ const (
 	maxFocusInFlight = 4
 	// pollNowCoalesce is how recent a cycle must be for a poll-now signal to be absorbed.
 	pollNowCoalesce = time.Second
+	// maxOneOffQueue is how many one-off cycles may wait for a free slot; further requests are dropped.
+	maxOneOffQueue = 4
 	// focusSchedulerTick is how often a slice looks for due focus cycles.
 	focusSchedulerTick = 50 * time.Millisecond
 	// focusWarnEvery limits the log line for a failing object to once a minute.
@@ -182,9 +184,16 @@ func (l *Loop) setFocused(objs []focus.Object) {
 		}
 	}
 	added := false
+	now := time.Now()
 	for member, o := range want {
 		if _, ok := l.focusSet[member]; !ok {
-			l.focusSet[member] = &focusEntry{obj: o}
+			e := &focusEntry{obj: o}
+			// A page that was opened first read once as a one-off (poll-now beat the registry read): that read counts as the
+			// object's first cycle, so opening a page costs one cycle, not two.
+			if at, ok := l.focusOnce[member]; ok && now.Sub(at) < time.Minute {
+				e.lastStart, e.cycles = at, 1
+			}
+			l.focusSet[member] = e
 			added = true
 		}
 	}
@@ -245,18 +254,59 @@ func (l *Loop) pollNow(o focus.Object, received time.Time) string {
 	if last, ok := l.focusOnce[member]; ok && received.Sub(last) < pollNowCoalesce {
 		return "coalesced"
 	}
+	// A one-off cycle counts against the same in-flight cap as the loops, and only a few may wait for a slot: a burst of
+	// signals must not take the slice's call budget from pages that are really open.
+	once := &onceRequest{obj: o, requestedAt: received}
+	switch {
+	case l.inFlightLocked() < maxFocusInFlight:
+		l.startOnceLocked(once)
+	case len(l.onceQueue) < maxOneOffQueue:
+		l.onceQueue = append(l.onceQueue, once)
+	default:
+		return "dropped"
+	}
 	l.focusOnce[member] = received
 	for m, at := range l.focusOnce { // forget old requests
 		if received.Sub(at) > time.Minute {
 			delete(l.focusOnce, m)
 		}
 	}
+	return "handled"
+}
+
+// onceRequest is a poll-now for an object that is not registered: one cycle, no loop.
+type onceRequest struct {
+	obj         focus.Object
+	requestedAt time.Time
+}
+
+// inFlightLocked is the number of focus cycles running in this slice, loops and one-offs alike. The caller holds focusMu.
+func (l *Loop) inFlightLocked() int {
+	n := l.onceRunning
+	for _, e := range l.focusSet {
+		if e.running {
+			n++
+		}
+	}
+	return n
+}
+
+// startOnceLocked runs a one-off cycle under the loop's context, so it ends with the loop. The caller holds focusMu.
+func (l *Loop) startOnceLocked(r *onceRequest) {
 	ctx := l.focusCtx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	go l.runFocusCycle(ctx, &focusEntry{obj: o}, 0, received, false)
-	return "handled"
+	l.onceRunning++
+	l.focusRunning.Add(1)
+	go func() {
+		defer l.focusRunning.Done()
+		l.runFocusCycle(ctx, &focusEntry{obj: r.obj}, 0, r.requestedAt, true)
+		l.focusMu.Lock()
+		l.onceRunning--
+		l.focusMu.Unlock()
+		l.wakeFocus() // a queued one-off may take the slot
+	}()
 }
 
 // runFocus starts the due focus cycles of the slice, most overdue first and at most maxFocusInFlight at once, until
@@ -282,12 +332,12 @@ func (l *Loop) runFocus(ctx context.Context) {
 func (l *Loop) startDueFocusCycles(ctx context.Context) {
 	l.focusMu.Lock()
 	defer l.focusMu.Unlock()
-	if len(l.focusSet) == 0 {
+	if len(l.focusSet) == 0 && len(l.onceQueue) == 0 {
 		return
 	}
 	interval := l.focusIntervalExact()
 	now := time.Now()
-	inFlight := 0
+	inFlight := l.onceRunning
 	var due []*focusEntry
 	for _, e := range l.focusSet {
 		switch {
@@ -316,6 +366,13 @@ func (l *Loop) startDueFocusCycles(ctx context.Context) {
 			defer l.focusRunning.Done()
 			l.runFocusCycle(ctx, e, cycle, trigAt, wasTriggered)
 		}()
+	}
+	// One-off cycles wait behind the loops: they are for pages that are not registered.
+	for inFlight < maxFocusInFlight && len(l.onceQueue) > 0 {
+		next := l.onceQueue[0]
+		l.onceQueue = l.onceQueue[1:]
+		l.startOnceLocked(next)
+		inFlight++
 	}
 }
 
@@ -349,6 +406,11 @@ func (l *Loop) runFocusCycle(ctx context.Context, e *focusEntry, cycle int, requ
 		tel.ObservePollNowLatency(finished.Sub(requestedAt))
 	}
 	if err != nil {
+		l.warnFocusFailure(ctx, e, err)
+		return
+	}
+	// A cycle with no rows to write skips the fence, so check it before saying the object was read.
+	if err := l.w.CheckLease(ctx); err != nil {
 		l.warnFocusFailure(ctx, e, err)
 		return
 	}
