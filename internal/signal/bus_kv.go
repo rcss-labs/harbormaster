@@ -23,18 +23,16 @@ func (b *kvBus) Subscribe(ctx context.Context, ch Channel, fn func(string), onGa
 	return b.c.Subscribe(ctx, b.c.Key(string(ch)), fn, onGap)
 }
 
-type upper interface{ Up() bool }
-
 // WithFallback publishes to primary while health says it is up (and to memory when a publish fails or it is down),
 // and subscribes to both, so a message published into memory during an outage still reaches subscribers in this
 // process. A subscriber on a fallback bus can be called from two goroutines at once (one per side).
-func WithFallback(primary, memory Bus, health upper) Bus {
+func WithFallback(primary, memory Bus, health kv.Upper) Bus {
 	return &fallbackBus{primary: primary, memory: memory, health: health}
 }
 
 type fallbackBus struct {
 	primary, memory Bus
-	health          upper
+	health          kv.Upper
 }
 
 func (f *fallbackBus) Publish(ctx context.Context, ch Channel, payload string) error {

@@ -4,21 +4,19 @@ import (
 	"context"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
-// upper is satisfied by *kv.Health.
-type upper interface{ Up() bool }
-
 type fallbackConcurrency struct {
 	primary, memory Concurrency
-	health          upper
+	health          kv.Upper
 	reg             *telemetry.Registry
 }
 
 // WithFallback uses primary while the store is up and memory while it is down, or for any single call where the
 // store returns an error, so an outage never blocks or errors a user. A release goes to the backend that granted.
-func WithFallback(primary, memory Concurrency, health upper, reg *telemetry.Registry) Concurrency {
+func WithFallback(primary, memory Concurrency, health kv.Upper, reg *telemetry.Registry) Concurrency {
 	return &fallbackConcurrency{primary: primary, memory: memory, health: health, reg: reg}
 }
 
@@ -63,12 +61,12 @@ func (f *fallbackConcurrency) Count(ctx context.Context, limit string, userID in
 
 type fallbackRate struct {
 	primary, memory Rate
-	health          upper
+	health          kv.Upper
 	reg             *telemetry.Registry
 }
 
 // RateWithFallback is WithFallback for Rate. A Reserve counts as an allowed decision: it always grants a slot.
-func RateWithFallback(primary, memory Rate, health upper, reg *telemetry.Registry) Rate {
+func RateWithFallback(primary, memory Rate, health kv.Upper, reg *telemetry.Registry) Rate {
 	return &fallbackRate{primary: primary, memory: memory, health: health, reg: reg}
 }
 
