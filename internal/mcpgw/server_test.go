@@ -344,8 +344,17 @@ func TestHandler_SDKClientConnectsAndListsAll39ReadOnlyTools(t *testing.T) {
 		t.Errorf("instructions = %q", init.Instructions)
 	}
 	// Deviation recorded by the implementer: initialize advertises tools only.
-	if init.Capabilities.Tools == nil || init.Capabilities.Resources != nil || init.Capabilities.Prompts != nil || init.Capabilities.Logging != nil {
-		t.Errorf("capabilities = %+v, want tools only", init.Capabilities)
+	// Checked through the JSON form so the deprecated Logging field is not read.
+	rawCaps, err := json.Marshal(init.Capabilities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var capabilityNames map[string]json.RawMessage
+	if err := json.Unmarshal(rawCaps, &capabilityNames); err != nil {
+		t.Fatal(err)
+	}
+	if _, hasTools := capabilityNames["tools"]; !hasTools || len(capabilityNames) != 1 {
+		t.Errorf("capabilities = %s, want tools only", rawCaps)
 	}
 
 	listed, err := session.ListTools(context.Background(), nil)
