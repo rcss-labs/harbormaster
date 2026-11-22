@@ -35,6 +35,12 @@ func NewToken(epoch int64, now time.Time) string {
 	return strconv.FormatInt(epoch, 10) + "-" + strconv.FormatInt(now.UnixMilli(), 10)
 }
 
+// Entry is one model read by GetMany. OK is false for a miss.
+type Entry struct {
+	Body []byte
+	OK   bool
+}
+
 // Cache is the store side of the snapshot cache. Every method may fail; callers treat a failure as a miss.
 type Cache interface {
 	// BumpAll sets the tokens of all keys (ten minute life) in one round trip, so a slice-wide write is one command
@@ -44,6 +50,12 @@ type Cache interface {
 	TouchAll(ctx context.Context, ks []GenKey, token string) error
 	// Tokens reads the tokens of all keys in one round trip; "" where one is missing.
 	Tokens(ctx context.Context, ks ...GenKey) ([]string, error)
+	// Lookup reads the token of gk and, when there is one, the model stored for id under it, in one round trip.
+	// token is "" when none is set (then there is no body).
+	Lookup(ctx context.Context, m Model, id string, gk GenKey) (token string, body []byte, ok bool, err error)
+	// GetMany returns the models stored for ids[i] under tokens[i], in one round trip; an empty token is not asked for
+	// and is reported as a miss.
+	GetMany(ctx context.Context, m Model, ids, tokens []string) ([]Entry, error)
 	// Get returns the model stored for id under token.
 	Get(ctx context.Context, m Model, id, token string) (body []byte, ok bool, err error)
 	// Put stores a model for ttl without overwriting an existing one; losing that race is not an error.

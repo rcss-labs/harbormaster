@@ -89,6 +89,14 @@ func (c *recordingCache) Get(context.Context, snapcache.Model, string, string) (
 	return nil, false, nil
 }
 
+func (c *recordingCache) Lookup(context.Context, snapcache.Model, string, snapcache.GenKey) (string, []byte, bool, error) {
+	return "", nil, false, nil
+}
+
+func (c *recordingCache) GetMany(_ context.Context, _ snapcache.Model, ids, _ []string) ([]snapcache.Entry, error) {
+	return make([]snapcache.Entry, len(ids)), nil
+}
+
 func (c *recordingCache) Put(context.Context, snapcache.Model, string, string, []byte, time.Duration) error {
 	return nil
 }

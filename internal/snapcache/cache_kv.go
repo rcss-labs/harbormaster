@@ -86,6 +86,57 @@ func (k kvCache) Tokens(ctx context.Context, gs ...GenKey) ([]string, error) {
 	return out, nil
 }
 
+// lookupScript reads a token and the model it names in one call. KEYS[1]: the token key. ARGV[1]: the model key up to
+// and including the separator before the token. It returns {} without a token, {token, false} for a miss.
+var lookupScript = kv.NewScript(`
+local token = redis.call('GET', KEYS[1])
+if not token then return {} end
+return {token, redis.call('GET', ARGV[1] .. token)}`)
+
+func (k kvCache) Lookup(ctx context.Context, m Model, id string, g GenKey) (string, []byte, bool, error) {
+	rep, err := k.c.Eval(ctx, lookupScript, []string{k.genKey(g)}, []string{k.modelKey(m, id, "")})
+	if err != nil {
+		return "", nil, false, err
+	}
+	parts, err := rep.Strings()
+	if err != nil {
+		return "", nil, false, err
+	}
+	if len(parts) == 0 || parts[0] == "" {
+		return "", nil, false, nil
+	}
+	if len(parts) < 2 || parts[1] == "" { // a stored model is never empty (it is gzip)
+		return parts[0], nil, false, nil
+	}
+	return parts[0], []byte(parts[1]), true, nil
+}
+
+func (k kvCache) GetMany(ctx context.Context, m Model, ids, tokens []string) ([]Entry, error) {
+	out := make([]Entry, len(ids))
+	var keys []string
+	var at []int
+	for i, id := range ids {
+		if tokens[i] == "" {
+			continue
+		}
+		keys = append(keys, k.modelKey(m, id, tokens[i]))
+		at = append(at, i)
+	}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	vals, err := k.c.MGet(ctx, keys...)
+	if err != nil {
+		return nil, err
+	}
+	for j, i := range at {
+		if j < len(vals) && vals[j].OK {
+			out[i] = Entry{Body: []byte(vals[j].S), OK: true}
+		}
+	}
+	return out, nil
+}
+
 func (k kvCache) Get(ctx context.Context, m Model, id, token string) ([]byte, bool, error) {
 	v, err := k.c.Get(ctx, k.modelKey(m, id, token))
 	if err != nil || !v.OK {

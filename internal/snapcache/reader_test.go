@@ -196,6 +196,10 @@ func (failingCache) Tokens(context.Context, ...GenKey) ([]string, error) {
 	return nil, errors.New("store down")
 }
 
+func (failingCache) Lookup(context.Context, Model, string, GenKey) (string, []byte, bool, error) {
+	return "", nil, false, errors.New("store down")
+}
+
 func TestRead_StoreDownReadsPostgres(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		r := newReaderRig(t, c)
