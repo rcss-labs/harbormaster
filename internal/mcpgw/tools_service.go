@@ -113,12 +113,12 @@ func serviceTools() []Tool {
 			// internal/api/timeline.go (getTimelineTask): serviceId and taskId path values.
 			Name: "get_timeline_task", Title: "Get a task from the timeline",
 			Description: "One task of the service in detail, including stopped tasks older than list_service_tasks shows: status, stop reason, " +
-				"containers and exit codes. The task id comes from get_service_timeline or list_service_tasks." + scopedNote,
+				"containers and exit codes. The task id is the short id: the short_id field of list_service_tasks, or the task id in get_service_timeline." + scopedNote,
 			Route: get("/api/services/{serviceId}/timeline/tasks/{taskId}"),
 			Params: []Param{
 				serviceIDParam(),
 				{Name: "task_id", Type: TypeString, In: InPath, Required: true,
-					Description: "The ECS task id (the last part of the task ARN), from get_service_timeline or list_service_tasks."},
+					Description: "The ECS task id (the last part of the task ARN): short_id in list_service_tasks, or the task id in get_service_timeline."},
 			},
 		},
 	}
