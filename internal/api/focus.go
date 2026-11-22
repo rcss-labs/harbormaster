@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/focus"
@@ -20,7 +22,41 @@ const (
 	// minFocusEvidenceAge is the least age at which a fresh entry stops counting as evidence: it must be newer than two
 	// effective intervals, and never less than this.
 	minFocusEvidenceAge = 10 * time.Second
+	// focusFirstReadWait is how long after an open a page without evidence is still waiting for the poller's first read
+	// rather than being served by nobody.
+	focusFirstReadWait = 12 * time.Second
+	// Opens that carry a poll-now signal are limited per user: a burst of ten (clicking through a list of pages), then two
+	// a second. The heartbeat itself is never refused.
+	focusOpenBurst           = 10
+	focusOpenRefillPerSecond = 2.0
 )
+
+// focusOpens remembers when each object was last opened through this task.
+type focusOpens struct {
+	mu sync.Mutex
+	at map[string]time.Time
+}
+
+func (o *focusOpens) mark(member string, now time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.at == nil {
+		o.at = map[string]time.Time{}
+	}
+	o.at[member] = now
+	for m, t := range o.at { // forget old opens
+		if now.Sub(t) > time.Minute {
+			delete(o.at, m)
+		}
+	}
+}
+
+func (o *focusOpens) recent(member string, now time.Time) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	t, ok := o.at[member]
+	return ok && now.Sub(t) < focusFirstReadWait
+}
 
 // focusObject resolves the request to the object it names. A kind other than cluster or service is an error the
 // caller turns into 422; an id that does not parse is ok=false (the page's own 404).
@@ -96,10 +132,14 @@ func (s *Server) postFocus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.countFocus(string(admission))
-	if req.Open && s.Bus != nil {
+	if req.Open {
+		s.focusOpens.mark(obj.Member(), s.Now())
 		// Whatever the admission: a capped page still gets its immediate read. A lost signal is repaired by the
-		// poller's own registry read, and there is none to repair for a capped object, so an error is ignored.
-		_ = s.Bus.Publish(ctx, signal.PollNow, obj.Member())
+		// poller's own registry read (not for a capped object, which only gets this one), so an error is ignored. A user
+		// past the open limit skips the signal; the registry read starts a registered object within a second.
+		if s.Bus != nil && s.allowRate(ctx, rateFocusOpen, strconv.FormatInt(sc.Subject.UserID, 10), focusOpenBurst, focusOpenRefillPerSecond) {
+			_ = s.Bus.Publish(ctx, signal.PollNow, obj.Member())
+		}
 	}
 
 	switch admission {
@@ -114,7 +154,7 @@ func (s *Server) postFocus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dto, err := s.focusEvidence(ctx, obj, req.Open || admission == focus.Admitted)
+	dto, err := s.focusEvidence(ctx, obj, req.Open || admission == focus.Admitted || s.focusOpens.recent(obj.Member(), s.Now()))
 	if err != nil {
 		s.Log.Warn("focus evidence read failed", "err", err)
 		s.focusUnavailable(w)

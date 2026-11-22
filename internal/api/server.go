@@ -109,6 +109,8 @@ type Server struct {
 	Bus   signal.Bus
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
+	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.
+	focusOpens *focusOpens
 }
 
 // Names of the per-user limits in Server.Limits (also the key segment and metric label).
@@ -123,6 +125,7 @@ const (
 	rateLogSearch  = "logsearch"
 	rateNotifyTest = "notifytest"
 	rateSAMLLogin  = "samllogin"
+	rateFocusOpen  = "focusopen"
 )
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
@@ -140,6 +143,7 @@ type ScanKicker interface{ Kick() }
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
 	s.costWarned = &sync.Map{}
+	s.focusOpens = &focusOpens{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()

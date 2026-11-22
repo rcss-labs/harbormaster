@@ -227,12 +227,14 @@ func TestFocus_ThrottledStateAndStretchedInterval(t *testing.T) {
 }
 
 func TestFocus_StaleEvidenceIsNotLive(t *testing.T) {
-	f := newFocusFixture(t, nil)
+	clock := &focusTestClock{t: time.Now()}
+	f := newFocusFixture(t, func(s *Server, _ *focusFixture) { s.Now = clock.now })
 	sam := login(t, f.srv, "sam", testPassword)
 	id := focusServiceKey("payments-api").ID()
 	postFocus(t, sam, "service", id, true)
+	clock.advance(60 * time.Second) // well past the wait for a first read
 	// Older than two intervals and at least 10 s: no longer evidence.
-	if err := f.reg.SetFresh(context.Background(), focusServiceObject("payments-api"), focus.Fresh{At: time.Now().Add(-40 * time.Second), Interval: 5 * time.Second, State: "live"}); err != nil {
+	if err := f.reg.SetFresh(context.Background(), focusServiceObject("payments-api"), focus.Fresh{At: clock.now().Add(-40 * time.Second), Interval: 5 * time.Second, State: "live"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, got := postFocus(t, sam, "service", id, false); got.State != "unavailable" {
@@ -269,16 +271,71 @@ func TestFocus_UserCapped(t *testing.T) {
 	}
 }
 
-func TestFocus_UnavailableWithoutEvidenceAfterTheFirstHeartbeat(t *testing.T) {
-	f := newFocusFixture(t, nil)
+// focusTestClock is a clock the test moves; the server reads it through Server.Now.
+type focusTestClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *focusTestClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *focusTestClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+func TestFocus_UnavailableWithoutEvidenceLongAfterTheOpen(t *testing.T) {
+	clock := &focusTestClock{t: time.Now()}
+	f := newFocusFixture(t, func(s *Server, _ *focusFixture) { s.Now = clock.now })
 	sam := login(t, f.srv, "sam", testPassword)
 	id := focusServiceKey("payments-api").ID()
 	if _, got := postFocus(t, sam, "service", id, true); got.State != "live" {
 		t.Fatalf("first heartbeat = %+v, want live", got)
 	}
+	clock.advance(20 * time.Second) // past the wait for the poller's first read
 	status, got := postFocus(t, sam, "service", id, false)
 	if status != http.StatusOK || got.State != "unavailable" || got.Message != "Live refresh unavailable" {
-		t.Fatalf("second heartbeat without evidence = %d %+v, want unavailable", status, got)
+		t.Fatalf("heartbeat without evidence long after the open = %d %+v, want unavailable", status, got)
+	}
+}
+
+// The first answer after an open has no evidence yet. A recheck a few seconds later is still waiting for the poller's
+// first read, which is not a fault: it must not read as unavailable.
+func TestFocus_RecheckSoonAfterAnOpenIsPendingNotUnavailable(t *testing.T) {
+	clock := &focusTestClock{t: time.Now()}
+	f := newFocusFixture(t, func(s *Server, _ *focusFixture) { s.Now = clock.now })
+	sam := login(t, f.srv, "sam", testPassword)
+	id := focusServiceKey("payments-api").ID()
+	postFocus(t, sam, "service", id, true)
+	clock.advance(3 * time.Second)
+	status, got := postFocus(t, sam, "service", id, false)
+	if status != http.StatusOK || got.State != "live" || got.RefreshedAt != nil || got.Message != "" {
+		t.Fatalf("recheck 3 s after an open = %d %+v, want live with no refreshed_at (pending)", status, got)
+	}
+}
+
+// Opens that publish poll-now are limited per user: a script cannot queue a read cycle per request. The heartbeat itself
+// is still admitted and answered; only the signal is skipped, and the poller's registry read starts the loop anyway.
+func TestFocus_OpenSignalIsRateLimitedPerUser(t *testing.T) {
+	f := newFocusFixture(t, nil)
+	sam := login(t, f.srv, "sam", testPassword)
+	id := focusServiceKey("payments-api").ID()
+	for i := 0; i < 30; i++ {
+		if status, got := postFocus(t, sam, "service", id, true); status != http.StatusOK || got.State == "" {
+			t.Fatalf("open %d = %d %+v, want it answered", i, status, got)
+		}
+	}
+	pub := f.bus.snapshot()
+	if len(pub) < 10 || len(pub) > 14 {
+		t.Fatalf("30 opens in a burst published %d poll-now signals, want the bucket of about 10", len(pub))
+	}
+	if got := listed(t, f.reg); len(got) != 1 {
+		t.Fatalf("registry = %v: limited opens must still register the object", got)
 	}
 }
 
