@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
+	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -64,6 +65,9 @@ type TaskDefinitionResponse struct {
 	Can               ChangeCanDTO     `json:"can"`
 	Tag               TagDTO           `json:"tag"`
 	PolledAt          time.Time        `json:"polled_at"`
+	// EnvironmentRedacted is true when HM_TOKEN_REDACT_ENV replaced the environment values for an access token, so
+	// a caller does not report "[redacted]" as a real value.
+	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
 // RevisionDTO is one task definition revision of the service's family.
@@ -93,6 +97,8 @@ type RevisionDefinitionResponse struct {
 	Definition   json.RawMessage `json:"definition"`
 	RegisteredAt time.Time       `json:"registered_at"`
 	RegisteredBy string          `json:"registered_by"`
+	// EnvironmentRedacted is true when HM_TOKEN_REDACT_ENV replaced the environment values for an access token.
+	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
 // ImageTagDTO is one tag in the service's ECR repository.
@@ -162,7 +168,12 @@ func (s *Server) getTaskDefinition(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	definition, err := deploy.DefinitionJSON(deployed.Definition)
+	redacted := s.redactForToken(r)
+	definitionSource := deployed.Definition
+	if redacted {
+		definitionSource = redactEnvironment(definitionSource)
+	}
+	definition, err := deploy.DefinitionJSON(definitionSource)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -190,6 +201,8 @@ func (s *Server) getTaskDefinition(w http.ResponseWriter, r *http.Request) {
 		Can:        changeCan(sc.Subject, tagID),
 		Tag:        inheritedTag(tags, tagID, row.TagInherited),
 		PolledAt:   polledAt,
+
+		EnvironmentRedacted: redacted,
 	})
 }
 
@@ -231,7 +244,12 @@ func (s *Server) getRevisionDefinition(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	definition, err := deploy.DefinitionJSON(found.Definition)
+	redacted := s.redactForToken(r)
+	definitionSource := found.Definition
+	if redacted {
+		definitionSource = redactEnvironment(definitionSource)
+	}
+	definition, err := deploy.DefinitionJSON(definitionSource)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -239,6 +257,7 @@ func (s *Server) getRevisionDefinition(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, RevisionDefinitionResponse{
 		Revision: found.Revision, ARN: found.ARN, Definition: definition,
 		RegisteredAt: found.RegisteredAt, RegisteredBy: found.RegisteredBy,
+		EnvironmentRedacted: redacted,
 	})
 }
 
@@ -286,4 +305,61 @@ func (s *Server) getDesiredCount(w http.ResponseWriter, r *http.Request) {
 		out.AutoScaling = &AutoScalingRangeDTO{Min: info.AutoScaling.Min, Max: info.AutoScaling.Max}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// redactedValue replaces an environment value for an access token when HM_TOKEN_REDACT_ENV is on.
+const redactedValue = "[redacted]"
+
+// redactForToken reports whether this request's answer must hide environment values: only for an access token and
+// only while the switch is on (it is off by default, owner decision 9). A session is never redacted.
+func (s *Server) redactForToken(r *http.Request) bool {
+	return s.Cfg.TokenRedactEnv && auth.IsToken(r.Context())
+}
+
+// redactEnvironment returns a copy of the task definition with every containerDefinitions[].environment[].value
+// replaced by "[redacted]". Names, secrets[].valueFrom and everything else are kept. The input is never modified:
+// definitions may be shared with a cache.
+func redactEnvironment(definition map[string]any) map[string]any {
+	containers, ok := definition["containerDefinitions"].([]any)
+	if !ok {
+		return definition
+	}
+	out := make(map[string]any, len(definition))
+	for key, value := range definition {
+		out[key] = value
+	}
+	redactedContainers := make([]any, len(containers))
+	for i, raw := range containers {
+		container, ok := raw.(map[string]any)
+		if !ok {
+			redactedContainers[i] = raw
+			continue
+		}
+		copied := make(map[string]any, len(container))
+		for key, value := range container {
+			copied[key] = value
+		}
+		if environment, ok := container["environment"].([]any); ok {
+			redactedEnvironment := make([]any, len(environment))
+			for j, rawEntry := range environment {
+				entry, ok := rawEntry.(map[string]any)
+				if !ok {
+					redactedEnvironment[j] = rawEntry
+					continue
+				}
+				copiedEntry := make(map[string]any, len(entry))
+				for key, value := range entry {
+					copiedEntry[key] = value
+				}
+				if _, has := copiedEntry["value"]; has {
+					copiedEntry["value"] = redactedValue
+				}
+				redactedEnvironment[j] = copiedEntry
+			}
+			copied["environment"] = redactedEnvironment
+		}
+		redactedContainers[i] = copied
+	}
+	out["containerDefinitions"] = redactedContainers
+	return out
 }
