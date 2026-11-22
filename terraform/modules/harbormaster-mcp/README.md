@@ -20,7 +20,7 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 ## Prerequisites
 
 - Private subnets that route to a NAT gateway, and public subnets for the load balancer.
-- The Harbormaster module with `internal = true`, `alb_ingress_security_group_ids = [<this module>.task_security_group_id]`, and in `extra_env`: `HM_API_TOKENS = "true"`, `HM_MCP_PUBLIC_URL` set to this module's `public_url`, and `HM_MCP_GATEWAY_CIDRS` set to the CIDRs of the subnets the gateway tasks run in (`private_subnet_ids`), so token calls record the real client IP instead of the gateway's.
+- The Harbormaster module with `internal = true`, `alb_ingress_security_group_ids = [<this module>.task_security_group_id]`, and in `extra_env`: `HM_API_TOKENS = "true"`, `HM_MCP_PUBLIC_URL` set to this module's `public_url`, and `HM_MCP_GATEWAY_CIDRS` set to the CIDRs of the subnets the gateway tasks run in (`private_subnet_ids`), so token calls record the real client IP instead of the gateway's. Give the gateway its own private subnets where you can: every task inside those CIDRs is trusted to name the client IP, so subnets shared with Harbormaster extend that trust to Harbormaster's tasks. The IP is used for records and rate limiting, never for authorization.
 - A private DNS name for `upstream_url` that matches the internal load balancer's certificate.
 - A public hostname, an ACM certificate for it, and a DNS record pointing at `alb_dns_name` (alias with `alb_zone_id`). There are no defaults for `public_url` or `certificate_arn`.
 - The gateway image in ECR, pinned to a tag or digest (`:latest` is rejected), matching `cpu_architecture`.
