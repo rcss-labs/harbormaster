@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -221,11 +222,27 @@ func targetHealthDiffers(stored, fresh []model.TargetHealth) bool {
 	for _, row := range fresh {
 		old, ok := byGroup[row.TargetGroupARN]
 		if !ok || old.LoadBalancerARN != row.LoadBalancerARN || old.Healthy != row.Healthy ||
-			old.Unhealthy != row.Unhealthy || !slices.Equal(old.Targets, row.Targets) {
+			old.Unhealthy != row.Unhealthy || !sameTargets(old.Targets, row.Targets) {
 			return true
 		}
 	}
 	return false
+}
+
+// sameTargets compares two target lists as sets: AWS does not promise an order, and a list that only came back in
+// another order must not invalidate the cached models every cycle.
+func sameTargets(a, b []model.Target) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	order := func(x, y model.Target) int {
+		return cmp.Or(cmp.Compare(x.ID, y.ID), cmp.Compare(x.Port, y.Port), cmp.Compare(x.AZ, y.AZ),
+			cmp.Compare(x.State, y.State), cmp.Compare(x.Reason, y.Reason), cmp.Compare(x.Description, y.Description))
+	}
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.SortFunc(a, order)
+	slices.SortFunc(b, order)
+	return slices.Equal(a, b)
 }
 
 // describeTargetGroupLoadBalancers maps each existing target group ARN to its load balancer ARN.
