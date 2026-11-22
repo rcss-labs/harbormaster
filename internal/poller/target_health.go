@@ -136,36 +136,33 @@ func sliceTargetHealthChanged(stored map[model.ServiceKey][]model.TargetHealth, 
 // read from AWS and no row is deleted. changed is true when a stored row differs from what AWS reported.
 func (l *TargetHealthLoop) RunService(ctx context.Context, key model.ServiceKey) (changed bool, err error) {
 	t := awsx.Target{AccountID: key.AccountID, Region: key.Region}
-	filter := store.TargetFilter{AccountID: t.AccountID, Region: t.Region}
-	services, err := l.Store.ListServices(ctx, filter, key.Cluster, store.Visibility{Admin: true})
+	svc, err := l.Store.GetServiceView(ctx, key, store.Visibility{Admin: true})
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
 	if err != nil {
-		return false, fmt.Errorf("list services: %w", err)
+		return false, fmt.Errorf("get service: %w", err)
 	}
 	var groups []string
 	seen := map[string]bool{}
-	for _, svc := range services {
-		if svc.Key != key {
-			continue
-		}
-		for _, lb := range svc.LoadBalancers {
-			if lb.TargetGroupARN != "" && !seen[lb.TargetGroupARN] {
-				seen[lb.TargetGroupARN] = true
-				groups = append(groups, lb.TargetGroupARN)
-			}
+	for _, lb := range svc.LoadBalancers {
+		if lb.TargetGroupARN != "" && !seen[lb.TargetGroupARN] {
+			seen[lb.TargetGroupARN] = true
+			groups = append(groups, lb.TargetGroupARN)
 		}
 	}
 	if len(groups) == 0 {
 		return false, nil
 	}
 
-	stored, err := l.Store.TargetHealthByService(ctx, filter, key.Cluster)
+	stored, err := l.Store.TargetHealthForService(ctx, key)
 	if err != nil {
 		return false, fmt.Errorf("stored target health: %w", err)
 	}
 	// A group already stored has its load balancer on record; only unknown groups need DescribeTargetGroups, which
 	// keeps a focus cycle to the reads the design lists.
 	loadBalancers := map[string]string{}
-	for _, row := range stored[key] {
+	for _, row := range stored {
 		if row.LoadBalancerARN != "" {
 			loadBalancers[row.TargetGroupARN] = row.LoadBalancerARN
 		}
@@ -206,7 +203,7 @@ func (l *TargetHealthLoop) RunService(ctx context.Context, key model.ServiceKey)
 		rows = append(rows, normalizeTargetHealth(key, arn, loadBalancerARN, out, now))
 	}
 
-	changed = targetHealthDiffers(stored[key], rows)
+	changed = targetHealthDiffers(stored, rows)
 	if err := l.Writer.UpsertTargetHealth(ctx, rows); err != nil {
 		return false, err
 	}
