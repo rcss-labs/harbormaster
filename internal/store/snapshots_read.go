@@ -449,37 +449,7 @@ func taskFrom(v visibilitySQL) string {
 
 // ListTasks returns one page of visible tasks and the size of the whole filtered set.
 func (s *Store) ListTasks(ctx context.Context, tq TaskQuery) ([]TaskRow, int, error) {
-	var q queryArgs
-	where := []string{q.target("t", tq.TargetFilter)}
-	v := q.visibility("t", tq.Vis)
-	where = append(where, v.Predicate)
-	if tq.Cluster != "" {
-		where = append(where, "t.cluster_name = "+q.add(tq.Cluster))
-	}
-	if tq.Service != "" {
-		where = append(where, "t.service_name = "+q.add(tq.Service))
-	}
-	if !tq.StoppedAfter.IsZero() {
-		where = append(where, "(t.last_status is distinct from 'STOPPED' or t.stopped_at >= "+q.add(tq.StoppedAfter)+")")
-	}
-	switch tq.Filter {
-	case "running":
-		where = append(where, runningSQL)
-	case "stopped":
-		where = append(where, "t.last_status = 'STOPPED'")
-	case "stopped_error":
-		where = append(where, stoppedErrorSQL)
-	case "problems":
-		where = append(where, "("+runningSQL+" or "+problemSQL+")")
-	}
-	if tq.Q != "" {
-		esc := likeEscape(tq.Q)
-		suffix, contains, prefix := q.add(esc), q.add(esc), q.add(esc)
-		where = append(where, fmt.Sprintf(
-			`(t.task_arn ilike '%%' || %s or t.family ilike '%%' || %s || '%%' or t.service_name ilike '%%' || %s || '%%' or t.private_ip like %s || '%%')`,
-			suffix, contains, contains, prefix))
-	}
-	whereSQL := strings.Join(where, " and ")
+	q, whereSQL, v := taskWhere(tq, true)
 	from := taskFrom(v)
 
 	var total int
@@ -504,6 +474,70 @@ func (s *Store) ListTasks(ctx context.Context, tq TaskQuery) ([]TaskRow, int, er
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// taskWhere builds the shared WHERE of the task queries. withFilter applies tq.Filter; the filter tabs are
+// counted without it.
+func taskWhere(tq TaskQuery, withFilter bool) (queryArgs, string, visibilitySQL) {
+	var q queryArgs
+	where := []string{q.target("t", tq.TargetFilter)}
+	v := q.visibility("t", tq.Vis)
+	where = append(where, v.Predicate)
+	if tq.Cluster != "" {
+		where = append(where, "t.cluster_name = "+q.add(tq.Cluster))
+	}
+	if tq.Service != "" {
+		where = append(where, "t.service_name = "+q.add(tq.Service))
+	}
+	if !tq.StoppedAfter.IsZero() {
+		where = append(where, "(t.last_status is distinct from 'STOPPED' or t.stopped_at >= "+q.add(tq.StoppedAfter)+")")
+	}
+	switch filterFor(tq, withFilter) {
+	case "running":
+		where = append(where, runningSQL)
+	case "stopped":
+		where = append(where, "t.last_status = 'STOPPED'")
+	case "stopped_error":
+		where = append(where, stoppedErrorSQL)
+	case "problems":
+		where = append(where, "("+runningSQL+" or "+problemSQL+")")
+	}
+	if tq.Q != "" {
+		esc := likeEscape(tq.Q)
+		suffix, contains, prefix := q.add(esc), q.add(esc), q.add(esc)
+		where = append(where, fmt.Sprintf(
+			`(t.task_arn ilike '%%' || %s or t.family ilike '%%' || %s || '%%' or t.service_name ilike '%%' || %s || '%%' or t.private_ip like %s || '%%')`,
+			suffix, contains, contains, prefix))
+	}
+	whereSQL := strings.Join(where, " and ")
+	return q, whereSQL, v
+}
+
+func filterFor(tq TaskQuery, withFilter bool) string {
+	if !withFilter {
+		return ""
+	}
+	return tq.Filter
+}
+
+// TaskCounts is the size of each task filter tab for one scope.
+type TaskCounts struct{ All, Problems, Running, Stopped, StoppedError int }
+
+// TaskCounts counts the tasks of every filter tab in one query. tq.Filter, Limit and Offset are ignored; the rest
+// (scope, visibility, stopped window and search) applies as in ListTasks.
+func (s *Store) TaskCounts(ctx context.Context, tq TaskQuery) (TaskCounts, error) {
+	q, whereSQL, v := taskWhere(tq, false)
+	var c TaskCounts
+	err := s.Pool.QueryRow(ctx, `select count(*),
+		count(*) filter (where `+problemSQL+` or `+runningSQL+`),
+		count(*) filter (where `+runningSQL+`),
+		count(*) filter (where t.last_status = 'STOPPED'),
+		count(*) filter (where `+stoppedErrorSQL+`)`+taskFrom(v)+` where `+whereSQL, q.values...).
+		Scan(&c.All, &c.Problems, &c.Running, &c.Stopped, &c.StoppedError)
+	if err != nil {
+		return TaskCounts{}, fmt.Errorf("count tasks by filter: %w", err)
+	}
+	return c, nil
 }
 
 // RunningTasks returns visible non-STOPPED tasks without raw and containers.
