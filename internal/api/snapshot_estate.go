@@ -67,10 +67,15 @@ func (s *Server) firstEvents(ctx context.Context, sc scope, in estateInputs) (ma
 	return out, nil
 }
 
+// targetKeysTTL is how long a task reuses the list of account x region pairs that hold rows. The list changes only when
+// the first cluster of a new account or region is polled, so a new one can be missing from the cached list pages for up
+// to this long; that staleness is accepted in exchange for dropping a UNION query from every list request.
+const targetKeysTTL = 5 * time.Second
+
 func (s *Server) cachedEstateInputs(ctx context.Context, sc scope, withClusters bool) (estateInputs, error) {
 	// The slices are every account x region that holds a row, so a slice whose poller is gone still shows what Postgres
 	// has, exactly as it does without the cache.
-	keys, err := s.Store.TargetKeys(ctx)
+	keys, err := s.targetKeys.get(s.Now(), targetKeysTTL, func() ([]store.TargetFilter, error) { return s.Store.TargetKeys(ctx) })
 	if err != nil {
 		return estateInputs{}, err
 	}
