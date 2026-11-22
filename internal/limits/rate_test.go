@@ -18,7 +18,7 @@ func eachRate(t *testing.T, fn func(t *testing.T, r Rate)) {
 	t.Run("memory", func(t *testing.T) { fn(t, NewMemoryRate(time.Now)) })
 	for _, u := range kvtest.URLs() {
 		u := u
-		t.Run("kv-"+engineLabel(u), func(t *testing.T) { fn(t, NewKVRate(kvtest.Open(t, u))) })
+		t.Run("kv-"+kvtest.Label(u), func(t *testing.T) { fn(t, NewKVRate(kvtest.Open(t, u))) })
 	}
 }
 

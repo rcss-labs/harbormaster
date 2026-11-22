@@ -75,7 +75,7 @@ func (k *KVConcurrency) Acquire(ctx context.Context, limit string, userID int64,
 	key := k.key(limit, userID)
 	member := randomID()
 	reply, err := k.c.Eval(ctx, acquireScript, []string{key}, []string{
-		strconv.Itoa(max), ms(k.Expiry), member, ms(k.KeyTTL),
+		strconv.Itoa(max), kv.Millis(k.Expiry), member, kv.Millis(k.KeyTTL),
 	})
 	if err != nil {
 		return func() {}, false, err
@@ -103,7 +103,7 @@ func (k *KVConcurrency) Acquire(ctx context.Context, limit string, userID int64,
 				return
 			case <-tick.C:
 				rctx, cancel := context.WithTimeout(k.stopCtx, 2*time.Second)
-				_, _ = k.c.Eval(rctx, refreshScript, []string{key}, []string{ms(k.Expiry), member, ms(k.KeyTTL)})
+				_, _ = k.c.Eval(rctx, refreshScript, []string{key}, []string{kv.Millis(k.Expiry), member, kv.Millis(k.KeyTTL)})
 				cancel()
 			}
 		}
@@ -130,8 +130,6 @@ func (k *KVConcurrency) Count(ctx context.Context, limit string, userID int64) (
 	}
 	return int(got[0]), nil
 }
-
-func ms(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(), 10) }
 
 func randomID() string {
 	b := make([]byte, 12)

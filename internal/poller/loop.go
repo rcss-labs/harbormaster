@@ -12,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
-	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/focus"
@@ -154,7 +153,6 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	add(tierTargetHealth, in.TargetHealth, l.gated(func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) }))
 	scaling := &ScalingLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Scaling}
 	add(tierScaling, in.Scaling, l.gated(func(ctx context.Context) error { return scaling.Run(ctx, l.target) }))
-	// plan 05
 	network := &NetworkLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Network}
 	add(tierNetwork, in.Network, l.gated(func(ctx context.Context) error { return network.Run(ctx, l.target) }))
 	storage := &StorageLoop{Writer: w, Clients: p.clients, Every: in.Storage}
@@ -164,73 +162,17 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	return l
 }
 
-// gated runs a tier that calls AWS sequentially while holding one slot of the loop's semaphore, so spec 5.3's
-// in-flight bound covers every AWS service of the target, not only ECS. plan 06
+// gated runs a tier that calls AWS sequentially while holding one slot of the loop's semaphore, so the
+// in-flight bound covers every AWS service of the target, not only ECS.
 func (l *Loop) gated(run func(context.Context) error) func(context.Context) error {
 	return func(ctx context.Context) error {
-		select {
-		case l.sem <- struct{}{}:
-			defer func() { <-l.sem }()
-		case <-ctx.Done():
-			return ctx.Err()
+		release, err := acquire(ctx, l.sem)
+		if err != nil {
+			return err
 		}
+		defer release()
 		return run(ctx)
 	}
-}
-
-// PollOnce runs every tier once, in order, for one target. API tests use it to fill the store from a fake estate.
-// It claims the target's slice lease under a throwaway owner and releases it afterwards, so its writes are fenced like
-// the real loops' and no unfenced way to write exists; it fails when a live owner holds the slice.
-func PollOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Config, t awsx.Target) error {
-	w, release, err := claimOnce(ctx, st, t)
-	if err != nil {
-		return err
-	}
-	defer release()
-	return newLoop(New(st, clients, cfg, slog.Default()), t, w).runOnce(ctx)
-}
-
-// claimOnce takes the slice's lease for one throwaway owner and returns its writer and a release function.
-func claimOnce(ctx context.Context, st *store.Store, t awsx.Target) (*store.SliceWriter, func(), error) {
-	// A claim behind a stuck writer must not hang the caller: give up a little after the store's own deadline.
-	claimCtx, cancel := context.WithTimeout(ctx, store.ClaimDeadline+2*time.Second)
-	defer cancel()
-	if err := st.EnsureSliceLease(claimCtx, t); err != nil {
-		return nil, nil, err
-	}
-	// Nothing renews this lease, and the fence also checks expiry, so a helper that runs past the TTL would get
-	// ErrLeaseLost halfway through. Ten minutes outlasts any one-shot poll; release returns it as soon as the helper ends.
-	l, ok, err := st.ClaimLeaseOnce(claimCtx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: t.AccountID, Region: t.Region}, uuid.New(), 10*time.Minute)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !ok {
-		return nil, nil, fmt.Errorf("poll once: slice %s/%s is held by a live owner", t.AccountID, t.Region)
-	}
-	w, err := st.SliceWriter(l)
-	if err != nil {
-		return nil, nil, err
-	}
-	release := func() {
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = st.ReleaseLease(rctx, l)
-	}
-	return w, release, nil
-}
-
-// PollCountsOnce is PollOnce followed by one counts-history tick: the sample the counts loop takes every few
-// minutes, which also folds the cluster's running capacity into today's cluster_capacity_daily row.
-func PollCountsOnce(ctx context.Context, st *store.Store, clients awsx.Clients, cfg Config, t awsx.Target) error {
-	w, release, err := claimOnce(ctx, st, t)
-	if err != nil {
-		return err
-	}
-	defer release()
-	l := newLoop(New(st, clients, cfg, slog.Default()), t, w)
-	err = l.runOnce(ctx)
-	l.recordCounts(ctx)
-	return err
 }
 
 // runOnce runs every tier once, synchronously: clusters, serviceList, services,
@@ -389,7 +331,7 @@ func (l *Loop) runTier(ctx context.Context, d tierDef) error {
 	}
 	if ctx.Err() == nil {
 		l.recordCycle(ctx, d.tier, err)
-		// plan 06: recordCycle has applied backoff, so cur is the interval the tier will run at next.
+		// recordCycle has applied backoff, so cur is the interval the tier will run at next.
 		d.tier.mu.Lock()
 		interval := d.tier.cur
 		d.tier.mu.Unlock()
@@ -434,9 +376,14 @@ type limitedECS struct {
 }
 
 func (c *limitedECS) acquire(ctx context.Context) (release func(), err error) {
+	return acquire(ctx, c.sem)
+}
+
+// acquire takes one slot of the in-flight semaphore, or fails when ctx ends first. The returned function frees the slot.
+func acquire(ctx context.Context, sem chan struct{}) (release func(), err error) {
 	select {
-	case c.sem <- struct{}{}:
-		return func() { <-c.sem }, nil
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -521,10 +468,11 @@ func (l *Loop) forEachCluster(ctx context.Context, fn func(ctx context.Context, 
 			if err := fn(ctx, k); err != nil {
 				errs[i] = fmt.Errorf("cluster %s: %w", k.Cluster, err)
 			}
-			l.markGeneration(ctx, k.Cluster, false) // a pass over the cluster keeps its token alive
 		}()
 	}
 	wg.Wait()
+	// A pass over the clusters keeps their tokens alive: one batched touch for the slice and every cluster.
+	l.markGeneration(ctx, "", false)
 	return errors.Join(errs...)
 }
 
@@ -557,20 +505,7 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	for _, arn := range arns {
 		keys = append(keys, model.ClusterKey{AccountID: l.target.AccountID, Region: l.target.Region, Cluster: clusterNameFromARN(arn)})
 	}
-	// Which clusters are about to go: the ones stored now that are not listed. Their own tokens must move too, or their
-	// pages would be served from the cache until the TTL. A failed read only costs that: the slice token still moves.
-	var gone []string
-	if stored, err := l.p.reads.ListClusters(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region}, store.Visibility{Admin: true}); err == nil {
-		listed := make(map[string]bool, len(keys))
-		for _, k := range keys {
-			listed[k.Cluster] = true
-		}
-		for _, c := range stored {
-			if !listed[c.Key.Cluster] {
-				gone = append(gone, c.Key.Cluster)
-			}
-		}
-	}
+	gone := l.clustersGone(ctx, keys)
 	deleted, err := l.w.DeleteClustersNotIn(ctx, l.target, keys)
 	if err != nil {
 		return err
@@ -595,6 +530,37 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	l.mu.Unlock()
 	l.markGeneration(ctx, "", false)
 	return nil
+}
+
+// clustersGone names the clusters that were stored and are no longer listed, so their own cache tokens can move with
+// the slice's (or their pages would be served from the cache until the TTL). It is only needed with a snapshot cache.
+// The previous pass's cluster set answers it; only a loop that has not run a pass yet (a start or a takeover) reads the
+// database. A failed read only costs the names: the slice token still moves.
+func (l *Loop) clustersGone(ctx context.Context, listedNow []model.ClusterKey) []string {
+	if l.p.cfg.Cache == nil {
+		return nil
+	}
+	var before []string
+	if prev := l.currentClusters(); len(prev) > 0 {
+		for _, k := range prev {
+			before = append(before, k.Cluster)
+		}
+	} else if stored, err := l.p.reads.ListClusters(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region}, store.Visibility{Admin: true}); err == nil {
+		for _, c := range stored {
+			before = append(before, c.Key.Cluster)
+		}
+	}
+	listed := make(map[string]bool, len(listedNow))
+	for _, k := range listedNow {
+		listed[k.Cluster] = true
+	}
+	var gone []string
+	for _, name := range before {
+		if !listed[name] {
+			gone = append(gone, name)
+		}
+	}
+	return gone
 }
 
 // describeClustersNamed describes the named clusters (names or ARNs) and upserts them. It deletes nothing: only the

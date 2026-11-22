@@ -85,7 +85,7 @@ func (l *Loop) recordCounts(ctx context.Context) {
 }
 
 // recordDeployments inserts every deployment of the services not seen before by this loop.
-// Outcomes and finish times are never written here; plan 02 owns them. The database's
+// Outcomes and finish times are never written here; another component owns them. The database's
 // ON CONFLICT is the backstop when the in-memory set is lost (restart, failover).
 func (l *Loop) recordDeployments(ctx context.Context, services []model.Service) {
 	for _, s := range services {

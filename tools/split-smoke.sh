@@ -24,8 +24,11 @@
 # refused schema name.
 set -euo pipefail
 
+# shellcheck source=lib/procs.sh
+. "$(dirname "$0")/lib/procs.sh"
+
 usage() {
-	sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
+	procs_usage "$0"
 }
 
 die_usage() {
@@ -57,12 +60,9 @@ while (($# > 0)); do
 	esac
 done
 
-# Keep in step with the floor versions make test-kv pins.
-case "$engine" in
-valkey) image="valkey/valkey:7.2.5-alpine" ;;
-redis) image="redis:7.0.15-alpine" ;;
-*) die_usage "--engine must be valkey or redis, got: $engine" ;;
-esac
+# The image pins live in tools/kv-images.txt, which make test-kv reads too.
+image="$(awk -v engine="$engine" '$1 == engine { print $3; exit }' "$(dirname "$0")/kv-images.txt")"
+[[ -n "$image" ]] || die_usage "--engine must be valkey or redis, got: $engine"
 
 for tool in curl docker jq go python3; do
 	command -v "$tool" >/dev/null 2>&1 || die_usage "$tool is required but not installed"
@@ -71,7 +71,7 @@ done
 docker info >/dev/null 2>&1 || die_usage "docker is not running"
 
 schema="${HM_SPLIT_SMOKE_SCHEMA:-hm_split_smoke_$engine}"
-[[ "$schema" =~ ^hm_split_smoke[a-z0-9_]*$ ]] || die_usage "HM_SPLIT_SMOKE_SCHEMA must start with hm_split_smoke (this script drops the schema); got: $schema"
+procs_check_schema "$schema" hm_split_smoke || die_usage "HM_SPLIT_SMOKE_SCHEMA must start with hm_split_smoke (this script drops the schema); got: $schema"
 
 base_port="${HM_SPLIT_SMOKE_PORT:-8580}"
 [[ "$base_port" =~ ^[0-9]+$ ]] || die_usage "HM_SPLIT_SMOKE_PORT must be a number"
@@ -93,34 +93,16 @@ workdir="$(mktemp -d)"
 container="hm-split-smoke-$engine-$$"
 kv_prefix="smoke$$"
 
-pids=()
-roles=()
 current_check="setup"
 checks_passed=0
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Cleanup: stop every process, remove the private store container, delete the temporary files.
 
-stop_pid() {
-	local pid="$1" i
-	kill -TERM "$pid" 2>/dev/null || return 0
-	for ((i = 0; i < 40; i++)); do
-		kill -0 "$pid" 2>/dev/null || return 0
-		sleep 0.5
-	done
-	kill -KILL "$pid" 2>/dev/null || true
-}
-
 cleanup() {
 	local status=$?
 	trap - EXIT INT TERM
-	local pid
-	for pid in ${pids[@]+"${pids[@]}"}; do
-		stop_pid "$pid"
-	done
-	for pid in ${pids[@]+"${pids[@]}"}; do
-		wait "$pid" 2>/dev/null || true
-	done
+	procs_stop_all
 	docker rm -f "$container" >/dev/null 2>&1 || true
 	if ((status != 0)) && [[ -d "$workdir" ]]; then
 		local f
@@ -178,20 +160,15 @@ wait_until() {
 	fail "timed out after ${seconds}s waiting for $what"
 }
 
-# start_role ROLE ADDR LOGNAME [EXTRA_ENV...] starts one process; its pid is the last entry of pids.
+# start_role ROLE ADDR LOGNAME [EXTRA_ENV...] starts one process; its pid is the last entry of PROCS_PIDS.
 start_role() {
 	local role="$1" addr="$2" log="$3"
 	shift 3
-	env HM_FAKE_AWS=1 HM_COOKIE_SECURE=false HM_SESSION_KEY=smoke-session-key HM_METRICS_TOKEN="$metrics_token" \
-		HM_DATABASE_URL="$db_url" HM_KV_URL="$kv_url" HM_KV_PREFIX="$kv_prefix" HM_BASE_URL="http://$web_addr" \
-		HM_LISTEN="$addr" HM_POLL_JITTER=1ms HM_POLL_IDLE_AFTER=0 HM_FAKE_OFFHOURS_DEMO=false HM_FAKE_NOTIFY_DEMO=false \
-		HM_POLL_SERVICES=2s HM_POLL_RUNNING_TASKS=2s HM_LOG_LEVEL=info "$@" \
-		bin/harbormaster serve --role="$role" >"$workdir/$log.log" 2>&1 &
-	pids+=("$!")
-	roles+=("$role")
+	procs_start "$role" "$addr" "$workdir/$log.log" HM_KV_PREFIX="$kv_prefix" \
+		HM_POLL_JITTER=1ms HM_POLL_IDLE_AFTER=0 HM_FAKE_OFFHOURS_DEMO=false HM_FAKE_NOTIFY_DEMO=false \
+		HM_POLL_SERVICES=2s HM_POLL_RUNNING_TASKS=2s HM_LOG_LEVEL=info ${@+"$@"}
 }
 
-healthz_ok() { [[ "$(curl -s --max-time 2 "http://$1/healthz" || true)" == "ok" ]]; }
 
 # api METHOD PATH [JSON] prints the body; the status goes to $workdir/status. It uses the signed-in cookie jar.
 api() {
@@ -244,15 +221,17 @@ kv_up_is() { [[ "$(metric_sum "$1" harbormaster_kv_up)" == "$2" ]]; }
 # Setup: the binary, the schema, the store container.
 
 current_check="setup"
-mkdir -p bin
-go build -o bin/harbormaster ./cmd/harbormaster || fail "go build failed"
-db_url="$(HM_E2E_SCHEMA="$schema" go run ./tools/e2eschema)" || fail "could not prepare the schema $schema"
+procs_build || fail "go build failed"
+PROCS_DB_URL="$(procs_prepare_schema "$schema")" || fail "could not prepare the schema $schema"
+PROCS_WEB_ADDR="$web_addr"
+PROCS_METRICS_TOKEN="$metrics_token"
+PROCS_SESSION_KEY=smoke-session-key
 
 # A fixed local port: a container that is stopped and started again keeps its published port only when it was fixed.
 host_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 [[ "$host_port" =~ ^[0-9]+$ ]] || die_usage "could not find a free local port (python3 is needed)"
 docker run -d --name "$container" -p "127.0.0.1:$host_port:6379" "$image" >/dev/null || die_usage "could not start $image (is the image available?)"
-kv_url="redis://127.0.0.1:$host_port"
+PROCS_KV_URL="redis://127.0.0.1:$host_port"
 kv_ready() { [[ "$(docker exec "$container" sh -c 'redis-cli ping 2>/dev/null || valkey-cli ping 2>/dev/null' || true)" == "PONG" ]]; }
 wait_until 30 "the $engine container to answer PING" kv_ready
 
@@ -260,12 +239,12 @@ wait_until 30 "the $engine container to answer PING" kv_ready
 # coordinator reconciles off-hours schedules only every 300 s, so a change inside the first minutes can only come from a
 # kick.
 start_role web "$web_addr" web
-wait_until 90 "web /healthz" healthz_ok "$web_addr"
+wait_until 90 "web /healthz" procs_healthy "$web_addr"
 start_role poller "$poller_addr" poller
-poller1_pid="${pids[${#pids[@]} - 1]}"
+poller1_pid="${PROCS_PIDS[${#PROCS_PIDS[@]} - 1]}"
 start_role coordinator "$coordinator_addr" coordinator HM_OFFHOURS_INTERVAL=300s
-wait_until 60 "poller /healthz" healthz_ok "$poller_addr"
-wait_until 60 "coordinator /healthz" healthz_ok "$coordinator_addr"
+wait_until 60 "poller /healthz" procs_healthy "$poller_addr"
+wait_until 60 "coordinator /healthz" procs_healthy "$coordinator_addr"
 
 # ---------------------------------------------------------------------------------------------------------------------
 # 1. Health.
@@ -273,7 +252,7 @@ wait_until 60 "coordinator /healthz" healthz_ok "$coordinator_addr"
 current_check="1 health"
 status_poller_me="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://$poller_addr/api/me" || true)"
 [[ "$status_poller_me" == "404" ]] || fail "poller /api/me = $status_poller_me, want 404"
-healthz_ok "$web_addr" && healthz_ok "$poller_addr" && healthz_ok "$coordinator_addr" || fail "/healthz is not ok on all three"
+procs_healthy "$web_addr" && procs_healthy "$poller_addr" && procs_healthy "$coordinator_addr" || fail "/healthz is not ok on all three"
 pass "/healthz ok on web, poller and coordinator; poller /api/me is 404"
 
 # Sign in as the seeded user and pick the service the focus checks use.
@@ -360,7 +339,7 @@ pass "the schedule saved on web was reconciled by the coordinator within 5 s"
 
 current_check="7 takeover"
 start_role poller "$poller2_addr" poller2
-wait_until 60 "second poller /healthz" healthz_ok "$poller2_addr"
+wait_until 60 "second poller /healthz" procs_healthy "$poller2_addr"
 kill -TERM "$poller1_pid"
 killed_at="$(now_ms)"
 poller2_owns_all() { [[ "$(metric_sum "$poller2_addr" harbormaster_lease_slices_owned)" == "$slice_count" ]]; }

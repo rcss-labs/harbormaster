@@ -2,7 +2,7 @@
 # Connects a running Harbormaster (make floci-serve) to the seeded floci estate through its API.
 #
 # Usage: tools/floci/connect.sh [--help]
-#   HM_FLOCI_PORT   port of the Harbormaster server (default 8482)
+#   HM_FLOCI_PORT   port of the Harbormaster server (default 8490)
 #
 # Signs in as admin (completing the forced password change on the first sign-in and keeping
 # tools/floci/.admin-password current), connects the AWS account "floci" with its three regions, tags the

@@ -35,19 +35,6 @@ func (t *tier) onSuccess() {
 	}
 }
 
-// throttled reports whether any tier is polling slower than its base interval.
-func (l *Loop) throttled() bool {
-	for _, d := range l.defs {
-		d.tier.mu.Lock()
-		backedOff := d.tier.cur > d.tier.base
-		d.tier.mu.Unlock()
-		if backedOff {
-			return true
-		}
-	}
-	return false
-}
-
 // errorsThrottled reports whether err, or any error joined into it, is an AWS throttle.
 // errors.As alone is not enough: it stops at the first API error in a join.
 func errorsThrottled(err error) bool {

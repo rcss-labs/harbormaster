@@ -148,6 +148,35 @@ func TestGeneration_RemovedClusterBumpsItsOwnToken(t *testing.T) {
 	}
 }
 
+// A loop that has already run a pass knows the stored clusters from it: no database read is needed to name the removed one.
+func TestGeneration_RemovedClusterBumpsItsOwnTokenOnARunningLoop(t *testing.T) {
+	cache := newRecordingCache()
+	h := genHarness(t, cache)
+	h.runOnce(t)
+	before := cache.snapshot()
+	h.estate.Mu.Lock()
+	kept := h.estate.Clusters[:0]
+	for _, c := range h.estate.Clusters {
+		if aws.ToString(c.Cluster.ClusterName) != "ci-tools" || c.AccountID != loopTarget.AccountID || c.Region != loopTarget.Region {
+			kept = append(kept, c)
+		}
+	}
+	h.estate.Clusters = kept
+	h.estate.Mu.Unlock()
+	if err := h.loop.syncClusters(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	moved := changedKeys(before, cache.snapshot())
+	if !hasKey(moved, genKeyOf("ci-tools")) || !hasKey(moved, sliceGenKey) {
+		t.Fatalf("removing ci-tools moved %v, want its own token and the slice's", moved)
+	}
+	for _, k := range moved {
+		if k != genKeyOf("ci-tools") && k != sliceGenKey {
+			t.Errorf("removing ci-tools also moved %+v", k)
+		}
+	}
+}
+
 func TestGeneration_RemovedClusterBumpsTheSlice(t *testing.T) {
 	cache := newRecordingCache()
 	h := genHarness(t, cache)
@@ -167,5 +196,26 @@ func TestGeneration_RemovedClusterBumpsTheSlice(t *testing.T) {
 	}
 	if moved := changedKeys(before, cache.snapshot()); !hasKey(moved, sliceGenKey) {
 		t.Fatalf("removing a cluster moved %v, want at least the slice", moved)
+	}
+}
+
+// A pass over every cluster keeps the tokens alive with one cache command, not one per cluster.
+func TestGeneration_ClusterPassTouchesTheCacheOnce(t *testing.T) {
+	cache := newRecordingCache()
+	h := genHarness(t, cache)
+	h.runOnce(t)
+	if n := len(h.clusterNames(t)); n < 2 {
+		t.Fatalf("the estate has %d clusters in the slice; the test needs several", n)
+	}
+	cache.mu.Lock()
+	cache.touchCalls = 0
+	cache.mu.Unlock()
+	if err := h.loop.syncServices(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.touchCalls != 1 {
+		t.Fatalf("one services pass made %d touch calls, want 1", cache.touchCalls)
 	}
 }

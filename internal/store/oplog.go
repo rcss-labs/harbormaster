@@ -153,12 +153,3 @@ func (s *Store) RecentOperations(ctx context.Context, f TargetFilter, vis Visibi
 	}
 	return operations, nil
 }
-
-// DeleteOperationsBefore removes operation log rows older than t and returns how many.
-func (s *Store) DeleteOperationsBefore(ctx context.Context, t time.Time) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from operation_log where ts < $1`, t)
-	if err != nil {
-		return 0, fmt.Errorf("delete operations: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}

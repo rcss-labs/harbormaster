@@ -157,7 +157,7 @@ func TestAccessPolicies_CoverEachRolesCallsAndNothingBroader(t *testing.T) {
 		polls++
 		for _, key := range []model.ServiceKey{payments, notifications} {
 			// The store writes a service row only when a hashed field changed, so the desired count varies per call.
-			if _, err := st.UpsertServices(ctx, []model.Service{{Key: key, Status: "ACTIVE", Desired: desired + polls, LaunchType: "FARGATE",
+			if _, err := storetest.Seed(st).UpsertServices(ctx, []model.Service{{Key: key, Status: "ACTIVE", Desired: desired + polls, LaunchType: "FARGATE",
 				Raw: []byte(`{"Tags":[{"Key":"env","Value":"` + env + `"}]}`), PolledAt: now}}); err != nil {
 				t.Fatal(err)
 			}

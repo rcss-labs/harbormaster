@@ -50,7 +50,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `scan_role_name` | string | `"harbormaster-scan"` | Role name in each account; becomes `HM_SCAN_ROLE_NAME`. Must match the access module's `scan_role_name`. |
 | `scan_role_arns` | list(string) | `null` | What the scanner task role may assume. Null resolves to `arn:aws:iam::*:role/<scan_role_name>`; tighten it like `access_role_arns`. |
 | `scanner_egress_cidrs` | list(string) | `["0.0.0.0/0"]` | Scanner egress, tcp 443 only (ECR, S3, STS). |
-| `split_services` | bool | `false` | Create the web, poller and coordinator services. Needs a cache unless `allow_split_without_cache`. |
+| `split_services` | bool | `false` | Create the web, poller and coordinator services. Needs a cache (`cache_mode` `create` or `external`). |
 | `keep_legacy_service` | bool | `true` | Keep the single `harbormaster-server` service, its task definition and its two roles. `false` needs `split_services = true`. |
 | `web_desired_count` / `web_min_count` / `web_max_count` | number | `2` / `2` / `6` | Each at least 1; desired within min and max. Autoscaling owns the count after the first apply. |
 | `poller_desired_count` / `poller_min_count` / `poller_max_count` | number | `2` / `2` / `4` | As for web. |
@@ -67,7 +67,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `cache_replicas` | number | `0` | 0 to 5. `1` or more adds replicas with Multi-AZ automatic failover. |
 | `cache_url_secret_arn` | string | `null` | Required with `cache_mode = "external"`, null otherwise: a Secrets Manager secret holding the full store URL. |
 | `cache_alarm_actions` | list(string) | `[]` | Notified when the created cache evicts keys. |
-| `allow_split_without_cache` | bool | `false` | Lets `split_services = true` run with `cache_mode = "none"`. Tests only. |
+| `allow_split_without_cache` | bool | `false` | Deprecated; must stay `false`. The split roles refuse to start without a store, so `split_services` always needs a cache. |
 
 ## Outputs
 
@@ -140,6 +140,8 @@ Each task holds a database pool (`HM_DB_MAX_CONNS`; unset means 6 for web, 8 for
 Engines: `cache_engine = "valkey"` (default, version `7.2`) or `"redis"` (version `7.1`); `cache_engine_version` overrides. Harbormaster uses only a command subset that Valkey 7.2 and Redis 7.0 or newer both support, so either engine works. An alarm per node (`harbormaster-cache-evictions-001` and so on) fires when `Evictions` stay above 0 for 15 minutes: size `cache_node_type` up. Set `cache_alarm_actions` to be told.
 
 The cache security group admits the web, poller and coordinator groups on 6379, and the legacy server group only while `keep_legacy_service` is true. The legacy security group and its database rule stay after the legacy service is removed, so removing the service changes nothing about either.
+
+The poller and coordinator security groups are one keyed resource, `aws_security_group.worker["poller"]` and `["coordinator"]`. An install that already has them sees two `has moved to` lines in its next plan and no change to the groups (the `security_group_ids` output keeps its keys).
 
 ## Upgrade: single service to split services
 
@@ -266,4 +268,4 @@ Two fixed names make a destroy followed by a re-create collide:
 
 ## Do not manage Harbormaster with itself
 
-Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count, ...] }` on the `aws_ecs_service`, with the full list in section 7.5) in the managing configuration. See design spec section 7.5 (`docs/design/2026-10-31-harbormaster-design.md`).
+Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count, ...] }` on the `aws_ecs_service`, with the full list below) in the managing configuration. The recommended list for a managed service is `task_definition`, `desired_count`, `enable_execute_command`, `deployment_circuit_breaker`, `deployment_minimum_healthy_percent`, `deployment_maximum_percent` and `health_check_grace_period_seconds`; autoscaling resources edited from Harbormaster need the same treatment.

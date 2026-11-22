@@ -12,6 +12,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 func authHash() (string, error) { return auth.HashPassword(testPassword) }
@@ -142,10 +143,10 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	ck := model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "apps"}
-	if _, err := st.UpsertClusters(ctx, []model.Cluster{{Key: ck, PolledAt: time.Now()}}); err != nil {
+	if _, err := storetest.Seed(st).UpsertClusters(ctx, []model.Cluster{{Key: ck, PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.UpsertServices(ctx, []model.Service{{Key: model.ServiceKey{ClusterKey: ck, Service: "web"}, PolledAt: time.Now()}}); err != nil {
+	if _, err := storetest.Seed(st).UpsertServices(ctx, []model.Service{{Key: model.ServiceKey{ClusterKey: ck, Service: "web"}, PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	var o2 meBody

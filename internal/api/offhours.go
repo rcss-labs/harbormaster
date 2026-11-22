@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -488,20 +489,20 @@ func (s *Server) getServiceOffHours(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, enrolErr)
 		return
 	}
-	// The store decides what a schedule matches (active services only), the same as the schedule views.
+	// Schedules match active services only; evaluate each selector against this one service's facts instead of
+	// listing every schedule's matches.
+	facts, active, err := s.Store.OffHoursServiceFacts(ctx, key)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	var matching []store.OffHoursSchedule
 	for _, candidate := range schedules {
-		if !candidate.Enabled {
+		if !active || !candidate.Enabled || slices.Contains(candidate.Exclusions, key) {
 			continue
 		}
-		tagMatches, err := s.Store.OffHoursMatches(ctx, candidate.Selectors)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		matched, _ := store.SplitExcluded(tagMatches, candidate.Exclusions)
-		for _, m := range matched {
-			if m.Key == key {
+		for _, selector := range candidate.Selectors {
+			if selector.Matches(facts) {
 				matching = append(matching, candidate)
 				break
 			}

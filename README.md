@@ -669,7 +669,7 @@ Three setups are supported, and they differ in what they need:
 
 - **One task (`role=all`, the default).** Nothing to configure: no store, no extra roles. This is how Harbormaster behaved before the roles existed, and `make run` is the same thing.
 - **Several `all` tasks.** Safe with or without a store. Leases decide who polls what, and the other behaviour below applies.
-- **Split services.** Web, poller and coordinator tasks, scaled separately. A store (`HM_KV_URL`) is strongly recommended: without one, live pages and kicks only work when the task that receives the request is the task that acts on it (see Split installs without a store).
+- **Split services.** Web, poller and coordinator tasks, scaled separately. A store (`HM_KV_URL`) is required: `serve` with role `web`, `poller` or `coordinator` refuses to start without it, because focus heartbeats and kicks must reach the task that acts on them (see Split installs without a store).
 
 #### Roles, leases and fencing
 
@@ -703,7 +703,7 @@ When the store returns, open pages re-register on their next heartbeat (every 10
 
 #### Split installs without a store
 
-A split install with `HM_KV_URL` empty on all three services is allowed (the Terraform module only accepts it with `allow_split_without_cache`, which it documents as for tests) and behaves like the table above for good. Limits are counted per task, a kick reaches only the task that received it, and the web task's set of open pages is its own memory, which no poller reads, so nothing makes a page live. The page shows `Live refresh unavailable` once its short wait for a first read has passed: the state it shows is evidence-based (a read newer than two intervals), so it never pretends. Normal polling and everything else work as usual.
+A split role (`web`, `poller`, `coordinator`) exits with a usage error naming `HM_KV_URL` when no store is configured. Without one the web task's set of open pages would be its own memory, which no poller reads, so a page could never become live; refusing to start is the only honest answer. Only `role=all` runs without a store. The store being unreachable at run time is a different case and is handled as the table above describes.
 
 #### Upgrades and rollbacks
 
@@ -722,7 +722,7 @@ The UI shows two banners per account and region:
 - **Slowed by AWS throttling**: AWS is throttling Harbormaster's calls for that account and region, so updates arrive more slowly.
 - **Data is N min old**: the last poll for that account and region failed. The banner shows how old the data is and the last error. If it says the data is unavailable, no poll has succeeded yet.
 
-The AWS API limits Harbormaster works within, and how the estate size affects them, are in [`docs/ops/ecs-api-budget.md`](docs/ops/ecs-api-budget.md).
+ECS throttles per account and region, in token buckets shared by every call of a kind (service reads: 100 tokens, 20 per second; cluster-resource reads such as `ListTasks` and `DescribeTasks`: 100 and 20; cluster reads: 50 and 20). At the reference estate of 20 clusters and 300 services per account and region, the original 5 s intervals used about 42 percent of the service-read bucket and about 30 percent of the cluster-resource bucket in steady state, and the current defaults (30 s and longer) use a fraction of that; a rollout spike stays inside the burst. A much larger estate in one account and region should lengthen the `HM_POLL_*` intervals; more accounts or regions add no load to a bucket.
 
 ### AWS costs
 
@@ -790,7 +790,7 @@ make run                            # http://127.0.0.1:8480, in-memory fake AWS 
 
 `make run` starts `serve --fake-aws`: it migrates the database, seeds demo users, tags and permissions, and serves a fake ECS estate, so no AWS credentials are needed. Sign in as `sam` / `harbormaster-e2e-1` (a global admin). `dana`, `omer` and `oncall` use the same password with narrower access. Never use `--fake-aws` (or `HM_FAKE_AWS`) against a database that holds real users.
 
-`make run-split` runs the three roles as separate processes (web on 8480, poller on 8482, coordinator on 8483) in a recreated `hm_run_split` schema of the test database, so leases, kicks and health can be tried locally. Export `HM_TEST_KV_URLS` (see `make test-kv`) so kicks cross processes. Each process has its own in-memory fake estate, so a deploy made through web is not seen by the poller's fake; write flows are tested in `role=all`. Ctrl-C stops all three. `make split-smoke` runs the same processes unattended and checks them.
+`make run-split` runs the three roles as separate processes (web on 8480, poller on 8482, coordinator on 8483) in a recreated `hm_run_split` schema of the test database, so leases, kicks and health can be tried locally. Export `HM_TEST_KV_URLS` (see `make test-kv`); split roles need the store and the script exits without it. Each process has its own in-memory fake estate, so a deploy made through web is not seen by the poller's fake; write flows are tested in `role=all`. Ctrl-C stops all three. `make split-smoke` runs the same processes unattended and checks them.
 
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 

@@ -174,6 +174,11 @@ func (s *Store) OpenFindingCounts(ctx context.Context, digests []string, scope [
 		return nil, nil, fmt.Errorf("open finding counts: %w", err)
 	}
 	defer rows.Close()
+	return foldFindingCountRows(rows)
+}
+
+// foldFindingCountRows folds (digest, severity, accepted, n) rows into open counts and accepted totals per digest.
+func foldFindingCountRows(rows pgx.Rows) (map[string]scan.SeverityCounts, map[string]int, error) {
 	counts, accepted := map[string]scan.SeverityCounts{}, map[string]int{}
 	for rows.Next() {
 		var digest, severity string

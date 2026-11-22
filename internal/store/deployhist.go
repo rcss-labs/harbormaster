@@ -141,15 +141,6 @@ func (s *Store) DeploymentsPerDay(ctx context.Context, f TargetFilter, vis Visib
 	return days, nil
 }
 
-// DeleteDeploymentsBefore removes deployments started before t and returns how many.
-func (s *Store) DeleteDeploymentsBefore(ctx context.Context, t time.Time) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from deployment_history where started_at < $1`, t)
-	if err != nil {
-		return 0, fmt.Errorf("delete deployments: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
 // RevisionRanBefore reports whether the service has a deployment record of the task definition revision that did not
 // fail: a rollout Harbormaster started (written when it starts) or one the poller saw on the service (Terraform or CI
 // included). Records older than the deployment history retention are gone, so an old revision reads as never run.

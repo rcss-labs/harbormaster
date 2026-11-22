@@ -27,7 +27,9 @@ type recordingCache struct {
 	tokens map[snapcache.GenKey]string
 	bumps  []snapcache.GenKey
 	touchs []snapcache.GenKey
-	fail   error
+	// touchCalls counts TouchAll calls, however many keys each carried.
+	touchCalls int
+	fail       error
 	// failBumps makes BumpAll fail while Touch and reads still work.
 	failBumps bool
 }
@@ -66,6 +68,7 @@ func (c *recordingCache) TouchAll(_ context.Context, ks []snapcache.GenKey, toke
 	if c.fail != nil {
 		return c.fail
 	}
+	c.touchCalls++
 	for _, k := range ks {
 		if _, ok := c.tokens[k]; !ok {
 			c.tokens[k] = token
@@ -87,6 +90,14 @@ func (c *recordingCache) Tokens(_ context.Context, ks ...snapcache.GenKey) ([]st
 
 func (c *recordingCache) Get(context.Context, snapcache.Model, string, string) ([]byte, bool, error) {
 	return nil, false, nil
+}
+
+func (c *recordingCache) Lookup(context.Context, snapcache.Model, string, snapcache.GenKey) (string, []byte, bool, error) {
+	return "", nil, false, nil
+}
+
+func (c *recordingCache) GetMany(_ context.Context, _ snapcache.Model, ids, _ []string) ([]snapcache.Entry, error) {
+	return make([]snapcache.Entry, len(ids)), nil
 }
 
 func (c *recordingCache) Put(context.Context, snapcache.Model, string, string, []byte, time.Duration) error {

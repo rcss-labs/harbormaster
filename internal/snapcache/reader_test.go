@@ -16,6 +16,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/kv/kvtest"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
@@ -82,7 +83,7 @@ func (r *readerRig) genKey() GenKey {
 
 func (r *readerRig) bump(t *testing.T, token string) {
 	t.Helper()
-	if err := r.cache.Bump(context.Background(), r.genKey(), token); err != nil {
+	if err := r.cache.BumpAll(context.Background(), []GenKey{r.genKey()}, token); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -145,7 +146,7 @@ func TestRead_OldGenerationIsNeverServedAfterABump(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The poller commits a change and bumps the token.
-		if _, err := r.f.st.UpsertServices(ctx, []model.Service{{Key: model.ServiceKey{ClusterKey: key, Service: "brand-new"}, Status: "ACTIVE", PolledAt: r.f.now}}); err != nil {
+		if _, err := storetest.Seed(r.f.st).UpsertServices(ctx, []model.Service{{Key: model.ServiceKey{ClusterKey: key, Service: "brand-new"}, Status: "ACTIVE", PolledAt: r.f.now}}); err != nil {
 			t.Fatal(err)
 		}
 		r.bump(t, "1-200")
@@ -194,6 +195,10 @@ type failingCache struct{ Cache }
 
 func (failingCache) Tokens(context.Context, ...GenKey) ([]string, error) {
 	return nil, errors.New("store down")
+}
+
+func (failingCache) Lookup(context.Context, Model, string, GenKey) (string, []byte, bool, error) {
+	return "", nil, false, errors.New("store down")
 }
 
 func TestRead_StoreDownReadsPostgres(t *testing.T) {
@@ -251,7 +256,7 @@ func TestSlices_OneTokenReadForAllSlicesAndEachLoadedOnce(t *testing.T) {
 		r.reader.Cache = counting
 		targets := []awsx.Target{{AccountID: acctA, Region: "us-east-1"}, {AccountID: acctA, Region: "eu-west-1"}, {AccountID: acctB, Region: "us-east-1"}}
 		for _, tg := range targets {
-			if err := r.cache.Bump(context.Background(), GenKey{AccountID: tg.AccountID, Region: tg.Region}, "1-1"); err != nil {
+			if err := r.cache.BumpAll(context.Background(), []GenKey{{AccountID: tg.AccountID, Region: tg.Region}}, "1-1"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -321,7 +326,7 @@ func TestRead_NotFoundIsReturnedAndNotCached(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		r := newReaderRig(t, c)
 		gone := ck(acctA, "us-east-1", "vanished")
-		if err := r.cache.Bump(context.Background(), GenKey{AccountID: gone.AccountID, Region: gone.Region, Cluster: gone.Cluster}, "1-1"); err != nil {
+		if err := r.cache.BumpAll(context.Background(), []GenKey{{AccountID: gone.AccountID, Region: gone.Region, Cluster: gone.Cluster}}, "1-1"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.reader.Cluster(context.Background(), gone); !errors.Is(err, store.ErrNotFound) {
@@ -348,7 +353,7 @@ func TestRead_ServiceUsesItsClusterTokenAndSliceItsOwn(t *testing.T) {
 			t.Fatalf("service reads under the cluster's token loaded %d times, want 1", got)
 		}
 		sliceKey := GenKey{AccountID: acctA, Region: "us-east-1"}
-		if err := r.cache.Bump(ctx, sliceKey, "1-300"); err != nil {
+		if err := r.cache.BumpAll(ctx, []GenKey{sliceKey}, "1-300"); err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < 2; i++ {

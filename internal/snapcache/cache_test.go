@@ -2,6 +2,7 @@ package snapcache
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -50,7 +51,7 @@ func TestCache_MissThenPutThenHit(t *testing.T) {
 
 func TestCache_BumpChangesWhatReadersAskFor(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Bump(ctx, clusterK, "1-100"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-100"); err != nil {
 			t.Fatal(err)
 		}
 		if got := mustTokens(t, c, clusterK); got[0] != "1-100" {
@@ -59,7 +60,7 @@ func TestCache_BumpChangesWhatReadersAskFor(t *testing.T) {
 		if err := c.Put(ctx, ModelCluster, "c1", "1-100", []byte("old"), time.Minute); err != nil {
 			t.Fatal(err)
 		}
-		if err := c.Bump(ctx, clusterK, "1-200"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-200"); err != nil {
 			t.Fatal(err)
 		}
 		tok := mustTokens(t, c, clusterK)[0]
@@ -74,14 +75,14 @@ func TestCache_BumpChangesWhatReadersAskFor(t *testing.T) {
 
 func TestCache_TouchKeepsAnExistingTokenAndRefreshesItsTTL(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, raw kv.Client) {
-		if err := c.Bump(ctx, clusterK, "1-100"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-100"); err != nil {
 			t.Fatal(err)
 		}
 		// Shorten the token's life, then touch: the value stays and the life is back to minutes.
 		if err := raw.PExpire(ctx, raw.Key("gen", clusterK.AccountID, clusterK.Region, clusterK.Cluster), 1500*time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
-		if err := c.Touch(ctx, clusterK, "1-999"); err != nil {
+		if err := c.TouchAll(ctx, []GenKey{clusterK}, "1-999"); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(2 * time.Second)
@@ -93,7 +94,7 @@ func TestCache_TouchKeepsAnExistingTokenAndRefreshesItsTTL(t *testing.T) {
 
 func TestCache_TouchSetsAMissingToken(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Touch(ctx, sliceK, "2-5"); err != nil {
+		if err := c.TouchAll(ctx, []GenKey{sliceK}, "2-5"); err != nil {
 			t.Fatal(err)
 		}
 		if got := mustTokens(t, c, sliceK); got[0] != "2-5" {
@@ -104,7 +105,7 @@ func TestCache_TouchSetsAMissingToken(t *testing.T) {
 
 func TestCache_TokensReturnsEmptyForMissing(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Bump(ctx, clusterK, "1-1"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-1"); err != nil {
 			t.Fatal(err)
 		}
 		got := mustTokens(t, c, clusterK, sliceK, otherSlcK)
@@ -119,7 +120,7 @@ func TestCache_TokensReturnsEmptyForMissing(t *testing.T) {
 
 func TestCache_ClusterAndSliceKeysDoNotCollide(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Bump(ctx, sliceK, "1-1"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{sliceK}, "1-1"); err != nil {
 			t.Fatal(err)
 		}
 		if got := mustTokens(t, c, clusterK); got[0] != "" {
@@ -273,25 +274,6 @@ func bounded2(t *testing.T) context.Context {
 	return c
 }
 
-func TestOff_NeverHits(t *testing.T) {
-	c := Off()
-	if err := c.Bump(ctx, clusterK, "1-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Touch(ctx, clusterK, "1-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Put(ctx, ModelCluster, "c1", "1-1", []byte("x"), time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if got := mustTokens(t, c, clusterK, sliceK); len(got) != 2 || got[0] != "" || got[1] != "" {
-		t.Fatalf("Off tokens = %q, want two empty", got)
-	}
-	if _, ok, err := c.Get(ctx, ModelCluster, "c1", "1-1"); ok || err != nil {
-		t.Fatalf("Off Get = ok %v err %v, want a clean miss", ok, err)
-	}
-}
-
 func TestNewToken_DiffersAcrossEpochsAndTime(t *testing.T) {
 	at := time.UnixMilli(1_700_000_000_123)
 	if got := NewToken(7, at); got != "7-1700000000123" {
@@ -305,5 +287,31 @@ func TestNewToken_DiffersAcrossEpochsAndTime(t *testing.T) {
 	}
 	if strings.ContainsAny(NewToken(1, at), " :") {
 		t.Fatal("a token must be one key segment")
+	}
+}
+
+// A non-positive TTL must not leave a model that never expires.
+func TestCache_PutWithNonPositiveTTLStillExpires(t *testing.T) {
+	urls := kvtest.URLs()
+	if len(urls) == 0 {
+		t.Skip(kvtest.EnvVar + " not set")
+	}
+	for _, u := range urls {
+		t.Run(kvtest.Label(u), func(t *testing.T) {
+			raw := kvtest.Open(t, u)
+			admin := kvtest.OpenAdmin(t, u)
+			c := NewKV(raw)
+			if err := c.Put(ctx, ModelCluster, "c1", "1-1", []byte("x"), 0); err != nil {
+				t.Fatal(err)
+			}
+			got, err := admin.Do("PTTL", raw.Key("snap", "cluster", ModelSchema, "c1", "1-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ms, _ := strconv.ParseInt(got, 10, 64)
+			if ms <= 0 || ms > TokenTTL.Milliseconds() {
+				t.Fatalf("PTTL = %s, want a positive life of at most %v", got, TokenTTL)
+			}
+		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 func getCapacity(t *testing.T, c *apiClient, query string) CapacityDTO {
@@ -109,7 +110,7 @@ func TestAnalyticsCapacity_ReservedTrendStackedByTag(t *testing.T) {
 	for _, svc := range visibleServices(t, st) {
 		rows = append(rows, svc.Service)
 	}
-	if err := st.InsertCountsHistory(t.Context(), time.Now().UTC().Add(-time.Hour), rows); err != nil {
+	if err := storetest.Seed(st).InsertCountsHistory(t.Context(), time.Now().UTC().Add(-time.Hour), rows); err != nil {
 		t.Fatal(err)
 	}
 	got := getCapacity(t, login(t, srv, "sam", testPassword), "")

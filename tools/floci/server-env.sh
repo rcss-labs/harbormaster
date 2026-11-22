@@ -3,13 +3,15 @@
 # so a non-local endpoint or a profile other than floci is refused (status 2) before anything else is set.
 #
 # Usage: . tools/floci/server-env.sh
-#   HM_FLOCI_PORT   port of the Harbormaster server (default 8482)
+#   HM_FLOCI_PORT   port of the Harbormaster server (default 8490)
 
+# Source-only, so no `set -euo pipefail` here: it would leak into the caller's shell. Failures are handled by hand
+# (`|| return`).
 _server_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=env.sh
 . "$_server_env_dir/env.sh" || return $?
 
-HM_FLOCI_PORT="${HM_FLOCI_PORT:-8482}"
+HM_FLOCI_PORT="${HM_FLOCI_PORT:-8490}"
 export HM_FLOCI_PORT
 export HM_LISTEN="127.0.0.1:${HM_FLOCI_PORT}"
 export HM_BASE_URL="http://127.0.0.1:${HM_FLOCI_PORT}"

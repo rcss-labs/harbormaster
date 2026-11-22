@@ -193,17 +193,8 @@ func (c *healthClient) PExpire(ctx context.Context, key string, ttl time.Duratio
 	return c.run(ctx, "pexpire", func(ctx context.Context) error { return c.h.inner.PExpire(ctx, key, ttl) })
 }
 
-func (c *healthClient) ZAdd(ctx context.Context, key string, score float64, member string) error {
-	return c.run(ctx, "zadd", func(ctx context.Context) error { return c.h.inner.ZAdd(ctx, key, score, member) })
-}
-
 func (c *healthClient) ZRem(ctx context.Context, key string, members ...string) error {
 	return c.run(ctx, "zrem", func(ctx context.Context) error { return c.h.inner.ZRem(ctx, key, members...) })
-}
-
-func (c *healthClient) ZCard(ctx context.Context, key string) (n int64, err error) {
-	err = c.run(ctx, "zcard", func(ctx context.Context) (e error) { n, e = c.h.inner.ZCard(ctx, key); return })
-	return
 }
 
 func (c *healthClient) ZRangeByScore(ctx context.Context, key string, min, max float64) (v []string, err error) {
@@ -212,16 +203,6 @@ func (c *healthClient) ZRangeByScore(ctx context.Context, key string, min, max f
 		return
 	})
 	return
-}
-
-func (c *healthClient) ZRemRangeByScore(ctx context.Context, key string, min, max float64) error {
-	return c.run(ctx, "zremrangebyscore", func(ctx context.Context) error {
-		return c.h.inner.ZRemRangeByScore(ctx, key, min, max)
-	})
-}
-
-func (c *healthClient) HSet(ctx context.Context, key string, fields map[string]string) error {
-	return c.run(ctx, "hset", func(ctx context.Context) error { return c.h.inner.HSet(ctx, key, fields) })
 }
 
 func (c *healthClient) HMGet(ctx context.Context, key string, fields ...string) (v []Value, err error) {

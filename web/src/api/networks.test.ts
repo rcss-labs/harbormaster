@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { AuthProvider } from '../app/auth/AuthProvider'
 import { server } from '../test/msw'
-import { nodeHref, useNetworks, useVpcTree, type TreeNode } from './networks'
+import { useNetworks, useVpcTree } from './networks'
 import { useStorage } from './storage'
 
 // Filters come from the URL (?account=&region=), so the hooks need the router and auth providers but no signed-in user.
@@ -60,25 +60,5 @@ describe('networks and storage hooks', () => {
     expect(requested).toBe('?account=111111111111')
     const options = client.getQueryCache().find({ queryKey: ['networks', { account: '111111111111', region: undefined }] })?.observers[0].options
     expect(options?.refetchInterval).toBe(5000)
-  })
-})
-
-describe('nodeHref', () => {
-  const base = { key: 'k', label: 'l', tasks: 0 }
-  const cluster: TreeNode = { ...base, kind: 'cluster', cluster: { cluster_id: 'cl-1', tag: { name: 'web', color: 'blue' }, services: 1 } }
-  const service: TreeNode = { ...base, kind: 'service', service: { service_id: 'svc-1', status: 'steady', revision: 3 } }
-  const attachedTask: TreeNode = { ...base, kind: 'task', task: { task_id: 't-1', service_id: 'svc-1', private_ip: '10.0.0.4', unhealthy: false } }
-  const standaloneTask: TreeNode = { ...base, kind: 'task', task: { task_id: 't-2', private_ip: '10.0.0.5', unhealthy: false } }
-  const vpc: TreeNode = { ...base, kind: 'vpc', vpc: { vpc_id: 'vpc-1', cidr: '10.0.0.0/16', zones: 2 } }
-
-  it('links clusters, services and tasks to their pages', () => {
-    expect(nodeHref(cluster)).toBe('/clusters/cl-1')
-    expect(nodeHref(service)).toBe('/services/svc-1/overview')
-    expect(nodeHref(attachedTask)).toBe('/services/svc-1/tasks')
-    expect(nodeHref(standaloneTask)).toBe('/tasks')
-  })
-
-  it('returns undefined for network grouping nodes', () => {
-    expect(nodeHref(vpc)).toBeUndefined()
   })
 })

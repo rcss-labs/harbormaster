@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"github.com/rcss-labs/harbormaster/internal/cost"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/focus"
+	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/limits"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
@@ -103,7 +105,7 @@ type Server struct {
 	KickNotify func()
 	// KVHealth reports whether the shared Valkey or Redis store is reachable, for the poller status; nil means there is
 	// no store.
-	KVHealth interface{ Up() bool }
+	KVHealth kv.Upper
 	// Focus is the set of pages open in a visible tab, and Bus carries the poll-now signal to the poller that owns the
 	// slice. A nil Focus turns live refresh off: the focus endpoint answers "unavailable".
 	Focus focus.Registry
@@ -112,9 +114,14 @@ type Server struct {
 	// means the cache is off and the handlers read Postgres as they always did.
 	Snap *snapcache.Reader
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
-	costWarned *sync.Map
+	costWarned *warnedSet
+	// rateForClass prices a task. It is cost.RateForClass unless a test swaps in a table without some price.
+	rateForClass func(region, architecture string, class cost.TaskClass) (cost.Rate, bool)
 	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.
 	focusOpens *focusOpens
+	// targetKeys and memberLines hold short-lived copies of reads that every list request or metrics scrape repeats.
+	targetKeys  *ttlCache[[]store.TargetFilter]
+	memberLines *ttlCache[string]
 }
 
 // Names of the per-user limits in Server.Limits (also the key segment and metric label).
@@ -146,8 +153,12 @@ type ScanKicker interface{ Kick() }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
-	s.costWarned = &sync.Map{}
+	s.costWarned = &warnedSet{}
+	if s.rateForClass == nil {
+		s.rateForClass = cost.RateForClass
+	}
 	s.focusOpens = &focusOpens{}
+	s.targetKeys, s.memberLines = &ttlCache[[]store.TargetFilter]{}, &ttlCache[string]{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()

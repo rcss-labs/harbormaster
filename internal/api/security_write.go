@@ -438,7 +438,7 @@ func (s *Server) putBaseImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if err := s.Store.SetRepoBase(ctx, repoKeyOf(image), ref, sc.Subject.UserID, s.now()); err != nil {
+	if err := s.Store.SetRepoBase(ctx, image.RepoKey(), ref, sc.Subject.UserID, s.now()); err != nil {
 		s.fail(w, err)
 		return
 	}

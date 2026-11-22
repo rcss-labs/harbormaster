@@ -51,7 +51,7 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 	}
 	repoKeys := make([]store.RepoKey, len(images))
 	for i, img := range images {
-		repoKeys[i] = repoKeyOf(img)
+		repoKeys[i] = img.RepoKey()
 	}
 	bases, err := s.Store.RepoBases(ctx, repoKeys)
 	if err != nil {
@@ -61,7 +61,7 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 	views := make([]imageView, 0, len(images))
 	for _, img := range images {
 		view := imageView{dto: imageDTO(img)}
-		view.dto.BaseImage = baseImageOf(img, bases[repoKeyOf(img)])
+		view.dto.BaseImage = baseImageOf(img, bases[img.RepoKey()])
 		view.dto.Requests = []SecurityRequestDTO{}
 		seen := map[model.ServiceKey]bool{}
 		for _, request := range requests[img.Digest] {
@@ -93,22 +93,25 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 		if len(view.dto.Requests) == 0 {
 			continue
 		}
-		// Counts cover exactly the services whose requests are listed, so they agree with the acceptance flags.
-		open, accepted, err := s.Store.OpenFindingCounts(ctx, []string{img.Digest}, view.services, s.now())
-		if err != nil {
-			return nil, err
-		}
-		counts := open[img.Digest]
-		view.dto.Open = SeverityCountsDTO{Critical: counts.Critical, High: counts.High, Medium: counts.Medium, Low: counts.Low,
-			Negligible: counts.Negligible, Unknown: counts.Unknown}
-		view.dto.Accepted = accepted[img.Digest]
 		views = append(views, view)
 	}
+	// Counts cover exactly the services whose requests are listed, so they agree with the acceptance flags.
+	scopes := make(map[string][]model.ServiceKey, len(views))
+	for _, view := range views {
+		scopes[view.dto.Digest] = view.services
+	}
+	open, accepted, err := s.Store.OpenFindingCountsByScope(ctx, scopes, s.now())
+	if err != nil {
+		return nil, err
+	}
+	for i := range views {
+		digest := views[i].dto.Digest
+		counts := open[digest]
+		views[i].dto.Open = SeverityCountsDTO{Critical: counts.Critical, High: counts.High, Medium: counts.Medium, Low: counts.Low,
+			Negligible: counts.Negligible, Unknown: counts.Unknown}
+		views[i].dto.Accepted = accepted[digest]
+	}
 	return views, nil
-}
-
-func repoKeyOf(img store.ScanImage) store.RepoKey {
-	return store.RepoKey{AccountID: img.RegistryAccountID, Region: img.RegistryRegion, Repository: img.Repository}
 }
 
 // baseImageOf compares the base configured for the image's repository with what the last scan recorded. A scan counts

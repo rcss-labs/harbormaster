@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/kv/kvtest"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/snapcache"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 // listQueries are the scopes the three list pages are compared under.
@@ -113,12 +114,12 @@ func TestListPages_UnhealthyTargetReachesStatusesThroughTheCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		body(t, admin, "/api/services") // warm
-		if err := p.st.UpsertTargetHealth(t.Context(), []model.TargetHealth{{Key: key, TargetGroupARN: "arn:tg/unhealthy", LoadBalancerARN: "arn:lb",
+		if err := storetest.Seed(p.st).UpsertTargetHealth(t.Context(), []model.TargetHealth{{Key: key, TargetGroupARN: "arn:tg/unhealthy", LoadBalancerARN: "arn:lb",
 			Healthy: 1, Unhealthy: 2, Targets: []model.Target{}, PolledAt: time.Now()}}); err != nil {
 			t.Fatal(err)
 		}
 		for _, k := range []snapcache.GenKey{{AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster}, {AccountID: key.AccountID, Region: key.Region}} {
-			if err := p.cache.Bump(t.Context(), k, "9-1"); err != nil {
+			if err := p.cache.BumpAll(t.Context(), []snapcache.GenKey{k}, "9-1"); err != nil {
 				t.Fatal(err)
 			}
 		}

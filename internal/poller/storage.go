@@ -22,7 +22,6 @@ type storageStore interface {
 }
 
 // StorageLoop is the 5 min tier that copies EFS file systems, mount targets and access points into the cache tables.
-// plan 05
 type StorageLoop struct {
 	Writer  *store.SliceWriter
 	Clients awsx.Clients

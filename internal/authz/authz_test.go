@@ -119,25 +119,6 @@ func TestEffectiveTaskTag_StandaloneUsesClusterTag(t *testing.T) {
 	}
 }
 
-func TestCanSeeCluster_AnyVisibleService(t *testing.T) {
-	other := model.ServiceKey{ClusterKey: clusterA, Service: "api"}
-	tags := mapTags{dev: tagDev, clusters: map[model.ClusterKey]TagID{clusterA: tagDev},
-		services: map[model.ServiceKey]TagID{other: tagProd}}
-	prodOnly := Subject{Perms: map[TagID]ActionSet{tagProd: ActionSet(View)}}
-	if !CanSeeCluster(prodOnly, tags, clusterA, []string{"web", "api"}) {
-		t.Error("one visible service should make the cluster visible")
-	}
-	if CanSeeCluster(prodOnly, tags, clusterA, []string{"web"}) {
-		t.Error("no visible service should hide the cluster")
-	}
-	if CanSeeCluster(prodOnly, tags, clusterA, nil) {
-		t.Error("cluster without services is invisible to non-admins")
-	}
-	if !CanSeeCluster(Subject{Admin: true}, tags, clusterA, nil) {
-		t.Error("admin sees everything")
-	}
-}
-
 func TestVisibleTagsAndPermissionsOf(t *testing.T) {
 	s := Subject{Perms: map[TagID]ActionSet{tagProd: ActionSet(View | Logs), tagDev: ActionSet(View), tagStaging: ActionSet(Logs)}}
 	got := VisibleTags(s)
@@ -237,10 +218,15 @@ func TestMockupUsers(t *testing.T) {
 	oncall := Subject{Username: "oncall", Perms: map[TagID]ActionSet{
 		tagStaging: P(View, Logs, Operate, Terminal), tagProd: P(View, Logs, Operate, Terminal)}}
 
+	// A cluster is visible to a non-admin when its one service is: the rule snapcache and the store SQL implement
+	// (agreement is asserted by snapcache's TestFilter_ClusterModelEqualsSQLVisibility).
+	sees := func(s Subject, k model.ClusterKey) bool {
+		return s.Admin || Can(s, View, EffectiveServiceTag(tags, model.ServiceKey{ClusterKey: k, Service: "svc"}))
+	}
 	count := func(s Subject) int {
 		n := 0
 		for _, k := range clusters {
-			if CanSeeCluster(s, tags, k, []string{"svc"}) {
+			if sees(s, k) {
 				n++
 			}
 		}

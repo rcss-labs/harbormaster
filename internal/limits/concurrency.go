@@ -1,5 +1,5 @@
 // Package limits holds the limits that are counted across tasks when a store is configured: concurrent sessions
-// per user and token buckets or pacers per key. Each has an in-memory implementation (today's per-task behaviour)
+// per user and token buckets or pacers per key. Each has an in-memory implementation (used when no HM_KV_URL is set or the store is down)
 // and a Valkey/Redis one.
 package limits
 

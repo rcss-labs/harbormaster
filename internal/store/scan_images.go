@@ -286,3 +286,8 @@ func (s *Store) RequestScanImage(ctx context.Context, img ScanImage, req ScanReq
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
+
+// RepoKey identifies the repository the image was pulled from, the key of its configured base image.
+func (img ScanImage) RepoKey() RepoKey {
+	return RepoKey{AccountID: img.RegistryAccountID, Region: img.RegistryRegion, Repository: img.Repository}
+}

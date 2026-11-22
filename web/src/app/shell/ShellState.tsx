@@ -5,8 +5,6 @@ export const SIDEBAR_STORAGE_KEY = 'harbormaster-sidebar'
 
 /** Below this viewport width the sidebar collapses by itself. */
 export const SIDEBAR_AUTO_COLLAPSE_BELOW = 1100
-export const SIDEBAR_WIDE_PX = 212
-export const SIDEBAR_NARROW_PX = 52
 
 type SidebarChoice = 'collapsed' | 'expanded' | null
 

@@ -42,8 +42,8 @@ resource "terraform_data" "split_checks" {
     }
 
     precondition {
-      condition     = !var.split_services || var.cache_mode != "none" || var.allow_split_without_cache
-      error_message = "split_services = true needs a cache: set cache_mode to \"create\" or \"external\", or set allow_split_without_cache = true (tests only: limits and live refresh then stay per task)."
+      condition     = !var.split_services || var.cache_mode != "none"
+      error_message = "split_services = true needs a cache: set cache_mode to \"create\" or \"external\". The web, poller and coordinator roles refuse to start without HM_KV_URL."
     }
 
     precondition {

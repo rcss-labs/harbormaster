@@ -223,7 +223,7 @@ func TestCoordinator_OnlyTheHolderRunsEveryJob(t *testing.T) {
 	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelab, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 
 	// Off-hours: an always-awake schedule selecting the service.
-	if _, err := st.UpsertServices(ctx, []model.Service{{Key: key, Status: "ACTIVE", Desired: 3, LaunchType: "FARGATE", TaskDefinitionARN: "arn:td/payments-api:1",
+	if _, err := storetest.Seed(st).UpsertServices(ctx, []model.Service{{Key: key, Status: "ACTIVE", Desired: 3, LaunchType: "FARGATE", TaskDefinitionARN: "arn:td/payments-api:1",
 		Raw: []byte(`{"Tags":[{"Key":"env","Value":"staging"}]}`), PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
@@ -324,11 +324,11 @@ func TestCoordinator_RunsRollupsBeforeRetentionAtStart(t *testing.T) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	sampledAt := today.AddDate(0, 0, -2).Add(12 * time.Hour)
 	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "c"}, Service: "api"}
-	if err := st.InsertCountsHistory(ctx, sampledAt, []model.Service{{Key: key, Running: 1, Desired: 2}}); err != nil {
+	if err := storetest.Seed(st).InsertCountsHistory(ctx, sampledAt, []model.Service{{Key: key, Running: 1, Desired: 2}}); err != nil {
 		t.Fatal(err)
 	}
 	stoppedAt := time.Now().Add(-8 * 24 * time.Hour)
-	if _, err := st.UpsertTasks(ctx, []model.Task{{
+	if _, err := storetest.Seed(st).UpsertTasks(ctx, []model.Task{{
 		Cluster: key.ClusterKey, ARN: "arn:t/old", ServiceName: "api", LastStatus: "STOPPED", DesiredStatus: "STOPPED", StoppedAt: &stoppedAt,
 	}}); err != nil {
 		t.Fatal(err)
@@ -357,7 +357,7 @@ func TestCoordinator_RollupRunsBeforeRetention(t *testing.T) {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	sampledAt := today.AddDate(0, 0, -3).Add(12 * time.Hour)
 	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "c"}, Service: "api"}
-	if err := st.InsertCountsHistory(ctx, sampledAt, []model.Service{
+	if err := storetest.Seed(st).InsertCountsHistory(ctx, sampledAt, []model.Service{
 		{Key: key, Running: 1, Desired: 2}, {Key: model.ServiceKey{ClusterKey: key.ClusterKey, Service: "web"}, Running: 2, Desired: 2},
 	}); err != nil {
 		t.Fatal(err)
@@ -389,7 +389,7 @@ func TestCoordinator_RunsRetention(t *testing.T) {
 	ctx := context.Background()
 	stoppedAt := time.Now().Add(-8 * 24 * time.Hour)
 	exit := 137
-	if _, err := st.UpsertTasks(ctx, []model.Task{{
+	if _, err := storetest.Seed(st).UpsertTasks(ctx, []model.Task{{
 		Cluster: model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "c"},
 		ARN:     "arn:t/old", ServiceName: "api", LastStatus: "STOPPED", DesiredStatus: "STOPPED",
 		StoppedAt: &stoppedAt, Containers: []model.Container{{Name: "app", ExitCode: &exit}},

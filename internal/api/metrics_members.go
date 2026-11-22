@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-// memberLiveWindow is how recent a heartbeat must be for a process to count as a live member (the lease timing's
-// MemberLive).
-const memberLiveWindow = 30 * time.Second
+// memberLinesTTL is how long a task reuses the rendered member and lease series, so frequent scrapes (or several
+// scrapers) cost one pair of queries per window. Heartbeat ages can be this much older than the scrape time.
+const memberLinesTTL = 5 * time.Second
 
 var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 
@@ -20,13 +21,21 @@ var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 // scrape time on a web task, which is the one place that sees every process. Any database error returns "" so the
 // series are left out rather than reported wrong.
 func (s *Server) memberMetrics(ctx context.Context) string {
-	members, err := s.Store.LiveMembers(ctx, memberLiveWindow)
+	out, err := s.memberLines.get(s.Now(), memberLinesTTL, func() (string, error) { return s.renderMemberMetrics(ctx) })
 	if err != nil {
 		return ""
 	}
+	return out
+}
+
+func (s *Server) renderMemberMetrics(ctx context.Context) (string, error) {
+	members, err := s.Store.LiveMembers(ctx, lease.DefaultTiming().MemberLive)
+	if err != nil {
+		return "", err
+	}
 	leases, err := s.Store.ListLeases(ctx)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	var b strings.Builder
 	family := func(name, help string) { fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", name, help, name) }
@@ -58,5 +67,5 @@ func (s *Server) memberMetrics(ctx context.Context) string {
 		fmt.Fprintf(&b, `harbormaster_lease_epoch{kind="%s",account="%s",region="%s",instance="%s"} %d`+"\n",
 			labelEscaper.Replace(l.Key.Kind), labelEscaper.Replace(l.Key.AccountID), labelEscaper.Replace(l.Key.Region), instance, l.Epoch)
 	}
-	return b.String()
+	return b.String(), nil
 }

@@ -428,14 +428,16 @@ func (s *Server) assignClusterTag(w http.ResponseWriter, r *http.Request) {
 	}
 	actor, _ := auth.UserFrom(ctx)
 	text := "Changed tag of cluster " + key.Cluster + " from " + oldName + " to " + newName + "."
+	ops := make([]store.Operation, 0, len(services))
 	for _, svc := range services {
 		name := svc.Key.Service
-		if err := s.Store.AppendOperation(ctx, store.Operation{
+		ops = append(ops, store.Operation{
 			AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster, Service: &name,
 			ActorUserID: &actor.ID, Source: "harbormaster", Text: text,
-		}); err != nil {
-			s.log().Error("tag assignment: oplog write failed", "service", name, "error", err)
-		}
+		})
+	}
+	if err := s.Store.AppendOperations(ctx, ops); err != nil {
+		s.log().Error("tag assignment: oplog write failed", "cluster", key.Cluster, "error", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

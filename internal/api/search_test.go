@@ -7,6 +7,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 type searchResponse struct {
@@ -174,7 +175,7 @@ func TestPoller_LastErrorOnlyForAdminsOrFailingTargets(t *testing.T) {
 	now := time.Now()
 	target := awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}
 	// not failing: one failure with an error text naming a resource
-	if err := st.UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
+	if err := storetest.Seed(st).UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
 		LastError: "AccessDenied on arn:aws:ecs:secret", Interval: time.Second, BaseInterval: time.Second, Failures: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +198,7 @@ func TestPoller_LastErrorOnlyForAdminsOrFailingTargets(t *testing.T) {
 	if msg, _ := errorFor("omer"); msg != "" {
 		t.Errorf("omer sees last_error %q on a healthy target", msg)
 	}
-	if err := st.UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
+	if err := storetest.Seed(st).UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
 		LastError: "AccessDenied on arn:aws:ecs:secret", Interval: time.Second, BaseInterval: time.Second, Failures: 5}); err != nil {
 		t.Fatal(err)
 	}

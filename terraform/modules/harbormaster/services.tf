@@ -2,6 +2,20 @@
 # is true, next to the legacy single service until keep_legacy_service is set to false (see the upgrade runbook).
 
 locals {
+  # What every split service waits for. The task definition references only secret ARNs and their values are written
+  # after the data layer is up: without waiting for the versions the first tasks fail with "can't find the specified
+  # secret value for staging label: AWSCURRENT" and the circuit breaker fails the initial deployment (see the legacy
+  # service).
+  service_start_dependencies = [
+    aws_iam_role_policy.service_execution_secrets,
+    aws_iam_role_policy_attachment.service_execution_managed,
+    aws_iam_role_policy.service_task_assume,
+    aws_secretsmanager_secret_version.database_url,
+    aws_secretsmanager_secret_version.session_key,
+    aws_secretsmanager_secret_version.metrics_token,
+    aws_secretsmanager_secret_version.kv_url,
+  ]
+
   service_base_env = merge(
     var.extra_env,
     {
@@ -103,22 +117,12 @@ resource "aws_ecs_service" "web" {
     ignore_changes = [desired_count]
   }
 
-  # The task definition references only secret ARNs and their values are written after the data layer is up: without
-  # waiting for the versions the first tasks fail with "can't find the specified secret value for staging label:
-  # AWSCURRENT" and the circuit breaker fails the initial deployment (see the legacy service).
-  depends_on = [
-    aws_lb_listener.https,
-    aws_iam_role_policy.service_execution_secrets,
-    aws_iam_role_policy_attachment.service_execution_managed,
-    aws_iam_role_policy.service_task_assume,
-    aws_secretsmanager_secret_version.database_url,
-    aws_secretsmanager_secret_version.session_key,
-    aws_secretsmanager_secret_version.metrics_token,
-    aws_secretsmanager_secret_version.kv_url,
-  ]
+  depends_on = [aws_lb_listener.https, local.service_start_dependencies]
 }
 
-# Autoscaling owns the poller's count too: slices rebalance across however many tasks run.
+# Autoscaling owns the poller's count too: slices rebalance across however many tasks run. Poller and coordinator stay two
+# resources, not one for_each: lifecycle ignore_changes cannot depend on the key, and the coordinator's fixed count
+# (coordinator_desired_count) must keep applying.
 resource "aws_ecs_service" "poller" {
   count = local.split_count
 
@@ -138,7 +142,7 @@ resource "aws_ecs_service" "poller" {
 
   network_configuration {
     subnets          = var.private_subnet_ids
-    security_groups  = [aws_security_group.poller.id]
+    security_groups  = [aws_security_group.worker["poller"].id]
     assign_public_ip = false
   }
 
@@ -148,15 +152,7 @@ resource "aws_ecs_service" "poller" {
     ignore_changes = [desired_count]
   }
 
-  depends_on = [
-    aws_iam_role_policy.service_execution_secrets,
-    aws_iam_role_policy_attachment.service_execution_managed,
-    aws_iam_role_policy.service_task_assume,
-    aws_secretsmanager_secret_version.database_url,
-    aws_secretsmanager_secret_version.session_key,
-    aws_secretsmanager_secret_version.metrics_token,
-    aws_secretsmanager_secret_version.kv_url,
-  ]
+  depends_on = [local.service_start_dependencies]
 }
 
 # A fixed count: one task holds the coordinator lease, the others wait for it.
@@ -179,21 +175,13 @@ resource "aws_ecs_service" "coordinator" {
 
   network_configuration {
     subnets          = var.private_subnet_ids
-    security_groups  = [aws_security_group.coordinator.id]
+    security_groups  = [aws_security_group.worker["coordinator"].id]
     assign_public_ip = false
   }
 
   tags = local.tags
 
-  depends_on = [
-    aws_iam_role_policy.service_execution_secrets,
-    aws_iam_role_policy_attachment.service_execution_managed,
-    aws_iam_role_policy.service_task_assume,
-    aws_secretsmanager_secret_version.database_url,
-    aws_secretsmanager_secret_version.session_key,
-    aws_secretsmanager_secret_version.metrics_token,
-    aws_secretsmanager_secret_version.kv_url,
-  ]
+  depends_on = [local.service_start_dependencies]
 }
 
 # ---- Autoscaling -------------------------------------------------------------------------------------------------
@@ -221,8 +209,8 @@ resource "aws_appautoscaling_policy" "web_requests" {
 
   target_tracking_scaling_policy_configuration {
     target_value       = var.web_requests_per_target
-    scale_in_cooldown  = 600
-    scale_out_cooldown = 60
+    scale_in_cooldown  = local.web_scale_in_cooldown
+    scale_out_cooldown = local.autoscaling_scale_out_cooldown
 
     predefined_metric_specification {
       predefined_metric_type = "ALBRequestCountPerTarget"
@@ -241,9 +229,9 @@ resource "aws_appautoscaling_policy" "web_cpu" {
   resource_id        = aws_appautoscaling_target.web[0].resource_id
 
   target_tracking_scaling_policy_configuration {
-    target_value       = 60
-    scale_in_cooldown  = 600
-    scale_out_cooldown = 60
+    target_value       = local.autoscaling_cpu_target
+    scale_in_cooldown  = local.web_scale_in_cooldown
+    scale_out_cooldown = local.autoscaling_scale_out_cooldown
 
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
@@ -273,9 +261,9 @@ resource "aws_appautoscaling_policy" "poller_cpu" {
   resource_id        = aws_appautoscaling_target.poller[0].resource_id
 
   target_tracking_scaling_policy_configuration {
-    target_value       = 60
-    scale_in_cooldown  = 300
-    scale_out_cooldown = 60
+    target_value       = local.autoscaling_cpu_target
+    scale_in_cooldown  = local.poller_scale_in_cooldown
+    scale_out_cooldown = local.autoscaling_scale_out_cooldown
 
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"

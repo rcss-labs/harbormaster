@@ -10,6 +10,7 @@ import (
 
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -122,7 +123,7 @@ func (l *OutcomeLogger) decide(row store.OpenDeployment, now time.Time) (outcome
 		case ecstypes.DeploymentRolloutStateCompleted:
 			return "completed", "", stale
 		case ecstypes.DeploymentRolloutStateFailed:
-			return "failed", derefString(deployment.RolloutStateReason), stale
+			return "failed", aws.ToString(deployment.RolloutStateReason), stale
 		}
 		return "", "", false
 	}
@@ -153,7 +154,7 @@ func findDeployment(row store.OpenDeployment) (ecstypes.Deployment, bool) {
 		return ecstypes.Deployment{}, false
 	}
 	for _, d := range svc.Deployments {
-		if derefString(d.Id) == row.DeploymentID {
+		if aws.ToString(d.Id) == row.DeploymentID {
 			return d, true
 		}
 	}
@@ -166,7 +167,7 @@ func deploymentLabel(row store.OpenDeployment) string {
 	arn := row.TaskDefinitionARN
 	if arn == "" {
 		if d, found := findDeployment(row); found {
-			arn = derefString(d.TaskDefinition)
+			arn = aws.ToString(d.TaskDefinition)
 		}
 	}
 	if family, revision, err := ParseRevisionARN(arn); err == nil {
@@ -184,13 +185,6 @@ func outcomeText(label, outcome, reason string) string {
 	default:
 		return fmt.Sprintf("Deployment of %s was superseded.", label)
 	}
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // failureInfo classifies a failed deployment. The last stopped task is only

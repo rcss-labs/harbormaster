@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 
@@ -68,8 +67,8 @@ func (r *kvRegistry) userKey(userID int64) string {
 
 func (r *kvRegistry) Heartbeat(ctx context.Context, o Object, userID int64, lim Limits) (Admission, error) {
 	reply, err := r.c.Eval(ctx, heartbeatScript, []string{r.estateKey(), r.userKey(userID)}, []string{
-		o.Member(), ms(lim.TTL), strconv.Itoa(lim.MaxObjects), strconv.Itoa(lim.MaxPerUser),
-		ms(userKeyTTL), ms(2 * lim.TTL),
+		o.Member(), kv.Millis(lim.TTL), strconv.Itoa(lim.MaxObjects), strconv.Itoa(lim.MaxPerUser),
+		kv.Millis(userKeyTTL), kv.Millis(2 * lim.TTL),
 	})
 	if err != nil {
 		return "", err
@@ -92,18 +91,21 @@ func (r *kvRegistry) Heartbeat(ctx context.Context, o Object, userID int64, lim 
 }
 
 func (r *kvRegistry) Release(ctx context.Context, o Object, userID int64) error {
-	_, err := r.c.Eval(ctx, releaseScript, []string{r.estateKey(), r.userKey(userID)}, []string{o.Member(), ms(ReleaseGrace)})
+	_, err := r.c.Eval(ctx, releaseScript, []string{r.estateKey(), r.userKey(userID)}, []string{o.Member(), kv.Millis(ReleaseGrace)})
 	return err
 }
 
+// KEYS: estate set. Returns the members that have not expired on the server's clock; the exclusive bound drops one
+// that expires exactly now.
+var listScript = kv.NewScript(luaNow + `
+return redis.call('ZRANGEBYSCORE', KEYS[1], '(' .. now, '+inf')`)
+
 func (r *kvRegistry) List(ctx context.Context) ([]Object, error) {
-	now, err := r.c.ServerTime(ctx)
+	reply, err := r.c.Eval(ctx, listScript, []string{r.estateKey()}, nil)
 	if err != nil {
 		return nil, err
 	}
-	// An exclusive lower bound is not expressible through the client, so a member expiring exactly now may be listed
-	// for one more read; the poller's read repeats every second.
-	members, err := r.c.ZRangeByScore(ctx, r.estateKey(), float64(now.UnixMilli())+1, math.Inf(1))
+	members, err := reply.Strings()
 	if err != nil {
 		return nil, err
 	}
@@ -139,5 +141,3 @@ func (r *kvRegistry) Fresh(ctx context.Context, o Object) (Fresh, bool, error) {
 	}
 	return Fresh{At: time.UnixMilli(j.AtMS).UTC(), Interval: time.Duration(j.IntervalMS) * time.Millisecond, State: j.State}, true, nil
 }
-
-func ms(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(), 10) }

@@ -12,6 +12,10 @@
 _floci_sourced=0
 [[ "${BASH_SOURCE[0]}" != "$0" ]] && _floci_sourced=1
 
+# No global `set -e`/`set -u` while sourced: it would leak into the caller's interactive shell and end it on the next
+# failing command. Strict mode applies only when this file runs as its own process.
+if [[ $_floci_sourced -eq 0 ]]; then set -euo pipefail; fi
+
 _floci_fail() { # status message
   echo "floci env: $2" >&2
   if [[ $_floci_sourced -eq 1 ]]; then return "$1"; else exit "$1"; fi

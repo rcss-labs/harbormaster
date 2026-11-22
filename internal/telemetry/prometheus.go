@@ -48,16 +48,7 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	if r.kvUpSet {
 		writeHeader(bw, "harbormaster_kv_command_duration_seconds", "Valkey/Redis command duration in seconds.", "histogram")
 		for _, k := range sortedKeys(r.kvDuration) {
-			h := r.kvDuration[k]
-			var cum uint64
-			for i, upper := range kvBuckets {
-				cum += h.buckets[i]
-				writeSample(bw, "harbormaster_kv_command_duration_seconds_bucket", kvLabels, k,
-					`le="`+strconv.FormatFloat(upper, 'g', -1, 64)+`"`, utoa(cum))
-			}
-			writeSample(bw, "harbormaster_kv_command_duration_seconds_bucket", kvLabels, k, `le="+Inf"`, utoa(h.count))
-			writeSample(bw, "harbormaster_kv_command_duration_seconds_sum", kvLabels, k, "", strconv.FormatFloat(h.sum, 'g', -1, 64))
-			writeSample(bw, "harbormaster_kv_command_duration_seconds_count", kvLabels, k, "", utoa(h.count))
+			writeHistogram(bw, "harbormaster_kv_command_duration_seconds", kvLabels, k, r.kvDuration[k])
 		}
 
 		writeHeader(bw, "harbormaster_kv_errors_total", "Failed Valkey/Redis commands by command.", "counter")
@@ -66,11 +57,7 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		}
 
 		writeHeader(bw, "harbormaster_kv_up", "1 if the Valkey/Redis store is reachable.", "gauge")
-		kvUp := "0"
-		if r.kvUp {
-			kvUp = "1"
-		}
-		writeSample(bw, "harbormaster_kv_up", nil, "", "", kvUp)
+		writeSample(bw, "harbormaster_kv_up", nil, "", "", boolValue(r.kvUp))
 	}
 
 	writeHeader(bw, "harbormaster_lease_events_total", "Lease events by kind (slice, coordinator) and event (acquired, released, lost, takeover).", "counter")
@@ -101,16 +88,7 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 
 	writeHeader(bw, "harbormaster_poll_loop_duration_seconds", "Poll loop run duration in seconds.", "histogram")
 	for _, k := range sortedKeys(r.loopDuration) {
-		h := r.loopDuration[k]
-		var cum uint64
-		for i, upper := range loopBuckets {
-			cum += h.buckets[i]
-			writeSample(bw, "harbormaster_poll_loop_duration_seconds_bucket", loopLabels, k,
-				`le="`+strconv.FormatFloat(upper, 'g', -1, 64)+`"`, utoa(cum))
-		}
-		writeSample(bw, "harbormaster_poll_loop_duration_seconds_bucket", loopLabels, k, `le="+Inf"`, utoa(h.count))
-		writeSample(bw, "harbormaster_poll_loop_duration_seconds_sum", loopLabels, k, "", strconv.FormatFloat(h.sum, 'g', -1, 64))
-		writeSample(bw, "harbormaster_poll_loop_duration_seconds_count", loopLabels, k, "", utoa(h.count))
+		writeHistogram(bw, "harbormaster_poll_loop_duration_seconds", loopLabels, k, r.loopDuration[k])
 	}
 
 	writeHeader(bw, "harbormaster_poll_loop_interval_seconds", "Configured poll loop interval in seconds.", "gauge")
@@ -133,11 +111,7 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	writeSample(bw, "harbormaster_poller_leader", nil, "", "", boolValue(r.leader))
 
 	writeHeader(bw, "harbormaster_poller_idle", "1 if polling is slowed because no one has used the UI recently.", "gauge")
-	idle := "0"
-	if r.idle {
-		idle = "1"
-	}
-	writeSample(bw, "harbormaster_poller_idle", nil, "", "", idle)
+	writeSample(bw, "harbormaster_poller_idle", nil, "", "", boolValue(r.idle))
 
 	writeHeader(bw, "harbormaster_registry_requests_total", "Reads of public image registries by host and outcome.", "counter")
 	for _, k := range sortedKeys(r.registryRequests) {
@@ -161,6 +135,17 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	}
 	_, err = w.Write(buf.Bytes())
 	return err
+}
+
+func writeHistogram(bw *bufio.Writer, name string, labels []string, key string, h *histogram) {
+	var cum uint64
+	for i, upper := range h.bounds {
+		cum += h.buckets[i]
+		writeSample(bw, name+"_bucket", labels, key, `le="`+strconv.FormatFloat(upper, 'g', -1, 64)+`"`, utoa(cum))
+	}
+	writeSample(bw, name+"_bucket", labels, key, `le="+Inf"`, utoa(h.count))
+	writeSample(bw, name+"_sum", labels, key, "", strconv.FormatFloat(h.sum, 'g', -1, 64))
+	writeSample(bw, name+"_count", labels, key, "", utoa(h.count))
 }
 
 func writeHeader(bw *bufio.Writer, name, help, typ string) {

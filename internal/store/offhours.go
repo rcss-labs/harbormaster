@@ -330,6 +330,28 @@ func (s *Store) DeleteOffHoursSchedule(ctx context.Context, id int64) error {
 	return nil
 }
 
+// Matches reports whether the service carries the selector's tag; AWS tags match case-sensitively, and an unset
+// tag value counts as the empty value, as in OffHoursMatches.
+func (sel OffHoursSelector) Matches(m OffHoursMatch) bool {
+	if sel.Kind == OffHoursSelectorHarbormaster {
+		return m.EffectiveTagID == sel.TagID
+	}
+	value, ok := m.AWSTags[sel.Key]
+	return ok && value == sel.Value
+}
+
+// OffHoursServiceFacts returns the service as OffHoursMatches reports it, whatever selectors it carries, or
+// ok=false when it is not an ACTIVE polled service.
+func (s *Store) OffHoursServiceFacts(ctx context.Context, key model.ServiceKey) (OffHoursMatch, bool, error) {
+	v := visibilityFor("s", Visibility{}, 1)
+	where := `s.account_id = $1 and s.region = $2 and s.cluster_name = $3 and s.service_name = $4`
+	rows, err := s.queryOffHoursMatches(ctx, v, where, []any{key.AccountID, key.Region, key.Cluster, key.Service})
+	if err != nil || len(rows) == 0 {
+		return OffHoursMatch{}, false, err
+	}
+	return rows[0], true, nil
+}
+
 // OffHoursMatches returns the ACTIVE services that carry ANY of the selectors, each once, with the facts needed to
 // price them and their effective Harbormaster tag. AWS tags match case-sensitively. No selectors match nothing.
 func (s *Store) OffHoursMatches(ctx context.Context, selectors []OffHoursSelector) ([]OffHoursMatch, error) {
@@ -357,6 +379,11 @@ func (s *Store) OffHoursMatches(ctx context.Context, selectors []OffHoursSelecto
 		args = append(args, tagIDs)
 		conditions = append(conditions, fmt.Sprintf(`%s = any($%d::bigint[])`, v.Effective, len(args)))
 	}
+	return s.queryOffHoursMatches(ctx, v, strings.Join(conditions, " or "), args)
+}
+
+// queryOffHoursMatches runs the off-hours match query for ACTIVE services satisfying the where condition.
+func (s *Store) queryOffHoursMatches(ctx context.Context, v visibilitySQL, where string, args []any) ([]OffHoursMatch, error) {
 	rows, err := s.Pool.Query(ctx,
 		`select s.account_id, s.region, s.cluster_name, s.service_name, coalesce(s.desired, 0), `+v.Effective+`,
 		   (select name from tags where id = `+v.Effective+`), s.raw -> 'Tags', coalesce(s.launch_type, ''),
@@ -364,7 +391,7 @@ func (s *Store) OffHoursMatches(ctx context.Context, selectors []OffHoursSelecto
 		   coalesce(td.cpu, ''), coalesce(td.memory, ''), coalesce(td.raw #>> '{RuntimePlatform,CpuArchitecture}', '')
 		 from services s`+v.Joins+`
 		 left join task_definitions td on td.account_id = s.account_id and td.region = s.region and td.arn = s.task_definition_arn
-		 where s.status = 'ACTIVE' and (`+strings.Join(conditions, " or ")+`)
+		 where s.status = 'ACTIVE' and (`+where+`)
 		 order by s.account_id, s.region, s.cluster_name, s.service_name`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("off-hours matches: %w", err)

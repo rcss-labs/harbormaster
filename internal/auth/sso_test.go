@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"sync"
 	"testing"
 	"time"
@@ -465,7 +466,7 @@ func TestLinkSSO_UserGoneAndHasIdentity(t *testing.T) {
 	ctx := context.Background()
 	mustUser(t, st, "sam", true)
 	a := mustUser(t, st, "alice", false)
-	if err := st.DeleteUser(ctx, a.ID); err != nil {
+	if err := storetest.DeleteUser(ctx, st, a.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err := svc.LinkSSO(ctx, a.ID, ssoIdentity("x", ""), ssoCfg(), "ip")

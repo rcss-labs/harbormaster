@@ -15,6 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 type reconcilerHarness struct {
@@ -50,7 +51,7 @@ func newReconcilerHarness(t *testing.T) *reconcilerHarness {
 func (h *reconcilerHarness) tagService(t *testing.T, key model.ServiceKey, tagsJSON, status string) {
 	t.Helper()
 	h.polls++
-	_, err := h.store.UpsertServices(t.Context(), []model.Service{{Key: key, Status: status, Desired: 3 + h.polls, LaunchType: "FARGATE",
+	_, err := storetest.Seed(h.store).UpsertServices(t.Context(), []model.Service{{Key: key, Status: status, Desired: 3 + h.polls, LaunchType: "FARGATE",
 		Raw: []byte(`{"Tags":` + tagsJSON + `}`), PolledAt: h.now}})
 	if err != nil {
 		t.Fatal(err)

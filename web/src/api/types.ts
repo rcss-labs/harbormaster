@@ -7,19 +7,7 @@ export type TagColor = 'neutral' | 'red' | 'amber' | 'blue' | 'violet' | 'green'
 export type Health = 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN'
 /** FARGATE, FARGATE_SPOT, EXTERNAL, or the name of an EC2 capacity provider. */
 export type Capacity = string
-export type TaskStatus =
-  | 'PROVISIONING'
-  | 'PENDING'
-  | 'ACTIVATING'
-  | 'RUNNING'
-  | 'DEACTIVATING'
-  | 'STOPPING'
-  | 'DEPROVISIONING'
-  | 'STOPPED'
-
 export type ActionKey = 'view' | 'logs' | 'operate' | 'deploy' | 'edit' | 'terminal'
-/** Permission bits per action: view=1 logs=2 operate=4 deploy=8 edit=16 terminal=32. */
-export const ACTION_BITS: Record<ActionKey, number> = { view: 1, logs: 2, operate: 4, deploy: 8, edit: 16, terminal: 32 }
 
 export type ErrorCode =
   | 'unauthenticated'
@@ -32,10 +20,6 @@ export type ErrorCode =
   | 'invalid'
   | 'throttled'
   | 'aws_error'
-
-export interface ErrorBody {
-  error: { code: ErrorCode | string; message: string }
-}
 
 /** Generic list body: `{items, next, polled_at}`. */
 export interface ListDTO<T> {
@@ -76,10 +60,6 @@ export interface MeDTO {
   break_glass: boolean
   email: string | null
   display_name: string | null
-}
-
-export interface SetupStatusDTO {
-  needed: boolean
 }
 
 // ---- Shared ----

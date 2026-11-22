@@ -412,7 +412,7 @@ func TestServiceRead_UnhealthyTargetReachesTheStatusThroughTheCache(t *testing.T
 				t.Fatalf("status = %s before the change, want steady", got)
 			}
 		}
-		if err := p.st.UpsertTargetHealth(t.Context(), []model.TargetHealth{{Key: key, TargetGroupARN: "arn:tg/unhealthy", LoadBalancerARN: "arn:lb",
+		if err := storetest.Seed(p.st).UpsertTargetHealth(t.Context(), []model.TargetHealth{{Key: key, TargetGroupARN: "arn:tg/unhealthy", LoadBalancerARN: "arn:lb",
 			Healthy: 1, Unhealthy: 2, Targets: []model.Target{}, PolledAt: time.Now()}}); err != nil {
 			t.Fatal(err)
 		}
@@ -421,7 +421,7 @@ func TestServiceRead_UnhealthyTargetReachesTheStatusThroughTheCache(t *testing.T
 			{AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster},
 			{AccountID: key.AccountID, Region: key.Region},
 		} {
-			if err := p.cache.Bump(t.Context(), k, "9-1"); err != nil {
+			if err := p.cache.BumpAll(t.Context(), []snapcache.GenKey{k}, "9-1"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -477,10 +477,18 @@ func TestClusterRead_DisconnectedAccountIsNotServedFromAWarmCache(t *testing.T) 
 	})
 }
 
-// failingTokens is a store that cannot be reached.
+// failingTokens is a store that cannot be reached: every read path (token read, single lookup, batched models) fails.
 type failingTokens struct{ snapcache.Cache }
 
 func (failingTokens) Tokens(context.Context, ...snapcache.GenKey) ([]string, error) {
+	return nil, errors.New("store down")
+}
+
+func (failingTokens) Lookup(context.Context, snapcache.Model, string, snapcache.GenKey) (string, []byte, bool, error) {
+	return "", nil, false, errors.New("store down")
+}
+
+func (failingTokens) GetMany(context.Context, snapcache.Model, []string, []string) ([]snapcache.Entry, error) {
 	return nil, errors.New("store down")
 }
 
@@ -500,6 +508,45 @@ func TestRead_StoreDownStillAnswersWithTodaysBodies(t *testing.T) {
 		}
 		if p.count(t, "cluster", "error") == 0 {
 			t.Fatal("the failures were not counted")
+		}
+	})
+}
+
+func (p *snapPair) reads(t *testing.T, model string) int {
+	t.Helper()
+	return p.count(t, model, "hit") + p.count(t, model, "miss")
+}
+
+// A focus heartbeat only needs to know whether the user may see the page. With the cache on that answer comes from the
+// cached read model (no Postgres read per heartbeat), and it must be the same answer the store gives for every user.
+func TestFocus_VisibilityCheckUsesTheCacheAndMatchesThePostgresAnswer(t *testing.T) {
+	kvtest.Each(t, func(t *testing.T, c kv.Client) {
+		p := newSnapPair(t, c)
+		ids := p.ids(t)
+		beforeClusters, beforeServices := p.reads(t, "cluster"), p.reads(t, "service")
+		visible, hidden := 0, 0
+		for _, user := range []string{"sam", "viewer", "operator", "omer"} {
+			on, off := login(t, p.on, user, snapUserPassword), login(t, p.off, user, snapUserPassword)
+			for kind, list := range map[string][]string{"cluster": ids.clusters, "service": ids.services} {
+				for _, id := range list {
+					got, _ := postFocus(t, on, kind, id, false)
+					want, _ := postFocus(t, off, kind, id, false)
+					if got != want {
+						t.Fatalf("%s %s as %s: cache on answered %d, Postgres %d", kind, id, user, got, want)
+					}
+					if got == http.StatusOK {
+						visible++
+					} else {
+						hidden++
+					}
+				}
+			}
+		}
+		if visible == 0 || hidden == 0 {
+			t.Fatalf("visible=%d hidden=%d: the users must see some objects and not others", visible, hidden)
+		}
+		if p.reads(t, "cluster") == beforeClusters || p.reads(t, "service") == beforeServices {
+			t.Fatal("focus did not read the cached models: it still asks Postgres on every heartbeat")
 		}
 	})
 }

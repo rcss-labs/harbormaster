@@ -1,0 +1,129 @@
+# HELP harbormaster_aws_api_calls_total AWS API calls made by Harbormaster.
+# TYPE harbormaster_aws_api_calls_total counter
+harbormaster_aws_api_calls_total{account="111",region="us-east-1",service="ecs",operation="ListClusters",result="ok",source="poll"} 1
+# HELP harbormaster_build_info Build information; value is always 1.
+# TYPE harbormaster_build_info gauge
+harbormaster_build_info{version="v1.2.3"} 1
+# HELP harbormaster_coordinator_active 1 if this process holds the coordinator lease.
+# TYPE harbormaster_coordinator_active gauge
+harbormaster_coordinator_active 1
+# HELP harbormaster_focus_admissions_total Focus heartbeats by result.
+# TYPE harbormaster_focus_admissions_total counter
+harbormaster_focus_admissions_total{result="admitted"} 1
+# HELP harbormaster_focus_cycle_duration_seconds Duration of focus cycles by kind.
+# TYPE harbormaster_focus_cycle_duration_seconds histogram
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="0.1"} 0
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="0.25"} 0
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="0.5"} 0
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="1"} 1
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="2.5"} 1
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="5"} 1
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="10"} 1
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="30"} 1
+harbormaster_focus_cycle_duration_seconds_bucket{kind="service",le="+Inf"} 1
+harbormaster_focus_cycle_duration_seconds_sum{kind="service"} 0.7
+harbormaster_focus_cycle_duration_seconds_count{kind="service"} 1
+# HELP harbormaster_focus_interval_seconds Effective focus interval of a slice in seconds.
+# TYPE harbormaster_focus_interval_seconds gauge
+harbormaster_focus_interval_seconds{account="111",region="us-east-1"} 2
+# HELP harbormaster_focus_objects Focus loops running in this process, by kind.
+# TYPE harbormaster_focus_objects gauge
+harbormaster_focus_objects{kind="service"} 2
+# HELP harbormaster_pollnow_latency_seconds Time from a poll-now signal to the end of the cycle it caused.
+# TYPE harbormaster_pollnow_latency_seconds histogram
+harbormaster_pollnow_latency_seconds_bucket{le="0.1"} 0
+harbormaster_pollnow_latency_seconds_bucket{le="0.25"} 1
+harbormaster_pollnow_latency_seconds_bucket{le="0.5"} 1
+harbormaster_pollnow_latency_seconds_bucket{le="1"} 1
+harbormaster_pollnow_latency_seconds_bucket{le="2.5"} 1
+harbormaster_pollnow_latency_seconds_bucket{le="5"} 1
+harbormaster_pollnow_latency_seconds_bucket{le="10"} 1
+harbormaster_pollnow_latency_seconds_bucket{le="30"} 2
+harbormaster_pollnow_latency_seconds_bucket{le="+Inf"} 2
+harbormaster_pollnow_latency_seconds_sum 12.12
+harbormaster_pollnow_latency_seconds_count 2
+# HELP harbormaster_pollnow_signals_total Poll-now signals by what the poller did with them.
+# TYPE harbormaster_pollnow_signals_total counter
+harbormaster_pollnow_signals_total{result="handled"} 1
+# HELP harbormaster_snapshot_cache_requests_total Cached page reads by model and result (hit, miss, bypass, error).
+# TYPE harbormaster_snapshot_cache_requests_total counter
+harbormaster_snapshot_cache_requests_total{model="cluster",result="hit"} 1
+# HELP harbormaster_snapshot_cache_token_write_failures_total Generation token writes that failed (the cached pages stay stale until the retry succeeds).
+# TYPE harbormaster_snapshot_cache_token_write_failures_total counter
+harbormaster_snapshot_cache_token_write_failures_total 0
+# HELP harbormaster_fenced_writes_rejected_total Poller writes rejected because the slice lease was lost.
+# TYPE harbormaster_fenced_writes_rejected_total counter
+harbormaster_fenced_writes_rejected_total 1
+# HELP harbormaster_kv_command_duration_seconds Valkey/Redis command duration in seconds.
+# TYPE harbormaster_kv_command_duration_seconds histogram
+harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.001"} 1
+harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.005"} 2
+harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.025"} 3
+harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.1"} 3
+harbormaster_kv_command_duration_seconds_bucket{op="get",le="0.25"} 3
+harbormaster_kv_command_duration_seconds_bucket{op="get",le="+Inf"} 4
+harbormaster_kv_command_duration_seconds_sum{op="get"} 0.42350000000000004
+harbormaster_kv_command_duration_seconds_count{op="get"} 4
+# HELP harbormaster_kv_errors_total Failed Valkey/Redis commands by command.
+# TYPE harbormaster_kv_errors_total counter
+harbormaster_kv_errors_total{op="set"} 1
+# HELP harbormaster_kv_up 1 if the Valkey/Redis store is reachable.
+# TYPE harbormaster_kv_up gauge
+harbormaster_kv_up 1
+# HELP harbormaster_lease_events_total Lease events by kind (slice, coordinator) and event (acquired, released, lost, takeover).
+# TYPE harbormaster_lease_events_total counter
+harbormaster_lease_events_total{kind="slice",event="acquired"} 1
+# HELP harbormaster_lease_renew_failures_total Lease renewals that failed for a reason other than losing the lease.
+# TYPE harbormaster_lease_renew_failures_total counter
+harbormaster_lease_renew_failures_total{kind="slice"} 1
+# HELP harbormaster_lease_slices_owned Account x region slices this process owns.
+# TYPE harbormaster_lease_slices_owned gauge
+harbormaster_lease_slices_owned 2
+# HELP harbormaster_lease_weight_owned Total weight (clusters) of the slices this process owns.
+# TYPE harbormaster_lease_weight_owned gauge
+harbormaster_lease_weight_owned 7
+# HELP harbormaster_limit_decisions_total Shared-limit decisions by limit, result and backend.
+# TYPE harbormaster_limit_decisions_total counter
+harbormaster_limit_decisions_total{limit="logsearch",result="allowed",backend="kv"} 1
+# HELP harbormaster_notification_deliveries_total Notification delivery attempts by destination and result.
+# TYPE harbormaster_notification_deliveries_total counter
+harbormaster_notification_deliveries_total{destination="slack",result="delivered"} 1
+# HELP harbormaster_poll_loop_duration_seconds Poll loop run duration in seconds.
+# TYPE harbormaster_poll_loop_duration_seconds histogram
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="0.1"} 1
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="0.25"} 1
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="0.5"} 2
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="1"} 3
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="2.5"} 3
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="5"} 4
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="10"} 4
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="30"} 4
+harbormaster_poll_loop_duration_seconds_bucket{account="111",region="us-east-1",tier="fast",le="+Inf"} 5
+harbormaster_poll_loop_duration_seconds_sum{account="111",region="us-east-1",tier="fast"} 49.45
+harbormaster_poll_loop_duration_seconds_count{account="111",region="us-east-1",tier="fast"} 5
+# HELP harbormaster_poll_loop_interval_seconds Configured poll loop interval in seconds.
+# TYPE harbormaster_poll_loop_interval_seconds gauge
+harbormaster_poll_loop_interval_seconds{account="111",region="us-east-1",tier="fast"} 5
+# HELP harbormaster_poll_loop_runs_total Poll loop runs by result.
+# TYPE harbormaster_poll_loop_runs_total counter
+harbormaster_poll_loop_runs_total{account="111",region="us-east-1",tier="fast",result="error"} 1
+harbormaster_poll_loop_runs_total{account="111",region="us-east-1",tier="fast",result="ok"} 4
+# HELP harbormaster_poll_members Live members (processes) by role, from the member heartbeats.
+# TYPE harbormaster_poll_members gauge
+harbormaster_poll_members{role="poller"} 2
+harbormaster_poll_members{role="web"} 3
+# HELP harbormaster_poller_leader 1 if this process holds the coordinator lease (kept under its old name for existing alerts).
+# TYPE harbormaster_poller_leader gauge
+harbormaster_poller_leader 1
+# HELP harbormaster_poller_idle 1 if polling is slowed because no one has used the UI recently.
+# TYPE harbormaster_poller_idle gauge
+harbormaster_poller_idle 1
+# HELP harbormaster_registry_requests_total Reads of public image registries by host and outcome.
+# TYPE harbormaster_registry_requests_total counter
+harbormaster_registry_requests_total{host="registry-1.docker.io",outcome="ok"} 1
+# HELP harbormaster_role_info The role this process runs (all, web, poller or coordinator); value is always 1.
+# TYPE harbormaster_role_info gauge
+harbormaster_role_info{role="poller",version="v1.2.3"} 1
+# HELP harbormaster_snapshot_rows_written_total Snapshot rows written by table.
+# TYPE harbormaster_snapshot_rows_written_total counter
+harbormaster_snapshot_rows_written_total{table="services"} 4

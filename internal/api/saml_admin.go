@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/saml"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -34,7 +35,7 @@ func samlConfigFromRow(row store.SAMLConfigRow) (saml.Config, error) {
 	cfg := saml.Config{
 		Enabled: row.Enabled, IdPEntityID: row.IdPEntityID, IdPSSORedirectURL: row.IdPSSORedirectURL,
 		IdPSSOPostURL: row.IdPSSOPostURL, SPEntityID: row.SPEntityID, NameIDFormat: row.NameIDFormat,
-		AttrEmail: deref(row.AttrEmail), AttrDisplayName: deref(row.AttrDisplayName), AttrUsername: deref(row.AttrUsername),
+		AttrEmail: aws.ToString(row.AttrEmail), AttrDisplayName: aws.ToString(row.AttrDisplayName), AttrUsername: aws.ToString(row.AttrUsername),
 		ClockSkew: time.Duration(row.ClockSkewSeconds) * time.Second, ButtonLabel: row.ButtonLabel,
 	}
 	for _, certPEM := range row.IdPCertsPEM {
@@ -251,7 +252,9 @@ func blankToNil(p *string) *string {
 	return nil
 }
 
-func equalStrPtr(a, b *string) bool { return deref(a) == deref(b) && (a == nil) == (b == nil) }
+func equalStrPtr(a, b *string) bool {
+	return aws.ToString(a) == aws.ToString(b) && (a == nil) == (b == nil)
+}
 
 func (s *Server) validRedirectURL(raw string) bool {
 	u, err := url.Parse(raw)

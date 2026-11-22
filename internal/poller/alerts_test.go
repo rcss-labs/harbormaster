@@ -134,7 +134,7 @@ func TestAlertsLoop_DeploymentFailedClearsOnNextCycle(t *testing.T) {
 	}
 	for _, running := range []int{svc.Desired, svc.Desired - 1} {
 		svc.Running = running
-		if _, err := h.store.UpsertServices(ctx, []model.Service{svc}); err != nil {
+		if _, err := h.writer().UpsertServices(ctx, []model.Service{svc}); err != nil {
 			t.Fatal(err)
 		}
 		h.runAlerts(t)
@@ -195,7 +195,7 @@ func TestAlertsLoop_ReplacesOldAlerts(t *testing.T) {
 func TestAlertsLoop_AccountUnreachable(t *testing.T) {
 	h := newObserveHarness(t, loopTarget)
 	lastOK := loopNow.Add(-2 * time.Minute)
-	if err := h.store.UpsertPollLoop(context.Background(), store.PollLoop{
+	if err := h.writer().UpsertPollLoop(context.Background(), store.PollLoop{
 		Target: loopTarget, Tier: "services", LastOKAt: &lastOK, LastError: "AccessDenied",
 		Interval: 10 * time.Second, BaseInterval: 10 * time.Second, Failures: 3, UpdatedAt: loopNow,
 	}); err != nil {

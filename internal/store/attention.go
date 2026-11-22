@@ -21,17 +21,6 @@ type ChangeQuery struct {
 	Before time.Time
 }
 
-// LastChangeBefore returns the newest Harbormaster operation or deployment of the service with
-// at < before and before-at <= window, or nil when there is none. It never guesses.
-func (s *Store) LastChangeBefore(ctx context.Context, key model.ServiceKey, before time.Time, window time.Duration) (*ChangeRef, error) {
-	query := ChangeQuery{Key: key, Before: before}
-	found, err := s.LastChangesBefore(ctx, []ChangeQuery{query}, window)
-	if err != nil {
-		return nil, err
-	}
-	return found[query], nil
-}
-
 // LastChangesBefore resolves many ChangeQuery values in one round trip. Queries with no change
 // in range are absent from the result.
 func (s *Store) LastChangesBefore(ctx context.Context, queries []ChangeQuery, window time.Duration) (map[ChangeQuery]*ChangeRef, error) {

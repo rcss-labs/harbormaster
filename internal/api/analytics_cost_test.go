@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"github.com/rcss-labs/harbormaster/internal/cost"
 	"io"
 	"log/slog"
 	"math"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
-	"github.com/rcss-labs/harbormaster/internal/cost"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -301,30 +301,6 @@ func TestAnalyticsCost_SpotTasksUseSpotRate(t *testing.T) {
 	}
 	if got.SpotPricesAsOf == "" || got.SpotPricesAsOf == got.PricesAsOf {
 		t.Errorf("spot_prices_as_of = %q (list %q), want its own date", got.SpotPricesAsOf, got.PricesAsOf)
-	}
-}
-
-func TestAnalyticsCost_SpotWithoutSpotRateIsUnpriced(t *testing.T) {
-	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
-	seedMockupTags(t, st)
-	forceProviders(fk, "FARGATE")
-	editRunningTasks(fk, "payments-api", func(index int, task *ecstypes.Task) {
-		spot := "FARGATE_SPOT"
-		task.CapacityProviderName = &spot
-	})
-	pollAll(t, st, fk)
-	t.Cleanup(cost.DropSpotRateForTest("us-east-1"))
-	got := getCost(t, login(t, srv, "sam", testPassword), "")
-	payments := costService(t, got, "payments-api")
-	if payments.Monthly != 0 || payments.Tasks != 3 {
-		t.Errorf("payments-api %d tasks %.4f/month, want unpriced (no list price for a Spot task)", payments.Tasks, payments.Monthly)
-	}
-	found := false
-	for _, region := range got.KPIs.UnpricedRegions {
-		found = found || region == "us-east-1"
-	}
-	if !found || got.KPIs.UnpricedTasks < 3 {
-		t.Errorf("unpriced_regions %v, unpriced tasks %d; want us-east-1 and at least 3 tasks", got.KPIs.UnpricedRegions, got.KPIs.UnpricedTasks)
 	}
 }
 
@@ -745,5 +721,38 @@ func TestAnalyticsCost_SpotCanDeployFollowsPermission(t *testing.T) {
 	omer := spotService(t, getCost(t, login(t, srv, "omer", testPassword), ""), "catalog-api")
 	if omer.CanDeploy != operator.Has(authz.Deploy) {
 		t.Errorf("omer (Operator on Dev) can_deploy = %v, want %v from authz.Can(Deploy)", omer.CanDeploy, operator.Has(authz.Deploy))
+	}
+}
+
+func TestAnalyticsCost_SpotWithoutSpotRateIsUnpriced(t *testing.T) {
+	// A region with a list price but no Spot price: the price tables never hold one, so the test swaps in a lookup.
+	noSpotInUSEast1 := func(region, architecture string, class cost.TaskClass) (cost.Rate, bool) {
+		if class == cost.Spot && region == "us-east-1" {
+			return cost.Rate{}, false
+		}
+		return cost.RateForClass(region, architecture, class)
+	}
+	srv, fk, st, _ := newServerCustom(t, true, func(s *Server) {
+		withCostAnalytics(s)
+		s.rateForClass = noSpotInUSEast1
+	})
+	seedMockupTags(t, st)
+	forceProviders(fk, "FARGATE")
+	editRunningTasks(fk, "payments-api", func(index int, task *ecstypes.Task) {
+		spot := "FARGATE_SPOT"
+		task.CapacityProviderName = &spot
+	})
+	pollAll(t, st, fk)
+	got := getCost(t, login(t, srv, "sam", testPassword), "")
+	payments := costService(t, got, "payments-api")
+	if payments.Monthly != 0 || payments.Tasks != 3 {
+		t.Errorf("payments-api %d tasks %.4f/month, want unpriced (no list-price fallback for a Spot task)", payments.Tasks, payments.Monthly)
+	}
+	found := false
+	for _, region := range got.KPIs.UnpricedRegions {
+		found = found || region == "us-east-1"
+	}
+	if !found || got.KPIs.UnpricedTasks < 3 {
+		t.Errorf("unpriced_regions %v, unpriced tasks %d; want us-east-1 and at least 3 tasks", got.KPIs.UnpricedRegions, got.KPIs.UnpricedTasks)
 	}
 }

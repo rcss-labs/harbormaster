@@ -81,13 +81,6 @@ func (s *Server) samlConfig(ctx context.Context) (saml.Config, store.SAMLConfigR
 	return cfg, row, nil
 }
 
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 // samlKeys decrypts the stored SP keys, active first. Keys that cannot be decrypted are skipped;
 // saml.ErrUndecryptable is returned when keys exist but none could be used.
 func (s *Server) samlKeys(ctx context.Context) ([]saml.SPKey, error) {

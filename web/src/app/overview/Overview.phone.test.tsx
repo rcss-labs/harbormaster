@@ -7,7 +7,7 @@ import { ALERTS, SERVICE_DETAILS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { installPhoneMedia } from '../../test/phone'
 import { renderApp } from '../../test/renderApp'
-import { listMatchingAlerts } from './attentionFixtures'
+import { listMatchingAlerts } from '../../test/attentionFixtures'
 
 let restoreMedia: () => void
 beforeEach(() => {

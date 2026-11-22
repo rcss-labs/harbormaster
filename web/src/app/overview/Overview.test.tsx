@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { OVERVIEW } from '../../test/fixtures'
 import { server } from '../../test/msw'
-import { listMatchingAlerts } from './attentionFixtures'
+import { listMatchingAlerts } from '../../test/attentionFixtures'
 import { renderApp } from '../../test/renderApp'
 
 beforeEach(() => {
