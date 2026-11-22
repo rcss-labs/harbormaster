@@ -65,6 +65,10 @@ describe('OAuthConsent', () => {
     expect(screen.queryByText(/including logs/)).not.toBeInTheDocument()
     expect(screen.getByText(/Access lasts up to 7 days; you can revoke it on My access/)).toBeInTheDocument()
     expect(screen.getByText(/you return to claude\.ai/)).toBeInTheDocument()
+    // Consent phishing: a link someone else sent connects their account, not yours.
+    expect(
+      screen.getByText(/Only approve if you started this from your own Claude just now\. If someone sent you this link, deny it\./),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled()
     // The whole request goes to the server, as it was in the URL.

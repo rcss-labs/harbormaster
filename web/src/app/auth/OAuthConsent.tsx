@@ -105,6 +105,11 @@ export function OAuthConsent() {
       <p className={styles.sub}>
         Access lasts up to {view.expires_in_days} {view.expires_in_days === 1 ? 'day' : 'days'}; you can revoke it on My access.
       </p>
+      <p className={styles.sub}>
+        <strong>
+          Only approve if you started this from your own {view.client_name} just now. If someone sent you this link, deny it.
+        </strong>
+      </p>
       <p className={styles.hint}>After you decide, you return to {view.redirect_host}.</p>
       <button type="button" className={`btn ${styles.submit}`} disabled={busy} onClick={() => decide('deny')}>
         Deny
