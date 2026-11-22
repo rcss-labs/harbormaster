@@ -20,6 +20,8 @@ locals {
     },
     var.enable_metrics ? { HM_METRICS_TOKEN = aws_secretsmanager_secret.metrics_token[0].arn } : {},
     var.smtp_password_secret_arn == null ? {} : { HM_SMTP_PASSWORD = var.smtp_password_secret_arn },
+    # Not set until a cache exists, so a single-service install without one renders the same task definition as before.
+    local.kv_enabled ? { HM_KV_URL = local.kv_url_secret_arn } : {},
   )
 
   # Map keys iterate in sorted order, so the rendered lists are stable.
@@ -71,14 +73,17 @@ resource "aws_ecs_cluster" "this" {
   tags = local.tags
 }
 
+# The legacy single service. keep_legacy_service = false removes it, its task definition and its two roles.
 resource "aws_ecs_task_definition" "server" {
+  count = local.legacy_count
+
   family                   = local.server_name
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.cpu
   memory                   = var.memory
-  execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  execution_role_arn       = aws_iam_role.execution[0].arn
+  task_role_arn            = aws_iam_role.task[0].arn
   container_definitions    = jsonencode(local.container_definitions)
 
   runtime_platform {
@@ -90,9 +95,11 @@ resource "aws_ecs_task_definition" "server" {
 }
 
 resource "aws_ecs_service" "server" {
+  count = local.legacy_count
+
   name                               = local.server_name
   cluster                            = aws_ecs_cluster.this.id
-  task_definition                    = aws_ecs_task_definition.server.arn
+  task_definition                    = aws_ecs_task_definition.server[0].arn
   desired_count                      = var.desired_count
   launch_type                        = "FARGATE"
   deployment_minimum_healthy_percent = 100
@@ -132,4 +139,15 @@ resource "aws_ecs_service" "server" {
     aws_secretsmanager_secret_version.session_key,
     aws_secretsmanager_secret_version.metrics_token,
   ]
+}
+
+# The legacy service and its task definition gained a count: keep an existing install's state.
+moved {
+  from = aws_ecs_task_definition.server
+  to   = aws_ecs_task_definition.server[0]
+}
+
+moved {
+  from = aws_ecs_service.server
+  to   = aws_ecs_service.server[0]
 }

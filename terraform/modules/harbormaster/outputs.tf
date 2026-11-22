@@ -1,11 +1,26 @@
 output "task_role_arn" {
-  description = "ARN of the Harbormaster task role (input for the access-role module's trust policy)."
-  value       = aws_iam_role.task.arn
+  description = "ARN of the legacy single-service task role (input harbormaster_task_role_arn of the access-role module). Null once keep_legacy_service is false."
+  value       = one(aws_iam_role.task[*].arn)
 }
 
 output "execution_role_arn" {
-  description = "ARN of the ECS task execution role."
-  value       = aws_iam_role.execution.arn
+  description = "ARN of the legacy single-service ECS task execution role. Null once keep_legacy_service is false."
+  value       = one(aws_iam_role.execution[*].arn)
+}
+
+output "web_task_role_arn" {
+  description = "ARN of the web task role (input web_task_role_arn of the access-role module). Always created."
+  value       = aws_iam_role.service_task["web"].arn
+}
+
+output "poller_task_role_arn" {
+  description = "ARN of the poller task role (input poller_task_role_arn of the access-role module). Always created."
+  value       = aws_iam_role.service_task["poller"].arn
+}
+
+output "coordinator_task_role_arn" {
+  description = "ARN of the coordinator task role (input coordinator_task_role_arn of the access-role module). Always created."
+  value       = aws_iam_role.service_task["coordinator"].arn
 }
 
 output "cluster_name" {
@@ -14,8 +29,8 @@ output "cluster_name" {
 }
 
 output "service_name" {
-  description = "ECS service name."
-  value       = aws_ecs_service.server.name
+  description = "Name of the legacy single ECS service. Null once keep_legacy_service is false."
+  value       = one(aws_ecs_service.server[*].name)
 }
 
 output "alb_dns_name" {
