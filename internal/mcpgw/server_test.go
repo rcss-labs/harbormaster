@@ -802,3 +802,94 @@ func TestHandler_ForwardsTheChainUpstream(t *testing.T) {
 		t.Errorf("an untrusted client's X-Forwarded-For was forwarded: %q", got)
 	}
 }
+
+func TestHandler_BatchIsRejectedWithoutUpstreamCall(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	call := `{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"get_overview","arguments":{}}}`
+	var entries []string
+	for i := 0; i < 50; i++ {
+		entries = append(entries, fmt.Sprintf(call, i))
+	}
+	for name, body := range map[string]string{
+		"batch of calls":     "[" + strings.Join(entries, ",") + "]",
+		"leading whitespace": " \n\t[" + entries[0] + "]",
+		"empty batch":        "[]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := h.post(t, h.authed(), []byte(body))
+			text := readBody(t, resp)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400; body %s", resp.StatusCode, text)
+			}
+			if !strings.Contains(text, `"jsonrpc":"2.0"`) || !strings.Contains(text, `"error"`) {
+				t.Errorf("body %q is not a JSON-RPC error", text)
+			}
+		})
+	}
+	if n := len(h.upstream.seen()); n != 0 {
+		t.Errorf("%d upstream calls, want 0", n)
+	}
+}
+
+func TestHandler_AmbiguousTopLevelKeysAreRejectedWithoutUpstreamCall(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	for name, body := range map[string]string{
+		"case variant method":     `{"jsonrpc":"2.0","id":1,"method":"tools/list","Method":"tools/call"}`,
+		"case variant first":      `{"METHOD":"tools/call","jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		"only a case variant":     `{"jsonrpc":"2.0","id":1,"Method":"tools/list"}`,
+		"escaped case variant":    `{"jsonrpc":"2.0","id":1,"method":"tools/list","Method":"tools/call"}`,
+		"duplicate method":        `{"jsonrpc":"2.0","id":1,"method":"tools/list","method":"tools/call"}`,
+		"duplicate params":        `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{},"params":{}}`,
+		"case variant params":     `{"jsonrpc":"2.0","id":1,"method":"tools/list","Params":{}}`,
+		"case variant id":         `{"jsonrpc":"2.0","id":1,"method":"tools/list","ID":2}`,
+		"case variant jsonrpc":    `{"jsonrpc":"2.0","id":1,"method":"tools/list","JSONRPC":"2.0"}`,
+		"duplicate unrelated key": `{"jsonrpc":"2.0","id":1,"method":"tools/list","extra":1,"extra":2}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := h.post(t, h.authed(), []byte(body))
+			text := readBody(t, resp)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status %d, want 400; body %s", resp.StatusCode, text)
+			}
+		})
+	}
+	if n := len(h.upstream.seen()); n != 0 {
+		t.Errorf("%d upstream calls, want 0", n)
+	}
+}
+
+func TestHandler_FakeTokenCannotBypassTheTokenCheck(t *testing.T) {
+	h := newHarness(t, harnessOptions{upstream: respondJSON(http.StatusUnauthorized, `{"error":{"code":"unauthenticated","message":"no"}}`)})
+	for _, method := range []string{"initialize", "tools/list"} {
+		resp := h.rpc(t, h.authed(), method, map[string]any{})
+		readBody(t, resp)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401", method, resp.StatusCode)
+		}
+	}
+	if n := len(h.upstream.seen()); n != 2 {
+		t.Errorf("%d upstream calls, want one token check per request", n)
+	}
+}
+
+func TestHandler_UpstreamBodyIsReadOnlyUpToTwiceTheResultCap(t *testing.T) {
+	big := `{"data":"` + strings.Repeat("x", 1<<20) + `"}`
+	h := newHarness(t, harnessOptions{
+		mutateConfig: func(c *Config) { c.MaxResultBytes = 100000 },
+		upstream:     respondJSON(200, big),
+	})
+	result := decodeToolResult(t, h.callTool(t, "get_overview", nil))
+	want := fmt.Sprintf("(%d bytes)", upstreamReadCap(100000))
+	if !result.IsError || !strings.Contains(result.Text, want) {
+		t.Errorf("text = %q, want a too-large error reporting %s", result.Text, want)
+	}
+}
+
+func TestUpstreamReadCap(t *testing.T) {
+	if got := upstreamReadCap(140000); got != 280000 {
+		t.Errorf("cap for 140000 = %d, want 280000", got)
+	}
+	if got := upstreamReadCap(10000); got < 2*10000 || got > 1<<20 {
+		t.Errorf("cap for 10000 = %d, want a small floor of at least 20000", got)
+	}
+}
