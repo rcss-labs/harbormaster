@@ -1,7 +1,8 @@
 # Image vulnerability scanning. Everything here exists only when enable_image_scanning is true.
 #
 # Two principals touch the bucket and nothing else does:
-#   - the server task role (aws_iam_role_policy.task_scan) starts, watches and stops scanner tasks, writes jobs and
+#   - the server task role (aws_iam_role_policy.task_scan, and aws_iam_role_policy.coordinator_scan once the services are
+#     split) starts, watches and stops scanner tasks, writes jobs and
 #     the vulnerability database, and reads and deletes results;
 #   - the scanner task role reads jobs and the database, writes results, and assumes the per-account scan role.
 # The scanner has its own execution role. aws_iam_role.execution can read the database URL and the session key, so
@@ -371,10 +372,10 @@ data "aws_iam_policy_document" "task_scan" {
 }
 
 resource "aws_iam_role_policy" "task_scan" {
-  count = local.scan_enabled ? 1 : 0
+  count = local.scan_enabled ? local.legacy_count : 0
 
   name   = "${local.server_name}-scan"
-  role   = aws_iam_role.task.id
+  role   = aws_iam_role.task[0].id
   policy = data.aws_iam_policy_document.task_scan[0].json
 }
 

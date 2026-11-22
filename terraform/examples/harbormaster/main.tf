@@ -26,6 +26,15 @@ module "harbormaster" {
   image              = local.image
   base_url           = local.base_url
 
+  # Split services (upgrade runbook: terraform/modules/harbormaster/README.md). Each step is a separate run; the
+  # variables below are added one run at a time, never all at once.
+  #   Run 3: split_services = true and a cache, with the legacy service still running.
+  #   Run 4: keep_legacy_service = false, once the split services are healthy.
+  # split_services      = true
+  # cache_mode          = "create" # or "external" with cache_url_secret_arn
+  # cache_engine        = "valkey" # or "redis"
+  # keep_legacy_service = false
+
   # Image vulnerability scanning (off by default). Step 1: apply with the block below, pinning the scanner image by
   # digest. Step 2: pass the scanner_task_role_arn output to the harbormaster-access module. See the module README.
   # enable_image_scanning = true
@@ -34,8 +43,23 @@ module "harbormaster" {
 }
 
 output "task_role_arn" {
-  description = "Task role ARN to pass to the harbormaster-access module."
+  description = "Legacy single-service task role ARN to pass to the harbormaster-access module. Null once keep_legacy_service is false."
   value       = module.harbormaster.task_role_arn
+}
+
+output "web_task_role_arn" {
+  description = "Web task role ARN to pass to the harbormaster-access module."
+  value       = module.harbormaster.web_task_role_arn
+}
+
+output "poller_task_role_arn" {
+  description = "Poller task role ARN to pass to the harbormaster-access module."
+  value       = module.harbormaster.poller_task_role_arn
+}
+
+output "coordinator_task_role_arn" {
+  description = "Coordinator task role ARN to pass to the harbormaster-access module."
+  value       = module.harbormaster.coordinator_task_role_arn
 }
 
 output "alb_dns_name" {

@@ -94,6 +94,8 @@ These five inputs are required. `public_subnet_ids` is also needed unless you se
 
 Plans and applies run in your Terraform runner (TerraDuckTel, env0, Terraform Cloud or similar); nothing is applied from a laptop. Apply the module with your Terraform pipeline.
 
+To run the web, poller and coordinator roles as three ECS services with a Valkey or Redis store (`split_services`, `cache_mode`, `cache_engine`), follow the ordered runs in [Upgrade: single service to split services](terraform/modules/harbormaster/README.md#upgrade-single-service-to-split-services). Nothing changes for an install that sets none of those variables.
+
 ### First run
 
 On the first start, with no users in the database, Harbormaster needs a first global admin. Choose one of these:
@@ -126,6 +128,8 @@ Harbormaster reads and changes resources in other accounts by assuming a role in
    ```
 
 4. Back in Harbormaster, enter the `role_arn` output of that module and press **Test and connect**.
+
+With split services each managed account has three roles from the same `role_name`: `harbormaster-access`, `harbormaster-access-poller` (read only) and `harbormaster-access-coordinator` (off-hours, the ARM64 check and the daily rollups). Pass the `web_task_role_arn`, `poller_task_role_arn` and `coordinator_task_role_arn` outputs to the access module as well, after the `harbormaster` module has been applied (IAM rejects a trust policy that names a role that does not exist). Harbormaster derives the suffixed ARNs from the one you enter, so there is nothing more to paste.
 
 Set `read_only = true` on the access module to create a role that can inspect resources but cannot register task definitions, update services, change auto scaling or alarms, stop tasks, open exec sessions or pass roles. The module details are in [`terraform/modules/harbormaster-access/README.md`](terraform/modules/harbormaster-access/README.md).
 
@@ -628,6 +632,10 @@ The service is designed to run with desired count 1 or more (design spec §4.3):
 - Terminal and live-log WebSockets are served by whichever task receives the connection, so the ALB needs no stickiness.
 
 The module runs desired count 1 by default, with deployment settings that allow a short overlap; the leases make overlap safe. With a store (`HM_KV_URL`) the terminal, live-tail and log-search limits, the log-search, notification-test and SSO login-start rate limits and the log error-count pacing are counted across all tasks. Without a store, or while it is down, they are counted per task, so with more than one task a user can open up to the limit on each.
+
+### Split services
+
+The ordered upgrade, with the account and region of each TerraDuckTel run and the checks after it, is in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md#upgrade-single-service-to-split-services). The cache's eviction alarm (`harbormaster-cache-evictions-*`) means the store is too small: raise `cache_node_type`. A poller or coordinator task that cannot assume its suffixed role in an account fails that account's polls or jobs with the AWS error; apply the access module there.
 
 ### Throttling and stale banners
 

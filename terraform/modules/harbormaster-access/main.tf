@@ -21,8 +21,9 @@ data "aws_iam_policy_document" "trust" {
     actions = ["sts:AssumeRole"]
 
     principals {
-      type        = "AWS"
-      identifiers = [var.harbormaster_task_role_arn]
+      type = "AWS"
+      # The legacy single task role (while it exists) and the web task role: both serve the API and the terminals.
+      identifiers = compact([var.harbormaster_task_role_arn, var.web_task_role_arn])
     }
 
     condition {
@@ -151,6 +152,13 @@ data "aws_iam_policy_document" "write" {
 }
 
 resource "aws_iam_role" "this" {
+  lifecycle {
+    precondition {
+      condition     = var.harbormaster_task_role_arn != null || var.web_task_role_arn != null
+      error_message = "Set harbormaster_task_role_arn (single service) or web_task_role_arn (split services): the access role must trust at least one task role."
+    }
+  }
+
   name                 = var.role_name
   assume_role_policy   = data.aws_iam_policy_document.trust.json
   max_session_duration = 3600
@@ -169,6 +177,184 @@ resource "aws_iam_role_policy" "write" {
   name   = "harbormaster-access-write"
   role   = aws_iam_role.this.id
   policy = data.aws_iam_policy_document.write.json
+}
+
+# ---- Least-privilege roles for the poller and the coordinator ------------------------------------------------------
+# With split services the poller assumes <role_name>-poller and the coordinator <role_name>-coordinator (Harbormaster
+# appends the suffix to the stored role ARN). Each action list is tied to the AWS calls the code makes by the Go test
+# TestAccessPolicies_CoverEachRolesCallsAndNothingBroader, which reads the lines between the "policy" markers below.
+
+data "aws_iam_policy_document" "poller_trust" {
+  count = var.poller_task_role_arn == null ? 0 : 1
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [var.poller_task_role_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "sts:ExternalId"
+      values   = [var.external_id]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "poller" {
+  statement {
+    sid    = "PollerReadOnly"
+    effect = "Allow"
+    # policy: poller
+    actions = [
+      "ecs:List*",
+      "ecs:Describe*",
+      "ecs:ListTagsForResource",
+      "ec2:DescribeVpcs",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeNatGateways",
+      "ec2:DescribeInternetGateways",
+      "ec2:DescribeVpcEndpoints",
+      "ec2:DescribeNetworkInterfaces",
+      "elasticfilesystem:DescribeFileSystems",
+      "elasticfilesystem:DescribeAccessPoints",
+      "elasticfilesystem:DescribeMountTargets",
+      "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:DescribeTargetHealth",
+      "application-autoscaling:Describe*",
+    ]
+    # end policy
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role" "poller" {
+  count = var.poller_task_role_arn == null ? 0 : 1
+
+  name                 = "${var.role_name}-poller"
+  assume_role_policy   = data.aws_iam_policy_document.poller_trust[0].json
+  max_session_duration = 3600
+  tags                 = var.tags
+}
+
+resource "aws_iam_role_policy" "poller" {
+  count = var.poller_task_role_arn == null ? 0 : 1
+
+  name   = "harbormaster-access-poller"
+  role   = aws_iam_role.poller[0].id
+  policy = data.aws_iam_policy_document.poller.json
+}
+
+data "aws_iam_policy_document" "coordinator_trust" {
+  count = var.coordinator_task_role_arn == null ? 0 : 1
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [var.coordinator_task_role_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "sts:ExternalId"
+      values   = [var.external_id]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "coordinator" {
+  # policy: coordinator
+  statement {
+    sid    = "CoordinatorRead"
+    effect = "Allow"
+    actions = [
+      "ecs:DescribeServices",
+      "application-autoscaling:Describe*",
+      "ecr:BatchGetImage",
+      "ecr:DescribeImages",
+      "cloudwatch:GetMetricData",
+    ]
+    resources = ["*"]
+  }
+
+  # Restoring the desired count when a service leaves off-hours. An ECS request does not carry the
+  # application-autoscaling:service-namespace key, so this statement must have no condition on it.
+  dynamic "statement" {
+    for_each = var.read_only ? [] : [1]
+    content {
+      sid       = "OffHoursRestoreDesiredCount"
+      effect    = "Allow"
+      actions   = ["ecs:UpdateService"]
+      resources = ["*"]
+    }
+  }
+
+  # Off-hours puts a service to sleep and wakes it. It registers the scalable target's range (its own target when the
+  # service has none), keeps its scheduled actions and restores the desired count when a service leaves. read_only
+  # drops these, so off-hours cannot act, as with the single role.
+  dynamic "statement" {
+    for_each = var.read_only ? [] : [1]
+    content {
+      sid    = "OffHoursWrites"
+      effect = "Allow"
+      actions = [
+        "application-autoscaling:RegisterScalableTarget",
+        "application-autoscaling:DeregisterScalableTarget",
+        "application-autoscaling:PutScheduledAction",
+        "application-autoscaling:DeleteScheduledAction",
+      ]
+      resources = ["*"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "application-autoscaling:service-namespace"
+        values   = ["ecs"]
+      }
+    }
+  }
+
+  # The first RegisterScalableTarget in an account that never used ECS autoscaling creates this service-linked role
+  # and fails without the permission. The single role has the same statement.
+  dynamic "statement" {
+    for_each = var.read_only ? [] : [1]
+    content {
+      sid       = "AutoScalingServiceLinkedRole"
+      effect    = "Allow"
+      actions   = ["iam:CreateServiceLinkedRole"]
+      resources = ["arn:aws:iam::${local.account_id}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "iam:AWSServiceName"
+        values   = ["ecs.application-autoscaling.amazonaws.com"]
+      }
+    }
+  }
+  # end policy
+}
+
+resource "aws_iam_role" "coordinator" {
+  count = var.coordinator_task_role_arn == null ? 0 : 1
+
+  name                 = "${var.role_name}-coordinator"
+  assume_role_policy   = data.aws_iam_policy_document.coordinator_trust[0].json
+  max_session_duration = 3600
+  tags                 = var.tags
+}
+
+resource "aws_iam_role_policy" "coordinator" {
+  count = var.coordinator_task_role_arn == null ? 0 : 1
+
+  name   = "harbormaster-access-coordinator"
+  role   = aws_iam_role.coordinator[0].id
+  policy = data.aws_iam_policy_document.coordinator.json
 }
 
 # The scan role is trusted by the scanner task only, never by the server, and holds read-only ECR pull

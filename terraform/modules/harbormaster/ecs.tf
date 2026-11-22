@@ -20,44 +20,65 @@ locals {
     },
     var.enable_metrics ? { HM_METRICS_TOKEN = aws_secretsmanager_secret.metrics_token[0].arn } : {},
     var.smtp_password_secret_arn == null ? {} : { HM_SMTP_PASSWORD = var.smtp_password_secret_arn },
+    # Not set until a cache exists, so a single-service install without one renders the same task definition as before.
+    local.kv_enabled ? { HM_KV_URL = local.kv_url_secret_arn } : {},
+  )
+
+  # One container template for the legacy service and the three split services. A spec names the container and gives
+  # its environment, its secrets (the execution role may read exactly these) and its log stream prefix; the legacy
+  # prefix stays "ecs" so its task definition renders as before.
+  container_specs = merge(
+    {
+      server = {
+        name          = local.server_name
+        environment   = local.container_env
+        secrets       = local.container_secrets
+        stream_prefix = "ecs"
+      }
+    },
+    local.split_container_specs,
   )
 
   # Map keys iterate in sorted order, so the rendered lists are stable.
-  container_definitions = [
-    {
-      name      = local.server_name
-      image     = var.image
-      essential = true
+  container_definitions_by_service = {
+    for key, spec in local.container_specs : key => [
+      {
+        name      = spec.name
+        image     = var.image
+        essential = true
 
-      portMappings = [
-        { containerPort = local.container_port, protocol = "tcp" }
-      ]
+        portMappings = [
+          { containerPort = local.container_port, protocol = "tcp" }
+        ]
 
-      environment = [for key, value in local.container_env : { name = key, value = value }]
-      secrets     = [for key, arn in local.container_secrets : { name = key, valueFrom = arn }]
+        environment = [for name, value in spec.environment : { name = name, value = value }]
+        secrets     = [for name, arn in spec.secrets : { name = name, valueFrom = arn }]
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group" = aws_cloudwatch_log_group.server.name
-          # Region from the log group ARN: data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
-          "awslogs-region"        = split(":", aws_cloudwatch_log_group.server.arn)[3]
-          "awslogs-stream-prefix" = "ecs"
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            "awslogs-group" = aws_cloudwatch_log_group.server.name
+            # Region from the log group ARN: data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
+            "awslogs-region"        = split(":", aws_cloudwatch_log_group.server.arn)[3]
+            "awslogs-stream-prefix" = spec.stream_prefix
+          }
         }
-      }
 
-      # ECS ignores the image's HEALTHCHECK; this is the check it uses.
-      healthCheck = {
-        command     = ["CMD", "/harbormaster", "healthcheck"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 30
-      }
+        # ECS ignores the image's HEALTHCHECK; this is the check it uses.
+        healthCheck = {
+          command     = ["CMD", "/harbormaster", "healthcheck"]
+          interval    = 30
+          timeout     = 5
+          retries     = 3
+          startPeriod = 30
+        }
 
-      readonlyRootFilesystem = true
-    }
-  ]
+        readonlyRootFilesystem = true
+      }
+    ]
+  }
+
+  container_definitions = local.container_definitions_by_service["server"]
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -71,14 +92,17 @@ resource "aws_ecs_cluster" "this" {
   tags = local.tags
 }
 
+# The legacy single service. keep_legacy_service = false removes it, its task definition and its two roles.
 resource "aws_ecs_task_definition" "server" {
+  count = local.legacy_count
+
   family                   = local.server_name
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.cpu
   memory                   = var.memory
-  execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  execution_role_arn       = aws_iam_role.execution[0].arn
+  task_role_arn            = aws_iam_role.task[0].arn
   container_definitions    = jsonencode(local.container_definitions)
 
   runtime_platform {
@@ -90,9 +114,11 @@ resource "aws_ecs_task_definition" "server" {
 }
 
 resource "aws_ecs_service" "server" {
+  count = local.legacy_count
+
   name                               = local.server_name
   cluster                            = aws_ecs_cluster.this.id
-  task_definition                    = aws_ecs_task_definition.server.arn
+  task_definition                    = aws_ecs_task_definition.server[0].arn
   desired_count                      = var.desired_count
   launch_type                        = "FARGATE"
   deployment_minimum_healthy_percent = 100
@@ -131,5 +157,17 @@ resource "aws_ecs_service" "server" {
     aws_secretsmanager_secret_version.database_url,
     aws_secretsmanager_secret_version.session_key,
     aws_secretsmanager_secret_version.metrics_token,
+    aws_secretsmanager_secret_version.kv_url,
   ]
+}
+
+# The legacy service and its task definition gained a count: keep an existing install's state.
+moved {
+  from = aws_ecs_task_definition.server
+  to   = aws_ecs_task_definition.server[0]
+}
+
+moved {
+  from = aws_ecs_service.server
+  to   = aws_ecs_service.server[0]
 }
