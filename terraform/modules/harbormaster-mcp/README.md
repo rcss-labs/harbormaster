@@ -36,7 +36,7 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `private_subnet_ids` | list(string) | required | Tasks; must route to a NAT gateway. |
 | `certificate_arn` | string | required | ACM certificate for the public hostname. |
 | `allowed_cidrs` | list(string) | `["0.0.0.0/0"]` | Open by decision, WAF protects it. Narrow only for the first rollout run. |
-| `http_redirect` | bool | `true` | Port 80 redirects to 443. |
+| `http_redirect` | bool | `false` | Open port 80 and redirect it to 443. Off by default so a client misconfigured with `http://` fails instead of sending its token in cleartext first. |
 | `cluster_arn` | string | required | ECS cluster (the Harbormaster module's). |
 | `image` | string | required | Must not end in `:latest`. |
 | `cpu_architecture` | string | `X86_64` | `X86_64` or `ARM64`. |
