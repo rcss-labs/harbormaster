@@ -3,11 +3,9 @@ package api
 import (
 	"context"
 	"encoding/base64"
-	"net"
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -161,17 +159,5 @@ func nextCursor(limit, offset, returned int) *string {
 // Earlier entries are client-controlled and must not be trusted; without a trusted proxy the
 // whole header is.
 func (s *Server) clientIP(r *http.Request) string {
-	if s.Cfg.TrustedProxy {
-		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-		for i := len(hops) - 1; i >= 0; i-- {
-			if hop := strings.TrimSpace(hops[i]); hop != "" {
-				return hop
-			}
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return auth.ClientIP(r, s.Cfg.TrustedProxy)
 }

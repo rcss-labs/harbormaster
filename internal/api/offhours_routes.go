@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/rcss-labs/harbormaster/internal/auth"
+)
 
 // offHoursRoutes registers the off-hours schedule administration (Admin) and the per-service state, wake and sleep
 // (View to read, Operate to change).
@@ -12,7 +16,7 @@ func (s *Server) offHoursRoutes(mux *http.ServeMux) {
 	s.handle(mux, "DELETE /api/offhours/schedules/{id}", s.deleteOffHoursSchedule, routeOptions{Admin: true})
 	s.handle(mux, "POST /api/offhours/preview", s.previewOffHours, routeOptions{Admin: true})
 	s.handle(mux, "GET /api/offhours/tags", s.listOffHoursTags, routeOptions{Admin: true})
-	s.handle(mux, "GET /api/services/{serviceId}/offhours", s.getServiceOffHours, routeOptions{})
+	s.handle(mux, "GET /api/services/{serviceId}/offhours", s.getServiceOffHours, routeOptions{Token: auth.ScopeRead})
 	s.handle(mux, "POST /api/services/{serviceId}/offhours/wake", s.wakeServiceOffHours, routeOptions{})
 	s.handle(mux, "POST /api/services/{serviceId}/offhours/sleep", s.sleepServiceOffHours, routeOptions{})
 }
