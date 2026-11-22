@@ -33,7 +33,8 @@ func claimSlice(t *testing.T, st *store.Store, target awsx.Target, owner uuid.UU
 	if err := st.EnsureSliceLease(ctx, target); err != nil {
 		t.Fatal(err)
 	}
-	l, ok, err := st.ClaimLease(ctx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: target.AccountID, Region: target.Region}, owner, time.Minute)
+	// The target need not be a connected account here, so claim the way the one-shot poll helpers do.
+	l, ok, err := st.ClaimLeaseOnce(ctx, store.LeaseKey{Kind: store.LeaseSlice, AccountID: target.AccountID, Region: target.Region}, owner, time.Minute)
 	if err != nil || !ok {
 		t.Fatalf("claim %+v: %v %v", target, ok, err)
 	}

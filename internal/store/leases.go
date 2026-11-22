@@ -56,7 +56,7 @@ func isLockTimeout(err error) bool {
 	return errors.As(err, &pe) && pe.Code == pgLockNotAvailable
 }
 
-// EnsureSliceLeases inserts a lease row for every target that has none, and deletes free rows of slices that no
+// EnsureSliceLeases inserts a lease row for every target of an account that still exists and has none, and deletes free rows of slices that no
 // longer exist. A held row of a removed target stays until its owner releases it. Epochs restart at 0 for a
 // recreated row, which is safe because owner ids are new on every process start and a manager never re-claims
 // a key whose previous holder is still running.
@@ -71,6 +71,7 @@ func (s *Store) EnsureSliceLeases(ctx context.Context, targets []awsx.Target) er
 		if _, err := tx.Exec(ctx,
 			`insert into poll_leases (kind, account_id, region)
 			 select 'slice', a, r from unnest($1::text[], $2::text[]) as t(a, r)
+			 where exists (select 1 from aws_accounts where account_id = t.a)
 			 on conflict do nothing`, accounts, regions); err != nil {
 			return err
 		}
@@ -113,18 +114,32 @@ func (s *Store) EnsureCoordinatorLease(ctx context.Context) error {
 // The first read takes no lock, so a claim attempt on a live lease never queues behind its owner's writes. The claim
 // itself selects the row FOR UPDATE: a plain UPDATE of owner_id and epoch would only take FOR NO KEY UPDATE, which does
 // not conflict with the FOR KEY SHARE the owner's fenced writes hold, and a takeover must wait for those writes.
+//
+// A slice is claimed only while its account still exists. A lease row recreated by a poller's stale target list while
+// the account was being disconnected becomes visible only after that delete committed, so this claim's own snapshot
+// already sees the account gone and the claim fails; without the check the new epoch would pass the fence.
 func (s *Store) ClaimLease(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration) (Lease, bool, error) {
+	return s.claimLeaseWithin(ctx, key, owner, ttl, true)
+}
+
+// ClaimLeaseOnce is ClaimLease for the one-shot poll helpers (poller.PollOnce and PollCountsOnce), which poll a target
+// that is not necessarily a connected account. The pollers never use it.
+func (s *Store) ClaimLeaseOnce(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration) (Lease, bool, error) {
+	return s.claimLeaseWithin(ctx, key, owner, ttl, false)
+}
+
+func (s *Store) claimLeaseWithin(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration, needAccount bool) (Lease, bool, error) {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, ClaimDeadline)
 	defer cancel()
-	l, ok, err := s.claimLease(ctx, key, owner, ttl)
+	l, ok, err := s.claimLease(ctx, key, owner, ttl, needAccount)
 	if err != nil && parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return Lease{}, false, nil // out of time behind a lock: not claimed, try again later
 	}
 	return l, ok, err
 }
 
-func (s *Store) claimLease(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration) (Lease, bool, error) {
+func (s *Store) claimLease(ctx context.Context, key LeaseKey, owner uuid.UUID, ttl time.Duration, needAccount bool) (Lease, bool, error) {
 	var live bool
 	err := s.Pool.QueryRow(ctx,
 		`select owner_id is not null and expires_at >= now() from poll_leases
@@ -152,7 +167,8 @@ func (s *Store) claimLease(ctx context.Context, key LeaseKey, owner uuid.UUID, t
 			`select epoch from poll_leases
 			 where kind = $1 and account_id = $2 and region = $3
 			   and (owner_id is null or expires_at < clock_timestamp())
-			 for update`, key.Kind, key.AccountID, key.Region).Scan(&epoch)
+			   and (kind <> 'slice' or not $4 or exists (select 1 from aws_accounts a where a.account_id = poll_leases.account_id))
+			 for update`, key.Kind, key.AccountID, key.Region, needAccount).Scan(&epoch)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

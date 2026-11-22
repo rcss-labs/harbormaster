@@ -35,7 +35,26 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 
 ## How it runs
 
-![Harbormaster architecture: browsers reach an ALB over HTTPS in the Harbormaster AWS account; the ECS service "harbormaster" (Fargate) runs the API, the leader-only poller, the exec bridge and the log tail, backed by RDS PostgreSQL and Secrets Manager; it assumes an IAM role per region in each managed account (sts:AssumeRole with external ID) to reach ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.](assets/AWS%20Harbormaster%20Architecture%20Overview.png)
+```text
+              browsers
+                 | HTTPS
+                ALB  (targets: web only)
+                 |
+    +------------+-------------+    +------------------------+    +---------------------------+
+    | web                      |    | poller                 |    | coordinator               |
+    | API, web app, WebSockets |    | slice loops and alerts |    | one active, the rest wait |
+    | deploys, terminal, logs  |    | focus loops            |    | notifications, off-hours, |
+    | focus heartbeats         |    | one lease per account  |    | image scans, ARM64 check, |
+    | snapshot cache reads     |    | and region             |    | rollups, retention        |
+    +---+-----------+----------+    +---+-----------+--------+    +---+-----------+-----------+
+        |           |                   |           |                 |           |
+        |           +-- Valkey or Redis (optional) -+-----------------+           |
+        |        open pages, poll-now and kick signals, shared limits, cache      |
+        +------------------------------ Postgres ---------------------------------+
+              snapshots, sessions, permissions, audit and the leases (the truth)
+```
+
+The default install is one ECS service running every part (`role=all`) and needs no store. With `split_services` the module runs the three roles above as three ECS services of the same image, so polling capacity, API capacity and the background jobs scale separately. Each task reaches AWS by assuming an IAM role per region in each managed account (`sts:AssumeRole` with an external ID): ECS, EC2, EFS, ECR, CloudWatch, Logs, App Auto Scaling, ELBv2 and SSM.
 
 Harbormaster is one Go binary that serves an embedded React single-page app. Browsers poll `/api` about every 5 seconds, so the view stays current without a push channel. Each account and region is polled by exactly one task at a time (the one holding its lease in Postgres), which writes the snapshots to Postgres, and any task can answer API reads from them, while logs, metrics, deploys and terminal sessions call AWS directly from whichever task serves the request. What a user can see and do comes from their tags and permissions, and the server checks them on every request, including the WebSocket endpoints for the terminal and live logs.
 
@@ -94,7 +113,7 @@ These five inputs are required. `public_subnet_ids` is also needed unless you se
 
 Plans and applies run in your Terraform runner (TerraDuckTel, env0, Terraform Cloud or similar); nothing is applied from a laptop. Apply the module with your Terraform pipeline.
 
-To run the web, poller and coordinator roles as three ECS services with a Valkey or Redis store (`split_services`, `cache_mode`, `cache_engine`), follow the ordered runs in [Upgrade: single service to split services](terraform/modules/harbormaster/README.md#upgrade-single-service-to-split-services). Nothing changes for an install that sets none of those variables.
+To run the web, poller and coordinator roles as three ECS services with a Valkey or Redis store (`split_services`, `cache_mode`, `cache_engine`), follow the ordered runs in [Upgrade: single service to split services](terraform/modules/harbormaster/README.md#upgrade-single-service-to-split-services). Nothing changes for an install that sets none of those variables. Each web, poller and coordinator task holds its own database pool (`HM_DB_MAX_CONNS`), so keep the default `db.t4g.micro` only at the default task counts and set `db_instance_class = "db.t4g.small"` before raising `web_max_count` or `poller_max_count` (the arithmetic is in the module README under Database connections).
 
 ### First run
 
@@ -282,7 +301,7 @@ The **Log search** page (`/logs`, under Insights in the navigation; under More o
 
 - **Permissions.** A service is listed and searchable only when you have Logs on it through its tag. A service you cannot see is never listed, and a request that includes one answers 404 for the whole request. A service you can see but lack Logs on answers 403.
 - **IAM.** The `harbormaster-access` role needs `logs:StartQuery`, `logs:GetQueryResults`, `logs:StopQuery` and `logs:DescribeLogGroups` (the scan estimate reads log group sizes); the module grants them in its read statement, so they stay with `read_only = true`. For a role created before `logs:StartQuery`, `logs:GetQueryResults` or `logs:StopQuery` were added, the page shows `The harbormaster-access role in {account} cannot run Logs Insights queries. Update the access module to the latest version.` for that account only; see [Connecting AWS accounts](#connecting-aws-accounts).
-- **Guardrails.** `HM_LOG_SEARCH_TIMEOUT`, `HM_LOG_SEARCH_MAX_SERVICES`, `HM_LOG_SEARCH_MAX_RANGE` and `HM_LOG_SEARCH_MAX_GB` (see [Limits](#limits)). A user can run 6 searches in a burst, then 1 per 10 seconds (HTTP 429), and one search at a time per Harbormaster task (HTTP 409), so with more than one task the limit applies on each.
+- **Guardrails.** `HM_LOG_SEARCH_TIMEOUT`, `HM_LOG_SEARCH_MAX_SERVICES`, `HM_LOG_SEARCH_MAX_RANGE` and `HM_LOG_SEARCH_MAX_GB` (see [Limits](#limits)). A user can run 6 searches in a burst, then 1 per 10 seconds (HTTP 429), and one search at a time per user (HTTP 409). Both limits are counted across all tasks when `HM_KV_URL` is set; without a store each task counts its own, so with more than one task the limit applies on each.
 - **Supported commands.** `fields`, `filter`, `parse`, `dedup`, `sort` and `limit`. `SOURCE` and aggregates such as `stats` are refused: log groups always come from the selected services, and every result line must carry its log group and stream so Harbormaster can attribute it and hide streams you may not read. Renaming a field to an `@...` name is refused for the same reason. The query checker must agree with AWS on where a string or regular expression ends, so a few ambiguous forms are refused: an escaped quote of the quote type that encloses the string (switch to the other quote type), a backslash inside backticks, and a `/` division followed later by another `/` with a quote, backtick or `|` between them.
 - **Cost.** Logs Insights charges $0.005 per GB scanned (GB = 2^30 bytes). A new search starts on a 1 hour range. Before you run, the page shows a rough guide (`store about X GB, about $Y`): the stored size of the selected log groups from `DescribeLogGroups`, counted once per group, for every service you can search and no others. It is not a bound: it covers all the logs the groups retain, not only the time range, but it is the compressed size while Insights bills uncompressed bytes. Log groups whose size cannot be read are listed as not counted. The scan limit below is the hard guard. While a search runs, Harbormaster stops every query with `StopQuery` once the search has scanned more than `HM_LOG_SEARCH_MAX_GB` (default 10 GB, `0` means no limit, shared across all the accounts and regions of one search) and returns the rows found so far, marked as partial; when the estimate is already above the limit the page warns that the search will stop at it. After each run it shows the bytes scanned and the cost; a search stopped at the limit may scan somewhat more than the limit, because CloudWatch reports progress only when polled (about once a second).
 - **Audit.** Every run is written to the audit log as `log_search` with the query text. It is not written to the operations log. Query text can contain identifiers, so it is kept for `HM_RETENTION_AUDIT_LOG`.
@@ -621,21 +640,76 @@ Settings → Single sign-on → "Test sign-in" opens a sign-in in a new tab and 
 
   `harbormaster_limit_decisions_total{limit,result,backend}` counts shared-limit decisions: `result` is `allowed` or `refused`, `backend` is `kv` or `memory` (the per-task fallback while the store is down).
 
+  Every role serves `/metrics`. The last column says where a series carries real values; on another role it is 0 or absent, and `all` reports every one. A poller or coordinator task is not behind the ALB, so its own `/metrics` is reachable only from the security groups in `metrics_ingress_security_group_ids`. Installs that scrape through the ALB get the per-member and per-lease series below from any web task.
+
+  | Series | Labels | Reported by |
+  | --- | --- | --- |
+  | `harbormaster_build_info` | `version` | every role |
+  | `harbormaster_role_info` | `role`, `version` | every role |
+  | `harbormaster_kv_up`, `harbormaster_kv_errors_total`, `harbormaster_kv_command_duration_seconds` | `op` (the last two) | every role, only when `HM_KV_URL` is set |
+  | `harbormaster_limit_decisions_total` | `limit`, `result`, `backend` | web (where the limits are taken) |
+  | `harbormaster_focus_admissions_total` | `result` | web |
+  | `harbormaster_snapshot_cache_requests_total` | `model`, `result` | web (the page reads) |
+  | `harbormaster_snapshot_cache_token_write_failures_total` | | poller (a generation token write that failed and is retried) |
+  | `harbormaster_lease_slices_owned`, `harbormaster_lease_weight_owned`, `harbormaster_lease_events_total`, `harbormaster_lease_renew_failures_total`, `harbormaster_fenced_writes_rejected_total` | `kind`, `event` where noted above | poller; the lease events and renew failures also on the coordinator (`kind="coordinator"`) |
+  | `harbormaster_coordinator_active`, `harbormaster_poller_leader` | | coordinator |
+  | `harbormaster_poller_idle` | | poller and coordinator |
+  | `harbormaster_poll_members` | `role` | poller and coordinator (the roles that heartbeat into the member table) |
+  | `harbormaster_focus_objects`, `harbormaster_focus_interval_seconds`, `harbormaster_focus_cycle_duration_seconds`, `harbormaster_pollnow_signals_total`, `harbormaster_pollnow_latency_seconds` | `kind`; `account`, `region`; `kind`; `result`; none | poller |
+  | `harbormaster_poll_loop_duration_seconds`, `harbormaster_poll_loop_interval_seconds`, `harbormaster_poll_loop_runs_total` | `account`, `region`, `tier` (and `result` on runs) | poller |
+  | `harbormaster_snapshot_rows_written_total` | `table` | poller |
+  | `harbormaster_notification_deliveries_total` | `destination`, `result` | coordinator |
+  | `harbormaster_registry_requests_total` | `host`, `outcome` | coordinator (the ARM64 platform check) |
+  | `harbormaster_aws_api_calls_total` | `account`, `region`, `service`, `operation`, `result`, `source` (`tier`, `focus`, `request`, `job`) | every role that calls AWS |
+  | `harbormaster_poll_member_slices`, `_weight`, `_focus_objects`, `_heartbeat_age_seconds`, `harbormaster_lease_epoch` | `instance`, `roles`; `kind`, `account`, `region`, `instance` | web, read from the database at scrape time |
+
 ### Running more than one task
 
-The service is designed to run with desired count 1 or more (design spec §4.3):
+Three setups are supported, and they differ in what they need:
 
-- **Polling is owned by leases.** Each account and region (a slice) has a row in `poll_leases`; the task that holds it polls that slice and nobody else does. Every task claims, renews (every 10 s, lease TTL 30 s) and gives back leases on a 5-second tick, using the database clock only. A single task claims every slice, which is exactly the old behaviour. With several pollers the slices are spread by weight (clusters per slice): a new task takes free slices up to its fair share and the others hand one slice back per 30 s until the shares are even.
-- **Fenced writes.** Every database write a poller makes for a slice runs in a transaction that first checks, with a row lock, that its lease epoch is still current. A task that was paused (a stalled container, a long garbage collection) and comes back after another task took over finds its write rejected and stops that slice, so it can never overwrite the new owner's rows. A task that cannot renew for 20 s stops the slice itself, before the lease can expire.
-- **Failover.** A task that is stopped (a deploy, a scale-in) releases its leases, and another task takes them within one tick (5 s). A task that dies without releasing is replaced within 35 s (the 30 s TTL plus one tick); the stale banner covers that gap. Before leases, failover took about 5 s in both cases.
-- **The background jobs run on one task, the coordinator.** Notifications, off-hours, image scans, the ARM64 platform check, the deployment outcome log, the daily rollups and retention run only on the task that holds the one coordinator lease, and each re-checks the lease right before it sends, launches or changes anything. "Never twice" still rests on the database (the unique delivery key and claim, the enrolment row lock, the scan run row); the lease check keeps a paused task from acting on stale decisions. `Send test` and a retry are handled by the task that serves the request.
-- **Upgrades and rollbacks.** Older versions elected a leader with a Postgres advisory lock. A task that polls or coordinates now takes the same key in shared mode (on one dedicated connection) and claims leases only while it holds it. While an old-version leader is alive no new task claims anything, and while any new task is alive no old task can become leader, so a rolling deploy or a rollback never has two versions acting at once. `HM_LEGACY_LEADER_GATE=false` turns the gate off; leave it on until every task runs this version or later (it is removed in a later release). If a task loses the gate connection (a database failover, a network cut), the gate notices at its next 5 s check and the loss is acted on within about 8 s; in that window an old-version task that happens to start could take the leader key while this task still polls. Fenced writes and the coordinator checks limit what overlapping tasks can do, and the window only exists during a mixed-version rollout.
-- All other state (sessions, snapshots, permissions) is in Postgres, so any task can serve any API request.
-- Terminal and live-log WebSockets are served by whichever task receives the connection, so the ALB needs no stickiness.
+- **One task (`role=all`, the default).** Nothing to configure: no store, no extra roles. This is how Harbormaster behaved before the roles existed, and `make run` is the same thing.
+- **Several `all` tasks.** Safe with or without a store. Leases decide who polls what, and the other behaviour below applies.
+- **Split services.** Web, poller and coordinator tasks, scaled separately. A store (`HM_KV_URL`) is strongly recommended: without one, live pages and kicks only work when the task that receives the request is the task that acts on it (see Split installs without a store).
 
-The module runs desired count 1 by default, with deployment settings that allow a short overlap; the leases make overlap safe. With a store (`HM_KV_URL`) the terminal, live-tail and log-search limits, the log-search, notification-test and SSO login-start rate limits and the log error-count pacing are counted across all tasks. Without a store, or while it is down, they are counted per task, so with more than one task a user can open up to the limit on each.
+#### Roles, leases and fencing
 
-**What the store holds (snapshot cache).** With a store and `HM_SNAPSHOT_CACHE` on, the poller that owns a slice writes a generation token for a cluster (and for the slice) each time it commits a change to it, and keeps the token alive when it finds nothing new. A page read asks for the token, then for the model stored under it: the cluster's services and running tasks, the unhealthy-target flags and the event times (the list pages read the same rows per account and region). A model that is missing is read from Postgres once, for everyone, and stored under that token. Only rows the poller itself writes are in it, never a permission, a tag, a user or a deployment record, and every request still loads its user and the tag snapshot from Postgres and filters the model in Go, so a permission or tag change shows on the next request and nobody sees an object they may not see. History, deployments, operations, alerts, task definitions, the service task list and the data age still come from Postgres on every request. The worst extra staleness is `HM_SNAPSHOT_CACHE_TTL`: a poller that dies between its commit and its token write, or a cluster that was deleted. A store that is down, slow or returns garbage costs only a Postgres read (`harbormaster_snapshot_cache_requests_total{model,result}` counts `hit`, `miss`, `bypass` and `error`). Sizes, measured on the soak estate (20 clusters of 15 services and 45 tasks per slice, synthetic rows): about 3 KB gzipped for a cluster model, 1.3 KB for a service model and 48 KB for a slice summary; real rows carry more text (the design estimates about 15 KB per cluster model), so plan on about 20 MB for 300 clusters. `HM_SNAPSHOT_CACHE=false` switches it off.
+Each account and region (a slice) has a row in `poll_leases`, and the poller task that holds it polls that slice and nobody else does. A poller claims, renews (every 10 s, lease TTL 30 s) and gives back leases on a 5-second tick, using the database clock only. A single poller claims every slice, which is exactly the old behaviour; with several, slices are spread by weight (clusters per slice): a new task takes free slices up to its fair share and the others hand one slice back per 30 s until the shares are even. A task that is stopped (a deploy, a scale-in) releases its leases, and another task takes them within one tick (5 s). A task that dies without releasing is replaced within 35 s (the 30 s TTL plus one tick); the stale banner covers that gap.
+
+Every database write a poller makes for a slice runs in a transaction that first checks, with a row lock, that its lease epoch is still current. A task that was paused (a stalled container, a long garbage collection) and comes back after another task took over finds its write rejected and stops that slice, so it cannot overwrite the new owner's rows; a task that cannot renew for 20 s stops the slice itself, before the lease can expire. `harbormaster_fenced_writes_rejected_total` counts the rejections.
+
+#### The coordinator
+
+Notifications, off-hours, image scans, the ARM64 platform check, the deployment outcome log, the daily rollups and retention run only on the task that holds the one coordinator lease (several coordinator tasks run, one is active and the others wait). Each job re-checks the lease right before it sends, launches or changes anything. "Never twice" still rests on the database (the unique delivery key and claim, the enrolment row lock, the scan run row); the lease check keeps a paused task from acting on stale decisions. `Send test` and a retry are handled by the web task that serves the request. When a web task changes something a job reads (a saved schedule, a changed route, a scan request) it asks the coordinator to run that job now over the store; without a store the job runs at its own interval.
+
+#### What the store holds, and what it does not
+
+The store (Valkey or Redis, `HM_KV_URL`) holds only state that is cheap to lose: the set of pages that are open and when each was last read, the poll-now and kick signals, the shared limits (terminal, live-tail and log-search sessions, three rate limits and log error-count pacing) and, with `HM_SNAPSHOT_CACHE` on, the generation tokens and cached read models described below. Every key expires. It never holds sessions, users, permissions, tags, snapshots, alerts, the notification queue or the leases: those are in Postgres, which stays the truth, and no write waits on the store.
+
+**Snapshot cache.** With a store and `HM_SNAPSHOT_CACHE` on, the poller that owns a slice writes a generation token for a cluster (and for the slice) each time it commits a change to it, and keeps the token alive when it finds nothing new. A page read asks for the token, then for the model stored under it: the cluster's services and running tasks, the unhealthy-target flags and the event times (the list pages read the same rows per account and region). A model that is missing is read from Postgres once, for everyone, and stored under that token. Only rows the poller itself writes are in it, never a permission, a tag, a user or a deployment record, and every request still loads its user and the tag snapshot from Postgres and filters the model in Go, so a permission or tag change shows on the next request and nobody sees an object they may not see. History, deployments, operations, alerts, task definitions, the service task list and the data age still come from Postgres on every request. The worst extra staleness is `HM_SNAPSHOT_CACHE_TTL`: a poller that dies between its commit and its token write, or a cluster that was deleted. A store that is down, slow or returns garbage costs only a Postgres read (`harbormaster_snapshot_cache_requests_total{model,result}` counts `hit`, `miss`, `bypass` and `error`). Sizes, measured on the soak estate (20 clusters of 15 services and 45 tasks per slice, synthetic rows): about 3 KB gzipped for a cluster model, 1.3 KB for a service model and 48 KB for a slice summary; real rows carry more text (the design estimates about 15 KB per cluster model), so plan on about 20 MB for 300 clusters. `HM_SNAPSHOT_CACHE=false` switches it off.
+
+#### When the store is down
+
+The client marks the store down after three failed commands or a failed ping (checked every 2 s), and up again after three good pings; each command is cut off after 250 ms so a slow store cannot slow a page. While it is down:
+
+| What | Behaviour |
+| --- | --- |
+| Polling, alerts, notifications, off-hours, scans, deploys, sign-in | Unchanged; none of them need the store |
+| Page reads | Straight from Postgres |
+| Live pages (focus, poll-now) | Stop. The page says `Live refresh unavailable` and the endpoint answers `unavailable`. A focus loop that is already running ends once the poller's registry read has failed for `HM_FOCUS_TTL` |
+| Limits and rate limiters | Counted per task in memory, with the usual values |
+| Kicks | The job runs at its interval |
+
+When the store returns, open pages re-register on their next heartbeat (every 10 s) and go live again. Sessions counted in memory during an outage are released from memory when they end, so the count is briefly split between the two backends. `make split-smoke` and the `TestDegraded_StoreCutMidRun` test exercise exactly this.
+
+#### Split installs without a store
+
+A split install with `HM_KV_URL` empty on all three services is allowed (the Terraform module only accepts it with `allow_split_without_cache`, which it documents as for tests) and behaves like the table above for good. Limits are counted per task, a kick reaches only the task that received it, and the web task's set of open pages is its own memory, which no poller reads, so nothing makes a page live. The page shows `Live refresh unavailable` once its short wait for a first read has passed: the state it shows is evidence-based (a read newer than two intervals), so it never pretends. Normal polling and everything else work as usual.
+
+#### Upgrades and rollbacks
+
+Older versions elected a leader with a Postgres advisory lock. A task that polls or coordinates now takes the same key in shared mode (on one dedicated connection) and claims leases only while it holds it. While an old-version leader is alive no new task claims anything, and while any new task is alive no old task can become leader, so a rolling deploy or a rollback never has two versions acting at once. `HM_LEGACY_LEADER_GATE=false` turns the gate off; leave it on until every task runs this version or later (it is removed in a later release). If a task loses the gate connection (a database failover, a network cut), the gate notices at its next 5 s check and the loss is acted on within about 8 s; in that window an old-version task that happens to start could take the leader key while this task still polls. Fenced writes and the coordinator checks limit what overlapping tasks can do, and the window only exists during a mixed-version rollout.
+
+All other state (sessions, snapshots, permissions) is in Postgres, so any web task can serve any API request. Terminal and live-log WebSockets are served by whichever web task receives the connection, so the ALB needs no stickiness. The `harbormaster` module runs desired count 1 for the single service, with deployment settings that allow a short overlap; the leases make overlap safe. Without a store, or while it is down, the shared limits are counted per task, so with more than one task a user can open up to the limit on each.
 
 ### Split services
 
@@ -716,7 +790,7 @@ make run                            # http://127.0.0.1:8480, in-memory fake AWS 
 
 `make run` starts `serve --fake-aws`: it migrates the database, seeds demo users, tags and permissions, and serves a fake ECS estate, so no AWS credentials are needed. Sign in as `sam` / `harbormaster-e2e-1` (a global admin). `dana`, `omer` and `oncall` use the same password with narrower access. Never use `--fake-aws` (or `HM_FAKE_AWS`) against a database that holds real users.
 
-`make run-split` runs the three roles as separate processes (web on 8480, poller on 8482, coordinator on 8483) in a recreated `hm_run_split` schema of the test database, so leases, kicks and health can be tried locally. Export `HM_TEST_KV_URLS` (see `make test-kv`) so kicks cross processes. Each process has its own in-memory fake estate, so a deploy made through web is not seen by the poller's fake; write flows are tested in `role=all`. Ctrl-C stops all three.
+`make run-split` runs the three roles as separate processes (web on 8480, poller on 8482, coordinator on 8483) in a recreated `hm_run_split` schema of the test database, so leases, kicks and health can be tried locally. Export `HM_TEST_KV_URLS` (see `make test-kv`) so kicks cross processes. Each process has its own in-memory fake estate, so a deploy made through web is not seen by the poller's fake; write flows are tested in `role=all`. Ctrl-C stops all three. `make split-smoke` runs the same processes unattended and checks them.
 
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 
@@ -730,8 +804,9 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 - `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
 - `make run-split`: run the web, poller and coordinator roles as three local processes (ports 8480, 8482, 8483); see Run it locally
+- `make split-smoke [ENGINE=valkey|redis]`: run web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a private Valkey or Redis container that the script starts and removes (ports 8580 to 8583, schema `hm_split_smoke_<engine>`). It checks health, lease ownership, a kick crossing processes, live focus, the snapshot cache, a poller taking over and a store outage, and exits 1 naming the first check that failed. Needs `HM_TEST_DATABASE_URL`, Docker, `curl`, `jq`, `python3` and `go`; about two minutes
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free
-- `make soak`: soak test at target estate scale. Requires `HM_TEST_DATABASE_URL`
+- `make soak`: soak tests at target estate scale, about 35 minutes: one poller's call budget, back-off and write volume, and, at the split's 12-slice, 300-cluster estate, three pollers sharing the slices (graceful stop and kill), the cycle time of the largest slice, and the AWS call rates with 10 and 50 pages focused. Requires `HM_TEST_DATABASE_URL`
 - `make tf-check`: validate every Terraform root under `terraform/` locally (fmt, init without a backend, validate, and tflint if installed). It never plans or applies
 - `make image VERSION=v1.0.0 [ARCH=amd64|arm64]`: build the image locally as `harbormaster:v1.0.0` with `docker build --platform linux/$(ARCH)`; `ARCH` defaults to `amd64`
 - `make check-image`: check the runtime contract of `harbormaster:$(VERSION)` (non-root, healthcheck, read-only root filesystem). If this machine cannot execute the image's architecture (for example an amd64 image on Apple silicon without emulation), it checks the shipped image's static contract and runs the runtime checks on a host-architecture build of the same Dockerfile (`harbormaster:$(VERSION)-check`). Local Docker only; nothing is pushed

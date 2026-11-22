@@ -23,7 +23,7 @@ func startServeWithKV(t *testing.T, extra map[string]string) string {
 	}
 	addr := freeAddr(t)
 	env := map[string]string{
-		"HM_DATABASE_URL": schemaScopedURL(t, dbURL), "HM_LISTEN": addr, "HM_COOKIE_SECURE": "false",
+		"HM_DATABASE_URL": schemaScopedURL(t, dbURL), "HM_LISTEN": addr, "HM_BASE_URL": "http://" + addr, "HM_COOKIE_SECURE": "false",
 		"HM_FAKE_AWS": "1", "HM_POLL_JITTER": "1ms", "HM_LOG_LEVEL": "warn", "HM_METRICS_TOKEN": "kv-test-token",
 	}
 	for k, v := range extra {

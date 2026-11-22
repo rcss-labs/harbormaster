@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test test-db test-kv e2e lint run run-split
+.PHONY: build test test-db test-kv e2e lint run run-split split-smoke
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
@@ -52,6 +52,13 @@ run:
 # run-split runs web (8480), poller (8482) and coordinator (8483) as three processes on fake AWS data; see tools/run-split.sh.
 run-split:
 	tools/run-split.sh
+
+# split-smoke runs web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a
+# private Valkey (default) or Redis container, and checks leases, kicks, focus, the cache, takeover and a store outage.
+# Pass ENGINE=redis for the other engine. About two minutes; see tools/split-smoke.sh.
+ENGINE ?= valkey
+split-smoke:
+	tools/split-smoke.sh --engine $(ENGINE)
 
 # e2e builds the binary, recreates the dedicated schema (tools/e2eschema; HM_E2E_SCHEMA, default hm_e2e) so each
 # run starts empty, then runs the Playwright smoke and flow specs against `serve --fake-aws`. Playwright wipes
@@ -150,14 +157,15 @@ check-notices:
 	tools/check-notices.sh
 
 # plan 06
-# soak runs the rate-limit / back-off soak tests at target estate scale (about 10 minutes, needs HM_TEST_DATABASE_URL; see 'make test-db').
+# soak runs the rate-limit / back-off soak tests at target estate scale, and the split-service soaks (three pollers, cycle
+# time, focus call rates): about 35 minutes. Needs HM_TEST_DATABASE_URL; see 'make test-db'.
 .PHONY: soak
 soak:
 	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
 		echo "make soak: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
 		exit 2; \
 	fi
-	HM_SOAK=1 go test -count=1 -tags soak -run TestSoak -timeout 20m -v ./internal/poller
+	HM_SOAK=1 go test -count=1 -tags soak -run TestSoak -timeout 60m -v ./internal/poller
 
 # Floci harness (tools/floci): a local AWS emulator plus Postgres, so Harbormaster's real AWS code path is checked
 # against an ECS estate. Every script sources tools/floci/env.sh, which refuses (exit 2) any non-local endpoint.

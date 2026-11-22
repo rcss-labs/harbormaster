@@ -201,6 +201,7 @@ func TestPoller_HoldSliceCountsAStaleWriteAsRejected(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	target := loopTarget
+	connectAccount(t, st, target)
 	if err := st.EnsureSliceLease(ctx, target); err != nil {
 		t.Fatal(err)
 	}

@@ -25,9 +25,24 @@ func sliceKey(account, region string) store.LeaseKey {
 	return store.LeaseKey{Kind: store.LeaseSlice, AccountID: account, Region: region}
 }
 
+// ensureAccounts creates the account rows of the targets: a slice lease exists only for a connected account.
+func ensureAccounts(t testing.TB, s *store.Store, targets ...awsx.Target) {
+	t.Helper()
+	for _, tg := range targets {
+		if _, err := s.GetAccountByAccountID(context.Background(), tg.AccountID); err == nil {
+			continue
+		}
+		if _, err := s.CreateAccount(context.Background(), store.AWSAccount{Name: "t" + tg.AccountID, AccountID: tg.AccountID,
+			RoleARN: "arn:aws:iam::" + tg.AccountID + ":role/x", ExternalID: "e", Regions: []string{tg.Region}, Enabled: true}); err != nil {
+			t.Fatalf("create account %s: %v", tg.AccountID, err)
+		}
+	}
+}
+
 // ensureSlice creates the lease row of one slice.
 func ensureSlice(t testing.TB, s *store.Store, account, region string) store.LeaseKey {
 	t.Helper()
+	ensureAccounts(t, s, awsx.Target{AccountID: account, Region: region})
 	if err := s.EnsureSliceLeases(context.Background(), []awsx.Target{{AccountID: account, Region: region}}); err != nil {
 		t.Fatalf("ensure slice leases: %v", err)
 	}
@@ -237,6 +252,7 @@ func TestEnsureSliceLeases_AddsMissingAndDropsOnlyFreeVanished(t *testing.T) {
 	a := awsx.Target{AccountID: "111111111111", Region: "us-east-1"}
 	b := awsx.Target{AccountID: "111111111111", Region: "eu-west-1"}
 	c := awsx.Target{AccountID: "222222222222", Region: "us-east-1"}
+	ensureAccounts(t, s, a, b, c)
 
 	if err := s.EnsureSliceLeases(ctx, []awsx.Target{a, b, c}); err != nil {
 		t.Fatal(err)
@@ -277,6 +293,7 @@ func TestEnsureSliceLease_AddsOnlyThatRowAndDropsNothing(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	other := awsx.Target{AccountID: "222222222222", Region: "us-east-1"}
+	ensureAccounts(t, s, other)
 	if err := s.EnsureSliceLeases(ctx, []awsx.Target{other}); err != nil {
 		t.Fatal(err)
 	}
@@ -426,5 +443,38 @@ func TestMigration0212_IsAdditive(t *testing.T) {
 	}
 	if len(added) != 2 || !added["poll_leases"] || !added["poll_members"] {
 		t.Errorf("0212 touched tables %v, want exactly poll_leases and poll_members", added)
+	}
+}
+
+// A stale target list must not bring a slice back after its account was disconnected, and disconnecting removes the
+// slice's lease row so its owner's later writes fail the fence.
+func TestEnsureSliceLeases_SkipsAnAccountThatWasDisconnected(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	gone := awsx.Target{AccountID: "111111111111", Region: "us-east-1"}
+	kept := awsx.Target{AccountID: "222222222222", Region: "us-east-1"}
+	ensureAccounts(t, s, gone, kept)
+	if err := s.EnsureSliceLeases(ctx, []awsx.Target{gone, kept}); err != nil {
+		t.Fatal(err)
+	}
+	owner := mustClaim(t, s, sliceKey(gone.AccountID, gone.Region), uuid.New())
+	account, err := s.GetAccountByAccountID(ctx, gone.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAccount(ctx, account.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := s.ListLeases(ctx); strings.Join(leaseKeys(rows), ",") != "slice|222222222222|us-east-1" {
+		t.Fatalf("lease rows after disconnecting = %v, want only the other account's", leaseKeys(rows))
+	}
+	if err := s.RenewLease(ctx, owner, leaseTTL); !errors.Is(err, store.ErrLeaseLost) {
+		t.Fatalf("renewing the deleted account's lease = %v, want ErrLeaseLost", err)
+	}
+	if err := s.EnsureSliceLeases(ctx, []awsx.Target{gone, kept}); err != nil { // the stale list
+		t.Fatal(err)
+	}
+	if rows, _ := s.ListLeases(ctx); strings.Join(leaseKeys(rows), ",") != "slice|222222222222|us-east-1" {
+		t.Fatalf("lease rows after a stale ensure = %v, want only the other account's", leaseKeys(rows))
 	}
 }
