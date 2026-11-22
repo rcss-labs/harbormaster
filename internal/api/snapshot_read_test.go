@@ -477,10 +477,18 @@ func TestClusterRead_DisconnectedAccountIsNotServedFromAWarmCache(t *testing.T) 
 	})
 }
 
-// failingTokens is a store that cannot be reached.
+// failingTokens is a store that cannot be reached: every read path (token read, single lookup, batched models) fails.
 type failingTokens struct{ snapcache.Cache }
 
 func (failingTokens) Tokens(context.Context, ...snapcache.GenKey) ([]string, error) {
+	return nil, errors.New("store down")
+}
+
+func (failingTokens) Lookup(context.Context, snapcache.Model, string, snapcache.GenKey) (string, []byte, bool, error) {
+	return "", nil, false, errors.New("store down")
+}
+
+func (failingTokens) GetMany(context.Context, snapcache.Model, []string, []string) ([]snapcache.Entry, error) {
 	return nil, errors.New("store down")
 }
 
