@@ -2,6 +2,8 @@ package coordinator
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/signal"
@@ -38,7 +40,7 @@ func (r *Runner) listenForKicks(ctx context.Context) {
 		}
 	}
 	onGap := func() {
-		for _, name := range []string{"scan", "offhours", "notify"} {
+		for _, name := range slices.Sorted(maps.Keys(jobs)) {
 			kick(name)
 		}
 	}
