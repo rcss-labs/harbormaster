@@ -416,7 +416,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 
 #### Live pages
 
-The cluster page and the service page (every tab) are read from AWS the moment you open them, and then every `HM_FOCUS_INTERVAL` (5 s) while the tab is visible. The page sends a heartbeat every 10 s; hiding the tab or leaving the page releases it, and a page that vanishes without saying so expires after `HM_FOCUS_TTL`. However many people view an object it is read once per interval, by the poller that owns its account and region, through the same fenced write path as the normal polling, so an unchanged object writes nothing. Only the object on screen is polled faster; the normal tiers are not touched.
+The cluster page and the service page (every tab) are read from AWS the moment you open them, and then every `HM_FOCUS_INTERVAL` (5 s) while the tab is visible. The page sends a heartbeat every 10 s; hiding the tab or leaving the page releases it, and a page that vanishes without saying so expires after `HM_FOCUS_TTL`. However many people view an object it is read once per interval, by the poller that owns its account and region, through the same fenced write path as the normal polling, and a cluster, service or task row that has not changed is not rewritten. A target group's health row is still rewritten on every cycle until it gets the same change check. Only the object on screen is polled faster; the normal tiers are not touched.
 
 The header shows how old the data is (`Updated 3s ago`, the newer of the last poll and the last live read) and a pill that says what is happening:
 
