@@ -13,6 +13,8 @@ export interface FocusDTO {
   refreshed_at: string | null
   /** Empty, or a sentence for the pill's title. */
   message: string
+  /** True for a definite fault (store down, registry error); false for a page only waiting for its first read. */
+  failed: boolean
 }
 
 /** How often a visible page tells the server it is still open; the server's TTL is three times this. */
@@ -22,11 +24,14 @@ const RECHECK_AFTER_OPEN_MS = 3000
 /** How long after an open a missing live read is only pending: the poller's first read takes a few seconds to land. */
 const PENDING_AFTER_OPEN_MS = 12_000
 
-const UNAVAILABLE: FocusDTO = { state: 'unavailable', interval_seconds: 0, refreshed_at: null, message: 'Live refresh unavailable' }
+const UNAVAILABLE: FocusDTO = { state: 'unavailable', interval_seconds: 0, refreshed_at: null, message: 'Live refresh unavailable', failed: true }
 
-/** Soon after an open, "unavailable" with no read yet only means the first read has not landed: show it as live, no pill. */
+/**
+ * Soon after an open, "unavailable" with no read yet only means the first read has not landed: show it as live, no pill.
+ * A definite failure the server flagged (store down, registry error) is never pending.
+ */
 function pendingOrNot(dto: FocusDTO, openedAt: number): FocusDTO {
-  if (dto.state === 'unavailable' && dto.refreshed_at === null && Date.now() - openedAt < PENDING_AFTER_OPEN_MS) {
+  if (dto.state === 'unavailable' && !dto.failed && dto.refreshed_at === null && Date.now() - openedAt < PENDING_AFTER_OPEN_MS) {
     return { ...dto, state: 'live', message: '' }
   }
   return dto

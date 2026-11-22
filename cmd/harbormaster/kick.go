@@ -5,9 +5,13 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/signal"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
+	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 // kickPublishTimeout bounds one publish: a request that saves a schedule must not wait on a slow store.
@@ -50,4 +54,23 @@ func buildFocusRegistry(health *kv.Health) focus.Registry {
 		return focus.NewMemoryRegistry(time.Now)
 	}
 	return focus.NewKVRegistry(health.Client())
+}
+
+// buildSnapshotCache is the shared store's side of the snapshot cache, or nil when there is no store or the cache is
+// switched off (HM_SNAPSHOT_CACHE=false). Both the poller (tokens) and the web side (models) build it the same way.
+func buildSnapshotCache(health *kv.Health, cfg config.Config) snapcache.Cache {
+	if health == nil || !cfg.SnapshotCache {
+		return nil
+	}
+	return snapcache.NewKV(health.Client())
+}
+
+// buildSnapshotReader is the web side of the snapshot cache, or nil when there is no cache (the handlers then read
+// Postgres as they always did).
+func buildSnapshotReader(health *kv.Health, cfg config.Config, st *store.Store, log *slog.Logger) *snapcache.Reader {
+	cache := buildSnapshotCache(health, cfg)
+	if cache == nil {
+		return nil
+	}
+	return &snapcache.Reader{Cache: cache, Store: st, TTL: cfg.SnapshotCacheTTL, Telemetry: telemetry.Default, Log: log, Up: health.Up}
 }

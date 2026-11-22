@@ -22,6 +22,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/secretbox"
 	"github.com/rcss-labs/harbormaster/internal/signal"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 	"github.com/rcss-labs/harbormaster/internal/web"
@@ -107,6 +108,9 @@ type Server struct {
 	// slice. A nil Focus turns live refresh off: the focus endpoint answers "unavailable".
 	Focus focus.Registry
 	Bus   signal.Bus
+	// Snap serves the cluster and service pages from versioned read models in the shared store (internal/snapcache); nil
+	// means the cache is off and the handlers read Postgres as they always did.
+	Snap *snapcache.Reader
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
 	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.

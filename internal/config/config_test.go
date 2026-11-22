@@ -86,6 +86,8 @@ func TestLoad_Defaults(t *testing.T) {
 		KV:                   KVConfig{Prefix: "hm"},
 		Role:                 RoleAll,
 		Focus:                FocusConfig{Interval: 5 * time.Second, TTL: 30 * time.Second, MaxObjects: 50, MaxPerUser: 5, MaxCallsPerSec: 5},
+		SnapshotCache:        true,
+		SnapshotCacheTTL:     30 * time.Second,
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,
@@ -146,6 +148,45 @@ func TestConfig_LegacyLeaderGateDefaultsTrue(t *testing.T) {
 	}
 	if cfg.LegacyLeaderGate {
 		t.Error("LegacyLeaderGate = true with HM_LEGACY_LEADER_GATE=false")
+	}
+}
+
+func TestConfig_SnapshotCacheDefaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SnapshotCache || cfg.SnapshotCacheTTL != 30*time.Second {
+		t.Fatalf("defaults = %v, %v; want true, 30s", cfg.SnapshotCache, cfg.SnapshotCacheTTL)
+	}
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE": "false", "HM_SNAPSHOT_CACHE_TTL": "5s"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SnapshotCache || cfg.SnapshotCacheTTL != 5*time.Second {
+		t.Fatalf("overrides = %v, %v; want false, 5s", cfg.SnapshotCache, cfg.SnapshotCacheTTL)
+	}
+}
+
+func TestConfig_SnapshotCacheTTLMustBeAtLeastOneSecond(t *testing.T) {
+	_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE_TTL": "500ms"}))
+	if err == nil || !strings.Contains(err.Error(), "HM_SNAPSHOT_CACHE_TTL") {
+		t.Fatalf("error = %v, want one naming HM_SNAPSHOT_CACHE_TTL", err)
+	}
+}
+
+// A cached model must not outlive the generation token that names it by more than the token's own life (ten minutes):
+// the TTL is the bound on how stale a deleted cluster's page can be, so it is capped there.
+func TestConfig_SnapshotCacheTTLIsCappedAtTheTokenLife(t *testing.T) {
+	for _, ttl := range []string{"10m1s", "11m", "1h"} {
+		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE_TTL": ttl}))
+		if err == nil || !strings.Contains(err.Error(), "HM_SNAPSHOT_CACHE_TTL") {
+			t.Errorf("TTL %s: error = %v, want one naming HM_SNAPSHOT_CACHE_TTL", ttl, err)
+		}
+	}
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE_TTL": "10m"}))
+	if err != nil || cfg.SnapshotCacheTTL != 10*time.Minute {
+		t.Fatalf("TTL 10m = %v, %v; want it accepted", cfg.SnapshotCacheTTL, err)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/cost"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/status"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -47,6 +48,12 @@ func (s *Server) loadEstate(ctx context.Context, f store.TargetFilter, vis store
 	if err != nil {
 		return nil, err
 	}
+	return newEstateView(clusters, services, tasks, unhealthy), nil
+}
+
+// newEstateView groups already-visible rows and derives the service statuses. The cache path builds it from filtered
+// models, the Postgres path from the visible reads; the view is the same either way.
+func newEstateView(clusters []store.ClusterRow, services []store.ServiceRow, tasks []store.TaskRow, unhealthy map[model.ServiceKey]bool) *estateView {
 	view := &estateView{
 		clusters: clusters, services: services, runningTasks: tasks,
 		tasksByService:    map[model.ServiceKey][]model.Task{},
@@ -68,7 +75,7 @@ func (s *Server) loadEstate(ctx context.Context, f store.TargetFilter, vis store
 		})
 		view.servicesByCluster[svc.Key.ClusterKey] = append(view.servicesByCluster[svc.Key.ClusterKey], svc)
 	}
-	return view, nil
+	return view
 }
 
 func (v *estateView) clusterStatus(k model.ClusterKey) model.ClusterStatus {
@@ -191,16 +198,12 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	rows, err := s.Store.ListClusters(ctx, sc.Filter, sc.Vis)
+	in, err := s.estateInputs(ctx, sc, true)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	view, err := s.loadEstate(ctx, sc.Filter, sc.Vis, "", rows)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	rows, view := in.clusters, in.view
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
 		s.fail(w, err)
@@ -211,7 +214,7 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	lastChange, err := s.Store.LastEventAtByCluster(ctx, sc.Filter, sc.Vis)
+	lastChange, err := s.lastChange(ctx, sc, in)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -244,6 +247,63 @@ func (s *Server) listClusters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ListResponse[ClusterCardDTO]{Items: page, Next: nextCursor(limit, offset, len(page)), PolledAt: polledAt})
 }
 
+// clusterInputs is what the cluster page reads about AWS: the visible cluster row, the estate view of its services and
+// tasks, the newest visible event time, and each service's first event. They come from the cached model, filtered for
+// this request, when the cache is on, and from Postgres otherwise; either way the page is built from the same rows.
+type clusterInputs struct {
+	row        store.ClusterRow
+	view       *estateView
+	lastChange map[model.ClusterKey]time.Time
+	firstEvent func(ctx context.Context, k model.ServiceKey) (at time.Time, ok bool, err error)
+}
+
+func (s *Server) clusterInputs(ctx context.Context, key model.ClusterKey, sc scope) (clusterInputs, error) {
+	filter := store.TargetFilter{AccountID: key.AccountID, Region: key.Region}
+	if s.Snap != nil {
+		m, err := s.Snap.Cluster(ctx, key)
+		if err != nil {
+			return clusterInputs{}, err
+		}
+		m, ok := snapcache.FilterCluster(m, sc.Subject, sc.Tags, sc.TagFilter)
+		if !ok {
+			return clusterInputs{}, store.ErrNotFound
+		}
+		unhealthy := make(map[model.ServiceKey]bool, len(m.Unhealthy))
+		for _, k := range m.Unhealthy {
+			unhealthy[k] = true
+		}
+		in := clusterInputs{row: m.Cluster, view: newEstateView([]store.ClusterRow{m.Cluster}, m.Services, m.Tasks, unhealthy), lastChange: map[model.ClusterKey]time.Time{}}
+		if at, ok := m.LastEvent(); ok {
+			in.lastChange[key] = at
+		}
+		first := snapcache.FirstEvents(m.Events)
+		in.firstEvent = func(_ context.Context, k model.ServiceKey) (time.Time, bool, error) {
+			at, ok := first[k]
+			return at, ok, nil
+		}
+		return in, nil
+	}
+	row, err := s.Store.GetCluster(ctx, key, sc.Vis)
+	if err != nil {
+		return clusterInputs{}, err
+	}
+	view, err := s.loadEstate(ctx, filter, sc.Vis, key.Cluster, []store.ClusterRow{row})
+	if err != nil {
+		return clusterInputs{}, err
+	}
+	lastChange, err := s.Store.LastEventAtByCluster(ctx, filter, sc.Vis)
+	if err != nil {
+		return clusterInputs{}, err
+	}
+	return clusterInputs{row: row, view: view, lastChange: lastChange, firstEvent: func(ctx context.Context, k model.ServiceKey) (time.Time, bool, error) {
+		events, err := s.Store.ServiceEvents(ctx, k, 1, 0)
+		if err != nil || len(events) == 0 {
+			return time.Time{}, false, err
+		}
+		return events[0].CreatedAt, true, nil
+	}}, nil
+}
+
 // getCluster answers GET /api/clusters/{clusterId}; invisible, unknown and malformed ids are all 404.
 func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 	key, err := model.ParseClusterID(r.PathValue("clusterId"))
@@ -257,17 +317,13 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	row, err := s.Store.GetCluster(ctx, key, sc.Vis)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
 	filter := store.TargetFilter{AccountID: key.AccountID, Region: key.Region}
-	view, err := s.loadEstate(ctx, filter, sc.Vis, key.Cluster, []store.ClusterRow{row})
+	in, err := s.clusterInputs(ctx, key, sc)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	row, view := in.row, in.view
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
 		s.fail(w, err)
@@ -278,11 +334,7 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	lastChange, err := s.Store.LastEventAtByCluster(ctx, filter, sc.Vis)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	lastChange := in.lastChange
 	polledAt, err := s.Store.PolledAt(ctx, filter)
 	if err != nil {
 		s.fail(w, err)
@@ -349,13 +401,12 @@ func (s *Server) getCluster(w http.ResponseWriter, r *http.Request) {
 		for _, t := range view.tasksByService[svc.Key] {
 			detail.Slots = append(detail.Slots, slotDTO(svc.Service, t))
 		}
-		events, err := s.Store.ServiceEvents(ctx, svc.Key, 1, 0)
+		at, hasEvent, err := in.firstEvent(ctx, svc.Key)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		if len(events) > 0 {
-			at := events[0].CreatedAt
+		if hasEvent {
 			detail.LastChangeAt = &at
 		}
 		dto.ServicesDetail = append(dto.ServicesDetail, detail)

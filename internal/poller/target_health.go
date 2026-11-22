@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -28,6 +29,9 @@ type TargetHealthLoop struct {
 	Clients awsx.Clients
 	Every   time.Duration
 	Now     func() time.Time
+	// OnChange is called once per Run after the rows are written, with whether the stored health changed (the
+	// snapshot cache's generation token follows it). Nil means nobody is told.
+	OnChange func(ctx context.Context, changed bool)
 }
 
 func (l *TargetHealthLoop) Name() string            { return tierTargetHealth }
@@ -84,10 +88,48 @@ func (l *TargetHealthLoop) Run(ctx context.Context, t awsx.Target) error {
 		rows = append(rows, normalizeTargetHealth(a.key, a.groupARN, loadBalancerARN, out, now))
 	}
 
+	// What changed is decided here, from the stored rows, and not by the upsert's SQL: the rows keep being rewritten
+	// every cycle, because the target-health endpoint reports their polled_at as the time they were read.
+	stored, err := l.Store.TargetHealthByService(ctx, store.TargetFilter{AccountID: t.AccountID, Region: t.Region}, "")
+	if err != nil {
+		return fmt.Errorf("stored target health: %w", err)
+	}
+	changed := sliceTargetHealthChanged(stored, rows, attached)
 	if err := l.Writer.UpsertTargetHealth(ctx, rows); err != nil {
 		return err
 	}
-	return l.Writer.DeleteTargetHealthNotIn(ctx, t, attached)
+	if err := l.Writer.DeleteTargetHealthNotIn(ctx, t, attached); err != nil {
+		if changed && l.OnChange != nil {
+			l.OnChange(ctx, true) // the upsert above is committed
+		}
+		return err
+	}
+	if l.OnChange != nil {
+		l.OnChange(ctx, changed)
+	}
+	return nil
+}
+
+// sliceTargetHealthChanged reports whether writing fresh and then deleting every group not in attached changes what is
+// stored: a row that is new or differs, or a stored row whose group is no longer attached to any service.
+func sliceTargetHealthChanged(stored map[model.ServiceKey][]model.TargetHealth, fresh []model.TargetHealth, attached []string) bool {
+	keep := make(map[string]bool, len(attached))
+	for _, arn := range attached {
+		keep[arn] = true
+	}
+	for _, rows := range stored {
+		for _, row := range rows {
+			if !keep[row.TargetGroupARN] {
+				return true
+			}
+		}
+	}
+	for _, row := range fresh {
+		if targetHealthDiffers(stored[row.Key], []model.TargetHealth{row}) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunService stores the health of the target groups attached to one service, and nothing else: no other service is
@@ -180,11 +222,27 @@ func targetHealthDiffers(stored, fresh []model.TargetHealth) bool {
 	for _, row := range fresh {
 		old, ok := byGroup[row.TargetGroupARN]
 		if !ok || old.LoadBalancerARN != row.LoadBalancerARN || old.Healthy != row.Healthy ||
-			old.Unhealthy != row.Unhealthy || !slices.Equal(old.Targets, row.Targets) {
+			old.Unhealthy != row.Unhealthy || !sameTargets(old.Targets, row.Targets) {
 			return true
 		}
 	}
 	return false
+}
+
+// sameTargets compares two target lists as sets: AWS does not promise an order, and a list that only came back in
+// another order must not invalidate the cached models every cycle.
+func sameTargets(a, b []model.Target) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	order := func(x, y model.Target) int {
+		return cmp.Or(cmp.Compare(x.ID, y.ID), cmp.Compare(x.Port, y.Port), cmp.Compare(x.AZ, y.AZ),
+			cmp.Compare(x.State, y.State), cmp.Compare(x.Reason, y.Reason), cmp.Compare(x.Description, y.Description))
+	}
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.SortFunc(a, order)
+	slices.SortFunc(b, order)
+	return slices.Equal(a, b)
 }
 
 // describeTargetGroupLoadBalancers maps each existing target group ARN to its load balancer ARN.

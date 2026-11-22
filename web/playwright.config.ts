@@ -92,6 +92,8 @@ export default defineConfig({
       env: {
         ...serverEnv,
         HM_LISTEN: `127.0.0.1:${port}`,
+        // Only read when HM_KV_URL is exported: the two servers run on different databases, so they must not share keys.
+        HM_KV_PREFIX: 'e2ebase',
         // The fake IdP and SP metadata use this origin; it must match the port Playwright serves on.
         HM_BASE_URL: baseURL,
         HM_DATABASE_URL: databaseURL,
@@ -108,6 +110,7 @@ export default defineConfig({
         ...serverEnv,
         HM_FAKE_FAIL: 'scheduled_actions,scaling_tier',
         HM_LISTEN: `127.0.0.1:${degradedPort}`,
+        HM_KV_PREFIX: 'e2edegraded', // see above: its own database, its own keys
         HM_BASE_URL: degradedBaseURL,
         HM_DATABASE_URL: degradedDatabaseURL.toString(),
         // tools/e2eschema recreates the degraded schema from the base URL, then prints the URL (discarded above).

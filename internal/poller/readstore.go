@@ -14,6 +14,7 @@ type readStore interface {
 	KnownTaskARNs(ctx context.Context, k model.ClusterKey, lastStatus string) ([]string, error)
 	KnownTaskARNsForService(ctx context.Context, k model.ServiceKey, lastStatus string) ([]string, error)
 	HasTaskDefinition(ctx context.Context, accountID, region, arn string) (bool, error)
+	ListClusters(ctx context.Context, f store.TargetFilter, vis store.Visibility) ([]store.ClusterRow, error)
 	ListServices(ctx context.Context, f store.TargetFilter, cluster string, vis store.Visibility) ([]store.ServiceRow, error)
 	ListTasks(ctx context.Context, tq store.TaskQuery) ([]store.TaskRow, int, error)
 	UnhealthyTargets(ctx context.Context, f store.TargetFilter) (map[model.ServiceKey]bool, error)

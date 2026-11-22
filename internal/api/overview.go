@@ -24,16 +24,12 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	now := s.now()
-	rows, err := s.Store.ListClusters(ctx, sc.Filter, sc.Vis)
+	in, err := s.estateInputs(ctx, sc, true)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	view, err := s.loadEstate(ctx, sc.Filter, sc.Vis, "", rows)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	rows, view := in.clusters, in.view
 
 	out := OverviewDTO{
 		Clusters:    []OverviewClusterDTO{},

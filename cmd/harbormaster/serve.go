@@ -400,6 +400,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			KickNotify:              kicks.KickNotify,
 			Focus:                   focusRegistry,
 			Bus:                     kicks.bus,
+			Snap:                    buildSnapshotReader(kvHealth, cfg, st, log),
 		})
 	}
 	listener, err := net.Listen("tcp", cfg.Listen)
@@ -417,6 +418,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		pollerConfig.Version = version
 		pollerConfig.NoSlices = !role.Polls()
 		pollerConfig.Registry, pollerConfig.Bus = focusRegistry, kicks.bus
+		pollerConfig.Cache = buildSnapshotCache(kvHealth, cfg)
 		switch role {
 		case config.RolePoller:
 			pollerConfig.Roles = []string{"poller"}

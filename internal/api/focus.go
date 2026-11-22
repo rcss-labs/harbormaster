@@ -201,7 +201,7 @@ func (s *Server) deleteFocus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) focusUnavailable(w http.ResponseWriter) {
 	s.countFocus("unavailable")
-	s.writeFocus(w, FocusDTO{State: "unavailable", IntervalSeconds: s.servicesIntervalSeconds(), Message: focusUnavailableMessage})
+	s.writeFocus(w, FocusDTO{State: "unavailable", IntervalSeconds: s.servicesIntervalSeconds(), Message: focusUnavailableMessage, Failed: true})
 }
 
 func (s *Server) writeFocus(w http.ResponseWriter, dto FocusDTO) { writeJSON(w, http.StatusOK, dto) }

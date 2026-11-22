@@ -40,6 +40,7 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 	writeSample(bw, "harbormaster_coordinator_active", nil, "", "", boolValue(r.coordinatorOn))
 
 	r.writeFocusFamilies(bw)
+	r.writeSnapshotCacheFamilies(bw)
 
 	writeHeader(bw, "harbormaster_fenced_writes_rejected_total", "Poller writes rejected because the slice lease was lost.", "counter")
 	writeSample(bw, "harbormaster_fenced_writes_rejected_total", nil, "", "", utoa(r.fencedRejected))

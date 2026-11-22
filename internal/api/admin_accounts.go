@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -291,9 +292,33 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The poller never sees these rows go: tell the snapshot cache here, with the clusters read before they are deleted.
+	var gone []snapcache.GenKey
+	if s.Snap != nil {
+		clusters, err := s.Store.ListClusters(r.Context(), store.TargetFilter{AccountID: account.AccountID}, store.Visibility{Admin: true})
+		if err != nil {
+			s.Log.Warn("snapshot cache: listing the clusters of a disconnected account failed", "err", err)
+		}
+		seen := map[string]bool{}
+		for _, c := range clusters {
+			gone = append(gone, snapcache.GenKey{AccountID: c.Key.AccountID, Region: c.Key.Region, Cluster: c.Key.Cluster})
+			seen[c.Key.Region] = true
+		}
+		for _, region := range account.Regions {
+			seen[region] = true
+		}
+		for region := range seen {
+			gone = append(gone, snapcache.GenKey{AccountID: account.AccountID, Region: region})
+		}
+	}
 	if err := s.Store.DeleteAccount(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
+	}
+	if s.Snap != nil {
+		if err := s.Snap.Invalidate(r.Context(), gone); err != nil {
+			s.Log.Warn("snapshot cache: pages of a disconnected account stay cached until the TTL", "err", err)
+		}
 	}
 	s.invalidate(account.AccountID)
 	s.auditAdmin(r, "account_disconnect", "account:"+account.Name, "Disconnected AWS account "+account.Name+".", nil)

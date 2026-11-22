@@ -24,11 +24,12 @@ func (s *Server) listServicesFlat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	view, err := s.loadEstate(ctx, sc.Filter, sc.Vis, "", nil)
+	in, err := s.estateInputs(ctx, sc, false)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	view := in.view
 	tags, err := s.tagDTOs(ctx)
 	if err != nil {
 		s.fail(w, err)
@@ -49,7 +50,7 @@ func (s *Server) listServicesFlat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	lastEvents, err := s.Store.RecentServiceEventsPerService(ctx, sc.Filter, 1)
+	lastEvents, err := s.firstEvents(ctx, sc, in)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -87,8 +88,7 @@ func (s *Server) listServicesFlat(w http.ResponseWriter, r *http.Request) {
 				Terminal: authz.Can(sc.Subject, authz.Terminal, svc.EffectiveTagID),
 			},
 		}
-		if events := lastEvents[svc.Key]; len(events) > 0 {
-			at := events[0].CreatedAt
+		if at, ok := lastEvents[svc.Key]; ok {
 			item.LastChangeAt = &at
 		}
 		items = append(items, item)
