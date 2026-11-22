@@ -105,12 +105,15 @@ func (s *Store) ConsumeOAuthCode(ctx context.Context, codeHash string) (OAuthCod
 	return c, nil
 }
 
-// insertGrantToken inserts an OAuth token of grant g. The token takes the grant's user and auth source, and its
-// expiry is capped at the grant's.
+// insertGrantToken inserts an OAuth token of grant g. The token takes the grant's user and auth source, its expiry is
+// capped at the grant's, and an empty name becomes the grant's client name.
 func insertGrantToken(ctx context.Context, tx pgx.Tx, g OAuthGrant, t APIToken) error {
 	expiresAt := t.ExpiresAt
 	if expiresAt.After(g.ExpiresAt) {
 		expiresAt = g.ExpiresAt
+	}
+	if t.Name == "" {
+		t.Name = g.ClientName
 	}
 	_, err := tx.Exec(ctx,
 		`insert into api_tokens (public_id, user_id, kind, name, secret_hash, scope, auth_source, expires_at, grant_id)

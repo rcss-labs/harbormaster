@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"net/url"
 	"time"
 
@@ -34,8 +35,10 @@ type Store interface {
 	CreateOAuthGrantWithTokens(ctx context.Context, g store.OAuthGrant, access, refresh store.APIToken) (store.OAuthGrant, error)
 	RotateOAuthRefresh(ctx context.Context, publicID, secretHash string, newAccess, newRefresh store.APIToken,
 		now time.Time, grace time.Duration) (store.OAuthGrant, error)
+	DeleteOAuthGrant(ctx context.Context, id, userID int64) error
 	GetUser(ctx context.Context, id int64) (store.User, error)
 	LoadSubject(ctx context.Context, userID int64) (authz.Subject, error)
+	Audit(ctx context.Context, e store.AuditEntry) error
 }
 
 // Service is the authorization server. Cfg.MCPPublicURL is the issuer, and its "/mcp" the only resource.
@@ -44,6 +47,7 @@ type Service struct {
 	Clients *ClientResolver
 	Cfg     config.Config
 	Now     func() time.Time
+	Log     *slog.Logger
 }
 
 // NewService builds the service from configuration, with a client resolver over the guarded HTTP client.
@@ -53,6 +57,7 @@ func NewService(st Store, cfg config.Config) *Service {
 		Clients: NewClientResolver(cfg.OAuthClientHosts, cfg.OAuthRedirectURIs),
 		Cfg:     cfg,
 		Now:     time.Now,
+		Log:     slog.Default(),
 	}
 }
 
