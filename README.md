@@ -821,15 +821,20 @@ make run                            # http://127.0.0.1:8480, in-memory fake AWS 
 
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 
+### Run the gateway locally
+
+`harbormaster-mcp` is the separate, read-only MCP gateway (`cmd/harbormaster-mcp`). It holds no credentials and forwards each tool call to Harbormaster's API with the caller's own token. To try it, start Harbormaster with tokens on (`HM_API_TOKENS=true make run`), create a token on the "My access" page, then run `make run-mcp` in a second terminal. The gateway listens on `http://127.0.0.1:8481/mcp` and forwards to `http://127.0.0.1:8480`. Add it to Claude Code with `claude mcp add --transport http harbormaster-local http://127.0.0.1:8481/mcp --header "Authorization: Bearer <token>"`, and remove it afterwards with `claude mcp remove harbormaster-local`. `make e2e` also uses port 8481, so stop the gateway first. The binary's commands are `serve`, `healthcheck` (exit 0 when the local `/healthz` answers) and `version`.
+
 ### Make targets
 
-- `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` binary
+- `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` and `bin/harbormaster-mcp` binaries
 - `make test`: run Go tests, plus web tests (Vitest) when the web app exists. Go tests need `HM_TEST_DATABASE_URL`; export `HM_TEST_KV_URLS` (see `make test-kv`) to include the Valkey and Redis tests
 - `make lint`: check gofmt, run `go vet`, run web lint and typecheck, and check third-party notices
 - `make vulncheck`: scan all packages with `govulncheck` against the Go vulnerability database (needs network access). `make release` runs it
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
 - `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
+- `make run-mcp`: run the MCP gateway on 127.0.0.1:8481 against a local `make run`; see Run the gateway locally
 - `make run-split`: run the web, poller and coordinator roles as three local processes (ports 8480, 8482, 8483); see Run it locally
 - `make split-smoke [ENGINE=valkey|redis]`: run web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a private Valkey or Redis container that the script starts and removes (ports 8580 to 8583, schema `hm_split_smoke_<engine>`). It checks health, lease ownership, a kick crossing processes, live focus, the snapshot cache, a poller taking over and a store outage, and exits 1 naming the first check that failed. Needs `HM_TEST_DATABASE_URL`, Docker, `curl`, `jq`, `python3` and `go`; about two minutes
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free
