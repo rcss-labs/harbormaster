@@ -63,10 +63,11 @@ func (c *ecsClient) RegisterTaskDefinition(ctx context.Context, in *ecs.Register
 		IpcMode:                 in.IpcMode,
 		PidMode:                 in.PidMode,
 		ProxyConfiguration:      deepCopy(in.ProxyConfiguration),
-		InferenceAccelerators:   deepCopy(in.InferenceAccelerators),
-		Status:                  ecstypes.TaskDefinitionStatusActive,
-		RegisteredAt:            aws.Time(e.now()),
-		RegisteredBy:            aws.String("arn:aws:iam::" + c.target.AccountID + ":role/" + fakeHarbormasterRole),
+		//lint:ignore SA1019 the fake copies every RegisterTaskDefinitionInput field, deprecated ones included, so it echoes what callers send
+		InferenceAccelerators: deepCopy(in.InferenceAccelerators),
+		Status:                ecstypes.TaskDefinitionStatusActive,
+		RegisteredAt:          aws.Time(e.now()),
+		RegisteredBy:          aws.String("arn:aws:iam::" + c.target.AccountID + ":role/" + fakeHarbormasterRole),
 	}
 	e.TaskDefinitions = append(e.TaskDefinitions, TaskDefinition{
 		AccountID: c.target.AccountID, Region: c.target.Region, Definition: td, Tags: deepCopy(in.Tags)})
