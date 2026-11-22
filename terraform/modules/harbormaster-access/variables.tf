@@ -1,10 +1,44 @@
 variable "harbormaster_task_role_arn" {
-  description = "ARN of the Harbormaster ECS task role (output of the harbormaster module) that is allowed to assume this role."
+  description = "ARN of the legacy single Harbormaster ECS task role (output task_role_arn of the harbormaster module) that is allowed to assume the access role. Keep it while the single service runs; set it to null once keep_legacy_service is false in the harbormaster module. At least one of this and web_task_role_arn is required."
   type        = string
+  default     = null
 
   validation {
-    condition     = can(regex("^arn:aws:iam::[0-9]{12}:role/", var.harbormaster_task_role_arn))
-    error_message = "harbormaster_task_role_arn must be an IAM role ARN (arn:aws:iam::<12-digit account>:role/...)."
+    condition     = var.harbormaster_task_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.harbormaster_task_role_arn))
+    error_message = "harbormaster_task_role_arn must be null or an IAM role ARN (arn:aws:iam::<12-digit account>:role/...)."
+  }
+}
+
+variable "web_task_role_arn" {
+  description = "ARN of the Harbormaster web task role (output web_task_role_arn of the harbormaster module). It is trusted by the access role next to the legacy role. Null (default) for installs that have not split."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.web_task_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.web_task_role_arn))
+    error_message = "web_task_role_arn must be null or an IAM role ARN (arn:aws:iam::<12-digit account>:role/...)."
+  }
+}
+
+variable "poller_task_role_arn" {
+  description = "ARN of the Harbormaster poller task role (output poller_task_role_arn of the harbormaster module). Setting it creates the <role_name>-poller role. Null (default) creates none."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.poller_task_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.poller_task_role_arn))
+    error_message = "poller_task_role_arn must be null or an IAM role ARN (arn:aws:iam::<12-digit account>:role/...)."
+  }
+}
+
+variable "coordinator_task_role_arn" {
+  description = "ARN of the Harbormaster coordinator task role (output coordinator_task_role_arn of the harbormaster module). Setting it creates the <role_name>-coordinator role. Null (default) creates none."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.coordinator_task_role_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:role/", var.coordinator_task_role_arn))
+    error_message = "coordinator_task_role_arn must be null or an IAM role ARN (arn:aws:iam::<12-digit account>:role/...)."
   }
 }
 
@@ -35,7 +69,7 @@ variable "external_id" {
 }
 
 variable "role_name" {
-  description = "Name of the IAM role Harbormaster assumes."
+  description = "Name of the IAM role Harbormaster assumes. The poller and coordinator roles are named <role_name>-poller and <role_name>-coordinator; Harbormaster derives their ARNs by appending the suffix, so keep role_name the same in every account that uses them."
   type        = string
   default     = "harbormaster-access"
 
@@ -74,7 +108,7 @@ variable "scan_repository_arns" {
 }
 
 variable "read_only" {
-  description = "When true, the write policy is omitted and Harbormaster can only inspect the account."
+  description = "When true, the write policy is omitted and Harbormaster can only inspect the account. The coordinator role loses its off-hours write statements too."
   type        = bool
   default     = false
 }

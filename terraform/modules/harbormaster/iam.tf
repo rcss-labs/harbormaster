@@ -9,8 +9,11 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
   }
 }
 
-# Execution role: pulls the image, writes logs and injects secrets at task start.
+# Legacy execution role (single service): pulls the image, writes logs and injects secrets at task start. It exists
+# while keep_legacy_service is true; the split services have their own execution roles in roles.tf.
 resource "aws_iam_role" "execution" {
+  count = local.legacy_count
+
   name               = "${local.server_name}-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 
@@ -18,7 +21,9 @@ resource "aws_iam_role" "execution" {
 }
 
 resource "aws_iam_role_policy_attachment" "execution_managed" {
-  role       = aws_iam_role.execution.name
+  count = local.legacy_count
+
+  role       = aws_iam_role.execution[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
@@ -33,6 +38,7 @@ data "aws_iam_policy_document" "execution_secrets" {
       ],
       aws_secretsmanager_secret.metrics_token[*].arn,
       var.smtp_password_secret_arn == null ? [] : [var.smtp_password_secret_arn],
+      local.kv_enabled ? [local.kv_url_secret_arn] : [],
     )
   }
 
@@ -55,15 +61,19 @@ data "aws_iam_policy_document" "execution_secrets" {
 }
 
 resource "aws_iam_role_policy" "execution_secrets" {
+  count = local.legacy_count
+
   name   = "${local.server_name}-secrets"
-  role   = aws_iam_role.execution.id
+  role   = aws_iam_role.execution[0].id
   policy = data.aws_iam_policy_document.execution_secrets.json
 }
 
-# Task role: what the Harbormaster process itself may do. Only sts:AssumeRole
+# Legacy task role (single service): what the Harbormaster process itself may do. Only sts:AssumeRole
 # into the configured access roles (spec 11.3), plus an optional single-secret
-# read for the bootstrap admin password.
+# read for the bootstrap admin password. The split services have their own task roles in roles.tf.
 resource "aws_iam_role" "task" {
+  count = local.legacy_count
+
   name               = "${local.server_name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 
@@ -79,8 +89,10 @@ data "aws_iam_policy_document" "task_assume" {
 }
 
 resource "aws_iam_role_policy" "task_assume" {
+  count = local.legacy_count
+
   name   = "${local.server_name}-assume"
-  role   = aws_iam_role.task.id
+  role   = aws_iam_role.task[0].id
   policy = data.aws_iam_policy_document.task_assume.json
 }
 
@@ -95,9 +107,36 @@ data "aws_iam_policy_document" "task_bootstrap" {
 }
 
 resource "aws_iam_role_policy" "task_bootstrap" {
-  count = var.bootstrap_admin_password_secret_arn == null ? 0 : 1
+  count = var.bootstrap_admin_password_secret_arn == null ? 0 : local.legacy_count
 
   name   = "${local.server_name}-bootstrap"
-  role   = aws_iam_role.task.id
+  role   = aws_iam_role.task[0].id
   policy = data.aws_iam_policy_document.task_bootstrap[0].json
+}
+
+# The legacy resources gained a count so keep_legacy_service = false can remove them. Each moved block keeps an
+# existing install's state: the resource is renamed to index 0, not replaced.
+moved {
+  from = aws_iam_role.execution
+  to   = aws_iam_role.execution[0]
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.execution_managed
+  to   = aws_iam_role_policy_attachment.execution_managed[0]
+}
+
+moved {
+  from = aws_iam_role_policy.execution_secrets
+  to   = aws_iam_role_policy.execution_secrets[0]
+}
+
+moved {
+  from = aws_iam_role.task
+  to   = aws_iam_role.task[0]
+}
+
+moved {
+  from = aws_iam_role_policy.task_assume
+  to   = aws_iam_role_policy.task_assume[0]
 }

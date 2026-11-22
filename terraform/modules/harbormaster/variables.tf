@@ -126,8 +126,8 @@ variable "extra_env" {
   }
 
   validation {
-    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_SMTP_PASSWORD", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
-    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY, HM_METRICS_TOKEN or HM_SMTP_PASSWORD (the module injects them from Secrets Manager), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
+    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_SMTP_PASSWORD", "HM_KV_URL", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
+    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY, HM_METRICS_TOKEN, HM_SMTP_PASSWORD or HM_KV_URL (the module injects them from Secrets Manager; HM_KV_URL carries the store password), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
   }
 
   validation {
@@ -273,4 +273,214 @@ variable "scanner_egress_cidrs" {
   description = "Destinations the scanner may reach on tcp 443 (ECR, S3 and STS). It never contacts the vulnerability data publisher."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+# ---- Split services (web, poller, coordinator) -------------------------------------------------------------------
+# Everything below defaults to today's single service. See the upgrade runbook in README.md.
+
+variable "split_services" {
+  description = "Create the web, poller and coordinator ECS services next to (or instead of) the single harbormaster-server service. Needs a cache (cache_mode) unless allow_split_without_cache is set."
+  type        = bool
+  default     = false
+}
+
+variable "keep_legacy_service" {
+  description = "Keep the single harbormaster-server service, its task definition and its two roles. Set to false only after the split services are healthy (runbook run 4). Removing the legacy service also removes its task and execution roles; run the access module once more with harbormaster_task_role_arn = null afterwards."
+  type        = bool
+  default     = true
+}
+
+variable "web_desired_count" {
+  description = "Initial number of web tasks. Autoscaling owns the count afterwards."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.web_desired_count >= 1
+    error_message = "web_desired_count must be at least 1."
+  }
+}
+
+variable "web_min_count" {
+  description = "Minimum number of web tasks (autoscaling)."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.web_min_count >= 1
+    error_message = "web_min_count must be at least 1."
+  }
+}
+
+variable "web_max_count" {
+  description = "Maximum number of web tasks (autoscaling). With more than 6, use db.t4g.small or larger (see the README, Database connections)."
+  type        = number
+  default     = 6
+
+  validation {
+    condition     = var.web_max_count >= 1
+    error_message = "web_max_count must be at least 1."
+  }
+}
+
+variable "poller_desired_count" {
+  description = "Initial number of poller tasks. Autoscaling owns the count afterwards."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.poller_desired_count >= 1
+    error_message = "poller_desired_count must be at least 1."
+  }
+}
+
+variable "poller_min_count" {
+  description = "Minimum number of poller tasks (autoscaling)."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.poller_min_count >= 1
+    error_message = "poller_min_count must be at least 1."
+  }
+}
+
+variable "poller_max_count" {
+  description = "Maximum number of poller tasks (autoscaling). With more than 4, use db.t4g.small or larger (see the README, Database connections)."
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.poller_max_count >= 1
+    error_message = "poller_max_count must be at least 1."
+  }
+}
+
+variable "coordinator_desired_count" {
+  description = "Number of coordinator tasks: one is active and the others stand by. Fixed, not autoscaled."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.coordinator_desired_count >= 1
+    error_message = "coordinator_desired_count must be at least 1."
+  }
+}
+
+variable "web_cpu" {
+  description = "Fargate CPU units of a web task."
+  type        = number
+  default     = 512
+}
+
+variable "web_memory" {
+  description = "Fargate memory in MiB of a web task."
+  type        = number
+  default     = 1024
+}
+
+variable "poller_cpu" {
+  description = "Fargate CPU units of a poller task."
+  type        = number
+  default     = 512
+}
+
+variable "poller_memory" {
+  description = "Fargate memory in MiB of a poller task."
+  type        = number
+  default     = 1024
+}
+
+variable "coordinator_cpu" {
+  description = "Fargate CPU units of a coordinator task."
+  type        = number
+  default     = 256
+}
+
+variable "coordinator_memory" {
+  description = "Fargate memory in MiB of a coordinator task."
+  type        = number
+  default     = 512
+}
+
+variable "web_requests_per_target" {
+  description = "Target value of ALBRequestCountPerTarget for web autoscaling: requests per target per minute."
+  type        = number
+  default     = 1000
+
+  validation {
+    condition     = var.web_requests_per_target >= 1
+    error_message = "web_requests_per_target must be at least 1."
+  }
+}
+
+variable "metrics_ingress_security_group_ids" {
+  description = "Security groups allowed to scrape /metrics on poller and coordinator tasks (the container port). Web is reached through the ALB; the legacy service is unchanged."
+  type        = list(string)
+  default     = []
+}
+
+# ---- Cache (Valkey or Redis) -------------------------------------------------------------------------------------
+
+variable "cache_mode" {
+  description = "\"create\" builds an ElastiCache replication group, \"external\" uses the endpoint in the secret cache_url_secret_arn (an endpoint you run yourself), \"none\" uses no store: shared limits and live page refresh stay per task and the split services need allow_split_without_cache."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["create", "external", "none"], var.cache_mode)
+    error_message = "cache_mode must be create, external or none."
+  }
+}
+
+variable "cache_engine" {
+  description = "Engine of the created cache: valkey or redis. Harbormaster uses a command subset both support (Valkey 7.2 and Redis 7.0 or newer). Only used when cache_mode = \"create\"."
+  type        = string
+  default     = "valkey"
+
+  validation {
+    condition     = contains(["valkey", "redis"], var.cache_engine)
+    error_message = "cache_engine must be valkey or redis."
+  }
+}
+
+variable "cache_engine_version" {
+  description = "Engine version of the created cache. Null resolves to 7.2 for valkey and 7.1 for redis."
+  type        = string
+  default     = null
+}
+
+variable "cache_node_type" {
+  description = "ElastiCache node type of the created cache."
+  type        = string
+  default     = "cache.t4g.micro"
+}
+
+variable "cache_replicas" {
+  description = "Replicas of the created cache. 1 or more adds replicas in other availability zones with Multi-AZ automatic failover."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.cache_replicas >= 0 && var.cache_replicas <= 5
+    error_message = "cache_replicas must be between 0 and 5."
+  }
+}
+
+variable "cache_url_secret_arn" {
+  description = "For cache_mode = \"external\": ARN of a Secrets Manager secret whose value is the full store URL (redis://, rediss://, valkey:// or valkeys://, with password). Must be null otherwise."
+  type        = string
+  default     = null
+}
+
+variable "cache_alarm_actions" {
+  description = "ARNs (for example an SNS topic) notified when the created cache evicts keys. Empty creates the alarm without actions."
+  type        = list(string)
+  default     = []
+}
+
+variable "allow_split_without_cache" {
+  description = "Allow split_services = true with cache_mode = \"none\". Without a store, limits and focus stay per task and a poll-now or kick reaches only the task that received it, so this is for tests only."
+  type        = bool
+  default     = false
 }

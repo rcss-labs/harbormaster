@@ -2,12 +2,15 @@
 
 Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in cluster `harbormaster`, behind an Application Load Balancer with an HTTPS listener (and an optional HTTP-to-HTTPS redirect), backed by a private, encrypted RDS PostgreSQL instance. The module also creates the Secrets Manager secrets (database URL, session key, optional metrics token), the CloudWatch log group, the security groups and the execution and task IAM roles. The task role may only `sts:AssumeRole` into the configured access roles.
 
+The same image can instead run as three ECS services (`harbormaster-web`, `harbormaster-poller`, `harbormaster-coordinator`) with a Valkey or Redis store between them. That is off by default (`split_services = false`, `cache_mode = "none"`), so an install that changes nothing keeps its single service. See [Split services](#split-services), [Cache](#cache) and [Upgrade: single service to split services](#upgrade-single-service-to-split-services).
+
 ## Prerequisites
 
 - A VPC with at least two private subnets in different AZs, plus public subnets unless `internal = true`.
 - Outbound access from the private subnets: a NAT gateway, or VPC endpoints for `ecr.api`, `ecr.dkr`, `logs`, `secretsmanager` and `sts` (plus the S3 gateway endpoint for ECR layers).
 - An ACM certificate in the same region for the HTTPS listener.
 - The Harbormaster image in ECR (or another reachable registry), pinned to a tag. `:latest` is rejected. The image architecture must match `cpu_architecture`.
+- AWS provider 5.82 or newer (below 7.0). 5.73.0 is the first version whose `aws_elasticache_replication_group` accepts `engine = "valkey"`, and 5.82.0 fixes a perpetual diff (a replacement) on `at_rest_encryption_enabled` for Valkey, which the module sets. Terraform 1.5 or newer.
 
 ## Inputs
 
@@ -47,24 +50,149 @@ Deploys Harbormaster on AWS: an ECS Fargate service (`harbormaster-server`) in c
 | `scan_role_name` | string | `"harbormaster-scan"` | Role name in each account; becomes `HM_SCAN_ROLE_NAME`. Must match the access module's `scan_role_name`. |
 | `scan_role_arns` | list(string) | `null` | What the scanner task role may assume. Null resolves to `arn:aws:iam::*:role/<scan_role_name>`; tighten it like `access_role_arns`. |
 | `scanner_egress_cidrs` | list(string) | `["0.0.0.0/0"]` | Scanner egress, tcp 443 only (ECR, S3, STS). |
+| `split_services` | bool | `false` | Create the web, poller and coordinator services. Needs a cache unless `allow_split_without_cache`. |
+| `keep_legacy_service` | bool | `true` | Keep the single `harbormaster-server` service, its task definition and its two roles. `false` needs `split_services = true`. |
+| `web_desired_count` / `web_min_count` / `web_max_count` | number | `2` / `2` / `6` | Each at least 1; desired within min and max. Autoscaling owns the count after the first apply. |
+| `poller_desired_count` / `poller_min_count` / `poller_max_count` | number | `2` / `2` / `4` | As for web. |
+| `coordinator_desired_count` | number | `2` | One task is active, the others stand by. Fixed. |
+| `web_cpu` / `web_memory` | number | `512` / `1024` | Must be a valid Fargate pair. |
+| `poller_cpu` / `poller_memory` | number | `512` / `1024` | |
+| `coordinator_cpu` / `coordinator_memory` | number | `256` / `512` | |
+| `web_requests_per_target` | number | `1000` | Target of `ALBRequestCountPerTarget`: requests per target per minute. |
+| `metrics_ingress_security_group_ids` | list(string) | `[]` | Groups allowed to scrape `/metrics` on poller and coordinator tasks. |
+| `cache_mode` | string | `"none"` | `"create"` builds ElastiCache, `"external"` uses the URL in `cache_url_secret_arn`, `"none"` uses no store. |
+| `cache_engine` | string | `"valkey"` | `"valkey"` or `"redis"`. Used when `cache_mode = "create"`. |
+| `cache_engine_version` | string | `null` | Null resolves to `7.2` for `valkey` and `7.1` for `redis`. |
+| `cache_node_type` | string | `"cache.t4g.micro"` | |
+| `cache_replicas` | number | `0` | 0 to 5. `1` or more adds replicas with Multi-AZ automatic failover. |
+| `cache_url_secret_arn` | string | `null` | Required with `cache_mode = "external"`, null otherwise: a Secrets Manager secret holding the full store URL. |
+| `cache_alarm_actions` | list(string) | `[]` | Notified when the created cache evicts keys. |
+| `allow_split_without_cache` | bool | `false` | Lets `split_services = true` run with `cache_mode = "none"`. Tests only. |
 
 ## Outputs
 
 | Output | Description |
 |---|---|
-| `task_role_arn` | Task role ARN; the principal to trust in the access-role module. |
-| `execution_role_arn` | ECS task execution role ARN. |
+| `task_role_arn` | Legacy single-service task role ARN; input `harbormaster_task_role_arn` of the access module. Null once `keep_legacy_service` is false. |
+| `execution_role_arn` | Legacy ECS task execution role ARN. Null once `keep_legacy_service` is false. |
+| `web_task_role_arn` / `poller_task_role_arn` / `coordinator_task_role_arn` | Task roles of the split services; inputs of the access module. Always created, whatever `split_services` says. |
 | `cluster_name` | ECS cluster name (`harbormaster`). |
-| `service_name` | ECS service name (`harbormaster-server`). |
+| `service_name` | Legacy ECS service name (`harbormaster-server`). Null once `keep_legacy_service` is false. |
+| `web_service_name` / `poller_service_name` / `coordinator_service_name` | Split service names. Null unless `split_services` is true. |
 | `alb_dns_name` | ALB DNS name. |
 | `alb_zone_id` | ALB hosted zone ID, for Route 53 alias records. |
 | `alb_arn` | ALB ARN. |
 | `db_address` | RDS hostname. |
 | `log_group_name` | `/ecs/harbormaster/harbormaster-server`. |
-| `security_group_ids` | Map with keys `alb`, `server`, `db`. |
+| `security_group_ids` | Map with keys `alb`, `server` (legacy), `web`, `poller`, `coordinator`, `db` and `cache` (null unless `cache_mode = "create"`). |
+| `cache_url_secret_arn` | ARN of the secret that holds the store URL (not its value). Null when `cache_mode = "none"`. |
+| `cache_primary_endpoint` | Address of the created cache's primary endpoint. Null unless `cache_mode = "create"`. |
 | `database_url_secret_arn` | ARN of the database URL secret (not its value). |
 | `scanner_task_role_arn` | Scanner task role ARN; the principal the access module's scan role trusts. Null when scanning is off. |
 | `scan_bucket_name` | Scan bucket name. Null when scanning is off. |
+
+## Split services
+
+With `split_services = true` the module runs one image in three roles as three ECS services in the `harbormaster` cluster:
+
+| Service | `HM_ROLE` | Count | Behind the ALB | Autoscaling |
+|---|---|---|---|---|
+| `harbormaster-web` | `web` | `web_*_count` (2, 2, 6) | yes, the only target | `ALBRequestCountPerTarget` at `web_requests_per_target` and average CPU at 60 percent, scale-in cooldown 10 minutes (a scale-in closes WebSockets) |
+| `harbormaster-poller` | `poller` | `poller_*_count` (2, 2, 4) | no | average CPU at 60 percent, scale-in cooldown 5 minutes. Lease load is on `/metrics`, not in CloudWatch |
+| `harbormaster-coordinator` | `coordinator` | `coordinator_desired_count` (2) | no | none: one task is active, the other waits |
+
+Each service has its own task role, execution role and security group, all created even when `split_services` is false: a managed account can trust a role only once it exists, and an unused role grants nothing. The task role grants `sts:AssumeRole` and nothing else, except web's optional bootstrap secret read and the coordinator's scan launch policy:
+
+| Permission | web | poller | coordinator | legacy |
+|---|---|---|---|---|
+| `sts:AssumeRole` on `access_role_arns` | yes | | | yes |
+| `sts:AssumeRole` on each `access_role_arns` entry with `-poller` appended | | yes | | |
+| `sts:AssumeRole` on each `access_role_arns` entry with `-coordinator` appended | | | yes | |
+| Read the bootstrap admin secret (when set) | yes | | | yes |
+| Scan launch policy (`enable_image_scanning`) | | | yes | yes |
+
+The execution role may read exactly the secrets injected into its container:
+
+| Secret | web | poller | coordinator | legacy |
+|---|---|---|---|---|
+| Database URL | yes | yes | yes | yes |
+| Store URL (`HM_KV_URL`, when a cache is configured) | yes | yes | yes | yes |
+| Metrics token (`enable_metrics`) | yes | yes | yes | yes |
+| Session key | yes | | yes | yes |
+| SMTP password (when set) | yes | | yes | yes |
+
+Poller and coordinator tasks serve only `/healthz` and `/metrics` on the container port. Their security groups take no ingress, except that port from `metrics_ingress_security_group_ids`.
+
+### Database connections
+
+Each task holds a database pool (`HM_DB_MAX_CONNS`; unset means 6 for web, 8 for poller, 4 for coordinator, pgx's default for the legacy service) and, during a rollout, one connection for the upgrade gate. At the maximum counts that is about 76 pool connections plus 6 gate connections, against about 110 on the default `db.t4g.micro`. The default instance class stays `db.t4g.micro` so existing installs do not change; **`db.t4g.small` is recommended** (set `db_instance_class`) whenever `web_max_count` or `poller_max_count` is raised above its default.
+
+## Cache
+
+`cache_mode` chooses where the shared store comes from. Without a store (`"none"`) every limit and live-refresh signal stays per task and nothing else changes; that is the single-service default. The data is disposable: when the store is down, empty or evicted, Harbormaster falls back to Postgres and per-task behaviour, and polling, sign-in and deploys never wait for it.
+
+| Mode | What the module does |
+|---|---|
+| `"create"` | ElastiCache replication group named `harbormaster`: cluster mode off, `1 + cache_replicas` nodes (Multi-AZ automatic failover when there are replicas), port 6379, TLS and at-rest encryption (with `db_kms_key_id` when set), an auth token from `random_password`, no snapshots, `apply_immediately = false`. A parameter group of family `<engine><major>` (`valkey7`, `redis7`) sets `maxmemory-policy = volatile-lru`: every key Harbormaster writes has a TTL, so only those are evicted. The full `rediss://:<token>@<primary endpoint>:6379/0` URL is stored in the secret `harbormaster/kv-url`; the token is in no task definition and no output |
+| `"external"` | Uses the secret in `cache_url_secret_arn` (a full `redis://`, `rediss://`, `valkey://` or `valkeys://` URL with the password) for an endpoint you run. The module creates nothing for it. The three split services and the legacy service must be able to reach it; if the secret uses a customer KMS key other than `db_kms_key_id`, add `kms:Decrypt` for the execution roles yourself |
+| `"none"` | No store, no secret, no `HM_KV_URL` |
+
+Engines: `cache_engine = "valkey"` (default, version `7.2`) or `"redis"` (version `7.1`); `cache_engine_version` overrides. Harbormaster uses only a command subset that Valkey 7.2 and Redis 7.0 or newer both support, so either engine works. An alarm per node (`harbormaster-cache-evictions-001` and so on) fires when `Evictions` stay above 0 for 15 minutes: size `cache_node_type` up. Set `cache_alarm_actions` to be told.
+
+The cache security group admits the web, poller and coordinator groups on 6379, and the legacy server group only while `keep_legacy_service` is true. The legacy security group and its database rule stay after the legacy service is removed, so removing the service changes nothing about either.
+
+## Upgrade: single service to split services
+
+These are TerraDuckTel runs: **nothing here is run locally.** Each numbered run is one trigger, in this order. Every change is backward compatible: the legacy single service keeps working until run 4 removes it, and rolling back is the reverse run. The module and image version are the same in every run, except where a run says otherwise.
+
+For each run, "account and region" is where TerraDuckTel acts: the Harbormaster account (the homelab account, `admin`) in `<region>` for the main module, and each managed account for the access module. Fill in the placeholders in your workspace; this page does not know them.
+
+### Run 1: main module, new image, no variable changes
+
+- **Module and where:** `harbormaster`, Harbormaster account `admin`, `<region>`.
+- **Variables:** none changed. Only `image` moves to the release that has `--role`.
+- **The plan must contain:** the six new roles (`harbormaster-web-task`, `-poller-task`, `-coordinator-task` and the three `-execution` roles) with their policies and policy attachments; three new security groups (`harbormaster-web`, `-poller`, `-coordinator`); `terraform_data.split_checks`; one in-place change to the database security group (its ingress gains the three new groups); the legacy task definition replaced by a new revision with the new image, and the legacy service updated in place to use it; and a `has moved to ...[0]` line for each of: `aws_iam_role.task`, `aws_iam_role.execution`, `aws_iam_role_policy.task_assume`, `aws_iam_role_policy.execution_secrets`, `aws_iam_role_policy_attachment.execution_managed`, `aws_ecs_service.server` and `aws_ecs_task_definition.server`.
+- **The plan must not contain:** a replace or destroy of the ECS service, the load balancer, the database, the secrets, or any existing role or security group. A replacement of the service or a role means a `moved` block did not match: stop and ask before applying.
+- **After:** `/healthz` answers `ok`; the UI loads and signs in; `harbormaster_lease_slices_owned` on the task equals the number of enabled account x region pairs (new tasks wait behind the shared leader gate until the old leader stops, then claim every slice; expect a gap of one retry plus one tick). Copy the outputs `web_task_role_arn`, `poller_task_role_arn` and `coordinator_task_role_arn` for run 2.
+
+### Run 2: access module, once per managed account
+
+This must come after run 1: IAM rejects a trust policy that names a role that does not exist. Today that is four runs, one per managed account.
+
+- **Module and where:** `harbormaster-access`, each managed account in turn, its region (IAM is global; use the region the workspace is configured for).
+- **Variables:** add `web_task_role_arn`, `poller_task_role_arn` and `coordinator_task_role_arn` from run 1's outputs. Keep `harbormaster_task_role_arn` and `external_id` as they are. Keep `role_name` the same as in the other accounts: Harbormaster derives `<role_name>-poller` and `<role_name>-coordinator` from the ARN stored for the account.
+- **The plan must contain:** two new roles (`<role_name>-poller`, `<role_name>-coordinator`) with one inline policy each, and an in-place change to the existing role's trust policy (it now also names the web task role). It must not remove or replace anything.
+- **After:** both suffixed roles exist in that account, for example `aws iam get-role --role-name harbormaster-access-poller --profile <managed account profile> --region <region>`. Nothing changes in Harbormaster yet.
+
+### Run 3: main module, switch on the split services next to the legacy one
+
+- **Module and where:** `harbormaster`, account `admin`, `<region>`.
+- **Variables:** `split_services = true`, `cache_mode = "create"`, `cache_engine = "valkey"` (or `"redis"`; for your own endpoint use `cache_mode = "external"` and `cache_url_secret_arn`), `keep_legacy_service = true` (the default). Consider `db_instance_class = "db.t4g.small"` now (see Database connections).
+- **The plan must contain:** the ElastiCache replication group, subnet group and parameter group, the `random_password`, the secret `harbormaster/kv-url` and its version, the cache security group, one evictions alarm, three task definitions and three services, two autoscaling targets and three policies; and these changes to existing resources: the legacy task definition gains the `HM_KV_URL` secret (a new revision, the legacy service updated in place) and the legacy execution role's secrets policy gains the store secret. Creating the cache takes several minutes.
+- **The plan must not contain:** a destroy of anything, or a replace of the legacy service, the database or the load balancer.
+- **After:** run the same workspace once more: the plan must be empty. (On a provider older than 6.45 a Valkey `engine_version` diff can show up; pin `cache_engine_version` to the full version the cache reports, or use a newer provider.) Then check (design step 4): the sum of `harbormaster_lease_slices_owned` over the poller and legacy tasks equals the number of account x region pairs, with no slice stale on the accounts page; `harbormaster_kv_up` is 1 on every task (legacy included); the `harbormaster-server` target group shows healthy web targets next to the legacy ones; a cluster page shows `Live, every 5 s` (releases with page freshness). Leave it running for a while; both services serve the ALB.
+
+### Run 4: main module, remove the legacy service
+
+- **Module and where:** `harbormaster`, account `admin`, `<region>`.
+- **Variables:** `keep_legacy_service = false`.
+- **The plan must contain only:** the destroy of the legacy ECS service, task definition, task role, execution role and their policies and attachments, and the in-place removal of the legacy security group from the cache security group's ingress. The legacy task gets SIGTERM, frees its leases, and the pollers and the coordinator claim them within one tick.
+- **After:** the sum of `harbormaster_lease_slices_owned` over the pollers equals the number of pairs; exactly one coordinator task reports `harbormaster_coordinator_active` = 1; the target group has only web targets and is healthy; the UI works. Outputs `task_role_arn`, `execution_role_arn` and `service_name` are now null.
+
+### Run 5: access module, once per managed account
+
+- **Module and where:** `harbormaster-access`, each managed account in turn.
+- **Variables:** `harbormaster_task_role_arn = null` (the legacy role no longer exists, and a trust policy cannot keep naming a deleted role: the next change to it would fail).
+- **The plan must contain only:** an in-place change to the existing role's trust policy (the legacy principal removed; the web task role stays).
+- **After:** the account still shows healthy slices; the access role trusts the web task role only.
+
+### Rollback and later releases
+
+- **Rollback** is the reverse run at any point: put `keep_legacy_service = true` back (run 4 undone) and the legacy service returns; set `split_services = false` to remove the split services. Rolling the image back is safe because old tasks cannot lead while a new task holds the shared gate.
+- **After undoing run 4, repeat run 2 in every managed account, straight away.** Run 4 destroyed `harbormaster-server-task`; putting `keep_legacy_service = true` back creates a new role with the same name but a new unique id, and IAM trust policies match the id, so managed accounts no longer trust it and the legacy service cannot assume its access roles. Re-apply the access module in each account (the plan shows the trust policy changing in place), with `harbormaster_task_role_arn` set to the legacy role's ARN again if run 5 had already set it to `null`. Until then, web, poller and coordinator keep working; only the legacy service is locked out.
+- **Repeating run 3 after a rollback** works: the store URL secret `harbormaster/kv-url` is deleted at once (no recovery window) when the cache is destroyed, so its name is free again. The cache itself is rebuilt empty, which is safe because its data is disposable.
+- **Later releases:** roll the coordinator and poller services first and web last. Migrations are additive, so old and new tasks can overlap; cache keys carry a schema version, so two versions never read each other's entries.
+- **Missing suffixed roles:** if a managed account lacks `<role_name>-poller` or `<role_name>-coordinator`, that account's polls fail with the AWS error and the page shows the stale banner; the accounts page shows each slice's last poll error. Apply run 2 in that account.
 
 ## Image scanning
 

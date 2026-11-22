@@ -1,11 +1,26 @@
 output "task_role_arn" {
-  description = "ARN of the Harbormaster task role (input for the access-role module's trust policy)."
-  value       = aws_iam_role.task.arn
+  description = "ARN of the legacy single-service task role (input harbormaster_task_role_arn of the access-role module). Null once keep_legacy_service is false."
+  value       = one(aws_iam_role.task[*].arn)
 }
 
 output "execution_role_arn" {
-  description = "ARN of the ECS task execution role."
-  value       = aws_iam_role.execution.arn
+  description = "ARN of the legacy single-service ECS task execution role. Null once keep_legacy_service is false."
+  value       = one(aws_iam_role.execution[*].arn)
+}
+
+output "web_task_role_arn" {
+  description = "ARN of the web task role (input web_task_role_arn of the access-role module). Always created."
+  value       = aws_iam_role.service_task["web"].arn
+}
+
+output "poller_task_role_arn" {
+  description = "ARN of the poller task role (input poller_task_role_arn of the access-role module). Always created."
+  value       = aws_iam_role.service_task["poller"].arn
+}
+
+output "coordinator_task_role_arn" {
+  description = "ARN of the coordinator task role (input coordinator_task_role_arn of the access-role module). Always created."
+  value       = aws_iam_role.service_task["coordinator"].arn
 }
 
 output "cluster_name" {
@@ -14,8 +29,23 @@ output "cluster_name" {
 }
 
 output "service_name" {
-  description = "ECS service name."
-  value       = aws_ecs_service.server.name
+  description = "Name of the legacy single ECS service. Null once keep_legacy_service is false."
+  value       = one(aws_ecs_service.server[*].name)
+}
+
+output "web_service_name" {
+  description = "Name of the web ECS service. Null unless split_services is true."
+  value       = one(aws_ecs_service.web[*].name)
+}
+
+output "poller_service_name" {
+  description = "Name of the poller ECS service. Null unless split_services is true."
+  value       = one(aws_ecs_service.poller[*].name)
+}
+
+output "coordinator_service_name" {
+  description = "Name of the coordinator ECS service. Null unless split_services is true."
+  value       = one(aws_ecs_service.coordinator[*].name)
 }
 
 output "alb_dns_name" {
@@ -44,12 +74,26 @@ output "log_group_name" {
 }
 
 output "security_group_ids" {
-  description = "Security group IDs keyed alb, server and db."
+  description = "Security group IDs keyed alb, server (legacy single service), web, poller, coordinator, db and cache (null unless cache_mode = \"create\")."
   value = {
-    alb    = aws_security_group.alb.id
-    server = aws_security_group.server.id
-    db     = aws_security_group.db.id
+    alb         = aws_security_group.alb.id
+    server      = aws_security_group.server.id
+    web         = aws_security_group.web.id
+    poller      = aws_security_group.poller.id
+    coordinator = aws_security_group.coordinator.id
+    db          = aws_security_group.db.id
+    cache       = one(aws_security_group.cache[*].id)
   }
+}
+
+output "cache_url_secret_arn" {
+  description = "ARN of the Secrets Manager secret that holds the store URL (the ARN only, never the value). Null when cache_mode = \"none\"."
+  value       = local.kv_enabled ? local.kv_url_secret_arn : null
+}
+
+output "cache_primary_endpoint" {
+  description = "Address of the created cache's primary endpoint (no credentials). Null unless cache_mode = \"create\"."
+  value       = one(aws_elasticache_replication_group.this[*].primary_endpoint_address)
 }
 
 output "database_url_secret_arn" {
