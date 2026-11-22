@@ -1,0 +1,30 @@
+# Harbormaster MCP gateway image: the harbormaster-mcp binary on distroless nonroot. No web build, no credentials.
+# Build: make mcp-image VERSION=<version> [ARCH=amd64|arm64]  (default amd64, matching the module's cpu_architecture)
+# The Go stage runs on the build host's native platform and cross-compiles, so building for another architecture
+# needs no emulation; only the final distroless stage is for the target platform.
+
+# golang:1.27.4-alpine3.24
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS go-build
+ARG VERSION=dev
+ARG COMMIT=none
+ARG TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/harbormaster-mcp ./cmd/harbormaster-mcp
+
+# gcr.io/distroless/static-debian12:nonroot (no versioned tags; pinned by digest)
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+COPY --from=go-build /out/harbormaster-mcp /harbormaster-mcp
+USER nonroot:nonroot
+ENV HM_MCP_LISTEN=:8481
+EXPOSE 8481
+# Exec form: the image has no shell.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/harbormaster-mcp", "healthcheck"]
+ENTRYPOINT ["/harbormaster-mcp"]
+CMD ["serve"]

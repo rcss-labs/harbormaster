@@ -31,6 +31,12 @@ variable "allowed_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "alb_ingress_security_group_ids" {
+  description = "Security groups allowed to reach the load balancer on 443 in addition to allowed_cidrs. Set it to the harbormaster-mcp module's task_security_group_id."
+  type        = list(string)
+  default     = []
+}
+
 variable "certificate_arn" {
   description = "ACM certificate ARN for the HTTPS listener."
   type        = string
