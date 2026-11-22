@@ -109,6 +109,16 @@ func TestPollerStatus_ReportsStoreHealth(t *testing.T) {
 	}
 }
 
+// Whether the shared store exists, and whether it is up, is operations detail: only admins get it.
+func TestPollerStatus_StoreStateIsAdminOnly(t *testing.T) {
+	srv, _, _, _ := newServerCustom(t, true, func(s *Server) { s.KVHealth = upStub{true} })
+	var got ownedPollerBody
+	decode(t, login(t, srv, "omer", testPassword).get("/api/poller"), &got)
+	if got.Store != "" {
+		t.Fatalf("non-admin sees store = %q, want it left out", got.Store)
+	}
+}
+
 func metricsBody(t *testing.T, base string) string {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, base+"/metrics", nil)

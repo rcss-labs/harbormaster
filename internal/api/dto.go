@@ -488,7 +488,8 @@ type PollerItemDTO struct {
 // PollerResponse is the body of GET /api/poller.
 type PollerResponse struct {
 	Items []PollerItemDTO `json:"items"`
-	// Store is the shared Valkey or Redis store: "up", "down", or "none" when the install has no store.
+	// Store is the shared Valkey or Redis store: "up", "down", or "none" when the install has no store. Admins only;
+	// empty for everyone else.
 	Store string `json:"store"`
 }
 

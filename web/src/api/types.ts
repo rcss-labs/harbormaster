@@ -440,8 +440,8 @@ export interface PollerTierDTO {
 }
 export interface PollerDTO {
   items: PollerEntryDTO[]
-  /** The shared Valkey or Redis store: "none" when the install has none. Always sent; optional here so partial test bodies type-check. */
-  store?: 'up' | 'down' | 'none'
+  /** The shared Valkey or Redis store, for admins; "" for everyone else, "none" when the install has none. Always sent; optional here so partial test bodies type-check. */
+  store?: 'up' | 'down' | 'none' | ''
 }
 
 // ---- Admin: users and permissions ----

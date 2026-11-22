@@ -154,7 +154,12 @@ func (s *Server) pollerStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
-	writeJSON(w, http.StatusOK, PollerResponse{Items: items, Store: s.storeState()})
+	// The store state is for admins, like the lease owners; everyone else gets an empty string.
+	storeState := ""
+	if sc.Vis.Admin {
+		storeState = s.storeState()
+	}
+	writeJSON(w, http.StatusOK, PollerResponse{Items: items, Store: storeState})
 }
 
 // storeState names the shared store's state for the poller status.
