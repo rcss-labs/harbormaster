@@ -307,3 +307,37 @@ func TestOAuthOnWithoutTokensIsOff(t *testing.T) {
 	env := newOAuthAPIEnvWith(t, true, func(s *Server) { s.Cfg.APITokens = false; s.OAuth = nil })
 	wantStatus(t, env.omer.get(authorizePath(env.request())), http.StatusNotFound)
 }
+
+// A connector's consent link, with its whole query, survives an SSO sign-in; anything off the origin does not.
+func TestSAMLLogin_ReturnPathKeepsTheQueryAndStaysSameOrigin(t *testing.T) {
+	srv, _, st := newServerWithFakeIdP(t)
+	long := "/oauth/authorize?state=" + strings.Repeat("s", 600)
+	consent := "/oauth/authorize?" + url.Values{
+		"response_type": {"code"}, "client_id": {"https://claude.ai/oauth/mcp-client.json"},
+		"redirect_uri": {oauthTestRedirect}, "code_challenge": {oauthChallenge(oauthTestVerifier)},
+		"code_challenge_method": {"S256"}, "state": {"a b&c=d"}, "resource": {oauthTestIssuer + "/mcp"},
+	}.Encode()
+	cases := []struct{ name, raw, want string }{
+		{"the consent link with its query", consent, consent},
+		{"a long state still fits", long, long},
+		{"over 2048 characters is dropped", "/oauth/authorize?state=" + strings.Repeat("s", 2100), "/"},
+		{"another origin", "https://evil.example" + consent, "/"},
+		{"protocol relative", "//evil.example" + consent, "/"},
+		{"backslash trick", `/\evil.example` + consent, "/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBrowser(t, srv)
+			resp := b.get("/api/auth/saml/login?return_to=" + url.QueryEscape(tc.raw))
+			resp.Body.Close()
+			loc, _ := url.Parse(resp.Header.Get("Location"))
+			var got string
+			if err := st.Pool.QueryRow(t.Context(), `select return_to from saml_requests where id = $1`, loc.Query().Get("RelayState")).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("return_to stored as %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
