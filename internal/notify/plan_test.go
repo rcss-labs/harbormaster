@@ -26,10 +26,6 @@ func awsTarget(account, region string) awsx.Target {
 	return awsx.Target{AccountID: account, Region: region}
 }
 
-func pKey(account, region, cluster, service string) model.ServiceKey {
-	return svc(account, region, cluster, service)
-}
-
 var (
 	clusterA = model.ClusterKey{AccountID: pAcct, Region: "us-east-1", Cluster: "A"}
 	svc1     = model.ServiceKey{ClusterKey: clusterA, Service: "svc1"}

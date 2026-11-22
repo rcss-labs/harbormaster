@@ -28,9 +28,6 @@ type ScalingLoop struct {
 	Now     func() time.Time
 }
 
-func (l *ScalingLoop) Name() string            { return tierScaling }
-func (l *ScalingLoop) Interval() time.Duration { return l.Every }
-
 // Run stores the scaling state of every service of the target. Services without a scalable
 // target are stored with HasTarget false.
 func (l *ScalingLoop) Run(ctx context.Context, t awsx.Target) error {

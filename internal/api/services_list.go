@@ -108,7 +108,7 @@ func (s *Server) listServicesFlat(w http.ResponseWriter, r *http.Request) {
 
 // newestAlertTextByService maps each service to the text of its newest open alert.
 func (s *Server) newestAlertTextByService(ctx context.Context, f store.TargetFilter) (map[model.ServiceKey]string, error) {
-	alerts, err := s.Store.ListAlerts(ctx, store.AlertFilter{AccountID: f.AccountID, Region: f.Region})
+	alerts, err := s.Store.ListAlerts(ctx, store.AlertFilter(f))
 	if err != nil {
 		return nil, err
 	}

@@ -29,9 +29,6 @@ type StorageLoop struct {
 	Now     func() time.Time
 }
 
-func (l *StorageLoop) Name() string            { return tierStorage }
-func (l *StorageLoop) Interval() time.Duration { return l.Every }
-
 // Run polls the EFS file systems, their mount targets and access points of the target.
 func (l *StorageLoop) Run(ctx context.Context, t awsx.Target) error {
 	api, err := l.Clients.EFS(ctx, t)

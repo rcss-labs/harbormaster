@@ -35,9 +35,6 @@ type consecutivePolls struct {
 	polls  int
 }
 
-func (l *AlertsLoop) Name() string            { return tierAlerts }
-func (l *AlertsLoop) Interval() time.Duration { return l.Every }
-
 // Run recomputes the target's status runs and replaces its alerts. Alerts are written for every
 // service regardless of tag visibility; the API filters when it presents them.
 func (l *AlertsLoop) Run(ctx context.Context, t awsx.Target) error {

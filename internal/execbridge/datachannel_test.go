@@ -138,19 +138,6 @@ func (a *fakeAgent) acksFor(seq int64) int {
 	return n
 }
 
-func (a *fakeAgent) openText() OpenDataChannelInput {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	var in OpenDataChannelInput
-	if len(a.texts) == 0 {
-		panic("no text frame written")
-	}
-	if err := json.Unmarshal(a.texts[0], &in); err != nil {
-		panic(err)
-	}
-	return in
-}
-
 const testAgentVersion = "3.3.1230.0"
 
 func agentMessage(seq int64, pt PayloadType, payload []byte) ClientMessage {
