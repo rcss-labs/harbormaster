@@ -423,3 +423,23 @@ func TestFocus_CountsAdmissions(t *testing.T) {
 		}
 	}
 }
+
+// mark must not walk the whole map on every call: expired entries are swept at most once a minute.
+func TestFocusOpens_SweepsExpiredEntriesAtMostOncePerMinute(t *testing.T) {
+	var o focusOpens
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	o.mark("a", t0)
+	o.mark("b", t0.Add(10*time.Second))
+	o.mark("c", t0.Add(70*time.Second)) // first sweep after a minute: a (70 s old) goes, b (60 s) stays
+	if _, ok := o.at["a"]; ok {
+		t.Fatal("a was not swept after a minute")
+	}
+	o.mark("d", t0.Add(80*time.Second)) // b is 70 s old now, but the last sweep was 10 s ago
+	if len(o.at) != 3 {
+		t.Fatalf("entries = %d, want 3 (b, c, d): swept again within a minute", len(o.at))
+	}
+	o.mark("e", t0.Add(131*time.Second)) // a minute after the last sweep: b and c (61 s) go, d (51 s) stays
+	if len(o.at) != 2 {
+		t.Fatalf("entries = %d, want d and e", len(o.at))
+	}
+}
