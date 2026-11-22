@@ -101,8 +101,8 @@ func certsDropped(old, updated []string) bool {
 }
 
 // UpsertSAMLConfig writes the configuration in one transaction. It never changes `enabled` (only
-// SetSAMLEnabled, which has the lockout guard, does). It ends every SAML session when the IdP entity
-// ID changes or a previously stored certificate is dropped. An entity ID change also clears every
+// SetSAMLEnabled, which has the lockout guard, does). It ends every SAML session, and every access token
+// created under SAML, when the IdP entity ID changes or a previously stored certificate is dropped. An entity ID change also clears every
 // pending link and detaches the SSO identity of users who have a password; identities of
 // password-less users are kept (they cannot match under the new entity ID, and an admin recovers
 // them by unlinking, which sets a temporary password). Passwords are never touched.
@@ -155,6 +155,9 @@ func (s *Store) UpsertSAMLConfig(ctx context.Context, row SAMLConfigRow) (SAMLCo
 			return change, fmt.Errorf("end saml sessions: %w", err)
 		}
 		change.SessionsEnded = tag.RowsAffected()
+		if _, err := deleteAPITokensBySource(ctx, tx, "saml"); err != nil {
+			return change, err
+		}
 	}
 	if entityChanged {
 		// Pending links are scoped to the old IdP, so all are cleared. Identities are detached only
@@ -179,7 +182,8 @@ func (s *Store) UpsertSAMLConfig(ctx context.Context, row SAMLConfigRow) (SAMLCo
 
 // SetSAMLEnabled turns SSO on or off. Enabling takes the admin row locks first and then requires at
 // least one break-glass admin in the same transaction (ErrNoBreakGlassAdmin), so it serialises with
-// every guarded admin write. Disabling an enabled configuration ends all SAML sessions. It never
+// every guarded admin write. Disabling an enabled configuration ends all SAML sessions and every access
+// token created under SAML. It never
 // touches users or passwords. ErrNotFound when SSO is unconfigured.
 func (s *Store) SetSAMLEnabled(ctx context.Context, enabled bool) (SAMLConfigChange, error) {
 	var change SAMLConfigChange
@@ -219,6 +223,9 @@ func (s *Store) SetSAMLEnabled(ctx context.Context, enabled bool) (SAMLConfigCha
 			return change, fmt.Errorf("end saml sessions: %w", err)
 		}
 		change.SessionsEnded = tag.RowsAffected()
+		if _, err := deleteAPITokensBySource(ctx, tx, "saml"); err != nil {
+			return change, err
+		}
 	}
 	return change, tx.Commit(ctx)
 }
