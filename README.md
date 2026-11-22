@@ -335,6 +335,35 @@ Terms are separated by spaces and must all hold for the same service. Text such 
 - **CSV.** Export CSV is built in your browser from the rows shown (or the ticked rows), one line per container, with the columns `service, cluster, account_id, account_name, region, permission_tag, family, revision, matched_revision, previous_revision, container, image, image_tag, base_image, ports, env_names, secret_names, task_role, execution_role, log_group, matched, service_id`. Cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not run them.
 - **Use with scripts and Bulk changes.** `GET /api/config-search?q=` returns stable service `id`s and is evaluated with the caller's permissions each time. Nothing is stored.
 
+## MCP: AI access
+
+Harbormaster can be read by AI tools such as Claude Code through a small public service, the MCP gateway (`harbormaster-mcp`, an image of its own, see [Build and push the image](#build-and-push-the-image) and the `harbormaster-mcp` Terraform module). Nothing here can change anything.
+
+- **What the gateway is.** A thin, read-only translator: it speaks the Model Context Protocol on `POST /mcp`, and each tool call becomes one read request to Harbormaster's own API, carrying the caller's own access token. It holds no credentials, no database or cache access and no AWS permissions; its task role has no policies. It is the only public piece: Harbormaster stays on an internal load balancer.
+- **What it is not.** It cannot restart, scale, deploy, sleep, wake or edit anything, and no tool exists for it. It acts as the token's user, so it sees exactly the tags that user sees, and log lines only where the user has Logs. An admin's token is not more powerful than the admin's own read access. Details and limits of tokens are in [Access tokens](#access-tokens).
+- **The tools (39).** `whoami` shows who you are, what you can see and how much log-search budget is left today. Estate: `get_overview`, `list_clusters`, `get_cluster`, `list_services`, `get_service`, `list_service_tasks`, `list_tasks`, `search`, `list_alerts`. Configuration: `get_task_definition`, `list_revisions`, `get_revision`, `get_scaling`, `get_desired_count`, `get_service_offhours`, `get_arm64_readiness`, `search_config` (names only, never values). Troubleshooting: `get_service_timeline`, `get_timeline_task`, `list_service_operations`, `get_target_health`, `get_service_metrics`, `get_service_logs`, `list_log_search_services`, `estimate_log_search`, `search_logs`. Security: `list_security`, `get_service_security`, `get_image_security`. Analytics: `get_cost_analytics`, `get_capacity_analytics`, `get_reliability_analytics`, `get_delivery_analytics`, `get_operations_analytics`. Network and storage: `list_networks`, `list_region_vpcs`, `get_vpc_tree`, `list_storage`.
+- **Connecting Claude Code.** Create a token on the My access page, then:
+
+  ```
+  claude mcp add --transport http harbormaster https://<host>/mcp --header "Authorization: Bearer hmp_..."
+  ```
+
+  This puts the token in your shell history and in plain text in `~/.claude.json`. To keep it out of both, store a reference instead. Read the token without echoing it, export it, and add the server with the variable name in single quotes, so your shell does not expand it:
+
+  ```
+  read -rs HARBORMASTER_MCP_TOKEN && export HARBORMASTER_MCP_TOKEN
+  claude mcp add --transport http harbormaster https://<host>/mcp --header 'Authorization: Bearer ${HARBORMASTER_MCP_TOKEN}'
+  ```
+
+  Claude Code expands `${VAR}` in a server's headers when it starts, so the variable must be set in the environment you start Claude Code from (put the export in a file only you can read, not in a committed one). Run `claude mcp get harbormaster` to confirm the stored header still shows the `${...}` reference and not the secret. claude.ai and Claude Desktop connectors are not supported yet.
+- **Token lifetimes.** Up to 90 days for a password user who is not an admin. A user linked to single sign-on and every global admin get at most 7 days. Harbormaster does not learn when someone leaves your identity provider, so a token must not outlive the 7-day browser session cap; renewing means signing in through SSO and creating a new token.
+- **Log search.** A token-initiated search may scan at most 2 GiB, and each user's tokens share 20 GiB per UTC day (`429 log_search_budget_exhausted` after that, until 00:00 UTC). `whoami` and `estimate_log_search` report what is left. Browser searches are not charged.
+- **What is logged.** The gateway writes one line per request: method, tool name, status, duration, client IP and the token's public id (`hmp_<id>`), never the token, a header, a request body or a result. Harbormaster records `token_create` and `token_revoke` in the audit log, tags log searches made with a token with `via: token` and the token id, and adds `token_id` to its request log. The AWS WAF log on the gateway's load balancer redacts the `authorization` and `cookie` headers.
+- **Prompt injection.** Log lines, environment names and stopped-task reasons are text written by your applications, and possibly by an attacker. The model reads it. The tools cannot write, so the damage is limited to what the model does with its other tools and to what it reads out. If an agent has this server and also a tool that can change things (a shell, a cloud CLI, a ticket system), treat anything it reads here as untrusted input to that tool.
+- **Data leaves your network.** Everything a tool returns is sent to the AI provider, environment variable values included. Set `HM_TOKEN_REDACT_ENV=true` on Harbormaster to replace environment values with `[redacted]` for tokens. A compromised gateway task could also send what passes through it to the internet, because it reaches Harbormaster through a NAT gateway with outbound 443; it holds no credential at rest, and the tokens it sees are read-only, expiring and revocable.
+- **A busy agent keeps polling fast.** Token calls count as activity, so an agent that calls at least every `HM_POLL_IDLE_AFTER` holds polling at full pace until its token ends.
+- **Rollout and operations.** See `docs/ops/mcp-runbook.md` in the source tree (not published with the repository).
+
 ## Access tokens
 
 An access token lets a script or an AI tool read Harbormaster as you, over the API, without a browser session. Tokens are off until `HM_API_TOKENS=true`; with it unset the token routes answer 404 and an `Authorization` header is ignored.
@@ -557,6 +586,20 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks, groupe
 | `HM_TOKEN_LOG_SEARCH_DAILY_GB` | `20` | GiB one user's tokens may scan per UTC day; `0` turns log search off for tokens |
 | `HM_TOKEN_REDACT_ENV` | `false` | Replace environment values with `[redacted]` in task definition answers to tokens |
 | `HM_MCP_PUBLIC_URL` | empty | Public `https://` base URL of the MCP gateway, shown in the connect instructions |
+
+### MCP gateway (settings)
+
+These are the `harbormaster-mcp` container's variables; the Terraform module sets them. The gateway has no secrets.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_MCP_UPSTREAM_URL` | required | Harbormaster's internal `https://` base URL |
+| `HM_MCP_PUBLIC_URL` | required | The gateway's public `https://` base URL, no path |
+| `HM_MCP_LISTEN` | `:8481` | Listen address; the image's healthcheck follows its port |
+| `HM_MCP_TRUSTED_PROXY` | `true` | Take the client IP from the load balancer's `X-Forwarded-For` |
+| `HM_MCP_ALLOWED_ORIGINS` | empty | Comma-separated browser origins allowed to call `/mcp`; a request with another `Origin` gets 403 |
+| `HM_MCP_MAX_RESULT_BYTES` | `100000` | Largest tool result (10000 to 140000) |
+| `HM_MCP_UPSTREAM_TIMEOUT` | `30s` | Per call to Harbormaster (`search_logs` uses 90 s) |
 
 ### Single sign-on (SAML)
 
