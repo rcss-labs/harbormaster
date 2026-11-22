@@ -230,7 +230,7 @@ func (r *Runner) requeueAfterLaunchFailure(ctx context.Context, batch []store.Sc
 func (r *Runner) baseImages(ctx context.Context, batch []store.ScanImage, accounts map[string]store.AWSAccount) (map[store.RepoKey]string, map[string]store.AWSAccount, error) {
 	keys := make([]store.RepoKey, len(batch))
 	for i, img := range batch {
-		keys[i] = repoKeyOf(img)
+		keys[i] = img.RepoKey()
 	}
 	bases, err := r.Store.RepoBases(ctx, keys)
 	if err != nil {
@@ -260,10 +260,6 @@ func (r *Runner) baseImages(ctx context.Context, batch []store.ScanImage, accoun
 	return bases, withBase, nil
 }
 
-func repoKeyOf(img store.ScanImage) store.RepoKey {
-	return store.RepoKey{AccountID: img.RegistryAccountID, Region: img.RegistryRegion, Repository: img.Repository}
-}
-
 // buildJob lists the batch and the registry credentials of the batch's accounts only, plus those of the accounts that
 // hold the images' base images.
 func (r *Runner) buildJob(runID int64, state store.ScanDBState, batch []store.ScanImage, accounts map[string]store.AWSAccount, bases map[store.RepoKey]string, now time.Time) scan.Job {
@@ -285,7 +281,7 @@ func (r *Runner) buildJob(runID int64, state store.ScanDBState, batch []store.Sc
 				RoleARN:    fmt.Sprintf("arn:aws:iam::%s:role/%s", id, r.Cfg.RoleName),
 				ExternalID: accounts[id].ExternalID, Region: img.RegistryRegion}
 		}
-		baseRef := bases[repoKeyOf(img)]
+		baseRef := bases[img.RepoKey()]
 		if parsed := scan.ParseImageRef(baseRef); parsed.Kind == scan.KindECR {
 			if account, ok := accounts[parsed.AccountID]; ok {
 				if _, added := job.Registries[parsed.AccountID]; !added {

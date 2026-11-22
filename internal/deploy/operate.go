@@ -160,7 +160,7 @@ func (s *Service) StopTask(ctx context.Context, subj authz.Subject, accountID, r
 	logged := store.Operation{
 		AccountID: accountID, Region: region, Cluster: task.Cluster.Cluster,
 		ActorUserID: &subj.UserID, Source: "harbormaster",
-		Text:    fmt.Sprintf("Stopped task %s.", shortTaskID(taskARN)),
+		Text:    fmt.Sprintf("Stopped task %s.", ShortTaskID(taskARN)),
 		Details: map[string]any{"op": "stop_task"},
 	}
 	if task.ServiceName != "" {
@@ -172,8 +172,8 @@ func (s *Service) StopTask(ctx context.Context, subj authz.Subject, accountID, r
 	return Stopped{TaskARN: taskARN, Reason: reason, ServiceName: task.ServiceName, Warning: warning}, nil
 }
 
-// shortTaskID is the first 12 characters of a task's id, the last segment of its ARN.
-func shortTaskID(taskARN string) string {
+// ShortTaskID is the first 12 characters of a task's id, the last segment of its ARN.
+func ShortTaskID(taskARN string) string {
 	id := taskARN[strings.LastIndex(taskARN, "/")+1:]
 	if len(id) > 12 {
 		id = id[:12]

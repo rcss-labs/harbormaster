@@ -3,6 +3,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -61,23 +62,14 @@ func filterValues(filters []ec2types.Filter, name string) ([]string, bool) {
 	return nil, false
 }
 
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
 // matchesFilter is true when the filter is absent or one of its values equals got.
 func matchesFilter(filters []ec2types.Filter, name, got string) bool {
 	values, ok := filterValues(filters, name)
-	return !ok || containsString(values, got)
+	return !ok || slices.Contains(values, got)
 }
 
 // matchesIDs is true when ids is empty or contains got.
-func matchesIDs(ids []string, got string) bool { return len(ids) == 0 || containsString(ids, got) }
+func matchesIDs(ids []string, got string) bool { return len(ids) == 0 || slices.Contains(ids, got) }
 
 // ec2Page slices items by NextToken (an offset) when maxResults is set.
 func ec2Page[T any](items []T, maxResults *int32, token *string) (page []T, next *string) {
@@ -210,7 +202,7 @@ func (c *EC2) DescribeInternetGateways(ctx context.Context, in *ec2.DescribeInte
 		if values, ok := filterValues(in.Filters, "attachment.vpc-id"); ok {
 			attached := false
 			for _, att := range g.Igw.Attachments {
-				attached = attached || containsString(values, aws.ToString(att.VpcId))
+				attached = attached || slices.Contains(values, aws.ToString(att.VpcId))
 			}
 			if !attached {
 				continue

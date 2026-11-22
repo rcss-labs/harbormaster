@@ -2,6 +2,7 @@ package api
 
 import (
 	"hash/fnv"
+	"maps"
 	"net/http"
 	"slices"
 	"sort"
@@ -125,7 +126,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto.ARM64 = arm64
-	dto.KPIs.UnpricedRegions = sortedKeys(unpricedRegions)
+	dto.KPIs.UnpricedRegions = slices.Sorted(maps.Keys(unpricedRegions))
 	dto.ByCluster, dto.ByAccount, dto.ByTag = byCluster.sorted(), byAccount.sorted(), byTag.sorted()
 	writeJSON(w, http.StatusOK, dto)
 }
@@ -323,15 +324,6 @@ func (g groupTotals) sorted() []CostGroupDTO {
 		}
 		return out[i].Key < out[j].Key
 	})
-	return out
-}
-
-func sortedKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for key := range set {
-		out = append(out, key)
-	}
-	sort.Strings(out)
 	return out
 }
 

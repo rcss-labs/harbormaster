@@ -51,7 +51,7 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 	}
 	repoKeys := make([]store.RepoKey, len(images))
 	for i, img := range images {
-		repoKeys[i] = repoKeyOf(img)
+		repoKeys[i] = img.RepoKey()
 	}
 	bases, err := s.Store.RepoBases(ctx, repoKeys)
 	if err != nil {
@@ -61,7 +61,7 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 	views := make([]imageView, 0, len(images))
 	for _, img := range images {
 		view := imageView{dto: imageDTO(img)}
-		view.dto.BaseImage = baseImageOf(img, bases[repoKeyOf(img)])
+		view.dto.BaseImage = baseImageOf(img, bases[img.RepoKey()])
 		view.dto.Requests = []SecurityRequestDTO{}
 		seen := map[model.ServiceKey]bool{}
 		for _, request := range requests[img.Digest] {
@@ -105,10 +105,6 @@ func (s *Server) imageViews(r *http.Request, sc scope, images []store.ScanImage,
 		views = append(views, view)
 	}
 	return views, nil
-}
-
-func repoKeyOf(img store.ScanImage) store.RepoKey {
-	return store.RepoKey{AccountID: img.RegistryAccountID, Region: img.RegistryRegion, Repository: img.Repository}
 }
 
 // baseImageOf compares the base configured for the image's repository with what the last scan recorded. A scan counts

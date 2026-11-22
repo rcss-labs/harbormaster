@@ -1,6 +1,7 @@
 package network
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -125,7 +126,7 @@ func Assemble(in Input) Tree {
 			unplaced++
 			continue
 		}
-		if !contains(vpcs, vpcID) {
+		if !slices.Contains(vpcs, vpcID) {
 			continue
 		}
 		placed++
@@ -333,13 +334,4 @@ func labelOr(label, fallback string) string {
 		return fallback
 	}
 	return label
-}
-
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
