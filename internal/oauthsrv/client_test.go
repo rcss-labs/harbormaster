@@ -74,13 +74,13 @@ func TestClientResolver_AcceptsAValidDocument(t *testing.T) {
 
 func TestClientResolver_CleansTheNameAndFallsBackToTheHost(t *testing.T) {
 	doc := goodDoc()
-	doc["client_name"] = "  Cla\u0000ude‮ " + strings.Repeat("x", 200)
+	doc["client_name"] = "  Cla\u0000ude\u202e " + strings.Repeat("x", 200)
 	d := newDocServer(t, serveDocument(doc))
 	got, err := d.resolver().Resolve(t.Context(), d.clientID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(got.Name, "\u0000‮") || len([]rune(got.Name)) > 100 || !strings.HasPrefix(got.Name, "Claude") {
+	if strings.ContainsAny(got.Name, "\u0000\u202e") || len([]rune(got.Name)) > 100 || !strings.HasPrefix(got.Name, "Claude") {
 		t.Fatalf("name = %q, want printable, at most 100 characters", got.Name)
 	}
 	doc2 := goodDoc()
