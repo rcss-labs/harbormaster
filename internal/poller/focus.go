@@ -137,6 +137,13 @@ func (p *Poller) runFocusManager(ctx context.Context) {
 	}
 }
 
+// focusObjectCount is the number of focused objects the loops of this process run now, for poll_members.focus_objects.
+func (p *Poller) focusObjectCount() int {
+	total := 0
+	p.eachLoop(func(l *Loop) { total += l.focusEntries() })
+	return total
+}
+
 // reportFocusGauges publishes the number of running focus loops by kind and each slice's effective interval.
 func (p *Poller) reportFocusGauges(tel interface {
 	SetFocusObjects(map[string]int)

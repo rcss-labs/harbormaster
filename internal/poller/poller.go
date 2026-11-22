@@ -207,6 +207,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		Store: p.store, ID: id, Roles: roles, Version: p.cfg.Version, Timing: p.timing, Gate: gate,
 		Coordinator: p.cfg.Coordinator,
 		Targets:     p.targets, TargetsEvery: p.cfg.AccountsRefresh, Telemetry: p.cfg.Telemetry, Log: p.log,
+		Gauges: p.focusObjectCount,
 	}
 	if !p.cfg.NoSlices {
 		m.Slices = lease.HolderFunc(p.holdSlice)
