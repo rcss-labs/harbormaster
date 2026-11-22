@@ -574,6 +574,8 @@ func TestManager_TwoCoordinatorsOneHolder(t *testing.T) {
 
 	stopA()
 	waitFor(t, 2*time.Second, "b to take over", b.HoldsCoordinator)
+	// The lease is held before the holder goroutine has recorded its start; wait for the record.
+	waitFor(t, 2*time.Second, "b's holder to start", func() bool { return len(bRec.startsOf(coordinatorKey)) >= 1 })
 	if len(bRec.startsOf(coordinatorKey)) != 1 {
 		t.Fatalf("b started %d times", len(bRec.startsOf(coordinatorKey)))
 	}
