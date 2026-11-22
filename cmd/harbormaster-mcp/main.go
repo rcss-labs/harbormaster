@@ -38,6 +38,7 @@ environment for serve:
   HM_MCP_LISTEN (default :8481), HM_MCP_ALLOWED_ORIGINS, HM_MCP_TRUSTED_PROXY (default true)
   HM_MCP_MAX_RESULT_BYTES (default 100000), HM_MCP_UPSTREAM_TIMEOUT (default 30s)
   HM_MCP_AUTHORIZE_URL (optional; Harbormaster's private https base URL; turns OAuth on)
+  HM_MCP_AUTHORIZE_VIA_GATEWAY (default false; publish the gateway's /oauth/authorize, a redirect to the above)
 `
 
 const (

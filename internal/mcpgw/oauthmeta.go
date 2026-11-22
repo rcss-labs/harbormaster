@@ -65,7 +65,12 @@ func authorizationServerMetadata(cfg Config) any {
 }
 
 // authorizationEndpoint is where a browser is sent to approve a connector.
-func (c Config) authorizationEndpoint() string { return c.AuthorizeURL + "/oauth/authorize" }
+func (c Config) authorizationEndpoint() string {
+	if c.AuthorizeViaGateway {
+		return c.PublicURL + "/oauth/authorize"
+	}
+	return c.AuthorizeURL + "/oauth/authorize"
+}
 
 // serveOAuthMetadata answers the three well-known documents; with OAuth off
 // they do not exist.

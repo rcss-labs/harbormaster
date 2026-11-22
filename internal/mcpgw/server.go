@@ -130,6 +130,10 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok")
 	case "/mcp":
 		g.serveMCP(w, r)
+	case "/oauth/token":
+		g.serveOAuthToken(w, r)
+	case "/oauth/authorize":
+		g.serveOAuthAuthorize(w, r)
 	case protectedResourcePath, protectedResourceMCPPath, authorizationServerPath:
 		g.serveOAuthMetadata(w, r)
 	default:

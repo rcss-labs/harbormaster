@@ -26,11 +26,14 @@ type Config struct {
 	UpstreamURL string
 	PublicURL   string
 	// AuthorizeURL is Harbormaster's private base URL that hosts /oauth/authorize. Empty turns OAuth off.
-	AuthorizeURL    string
-	AllowedOrigins  []string
-	TrustedProxy    bool
-	MaxResultBytes  int
-	UpstreamTimeout time.Duration
+	AuthorizeURL string
+	// AuthorizeViaGateway publishes the gateway's own /oauth/authorize (a bare redirect to AuthorizeURL) as the
+	// authorization endpoint, for a client that refuses an endpoint on another host than the issuer.
+	AuthorizeViaGateway bool
+	AllowedOrigins      []string
+	TrustedProxy        bool
+	MaxResultBytes      int
+	UpstreamTimeout     time.Duration
 }
 
 // LoadConfig reads the HM_MCP_* settings through getenv and validates them.
@@ -67,6 +70,14 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 			return Config{}, err
 		}
 		cfg.AuthorizeURL = authorize
+	}
+
+	if raw := strings.TrimSpace(getenv("HM_MCP_AUTHORIZE_VIA_GATEWAY")); raw != "" {
+		via, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("HM_MCP_AUTHORIZE_VIA_GATEWAY must be true or false, got %q", raw)
+		}
+		cfg.AuthorizeViaGateway = via && cfg.AuthorizeURL != ""
 	}
 
 	for _, origin := range strings.Split(getenv("HM_MCP_ALLOWED_ORIGINS"), ",") {

@@ -216,3 +216,48 @@ func buildPath(pattern string, values map[string]string) (rawPath, escapedPath s
 	}
 	return raw.String(), escaped.String(), nil
 }
+
+// relayTokenPath is the one Harbormaster path outside the tool table.
+const relayTokenPath = "/api/oauth/token"
+
+const (
+	relayTokenTimeout      = 10 * time.Second
+	maxRelayTokenBodyBytes = 64 << 10
+)
+
+// RelayToken forwards an OAuth token request (a form body, already size and
+// type checked) to Harbormaster's token endpoint and returns its status and
+// body unchanged. It sends no Authorization header: the endpoint is public and
+// the body carries the code or refresh token. It is the only upstream call
+// that is not a tool call, and it neither logs nor returns the form.
+func (u *Upstream) RelayToken(ctx context.Context, form []byte, forwardedFor string) (status int, body []byte, err error) {
+	ctx, cancel := context.WithTimeout(ctx, relayTokenTimeout)
+	defer cancel()
+
+	target := &url.URL{Scheme: u.base.Scheme, Host: u.base.Host, Path: relayTokenPath}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(form))
+	if err != nil {
+		return 0, nil, fmt.Errorf("build upstream token request: %w", err)
+	}
+	if req.URL.Scheme != u.base.Scheme || req.URL.Host != u.base.Host {
+		return 0, nil, errors.New("upstream request does not address the configured host")
+	}
+	req.Header = http.Header{}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "harbormaster-mcp/"+Version)
+	if forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+	}
+
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("upstream token endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxRelayTokenBodyBytes))
+	if err != nil {
+		return 0, nil, fmt.Errorf("read upstream token endpoint: %w", err)
+	}
+	return resp.StatusCode, body, nil
+}
