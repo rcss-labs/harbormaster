@@ -169,3 +169,24 @@ func TestGeneration_RemovedClusterBumpsTheSlice(t *testing.T) {
 		t.Fatalf("removing a cluster moved %v, want at least the slice", moved)
 	}
 }
+
+// A pass over every cluster keeps the tokens alive with one cache command, not one per cluster.
+func TestGeneration_ClusterPassTouchesTheCacheOnce(t *testing.T) {
+	cache := newRecordingCache()
+	h := genHarness(t, cache)
+	h.runOnce(t)
+	if n := len(h.clusterNames(t)); n < 2 {
+		t.Fatalf("the estate has %d clusters in the slice; the test needs several", n)
+	}
+	cache.mu.Lock()
+	cache.touchCalls = 0
+	cache.mu.Unlock()
+	if err := h.loop.syncServices(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.touchCalls != 1 {
+		t.Fatalf("one services pass made %d touch calls, want 1", cache.touchCalls)
+	}
+}

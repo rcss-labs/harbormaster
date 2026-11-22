@@ -521,10 +521,11 @@ func (l *Loop) forEachCluster(ctx context.Context, fn func(ctx context.Context, 
 			if err := fn(ctx, k); err != nil {
 				errs[i] = fmt.Errorf("cluster %s: %w", k.Cluster, err)
 			}
-			l.markGeneration(ctx, k.Cluster, false) // a pass over the cluster keeps its token alive
 		}()
 	}
 	wg.Wait()
+	// A pass over the clusters keeps their tokens alive: one batched touch for the slice and every cluster.
+	l.markGeneration(ctx, "", false)
 	return errors.Join(errs...)
 }
 
