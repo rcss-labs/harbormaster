@@ -6,8 +6,7 @@ import { api } from './client'
 import { queryString, type Filters } from './hooks'
 import type { Status } from './types'
 
-const LIVE_REFETCH_MS = 5_000
-const livePolling = { refetchInterval: LIVE_REFETCH_MS, refetchIntervalInBackground: false } as const
+import { livePolling } from './polling'
 
 export interface NetworkRegion {
   region: string

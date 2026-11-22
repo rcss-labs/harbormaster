@@ -2,6 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query'
 import { useEffect, useMemo } from 'react'
 import { api } from '../../api/client'
 import { queryString, type Filters } from '../../api/hooks'
+import { livePolling } from '../../api/polling'
 import type { TaskDTO, TasksListDTO } from '../../api/types'
 
 /** The API caps a page at 500 rows. */
@@ -33,8 +34,7 @@ export function useAllTasks(filters: Filters): AllTasks {
       api.get<TasksListDTO>(`/api/tasks${queryString({ ...filters, filter: 'all', limit: PAGE_LIMIT, cursor: pageParam })}`),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next ?? undefined,
-    refetchInterval: 5000,
-    refetchIntervalInBackground: false,
+    ...livePolling,
   })
   const pages = useMemo(() => query.data?.pages ?? [], [query.data])
   const items = useMemo(() => pages.flatMap((page) => page.items), [pages])

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
+import { livePolling } from './polling'
 
 export type ExecAgentStatus = 'RUNNING' | 'PENDING' | 'STOPPED' | 'MISSING'
 
@@ -17,8 +18,7 @@ export function useExecTargets(taskId: string | undefined, connected = false) {
     queryKey: ['task', taskId, 'exec-targets'],
     queryFn: () => api.get<ExecTargets>(`/api/tasks/${taskId}/exec-targets`),
     enabled: Boolean(taskId),
-    refetchInterval: connected ? false : 5000,
-    refetchIntervalInBackground: false,
+    ...(connected ? { refetchInterval: false } : livePolling),
   })
 }
 

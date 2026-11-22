@@ -6,8 +6,7 @@ import { api } from './client'
 import { queryString } from './hooks'
 import type { TagDTO } from './types'
 
-const METRICS_REFETCH_MS = 60_000
-const metricsPolling = { refetchInterval: METRICS_REFETCH_MS, refetchIntervalInBackground: false } as const
+import { metricsPolling } from './polling'
 
 export type AnalyticsTab = 'delivery' | 'reliability' | 'capacity' | 'operations' | 'cost'
 export type AnalyticsRange = '24h' | '7d' | '30d' | '90d'

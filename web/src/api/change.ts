@@ -18,8 +18,7 @@ export type {
   RevisionDTO as RevisionItem,
 } from './types'
 
-// Same cadence as the live hooks in hooks.ts: refresh every 5 s, but not while the tab is in the background.
-const live = { refetchInterval: 5000, refetchIntervalInBackground: false } as const
+import { livePolling } from './polling'
 
 // ---- Write payloads and results ----
 
@@ -95,7 +94,7 @@ export function useTaskDefinition(serviceId: string) {
   return useQuery({
     queryKey: ['service', serviceId, 'task-definition'],
     queryFn: () => api.get<TaskDefinitionResponse>(`/api/services/${serviceId}/task-definition`),
-    ...live,
+    ...livePolling,
   })
 }
 
@@ -103,7 +102,7 @@ export function useRevisions(serviceId: string) {
   return useQuery({
     queryKey: ['service', serviceId, 'revisions'],
     queryFn: () => api.get<RevisionsResponse>(`/api/services/${serviceId}/revisions`),
-    ...live,
+    ...livePolling,
   })
 }
 

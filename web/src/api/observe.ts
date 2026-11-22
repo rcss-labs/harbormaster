@@ -19,11 +19,7 @@ import type {
   TargetHealthDTO,
 } from './types'
 
-const METRICS_REFETCH_MS = 60_000
-const SNAPSHOT_REFETCH_MS = 5_000
-
-const metricsPolling = { refetchInterval: METRICS_REFETCH_MS, refetchIntervalInBackground: false } as const
-const snapshotPolling = { refetchInterval: SNAPSHOT_REFETCH_MS, refetchIntervalInBackground: false } as const
+import { livePolling, metricsPolling } from './polling'
 
 export function useServiceMetrics(id: string, range: Range) {
   return useQuery({
@@ -77,7 +73,7 @@ export function useTargetHealth(id: string) {
   return useQuery({
     queryKey: ['service', id, 'target-health'],
     queryFn: () => api.get<TargetHealthDTO>(`/api/services/${id}/target-health`),
-    ...snapshotPolling,
+    ...livePolling,
   })
 }
 
@@ -85,7 +81,7 @@ export function useScaling(id: string) {
   return useQuery({
     queryKey: ['service', id, 'scaling'],
     queryFn: () => api.get<ScalingDTO>(`/api/services/${id}/scaling`),
-    ...snapshotPolling,
+    ...livePolling,
   })
 }
 
@@ -93,7 +89,7 @@ export function useAlerts(filters: Filters = {}) {
   return useQuery({
     queryKey: ['alerts', filters],
     queryFn: () => api.get<AlertsDTO>(`/api/alerts${queryString({ ...filters })}`),
-    ...snapshotPolling,
+    ...livePolling,
   })
 }
 
@@ -126,8 +122,7 @@ export function useTaskLogs(serviceId: string, taskShortId: string, { enabled = 
     queryKey: ['service', serviceId, 'logs', 'task', taskShortId, container, limit],
     queryFn: () => api.get<LogsHistoryDTO>(`/api/services/${serviceId}/logs${queryString({ task: taskShortId, limit, container })}`),
     enabled,
-    refetchInterval: SNAPSHOT_REFETCH_MS,
-    refetchIntervalInBackground: false,
+    ...livePolling,
   })
 }
 

@@ -1,6 +1,7 @@
 import { useQueries } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useNetworks, type RegionVpcsResponse } from '../../api/networks'
+import { livePolling } from '../../api/polling'
 
 export interface VpcEntry {
   /** `account/region/vpc-id`; the value of the `vpc` URL parameter. */
@@ -15,8 +16,6 @@ export interface VpcEntry {
   tasks: number
   subnets: number
 }
-
-const LIVE_REFETCH_MS = 5_000
 
 /**
  * Every active VPC the user can see, in account then region order. The accounts response lists the regions with active
@@ -33,8 +32,7 @@ export function useVpcList() {
       queryKey: ['networks', account.account_id, region],
       queryFn: () =>
         api.get<RegionVpcsResponse>(`/api/networks/${encodeURIComponent(account.account_id)}/${encodeURIComponent(region)}`),
-      refetchInterval: LIVE_REFETCH_MS,
-      refetchIntervalInBackground: false,
+      ...livePolling,
     })),
   })
 
