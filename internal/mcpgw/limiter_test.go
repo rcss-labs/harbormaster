@@ -26,7 +26,9 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-func newFakeClock() *fakeClock { return &fakeClock{now: time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)} }
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)}
+}
 
 func TestFailureLimiter_BlocksAfterMaxAndResetsWithTheWindow(t *testing.T) {
 	clock := newFakeClock()
