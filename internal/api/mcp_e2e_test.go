@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/mcpgw"
+	"github.com/rcss-labs/harbormaster/internal/oauthsrv"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -34,7 +37,11 @@ type mcpEnv struct {
 	logs    *syncBuffer
 }
 
-func newMCPEnv(t *testing.T) *mcpEnv {
+func newMCPEnv(t *testing.T) *mcpEnv { return newMCPEnvWith(t, nil) }
+
+// newMCPEnvWith is newMCPEnv with OAuth on when docs is set: Harbormaster serves the authorization server (trusting
+// docs' client document host) and the gateway relays its token endpoint.
+func newMCPEnvWith(t *testing.T, docs *oauthDocs) *mcpEnv {
 	t.Helper()
 	env := &mcpEnv{}
 	srv, api, fk, st, _ := newServerCustomAPI(t, true, func(s *Server) {
@@ -50,6 +57,13 @@ func newMCPEnv(t *testing.T) *mcpEnv {
 		s.Cfg.TokenMaxPerUser = 10
 		s.Cfg.TokenLogSearchMaxGB = 2
 		s.Cfg.TokenLogSearchDailyGB = 20
+		if docs != nil {
+			s.Cfg.OAuth, s.Cfg.MCPPublicURL, s.Cfg.OAuthAccessTTL = true, oauthTestIssuer, time.Hour
+			s.Cfg.OAuthClientHosts = []string{"127.0.0.1"}
+			s.Cfg.OAuthRedirectURIs = []string{oauthTestRedirect}
+			s.OAuth = oauthsrv.NewService(s.Store, s.Cfg)
+			s.OAuth.Clients = docs.resolver
+		}
 		// auth.NewService copied the config before this hook ran, so rebuild it with tokens on.
 		s.Auth = auth.NewService(s.Store, s.Cfg)
 		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, PollEvery: 5 * time.Millisecond, Timeout: 3 * time.Second}
@@ -69,6 +83,9 @@ func newMCPEnv(t *testing.T) *mcpEnv {
 	}
 	env.logs = &syncBuffer{}
 	cfg := mcpgw.Config{UpstreamURL: srv.URL, PublicURL: "https://mcp.example.com", MaxResultBytes: 140000, UpstreamTimeout: 20 * time.Second}
+	if docs != nil {
+		cfg.AuthorizeURL = srv.URL
+	}
 	env.gateway = httptest.NewServer(mcpgw.NewHandler(cfg, upstream, slog.New(slog.NewTextHandler(env.logs, nil))))
 	t.Cleanup(env.gateway.Close)
 	return env
@@ -520,4 +537,136 @@ func TestMCP_GatewayLogHoldsNeitherTokenNorResult(t *testing.T) {
 	if !strings.Contains(log, row.PublicID) {
 		t.Errorf("gateway log lacks the display id %s: %s", row.PublicID, log)
 	}
+}
+
+// oauthThroughGateway is a connector's side of the flow: a signed-in user approves in Harbormaster's UI, and the
+// token exchange and every MCP call go through the gateway.
+type oauthThroughGateway struct {
+	*mcpEnv
+	oauth *oauthAPIEnv
+}
+
+func newOAuthThroughGateway(t *testing.T) *oauthThroughGateway {
+	t.Helper()
+	docs := newOAuthDocs(t)
+	env := newMCPEnvWith(t, docs)
+	return &oauthThroughGateway{mcpEnv: env, oauth: &oauthAPIEnv{srv: env.srv, api: env.api, st: env.st, logs: env.logs,
+		docs: docs, sam: env.sam, omer: env.omer}}
+}
+
+// gatewayToken posts a token request form to the gateway's relay.
+func (e *oauthThroughGateway) gatewayToken(t *testing.T, form url.Values) (int, tokenResponse, http.Header) {
+	t.Helper()
+	resp, err := http.Post(e.gateway.URL+"/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out tokenResponse
+	if resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return resp.StatusCode, out, resp.Header
+}
+
+func whoamiOf(t *testing.T, c *gatewayClient) WhoAmIDTO {
+	t.Helper()
+	var who WhoAmIDTO
+	if err := json.Unmarshal([]byte(c.mustCall("whoami", nil)), &who); err != nil {
+		t.Fatal(err)
+	}
+	return who
+}
+
+// TestMCP_OAuthEndToEnd: code exchange, whoami, refresh and whoami again, through the real API handler and the gateway.
+func TestMCP_OAuthEndToEnd(t *testing.T) {
+	env := newOAuthThroughGateway(t)
+	code := env.oauth.approve(t, env.omer, env.oauth.request())
+
+	status, first, header := env.gatewayToken(t, env.oauth.codeForm(code))
+	if status != http.StatusOK {
+		t.Fatalf("code exchange through the gateway: HTTP %d", status)
+	}
+	if first.TokenType != "Bearer" || first.ExpiresIn != 3600 || first.Scope != "harbormaster:read" ||
+		!strings.HasPrefix(first.AccessToken, "hmo_") || !strings.HasPrefix(first.RefreshToken, "hmr_") {
+		t.Fatalf("token response = %+v", first)
+	}
+	if !strings.Contains(header.Get("Cache-Control"), "no-store") {
+		t.Errorf("Cache-Control = %q, want no-store", header.Get("Cache-Control"))
+	}
+
+	// The access token is omer's, as a connector: the same tools as a personal token.
+	who := whoamiOf(t, env.client(t, first.AccessToken))
+	if who.User.Username != "omer" || who.User.Admin || who.Token.Kind != "oauth_access" || who.Token.Name != "Claude" ||
+		who.Token.Scope != "read" {
+		t.Fatalf("whoami = %+v", who)
+	}
+	env.client(t, first.AccessToken).mustCall("get_overview", nil)
+
+	// Refresh through the gateway: a new pair, and whoami works with the new access token.
+	status, second, _ := env.gatewayToken(t, env.oauth.refreshForm(first.RefreshToken))
+	if status != http.StatusOK {
+		t.Fatalf("refresh through the gateway: HTTP %d", status)
+	}
+	if second.AccessToken == first.AccessToken || second.RefreshToken == first.RefreshToken {
+		t.Fatal("refresh reissued a token")
+	}
+	again := whoamiOf(t, env.client(t, second.AccessToken))
+	if again.User.Username != "omer" || again.Token.PublicID == who.Token.PublicID {
+		t.Fatalf("whoami after refresh = %+v", again)
+	}
+	// The access token it replaced is gone, and a refresh token is no MCP credential.
+	if st, _, _ := env.client(t, first.AccessToken).call("whoami", nil); st != http.StatusUnauthorized {
+		t.Errorf("the replaced access token: HTTP %d, want 401", st)
+	}
+	if st, _, _ := env.client(t, second.RefreshToken).call("whoami", nil); st != http.StatusUnauthorized {
+		t.Errorf("a refresh token on /mcp: HTTP %d, want 401", st)
+	}
+	// A code is single-use through the relay too.
+	if status, _, _ := env.gatewayToken(t, env.oauth.codeForm(code)); status != http.StatusBadRequest {
+		t.Errorf("code replay through the gateway: HTTP %d, want 400", status)
+	}
+}
+
+func TestMCP_OAuthAccessIsBudgetedAndRevocable(t *testing.T) {
+	env := newOAuthThroughGateway(t)
+	status, issued, _ := env.gatewayToken(t, env.oauth.codeForm(env.oauth.approve(t, env.sam, env.oauth.request())))
+	if status != http.StatusOK {
+		t.Fatalf("exchange: HTTP %d", status)
+	}
+	c := env.client(t, issued.AccessToken)
+	before := whoamiBudget(t, c)
+	c.mustCall("search_logs", map[string]any{"service_ids": []string{webFrontendID()}, "range": "1h", "query": logSearchQuery})
+	after := whoamiBudget(t, c)
+	if before.DailyBytes == 0 || after.UsedBytes <= before.UsedBytes {
+		t.Errorf("an OAuth token's log search did not spend budget: %+v then %+v", before, after)
+	}
+
+	// Revoking the grant from the UI stops the very next call.
+	resp := env.sam.get("/api/tokens")
+	wantStatus(t, resp, http.StatusOK)
+	var list struct {
+		Grants []GrantDTO `json:"grants"`
+	}
+	decode(t, resp, &list)
+	if len(list.Grants) != 1 {
+		t.Fatalf("grants = %+v", list.Grants)
+	}
+	wantStatus(t, env.sam.do(http.MethodDelete, "/api/oauth/grants/"+strconv.FormatInt(list.Grants[0].ID, 10), nil, nil), http.StatusNoContent)
+	if st, _, _ := c.call("get_overview", nil); st != http.StatusUnauthorized {
+		t.Errorf("a call after the grant was revoked: HTTP %d, want 401", st)
+	}
+}
+
+func TestMCP_OAuthNothingSecretReachesTheGatewayLog(t *testing.T) {
+	env := newOAuthThroughGateway(t)
+	code := env.oauth.approve(t, env.omer, env.oauth.request())
+	_, first, _ := env.gatewayToken(t, env.oauth.codeForm(code))
+	_, second, _ := env.gatewayToken(t, env.oauth.refreshForm(first.RefreshToken))
+	env.client(t, second.AccessToken).mustCall("whoami", nil)
+	env.gatewayToken(t, env.oauth.codeForm(code)) // an error answer
+	assertNoSecrets(t, "gateway log", env.logs.String(), code, first.AccessToken, first.RefreshToken,
+		second.AccessToken, second.RefreshToken, oauthTestVerifier)
 }
