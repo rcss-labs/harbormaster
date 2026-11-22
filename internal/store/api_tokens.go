@@ -145,12 +145,14 @@ func (s *Store) DeleteAPITokensForUser(ctx context.Context, userID int64, authSo
 }
 
 // deleteAPITokensForUser is DeleteAPITokensForUser on q, so a transaction that ends sessions ends tokens with them.
-// One statement removes the grants and the tokens, so it is atomic even on the pool. OAuth tokens carry their grant's
+// One statement removes the grants, the unexchanged authorization codes and the tokens, so it is atomic even on the pool. OAuth tokens carry their grant's
 // user and auth source, so the token delete matches them too.
 func deleteAPITokensForUser(ctx context.Context, q execer, userID int64, authSource string) (int64, error) {
 	tag, err := q.Exec(ctx,
 		`with revoked_grants as (
 		   delete from oauth_grants where user_id = $1 and ($2 = '' or auth_source = $2)
+		 ), revoked_codes as (
+		   delete from oauth_codes where user_id = $1 and ($2 = '' or auth_source = $2)
 		 )
 		 delete from api_tokens where user_id = $1 and ($2 = '' or auth_source = $2)`, userID, authSource)
 	if err != nil {
@@ -169,7 +171,8 @@ func deleteAPITokensBySource(ctx context.Context, q execer, authSource string) (
 		return 0, errors.New("delete api tokens by source: empty auth source")
 	}
 	tag, err := q.Exec(ctx,
-		`with revoked_grants as (delete from oauth_grants where auth_source = $1)
+		`with revoked_grants as (delete from oauth_grants where auth_source = $1),
+		      revoked_codes as (delete from oauth_codes where auth_source = $1)
 		 delete from api_tokens where auth_source = $1`, authSource)
 	if err != nil {
 		return 0, fmt.Errorf("delete api tokens by source: %w", err)

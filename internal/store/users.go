@@ -348,6 +348,11 @@ func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
 	if err != nil {
 		return User{}, fmt.Errorf("bind identity: %w", err)
 	}
+	// An SSO-linked user's tokens live at most the short SSO maximum; whatever the account held under the password
+	// user's longer cap is ended with the link.
+	if _, err := deleteAPITokensForUser(ctx, tx, b.UserID, ""); err != nil {
+		return User{}, err
+	}
 	return u, tx.Commit(ctx)
 }
 

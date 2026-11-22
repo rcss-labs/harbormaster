@@ -129,12 +129,32 @@ func insertGrantToken(ctx context.Context, tx pgx.Tx, g OAuthGrant, t APIToken) 
 // UserID and AuthSource are taken from the grant and their expiry is capped at the grant's. An empty AuthSource is
 // stored as "password". Returns ErrNotFound when the user is absent.
 func (s *Store) CreateOAuthGrantWithTokens(ctx context.Context, g OAuthGrant, access, refresh APIToken) (OAuthGrant, error) {
+	return s.CreateOAuthGrantWithTokensWithin(ctx, g, access, refresh, nil)
+}
+
+// CreateOAuthGrantWithTokensWithin is CreateOAuthGrantWithTokens with a lifetime ceiling decided from the user's row
+// as read under the lock: latestEnd maps that fresh row (admin flag, SSO link) to the latest allowed grant end, and a
+// later requested end is cut back to it (the tokens follow, being capped at the grant's). This closes the race with a
+// promotion or SSO link that commits after the caller loaded the user. A nil latestEnd applies no ceiling.
+func (s *Store) CreateOAuthGrantWithTokensWithin(ctx context.Context, g OAuthGrant, access, refresh APIToken, latestEnd func(User) time.Time) (OAuthGrant, error) {
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return OAuthGrant{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	locked, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 for update`, g.UserID))
+	if errors.Is(err, ErrNotFound) {
+		return OAuthGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return OAuthGrant{}, fmt.Errorf("lock user: %w", err)
+	}
+	if latestEnd != nil {
+		if ceiling := latestEnd(locked); g.ExpiresAt.After(ceiling) {
+			g.ExpiresAt = ceiling
+		}
+	}
 	created, err := scanOAuthGrant(tx.QueryRow(ctx,
 		`insert into oauth_grants (user_id, client_id, client_name, scope, resource, auth_source, expires_at)
 		 values ($1, $2, $3, $4, $5, coalesce(nullif($6, ''), 'password'), $7)
@@ -167,6 +187,15 @@ func (s *Store) CreateOAuthGrantWithTokens(ctx context.Context, g OAuthGrant, ac
 //     stored with expiries no later than the grant's.
 func (s *Store) RotateOAuthRefresh(ctx context.Context, publicID, secretHash string, newAccess, newRefresh APIToken,
 	now time.Time, grace time.Duration) (OAuthGrant, error) {
+	return s.RotateOAuthRefreshWithin(ctx, publicID, secretHash, newAccess, newRefresh, now, grace, nil)
+}
+
+// RotateOAuthRefreshWithin is RotateOAuthRefresh with a lifetime ceiling from the grant user's current state: the
+// grant may not run past its created_at plus maxLifetime(user), so a user who has since become an admin or SSO-linked
+// cannot keep refreshing under the longer cap they were approved with. Past that ceiling the token is ErrNotFound; a
+// nil maxLifetime applies none. The returned grant carries the clamped end.
+func (s *Store) RotateOAuthRefreshWithin(ctx context.Context, publicID, secretHash string, newAccess, newRefresh APIToken,
+	now time.Time, grace time.Duration, maxLifetime func(User) time.Duration) (OAuthGrant, error) {
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return OAuthGrant{}, fmt.Errorf("begin: %w", err)
@@ -203,6 +232,19 @@ func (s *Store) RotateOAuthRefresh(ctx context.Context, publicID, secretHash str
 	}
 	if err != nil {
 		return OAuthGrant{}, fmt.Errorf("lock oauth grant: %w", err)
+	}
+	if maxLifetime != nil {
+		// Read without a lock: taking the user's lock after the grant's would invert the order revocation uses.
+		current, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1`, grant.UserID))
+		if errors.Is(err, ErrNotFound) {
+			return OAuthGrant{}, ErrNotFound
+		}
+		if err != nil {
+			return OAuthGrant{}, fmt.Errorf("load user: %w", err)
+		}
+		if ceiling := grant.CreatedAt.Add(maxLifetime(current)); grant.ExpiresAt.After(ceiling) {
+			grant.ExpiresAt = ceiling
+		}
 	}
 	if !now.Before(grant.ExpiresAt) {
 		return OAuthGrant{}, ErrNotFound
@@ -292,10 +334,13 @@ func (s *Store) TouchOAuthGrant(ctx context.Context, id int64, at time.Time) err
 const (
 	oauthCodeRetention  = 10 * time.Minute
 	oauthGrantRetention = 24 * time.Hour
+	// rotatedRefreshRetention must stay above the reuse grace window (60 s): inside it a replay is a retry.
+	rotatedRefreshRetention = 5 * time.Minute
 )
 
 // DeleteExpiredOAuth removes codes expired over 10 minutes before now and grants expired over a day before now,
-// returning how many rows of both were removed.
+// and rotated refresh tokens rotated over 5 minutes before now (the latest rotated one of each grant stays, so a
+// replay of it is still recognised as reuse), returning how many rows were removed.
 func (s *Store) DeleteExpiredOAuth(ctx context.Context, now time.Time) (int64, error) {
 	codes, err := s.Pool.Exec(ctx, `delete from oauth_codes where expires_at < $1`, now.Add(-oauthCodeRetention))
 	if err != nil {
@@ -305,5 +350,13 @@ func (s *Store) DeleteExpiredOAuth(ctx context.Context, now time.Time) (int64, e
 	if err != nil {
 		return codes.RowsAffected(), fmt.Errorf("delete expired oauth grants: %w", err)
 	}
-	return codes.RowsAffected() + grants.RowsAffected(), nil
+	rotated, err := s.Pool.Exec(ctx,
+		`delete from api_tokens t where t.kind = 'oauth_refresh' and t.rotated_at < $1
+		   and exists (select 1 from api_tokens newer where newer.grant_id = t.grant_id and newer.kind = 'oauth_refresh'
+		               and newer.rotated_at is not null and (newer.rotated_at, newer.id) > (t.rotated_at, t.id))`,
+		now.Add(-rotatedRefreshRetention))
+	if err != nil {
+		return codes.RowsAffected() + grants.RowsAffected(), fmt.Errorf("delete rotated refresh tokens: %w", err)
+	}
+	return codes.RowsAffected() + grants.RowsAffected() + rotated.RowsAffected(), nil
 }
