@@ -178,32 +178,49 @@ func (c *Client) fetchFromCloudWatch(ctx context.Context, t awsx.Target, queries
 	for _, i := range indexes {
 		out[queries[i].ID] = make([]*float64, buckets)
 	}
-	for chunk := range slices.Chunk(indexes, maxQueriesPerCall) {
+	chosen := make([]Query, len(indexes))
+	for n, i := range indexes {
+		chosen[n] = queries[i]
+	}
+	err = eachMetricDataResult(ctx, api, chosen, start, end, func(r cwtypes.MetricDataResult) {
+		values, ok := out[aws.ToString(r.Id)]
+		if !ok {
+			return
+		}
+		for n, ts := range r.Timestamps {
+			if n >= len(r.Values) || ts.Before(start) || !ts.Before(end) {
+				continue
+			}
+			v := r.Values[n]
+			values[int(ts.Sub(start)/periodDur)] = &v // later datapoints win
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// eachMetricDataResult runs queries against CloudWatch for [start, end) in chunks of maxQueriesPerCall, follows
+// NextToken, and calls visit for every result of every page.
+func eachMetricDataResult(ctx context.Context, api awsx.CloudWatchAPI, queries []Query, start, end time.Time,
+	visit func(cwtypes.MetricDataResult)) error {
+	for chunk := range slices.Chunk(queries, maxQueriesPerCall) {
 		input := &cloudwatch.GetMetricDataInput{
 			StartTime: aws.Time(start), EndTime: aws.Time(end),
 			ScanBy:            cwtypes.ScanByTimestampAscending,
 			MetricDataQueries: make([]cwtypes.MetricDataQuery, len(chunk)),
 		}
-		for n, i := range chunk {
-			input.MetricDataQueries[n] = toMetricDataQuery(queries[i])
+		for n, q := range chunk {
+			input.MetricDataQueries[n] = toMetricDataQuery(q)
 		}
 		for {
 			page, err := api.GetMetricData(ctx, input)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			for _, r := range page.MetricDataResults {
-				values, ok := out[aws.ToString(r.Id)]
-				if !ok {
-					continue
-				}
-				for n, ts := range r.Timestamps {
-					if n >= len(r.Values) || ts.Before(start) || !ts.Before(end) {
-						continue
-					}
-					v := r.Values[n]
-					values[int(ts.Sub(start)/periodDur)] = &v // later datapoints win
-				}
+				visit(r)
 			}
 			if aws.ToString(page.NextToken) == "" {
 				break
@@ -211,7 +228,7 @@ func (c *Client) fetchFromCloudWatch(ctx context.Context, t awsx.Target, queries
 			input.NextToken = page.NextToken
 		}
 	}
-	return out, nil
+	return nil
 }
 
 func toMetricDataQuery(q Query) cwtypes.MetricDataQuery {

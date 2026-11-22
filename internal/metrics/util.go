@@ -2,12 +2,10 @@ package metrics
 
 import (
 	"context"
-	"slices"
 	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -44,30 +42,13 @@ func UtilQueries(index int, cluster, service string, period int) []Query {
 // to CloudWatch directly: no cache and no span rules, for callers that fetch one fixed window once (the daily rollup).
 func FetchValues(ctx context.Context, api awsx.CloudWatchAPI, queries []Query, start, end time.Time) (map[string]float64, error) {
 	out := make(map[string]float64, len(queries))
-	for chunk := range slices.Chunk(queries, maxQueriesPerCall) {
-		input := &cloudwatch.GetMetricDataInput{
-			StartTime: aws.Time(start), EndTime: aws.Time(end),
-			ScanBy:            cwtypes.ScanByTimestampAscending,
-			MetricDataQueries: make([]cwtypes.MetricDataQuery, len(chunk)),
+	err := eachMetricDataResult(ctx, api, queries, start, end, func(r cwtypes.MetricDataResult) {
+		if len(r.Values) > 0 {
+			out[aws.ToString(r.Id)] = r.Values[len(r.Values)-1]
 		}
-		for n, q := range chunk {
-			input.MetricDataQueries[n] = toMetricDataQuery(q)
-		}
-		for {
-			page, err := api.GetMetricData(ctx, input)
-			if err != nil {
-				return nil, err
-			}
-			for _, r := range page.MetricDataResults {
-				if len(r.Values) > 0 {
-					out[aws.ToString(r.Id)] = r.Values[len(r.Values)-1]
-				}
-			}
-			if aws.ToString(page.NextToken) == "" {
-				break
-			}
-			input.NextToken = page.NextToken
-		}
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
