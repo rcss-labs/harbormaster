@@ -34,7 +34,7 @@ const alertsInterval = 5 * time.Second
 type Intervals struct {
 	Services, RunningTasks, FullTasks, StoppedTasks, Clusters, ServiceList time.Duration
 	TargetHealth, Scaling, Alerts                                          time.Duration
-	Network, Storage                                                       time.Duration // plan 05
+	Network, Storage                                                       time.Duration
 }
 
 // Config is the poller's runtime configuration.
@@ -45,7 +45,7 @@ type Config struct {
 	IdleAfter, IdleInterval                time.Duration
 	CountsHistory, Jitter, AccountsRefresh time.Duration
 	MaxInFlight                            int
-	// Telemetry receives loop timings, leadership and write counts (plan 06); nil means telemetry.Default.
+	// Telemetry receives loop timings, lease ownership and write counts; nil means telemetry.Default.
 	Telemetry *telemetry.Registry
 	// StartStagger spaces the first cycles of the task tiers (runningTasks, stoppedTasks, fullTasks)
 	// so a fresh loop does not drain ECS's cluster-resource-read bucket; zero disables staggering.
@@ -92,8 +92,8 @@ func ConfigFrom(c config.Config) Config {
 			TargetHealth: c.Poll.TargetHealth,
 			Scaling:      c.Poll.Scaling,
 			Alerts:       alertsInterval,
-			Network:      c.Poll.Network, // plan 05
-			Storage:      c.Poll.Storage, // plan 05
+			Network:      c.Poll.Network,
+			Storage:      c.Poll.Storage,
 		},
 		IdleAfter:       c.Poll.IdleAfter,
 		IdleInterval:    c.Poll.IdleInterval,
@@ -141,7 +141,7 @@ type Poller struct {
 	focusReadEvery time.Duration
 }
 
-// New creates a Poller. Call Run to start electing and polling.
+// New creates a Poller. Call Run to start claiming leases and polling.
 func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *Poller {
 	if cfg.AccountsRefresh <= 0 {
 		cfg.AccountsRefresh = defaultAccountsRefresh
@@ -207,6 +207,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		Store: p.store, ID: id, Roles: roles, Version: p.cfg.Version, Timing: p.timing, Gate: gate,
 		Coordinator: p.cfg.Coordinator,
 		Targets:     p.targets, TargetsEvery: p.cfg.AccountsRefresh, Telemetry: p.cfg.Telemetry, Log: p.log,
+		Gauges: p.focusObjectCount,
 	}
 	if !p.cfg.NoSlices {
 		m.Slices = lease.HolderFunc(p.holdSlice)

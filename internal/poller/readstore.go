@@ -16,6 +16,8 @@ type readStore interface {
 	HasTaskDefinition(ctx context.Context, accountID, region, arn string) (bool, error)
 	ListClusters(ctx context.Context, f store.TargetFilter, vis store.Visibility) ([]store.ClusterRow, error)
 	ListServices(ctx context.Context, f store.TargetFilter, cluster string, vis store.Visibility) ([]store.ServiceRow, error)
+	GetServiceView(ctx context.Context, k model.ServiceKey, vis store.Visibility) (store.ServiceRow, error)
+	TargetHealthForService(ctx context.Context, k model.ServiceKey) ([]model.TargetHealth, error)
 	ListTasks(ctx context.Context, tq store.TaskQuery) ([]store.TaskRow, int, error)
 	UnhealthyTargets(ctx context.Context, f store.TargetFilter) (map[model.ServiceKey]bool, error)
 	StatusRuns(ctx context.Context, t awsx.Target) (map[model.ServiceKey]store.StatusRun, error)

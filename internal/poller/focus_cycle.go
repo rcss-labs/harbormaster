@@ -266,13 +266,12 @@ func (c *focusELB) gate(ctx context.Context) (func(), error) {
 	if err := c.loop.limiter.Wait(ctx, focus.ELB); err != nil {
 		return nil, err
 	}
-	select {
-	case c.loop.sem <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	release, err := acquire(ctx, c.loop.sem)
+	if err != nil {
+		return nil, err
 	}
 	c.calls.add(focus.ELB)
-	return func() { <-c.loop.sem }, nil
+	return release, nil
 }
 
 func (c *focusELB) DescribeTargetGroups(ctx context.Context, in *elasticloadbalancingv2.DescribeTargetGroupsInput, opts ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error) {

@@ -103,6 +103,7 @@ func newFocusRig(t *testing.T, estate *fake.Estate, cfg Config, readEvery time.D
 	}
 	unregister := r.p.registerLoop(r.loop)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
+	r.loop.focusCtx = r.ctx // Loop.Run does this before it starts runFocus
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); r.loop.runFocus(r.ctx) }()

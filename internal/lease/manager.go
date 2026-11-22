@@ -330,12 +330,7 @@ func (m *Manager) publish() {
 		return
 	}
 	slicesHeld, weight := m.ownedGauges()
-	coordinator := false
-	m.mu.Lock()
-	if h, ok := m.held[store.LeaseKey{Kind: store.LeaseCoordinator}]; ok && !h.lost {
-		coordinator = true
-	}
-	m.mu.Unlock()
+	coordinator := m.HoldsCoordinator()
 	m.Telemetry.SetLeaseOwned(slicesHeld, weight)
 	m.Telemetry.SetCoordinatorActive(coordinator)
 	m.Telemetry.SetLeader(coordinator)
