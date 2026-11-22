@@ -14,6 +14,7 @@ const POLICY: TokenPolicyDTO = {
   sso_linked: false,
   admin: false,
   mcp_url: '',
+  oauth: false,
   log_search_daily_bytes: 20 * 1024 ** 3,
   log_search_used_bytes: 5 * 1024 ** 3,
   log_search_max_bytes_per_search: 2 * 1024 ** 3,
@@ -33,7 +34,7 @@ const token = (over: Partial<TokenDTO>): TokenDTO => ({
   ...over,
 })
 
-const list = (items: TokenDTO[], policy: Partial<TokenPolicyDTO> = {}): TokenListDTO => ({ items, policy: { ...POLICY, ...policy } })
+const list = (items: TokenDTO[], policy: Partial<TokenPolicyDTO> = {}): TokenListDTO => ({ items, grants: [], policy: { ...POLICY, ...policy } })
 
 const serveTokens = (body: () => TokenListDTO) => server.use(http.get('/api/tokens', () => HttpResponse.json(body())))
 
