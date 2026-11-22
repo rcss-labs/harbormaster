@@ -54,6 +54,9 @@ type ClientResolver struct {
 	RedirectPatterns []string
 	HTTP             *http.Client
 	Now              func() time.Time
+	// AllowExplicitPort admits a client_id with a port. Production leaves it false so an allowlisted host is only
+	// ever fetched on the default https port; tests that serve the document on a random port set it.
+	AllowExplicitPort bool
 
 	mu    sync.Mutex
 	cache map[string]cachedClient
@@ -100,6 +103,9 @@ func (r *ClientResolver) checkClientID(clientID string) error {
 	parsed, err := url.Parse(clientID)
 	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Opaque != "" ||
 		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Hostname() == "" {
+		return ErrClientNotAllowed
+	}
+	if !r.AllowExplicitPort && (parsed.Port() != "" || strings.HasSuffix(parsed.Host, ":")) {
 		return ErrClientNotAllowed
 	}
 	// A metadata document URL has a path, and no dot segments (the CIMD rules).

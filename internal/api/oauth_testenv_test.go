@@ -53,6 +53,7 @@ func newOAuthDocs(t *testing.T) *oauthDocs {
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	d.resolver = oauthsrv.NewClientResolver([]string{"127.0.0.1"}, []string{oauthTestRedirect, "http://localhost/callback"})
 	d.resolver.HTTP = hc
+	d.resolver.AllowExplicitPort = true // the test server listens on a random port
 	return d
 }
 

@@ -32,9 +32,10 @@ const (
 type Store interface {
 	CreateOAuthCode(ctx context.Context, c store.OAuthCode) error
 	ConsumeOAuthCode(ctx context.Context, codeHash string) (store.OAuthCode, error)
-	CreateOAuthGrantWithTokens(ctx context.Context, g store.OAuthGrant, access, refresh store.APIToken) (store.OAuthGrant, error)
-	RotateOAuthRefresh(ctx context.Context, publicID, secretHash string, newAccess, newRefresh store.APIToken,
-		now time.Time, grace time.Duration) (store.OAuthGrant, error)
+	CreateOAuthGrantWithTokensWithin(ctx context.Context, g store.OAuthGrant, access, refresh store.APIToken,
+		latestEnd func(store.User) time.Time) (store.OAuthGrant, error)
+	RotateOAuthRefreshWithin(ctx context.Context, publicID, secretHash string, newAccess, newRefresh store.APIToken,
+		now time.Time, grace time.Duration, maxLifetime func(store.User) time.Duration) (store.OAuthGrant, error)
 	DeleteOAuthGrant(ctx context.Context, id, userID int64) error
 	GetUser(ctx context.Context, id int64) (store.User, error)
 	LoadSubject(ctx context.Context, userID int64) (authz.Subject, error)
