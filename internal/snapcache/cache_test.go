@@ -2,6 +2,7 @@ package snapcache
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -286,5 +287,31 @@ func TestNewToken_DiffersAcrossEpochsAndTime(t *testing.T) {
 	}
 	if strings.ContainsAny(NewToken(1, at), " :") {
 		t.Fatal("a token must be one key segment")
+	}
+}
+
+// A non-positive TTL must not leave a model that never expires.
+func TestCache_PutWithNonPositiveTTLStillExpires(t *testing.T) {
+	urls := kvtest.URLs()
+	if len(urls) == 0 {
+		t.Skip(kvtest.EnvVar + " not set")
+	}
+	for _, u := range urls {
+		t.Run(kvtest.Label(u), func(t *testing.T) {
+			raw := kvtest.Open(t, u)
+			admin := kvtest.OpenAdmin(t, u)
+			c := NewKV(raw)
+			if err := c.Put(ctx, ModelCluster, "c1", "1-1", []byte("x"), 0); err != nil {
+				t.Fatal(err)
+			}
+			got, err := admin.Do("PTTL", raw.Key("snap", "cluster", ModelSchema, "c1", "1-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ms, _ := strconv.ParseInt(got, 10, 64)
+			if ms <= 0 || ms > TokenTTL.Milliseconds() {
+				t.Fatalf("PTTL = %s, want a positive life of at most %v", got, TokenTTL)
+			}
+		})
 	}
 }

@@ -43,14 +43,14 @@ func Each(t *testing.T, fn func(t *testing.T, c kv.Client)) {
 	}
 	for _, u := range urls {
 		u := u
-		t.Run(label(u), func(t *testing.T) {
+		t.Run(Label(u), func(t *testing.T) {
 			fn(t, Open(t, u))
 		})
 	}
 }
 
-// label names a subtest after the port, which tells the engines apart without printing credentials.
-func label(rawURL string) string {
+// Label names a subtest after the port, which tells the engines apart without printing credentials.
+func Label(rawURL string) string {
 	o, err := kv.ParseURL(rawURL)
 	if err != nil {
 		return "bad-url"
