@@ -24,7 +24,7 @@ import (
 // maxRequestBodyBytes bounds one MCP request body.
 const maxRequestBodyBytes = 256 << 10
 
-// wwwAuthenticate is sent with every 401 (phase 4 adds resource_metadata).
+// wwwAuthenticate is sent with every 401 while OAuth is off.
 const wwwAuthenticate = `Bearer realm="harbormaster-mcp"`
 
 // serverInstructions is returned at initialize.
@@ -130,6 +130,8 @@ func (g *gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok")
 	case "/mcp":
 		g.serveMCP(w, r)
+	case protectedResourcePath, protectedResourceMCPPath, authorizationServerPath:
+		g.serveOAuthMetadata(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -173,7 +175,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		// A malformed token costs Harbormaster nothing: no upstream call, and it does not count as a failure.
-		writeUnauthorized(w)
+		g.writeUnauthorized(w)
 		g.logRequest("", "", 0, started, ip, "", http.StatusUnauthorized)
 		return
 	}
@@ -198,7 +200,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		case resp.Status == http.StatusUnauthorized:
 			g.limiter.Failed(ip)
-			writeUnauthorized(w)
+			g.writeUnauthorized(w)
 			g.logRequest(method, "", resp.Status, started, ip, displayID, http.StatusUnauthorized)
 			return
 		case resp.Status == http.StatusTooManyRequests:
@@ -225,7 +227,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	tool, upstreamStatus, unauthorized := state.snapshot()
 	if unauthorized {
 		g.limiter.Failed(ip)
-		writeUnauthorized(w)
+		g.writeUnauthorized(w)
 		g.logRequest(method, tool, upstreamStatus, started, ip, displayID, http.StatusUnauthorized)
 		return
 	}
@@ -382,8 +384,14 @@ func forwardedFor(r *http.Request, trustedProxy bool) string {
 	return peer
 }
 
-func writeUnauthorized(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", wwwAuthenticate)
+// writeUnauthorized answers 401. With OAuth on, the challenge points at the
+// protected resource metadata so a connector can discover where to sign in.
+func (g *gateway) writeUnauthorized(w http.ResponseWriter) {
+	challenge := wwwAuthenticate
+	if g.cfg.OAuthEnabled() {
+		challenge = oauthChallenge(g.cfg)
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
 	writeJSONError(w, http.StatusUnauthorized, "unauthenticated")
 }
 
