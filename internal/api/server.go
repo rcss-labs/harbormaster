@@ -20,6 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/notify"
+	"github.com/rcss-labs/harbormaster/internal/oauthsrv"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/secretbox"
@@ -124,6 +125,9 @@ type Server struct {
 	memberLines *ttlCache[string]
 	// routeLog records the routes Routes asks for; New creates it.
 	routeLog *routeRecorder
+	// OAuth is the authorization server for MCP connectors; New builds it when HM_OAUTH is on, and its routes exist
+	// only then.
+	OAuth *oauthsrv.Service
 	// testTokenRoutes marks extra routes for tokens, by pattern. TEST ONLY: it exists so a test can prove that the
 	// read-only subject alone refuses a write route that was marked by mistake. Production code never sets it.
 	testTokenRoutes map[string]auth.Scope
@@ -216,6 +220,10 @@ func New(s Server) *Server {
 	}
 	// plan 07
 	s.SAML = newSAMLService(s.SAML, &s)
+	if s.OAuth == nil && s.oauthOn() {
+		s.OAuth = oauthsrv.NewService(s.Store, s.Cfg)
+		s.OAuth.Now = s.Now
+	}
 	// plan 04: terminal
 	if s.ExecStartTimeout <= 0 {
 		s.ExecStartTimeout = 5 * time.Second
@@ -230,6 +238,12 @@ func New(s Server) *Server {
 }
 
 func (s *Server) log() *slog.Logger { return s.Log }
+
+// oauthOn reports whether the OAuth authorization server is enabled. Config validation already requires HM_API_TOKENS
+// and HM_MCP_PUBLIC_URL for HM_OAUTH; checking them again keeps a hand-built Config from half-enabling it.
+func (s *Server) oauthOn() bool {
+	return s.Cfg.OAuth && s.Cfg.APITokens && s.Cfg.MCPPublicURL != ""
+}
 
 func (s *Server) now() time.Time { return s.Now() }
 
@@ -413,6 +427,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.configSearchRoutes(mux) // estate-wide config search
 	if s.Cfg.APITokens {
 		s.tokenRoutes(mux) // access tokens: absent (404) while HM_API_TOKENS is off
+	}
+	if s.oauthOn() {
+		s.oauthRoutes(mux) // OAuth for MCP connectors: absent (404) while HM_OAUTH is off
 	}
 
 	// Change-path reads (plan 02).
