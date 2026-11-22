@@ -10,7 +10,8 @@ import (
 )
 
 // APIToken is a stored access token. SecretHash is sha256 of the secret; the secret itself is never stored.
-// PublicID is the display form (hmp_<id>) and is safe to log.
+// PublicID is the display form (hmp_<id>, hmo_<id>, hmr_<id>) and is safe to log. GrantID is set exactly for the OAuth
+// kinds; RotatedAt is set on a refresh token once it has been exchanged for a new pair.
 type APIToken struct {
 	ID         int64
 	PublicID   string
@@ -24,19 +25,21 @@ type APIToken struct {
 	ExpiresAt  time.Time
 	LastUsedAt *time.Time
 	LastUsedIP string
+	GrantID    *int64
+	RotatedAt  *time.Time
 }
 
 // ErrTokenLimit is returned by CreateAPIToken when the user already holds the maximum number of unexpired tokens.
 var ErrTokenLimit = errors.New("token limit reached")
 
 const apiTokenColumns = `id, public_id, user_id, kind, name, secret_hash, scope, auth_source,
-	created_at, expires_at, last_used_at, last_used_ip`
+	created_at, expires_at, last_used_at, last_used_ip, grant_id, rotated_at`
 
 func scanAPIToken(row pgx.Row) (APIToken, error) {
 	var t APIToken
 	var lastUsedIP *string
 	err := row.Scan(&t.ID, &t.PublicID, &t.UserID, &t.Kind, &t.Name, &t.SecretHash, &t.Scope, &t.AuthSource,
-		&t.CreatedAt, &t.ExpiresAt, &t.LastUsedAt, &lastUsedIP)
+		&t.CreatedAt, &t.ExpiresAt, &t.LastUsedAt, &lastUsedIP, &t.GrantID, &t.RotatedAt)
 	t.LastUsedIP = derefString(lastUsedIP)
 	return t, err
 }
@@ -95,10 +98,11 @@ func (s *Store) GetAPITokenByPublicID(ctx context.Context, publicID string) (API
 	return t, nil
 }
 
-// ListAPITokensForUser returns the user's unexpired tokens, newest first.
+// ListAPITokensForUser returns the user's unexpired personal tokens, newest first. OAuth tokens are listed through
+// their grants (ListOAuthGrantsForUser).
 func (s *Store) ListAPITokensForUser(ctx context.Context, userID int64) ([]APIToken, error) {
 	rows, err := s.Pool.Query(ctx,
-		`select `+apiTokenColumns+` from api_tokens where user_id = $1 and expires_at >= now()
+		`select `+apiTokenColumns+` from api_tokens where user_id = $1 and kind = 'pat' and expires_at >= now()
 		 order by created_at desc, id desc`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list api tokens: %w", err)
@@ -115,28 +119,34 @@ func (s *Store) ListAPITokensForUser(ctx context.Context, userID int64) ([]APITo
 	return tokens, rows.Err()
 }
 
-// DeleteAPIToken revokes one token. Returns ErrNotFound when no token with id belongs to userID.
+// DeleteAPIToken revokes one personal token. Returns ErrNotFound when no personal token with id belongs to userID; an
+// OAuth token is revoked by deleting its grant.
 func (s *Store) DeleteAPIToken(ctx context.Context, id, userID int64) error {
-	return s.execExpectOne(ctx, `delete from api_tokens where id = $1 and user_id = $2`, id, userID)
+	return s.execExpectOne(ctx, `delete from api_tokens where id = $1 and user_id = $2 and kind = 'pat'`, id, userID)
 }
 
-// DeleteAPITokensForUser revokes the user's tokens created under authSource ("password" or "saml"), or all of the
-// user's tokens when authSource is empty. It returns how many were removed.
+// DeleteAPITokensForUser revokes the user's tokens and OAuth grants created under authSource ("password" or "saml"),
+// or all of them when authSource is empty. It returns how many tokens were removed (a grant's tokens included).
 func (s *Store) DeleteAPITokensForUser(ctx context.Context, userID int64, authSource string) (int64, error) {
 	return deleteAPITokensForUser(ctx, s.Pool, userID, authSource)
 }
 
 // deleteAPITokensForUser is DeleteAPITokensForUser on q, so a transaction that ends sessions ends tokens with them.
+// One statement removes the grants and the tokens, so it is atomic even on the pool. OAuth tokens carry their grant's
+// user and auth source, so the token delete matches them too.
 func deleteAPITokensForUser(ctx context.Context, q execer, userID int64, authSource string) (int64, error) {
 	tag, err := q.Exec(ctx,
-		`delete from api_tokens where user_id = $1 and ($2 = '' or auth_source = $2)`, userID, authSource)
+		`with revoked_grants as (
+		   delete from oauth_grants where user_id = $1 and ($2 = '' or auth_source = $2)
+		 )
+		 delete from api_tokens where user_id = $1 and ($2 = '' or auth_source = $2)`, userID, authSource)
 	if err != nil {
 		return 0, fmt.Errorf("delete api tokens for user: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
 
-// DeleteAPITokensBySource revokes every user's tokens created under authSource.
+// DeleteAPITokensBySource revokes every user's tokens and OAuth grants created under authSource.
 func (s *Store) DeleteAPITokensBySource(ctx context.Context, authSource string) (int64, error) {
 	return deleteAPITokensBySource(ctx, s.Pool, authSource)
 }
@@ -145,7 +155,9 @@ func deleteAPITokensBySource(ctx context.Context, q execer, authSource string) (
 	if authSource == "" {
 		return 0, errors.New("delete api tokens by source: empty auth source")
 	}
-	tag, err := q.Exec(ctx, `delete from api_tokens where auth_source = $1`, authSource)
+	tag, err := q.Exec(ctx,
+		`with revoked_grants as (delete from oauth_grants where auth_source = $1)
+		 delete from api_tokens where auth_source = $1`, authSource)
 	if err != nil {
 		return 0, fmt.Errorf("delete api tokens by source: %w", err)
 	}
@@ -167,10 +179,15 @@ func (s *Store) DeleteExpiredAPITokens(ctx context.Context, before time.Time) (i
 	return tag.RowsAffected(), nil
 }
 
-// CountAPITokensByUser returns the number of unexpired tokens per user, for users that hold at least one.
+// CountAPITokensByUser returns the number of unexpired personal tokens plus unexpired OAuth grants per user, for users
+// that hold at least one.
 func (s *Store) CountAPITokensByUser(ctx context.Context) (map[int64]int, error) {
 	rows, err := s.Pool.Query(ctx,
-		`select user_id, count(*) from api_tokens where expires_at >= now() group by user_id`)
+		`select user_id, count(*) from (
+		   select user_id from api_tokens where kind = 'pat' and expires_at >= now()
+		   union all
+		   select user_id from oauth_grants where expires_at >= now()
+		 ) held group by user_id`)
 	if err != nil {
 		return nil, fmt.Errorf("count api tokens by user: %w", err)
 	}

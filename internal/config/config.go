@@ -163,6 +163,14 @@ type Config struct {
 	TokenRedactEnv        bool          // redact environment values in task definitions answered to tokens
 	MCPPublicURL          string        // the MCP gateway's public base URL, shown in the UI's connect instructions
 
+	// OAuth for MCP connectors (MCP phase 4). Off unless OAuth is true, which needs APITokens and MCPPublicURL. The
+	// client host and redirect lists are configuration on purpose: what Claude's clients actually send was not yet
+	// verified against a real connector, and a finding should change a setting, not code.
+	OAuth             bool          // HM_OAUTH
+	OAuthAccessTTL    time.Duration // lifetime of an OAuth access token
+	OAuthClientHosts  []string      // hosts a client_id metadata document URL may be on
+	OAuthRedirectURIs []string      // redirect URIs a client may use; http loopback entries match any port
+
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
 
@@ -377,6 +385,12 @@ func Load(getenv func(string) string) (Config, error) {
 		TokenRedactEnv:        reader.boolean("HM_TOKEN_REDACT_ENV", false),
 		MCPPublicURL:          strings.TrimSpace(reader.text("HM_MCP_PUBLIC_URL", "")),
 
+		// MCP phase 4: OAuth for connectors
+		OAuth:             reader.boolean("HM_OAUTH", false),
+		OAuthAccessTTL:    reader.duration("HM_OAUTH_ACCESS_TTL", time.Hour),
+		OAuthClientHosts:  reader.list("HM_OAUTH_CLIENT_HOSTS"),
+		OAuthRedirectURIs: reader.list("HM_OAUTH_REDIRECT_URIS"),
+
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
 			Prefix: reader.text("HM_KV_PREFIX", "hm"),
@@ -458,6 +472,15 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := validateTokens(cfg); err != nil {
 		return Config{}, err
 	}
+	if len(cfg.OAuthClientHosts) == 0 {
+		cfg.OAuthClientHosts = DefaultOAuthClientHosts()
+	}
+	if len(cfg.OAuthRedirectURIs) == 0 {
+		cfg.OAuthRedirectURIs = DefaultOAuthRedirectURIs()
+	}
+	if err := validateOAuth(cfg); err != nil {
+		return Config{}, err
+	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
 		return Config{}, errors.New("HM_DATABASE_URL or HM_DATABASE_SECRET_ARN must be set")
 	}
@@ -492,6 +515,69 @@ func validateTokens(cfg Config) error {
 			strings.HasSuffix(cfg.MCPPublicURL, "/") || strings.ContainsAny(cfg.MCPPublicURL, "?#") {
 			return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
 		}
+	}
+	return nil
+}
+
+// DefaultOAuthClientHosts is where Claude's client metadata documents are expected to live. Unverified against a real
+// connector (MCP phase 4, task 2); HM_OAUTH_CLIENT_HOSTS replaces it.
+func DefaultOAuthClientHosts() []string { return []string{"claude.ai"} }
+
+// DefaultOAuthRedirectURIs are Claude's documented callbacks: the hosted clients' (claude.com is unverified) and Claude
+// Code's loopback ones, which match on any port. HM_OAUTH_REDIRECT_URIS replaces the whole list.
+func DefaultOAuthRedirectURIs() []string {
+	return []string{
+		"https://claude.ai/api/mcp/auth_callback",
+		"https://claude.com/api/mcp/auth_callback",
+		"http://localhost/callback",
+		"http://127.0.0.1/callback",
+	}
+}
+
+// validateOAuth checks the OAuth settings, whether or not HM_OAUTH is on, so a bad value is caught before anyone turns
+// OAuth on.
+func validateOAuth(cfg Config) error {
+	if cfg.OAuth && !cfg.APITokens {
+		return errors.New("HM_OAUTH: needs HM_API_TOKENS=true")
+	}
+	if cfg.OAuth && cfg.MCPPublicURL == "" {
+		return errors.New("HM_OAUTH: needs HM_MCP_PUBLIC_URL (the OAuth issuer and resource)")
+	}
+	if cfg.OAuthAccessTTL < 5*time.Minute || cfg.OAuthAccessTTL > 24*time.Hour {
+		return errors.New("HM_OAUTH_ACCESS_TTL: must be between 5m and 24h")
+	}
+	for _, host := range cfg.OAuthClientHosts {
+		if host != strings.ToLower(host) || strings.ContainsAny(host, "/:@?#* ") || strings.Trim(host, ".") != host {
+			return fmt.Errorf("HM_OAUTH_CLIENT_HOSTS: %q must be a lowercase host name with no scheme, port or path", host)
+		}
+	}
+	for _, raw := range cfg.OAuthRedirectURIs {
+		if err := validateOAuthRedirectPattern(raw); err != nil {
+			return fmt.Errorf("HM_OAUTH_REDIRECT_URIS: %q %w", raw, err)
+		}
+	}
+	return nil
+}
+
+// validateOAuthRedirectPattern accepts an https URL with a host and a path, or an http URL on localhost or 127.0.0.1
+// with no port (it then matches any port). Neither may carry credentials, a query or a fragment.
+func validateOAuthRedirectPattern(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" ||
+		strings.ContainsAny(raw, "?#") || parsed.Path == "" {
+		return errors.New("must be an absolute URL with a path and no credentials, query or fragment")
+	}
+	switch parsed.Scheme {
+	case "https":
+		if parsed.Hostname() == "" {
+			return errors.New("must name a host")
+		}
+	case "http":
+		if parsed.Host != "localhost" && parsed.Host != "127.0.0.1" {
+			return errors.New("may use http only on localhost or 127.0.0.1, without a port")
+		}
+	default:
+		return errors.New("must be https, or http on a loopback host")
 	}
 	return nil
 }
