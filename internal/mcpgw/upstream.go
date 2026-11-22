@@ -239,20 +239,20 @@ const (
 
 // RelayToken forwards an OAuth token request (a form body, already size and
 // type checked) to Harbormaster's token endpoint and returns its status and
-// body unchanged. It sends no Authorization header: the endpoint is public and
+// body unchanged, plus the one safe header (Retry-After). It sends no Authorization header: the endpoint is public and
 // the body carries the code or refresh token. It is the only upstream call
 // that is not a tool call, and it neither logs nor returns the form.
-func (u *Upstream) RelayToken(ctx context.Context, form []byte, forwardedFor string) (status int, body []byte, err error) {
+func (u *Upstream) RelayToken(ctx context.Context, form []byte, forwardedFor string) (status int, header http.Header, body []byte, err error) {
 	ctx, cancel := context.WithTimeout(ctx, relayTokenTimeout)
 	defer cancel()
 
 	target := &url.URL{Scheme: u.base.Scheme, Host: u.base.Host, Path: relayTokenPath}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(form))
 	if err != nil {
-		return 0, nil, fmt.Errorf("build upstream token request: %w", err)
+		return 0, nil, nil, fmt.Errorf("build upstream token request: %w", err)
 	}
 	if req.URL.Scheme != u.base.Scheme || req.URL.Host != u.base.Host {
-		return 0, nil, errors.New("upstream request does not address the configured host")
+		return 0, nil, nil, errors.New("upstream request does not address the configured host")
 	}
 	req.Header = http.Header{}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -264,12 +264,16 @@ func (u *Upstream) RelayToken(ctx context.Context, form []byte, forwardedFor str
 
 	resp, err := u.client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("upstream token endpoint: %w", err)
+		return 0, nil, nil, fmt.Errorf("upstream token endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err = io.ReadAll(io.LimitReader(resp.Body, maxRelayTokenBodyBytes))
 	if err != nil {
-		return 0, nil, fmt.Errorf("read upstream token endpoint: %w", err)
+		return 0, nil, nil, fmt.Errorf("read upstream token endpoint: %w", err)
 	}
-	return resp.StatusCode, body, nil
+	header = http.Header{}
+	if v := resp.Header.Get("Retry-After"); v != "" {
+		header.Set("Retry-After", v)
+	}
+	return resp.StatusCode, header, body, nil
 }

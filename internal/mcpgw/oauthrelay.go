@@ -39,11 +39,6 @@ func (g *gateway) serveOAuthToken(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusUnsupportedMediaType, "invalid_request")
 		return
 	}
-	if g.limiter.Blocked(ip) {
-		g.writeBlocked(w, ip)
-		g.logRelay(started, ip, http.StatusTooManyRequests, 0)
-		return
-	}
 	if r.ContentLength > maxTokenFormBytes {
 		writeOAuthError(w, http.StatusRequestEntityTooLarge, "invalid_request")
 		return
@@ -59,15 +54,19 @@ func (g *gateway) serveOAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, body, err := g.up.RelayToken(r.Context(), form, forwardedFor(r, g.cfg.TrustedProxy))
+	status, upstreamHeader, body, err := g.up.RelayToken(r.Context(), form, forwardedFor(r, g.cfg.TrustedProxy))
 	if err != nil {
 		g.log.Warn("token relay failed", "client_ip", ip, "error", describeTransportError(err))
 		writeOAuthError(w, http.StatusBadGateway, "temporarily_unavailable")
 		g.logRelay(started, ip, http.StatusBadGateway, 0)
 		return
 	}
-	if status == http.StatusBadRequest || status == http.StatusUnauthorized {
-		g.limiter.Failed(ip)
+	// Token-endpoint 400/401 answers are deliberately not counted in the /mcp
+	// failure limiter: the caller is often a shared egress IP (claude.ai) and
+	// anyone can make it post junk codes. The WAF /oauth/ rate rule and
+	// Harbormaster's own per-IP bucket protect this endpoint.
+	if v := upstreamHeader.Get("Retry-After"); v != "" {
+		w.Header().Set("Retry-After", v)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
