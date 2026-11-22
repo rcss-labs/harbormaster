@@ -166,12 +166,11 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 // in-flight bound covers every AWS service of the target, not only ECS.
 func (l *Loop) gated(run func(context.Context) error) func(context.Context) error {
 	return func(ctx context.Context) error {
-		select {
-		case l.sem <- struct{}{}:
-			defer func() { <-l.sem }()
-		case <-ctx.Done():
-			return ctx.Err()
+		release, err := acquire(ctx, l.sem)
+		if err != nil {
+			return err
 		}
+		defer release()
 		return run(ctx)
 	}
 }
@@ -377,9 +376,14 @@ type limitedECS struct {
 }
 
 func (c *limitedECS) acquire(ctx context.Context) (release func(), err error) {
+	return acquire(ctx, c.sem)
+}
+
+// acquire takes one slot of the in-flight semaphore, or fails when ctx ends first. The returned function frees the slot.
+func acquire(ctx context.Context, sem chan struct{}) (release func(), err error) {
 	select {
-	case c.sem <- struct{}{}:
-		return func() { <-c.sem }, nil
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
