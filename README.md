@@ -93,6 +93,8 @@ Replace `<acct>` with your AWS account ID. The image must be pinned to a tag; th
 
 The image-security feature runs scans in a separate scanner image: `make scanner-image VERSION=v1.0.0` (same `ARCH` rule) builds `harbormaster-scanner:v1.0.0` from `Dockerfile.scanner`, and `make check-scanner-image VERSION=v1.0.0` checks it. The build downloads Syft and Grype, verifies their cosign signatures and checksums (`tools/scanner-verify.sh`, versions and identities pinned as `ARG`s) and fails if anything does not verify. Tag and push it to ECR the same way as the main image.
 
+The MCP gateway runs from its own small image: `make mcp-image VERSION=v1.0.0` (same `ARCH` rule) builds `harbormaster-mcp:v1.0.0` from `Dockerfile.mcp` (the gateway binary alone on distroless nonroot, no credentials), and `make check-mcp-image VERSION=v1.0.0` checks it: non-root, healthcheck, no shell, static binary, and no database, cache, AWS or SAML module linked in (`tools/check-mcp-image.sh`). Tag and push it to ECR the same way as the main image.
+
 ### Terraform and the harbormaster module
 
 Deploy Harbormaster with the `harbormaster` module, pinned to the release tag:
