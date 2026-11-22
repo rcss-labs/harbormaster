@@ -226,10 +226,10 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 
 ### github.com/crewjam/saml
 
-- Version: v0.5.1
+- Version: v0.5.2
 - Licence: BSD-2-Clause
 - Copyright: Copyright (c) 2015, Ross Kinder
-- Source: https://github.com/crewjam/saml (licence file: `LICENSE` at tag v0.5.1)
+- Source: https://github.com/crewjam/saml (licence file: `LICENSE` at tag v0.5.2)
 
 ### github.com/russellhaering/goxmldsig
 
@@ -239,10 +239,10 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 
 ### github.com/beevik/etree
 
-- Version: v1.7.0
+- Version: v1.8.1
 - Licence: BSD-2-Clause
 - Copyright: Copyright 2015-2024 Brett Vickers. All rights reserved.
-- Source: https://github.com/beevik/etree (licence file: `LICENSE` at tag v1.7.0)
+- Source: https://github.com/beevik/etree (licence file: `LICENSE` at tag v1.8.1)
 
 ### github.com/jonboulle/clockwork
 

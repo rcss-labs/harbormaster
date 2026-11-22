@@ -256,7 +256,9 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 	if sess, ok := auth.SessionFrom(r.Context()); ok && sess.AuthSource != "" {
 		authSource = sess.AuthSource
 	}
-	created, err := s.Store.CreateAPIToken(r.Context(), store.APIToken{
+	// The subject was loaded before the row lock; the store re-reads admin and SSO state under it and clamps.
+	issuedAt := s.now()
+	created, err := s.Store.CreateAPITokenWithin(r.Context(), store.APIToken{
 		PublicID:   apitoken.DisplayID(parsed),
 		UserID:     user.ID,
 		Kind:       string(apitoken.KindPAT),
@@ -264,8 +266,10 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		SecretHash: apitoken.Hash(parsed.Secret),
 		Scope:      string(auth.ScopeRead),
 		AuthSource: authSource,
-		ExpiresAt:  s.now().Add(time.Duration(days) * 24 * time.Hour),
-	}, s.Cfg.TokenMaxPerUser)
+		ExpiresAt:  issuedAt.Add(time.Duration(days) * 24 * time.Hour),
+	}, s.Cfg.TokenMaxPerUser, func(locked store.User) time.Time {
+		return issuedAt.Add(auth.TokenMaxTTL(s.Cfg, locked, locked.Admin))
+	})
 	if errors.Is(err, store.ErrTokenLimit) {
 		s.fail(w, &APIError{Status: http.StatusConflict, Code: "conflict",
 			Message: fmt.Sprintf("You already have %d tokens. Revoke one first.", s.Cfg.TokenMaxPerUser)})

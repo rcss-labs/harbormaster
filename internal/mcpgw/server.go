@@ -86,6 +86,7 @@ func NewHandler(cfg Config, up *Upstream, log *slog.Logger) http.Handler {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	up.maxBodyBytes = int64(upstreamReadCap(cfg.MaxResultBytes))
 	g := &gateway{cfg: cfg, up: up, log: log, limiter: newFailureLimiter(failureLimit, failureWindow, time.Now)}
 
 	server := mcp.NewServer(
@@ -192,7 +193,13 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state := &requestState{bearer: bearer, forwardedFor: forwardedFor(r, g.cfg.TrustedProxy)}
-	method := jsonRPCMethod(body)
+	method, err := jsonRPCMethod(body)
+	if err != nil {
+		// Batches and ambiguous keys are refused before any upstream call.
+		writeJSONRPCError(w, http.StatusBadRequest, err.Error())
+		g.logRequest("", "", 0, started, ip, displayID, http.StatusBadRequest)
+		return
+	}
 	if method != "tools/call" {
 		// One token check per non-call method, so a bad token is a real HTTP 401 at connect time.
 		resp, err := g.up.Do(r.Context(), state.bearer, state.forwardedFor, Call{Route: whoamiRoute})
@@ -341,16 +348,50 @@ func bearerToken(header string) (string, bool) {
 }
 
 // jsonRPCMethod returns the method of a single JSON-RPC message, or "" for
-// anything else (a batch, a response or unparsable input), which is then
-// treated as "not tools/call" and so gets the token check.
-func jsonRPCMethod(body []byte) string {
-	var message struct {
-		Method string `json:"method"`
+// anything else (a response or unparsable input), which is then treated as
+// "not tools/call" and so gets the token check.
+//
+// It errors on a body the gateway and the SDK could read differently: a batch
+// (removed in MCP 2025-06-18; the SDK would run every call in it), a repeated
+// top-level key, or a key that matches "jsonrpc", "id", "method" or "params"
+// only ignoring case (encoding/json matches keys case-insensitively, the SDK
+// does not). Keys are read case-sensitively here, as the SDK reads them.
+func jsonRPCMethod(body []byte) (string, error) {
+	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
+		return "", errors.New("JSON-RPC batches are not supported")
 	}
-	if json.Unmarshal(body, &message) != nil {
-		return ""
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if open, err := decoder.Token(); err != nil || open != json.Delim('{') {
+		return "", nil
 	}
-	return message.Method
+	method := ""
+	seen := map[string]bool{}
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return "", nil
+		}
+		key, _ := keyToken.(string)
+		if seen[key] {
+			return "", errors.New("duplicate key in the JSON-RPC message")
+		}
+		seen[key] = true
+		for _, reserved := range []string{"jsonrpc", "id", "method", "params"} {
+			if key != reserved && strings.EqualFold(key, reserved) {
+				return "", errors.New("ambiguous key in the JSON-RPC message")
+			}
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return "", nil
+		}
+		if key == "method" {
+			if json.Unmarshal(value, &method) != nil {
+				method = ""
+			}
+		}
+	}
+	return method, nil
 }
 
 // clientIP is the peer address, unless trustedProxy says exactly one trusted
@@ -403,6 +444,13 @@ func writeJSONError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, `{"error":`+strconv.Quote(code)+`}`)
+}
+
+// writeJSONRPCError answers with a JSON-RPC 2.0 error object (id null).
+func writeJSONRPCError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":`+strconv.Quote(message)+`}}`)
 }
 
 // bufferedResponse holds the SDK's answer until serveMCP knows whether a tool

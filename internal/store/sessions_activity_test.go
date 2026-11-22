@@ -49,3 +49,69 @@ func TestLastSessionActivity(t *testing.T) {
 		t.Errorf("last activity = %v, want %v", got, newer)
 	}
 }
+
+// activityToken stores a token for the user and, when lastUsed is set, records its use.
+func activityToken(t *testing.T, s *store.Store, userID int64, id string, expires time.Time, lastUsed *time.Time) {
+	t.Helper()
+	tok := mustCreateToken(t, s, store.APIToken{PublicID: id, UserID: userID, Kind: "pat", Name: "n", SecretHash: "h",
+		Scope: "read", AuthSource: "password", ExpiresAt: expires})
+	if lastUsed != nil {
+		if err := s.TouchAPIToken(context.Background(), tok.ID, *lastUsed, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLastSessionActivity_CountsTokenUse(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	user, _ := s.CreateUser(ctx, "sam", "hash", false, false)
+	used := now.Add(-3 * time.Minute)
+	activityToken(t, s, user.ID, "hmp_aaaaaaaaaaaa", now.Add(time.Hour), &used)
+	got, ok, err := s.LastSessionActivity(ctx, now)
+	if err != nil || !ok || !got.Equal(used) {
+		t.Fatalf("got %v, %v, %v; want %v, true", got, ok, err, used)
+	}
+}
+
+func TestLastSessionActivity_NewerOfSessionAndToken(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for name, tc := range map[string]struct{ session, token time.Time }{
+		"session newer": {now.Add(-time.Minute), now.Add(-10 * time.Minute)},
+		"token newer":   {now.Add(-10 * time.Minute), now.Add(-time.Minute)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := storetest.Open(t)
+			ctx := context.Background()
+			user, _ := s.CreateUser(ctx, "sam", "hash", false, false)
+			if err := s.CreateSession(ctx, store.Session{IDHash: "s", UserID: user.ID, CSRFToken: "c",
+				CreatedAt: tc.session, LastSeenAt: tc.session, ExpiresAt: now.Add(time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+			token := tc.token
+			activityToken(t, s, user.ID, "hmp_aaaaaaaaaaaa", now.Add(time.Hour), &token)
+			want := tc.session
+			if tc.token.After(want) {
+				want = tc.token
+			}
+			got, ok, err := s.LastSessionActivity(ctx, now)
+			if err != nil || !ok || !got.Equal(want) {
+				t.Fatalf("got %v, %v, %v; want %v", got, ok, err, want)
+			}
+		})
+	}
+}
+
+func TestLastSessionActivity_IgnoresExpiredTokensAndNeverUsedOnes(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	user, _ := s.CreateUser(ctx, "sam", "hash", false, false)
+	used := now.Add(-time.Minute)
+	activityToken(t, s, user.ID, "hmp_expiredexpir", now.Add(-time.Second), &used)
+	activityToken(t, s, user.ID, "hmp_neverusedneve", now.Add(time.Hour), nil)
+	if got, ok, err := s.LastSessionActivity(ctx, now); err != nil || ok {
+		t.Fatalf("got %v, %v, %v; want no activity", got, ok, err)
+	}
+}

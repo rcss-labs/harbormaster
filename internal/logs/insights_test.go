@@ -41,6 +41,10 @@ type spyClients struct {
 	// scripted, when set, replaces the fake: StartQuery returns "scripted-q" and every
 	// GetQueryResults returns this response.
 	scripted *cloudwatchlogs.GetQueryResultsOutput
+	// afterStop, when set with scripted, is what GetQueryResults returns once StopQuery has been called,
+	// like the final statistics AWS settles after a stop.
+	afterStop *cloudwatchlogs.GetQueryResultsOutput
+	stopped   bool
 	// cancelDuringStart, when set, is called after AWS has created the query and before the
 	// response reaches the caller, like a cancel landing mid-request. If the StartQuery context
 	// is done by then, the response is lost the way an HTTP client loses it.
@@ -98,6 +102,7 @@ func (l *spyLogs) StartQuery(ctx context.Context, in *cloudwatchlogs.StartQueryI
 func (l *spyLogs) StopQuery(ctx context.Context, in *cloudwatchlogs.StopQueryInput, o ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StopQueryOutput, error) {
 	l.s.mu.Lock()
 	l.s.stopCtxErrs = append(l.s.stopCtxErrs, ctx.Err())
+	l.s.stopped = true
 	l.s.mu.Unlock()
 	if l.s.scripted != nil {
 		return &cloudwatchlogs.StopQueryOutput{Success: true}, nil
@@ -107,6 +112,11 @@ func (l *spyLogs) StopQuery(ctx context.Context, in *cloudwatchlogs.StopQueryInp
 
 func (l *spyLogs) GetQueryResults(ctx context.Context, in *cloudwatchlogs.GetQueryResultsInput, o ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetQueryResultsOutput, error) {
 	if l.s.scripted != nil {
+		l.s.mu.Lock()
+		defer l.s.mu.Unlock()
+		if l.s.stopped && l.s.afterStop != nil {
+			return l.s.afterStop, nil
+		}
 		return l.s.scripted, nil
 	}
 	return l.LogsAPI.GetQueryResults(ctx, in, o...)
@@ -647,5 +657,38 @@ func TestSearcherIT_RealInsights(t *testing.T) {
 	}
 	if len(res.Rows) == 0 || res.Rows[0].ServiceID != "it" {
 		t.Fatalf("rows = %+v targets = %+v", res.Rows, res.Targets)
+	}
+}
+
+func TestSearcher_CancelReadsFinalStatisticsAfterStopQuery(t *testing.T) {
+	f := newSearchFake()
+	s, spy := newSearcher(f)
+	running := func(bytes float64) *cloudwatchlogs.GetQueryResultsOutput {
+		return &cloudwatchlogs.GetQueryResultsOutput{
+			Status: logstypes.QueryStatusRunning, Statistics: &logstypes.QueryStatistics{BytesScanned: bytes},
+		}
+	}
+	spy.scripted, spy.afterStop = running(100), running(5000)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BytesScanned != 5000 {
+		t.Errorf("BytesScanned = %d, want the 5000 the final statistics report after StopQuery", res.BytesScanned)
+	}
+
+	// Final statistics below the last poll never lower what was seen.
+	spy.stopped = false
+	spy.scripted, spy.afterStop = running(7000), running(10)
+	ctx, cancel = context.WithCancel(context.Background())
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	res, err = s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BytesScanned != 7000 {
+		t.Errorf("BytesScanned = %d, want 7000 (a smaller final read must not lower it)", res.BytesScanned)
 	}
 }

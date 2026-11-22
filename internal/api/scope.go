@@ -157,7 +157,7 @@ func nextCursor(limit, offset, returned int) *string {
 // clientIP is the peer address, unless Cfg.TrustedProxy says exactly one trusted proxy (the ALB)
 // appends the real client IP, in which case it is the rightmost non-empty X-Forwarded-For entry.
 // Earlier entries are client-controlled and must not be trusted; without a trusted proxy the
-// whole header is.
+// whole header is. A peer inside Cfg.MCPGatewayCIDRs is the MCP gateway, so the entry to its left is used.
 func (s *Server) clientIP(r *http.Request) string {
-	return auth.ClientIP(r, s.Cfg.TrustedProxy)
+	return auth.ClientIP(r, s.Cfg.TrustedProxy, s.Cfg.MCPGatewayCIDRs)
 }

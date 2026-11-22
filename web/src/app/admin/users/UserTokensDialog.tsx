@@ -74,7 +74,7 @@ export function UserTokensDialog({ user, onClose }: { user: UserDTO; onClose: ()
               <div key={token.id} className={styles.tokenRow}>
                 <div className={styles.tokenMain}>
                   <span className={styles.name}>{token.name}</span>
-                  <span className={`${styles.muted} ${styles.mono}`}>{`hmp_${token.public_id}`}</span>
+                  <span className={`${styles.muted} ${styles.mono}`}>{token.public_id}</span>
                   <span className={`${styles.muted} ${styles.small}`}>
                     Created {new Date(token.created_at).toLocaleDateString()} · <ExpiryText expiresAt={token.expires_at} />
                   </span>

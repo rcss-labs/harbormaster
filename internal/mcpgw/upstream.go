@@ -17,9 +17,19 @@ import (
 // reported as the MCP server version. The command sets it from -ldflags.
 var Version = "dev"
 
-// maxUpstreamBodyBytes bounds how much of an upstream answer is read. Any
-// answer this large is far over the largest allowed tool result anyway.
+// maxUpstreamBodyBytes is the default bound on how much of an upstream answer
+// is read. NewHandler lowers it to upstreamReadCap(MaxResultBytes).
 const maxUpstreamBodyBytes = 8 << 20
+
+// minUpstreamReadCap is the floor of the per-answer read cap.
+const minUpstreamReadCap = 64 << 10
+
+// upstreamReadCap is how much of one upstream answer is read: twice the result
+// cap, so an oversized answer is still seen as oversized but many concurrent
+// calls cannot each hold megabytes in memory.
+func upstreamReadCap(maxResultBytes int) int {
+	return min(max(2*maxResultBytes, minUpstreamReadCap), maxUpstreamBodyBytes)
+}
 
 // Route is one Harbormaster API route, written exactly as its mux pattern.
 type Route struct {
@@ -58,6 +68,7 @@ type Upstream struct {
 	base           *url.URL
 	defaultTimeout time.Duration
 	client         *http.Client
+	maxBodyBytes   int64
 }
 
 // NewUpstream returns the client for baseURL (scheme and host only). client
@@ -94,6 +105,7 @@ func NewUpstream(baseURL string, defaultTimeout time.Duration, client *http.Clie
 		base:           &url.URL{Scheme: base.Scheme, Host: base.Host},
 		defaultTimeout: defaultTimeout,
 		client:         &httpClient,
+		maxBodyBytes:   maxUpstreamBodyBytes,
 	}, nil
 }
 
@@ -156,7 +168,7 @@ func (u *Upstream) Do(ctx context.Context, bearer, forwardedFor string, c Call) 
 		return Response{}, fmt.Errorf("upstream %s: %w", c.Route, err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBodyBytes))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, u.maxBodyBytes))
 	if err != nil {
 		return Response{}, fmt.Errorf("read upstream %s: %w", c.Route, err)
 	}

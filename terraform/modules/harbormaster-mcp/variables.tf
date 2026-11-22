@@ -31,9 +31,9 @@ variable "allowed_cidrs" {
 }
 
 variable "http_redirect" {
-  description = "Redirect port 80 to 443."
+  description = "Open port 80 and redirect it to 443. Off by default: an MCP client misconfigured with http:// would send its bearer token in cleartext before the redirect, so the gateway fails closed instead."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cluster_arn" {

@@ -587,6 +587,7 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks, groupe
 | `HM_TOKEN_LOG_SEARCH_DAILY_GB` | `20` | GiB one user's tokens may scan per UTC day; `0` turns log search off for tokens |
 | `HM_TOKEN_REDACT_ENV` | `false` | Replace environment values with `[redacted]` in task definition answers to tokens |
 | `HM_MCP_PUBLIC_URL` | empty | Public `https://` base URL of the MCP gateway, shown in the connect instructions; also the OAuth issuer |
+| `HM_MCP_GATEWAY_CIDRS` | empty | Comma-separated CIDRs the MCP gateway tasks run in (its subnets). When the address the load balancer appended to `X-Forwarded-For` is inside one, the entry to its left (the real client) is used for `last_used_ip`, the audit log and the request log. Only that one hop, only from these ranges; needs `HM_TRUSTED_PROXY`. `0.0.0.0/0` and `::/0` are refused. Run the gateway in its own subnets: any task inside these ranges is trusted to name the client IP, so sharing subnets with Harbormaster widens that trust to Harbormaster's own tasks |
 | `HM_OAUTH` | `false` | OAuth for claude.ai, Claude Desktop and Claude Code connectors. Needs `HM_API_TOKENS=true` and `HM_MCP_PUBLIC_URL`. Off, the OAuth routes answer 404 |
 | `HM_OAUTH_ACCESS_TTL` | `1h` | Lifetime of an OAuth access token (5 minutes to 24 hours) |
 | `HM_OAUTH_CLIENT_HOSTS` | `claude.ai` | Comma-separated hosts whose client metadata documents are accepted as client ids; replaces the default |

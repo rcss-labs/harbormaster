@@ -137,6 +137,32 @@ func (s *Store) SetPassword(ctx context.Context, id int64, hash string, mustChan
 		id, hash, mustChange)
 }
 
+// SetPasswordEndingCredentials replaces the password and, in the same transaction, deletes the user's sessions
+// (all but the one whose id hash is keepSessionIDHash, when that is non-empty) and every access token, so a failure
+// leaves the old password in place rather than a new one beside live credentials. Returns ErrNotFound if absent.
+func (s *Store) SetPasswordEndingCredentials(ctx context.Context, id int64, hash string, mustChange bool, keepSessionIDHash string) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
+		`update users set password_hash = $2, must_change_password = $3 where id = $1`, id, hash, mustChange)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `delete from sessions where user_id = $1 and id_hash <> $2`, id, keepSessionIDHash); err != nil {
+		return fmt.Errorf("end sessions: %w", err)
+	}
+	if _, err := deleteAPITokensForUser(ctx, tx, id, ""); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // TouchSignIn records the time of a successful sign-in. Returns ErrNotFound if absent.
 func (s *Store) TouchSignIn(ctx context.Context, id int64, at time.Time) error {
 	return s.execExpectOne(ctx, `update users set last_sign_in_at = $2 where id = $1`, id, at)

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/config"
@@ -123,6 +124,8 @@ type apiClient struct {
 	http *http.Client
 	base string
 	csrf string
+	// bearer, when set, is sent as "Authorization: Bearer" on every request (see tokenClient).
+	bearer string
 }
 
 func newAPIClient(t *testing.T, srv *httptest.Server) *apiClient {
@@ -173,6 +176,9 @@ func (c *apiClient) do(method, path string, body any, headers map[string]string)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
 	if method != http.MethodGet && c.csrf != "" {
 		req.Header.Set("X-CSRF-Token", c.csrf)
@@ -226,4 +232,60 @@ func setupTokenFrom(t *testing.T, logs *syncBuffer) string {
 		t.Fatalf("no setup token in log: %q", logs.String())
 	}
 	return strings.Trim(m[1], `"`)
+}
+
+// withTokens turns access tokens on (with the default limits) before the Server is built, then applies the
+// optional tweak to the config and mutate to the server. The auth service is rebuilt so it sees the new config.
+func withTokens(tweak func(*config.Config), mutate func(*Server)) func(*Server) {
+	return func(s *Server) {
+		s.Cfg.APITokens = true
+		s.Cfg.TokenMaxTTL = 90 * 24 * time.Hour
+		s.Cfg.TokenMaxTTLSSO = 7 * 24 * time.Hour
+		s.Cfg.TokenMaxPerUser = 10
+		s.Cfg.TokenLogSearchMaxGB = 2
+		s.Cfg.TokenLogSearchDailyGB = 20
+		if tweak != nil {
+			tweak(&s.Cfg)
+		}
+		s.Auth = auth.NewService(s.Store, s.Cfg)
+		if mutate != nil {
+			mutate(s)
+		}
+	}
+}
+
+// newTokenServer is newTestServer with HM_API_TOKENS on.
+func newTokenServer(t *testing.T) (*httptest.Server, *fake.Fake, *store.Store) {
+	t.Helper()
+	srv, fk, st, _ := newServerCustom(t, true, withTokens(nil, nil))
+	return srv, fk, st
+}
+
+// issueToken stores a read token for username directly (no API involved) and returns its raw form.
+func issueToken(t *testing.T, st *store.Store, username string, expires time.Time) string {
+	t.Helper()
+	user, err := st.GetUserByUsername(t.Context(), username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, parsed, err := apitoken.Generate(apitoken.KindPAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateAPIToken(t.Context(), store.APIToken{
+		PublicID: apitoken.DisplayID(parsed), UserID: user.ID, Kind: "pat", Name: "test-" + username,
+		SecretHash: apitoken.Hash(parsed.Secret), Scope: "read", AuthSource: "password", ExpiresAt: expires,
+	}, 100); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// tokenClient returns a client for srv that authenticates as username with a freshly stored token: it sends
+// Authorization: Bearer and no cookie.
+func tokenClient(t *testing.T, srv *httptest.Server, st *store.Store, username string) *apiClient {
+	t.Helper()
+	c := newAPIClient(t, srv)
+	c.bearer = issueToken(t, st, username, time.Now().Add(24*time.Hour))
+	return c
 }
