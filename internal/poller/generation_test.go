@@ -29,7 +29,7 @@ type recordingCache struct {
 	touchs []snapcache.GenKey
 	// touchCalls counts TouchAll calls, however many keys each carried.
 	touchCalls int
-	fail   error
+	fail       error
 	// failBumps makes BumpAll fail while Touch and reads still work.
 	failBumps bool
 }

@@ -558,20 +558,7 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	for _, arn := range arns {
 		keys = append(keys, model.ClusterKey{AccountID: l.target.AccountID, Region: l.target.Region, Cluster: clusterNameFromARN(arn)})
 	}
-	// Which clusters are about to go: the ones stored now that are not listed. Their own tokens must move too, or their
-	// pages would be served from the cache until the TTL. A failed read only costs that: the slice token still moves.
-	var gone []string
-	if stored, err := l.p.reads.ListClusters(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region}, store.Visibility{Admin: true}); err == nil {
-		listed := make(map[string]bool, len(keys))
-		for _, k := range keys {
-			listed[k.Cluster] = true
-		}
-		for _, c := range stored {
-			if !listed[c.Key.Cluster] {
-				gone = append(gone, c.Key.Cluster)
-			}
-		}
-	}
+	gone := l.clustersGone(ctx, keys)
 	deleted, err := l.w.DeleteClustersNotIn(ctx, l.target, keys)
 	if err != nil {
 		return err
@@ -596,6 +583,37 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	l.mu.Unlock()
 	l.markGeneration(ctx, "", false)
 	return nil
+}
+
+// clustersGone names the clusters that were stored and are no longer listed, so their own cache tokens can move with
+// the slice's (or their pages would be served from the cache until the TTL). It is only needed with a snapshot cache.
+// The previous pass's cluster set answers it; only a loop that has not run a pass yet (a start or a takeover) reads the
+// database. A failed read only costs the names: the slice token still moves.
+func (l *Loop) clustersGone(ctx context.Context, listedNow []model.ClusterKey) []string {
+	if l.p.cfg.Cache == nil {
+		return nil
+	}
+	var before []string
+	if prev := l.currentClusters(); len(prev) > 0 {
+		for _, k := range prev {
+			before = append(before, k.Cluster)
+		}
+	} else if stored, err := l.p.reads.ListClusters(ctx, store.TargetFilter{AccountID: l.target.AccountID, Region: l.target.Region}, store.Visibility{Admin: true}); err == nil {
+		for _, c := range stored {
+			before = append(before, c.Key.Cluster)
+		}
+	}
+	listed := make(map[string]bool, len(listedNow))
+	for _, k := range listedNow {
+		listed[k.Cluster] = true
+	}
+	var gone []string
+	for _, name := range before {
+		if !listed[name] {
+			gone = append(gone, name)
+		}
+	}
+	return gone
 }
 
 // describeClustersNamed describes the named clusters (names or ARNs) and upserts them. It deletes nothing: only the
