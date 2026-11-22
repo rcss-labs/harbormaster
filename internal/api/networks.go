@@ -164,6 +164,26 @@ func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	allVPCs, err := s.Store.ListVPCs(ctx, sc.Filter.AccountID, sc.Filter.Region)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	allSubnets, err := s.Store.ListSubnets(ctx, sc.Filter.AccountID, sc.Filter.Region)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	vpcsByTarget := map[awsTarget][]model.VPC{}
+	for _, vpc := range allVPCs {
+		target := awsTarget{vpc.AccountID, vpc.Region}
+		vpcsByTarget[target] = append(vpcsByTarget[target], vpc)
+	}
+	subnetsByTarget := map[awsTarget][]model.Subnet{}
+	for _, subnet := range allSubnets {
+		target := awsTarget{subnet.AccountID, subnet.Region}
+		subnetsByTarget[target] = append(subnetsByTarget[target], subnet)
+	}
 	out := NetworksOverviewDTO{Items: []NetworkAccountDTO{}}
 	var newest time.Time
 	for _, account := range accounts {
@@ -175,15 +195,12 @@ func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
 			if sc.Filter.Region != "" && sc.Filter.Region != region {
 				continue
 			}
-			vpcs, err := s.Store.ListVPCs(ctx, account.AccountID, region)
-			if err != nil {
-				s.fail(w, err)
-				return
+			vpcs, subnets := vpcsByTarget[awsTarget{account.AccountID, region}], subnetsByTarget[awsTarget{account.AccountID, region}]
+			if vpcs == nil {
+				vpcs = []model.VPC{}
 			}
-			subnets, err := s.Store.ListSubnets(ctx, account.AccountID, region)
-			if err != nil {
-				s.fail(w, err)
-				return
+			if subnets == nil {
+				subnets = []model.Subnet{}
 			}
 			tasks := byTarget[awsTarget{account.AccountID, region}]
 			summary := network.SummarizeRegion(region, vpcs, subnets, tasks, everyTask[awsTarget{account.AccountID, region}])

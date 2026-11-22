@@ -263,18 +263,19 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 // vpcNames resolves VPC names for the regions of the listed file systems.
 func (s *Server) vpcNames(ctx context.Context, fileSystems []model.FileSystem) (map[awsTarget]map[string]string, error) {
 	names := map[awsTarget]map[string]string{}
+	if len(fileSystems) == 0 {
+		return names, nil
+	}
 	for _, fs := range fileSystems {
-		target := awsTarget{fs.AccountID, fs.Region}
-		if _, done := names[target]; done {
-			continue
-		}
-		vpcs, err := s.Store.ListVPCs(ctx, fs.AccountID, fs.Region)
-		if err != nil {
-			return nil, err
-		}
-		names[target] = map[string]string{}
-		for _, vpc := range vpcs {
-			names[target][vpc.VPCID] = vpc.Name
+		names[awsTarget{fs.AccountID, fs.Region}] = map[string]string{}
+	}
+	vpcs, err := s.Store.ListVPCs(ctx, "", "")
+	if err != nil {
+		return nil, err
+	}
+	for _, vpc := range vpcs {
+		if byID, wanted := names[awsTarget{vpc.AccountID, vpc.Region}]; wanted {
+			byID[vpc.VPCID] = vpc.Name
 		}
 	}
 	return names, nil
