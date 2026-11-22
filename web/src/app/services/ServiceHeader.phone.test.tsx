@@ -44,6 +44,21 @@ describe('ServiceHeader on phones', () => {
     expect(within(menu).getByRole('menuitem', { name: /^Restart/ })).toBeEnabled()
   })
 
+  it('wraps the age and pill under the title', () => {
+    renderWithProviders(
+      <AuthProvider>
+        <ServiceHeader service={SERVICE_PAYMENTS} tab="overview" focus={{ state: 'live', interval_seconds: 5, refreshed_at: new Date().toISOString(), message: '' }} />
+      </AuthProvider>,
+    )
+    const age = screen.getByText(/^Updated/)
+    const pill = screen.getByText('Live, every 5 s')
+    // Own row below the compact row: it shares no row with the Deploy link or the actions button.
+    const row = age.closest('[data-live-refresh]') as HTMLElement
+    expect(row).toContainElement(pill)
+    expect(row).not.toContainElement(screen.getByRole('link', { name: 'Deploy' }))
+    expect(row).not.toContainElement(screen.getByRole('button', { name: 'More actions for payments-api' }))
+  })
+
   it('hides the Deploy link on the Deploy tab and when locked, and gives the locked reasons in the sheet', async () => {
     const user = userEvent.setup()
     const { unmount } = render(SERVICE_PAYMENTS, 'deploy')

@@ -49,6 +49,7 @@ import {
   SSO_TEST_OK,
   SSO_UNCONFIGURED,
 } from './fixtures'
+import { focusHandlers } from './focusFixtures'
 import { timelineHandlers } from './timelineFixtures'
 import { offhoursHandlers } from './offhoursFixtures'
 import { notificationsHandlers } from './notificationsFixtures'
@@ -80,6 +81,7 @@ function search(q: string): SearchResultDTO[] {
 export const handlers = [
   // Registered first so :id/timeline is not read as the service id route.
   ...timelineHandlers,
+  ...focusHandlers,
   ...offhoursHandlers,
   ...notificationsHandlers,
   http.get('/api/me', () => HttpResponse.json(ME_ADMIN)),

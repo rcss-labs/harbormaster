@@ -83,6 +83,8 @@
   .phoneHead { min-width: 0; }
   .phoneMeta { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-height: 44px; padding: 0 4px 0 12px; }
   .revisionLink { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); text-decoration: none; }
+  .phoneFresh { padding: 0 12px 6px; }
+  .phoneFresh:empty { display: none; }
   .phoneLaunch { font-size: 12px; color: var(--muted); white-space: nowrap; }
   .grow { flex: 1 1 auto; min-width: 0; }
   .phoneDeploy { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font-weight: 600; text-decoration: none; white-space: nowrap; }

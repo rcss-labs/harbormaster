@@ -135,6 +135,16 @@ export function refetchWhileSettling(refetch: () => Promise<void>): Promise<void
   return refetch()
 }
 
+/**
+ * After a page opens for live refresh the server reads AWS at once; refetch at 1, 2 and 3 s so the new data shows
+ * without waiting for the 5 s timer. With ETags these are 304s until something changed. Returns a function that cancels
+ * the refetches still waiting.
+ */
+export function refetchFastFollow(refetch: () => Promise<unknown>): () => void {
+  const timers = [1, 2, 3].map((seconds) => setTimeout(() => void refetch(), seconds * 1000))
+  return () => timers.forEach(clearTimeout)
+}
+
 /** Rollouts and scaling also add entries to the operations history. */
 function invalidateServiceAndOperations(queryClient: QueryClient, serviceId: string) {
   void queryClient.invalidateQueries({ queryKey: ['operations', serviceId] })

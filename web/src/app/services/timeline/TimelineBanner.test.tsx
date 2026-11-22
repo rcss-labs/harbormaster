@@ -161,7 +161,9 @@ describe('Roll back', () => {
   it('navigates to the Deploy tab review and makes no request of its own', async () => {
     const posts: string[] = []
     const record = ({ request }: { request: Request }) => {
-      if (request.method !== 'GET') posts.push(`${request.method} ${new URL(request.url).pathname}`)
+      const path = new URL(request.url).pathname
+      // The page's own live-refresh heartbeats are not changes.
+      if (request.method !== 'GET' && path !== '/api/focus') posts.push(`${request.method} ${path}`)
     }
     server.events.on('request:start', record)
     // Keeps the Deploy tab from resolving the revision, so it does not consume ?review=1 before the assertion.

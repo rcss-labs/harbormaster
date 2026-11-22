@@ -44,6 +44,14 @@ describe('Cluster', () => {
     )
   })
 
+  it('shows the data age and the live pill in the header', async () => {
+    renderApp(`/clusters/${CLUSTER_CORE.id}`)
+    const heading = await screen.findByRole('heading', { name: CLUSTER_CORE.name, level: 1 })
+    const header = heading.closest('header') as HTMLElement
+    expect(within(header).getByText(/^Updated/)).toBeInTheDocument()
+    expect(await within(header).findByText('Live, every 5 s')).toBeInTheDocument()
+  })
+
   it('counts EC2 tasks apart from Fargate and shows no EC2 label when there are none', async () => {
     serveCluster({ ...CLUSTER_CORE, fargate_tasks: 4, spot_tasks: 1, other_tasks: 2 })
     const { unmount } = renderApp(`/clusters/${CLUSTER_CORE.id}`)

@@ -104,6 +104,7 @@ import {
   ROUTE_RESIZER_TELEGRAM,
   ROUTE_WEBHOOK_SIGNED,
 } from '../notificationsFixtures'
+import { FOCUS_CAPPED, FOCUS_LIVE } from '../focusFixtures'
 import { CONFIG_SEARCH_EMPTY, CONFIG_SEARCH_NODE, CONFIG_SEARCH_TRUNCATED, CONFIG_SEARCH_UNINDEXED } from '../configSearchFixtures'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../timelineFixtures'
 
@@ -182,6 +183,9 @@ describe('API contract', () => {
     ['search', () => body('/api/search?q=pa')],
     ['poller', () => body('/api/poller')],
     ['poller', () => POLLER_TIERS],
+    ['focus', () => FOCUS_LIVE],
+    ['focus', () => FOCUS_CAPPED],
+    ['focus', () => body('/api/focus', { method: 'POST', body: JSON.stringify({ kind: 'service', id: 'x', open: true }) })],
     ['servicesList', () => SERVICES_LIST],
     ['servicesList', () => body('/api/services')],
     ['logs', () => body(`/api/services/${serviceId}/logs?task=a1b2c3d4&limit=20`)],

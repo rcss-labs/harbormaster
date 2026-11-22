@@ -1,0 +1,7 @@
+.root { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.age { font-size: 12px; color: var(--dim); white-space: nowrap; }
+
+/* Phone: the age and pill take their own row under the title instead of squeezing the title row. */
+@media (max-width: 700px) {
+  .root { flex-basis: 100%; }
+}

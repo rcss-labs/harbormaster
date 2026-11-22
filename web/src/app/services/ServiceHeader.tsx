@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import type { FocusDTO } from '../../api/focus'
 import type { ServiceDTO } from '../../api/types'
 import { BottomSheet, SheetAction } from '../../components/BottomSheet'
 import { Icon } from '../../components/Icon'
+import { LiveRefresh } from '../../components/LiveRefresh'
 import { PinButton } from '../../components/PinButton'
 import { StatusDot } from '../../components/StatusDot'
 import { TagChip } from '../../components/TagChip'
@@ -21,9 +23,11 @@ interface ServiceHeaderProps {
   onTagClick?: TagClickHandler
   /** The open tab; the phone row leaves out its Deploy link on the Deploy tab. */
   tab?: string
+  /** What is refreshing the page live; see useFocus. */
+  focus?: FocusDTO
 }
 
-export function ServiceHeader({ service, onTagClick, tab }: ServiceHeaderProps) {
+export function ServiceHeader({ service, onTagClick, tab, focus }: ServiceHeaderProps) {
   const phone = usePhone()
   const { isPinned, toggle } = usePins()
   const pinned = isPinned('service', service.id)
@@ -39,7 +43,7 @@ export function ServiceHeader({ service, onTagClick, tab }: ServiceHeaderProps) 
   const togglePin = () => toggle({ kind: 'service', id: service.id, name: service.name, cluster: service.cluster.name })
 
   if (phone) {
-    return <PhoneServiceHeader service={service} tab={tab} launchType={launchType} tagChip={tagChip} pinned={pinned} onTogglePin={togglePin} />
+    return <PhoneServiceHeader service={service} tab={tab} focus={focus} launchType={launchType} tagChip={tagChip} pinned={pinned} onTogglePin={togglePin} />
   }
 
   return (
@@ -50,6 +54,7 @@ export function ServiceHeader({ service, onTagClick, tab }: ServiceHeaderProps) 
           {tagChip}
           <StatusDot status={service.status} />
           <PinButton name={service.name} pinned={pinned} onToggle={togglePin} />
+          <LiveRefresh polledAt={service.polled_at} focus={focus} />
         </div>
         <div className={styles.meta}>
           <Link className={styles.accentLink} to={`/clusters/${service.cluster.id}`}>
@@ -85,6 +90,7 @@ type PhoneSheet = 'actions' | 'restart' | 'desired' | 'scan'
 interface PhoneServiceHeaderProps {
   service: ServiceDTO
   tab?: string
+  focus?: FocusDTO
   launchType: string
   tagChip: React.ReactNode
   pinned: boolean
@@ -92,7 +98,7 @@ interface PhoneServiceHeaderProps {
 }
 
 /** The sticky compact row under the phone top bar: status, tag, revision, launch type, Deploy and a "…" sheet with the other actions. */
-function PhoneServiceHeader({ service, tab, launchType, tagChip, pinned, onTogglePin }: PhoneServiceHeaderProps) {
+function PhoneServiceHeader({ service, tab, focus, launchType, tagChip, pinned, onTogglePin }: PhoneServiceHeaderProps) {
   const [sheet, setSheet] = useState<PhoneSheet | null>(null)
   const deployLock = TAB_LOCKS.deploy!
   const canDeploy = isUnlocked(deployLock, service.can)
@@ -122,6 +128,9 @@ function PhoneServiceHeader({ service, tab, launchType, tagChip, pinned, onToggl
         <button type="button" className={styles.phoneMore} aria-label={`More actions for ${service.name}`} aria-haspopup="menu" onClick={() => setSheet('actions')}>
           <Icon name="more" size={18} />
         </button>
+      </div>
+      <div className={styles.phoneFresh}>
+        <LiveRefresh polledAt={service.polled_at} focus={focus} />
       </div>
       <BottomSheet
         open={sheet === 'actions'}
