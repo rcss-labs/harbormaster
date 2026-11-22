@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test test-db test-kv e2e lint run run-split
+.PHONY: build test test-db test-kv e2e lint run run-split split-smoke
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
@@ -52,6 +52,13 @@ run:
 # run-split runs web (8480), poller (8482) and coordinator (8483) as three processes on fake AWS data; see tools/run-split.sh.
 run-split:
 	tools/run-split.sh
+
+# split-smoke runs web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a
+# private Valkey (default) or Redis container, and checks leases, kicks, focus, the cache, takeover and a store outage.
+# Pass ENGINE=redis for the other engine. About two minutes; see tools/split-smoke.sh.
+ENGINE ?= valkey
+split-smoke:
+	tools/split-smoke.sh --engine $(ENGINE)
 
 # e2e builds the binary, recreates the dedicated schema (tools/e2eschema; HM_E2E_SCHEMA, default hm_e2e) so each
 # run starts empty, then runs the Playwright smoke and flow specs against `serve --fake-aws`. Playwright wipes
