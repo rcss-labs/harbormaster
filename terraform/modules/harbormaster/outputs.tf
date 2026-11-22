@@ -79,8 +79,8 @@ output "security_group_ids" {
     alb         = aws_security_group.alb.id
     server      = aws_security_group.server.id
     web         = aws_security_group.web.id
-    poller      = aws_security_group.poller.id
-    coordinator = aws_security_group.coordinator.id
+    poller      = aws_security_group.worker["poller"].id
+    coordinator = aws_security_group.worker["coordinator"].id
     db          = aws_security_group.db.id
     cache       = one(aws_security_group.cache[*].id)
   }

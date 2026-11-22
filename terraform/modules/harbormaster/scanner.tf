@@ -11,11 +11,7 @@
 locals {
   scan_enabled = var.enable_image_scanning
 
-  # Region and account from the log group ARN (arn:aws:logs:<region>:<account>:...), as ecs.tf does for the region:
-  # data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
-  region     = split(":", aws_cloudwatch_log_group.server.arn)[3]
-  account_id = split(":", aws_cloudwatch_log_group.server.arn)[4]
-
+  # local.region and local.account_id are in locals.tf.
   scan_bucket_name = coalesce(var.scan_bucket_name, "harbormaster-scan-${local.account_id}-${local.region}")
   scan_role_arns   = coalesce(var.scan_role_arns, ["arn:aws:iam::*:role/${var.scan_role_name}"])
 

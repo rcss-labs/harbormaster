@@ -93,9 +93,12 @@ resource "aws_security_group" "web" {
 }
 
 # Poller and coordinator tasks take no traffic. The container port is open only to the groups that scrape /metrics.
-resource "aws_security_group" "poller" {
-  name        = "${local.name}-poller"
-  description = "Harbormaster poller tasks"
+# One group each, keyed by role.
+resource "aws_security_group" "worker" {
+  for_each = local.worker_roles
+
+  name        = "${local.name}-${each.key}"
+  description = "Harbormaster ${each.key} tasks"
   vpc_id      = var.vpc_id
 
   dynamic "ingress" {
@@ -120,31 +123,15 @@ resource "aws_security_group" "poller" {
   tags = local.tags
 }
 
-resource "aws_security_group" "coordinator" {
-  name        = "${local.name}-coordinator"
-  description = "Harbormaster coordinator tasks"
-  vpc_id      = var.vpc_id
+# The poller and coordinator groups moved from one resource each to this keyed one: an existing install keeps them.
+moved {
+  from = aws_security_group.poller
+  to   = aws_security_group.worker["poller"]
+}
 
-  dynamic "ingress" {
-    for_each = length(var.metrics_ingress_security_group_ids) > 0 ? [1] : []
-    content {
-      description     = "Metrics scrape"
-      from_port       = local.container_port
-      to_port         = local.container_port
-      protocol        = "tcp"
-      security_groups = var.metrics_ingress_security_group_ids
-    }
-  }
-
-  egress {
-    description = "All outbound (AWS APIs, RDS, the cache, Secrets Manager)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = local.tags
+moved {
+  from = aws_security_group.coordinator
+  to   = aws_security_group.worker["coordinator"]
 }
 
 resource "aws_security_group" "cache" {
@@ -156,14 +143,14 @@ resource "aws_security_group" "cache" {
 
   ingress {
     description = "Store port from the Harbormaster tasks only"
-    from_port   = 6379
-    to_port     = 6379
+    from_port   = local.cache_port
+    to_port     = local.cache_port
     protocol    = "tcp"
     security_groups = concat(
       [
         aws_security_group.web.id,
-        aws_security_group.poller.id,
-        aws_security_group.coordinator.id,
+        aws_security_group.worker["poller"].id,
+        aws_security_group.worker["coordinator"].id,
       ],
       # The legacy task connects to the store while both run (migration step 3), and only then.
       var.keep_legacy_service ? [aws_security_group.server.id] : [],
@@ -180,14 +167,14 @@ resource "aws_security_group" "db" {
 
   ingress {
     description = "PostgreSQL from the Harbormaster tasks only"
-    from_port   = 5432
-    to_port     = 5432
+    from_port   = local.database_port
+    to_port     = local.database_port
     protocol    = "tcp"
     security_groups = [
       aws_security_group.server.id,
       aws_security_group.web.id,
-      aws_security_group.poller.id,
-      aws_security_group.coordinator.id,
+      aws_security_group.worker["poller"].id,
+      aws_security_group.worker["coordinator"].id,
     ]
   }
 

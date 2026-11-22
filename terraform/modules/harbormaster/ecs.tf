@@ -57,9 +57,8 @@ locals {
         logConfiguration = {
           logDriver = "awslogs"
           options = {
-            "awslogs-group" = aws_cloudwatch_log_group.server.name
-            # Region from the log group ARN: data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
-            "awslogs-region"        = split(":", aws_cloudwatch_log_group.server.arn)[3]
+            "awslogs-group"         = aws_cloudwatch_log_group.server.name
+            "awslogs-region"        = local.region
             "awslogs-stream-prefix" = spec.stream_prefix
           }
         }

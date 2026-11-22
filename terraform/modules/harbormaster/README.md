@@ -141,6 +141,8 @@ Engines: `cache_engine = "valkey"` (default, version `7.2`) or `"redis"` (versio
 
 The cache security group admits the web, poller and coordinator groups on 6379, and the legacy server group only while `keep_legacy_service` is true. The legacy security group and its database rule stay after the legacy service is removed, so removing the service changes nothing about either.
 
+The poller and coordinator security groups are one keyed resource, `aws_security_group.worker["poller"]` and `["coordinator"]`. An install that already has them sees two `has moved to` lines in its next plan and no change to the groups (the `security_group_ids` output keeps its keys).
+
 ## Upgrade: single service to split services
 
 These are TerraDuckTel runs: **nothing here is run locally.** Each numbered run is one trigger, in this order. Every change is backward compatible: the legacy single service keeps working until run 4 removes it, and rolling back is the reverse run. The module and image version are the same in every run, except where a run says otherwise.
@@ -266,4 +268,4 @@ Two fixed names make a destroy followed by a re-create collide:
 
 ## Do not manage Harbormaster with itself
 
-Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count, ...] }` on the `aws_ecs_service`, with the full list in section 7.5) in the managing configuration. See design spec section 7.5 (`docs/design/2026-10-31-harbormaster-design.md`).
+Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count, ...] }` on the `aws_ecs_service`, with the full list below) in the managing configuration. The recommended list for a managed service is `task_definition`, `desired_count`, `enable_execute_command`, `deployment_circuit_breaker`, `deployment_minimum_healthy_percent`, `deployment_maximum_percent` and `health_check_grace_period_seconds`; autoscaling resources edited from Harbormaster need the same treatment.

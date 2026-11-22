@@ -46,7 +46,7 @@ resource "aws_elasticache_replication_group" "this" {
   engine         = var.cache_engine
   engine_version = local.cache_engine_version
   node_type      = var.cache_node_type
-  port           = 6379
+  port           = local.cache_port
 
   # Cluster mode off: one shard, 1 + replicas nodes.
   num_cache_clusters         = 1 + var.cache_replicas
@@ -86,7 +86,7 @@ resource "aws_secretsmanager_secret_version" "kv_url" {
   count = local.cache_create ? 1 : 0
 
   secret_id     = aws_secretsmanager_secret.kv_url[0].id
-  secret_string = "rediss://:${random_password.cache_auth_token[0].result}@${aws_elasticache_replication_group.this[0].primary_endpoint_address}:6379/0"
+  secret_string = "rediss://:${random_password.cache_auth_token[0].result}@${aws_elasticache_replication_group.this[0].primary_endpoint_address}:${local.cache_port}/0"
 }
 
 # ElastiCache names the nodes of a replication group <id>-001, <id>-002 and so on, and publishes Evictions per node.
