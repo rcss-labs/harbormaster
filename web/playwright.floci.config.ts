@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 // Checks the real UI against the floci estate (see tools/floci).
 // `make floci-check` builds the binary, prepares the database and runs this config; the webServer below starts
 // tools/floci/serve.sh, which sources the isolated AWS environment and refuses any non-local endpoint.
-const port = process.env.HM_FLOCI_PORT ?? '8482'
+const port = process.env.HM_FLOCI_PORT ?? '8490'
 const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({

@@ -2,7 +2,7 @@
 # Runs bin/harbormaster serve against floci in the foreground (used by make floci-serve and the Playwright webServer).
 #
 # Usage: tools/floci/serve.sh [--help]
-#   HM_FLOCI_PORT   port to listen on (default 8482)
+#   HM_FLOCI_PORT   port to listen on (default 8490)
 # Exit codes: 2 refused (environment not local floci) or bad usage, 1 binary missing.
 set -euo pipefail
 

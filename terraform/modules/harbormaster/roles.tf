@@ -5,6 +5,8 @@
 
 locals {
   service_roles = toset(["web", "poller", "coordinator"])
+  # The roles with no load balancer: they share a security group shape and the service start order (services.tf).
+  worker_roles = toset(["poller", "coordinator"])
 
   # Container secrets by role. The execution role may read exactly these (values of the map), so the matrix of the
   # design's IAM section is written once. Database URL, store URL and metrics token for all three; the session key

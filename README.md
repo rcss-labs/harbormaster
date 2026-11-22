@@ -722,7 +722,7 @@ The UI shows two banners per account and region:
 - **Slowed by AWS throttling**: AWS is throttling Harbormaster's calls for that account and region, so updates arrive more slowly.
 - **Data is N min old**: the last poll for that account and region failed. The banner shows how old the data is and the last error. If it says the data is unavailable, no poll has succeeded yet.
 
-The AWS API limits Harbormaster works within, and how the estate size affects them, are in [`docs/ops/ecs-api-budget.md`](docs/ops/ecs-api-budget.md).
+ECS throttles per account and region, in token buckets shared by every call of a kind (service reads: 100 tokens, 20 per second; cluster-resource reads such as `ListTasks` and `DescribeTasks`: 100 and 20; cluster reads: 50 and 20). At the reference estate of 20 clusters and 300 services per account and region, the original 5 s intervals used about 42 percent of the service-read bucket and about 30 percent of the cluster-resource bucket in steady state, and the current defaults (30 s and longer) use a fraction of that; a rollout spike stays inside the burst. A much larger estate in one account and region should lengthen the `HM_POLL_*` intervals; more accounts or regions add no load to a bucket.
 
 ### AWS costs
 

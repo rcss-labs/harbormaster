@@ -8,3 +8,10 @@ web/test-results
 docs
 terraform
 *.md
+web/test-results-failed
+web/playwright-report
+.env
+.superpowers
+CLAUDE.md
+**/.DS_Store
+.claude

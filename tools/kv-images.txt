@@ -1,0 +1,5 @@
+# The key-value stores the tests run against, pinned to the floor versions the design supports so a command added in a
+# newer release fails locally. One line per engine: <engine> <container name> <image> <host port>.
+# Read by `make test-kv` and tools/split-smoke.sh (which uses only the engine and image columns); change a pin here only.
+valkey hm-test-valkey valkey/valkey:7.2.5-alpine 63791
+redis hm-test-redis redis:7.0.15-alpine 63792

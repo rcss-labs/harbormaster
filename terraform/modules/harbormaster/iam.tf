@@ -31,15 +31,8 @@ data "aws_iam_policy_document" "execution_secrets" {
   statement {
     sid     = "ReadServerSecrets"
     actions = ["secretsmanager:GetSecretValue"]
-    resources = concat(
-      [
-        aws_secretsmanager_secret.database_url.arn,
-        aws_secretsmanager_secret.session_key.arn,
-      ],
-      aws_secretsmanager_secret.metrics_token[*].arn,
-      var.smtp_password_secret_arn == null ? [] : [var.smtp_password_secret_arn],
-      local.kv_enabled ? [local.kv_url_secret_arn] : [],
-    )
+    # The same secrets the legacy container injects (ecs.tf), so the two lists cannot drift apart.
+    resources = values(local.container_secrets)
   }
 
   dynamic "statement" {
@@ -53,8 +46,7 @@ data "aws_iam_policy_document" "execution_secrets" {
       condition {
         test     = "StringEquals"
         variable = "kms:ViaService"
-        # Region from the log group ARN, as ecs.tf does.
-        values = ["secretsmanager.${split(":", aws_cloudwatch_log_group.server.arn)[3]}.amazonaws.com"]
+        values   = ["secretsmanager.${local.region}.amazonaws.com"]
       }
     }
   }
