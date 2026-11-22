@@ -16,7 +16,11 @@ const (
 func (t *tier) onThrottle() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.cur = min(t.cur*2, maxBackoffInterval)
+	limit := maxBackoffInterval
+	if t.cap > 0 {
+		limit = max(t.cap, t.base)
+	}
+	t.cur = min(t.cur*2, limit)
 	t.clean = 0
 }
 

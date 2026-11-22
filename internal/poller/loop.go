@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
+	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -63,6 +65,25 @@ type Loop struct {
 	writes          store.WriteResult
 	// warnedNoTags holds the clusters already logged for the describe-without-tags fallback.
 	warnedNoTags map[string]bool
+
+	// focusTier is the interval of the focus cycles of this slice. A throttle anywhere in the slice doubles it, up to the
+	// services tier's interval.
+	focusTier *tier
+	// limiter holds the slice's focus calls to the configured rate per AWS rate category.
+	limiter *focus.Limiter
+	// focusRound is the measured time of one round over the slice's focused objects, in nanoseconds.
+	focusRound atomic.Int64
+	// callsPerSec is the slice's focus call budget per rate category.
+	callsPerSec int
+
+	// The slice's focused objects and their scheduler (focus.go). focusSet is keyed by the object's member string;
+	// focusOnce remembers the last single-cycle request for objects that are not registered.
+	focusMu      sync.Mutex
+	focusSet     map[string]*focusEntry
+	focusOnce    map[string]time.Time
+	focusWake    chan struct{}
+	focusCtx     context.Context
+	focusRunning sync.WaitGroup
 }
 
 // tierDef pairs a tier with its work function.
@@ -89,6 +110,19 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 		seenDeployments: map[string]bool{},
 	}
 	in := p.cfg.Intervals
+	focusBase := p.cfg.Focus.Interval
+	if focusBase <= 0 {
+		focusBase = defaultFocusInterval
+	}
+	callsPerSec := p.cfg.Focus.MaxCallsPerSec
+	if callsPerSec <= 0 {
+		callsPerSec = defaultFocusCallsPerSec
+	}
+	l.focusTier = newTier(tierFocus, focusBase)
+	l.focusTier.cap = in.Services
+	l.limiter = focus.NewLimiter(callsPerSec, time.Now)
+	l.callsPerSec = callsPerSec
+	l.focusSet, l.focusOnce, l.focusWake = map[string]*focusEntry{}, map[string]time.Time{}, make(chan struct{}, 1)
 	add := func(name string, base time.Duration, run func(context.Context) error) {
 		tr := newTier(name, base)
 		l.tiers[name] = tr
@@ -207,6 +241,11 @@ func (l *Loop) Run(ctx context.Context) {
 		_ = l.runTier(ctx, d)
 	}
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		l.runFocus(ctx)
+	}()
 	if every := l.p.cfg.CountsHistory; every > 0 {
 		wg.Add(1)
 		go func() {

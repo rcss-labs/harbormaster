@@ -39,6 +39,7 @@ func (l *Loop) recordCycle(ctx context.Context, tr *tier, err error) {
 		tr.onSuccess()
 	case errorsThrottled(err):
 		tr.onThrottle()
+		l.onTierThrottle()
 	}
 	tr.mu.Lock()
 	row.Interval = tr.cur

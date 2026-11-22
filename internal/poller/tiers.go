@@ -30,7 +30,9 @@ const minTickInterval = 10 * time.Millisecond
 type tier struct {
 	name      string
 	base, cur time.Duration
-	clean     int // consecutive successful cycles since the last throttle or halving
+	// cap, when set, replaces maxBackoffInterval as the most a throttle can raise cur to (but never below base).
+	cap   time.Duration
+	clean int // consecutive successful cycles since the last throttle or halving
 
 	mu sync.Mutex
 	// Status of the latest cycles, recorded by Loop.recordCycle.

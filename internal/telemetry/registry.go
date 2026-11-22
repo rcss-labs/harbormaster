@@ -51,6 +51,7 @@ type Registry struct {
 	kvUpSet          bool
 	kvErrors         map[string]uint64
 	kvDuration       map[string]*histogram
+	focusM           focusMetrics
 }
 
 // Default is the process-wide registry.
