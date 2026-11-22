@@ -11,8 +11,8 @@
 #                         hm_run_split, recreated (dropped) on every start. HM_RUN_SPLIT_SCHEMA may change it, but the
 #                         name must start with hm_run_split: anything else is refused, so a schema that holds other
 #                         data is never dropped
-#   HM_TEST_KV_URLS       optional; the first URL is used as HM_KV_URL so kicks cross processes. Without it kicks
-#                         stay inside each process and the jobs run at their intervals
+#   HM_TEST_KV_URLS       required; the first URL is used as HM_KV_URL (split roles refuse to start without a store,
+#                         because focus heartbeats and kicks must cross processes)
 #
 # Sign in at http://127.0.0.1:8480 as sam / harbormaster-e2e-1. Ctrl-C stops all three.
 # Exit codes: 0 stopped by Ctrl-C or SIGTERM, 1 the build or schema preparation failed or a process exited on its own
@@ -47,12 +47,11 @@ fi
 
 cd "$(dirname "$0")/.."
 
-kv_url=""
-if [[ -n "${HM_TEST_KV_URLS:-}" ]]; then
-	kv_url="${HM_TEST_KV_URLS%%,*}"
-else
-	echo "run-split: HM_TEST_KV_URLS is not set (run 'make test-kv'): kicks and live refresh will not cross processes" >&2
+if [[ -z "${HM_TEST_KV_URLS:-}" ]]; then
+	echo "run-split: HM_TEST_KV_URLS is not set; run 'make test-kv' and export the URLs it prints (split roles need HM_KV_URL)" >&2
+	exit 2
 fi
+kv_url="${HM_TEST_KV_URLS%%,*}"
 
 web_addr=127.0.0.1:8480
 poller_addr=127.0.0.1:8482

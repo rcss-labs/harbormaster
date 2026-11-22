@@ -7,6 +7,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 // withAnalyticsRetention gives the test server the production default retentions (testConfig leaves them 0).
@@ -51,7 +52,7 @@ func seedBelowDesired(t *testing.T, st *store.Store, below map[model.ServiceKey]
 		}
 		rows = append(rows, row)
 	}
-	if err := st.InsertCountsHistory(t.Context(), at, rows); err != nil {
+	if err := storetest.Seed(st).InsertCountsHistory(t.Context(), at, rows); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -126,14 +127,14 @@ func TestAnalyticsReliability_KPIsSeriesAndTable(t *testing.T) {
 
 	stoppedAt := time.Now().UTC().Add(-2 * time.Hour)
 	exit := 137
-	if _, err := st.UpsertTasks(t.Context(), []model.Task{{
+	if _, err := storetest.Seed(st).UpsertTasks(t.Context(), []model.Task{{
 		Cluster: bad.Key.ClusterKey, ARN: "arn:aws:ecs:x:1:task/oom1", ServiceName: bad.Key.Service, LastStatus: "STOPPED",
 		StoppedAt: &stoppedAt, StoppedReason: "OutOfMemoryError", AvailabilityZone: "eu-west-1a", PolledAt: stoppedAt,
 		CreatedAt: stoppedAt.Add(-time.Hour), Containers: []model.Container{{Name: "app", ExitCode: &exit}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.InsertServiceEvents(t.Context(), []model.ServiceEvent{
+	if _, err := storetest.Seed(st).InsertServiceEvents(t.Context(), []model.ServiceEvent{
 		{Key: bad.Key, ID: "pf1", CreatedAt: time.Now().Add(-time.Hour), Message: "(service x) was unable to place a task."}}); err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/kv/kvtest"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
@@ -145,7 +146,7 @@ func TestRead_OldGenerationIsNeverServedAfterABump(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The poller commits a change and bumps the token.
-		if _, err := r.f.st.UpsertServices(ctx, []model.Service{{Key: model.ServiceKey{ClusterKey: key, Service: "brand-new"}, Status: "ACTIVE", PolledAt: r.f.now}}); err != nil {
+		if _, err := storetest.Seed(r.f.st).UpsertServices(ctx, []model.Service{{Key: model.ServiceKey{ClusterKey: key, Service: "brand-new"}, Status: "ACTIVE", PolledAt: r.f.now}}); err != nil {
 			t.Fatal(err)
 		}
 		r.bump(t, "1-200")

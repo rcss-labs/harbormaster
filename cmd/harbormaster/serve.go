@@ -27,6 +27,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/coordinator"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
+	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/notify"
@@ -222,6 +223,11 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	if err != nil {
 		return err
 	}
+	// Split roles talk to each other only through the shared store. Without it focus heartbeats and kicks stay in the
+	// receiving task's memory and never reach the task that acts on them.
+	if role != config.RoleAll && !kvConfigured {
+		return errUsage{"role " + string(role) + " needs the shared store: set HM_KV_URL (only role all runs without it)\n" + serveUsage}
+	}
 
 	var base aws.Config
 	if !fakeAWS {
@@ -333,27 +339,41 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			}
 		}
 	}
-	// One applier serves the API (manual wake and sleep) and the reconciler (the leader's loop); both change AWS
-	// through the same code under the same per-service lock.
-	offHoursApplier := &offhours.Applier{Store: st, Clients: clients, Now: time.Now, Log: log}
-	offHoursReconciler := &offhours.Reconciler{Applier: offHoursApplier, Store: st, Interval: cfg.OffHours.Interval, Now: time.Now, Log: log}
-	// Notifications: the guarded senders and the leader-only dispatcher. Without a session key the dispatcher fails
-	// any delivery that needs a secret with a clear note. In fake mode an in-process receiver at /fake-notify/ takes
-	// every delivery.
-	notifySenders := &notify.Senders{
-		BaseURL: cfg.BaseURL, Version: version, SMTP: cfg.Notify.SMTP, Log: log,
-		Guard: safedial.Policy{AllowedPrivate: cfg.Notify.AllowedPrivateCIDRs},
+	// The off-hours applier and the notification senders serve the API (manual wake and sleep, Send test) and the
+	// coordinator's jobs; a poller needs neither, so it builds none of them.
+	var (
+		offHoursApplier    *offhours.Applier
+		offHoursReconciler *offhours.Reconciler
+		notifySenders      *notify.Senders
+		notifyDispatcher   *notify.Dispatcher
+	)
+	if role.ServesAPI() || role.Coordinates() {
+		// One applier serves the API and the reconciler (the leader's loop); both change AWS through the same code
+		// under the same per-service lock.
+		offHoursApplier = &offhours.Applier{Store: st, Clients: clients, Now: time.Now, Log: log}
+		// Notifications: the guarded senders and the leader-only dispatcher. Without a session key the dispatcher fails
+		// any delivery that needs a secret with a clear note. In fake mode an in-process receiver at /fake-notify/ takes
+		// every delivery.
+		notifySenders = &notify.Senders{
+			BaseURL: cfg.BaseURL, Version: version, SMTP: cfg.Notify.SMTP, Log: log,
+			Guard: safedial.Policy{AllowedPrivate: cfg.Notify.AllowedPrivateCIDRs},
+		}
+		if fakeAWS {
+			fakeNotifySink := fakesink.New()
+			if role.ServesAPI() {
+				fakeNotify = fakeNotifySink.Handler()
+			}
+			notifySenders.Guard.AllowLoopback = true
+			notifySenders.FakeBase = strings.TrimRight(cfg.BaseURL, "/") + "/fake-notify"
+			notifySenders.TelegramBase = notifySenders.FakeBase + "/telegram"
+			notifySenders.FakeMail = fakeNotifySink.Mail
+		}
 	}
-	if fakeAWS {
-		fakeNotifySink := fakesink.New()
-		fakeNotify = fakeNotifySink.Handler()
-		notifySenders.Guard.AllowLoopback = true
-		notifySenders.FakeBase = strings.TrimRight(cfg.BaseURL, "/") + "/fake-notify"
-		notifySenders.TelegramBase = notifySenders.FakeBase + "/telegram"
-		notifySenders.FakeMail = fakeNotifySink.Mail
+	if role.Coordinates() {
+		offHoursReconciler = &offhours.Reconciler{Applier: offHoursApplier, Store: st, Interval: cfg.OffHours.Interval, Now: time.Now, Log: log}
+		notifyDispatcher = &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
+			Interval: cfg.Notify.Interval, Settle: cfg.Notify.Settle, Now: time.Now, Log: log, Telemetry: telemetry.Default}
 	}
-	notifyDispatcher := &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
-		Interval: cfg.Notify.Interval, Settle: cfg.Notify.Settle, Now: time.Now, Log: log, Telemetry: telemetry.Default}
 	telemetry.Default.SetBuildInfo(version) // plan 06
 
 	// What each role serves: the API and web app (all, web), or only /healthz and /metrics (poller, coordinator).
@@ -365,7 +385,11 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// Pages that are open in a visible tab: the shared store's registry when there is one, so a web task and the poller
 	// that owns the slice see the same set, and a registry inside this process otherwise (role all shares it between the
 	// API and the poller).
-	focusRegistry := buildFocusRegistry(kvHealth)
+	// A coordinator reads no slices, so it needs neither the registry nor the snapshot cache.
+	var focusRegistry focus.Registry
+	if role.ServesAPI() || role.Polls() {
+		focusRegistry = buildFocusRegistry(kvHealth)
+	}
 	if role.ServesAPI() {
 		setup, err := auth.NewSetup(ctx, st, log)
 		if err != nil {
@@ -417,8 +441,11 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		pollerConfig := poller.ConfigFrom(cfg)
 		pollerConfig.Version = version
 		pollerConfig.NoSlices = !role.Polls()
-		pollerConfig.Registry, pollerConfig.Bus = focusRegistry, kicks.bus
-		pollerConfig.Cache = buildSnapshotCache(kvHealth, cfg)
+		pollerConfig.Bus = kicks.bus
+		if role.Polls() {
+			pollerConfig.Registry = focusRegistry
+			pollerConfig.Cache = buildSnapshotCache(kvHealth, cfg)
+		}
 		switch role {
 		case config.RolePoller:
 			pollerConfig.Roles = []string{"poller"}

@@ -13,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/signal"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -29,12 +30,15 @@ const (
 	// a second. The heartbeat itself is never refused.
 	focusOpenBurst           = 10
 	focusOpenRefillPerSecond = 2.0
+	// focusOpensSweepEvery bounds how often mark walks the whole map to forget old opens.
+	focusOpensSweepEvery = time.Minute
 )
 
 // focusOpens remembers when each object was last opened through this task.
 type focusOpens struct {
-	mu sync.Mutex
-	at map[string]time.Time
+	mu        sync.Mutex
+	at        map[string]time.Time
+	lastSweep time.Time
 }
 
 func (o *focusOpens) mark(member string, now time.Time) {
@@ -44,6 +48,10 @@ func (o *focusOpens) mark(member string, now time.Time) {
 		o.at = map[string]time.Time{}
 	}
 	o.at[member] = now
+	if now.Sub(o.lastSweep) < focusOpensSweepEvery {
+		return
+	}
+	o.lastSweep = now
 	for m, t := range o.at { // forget old opens
 		if now.Sub(t) > time.Minute {
 			delete(o.at, m)
@@ -105,11 +113,7 @@ func (s *Server) postFocus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if obj.Kind == focus.KindCluster {
-		_, err = s.Store.GetCluster(ctx, obj.Cluster, sc.Vis)
-	} else {
-		_, err = s.Store.GetServiceView(ctx, obj.ServiceKey(), sc.Vis)
-	}
+	err = s.focusVisible(ctx, obj, sc)
 	if errors.Is(err, store.ErrNotFound) {
 		s.countFocus("not_found")
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
@@ -161,6 +165,39 @@ func (s *Server) postFocus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeFocus(w, dto)
+}
+
+// focusVisible reports store.ErrNotFound unless the user may see the object. With the snapshot cache on it reads the
+// cached model and applies the same filter as the page itself (getCluster, getService), so a heartbeat costs no
+// Postgres read; without it the store answers.
+func (s *Server) focusVisible(ctx context.Context, obj focus.Object, sc scope) error {
+	if s.Snap != nil {
+		if obj.Kind == focus.KindCluster {
+			m, err := s.Snap.Cluster(ctx, obj.Cluster)
+			if err != nil {
+				return err
+			}
+			if _, ok := snapcache.FilterCluster(m, sc.Subject, sc.Tags, sc.TagFilter); !ok {
+				return store.ErrNotFound
+			}
+			return nil
+		}
+		m, err := s.Snap.Service(ctx, obj.ServiceKey())
+		if err != nil {
+			return err
+		}
+		if _, ok := snapcache.FilterService(m, sc.Subject, sc.Tags, sc.TagFilter); !ok {
+			return store.ErrNotFound
+		}
+		return nil
+	}
+	var err error
+	if obj.Kind == focus.KindCluster {
+		_, err = s.Store.GetCluster(ctx, obj.Cluster, sc.Vis)
+	} else {
+		_, err = s.Store.GetServiceView(ctx, obj.ServiceKey(), sc.Vis)
+	}
+	return err
 }
 
 // focusEvidence answers from what the poller wrote: a fresh entry newer than two effective intervals (at least 10 s).

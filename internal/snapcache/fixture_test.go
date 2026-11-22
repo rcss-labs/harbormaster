@@ -64,7 +64,7 @@ func newEstateFixture(t *testing.T) *estateFixture {
 		clusters = append(clusters, model.Cluster{Key: k, ARN: "arn:" + k.Cluster, Status: "ACTIVE", RunningTasks: 2,
 			CapacityProviders: []string{"FARGATE"}, Raw: json.RawMessage(`{"big":"document"}`), PolledAt: f.now})
 	}
-	_, err = st.UpsertClusters(ctx, clusters)
+	_, err = storetest.Seed(st).UpsertClusters(ctx, clusters)
 	must(err)
 
 	counts := map[string]int{"core": 5, "batch": 8, "edge": 7}
@@ -110,13 +110,13 @@ func newEstateFixture(t *testing.T) *estateFixture {
 				CreatedAt: started, StartedAt: &started, PolledAt: f.now},
 			model.Task{Cluster: k, ARN: "arn:task/" + k.Cluster + "/solo-stop", LastStatus: "STOPPED", StoppedAt: &stopped, CreatedAt: started, PolledAt: f.now})
 	}
-	_, err = st.UpsertServices(ctx, services)
+	_, err = storetest.Seed(st).UpsertServices(ctx, services)
 	must(err)
-	_, err = st.UpsertTasks(ctx, tasks)
+	_, err = storetest.Seed(st).UpsertTasks(ctx, tasks)
 	must(err)
-	_, err = st.InsertServiceEvents(ctx, events)
+	_, err = storetest.Seed(st).InsertServiceEvents(ctx, events)
 	must(err)
-	must(st.UpsertTargetHealth(ctx, health))
+	must(storetest.Seed(st).UpsertTargetHealth(ctx, health))
 	return f
 }
 

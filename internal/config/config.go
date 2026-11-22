@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rcss-labs/harbormaster/internal/focus"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 )
 
 // PollConfig holds the polling intervals and concurrency limits for AWS reads.
@@ -164,10 +167,6 @@ type Config struct {
 	SnapshotCache    bool
 	SnapshotCacheTTL time.Duration
 }
-
-// maxSnapshotCacheTTL mirrors snapcache.TokenTTL: a model should not outlive the token that names it by more than the
-// token's own life.
-const maxSnapshotCacheTTL = 10 * time.Minute
 
 // FocusConfig holds the live page refresh settings (HM_FOCUS_*).
 type FocusConfig struct {
@@ -389,7 +388,7 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := validateFocus(cfg.Focus); err != nil {
 		return Config{}, err
 	}
-	if cfg.SnapshotCacheTTL < time.Second || cfg.SnapshotCacheTTL > maxSnapshotCacheTTL {
+	if cfg.SnapshotCacheTTL < time.Second || cfg.SnapshotCacheTTL > snapcache.TokenTTL {
 		return Config{}, errors.New("HM_SNAPSHOT_CACHE_TTL: must be between 1s and 10m (the life of a generation token)")
 	}
 	if cfg.MaxDesiredCount < 1 {
@@ -493,14 +492,11 @@ func validateScan(scan ScanConfig) error {
 	return nil
 }
 
-// focusReleaseGrace mirrors focus.ReleaseGrace: a TTL at or below it would make a release lengthen the expiry.
-const focusReleaseGrace = 12 * time.Second
-
 func validateFocus(f FocusConfig) error {
 	switch {
 	case f.Interval < 2*time.Second:
 		return errors.New("HM_FOCUS_INTERVAL: must be at least 2s")
-	case f.TTL <= focusReleaseGrace:
+	case f.TTL <= focus.ReleaseGrace:
 		return errors.New("HM_FOCUS_TTL: must be longer than 12s")
 	case f.MaxObjects < 1:
 		return errors.New("HM_FOCUS_MAX_OBJECTS: must be at least 1")

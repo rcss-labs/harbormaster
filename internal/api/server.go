@@ -118,6 +118,9 @@ type Server struct {
 	rateForClass func(region, architecture string, class cost.TaskClass) (cost.Rate, bool)
 	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.
 	focusOpens *focusOpens
+	// targetKeys and memberLines hold short-lived copies of reads that every list request or metrics scrape repeats.
+	targetKeys  *ttlCache[[]store.TargetFilter]
+	memberLines *ttlCache[string]
 }
 
 // Names of the per-user limits in Server.Limits (also the key segment and metric label).
@@ -154,6 +157,7 @@ func New(s Server) *Server {
 		s.rateForClass = cost.RateForClass
 	}
 	s.focusOpens = &focusOpens{}
+	s.targetKeys, s.memberLines = &ttlCache[[]store.TargetFilter]{}, &ttlCache[string]{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()

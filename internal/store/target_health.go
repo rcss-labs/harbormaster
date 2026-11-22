@@ -10,11 +10,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
-// UpsertTargetHealth stores each target group's health, replacing the row for the same key.
-func (s *Store) UpsertTargetHealth(ctx context.Context, rows []model.TargetHealth) error {
-	return upsertTargetHealth(ctx, s.Pool, rows)
-}
-
+// upsertTargetHealth stores each target group's health, replacing the row for the same key.
 func upsertTargetHealth(ctx context.Context, q db, rows []model.TargetHealth) error {
 	if len(rows) == 0 {
 		return nil
@@ -38,11 +34,7 @@ func upsertTargetHealth(ctx context.Context, q db, rows []model.TargetHealth) er
 	return nil
 }
 
-// DeleteTargetHealthNotIn removes the target's rows whose target group ARN is not in keep.
-func (s *Store) DeleteTargetHealthNotIn(ctx context.Context, t awsx.Target, keep []string) error {
-	return deleteTargetHealthNotIn(ctx, s.Pool, t, keep)
-}
-
+// deleteTargetHealthNotIn removes the target's rows whose target group ARN is not in keep.
 func deleteTargetHealthNotIn(ctx context.Context, q db, t awsx.Target, keep []string) error {
 	if keep == nil {
 		keep = []string{} // a nil slice would bind NULL and match nothing
