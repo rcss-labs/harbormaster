@@ -196,27 +196,17 @@ func TestRelay_OffWithoutAuthorizeURL(t *testing.T) {
 	}
 }
 
-func TestRelay_RepeatedFailuresAreLimited(t *testing.T) {
+// M1: a shared egress IP (claude.ai) must not be lockable out of /mcp or the
+// token endpoint by junk codes; the WAF and Harbormaster limit /oauth/token.
+func TestRelay_TokenFailuresNeverBlockTheCaller(t *testing.T) {
 	for _, failing := range []int{http.StatusBadRequest, http.StatusUnauthorized} {
 		h := relayHarness(t, respondJSON(failing, `{"error":"invalid_grant"}`))
-		for i := 0; i < failureLimit; i++ {
+		for i := 0; i < failureLimit*3; i++ {
 			resp := h.relay(t, formType, tokenForm(), nil)
 			readBody(t, resp)
 			if resp.StatusCode != failing {
-				t.Fatalf("upstream %d: attempt %d got %d", failing, i, resp.StatusCode)
+				t.Fatalf("upstream %d: attempt %d got %d, want it relayed unchanged", failing, i, resp.StatusCode)
 			}
-		}
-		before := len(h.upstream.seen())
-		resp := h.relay(t, formType, tokenForm(), nil)
-		readBody(t, resp)
-		if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
-			t.Errorf("upstream %d: after %d failures status %d retry-after %q", failing, failureLimit, resp.StatusCode, resp.Header.Get("Retry-After"))
-		}
-		if len(h.upstream.seen()) != before {
-			t.Errorf("upstream %d: a blocked client still reached Harbormaster", failing)
-		}
-		if resp.Header.Get("Cache-Control") != "no-store" {
-			t.Errorf("blocked answer Cache-Control = %q", resp.Header.Get("Cache-Control"))
 		}
 	}
 }
@@ -234,15 +224,34 @@ func TestRelay_SuccessAndServerErrorsDoNotCountAsFailures(t *testing.T) {
 	}
 }
 
-func TestRelay_FailuresShareTheLimiterWithMCP(t *testing.T) {
+func TestRelay_TokenFailuresDoNotBlockMCP(t *testing.T) {
 	h := relayHarness(t, respondJSON(http.StatusBadRequest, `{}`))
-	for i := 0; i < failureLimit; i++ {
+	for i := 0; i < failureLimit*3; i++ {
 		readBody(t, h.relay(t, formType, tokenForm(), nil))
 	}
 	resp := h.rpc(t, h.authed(), "tools/list", nil)
 	readBody(t, resp)
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("/mcp after relay failures: status %d, want 429 (same per-IP limiter)", resp.StatusCode)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		t.Error("/mcp blocked by token-endpoint failures")
+	}
+}
+
+// L6: only Retry-After is copied from the upstream answer.
+func TestRelay_PassesRetryAfterThrough(t *testing.T) {
+	h := relayHarness(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "17")
+		w.Header().Set("Set-Cookie", "a=b")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":"slow_down"}`)
+	})
+	resp := h.relay(t, formType, tokenForm(), nil)
+	readBody(t, resp)
+	if resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") != "17" {
+		t.Errorf("status %d Retry-After %q, want 429 and 17", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if resp.Header.Get("Set-Cookie") != "" {
+		t.Error("Set-Cookie must not be copied")
 	}
 }
 
