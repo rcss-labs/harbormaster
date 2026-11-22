@@ -181,7 +181,9 @@ func TestTokenLogSearch_ChargesScannedBytes(t *testing.T) {
 }
 
 func TestTokenLogSearch_CancelledSearchStillCharged(t *testing.T) {
-	env := newTokenLogSearchEnv(t, nil, scanning(1<<20))
+	// The query reports nothing scanned, and the search is dropped the moment it starts: no poll has seen a byte,
+	// yet AWS bills the scan, so the reservation stays charged.
+	env := newTokenLogSearchEnv(t, nil, scanning(0))
 	c := tokenClient(t, env.srv, env.st, "sam")
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -192,13 +194,40 @@ func TestTokenLogSearch_CancelledSearchStillCharged(t *testing.T) {
 		}
 	}()
 	waitFor(t, "the search to start", func() bool { return env.fk.Calls()["StartQuery"] >= 1 })
-	time.Sleep(50 * time.Millisecond) // let a poll report the scanned bytes
 	cancel()
 	<-done
-	waitFor(t, "the cancelled search to be charged", func() bool { return tokenUsage(t, env, "sam") > 0 })
-	if got := tokenUsage(t, env, "sam"); got != 1<<20 {
-		t.Errorf("usage = %d, want the 1 MiB the query had scanned", got)
+	waitFor(t, "the cancelled search to be settled", func() bool { return env.fk.Calls()["StopQuery"] >= 1 })
+	time.Sleep(200 * time.Millisecond) // the settle runs after StopQuery
+	if got := tokenUsage(t, env, "sam"); got != 2*gib {
+		t.Errorf("usage = %d, want the 2 GiB reservation (a dropped search is charged what it could have scanned)", got)
 	}
+}
+
+func TestTokenLogSearch_ReservesBudgetWhileRunning(t *testing.T) {
+	env := newTokenLogSearchEnv(t, nil, scanning(0))
+	c := tokenClient(t, env.srv, env.st, "sam")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		if resp, err := postWithBearer(ctx, c, searchReq(paymentsID())); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	waitFor(t, "the reservation", func() bool { return tokenUsage(t, env, "sam") == 2*gib })
+}
+
+func TestTokenLogSearch_ReservationIsCappedByRemainingBudget(t *testing.T) {
+	env := newTokenLogSearchEnv(t, func(cfg *config.Config) { cfg.TokenLogSearchDailyGB = 3 }, scanning(0))
+	addTokenUsage(t, env, "sam", 5*gib/2) // 0.5 GiB left, below the 2 GiB per-search cap
+	c := tokenClient(t, env.srv, env.st, "sam")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		if resp, err := postWithBearer(ctx, c, searchReq(paymentsID())); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	waitFor(t, "the reservation", func() bool { return tokenUsage(t, env, "sam") == 3*gib })
 }
 
 // postWithBearer sends a log search as the token client that the caller can abandon.

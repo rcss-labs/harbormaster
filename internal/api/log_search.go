@@ -255,11 +255,13 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	// one user cannot both pass the check; the cap of this search is whatever the budget has left.
 	viaToken := auth.IsToken(ctx)
 	searchMaxBytes := int64(0)
+	var reservation tokenScanReservation
 	if viaToken {
 		var allowed bool
-		if searchMaxBytes, allowed = s.tokenSearchCap(w, r, user.ID); !allowed {
+		if reservation, allowed = s.reserveTokenLogScan(w, r, user.ID); !allowed {
 			return
 		}
+		searchMaxBytes = reservation.bytes
 	}
 
 	// 6. Search. r.Context() ends when the client goes away, which stops the queries; so does BeginDrain
@@ -324,7 +326,7 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	// already be cancelled (that is why we are here), so the write detaches from it.
 	s.auditLogSearch(r, user, queried, req.Range, req.Query, from, to, found, targetStates)
 	if viaToken {
-		s.chargeTokenLogScan(r, user.ID, found.BytesScanned)
+		s.settleTokenLogScan(r, user.ID, reservation, found)
 	}
 
 	var queryErr *logs.QueryError
@@ -450,39 +452,57 @@ func (s *Server) postLogSearchEstimate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// tokenSearchCap decides whether a token-initiated search may run and with what scan cap: the smaller of the token
-// cap, the global cap and what the day's budget has left. When it may not, it has already answered (403 with the
-// budget at 0, 429 with Retry-After when the day's budget is used up) and returns false.
-func (s *Server) tokenSearchCap(w http.ResponseWriter, r *http.Request, userID int64) (int64, bool) {
+// tokenScanReservation is the part of the day's budget a token search holds while it runs.
+type tokenScanReservation struct {
+	bytes int64     // charged to the ledger up front; also the scan cap of this search
+	day   time.Time // the ledger day it was charged to, so a search spanning midnight settles the same row
+}
+
+// reserveTokenLogScan decides whether a token-initiated search may run and charges its budget up front: the smaller
+// of the token cap, the global cap and what the day's budget has left. The reservation is atomic in the store, so
+// searches cannot both take the same remaining budget, and a search dropped before any poll is still charged. When
+// the search may not run, it has already answered (403 with the budget at 0, 429 with Retry-After when the day's
+// budget is used up) and returns false.
+func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, userID int64) (tokenScanReservation, bool) {
 	state, err := s.tokenLogSearchState(r.Context(), userID)
 	if err != nil {
 		s.fail(w, err)
-		return 0, false
+		return tokenScanReservation{}, false
 	}
 	if state.DailyBytes == 0 {
 		s.fail(w, errTokenSearchOff)
-		return 0, false
+		return tokenScanReservation{}, false
 	}
-	remaining := state.DailyBytes - state.UsedBytes
-	if remaining <= 0 {
+	day := s.now()
+	reserved, err := s.Store.ReserveTokenLogScan(r.Context(), userID, day, state.DailyBytes, state.MaxBytesPerSearch)
+	if err != nil {
+		s.fail(w, err)
+		return tokenScanReservation{}, false
+	}
+	if reserved <= 0 {
 		retry := max(int(state.ResetsAt.Sub(s.now()).Seconds()), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		writeError(w, http.StatusTooManyRequests, "log_search_budget_exhausted", budgetExhaustedMessage)
-		return 0, false
+		return tokenScanReservation{}, false
 	}
-	capBytes := state.MaxBytesPerSearch
-	if capBytes == 0 || remaining < capBytes {
-		capBytes = remaining
-	}
-	return capBytes, true
+	return tokenScanReservation{bytes: reserved, day: day}, true
 }
 
-// chargeTokenLogScan adds what a token-initiated search scanned to the user's day. It runs on a context detached
-// from the request, like the audit write, so a search the client abandoned is charged all the same.
-func (s *Server) chargeTokenLogScan(r *http.Request, userID, bytesScanned int64) {
+// settleTokenLogScan replaces the reservation with what the search scanned. A search that finished refunds the
+// difference; one that was cut off (cancelled or timed out) keeps the whole reservation, because the scan it
+// started may bill beyond what the final statistics show. The charge is never below the bytes actually scanned.
+// It runs on a context detached from the request, like the audit write, so an abandoned search is settled all the same.
+func (s *Server) settleTokenLogScan(r *http.Request, userID int64, reservation tokenScanReservation, found logs.SearchResult) {
+	actual := found.BytesScanned
+	for _, target := range found.Targets {
+		if target.State == logs.StateCancelled || target.State == logs.StateTimeout {
+			actual = max(actual, reservation.bytes)
+			break
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), auditWriteTimeout)
 	defer cancel()
-	if err := s.Store.AddTokenLogScanUsage(ctx, userID, s.now(), bytesScanned); err != nil {
+	if err := s.Store.SettleTokenLogScan(ctx, userID, reservation.day, reservation.bytes, actual); err != nil {
 		s.log().Error("token log scan usage write failed", "error", err)
 	}
 }
