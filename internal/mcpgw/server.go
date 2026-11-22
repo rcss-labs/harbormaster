@@ -35,16 +35,14 @@ const serverInstructions = "This server is read-only: its tools can look at the 
 // whoamiRoute validates a token for every MCP method other than tools/call.
 var whoamiRoute = Route{Method: http.MethodGet, Pattern: "/api/tokens/current"}
 
-// failureLimiter counts upstream 401s per client IP (task 6 supplies the real one).
+// failureLimiter counts upstream 401s per client IP; a blocked IP gets 429
+// without an upstream call. Malformed tokens never count: they cost
+// Harbormaster nothing.
 type failureLimiter interface {
 	Blocked(ip string) bool
 	Failed(ip string)
+	RetryAfter(ip string) time.Duration
 }
-
-type noFailureLimiter struct{}
-
-func (noFailureLimiter) Blocked(string) bool { return false }
-func (noFailureLimiter) Failed(string)       {}
 
 // requestState carries one HTTP request's identity into the SDK's tool
 // handlers (through the request context) and the tool handler's outcome back.
@@ -88,7 +86,7 @@ func NewHandler(cfg Config, up *Upstream, log *slog.Logger) http.Handler {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	g := &gateway{cfg: cfg, up: up, log: log, limiter: noFailureLimiter{}}
+	g := &gateway{cfg: cfg, up: up, log: log, limiter: newFailureLimiter(failureLimit, failureWindow, time.Now)}
 
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "harbormaster", Title: "Harbormaster", Version: Version},
@@ -305,7 +303,8 @@ func (g *gateway) logRequest(method, tool string, upstreamStatus int, started ti
 	g.log.Info("mcp request", attrs...)
 }
 
-func (g *gateway) writeBlocked(w http.ResponseWriter, _ string) {
+func (g *gateway) writeBlocked(w http.ResponseWriter, ip string) {
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(g.limiter.RetryAfter(ip))))
 	writeJSONError(w, http.StatusTooManyRequests, "rate_limited")
 }
 
