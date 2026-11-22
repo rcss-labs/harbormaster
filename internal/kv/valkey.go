@@ -420,6 +420,10 @@ func (c *client) Subscribe(ctx context.Context, channel string, onMessage func(p
 		})
 		if subscribedOnce {
 			backoff = resubscribeMin
+		} else {
+			// An attempt that never subscribed means messages may have been published meanwhile: the subscription
+			// that finally succeeds is a re-establishment too, even if it is the first one that worked.
+			first = false
 		}
 		_ = err // the cause (a dropped connection, a refused dial) is retried; there is nothing to report
 		select {
