@@ -411,6 +411,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.notificationRoutes(mux) // alert notifications
 
 	s.configSearchRoutes(mux) // estate-wide config search
+	if s.Cfg.APITokens {
+		s.tokenRoutes(mux) // access tokens: absent (404) while HM_API_TOKENS is off
+	}
 
 	// Change-path reads (plan 02).
 	s.handle(mux, "GET /api/services/{serviceId}/task-definition", s.getTaskDefinition, routeOptions{Token: auth.ScopeRead})

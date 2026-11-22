@@ -166,3 +166,23 @@ func (s *Store) DeleteExpiredAPITokens(ctx context.Context, before time.Time) (i
 	}
 	return tag.RowsAffected(), nil
 }
+
+// CountAPITokensByUser returns the number of unexpired tokens per user, for users that hold at least one.
+func (s *Store) CountAPITokensByUser(ctx context.Context) (map[int64]int, error) {
+	rows, err := s.Pool.Query(ctx,
+		`select user_id, count(*) from api_tokens where expires_at >= now() group by user_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count api tokens by user: %w", err)
+	}
+	defer rows.Close()
+	counts := map[int64]int{}
+	for rows.Next() {
+		var userID int64
+		var n int
+		if err := rows.Scan(&userID, &n); err != nil {
+			return nil, fmt.Errorf("scan token count: %w", err)
+		}
+		counts[userID] = n
+	}
+	return counts, rows.Err()
+}

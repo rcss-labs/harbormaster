@@ -33,6 +33,8 @@ type UserDTO struct {
 	PendingLinkExpiresAt *time.Time `json:"pending_link_expires_at"`
 	Email                *string    `json:"email"`
 	DisplayName          *string    `json:"display_name"`
+	// TokenCount is how many unexpired access tokens the user holds (0 while tokens are off).
+	TokenCount int `json:"token_count"`
 }
 
 // ssoState derives the UserDTO SSO fields: a linked identity wins over a pending link, and a pending
@@ -61,10 +63,14 @@ func (s *Server) buildUserDTOs(r *http.Request, users []store.User) ([]UserDTO, 
 	if err != nil {
 		return nil, err
 	}
+	tokenCounts, err := s.tokenCountsByUser(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	out := make([]UserDTO, 0, len(users))
 	for _, u := range users {
 		dto := UserDTO{ID: u.ID, Username: u.Username, Admin: u.Admin, MustChangePassword: u.MustChangePassword,
-			LastSignInAt: u.LastSignInAt, CanSee: []TagDTO{},
+			LastSignInAt: u.LastSignInAt, CanSee: []TagDTO{}, TokenCount: tokenCounts[u.ID],
 			HasPassword: u.HasPassword(), BreakGlass: u.BreakGlass, Email: u.Email, DisplayName: u.DisplayName}
 		dto.SSO, dto.SSONameID, dto.PendingLinkExpiresAt = ssoState(u, s.Now())
 		for _, t := range tags {
