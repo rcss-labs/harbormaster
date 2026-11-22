@@ -1435,6 +1435,11 @@
       "sso_name_id": {
         "$null": "string"
       },
+      "token_count": {
+        "$optional": {
+          "$null": "number"
+        }
+      },
       "username": "string"
     }
   },
@@ -1569,6 +1574,16 @@
     "truncated": "boolean"
   },
   "logSearchEstimate": {
+    "budget_bytes": {
+      "$optional": {
+        "$null": "number"
+      }
+    },
+    "budget_remaining_bytes": {
+      "$optional": {
+        "$null": "number"
+      }
+    },
     "cost_usd": "number",
     "exceeds_scan_limit": "boolean",
     "groups": "number",
@@ -2522,6 +2537,9 @@
   "revisionDefinition": {
     "arn": "string",
     "definition": "any",
+    "environment_redacted": {
+      "$optional": "boolean"
+    },
     "registered_at": "time",
     "registered_by": "string",
     "revision": "number"
@@ -3587,6 +3605,9 @@
     },
     "definition": "any",
     "deployed_revision": "number",
+    "environment_redacted": {
+      "$optional": "boolean"
+    },
     "family": "string",
     "main_container": "string",
     "polled_at": "time",
@@ -3863,6 +3884,11 @@
         "sso": "string",
         "sso_name_id": {
           "$null": "string"
+        },
+        "token_count": {
+          "$optional": {
+            "$null": "number"
+          }
         },
         "username": "string"
       }
