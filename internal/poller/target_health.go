@@ -34,9 +34,6 @@ type TargetHealthLoop struct {
 	OnChange func(ctx context.Context, changed bool)
 }
 
-func (l *TargetHealthLoop) Name() string            { return tierTargetHealth }
-func (l *TargetHealthLoop) Interval() time.Duration { return l.Every }
-
 // Run stores the health of every target group attached to a service of the target. Target
 // groups that no longer exist are skipped; their stored rows stay until the service detaches them.
 func (l *TargetHealthLoop) Run(ctx context.Context, t awsx.Target) error {

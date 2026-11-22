@@ -34,10 +34,6 @@ func main() {
 	os.Exit(runWith(ctx, os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
-	return runWith(context.Background(), args, os.Getenv, os.Stdin, stdout, stderr)
-}
-
 // exitCode maps a command error to a process exit status: 2 usage, 3 user exists, 1 anything else.
 func exitCode(err error, stderr io.Writer) int {
 	switch {

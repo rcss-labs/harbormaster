@@ -67,7 +67,7 @@ func TestParseResult_SanitizesFindingLayerAndBase(t *testing.T) {
 	good, bad := sampleFinding(1), sampleFinding(2)
 	good.LayerID, bad.LayerID = digestA, "not-a-digest"
 	body := resultBody(t, digestA, []Finding{good, bad}, func(m map[string]any) {
-		m["base"] = BaseLayers{Ref: "node:20‮\n", Digest: "garbage", Error: "no\x00 access‮"}
+		m["base"] = BaseLayers{Ref: "node:20\u202e\n", Digest: "garbage", Error: "no\x00 access\u202e"}
 	})
 	res, err := ParseResult(body, digestA)
 	if err != nil {

@@ -8,7 +8,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test lint test-db test-kv run run-split split-smoke e2e tf-check test-it-exec \
+.PHONY: build test lint test-db test-kv run run-split split-smoke e2e tf-check test-it-exec staticcheck \
 	image check-image release release-check scanner-image check-scanner-image vulncheck icons check-notices soak \
 	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
 
@@ -24,6 +24,7 @@ test:
 lint:
 	@unformatted="$$(gofmt -l cmd internal)"; if [ -n "$$unformatted" ]; then echo "gofmt needed for:"; echo "$$unformatted"; exit 1; fi
 	go vet ./...
+	$(MAKE) staticcheck
 	if [ -f web/package.json ]; then npm --prefix web run lint && npm --prefix web run typecheck; fi
 	tools/check-notices.sh
 
@@ -136,6 +137,11 @@ release: lint test vulncheck build image check-image scanner-image check-scanner
 	@echo "image: harbormaster:$(VERSION)"
 	@echo "scanner image: harbormaster-scanner:$(VERSION)"
 	bin/harbormaster version
+
+# staticcheck runs the pinned analyser with staticcheck.conf (its defaults minus ST1005). A finding that is
+# intended carries a //lint:ignore with the reason, so the run stays at zero. Needs network access the first time.
+staticcheck:
+	go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
 
 # vulncheck scans the call graph of every package against the Go vulnerability database (needs network access).
 vulncheck:

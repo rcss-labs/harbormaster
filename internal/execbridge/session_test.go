@@ -179,6 +179,7 @@ func TestSession_Reorder_And_Duplicate_DeliverOnceInOrder(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	want := prompt + "ls\r\n" + "bin  dev  etc  home  proc  sys  tmp  usr  var\r\n" + prompt
+	//lint:ignore SA4006 got is re-read after a pause on purpose, to catch a late duplicate frame
 	got := c.waitText(t, func(txt string) bool { return len(txt) >= len(want) })
 	// give any stray duplicate a moment to (wrongly) show up
 	time.Sleep(100 * time.Millisecond)

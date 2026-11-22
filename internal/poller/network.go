@@ -47,9 +47,6 @@ type NetworkLoop struct {
 	Now     func() time.Time
 }
 
-func (l *NetworkLoop) Name() string            { return tierNetwork }
-func (l *NetworkLoop) Interval() time.Duration { return l.Every }
-
 // Run polls the VPCs, subnets, gateways, endpoints and in-use security groups of the target.
 func (l *NetworkLoop) Run(ctx context.Context, t awsx.Target) error {
 	api, err := l.Clients.EC2(ctx, t)

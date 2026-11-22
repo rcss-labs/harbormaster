@@ -46,6 +46,7 @@ func TestDedupKey_StableAndDistinctPerKind(t *testing.T) {
 	if got, want := DedupKey(a), "hm/111111111111/us-east-1/core/api/service_failing"; got != want {
 		t.Errorf("DedupKey = %q, want %q", got, want)
 	}
+	//lint:ignore SA4000 calling DedupKey twice is the stability check
 	if DedupKey(a) != DedupKey(a) {
 		t.Error("DedupKey is not stable")
 	}

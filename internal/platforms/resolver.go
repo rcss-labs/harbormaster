@@ -132,10 +132,10 @@ func (r *Resolver) RunOnce(ctx context.Context) error {
 
 // outcome is how one check ended.
 type outcome struct {
-	status, detail     string
-	registry, repo     string
-	digest             string
-	rateLimited, final bool
+	status, detail string
+	registry, repo string
+	digest         string
+	rateLimited    bool
 }
 
 // resolve checks one image and stores the result. The stored checked_at is when the current status began, so a run of

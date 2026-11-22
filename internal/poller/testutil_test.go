@@ -58,12 +58,6 @@ func waitFor(t *testing.T, within time.Duration, what string, cond func() bool) 
 	t.Fatalf("timed out after %v waiting for %s", within, what)
 }
 
-// holdsCoordinator reports whether the poller's lease manager holds the coordinator lease.
-func holdsCoordinator(p *Poller) bool {
-	m := p.Manager()
-	return m != nil && m.HoldsCoordinator()
-}
-
 // connectAccount gives the target's account a row: a slice lease exists only for a connected account.
 func connectAccount(t testing.TB, st *store.Store, target awsx.Target) {
 	t.Helper()

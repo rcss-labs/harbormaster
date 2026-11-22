@@ -103,7 +103,6 @@ type Server struct {
 	tamper Tamper
 
 	wrongOnce sync.Once
-	wrongCert *x509.Certificate
 	wrongKey  saml.SPKey
 	wrongErr  error
 }

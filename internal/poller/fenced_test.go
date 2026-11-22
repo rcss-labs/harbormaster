@@ -38,6 +38,7 @@ var fencedWrites = map[string]bool{
 // write through the Poller's own *store.Store, which the loops reach as p.store).
 func TestPoller_LoopsWriteOnlyThroughTheSliceWriter(t *testing.T) {
 	fset := token.NewFileSet()
+	//lint:ignore SA1019 the package has no build-tagged files, so ParseDir sees exactly what the build does
 	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
 	if err != nil {
 		t.Fatal(err)

@@ -260,7 +260,6 @@ func TestBus_CallsOnGapAfterReconnect(t *testing.T) {
 type fakeBus struct {
 	mu        sync.Mutex
 	published []string
-	subs      inbox
 	err       error
 }
 

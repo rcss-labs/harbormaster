@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 )
 
+//lint:ignore ST1008 test helper: callers assert the error and then the elapsed time, in that order
 func runShell(t *testing.T, cmd OSCommand, ctx context.Context, script string, stdoutMax int64) (CommandResult, error, time.Duration) {
 	t.Helper()
 	start := time.Now()
