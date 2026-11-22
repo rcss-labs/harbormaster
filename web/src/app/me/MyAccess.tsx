@@ -7,6 +7,7 @@ import { Table, tableClass } from '../../components/Table'
 import { TagChip } from '../../components/TagChip'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { AccessTokensCard } from './AccessTokensCard'
 import styles from './myAccess.module.css'
 
 /** The signed-in user's permissions on each tag. Global admins can do everything, so they get no table. */
@@ -18,12 +19,15 @@ export function MyAccess() {
 
   if (me.admin) {
     return (
-      <div className={styles.pageHead}>
-        <div className={styles.titles}>
-          <h1 className="hm-phone-title-sr">My access</h1>
-          <div className={styles.meta}>You are a global admin: you can do everything, on every tag.</div>
+      <>
+        <div className={styles.pageHead}>
+          <div className={styles.titles}>
+            <h1 className="hm-phone-title-sr">My access</h1>
+            <div className={styles.meta}>You are a global admin: you can do everything, on every tag.</div>
+          </div>
         </div>
-      </div>
+        <AccessTokensCard />
+      </>
     )
   }
 
@@ -102,6 +106,7 @@ export function MyAccess() {
         </Table>
       </div>
       )}
+      <AccessTokensCard />
     </>
   )
 }

@@ -21,6 +21,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `public_subnet_ids` | list(string) | `[]` | ALB when `internal = false`; must be non-empty unless `internal` (enforced by a precondition). |
 | `internal` | bool | `false` | Internal ALB in `private_subnet_ids`. |
 | `allowed_cidrs` | list(string) | `["0.0.0.0/0"]` | ALB ingress. |
+| `alb_ingress_security_group_ids` | list(string) | `[]` | Security groups allowed to reach the ALB on 443 in addition to `allowed_cidrs`. Set it to the `harbormaster-mcp` module's `task_security_group_id`. |
 | `certificate_arn` | string | required | ACM certificate for the HTTPS listener. |
 | `http_redirect` | bool | `true` | Port 80 redirects to 443. |
 | `image` | string | required | Full image reference including tag; must not end with `:latest`. |

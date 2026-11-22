@@ -4,6 +4,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -151,6 +153,18 @@ type Config struct {
 	// plan 06: metrics endpoint token; empty disables /metrics
 	MetricsToken string
 
+	// Access tokens (MCP phase 1). Everything is off unless APITokens is true: bearer tokens are ignored and the
+	// token routes answer 404.
+	APITokens             bool           // HM_API_TOKENS
+	TokenMaxTTL           time.Duration  // longest lifetime for a user who is neither SSO-linked nor an admin
+	TokenMaxTTLSSO        time.Duration  // longest lifetime for an SSO-linked user or an admin
+	TokenMaxPerUser       int            // unexpired personal tokens per user
+	TokenLogSearchMaxGB   int            // scan cap in GiB for one token-initiated log search
+	TokenLogSearchDailyGB int            // scan budget in GiB per user per UTC day for token searches; 0 turns them off
+	TokenRedactEnv        bool           // redact environment values in task definitions answered to tokens
+	MCPPublicURL          string         // the MCP gateway's public base URL, shown in the UI's connect instructions
+	MCPGatewayCIDRs       []netip.Prefix // source ranges of the MCP gateway tasks; behind one, the client IP is the X-Forwarded-For entry to its left
+
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
 
@@ -243,6 +257,25 @@ func (r *envReader) list(name string) []string {
 		}
 	}
 	return items
+}
+
+// prefixes parses a comma-separated list of CIDRs. A range that would match every address is refused, because it
+// would let any peer pass as the gateway.
+func (r *envReader) prefixes(name string) []netip.Prefix {
+	var parsed []netip.Prefix
+	for _, item := range r.list(name) {
+		prefix, err := netip.ParsePrefix(item)
+		if err != nil {
+			r.fail(name, "%q is not a CIDR such as 10.0.8.0/22", item)
+			return nil
+		}
+		if prefix.Bits() == 0 {
+			r.fail(name, "%q matches every address; name the gateway subnets", item)
+			return nil
+		}
+		parsed = append(parsed, prefix.Masked())
+	}
+	return parsed
 }
 
 func (r *envReader) fail(name, format string, args ...any) {
@@ -355,6 +388,17 @@ func Load(getenv func(string) string) (Config, error) {
 		// plan 06: metrics endpoint token
 		MetricsToken: strings.TrimSpace(reader.text("HM_METRICS_TOKEN", "")),
 
+		// MCP phase 1: access tokens
+		APITokens:             reader.boolean("HM_API_TOKENS", false),
+		TokenMaxTTL:           reader.duration("HM_TOKEN_MAX_TTL", 2160*time.Hour),
+		TokenMaxTTLSSO:        reader.duration("HM_TOKEN_MAX_TTL_SSO", 168*time.Hour),
+		TokenMaxPerUser:       reader.integer("HM_TOKEN_MAX_PER_USER", 10),
+		TokenLogSearchMaxGB:   reader.integer("HM_TOKEN_LOG_SEARCH_MAX_GB", 2),
+		TokenLogSearchDailyGB: reader.integer("HM_TOKEN_LOG_SEARCH_DAILY_GB", 20),
+		TokenRedactEnv:        reader.boolean("HM_TOKEN_REDACT_ENV", false),
+		MCPPublicURL:          strings.TrimSpace(reader.text("HM_MCP_PUBLIC_URL", "")),
+		MCPGatewayCIDRs:       reader.prefixes("HM_MCP_GATEWAY_CIDRS"),
+
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
 			Prefix: reader.text("HM_KV_PREFIX", "hm"),
@@ -433,10 +477,45 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := validateKV(cfg.KV); err != nil {
 		return Config{}, err
 	}
+	if err := validateTokens(cfg); err != nil {
+		return Config{}, err
+	}
 	if cfg.DatabaseURL == "" && cfg.DatabaseSecretARN == "" {
 		return Config{}, errors.New("HM_DATABASE_URL or HM_DATABASE_SECRET_ARN must be set")
 	}
 	return cfg, nil
+}
+
+// validateTokens checks the access token settings. They are checked whether or not HM_API_TOKENS is on, so a bad
+// value is caught before anyone turns tokens on.
+func validateTokens(cfg Config) error {
+	if cfg.TokenMaxTTL <= 0 {
+		return errors.New("HM_TOKEN_MAX_TTL: must be positive")
+	}
+	if cfg.TokenMaxTTLSSO <= 0 {
+		return errors.New("HM_TOKEN_MAX_TTL_SSO: must be positive")
+	}
+	if cfg.TokenMaxTTLSSO > cfg.TokenMaxTTL {
+		return errors.New("HM_TOKEN_MAX_TTL_SSO: must not be above HM_TOKEN_MAX_TTL")
+	}
+	if cfg.TokenMaxPerUser < 1 {
+		return errors.New("HM_TOKEN_MAX_PER_USER: must be at least 1")
+	}
+	if cfg.TokenLogSearchMaxGB < 0 {
+		return errors.New("HM_TOKEN_LOG_SEARCH_MAX_GB: must be 0 or positive")
+	}
+	if cfg.TokenLogSearchDailyGB < 0 {
+		return errors.New("HM_TOKEN_LOG_SEARCH_DAILY_GB: must be 0 (token log search off) or positive")
+	}
+	if cfg.MCPPublicURL != "" {
+		parsed, err := url.Parse(cfg.MCPPublicURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+			parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" ||
+			strings.HasSuffix(cfg.MCPPublicURL, "/") || strings.ContainsAny(cfg.MCPPublicURL, "?#") {
+			return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
+		}
+	}
+	return nil
 }
 
 // ValidateScanLaunch checks the scanner launch settings. It is separate from Load

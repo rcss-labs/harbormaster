@@ -141,7 +141,7 @@ func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Ses
 }
 
 // ChangePassword verifies the current password, sets the new one and ends every session of the
-// user except the one carried in ctx (see SessionFrom).
+// user except the one carried in ctx (see SessionFrom), and every one of the user's access tokens.
 func (a *Service) ChangePassword(ctx context.Context, userID int64, current, next string) error {
 	user, err := a.store.GetUser(ctx, userID)
 	if err != nil {
@@ -160,32 +160,26 @@ func (a *Service) ChangePassword(ctx context.Context, userID int64, current, nex
 	if err != nil {
 		return err
 	}
-	if err := a.store.SetPassword(ctx, userID, hash, false); err != nil {
-		return err
-	}
+	keep := ""
 	if sess, ok := SessionFrom(ctx); ok && sess.UserID == userID {
-		err = a.store.DeleteSessionsForUserExcept(ctx, userID, sess.IDHash)
-	} else {
-		err = a.store.DeleteSessionsForUser(ctx, userID)
+		keep = sess.IDHash
 	}
-	if err != nil {
+	if err := a.store.SetPasswordEndingCredentials(ctx, userID, hash, false, keep); err != nil {
 		return err
 	}
 	a.audit(ctx, &user, "password_change", "Changed password.", "")
 	return nil
 }
 
-// AdminResetPassword sets a new temporary password that must be changed at next sign-in and ends all sessions.
+// AdminResetPassword sets a new temporary password that must be changed at next sign-in and ends all sessions
+// and access tokens.
 func (a *Service) AdminResetPassword(ctx context.Context, userID int64) (string, error) {
 	temp := GenerateTemporaryPassword()
 	hash, err := HashPassword(temp)
 	if err != nil {
 		return "", err
 	}
-	if err := a.store.SetPassword(ctx, userID, hash, true); err != nil {
-		return "", err
-	}
-	if err := a.store.DeleteSessionsForUser(ctx, userID); err != nil {
+	if err := a.store.SetPasswordEndingCredentials(ctx, userID, hash, true, ""); err != nil {
 		return "", err
 	}
 	return temp, nil

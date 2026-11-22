@@ -443,6 +443,8 @@ export interface UserDTO {
   pending_link_expires_at: string | null
   email: string | null
   display_name: string | null
+  /** Unexpired personal access tokens; absent while tokens are off (HM_API_TOKENS=false). */
+  token_count?: number
 }
 export interface UsersDTO {
   items: UserDTO[]

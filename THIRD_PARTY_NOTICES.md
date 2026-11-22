@@ -226,10 +226,10 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 
 ### github.com/crewjam/saml
 
-- Version: v0.5.1
+- Version: v0.5.2
 - Licence: BSD-2-Clause
 - Copyright: Copyright (c) 2015, Ross Kinder
-- Source: https://github.com/crewjam/saml (licence file: `LICENSE` at tag v0.5.1)
+- Source: https://github.com/crewjam/saml (licence file: `LICENSE` at tag v0.5.2)
 
 ### github.com/russellhaering/goxmldsig
 
@@ -239,10 +239,10 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 
 ### github.com/beevik/etree
 
-- Version: v1.7.0
+- Version: v1.8.1
 - Licence: BSD-2-Clause
 - Copyright: Copyright 2015-2024 Brett Vickers. All rights reserved.
-- Source: https://github.com/beevik/etree (licence file: `LICENSE` at tag v1.7.0)
+- Source: https://github.com/beevik/etree (licence file: `LICENSE` at tag v1.8.1)
 
 ### github.com/jonboulle/clockwork
 
@@ -270,6 +270,54 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 - Licence: Apache-2.0
 - Source: https://github.com/valkey-io/valkey-go (licence file: `LICENSE` at tag v1.0.80)
 - Note: the client for the optional Valkey or Redis store; imported only by `internal/kv/valkey.go`.
+
+### github.com/modelcontextprotocol/go-sdk
+
+- Version: v1.8.0
+- Licence: Apache-2.0 for new contributions and relicensed code; MIT for older contributions not yet relicensed (the project is moving from MIT to Apache-2.0; both texts are in its `LICENSE`)
+- Copyright: Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.
+- Source: https://github.com/modelcontextprotocol/go-sdk (licence file: `LICENSE` at tag v1.8.0)
+- Note: the MCP protocol library of the `harbormaster-mcp` gateway; imported only by `internal/mcpgw`. The modules below are linked into that binary through it.
+
+### github.com/google/jsonschema-go
+
+- Version: v0.4.3
+- Licence: MIT
+- Copyright: Copyright (c) 2025 JSON Schema Go Project Authors
+- Source: https://github.com/google/jsonschema-go (licence file: `LICENSE` at tag v0.4.3)
+- Note: dependency of modelcontextprotocol/go-sdk.
+
+### github.com/segmentio/encoding
+
+- Version: v0.5.4
+- Licence: MIT
+- Copyright: Copyright (c) 2019 Segment.io, Inc.
+- Source: https://github.com/segmentio/encoding (licence file: `LICENSE` at tag v0.5.4)
+- Note: dependency of modelcontextprotocol/go-sdk.
+
+### github.com/segmentio/asm
+
+- Version: v1.1.3
+- Licence: MIT
+- Copyright: Copyright (c) 2021 Segment
+- Source: https://github.com/segmentio/asm (licence file: `LICENSE` at tag v1.1.3)
+- Note: dependency of segmentio/encoding.
+
+### github.com/yosida95/uritemplate/v3
+
+- Version: v3.0.2
+- Licence: BSD-3-Clause
+- Copyright: Copyright (C) 2016, Kohei YOSHIDA
+- Source: https://github.com/yosida95/uritemplate (licence file: `LICENSE` at tag v3.0.2)
+- Note: dependency of modelcontextprotocol/go-sdk.
+
+### golang.org/x/oauth2 and golang.org/x/time
+
+- Versions: v0.35.0 and v0.15.0
+- Licence: BSD-3-Clause
+- Copyright: Copyright 2009 The Go Authors.
+- Source: https://go.googlesource.com/oauth2 and https://go.googlesource.com/time (licence file: `LICENSE` at each tag)
+- Note: dependencies of modelcontextprotocol/go-sdk.
 
 ### Syft
 

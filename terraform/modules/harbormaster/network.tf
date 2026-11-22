@@ -12,6 +12,17 @@ resource "aws_security_group" "alb" {
   }
 
   dynamic "ingress" {
+    for_each = length(var.alb_ingress_security_group_ids) > 0 ? [1] : []
+    content {
+      description     = "HTTPS from the MCP gateway"
+      from_port       = 443
+      to_port         = 443
+      protocol        = "tcp"
+      security_groups = var.alb_ingress_security_group_ids
+    }
+  }
+
+  dynamic "ingress" {
     for_each = var.http_redirect ? [1] : []
     content {
       description = "HTTP (redirected to HTTPS)"

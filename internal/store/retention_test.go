@@ -391,3 +391,43 @@ func TestRunRetention_DeletesFinishedRunsWithTheirImages(t *testing.T) {
 		t.Fatalf("runs left = %d (want 2), batch rows of deleted run = %d (want 0)", runs, batchRows)
 	}
 }
+
+func TestRetention_RemovesExpiredTokensAndOldUsage(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	now := time.Now()
+	day := 24 * time.Hour
+	u, _ := s.CreateUser(ctx, "alice", "h", false, false)
+	for id, expires := range map[string]time.Time{
+		"hmp_goneexpired1": now.Add(-2 * day),
+		"hmp_stillkept111": now.Add(-time.Hour), // expired, but inside the 24 h grace
+		"hmp_livelivelive": now.Add(day),
+	} {
+		mustCreateToken(t, s, store.APIToken{PublicID: id, UserID: u.ID, Kind: "pat", Name: "n", SecretHash: "h",
+			Scope: "read", AuthSource: "password", ExpiresAt: expires})
+	}
+	if err := s.AddTokenLogScanUsage(ctx, u.ID, now.Add(-40*day), 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTokenLogScanUsage(ctx, u.ID, now.Add(-day), 5); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.RunRetention(ctx, now, store.Retention{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["api_tokens"] != 1 || res["token_log_scan_usage"] != 1 {
+		t.Fatalf("result = %v, want one token and one usage row", res)
+	}
+	var tokens, usage int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from api_tokens`).Scan(&tokens); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, `select count(*) from token_log_scan_usage`).Scan(&usage); err != nil {
+		t.Fatal(err)
+	}
+	if tokens != 2 || usage != 1 {
+		t.Fatalf("remaining tokens=%d usage=%d, want 2 and 1", tokens, usage)
+	}
+}

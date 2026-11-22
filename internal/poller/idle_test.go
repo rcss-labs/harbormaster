@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
@@ -139,5 +141,42 @@ func TestRunIdleMonitor_ChecksImmediatelyAndResetsOnExit(t *testing.T) {
 	<-done
 	if p.idle.isIdle() {
 		t.Error("idle state not reset on exit (leadership lost)")
+	}
+}
+
+// TestIdle_TokenCallKeepsFullPace uses the real store: with no sessions at all, only an access token's last use
+// stands between the poller and idle mode.
+func TestIdle_TokenCallKeepsFullPace(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	user, err := st.CreateUser(ctx, "agent", "h", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := st.CreateAPIToken(ctx, store.APIToken{PublicID: "hmp_aaaaaaaaaaaa", UserID: user.ID, Kind: "pat",
+		Name: "n", SecretHash: "h", Scope: "read", AuthSource: "password", ExpiresAt: idleNow.Add(24 * time.Hour)}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TouchAPIToken(ctx, tok.ID, idleNow.Add(-2*time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{IdleAfter: 10 * time.Minute, IdleInterval: 5 * time.Minute, Telemetry: telemetry.New()}
+	p := New(st, nil, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p.cfg.Jitter = 0
+	clock := idleNow
+	p.now = func() time.Time { return clock }
+	l := newLoop(p, loopTarget, nil)
+	fast := newTier("fast", 10*time.Second)
+
+	p.checkIdle(ctx)
+	if d, _ := l.tierDelay(fast); d != 10*time.Second {
+		t.Fatalf("delay with a recent token call = %v, want the normal 10s", d)
+	}
+	clock = idleNow.Add(9 * time.Minute) // the call is now 11 minutes old, past IdleAfter
+	p.checkIdle(ctx)
+	if d, _ := l.tierDelay(fast); d != 5*time.Minute {
+		t.Fatalf("delay after IdleAfter with no further call = %v, want the idle 5m", d)
 	}
 }

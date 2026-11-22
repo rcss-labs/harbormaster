@@ -147,7 +147,10 @@ func TestVerify_NameIDNamespaceHandling(t *testing.T) {
 	}{
 		{name: "normal"},
 		{name: "only_foreign", omit: true, foreign: "admin@example.test", reason: saml.ReasonNoNameID},
-		{name: "foreign_after_real_differs", edit: foreignAfterReal, reason: saml.ReasonValidatorDisagreement},
+		// crewjam v0.5.2 matches NameID in the assertion namespace only, so a
+		// foreign NameID is ignored (as it is when it comes first) and the real
+		// identity is kept.
+		{name: "foreign_after_real_ignored", edit: foreignAfterReal},
 		{name: "foreign_before_real_keeps_real_identity", edit: func(el *etree.Element) {
 			subjectOf(el).InsertChildAt(0, foreignEl("NameID", "admin@example.test"))
 		}},
@@ -430,13 +433,14 @@ func TestVerify_AttributesAndAuthnStatementReadFromAssertionNamespace(t *testing
 			}})), saml.ReasonNoAuthnStatement)
 		})
 	})
-	t.Run("foreign_authn_statement_is_a_disagreement", func(t *testing.T) {
+	t.Run("extra_foreign_authn_statement_is_ignored", func(t *testing.T) {
 		h := newHarness(t)
-		// crewjam folds the foreign statement into its struct, so the views differ.
-		h.wantReason(h.respond(fakeidp.Tamper{EditAssertion: func(el *etree.Element) {
+		// crewjam v0.5.2 no longer folds a foreign statement into its struct, so
+		// both layers see only the real AuthnStatement.
+		wantAlex(t, h, h.respond(fakeidp.Tamper{EditAssertion: func(el *etree.Element) {
 			f := foreignEl("AuthnStatement", "")
 			f.CreateAttr("SessionNotOnOrAfter", time.Now().Add(time.Minute).UTC().Format(time.RFC3339))
 			el.AddChild(f)
-		}}), saml.ReasonValidatorDisagreement)
+		}}))
 	})
 }

@@ -137,6 +137,32 @@ func (s *Store) SetPassword(ctx context.Context, id int64, hash string, mustChan
 		id, hash, mustChange)
 }
 
+// SetPasswordEndingCredentials replaces the password and, in the same transaction, deletes the user's sessions
+// (all but the one whose id hash is keepSessionIDHash, when that is non-empty) and every access token, so a failure
+// leaves the old password in place rather than a new one beside live credentials. Returns ErrNotFound if absent.
+func (s *Store) SetPasswordEndingCredentials(ctx context.Context, id int64, hash string, mustChange bool, keepSessionIDHash string) error {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx,
+		`update users set password_hash = $2, must_change_password = $3 where id = $1`, id, hash, mustChange)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `delete from sessions where user_id = $1 and id_hash <> $2`, id, keepSessionIDHash); err != nil {
+		return fmt.Errorf("end sessions: %w", err)
+	}
+	if _, err := deleteAPITokensForUser(ctx, tx, id, ""); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // TouchSignIn records the time of a successful sign-in. Returns ErrNotFound if absent.
 func (s *Store) TouchSignIn(ctx context.Context, id int64, at time.Time) error {
 	return s.execExpectOne(ctx, `update users set last_sign_in_at = $2 where id = $1`, id, at)
@@ -377,7 +403,7 @@ func (s *Store) ClearPendingLink(ctx context.Context, id int64) error {
 		 where id = $1 and pending_link_name_id is not null`, id)
 }
 
-// UnlinkSSO detaches the user's SSO identity and ends their SSO sessions. When the user has no
+// UnlinkSSO detaches the user's SSO identity and ends their SSO sessions and SSO-created access tokens. When the user has no
 // password it sets newHash with must_change_password so they keep a credential (passwordSet).
 // ErrNotLinked when no identity is bound; ErrNotFound when the user is absent.
 func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwordSet bool, sessionsEnded int64, err error) {
@@ -412,6 +438,9 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 	tag, err := tx.Exec(ctx, `delete from sessions where user_id = $1 and auth_source = 'saml'`, id)
 	if err != nil {
 		return false, 0, fmt.Errorf("end saml sessions: %w", err)
+	}
+	if _, err := deleteAPITokensForUser(ctx, tx, id, "saml"); err != nil {
+		return false, 0, err
 	}
 	return !hasPassword, tag.RowsAffected(), tx.Commit(ctx)
 }

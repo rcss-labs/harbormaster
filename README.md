@@ -93,6 +93,8 @@ Replace `<acct>` with your AWS account ID. The image must be pinned to a tag; th
 
 The image-security feature runs scans in a separate scanner image: `make scanner-image VERSION=v1.0.0` (same `ARCH` rule) builds `harbormaster-scanner:v1.0.0` from `Dockerfile.scanner`, and `make check-scanner-image VERSION=v1.0.0` checks it. The build downloads Syft and Grype, verifies their cosign signatures and checksums (`tools/scanner-verify.sh`, versions and identities pinned as `ARG`s) and fails if anything does not verify. Tag and push it to ECR the same way as the main image.
 
+The MCP gateway runs from its own small image: `make mcp-image VERSION=v1.0.0` (same `ARCH` rule) builds `harbormaster-mcp:v1.0.0` from `Dockerfile.mcp` (the gateway binary alone on distroless nonroot, no credentials), and `make check-mcp-image VERSION=v1.0.0` checks it: non-root, healthcheck, no shell, static binary, and no database, cache, AWS or SAML module linked in (`tools/check-mcp-image.sh`). Tag and push it to ECR the same way as the main image.
+
 ### Terraform and the harbormaster module
 
 Deploy Harbormaster with the `harbormaster` module, pinned to the release tag:
@@ -333,6 +335,49 @@ Terms are separated by spaces and must all hold for the same service. Text such 
 - **CSV.** Export CSV is built in your browser from the rows shown (or the ticked rows), one line per container, with the columns `service, cluster, account_id, account_name, region, permission_tag, family, revision, matched_revision, previous_revision, container, image, image_tag, base_image, ports, env_names, secret_names, task_role, execution_role, log_group, matched, service_id`. Cells that start with `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not run them.
 - **Use with scripts and Bulk changes.** `GET /api/config-search?q=` returns stable service `id`s and is evaluated with the caller's permissions each time. Nothing is stored.
 
+## MCP: AI access
+
+Harbormaster can be read by AI tools such as Claude Code through a small public service, the MCP gateway (`harbormaster-mcp`, an image of its own, see [Build and push the image](#build-and-push-the-image) and the `harbormaster-mcp` Terraform module). Nothing here can change anything.
+
+- **What the gateway is.** A thin, read-only translator: it speaks the Model Context Protocol on `POST /mcp`, and each tool call becomes one read request to Harbormaster's own API, carrying the caller's own access token. It holds no credentials, no database or cache access and no AWS permissions; its task role has no policies. It is the only public piece: Harbormaster stays on an internal load balancer.
+- **What it is not.** It cannot restart, scale, deploy, sleep, wake or edit anything, and no tool exists for it. It acts as the token's user, so it sees exactly the tags that user sees, and log lines only where the user has Logs. An admin's token is not more powerful than the admin's own read access. Details and limits of tokens are in [Access tokens](#access-tokens).
+- **The tools (39).** `whoami` shows who you are, what you can see and how much log-search budget is left today. Estate: `get_overview`, `list_clusters`, `get_cluster`, `list_services`, `get_service`, `list_service_tasks`, `list_tasks`, `search`, `list_alerts`. Configuration: `get_task_definition`, `list_revisions`, `get_revision`, `get_scaling`, `get_desired_count`, `get_service_offhours`, `get_arm64_readiness`, `search_config` (names only, never values). Troubleshooting: `get_service_timeline`, `get_timeline_task`, `list_service_operations`, `get_target_health`, `get_service_metrics`, `get_service_logs`, `list_log_search_services`, `estimate_log_search`, `search_logs`. Security: `list_security`, `get_service_security`, `get_image_security`. Analytics: `get_cost_analytics`, `get_capacity_analytics`, `get_reliability_analytics`, `get_delivery_analytics`, `get_operations_analytics`. Network and storage: `list_networks`, `list_region_vpcs`, `get_vpc_tree`, `list_storage`.
+- **Connecting Claude Code.** Create a token on the My access page, then:
+
+  ```
+  claude mcp add --transport http harbormaster https://<host>/mcp --header "Authorization: Bearer hmp_..."
+  ```
+
+  This puts the token in your shell history and in plain text in `~/.claude.json`. To keep it out of both, store a reference instead. Read the token without echoing it, export it, and add the server with the variable name in single quotes, so your shell does not expand it:
+
+  ```
+  read -rs HARBORMASTER_MCP_TOKEN && export HARBORMASTER_MCP_TOKEN
+  claude mcp add --transport http harbormaster https://<host>/mcp --header 'Authorization: Bearer ${HARBORMASTER_MCP_TOKEN}'
+  ```
+
+  Claude Code expands `${VAR}` in a server's `headers` when it loads its MCP configuration ([docs](https://code.claude.com/docs/en/mcp)), so the variable must be set in the environment you start Claude Code from (put the export in a file only you can read, not in a committed one). Use your own variable name: Claude Code reads its own credential variables, such as `ANTHROPIC_API_KEY`, as empty in remote headers. The docs do not say whether `claude mcp add --header` stores the `${...}` text or the expanded value, so run `claude mcp get harbormaster` and confirm the header still shows `${HARBORMASTER_MCP_TOKEN}` and not the secret. If it shows the secret, remove the server and add the same entry to your MCP configuration by hand, with `"headers": { "Authorization": "Bearer ${HARBORMASTER_MCP_TOKEN}" }`. To fetch the token at connect time instead (for example from a password manager), use a `headersHelper` command that prints `{"Authorization": "Bearer ..."}` to stdout. claude.ai and Claude Desktop connectors are not supported yet.
+- **Token lifetimes.** Up to 90 days for a password user who is not an admin. A user linked to single sign-on and every global admin get at most 7 days. Harbormaster does not learn when someone leaves your identity provider, so a token must not outlive the 7-day browser session cap; renewing means signing in through SSO and creating a new token.
+- **Log search.** A token-initiated search may scan at most 2 GiB, and each user's tokens share 20 GiB per UTC day (`429 log_search_budget_exhausted` after that, until 00:00 UTC). `whoami` and `estimate_log_search` report what is left. Browser searches are not charged.
+- **What is logged.** The gateway writes one line per request: method, tool name, status, duration, client IP and the token's public id (`hmp_<id>`), never the token, a header, a request body or a result. Harbormaster records `token_create` and `token_revoke` in the audit log, tags log searches made with a token with `via: token` and the token id, and adds `token_id` to its request log. The AWS WAF log on the gateway's load balancer redacts the `authorization` and `cookie` headers.
+- **Prompt injection.** Log lines, environment names and stopped-task reasons are text written by your applications, and possibly by an attacker. The model reads it. The tools cannot write, so the damage is limited to what the model does with its other tools and to what it reads out. If an agent has this server and also a tool that can change things (a shell, a cloud CLI, a ticket system), treat anything it reads here as untrusted input to that tool.
+- **Data leaves your network.** Everything a tool returns is sent to the AI provider, environment variable values included. Set `HM_TOKEN_REDACT_ENV=true` on Harbormaster to replace environment values with `[redacted]` for tokens. A compromised gateway task could also send what passes through it to the internet, because it reaches Harbormaster through a NAT gateway with outbound 443; it holds no credential at rest, and the tokens it sees are read-only, expiring and revocable.
+- **A busy agent keeps polling fast.** Token calls count as activity, so an agent that calls at least every `HM_POLL_IDLE_AFTER` holds polling at full pace until its token ends.
+- **Rollout and operations.** See `docs/ops/mcp-runbook.md` in the source tree (not published with the repository).
+
+## Access tokens
+
+An access token lets a script or an AI tool read Harbormaster as you, over the API, without a browser session. Tokens are off until `HM_API_TOKENS=true`; with it unset the token routes answer 404 and an `Authorization` header is ignored.
+
+- **What a token is.** An opaque secret that starts with `hmp_`, created on the My access page. The secret is shown once when you create it; Harbormaster stores only a hash, so a lost token is replaced, never recovered. Token names and ids appear in the audit log (`token_create`, `token_revoke`), never the secret.
+- **Read-only.** A token sees what its user sees and nothing more: the same tags, and Logs only where the user has Logs. It can call only an explicit list of read routes (overview, clusters, services, tasks, metrics, alerts, analytics, security, timeline, off-hours, networks, storage, log search, config search and whoami). Every other route, writes and every admin screen included, answers `403 token_not_allowed`, an admin's token too. A token cannot create, list or revoke tokens.
+- **Lifetimes.** The longest lifetime is `HM_TOKEN_MAX_TTL` (90 days by default). A user who is linked to single sign-on, and any global admin, is capped at `HM_TOKEN_MAX_TTL_SSO` (7 days). Each user holds at most `HM_TOKEN_MAX_PER_USER` tokens (10).
+- **Revocation.** Tokens end wherever sessions end: a password change or reset, removing or granting global admin, unlinking single sign-on (SSO tokens only) and turning single sign-on off (every user's SSO tokens). An admin can also revoke any user's token on the Users screen, and you can revoke your own at any time. A locked account does not stop tokens; removing the user or revoking the token does.
+- **Log search budget.** Searches made with a token share a daily scan budget per user, `HM_TOKEN_LOG_SEARCH_DAILY_GB` (20 GiB per UTC day; `0` turns token log search off), and one search may scan at most `HM_TOKEN_LOG_SEARCH_MAX_GB` (2 GiB, and never above `HM_LOG_SEARCH_MAX_GB`). A search's cap is also limited to what is left of the day's budget; when it is used up the answer is `429 log_search_budget_exhausted` until 00:00 UTC. What a search scanned is charged even when the caller gave up on it. Searches made in the browser are not charged.
+- **Environment values.** Task definition and revision answers show environment values to a token just as the UI shows them to its user. `HM_TOKEN_REDACT_ENV=true` replaces every environment value with `[redacted]` for tokens (names and secret references stay) and marks the answer `environment_redacted`.
+- **Polling.** A token call counts as activity like an open browser session: it keeps the poller at full pace (see `HM_POLL_IDLE_AFTER`). An unattended agent that calls at least every `HM_POLL_IDLE_AFTER` therefore holds polling at full pace until its token expires or is revoked. The audit log and `GET /api/tokens/current` show which token it is.
+- **Rate limit.** 120 requests in a burst, then 2 per second per user (HTTP 429 with `Retry-After`).
+- **Retention.** An expired token is deleted a day after it expires; the daily search ledger is kept 35 days.
+
 ## Terraform and Harbormaster deploys
 
 AWS is the source of truth, and Terraform will see a revision registered here as
@@ -421,7 +466,7 @@ All settings are environment variables, read by `internal/config`. Durations use
 | `HM_FOCUS_MAX_OBJECTS` | `50` | Most clusters and services read at the focus interval across the whole install; a page over the cap stays at the normal pace and says so |
 | `HM_FOCUS_MAX_PER_USER` | `5` | Most pages one user can have read at the focus interval at once |
 | `HM_FOCUS_MAX_CALLS_PER_SEC` | `5` | AWS calls a slice's focus reads may make per second in each rate category (burst is twice that). When more pages are open than this allows, each page's interval stretches and the page shows it |
-| `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen) for this long puts the poller in idle mode. `0` disables idle mode |
+| `HM_POLL_IDLE_AFTER` | `10m` | No UI activity (no unexpired session seen and no access token used) for this long puts the poller in idle mode. `0` disables idle mode |
 | `HM_POLL_IDLE_INTERVAL` | `5m` | While idle, every AWS poll tier waits at least this long between runs (slower tiers keep their own interval). Minimum 1s when idle mode is enabled. Normal speed resumes within about 30s of activity returning; see `harbormaster_poller_idle` |
 | `HM_OFFHOURS_INTERVAL` | `60s` | How often the coordinator reconciles off-hours schedules. Minimum 1s |
 | `HM_NOTIFY_INTERVAL` | `10s` | How often the coordinator plans and sends alert notifications. Minimum 1s |
@@ -528,6 +573,34 @@ The Cost tab estimates the monthly run rate of the running Fargate tasks, groupe
 | `HM_EXEC_IDLE_TIMEOUT` | `20m` | Close a terminal session after this long without keystrokes or resizes. Output does not count |
 | `HM_EXEC_MAX_DURATION` | `4h` | Close a terminal session this long after it opened |
 | `HM_EXEC_MAX_SESSIONS_PER_USER` | `3` | Concurrent terminal sessions per user, across all tasks when `HM_KV_URL` is set, otherwise per task (see Running more than one task) |
+
+### Access tokens (settings)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_API_TOKENS` | `false` | Turns access tokens on: bearer authentication and the token routes. Off, nothing changes |
+| `HM_TOKEN_MAX_TTL` | `2160h` | Longest lifetime of a new token (90 days) |
+| `HM_TOKEN_MAX_TTL_SSO` | `168h` | Longest lifetime for a user linked to single sign-on and for global admins (7 days); not above `HM_TOKEN_MAX_TTL` |
+| `HM_TOKEN_MAX_PER_USER` | `10` | Unexpired tokens one user may hold (at least 1) |
+| `HM_TOKEN_LOG_SEARCH_MAX_GB` | `2` | Most GiB one token-initiated log search may scan |
+| `HM_TOKEN_LOG_SEARCH_DAILY_GB` | `20` | GiB one user's tokens may scan per UTC day; `0` turns log search off for tokens |
+| `HM_TOKEN_REDACT_ENV` | `false` | Replace environment values with `[redacted]` in task definition answers to tokens |
+| `HM_MCP_PUBLIC_URL` | empty | Public `https://` base URL of the MCP gateway, shown in the connect instructions |
+| `HM_MCP_GATEWAY_CIDRS` | empty | Comma-separated CIDRs the MCP gateway tasks run in (its subnets). When the address the load balancer appended to `X-Forwarded-For` is inside one, the entry to its left (the real client) is used for `last_used_ip`, the audit log and the request log. Only that one hop, only from these ranges; needs `HM_TRUSTED_PROXY`. `0.0.0.0/0` and `::/0` are refused. Run the gateway in its own subnets: any task inside these ranges is trusted to name the client IP, so sharing subnets with Harbormaster widens that trust to Harbormaster's own tasks |
+
+### MCP gateway (settings)
+
+These are the `harbormaster-mcp` container's variables; the Terraform module sets them. The gateway has no secrets.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HM_MCP_UPSTREAM_URL` | required | Harbormaster's internal `https://` base URL |
+| `HM_MCP_PUBLIC_URL` | required | The gateway's public `https://` base URL, no path |
+| `HM_MCP_LISTEN` | `:8481` | Listen address; the image's healthcheck follows its port |
+| `HM_MCP_TRUSTED_PROXY` | `true` | Take the client IP from the load balancer's `X-Forwarded-For` |
+| `HM_MCP_ALLOWED_ORIGINS` | empty | Comma-separated browser origins allowed to call `/mcp`; a request with another `Origin` gets 403 |
+| `HM_MCP_MAX_RESULT_BYTES` | `100000` | Largest tool result (10000 to 140000) |
+| `HM_MCP_UPSTREAM_TIMEOUT` | `30s` | Per call to Harbormaster (`search_logs` uses 90 s) |
 
 ### Single sign-on (SAML)
 
@@ -794,15 +867,20 @@ make run                            # http://127.0.0.1:8480, in-memory fake AWS 
 
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 
+### Run the gateway locally
+
+`harbormaster-mcp` is the separate, read-only MCP gateway (`cmd/harbormaster-mcp`). It holds no credentials and forwards each tool call to Harbormaster's API with the caller's own token. To try it, start Harbormaster with tokens on (`HM_API_TOKENS=true make run`), create a token on the "My access" page, then run `make run-mcp` in a second terminal. The gateway listens on `http://127.0.0.1:8481/mcp` and forwards to `http://127.0.0.1:8480`. Add it to Claude Code with `claude mcp add --transport http harbormaster-local http://127.0.0.1:8481/mcp --header "Authorization: Bearer <token>"`, and remove it afterwards with `claude mcp remove harbormaster-local`. `make e2e` also uses port 8481, so stop the gateway first. The binary's commands are `serve`, `healthcheck` (exit 0 when the local `/healthz` answers) and `version`.
+
 ### Make targets
 
-- `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` binary
+- `make build`: build the web UI (when `web/package.json` exists) and the `bin/harbormaster` and `bin/harbormaster-mcp` binaries
 - `make test`: run Go tests, plus web tests (Vitest) when the web app exists. Go tests need `HM_TEST_DATABASE_URL`; export `HM_TEST_KV_URLS` (see `make test-kv`) to include the Valkey and Redis tests
 - `make lint`: check gofmt, run `go vet`, run web lint and typecheck, and check third-party notices
 - `make vulncheck`: scan all packages with `govulncheck` against the Go vulnerability database (needs network access). `make release` runs it
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
 - `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
+- `make run-mcp`: run the MCP gateway on 127.0.0.1:8481 against a local `make run`; see Run the gateway locally
 - `make run-split`: run the web, poller and coordinator roles as three local processes (ports 8480, 8482, 8483); see Run it locally
 - `make split-smoke [ENGINE=valkey|redis]`: run web, two pollers and the coordinator as real processes on fake AWS data against Postgres and a private Valkey or Redis container that the script starts and removes (ports 8580 to 8583, schema `hm_split_smoke_<engine>`). It checks health, lease ownership, a kick crossing processes, live focus, the snapshot cache, a poller taking over and a store outage, and exits 1 naming the first check that failed. Needs `HM_TEST_DATABASE_URL`, Docker, `curl`, `jq`, `python3` and `go`; about two minutes
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free

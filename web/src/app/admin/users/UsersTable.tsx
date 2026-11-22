@@ -18,6 +18,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { ACTIONS } from '../perms'
 import { PendingLinkDialog } from './PendingLinkDialog'
 import { UserPermissionsSheet } from './UserPermissionsSheet'
+import { UserTokensDialog } from './UserTokensDialog'
 import styles from './users.module.css'
 
 const expiry = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : 'soon')
@@ -58,6 +59,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
   const phone = usePhone()
   const [pending, setPending] = useState<Pending | null>(null)
   const [linking, setLinking] = useState<UserDTO | null>(null)
+  const [viewingTokens, setViewingTokens] = useState<UserDTO | null>(null)
   const [menuFor, setMenuFor] = useState<number | null>(null)
   const [editingPermissions, setEditingPermissions] = useState<number | null>(null)
   /** Runs a menu choice and closes the menu first. */
@@ -177,6 +179,10 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
     }
     if (user.sso === 'pending') entries.push({ key: 'clear-link', label: 'Clear pending link', run: () => clearLink.mutate(user) })
     if (user.sso === 'linked') entries.push({ key: 'unlink', label: 'Unlink SSO…', run: () => setPending({ kind: 'unlink', user }) })
+    // token_count is absent while tokens are off.
+    if (user.token_count !== undefined) {
+      entries.push({ key: 'tokens', label: `Access tokens (${user.token_count})…`, run: () => setViewingTokens(user) })
+    }
     entries.push({ key: 'admin', label: user.admin ? 'Remove global admin' : 'Make global admin', run: () => setPending({ kind: 'admin', user }) })
     entries.push({
       key: 'delete',
@@ -270,6 +276,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
         />
       )}
       {linking && <PendingLinkDialog user={linking} onClose={() => setLinking(null)} />}
+      {viewingTokens && <UserTokensDialog user={viewingTokens} onClose={() => setViewingTokens(null)} />}
       {pending?.kind === 'delete' && (
         <ConfirmDialog
           danger

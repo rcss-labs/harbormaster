@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/network"
@@ -73,9 +74,9 @@ type VPCTreeDTO struct {
 
 // networkRoutes registers the plan 05 networks read routes.
 func (s *Server) networkRoutes(mux *http.ServeMux) {
-	s.handle(mux, "GET /api/networks", s.listNetworks, routeOptions{})
-	s.handle(mux, "GET /api/networks/{account}/{region}", s.listRegionVPCs, routeOptions{})
-	s.handle(mux, "GET /api/vpcs/{vpcId}/tree", s.getVPCTree, routeOptions{})
+	s.handle(mux, "GET /api/networks", s.listNetworks, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/networks/{account}/{region}", s.listRegionVPCs, routeOptions{Token: auth.ScopeRead})
+	s.handle(mux, "GET /api/vpcs/{vpcId}/tree", s.getVPCTree, routeOptions{Token: auth.ScopeRead})
 }
 
 // visibleTasks keeps the RUNNING tasks of rows that the caller may see.
