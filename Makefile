@@ -8,14 +8,15 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build test lint test-db test-kv run run-split split-smoke e2e tf-check test-it-exec staticcheck \
-	image check-image release release-check scanner-image check-scanner-image vulncheck icons check-notices soak \
+.PHONY: build test lint test-db test-kv run run-mcp run-split split-smoke e2e tf-check test-it-exec staticcheck \
+	image check-image release release-check scanner-image check-scanner-image mcp-image check-mcp-image vulncheck icons check-notices soak \
 	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
 
 
 build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
 	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster ./cmd/harbormaster
+	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster-mcp ./cmd/harbormaster-mcp
 
 test:
 	go test -timeout 30m ./...
@@ -52,6 +53,10 @@ test-kv:
 
 run:
 	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
+
+# run-mcp runs the MCP gateway against a local `make run` (Harbormaster on 8480); see README "Run the gateway locally".
+run-mcp:
+	HM_MCP_LISTEN=127.0.0.1:8481 HM_MCP_UPSTREAM_URL=http://127.0.0.1:8480 HM_MCP_PUBLIC_URL=http://127.0.0.1:8481 HM_MCP_TRUSTED_PROXY=false go run ./cmd/harbormaster-mcp serve
 
 # run-split runs web (8480), poller (8482) and coordinator (8483) as three processes on fake AWS data; see tools/run-split.sh.
 run-split:
@@ -131,11 +136,29 @@ check-scanner-image:
 		tools/check-scanner-image.sh harbormaster-scanner:$(VERSION)-check $(VERSION); \
 	fi
 
+# mcp-image builds the MCP gateway image (Dockerfile.mcp): the harbormaster-mcp binary alone on distroless. Nothing is pushed.
+mcp-image:
+	docker build -f Dockerfile.mcp --platform linux/$(ARCH) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-mcp:$(VERSION) .
+
+# check-mcp-image follows check-scanner-image: runtime checks on the shipped image when this host can execute it,
+# otherwise static checks on it and runtime checks on a native build of the same Dockerfile.
+check-mcp-image:
+	@if tools/check-mcp-image.sh --can-run harbormaster-mcp:$(VERSION) $(VERSION); then \
+		tools/check-mcp-image.sh harbormaster-mcp:$(VERSION) $(VERSION); \
+	else \
+		native="$$(docker info --format '{{.Architecture}}' | sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/')"; \
+		echo "check-mcp-image: host cannot run harbormaster-mcp:$(VERSION); static checks on it, runtime checks on a native $$native build"; \
+		CHECK_IMAGE_STATIC_ONLY=1 tools/check-mcp-image.sh harbormaster-mcp:$(VERSION) $(VERSION) && \
+		docker build -q -f Dockerfile.mcp --platform linux/$$native --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-mcp:$(VERSION)-check . >/dev/null && \
+		tools/check-mcp-image.sh harbormaster-mcp:$(VERSION)-check $(VERSION); \
+	fi
+
 # release runs its prerequisites in order (do not use make -j). The build step generates the web app,
 # so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
-release: lint test vulncheck build image check-image scanner-image check-scanner-image
+release: lint test vulncheck build image check-image scanner-image check-scanner-image mcp-image check-mcp-image
 	@echo "image: harbormaster:$(VERSION)"
 	@echo "scanner image: harbormaster-scanner:$(VERSION)"
+	@echo "mcp image: harbormaster-mcp:$(VERSION)"
 	bin/harbormaster version
 
 # staticcheck runs the pinned analyser with staticcheck.conf (its defaults minus ST1005). A finding that is
