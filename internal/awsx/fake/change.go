@@ -25,8 +25,8 @@ const (
 	stopEventTaskChars   = 12
 )
 
-func (c *ecsClient) RegisterTaskDefinition(_ context.Context, in *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "RegisterTaskDefinition")
+func (c *ecsClient) RegisterTaskDefinition(ctx context.Context, in *ecs.RegisterTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.RegisterTaskDefinitionOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "RegisterTaskDefinition")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -75,8 +75,8 @@ func (c *ecsClient) RegisterTaskDefinition(_ context.Context, in *ecs.RegisterTa
 
 // ListTaskDefinitions matches AWS: family-prefix filter, ACTIVE unless a status
 // is given, grouped by family then revision, descending when asked.
-func (c *ecsClient) ListTaskDefinitions(_ context.Context, in *ecs.ListTaskDefinitionsInput, _ ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "ListTaskDefinitions")
+func (c *ecsClient) ListTaskDefinitions(ctx context.Context, in *ecs.ListTaskDefinitionsInput, _ ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "ListTaskDefinitions")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -119,8 +119,8 @@ func (c *ecsClient) ListTaskDefinitions(_ context.Context, in *ecs.ListTaskDefin
 }
 
 // ListTagsForResource answers for task definition ARNs in this target.
-func (c *ecsClient) ListTagsForResource(_ context.Context, in *ecs.ListTagsForResourceInput, _ ...func(*ecs.Options)) (*ecs.ListTagsForResourceOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "ListTagsForResource")
+func (c *ecsClient) ListTagsForResource(ctx context.Context, in *ecs.ListTagsForResourceInput, _ ...func(*ecs.Options)) (*ecs.ListTagsForResourceOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "ListTagsForResource")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -140,8 +140,8 @@ func (c *ecsClient) ListTagsForResource(_ context.Context, in *ecs.ListTagsForRe
 
 // StopTask marks a running task STOPPED and records a service event for it.
 // A task that is already stopped is returned unchanged.
-func (c *ecsClient) StopTask(_ context.Context, in *ecs.StopTaskInput, _ ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "StopTask")
+func (c *ecsClient) StopTask(ctx context.Context, in *ecs.StopTaskInput, _ ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "StopTask")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -226,7 +226,7 @@ var _ awsx.ECRAPI = (*ecrClient)(nil)
 // first, or only the images named in ImageIds (by tag or digest). A repository
 // is one that a task definition in this target pulls from.
 func (c *ecrClient) DescribeImages(ctx context.Context, in *ecr.DescribeImagesInput, _ ...func(*ecr.Options)) (*ecr.DescribeImagesOutput, error) {
-	done, err := c.f.begin(c.target, "ecr", "DescribeImages")
+	done, err := c.f.begin(ctx, c.target, "ecr", "DescribeImages")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -275,7 +275,7 @@ func (c *ecrClient) DescribeImages(ctx context.Context, in *ecr.DescribeImagesIn
 // does not exist. A repository marked with SetImageIndex answers an OCI index listing amd64, arm64 when it has it, and an
 // unknown/unknown attestation; every other repository answers a small single manifest.
 func (c *ecrClient) BatchGetImage(ctx context.Context, in *ecr.BatchGetImageInput, _ ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error) {
-	done, err := c.f.begin(c.target, "ecr", "BatchGetImage")
+	done, err := c.f.begin(ctx, c.target, "ecr", "BatchGetImage")
 	defer done()
 	if err != nil {
 		return nil, err

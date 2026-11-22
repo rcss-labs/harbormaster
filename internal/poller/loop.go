@@ -319,7 +319,7 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // runTier runs one tier, logs its failure and records the cycle in poll_loops.
 func (l *Loop) runTier(ctx context.Context, d tierDef) error {
 	started := time.Now()
-	err := d.run(ctx)
+	err := d.run(awsx.WithSource(ctx, awsx.SourceTier))
 	if err != nil && ctx.Err() == nil {
 		if errors.Is(err, awsx.ErrAccountUnknown) {
 			l.log.Info("poller: account not connected, retrying next tick", "tier", d.tier.name)

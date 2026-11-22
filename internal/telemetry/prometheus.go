@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	awsCallLabels = []string{"account", "region", "service", "operation", "result"}
+	awsCallLabels = []string{"account", "region", "service", "operation", "result", "source"}
 	loopLabels    = []string{"account", "region", "tier"}
 	loopRunLabels = []string{"account", "region", "tier", "result"}
 	kvLabels      = []string{"op"}

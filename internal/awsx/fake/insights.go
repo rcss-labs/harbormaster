@@ -53,8 +53,8 @@ func malformedQuery(format string, args ...any) error {
 
 // StartQuery validates the request, evaluates the query against the groups' lines
 // and returns an id. The query is evaluated once, here; polling only reveals it.
-func (c *logsClient) StartQuery(_ context.Context, in *cloudwatchlogs.StartQueryInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StartQueryOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "logs", "StartQuery", &c.f.ThrottleLogs)
+func (c *logsClient) StartQuery(ctx context.Context, in *cloudwatchlogs.StartQueryInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StartQueryOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "logs", "StartQuery", &c.f.ThrottleLogs)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -141,8 +141,8 @@ func (c *logsClient) StartQuery(_ context.Context, in *cloudwatchlogs.StartQuery
 // GetQueryResults reports Running (no rows) on the first poll of a query and
 // Complete with rows and statistics from the second, unless the query was stopped
 // or Fake.InsightsAlwaysRunning is set.
-func (c *logsClient) GetQueryResults(_ context.Context, in *cloudwatchlogs.GetQueryResultsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetQueryResultsOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "logs", "GetQueryResults", &c.f.ThrottleLogs)
+func (c *logsClient) GetQueryResults(ctx context.Context, in *cloudwatchlogs.GetQueryResultsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.GetQueryResultsOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "logs", "GetQueryResults", &c.f.ThrottleLogs)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -172,8 +172,8 @@ func (c *logsClient) GetQueryResults(_ context.Context, in *cloudwatchlogs.GetQu
 }
 
 // StopQuery records the stop and cancels a query that has not completed.
-func (c *logsClient) StopQuery(_ context.Context, in *cloudwatchlogs.StopQueryInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StopQueryOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "logs", "StopQuery", &c.f.ThrottleLogs)
+func (c *logsClient) StopQuery(ctx context.Context, in *cloudwatchlogs.StopQueryInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.StopQueryOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "logs", "StopQuery", &c.f.ThrottleLogs)
 	defer done()
 	if err != nil {
 		return nil, err

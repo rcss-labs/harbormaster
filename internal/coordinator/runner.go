@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/lease"
@@ -79,6 +80,7 @@ func (r *Runner) log() *slog.Logger {
 // every RetentionEvery (rollups first, so retention never deletes rows a rollup still needs). It sets each job's guard
 // to a check of l, and returns when ctx ends and every job has stopped, clearing the guards.
 func (r *Runner) Hold(ctx context.Context, l store.Lease) {
+	ctx = awsx.WithSource(ctx, awsx.SourceJob)
 	minRemaining := r.Timing.GuardMinRemaining
 	if minRemaining == 0 {
 		minRemaining = lease.DefaultTiming().GuardMinRemaining

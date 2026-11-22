@@ -82,8 +82,8 @@ func (c *ecsClient) inScope(accountID, region string) bool {
 	return accountID == c.target.AccountID && region == c.target.Region
 }
 
-func (c *ecsClient) ListClusters(_ context.Context, in *ecs.ListClustersInput, _ ...func(*ecs.Options)) (*ecs.ListClustersOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "ListClusters")
+func (c *ecsClient) ListClusters(ctx context.Context, in *ecs.ListClustersInput, _ ...func(*ecs.Options)) (*ecs.ListClustersOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "ListClusters")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -105,8 +105,8 @@ func (c *ecsClient) ListClusters(_ context.Context, in *ecs.ListClustersInput, _
 }
 
 // DescribeClusters always returns statistics and settings, whatever Include says.
-func (c *ecsClient) DescribeClusters(_ context.Context, in *ecs.DescribeClustersInput, _ ...func(*ecs.Options)) (*ecs.DescribeClustersOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "DescribeClusters")
+func (c *ecsClient) DescribeClusters(ctx context.Context, in *ecs.DescribeClustersInput, _ ...func(*ecs.Options)) (*ecs.DescribeClustersOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "DescribeClusters")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -167,8 +167,8 @@ func (c *ecsClient) withStatistics(cl Cluster) ecstypes.Cluster {
 	return out
 }
 
-func (c *ecsClient) ListServices(_ context.Context, in *ecs.ListServicesInput, _ ...func(*ecs.Options)) (*ecs.ListServicesOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "ListServices")
+func (c *ecsClient) ListServices(ctx context.Context, in *ecs.ListServicesInput, _ ...func(*ecs.Options)) (*ecs.ListServicesOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "ListServices")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -193,8 +193,8 @@ func (c *ecsClient) ListServices(_ context.Context, in *ecs.ListServicesInput, _
 	return &ecs.ListServicesOutput{ServiceArns: page, NextToken: next}, nil
 }
 
-func (c *ecsClient) DescribeServices(_ context.Context, in *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "DescribeServices")
+func (c *ecsClient) DescribeServices(ctx context.Context, in *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "DescribeServices")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -238,8 +238,8 @@ func (c *ecsClient) DescribeServices(_ context.Context, in *ecs.DescribeServices
 }
 
 // ListTasks filters by DesiredStatus (default RUNNING), ServiceName and Family.
-func (c *ecsClient) ListTasks(_ context.Context, in *ecs.ListTasksInput, _ ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "ListTasks")
+func (c *ecsClient) ListTasks(ctx context.Context, in *ecs.ListTasksInput, _ ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "ListTasks")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -284,8 +284,8 @@ func familyOf(taskDefinitionARN string) string {
 	return seg
 }
 
-func (c *ecsClient) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "DescribeTasks")
+func (c *ecsClient) DescribeTasks(ctx context.Context, in *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "DescribeTasks")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -323,8 +323,8 @@ func (c *ecsClient) DescribeTasks(_ context.Context, in *ecs.DescribeTasksInput,
 }
 
 // DescribeTaskDefinition accepts an ARN, "family:revision" or a bare family (latest).
-func (c *ecsClient) DescribeTaskDefinition(_ context.Context, in *ecs.DescribeTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "DescribeTaskDefinition")
+func (c *ecsClient) DescribeTaskDefinition(ctx context.Context, in *ecs.DescribeTaskDefinitionInput, _ ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "DescribeTaskDefinition")
 	defer done()
 	if err != nil {
 		return nil, err

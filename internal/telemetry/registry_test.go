@@ -10,9 +10,9 @@ import (
 
 func TestRegistry_CountersAccumulate(t *testing.T) {
 	r := New()
-	r.CountAWSCall("482109375512", "us-east-1", "ecs", "ListClusters", "ok")
-	r.CountAWSCall("482109375512", "us-east-1", "ecs", "ListClusters", "ok")
-	key := "482109375512|us-east-1|ecs|ListClusters|ok"
+	r.CountAWSCall("482109375512", "us-east-1", "ecs", "ListClusters", "ok", "tier")
+	r.CountAWSCall("482109375512", "us-east-1", "ecs", "ListClusters", "ok", "tier")
+	key := "482109375512|us-east-1|ecs|ListClusters|ok|tier"
 	if got := r.Snapshot().AWSCalls[key]; got != 2 {
 		t.Fatalf("AWSCalls[%q] = %d, want 2", key, got)
 	}
@@ -68,9 +68,24 @@ func TestWritePrometheus_RegistryRequestsByHostAndOutcome(t *testing.T) {
 	}
 }
 
+func TestPrometheus_AWSCallsHaveSourceLabel(t *testing.T) {
+	r := New()
+	r.CountAWSCall("482109375512", "us-east-1", "ecs", "DescribeServices", "ok", "focus")
+	r.CountAWSCall("482109375512", "us-east-1", "ecs", "DescribeServices", "ok", "tier")
+	out := render(t, r)
+	for _, want := range []string{
+		`harbormaster_aws_api_calls_total{account="482109375512",region="us-east-1",service="ecs",operation="DescribeServices",result="ok",source="focus"} 1`,
+		`harbormaster_aws_api_calls_total{account="482109375512",region="us-east-1",service="ecs",operation="DescribeServices",result="ok",source="tier"} 1`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n%s", want, out)
+		}
+	}
+}
+
 func TestWritePrometheus_EscapesLabelValues(t *testing.T) {
 	r := New()
-	r.CountAWSCall("a", "r", "s", `a"b\c`, "ok")
+	r.CountAWSCall("a", "r", "s", `a"b\c`, "ok", "tier")
 	if out := render(t, r); !strings.Contains(out, `operation="a\"b\\c"`) {
 		t.Fatalf("label not escaped:\n%s", out)
 	}
@@ -116,8 +131,8 @@ func TestWritePrometheus_DeterministicOrder(t *testing.T) {
 	r := New()
 	r.SetBuildInfo("1.2.3")
 	r.CountSnapshotWrites("services", 3)
-	r.CountAWSCall("b", "r", "ecs", "X", "ok")
-	r.CountAWSCall("a", "r", "ecs", "Y", "error")
+	r.CountAWSCall("b", "r", "ecs", "X", "ok", "tier")
+	r.CountAWSCall("a", "r", "ecs", "Y", "error", "tier")
 	r.ObserveLoop("a", "r", "t", time.Second, false)
 	r.SetLoopInterval("a", "r", "t", 30*time.Second)
 	if a, b := render(t, r), render(t, r); a != b {
@@ -143,7 +158,7 @@ func (b *blockingWriter) Write(p []byte) (int, error) {
 func TestWritePrometheus_SlowWriterDoesNotBlockRecording(t *testing.T) {
 	r := New()
 	for i := 0; i < 200; i++ { // enough output to exceed any internal write buffer
-		r.CountAWSCall("acct", "us-east-1", "ecs", fmt.Sprintf("Op%d", i), "ok")
+		r.CountAWSCall("acct", "us-east-1", "ecs", fmt.Sprintf("Op%d", i), "ok", "tier")
 	}
 	w := &blockingWriter{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	done := make(chan error, 1)
@@ -157,7 +172,7 @@ func TestWritePrometheus_SlowWriterDoesNotBlockRecording(t *testing.T) {
 	}
 	recorded := make(chan struct{})
 	go func() {
-		r.CountAWSCall("acct", "us-east-1", "ecs", "Late", "ok")
+		r.CountAWSCall("acct", "us-east-1", "ecs", "Late", "ok", "tier")
 		close(recorded)
 	}()
 	select {

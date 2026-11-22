@@ -78,10 +78,10 @@ func New() *Registry {
 func joinKey(parts ...string) string { return strings.Join(parts, keySep) }
 
 // CountAWSCall records one AWS API call; result is "ok", "throttled" or "error".
-func (r *Registry) CountAWSCall(account, region, service, operation, result string) {
+func (r *Registry) CountAWSCall(account, region, service, operation, result, source string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.awsCalls[joinKey(account, region, service, operation, result)]++
+	r.awsCalls[joinKey(account, region, service, operation, result, source)]++
 }
 
 // CountRegistryRequest records one read of a public image registry; outcome is ok, not_found, denied, rate_limited,
@@ -277,7 +277,7 @@ func (r *Registry) ObserveKVCommand(op string, d time.Duration) {
 
 // Snapshot is a copy of selected registry state for tests and the soak test.
 type Snapshot struct {
-	AWSCalls     map[string]uint64        // key "account|region|service|operation|result"
+	AWSCalls     map[string]uint64        // key "account|region|service|operation|result|source"
 	LoopInterval map[string]time.Duration // key "account|region|tier"
 	Leader       bool
 	Idle         bool

@@ -55,8 +55,8 @@ func hasString(items []string, want string) bool {
 	return false
 }
 
-func (c *autoScalingClient) DescribeScalableTargets(_ context.Context, in *applicationautoscaling.DescribeScalableTargetsInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalableTargetsOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DescribeScalableTargets", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DescribeScalableTargets(ctx context.Context, in *applicationautoscaling.DescribeScalableTargetsInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalableTargetsOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DescribeScalableTargets", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -78,8 +78,8 @@ func (c *autoScalingClient) DescribeScalableTargets(_ context.Context, in *appli
 	return out, nil
 }
 
-func (c *autoScalingClient) DescribeScalingPolicies(_ context.Context, in *applicationautoscaling.DescribeScalingPoliciesInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingPoliciesOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DescribeScalingPolicies", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DescribeScalingPolicies(ctx context.Context, in *applicationautoscaling.DescribeScalingPoliciesInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingPoliciesOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DescribeScalingPolicies", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -96,8 +96,8 @@ func (c *autoScalingClient) DescribeScalingPolicies(_ context.Context, in *appli
 	return out, nil
 }
 
-func (c *autoScalingClient) DescribeScheduledActions(_ context.Context, in *applicationautoscaling.DescribeScheduledActionsInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScheduledActionsOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DescribeScheduledActions", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DescribeScheduledActions(ctx context.Context, in *applicationautoscaling.DescribeScheduledActionsInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScheduledActionsOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DescribeScheduledActions", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -125,8 +125,8 @@ func (c *autoScalingClient) DescribeScheduledActions(_ context.Context, in *appl
 
 // DescribeScalingActivities returns one activity per scaled service, five
 // hours old.
-func (c *autoScalingClient) DescribeScalingActivities(_ context.Context, in *applicationautoscaling.DescribeScalingActivitiesInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingActivitiesOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DescribeScalingActivities", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DescribeScalingActivities(ctx context.Context, in *applicationautoscaling.DescribeScalingActivitiesInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DescribeScalingActivitiesOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DescribeScalingActivities", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err

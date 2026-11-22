@@ -39,8 +39,8 @@ func checkFilterLimit(filters []ec2types.Filter) error {
 }
 
 // begin counts the call, applies FailNext and the ThrottleEC2 knob.
-func (c *EC2) begin(op string) (func(), error) {
-	done, err := c.f.beginThrottled(c.target, "ec2", op, &c.f.ThrottleEC2)
+func (c *EC2) begin(ctx context.Context, op string) (func(), error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "ec2", op, &c.f.ThrottleEC2)
 	if err != nil {
 		return done, err
 	}
@@ -98,8 +98,8 @@ func ec2Page[T any](items []T, maxResults *int32, token *string) (page []T, next
 	return items[start:end], aws.String(strconv.Itoa(end))
 }
 
-func (c *EC2) DescribeVpcs(_ context.Context, in *ec2.DescribeVpcsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
-	done, err := c.begin("DescribeVpcs")
+func (c *EC2) DescribeVpcs(ctx context.Context, in *ec2.DescribeVpcsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
+	done, err := c.begin(ctx, "DescribeVpcs")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -139,8 +139,8 @@ func (e *Estate) runningTasksBySubnet(account, region string) map[string]int {
 	return counts
 }
 
-func (c *EC2) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
-	done, err := c.begin("DescribeSubnets")
+func (c *EC2) DescribeSubnets(ctx context.Context, in *ec2.DescribeSubnetsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
+	done, err := c.begin(ctx, "DescribeSubnets")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -167,8 +167,8 @@ func (c *EC2) DescribeSubnets(_ context.Context, in *ec2.DescribeSubnetsInput, _
 	return &ec2.DescribeSubnetsOutput{Subnets: page, NextToken: next}, nil
 }
 
-func (c *EC2) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
-	done, err := c.begin("DescribeNatGateways")
+func (c *EC2) DescribeNatGateways(ctx context.Context, in *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+	done, err := c.begin(ctx, "DescribeNatGateways")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -190,8 +190,8 @@ func (c *EC2) DescribeNatGateways(_ context.Context, in *ec2.DescribeNatGateways
 	return &ec2.DescribeNatGatewaysOutput{NatGateways: page, NextToken: next}, nil
 }
 
-func (c *EC2) DescribeInternetGateways(_ context.Context, in *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
-	done, err := c.begin("DescribeInternetGateways")
+func (c *EC2) DescribeInternetGateways(ctx context.Context, in *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
+	done, err := c.begin(ctx, "DescribeInternetGateways")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -222,8 +222,8 @@ func (c *EC2) DescribeInternetGateways(_ context.Context, in *ec2.DescribeIntern
 	return &ec2.DescribeInternetGatewaysOutput{InternetGateways: page, NextToken: next}, nil
 }
 
-func (c *EC2) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
-	done, err := c.begin("DescribeVpcEndpoints")
+func (c *EC2) DescribeVpcEndpoints(ctx context.Context, in *ec2.DescribeVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error) {
+	done, err := c.begin(ctx, "DescribeVpcEndpoints")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -245,8 +245,8 @@ func (c *EC2) DescribeVpcEndpoints(_ context.Context, in *ec2.DescribeVpcEndpoin
 	return &ec2.DescribeVpcEndpointsOutput{VpcEndpoints: page, NextToken: next}, nil
 }
 
-func (c *EC2) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
-	done, err := c.begin("DescribeSecurityGroups")
+func (c *EC2) DescribeSecurityGroups(ctx context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+	done, err := c.begin(ctx, "DescribeSecurityGroups")
 	defer done()
 	if err != nil {
 		return nil, err

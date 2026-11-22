@@ -91,8 +91,8 @@ func (c *autoScalingClient) existingConfig(key model.ServiceKey) (*ScalingSeed, 
 // RegisterScalableTarget creates the target or updates its range; policies and
 // scheduled actions of an existing target are kept. As AWS does, the service's
 // desired count is clamped into the new range.
-func (c *autoScalingClient) RegisterScalableTarget(_ context.Context, in *applicationautoscaling.RegisterScalableTargetInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.RegisterScalableTargetOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "RegisterScalableTarget", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) RegisterScalableTarget(ctx context.Context, in *applicationautoscaling.RegisterScalableTargetInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.RegisterScalableTargetOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "RegisterScalableTarget", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -138,8 +138,8 @@ func (c *autoScalingClient) RegisterScalableTarget(_ context.Context, in *applic
 
 // DeregisterScalableTarget removes the target together with its policies and
 // scheduled actions, as AWS does.
-func (c *autoScalingClient) DeregisterScalableTarget(_ context.Context, in *applicationautoscaling.DeregisterScalableTargetInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeregisterScalableTargetOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DeregisterScalableTarget", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DeregisterScalableTarget(ctx context.Context, in *applicationautoscaling.DeregisterScalableTargetInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeregisterScalableTargetOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DeregisterScalableTarget", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -163,8 +163,8 @@ func (c *autoScalingClient) DeregisterScalableTarget(_ context.Context, in *appl
 
 // PutScalingPolicy upserts a policy by name. Target tracking policies need a
 // predefined metric; the ALB metric also needs its ResourceLabel.
-func (c *autoScalingClient) PutScalingPolicy(_ context.Context, in *applicationautoscaling.PutScalingPolicyInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScalingPolicyOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "PutScalingPolicy", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) PutScalingPolicy(ctx context.Context, in *applicationautoscaling.PutScalingPolicyInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScalingPolicyOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "PutScalingPolicy", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -218,8 +218,8 @@ func (c *autoScalingClient) PutScalingPolicy(_ context.Context, in *applicationa
 	return &applicationautoscaling.PutScalingPolicyOutput{PolicyARN: describePolicy(key, policy).PolicyARN}, nil
 }
 
-func (c *autoScalingClient) DeleteScalingPolicy(_ context.Context, in *applicationautoscaling.DeleteScalingPolicyInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeleteScalingPolicyOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DeleteScalingPolicy", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DeleteScalingPolicy(ctx context.Context, in *applicationautoscaling.DeleteScalingPolicyInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeleteScalingPolicyOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DeleteScalingPolicy", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -248,8 +248,8 @@ func (c *autoScalingClient) DeleteScalingPolicy(_ context.Context, in *applicati
 }
 
 // PutScheduledAction upserts a scheduled action by name.
-func (c *autoScalingClient) PutScheduledAction(_ context.Context, in *applicationautoscaling.PutScheduledActionInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScheduledActionOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "PutScheduledAction", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) PutScheduledAction(ctx context.Context, in *applicationautoscaling.PutScheduledActionInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.PutScheduledActionOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "PutScheduledAction", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err
@@ -285,8 +285,8 @@ func (c *autoScalingClient) PutScheduledAction(_ context.Context, in *applicatio
 	return &applicationautoscaling.PutScheduledActionOutput{}, nil
 }
 
-func (c *autoScalingClient) DeleteScheduledAction(_ context.Context, in *applicationautoscaling.DeleteScheduledActionInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeleteScheduledActionOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "application-autoscaling", "DeleteScheduledAction", &c.f.ThrottleAutoScaling)
+func (c *autoScalingClient) DeleteScheduledAction(ctx context.Context, in *applicationautoscaling.DeleteScheduledActionInput, _ ...func(*applicationautoscaling.Options)) (*applicationautoscaling.DeleteScheduledActionOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "application-autoscaling", "DeleteScheduledAction", &c.f.ThrottleAutoScaling)
 	defer done()
 	if err != nil {
 		return nil, err

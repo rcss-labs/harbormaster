@@ -284,6 +284,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	if fakeAWS {
 		estate := fake.MockupEstate(time.Now)
 		f := fake.New(estate)
+		// The fake bypasses the SDK middleware, so it feeds the same AWS call counter itself.
+		f.OnCall = func(ctx context.Context, t awsx.Target, service, op, result string) {
+			telemetry.Default.CountAWSCall(t.AccountID, t.Region, service, op, result, string(awsx.SourceFrom(ctx)))
+		}
 		// The fake ECS hands out ws:// streams served by an in-process fake SSM agent.
 		ssmServer := fake.NewSSMServer(fake.SSMServerOptions{})
 		ssmServer.Start()

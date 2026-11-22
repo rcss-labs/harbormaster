@@ -16,8 +16,8 @@ const storedBytesWindow = 30 * 24 * time.Hour
 
 // DescribeLogGroups lists the target's known log groups (explicit lines, stored-bytes overrides and the
 // generated "/ecs/<cluster>/<service>" groups) whose name starts with LogGroupNamePrefix, in one page.
-func (c *logsClient) DescribeLogGroups(_ context.Context, in *cloudwatchlogs.DescribeLogGroupsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
-	done, err := c.f.beginThrottled(c.target, "logs", "DescribeLogGroups", &c.f.ThrottleLogs)
+func (c *logsClient) DescribeLogGroups(ctx context.Context, in *cloudwatchlogs.DescribeLogGroupsInput, _ ...func(*cloudwatchlogs.Options)) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "logs", "DescribeLogGroups", &c.f.ThrottleLogs)
 	defer done()
 	if err != nil {
 		return nil, err
