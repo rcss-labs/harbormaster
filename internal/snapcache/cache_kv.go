@@ -24,14 +24,6 @@ func (k kvCache) modelKey(m Model, id, token string) string {
 	return k.c.Key("snap", string(m), ModelSchema, id, token)
 }
 
-func (k kvCache) Bump(ctx context.Context, g GenKey, token string) error {
-	return k.BumpAll(ctx, []GenKey{g}, token)
-}
-
-func (k kvCache) Touch(ctx context.Context, g GenKey, token string) error {
-	return k.TouchAll(ctx, []GenKey{g}, token)
-}
-
 // The scripts write every key in one round trip. They use only redis.call and no clock: the life is an argument.
 // KEYS: the token keys. ARGV: token, life in ms.
 var bumpAllScript = kv.NewScript(`

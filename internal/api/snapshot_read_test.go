@@ -421,7 +421,7 @@ func TestServiceRead_UnhealthyTargetReachesTheStatusThroughTheCache(t *testing.T
 			{AccountID: key.AccountID, Region: key.Region, Cluster: key.Cluster},
 			{AccountID: key.AccountID, Region: key.Region},
 		} {
-			if err := p.cache.Bump(t.Context(), k, "9-1"); err != nil {
+			if err := p.cache.BumpAll(t.Context(), []snapcache.GenKey{k}, "9-1"); err != nil {
 				t.Fatal(err)
 			}
 		}

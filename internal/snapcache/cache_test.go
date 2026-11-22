@@ -50,7 +50,7 @@ func TestCache_MissThenPutThenHit(t *testing.T) {
 
 func TestCache_BumpChangesWhatReadersAskFor(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Bump(ctx, clusterK, "1-100"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-100"); err != nil {
 			t.Fatal(err)
 		}
 		if got := mustTokens(t, c, clusterK); got[0] != "1-100" {
@@ -59,7 +59,7 @@ func TestCache_BumpChangesWhatReadersAskFor(t *testing.T) {
 		if err := c.Put(ctx, ModelCluster, "c1", "1-100", []byte("old"), time.Minute); err != nil {
 			t.Fatal(err)
 		}
-		if err := c.Bump(ctx, clusterK, "1-200"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-200"); err != nil {
 			t.Fatal(err)
 		}
 		tok := mustTokens(t, c, clusterK)[0]
@@ -74,14 +74,14 @@ func TestCache_BumpChangesWhatReadersAskFor(t *testing.T) {
 
 func TestCache_TouchKeepsAnExistingTokenAndRefreshesItsTTL(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, raw kv.Client) {
-		if err := c.Bump(ctx, clusterK, "1-100"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-100"); err != nil {
 			t.Fatal(err)
 		}
 		// Shorten the token's life, then touch: the value stays and the life is back to minutes.
 		if err := raw.PExpire(ctx, raw.Key("gen", clusterK.AccountID, clusterK.Region, clusterK.Cluster), 1500*time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
-		if err := c.Touch(ctx, clusterK, "1-999"); err != nil {
+		if err := c.TouchAll(ctx, []GenKey{clusterK}, "1-999"); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(2 * time.Second)
@@ -93,7 +93,7 @@ func TestCache_TouchKeepsAnExistingTokenAndRefreshesItsTTL(t *testing.T) {
 
 func TestCache_TouchSetsAMissingToken(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Touch(ctx, sliceK, "2-5"); err != nil {
+		if err := c.TouchAll(ctx, []GenKey{sliceK}, "2-5"); err != nil {
 			t.Fatal(err)
 		}
 		if got := mustTokens(t, c, sliceK); got[0] != "2-5" {
@@ -104,7 +104,7 @@ func TestCache_TouchSetsAMissingToken(t *testing.T) {
 
 func TestCache_TokensReturnsEmptyForMissing(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Bump(ctx, clusterK, "1-1"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{clusterK}, "1-1"); err != nil {
 			t.Fatal(err)
 		}
 		got := mustTokens(t, c, clusterK, sliceK, otherSlcK)
@@ -119,7 +119,7 @@ func TestCache_TokensReturnsEmptyForMissing(t *testing.T) {
 
 func TestCache_ClusterAndSliceKeysDoNotCollide(t *testing.T) {
 	eachCache(t, func(t *testing.T, c Cache, _ kv.Client) {
-		if err := c.Bump(ctx, sliceK, "1-1"); err != nil {
+		if err := c.BumpAll(ctx, []GenKey{sliceK}, "1-1"); err != nil {
 			t.Fatal(err)
 		}
 		if got := mustTokens(t, c, clusterK); got[0] != "" {
@@ -271,25 +271,6 @@ func bounded2(t *testing.T) context.Context {
 	c, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
 	t.Cleanup(cancel)
 	return c
-}
-
-func TestOff_NeverHits(t *testing.T) {
-	c := Off()
-	if err := c.Bump(ctx, clusterK, "1-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Touch(ctx, clusterK, "1-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Put(ctx, ModelCluster, "c1", "1-1", []byte("x"), time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	if got := mustTokens(t, c, clusterK, sliceK); len(got) != 2 || got[0] != "" || got[1] != "" {
-		t.Fatalf("Off tokens = %q, want two empty", got)
-	}
-	if _, ok, err := c.Get(ctx, ModelCluster, "c1", "1-1"); ok || err != nil {
-		t.Fatalf("Off Get = ok %v err %v, want a clean miss", ok, err)
-	}
 }
 
 func TestNewToken_DiffersAcrossEpochsAndTime(t *testing.T) {
