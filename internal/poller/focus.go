@@ -251,6 +251,11 @@ func (l *Loop) pollNow(o focus.Object, received time.Time) string {
 		l.wakeFocus()
 		return "handled"
 	}
+	// A one-off runs under the loop's context. Before the scheduler has one, or once it is stopping, none may start: a
+	// cycle added after runFocus began to Wait would misuse the WaitGroup, and the Background fallback would outlive the loop.
+	if l.focusCtx == nil || l.focusStopped || l.focusCtx.Err() != nil {
+		return "dropped"
+	}
 	if last, ok := l.focusOnce[member]; ok && received.Sub(last) < pollNowCoalesce {
 		return "coalesced"
 	}
@@ -294,9 +299,6 @@ func (l *Loop) inFlightLocked() int {
 // startOnceLocked runs a one-off cycle under the loop's context, so it ends with the loop. The caller holds focusMu.
 func (l *Loop) startOnceLocked(r *onceRequest) {
 	ctx := l.focusCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	l.onceRunning++
 	l.focusRunning.Add(1)
 	go func() {
@@ -320,6 +322,9 @@ func (l *Loop) runFocus(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			l.focusMu.Lock()
+			l.focusStopped = true
+			l.focusMu.Unlock()
 			l.focusRunning.Wait()
 			return
 		case <-ticker.C:

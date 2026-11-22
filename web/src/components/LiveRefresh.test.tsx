@@ -4,7 +4,7 @@ import type { FocusDTO } from '../api/focus'
 import { LiveRefresh, pillText } from './LiveRefresh'
 
 const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString()
-const focus = (patch: Partial<FocusDTO>): FocusDTO => ({ state: 'live', interval_seconds: 5, refreshed_at: ago(2), message: '', ...patch })
+const focus = (patch: Partial<FocusDTO>): FocusDTO => ({ state: 'live', interval_seconds: 5, refreshed_at: ago(2), message: '', failed: false, ...patch })
 
 describe('LiveRefresh', () => {
   it('shows Live, every 5 s', () => {

@@ -1544,6 +1544,7 @@
     "running": "number"
   },
   "focus": {
+    "failed": "boolean",
     "interval_seconds": "number",
     "message": "string",
     "refreshed_at": {

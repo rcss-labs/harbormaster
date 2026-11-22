@@ -147,7 +147,7 @@ describe('useFocus', () => {
   })
 
   it('shows no warning while the first live read is still pending, then reports unavailable', async () => {
-    const waiting: FocusDTO = { state: 'unavailable', interval_seconds: 30, refreshed_at: null, message: 'Live refresh unavailable' }
+    const waiting: FocusDTO = { state: 'unavailable', interval_seconds: 30, refreshed_at: null, message: 'Live refresh unavailable', failed: false }
     server.use(http.post('/api/focus', () => HttpResponse.json(waiting)))
     const { result } = renderHook(() => useFocus('service', 'svc-1', vi.fn().mockResolvedValue(undefined)))
     await tick(3000) // the recheck: nothing is wrong yet
@@ -156,6 +156,15 @@ describe('useFocus', () => {
     expect(result.current?.message).toBe('')
     await tick(2 * FOCUS_HEARTBEAT_MS) // well past the open, still no evidence: now it is a fault
     expect(result.current?.state).toBe('unavailable')
+  })
+
+  it('reports a definite server failure at once, without waiting out the first-read grace', async () => {
+    const failed: FocusDTO = { state: 'unavailable', interval_seconds: 30, refreshed_at: null, message: 'Live refresh unavailable', failed: true }
+    server.use(http.post('/api/focus', () => HttpResponse.json(failed)))
+    const { result } = renderHook(() => useFocus('service', 'svc-1', vi.fn().mockResolvedValue(undefined)))
+    await tick(0)
+    expect(result.current?.state).toBe('unavailable')
+    expect(result.current?.message).toBe('Live refresh unavailable')
   })
 
   it('reports unavailable when the request fails, and keeps heartbeating', async () => {

@@ -47,7 +47,7 @@ describe('ServiceHeader on phones', () => {
   it('wraps the age and pill under the title', () => {
     renderWithProviders(
       <AuthProvider>
-        <ServiceHeader service={SERVICE_PAYMENTS} tab="overview" focus={{ state: 'live', interval_seconds: 5, refreshed_at: new Date().toISOString(), message: '' }} />
+        <ServiceHeader service={SERVICE_PAYMENTS} tab="overview" focus={{ state: 'live', interval_seconds: 5, refreshed_at: new Date().toISOString(), message: '', failed: false }} />
       </AuthProvider>,
     )
     const age = screen.getByText(/^Updated/)

@@ -17,4 +17,7 @@ type FocusDTO struct {
 	IntervalSeconds int        `json:"interval_seconds"`
 	RefreshedAt     *time.Time `json:"refreshed_at"`
 	Message         string     `json:"message"`
+	// Failed is true for a definite fault (the store is down, the registry errored or is absent), as opposed to a page
+	// that is only waiting for the poller's first read. The page's grace for the latter never applies to the former.
+	Failed bool `json:"failed"`
 }

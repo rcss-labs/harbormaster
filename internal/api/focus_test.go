@@ -91,6 +91,7 @@ type focusResponse struct {
 	IntervalSeconds int     `json:"interval_seconds"`
 	RefreshedAt     *string `json:"refreshed_at"`
 	Message         string  `json:"message"`
+	Failed          bool    `json:"failed"`
 }
 
 func postFocus(t *testing.T, c *apiClient, kind, id string, open bool) (int, focusResponse) {
@@ -299,8 +300,8 @@ func TestFocus_UnavailableWithoutEvidenceLongAfterTheOpen(t *testing.T) {
 	}
 	clock.advance(20 * time.Second) // past the wait for the poller's first read
 	status, got := postFocus(t, sam, "service", id, false)
-	if status != http.StatusOK || got.State != "unavailable" || got.Message != "Live refresh unavailable" {
-		t.Fatalf("heartbeat without evidence long after the open = %d %+v, want unavailable", status, got)
+	if status != http.StatusOK || got.State != "unavailable" || got.Message != "Live refresh unavailable" || got.Failed {
+		t.Fatalf("heartbeat without evidence long after the open = %d %+v, want unavailable and not failed (no evidence is not a fault)", status, got)
 	}
 }
 
@@ -314,7 +315,7 @@ func TestFocus_RecheckSoonAfterAnOpenIsPendingNotUnavailable(t *testing.T) {
 	postFocus(t, sam, "service", id, true)
 	clock.advance(3 * time.Second)
 	status, got := postFocus(t, sam, "service", id, false)
-	if status != http.StatusOK || got.State != "live" || got.RefreshedAt != nil || got.Message != "" {
+	if status != http.StatusOK || got.State != "live" || got.RefreshedAt != nil || got.Message != "" || got.Failed {
 		t.Fatalf("recheck 3 s after an open = %d %+v, want live with no refreshed_at (pending)", status, got)
 	}
 }
@@ -342,8 +343,8 @@ func TestFocus_OpenSignalIsRateLimitedPerUser(t *testing.T) {
 func TestFocus_UnavailableWhenStoreIsDown(t *testing.T) {
 	f := newFocusFixture(t, func(s *Server, _ *focusFixture) { s.KVHealth = storeDown{} })
 	status, got := postFocus(t, login(t, f.srv, "sam", testPassword), "service", focusServiceKey("payments-api").ID(), true)
-	if status != http.StatusOK || got.State != "unavailable" || got.Message != "Live refresh unavailable" {
-		t.Fatalf("response = %d %+v, want unavailable", status, got)
+	if status != http.StatusOK || got.State != "unavailable" || got.Message != "Live refresh unavailable" || !got.Failed {
+		t.Fatalf("response = %d %+v, want unavailable and failed", status, got)
 	}
 	if listed := listed(t, f.reg); len(listed) != 0 {
 		t.Fatalf("registered %v while the store is down", listed)
@@ -355,16 +356,16 @@ func TestFocus_UnavailableWhenRegistryErrors(t *testing.T) {
 		s.Focus = failingRegistry{Registry: focus.NewMemoryRegistry(time.Now)}
 	})
 	status, got := postFocus(t, login(t, f.srv, "sam", testPassword), "service", focusServiceKey("payments-api").ID(), true)
-	if status != http.StatusOK || got.State != "unavailable" {
-		t.Fatalf("response = %d %+v, want unavailable", status, got)
+	if status != http.StatusOK || got.State != "unavailable" || !got.Failed {
+		t.Fatalf("response = %d %+v, want unavailable and failed", status, got)
 	}
 }
 
 func TestFocus_NoRegistryMeansUnavailable(t *testing.T) {
 	f := newFocusFixture(t, func(s *Server, _ *focusFixture) { s.Focus = nil })
 	status, got := postFocus(t, login(t, f.srv, "sam", testPassword), "service", focusServiceKey("payments-api").ID(), true)
-	if status != http.StatusOK || got.State != "unavailable" {
-		t.Fatalf("response = %d %+v, want unavailable", status, got)
+	if status != http.StatusOK || got.State != "unavailable" || !got.Failed {
+		t.Fatalf("response = %d %+v, want unavailable and failed", status, got)
 	}
 }
 

@@ -84,6 +84,8 @@ type Loop struct {
 	focusWake    chan struct{}
 	focusCtx     context.Context
 	focusRunning sync.WaitGroup
+	// focusStopped is set under focusMu before runFocus waits for the cycles: no cycle may be added after it.
+	focusStopped bool
 	// onceQueue holds one-off cycles waiting for a free slot; onceRunning counts the ones running.
 	onceQueue   []*onceRequest
 	onceRunning int
