@@ -49,15 +49,6 @@ export const STATUS_COLOR: Record<PillKind, string> = {
   expected: 'var(--expected)',
 }
 
-export const SERIES = [
-  'var(--series-1)',
-  'var(--series-2)',
-  'var(--series-3)',
-  'var(--series-4)',
-  'var(--series-5)',
-  'var(--series-6)',
-]
-
 export const REASON_COLOR: Record<string, string> = {
   'Out of memory (exit 137)': 'var(--danger)',
   'Failed load balancer health checks': 'var(--warning)',

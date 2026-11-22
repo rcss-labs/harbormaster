@@ -67,8 +67,6 @@ export interface RestartStarted {
   warning?: string | null
 }
 
-export type RolloutStarted = DeployStarted | RestartStarted
-
 export interface DesiredCountBody {
   desired: number
 }

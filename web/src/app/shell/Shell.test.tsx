@@ -7,7 +7,7 @@ import { ALERTS, ACCOUNT_STAGING, CLUSTERS, ME_OMER, POLLER } from '../../test/f
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 import { installPhoneMedia } from '../../test/phone'
-import { openAccountMenu, openScope } from './testUtils'
+import { openAccountMenu, openScope } from '../../test/shellUtils'
 
 const originalWidth = window.innerWidth
 

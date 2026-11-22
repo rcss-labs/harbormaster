@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import type { UserEvent } from '@testing-library/user-event'
 
 /** Opens the scope popover (if it is not open) and returns it. */
@@ -16,5 +16,3 @@ export async function openAccountMenu(user: UserEvent): Promise<HTMLElement> {
   await user.click(await screen.findByRole('button', { name: /^Account menu for/ }))
   return screen.findByRole('group', { name: 'Account' })
 }
-
-export const inScope = async (user: UserEvent) => within(await openScope(user))

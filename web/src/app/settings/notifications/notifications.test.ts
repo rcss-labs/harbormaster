@@ -32,7 +32,7 @@ import {
   isGroupKind,
   newRouteDraft,
   pendingSentence,
-  previewLines,
+  previewLineItems,
   previewSentence,
   scopeKey,
   scopeLabel,
@@ -291,6 +291,8 @@ describe('validateDraft', () => {
     expect(validateDraft(fresh({ url: 'https://hooks.slack.com/x', kinds: [] }), undefined, CAPS)).toBe('Choose at least one alert type.')
   })
 })
+
+const previewLines = (preview: NotificationPreview) => previewLineItems(preview).map((line) => line.text)
 
 describe('preview sentences', () => {
   it('counts open groups and per-alert matches into one sentence', () => {

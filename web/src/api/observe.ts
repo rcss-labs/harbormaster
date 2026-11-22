@@ -1,7 +1,7 @@
 // TanStack hooks for the observe endpoints. Metrics refresh once a minute (CloudWatch is slow and billed per call);
 // snapshot hooks (target health, scaling, alerts) refresh every 5 s like the other live data. Neither runs in a background tab.
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { ApiError, api } from './client'
+import { api } from './client'
 import { queryString, usePollerStatus, type Filters } from './hooks'
 import type {
   AlertsDTO,
@@ -161,6 +161,3 @@ export function useDataProblems(labels?: readonly string[]): DataProblems {
 export function allNull(...series: Series[]): boolean {
   return series.every((s) => s.every((v) => v === null))
 }
-
-export const isThrottled = (err: unknown): boolean => err instanceof ApiError && err.code === 'throttled'
-export const isAwsError = (err: unknown): boolean => err instanceof ApiError && err.code === 'aws_error'

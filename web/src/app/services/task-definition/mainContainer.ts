@@ -80,19 +80,3 @@ export function withImageTag(image: unknown, tag: string): string {
   return `${base}:${tag}`
 }
 
-export function mainImageTag(def: Definition, serviceName: string): string {
-  const index = mainContainerIndex(def, serviceName)
-  return index < 0 ? '' : imageTagOf(containersOf(def)[index]?.image)
-}
-
-/** Returns a copy of `def` where the main container is replaced by `change(container)`. */
-export function updateMainContainer(
-  def: Definition,
-  serviceName: string,
-  change: (container: Record<string, unknown>) => Record<string, unknown>,
-): Definition {
-  const index = mainContainerIndex(def, serviceName)
-  if (index < 0) return def
-  const containers = containersOf(def).map((container, position) => (position === index ? change(container) : container))
-  return { ...def, containerDefinitions: containers }
-}

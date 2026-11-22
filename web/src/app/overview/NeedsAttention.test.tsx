@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AlertDTO, AlertsDTO, ServiceDTO } from '../../api/types'
 import { ALERTS, ME_OMER, SERVICE_DETAILS } from '../../test/fixtures'
 import { server } from '../../test/msw'
-import { allSteadyList, listMatchingAlerts } from './attentionFixtures'
+import { allSteadyList, listMatchingAlerts } from '../../test/attentionFixtures'
 import { renderApp } from '../../test/renderApp'
 
 beforeEach(() => {

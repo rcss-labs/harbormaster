@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ALERTS, CLUSTER_CORE, SERVICE_PAYMENTS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
-import { openAccountMenu, openScope } from './testUtils'
+import { openAccountMenu, openScope } from '../../test/shellUtils'
 
 const originalWidth = window.innerWidth
 const setWidth = (width: number) => {

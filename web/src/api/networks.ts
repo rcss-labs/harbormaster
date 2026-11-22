@@ -91,34 +91,11 @@ export interface VpcTreeResponse {
   polled_at: string
 }
 
-/** Where a tree node links to, or undefined for grouping nodes (VPC, AZ, subnet) that have no page of their own. */
-export function nodeHref(node: TreeNode): string | undefined {
-  switch (node.kind) {
-    case 'cluster':
-      return `/clusters/${node.cluster.cluster_id}`
-    case 'service':
-      return `/services/${node.service.service_id}/overview`
-    case 'task':
-      return node.task.service_id ? `/services/${node.task.service_id}/tasks` : '/tasks'
-    default:
-      return undefined
-  }
-}
-
 export function useNetworks() {
   const { filters } = useFilters()
   return useQuery({
     queryKey: ['networks', filters],
     queryFn: () => api.get<NetworksResponse>(`/api/networks${queryString({ ...filters })}`),
-    ...livePolling,
-  })
-}
-
-export function useNetworkRegion(account: string, region: string) {
-  return useQuery({
-    queryKey: ['networks', account, region],
-    queryFn: () =>
-      api.get<RegionVpcsResponse>(`/api/networks/${encodeURIComponent(account)}/${encodeURIComponent(region)}`),
     ...livePolling,
   })
 }

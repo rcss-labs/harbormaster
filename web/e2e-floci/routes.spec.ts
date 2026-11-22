@@ -1,7 +1,6 @@
 import { expect, test } from '../e2e/fixtures/test'
 import { saveScreenshot } from '../e2e/helpers'
 import { isExpectedFailure } from './allowlist'
-import { waivers } from './known-wave0'
 import { ROUTES } from './routes'
 import { resolveTargets } from './targets'
 
@@ -65,28 +64,12 @@ for (const route of ROUTES) {
 
           await saveScreenshot(page, `${route.name}-${width}-${theme}.png`)
 
-          // Hard checks first: these have no wave-0 waiver.
           expect(pageErrors, 'uncaught page errors').toEqual([])
           expect(consoleErrors, 'console errors').toEqual([])
           expect(badResponses, 'HTTP failures outside the allowlist').toEqual([])
-
-          // Layout checks that the old UI legitimately fails are waived with test.fixme (see known-wave0.ts).
-          const waived: string[] = []
-          const overflowing = overflow.document > 0 || overflow.main > 0
-          if (overflowing) {
-            const reasons = waivers('overflow', route.name, width)
-            if (reasons.length > 0) waived.push(...reasons)
-            else {
-              expect(overflow.document, 'document scrollWidth beyond the window (px)').toBeLessThanOrEqual(0)
-              expect(overflow.main, 'main scrollWidth beyond its client width (px)').toBeLessThanOrEqual(0)
-            }
-          }
-          if (banners > 1) {
-            const reasons = waivers('stacked-banners', route.name, width)
-            if (reasons.length > 0) waived.push(...reasons)
-            else expect(banners, 'stacked "Data for" banners (at most one)').toBeLessThanOrEqual(1)
-          }
-          test.fixme(waived.length > 0, [...new Set(waived)].join('; '))
+          expect(overflow.document, 'document scrollWidth beyond the window (px)').toBeLessThanOrEqual(0)
+          expect(overflow.main, 'main scrollWidth beyond its client width (px)').toBeLessThanOrEqual(0)
+          expect(banners, 'stacked "Data for" banners (at most one)').toBeLessThanOrEqual(1)
         })
       }
     }

@@ -284,12 +284,6 @@ test.describe('sam on auth-service', () => {
   })
 })
 
-// A partial run (register succeeded, a later step failed, then "Retry remaining steps" without registering again)
-// needs the fake AWS to fail one specific call, which only Go tests can arrange (Fake.FailNext). A real e2e path would
-// need a test-only backdoor in the server. It is covered by deploy.TestChangeSet_* (UpdateServiceFailureAfterRegisterIsPartial,
-// RetryWithRevisionDoesNotRegisterAgain), the API test _PartialIs200WithSteps and DeployTab.review.test.tsx.
-test.skip('partial failure shows the steps and retries without registering again', () => {})
-
 test.describe('sam on image-resizer (failing OOM rollout)', () => {
   test.use(asUser('sam'))
 

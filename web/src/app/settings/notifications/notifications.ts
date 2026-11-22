@@ -456,10 +456,6 @@ export function previewLineItems(preview: NotificationPreview): PreviewLine[] {
   return lines
 }
 
-export function previewLines(preview: NotificationPreview): string[] {
-  return previewLineItems(preview).map((line) => line.text)
-}
-
 const minutesOf = (seconds: number) => Math.max(1, Math.ceil(seconds / 60))
 const minutesText = (seconds: number) => {
   const minutes = minutesOf(seconds)
