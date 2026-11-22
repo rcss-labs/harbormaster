@@ -11,7 +11,7 @@ locals {
   kv_enabled   = var.cache_mode != "none"
 
   # The secret that holds the store URL (injected as HM_KV_URL), or null without a store.
-  kv_url_secret_arn = var.cache_url_secret_arn # the created secret joins this in cache.tf
+  kv_url_secret_arn = local.cache_create ? aws_secretsmanager_secret.kv_url[0].arn : var.cache_url_secret_arn
 
   legacy_count = var.keep_legacy_service ? 1 : 0
   split_count  = var.split_services ? 1 : 0

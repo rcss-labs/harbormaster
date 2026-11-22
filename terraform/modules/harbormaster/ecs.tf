@@ -138,6 +138,7 @@ resource "aws_ecs_service" "server" {
     aws_secretsmanager_secret_version.database_url,
     aws_secretsmanager_secret_version.session_key,
     aws_secretsmanager_secret_version.metrics_token,
+    aws_secretsmanager_secret_version.kv_url,
   ]
 }
 

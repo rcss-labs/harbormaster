@@ -59,12 +59,26 @@ output "log_group_name" {
 }
 
 output "security_group_ids" {
-  description = "Security group IDs keyed alb, server and db."
+  description = "Security group IDs keyed alb, server (legacy single service), web, poller, coordinator, db and cache (null unless cache_mode = \"create\")."
   value = {
-    alb    = aws_security_group.alb.id
-    server = aws_security_group.server.id
-    db     = aws_security_group.db.id
+    alb         = aws_security_group.alb.id
+    server      = aws_security_group.server.id
+    web         = aws_security_group.web.id
+    poller      = aws_security_group.poller.id
+    coordinator = aws_security_group.coordinator.id
+    db          = aws_security_group.db.id
+    cache       = one(aws_security_group.cache[*].id)
   }
+}
+
+output "cache_url_secret_arn" {
+  description = "ARN of the Secrets Manager secret that holds the store URL (the ARN only, never the value). Null when cache_mode = \"none\"."
+  value       = local.kv_enabled ? local.kv_url_secret_arn : null
+}
+
+output "cache_primary_endpoint" {
+  description = "Address of the created cache's primary endpoint (no credentials). Null unless cache_mode = \"create\"."
+  value       = one(aws_elasticache_replication_group.this[*].primary_endpoint_address)
 }
 
 output "database_url_secret_arn" {
