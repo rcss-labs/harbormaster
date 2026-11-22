@@ -284,6 +284,18 @@ data "aws_iam_policy_document" "coordinator" {
     resources = ["*"]
   }
 
+  # Restoring the desired count when a service leaves off-hours. An ECS request does not carry the
+  # application-autoscaling:service-namespace key, so this statement must have no condition on it.
+  dynamic "statement" {
+    for_each = var.read_only ? [] : [1]
+    content {
+      sid       = "OffHoursRestoreDesiredCount"
+      effect    = "Allow"
+      actions   = ["ecs:UpdateService"]
+      resources = ["*"]
+    }
+  }
+
   # Off-hours puts a service to sleep and wakes it. It registers the scalable target's range (its own target when the
   # service has none), keeps its scheduled actions and restores the desired count when a service leaves. read_only
   # drops these, so off-hours cannot act, as with the single role.
@@ -293,7 +305,6 @@ data "aws_iam_policy_document" "coordinator" {
       sid    = "OffHoursWrites"
       effect = "Allow"
       actions = [
-        "ecs:UpdateService",
         "application-autoscaling:RegisterScalableTarget",
         "application-autoscaling:DeregisterScalableTarget",
         "application-autoscaling:PutScheduledAction",
