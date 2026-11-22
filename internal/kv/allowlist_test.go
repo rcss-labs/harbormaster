@@ -14,14 +14,14 @@ import (
 // designAllowList is the design's "Command allow-list", copied here on purpose so that editing
 // kv.AllowedCommands alone cannot make the test agree with itself.
 var designAllowList = []string{
-	"GET", "MGET", "SET", "DEL", "PEXPIRE", "ZREM", "ZRANGEBYSCORE", "HMGET",
-	"EVALSHA", "EVAL", "SCRIPT LOAD", "PUBLISH", "SUBSCRIBE", "UNSUBSCRIBE", "PING", "TIME",
+	"GET", "MGET", "SET", "DEL", "PEXPIRE", "ZADD", "ZREM", "ZCARD", "ZRANGEBYSCORE", "ZREMRANGEBYSCORE",
+	"HSET", "HMGET", "EVALSHA", "EVAL", "SCRIPT LOAD", "PUBLISH", "SUBSCRIBE", "UNSUBSCRIBE", "PING", "TIME",
 	"HELLO", "AUTH", "CLIENT SETNAME", "INFO SERVER",
 }
 
 func TestAllowedCommands_MatchesTheDesign(t *testing.T) {
-	if len(designAllowList) != 20 {
-		t.Fatalf("test list has %d names, the design has 20", len(designAllowList))
+	if len(designAllowList) != 24 {
+		t.Fatalf("test list has %d names, the design has 24", len(designAllowList))
 	}
 	want := map[string]bool{}
 	for _, n := range designAllowList {

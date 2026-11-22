@@ -63,7 +63,10 @@ func Millis(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(),
 // including the ones the client library sends while connecting, must be in it.
 var AllowedCommands = map[string]bool{
 	"GET": true, "MGET": true, "SET": true, "DEL": true, "PEXPIRE": true,
-	"ZREM": true, "ZRANGEBYSCORE": true, "HMGET": true,
+	// ZADD, ZCARD, ZREMRANGEBYSCORE and HSET are not client methods any more; the Lua scripts still run them server
+	// side, where they show in the command statistics, so they stay listed.
+	"ZADD": true, "ZREM": true, "ZCARD": true, "ZRANGEBYSCORE": true, "ZREMRANGEBYSCORE": true,
+	"HSET": true, "HMGET": true,
 	"EVALSHA": true, "EVAL": true, "SCRIPT LOAD": true,
 	"PUBLISH": true, "SUBSCRIBE": true, "UNSUBSCRIBE": true,
 	"PING": true, "TIME": true, "HELLO": true, "AUTH": true,
