@@ -278,3 +278,32 @@ func (s *Store) GetOAuthGrant(ctx context.Context, id, userID int64) (OAuthGrant
 func (s *Store) DeleteOAuthGrant(ctx context.Context, id, userID int64) error {
 	return s.execExpectOne(ctx, `delete from oauth_grants where id = $1 and user_id = $2`, id, userID)
 }
+
+// TouchOAuthGrant records the grant's last use. A missing grant is not an error: its tokens are gone with it.
+func (s *Store) TouchOAuthGrant(ctx context.Context, id int64, at time.Time) error {
+	if _, err := s.Pool.Exec(ctx, `update oauth_grants set last_used_at = $2 where id = $1`, id, at); err != nil {
+		return fmt.Errorf("touch oauth grant: %w", err)
+	}
+	return nil
+}
+
+// oauthCodeRetention and oauthGrantRetention are fixed: an expired code is useless at once and kept 10 minutes; an
+// expired grant (and, by cascade, any token of it) is kept a day, like an expired access token.
+const (
+	oauthCodeRetention  = 10 * time.Minute
+	oauthGrantRetention = 24 * time.Hour
+)
+
+// DeleteExpiredOAuth removes codes expired over 10 minutes before now and grants expired over a day before now,
+// returning how many rows of both were removed.
+func (s *Store) DeleteExpiredOAuth(ctx context.Context, now time.Time) (int64, error) {
+	codes, err := s.Pool.Exec(ctx, `delete from oauth_codes where expires_at < $1`, now.Add(-oauthCodeRetention))
+	if err != nil {
+		return 0, fmt.Errorf("delete expired oauth codes: %w", err)
+	}
+	grants, err := s.Pool.Exec(ctx, `delete from oauth_grants where expires_at < $1`, now.Add(-oauthGrantRetention))
+	if err != nil {
+		return codes.RowsAffected(), fmt.Errorf("delete expired oauth grants: %w", err)
+	}
+	return codes.RowsAffected() + grants.RowsAffected(), nil
+}

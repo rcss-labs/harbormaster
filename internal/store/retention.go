@@ -117,6 +117,12 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 	}
 	result["api_tokens"] = n
 
+	n, err = s.DeleteExpiredOAuth(ctx, now)
+	if err != nil {
+		return result, fmt.Errorf("retention oauth: %w", err)
+	}
+	result["oauth"] = n
+
 	n, err = s.DeleteTokenLogScanUsageBefore(ctx, now.Add(-tokenLogScanUsageRetention))
 	if err != nil {
 		return result, fmt.Errorf("retention token_log_scan_usage: %w", err)

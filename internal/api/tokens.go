@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -32,6 +33,38 @@ type TokenDTO struct {
 	LastUsedIP string     `json:"last_used_ip"`
 }
 
+// GrantDTO is an OAuth connection ("connected app") as listed. It never carries a token.
+type GrantDTO struct {
+	ID         int64      `json:"id"`
+	ClientID   string     `json:"client_id"`
+	ClientName string     `json:"client_name"`
+	Scope      string     `json:"scope"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
+func grantDTOs(grants []store.OAuthGrant) []GrantDTO {
+	out := make([]GrantDTO, 0, len(grants))
+	for _, g := range grants {
+		out = append(out, GrantDTO{ID: g.ID, ClientID: g.ClientID, ClientName: g.ClientName, Scope: g.Scope,
+			CreatedAt: g.CreatedAt, ExpiresAt: g.ExpiresAt, LastUsedAt: g.LastUsedAt})
+	}
+	return out
+}
+
+// listGrants returns the user's connected apps while OAuth is on, and an empty list otherwise.
+func (s *Server) listGrants(ctx context.Context, userID int64) ([]GrantDTO, error) {
+	if !s.oauthOn() {
+		return []GrantDTO{}, nil
+	}
+	grants, err := s.Store.ListOAuthGrantsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return grantDTOs(grants), nil
+}
+
 // TokenPolicyDTO is what the UI needs to offer token creation: this user's limits and today's log search budget.
 type TokenPolicyDTO struct {
 	MaxTTLDays                 int    `json:"max_ttl_days"`
@@ -39,15 +72,23 @@ type TokenPolicyDTO struct {
 	SSOLinked                  bool   `json:"sso_linked"`
 	Admin                      bool   `json:"admin"`
 	MCPURL                     string `json:"mcp_url"`
+	OAuth                      bool   `json:"oauth"`
 	LogSearchDailyBytes        int64  `json:"log_search_daily_bytes"`
 	LogSearchUsedBytes         int64  `json:"log_search_used_bytes"`
 	LogSearchMaxBytesPerSearch int64  `json:"log_search_max_bytes_per_search"`
 }
 
-// TokenListResponse is the body of GET /api/tokens.
+// TokenListResponse is the body of GET /api/tokens. Grants are the connected apps (empty while OAuth is off).
 type TokenListResponse struct {
 	Items  []TokenDTO     `json:"items"`
+	Grants []GrantDTO     `json:"grants"`
 	Policy TokenPolicyDTO `json:"policy"`
+}
+
+// UserTokensResponse is the body of GET /api/users/{id}/tokens.
+type UserTokensResponse struct {
+	Items  []TokenDTO `json:"items"`
+	Grants []GrantDTO `json:"grants"`
 }
 
 // CreateTokenResponse is the body of POST /api/tokens. Secret is shown here once and never again.
@@ -152,6 +193,7 @@ func (s *Server) tokenPolicy(ctx context.Context, user store.User, admin bool) (
 		SSOLinked:                  user.SSOLinked(),
 		Admin:                      admin,
 		MCPURL:                     s.Cfg.MCPPublicURL,
+		OAuth:                      s.oauthOn(),
 		LogSearchDailyBytes:        state.DailyBytes,
 		LogSearchUsedBytes:         state.UsedBytes,
 		LogSearchMaxBytesPerSearch: state.MaxBytesPerSearch,
@@ -166,12 +208,17 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	grants, err := s.listGrants(r.Context(), user.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	policy, err := s.tokenPolicy(r.Context(), user, subject.Admin)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, TokenListResponse{Items: tokenDTOs(tokens), Policy: policy})
+	writeJSON(w, http.StatusOK, TokenListResponse{Items: tokenDTOs(tokens), Grants: grants, Policy: policy})
 }
 
 func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +337,12 @@ func (s *Server) listUserTokens(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ItemsResponse[TokenDTO]{Items: tokenDTOs(tokens)})
+	grants, err := s.listGrants(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, UserTokensResponse{Items: tokenDTOs(tokens), Grants: grants})
 }
 
 func (s *Server) deleteUserToken(w http.ResponseWriter, r *http.Request) {
@@ -306,6 +358,54 @@ func (s *Server) deleteUserToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.revokeToken(w, r, userID, tokenID, target.Username)
+}
+
+// revokeGrant deletes one of ownerID's OAuth grants (its tokens go with it, so they stop authenticating at once) and
+// audits it as oauth_revoke; targetUsername is set when an admin revokes another user's grant.
+func (s *Server) revokeGrant(w http.ResponseWriter, r *http.Request, ownerID, grantID int64, targetUsername string) {
+	grant, err := s.Store.GetOAuthGrant(r.Context(), grantID, ownerID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.Store.DeleteOAuthGrant(r.Context(), grantID, ownerID); err != nil {
+		s.fail(w, err)
+		return
+	}
+	details := map[string]any{"grant_id": grant.ID, "client_id": grant.ClientID, "client_name": grant.ClientName,
+		"reason": "revoked"}
+	summary := "Disconnected " + grant.ClientName + "."
+	if targetUsername != "" {
+		details["user"] = targetUsername
+		summary = "Disconnected " + grant.ClientName + " of " + targetUsername + "."
+	}
+	s.auditAdmin(r, "oauth_revoke", "oauth_grant:"+strconv.FormatInt(grant.ID, 10), summary, details)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) deleteGrant(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, "id")
+	if !ok {
+		s.fail(w, store.ErrNotFound)
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	s.revokeGrant(w, r, user.ID, id, "")
+}
+
+func (s *Server) deleteUserGrant(w http.ResponseWriter, r *http.Request) {
+	userID, ok := pathID(r, "id")
+	grantID, ok2 := pathID(r, "grantId")
+	if !ok || !ok2 {
+		s.fail(w, store.ErrNotFound)
+		return
+	}
+	target, err := s.Store.GetUser(r.Context(), userID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.revokeGrant(w, r, userID, grantID, target.Username)
 }
 
 // whoAmI answers GET /api/tokens/current for a token credential: the user, the token, the tags the user can view and
