@@ -74,7 +74,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spend := tallyServiceSpend(tasks, facts)
+	spend := tallyServiceSpend(tasks, facts, s.rateForClass)
 	dto := CostDTO{
 		Tab:        "cost",
 		Window:     win.dto(retention, false),
@@ -180,7 +180,7 @@ func (t *serviceSpend) tasks() int { return t.priced + t.unpriced }
 // tallyServiceSpend prices each running task of a visible service at its own size, so a rollout between two
 // task definition sizes is correct. Windows tasks are unpriced because the table holds Linux rates only. Standalone tasks (no service) are skipped: how long they run is unknown, so a
 // month of hours would overstate them. Tasks whose service is not among the visible facts are skipped too.
-func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostServiceFact) map[model.ServiceKey]*serviceSpend {
+func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostServiceFact, rateForClass func(region, architecture string, class cost.TaskClass) (cost.Rate, bool)) map[model.ServiceKey]*serviceSpend {
 	type platform struct {
 		architecture string
 		windows      bool
@@ -210,7 +210,7 @@ func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostService
 			totals.notFargate++
 			continue
 		}
-		rate, ok := cost.RateForClass(task.Cluster.Region, service.architecture, class)
+		rate, ok := rateForClass(task.Cluster.Region, service.architecture, class)
 		if !ok {
 			totals.unpriced++
 			totals.noRateTasks++
