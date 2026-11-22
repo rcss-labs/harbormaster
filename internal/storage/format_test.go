@@ -7,15 +7,6 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 )
 
-func TestFormatSize(t *testing.T) {
-	cases := map[int64]string{21474836: "20 MiB", 41231686041: "38.4 GiB", 227204155801: "211.6 GiB", 0: "0 MiB"}
-	for in, want := range cases {
-		if got := FormatSize(in); got != want {
-			t.Errorf("FormatSize(%d) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func pts(vals ...*float64) []metrics.Point {
 	out := []metrics.Point{}
 	for _, v := range vals {

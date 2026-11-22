@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/model"
 )
@@ -49,19 +48,3 @@ const upsertStatusRunSQL = `insert into service_status_runs (account_id, region,
 	 values ($1, $2, $3, $4, $5, $6, $7)
 	 on conflict (account_id, region, cluster_name, service_name) do update set
 	   status = excluded.status, since = excluded.since, polls = excluded.polls`
-
-// UpsertStatusRuns stores each run, replacing the row for the same service.
-func (s *Store) UpsertStatusRuns(ctx context.Context, runs []StatusRun) error {
-	if len(runs) == 0 {
-		return nil
-	}
-	batch := &pgx.Batch{}
-	for _, run := range runs {
-		batch.Queue(upsertStatusRunSQL,
-			run.Key.AccountID, run.Key.Region, run.Key.Cluster, run.Key.Service, string(run.Status), run.Since, run.Polls)
-	}
-	if err := s.execBatch(ctx, batch); err != nil {
-		return fmt.Errorf("upsert status runs: %w", err)
-	}
-	return nil
-}

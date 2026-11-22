@@ -100,14 +100,14 @@ func TestToRegisterReady_KeepsZeroUlimitsAndDropsZeroContainerCPU(t *testing.T) 
 	}
 }
 
-func TestToRegisterInput_RoundTrips(t *testing.T) {
+func TestDecodeDefinition_RoundTrips(t *testing.T) {
 	td := loadFixture(t, "describe_payments_api.json")
 	def, err := ToRegisterReady(td)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tags := []ecstypes.Tag{{Key: aws.String("owner"), Value: aws.String("payments")}}
-	in, err := ToRegisterInput(def, tags)
+	in, err := decodeDefinition(def, tags, false)
 	if err != nil {
 		t.Fatal(err)
 	}

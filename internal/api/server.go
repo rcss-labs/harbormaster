@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"github.com/rcss-labs/harbormaster/internal/cost"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -112,7 +113,9 @@ type Server struct {
 	// means the cache is off and the handlers read Postgres as they always did.
 	Snap *snapcache.Reader
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
-	costWarned *sync.Map
+	costWarned *warnedSet
+	// rateForClass prices a task. It is cost.RateForClass unless a test swaps in a table without some price.
+	rateForClass func(region, architecture string, class cost.TaskClass) (cost.Rate, bool)
 	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.
 	focusOpens *focusOpens
 }
@@ -146,7 +149,10 @@ type ScanKicker interface{ Kick() }
 
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
-	s.costWarned = &sync.Map{}
+	s.costWarned = &warnedSet{}
+	if s.rateForClass == nil {
+		s.rateForClass = cost.RateForClass
+	}
 	s.focusOpens = &focusOpens{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {

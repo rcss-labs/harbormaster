@@ -2,10 +2,12 @@ package api
 
 import (
 	"hash/fnv"
+	"maps"
 	"net/http"
 	"slices"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -72,7 +74,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spend := tallyServiceSpend(tasks, facts)
+	spend := tallyServiceSpend(tasks, facts, s.rateForClass)
 	dto := CostDTO{
 		Tab:        "cost",
 		Window:     win.dto(retention, false),
@@ -125,7 +127,7 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto.ARM64 = arm64
-	dto.KPIs.UnpricedRegions = sortedKeys(unpricedRegions)
+	dto.KPIs.UnpricedRegions = slices.Sorted(maps.Keys(unpricedRegions))
 	dto.ByCluster, dto.ByAccount, dto.ByTag = byCluster.sorted(), byAccount.sorted(), byTag.sorted()
 	writeJSON(w, http.StatusOK, dto)
 }
@@ -178,7 +180,7 @@ func (t *serviceSpend) tasks() int { return t.priced + t.unpriced }
 // tallyServiceSpend prices each running task of a visible service at its own size, so a rollout between two
 // task definition sizes is correct. Windows tasks are unpriced because the table holds Linux rates only. Standalone tasks (no service) are skipped: how long they run is unknown, so a
 // month of hours would overstate them. Tasks whose service is not among the visible facts are skipped too.
-func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostServiceFact) map[model.ServiceKey]*serviceSpend {
+func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostServiceFact, rateForClass func(region, architecture string, class cost.TaskClass) (cost.Rate, bool)) map[model.ServiceKey]*serviceSpend {
 	type platform struct {
 		architecture string
 		windows      bool
@@ -208,7 +210,7 @@ func tallyServiceSpend(tasks []store.CapacityTaskFact, facts []store.CostService
 			totals.notFargate++
 			continue
 		}
-		rate, ok := cost.RateForClass(task.Cluster.Region, service.architecture, class)
+		rate, ok := rateForClass(task.Cluster.Region, service.architecture, class)
 		if !ok {
 			totals.unpriced++
 			totals.noRateTasks++
@@ -326,15 +328,6 @@ func (g groupTotals) sorted() []CostGroupDTO {
 	return out
 }
 
-func sortedKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for key := range set {
-		out = append(out, key)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // warnUnreadableFloors logs an unparsable container definition once per service and definition per process; the
 // endpoint is polled, so logging on every request would repeat the same line. The contents are never logged.
 func (s *Server) warnUnreadableFloors(fact store.CostServiceFact, err error) {
@@ -342,7 +335,7 @@ func (s *Server) warnUnreadableFloors(fact store.CostServiceFact, err error) {
 	hash.Write(fact.ContainerDefinitions) //nolint:errcheck // hash writes never fail
 	key := fact.Key.ID() + "/" + strconv.FormatUint(hash.Sum64(), 16)
 	if s.costWarned != nil {
-		if _, seen := s.costWarned.LoadOrStore(key, struct{}{}); seen {
+		if !s.costWarned.add(key) {
 			return
 		}
 	}
@@ -405,4 +398,29 @@ func sortSpotServices(services []CostSpotServiceDTO) {
 		}
 		return a.ServiceID < b.ServiceID
 	})
+}
+
+// maxWarnedKeys bounds warnedSet. Keys include a hash of the container definitions, so a service whose definition
+// keeps changing would otherwise add a key per revision for the life of the process.
+const maxWarnedKeys = 4096
+
+// warnedSet remembers which warnings were already logged. When it fills up it starts over, which can repeat a warning
+// once; that is cheaper than growing without a bound.
+type warnedSet struct {
+	mu   sync.Mutex
+	keys map[string]struct{}
+}
+
+// add records key and reports whether it was new.
+func (w *warnedSet) add(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, seen := w.keys[key]; seen {
+		return false
+	}
+	if w.keys == nil || len(w.keys) >= maxWarnedKeys {
+		w.keys = make(map[string]struct{})
+	}
+	w.keys[key] = struct{}{}
+	return true
 }

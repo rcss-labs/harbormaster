@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -570,6 +571,24 @@ func TestBaseDestinationAllowed(t *testing.T) {
 		}
 		if got := baseDestinationAllowed(addr, true); got != tc.onECR {
 			t.Errorf("%s allowed for ECR = %v, want %v", tc.addr, got, tc.onECR)
+		}
+	}
+}
+
+// safedial's policy (used by the API-side clients) also refuses the special-use IPv4 ranges (RFC 6890); the scanner
+// cannot import it (see TestScannerImportsOnlyScanFromTheModule), so its own guard must refuse them too, ECR included.
+func TestBaseDialContext_RefusesSpecialUseRanges(t *testing.T) {
+	for _, literal := range []string{"198.18.0.1", "240.0.0.1", "255.255.255.255", "192.0.0.8", "0.1.2.3"} {
+		for _, allowPrivate := range []bool{false, true} {
+			dialed := false
+			r := &Runner{baseDial: func(context.Context, string, string) (net.Conn, error) {
+				dialed = true
+				return nil, errors.New("dialed")
+			}}
+			_, err := r.baseDialContext(allowPrivate)(context.Background(), "tcp", net.JoinHostPort(literal, "443"))
+			if dialed || !errors.Is(err, errBlockedDestination) {
+				t.Errorf("%s (allowPrivate=%v): dialed=%v err=%v, want a blocked destination", literal, allowPrivate, dialed, err)
+			}
 		}
 	}
 }

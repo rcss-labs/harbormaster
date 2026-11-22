@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/execbridge"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -277,7 +277,7 @@ func (s *Server) runExec(r *http.Request, sock *execSocket, start execClientMess
 	_ = sess.Resize(ctx, uint32(start.Cols), uint32(start.Rows))
 
 	ops := execOperations{s: s, subject: subject, task: task, container: container, command: command, sessionID: sess.ID()}
-	opened := ops.append(ctx, "Opened terminal session on task "+shortTaskID(task.ARN)+" ("+container+", "+command+").", nil)
+	opened := ops.append(ctx, "Opened terminal session on task "+deploy.ShortTaskID(task.ARN)+" ("+container+", "+command+").", nil)
 	_ = sock.sendJSON(ctx, execServerStatus{Type: "status", State: "connected", SessionID: sess.ID()})
 
 	// Session -> browser. It owns the final frames and the close; the loop below only feeds input.
@@ -339,12 +339,6 @@ func (s *Server) pingBrowser(sock *execSocket, sess *execbridge.Session) (stop f
 func (s *Server) execInternalError(sock *execSocket, what string, err error) {
 	s.log().Error("exec: "+what, "error", err)
 	sock.reject(wsCloseInternal, "internal", "Something went wrong on our side.")
-}
-
-// shortTaskID is the first 12 characters of the task id (the last ARN segment).
-func shortTaskID(taskARN string) string {
-	id := taskARN[strings.LastIndex(taskARN, "/")+1:]
-	return id[:min(12, len(id))]
 }
 
 func awsMessage(err error) string {
@@ -451,6 +445,6 @@ func (o execOperations) logClosed(sess *execbridge.Session, reason execbridge.Cl
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	duration := sess.Duration()
-	o.append(ctx, "Closed terminal session on task "+shortTaskID(o.task.ARN)+" ("+o.container+") after "+durationText(duration)+".",
+	o.append(ctx, "Closed terminal session on task "+deploy.ShortTaskID(o.task.ARN)+" ("+o.container+") after "+durationText(duration)+".",
 		map[string]any{"op": "terminal_close", "duration_ms": duration.Milliseconds(), "reason": string(reason)})
 }

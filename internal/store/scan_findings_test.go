@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"testing"
 	"time"
 
@@ -169,7 +170,7 @@ func TestOpenFindingCounts_AcceptanceIsPerService(t *testing.T) {
 	a, b := serviceKey("core-services", "payments-api"), serviceKey("core-services", "notifications")
 	openFindingFixture(t, fx, "sha256:a")
 	for _, key := range []model.ServiceKey{a, b} {
-		if _, err := s.AddScanRequest(ctx, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v1",
+		if _, err := storetest.AddScanRequest(ctx, s, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v1",
 			Source: "manual", RequestedAt: fx.now}); err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +201,7 @@ func TestOpenFindingCounts_AcceptedOnlyWhenEveryServiceOfTheSetAccepted(t *testi
 	a, b, c := serviceKey("core-services", "payments-api"), serviceKey("core-services", "notifications"), serviceKey("ci-tools", "artifact-proxy")
 	openFindingFixture(t, fx, "sha256:a")
 	for _, key := range []model.ServiceKey{a, b, c} {
-		if _, err := s.AddScanRequest(ctx, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v1",
+		if _, err := storetest.AddScanRequest(ctx, s, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v1",
 			Source: "manual", RequestedAt: fx.now}); err != nil {
 			t.Fatal(err)
 		}

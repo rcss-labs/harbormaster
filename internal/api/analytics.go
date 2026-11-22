@@ -94,9 +94,6 @@ func clampWindow(requested AnalyticsRange, retention time.Duration, now time.Tim
 	}
 }
 
-// bucketName is the bucket width as the API names it: "1h", "4h", "1d" or "2d".
-func (w windowSpec) bucketName() string { return w.bucketID }
-
 // dto renders the window block of a response. retention is the governing table's retention.
 func (w windowSpec) dto(retention time.Duration, rangeApplies bool) AnalyticsWindowDTO {
 	return AnalyticsWindowDTO{

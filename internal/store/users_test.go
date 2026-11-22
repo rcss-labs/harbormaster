@@ -63,7 +63,7 @@ func TestDeleteUser_CascadesSessionsAndPermissions(t *testing.T) {
 		t.Fatalf("insert permission: %v", err)
 	}
 
-	if err := s.DeleteUser(ctx, user.ID); err != nil {
+	if err := storetest.DeleteUser(ctx, s, user.ID); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 	var sessions, permissions int

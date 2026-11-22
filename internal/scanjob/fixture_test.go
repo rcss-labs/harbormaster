@@ -217,7 +217,7 @@ func (fx *fixture) queueFor(account, repository, tag string, at time.Time) strin
 	if err != nil {
 		fx.t.Fatal(err)
 	}
-	_, err = fx.st.AddScanRequest(ctx, store.ScanRequest{Digest: digest,
+	_, err = storetest.AddScanRequest(ctx, fx.st, store.ScanRequest{Digest: digest,
 		Key:       model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: account, Region: "us-east-1", Cluster: "core-services"}, Service: "svc-" + repository},
 		Container: "app", Image: image + ":" + tag, Tag: tag, Source: "manual", RequestedAt: at})
 	if err != nil {

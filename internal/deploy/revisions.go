@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,7 +63,7 @@ func (s *Service) Revisions(ctx context.Context, key model.ServiceKey) (Revision
 	for _, deployment := range svc.Deployments {
 		status := aws.ToString(deployment.Status)
 		deploymentARN := aws.ToString(deployment.TaskDefinition)
-		if (status == "PRIMARY" || status == "ACTIVE") && deploymentARN != "" && !containsString(arns, deploymentARN) {
+		if (status == "PRIMARY" || status == "ACTIVE") && deploymentARN != "" && !slices.Contains(arns, deploymentARN) {
 			arns = append(arns, deploymentARN)
 		}
 	}
@@ -229,15 +230,6 @@ func sortRevisionsNewestFirst(items []Revision) {
 			items[j], items[j-1] = items[j-1], items[j]
 		}
 	}
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 // primaryDefinition returns the polled service and the stored task definition of its PRIMARY deployment.

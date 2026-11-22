@@ -227,6 +227,14 @@ func (r *Runner) baseDialContext(allowPrivate bool) func(ctx context.Context, ne
 // Prefixes that stay blocked for every registry, including ECR.
 var (
 	carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
+	// Special-use IPv4 ranges (RFC 6890) that are not routable public destinations, as in safedial. 240.0.0.0/4
+	// includes the 255.255.255.255 broadcast address.
+	specialIPv4 = []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("198.18.0.0/15"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+	}
 	ec2IPv6Metadata = netip.MustParsePrefix("fd00:ec2::/32") // inside fc00::/7, so it needs its own entry
 	// Translation prefixes embed an IPv4 address the filter would otherwise not see; registries do not need them.
 	translatedIPv6 = []netip.Prefix{
@@ -246,7 +254,7 @@ func baseDestinationAllowed(addr netip.Addr, allowPrivate bool) bool {
 	addr = addr.Unmap()
 	switch {
 	case !addr.IsValid(), addr.IsUnspecified(), addr.IsLoopback(), addr.IsLinkLocalUnicast(), addr.IsMulticast(),
-		carrierGradeNAT.Contains(addr), ec2IPv6Metadata.Contains(addr), inAny(translatedIPv6, addr):
+		carrierGradeNAT.Contains(addr), ec2IPv6Metadata.Contains(addr), inAny(translatedIPv6, addr), inAny(specialIPv4, addr):
 		return false
 	case addr.IsPrivate():
 		return allowPrivate

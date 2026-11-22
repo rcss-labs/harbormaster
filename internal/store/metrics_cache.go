@@ -66,11 +66,6 @@ func (s *Store) PutMetricsCache(ctx context.Context, rows []CachedSeries) error 
 	return nil
 }
 
-// PruneMetricsCache deletes rows fetched more than olderThan ago and returns how many.
-func (s *Store) PruneMetricsCache(ctx context.Context, olderThan time.Duration) (int64, error) {
-	return s.pruneMetricsCacheBefore(ctx, time.Now().Add(-olderThan))
-}
-
 // pruneMetricsCacheBefore deletes rows fetched before cutoff. RunRetention uses it so its
 // cutoff is measured from the same clock as every other retention step.
 func (s *Store) pruneMetricsCacheBefore(ctx context.Context, cutoff time.Time) (int64, error) {

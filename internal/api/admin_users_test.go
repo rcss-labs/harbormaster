@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"net/http"
 	"strings"
 	"testing"
@@ -180,7 +181,7 @@ func TestSetAdmin_LastAdminRefused(t *testing.T) {
 	// Deleting the last admin is unreachable through DELETE (the caller is an admin, so it is self);
 	// the store test covers that guard. Here: the last admin cannot be demoted.
 	omerID := userID(t, st, "omer")
-	if err := st.SetAdmin(t.Context(), omerID, true); err != nil {
+	if err := storetest.SetAdmin(t.Context(), st, omerID, true); err != nil {
 		t.Fatal(err)
 	}
 	sam := login(t, srv, "sam", testPassword)
@@ -211,7 +212,7 @@ func TestRemoveAdmin_EndsSessionsOfThatUser(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	omerID := userID(t, st, "omer")
 	samID := userID(t, st, "sam")
-	if err := st.SetAdmin(t.Context(), omerID, true); err != nil {
+	if err := storetest.SetAdmin(t.Context(), st, omerID, true); err != nil {
 		t.Fatal(err)
 	}
 	sam := login(t, srv, "sam", testPassword)

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 func addRequest(t *testing.T, s *store.Store, digest string, key model.ServiceKey, container string, at time.Time) {
 	t.Helper()
-	if id, err := s.AddScanRequest(context.Background(), store.ScanRequest{Digest: digest, Key: key, Container: container,
+	if id, err := storetest.AddScanRequest(context.Background(), s, store.ScanRequest{Digest: digest, Key: key, Container: container,
 		Image: "repo:v1", Tag: "v1", Source: "manual", RequestedAt: at}); err != nil || id == 0 {
 		t.Fatalf("AddScanRequest: id=%d err=%v", id, err)
 	}
@@ -25,7 +26,7 @@ func TestAddScanRequest_UpsertsPerServiceAndContainer(t *testing.T) {
 	later := fx.now.Add(time.Hour)
 
 	addRequest(t, s, "sha256:a", key, "app", fx.now)
-	if _, err := s.AddScanRequest(ctx, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v2", Tag: "v2",
+	if _, err := storetest.AddScanRequest(ctx, s, store.ScanRequest{Digest: "sha256:a", Key: key, Container: "app", Image: "repo:v2", Tag: "v2",
 		Source: "pre_deploy", RequestedAt: later}); err != nil {
 		t.Fatal(err)
 	}

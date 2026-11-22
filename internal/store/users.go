@@ -130,31 +130,11 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// CountAdmins returns the number of global admins.
-func (s *Store) CountAdmins(ctx context.Context) (int, error) {
-	var n int
-	err := s.Pool.QueryRow(ctx, `select count(*) from users where is_admin`).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count admins: %w", err)
-	}
-	return n, nil
-}
-
-// DeleteUser removes a user; their sessions and permissions cascade. Returns ErrNotFound if absent.
-func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	return s.execExpectOne(ctx, `delete from users where id = $1`, id)
-}
-
 // SetPassword replaces a user's password hash and must-change flag. Returns ErrNotFound if absent.
 func (s *Store) SetPassword(ctx context.Context, id int64, hash string, mustChange bool) error {
 	return s.execExpectOne(ctx,
 		`update users set password_hash = $2, must_change_password = $3 where id = $1`,
 		id, hash, mustChange)
-}
-
-// SetAdmin grants or revokes the global admin flag. Returns ErrNotFound if absent.
-func (s *Store) SetAdmin(ctx context.Context, id int64, admin bool) error {
-	return s.execExpectOne(ctx, `update users set is_admin = $2 where id = $1`, id, admin)
 }
 
 // TouchSignIn records the time of a successful sign-in. Returns ErrNotFound if absent.

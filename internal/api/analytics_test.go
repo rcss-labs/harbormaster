@@ -86,8 +86,8 @@ func TestClampWindow_BucketSizes(t *testing.T) {
 	}
 	for _, c := range cases {
 		spec := clampWindow(c.rng, 0, analyticsNow)
-		if spec.bucket != c.bucket || spec.buckets != c.buckets || spec.bucketName() != c.name {
-			t.Errorf("%s: bucket %v x%d %q; want %v x%d %q", c.rng, spec.bucket, spec.buckets, spec.bucketName(), c.bucket, c.buckets, c.name)
+		if spec.bucket != c.bucket || spec.buckets != c.buckets || spec.bucketID != c.name {
+			t.Errorf("%s: bucket %v x%d %q; want %v x%d %q", c.rng, spec.bucket, spec.buckets, spec.bucketID, c.bucket, c.buckets, c.name)
 		}
 	}
 }

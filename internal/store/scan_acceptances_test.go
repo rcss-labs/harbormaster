@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func TestDeleteUser_KeepsAcceptanceWithoutTheUser(t *testing.T) {
 		t.Fatalf("acceptance before delete: username=%q err=%v, want alice", withUser.AcceptedByUsername, err)
 	}
 
-	if err := s.DeleteUser(ctx, user.ID); err != nil {
+	if err := storetest.DeleteUser(ctx, s, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.GetScanAcceptance(ctx, ids[0])
