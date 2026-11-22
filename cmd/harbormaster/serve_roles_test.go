@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/rcss-labs/harbormaster/internal/kv/kvtest"
 )
 
 const rolesMetricsToken = "roles-metrics-token"
@@ -31,6 +35,14 @@ func startRole(t *testing.T, schemaURL, role string, flagStyle bool, extra map[s
 		"HM_DATABASE_URL": schemaURL, "HM_LISTEN": addr, "HM_BASE_URL": "http://" + addr, "HM_COOKIE_SECURE": "false",
 		"HM_FAKE_AWS": "1", "HM_POLL_JITTER": "1ms", "HM_LOG_LEVEL": "warn", "HM_METRICS_TOKEN": rolesMetricsToken,
 	}
+	// Split roles refuse to start without the shared store. Every task of one test shares a prefix (derived from its
+	// schema) so they see the same focus registry and kicks, and tests do not see each other's.
+	urls := kvtest.URLs()
+	if len(urls) == 0 {
+		t.Skip(kvtest.EnvVar + " not set: split roles need HM_KV_URL")
+	}
+	sum := sha1.Sum([]byte(schemaURL))
+	env["HM_KV_URL"], env["HM_KV_PREFIX"] = urls[0], "roles-"+hex.EncodeToString(sum[:6])
 	for k, v := range extra {
 		env[k] = v
 	}
@@ -161,6 +173,21 @@ func grepLines(text, needle string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// A split role without a shared store would run on per-task memory: focus heartbeats posted to a web task never reach
+// a poller, yet the API would still report a page as live. Start must refuse instead.
+func TestServe_SplitRolesRequireKV(t *testing.T) {
+	for _, role := range []string{"web", "poller", "coordinator"} {
+		t.Run(role, func(t *testing.T) {
+			env := map[string]string{"HM_DATABASE_URL": "postgres://example/none", "HM_ROLE": role, "HM_FAKE_AWS": "1"}
+			err := runServe(t.Context(), nil, func(k string) string { return env[k] }, io.Discard)
+			var usage errUsage
+			if !errors.As(err, &usage) || !strings.Contains(usage.msg, "HM_KV_URL") {
+				t.Fatalf("err = %v, want a usage error naming HM_KV_URL", err)
+			}
+		})
+	}
 }
 
 func TestServe_UnknownRoleIsAUsageError(t *testing.T) {

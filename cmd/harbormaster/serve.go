@@ -222,6 +222,11 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	if err != nil {
 		return err
 	}
+	// Split roles talk to each other only through the shared store. Without it focus heartbeats and kicks stay in the
+	// receiving task's memory and never reach the task that acts on them.
+	if role != config.RoleAll && !kvConfigured {
+		return errUsage{"role " + string(role) + " needs the shared store: set HM_KV_URL (only role all runs without it)\n" + serveUsage}
+	}
 
 	var base aws.Config
 	if !fakeAWS {
