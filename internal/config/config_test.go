@@ -105,6 +105,18 @@ func TestLoad_Defaults(t *testing.T) {
 		ExecIdleTimeout:        20 * time.Minute,
 		ExecMaxDuration:        4 * time.Hour,
 		ExecMaxSessionsPerUser: 3,
+		// MCP phase 1: access tokens (off) and phase 4: OAuth (off)
+		TokenMaxTTL:           2160 * time.Hour,
+		TokenMaxTTLSSO:        168 * time.Hour,
+		TokenMaxPerUser:       10,
+		TokenLogSearchMaxGB:   2,
+		TokenLogSearchDailyGB: 20,
+		OAuthAccessTTL:        time.Hour,
+		OAuthClientHosts:      []string{"claude.ai"},
+		OAuthRedirectURIs: []string{
+			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
+			"http://localhost/callback", "http://127.0.0.1/callback",
+		},
 	}
 
 	if !reflect.DeepEqual(cfg, want) {
