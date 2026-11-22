@@ -1,6 +1,8 @@
 package store_test
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,5 +49,78 @@ func TestTokenLogScanUsage_UpsertAndDayBoundary(t *testing.T) {
 	}
 	if n, err := st.DeleteTokenLogScanUsageBefore(ctx, early); err != nil || n != 1 {
 		t.Errorf("delete before = %d, %v; want 1", n, err)
+	}
+}
+
+func TestReserveTokenLogScan_CapsAtRemainingAndPerSearch(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	u, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	day := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+
+	got, err := st.ReserveTokenLogScan(ctx, u.ID, day, 100, 30)
+	if err != nil || got != 30 {
+		t.Fatalf("first = %d, %v; want 30 (per-search cap)", got, err)
+	}
+	if got, _ = st.ReserveTokenLogScan(ctx, u.ID, day, 100, 0); got != 70 {
+		t.Fatalf("second = %d, want the remaining 70 (no per-search cap)", got)
+	}
+	if got, _ = st.ReserveTokenLogScan(ctx, u.ID, day, 100, 30); got != 0 {
+		t.Fatalf("third = %d, want 0 once the day is used up", got)
+	}
+	if b, n, _ := st.TokenLogScanUsage(ctx, u.ID, day); b != 100 || n != 2 {
+		t.Errorf("usage = %d, %d; want 100 bytes and 2 searches (a refused reserve is not a search)", b, n)
+	}
+}
+
+func TestReserveTokenLogScan_ConcurrentReservesNeverExceedTheDay(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	u, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	day := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+
+	var wg sync.WaitGroup
+	var total atomic.Int64
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := st.ReserveTokenLogScan(ctx, u.ID, day, 100, 30)
+			if err != nil {
+				t.Error(err)
+			}
+			total.Add(got)
+		}()
+	}
+	wg.Wait()
+	if total.Load() != 100 {
+		t.Errorf("reserved in total = %d, want exactly the day's 100", total.Load())
+	}
+}
+
+func TestSettleTokenLogScan_ReplacesTheReservationWithActual(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	u, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	day := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+
+	if _, err := st.ReserveTokenLogScan(ctx, u.ID, day, 100, 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SettleTokenLogScan(ctx, u.ID, day, 30, 12); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, _ := st.TokenLogScanUsage(ctx, u.ID, day); b != 12 {
+		t.Errorf("after refund = %d, want 12", b)
+	}
+	// Actual above the reservation is charged in full: the charge is never below what was scanned.
+	if _, err := st.ReserveTokenLogScan(ctx, u.ID, day, 100, 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SettleTokenLogScan(ctx, u.ID, day, 30, 45); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, _ := st.TokenLogScanUsage(ctx, u.ID, day); b != 57 {
+		t.Errorf("after overrun = %d, want 57", b)
 	}
 }

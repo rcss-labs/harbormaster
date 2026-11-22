@@ -52,3 +52,51 @@ func (s *Store) DeleteTokenLogScanUsageBefore(ctx context.Context, day time.Time
 	}
 	return tag.RowsAffected(), nil
 }
+
+// ReserveTokenLogScan charges min(perSearchCap, what is left of dailyBytes) to the user's day before a search runs
+// and returns it; perSearchCap 0 means no per-search cap. It counts one search. The row is locked while the
+// remainder is read, so concurrent reserves cannot both take the same remaining budget. It returns 0 and changes
+// nothing when the day is used up.
+func (s *Store) ReserveTokenLogScan(ctx context.Context, userID int64, day time.Time, dailyBytes, perSearchCap int64) (int64, error) {
+	var reserved int64
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`insert into token_log_scan_usage (user_id, day, bytes_scanned, searches) values ($1, $2, 0, 0)
+			 on conflict (user_id, day) do nothing`, userID, utcDate(day)); err != nil {
+			return err
+		}
+		var used int64
+		if err := tx.QueryRow(ctx,
+			`select bytes_scanned from token_log_scan_usage where user_id = $1 and day = $2 for update`,
+			userID, utcDate(day)).Scan(&used); err != nil {
+			return err
+		}
+		reserved = max(dailyBytes-used, 0)
+		if perSearchCap > 0 {
+			reserved = min(reserved, perSearchCap)
+		}
+		if reserved == 0 {
+			return nil
+		}
+		_, err := tx.Exec(ctx,
+			`update token_log_scan_usage set bytes_scanned = bytes_scanned + $3, searches = searches + 1
+			 where user_id = $1 and day = $2`, userID, utcDate(day), reserved)
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("reserve token log scan: %w", err)
+	}
+	return reserved, nil
+}
+
+// SettleTokenLogScan replaces a reservation made on day with the bytes the search actually scanned: the difference
+// is refunded, or charged when the scan overran the reservation. The day's total never goes below zero.
+func (s *Store) SettleTokenLogScan(ctx context.Context, userID int64, day time.Time, reserved, actual int64) error {
+	_, err := s.Pool.Exec(ctx,
+		`update token_log_scan_usage set bytes_scanned = greatest(bytes_scanned - $3 + $4, 0)
+		 where user_id = $1 and day = $2`, userID, utcDate(day), reserved, actual)
+	if err != nil {
+		return fmt.Errorf("settle token log scan: %w", err)
+	}
+	return nil
+}
