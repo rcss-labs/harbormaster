@@ -867,6 +867,36 @@ func TestHandler_AmbiguousTopLevelKeysAreRejectedWithoutUpstreamCall(t *testing.
 	}
 }
 
+// Each body has a case-variant key and no exact key of that name, so only the
+// case-variant check (not the duplicate-key check) can reject it.
+func TestHandler_CaseVariantKeyAloneIsRejectedWithoutUpstreamCall(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	for name, body := range map[string]string{
+		"Method":  `{"jsonrpc":"2.0","id":1,"Method":"tools/list"}`,
+		"METHOD":  `{"jsonrpc":"2.0","id":1,"METHOD":"tools/list"}`,
+		"Params":  `{"jsonrpc":"2.0","id":1,"method":"tools/call","Params":{"name":"get_overview"}}`,
+		"ID":      `{"jsonrpc":"2.0","ID":1,"method":"tools/list"}`,
+		"JsonRpc": `{"JsonRpc":"2.0","id":1,"method":"tools/list"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := h.post(t, h.authed(), []byte(body))
+			text := readBody(t, resp)
+			if resp.StatusCode != http.StatusBadRequest || !strings.Contains(text, "ambiguous key") {
+				t.Errorf("status %d body %s, want 400 ambiguous key", resp.StatusCode, text)
+			}
+		})
+	}
+	if n := len(h.upstream.seen()); n != 0 {
+		t.Errorf("%d upstream calls, want 0", n)
+	}
+	// Control: the exact spelling is not rejected by the key checks.
+	resp := h.post(t, h.authed(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	text := readBody(t, resp)
+	if resp.StatusCode == http.StatusBadRequest {
+		t.Errorf("exact keys got 400: %s", text)
+	}
+}
+
 func TestHandler_FakeTokenCannotBypassTheTokenCheck(t *testing.T) {
 	h := newHarness(t, harnessOptions{upstream: respondJSON(http.StatusUnauthorized, `{"error":{"code":"unauthenticated","message":"no"}}`)})
 	for _, method := range []string{"initialize", "tools/list"} {
