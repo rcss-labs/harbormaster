@@ -37,3 +37,13 @@ output "log_group_name" {
   description = "CloudWatch log group of the gateway."
   value       = aws_cloudwatch_log_group.service.name
 }
+
+output "web_acl_arn" {
+  description = "ARN of the WAF web ACL on the public load balancer."
+  value       = aws_wafv2_web_acl.this.arn
+}
+
+output "waf_log_group_name" {
+  description = "CloudWatch log group of the WAF log (blocked and counted requests)."
+  value       = aws_cloudwatch_log_group.waf.name
+}

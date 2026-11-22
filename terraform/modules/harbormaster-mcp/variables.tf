@@ -128,3 +128,37 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "waf_rate_limit" {
+  description = "Requests per 5 minutes per source IP before WAF blocks the IP."
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.waf_rate_limit >= 10
+    error_message = "waf_rate_limit must be at least 10 (the WAF minimum for rate-based rules is 10)."
+  }
+}
+
+variable "waf_common_count_rules" {
+  description = "Rules of the AWS common rule set that only count. Body rules in block mode would refuse a search_logs call whose query looks like an injection. Move a rule out only after a clean week in the WAF log."
+  type        = list(string)
+  default     = ["SizeRestrictions_BODY", "CrossSiteScripting_BODY", "GenericRFI_BODY"]
+}
+
+variable "waf_oauth_rate_limit" {
+  description = "Requests per 5 minutes per source IP on /oauth/ paths. Used only when enable_oauth_paths is true."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.waf_oauth_rate_limit >= 10
+    error_message = "waf_oauth_rate_limit must be at least 10."
+  }
+}
+
+variable "enable_oauth_paths" {
+  description = "Add the stricter per-IP rate rule for /oauth/ paths (OAuth phase)."
+  type        = bool
+  default     = false
+}
