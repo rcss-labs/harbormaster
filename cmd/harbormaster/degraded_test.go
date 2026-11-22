@@ -264,10 +264,13 @@ func TestDegraded_StoreCutMidRun(t *testing.T) {
 				}
 			})
 			t.Run("polling keeps advancing", func(t *testing.T) {
-				duringCut := lastOK(t, conn, "services")
-				if !duringCut.After(servicesTierBefore) {
-					t.Fatalf("the services tier did not cycle between the last read before the cut (%v) and now (%v)", servicesTierBefore, duringCut)
-				}
+				// Whether a cycle already finished depends on how long the subtests above took, so wait for it rather than
+				// assume it: under load the first check raced the tier and failed on a healthy poller.
+				var duringCut time.Time
+				within(t, degradedWindow, "the services tier to cycle after the last read before the cut", func() bool {
+					duringCut = lastOK(t, conn, "services")
+					return duringCut.After(servicesTierBefore)
+				})
 				within(t, degradedWindow, "the services tier to complete another cycle while the store is down", func() bool {
 					return lastOK(t, conn, "services").After(duringCut)
 				})
