@@ -743,22 +743,33 @@ func (s *Store) LastEventAtByCluster(ctx context.Context, f TargetFilter, vis Vi
 
 // GetTaskDefinition returns a stored task definition revision, or ErrNotFound.
 func (s *Store) GetTaskDefinition(ctx context.Context, accountID, region, arn string) (model.TaskDefinitionRef, error) {
+	rows, err := s.Pool.Query(ctx, `select `+taskDefinitionColumns+` from task_definitions
+		 where account_id = $1 and region = $2 and arn = $3`, accountID, region, arn)
+	if err != nil {
+		return model.TaskDefinitionRef{}, fmt.Errorf("get task definition: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return model.TaskDefinitionRef{}, fmt.Errorf("get task definition: %w", err)
+		}
+		return model.TaskDefinitionRef{}, ErrNotFound
+	}
+	return scanTaskDefinition(rows)
+}
+
+const taskDefinitionColumns = `account_id, region, arn, coalesce(family, ''), coalesce(revision, 0), coalesce(cpu, ''),
+	coalesce(memory, ''), coalesce(network_mode, ''), coalesce(task_role_arn, ''),
+	coalesce(execution_role_arn, ''), requires_compatibilities, containers, efs_volumes, registered_at,
+	raw, polled_at`
+
+func scanTaskDefinition(row pgx.Row) (model.TaskDefinitionRef, error) {
 	var td model.TaskDefinitionRef
 	var containers, efs []byte
 	var registeredAt *time.Time
-	err := s.Pool.QueryRow(ctx,
-		`select account_id, region, arn, coalesce(family, ''), coalesce(revision, 0), coalesce(cpu, ''),
-		   coalesce(memory, ''), coalesce(network_mode, ''), coalesce(task_role_arn, ''),
-		   coalesce(execution_role_arn, ''), requires_compatibilities, containers, efs_volumes, registered_at,
-		   raw, polled_at
-		 from task_definitions where account_id = $1 and region = $2 and arn = $3`,
-		accountID, region, arn).Scan(&td.AccountID, &td.Region, &td.ARN, &td.Family, &td.Revision, &td.CPU,
+	if err := row.Scan(&td.AccountID, &td.Region, &td.ARN, &td.Family, &td.Revision, &td.CPU,
 		&td.Memory, &td.NetworkMode, &td.TaskRoleARN, &td.ExecutionRoleARN, &td.RequiresCompatibilities,
-		&containers, &efs, &registeredAt, &td.Raw, &td.PolledAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return model.TaskDefinitionRef{}, ErrNotFound
-	}
-	if err != nil {
+		&containers, &efs, &registeredAt, &td.Raw, &td.PolledAt); err != nil {
 		return model.TaskDefinitionRef{}, fmt.Errorf("get task definition: %w", err)
 	}
 	nullable(registeredAt, &td.RegisteredAt)
@@ -769,6 +780,34 @@ func (s *Store) GetTaskDefinition(ctx context.Context, accountID, region, arn st
 		return model.TaskDefinitionRef{}, fmt.Errorf("decode task definition volumes: %w", err)
 	}
 	return td, nil
+}
+
+// GetTaskDefinitions returns the cached task definitions with the given ARNs, keyed by ARN. ARNs that have not been
+// polled are absent from the map.
+func (s *Store) GetTaskDefinitions(ctx context.Context, arns []string) (map[string]model.TaskDefinitionRef, error) {
+	out := map[string]model.TaskDefinitionRef{}
+	if len(arns) == 0 {
+		return out, nil
+	}
+	rows, err := s.Pool.Query(ctx, `select `+taskDefinitionColumns+` from task_definitions where arn = any($1)
+		 order by account_id, region, arn`, arns)
+	if err != nil {
+		return nil, fmt.Errorf("get task definitions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		td, err := scanTaskDefinition(rows)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := out[td.ARN]; !dup {
+			out[td.ARN] = td
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get task definitions: %w", err)
+	}
+	return out, nil
 }
 
 // CountsPoint is the summed service counts at one sample time.

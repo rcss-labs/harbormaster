@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"sort"
@@ -17,7 +16,6 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/storage"
-	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // storageMetricsConcurrency bounds how many account x region CloudWatch fetches run at once.
@@ -111,20 +109,21 @@ func (s *Server) mountIndexFor(ctx context.Context, sc scope) (map[string][]stor
 		}
 	}
 	services := make([]model.Service, 0, len(rows))
-	taskDefs := map[string]json.RawMessage{}
+	var arns []string
+	seen := map[string]bool{}
 	for _, row := range rows {
 		services = append(services, row.Service)
-		arn := row.TaskDefinitionARN
-		if _, done := taskDefs[arn]; done || arn == "" {
-			continue
+		if arn := row.TaskDefinitionARN; arn != "" && !seen[arn] {
+			seen[arn] = true
+			arns = append(arns, arn)
 		}
-		td, err := s.Store.GetTaskDefinition(ctx, row.Key.AccountID, row.Key.Region, arn)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
+	}
+	defs, err := s.Store.GetTaskDefinitions(ctx, arns)
+	if err != nil {
+		return nil, err
+	}
+	taskDefs := make(map[string]json.RawMessage, len(defs))
+	for arn, td := range defs {
 		taskDefs[arn] = td.Raw
 	}
 	index := storage.MountIndex(services, taskDefs, running)
