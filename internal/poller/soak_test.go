@@ -72,11 +72,16 @@ type soakEnv struct {
 // the production poller configuration (config defaults through ConfigFrom).
 func newSoakEnv(t *testing.T, scale fake.Scale) *soakEnv {
 	t.Helper()
+	return newSoakEnvFor(t, fake.Generate(1, scale))
+}
+
+// newSoakEnvFor is newSoakEnv on an estate the caller built.
+func newSoakEnvFor(t *testing.T, estate *fake.Estate) *soakEnv {
+	t.Helper()
 	if os.Getenv("HM_SOAK") != "1" {
 		t.Skip("set HM_SOAK=1 (make soak)")
 	}
 	st := storetest.Open(t)
-	estate := fake.Generate(1, scale)
 	f := fake.New(estate)
 	f.CallLatency = fakeLatency // before any poller starts; makes MaxInFlight meaningful
 

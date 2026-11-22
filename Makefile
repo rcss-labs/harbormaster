@@ -150,14 +150,15 @@ check-notices:
 	tools/check-notices.sh
 
 # plan 06
-# soak runs the rate-limit / back-off soak tests at target estate scale (about 10 minutes, needs HM_TEST_DATABASE_URL; see 'make test-db').
+# soak runs the rate-limit / back-off soak tests at target estate scale, and the split-service soaks (three pollers, cycle
+# time, focus call rates): about 35 minutes. Needs HM_TEST_DATABASE_URL; see 'make test-db'.
 .PHONY: soak
 soak:
 	@if [ -z "$$HM_TEST_DATABASE_URL" ]; then \
 		echo "make soak: HM_TEST_DATABASE_URL is not set; run 'make test-db' and export the URL it prints" >&2; \
 		exit 2; \
 	fi
-	HM_SOAK=1 go test -count=1 -tags soak -run TestSoak -timeout 20m -v ./internal/poller
+	HM_SOAK=1 go test -count=1 -tags soak -run TestSoak -timeout 60m -v ./internal/poller
 
 # Floci harness (tools/floci): a local AWS emulator plus Postgres, so Harbormaster's real AWS code path is checked
 # against an ECS estate. Every script sources tools/floci/env.sh, which refuses (exit 2) any non-local endpoint.
