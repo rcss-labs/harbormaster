@@ -21,13 +21,6 @@ func invalid(format string, args ...any) error {
 	return &ValidationError{Message: fmt.Sprintf(format, args...)}
 }
 
-// Validate checks a draft against the definition it was edited from (spec §7.1).
-// It returns nil or a *ValidationError.
-func Validate(base, draft Definition, admin bool, accountID string) error {
-	_, err := Prepare(base, draft, admin, accountID, nil)
-	return err
-}
-
 // Prepare validates a draft and returns the request that is safe to send to AWS.
 //
 // Security: the rules run on the canonical form of the request that will actually be sent

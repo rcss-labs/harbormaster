@@ -276,7 +276,7 @@ func TestValidate(t *testing.T) {
 			}
 			draft := cloneDefinition(t, base)
 			tc.mutate(draft)
-			err := Validate(base, draft, tc.admin, testAccount)
+			err := validate(base, draft, tc.admin, testAccount)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("Validate() = %v, want nil", err)
@@ -300,12 +300,12 @@ func TestValidate_BaseWithoutSecretsRejectsNewSecretForNonAdmin(t *testing.T) {
 	draft := cloneDefinition(t, base)
 	firstContainer(draft)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": "arn:aws:ssm:us-east-1:482109375512:parameter/payments/X"}}
 
-	err := Validate(base, draft, false, testAccount)
+	err := validate(base, draft, false, testAccount)
 	var validation *ValidationError
 	if !errors.As(err, &validation) || validation.Message != "Changing secrets outside the existing prefixes needs a global admin" {
 		t.Fatalf("non-admin: %v", err)
 	}
-	if err := Validate(base, draft, true, testAccount); err != nil {
+	if err := validate(base, draft, true, testAccount); err != nil {
 		t.Fatalf("admin: %v", err)
 	}
 }
@@ -313,7 +313,7 @@ func TestValidate_BaseWithoutSecretsRejectsNewSecretForNonAdmin(t *testing.T) {
 func TestValidate_FixtureUnchanged(t *testing.T) {
 	base := convertFixture(t, "describe_payments_api.json")
 	draft := cloneDefinition(t, base)
-	if err := Validate(base, draft, false, testAccount); err != nil {
+	if err := validate(base, draft, false, testAccount); err != nil {
 		t.Fatalf("Validate() = %v, want nil", err)
 	}
 }
@@ -437,7 +437,7 @@ func TestValidate_FoldedDuplicateKeysAreRejected(t *testing.T) {
 			draft := cloneDefinition(t, base)
 			vector.duplicate(draft)
 			for _, admin := range []bool{false, true} {
-				err := Validate(base, draft, admin, testAccount)
+				err := validate(base, draft, admin, testAccount)
 				var validation *ValidationError
 				if !errors.As(err, &validation) || !strings.Contains(validation.Message, "letter case") {
 					t.Fatalf("admin=%v: Validate() = %v, want a duplicate-key ValidationError", admin, err)
@@ -459,7 +459,7 @@ func TestValidate_FoldedKeyIsJudgedAsDecoded(t *testing.T) {
 			delete(firstContainer(base), "secrets")
 			draft := cloneDefinition(t, base)
 			vector.lone(draft)
-			err := Validate(base, draft, false, testAccount)
+			err := validate(base, draft, false, testAccount)
 			var validation *ValidationError
 			if !errors.As(err, &validation) ||
 				(validation.Message != "Changing roles needs a global admin" &&
@@ -480,7 +480,7 @@ func TestValidate_UnknownKeysAreRejected(t *testing.T) {
 			base := validBase(t)
 			draft := cloneDefinition(t, base)
 			mutate(draft)
-			err := Validate(base, draft, true, testAccount)
+			err := validate(base, draft, true, testAccount)
 			var validation *ValidationError
 			if !errors.As(err, &validation) || !strings.Contains(validation.Message, "unknown key") {
 				t.Fatalf("Validate() = %v, want an unknown-key ValidationError", err)
@@ -494,7 +494,13 @@ func TestValidate_CaseDifferingMapKeysAreAllowed(t *testing.T) {
 	base := validBase(t)
 	draft := cloneDefinition(t, base)
 	firstContainer(draft)["dockerLabels"] = map[string]any{"Env": "a", "env": "b"}
-	if err := Validate(base, draft, false, testAccount); err != nil {
+	if err := validate(base, draft, false, testAccount); err != nil {
 		t.Fatalf("Validate() = %v, want nil", err)
 	}
+}
+
+// validate runs Prepare and keeps only the verdict.
+func validate(base, draft Definition, admin bool, accountID string) error {
+	_, err := Prepare(base, draft, admin, accountID, nil)
+	return err
 }

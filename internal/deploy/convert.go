@@ -152,14 +152,6 @@ func lowerCamel(name string) string {
 	return string(runes)
 }
 
-// ToRegisterInput builds the RegisterTaskDefinition request from a register-ready definition.
-// SDK structs have no json tags and encoding/json matches field names case-insensitively,
-// so a marshal/unmarshal round trip is enough. Unknown keys are ignored; use decodeStrict
-// (via Prepare) for user-submitted drafts.
-func ToRegisterInput(def Definition, tags []ecstypes.Tag) (*ecs.RegisterTaskDefinitionInput, error) {
-	return decodeDefinition(def, tags, false)
-}
-
 // decodeDefinition round-trips def through JSON into the request. With strict, a key that
 // matches no request field (at any depth, case-insensitively) is an error instead of being dropped.
 func decodeDefinition(def Definition, tags []ecstypes.Tag, strict bool) (*ecs.RegisterTaskDefinitionInput, error) {
