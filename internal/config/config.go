@@ -155,6 +155,15 @@ type Config struct {
 	Role Role
 	// DBMaxConns caps the database pool (HM_DB_MAX_CONNS); 0 means the role's default (see PoolSize).
 	DBMaxConns int
+
+	// Focus configures live refresh of the cluster or service page that is on screen.
+	Focus FocusConfig
+}
+
+// FocusConfig holds the live page refresh settings (HM_FOCUS_*).
+type FocusConfig struct {
+	Interval, TTL                          time.Duration
+	MaxObjects, MaxPerUser, MaxCallsPerSec int
 }
 
 // KVConfig holds the shared store settings. The URL can carry a password, so
@@ -352,12 +361,22 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Role = role
+	cfg.Focus = FocusConfig{
+		Interval:       reader.duration("HM_FOCUS_INTERVAL", 5*time.Second),
+		TTL:            reader.duration("HM_FOCUS_TTL", 30*time.Second),
+		MaxObjects:     reader.integer("HM_FOCUS_MAX_OBJECTS", 50),
+		MaxPerUser:     reader.integer("HM_FOCUS_MAX_PER_USER", 5),
+		MaxCallsPerSec: reader.integer("HM_FOCUS_MAX_CALLS_PER_SEC", 5),
+	}
 	cfg.DBMaxConns = reader.integer("HM_DB_MAX_CONNS", 0)
 	if reader.err != nil {
 		return Config{}, reader.err
 	}
 	if cfg.DBMaxConns != 0 && cfg.DBMaxConns < minDBMaxConns {
 		return Config{}, errors.New("HM_DB_MAX_CONNS: must be 0 (the role's default) or at least 3")
+	}
+	if err := validateFocus(cfg.Focus); err != nil {
+		return Config{}, err
 	}
 	if cfg.MaxDesiredCount < 1 {
 		return Config{}, errors.New("HM_MAX_DESIRED_COUNT: must be at least 1")
@@ -456,6 +475,25 @@ func validateScan(scan ScanConfig) error {
 	}
 	if scan.DBMaxAge < time.Hour {
 		return errors.New("HM_SCAN_DB_MAX_AGE: must be at least 1h")
+	}
+	return nil
+}
+
+// focusReleaseGrace mirrors focus.ReleaseGrace: a TTL at or below it would make a release lengthen the expiry.
+const focusReleaseGrace = 12 * time.Second
+
+func validateFocus(f FocusConfig) error {
+	switch {
+	case f.Interval < 2*time.Second:
+		return errors.New("HM_FOCUS_INTERVAL: must be at least 2s")
+	case f.TTL <= focusReleaseGrace:
+		return errors.New("HM_FOCUS_TTL: must be longer than 12s")
+	case f.MaxObjects < 1:
+		return errors.New("HM_FOCUS_MAX_OBJECTS: must be at least 1")
+	case f.MaxPerUser < 1:
+		return errors.New("HM_FOCUS_MAX_PER_USER: must be at least 1")
+	case f.MaxCallsPerSec < 1:
+		return errors.New("HM_FOCUS_MAX_CALLS_PER_SEC: must be at least 1")
 	}
 	return nil
 }

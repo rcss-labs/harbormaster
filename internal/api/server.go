@@ -13,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
+	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/limits"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/metrics"
@@ -20,6 +21,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/secretbox"
+	"github.com/rcss-labs/harbormaster/internal/signal"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 	"github.com/rcss-labs/harbormaster/internal/web"
@@ -101,8 +103,14 @@ type Server struct {
 	// KVHealth reports whether the shared Valkey or Redis store is reachable, for the poller status; nil means there is
 	// no store.
 	KVHealth interface{ Up() bool }
+	// Focus is the set of pages open in a visible tab, and Bus carries the poll-now signal to the poller that owns the
+	// slice. A nil Focus turns live refresh off: the focus endpoint answers "unavailable".
+	Focus focus.Registry
+	Bus   signal.Bus
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
+	// focusOpens remembers when each object was last opened through this task, for the wait for its first live read.
+	focusOpens *focusOpens
 }
 
 // Names of the per-user limits in Server.Limits (also the key segment and metric label).
@@ -117,6 +125,7 @@ const (
 	rateLogSearch  = "logsearch"
 	rateNotifyTest = "notifytest"
 	rateSAMLLogin  = "samllogin"
+	rateFocusOpen  = "focusopen"
 )
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
@@ -134,6 +143,7 @@ type ScanKicker interface{ Kick() }
 // New returns s ready to serve; it fills in defaults for Log and Now.
 func New(s Server) *Server {
 	s.costWarned = &sync.Map{}
+	s.focusOpens = &focusOpens{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()
@@ -268,6 +278,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/services/{serviceId}", s.getService, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/tasks", s.listServiceTasks, routeOptions{})
 	s.handle(mux, "GET /api/services/{serviceId}/operations", s.serviceOperations, routeOptions{})
+	// Live page refresh: a heartbeat from a page that is open in a visible tab, and its release.
+	s.handle(mux, "POST /api/focus", s.postFocus, routeOptions{NoETag: true})
+	s.handle(mux, "DELETE /api/focus", s.deleteFocus, routeOptions{NoETag: true})
 	s.handle(mux, "GET /api/tasks", s.listTasks, routeOptions{})
 	s.handle(mux, "GET /api/search", s.search, routeOptions{})
 	s.handle(mux, "GET /api/poller", s.pollerStatus, routeOptions{})

@@ -1543,6 +1543,14 @@
     "max": "number",
     "running": "number"
   },
+  "focus": {
+    "interval_seconds": "number",
+    "message": "string",
+    "refreshed_at": {
+      "$null": "time"
+    },
+    "state": "string"
+  },
   "imageTags": {
     "container": "string",
     "current": "string",

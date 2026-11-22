@@ -22,8 +22,8 @@ var _ awsx.EFSAPI = (*EFS)(nil)
 
 const efsPageSize = 2
 
-func (c *EFS) begin(op string) (func(), error) {
-	done, err := c.f.beginThrottled(c.target, "efs", op, &c.f.ThrottleEFS)
+func (c *EFS) begin(ctx context.Context, op string) (func(), error) {
+	done, err := c.f.beginThrottled(ctx, c.target, "efs", op, &c.f.ThrottleEFS)
 	if err != nil {
 		return done, err
 	}
@@ -52,8 +52,8 @@ func efsPage[T any](items []T, marker *string) (page []T, next *string) {
 
 func optionalMatch(want *string, got string) bool { return want == nil || *want == got }
 
-func (c *EFS) DescribeFileSystems(_ context.Context, in *efs.DescribeFileSystemsInput, _ ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error) {
-	done, err := c.begin("DescribeFileSystems")
+func (c *EFS) DescribeFileSystems(ctx context.Context, in *efs.DescribeFileSystemsInput, _ ...func(*efs.Options)) (*efs.DescribeFileSystemsOutput, error) {
+	done, err := c.begin(ctx, "DescribeFileSystems")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -71,8 +71,8 @@ func (c *EFS) DescribeFileSystems(_ context.Context, in *efs.DescribeFileSystems
 	return &efs.DescribeFileSystemsOutput{FileSystems: page, NextMarker: next}, nil
 }
 
-func (c *EFS) DescribeAccessPoints(_ context.Context, in *efs.DescribeAccessPointsInput, _ ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error) {
-	done, err := c.begin("DescribeAccessPoints")
+func (c *EFS) DescribeAccessPoints(ctx context.Context, in *efs.DescribeAccessPointsInput, _ ...func(*efs.Options)) (*efs.DescribeAccessPointsOutput, error) {
+	done, err := c.begin(ctx, "DescribeAccessPoints")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -91,8 +91,8 @@ func (c *EFS) DescribeAccessPoints(_ context.Context, in *efs.DescribeAccessPoin
 	return &efs.DescribeAccessPointsOutput{AccessPoints: page, NextToken: next}, nil
 }
 
-func (c *EFS) DescribeMountTargets(_ context.Context, in *efs.DescribeMountTargetsInput, _ ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error) {
-	done, err := c.begin("DescribeMountTargets")
+func (c *EFS) DescribeMountTargets(ctx context.Context, in *efs.DescribeMountTargetsInput, _ ...func(*efs.Options)) (*efs.DescribeMountTargetsOutput, error) {
+	done, err := c.begin(ctx, "DescribeMountTargets")
 	defer done()
 	if err != nil {
 		return nil, err

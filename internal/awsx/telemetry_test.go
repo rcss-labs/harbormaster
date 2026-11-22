@@ -45,7 +45,7 @@ func TestTelemetryMiddleware_CountsOperationAndResult(t *testing.T) {
 		_, _ = client.ListClusters(t.Context(), &ecs.ListClustersInput{})
 	}
 	calls := reg.Snapshot().AWSCalls
-	for _, key := range []string{"482109375512|us-east-1|ECS|ListClusters|ok", "482109375512|us-east-1|ECS|ListClusters|throttled"} {
+	for _, key := range []string{"482109375512|us-east-1|ECS|ListClusters|ok|request", "482109375512|us-east-1|ECS|ListClusters|throttled|request"} {
 		if calls[key] != 1 {
 			t.Errorf("%s = %d, want 1 (all: %v)", key, calls[key], calls)
 		}

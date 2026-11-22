@@ -418,6 +418,30 @@ func (s *Store) KnownTaskARNs(ctx context.Context, k model.ClusterKey, lastStatu
 	return arns, nil
 }
 
+// KnownTaskARNsForService is KnownTaskARNs for one service's tasks.
+func (s *Store) KnownTaskARNsForService(ctx context.Context, k model.ServiceKey, lastStatus string) ([]string, error) {
+	rows, err := s.Pool.Query(ctx,
+		`select task_arn from tasks where account_id = $1 and region = $2 and cluster_name = $3 and service_name = $4
+		   and ($5 = '' and last_status is distinct from 'STOPPED' or $5 <> '' and last_status = $5)
+		 order by task_arn`, k.AccountID, k.Region, k.Cluster, k.Service, lastStatus)
+	if err != nil {
+		return nil, fmt.Errorf("known task arns for service: %w", err)
+	}
+	defer rows.Close()
+	arns := []string{}
+	for rows.Next() {
+		var arn string
+		if err := rows.Scan(&arn); err != nil {
+			return nil, fmt.Errorf("scan task arn: %w", err)
+		}
+		arns = append(arns, arn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("known task arns for service: %w", err)
+	}
+	return arns, nil
+}
+
 // MarkTasksMissing stops the cluster's rows listed in arns that are not yet STOPPED
 // (RUNNING, PENDING, ACTIVATING, STOPPING ... tasks ECS no longer reports):
 // STOPPED, stop_code 'Unknown', stopped_at = now if unset. content_hash is replaced so the row counts as changed.

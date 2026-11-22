@@ -114,6 +114,13 @@ func fencedDo[T any](ctx context.Context, w *SliceWriter, fn func(q db) (T, erro
 	return result, nil
 }
 
+// CheckLease runs the fence alone: it returns ErrLeaseLost when the lease has moved on and nil otherwise. A write with
+// no rows skips the fence, so a caller that must not report work done after losing the lease calls this.
+func (w *SliceWriter) CheckLease(ctx context.Context) error {
+	_, err := fencedDo(ctx, w, func(db) (struct{}, error) { return struct{}{}, nil })
+	return err
+}
+
 func (w *SliceWriter) ownKey(k model.ClusterKey) error { return w.own(k.AccountID, k.Region) }
 
 func (w *SliceWriter) ownTarget(t awsx.Target) error { return w.own(t.AccountID, t.Region) }

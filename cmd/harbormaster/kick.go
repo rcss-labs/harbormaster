@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/signal"
 )
@@ -41,4 +42,12 @@ func newKickBus(health *kv.Health) signal.Bus {
 		return memory
 	}
 	return signal.WithFallback(signal.NewKVBus(health.Client()), memory, health)
+}
+
+// buildFocusRegistry is where focused pages are registered: the shared store when one is configured, memory otherwise.
+func buildFocusRegistry(health *kv.Health) focus.Registry {
+	if health == nil {
+		return focus.NewMemoryRegistry(time.Now)
+	}
+	return focus.NewKVRegistry(health.Client())
 }

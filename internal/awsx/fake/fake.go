@@ -53,6 +53,10 @@ type Fake struct {
 	// CallLatency delays every API call (plan 06), so concurrent callers overlap and MaxInFlight is meaningful.
 	CallLatency time.Duration
 
+	// OnCall, when set, is called once per fake API call after it was dispatched; result is "ok", "throttled" or
+	// "error". serve --fake-aws feeds the AWS call counter with it, since the fake bypasses the SDK middleware.
+	OnCall func(ctx context.Context, t awsx.Target, service, op, result string)
+
 	mu         sync.Mutex
 	calls      map[string]int
 	callCounts map[string]uint64       // "account|region|service|operation"; see CallCounts
@@ -97,27 +101,32 @@ func (f *Fake) Calls() map[string]int {
 // calls are counted under the zero Target (empty account and region).
 
 // begin counts the call and applies the ECS throttle knob.
-func (f *Fake) begin(t awsx.Target, service, op string) (func(), error) {
-	done := f.enter(t, service, op)
-	if err := f.takeFailure(op); err != nil {
-		return done, err
-	}
-	if err := f.takeRateToken(t); err != nil {
-		return done, err
-	}
-	return done, takeThrottle(&f.Throttle)
+func (f *Fake) begin(ctx context.Context, t awsx.Target, service, op string) (func(), error) {
+	return f.beginThrottled(ctx, t, service, op, &f.Throttle)
 }
 
 // beginThrottled counts the call and applies a per-service throttle knob.
-func (f *Fake) beginThrottled(t awsx.Target, service, op string, knob *int32) (func(), error) {
+func (f *Fake) beginThrottled(ctx context.Context, t awsx.Target, service, op string, knob *int32) (func(), error) {
 	done := f.enter(t, service, op)
-	if err := f.takeFailure(op); err != nil {
-		return done, err
+	err := f.takeFailure(op)
+	if err == nil {
+		err = f.takeRateToken(t)
 	}
-	if err := f.takeRateToken(t); err != nil {
-		return done, err
+	if err == nil {
+		err = takeThrottle(knob)
 	}
-	return done, takeThrottle(knob)
+	if f.OnCall != nil {
+		result := "ok"
+		switch {
+		case err == nil:
+		case awsx.IsThrottle(err):
+			result = "throttled"
+		default:
+			result = "error"
+		}
+		f.OnCall(ctx, t, service, op, result)
+	}
+	return done, err
 }
 
 // takeThrottle consumes one unit of a Throttle knob, if any is left.

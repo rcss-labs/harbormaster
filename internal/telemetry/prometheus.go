@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	awsCallLabels = []string{"account", "region", "service", "operation", "result"}
+	awsCallLabels = []string{"account", "region", "service", "operation", "result", "source"}
 	loopLabels    = []string{"account", "region", "tier"}
 	loopRunLabels = []string{"account", "region", "tier", "result"}
 	kvLabels      = []string{"op"}
@@ -38,6 +38,8 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 
 	writeHeader(bw, "harbormaster_coordinator_active", "1 if this process holds the coordinator lease.", "gauge")
 	writeSample(bw, "harbormaster_coordinator_active", nil, "", "", boolValue(r.coordinatorOn))
+
+	r.writeFocusFamilies(bw)
 
 	writeHeader(bw, "harbormaster_fenced_writes_rejected_total", "Poller writes rejected because the slice lease was lost.", "counter")
 	writeSample(bw, "harbormaster_fenced_writes_rejected_total", nil, "", "", utoa(r.fencedRejected))

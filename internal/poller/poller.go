@@ -12,7 +12,9 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/lease"
+	"github.com/rcss-labs/harbormaster/internal/signal"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -64,6 +66,14 @@ type Config struct {
 	// LegacyGate makes the lease manager claim only while it holds the old leader key in shared mode
 	// (HM_LEGACY_LEADER_GATE), so old and new versions never both act during an upgrade or a rollback.
 	LegacyGate bool
+
+	// Focus sets the live refresh of pages that are open: the interval, and the AWS call budget per slice. A zero
+	// interval means 5 s and a zero MaxCallsPerSec means 5.
+	Focus config.FocusConfig
+	// Registry and Bus carry live page refresh: the objects that are open, and the poll-now signals. A nil Registry
+	// turns focus off for this process.
+	Registry focus.Registry
+	Bus      signal.Bus
 }
 
 // ConfigFrom derives the poller configuration from the server configuration.
@@ -88,6 +98,7 @@ func ConfigFrom(c config.Config) Config {
 		Jitter:          c.Poll.Jitter,
 		MaxInFlight:     c.Poll.MaxInFlight,
 		LegacyGate:      c.LegacyLeaderGate,
+		Focus:           c.Focus,
 		StartStagger:    defaultStartStagger,
 		AccountsRefresh: defaultAccountsRefresh,
 	}
@@ -119,6 +130,12 @@ type Poller struct {
 	timing        lease.Timing
 	// loopFactory runs one slice's polling loop until ctx is cancelled; w is fenced by the slice's lease.
 	loopFactory func(ctx context.Context, t awsx.Target, w *store.SliceWriter)
+
+	// loops are the slice loops this process runs now, for the focus manager to route to.
+	loopsMu sync.Mutex
+	loops   map[awsx.Target]*Loop
+	// focusReadEvery is how often the focus manager reads the registry; tests shorten it.
+	focusReadEvery time.Duration
 }
 
 // New creates a Poller. Call Run to start electing and polling.
@@ -133,6 +150,7 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 		store: st, reads: st, clients: clients, cfg: cfg, log: log,
 		lockKey: lease.LegacyLockKey, retryInterval: defaultRetryInterval, timing: lease.DefaultTiming(),
 		idle: newIdleState(), now: time.Now, idleCheckEvery: defaultIdleCheckEvery,
+		loops: map[awsx.Target]*Loop{}, focusReadEvery: time.Second,
 	}
 	p.sessionActivity = func(ctx context.Context, now time.Time) (time.Time, bool, error) {
 		return p.store.LastSessionActivity(ctx, now)
@@ -143,7 +161,9 @@ func New(st *store.Store, clients awsx.Clients, cfg Config, log *slog.Logger) *P
 
 // defaultLoopFactory runs the real per-slice polling loop until ctx is cancelled.
 func (p *Poller) defaultLoopFactory(ctx context.Context, t awsx.Target, w *store.SliceWriter) {
-	newLoop(p, t, w).Run(ctx)
+	l := newLoop(p, t, w)
+	defer p.registerLoop(l)()
+	l.Run(ctx)
 }
 
 // IsIdle reports whether polling is in idle mode (nobody uses the UI).
@@ -192,6 +212,15 @@ func (p *Poller) Run(ctx context.Context) error {
 	p.manager = m
 	p.mgrMu.Unlock()
 
+	var focusDone sync.WaitGroup
+	if p.cfg.Registry != nil && !p.cfg.NoSlices {
+		focusDone.Add(1)
+		go func() {
+			defer focusDone.Done()
+			p.runFocusManager(ctx)
+		}()
+	}
+
 	var idleDone sync.WaitGroup
 	idleDone.Add(1)
 	go func() {
@@ -201,6 +230,7 @@ func (p *Poller) Run(ctx context.Context) error {
 
 	err := m.Run(ctx)
 	idleDone.Wait()
+	focusDone.Wait()
 	stopGate()
 	if gateDone != nil {
 		<-gateDone

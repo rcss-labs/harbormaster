@@ -29,6 +29,26 @@ describe('ServicePage', () => {
     expect(headerLink).toHaveAttribute('href', `/services/${SERVICE_PAYMENTS.id}/deploy`)
   })
 
+  it('shows the data age and the live pill in the header, on every tab', async () => {
+    renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    expect(screen.getByText(/^Updated/)).toBeInTheDocument()
+    expect(await screen.findByText('Live, every 5 s')).toBeInTheDocument()
+  })
+
+  it('asks for live refresh of its own service when it opens', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.post('/api/focus', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ state: 'live', interval_seconds: 5, refreshed_at: null, message: '' })
+      }),
+    )
+    renderApp(`/services/${SERVICE_PAYMENTS.id}`)
+    await screen.findByRole('heading', { name: 'payments-api', level: 1 })
+    await waitFor(() => expect(bodies[0]).toEqual({ kind: 'service', id: SERVICE_PAYMENTS.id, open: true }))
+  })
+
   it('header shows a disabled Deploy button with the lock tooltip when locked', async () => {
     server.use(withCan(viewerOnly))
     renderApp(`/services/${SERVICE_PAYMENTS.id}`)

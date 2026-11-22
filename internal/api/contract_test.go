@@ -176,6 +176,8 @@ func contractShapes() map[string]any {
 		"notificationSummary":    shapeOf(reflect.TypeFor[NotificationSummaryDTO]()),
 		// config search
 		"configSearch": shapeOf(reflect.TypeFor[ConfigSearchResponse]()),
+		// live page refresh
+		"focus": shapeOf(reflect.TypeFor[FocusDTO]()),
 	}
 }
 

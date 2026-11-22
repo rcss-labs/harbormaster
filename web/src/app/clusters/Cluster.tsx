@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
+import { useFocus } from '../../api/focus'
 import { useCluster } from '../../api/hooks'
 import { useClusterMetrics } from '../../api/observe'
 import { BarChart } from '../../charts/BarChart'
@@ -8,6 +9,7 @@ import { fmtNum } from '../../charts/format'
 import { ColumnPicker, useColumnPrefs } from '../../components/ColumnPicker'
 import { DataBanner } from '../../components/DataBanner'
 import { EmptyState } from '../../components/EmptyState'
+import { LiveRefresh } from '../../components/LiveRefresh'
 import { KpiStrip } from '../../components/KpiStrip'
 import { PinButton } from '../../components/PinButton'
 import { Chips } from '../../components/Chips'
@@ -60,6 +62,7 @@ const withSub = (value: ReactNode, sub: ReactNode) => (
 export function Cluster() {
   const { clusterId = '' } = useParams()
   const clusterQuery = useCluster(clusterId)
+  const focus = useFocus('cluster', clusterId, clusterQuery.refetch)
   const clusterMetricsQuery = useClusterMetrics(clusterId, '24h')
   const { me } = useAuth()
   const { isPinned, toggle } = usePins()
@@ -118,6 +121,7 @@ export function Cluster() {
                 toggle({ kind: 'cluster', id: cluster.id, name: cluster.name, account_name: cluster.account_name, account_id: cluster.account_id })
               }
             />
+            <LiveRefresh polledAt={cluster.polled_at} focus={focus} />
             {phone && (
               <button type="button" className={styles.moreButton} aria-label={`More actions for ${cluster.name}`} aria-haspopup="dialog" onClick={() => setHeadSheetOpen(true)}>
                 <Icon name="more" size={18} />

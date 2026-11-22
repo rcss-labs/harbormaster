@@ -23,6 +23,13 @@ for (const tab of ['overview', 'timeline', 'metrics', 'scaling', 'task-definitio
   })
 }
 
+test('the header shows the data age and the live pill, with no horizontal scroll', async ({ page }) => {
+  await open(page, 'overview')
+  await expect(page.getByText(/^Updated/)).toBeVisible()
+  await expect(page.getByText('Live, every 5 s')).toBeVisible({ timeout: 8000 })
+  await expectPhoneLayoutClean(page)
+})
+
 test('the compact header shows Deploy and the actions sheet keeps every row', async ({ page }) => {
   await open(page, 'overview')
   await expect(page.getByRole('link', { name: 'Deploy', exact: true }).first()).toBeVisible()

@@ -24,7 +24,7 @@ func TelemetryMiddleware(account, region string, reg *telemetry.Registry) func(*
 				default:
 					result = "error"
 				}
-				reg.CountAWSCall(account, region, awsmiddleware.GetServiceID(ctx), awsmiddleware.GetOperationName(ctx), result)
+				reg.CountAWSCall(account, region, awsmiddleware.GetServiceID(ctx), awsmiddleware.GetOperationName(ctx), result, string(SourceFrom(ctx)))
 				return out, md, err
 			}), middleware.Before)
 	}

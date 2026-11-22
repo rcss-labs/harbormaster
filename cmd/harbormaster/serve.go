@@ -284,6 +284,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	if fakeAWS {
 		estate := fake.MockupEstate(time.Now)
 		f := fake.New(estate)
+		// The fake bypasses the SDK middleware, so it feeds the same AWS call counter itself.
+		f.OnCall = func(ctx context.Context, t awsx.Target, service, op, result string) {
+			telemetry.Default.CountAWSCall(t.AccountID, t.Region, service, op, result, string(awsx.SourceFrom(ctx)))
+		}
 		// The fake ECS hands out ws:// streams served by an in-process fake SSM agent.
 		ssmServer := fake.NewSSMServer(fake.SSMServerOptions{})
 		ssmServer.Start()
@@ -358,6 +362,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	// Kicks cross tasks on the signal bus: a web task publishes, the coordinator that holds the lease listens. In a single
 	// task (role all, no shared store) the bus is memory and both sides are this process.
 	kicks := &kickPublisher{bus: newKickBus(kvHealth), log: log}
+	// Pages that are open in a visible tab: the shared store's registry when there is one, so a web task and the poller
+	// that owns the slice see the same set, and a registry inside this process otherwise (role all shares it between the
+	// API and the poller).
+	focusRegistry := buildFocusRegistry(kvHealth)
 	if role.ServesAPI() {
 		setup, err := auth.NewSetup(ctx, st, log)
 		if err != nil {
@@ -390,6 +398,8 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			KVHealth:                storeHealth,
 			KickOffHours:            kicks.KickOffHours,
 			KickNotify:              kicks.KickNotify,
+			Focus:                   focusRegistry,
+			Bus:                     kicks.bus,
 		})
 	}
 	listener, err := net.Listen("tcp", cfg.Listen)
@@ -406,6 +416,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		pollerConfig := poller.ConfigFrom(cfg)
 		pollerConfig.Version = version
 		pollerConfig.NoSlices = !role.Polls()
+		pollerConfig.Registry, pollerConfig.Bus = focusRegistry, kicks.bus
 		switch role {
 		case config.RolePoller:
 			pollerConfig.Roles = []string{"poller"}

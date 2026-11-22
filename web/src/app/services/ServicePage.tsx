@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
 import { useRevisions } from '../../api/change'
+import { useFocus } from '../../api/focus'
 import { useCluster, useService } from '../../api/hooks'
 import { EmptyState } from '../../components/EmptyState'
 import { EditTagDialog } from '../admin/tags/EditTagDialog'
@@ -44,6 +45,7 @@ function NoAccess() {
 export function ServicePage() {
   const { serviceId = '', tab = DEFAULT_TAB } = useParams()
   const serviceQuery = useService(serviceId)
+  const focus = useFocus('service', serviceId, serviceQuery.refetch)
   const { me } = useAuth()
   const [editing, setEditing] = useState<TagTarget | null>(null)
   const service = serviceQuery.data
@@ -94,7 +96,7 @@ export function ServicePage() {
   return (
     <>
       <div className={styles.stickyHead}>
-        <ServiceHeader service={service} tab={tab} onTagClick={me?.admin ? setEditing : undefined} />
+        <ServiceHeader service={service} tab={tab} focus={focus} onTagClick={me?.admin ? setEditing : undefined} />
         <Tabs ariaLabel="Service tabs" items={items} active={tab} hrefFor={(key) => `/services/${serviceId}/${key}`} />
       </div>
       {!service.controller.supported && <ControllerBanner banner={service.controller.banner} />}

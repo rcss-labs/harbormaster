@@ -36,8 +36,8 @@ const (
 // start no deployment; tasks started later follow the new exec flag, running
 // ones keep theirs until replaced. A task definition or force-new-deployment starts a deployment even while
 // another is in progress, as ECS does.
-func (c *ecsClient) UpdateService(_ context.Context, in *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "UpdateService")
+func (c *ecsClient) UpdateService(ctx context.Context, in *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "UpdateService")
 	defer done()
 	if err != nil {
 		return nil, err

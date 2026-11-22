@@ -17,8 +17,8 @@ const execNotEnabledMessage = "The execute command failed because execute comman
 var errNoExecServer = errors.New("fake: no exec server")
 
 // ExecuteCommand starts a session on the fake SSM server for a task whose container has a running ExecuteCommandAgent.
-func (c *ecsClient) ExecuteCommand(_ context.Context, in *ecs.ExecuteCommandInput, _ ...func(*ecs.Options)) (*ecs.ExecuteCommandOutput, error) {
-	done, err := c.f.begin(c.target, "ecs", "ExecuteCommand")
+func (c *ecsClient) ExecuteCommand(ctx context.Context, in *ecs.ExecuteCommandInput, _ ...func(*ecs.Options)) (*ecs.ExecuteCommandOutput, error) {
+	done, err := c.f.begin(ctx, c.target, "ecs", "ExecuteCommand")
 	defer done()
 	if err != nil {
 		return nil, err
@@ -99,8 +99,8 @@ var _ awsx.SSMAPI = (*ssmClient)(nil)
 
 // TerminateSession terminates a fake exec session. An unknown session yields a nil output and no
 // error, mirroring the brief for this fake.
-func (c *ssmClient) TerminateSession(_ context.Context, in *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
-	done, err := c.f.begin(awsx.Target{}, "ssm", "TerminateSession")
+func (c *ssmClient) TerminateSession(ctx context.Context, in *ssm.TerminateSessionInput, _ ...func(*ssm.Options)) (*ssm.TerminateSessionOutput, error) {
+	done, err := c.f.begin(ctx, awsx.Target{}, "ssm", "TerminateSession")
 	defer done()
 	if err != nil {
 		return nil, err
