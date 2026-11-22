@@ -136,13 +136,13 @@ type routeOptions struct {
 }
 
 // protect wraps h in the per-route chain:
-// RequireAuth -> RequireTokenScope -> RequirePasswordChanged -> RequireCSRF -> RequireAdmin -> handler -> ETag (GET only).
+// Public routes: RefuseToken -> handler -> ETag. Others: RequireAuth -> RequireTokenScope -> RequirePasswordChanged -> RequireCSRF -> RequireAdmin -> handler -> ETag (GET only).
 func protect(h http.Handler, opts routeOptions) http.Handler {
 	if !opts.NoETag {
 		h = etagMiddleware(h)
 	}
 	if opts.Public {
-		return h
+		return auth.RefuseToken(h)
 	}
 	if opts.Admin {
 		h = auth.RequireAdmin(h)

@@ -176,3 +176,17 @@ func RequireTokenScope(route Scope) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// RefuseToken is the gate for routes that need no session (login, setup, SAML start). An access token has no business
+// there, so a token credential is refused with 403 token_not_allowed instead of being passed through; sessions and
+// anonymous requests continue exactly as before. This is defence in depth: the token path of Middleware already ends
+// an unresolvable token with 401 before this runs.
+func RefuseToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsToken(r.Context()) {
+			writeError(w, http.StatusForbidden, "token_not_allowed", "This route is not available to access tokens.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
