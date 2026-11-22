@@ -42,6 +42,7 @@ func TestSuffixRoles_RejectsNonRoleARN(t *testing.T) {
 	for _, in := range []string{
 		"", "not-an-arn", "arn:aws:iam::123456789012:user/sam", "arn:aws:s3:::bucket/role/x",
 		"arn:aws:iam::123456789012:role/", "arn:aws:iam::123456789012:role/path/",
+		"arn:aws:iam:::role/harbormaster-access", // no account
 	} {
 		src := SuffixRoles(fixedRoles{arn: in}, "-poller")
 		got, _, err := src.Role(context.Background(), "123456789012")

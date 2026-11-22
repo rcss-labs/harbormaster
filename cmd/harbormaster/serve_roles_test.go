@@ -285,6 +285,27 @@ func TestServe_PollerAndCoordinatorTogetherCoverWhatAllDid(t *testing.T) {
 	})
 }
 
+// A manager that has not finished its first tick yet counts from process start: healthy shortly after it, stale after.
+func TestLeaseLoopHealthy_NoTickYetIsHealthyShortlyAfterStart(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	noTick := func() time.Time { return time.Time{} }
+	soon := leaseLoopHealthy(noTick, now.Add(-5*time.Second), func() time.Time { return now }, leaseLoopStaleAfter)
+	if err := soon(); err != nil {
+		t.Errorf("5 s after start with no tick: %v", err)
+	}
+	late := leaseLoopHealthy(noTick, now.Add(-2*leaseLoopStaleAfter), func() time.Time { return now }, leaseLoopStaleAfter)
+	if err := late(); err == nil {
+		t.Error("two limits after start with no tick must be stale")
+	}
+}
+
+// ECS replaces a poller after this long without a tick: the value is part of the contract, so it is pinned.
+func TestLeaseLoopStaleAfter_IsSixtySeconds(t *testing.T) {
+	if leaseLoopStaleAfter != 60*time.Second {
+		t.Fatalf("leaseLoopStaleAfter = %v, want 60s", leaseLoopStaleAfter)
+	}
+}
+
 func TestLeaseLoopHealthy_GoesStaleAfterTheLimit(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	started := now.Add(-10 * time.Minute)
