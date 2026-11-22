@@ -49,10 +49,23 @@ func failInternal(w http.ResponseWriter, r *http.Request, what string, err error
 	writeError(w, http.StatusInternalServerError, "internal", "Something went wrong on our side.")
 }
 
-// Middleware attaches the session, user and subject to the request context when the cookie is valid.
-// A missing or invalid cookie continues unauthenticated; RequireAuth decides whether that is allowed.
+// Middleware attaches the credential, user and subject to the request context.
+//
+// With HM_API_TOKENS on, a request whose Authorization header is "Bearer " followed by a well-formed token takes the
+// token path: the cookie is not read, and a token that does not resolve is answered 401 here, on every route, never
+// continuing as anonymous or as a session. A resolved token yields its user, a read-only subject and a token
+// credential, and no session. With tokens off, or any other Authorization header, the header is ignored.
+//
+// Otherwise the session cookie is used: a valid one attaches the session, user, subject and a session credential;
+// a missing or invalid cookie continues unauthenticated, and RequireAuth decides whether that is allowed.
 func (a *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.cfg.APITokens {
+			if raw, ok := bearerToken(r); ok {
+				a.serveToken(w, r, next, raw)
+				return
+			}
+		}
 		cookie, err := r.Cookie(CookieName)
 		if err != nil || cookie.Value == "" {
 			next.ServeHTTP(w, r)
@@ -79,14 +92,15 @@ func (a *Service) Middleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), sessionKey{}, sess)
 		ctx = context.WithValue(ctx, userKey{}, user)
 		ctx = context.WithValue(ctx, subjectKey{}, subject)
+		ctx = context.WithValue(ctx, credentialKey{}, Credential{Kind: CredentialSession})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// RequireAuth rejects unauthenticated requests with 401.
+// RequireAuth rejects unauthenticated requests with 401. A session or an access token credential passes.
 func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := SessionFrom(r.Context()); !ok {
+		if _, ok := CredentialFrom(r.Context()); !ok {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "Sign in to continue.")
 			return
 		}
@@ -94,11 +108,16 @@ func RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// RequireCSRF requires the session's CSRF token on every method except GET, HEAD and OPTIONS.
+// RequireCSRF requires the session's CSRF token on every method except GET, HEAD and OPTIONS. A request
+// authenticated by an access token needs none: no cookie took part, so there is nothing to forge.
 func RequireCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if IsToken(r.Context()) {
 			next.ServeHTTP(w, r)
 			return
 		}

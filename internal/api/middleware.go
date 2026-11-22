@@ -2,10 +2,12 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"net"
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 )
@@ -59,11 +61,20 @@ func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// requestLogInfo carries what inner middleware learns about a request back out to the request log, which runs before
+// authentication. It holds only values that are safe to log.
+type requestLogInfo struct {
+	tokenID string // the token's public id (hmp_<id>) when an access token authenticated the request
+}
+
+type requestLogKey struct{}
+
 func (s *Server) requestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := s.now()
 		rec := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(rec, r)
+		info := &requestLogInfo{}
+		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), requestLogKey{}, info)))
 		if r.URL.Path == "/healthz" {
 			return
 		}
@@ -71,8 +82,36 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		s.log().Info("request", "method", r.Method, "path", loggedPath(r.URL.Path), "status", status,
-			"duration_ms", s.now().Sub(start).Milliseconds(), "ip", s.clientIP(r))
+		attrs := []any{"method", r.Method, "path", loggedPath(r.URL.Path), "status", status,
+			"duration_ms", s.now().Sub(start).Milliseconds(), "ip", s.clientIP(r)}
+		if info.tokenID != "" {
+			attrs = append(attrs, "token_id", info.tokenID)
+		}
+		s.log().Info("request", attrs...)
+	})
+}
+
+// tokenRequests runs after auth.Middleware. For a request authenticated by an access token it records the token's
+// public id for the request log and takes one unit from the user's token bucket (120 burst, 2 per second, shared
+// across web tasks through Rates); an empty bucket is 429 rate_limited with Retry-After. Session and anonymous
+// requests pass untouched.
+func (s *Server) tokenRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cred, ok := auth.CredentialFrom(r.Context())
+		if !ok || cred.Kind != auth.CredentialToken {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if info, ok := r.Context().Value(requestLogKey{}).(*requestLogInfo); ok {
+			info.tokenID = cred.TokenPublicID
+		}
+		user, _ := auth.UserFrom(r.Context())
+		if !s.allowRate(r.Context(), rateAPIToken, strconv.FormatInt(user.ID, 10), apiTokenBurst, apiTokenPerSecond) {
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests with access tokens. Wait a moment and try again.")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

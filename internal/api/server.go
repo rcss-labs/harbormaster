@@ -137,6 +137,14 @@ const (
 	rateNotifyTest = "notifytest"
 	rateSAMLLogin  = "samllogin"
 	rateFocusOpen  = "focusopen"
+	rateAPIToken   = "apitoken"
+)
+
+// The per-user bucket for requests authenticated by an access token (design: "Authentication"). Constants, not
+// settings.
+const (
+	apiTokenBurst     = 120
+	apiTokenPerSecond = 2
 )
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
@@ -220,11 +228,12 @@ func (s *Server) log() *slog.Logger { return s.Log }
 func (s *Server) now() time.Time { return s.Now() }
 
 // Handler builds the mux and wraps it:
-// recover -> request log -> security headers -> auth.Middleware (for /api).
+// recover -> request log -> security headers -> auth.Middleware (for /api) -> token rate limit.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
 	var h http.Handler = mux
+	h = s.tokenRequests(h)
 	h = onlyAPI(s.Auth.Middleware, h)
 	h = withTagsMemo(h)
 	h = SecurityHeaders(h)
