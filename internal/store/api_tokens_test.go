@@ -192,3 +192,40 @@ func TestAPIToken_SchemaRefusesOtherScopes(t *testing.T) {
 		t.Errorf("valid row refused: %v", err)
 	}
 }
+
+// The caller's lifetime limit comes from the user as loaded earlier; the row lock must re-read admin and SSO state so
+// a promotion that commits in between still caps the new token.
+func TestAPIToken_CreateWithin_ClampsToTheLockedRowsState(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	now := time.Now()
+	limit := func(u store.User) time.Time {
+		if u.Admin || u.SSOLinked() {
+			return now.Add(7 * 24 * time.Hour)
+		}
+		return now.Add(90 * 24 * time.Hour)
+	}
+	requested := now.Add(90 * 24 * time.Hour)
+
+	admin, _ := st.CreateUser(ctx, "root", "h", true, false) // the row is admin; the caller's subject said otherwise
+	tok := newAPIToken(admin.ID, "hmp_aaaaaaaaaaaa")
+	tok.ExpiresAt = requested
+	created, err := st.CreateAPITokenWithin(ctx, tok, 100, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := now.Add(7 * 24 * time.Hour); created.ExpiresAt.After(want.Add(time.Second)) {
+		t.Errorf("admin row: expires_at %v, want at most %v", created.ExpiresAt, want)
+	}
+
+	plain, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	tok = newAPIToken(plain.ID, "hmp_bbbbbbbbbbbb")
+	tok.ExpiresAt = requested
+	created, err = st.CreateAPITokenWithin(ctx, tok, 100, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ExpiresAt.Before(requested.Add(-time.Second)) {
+		t.Errorf("plain user: expires_at %v was shortened, want %v", created.ExpiresAt, requested)
+	}
+}
