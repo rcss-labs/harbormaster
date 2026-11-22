@@ -19,6 +19,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 func paymentsKey() model.ServiceKey {
@@ -49,7 +50,7 @@ func seedTimelineOperation(t *testing.T, st *store.Store, key model.ServiceKey, 
 func seedTimelineStop(t *testing.T, st *store.Store, key model.ServiceKey, id, stopCode, reason string, exitCode int, ago time.Duration) {
 	t.Helper()
 	stoppedAt := time.Now().Add(-ago)
-	if _, err := st.UpsertTasks(t.Context(), []model.Task{{
+	if _, err := storetest.Seed(st).UpsertTasks(t.Context(), []model.Task{{
 		Cluster: key.ClusterKey, ARN: "arn:aws:ecs:" + key.Region + ":" + key.AccountID + ":task/" + key.Cluster + "/" + id,
 		ServiceName: key.Service, LastStatus: "STOPPED", StopCode: stopCode, StoppedReason: reason,
 		StoppedAt: &stoppedAt, Revision: 7, Containers: []model.Container{{Name: "app", ExitCode: &exitCode}},

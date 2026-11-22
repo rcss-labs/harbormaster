@@ -76,7 +76,7 @@ func (h *harness) count(t *testing.T, query string, args ...any) int {
 func (h *harness) sample(t *testing.T, ts time.Time, service string, running, desired int) {
 	t.Helper()
 	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelab, Region: target.Region, Cluster: "core-services"}, Service: service}
-	if err := h.st.InsertCountsHistory(context.Background(), ts, []model.Service{{Key: key, Running: running, Desired: desired}}); err != nil {
+	if err := storetest.Seed(h.st).InsertCountsHistory(context.Background(), ts, []model.Service{{Key: key, Running: running, Desired: desired}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -241,7 +241,7 @@ func TestUtilDay_OneLogicalBatchPerTarget(t *testing.T) {
 		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelab, Region: target.Region, Cluster: "core-services"}, Service: fmt.Sprintf("bulk-%03d", i)}
 		extra = append(extra, model.Service{Key: key, Running: 1, Desired: 1, PolledAt: now})
 	}
-	if _, err := h.st.UpsertServices(ctx, extra); err != nil {
+	if _, err := storetest.Seed(h.st).UpsertServices(ctx, extra); err != nil {
 		t.Fatal(err)
 	}
 	withInsights, _ := insightsServices(t, h)

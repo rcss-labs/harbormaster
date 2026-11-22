@@ -20,6 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/secretbox"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 // notifyEnv is an API server whose notification senders post to an in-process fake receiver, like fake mode.
@@ -189,7 +190,7 @@ func (e *notifyEnv) seedActiveServices(keys ...model.ServiceKey) {
 	for _, k := range keys {
 		rows = append(rows, model.Service{Key: k, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()})
 	}
-	if _, err := e.st.UpsertServices(e.t.Context(), rows); err != nil {
+	if _, err := storetest.Seed(e.st).UpsertServices(e.t.Context(), rows); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -666,10 +667,10 @@ func TestNotificationRoutes_ScopeRoundTripsWithNamesAndMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.UpsertClusters(t.Context(), []model.Cluster{{Key: nxKey.ClusterKey, PolledAt: time.Now()}}); err != nil {
+	if _, err := storetest.Seed(e.st).UpsertClusters(t.Context(), []model.Cluster{{Key: nxKey.ClusterKey, PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.UpsertServices(t.Context(), []model.Service{{Key: nxKey, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()}}); err != nil {
+	if _, err := storetest.Seed(e.st).UpsertServices(t.Context(), []model.Service{{Key: nxKey, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	gone := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "deleted-svc"}
@@ -800,10 +801,10 @@ func TestNotificationRoutes_ScopeValidation(t *testing.T) {
 func TestNotificationTargets_ListsAccountsClustersAndServices(t *testing.T) {
 	e := newNotifyEnv(t)
 	now := time.Now()
-	if _, err := e.st.UpsertClusters(t.Context(), []model.Cluster{{Key: nxKey.ClusterKey, PolledAt: now}, {Key: nwKey.ClusterKey, PolledAt: now}}); err != nil {
+	if _, err := storetest.Seed(e.st).UpsertClusters(t.Context(), []model.Cluster{{Key: nxKey.ClusterKey, PolledAt: now}, {Key: nwKey.ClusterKey, PolledAt: now}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.UpsertServices(t.Context(), []model.Service{
+	if _, err := storetest.Seed(e.st).UpsertServices(t.Context(), []model.Service{
 		{Key: nxKey, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: now},
 		{Key: nyKey, Status: "INACTIVE", Raw: []byte(`{}`), PolledAt: now},
 		{Key: nwKey, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: now},

@@ -139,12 +139,8 @@ func (s *Store) RunningTaskCapacityByCluster(ctx context.Context, target TargetF
 	return out, nil
 }
 
-// UpsertClusterCapacitySample folds one poll's samples into each cluster's row for day: sample count and sums grow,
+// upsertClusterCapacitySample folds one poll's samples into each cluster's row for day: sample count and sums grow,
 // maxima keep the largest. One row per cluster per day, so the table never holds per-sample history.
-func (s *Store) UpsertClusterCapacitySample(ctx context.Context, day time.Time, samples []ClusterCapacitySample) error {
-	return upsertClusterCapacitySample(ctx, s.Pool, day, samples)
-}
-
 func upsertClusterCapacitySample(ctx context.Context, q db, day time.Time, samples []ClusterCapacitySample) error {
 	if len(samples) == 0 {
 		return nil

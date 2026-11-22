@@ -14,6 +14,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 // markServiceTasksHealthy sets the ECS health of every running task of the service to HEALTHY,
@@ -136,7 +137,7 @@ func TestPollerStatus_NonCoreTierFailureKeepsCoreCurrent(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
-	if err := st.UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "scaling",
+	if err := storetest.Seed(st).UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "scaling",
 		LastError: "DescribeScheduledActions: UnsupportedOperation", Interval: time.Minute, BaseInterval: time.Minute, Failures: 5}); err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestPollerStatus_TierLabelsMerge(t *testing.T) {
 		{Target: target, Tier: "services", LastOKAt: &newer, Interval: 5 * time.Second, BaseInterval: 5 * time.Second},
 		{Target: target, Tier: "clusters", LastOKAt: &older, Interval: 30 * time.Second, BaseInterval: 30 * time.Second},
 	} {
-		if err := st.UpsertPollLoop(t.Context(), loop); err != nil {
+		if err := storetest.Seed(st).UpsertPollLoop(t.Context(), loop); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -190,11 +191,11 @@ func TestPollerStatus_NonAdminTierErrorHidden(t *testing.T) {
 	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
 	now := time.Now()
 	// one non-failing blip names a resource, a failing tier names another
-	if err := st.UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "network", LastOKAt: &now,
+	if err := storetest.Seed(st).UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "network", LastOKAt: &now,
 		LastError: "AccessDenied on arn:aws:ec2:secret", Interval: time.Minute, BaseInterval: time.Minute, Failures: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "scaling", LastOKAt: &now,
+	if err := storetest.Seed(st).UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "scaling", LastOKAt: &now,
 		LastError: "scaling failure text", Interval: time.Minute, BaseInterval: time.Minute, Failures: 5}); err != nil {
 		t.Fatal(err)
 	}

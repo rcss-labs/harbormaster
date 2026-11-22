@@ -259,7 +259,7 @@ func (e *env) seedServices(keys ...model.ServiceKey) {
 	for _, k := range keys {
 		rows = append(rows, model.Service{Key: k, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()})
 	}
-	if _, err := e.st.UpsertServices(context.Background(), rows); err != nil {
+	if _, err := storetest.Seed(e.st).UpsertServices(context.Background(), rows); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -336,7 +336,7 @@ func TestDispatcher_SelectorsMatchAWSAndHarbormasterTags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.UpsertServices(ctx, []model.Service{
+	if _, err := storetest.Seed(e.st).UpsertServices(ctx, []model.Service{
 		{Key: svcX, Status: "ACTIVE", Raw: []byte(`{"Tags":[{"Key":"env","Value":"staging"}]}`), PolledAt: time.Now()},
 		{Key: svcY, Status: "ACTIVE", Raw: []byte(`{"Tags":[]}`), PolledAt: time.Now()},
 		{Key: svcZ, Status: "ACTIVE", Raw: []byte(`{"Tags":[]}`), PolledAt: time.Now()},
@@ -1293,7 +1293,7 @@ func TestDispatcher_RouteWhoseTagWasDeletedMatchesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.UpsertServices(ctx, []model.Service{
+	if _, err := storetest.Seed(e.st).UpsertServices(ctx, []model.Service{
 		{Key: svcX, Status: "ACTIVE", Raw: []byte(`{"Tags":[]}`), PolledAt: time.Now()},
 		{Key: svcY, Status: "ACTIVE", Raw: []byte(`{"Tags":[]}`), PolledAt: time.Now()},
 	}); err != nil {

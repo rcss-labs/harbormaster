@@ -412,7 +412,7 @@ func TestServiceRead_UnhealthyTargetReachesTheStatusThroughTheCache(t *testing.T
 				t.Fatalf("status = %s before the change, want steady", got)
 			}
 		}
-		if err := p.st.UpsertTargetHealth(t.Context(), []model.TargetHealth{{Key: key, TargetGroupARN: "arn:tg/unhealthy", LoadBalancerARN: "arn:lb",
+		if err := storetest.Seed(p.st).UpsertTargetHealth(t.Context(), []model.TargetHealth{{Key: key, TargetGroupARN: "arn:tg/unhealthy", LoadBalancerARN: "arn:lb",
 			Healthy: 1, Unhealthy: 2, Targets: []model.Target{}, PolledAt: time.Now()}}); err != nil {
 			t.Fatal(err)
 		}

@@ -31,12 +31,8 @@ func (p PollLoop) Throttled() bool { return p.Interval > p.BaseInterval }
 // Failing reports whether the loop has failed too many times in a row.
 func (p PollLoop) Failing() bool { return p.Failures >= failingThreshold }
 
-// UpsertPollLoop stores a loop's status, replacing any previous status for the same
+// upsertPollLoop stores a loop's status, replacing any previous status for the same
 // account, region and tier. A zero UpdatedAt stores the current time.
-func (s *Store) UpsertPollLoop(ctx context.Context, p PollLoop) error {
-	return upsertPollLoop(ctx, s.Pool, p)
-}
-
 func upsertPollLoop(ctx context.Context, q db, p PollLoop) error {
 	var updatedAt *time.Time
 	if !p.UpdatedAt.IsZero() {

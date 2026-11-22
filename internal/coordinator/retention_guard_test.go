@@ -17,7 +17,7 @@ func TestCoordinator_RetentionDoesNothingWithoutTheLease(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	stoppedAt := time.Now().Add(-8 * 24 * time.Hour)
-	if _, err := st.UpsertTasks(ctx, []model.Task{{
+	if _, err := storetest.Seed(st).UpsertTasks(ctx, []model.Task{{
 		Cluster: model.ClusterKey{AccountID: "111111111111", Region: "eu-west-1", Cluster: "c"},
 		ARN:     "arn:t/old", ServiceName: "api", LastStatus: "STOPPED", DesiredStatus: "STOPPED", StoppedAt: &stoppedAt,
 	}}); err != nil {
