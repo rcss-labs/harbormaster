@@ -35,6 +35,7 @@ module "harbormaster" {
   extra_env = {
     HM_API_TOKENS     = "true"
     HM_MCP_PUBLIC_URL = local.mcp_public_url
+    HM_OAUTH          = "true" # claude.ai / Claude Desktop connectors; needs the two settings above
   }
 }
 
@@ -55,6 +56,11 @@ module "harbormaster_mcp" {
   image              = local.mcp_image
   upstream_url       = local.base_url
   public_url         = local.mcp_public_url
+
+  # OAuth for connectors: the browser is sent to Harbormaster's private URL to approve (reachable on the VPN only),
+  # and the /oauth/ paths get their own stricter rate rule.
+  authorize_url      = local.base_url
+  enable_oauth_paths = true
 
   harbormaster_alb_security_group_id = module.harbormaster.security_group_ids.alb
 }
