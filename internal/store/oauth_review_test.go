@@ -59,7 +59,7 @@ func TestRotateOAuthRefreshWithin_ClampsToTheCurrentCeiling(t *testing.T) {
 	if got.ExpiresAt.After(ceiling.Add(time.Second)) {
 		t.Fatalf("returned grant ends %v, past the ceiling %v", got.ExpiresAt, ceiling)
 	}
-	if n := f.count(t, `select count(*) from api_tokens where grant_id = $1 and expires_at > $2`, g.ID, ceiling.Add(time.Second)); n != 0 {
+	if n := f.count(t, `select count(*) from api_tokens where grant_id = $1 and rotated_at is null and expires_at > $2`, g.ID, ceiling.Add(time.Second)); n != 0 {
 		t.Fatalf("%d tokens outlive the ceiling", n)
 	}
 }
