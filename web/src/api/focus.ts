@@ -18,6 +18,8 @@ export interface FocusDTO {
 /** How often a visible page tells the server it is still open; the server's TTL is three times this. */
 export const FOCUS_HEARTBEAT_MS = 10_000
 
+const RECHECK_AFTER_OPEN_MS = 3000
+
 const UNAVAILABLE: FocusDTO = { state: 'unavailable', interval_seconds: 0, refreshed_at: null, message: 'Live refresh unavailable' }
 
 const isVisible = () => document.visibilityState === 'visible'
@@ -51,7 +53,13 @@ export function useFocus(kind: FocusKind, id: string, refetch: () => Promise<unk
     }
     const start = () => {
       send(true)
-      cancelFastFollow = refetchFastFollow(() => refetchRef.current())
+      const cancelRefetches = refetchFastFollow(() => refetchRef.current())
+      // The first live read lands a moment after the open; ask again then, so the pill does not wait for the next heartbeat.
+      const recheck = setTimeout(() => send(false), RECHECK_AFTER_OPEN_MS)
+      cancelFastFollow = () => {
+        cancelRefetches()
+        clearTimeout(recheck)
+      }
       timer = setInterval(() => send(false), FOCUS_HEARTBEAT_MS)
     }
     const stop = () => {

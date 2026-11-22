@@ -69,19 +69,29 @@ describe('useFocus', () => {
     expect(refetch).toHaveBeenCalledTimes(3)
   })
 
+  it('asks again 3 s after an open, so the pill shows the first live read without waiting a heartbeat', async () => {
+    renderHook(() => useFocus('service', 'svc-1', vi.fn().mockResolvedValue(undefined)))
+    await tick(0)
+    expect(posts()).toHaveLength(1)
+    await tick(3000)
+    expect(posts().map((p) => p.body.open)).toEqual([true, false])
+    await tick(FOCUS_HEARTBEAT_MS - 3000)
+    expect(posts()).toHaveLength(3) // the regular heartbeat is on its own 10 s clock
+  })
+
   it('heartbeats every 10 s only while visible', async () => {
     renderHook(() => useFocus('cluster', 'cl-1', vi.fn().mockResolvedValue(undefined)))
     await tick(0)
     expect(posts()).toHaveLength(1)
-    await tick(FOCUS_HEARTBEAT_MS)
-    expect(posts()).toHaveLength(2)
-    expect(posts()[1].body.open).toBe(false)
-    await tick(FOCUS_HEARTBEAT_MS)
+    await tick(FOCUS_HEARTBEAT_MS) // the recheck after the open, then the first heartbeat
     expect(posts()).toHaveLength(3)
+    expect(posts()[2].body.open).toBe(false)
+    await tick(FOCUS_HEARTBEAT_MS)
+    expect(posts()).toHaveLength(4)
 
     setVisibility('hidden')
     await tick(5 * FOCUS_HEARTBEAT_MS)
-    expect(posts()).toHaveLength(3)
+    expect(posts()).toHaveLength(4)
   })
 
   it('releases on hide and on unmount', async () => {
