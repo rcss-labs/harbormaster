@@ -154,7 +154,36 @@ describe('Accounts', () => {
     expect(await within(row).findByText('Data is 12 min old')).toBeInTheDocument()
     const details = within(row).getByText('Show AWS error').closest('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
-    expect(within(details).getByText('ExpiredToken')).toBeInTheDocument()
+    expect(within(details).getByText('us-east-1: ExpiredToken')).toBeInTheDocument()
+  })
+
+  it("shows each region's last poll error", async () => {
+    server.use(
+      http.get('/api/poller', () =>
+        HttpResponse.json({
+          ...POLLER,
+          items: POLLER.items.map((entry) => {
+            if (entry.account_id !== ACCOUNTS.items[0].account_id) return entry
+            if (entry.region === 'us-east-1') return { ...entry, failing: true, last_error: 'ExpiredToken' }
+            if (entry.region === 'eu-west-1') return { ...entry, failing: true, last_error: 'AccessDenied: not authorized to assume harbormaster-access-poller' }
+            return entry
+          }),
+        }),
+      ),
+    )
+    renderApp('/settings/accounts')
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    const details = (await within(row).findByText('Show AWS error')).closest('details') as HTMLDetailsElement
+    expect(within(details).getByText('us-east-1: ExpiredToken')).toBeInTheDocument()
+    expect(within(details).getByText('eu-west-1: AccessDenied: not authorized to assume harbormaster-access-poller')).toBeInTheDocument()
+  })
+
+  it('shows nothing extra when every region is healthy', async () => {
+    renderApp('/settings/accounts')
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    await within(row).findByText('Connected')
+    expect(within(row).queryByText(/^[a-z]+-[a-z]+-\d: /)).not.toBeInTheDocument()
+    expect(within(row).queryByText('Show AWS error')).not.toBeInTheDocument()
   })
 
   it('Test now posts the account role, external id and regions and reports each region', async () => {

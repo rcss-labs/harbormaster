@@ -141,6 +141,11 @@ func (r *Registry) WritePrometheus(w io.Writer) error {
 		writeSample(bw, "harbormaster_registry_requests_total", []string{"host", "outcome"}, k, "", utoa(r.registryRequests[k]))
 	}
 
+	writeHeader(bw, "harbormaster_role_info", "The role this process runs (all, web, poller or coordinator); value is always 1.", "gauge")
+	if r.roleInfoSet {
+		writeSample(bw, "harbormaster_role_info", []string{"role", "version"}, joinKey(r.roleName, r.roleVersion), "", "1")
+	}
+
 	writeHeader(bw, "harbormaster_snapshot_rows_written_total", "Snapshot rows written by table.", "counter")
 	for _, k := range sortedKeys(r.snapshotRows) {
 		writeSample(bw, "harbormaster_snapshot_rows_written_total", []string{"table"}, k, "", utoa(r.snapshotRows[k]))

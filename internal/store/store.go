@@ -36,23 +36,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 // OpenWithParams is Open with extra Postgres runtime parameters (for example
 // search_path) applied to every pooled connection.
 func OpenWithParams(ctx context.Context, databaseURL string, runtimeParams map[string]string) (*Store, error) {
-	cfg, err := pgxpool.ParseConfig(databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse database url: %w", err)
-	}
-	for k, v := range runtimeParams {
-		cfg.ConnConfig.RuntimeParams[k] = v
-	}
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("open pool: %w", err)
-	}
-	s := &Store{Pool: pool}
-	if err := s.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	return s, nil
+	return OpenWithOptions(ctx, databaseURL, OpenOptions{RuntimeParams: runtimeParams})
 }
 
 // Close releases the pool.

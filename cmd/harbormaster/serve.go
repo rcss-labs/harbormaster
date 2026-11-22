@@ -47,8 +47,12 @@ import (
 // grypeLatestURL is Anchore's listing of the current Grype vulnerability database.
 const grypeLatestURL = "https://grype.anchore.io/databases/v6/latest.json"
 
+const serveUsage = "usage: harbormaster serve [--fake-aws] [--role=all|web|poller|coordinator]"
+
 const (
-	shutdownTimeout = 15 * time.Second
+	// leaseLoopStaleAfter is how long a poller's lease manager may go without finishing a tick before /healthz says 503.
+	leaseLoopStaleAfter = 60 * time.Second
+	shutdownTimeout     = 15 * time.Second
 	// fakeRolloutStep is how often the fake AWS estate advances rollouts.
 	fakeRolloutStep = 2400 * time.Millisecond
 )
@@ -135,7 +139,12 @@ func databaseURLFromSecret(raw string) (string, error) {
 // openStore opens the database, scrubbing the connection string from any error so a
 // credential embedded in it never reaches logs.
 func openStore(ctx context.Context, dbURL string) (*store.Store, error) {
-	st, err := store.Open(ctx, dbURL)
+	return openStoreSized(ctx, dbURL, 0)
+}
+
+// openStoreSized is openStore with a pool cap; 0 keeps pgx's default.
+func openStoreSized(ctx context.Context, dbURL string, maxConns int) (*store.Store, error) {
+	st, err := store.OpenWithOptions(ctx, dbURL, store.OpenOptions{MaxConns: maxConns})
 	if err != nil {
 		msg := strings.ReplaceAll(err.Error(), dbURL, "[database url]")
 		if parsed, perr := url.Parse(dbURL); perr == nil && parsed.User != nil {
@@ -177,13 +186,22 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	fakeFlag := flags.Bool("fake-aws", false, "serve an in-memory AWS estate with demo data")
+	roleFlag := flags.String("role", "", "run only this role's parts: all, web, poller or coordinator (default all, or HM_ROLE)")
 	if err := flags.Parse(args); err != nil {
-		return errUsage{"usage: harbormaster serve [--fake-aws]"}
+		return errUsage{serveUsage}
 	}
 	cfg, err := config.Load(getenv)
 	if err != nil {
 		return err
 	}
+	if *roleFlag != "" {
+		parsed, err := config.ParseRole(*roleFlag)
+		if err != nil {
+			return errUsage{"--role: must be all, web, poller or coordinator\n" + serveUsage}
+		}
+		cfg.Role = parsed
+	}
+	role := cfg.Role
 	fakeAWS := *fakeFlag || cfg.FakeAWS
 	// The API's SSRF filter relaxes http loopback URLs only when cfg.FakeAWS is set, so the --fake-aws
 	// flag must set it too or the demo IdP's metadata cannot be imported.
@@ -192,8 +210,12 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	if fakeAWS {
 		cfg.Scan.Enabled = true
 	}
-	if err := cfg.ValidateScanLaunch(); err != nil {
-		return err
+	// Only a task that coordinates launches scans. A web task needs HM_SCAN_ENABLED to show the feature but not the
+	// launch settings, and a poller needs neither.
+	if role.Coordinates() {
+		if err := cfg.ValidateScanLaunch(); err != nil {
+			return err
+		}
 	}
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
 	kvOpts, kvConfigured, err := kvOptions(cfg.KV)
@@ -212,11 +234,12 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		return err
 	}
 
-	st, err := openStore(ctx, dbURL)
+	st, err := openStoreSized(ctx, dbURL, cfg.PoolSize())
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+	telemetry.Default.SetRoleInfo(string(role), version)
 	if applied, err := st.Migrate(ctx); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	} else if len(applied) > 0 {
@@ -267,26 +290,32 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		defer ssmServer.Close()
 		f.ExecServer = ssmServer
 		execInsecureStream = true
-		// The fake scanner is the launcher, the bucket and the DB source in one; the demo's cert-renewer cannot be pulled.
-		fakeScanner := fake.NewScanner(estate)
-		fakeScanner.FailPull("cert-renewer")
-		scanRunner = &scanjob.Runner{Store: st, Launcher: fakeScanner, Bucket: fakeScanner, DB: fakeScanner, Cfg: cfg.Scan, Now: time.Now, Log: log}
+		if role.Coordinates() {
+			// The fake scanner is the launcher, the bucket and the DB source in one; the demo's cert-renewer cannot be pulled.
+			fakeScanner := fake.NewScanner(estate)
+			fakeScanner.FailPull("cert-renewer")
+			scanRunner = &scanjob.Runner{Store: st, Launcher: fakeScanner, Bucket: fakeScanner, DB: fakeScanner, Cfg: cfg.Scan, Now: time.Now, Log: log}
+		}
 		clients, prober = f, f
 		go estate.RunRollouts(ctx, fakeRolloutStep)
-		if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, notifyDemo...); err != nil {
-			return fmt.Errorf("seed demo data: %w", err)
+		// The demo data, the fake IdP and the sign-in belong to the task that serves the API. Every process has its own
+		// fake estate (it lives in memory), so a split fake install shows leases, kicks and health, not write flows.
+		if role.ServesAPI() {
+			if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, notifyDemo...); err != nil {
+				return fmt.Errorf("seed demo data: %w", err)
+			}
+			idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
+			if err != nil {
+				return fmt.Errorf("start fake IdP: %w", err)
+			}
+			fakeIdP = idp.Handler()
+			log.Info("fake AWS mode: demo data loaded; sign in as sam / " + devseed.Password +
+				"; fake IdP at " + strings.TrimRight(cfg.BaseURL, "/") + "/fake-idp/metadata")
 		}
-		idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
-		if err != nil {
-			return fmt.Errorf("start fake IdP: %w", err)
-		}
-		fakeIdP = idp.Handler()
-		log.Info("fake AWS mode: demo data loaded; sign in as sam / " + devseed.Password +
-			"; fake IdP at " + strings.TrimRight(cfg.BaseURL, "/") + "/fake-idp/metadata")
 	} else {
-		real := awsx.NewReal(base, storeRoles{st})
+		real := awsx.NewReal(base, accessRoles(role, storeRoles{st}))
 		clients, prober = real, real
-		if cfg.Scan.Enabled {
+		if cfg.Scan.Enabled && role.Coordinates() {
 			// The scan loop uses the server's own AWS config, never an access role.
 			home := awsx.NewHome(base, awsx.HomeConfig{ClusterARN: cfg.Scan.ClusterARN, TaskDefinitionARN: cfg.Scan.TaskDefinitionARN,
 				SecurityGroup: cfg.Scan.SecurityGroup, Bucket: cfg.Scan.Bucket, Subnets: cfg.Scan.Subnets})
@@ -294,8 +323,10 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			source.Log = log
 			scanRunner = &scanjob.Runner{Store: st, Launcher: home, Bucket: home, DB: source, Cfg: cfg.Scan, Now: time.Now, Log: log}
 		}
-		if err := auth.Bootstrap(ctx, st, awsx.NewSecretReader(base), cfg.BootstrapAdminSecretARN, log); err != nil {
-			return err
+		if role.ServesAPI() {
+			if err := auth.Bootstrap(ctx, st, awsx.NewSecretReader(base), cfg.BootstrapAdminSecretARN, log); err != nil {
+				return err
+			}
 		}
 	}
 	// One applier serves the API (manual wake and sleep) and the reconciler (the leader's loop); both change AWS
@@ -319,69 +350,122 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	}
 	notifyDispatcher := &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
 		Interval: cfg.Notify.Interval, Settle: cfg.Notify.Settle, Now: time.Now, Log: log, Telemetry: telemetry.Default}
-	setup, err := auth.NewSetup(ctx, st, log)
-	if err != nil {
-		return err
-	}
-
 	telemetry.Default.SetBuildInfo(version) // plan 06
-	var scanKicker api.ScanKicker           // stays a nil interface when scanning is off
-	if scanRunner != nil {
-		scanKicker = scanRunner
+
+	// What each role serves: the API and web app (all, web), or only /healthz and /metrics (poller, coordinator).
+	// handler is built after the background parts so a poller's health can read its lease manager.
+	var apiServer *api.Server
+	// Kicks cross tasks on the signal bus: a web task publishes, the coordinator that holds the lease listens. In a single
+	// task (role all, no shared store) the bus is memory and both sides are this process.
+	kicks := &kickPublisher{bus: newKickBus(kvHealth), log: log}
+	if role.ServesAPI() {
+		setup, err := auth.NewSetup(ctx, st, log)
+		if err != nil {
+			return err
+		}
+		var scanKicker api.ScanKicker // stays a nil interface when scanning is off
+		if cfg.Scan.Enabled {
+			scanKicker = kicks
+		}
+		var storeHealth interface{ Up() bool } // stays a nil interface when there is no shared store
+		if kvHealth != nil {
+			storeHealth = kvHealth
+		}
+		apiServer = api.New(api.Server{
+			Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
+			Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
+			Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,
+				Guard: &offhours.Guard{Store: st, Now: time.Now}},
+			ExecAllowInsecureStream: execInsecureStream,
+			Limits:                  buildConcurrency(kvHealth),
+			Rates:                   buildRates(kvHealth),
+			FakeIdP:                 fakeIdP,
+			FakeNotify:              fakeNotify,
+			MetricsToken:            cfg.MetricsToken, // plan 06
+			Telemetry:               telemetry.Default,
+			Scan:                    scanKicker,
+			OffHours:                offHoursApplier,
+			Notify:                  notifySenders,
+			NotifyBox:               notifyBox,
+			KVHealth:                storeHealth,
+			KickOffHours:            kicks.KickOffHours,
+			KickNotify:              kicks.KickNotify,
+		})
 	}
-	server := api.New(api.Server{
-		Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
-		Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
-		Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,
-			Guard: &offhours.Guard{Store: st, Now: time.Now}},
-		ExecAllowInsecureStream: execInsecureStream,
-		Limits:                  buildConcurrency(kvHealth),
-		Rates:                   buildRates(kvHealth),
-		FakeIdP:                 fakeIdP,
-		FakeNotify:              fakeNotify,
-		MetricsToken:            cfg.MetricsToken, // plan 06
-		Telemetry:               telemetry.Default,
-		Scan:                    scanKicker,
-		OffHours:                offHoursApplier,
-		KickOffHours:            offHoursReconciler.Kick,
-		Notify:                  notifySenders,
-		NotifyBox:               notifyBox,
-		KickNotify:              notifyDispatcher.Kick,
-	})
-	httpServer := &http.Server{Addr: cfg.Listen, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and
-	// audit on detached contexts), so deploys, writes, exec and tails keep their full drain.
-	httpServer.RegisterOnShutdown(server.BeginDrain)
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
 	}
 
-	pollerConfig := poller.ConfigFrom(cfg)
-	pollerConfig.Version = version
-	// The jobs that must have one active instance run under the coordinator lease; the deployment outcome logger is
-	// one of them (its claim in FinishDeployment already prevents duplicate lines, so a handover loses nothing).
-	coordinatorRunner := &coordinator.Runner{
-		Store: st, Timing: lease.DefaultTiming(),
-		Scan: scanRunner, OffHours: offHoursReconciler, ImagePlatforms: imagePlatformResolver(cfg, st, clients, fakeAWS, log),
-		Notify: notifyDispatcher,
-		Rollups: &rollup.Runner{Store: st, Clients: clients, Now: time.Now, UtilEnabled: cfg.Analytics.Util,
-			SampleInterval: cfg.Poll.CountsHistory, CountsRetention: cfg.Retention.CountsHistory, Log: log},
-		Retention: coordinator.RetentionFrom(cfg), RetentionEvery: coordinator.DefaultRetentionEvery,
-		Outcomes: deploy.NewOutcomeLogger(st, 5*time.Second),
-		Log:      log,
-	}
-	pollerConfig.Coordinator = coordinatorRunner
+	// The lease manager runs in every role but web: slice loops for role poller, the run-once jobs for role
+	// coordinator, both for all. A web task builds none of it, so it cannot poll, launch a scan or run a job.
 	pollCtx, stopPoller := context.WithCancel(ctx)
 	pollerDone := make(chan struct{})
-	pollerInstance := poller.New(st, clients, pollerConfig, log)
-	coordinatorRunner.Idle = pollerInstance.IsIdle
-	go func() {
-		defer close(pollerDone)
-		if err := pollerInstance.Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Error("poller stopped", "error", err)
+	var pollerInstance *poller.Poller
+	if role.Polls() || role.Coordinates() {
+		pollerConfig := poller.ConfigFrom(cfg)
+		pollerConfig.Version = version
+		pollerConfig.NoSlices = !role.Polls()
+		switch role {
+		case config.RolePoller:
+			pollerConfig.Roles = []string{"poller"}
+		case config.RoleCoordinator:
+			pollerConfig.Roles = []string{"coordinator"}
 		}
-	}()
+		var coordinatorRunner *coordinator.Runner
+		if role.Coordinates() {
+			// The jobs that must have one active instance run under the coordinator lease; the deployment outcome logger is
+			// one of them (its claim in FinishDeployment already prevents duplicate lines, so a handover loses nothing).
+			coordinatorRunner = &coordinator.Runner{
+				Store: st, Timing: lease.DefaultTiming(),
+				Scan: scanRunner, OffHours: offHoursReconciler, ImagePlatforms: imagePlatformResolver(cfg, st, clients, fakeAWS, log),
+				Notify: notifyDispatcher,
+				Rollups: &rollup.Runner{Store: st, Clients: clients, Now: time.Now, UtilEnabled: cfg.Analytics.Util,
+					SampleInterval: cfg.Poll.CountsHistory, CountsRetention: cfg.Retention.CountsHistory, Log: log},
+				Retention: coordinator.RetentionFrom(cfg), RetentionEvery: coordinator.DefaultRetentionEvery,
+				Outcomes: deploy.NewOutcomeLogger(st, 5*time.Second),
+				Bus:      kicks.bus,
+				Log:      log,
+			}
+			pollerConfig.Coordinator = coordinatorRunner
+		}
+		pollerInstance = poller.New(st, clients, pollerConfig, log)
+		if coordinatorRunner != nil {
+			coordinatorRunner.Idle = pollerInstance.IsIdle
+		}
+		go func() {
+			defer close(pollerDone)
+			if err := pollerInstance.Run(pollCtx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Error("poller stopped", "error", err)
+			}
+		}()
+	} else {
+		close(pollerDone)
+	}
+
+	var handler http.Handler
+	if apiServer != nil {
+		handler = apiServer.Handler()
+	} else {
+		var lastTick func() time.Time
+		if role == config.RolePoller {
+			// ECS replaces a poller whose lease manager has stopped finishing ticks. Other roles stay as they are: role
+			// all must not change for a single-task install, and a coordinator has no slices to starve.
+			lastTick = func() time.Time {
+				if m := pollerInstance.Manager(); m != nil {
+					return m.LastTick()
+				}
+				return time.Time{}
+			}
+		}
+		handler = api.OpsHandler(st.Ping, leaseLoopHealthy(lastTick, time.Now(), time.Now, leaseLoopStaleAfter), cfg.MetricsToken, telemetry.Default, log)
+	}
+	httpServer := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	if apiServer != nil {
+		// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and
+		// audit on detached contexts), so deploys, writes, exec and tails keep their full drain.
+		httpServer.RegisterOnShutdown(apiServer.BeginDrain)
+	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.Serve(listener) }()
@@ -403,6 +487,24 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		result = nil
 	}
 	return result
+}
+
+// leaseLoopHealthy reports an error when the lease manager's last completed tick is older than limit. A manager that has
+// not ticked yet counts from started. A nil lastTick (a role that does not use this check) is always healthy.
+func leaseLoopHealthy(lastTick func() time.Time, started time.Time, now func() time.Time, limit time.Duration) func() error {
+	return func() error {
+		if lastTick == nil {
+			return nil
+		}
+		last := lastTick()
+		if last.IsZero() {
+			last = started
+		}
+		if age := now().Sub(last); age > limit {
+			return fmt.Errorf("lease manager has not completed a tick for %s", age.Round(time.Second))
+		}
+		return nil
+	}
 }
 
 // imagePlatformResolver builds the leader job behind the ARM64 advisor, or nil when HM_ARM64_CHECK is off. With --fake-aws

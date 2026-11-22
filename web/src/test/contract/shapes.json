@@ -2484,6 +2484,12 @@
         "last_ok_at": {
           "$null": "time"
         },
+        "owner_epoch": {
+          "$null": "number"
+        },
+        "owner_instance": {
+          "$null": "string"
+        },
         "region": "string",
         "throttled": "boolean",
         "tiers": [
@@ -2501,7 +2507,8 @@
           }
         ]
       }
-    ]
+    ],
+    "store": "string"
   },
   "revisionDefinition": {
     "arn": "string",

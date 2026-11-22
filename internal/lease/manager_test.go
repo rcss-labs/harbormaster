@@ -574,6 +574,8 @@ func TestManager_TwoCoordinatorsOneHolder(t *testing.T) {
 
 	stopA()
 	waitFor(t, 2*time.Second, "b to take over", b.HoldsCoordinator)
+	// The lease is held before the holder goroutine has recorded its start; wait for the record.
+	waitFor(t, 2*time.Second, "b's holder to start", func() bool { return len(bRec.startsOf(coordinatorKey)) >= 1 })
 	if len(bRec.startsOf(coordinatorKey)) != 1 {
 		t.Fatalf("b started %d times", len(bRec.startsOf(coordinatorKey)))
 	}
@@ -595,6 +597,64 @@ func TestManager_HolderThatReturnsEarlyIsReleasedAndRestarted(t *testing.T) {
 	if row := leaseRow(t, st, sliceKeyOf("acct00")); row.Epoch != 2 {
 		t.Fatalf("epoch = %d, want 2 (released after the first holder returned, then claimed again)", row.Epoch)
 	}
+}
+
+// gateRenewStore holds the first RenewLease call after it started, so a test can release the lease while a renewal is in
+// flight.
+type gateRenewStore struct {
+	*store.Store
+	entered chan struct{}
+	proceed chan struct{}
+	once    atomic.Bool
+}
+
+func (s *gateRenewStore) RenewLease(ctx context.Context, l store.Lease, ttl time.Duration) error {
+	if s.once.CompareAndSwap(false, true) {
+		close(s.entered)
+		<-s.proceed
+	}
+	return s.Store.RenewLease(ctx, l, ttl)
+}
+
+// A holder that returns on its own is released by the tick. A renewal that was already in flight then finds the lease
+// gone; that is our own release, not a loss, and must not be logged or counted as one.
+func TestManager_ReleaseOfAFinishedHolderIsNotCountedAsLost(t *testing.T) {
+	st := storetest.Open(t)
+	reg := telemetry.New()
+	giveUp := make(chan struct{})
+	var starts atomic.Int32
+	holder := HolderFunc(func(ctx context.Context, l store.Lease) {
+		if starts.Add(1) == 1 {
+			select {
+			case <-giveUp:
+			case <-ctx.Done():
+			}
+			return
+		}
+		<-ctx.Done()
+	})
+	m := newManager(st, managerOpts{roles: []string{"poller"}, slices: holder, targets: newTargets("acct00")})
+	m.Telemetry = reg
+	gated := &gateRenewStore{Store: st, entered: make(chan struct{}), proceed: make(chan struct{})}
+	m.ls = gated
+	start(t, m)
+
+	waitFor(t, 5*time.Second, "a renewal to be in flight", func() bool {
+		select {
+		case <-gated.entered:
+			return true
+		default:
+			return false
+		}
+	})
+	close(giveUp)
+	waitFor(t, 5*time.Second, "the finished holder to be released", func() bool {
+		return hasLine(metricsText(t, reg), `harbormaster_lease_events_total{kind="slice",event="released"} 1`)
+	})
+	close(gated.proceed)
+	stays(t, 500*time.Millisecond, "no lost event for our own release", func() bool {
+		return !hasLine(metricsText(t, reg), `harbormaster_lease_events_total{kind="slice",event="lost"} 1`)
+	})
 }
 
 func TestGuardFor_FailsAfterTakeoverAndNearExpiry(t *testing.T) {

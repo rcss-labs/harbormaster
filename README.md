@@ -39,6 +39,17 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team the exp
 
 Harbormaster is one Go binary that serves an embedded React single-page app. Browsers poll `/api` about every 5 seconds, so the view stays current without a push channel. Each account and region is polled by exactly one task at a time (the one holding its lease in Postgres), which writes the snapshots to Postgres, and any task can answer API reads from them, while logs, metrics, deploys and terminal sessions call AWS directly from whichever task serves the request. What a user can see and do comes from their tags and permissions, and the server checks them on every request, including the WebSocket endpoints for the terminal and live logs.
 
+One image runs in four roles, chosen with `serve --role=<role>` or `HM_ROLE`. The default, `all`, is the single-task install described above and needs nothing else.
+
+| Role | Serves | Runs |
+| --- | --- | --- |
+| `all` (default) | the API, the web app and the WebSockets, `/healthz`, `/metrics` | everything below, in one process |
+| `web` | the API, the web app and the WebSockets, `/healthz`, `/metrics` | the bootstrap admin step, manual wake and sleep, "Send test", delivery retry. No polling and no background job |
+| `poller` | `/healthz` and `/metrics` only (every other path is a 404) | the slice polling loops under leases, and the idle monitor |
+| `coordinator` | `/healthz` and `/metrics` only | the jobs under the coordinator lease (notifications, off-hours, image scans, ARM64 check, outcome log, rollups, retention) and an idle monitor |
+
+Every role migrates the schema on start. A web task asks the coordinator to run a job now (a saved schedule, a changed route, a scan request) over the shared store (`HM_KV_URL`); if there is no store, or nobody hears it, the job runs at its own interval. In managed accounts a poller assumes `<role>-poller` and a coordinator `<role>-coordinator`, where `<role>` is the account's stored role name (for example `harbormaster-access-poller`); `all` and `web` use the stored role itself.
+
 ## Install
 
 ### Prerequisites
@@ -341,6 +352,8 @@ All settings are environment variables, read by `internal/config`. Durations use
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `HM_LISTEN` | `:8480` | Address the HTTP server listens on |
+| `HM_ROLE` | `all` | Which parts this process runs: `all`, `web`, `poller` or `coordinator` (see How it runs). The `serve --role` flag overrides it |
+| `HM_DB_MAX_CONNS` | | Largest database pool. Unset: pgx's default for `all`, 6 for `web`, 8 for `poller`, 4 for `coordinator`. A set value must be at least 3 |
 | `HM_BASE_URL` | `http://127.0.0.1:8480` | Public URL of the app |
 | `HM_DATABASE_URL` | | Postgres URL. Either this or `HM_DATABASE_SECRET_ARN` is required |
 | `HM_DATABASE_SECRET_ARN` | | Secrets Manager secret holding the database credentials (a postgres URL, or JSON with `username`, `password`, `host`, `port` and `dbname`; RDS-managed master secrets have no `host` and are rejected) |
@@ -671,6 +684,8 @@ make run                            # http://127.0.0.1:8480, in-memory fake AWS 
 
 `make run` starts `serve --fake-aws`: it migrates the database, seeds demo users, tags and permissions, and serves a fake ECS estate, so no AWS credentials are needed. Sign in as `sam` / `harbormaster-e2e-1` (a global admin). `dana`, `omer` and `oncall` use the same password with narrower access. Never use `--fake-aws` (or `HM_FAKE_AWS`) against a database that holds real users.
 
+`make run-split` runs the three roles as separate processes (web on 8480, poller on 8482, coordinator on 8483) in a recreated `hm_run_split` schema of the test database, so leases, kicks and health can be tried locally. Export `HM_TEST_KV_URLS` (see `make test-kv`) so kicks cross processes. Each process has its own in-memory fake estate, so a deploy made through web is not seen by the poller's fake; write flows are tested in `role=all`. Ctrl-C stops all three.
+
 For frontend work, run `make run` in one terminal and `npm --prefix web run dev` in another. Vite serves the SPA and proxies `/api` to port 8480.
 
 ### Make targets
@@ -682,6 +697,7 @@ For frontend work, run `make run` in one terminal and `npm --prefix web run dev`
 - `make test-db`: start (or reuse) the local Postgres test container `hm-test-pg`. When it creates the container it prints the `HM_TEST_DATABASE_URL` to export; when it reuses an existing one it prints a `docker port hm-test-pg` hint instead, so build the URL from that
 - `make test-kv`: start (or reuse) the Valkey and Redis test containers `hm-test-valkey` (`valkey/valkey:7.2.5-alpine`, port 63791) and `hm-test-redis` (`redis:7.0.15-alpine`, port 63792), the oldest versions the store layer supports, and print `export HM_TEST_KV_URLS=...`. Store-backed tests run against every URL in that variable and skip when it is unset
 - `make run`: run the server locally against fake AWS data and the test database
+- `make run-split`: run the web, poller and coordinator roles as three local processes (ports 8480, 8482, 8483); see Run it locally
 - `make e2e`: build, then run the Playwright smoke tests against the real server (`serve --fake-aws` on `127.0.0.1:8481`). Requires `HM_TEST_DATABASE_URL`. Each run recreates a dedicated `hm_e2e` schema in that database, so it never touches your other data. Install the browser once with `cd web && npx playwright install chromium`. Port 8481 must be free
 - `make soak`: soak test at target estate scale. Requires `HM_TEST_DATABASE_URL`
 - `make tf-check`: validate every Terraform root under `terraform/` locally (fmt, init without a backend, validate, and tflint if installed). It never plans or applies

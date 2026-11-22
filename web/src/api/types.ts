@@ -422,6 +422,9 @@ export interface PollerEntryDTO {
   last_ok_at: string | null
   /** Every data type, core or not. throttled/failing/last_error above aggregate the core tiers only. */
   tiers: PollerTierDTO[]
+  /** The process holding this slice's lease and its epoch. Admins only; null for everyone else and for a free slice. */
+  owner_instance: string | null
+  owner_epoch: number | null
 }
 /** One data type of an account x region; tiers sharing a label are merged (worst state wins). */
 export interface PollerTierDTO {
@@ -437,6 +440,8 @@ export interface PollerTierDTO {
 }
 export interface PollerDTO {
   items: PollerEntryDTO[]
+  /** The shared Valkey or Redis store, for admins; "" for everyone else, "none" when the install has none. Always sent; optional here so partial test bodies type-check. */
+  store?: 'up' | 'down' | 'none' | ''
 }
 
 // ---- Admin: users and permissions ----

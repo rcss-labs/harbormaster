@@ -86,8 +86,8 @@ type Server struct {
 	OffHours *offhours.Applier
 	// OffHoursTimeout bounds the lock wait and the AWS work of a manual wake or sleep (default 20 s).
 	OffHoursTimeout time.Duration
-	// KickOffHours wakes the off-hours reconciler after a schedule change; nil is a no-op. Like Scan it reaches only
-	// the reconciler in this process, so on another task a change waits at most HM_OFFHOURS_INTERVAL.
+	// KickOffHours wakes the off-hours reconciler after a schedule change; nil is a no-op. serve wires it to the signal
+	// bus, which reaches the active coordinator; if nobody hears it a change waits at most HM_OFFHOURS_INTERVAL.
 	KickOffHours func()
 	// FakeNotify is the in-process notification receiver, mounted at /fake-notify/ when non-nil; only fake AWS mode sets it.
 	FakeNotify http.Handler
@@ -95,9 +95,12 @@ type Server struct {
 	Notify *notify.Senders
 	// NotifyBox seals and opens route secrets; New builds it from Cfg.SessionKey when nil, and it stays nil without a key.
 	NotifyBox *secretbox.Box
-	// KickNotify wakes the notification dispatcher after a route change; nil is a no-op. Like KickOffHours it reaches
-	// only the dispatcher in this process, so on another task a change waits at most HM_NOTIFY_INTERVAL.
+	// KickNotify wakes the notification dispatcher after a route change; nil is a no-op. Like KickOffHours it travels
+	// on the signal bus; if nobody hears it a change waits at most HM_NOTIFY_INTERVAL.
 	KickNotify func()
+	// KVHealth reports whether the shared Valkey or Redis store is reachable, for the poller status; nil means there is
+	// no store.
+	KVHealth interface{ Up() bool }
 	// costWarned remembers which unreadable container definitions the cost tab already logged.
 	costWarned *sync.Map
 }
@@ -123,8 +126,8 @@ func (s *Server) allowRate(ctx context.Context, name, key string, capacity int, 
 	return err != nil || ok
 }
 
-// ScanKicker wakes the scan loop so a request does not wait for the next interval. Kick reaches only the loop in the
-// process that runs it: requests are served by any task but the loop runs only in the poller leader, so on another task a
+// ScanKicker wakes the scan loop so a request does not wait for the next interval. serve implements it over the signal
+// bus, so any web task reaches the loop on the active coordinator; if nobody hears it a
 // request waits at most HM_SCAN_INTERVAL.
 type ScanKicker interface{ Kick() }
 
@@ -231,7 +234,7 @@ func (s *Server) handle(mux *http.ServeMux, pattern string, h http.HandlerFunc, 
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	// plan 06: token-protected, deliberately outside session auth, CSRF and ETag.
-	mux.Handle("GET /metrics", MetricsHandler(s.MetricsToken, s.Telemetry))
+	mux.Handle("GET /metrics", metricsHandler(s.MetricsToken, s.Telemetry, s.memberMetrics))
 
 	s.handle(mux, "POST /api/auth/login", s.login, routeOptions{Public: true})
 	s.handle(mux, "GET /api/auth/setup", s.setupNeeded, routeOptions{Public: true})

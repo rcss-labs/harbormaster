@@ -64,7 +64,7 @@ function AccountStatus({
             {account.status === 'error' && account.last_error !== '' && <div className={styles.mono}>{account.last_error}</div>}
             {failing.map((entry) => (
               <div key={entry.region} className={styles.mono}>
-                {entry.last_error}
+                {`${entry.region}: ${entry.last_error}`}
               </div>
             ))}
             {tested && tested.length > 0 && (

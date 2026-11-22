@@ -17,6 +17,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/platforms"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
+	"github.com/rcss-labs/harbormaster/internal/signal"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -39,6 +40,11 @@ type Runner struct {
 	Outcomes       *deploy.OutcomeLogger
 	// Idle reports whether polling is idle; the image resolver stays quiet while it is.
 	Idle func() bool
+	// Bus carries kicks from web tasks. While this runner holds the lease it listens and wakes the named job; nil
+	// means it listens to nothing and the jobs run at their intervals.
+	Bus signal.Bus
+	// OnKick, when set, is called with the job's name each time a bus message woke a job.
+	OnKick func(job string)
 
 	Telemetry *telemetry.Registry
 	Log       *slog.Logger
@@ -117,6 +123,9 @@ func (r *Runner) Hold(ctx context.Context, l store.Lease) {
 	}
 	if r.Outcomes != nil {
 		start(r.Outcomes.Run)
+	}
+	if r.Bus != nil {
+		start(r.listenForKicks)
 	}
 
 	every := r.RetentionEvery

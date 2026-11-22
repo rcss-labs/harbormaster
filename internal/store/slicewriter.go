@@ -73,7 +73,8 @@ const fenceSQL = `select 1 from poll_leases
 
 // fenceTimeoutsSQL bounds this transaction on the server, whatever its client does: a frozen or partitioned owner that
 // leaves the transaction open (holding the fence lock) is cut off by the server after fenceIdleTimeout, so a takeover
-// always gets through.
+// always gets through. It must run as its own statement before the fence: a timeout set inside a statement does not
+// bound that same statement, and the fence can wait on a takeover's row lock.
 const fenceTimeoutsSQL = `select set_config('idle_in_transaction_session_timeout', $1, true),
   set_config('statement_timeout', $2, true)`
 

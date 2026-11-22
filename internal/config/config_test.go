@@ -84,6 +84,7 @@ func TestLoad_Defaults(t *testing.T) {
 		Notify:               NotifyConfig{Interval: 10 * time.Second, Settle: 3 * time.Minute, FakeDemo: true, SMTP: SMTPConfig{Port: 587, TLS: "starttls"}},
 		Analytics:            AnalyticsConfig{Util: true},
 		KV:                   KVConfig{Prefix: "hm"},
+		Role:                 RoleAll,
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,

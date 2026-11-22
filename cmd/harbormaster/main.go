@@ -20,7 +20,7 @@ var (
 const usageText = `usage: harbormaster <command>
 
 commands:
-  serve         run the HTTP server
+  serve         run the server; --role=all|web|poller|coordinator picks the parts (default all)
   migrate       apply database migrations
   healthcheck   check that the server is healthy
   version       print version information

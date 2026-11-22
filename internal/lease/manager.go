@@ -26,7 +26,7 @@ const (
 	// maxClaimPasses bounds the re-plans within one tick after a claim lost a race to another member.
 	maxClaimPasses = 3
 	// slowClaim is how long a claim may take before it counts as blocked behind another transaction's lock; a blocked
-	// claim backs its lease off for a few ticks, and a tick makes at most maxSlowClaims of them.
+	// claim backs its lease off for two ticks, and a tick makes at most maxSlowClaims of them.
 	slowClaim     = time.Second
 	maxSlowClaims = 2
 )
@@ -263,8 +263,11 @@ func (m *Manager) reapFinished(ctx context.Context) {
 		select {
 		case <-h.done:
 			m.forget(h)
+			// Mark it stopping before the release: a renewal already in flight must read the vanished lease as our own
+			// release, not as a loss.
 			m.mu.Lock()
 			lost := h.lost
+			h.stopping = true
 			m.mu.Unlock()
 			if !lost {
 				m.release(ctx, h.lease, "holder stopped")
@@ -343,7 +346,13 @@ func (m *Manager) stopAll(ctx context.Context, why string) {
 	for _, h := range m.snapshotHeld() {
 		m.stopHolder(h)
 		m.forget(h)
-		m.release(ctx, h.lease, why)
+		// A lease a renewal found taken has nothing to release, and counting a release would double-report it.
+		m.mu.Lock()
+		lost := h.lost
+		m.mu.Unlock()
+		if !lost {
+			m.release(ctx, h.lease, why)
+		}
 	}
 }
 
@@ -552,8 +561,9 @@ func (m *Manager) backedOff(k store.LeaseKey) bool {
 	return ok && time.Now().Before(until)
 }
 
-// noteClaim records how long a claim took: a blocked one backs the lease off for a few ticks and counts against the
-// tick's budget of slow claims. It reports whether the budget is spent.
+// noteClaim records how long a claim took: a blocked one backs the lease off for two ticks and counts against the
+// tick's budget of slow claims. Two, not more: a lone claimant that was blocked once waits ClaimDeadline plus the
+// backoff plus a tick before it tries again (about 20 s by default), instead of about 30 s with four. It reports whether the budget is spent.
 func (m *Manager) noteClaim(k store.LeaseKey, took time.Duration, claimed bool, slow *int) (spent bool) {
 	if claimed || took < slowClaim {
 		return false
@@ -561,7 +571,7 @@ func (m *Manager) noteClaim(k store.LeaseKey, took time.Duration, claimed bool, 
 	if m.claimBackoff == nil {
 		m.claimBackoff = map[store.LeaseKey]time.Time{}
 	}
-	m.claimBackoff[k] = time.Now().Add(4 * m.Timing.Tick)
+	m.claimBackoff[k] = time.Now().Add(2 * m.Timing.Tick)
 	*slow++
 	return *slow >= maxSlowClaims
 }

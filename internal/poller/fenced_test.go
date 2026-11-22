@@ -3,6 +3,7 @@ package poller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -191,5 +192,47 @@ func TestPoller_PausedOwnerCannotOverwriteAfterTakeover(t *testing.T) {
 	var pollRows int
 	if err := st.Pool.QueryRow(ctx, `select count(*) from poll_loops`).Scan(&pollRows); err != nil || pollRows != 0 {
 		t.Fatalf("poll_loops rows = %d, %v; the lost slice must not record a cycle", pollRows, err)
+	}
+}
+
+// holdSlice is the only place that counts rejected writes. With no manager running, take the slice over and write with the
+// old lease: the write must be refused, counted, and the loop told to stop.
+func TestPoller_HoldSliceCountsAStaleWriteAsRejected(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	target := loopTarget
+	if err := st.EnsureSliceLease(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	key := store.LeaseKey{Kind: store.LeaseSlice, AccountID: target.AccountID, Region: target.Region}
+	old, ok, err := st.ClaimLease(ctx, key, uuid.New(), time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim: %v %v", ok, err)
+	}
+	if _, err := st.Pool.Exec(ctx, `update poll_leases set owner_id = $1, epoch = epoch + 1 where kind = 'slice' and account_id = $2 and region = $3`,
+		uuid.New(), target.AccountID, target.Region); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := telemetry.New()
+	p := newTestPoller(st, Config{Telemetry: reg}, randomLockKey())
+	var writeErr error
+	p.loopFactory = func(lctx context.Context, _ awsx.Target, w *store.SliceWriter) {
+		_, writeErr = w.UpsertClusters(lctx, []model.Cluster{{Key: model.ClusterKey{AccountID: target.AccountID, Region: target.Region, Cluster: "stale"}, Status: "ACTIVE"}})
+		if lctx.Err() == nil {
+			t.Error("the loop context was not cancelled by the rejected write")
+		}
+	}
+	p.holdSlice(ctx, old)
+
+	if !errors.Is(writeErr, store.ErrLeaseLost) {
+		t.Fatalf("stale write error = %v, want ErrLeaseLost", writeErr)
+	}
+	var metrics bytes.Buffer
+	if err := reg.WritePrometheus(&metrics); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(metrics.String(), "harbormaster_fenced_writes_rejected_total 1\n") {
+		t.Fatalf("rejected-write counter did not reach 1:\n%s", metrics.String())
 	}
 }
