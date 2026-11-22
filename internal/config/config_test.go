@@ -85,6 +85,7 @@ func TestLoad_Defaults(t *testing.T) {
 		Analytics:            AnalyticsConfig{Util: true},
 		KV:                   KVConfig{Prefix: "hm"},
 		Role:                 RoleAll,
+		Focus:                FocusConfig{Interval: 5 * time.Second, TTL: 30 * time.Second, MaxObjects: 50, MaxPerUser: 5, MaxCallsPerSec: 5},
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,
