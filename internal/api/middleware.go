@@ -128,10 +128,15 @@ type routeOptions struct {
 	Public bool // no session required: skips RequireAuth, RequirePasswordChanged and RequireCSRF (login, setup)
 	Admin  bool // RequireAdmin
 	NoETag bool // do not buffer the response (streaming, WebSocket)
+	// Token is the access token scope this route admits. Empty, the default, refuses every access token with 403
+	// token_not_allowed. Only the read routes the MCP gateway calls are marked auth.ScopeRead; the list is pinned by
+	// a test because it is the security boundary of token access. Never mark an Admin route or a route that changes
+	// anything.
+	Token auth.Scope
 }
 
 // protect wraps h in the per-route chain:
-// RequireAuth -> RequirePasswordChanged -> RequireCSRF -> RequireAdmin -> handler -> ETag (GET only).
+// RequireAuth -> RequireTokenScope -> RequirePasswordChanged -> RequireCSRF -> RequireAdmin -> handler -> ETag (GET only).
 func protect(h http.Handler, opts routeOptions) http.Handler {
 	if !opts.NoETag {
 		h = etagMiddleware(h)
@@ -144,5 +149,6 @@ func protect(h http.Handler, opts routeOptions) http.Handler {
 	}
 	h = auth.RequireCSRF(h)
 	h = auth.RequirePasswordChanged(h)
+	h = auth.RequireTokenScope(opts.Token)(h)
 	return auth.RequireAuth(h)
 }

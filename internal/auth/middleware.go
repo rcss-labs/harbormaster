@@ -159,3 +159,20 @@ func RequirePasswordChanged(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// RequireTokenScope is the token route gate (layer 1 of the read-only design), default deny. A session credential
+// passes. A token credential passes only when the route is marked (route is not empty) and the token's scope equals
+// the mark; any other token is refused with 403 token_not_allowed, on every unmarked route whatever its method.
+// An anonymous request passes through to RequireAuth's decision.
+func RequireTokenScope(route Scope) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cred, ok := CredentialFrom(r.Context())
+			if ok && cred.Kind != CredentialSession && (route == "" || cred.Scope != route) {
+				writeError(w, http.StatusForbidden, "token_not_allowed", "This route is not available to access tokens.")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
