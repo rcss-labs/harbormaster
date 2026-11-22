@@ -400,12 +400,6 @@ func (s *Store) MarkOrphanedTags(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// DeleteOrphanedTagsBefore removes assignments orphaned before t and returns how many.
-func (s *Store) DeleteOrphanedTagsBefore(ctx context.Context, t time.Time) (int64, error) {
-	clusters, services, err := s.deleteOrphanedTagsBeforeCounts(ctx, t)
-	return clusters + services, err
-}
-
 // deleteOrphanedTagsBeforeCounts is DeleteOrphanedTagsBefore with per-table counts.
 func (s *Store) deleteOrphanedTagsBeforeCounts(ctx context.Context, t time.Time) (clusters, services int64, err error) {
 	counts := [2]int64{}

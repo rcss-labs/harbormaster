@@ -123,21 +123,3 @@ func (s *Store) DeleteSessionsForUserExcept(ctx context.Context, userID int64, k
 	}
 	return nil
 }
-
-// DeleteSAMLSessions removes every session opened through SSO and returns how many were removed.
-func (s *Store) DeleteSAMLSessions(ctx context.Context) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from sessions where auth_source = 'saml'`)
-	if err != nil {
-		return 0, fmt.Errorf("delete saml sessions: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
-// DeleteSAMLSessionsForUser removes the SSO sessions of one user and returns how many were removed.
-func (s *Store) DeleteSAMLSessionsForUser(ctx context.Context, userID int64) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from sessions where auth_source = 'saml' and user_id = $1`, userID)
-	if err != nil {
-		return 0, fmt.Errorf("delete saml sessions for user: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}

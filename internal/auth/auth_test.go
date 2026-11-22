@@ -246,7 +246,7 @@ func TestDeleteUser_EndsSessions(t *testing.T) {
 	u := mustUser(t, st, "hank", false)
 	ctx := context.Background()
 	res := mustLogin(t, svc, "hank", testPassword, "10.0.0.5", "ua")
-	if err := st.DeleteUser(ctx, u.ID); err != nil {
+	if err := storetest.DeleteUser(ctx, st, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := svc.Authenticate(ctx, res.SessionID); err == nil {

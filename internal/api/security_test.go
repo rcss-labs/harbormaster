@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -481,7 +482,7 @@ func TestSecurity_ListShowsOnlyRequestedAndVisible(t *testing.T) {
 	}
 
 	// The same image requested later by a Prod service stays invisible to omer, and ordering follows the newest request.
-	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: devStatus.Image.Digest, Key: securityPaymentsKey,
+	if _, err := storetest.AddScanRequest(t.Context(), env.st, store.ScanRequest{Digest: devStatus.Image.Digest, Key: securityPaymentsKey,
 		Container: "payments-api", Image: image.Image, Tag: image.Tag, Source: "manual", RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +561,7 @@ func TestSecurity_DetailListsFindingsWithAcceptancesOfVisibleServices(t *testing
 	env.scanAll(t)
 	digest := status.Image.Digest
 	// A Prod service asked for the same image too.
-	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: securityPaymentsKey, Container: "payments-api",
+	if _, err := storetest.AddScanRequest(t.Context(), env.st, store.ScanRequest{Digest: digest, Key: securityPaymentsKey, Container: "payments-api",
 		Image: status.Image.Image, Tag: "1.27.2", Source: "manual", RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +634,7 @@ func TestSecurity_ListCountsCoverTheServicesTheCallerCanSee(t *testing.T) {
 	status := mustRequestScan(t, env.dana, edgeNginxKey.ID(), "edge-nginx", "1.27.2")
 	env.scanAll(t)
 	digest := status.Image.Digest
-	if _, err := env.st.AddScanRequest(t.Context(), store.ScanRequest{Digest: digest, Key: securityPaymentsKey, Container: "payments-api",
+	if _, err := storetest.AddScanRequest(t.Context(), env.st, store.ScanRequest{Digest: digest, Key: securityPaymentsKey, Container: "payments-api",
 		Image: status.Image.Image, Tag: "1.27.2", Source: "manual", RequestedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}

@@ -181,18 +181,6 @@ func (s *Store) ScanRunDigests(ctx context.Context, id int64) ([]string, error) 
 	return digests, rows.Err()
 }
 
-func (s *Store) LatestScanRun(ctx context.Context, kind string) (ScanRun, error) {
-	r, err := scanScanRun(s.Pool.QueryRow(ctx, `select `+scanRunColumns+` from scan_runs where kind = $1
-		order by started_at desc, id desc limit 1`, kind))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ScanRun{}, ErrNotFound
-	}
-	if err != nil {
-		return ScanRun{}, fmt.Errorf("latest scan run: %w", err)
-	}
-	return r, nil
-}
-
 // ScanRunsSummary reports active runs, the last success, and the failure streak since it.
 // A failure is a run that ended failed or timed_out.
 func (s *Store) ScanRunsSummary(ctx context.Context) (ScanRunsSummary, error) {
