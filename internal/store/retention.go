@@ -32,6 +32,13 @@ const samlRetiredKeyRetention = 7 * 24 * time.Hour
 // imagePlatformsRetention is fixed: an image no task definition has mentioned for a week is not tracked any more.
 const imagePlatformsRetention = 7 * 24 * time.Hour
 
+// apiTokenRetention is fixed: an expired access token is kept a day past its expiry, then removed.
+const apiTokenRetention = 24 * time.Hour
+
+// tokenLogScanUsageRetention is fixed: the daily log search ledger only matters for the current day; 35 days leaves
+// room to look back over a month.
+const tokenLogScanUsageRetention = 35 * 24 * time.Hour
+
 // RunRetention deletes rows older than the configured ages, measured from now.
 func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (RetentionResult, error) {
 	result := RetentionResult{}
@@ -103,6 +110,18 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 		return result, fmt.Errorf("retention login_attempts: %w", err)
 	}
 	result["login_attempts"] = n
+
+	n, err = s.DeleteExpiredAPITokens(ctx, now.Add(-apiTokenRetention))
+	if err != nil {
+		return result, fmt.Errorf("retention api_tokens: %w", err)
+	}
+	result["api_tokens"] = n
+
+	n, err = s.DeleteTokenLogScanUsageBefore(ctx, now.Add(-tokenLogScanUsageRetention))
+	if err != nil {
+		return result, fmt.Errorf("retention token_log_scan_usage: %w", err)
+	}
+	result["token_log_scan_usage"] = n
 
 	n, err = s.pruneMetricsCacheBefore(ctx, now.Add(-metricsCacheRetention))
 	if err != nil {
