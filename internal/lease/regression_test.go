@@ -47,6 +47,7 @@ func TestManager_StopAllReleasesOnlyLeasesStillHeld(t *testing.T) {
 
 	add := func(name string, lost bool) {
 		k := sliceKeyOf(name)
+		ensureAccounts(st, awsx.Target{AccountID: name, Region: "r"})
 		if err := st.EnsureSliceLease(ctx, awsx.Target{AccountID: name, Region: "r"}); err != nil {
 			t.Fatal(err)
 		}

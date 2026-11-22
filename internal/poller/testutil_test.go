@@ -64,6 +64,18 @@ func holdsCoordinator(p *Poller) bool {
 	return m != nil && m.HoldsCoordinator()
 }
 
+// connectAccount gives the target's account a row: a slice lease exists only for a connected account.
+func connectAccount(t testing.TB, st *store.Store, target awsx.Target) {
+	t.Helper()
+	if _, err := st.GetAccountByAccountID(context.Background(), target.AccountID); err == nil {
+		return
+	}
+	if _, err := st.CreateAccount(context.Background(), store.AWSAccount{Name: "t" + target.AccountID, AccountID: target.AccountID,
+		RoleARN: "arn:aws:iam::" + target.AccountID + ":role/x", ExternalID: "e", Regions: []string{target.Region}, Enabled: true}); err != nil {
+		t.Fatalf("connect account %s: %v", target.AccountID, err)
+	}
+}
+
 // testWriter claims the slice's lease under a throwaway owner and returns its fenced writer. The lease is released when
 // the test ends. A loop under test writes through it exactly as a real one does.
 func testWriter(t testing.TB, st *store.Store, target awsx.Target) *store.SliceWriter {

@@ -33,6 +33,7 @@ func TestManager_BlockedClaimsAndASlowStopDoNotSelfFenceHealthySlices(t *testing
 	// Seven expired leases whose dead owners left a write transaction open: a claim waits on the row lock.
 	for _, name := range blockedNames(7) {
 		k := sliceKeyOf(name)
+		ensureAccounts(st, awsx.Target{AccountID: name, Region: "r"})
 		if err := st.EnsureSliceLease(ctx, awsx.Target{AccountID: name, Region: "r"}); err != nil {
 			t.Fatal(err)
 		}

@@ -263,6 +263,7 @@ func TestPollOnce_FailsWhenALiveOwnerHoldsTheSlice(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	k := store.LeaseKey{Kind: store.LeaseSlice, AccountID: loopTarget.AccountID, Region: loopTarget.Region}
+	connectAccount(t, st, loopTarget)
 	if err := st.EnsureSliceLease(ctx, loopTarget); err != nil {
 		t.Fatal(err)
 	}
