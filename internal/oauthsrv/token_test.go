@@ -162,9 +162,9 @@ func (c *countingStore) ConsumeOAuthCode(ctx context.Context, h string) (store.O
 	return c.Store.ConsumeOAuthCode(ctx, h)
 }
 
-func (c *countingStore) RotateOAuthRefresh(ctx context.Context, id, h string, a, r store.APIToken, now time.Time, g time.Duration) (store.OAuthGrant, error) {
+func (c *countingStore) RotateOAuthRefreshWithin(ctx context.Context, id, h string, a, r store.APIToken, now time.Time, g time.Duration, maxLifetime func(store.User) time.Duration) (store.OAuthGrant, error) {
 	c.calls.Add(1)
-	return c.Store.RotateOAuthRefresh(ctx, id, h, a, r, now, g)
+	return c.Store.RotateOAuthRefreshWithin(ctx, id, h, a, r, now, g, maxLifetime)
 }
 
 func TestToken_MalformedCodeOrRefreshNeverReadsTheDatabase(t *testing.T) {
@@ -414,5 +414,47 @@ func TestToken_NothingSecretIsLoggedOrAudited(t *testing.T) {
 				t.Errorf("%s leaks into the %s", name, sink)
 			}
 		}
+	}
+}
+
+// L4: a refresh without client_id is refused as a malformed request and does not touch the grant or the token.
+func TestToken_RefreshWithoutClientIDIsRefusedAndHarmless(t *testing.T) {
+	e := newOAuthEnv(t)
+	now := time.Now()
+	first, _ := e.exchange(e.approve(e.user, e.request()), now)
+	_, terr := e.svc.Exchange(t.Context(), TokenRequest{GrantType: "refresh_token", RefreshToken: first.RefreshToken}, now)
+	if terr == nil || terr.Code != "invalid_request" {
+		t.Fatalf("error = %+v, want invalid_request", terr)
+	}
+	if e.count(`select count(*) from oauth_grants`) != 1 || e.count(`select count(*) from api_tokens where rotated_at is not null`) != 0 {
+		t.Fatal("a refresh without client_id changed the grant or rotated the token")
+	}
+	if _, terr := e.refresh(first.RefreshToken, now.Add(time.Minute)); terr != nil {
+		t.Fatalf("the refresh token stopped working: %+v", terr)
+	}
+}
+
+// M2 defence in depth: a grant approved under the password user's long cap stops refreshing once the user is
+// SSO-linked, even if nothing revoked it (the link below is written straight to the row).
+func TestToken_RefreshIsClampedToTheUsersCurrentMaximum(t *testing.T) {
+	e := newOAuthEnv(t)
+	start := time.Now()
+	first, terr := e.exchange(e.approve(e.user, e.request()), start)
+	if terr != nil {
+		t.Fatal(terr)
+	}
+	if _, err := e.st.Pool.Exec(t.Context(),
+		`update users set idp_entity_id = 'idp', external_id = 'alice', external_id_format = 'persistent' where id = $1`, e.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, terr := e.refresh(first.RefreshToken, start.Add(8*24*time.Hour)); terr == nil || terr.Code != "invalid_grant" {
+		t.Fatalf("refresh on day 8 after an SSO link = %+v, want invalid_grant", terr)
+	}
+	second, terr := e.refresh(first.RefreshToken, start.Add(24*time.Hour))
+	if terr != nil {
+		t.Fatalf("refresh on day 1: %+v", terr)
+	}
+	if e.count(`select count(*) from api_tokens where rotated_at is null and expires_at > $1`, start.Add(7*24*time.Hour+time.Minute)) != 0 {
+		t.Fatalf("a token outlives the SSO maximum: %+v", second)
 	}
 }

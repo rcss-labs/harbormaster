@@ -42,6 +42,7 @@ func (d *docServer) resolver() *ClientResolver {
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	r := NewClientResolver([]string{"127.0.0.1"}, []string{"https://claude.ai/api/mcp/auth_callback"})
 	r.HTTP = hc
+	r.AllowExplicitPort = true // the test server listens on a random port
 	return r
 }
 
@@ -241,6 +242,7 @@ func TestClientResolver_RefusesPrivateAndRedirectedTargets(t *testing.T) {
 		defer srv.Close()
 		// The real guarded client, with the real policy: it must refuse before dialling.
 		r := NewClientResolver([]string{"127.0.0.1"}, nil)
+		r.AllowExplicitPort = true
 		if _, err := r.Resolve(t.Context(), srv.URL+"/client.json"); !errors.Is(err, ErrClientUnavailable) {
 			t.Fatalf("err = %v, want ErrClientUnavailable", err)
 		}
@@ -271,6 +273,7 @@ func TestClientResolver_RefusesPrivateAndRedirectedTargets(t *testing.T) {
 		})
 		// Keep NewClientResolver's own client (its redirect policy), but let it reach the test server.
 		r := NewClientResolver([]string{"127.0.0.1"}, nil)
+		r.AllowExplicitPort = true
 		transport := r.HTTP.Transport.(*http.Transport).Clone()
 		transport.DialContext = (&net.Dialer{}).DialContext
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test server certificate
@@ -410,5 +413,18 @@ func TestRedirectAllowed_Table(t *testing.T) {
 	// Sanity: the cases above are real URLs where they should parse.
 	if _, err := url.Parse("https://claude.ai/api/mcp/auth_callback"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// L5: only the default port is accepted in a client_id, so an allowlisted host cannot be reached on another port.
+func TestClientResolver_RefusesAnExplicitPort(t *testing.T) {
+	r := NewClientResolver([]string{"claude.ai"}, nil)
+	for _, id := range []string{"https://claude.ai:8443/client.json", "https://claude.ai:443/client.json", "https://claude.ai:/client.json"} {
+		if err := r.checkClientID(id); !errors.Is(err, ErrClientNotAllowed) {
+			t.Errorf("%s: err = %v, want ErrClientNotAllowed", id, err)
+		}
+	}
+	if err := r.checkClientID("https://claude.ai/client.json"); err != nil {
+		t.Errorf("default port: err = %v, want nil", err)
 	}
 }

@@ -104,13 +104,15 @@ func (s *Service) exchangeCode(ctx context.Context, req TokenRequest, now time.T
 	if err != nil {
 		return TokenResponse{}, serverError()
 	}
+	// The ceiling is decided again from the user row the store locks, so a promotion or SSO link that commits between
+	// the load above and the insert still caps the grant.
 	grantEnd := now.Add(auth.TokenMaxTTL(s.Cfg, user, subject.Admin))
 	pair, err := newTokenPair(now, s.Cfg.OAuthAccessTTL, grantEnd)
 	if err != nil {
 		return TokenResponse{}, serverError()
 	}
 	pair.access.Name, pair.refresh.Name = code.ClientName, code.ClientName
-	grant, err := s.Store.CreateOAuthGrantWithTokens(ctx, store.OAuthGrant{
+	grant, err := s.Store.CreateOAuthGrantWithTokensWithin(ctx, store.OAuthGrant{
 		UserID:     user.ID,
 		ClientID:   code.ClientID,
 		ClientName: code.ClientName,
@@ -118,7 +120,9 @@ func (s *Service) exchangeCode(ctx context.Context, req TokenRequest, now time.T
 		Resource:   code.Resource,
 		AuthSource: code.AuthSource,
 		ExpiresAt:  grantEnd,
-	}, pair.access, pair.refresh)
+	}, pair.access, pair.refresh, func(locked store.User) time.Time {
+		return now.Add(auth.TokenMaxTTL(s.Cfg, locked, locked.Admin))
+	})
 	if errors.Is(err, store.ErrNotFound) {
 		return TokenResponse{}, invalidGrant()
 	}
@@ -133,13 +137,16 @@ func (s *Service) exchangeCode(ctx context.Context, req TokenRequest, now time.T
 			"scope": grant.Scope, "expires_at": grant.ExpiresAt, "access_token_id": pair.access.PublicID},
 		IP: req.ClientIP,
 	})
-	return pair.response(now, grantEnd), nil
+	return pair.response(now, grant.ExpiresAt), nil
 }
 
 func (s *Service) exchangeRefresh(ctx context.Context, req TokenRequest, now time.Time) (TokenResponse, *TokenError) {
 	parsed, ok := apitoken.Parse(req.RefreshToken)
 	if !ok || parsed.Kind != apitoken.KindOAuthRefresh {
 		return TokenResponse{}, invalidGrant()
+	}
+	if req.ClientID == "" {
+		return TokenResponse{}, &TokenError{Code: "invalid_request", Description: "client_id is required."}
 	}
 	if req.Resource != "" && req.Resource != s.Resource() {
 		return TokenResponse{}, &TokenError{Code: "invalid_target", Description: "resource does not match the grant."}
@@ -150,8 +157,10 @@ func (s *Service) exchangeRefresh(ctx context.Context, req TokenRequest, now tim
 	if err != nil {
 		return TokenResponse{}, serverError()
 	}
-	grant, err := s.Store.RotateOAuthRefresh(ctx, apitoken.DisplayID(parsed), apitoken.Hash(parsed.Secret),
-		pair.access, pair.refresh, now, refreshRetryGrace)
+	grant, err := s.Store.RotateOAuthRefreshWithin(ctx, apitoken.DisplayID(parsed), apitoken.Hash(parsed.Secret),
+		pair.access, pair.refresh, now, refreshRetryGrace, func(current store.User) time.Duration {
+			return auth.TokenMaxTTL(s.Cfg, current, current.Admin)
+		})
 	switch {
 	case errors.Is(err, store.ErrRefreshReused):
 		s.auditRevoke(ctx, grant, "refresh_reuse", req.ClientIP)
@@ -163,7 +172,7 @@ func (s *Service) exchangeRefresh(ctx context.Context, req TokenRequest, now tim
 	}
 	// A refresh token presented by a client other than the one it was issued to is treated like reuse: the token has
 	// leaked, so the grant ends.
-	if req.ClientID != "" && !equalStrings(req.ClientID, grant.ClientID) {
+	if !equalStrings(req.ClientID, grant.ClientID) {
 		if err := s.Store.DeleteOAuthGrant(ctx, grant.ID, grant.UserID); err != nil && !errors.Is(err, store.ErrNotFound) {
 			return TokenResponse{}, serverError()
 		}
