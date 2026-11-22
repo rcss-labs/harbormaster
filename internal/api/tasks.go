@@ -100,33 +100,12 @@ func (s *Server) tasksList(ctx context.Context, r *http.Request, sc scope, base 
 		return TasksListDTO{}, err
 	}
 
-	var counts TaskCountsDTO
-	for _, f := range taskFilters {
-		n := total
-		if f != filter {
-			probe := base
-			probe.Filter, probe.Limit = f, 1
-			if _, n, err = s.Store.ListTasks(ctx, probe); err != nil {
-				return TasksListDTO{}, err
-			}
-		}
-		switch f {
-		case "problems":
-			counts.Problems = n
-		case "running":
-			counts.Running = n
-		case "stopped":
-			counts.Stopped = n
-		default:
-			counts.All = n
-		}
-	}
-
-	probe := base
-	probe.Filter, probe.Limit = "stopped_error", 1
-	if _, counts.StoppedError, err = s.Store.ListTasks(ctx, probe); err != nil {
+	tabCounts, err := s.Store.TaskCounts(ctx, base)
+	if err != nil {
 		return TasksListDTO{}, err
 	}
+	counts := TaskCountsDTO{All: tabCounts.All, Problems: tabCounts.Problems, Running: tabCounts.Running,
+		Stopped: tabCounts.Stopped, StoppedError: tabCounts.StoppedError}
 
 	view, err := s.loadEstate(ctx, base.TargetFilter, sc.Vis, base.Cluster, nil)
 	if err != nil {

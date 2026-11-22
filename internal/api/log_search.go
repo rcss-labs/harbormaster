@@ -523,14 +523,20 @@ func (s *Server) auditLogSearch(r *http.Request, user store.User, queried []sear
 // accountNamesFor maps each target's account id to its name, falling back to the id itself.
 func (s *Server) accountNamesFor(ctx context.Context, targets []logs.TargetResult) map[string]string {
 	names := map[string]string{}
+	if len(targets) == 0 {
+		return names
+	}
+	byID := map[string]string{}
+	if accounts, err := s.Store.ListAccounts(ctx); err == nil {
+		for _, account := range accounts {
+			byID[account.AccountID] = account.Name
+		}
+	}
 	for _, target := range targets {
 		id := target.Target.AccountID
-		if _, done := names[id]; done {
-			continue
-		}
 		names[id] = id
-		if account, err := s.Store.GetAccountByAccountID(ctx, id); err == nil && account.Name != "" {
-			names[id] = account.Name
+		if name := byID[id]; name != "" {
+			names[id] = name
 		}
 	}
 	return names

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"sort"
@@ -17,7 +16,6 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/metrics"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/storage"
-	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // storageMetricsConcurrency bounds how many account x region CloudWatch fetches run at once.
@@ -111,20 +109,21 @@ func (s *Server) mountIndexFor(ctx context.Context, sc scope) (map[string][]stor
 		}
 	}
 	services := make([]model.Service, 0, len(rows))
-	taskDefs := map[string]json.RawMessage{}
+	var arns []string
+	seen := map[string]bool{}
 	for _, row := range rows {
 		services = append(services, row.Service)
-		arn := row.TaskDefinitionARN
-		if _, done := taskDefs[arn]; done || arn == "" {
-			continue
+		if arn := row.TaskDefinitionARN; arn != "" && !seen[arn] {
+			seen[arn] = true
+			arns = append(arns, arn)
 		}
-		td, err := s.Store.GetTaskDefinition(ctx, row.Key.AccountID, row.Key.Region, arn)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
+	}
+	defs, err := s.Store.GetTaskDefinitions(ctx, arns)
+	if err != nil {
+		return nil, err
+	}
+	taskDefs := make(map[string]json.RawMessage, len(defs))
+	for arn, td := range defs {
 		taskDefs[arn] = td.Raw
 	}
 	index := storage.MountIndex(services, taskDefs, running)
@@ -263,18 +262,19 @@ func (s *Server) listStorage(w http.ResponseWriter, r *http.Request) {
 // vpcNames resolves VPC names for the regions of the listed file systems.
 func (s *Server) vpcNames(ctx context.Context, fileSystems []model.FileSystem) (map[awsTarget]map[string]string, error) {
 	names := map[awsTarget]map[string]string{}
+	if len(fileSystems) == 0 {
+		return names, nil
+	}
 	for _, fs := range fileSystems {
-		target := awsTarget{fs.AccountID, fs.Region}
-		if _, done := names[target]; done {
-			continue
-		}
-		vpcs, err := s.Store.ListVPCs(ctx, fs.AccountID, fs.Region)
-		if err != nil {
-			return nil, err
-		}
-		names[target] = map[string]string{}
-		for _, vpc := range vpcs {
-			names[target][vpc.VPCID] = vpc.Name
+		names[awsTarget{fs.AccountID, fs.Region}] = map[string]string{}
+	}
+	vpcs, err := s.Store.ListVPCs(ctx, "", "")
+	if err != nil {
+		return nil, err
+	}
+	for _, vpc := range vpcs {
+		if byID, wanted := names[awsTarget{vpc.AccountID, vpc.Region}]; wanted {
+			byID[vpc.VPCID] = vpc.Name
 		}
 	}
 	return names, nil

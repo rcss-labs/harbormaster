@@ -177,13 +177,20 @@ func (r *Reconciler) Cycle(ctx context.Context) error {
 func (r *Reconciler) members(ctx context.Context, schedules []store.OffHoursSchedule, enrolled map[model.ServiceKey]store.OffHoursEnrolment, enabledAccounts map[string]bool) (map[model.ServiceKey]candidate, error) {
 	sort.Slice(schedules, func(i, j int) bool { return schedules[i].ID < schedules[j].ID })
 	out := map[model.ServiceKey]candidate{}
+	// Schedules may share a selector list; query each distinct list once per tick.
+	bySelectors := map[string][]store.OffHoursMatch{}
 	for _, sc := range schedules {
 		if !sc.Enabled {
 			continue
 		}
-		matched, err := r.Store.OffHoursMatches(ctx, sc.Selectors)
-		if err != nil {
-			return nil, err
+		selectorsKey := fmt.Sprintf("%v", sc.Selectors)
+		matched, cached := bySelectors[selectorsKey]
+		if !cached {
+			var err error
+			if matched, err = r.Store.OffHoursMatches(ctx, sc.Selectors); err != nil {
+				return nil, err
+			}
+			bySelectors[selectorsKey] = matched
 		}
 		matches, _ := store.SplitExcluded(matched, sc.Exclusions)
 		for _, m := range matches {

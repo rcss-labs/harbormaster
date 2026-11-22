@@ -112,25 +112,33 @@ func (r *Runner) holdForDB(ctx context.Context, due []store.ScanImage, state sto
 	return errors.Join(errs...)
 }
 
+// accountsByID reads every account once, keyed by AWS account id.
+func (r *Runner) accountsByID(ctx context.Context) (map[string]store.AWSAccount, error) {
+	accounts, err := r.Store.ListAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]store.AWSAccount, len(accounts))
+	for _, account := range accounts {
+		byID[account.AccountID] = account
+	}
+	return byID, nil
+}
+
 // connectedImages fails the images whose registry account is not connected and returns the scan role details of the
 // accounts that are.
 func (r *Runner) connectedImages(ctx context.Context, due []store.ScanImage) (map[string]store.AWSAccount, []store.ScanImage, error) {
 	accounts := map[string]store.AWSAccount{}
-	checked := map[string]bool{}
+	known, err := r.accountsByID(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	var keep []store.ScanImage
 	var disconnected []string
 	for _, img := range due {
 		id := img.RegistryAccountID
-		if !checked[id] {
-			checked[id] = true
-			account, err := r.Store.GetAccountByAccountID(ctx, id)
-			switch {
-			case errors.Is(err, store.ErrNotFound):
-			case err != nil:
-				return nil, nil, err
-			case account.Enabled:
-				accounts[id] = account
-			}
+		if account, ok := known[id]; ok && account.Enabled {
+			accounts[id] = account
 		}
 		if _, ok := accounts[id]; ok {
 			keep = append(keep, img)
@@ -236,6 +244,7 @@ func (r *Runner) baseImages(ctx context.Context, batch []store.ScanImage, accoun
 	if err != nil {
 		return nil, nil, err
 	}
+	var known map[string]store.AWSAccount // read on the first ECR base that is not yet covered
 	withBase := make(map[string]store.AWSAccount, len(accounts))
 	for id, account := range accounts {
 		withBase[id] = account
@@ -248,12 +257,12 @@ func (r *Runner) baseImages(ctx context.Context, batch []store.ScanImage, accoun
 		if _, known := withBase[parsed.AccountID]; known {
 			continue
 		}
-		account, err := r.Store.GetAccountByAccountID(ctx, parsed.AccountID)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-		case err != nil:
-			return nil, nil, err
-		case account.Enabled:
+		if known == nil {
+			if known, err = r.accountsByID(ctx); err != nil {
+				return nil, nil, err
+			}
+		}
+		if account, ok := known[parsed.AccountID]; ok && account.Enabled {
 			withBase[parsed.AccountID] = account
 		}
 	}
