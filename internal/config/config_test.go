@@ -86,6 +86,8 @@ func TestLoad_Defaults(t *testing.T) {
 		KV:                   KVConfig{Prefix: "hm"},
 		Role:                 RoleAll,
 		Focus:                FocusConfig{Interval: 5 * time.Second, TTL: 30 * time.Second, MaxObjects: 50, MaxPerUser: 5, MaxCallsPerSec: 5},
+		SnapshotCache:        true,
+		SnapshotCacheTTL:     30 * time.Second,
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,
@@ -146,6 +148,30 @@ func TestConfig_LegacyLeaderGateDefaultsTrue(t *testing.T) {
 	}
 	if cfg.LegacyLeaderGate {
 		t.Error("LegacyLeaderGate = true with HM_LEGACY_LEADER_GATE=false")
+	}
+}
+
+func TestConfig_SnapshotCacheDefaults(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SnapshotCache || cfg.SnapshotCacheTTL != 30*time.Second {
+		t.Fatalf("defaults = %v, %v; want true, 30s", cfg.SnapshotCache, cfg.SnapshotCacheTTL)
+	}
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE": "false", "HM_SNAPSHOT_CACHE_TTL": "5s"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SnapshotCache || cfg.SnapshotCacheTTL != 5*time.Second {
+		t.Fatalf("overrides = %v, %v; want false, 5s", cfg.SnapshotCache, cfg.SnapshotCacheTTL)
+	}
+}
+
+func TestConfig_SnapshotCacheTTLMustBeAtLeastOneSecond(t *testing.T) {
+	_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_SNAPSHOT_CACHE_TTL": "500ms"}))
+	if err == nil || !strings.Contains(err.Error(), "HM_SNAPSHOT_CACHE_TTL") {
+		t.Fatalf("error = %v, want one naming HM_SNAPSHOT_CACHE_TTL", err)
 	}
 }
 
