@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// defaultIdleCheckEvery is how often the leader re-reads session activity. It bounds how long a
+// defaultIdleCheckEvery is how often every process re-reads session activity. It bounds how long a
 // returning user waits for fresh data: a tier wakes at the next check after activity resumes.
 const defaultIdleCheckEvery = 30 * time.Second
 
@@ -83,8 +83,8 @@ func (p *Poller) applyIdle(idle bool) {
 	}
 }
 
-// runIdleMonitor keeps the idle state current until ctx ends, then resets it to active (the
-// supervisor, and with it this monitor, runs only on the leader). It does nothing when idle mode is off.
+// runIdleMonitor keeps the idle state current until ctx ends, then resets it to active (every
+// role runs this monitor, since each process polls or serves on its own view of activity). It does nothing when idle mode is off.
 func (p *Poller) runIdleMonitor(ctx context.Context) {
 	if !p.idleEnabled() {
 		return

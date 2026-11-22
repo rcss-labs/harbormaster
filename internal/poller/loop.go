@@ -153,7 +153,6 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	add(tierTargetHealth, in.TargetHealth, l.gated(func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) }))
 	scaling := &ScalingLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Scaling}
 	add(tierScaling, in.Scaling, l.gated(func(ctx context.Context) error { return scaling.Run(ctx, l.target) }))
-	// plan 05
 	network := &NetworkLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Network}
 	add(tierNetwork, in.Network, l.gated(func(ctx context.Context) error { return network.Run(ctx, l.target) }))
 	storage := &StorageLoop{Writer: w, Clients: p.clients, Every: in.Storage}
@@ -163,8 +162,8 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	return l
 }
 
-// gated runs a tier that calls AWS sequentially while holding one slot of the loop's semaphore, so spec 5.3's
-// in-flight bound covers every AWS service of the target, not only ECS. plan 06
+// gated runs a tier that calls AWS sequentially while holding one slot of the loop's semaphore, so the
+// in-flight bound covers every AWS service of the target, not only ECS.
 func (l *Loop) gated(run func(context.Context) error) func(context.Context) error {
 	return func(ctx context.Context) error {
 		select {
@@ -333,7 +332,7 @@ func (l *Loop) runTier(ctx context.Context, d tierDef) error {
 	}
 	if ctx.Err() == nil {
 		l.recordCycle(ctx, d.tier, err)
-		// plan 06: recordCycle has applied backoff, so cur is the interval the tier will run at next.
+		// recordCycle has applied backoff, so cur is the interval the tier will run at next.
 		d.tier.mu.Lock()
 		interval := d.tier.cur
 		d.tier.mu.Unlock()
