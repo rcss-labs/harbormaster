@@ -487,29 +487,9 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 		in.NextToken = out.NextToken
 	}
 
-	now := time.Now().UTC()
-	var rows []model.Cluster
-	for _, batch := range chunk(arns, describeClustersLimit) {
-		out, err := api.DescribeClusters(ctx, &ecs.DescribeClustersInput{
-			Clusters: batch,
-			Include:  []ecstypes.ClusterField{ecstypes.ClusterFieldStatistics, ecstypes.ClusterFieldSettings},
-		})
-		if err != nil {
-			return fmt.Errorf("describe clusters: %w", err)
-		}
-		for _, failure := range out.Failures {
-			l.log.Warn("poller: describe cluster failed", "arn", aws.ToString(failure.Arn), "reason", aws.ToString(failure.Reason))
-		}
-		for _, c := range out.Clusters {
-			rows = append(rows, normalizeCluster(l.target, c, now))
-		}
-	}
-
-	res, err := l.w.UpsertClusters(ctx, rows)
-	if err != nil {
+	if _, err := l.describeClustersNamed(ctx, api, arns); err != nil {
 		return err
 	}
-	l.recordWrite("clusters", res)
 
 	// Keep every listed cluster, even one whose describe failed, so a hiccup never deletes data.
 	keys := make([]model.ClusterKey, 0, len(arns))
@@ -536,6 +516,34 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	return nil
 }
 
+// describeClustersNamed describes the named clusters (names or ARNs) and upserts them. It deletes nothing: only the
+// full listing in syncClusters knows which clusters vanished.
+func (l *Loop) describeClustersNamed(ctx context.Context, api awsx.ECSAPI, names []string) (store.WriteResult, error) {
+	now := time.Now().UTC()
+	var rows []model.Cluster
+	for _, batch := range chunk(names, describeClustersLimit) {
+		out, err := api.DescribeClusters(ctx, &ecs.DescribeClustersInput{
+			Clusters: batch,
+			Include:  []ecstypes.ClusterField{ecstypes.ClusterFieldStatistics, ecstypes.ClusterFieldSettings},
+		})
+		if err != nil {
+			return store.WriteResult{}, fmt.Errorf("describe clusters: %w", err)
+		}
+		for _, failure := range out.Failures {
+			l.log.Warn("poller: describe cluster failed", "arn", aws.ToString(failure.Arn), "reason", aws.ToString(failure.Reason))
+		}
+		for _, c := range out.Clusters {
+			rows = append(rows, normalizeCluster(l.target, c, now))
+		}
+	}
+	res, err := l.w.UpsertClusters(ctx, rows)
+	if err != nil {
+		return res, err
+	}
+	l.recordWrite("clusters", res)
+	return res, nil
+}
+
 // syncServiceList records each cluster's service names and deletes services that vanished.
 func (l *Loop) syncServiceList(ctx context.Context) error {
 	api, err := l.api(ctx)
@@ -543,29 +551,34 @@ func (l *Loop) syncServiceList(ctx context.Context) error {
 		return err
 	}
 	return l.forEachCluster(ctx, func(ctx context.Context, k model.ClusterKey) error {
-		names := []string{}
-		in := &ecs.ListServicesInput{Cluster: aws.String(k.Cluster), MaxResults: aws.Int32(listPageSize)}
-		for {
-			out, err := api.ListServices(ctx, in)
-			if err != nil {
-				return fmt.Errorf("list services: %w", err)
-			}
-			for _, arn := range out.ServiceArns {
-				names = append(names, clusterNameFromARN(arn)) // last path segment
-			}
-			if out.NextToken == nil {
-				break
-			}
-			in.NextToken = out.NextToken
-		}
-		if _, err := l.w.DeleteServicesNotIn(ctx, k, names); err != nil {
-			return err
-		}
-		l.mu.Lock()
-		l.services[k.Cluster] = names
-		l.mu.Unlock()
-		return nil
+		return l.listServicesIn(ctx, api, k)
 	})
+}
+
+// listServicesIn lists one cluster's services, deletes the ones that vanished and remembers the names.
+func (l *Loop) listServicesIn(ctx context.Context, api awsx.ECSAPI, k model.ClusterKey) error {
+	names := []string{}
+	in := &ecs.ListServicesInput{Cluster: aws.String(k.Cluster), MaxResults: aws.Int32(listPageSize)}
+	for {
+		out, err := api.ListServices(ctx, in)
+		if err != nil {
+			return fmt.Errorf("list services: %w", err)
+		}
+		for _, arn := range out.ServiceArns {
+			names = append(names, clusterNameFromARN(arn)) // last path segment
+		}
+		if out.NextToken == nil {
+			break
+		}
+		in.NextToken = out.NextToken
+	}
+	if _, err := l.w.DeleteServicesNotIn(ctx, k, names); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	l.services[k.Cluster] = names
+	l.mu.Unlock()
+	return nil
 }
 
 // warnNoTagsOnce logs the tags fallback once per cluster so a legacy cluster does not flood the log every cycle.
@@ -590,69 +603,84 @@ func (l *Loop) syncServices(ctx context.Context) error {
 		return err
 	}
 	return l.forEachCluster(ctx, func(ctx context.Context, k model.ClusterKey) error {
-		l.mu.Lock()
-		names := append([]string(nil), l.services[k.Cluster]...)
-		l.mu.Unlock()
-
-		now := time.Now().UTC()
-		var services []model.Service
-		var events []model.ServiceEvent
-		for _, batch := range chunk(names, describeServicesLimit) {
-			out, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{
-				Cluster:  aws.String(k.Cluster),
-				Services: batch,
-				Include:  []ecstypes.ServiceField{ecstypes.ServiceFieldTags},
-			})
-			var invalid *ecstypes.InvalidParameterException
-			if errors.As(err, &invalid) {
-				// Legacy short-ARN services reject tag lookups. Describe the batch without tags rather than
-				// losing the whole cluster; those services carry no tags and so match no off-hours schedule.
-				l.warnNoTagsOnce(k.Cluster, err)
-				out, err = api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String(k.Cluster), Services: batch})
-			}
-			if err != nil {
-				return fmt.Errorf("describe services: %w", err)
-			}
-			for _, failure := range out.Failures {
-				l.log.Warn("poller: describe service failed", "arn", aws.ToString(failure.Arn), "reason", aws.ToString(failure.Reason))
-			}
-			for _, s := range out.Services {
-				service, serviceEvents := normalizeService(l.target, k.Cluster, s, now)
-				services = append(services, service)
-				events = append(events, serviceEvents...)
-			}
-		}
-
-		res, err := l.w.UpsertServices(ctx, services)
-		if err != nil {
-			return err
-		}
-		l.recordWrite("services", res)
-		if _, err := l.w.InsertServiceEvents(ctx, events); err != nil {
-			return err
-		}
-		l.markChangedServicesDirty(services)
-		l.rememberServices(k.Cluster, services)
-		l.recordDeployments(ctx, services)
-
-		var definitionARNs []string
-		for _, s := range services {
-			for _, d := range s.Deployments {
-				definitionARNs = append(definitionARNs, d.TaskDefinitionARN)
-			}
-		}
-		l.ensureTaskDefinitions(ctx, api, definitionARNs)
-		return nil
+		_, err := l.syncServicesIn(ctx, api, k, nil)
+		return err
 	})
 }
 
-// rememberServices replaces the cluster's entries in the latest snapshot.
-func (l *Loop) rememberServices(cluster string, services []model.Service) {
+// syncServicesIn describes the named services of one cluster (every known service when names is nil), stores them and
+// their new events, and flags services whose counts changed. changed is true when a row or event was written.
+func (l *Loop) syncServicesIn(ctx context.Context, api awsx.ECSAPI, k model.ClusterKey, names []string) (changed bool, err error) {
+	whole := names == nil
+	if whole {
+		l.mu.Lock()
+		names = append([]string(nil), l.services[k.Cluster]...)
+		l.mu.Unlock()
+	}
+
+	now := time.Now().UTC()
+	var services []model.Service
+	var events []model.ServiceEvent
+	for _, batch := range chunk(names, describeServicesLimit) {
+		out, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{
+			Cluster:  aws.String(k.Cluster),
+			Services: batch,
+			Include:  []ecstypes.ServiceField{ecstypes.ServiceFieldTags},
+		})
+		var invalid *ecstypes.InvalidParameterException
+		if errors.As(err, &invalid) {
+			// Legacy short-ARN services reject tag lookups. Describe the batch without tags rather than
+			// losing the whole cluster; those services carry no tags and so match no off-hours schedule.
+			l.warnNoTagsOnce(k.Cluster, err)
+			out, err = api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String(k.Cluster), Services: batch})
+		}
+		if err != nil {
+			return false, fmt.Errorf("describe services: %w", err)
+		}
+		for _, failure := range out.Failures {
+			l.log.Warn("poller: describe service failed", "arn", aws.ToString(failure.Arn), "reason", aws.ToString(failure.Reason))
+		}
+		for _, s := range out.Services {
+			service, serviceEvents := normalizeService(l.target, k.Cluster, s, now)
+			services = append(services, service)
+			events = append(events, serviceEvents...)
+		}
+	}
+
+	res, err := l.w.UpsertServices(ctx, services)
+	if err != nil {
+		return false, err
+	}
+	l.recordWrite("services", res)
+	insertedEvents, err := l.w.InsertServiceEvents(ctx, events)
+	if err != nil {
+		return false, err
+	}
+	changed = res.Inserted+res.Updated > 0 || insertedEvents > 0
+	l.markChangedServicesDirty(services)
+	l.rememberServices(k.Cluster, services, whole)
+	l.recordDeployments(ctx, services)
+
+	var definitionARNs []string
+	for _, s := range services {
+		for _, d := range s.Deployments {
+			definitionARNs = append(definitionARNs, d.TaskDefinitionARN)
+		}
+	}
+	l.ensureTaskDefinitions(ctx, api, definitionARNs)
+	return changed, nil
+}
+
+// rememberServices records the described services in the latest snapshot. With replaceCluster it first drops the
+// cluster's other entries (a whole-cluster run); a run for named services only adds or updates theirs.
+func (l *Loop) rememberServices(cluster string, services []model.Service, replaceCluster bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for key := range l.latest {
-		if key.Cluster == cluster {
-			delete(l.latest, key)
+	if replaceCluster {
+		for key := range l.latest {
+			if key.Cluster == cluster {
+				delete(l.latest, key)
+			}
 		}
 	}
 	for _, s := range services {
@@ -704,56 +732,102 @@ func (l *Loop) restoreDirty(cluster string, names []string) {
 	}
 }
 
-// syncRunningTasks keeps non-STOPPED tasks current. Each cycle it compares ECS's RUNNING list with the
-// database's non-STOPPED rows (not in-memory state, so restarts and failovers need no special case):
-// new ARNs and the tasks of dirty services are described; ARNs that left the list are described too
-// (normally they are now STOPPED, with their reason), and any ECS no longer knows are marked missing.
+// takeDirtyService removes the service's dirty flag and reports whether it was set. Other services' flags stay.
+func (l *Loop) takeDirtyService(cluster, service string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.dirty[cluster][service] {
+		return false
+	}
+	delete(l.dirty[cluster], service)
+	if len(l.dirty[cluster]) == 0 {
+		delete(l.dirty, cluster)
+	}
+	return true
+}
+
+// syncRunningTasks keeps non-STOPPED tasks current, for every cluster.
 func (l *Loop) syncRunningTasks(ctx context.Context) error {
 	api, err := l.api(ctx)
 	if err != nil {
 		return err
 	}
-	return l.forEachCluster(ctx, func(ctx context.Context, k model.ClusterKey) (err error) {
-		dirty := l.takeDirty(k.Cluster)
+	return l.forEachCluster(ctx, func(ctx context.Context, k model.ClusterKey) error {
+		_, err := l.syncRunningTasksIn(ctx, api, k, "", false)
+		return err
+	})
+}
+
+// syncRunningTasksIn keeps one cluster's (or, with service set, one service's) non-STOPPED tasks current. Each run it
+// compares ECS's RUNNING list with the database's non-STOPPED rows (not in-memory state, so restarts and failovers need
+// no special case): new ARNs and the tasks of dirty services are described; ARNs that left the list are described too
+// (normally they are now STOPPED, with their reason), and any ECS no longer knows are marked missing. describeAll also
+// describes every listed task. A service-scoped run takes only that service's dirty flag. changed is true when a task
+// row was written or marked missing.
+func (l *Loop) syncRunningTasksIn(ctx context.Context, api awsx.ECSAPI, k model.ClusterKey, service string, describeAll bool) (changed bool, err error) {
+	if service != "" {
+		dirty := l.takeDirtyService(k.Cluster, service)
 		defer func() {
-			if err != nil {
-				l.restoreDirty(k.Cluster, dirty)
+			if err != nil && dirty {
+				l.restoreDirty(k.Cluster, []string{service})
 			}
 		}()
-
-		listed, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusRunning, "")
+		listed, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusRunning, service)
 		if err != nil {
-			return err
+			return false, err
 		}
-		known, err := l.p.reads.KnownTaskARNs(ctx, k, "")
+		known, err := l.p.reads.KnownTaskARNsForService(ctx, model.ServiceKey{ClusterKey: k, Service: service}, "")
 		if err != nil {
-			return err
+			return false, err
 		}
-		knownSet := toSet(known)
-		listedSet := toSet(listed)
-
-		wanted := map[string]bool{}
-		for _, arn := range listed {
-			if !knownSet[arn] {
-				wanted[arn] = true
-			}
-		}
-		for _, arn := range known {
-			if !listedSet[arn] {
-				wanted[arn] = true
-			}
-		}
-		for _, service := range dirty {
-			arns, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusRunning, service)
-			if err != nil {
-				return err
-			}
-			for _, arn := range arns {
-				wanted[arn] = true
-			}
-		}
+		wanted := wantedRunning(listed, known, describeAll || dirty)
 		return l.describeAndStoreTasks(ctx, api, k, keysOf(wanted), true)
-	})
+	}
+
+	dirty := l.takeDirty(k.Cluster)
+	defer func() {
+		if err != nil {
+			l.restoreDirty(k.Cluster, dirty)
+		}
+	}()
+
+	listed, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusRunning, "")
+	if err != nil {
+		return false, err
+	}
+	known, err := l.p.reads.KnownTaskARNs(ctx, k, "")
+	if err != nil {
+		return false, err
+	}
+	wanted := wantedRunning(listed, known, describeAll)
+	for _, dirtyService := range dirty {
+		arns, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusRunning, dirtyService)
+		if err != nil {
+			return false, err
+		}
+		for _, arn := range arns {
+			wanted[arn] = true
+		}
+	}
+	return l.describeAndStoreTasks(ctx, api, k, keysOf(wanted), true)
+}
+
+// wantedRunning is the set of task ARNs worth describing: the listed ones not yet stored, the stored ones that left the
+// list, and, with all set, every listed one.
+func wantedRunning(listed, known []string, all bool) map[string]bool {
+	knownSet, listedSet := toSet(known), toSet(listed)
+	wanted := map[string]bool{}
+	for _, arn := range listed {
+		if all || !knownSet[arn] {
+			wanted[arn] = true
+		}
+	}
+	for _, arn := range known {
+		if !listedSet[arn] {
+			wanted[arn] = true
+		}
+	}
+	return wanted
 }
 
 // syncFullTasks re-describes every non-STOPPED task so slow-changing fields (health, agents) stay fresh.
@@ -767,34 +841,46 @@ func (l *Loop) syncFullTasks(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		return l.describeAndStoreTasks(ctx, api, k, known, true)
+		_, err = l.describeAndStoreTasks(ctx, api, k, known, true)
+		return err
 	})
 }
 
-// syncStoppedTasks stores recently stopped tasks not yet recorded as STOPPED.
+// syncStoppedTasks stores recently stopped tasks not yet recorded as STOPPED, for every cluster.
 func (l *Loop) syncStoppedTasks(ctx context.Context) error {
 	api, err := l.api(ctx)
 	if err != nil {
 		return err
 	}
 	return l.forEachCluster(ctx, func(ctx context.Context, k model.ClusterKey) error {
-		listed, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusStopped, "")
-		if err != nil {
-			return err
-		}
-		stored, err := l.p.reads.KnownTaskARNs(ctx, k, "STOPPED")
-		if err != nil {
-			return err
-		}
-		storedSet := toSet(stored)
-		var fresh []string
-		for _, arn := range listed {
-			if !storedSet[arn] {
-				fresh = append(fresh, arn)
-			}
-		}
-		return l.describeAndStoreTasks(ctx, api, k, fresh, false)
+		_, err := l.syncStoppedTasksIn(ctx, api, k, "")
+		return err
 	})
+}
+
+// syncStoppedTasksIn stores one cluster's (or one service's) recently stopped tasks not yet recorded as STOPPED.
+func (l *Loop) syncStoppedTasksIn(ctx context.Context, api awsx.ECSAPI, k model.ClusterKey, service string) (changed bool, err error) {
+	listed, err := l.listTaskARNs(ctx, api, k, ecstypes.DesiredStatusStopped, service)
+	if err != nil {
+		return false, err
+	}
+	var stored []string
+	if service == "" {
+		stored, err = l.p.reads.KnownTaskARNs(ctx, k, "STOPPED")
+	} else {
+		stored, err = l.p.reads.KnownTaskARNsForService(ctx, model.ServiceKey{ClusterKey: k, Service: service}, "STOPPED")
+	}
+	if err != nil {
+		return false, err
+	}
+	storedSet := toSet(stored)
+	var fresh []string
+	for _, arn := range listed {
+		if !storedSet[arn] {
+			fresh = append(fresh, arn)
+		}
+	}
+	return l.describeAndStoreTasks(ctx, api, k, fresh, false)
 }
 
 // listTaskARNs pages through ListTasks for a desired status, optionally for one service.
@@ -819,14 +905,14 @@ func (l *Loop) listTaskARNs(ctx context.Context, api awsx.ECSAPI, k model.Cluste
 
 // describeAndStoreTasks describes ARNs in batches of 100 and upserts the tasks, ensuring their task
 // definitions are cached. With markMissing, ARNs ECS reports as MISSING are marked STOPPED/Unknown.
-func (l *Loop) describeAndStoreTasks(ctx context.Context, api awsx.ECSAPI, k model.ClusterKey, arns []string, markMissing bool) error {
+func (l *Loop) describeAndStoreTasks(ctx context.Context, api awsx.ECSAPI, k model.ClusterKey, arns []string, markMissing bool) (bool, error) {
 	now := time.Now().UTC()
 	var rows []model.Task
 	var missing []string
 	for _, batch := range chunk(arns, describeTasksLimit) {
 		out, err := api.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String(k.Cluster), Tasks: batch})
 		if err != nil {
-			return fmt.Errorf("describe tasks: %w", err)
+			return false, fmt.Errorf("describe tasks: %w", err)
 		}
 		for _, task := range out.Tasks {
 			rows = append(rows, normalizeTask(l.target, k.Cluster, task, now))
@@ -839,20 +925,22 @@ func (l *Loop) describeAndStoreTasks(ctx context.Context, api awsx.ECSAPI, k mod
 	}
 	res, err := l.w.UpsertTasks(ctx, rows)
 	if err != nil {
-		return err
+		return false, err
 	}
+	changed := res.Inserted+res.Updated > 0
 	l.recordWrite("tasks", res)
 	if markMissing {
 		if err := l.w.MarkTasksMissing(ctx, k, missing, now); err != nil {
-			return err
+			return false, err
 		}
+		changed = changed || len(missing) > 0
 	}
 	definitionARNs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		definitionARNs = append(definitionARNs, row.TaskDefinitionARN)
 	}
 	l.ensureTaskDefinitions(ctx, api, definitionARNs)
-	return nil
+	return changed, nil
 }
 
 // ensureTaskDefinitions stores any task definition not yet in the database. Task definitions are
