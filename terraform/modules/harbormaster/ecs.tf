@@ -24,42 +24,61 @@ locals {
     local.kv_enabled ? { HM_KV_URL = local.kv_url_secret_arn } : {},
   )
 
-  # Map keys iterate in sorted order, so the rendered lists are stable.
-  container_definitions = [
+  # One container template for the legacy service and the three split services. A spec names the container and gives
+  # its environment, its secrets (the execution role may read exactly these) and its log stream prefix; the legacy
+  # prefix stays "ecs" so its task definition renders as before.
+  container_specs = merge(
     {
-      name      = local.server_name
-      image     = var.image
-      essential = true
+      server = {
+        name          = local.server_name
+        environment   = local.container_env
+        secrets       = local.container_secrets
+        stream_prefix = "ecs"
+      }
+    },
+    local.split_container_specs,
+  )
 
-      portMappings = [
-        { containerPort = local.container_port, protocol = "tcp" }
-      ]
+  # Map keys iterate in sorted order, so the rendered lists are stable.
+  container_definitions_by_service = {
+    for key, spec in local.container_specs : key => [
+      {
+        name      = spec.name
+        image     = var.image
+        essential = true
 
-      environment = [for key, value in local.container_env : { name = key, value = value }]
-      secrets     = [for key, arn in local.container_secrets : { name = key, valueFrom = arn }]
+        portMappings = [
+          { containerPort = local.container_port, protocol = "tcp" }
+        ]
 
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group" = aws_cloudwatch_log_group.server.name
-          # Region from the log group ARN: data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
-          "awslogs-region"        = split(":", aws_cloudwatch_log_group.server.arn)[3]
-          "awslogs-stream-prefix" = "ecs"
+        environment = [for name, value in spec.environment : { name = name, value = value }]
+        secrets     = [for name, arn in spec.secrets : { name = name, valueFrom = arn }]
+
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            "awslogs-group" = aws_cloudwatch_log_group.server.name
+            # Region from the log group ARN: data.aws_region .name/.id are deprecated in provider 6.x and .region is 6.x-only.
+            "awslogs-region"        = split(":", aws_cloudwatch_log_group.server.arn)[3]
+            "awslogs-stream-prefix" = spec.stream_prefix
+          }
         }
-      }
 
-      # ECS ignores the image's HEALTHCHECK; this is the check it uses.
-      healthCheck = {
-        command     = ["CMD", "/harbormaster", "healthcheck"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 30
-      }
+        # ECS ignores the image's HEALTHCHECK; this is the check it uses.
+        healthCheck = {
+          command     = ["CMD", "/harbormaster", "healthcheck"]
+          interval    = 30
+          timeout     = 5
+          retries     = 3
+          startPeriod = 30
+        }
 
-      readonlyRootFilesystem = true
-    }
-  ]
+        readonlyRootFilesystem = true
+      }
+    ]
+  }
+
+  container_definitions = local.container_definitions_by_service["server"]
 }
 
 resource "aws_ecs_cluster" "this" {

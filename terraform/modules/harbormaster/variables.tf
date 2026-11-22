@@ -126,8 +126,8 @@ variable "extra_env" {
   }
 
   validation {
-    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_SMTP_PASSWORD", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
-    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY, HM_METRICS_TOKEN or HM_SMTP_PASSWORD (the module injects them from Secrets Manager), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
+    condition     = length(setintersection(keys(var.extra_env), ["HM_DATABASE_URL", "HM_SESSION_KEY", "HM_METRICS_TOKEN", "HM_SMTP_PASSWORD", "HM_KV_URL", "HM_FAKE_AWS", "HM_TRUSTED_PROXY"])) == 0
+    error_message = "extra_env must not set HM_DATABASE_URL, HM_SESSION_KEY, HM_METRICS_TOKEN, HM_SMTP_PASSWORD or HM_KV_URL (the module injects them from Secrets Manager; HM_KV_URL carries the store password), HM_FAKE_AWS (demo mode seeds a known-password admin) or HM_TRUSTED_PROXY (the module sets it for the ALB)."
   }
 
   validation {

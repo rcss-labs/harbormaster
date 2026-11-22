@@ -33,6 +33,21 @@ output "service_name" {
   value       = one(aws_ecs_service.server[*].name)
 }
 
+output "web_service_name" {
+  description = "Name of the web ECS service. Null unless split_services is true."
+  value       = one(aws_ecs_service.web[*].name)
+}
+
+output "poller_service_name" {
+  description = "Name of the poller ECS service. Null unless split_services is true."
+  value       = one(aws_ecs_service.poller[*].name)
+}
+
+output "coordinator_service_name" {
+  description = "Name of the coordinator ECS service. Null unless split_services is true."
+  value       = one(aws_ecs_service.coordinator[*].name)
+}
+
 output "alb_dns_name" {
   description = "DNS name of the load balancer."
   value       = aws_lb.this.dns_name
