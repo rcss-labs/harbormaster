@@ -75,6 +75,10 @@ resource "aws_secretsmanager_secret" "kv_url" {
   name       = "${local.name}/kv-url"
   kms_key_id = var.db_kms_key_id
 
+  # The URL is rebuilt from the cache on every apply, so there is nothing to recover. Deleting at once lets a repeated
+  # run 3 after a rollback re-create the name instead of failing on the 30-day recovery window.
+  recovery_window_in_days = 0
+
   tags = local.tags
 }
 
