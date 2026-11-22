@@ -15,6 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/focus"
 	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/signal"
+	"github.com/rcss-labs/harbormaster/internal/snapcache"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -74,6 +75,8 @@ type Config struct {
 	// turns focus off for this process.
 	Registry focus.Registry
 	Bus      signal.Bus
+	// Cache receives a generation token whenever a cluster's rows change (see generation.go); nil means no snapshot cache.
+	Cache snapcache.Cache
 }
 
 // ConfigFrom derives the poller configuration from the server configuration.

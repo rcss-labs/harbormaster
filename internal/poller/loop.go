@@ -89,6 +89,12 @@ type Loop struct {
 	// onceQueue holds one-off cycles waiting for a free slot; onceRunning counts the ones running.
 	onceQueue   []*onceRequest
 	onceRunning int
+
+	// genMu guards genLastMS, the millisecond of the last generation token this loop issued (generation.go), and
+	// clusterHashes, the content hash of each cluster row as last written.
+	genMu         sync.Mutex
+	genLastMS     int64
+	clusterHashes map[model.ClusterKey]string
 }
 
 // tierDef pairs a tier with its work function.
@@ -140,7 +146,8 @@ func newLoop(p *Poller, t awsx.Target, w *store.SliceWriter) *Loop {
 	add(tierRunningTasks, in.RunningTasks, l.syncRunningTasks)
 	add(tierStoppedTasks, in.StoppedTasks, l.syncStoppedTasks)
 	add(tierFullTasks, in.FullTasks, l.syncFullTasks)
-	targetHealth := &TargetHealthLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.TargetHealth}
+	targetHealth := &TargetHealthLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.TargetHealth,
+		OnChange: func(ctx context.Context, changed bool) { l.markGeneration(ctx, "", changed) }}
 	add(tierTargetHealth, in.TargetHealth, l.gated(func(ctx context.Context) error { return targetHealth.Run(ctx, l.target) }))
 	scaling := &ScalingLoop{Store: p.reads, Writer: w, Clients: p.clients, Every: in.Scaling}
 	add(tierScaling, in.Scaling, l.gated(func(ctx context.Context) error { return scaling.Run(ctx, l.target) }))
@@ -511,6 +518,7 @@ func (l *Loop) forEachCluster(ctx context.Context, fn func(ctx context.Context, 
 			if err := fn(ctx, k); err != nil {
 				errs[i] = fmt.Errorf("cluster %s: %w", k.Cluster, err)
 			}
+			l.markGeneration(ctx, k.Cluster, false) // a pass over the cluster keeps its token alive
 		}()
 	}
 	wg.Wait()
@@ -546,9 +554,14 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 	for _, arn := range arns {
 		keys = append(keys, model.ClusterKey{AccountID: l.target.AccountID, Region: l.target.Region, Cluster: clusterNameFromARN(arn)})
 	}
-	if _, err := l.w.DeleteClustersNotIn(ctx, l.target, keys); err != nil {
+	deleted, err := l.w.DeleteClustersNotIn(ctx, l.target, keys)
+	if err != nil {
 		return err
 	}
+	if deleted > 0 {
+		l.markSliceGone(ctx)
+	}
+	l.forgetClusterHashes(keys)
 
 	l.mu.Lock()
 	l.clusters = keys
@@ -563,6 +576,7 @@ func (l *Loop) syncClusters(ctx context.Context) error {
 		}
 	}
 	l.mu.Unlock()
+	l.markGeneration(ctx, "", false)
 	return nil
 }
 
@@ -591,6 +605,12 @@ func (l *Loop) describeClustersNamed(ctx context.Context, api awsx.ECSAPI, names
 		return res, err
 	}
 	l.recordWrite("clusters", res)
+	if res.Inserted+res.Updated > 0 {
+		for _, name := range l.changedClusterNames(rows) {
+			l.markGeneration(ctx, name, true)
+		}
+	}
+	l.rememberClusterHashes(rows)
 	return res, nil
 }
 
@@ -622,8 +642,12 @@ func (l *Loop) listServicesIn(ctx context.Context, api awsx.ECSAPI, k model.Clus
 		}
 		in.NextToken = out.NextToken
 	}
-	if _, err := l.w.DeleteServicesNotIn(ctx, k, names); err != nil {
+	deleted, err := l.w.DeleteServicesNotIn(ctx, k, names)
+	if err != nil {
 		return err
+	}
+	if deleted > 0 {
+		l.markGeneration(ctx, k.Cluster, true)
 	}
 	l.mu.Lock()
 	l.services[k.Cluster] = names
@@ -702,11 +726,17 @@ func (l *Loop) syncServicesIn(ctx context.Context, api awsx.ECSAPI, k model.Clus
 		return false, err
 	}
 	l.recordWrite("services", res)
+	if res.Inserted+res.Updated > 0 {
+		l.markGeneration(ctx, k.Cluster, true) // committed even if the events below fail
+	}
 	insertedEvents, err := l.w.InsertServiceEvents(ctx, events)
 	if err != nil {
 		return false, err
 	}
 	changed = res.Inserted+res.Updated > 0 || insertedEvents > 0
+	if insertedEvents > 0 {
+		l.markGeneration(ctx, k.Cluster, true)
+	}
 	l.markChangedServicesDirty(services)
 	l.rememberServices(k.Cluster, services, whole)
 	l.recordDeployments(ctx, services)
@@ -981,9 +1011,15 @@ func (l *Loop) describeAndStoreTasks(ctx context.Context, api awsx.ECSAPI, k mod
 	l.recordWrite("tasks", res)
 	if markMissing {
 		if err := l.w.MarkTasksMissing(ctx, k, missing, now); err != nil {
+			if changed {
+				l.markGeneration(ctx, k.Cluster, true) // the upsert above is committed even though this step failed
+			}
 			return false, err
 		}
 		changed = changed || len(missing) > 0
+	}
+	if changed {
+		l.markGeneration(ctx, k.Cluster, true)
 	}
 	definitionARNs := make([]string, 0, len(rows))
 	for _, row := range rows {

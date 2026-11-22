@@ -59,7 +59,11 @@ func (l *Loop) focusCluster(ctx context.Context, k model.ClusterKey, cycle int) 
 	if err != nil {
 		return focusResult{}, err
 	}
-	defer func() { calls.fill(&res); l.finishFocusCycle(err) }()
+	defer func() {
+		calls.fill(&res)
+		l.finishFocusCycle(err)
+		l.markGeneration(ctx, k.Cluster, false) // a cycle that found nothing keeps the token alive
+	}()
 
 	cluster, err := l.describeClustersNamed(ctx, api, []string{k.Cluster})
 	if err != nil {
@@ -94,7 +98,11 @@ func (l *Loop) focusService(ctx context.Context, k model.ServiceKey, cycle int) 
 	if err != nil {
 		return focusResult{}, err
 	}
-	defer func() { calls.fill(&res); l.finishFocusCycle(err) }()
+	defer func() {
+		calls.fill(&res)
+		l.finishFocusCycle(err)
+		l.markGeneration(ctx, k.Cluster, false)
+	}()
 
 	servicesChanged, err := l.syncServicesIn(ctx, api, k.ClusterKey, []string{k.Service})
 	if err != nil {
@@ -108,6 +116,9 @@ func (l *Loop) focusService(ctx context.Context, k model.ServiceKey, cycle int) 
 	healthChanged, err := health.RunService(ctx, k)
 	if err != nil {
 		return res, err
+	}
+	if healthChanged {
+		l.markGeneration(ctx, k.Cluster, true)
 	}
 	res.changed = servicesChanged || tasksChanged || healthChanged
 	if cycle%3 == 0 {

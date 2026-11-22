@@ -417,6 +417,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		pollerConfig.Version = version
 		pollerConfig.NoSlices = !role.Polls()
 		pollerConfig.Registry, pollerConfig.Bus = focusRegistry, kicks.bus
+		pollerConfig.Cache = buildSnapshotCache(kvHealth, cfg)
 		switch role {
 		case config.RolePoller:
 			pollerConfig.Roles = []string{"poller"}
