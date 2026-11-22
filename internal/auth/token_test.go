@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -321,5 +322,40 @@ func TestRequireCSRF_TokenCredentialNeedsNone(t *testing.T) {
 	raw, _ := issueToken(t, st, u.ID, time.Now().Add(time.Hour))
 	if _, called := authedRequest(t, svc, st, "POST", "/api/x", map[string]string{"Authorization": "Bearer " + raw}); !called {
 		t.Fatal("token POST without CSRF header was refused")
+	}
+}
+
+func TestClientIP_GatewayHop(t *testing.T) {
+	gateway := []netip.Prefix{netip.MustParsePrefix("10.0.8.0/22"), netip.MustParsePrefix("10.1.0.0/24")}
+	req := func(xff string) *http.Request {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = "10.0.1.1:4000"
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		return r
+	}
+	rows := []struct {
+		name     string
+		xff      string
+		trusted  bool
+		gateways []netip.Prefix
+		want     string
+	}{
+		{"peer in cidr: next entry to the left", "203.0.113.7, 10.0.9.20", true, gateway, "203.0.113.7"},
+		{"peer in second cidr", "203.0.113.7, 10.1.0.9", true, gateway, "203.0.113.7"},
+		{"peer outside cidr: unchanged", "203.0.113.7, 10.0.20.20", true, gateway, "10.0.20.20"},
+		{"spoofed extra entries further left never used", "6.6.6.6, 7.7.7.7, 203.0.113.7, 10.0.9.20", true, gateway, "203.0.113.7"},
+		{"one extra hop only even if that entry is also a gateway address", "6.6.6.6, 10.0.9.21, 10.0.9.20", true, gateway, "10.0.9.21"},
+		{"setting empty: unchanged", "203.0.113.7, 10.0.9.20", true, nil, "10.0.9.20"},
+		{"proxy not trusted: header ignored", "203.0.113.7, 10.0.9.20", false, gateway, "10.0.1.1"},
+		{"no entry to the left: the peer", "10.0.9.20", true, gateway, "10.0.9.20"},
+		{"left entry not an address: the peer", "garbage, 10.0.9.20", true, gateway, "10.0.9.20"},
+		{"empty left entry: the peer", ", 10.0.9.20", true, gateway, "10.0.9.20"},
+	}
+	for _, row := range rows {
+		if got := ClientIP(req(row.xff), row.trusted, row.gateways); got != row.want {
+			t.Errorf("%s: %q, want %q", row.name, got, row.want)
+		}
 	}
 }

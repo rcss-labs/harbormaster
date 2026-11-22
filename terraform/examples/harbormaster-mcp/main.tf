@@ -19,6 +19,13 @@ locals {
   mcp_public_url     = "https://mcp.example.com"
 }
 
+# The gateway tasks run in private_subnet_ids. Harbormaster reads the client IP one hop further left of the
+# internal load balancer's entry when that entry is in these ranges.
+data "aws_subnet" "gateway" {
+  for_each = toset(local.private_subnet_ids)
+  id       = each.value
+}
+
 # Harbormaster itself, on an internal load balancer. The gateway's task security group may reach it on 443.
 module "harbormaster" {
   source = "../../modules/harbormaster"
@@ -33,8 +40,9 @@ module "harbormaster" {
   alb_ingress_security_group_ids = [module.harbormaster_mcp.task_security_group_id]
 
   extra_env = {
-    HM_API_TOKENS     = "true"
-    HM_MCP_PUBLIC_URL = local.mcp_public_url
+    HM_API_TOKENS        = "true"
+    HM_MCP_PUBLIC_URL    = local.mcp_public_url
+    HM_MCP_GATEWAY_CIDRS = join(",", sort([for subnet in data.aws_subnet.gateway : subnet.cidr_block]))
   }
 }
 

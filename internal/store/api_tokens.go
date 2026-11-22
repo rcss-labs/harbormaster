@@ -46,18 +46,31 @@ func scanAPIToken(row pgx.Row) (APIToken, error) {
 // when maxPerUser are already held. An empty AuthSource is stored as "password". Returns ErrNotFound when the user
 // is absent.
 func (s *Store) CreateAPIToken(ctx context.Context, t APIToken, maxPerUser int) (APIToken, error) {
+	return s.CreateAPITokenWithin(ctx, t, maxPerUser, nil)
+}
+
+// CreateAPITokenWithin is CreateAPIToken with a lifetime ceiling decided from the user's row as read under the lock:
+// latestExpiry maps that fresh row (admin flag, SSO link) to the latest allowed expires_at, and a later requested
+// expiry is cut back to it. This closes the race with a promotion or SSO link that commits after the caller loaded
+// the user. A nil latestExpiry applies no ceiling.
+func (s *Store) CreateAPITokenWithin(ctx context.Context, t APIToken, maxPerUser int, latestExpiry func(User) time.Time) (APIToken, error) {
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return APIToken{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var lockedID int64
-	if err := tx.QueryRow(ctx, `select id from users where id = $1 for update`, t.UserID).Scan(&lockedID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	locked, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 for update`, t.UserID))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
 			return APIToken{}, ErrNotFound
 		}
 		return APIToken{}, fmt.Errorf("lock user: %w", err)
+	}
+	if latestExpiry != nil {
+		if ceiling := latestExpiry(locked); t.ExpiresAt.After(ceiling) {
+			t.ExpiresAt = ceiling
+		}
 	}
 	var held int
 	if err := tx.QueryRow(ctx,
