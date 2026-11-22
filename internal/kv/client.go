@@ -5,6 +5,7 @@ package kv
 
 import (
 	"context"
+	"strconv"
 	"time"
 )
 
@@ -35,12 +36,8 @@ type Client interface {
 	Set(ctx context.Context, key, value string, o SetOptions) (stored bool, err error)
 	Del(ctx context.Context, keys ...string) error
 	PExpire(ctx context.Context, key string, ttl time.Duration) error
-	ZAdd(ctx context.Context, key string, score float64, member string) error
 	ZRem(ctx context.Context, key string, members ...string) error
-	ZCard(ctx context.Context, key string) (int64, error)
 	ZRangeByScore(ctx context.Context, key string, min, max float64) ([]string, error)
-	ZRemRangeByScore(ctx context.Context, key string, min, max float64) error
-	HSet(ctx context.Context, key string, fields map[string]string) error
 	HMGet(ctx context.Context, key string, fields ...string) ([]Value, error)
 	// Eval sends EVALSHA and falls back to EVAL once when the server does not know the script.
 	Eval(ctx context.Context, s *Script, keys, args []string) (Reply, error)
@@ -55,12 +52,18 @@ type Client interface {
 	Close()
 }
 
+// Upper reports whether the store is currently usable. *Health satisfies it; fallbacks and handlers take it so
+// they need not import the whole wrapper.
+type Upper interface{ Up() bool }
+
+// Millis formats a duration as whole milliseconds, the unit the Lua scripts take.
+func Millis(d time.Duration) string { return strconv.FormatInt(d.Milliseconds(), 10) }
+
 // AllowedCommands is the command allow-list from the design, upper case. Every command that reaches the server,
 // including the ones the client library sends while connecting, must be in it.
 var AllowedCommands = map[string]bool{
 	"GET": true, "MGET": true, "SET": true, "DEL": true, "PEXPIRE": true,
-	"ZADD": true, "ZREM": true, "ZCARD": true, "ZRANGEBYSCORE": true, "ZREMRANGEBYSCORE": true,
-	"HSET": true, "HMGET": true,
+	"ZREM": true, "ZRANGEBYSCORE": true, "HMGET": true,
 	"EVALSHA": true, "EVAL": true, "SCRIPT LOAD": true,
 	"PUBLISH": true, "SUBSCRIBE": true, "UNSUBSCRIBE": true,
 	"PING": true, "TIME": true, "HELLO": true, "AUTH": true,

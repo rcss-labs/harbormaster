@@ -14,14 +14,14 @@ import (
 // designAllowList is the design's "Command allow-list", copied here on purpose so that editing
 // kv.AllowedCommands alone cannot make the test agree with itself.
 var designAllowList = []string{
-	"GET", "MGET", "SET", "DEL", "PEXPIRE", "ZADD", "ZREM", "ZCARD", "ZRANGEBYSCORE", "ZREMRANGEBYSCORE",
-	"HSET", "HMGET", "EVALSHA", "EVAL", "SCRIPT LOAD", "PUBLISH", "SUBSCRIBE", "UNSUBSCRIBE", "PING", "TIME",
+	"GET", "MGET", "SET", "DEL", "PEXPIRE", "ZREM", "ZRANGEBYSCORE", "HMGET",
+	"EVALSHA", "EVAL", "SCRIPT LOAD", "PUBLISH", "SUBSCRIBE", "UNSUBSCRIBE", "PING", "TIME",
 	"HELLO", "AUTH", "CLIENT SETNAME", "INFO SERVER",
 }
 
 func TestAllowedCommands_MatchesTheDesign(t *testing.T) {
-	if len(designAllowList) != 24 {
-		t.Fatalf("test list has %d names, the design has 24", len(designAllowList))
+	if len(designAllowList) != 20 {
+		t.Fatalf("test list has %d names, the design has 20", len(designAllowList))
 	}
 	want := map[string]bool{}
 	for _, n := range designAllowList {
@@ -141,14 +141,9 @@ func exerciseEveryMethod(t *testing.T, c kv.Client) {
 	_, err = c.MGet(ctx, key, c.Key("b"))
 	must(err)
 	must(c.PExpire(ctx, key, time.Minute))
-	must(c.ZAdd(ctx, zset, 1, "m"))
-	_, err = c.ZCard(ctx, zset)
-	must(err)
 	_, err = c.ZRangeByScore(ctx, zset, 0, 2)
 	must(err)
-	must(c.ZRemRangeByScore(ctx, zset, 0, 0))
 	must(c.ZRem(ctx, zset, "m"))
-	must(c.HSet(ctx, hash, map[string]string{"f": "v"}))
 	_, err = c.HMGet(ctx, hash, "f")
 	must(err)
 	_, err = c.Eval(ctx, kv.NewScript(`return redis.call('GET', KEYS[1])`), []string{key}, nil)
