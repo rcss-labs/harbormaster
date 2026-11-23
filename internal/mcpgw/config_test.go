@@ -22,7 +22,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != ":8481" || cfg.MaxResultBytes != 100000 || cfg.UpstreamTimeout != 30*time.Second || !cfg.TrustedProxy {
+	if cfg.Listen != ":8481" || cfg.MaxResultBytes != 100000 || cfg.UpstreamTimeout != 30*time.Second || cfg.TrustedProxy {
 		t.Errorf("defaults wrong: %+v", cfg)
 	}
 	if cfg.UpstreamURL != "https://harbormaster.internal" || cfg.PublicURL != "https://mcp.example.com" {

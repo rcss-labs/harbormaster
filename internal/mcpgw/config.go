@@ -41,7 +41,6 @@ type Config struct {
 func LoadConfig(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		Listen:          defaultListen,
-		TrustedProxy:    true,
 		MaxResultBytes:  defaultMaxResultBytes,
 		UpstreamTimeout: defaultUpstreamTimeout,
 	}
