@@ -127,7 +127,8 @@ func (s *Server) analyticsCost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto.ARM64 = arm64
-	dto.KPIs.UnpricedRegions = slices.Sorted(maps.Keys(unpricedRegions))
+	// slices.Sorted returns nil for an empty map; the UI reads the list's length, so it must encode as [] (never null).
+	dto.KPIs.UnpricedRegions = append([]string{}, slices.Sorted(maps.Keys(unpricedRegions))...)
 	dto.ByCluster, dto.ByAccount, dto.ByTag = byCluster.sorted(), byAccount.sorted(), byTag.sorted()
 	writeJSON(w, http.StatusOK, dto)
 }
