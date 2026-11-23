@@ -3,6 +3,7 @@ package store_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -436,5 +437,72 @@ func TestRetention_RemovesExpiredCodesAndGrants(t *testing.T) {
 	}
 	if f.count(t, `select count(*) from oauth_grants where id in ($1, $2)`, recentGrant.ID, liveGrant.ID) != 2 {
 		t.Fatal("a grant within retention was removed")
+	}
+}
+
+// seedAllCredentials creates a personal token, an OAuth grant with its two tokens and a pending code: 3 tokens, 1 grant, 1 code.
+func (f *oauthFixture) seedAllCredentials(t *testing.T) {
+	t.Helper()
+	end := time.Now().Add(time.Hour)
+	mustCreateToken(t, f.st, newAPIToken(f.user.ID, "hmp_revokeall001"))
+	f.grant(t, f.user.ID, "password", end, 30*time.Minute)
+	if err := f.st.CreateOAuthCode(t.Context(), f.code("code-revokeall", end)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *oauthFixture) credentialRows(t *testing.T) (tokens, grants, codes int) {
+	t.Helper()
+	return f.count(t, `select count(*) from api_tokens`), f.count(t, `select count(*) from oauth_grants`),
+		f.count(t, `select count(*) from oauth_codes`)
+}
+
+func TestDeleteAllAPICredentials_EmptiesAllThreeTablesAndCounts(t *testing.T) {
+	f := newOAuthFixture(t)
+	f.seedAllCredentials(t)
+	bob, err := f.st.CreateUser(t.Context(), "bob", "h", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.grant(t, bob.ID, "saml", time.Now().Add(time.Hour), 30*time.Minute)
+
+	got, err := f.st.DeleteAllAPICredentials(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (store.RevokedCredentials{Tokens: 5, Grants: 2, Codes: 1}); got != want {
+		t.Errorf("counts = %+v, want %+v", got, want)
+	}
+	if tk, g, c := f.credentialRows(t); tk+g+c != 0 {
+		t.Errorf("rows left: tokens=%d grants=%d codes=%d", tk, g, c)
+	}
+	if n := f.count(t, `select count(*) from users`); n != 2 {
+		t.Errorf("users = %d, want 2 untouched", n)
+	}
+	again, err := f.st.DeleteAllAPICredentials(t.Context())
+	if err != nil || again != (store.RevokedCredentials{}) {
+		t.Errorf("second call = %+v, %v; want zero counts", again, err)
+	}
+}
+
+// A failure on the last table must roll back the earlier deletes: revoke is all or nothing.
+func TestDeleteAllAPICredentials_FailureLeavesEverythingIntact(t *testing.T) {
+	f := newOAuthFixture(t)
+	f.seedAllCredentials(t)
+	ctx := t.Context()
+	for _, stmt := range []string{
+		`create function fail_revoke() returns trigger language plpgsql as $$ begin raise exception 'forced failure'; end $$`,
+		`create trigger fail_revoke_grants before delete on oauth_grants for each statement execute function fail_revoke()`,
+		`create trigger fail_revoke_codes before delete on oauth_codes for each statement execute function fail_revoke()`,
+	} {
+		if _, err := f.st.Pool.Exec(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.st.DeleteAllAPICredentials(ctx); err == nil || !strings.Contains(err.Error(), "forced failure") {
+		t.Fatalf("err = %v, want the forced failure", err)
+	}
+	if tk, g, c := f.credentialRows(t); tk != 3 || g != 1 || c != 1 {
+		t.Errorf("after failed revoke tokens=%d grants=%d codes=%d, want 3/1/1", tk, g, c)
 	}
 }
