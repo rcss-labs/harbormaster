@@ -238,7 +238,9 @@ func TestRotateOAuthRefresh_Table(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newOAuthFixture(t)
-			base := time.Now()
+			// Sub-microsecond nanoseconds, as Linux clocks give: Postgres stores rotated_at at microsecond precision,
+			// so the grace edge must hold even when "now" carries more precision than the stored time.
+			base := time.Now().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 			end := base.Add(7 * 24 * time.Hour)
 			g, _, refresh := f.grant(t, f.user.ID, "password", end, time.Hour)
 			original, latest := refresh, refresh
