@@ -943,7 +943,8 @@ func TestDeployByRevision_RanBeforeIsNotGatedWhenTheDescribeCallFails(t *testing
 	}
 	env.fk.FailAlways("DescribeTaskDefinition", &smithy.GenericAPIError{Code: "ServerException", Message: "down"})
 
-	wantStatus(t, env.dana.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision}), http.StatusAccepted)
+	// An admin: a non-admin's deploy also reads the revision to check its log destination, and fails closed.
+	wantStatus(t, env.sam.post("/api/services/"+edgeNginxKey.ID()+"/deploy", map[string]any{"revision": revision}), http.StatusAccepted)
 }
 
 func TestDeployByRevision_FailedActiveDeploymentOfANeverRunRevisionIsGated(t *testing.T) {

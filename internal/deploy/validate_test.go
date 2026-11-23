@@ -542,9 +542,17 @@ func TestValidate_LogDestination(t *testing.T) {
 			"awslogs-group": "/ecs/dev/payments", "AWSLOGS-GROUP": "/ecs/prod/payments", "awslogs-region": "us-east-1"}))},
 		{name: "non-admin only upper-case group key", base: baseLogs, wantErr: logMsg, mutate: withLogs(awslogs(map[string]any{
 			"AWSLOGS-GROUP": "/ecs/prod/payments", "awslogs-region": "us-east-1"}))},
-		{name: "non-admin new container reuses base group", base: baseLogs, mutate: secondContainerLogs(group("/ecs/dev/payments", "us-east-1"))},
-		{name: "non-admin changes stream prefix and mode", base: baseLogs, mutate: withLogs(awslogs(map[string]any{
-			"awslogs-group": "/ecs/dev/payments", "awslogs-region": "us-east-1", "awslogs-stream-prefix": "new", "mode": "non-blocking"}))},
+		{name: "non-admin new sidecar with awslogs reusing base group", base: baseLogs, mutate: secondContainerLogs(group("/ecs/dev/payments", "us-east-1")), wantErr: logMsg},
+		{name: "non-admin renames the logging container", base: baseLogs, wantErr: logMsg, mutate: func(d Definition) {
+			firstContainer(d)["name"] = "billing-api"
+		}},
+		{name: "non-admin changes stream prefix", base: baseLogs, wantErr: logMsg, mutate: withLogs(awslogs(map[string]any{
+			"awslogs-group": "/ecs/dev/payments", "awslogs-region": "us-east-1", "awslogs-stream-prefix": "billing"}))},
+		{name: "non-admin upper-case stream prefix key", base: baseLogs, wantErr: logMsg, mutate: withLogs(awslogs(map[string]any{
+			"awslogs-group": "/ecs/dev/payments", "awslogs-region": "us-east-1", "awslogs-stream-prefix": "ecs", "AWSLOGS-STREAM-PREFIX": "billing"}))},
+		{name: "non-admin changes mode and buffer size", base: baseLogs, mutate: withLogs(awslogs(map[string]any{
+			"awslogs-group": "/ecs/dev/payments", "awslogs-region": "us-east-1", "awslogs-stream-prefix": "ecs",
+			"mode": "non-blocking", "max-buffer-size": "25m", "awslogs-datetime-format": "%Y", "awslogs-multiline-pattern": "^x"}))},
 		{name: "non-admin removes log configuration", base: baseLogs, mutate: func(d Definition) { delete(firstContainer(d), "logConfiguration") }},
 		{name: "admin changes group", admin: true, base: baseLogs, mutate: withLogs(group("/ecs/prod/payments", "us-east-1"))},
 		{name: "non-admin adds log configuration when base has none", mutate: withLogs(group("/ecs/prod/payments", "us-east-1")), wantErr: logMsg},
