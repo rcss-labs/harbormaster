@@ -418,15 +418,17 @@ func peerIP(r *http.Request) string {
 	return host
 }
 
-// forwardedFor is the X-Forwarded-For sent upstream: the incoming chain plus
-// this hop's peer when the proxy in front is trusted, else only the peer
-// (an untrusted client's header is dropped).
+// forwardedFor is the X-Forwarded-For sent upstream: exactly one entry. Behind
+// the trusted public load balancer it is the rightmost incoming entry, the
+// client address that load balancer appended; otherwise it is the direct peer.
+// Client-supplied entries are never forwarded: Harbormaster's internal load
+// balancer appends this gateway's address, and auth.ClientIP reads one hop
+// past it, so any extra entry here would be taken for the client.
 func forwardedFor(r *http.Request, trustedProxy bool) string {
-	peer := peerIP(r)
-	if incoming := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); trustedProxy && incoming != "" {
-		return incoming + ", " + peer
+	if trustedProxy {
+		return clientIP(r, true)
 	}
-	return peer
+	return peerIP(r)
 }
 
 // writeUnauthorized answers 401. With OAuth on, the challenge points at the

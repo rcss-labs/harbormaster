@@ -795,11 +795,11 @@ func TestClientIP(t *testing.T) {
 func TestHandler_ForwardsTheChainUpstream(t *testing.T) {
 	h := newHarness(t, harnessOptions{mutateConfig: func(c *Config) { c.TrustedProxy = true }})
 	headers := h.authed()
-	headers["X-Forwarded-For"] = "203.0.113.7"
+	headers["X-Forwarded-For"] = "6.6.6.6, 203.0.113.7"
 	decodeToolResult(t, h.rpc(t, headers, "tools/call", map[string]any{"name": "get_overview"}))
 	got := h.upstream.seen()[0].Header.Get("X-Forwarded-For")
-	if !strings.HasPrefix(got, "203.0.113.7, ") {
-		t.Errorf("X-Forwarded-For upstream = %q, want the client's entry followed by the gateway's peer", got)
+	if got != "203.0.113.7" {
+		t.Errorf("X-Forwarded-For upstream = %q, want exactly the entry the load balancer appended", got)
 	}
 
 	// Untrusted: the client's own header must not be passed on as if it were a proxy's.

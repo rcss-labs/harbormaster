@@ -278,15 +278,15 @@ func TestRequestLog_CarriesTokenIDNeverTheSecret(t *testing.T) {
 	}
 }
 
-// Behind the gateway the internal ALB appends the gateway task's address; the entry to its left is the client the
-// public ALB saw. last_used_ip must record that client, not the gateway.
+// Behind the gateway the gateway sends one entry, the client the public ALB saw, and the internal ALB appends the
+// gateway task's address after it. last_used_ip must record that client, not the gateway.
 func TestBearer_LastUsedIPIsTheForwardedClientBehindTheGateway(t *testing.T) {
 	srv, _, st, _ := newServerCustom(t, true, withTokens(func(c *config.Config) {
 		c.TrustedProxy = true
 		c.MCPGatewayCIDRs = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}
 	}, nil))
 	c := tokenClient(t, srv, st, "sam")
-	resp := c.do("GET", "/api/overview", nil, map[string]string{"X-Forwarded-For": "6.6.6.6, 203.0.113.7, 127.0.0.1"})
+	resp := c.do("GET", "/api/overview", nil, map[string]string{"X-Forwarded-For": "203.0.113.7, 127.0.0.1"})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)

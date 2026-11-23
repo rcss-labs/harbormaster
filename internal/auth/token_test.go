@@ -335,6 +335,8 @@ func TestClientIP_GatewayHop(t *testing.T) {
 		}
 		return r
 	}
+	// The real chain is "client, gateway task": the gateway sends the one client entry and the internal load
+	// balancer appends the gateway. Rows with more entries pin that client-supplied entries are never read.
 	rows := []struct {
 		name     string
 		xff      string
