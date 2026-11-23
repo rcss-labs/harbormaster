@@ -200,6 +200,9 @@ func (s *Service) ApplyChangeSet(ctx context.Context, subj authz.Subject, key mo
 		if err := validateExistingRevision(ctx, ecsAPI, st, td.Revision); err != nil {
 			return ChangeSetResult{}, err
 		}
+		if err := s.guardExistingRevisionLogs(ctx, subj, key, ecsAPI, live, st.Family, td.Revision); err != nil {
+			return ChangeSetResult{}, err
+		}
 	}
 	run := &changeSetRun{
 		s: s, subj: subj, key: key, cs: cs, plan: plan, st: st, ecsAPI: ecsAPI, registerInput: registerInput,

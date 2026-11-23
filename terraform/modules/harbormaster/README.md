@@ -21,7 +21,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `public_subnet_ids` | list(string) | `[]` | ALB when `internal = false`; must be non-empty unless `internal` (enforced by a precondition). |
 | `internal` | bool | required | Required. `true` puts Harbormaster on an internal ALB in `private_subnet_ids` (recommended; needed for `HM_API_TOKENS`). `false` creates an internet-facing ALB. There is no default, so an existing deployment that relied on the old default (`false`) must now set it explicitly instead of having its load balancer replaced. Any true value of `HM_API_TOKENS` (`true`, `1`, `t`) requires `internal = true`: a precondition fails the plan otherwise, because tokens must reach Harbormaster only through the MCP gateway. |
 | `allowed_cidrs` | list(string) | required | Required. CIDR blocks allowed to reach the ALB on 443. Use your VPN or office ranges; `0.0.0.0/0` makes the login page reachable from the whole internet. Must list at least one block. |
-| `alb_deletion_protection` | bool | `true` | Deletion protection on the ALB. |
+| `alb_deletion_protection` | bool | `true` | Deletion protection on the ALB. Before a change that replaces the ALB (for example switching `internal` from `false` to `true`), first apply with `alb_deletion_protection = false`, then make the change, then turn it back on. |
 | `alb_ingress_security_group_ids` | list(string) | `[]` | Security groups allowed to reach the ALB on 443 in addition to `allowed_cidrs`. Set it to the `harbormaster-mcp` module's `task_security_group_id`. |
 | `certificate_arn` | string | required | ACM certificate for the HTTPS listener. |
 | `http_redirect` | bool | `true` | Port 80 redirects to 443. |
