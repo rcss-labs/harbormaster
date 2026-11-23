@@ -8,6 +8,15 @@ resource "aws_lb" "this" {
   idle_timeout               = var.alb_idle_timeout
 
   tags = local.tags
+
+  lifecycle {
+    # Access tokens are meant to reach Harbormaster only through the MCP gateway (WAF, bad-token limiter). With a
+    # public load balancer a bearer token would be accepted straight from the internet, bypassing both.
+    precondition {
+      condition     = var.internal || lower(lookup(var.extra_env, "HM_API_TOKENS", "false")) != "true"
+      error_message = "HM_API_TOKENS = \"true\" needs internal = true: tokens must reach Harbormaster only through the harbormaster-mcp gateway, not a public load balancer."
+    }
+  }
 }
 
 resource "aws_lb_target_group" "server" {

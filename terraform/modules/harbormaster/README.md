@@ -19,7 +19,7 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `vpc_id` | string | required | |
 | `private_subnet_ids` | list(string) | required | Service tasks and RDS; two subnets in different AZs are expected; only the count (at least 2) is validated. |
 | `public_subnet_ids` | list(string) | `[]` | ALB when `internal = false`; must be non-empty unless `internal` (enforced by a precondition). |
-| `internal` | bool | `false` | Internal ALB in `private_subnet_ids`. |
+| `internal` | bool | `false` | Internal ALB in `private_subnet_ids`. Required when `extra_env` sets `HM_API_TOKENS = "true"`: a precondition fails the plan otherwise, because tokens must reach Harbormaster only through the MCP gateway. |
 | `allowed_cidrs` | list(string) | `["0.0.0.0/0"]` | ALB ingress. |
 | `alb_ingress_security_group_ids` | list(string) | `[]` | Security groups allowed to reach the ALB on 443 in addition to `allowed_cidrs`. Set it to the `harbormaster-mcp` module's `task_security_group_id`. |
 | `certificate_arn` | string | required | ACM certificate for the HTTPS listener. |
