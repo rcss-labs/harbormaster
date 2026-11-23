@@ -35,7 +35,8 @@ commands:
 
 environment for serve:
   HM_MCP_UPSTREAM_URL (required), HM_MCP_PUBLIC_URL (required)
-  HM_MCP_LISTEN (default :8481), HM_MCP_ALLOWED_ORIGINS, HM_MCP_TRUSTED_PROXY (default true)
+  HM_MCP_LISTEN (default :8481), HM_MCP_ALLOWED_ORIGINS, HM_MCP_TRUSTED_PROXY (default false)
+  HM_MCP_UPSTREAM_CA_PEM (optional; PEM text of extra CA certificates for the upstream connection only)
   HM_MCP_MAX_RESULT_BYTES (default 100000), HM_MCP_UPSTREAM_TIMEOUT (default 30s)
   HM_MCP_AUTHORIZE_URL (optional; Harbormaster's private https base URL; turns OAuth on)
   HM_MCP_AUTHORIZE_VIA_GATEWAY (default false; publish the gateway's /oauth/authorize, a redirect to the above)
@@ -87,7 +88,7 @@ func serve(ctx context.Context, stderr io.Writer, getenv func(string) string) in
 		logger.Error("invalid configuration", "err", err.Error())
 		return 2
 	}
-	upstream, err := mcpgw.NewUpstream(cfg.UpstreamURL, cfg.UpstreamTimeout, nil)
+	upstream, err := mcpgw.NewUpstreamWithCA(cfg.UpstreamURL, cfg.UpstreamTimeout, cfg.UpstreamCAPEM)
 	if err != nil {
 		logger.Error("invalid configuration", "err", "HM_MCP_UPSTREAM_URL: "+err.Error())
 		return 2

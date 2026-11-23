@@ -8,7 +8,8 @@ provider "aws" {
 
 # Placeholder values only. Replace them with the real network, certificate and image details.
 locals {
-  vpc_id             = "vpc-0123456789abcdef0"
+  vpc_id = "vpc-0123456789abcdef0"
+  # Harbormaster's own tasks and load balancer.
   private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
   public_subnet_ids  = ["subnet-0123456789abcdef2", "subnet-0123456789abcdef3"]
   internal_cert_arn  = "arn:aws:acm:eu-west-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
@@ -19,10 +20,31 @@ locals {
   mcp_public_url     = "https://mcp.example.com"
 }
 
-# The gateway tasks run in private_subnet_ids. Harbormaster reads the client IP one hop further left of the
+variable "gateway_private_subnet_ids" {
+  description = "Private subnets for the gateway tasks. Use dedicated subnets (not Harbormaster's): every task inside their CIDRs is trusted via HM_MCP_GATEWAY_CIDRS to name a client IP. They must route to a NAT gateway."
+  type        = list(string)
+  default     = ["subnet-0123456789abcdef4", "subnet-0123456789abcdef5"] # placeholders
+}
+
+locals {
+  harbormaster_internal = true
+}
+
+# The gateway needs Harbormaster on an internal load balancer. With internal = false, HM_API_TOKENS would accept
+# personal tokens on Harbormaster's own public ALB, bypassing the gateway's WAF and rate limiter.
+resource "terraform_data" "require_internal_harbormaster" {
+  lifecycle {
+    precondition {
+      condition     = local.harbormaster_internal
+      error_message = "The harbormaster module must have internal = true when HM_API_TOKENS is on; otherwise tokens are accepted on its public ALB and bypass the gateway's WAF and limiter."
+    }
+  }
+}
+
+# The gateway tasks run in gateway_private_subnet_ids. Harbormaster reads the client IP one hop further left of the
 # internal load balancer's entry when that entry is in these ranges.
 data "aws_subnet" "gateway" {
-  for_each = toset(local.private_subnet_ids)
+  for_each = toset(var.gateway_private_subnet_ids)
   id       = each.value
 }
 
@@ -35,7 +57,7 @@ module "harbormaster" {
   certificate_arn    = local.internal_cert_arn
   image              = local.image
   base_url           = local.base_url
-  internal           = true
+  internal           = local.harbormaster_internal
 
   alb_ingress_security_group_ids = [module.harbormaster_mcp.task_security_group_id]
 
@@ -43,7 +65,10 @@ module "harbormaster" {
     HM_API_TOKENS        = "true"
     HM_MCP_PUBLIC_URL    = local.mcp_public_url
     HM_MCP_GATEWAY_CIDRS = join(",", sort([for subnet in data.aws_subnet.gateway : subnet.cidr_block]))
-    HM_OAUTH             = "true" # claude.ai / Claude Desktop connectors; needs HM_API_TOKENS and HM_MCP_PUBLIC_URL
+    # OAuth (claude.ai / Claude Desktop connectors) is off until the real-connector spike has run; see "OAuth spike" in
+    # docs/ops/mcp-runbook.md. To enable it later, uncomment this line (needs HM_API_TOKENS and HM_MCP_PUBLIC_URL) together
+    # with authorize_url and enable_oauth_paths on the gateway module below.
+    # HM_OAUTH = "true"
   }
 }
 
@@ -58,17 +83,18 @@ module "harbormaster_mcp" {
 
   vpc_id             = local.vpc_id
   public_subnet_ids  = local.public_subnet_ids
-  private_subnet_ids = local.private_subnet_ids
+  private_subnet_ids = var.gateway_private_subnet_ids
   certificate_arn    = local.public_cert_arn
   cluster_arn        = data.aws_ecs_cluster.harbormaster.arn
   image              = local.mcp_image
   upstream_url       = local.base_url
   public_url         = local.mcp_public_url
 
-  # OAuth for connectors: the browser is sent to Harbormaster's private URL to approve (reachable on the VPN only),
-  # and the /oauth/ paths get their own stricter rate rule.
-  authorize_url      = local.base_url
-  enable_oauth_paths = true
+  # OAuth for connectors is off in this example (personal tokens only) until the real-connector spike has run; see the
+  # OAuth spike section of docs/ops/mcp-runbook.md. To enable it, also uncomment HM_OAUTH on the harbormaster module:
+  # the browser is sent to Harbormaster's private URL to approve (VPN only), and /oauth/ paths get a stricter rate rule.
+  # authorize_url      = local.base_url
+  # enable_oauth_paths = true
 
   harbormaster_alb_security_group_id = module.harbormaster.security_group_ids.alb
 }

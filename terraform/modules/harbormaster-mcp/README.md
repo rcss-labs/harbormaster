@@ -20,7 +20,7 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 ## Prerequisites
 
 - Private subnets that route to a NAT gateway, and public subnets for the load balancer.
-- The Harbormaster module with `internal = true`, `alb_ingress_security_group_ids = [<this module>.task_security_group_id]`, and in `extra_env`: `HM_API_TOKENS = "true"`, `HM_MCP_PUBLIC_URL` set to this module's `public_url`, and `HM_MCP_GATEWAY_CIDRS` set to the CIDRs of the subnets the gateway tasks run in (`private_subnet_ids`), so token calls record the real client IP instead of the gateway's. Give the gateway its own private subnets where you can: every task inside those CIDRs is trusted to name the client IP, so subnets shared with Harbormaster extend that trust to Harbormaster's tasks. The IP is used for records and rate limiting, never for authorization.
+- The Harbormaster module with `internal = true` (required: with `internal = false`, `HM_API_TOKENS` would accept tokens on Harbormaster's own public ALB, bypassing this gateway's WAF and rate limiter), `alb_ingress_security_group_ids = [<this module>.task_security_group_id]`, and in `extra_env`: `HM_API_TOKENS = "true"`, `HM_MCP_PUBLIC_URL` set to this module's `public_url`, and `HM_MCP_GATEWAY_CIDRS` set to the CIDRs of the subnets the gateway tasks run in (`private_subnet_ids`), so token calls record the real client IP instead of the gateway's. Give the gateway its own private subnets where you can: every task inside those CIDRs is trusted to name the client IP, so subnets shared with Harbormaster extend that trust to Harbormaster's tasks. The IP is used for records and rate limiting, never for authorization.
 - A private DNS name for `upstream_url` that matches the internal load balancer's certificate.
 - A public hostname, an ACM certificate for it, and a DNS record pointing at `alb_dns_name` (alias with `alb_zone_id`). There are no defaults for `public_url` or `certificate_arn`.
 - The gateway image in ECR, pinned to a tag or digest (`:latest` is rejected), matching `cpu_architecture`.
@@ -52,6 +52,14 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `waf_common_count_rules` | list(string) | `SizeRestrictions_BODY`, `CrossSiteScripting_BODY`, `GenericRFI_BODY` | Common rule set rules that only count. |
 | `waf_oauth_rate_limit` | number | `60` | Per IP on `/oauth/`; used when `enable_oauth_paths`. |
 | `enable_oauth_paths` | bool | `false` | Adds the `/oauth/` rate rule. Set it together with `authorize_url`. |
+| `authorize_via_gateway` | bool | `false` | `HM_MCP_AUTHORIZE_VIA_GATEWAY`. Requires `authorize_url` (checked by a precondition on the task definition). |
+| `max_result_bytes` | number | `null` | `HM_MCP_MAX_RESULT_BYTES`; null uses the gateway default. |
+| `upstream_timeout` | string | `null` | `HM_MCP_UPSTREAM_TIMEOUT`, a duration such as `20s`; null uses the gateway default. |
+| `upstream_ca_pem` | string (sensitive) | `null` | `HM_MCP_UPSTREAM_CA_PEM`: PEM of extra CAs for the internal load balancer's certificate. A CA certificate is public, so it goes in as a plain environment value (visible in the task definition; not a secret); it only adds to the task definition's size. Sensitive only to keep it out of plan output. |
+| `alarm_sns_topic_arns` | list(string) | `[]` | SNS topics for alarms. Empty creates no alarms. |
+| `access_logs_bucket` | string | `null` | S3 bucket for load balancer access logs; null is off. The bucket and its policy for regional ELB log delivery are yours to create. |
+| `access_logs_prefix` | string | `harbormaster-mcp` | Key prefix in that bucket. |
+| `deletion_protection` | bool | `true` | Deletion protection on the load balancer. Set `false` and apply before destroying. |
 | `tags` | map(string) | `{}` | |
 
 ## Outputs
@@ -65,6 +73,15 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `task_role_arn` | Task role (no policies). |
 | `log_group_name`, `waf_log_group_name` | Gateway and WAF log groups. |
 | `web_acl_arn` | The web ACL. |
+| `alarm_arns` | Map of alarm ARNs (`alb-5xx`, `target-5xx`, `unhealthy-hosts`, `waf-blocked`); empty without `alarm_sns_topic_arns`. |
+
+## Alarms, access logs and deletion protection
+
+With `alarm_sns_topic_arns` set, the module creates four CloudWatch alarms (5-minute periods, missing data not breaching, notifying on alarm and on recovery): `<name>-alb-5xx` (load balancer 5xx count at least 5), `<name>-target-5xx` (gateway 5xx count at least 5), `<name>-unhealthy-hosts` (any unhealthy target) and `<name>-waf-blocked` (WAF `BlockedRequests` at least 100). Thresholds are fixed; copy the module if you need different ones. Without topics no alarm exists.
+
+`access_logs_bucket` turns on load balancer access logs. The bucket (same region, with a policy that lets the regional ELB log delivery account write) is the operator's; the module does not create or manage it. `deletion_protection` defaults to true, so destroying the module needs a prior apply with it set to false.
+
+Warning: with the Harbormaster module's `internal = false` and `HM_API_TOKENS` on, personal tokens are accepted on Harbormaster's own public load balancer, bypassing this gateway's WAF and limiter. Keep Harbormaster internal.
 
 ## WAF tuning
 
@@ -76,4 +93,4 @@ Plans and applies run in TerraDuckTel. Locally, run only `terraform fmt` and `te
 
 ## OAuth for claude.ai and Claude Desktop connectors
 
-Set `authorize_url` (Harbormaster's internal base URL) and `enable_oauth_paths = true` on this module, and on the Harbormaster module add `HM_OAUTH = "true"` to `extra_env` (it requires `HM_API_TOKENS=true` and `HM_MCP_PUBLIC_URL`, which the example already sets). The gateway then publishes `/.well-known/oauth-protected-resource` (also under `/mcp`) and `/.well-known/oauth-authorization-server`, points every 401 at them, and relays only `POST /oauth/token` to Harbormaster. The approval page stays on the private network. Optional extras go through the Harbormaster module's `extra_env`: `HM_OAUTH_ACCESS_TTL`, `HM_OAUTH_CLIENT_HOSTS`, `HM_OAUTH_REDIRECT_URIS`. The gateway setting `HM_MCP_AUTHORIZE_VIA_GATEWAY` (a redirect fallback if Claude refuses an authorization endpoint on another host) is not a module variable; add it only if the claude.ai spike in `docs/ops/mcp-runbook.md` shows it is needed.
+Set `authorize_url` (Harbormaster's internal base URL) and `enable_oauth_paths = true` on this module, and on the Harbormaster module add `HM_OAUTH = "true"` to `extra_env` (it requires `HM_API_TOKENS=true` and `HM_MCP_PUBLIC_URL`, which the example sets). The module does not set `HM_OAUTH`, and the example leaves OAuth commented out until the real-connector spike (OAuth spike section of `docs/ops/mcp-runbook.md`) has run, so copying it enables personal tokens only. The gateway then publishes `/.well-known/oauth-protected-resource` (also under `/mcp`) and `/.well-known/oauth-authorization-server`, points every 401 at them, and relays only `POST /oauth/token` to Harbormaster. The approval page stays on the private network. Optional extras go through the Harbormaster module's `extra_env`: `HM_OAUTH_ACCESS_TTL`, `HM_OAUTH_CLIENT_HOSTS`, `HM_OAUTH_REDIRECT_URIS`. Set `authorize_via_gateway = true` (a redirect fallback if Claude refuses an authorization endpoint on another host) only if the spike shows it is needed.

@@ -219,3 +219,35 @@ func (s *Store) CountAPITokensByUser(ctx context.Context) (map[int64]int, error)
 	}
 	return counts, rows.Err()
 }
+
+// RevokedCredentials counts what DeleteAllAPICredentials removed.
+type RevokedCredentials struct {
+	Tokens int64 // every api_tokens row: personal, OAuth access and OAuth refresh
+	Grants int64 // oauth_grants rows
+	Codes  int64 // unexchanged oauth_codes rows
+}
+
+// DeleteAllAPICredentials revokes every access credential at once: all api_tokens, oauth_grants and oauth_codes rows,
+// in one transaction, so a failure leaves all of them in place. It is the operator's "revoke everything" after an
+// incident; switching HM_API_TOKENS or HM_OAUTH off alone leaves the rows, and turning them back on would revive them.
+func (s *Store) DeleteAllAPICredentials(ctx context.Context) (RevokedCredentials, error) {
+	var revoked RevokedCredentials
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		// Tokens first, so the count includes OAuth tokens that deleting their grant would cascade away unseen.
+		for _, step := range []struct {
+			table string
+			count *int64
+		}{{"api_tokens", &revoked.Tokens}, {"oauth_codes", &revoked.Codes}, {"oauth_grants", &revoked.Grants}} {
+			tag, err := tx.Exec(ctx, `delete from `+step.table)
+			if err != nil {
+				return fmt.Errorf("delete all %s: %w", step.table, err)
+			}
+			*step.count = tag.RowsAffected()
+		}
+		return nil
+	})
+	if err != nil {
+		return RevokedCredentials{}, err
+	}
+	return revoked, nil
+}

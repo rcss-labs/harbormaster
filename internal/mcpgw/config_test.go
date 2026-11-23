@@ -1,6 +1,8 @@
 package mcpgw
 
 import (
+	"encoding/pem"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +24,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != ":8481" || cfg.MaxResultBytes != 100000 || cfg.UpstreamTimeout != 30*time.Second || !cfg.TrustedProxy {
+	if cfg.Listen != ":8481" || cfg.MaxResultBytes != 100000 || cfg.UpstreamTimeout != 30*time.Second || cfg.TrustedProxy {
 		t.Errorf("defaults wrong: %+v", cfg)
 	}
 	if cfg.UpstreamURL != "https://harbormaster.internal" || cfg.PublicURL != "https://mcp.example.com" {
@@ -72,6 +74,8 @@ func TestLoadConfig_Validation(t *testing.T) {
 		{name: "public with a path", set: map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com/mcp"}, wantVar: "HM_MCP_PUBLIC_URL"},
 		{name: "public without a host", set: map[string]string{"HM_MCP_PUBLIC_URL": "https://"}, wantVar: "HM_MCP_PUBLIC_URL"},
 		{name: "listen without a port", set: map[string]string{"HM_MCP_LISTEN": "localhost"}, wantVar: "HM_MCP_LISTEN"},
+		{name: "upstream CA PEM is not PEM", set: map[string]string{"HM_MCP_UPSTREAM_CA_PEM": "not a certificate"}, wantVar: "HM_MCP_UPSTREAM_CA_PEM"},
+		{name: "upstream CA PEM holds no certificate", set: map[string]string{"HM_MCP_UPSTREAM_CA_PEM": "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"}, wantVar: "HM_MCP_UPSTREAM_CA_PEM"},
 		{name: "trusted proxy not a bool", set: map[string]string{"HM_MCP_TRUSTED_PROXY": "maybe"}, wantVar: "HM_MCP_TRUSTED_PROXY"},
 		{name: "max result too small", set: map[string]string{"HM_MCP_MAX_RESULT_BYTES": "9999"}, wantVar: "HM_MCP_MAX_RESULT_BYTES"},
 		{name: "max result too large", set: map[string]string{"HM_MCP_MAX_RESULT_BYTES": "140001"}, wantVar: "HM_MCP_MAX_RESULT_BYTES"},
@@ -118,5 +122,28 @@ func TestLoadConfig_AcceptsLoopbackHTTPAndBounds(t *testing.T) {
 		if _, err := LoadConfig(envFrom(env)); err != nil {
 			t.Errorf("%s=%s: %v", bound.name, bound.value, err)
 		}
+	}
+}
+
+func testCertificatePEM(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewTLSServer(nil)
+	defer srv.Close()
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+}
+
+func TestLoadConfig_UpstreamCAPEM(t *testing.T) {
+	cfg, err := LoadConfig(envFrom(validEnv()))
+	if err != nil || cfg.UpstreamCAPEM != "" {
+		t.Fatalf("default: %+v, %v; want no extra CA", cfg, err)
+	}
+	env := validEnv()
+	env["HM_MCP_UPSTREAM_CA_PEM"] = testCertificatePEM(t)
+	cfg, err = LoadConfig(envFrom(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UpstreamCAPEM != strings.TrimSpace(env["HM_MCP_UPSTREAM_CA_PEM"]) {
+		t.Error("the PEM was not kept")
 	}
 }

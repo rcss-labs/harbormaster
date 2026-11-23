@@ -1,6 +1,7 @@
 package mcpgw
 
 import (
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/url"
@@ -34,6 +35,9 @@ type Config struct {
 	TrustedProxy        bool
 	MaxResultBytes      int
 	UpstreamTimeout     time.Duration
+	// UpstreamCAPEM is optional PEM text of extra CA certificates trusted, besides the system pool, for the
+	// upstream connection only (a private CA on Harbormaster's internal load balancer). It is public material.
+	UpstreamCAPEM string
 }
 
 // LoadConfig reads the HM_MCP_* settings through getenv and validates them.
@@ -41,7 +45,6 @@ type Config struct {
 func LoadConfig(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		Listen:          defaultListen,
-		TrustedProxy:    true,
 		MaxResultBytes:  defaultMaxResultBytes,
 		UpstreamTimeout: defaultUpstreamTimeout,
 	}
@@ -95,6 +98,13 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("HM_MCP_TRUSTED_PROXY must be true or false, got %q", raw)
 		}
 		cfg.TrustedProxy = trusted
+	}
+
+	if raw := strings.TrimSpace(getenv("HM_MCP_UPSTREAM_CA_PEM")); raw != "" {
+		if !x509.NewCertPool().AppendCertsFromPEM([]byte(raw)) {
+			return Config{}, fmt.Errorf("HM_MCP_UPSTREAM_CA_PEM must hold at least one PEM-encoded CA certificate")
+		}
+		cfg.UpstreamCAPEM = raw
 	}
 
 	if raw := strings.TrimSpace(getenv("HM_MCP_MAX_RESULT_BYTES")); raw != "" {

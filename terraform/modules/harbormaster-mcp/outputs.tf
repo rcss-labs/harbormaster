@@ -47,3 +47,8 @@ output "waf_log_group_name" {
   description = "CloudWatch log group of the WAF log (blocked and counted requests)."
   value       = aws_cloudwatch_log_group.waf.name
 }
+
+output "alarm_arns" {
+  description = "ARNs of the CloudWatch alarms by short name (alb-5xx, target-5xx, unhealthy-hosts, waf-blocked). Empty when alarm_sns_topic_arns is empty."
+  value       = { for key, alarm in aws_cloudwatch_metric_alarm.this : key => alarm.arn }
+}

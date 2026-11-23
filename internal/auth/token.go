@@ -197,9 +197,10 @@ func (a *Service) serveToken(w http.ResponseWriter, r *http.Request, next http.H
 // ClientIP is the peer address, unless trustedProxy says exactly one trusted proxy (the load balancer) sits in front,
 // in which case it is the rightmost X-Forwarded-For entry, the one that proxy appended.
 //
-// When that entry lies inside gatewayCIDRs the request came through the MCP gateway: the gateway forwards the chain
-// the public load balancer built, so the entry to its left is the real client. Exactly one such extra hop is read,
-// and only from a configured gateway address; anything further left is client-controlled and never used.
+// When that entry lies inside gatewayCIDRs the request came through the MCP gateway: the gateway sends exactly one
+// X-Forwarded-For entry (the client address its public load balancer appended), so the entry to its left is the real
+// client. Exactly one such extra hop is read, and only from a configured gateway address; anything further left is
+// never used.
 func ClientIP(r *http.Request, trustedProxy bool, gatewayCIDRs []netip.Prefix) string {
 	if trustedProxy {
 		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
