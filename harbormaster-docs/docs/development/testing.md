@@ -50,7 +50,7 @@ GitHub Actions runs `.github/workflows/ci.yml` on every pull request and every p
 | `tf-check` | `make tf-check` with tflint | Yes |
 | `e2e` | `make e2e` (Playwright) | No, reported only |
 | `images` | Builds and runtime-checks the server, scanner and MCP images | No, reported only |
-| `vulncheck` | `make vulncheck` | No, reported only |
+| `vulncheck` | `make vulncheck`: fails on called advisories not listed, with a reason, in `tools/vulncheck-accepted.txt` | No, reported only |
 
 - `main` is protected: changes arrive through a pull request, and the four required checks must pass. This applies to administrators too.
 - The `go-test` service images are pinned to the same versions as `make test-db` and `tools/kv-images.txt`. The job's first step fails if they drift, so change a pin in both places.

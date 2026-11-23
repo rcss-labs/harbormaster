@@ -1,0 +1,3 @@
+{"config":{"scanner_name":"govulncheck"}}
+{"finding":{"osv":"GO-2026-6909","trace":[{"module":"github.com/crewjam/saml","package":"github.com/crewjam/saml","function":"ParseXMLResponse"}]}}
+{"finding":{"osv":"GO-2099-0001","trace":[{"module":"example.com/lib","package":"example.com/lib","function":"Parse"}]}}

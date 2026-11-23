@@ -34,7 +34,7 @@ In order: `lint`, `test`, `vulncheck`, `build`, `image`, `check-image`, `scanner
 
 | Step | What it checks |
 |---|---|
-| `vulncheck` | `govulncheck` on the call graph of every package |
+| `vulncheck` | `govulncheck` on the call graph of every package; fails on called advisories not listed in `tools/vulncheck-accepted.txt` |
 | `image` | Builds `harbormaster:<version>`. Use `ARCH=arm64` with `cpu_architecture = "ARM64"` |
 | `check-image` | Non-root user, health check, distroless, read-only root filesystem start |
 | `scanner-image`, `mcp-image` | Build the scanner and MCP gateway images |
