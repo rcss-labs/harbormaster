@@ -602,10 +602,11 @@ These are the `harbormaster-mcp` container's variables; the Terraform module set
 | `HM_MCP_UPSTREAM_URL` | required | Harbormaster's internal `https://` base URL |
 | `HM_MCP_PUBLIC_URL` | required | The gateway's public `https://` base URL, no path |
 | `HM_MCP_LISTEN` | `:8481` | Listen address; the image's healthcheck follows its port |
-| `HM_MCP_TRUSTED_PROXY` | `true` | Take the client IP from the load balancer's `X-Forwarded-For` |
+| `HM_MCP_TRUSTED_PROXY` | `false` | Set `true` only behind the public load balancer: the client IP is then the entry it appended to `X-Forwarded-For`, and that one entry is what the gateway passes on to Harbormaster. Left `false`, anyone can spoof their IP, so the gateway uses its direct peer. The Terraform module sets `true` |
 | `HM_MCP_ALLOWED_ORIGINS` | empty | Comma-separated browser origins allowed to call `/mcp`; a request with another `Origin` gets 403 |
 | `HM_MCP_MAX_RESULT_BYTES` | `100000` | Largest tool result (10000 to 140000) |
 | `HM_MCP_UPSTREAM_TIMEOUT` | `30s` | Per call to Harbormaster (`search_logs` uses 90 s) |
+| `HM_MCP_UPSTREAM_CA_PEM` | empty | PEM text of extra CA certificates (public material), added to the system roots for the connection to `HM_MCP_UPSTREAM_URL` only. Needed when Harbormaster's internal load balancer presents a certificate from a private CA, which the gateway image does not carry. Invalid PEM stops startup with exit code 2 |
 | `HM_MCP_AUTHORIZE_URL` | empty | Harbormaster's private `https://` base URL, no path. Setting it turns OAuth on: the gateway serves the well-known metadata documents and relays `POST /oauth/token` |
 | `HM_MCP_AUTHORIZE_VIA_GATEWAY` | `false` | Advertise the gateway's own `/oauth/authorize` (a bare redirect to `HM_MCP_AUTHORIZE_URL`) for a client that refuses an authorization endpoint on another host |
 
