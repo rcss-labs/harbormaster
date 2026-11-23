@@ -44,11 +44,13 @@ func New(c awsx.Clients, s *store.Store, ttl time.Duration) *Client {
 	return &Client{Clients: c, Store: s, TTL: ttl, MaxStale: 10 * time.Minute, Now: time.Now, Log: slog.Default()}
 }
 
+// now is truncated to the microsecond Postgres keeps, so a FetchedAt read back from the cache equals the one the
+// filling fetch reported (Linux clocks carry nanoseconds) and responses built from it stay byte-identical.
 func (c *Client) now() time.Time {
 	if c.Now == nil {
-		return time.Now()
+		return time.Now().Truncate(time.Microsecond)
 	}
-	return c.Now()
+	return c.Now().Truncate(time.Microsecond)
 }
 
 func (c *Client) log() *slog.Logger {

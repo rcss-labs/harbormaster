@@ -59,6 +59,26 @@ func TestFetch_ServesFromCacheWithinTTL(t *testing.T) {
 	}
 }
 
+// Linux clocks carry nanoseconds while Postgres keeps microseconds. A cache hit must report the same FetchedAt as
+// the fetch that filled the cache, or every response built from it (and its ETag) changes on the next poll.
+func TestFetch_CachedFetchedAtMatchesFirstFetchWithNanosecondClock(t *testing.T) {
+	s := storetest.Open(t)
+	now := testNow.Add(789 * time.Nanosecond)
+	client := clientWithStore(newFakeClients(), s, &now)
+	ctx := context.Background()
+	first, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.FetchedAt.Equal(first.FetchedAt) {
+		t.Errorf("cached FetchedAt = %v, want %v (the first fetch's)", second.FetchedAt, first.FetchedAt)
+	}
+}
+
 func TestFetch_CacheIsSharedAcrossClients(t *testing.T) {
 	s := storetest.Open(t)
 	fa, fb := newFakeClients(), newFakeClients()
