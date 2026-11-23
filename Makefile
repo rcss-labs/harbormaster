@@ -10,7 +10,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test lint test-db test-kv run run-mcp run-split split-smoke e2e tf-check test-it-exec staticcheck \
 	image check-image release release-check scanner-image check-scanner-image mcp-image check-mcp-image vulncheck icons check-notices soak \
-	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
+	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-mcp-check floci-sanity floci-down
 
 
 build:
@@ -224,6 +224,29 @@ floci-check:
 	git checkout -- internal/web/dist/index.html
 	tools/floci/prepare.sh
 	cd web && npx playwright test -c playwright.floci.config.ts
+
+# floci-mcp-check checks access tokens, OAuth discovery and the MCP gateway against floci, in two steps that run one after the
+# other on the same port (HM_FLOCI_PORT, default 8491; the plain floci suite keeps 8490): first the Playwright tokens config
+# (its webServer starts tools/floci/serve-tokens.sh, i.e. HM_API_TOKENS and HM_OAUTH on, and its setup project runs
+# connect.sh), which stops the server when it ends; then tools/floci/mcp-e2e.sh, which finds nothing listening, starts
+# serve-tokens.sh and bin/harbormaster-mcp (HM_FLOCI_MCP_PORT, default 8495) itself, runs connect.sh and stops both on exit.
+# Do not run it next to floci-serve or floci-check: all of them share one Postgres. Needs make floci-up floci-seed first.
+floci-mcp-check:
+	tools/floci/env.sh >/dev/null
+	@if ! git diff --quiet -- internal/web/dist/index.html; then \
+		echo "make floci-mcp-check: internal/web/dist/index.html has local edits; commit or stash them (the build overwrites the file and this target restores it)" >&2; \
+		exit 2; \
+	fi
+	$(MAKE) build
+	git checkout -- internal/web/dist/index.html
+	tools/floci/prepare.sh
+	cd web && npx playwright test -c playwright.floci-tokens.config.ts
+	tools/floci/mcp-e2e.sh
+
+# floci-sanity drives the write and core-feature paths (restart, scale, deploy, off-hours, permissions, admin, ...) through
+# the API of a running server (make floci-serve) and verifies each change in floci with the aws CLI.
+floci-sanity:
+	tools/floci/sanity.sh
 
 floci-down:
 	$(FLOCI_COMPOSE) down -v --remove-orphans

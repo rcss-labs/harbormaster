@@ -307,7 +307,13 @@ const problemsByPage = new WeakMap<Page, string[]>()
  * every later `expectPhoneLayoutClean` on this page. `isExpectedFailure` is the allowlist for HTTP failures.
  */
 // The app asks who is signed in on every load, so a signed-out page always sees this 401.
-const signedOutProbe: ExpectedFailure = (method, url, status) => method === 'GET' && status === 401 && new URL(url).pathname === '/api/me'
+// Designed probes: GET /api/me answers 401 when signed out, and GET /api/tokens answers 404 while HM_API_TOKENS is off
+// (the My access token card hides itself on it).
+const signedOutProbe: ExpectedFailure = (method, url, status) => {
+  if (method !== 'GET') return false
+  const path = new URL(url).pathname
+  return (status === 401 && path === '/api/me') || (status === 404 && path === '/api/tokens')
+}
 
 export function watchPage(page: Page, isExpectedFailure: ExpectedFailure = signedOutProbe): string[] {
   const problems: string[] = []

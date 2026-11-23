@@ -89,8 +89,10 @@ test('overview and deploy use two columns at 2560 and 3840', async ({ page, requ
       // The columns re-render as data arrives, so read both boxes in one step and poll until they are side by side.
       const layout = () =>
         split.evaluate((element) => {
-          const [first, second] = [...element.children].map((child) => child.getBoundingClientRect())
-          return { columns: element.children.length, rightOfFirst: second.x >= first.right - 1, topOffset: Math.abs(second.y - first.y) }
+          // CSS columns balance by height, so the panel that opens the second column depends on the content; find it.
+          const [first, ...rest] = [...element.children].map((child) => child.getBoundingClientRect())
+          const second = rest.find((box) => box.x >= first.right - 1)
+          return { columns: element.children.length, rightOfFirst: second !== undefined, topOffset: second ? Math.abs(second.y - first.y) : Infinity }
         })
       await expect.poll(layout, { message: `${path} at ${width}: two columns side by side` }).toMatchObject({ rightOfFirst: true })
       const settled = await layout()

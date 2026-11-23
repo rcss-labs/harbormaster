@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/rcss-labs/harbormaster/internal/cost"
 	"io"
@@ -754,5 +755,35 @@ func TestAnalyticsCost_SpotWithoutSpotRateIsUnpriced(t *testing.T) {
 	}
 	if !found || got.KPIs.UnpricedTasks < 3 {
 		t.Errorf("unpriced_regions %v, unpriced tasks %d; want us-east-1 and at least 3 tasks", got.KPIs.UnpricedRegions, got.KPIs.UnpricedTasks)
+	}
+}
+
+// Every region is priced in the fake estate, so unpriced_regions is empty. It must still be a JSON array: the Cost tab
+// reads its length, and a null crashed the whole page.
+func TestAnalyticsCost_ListsAreArraysWhenEmpty(t *testing.T) {
+	srv, fk, st, _ := newServerCustom(t, true, withCostAnalytics)
+	seedMockupTags(t, st)
+	pollAll(t, st, fk)
+	resp := login(t, srv, "sam", testPassword).get("/api/analytics/cost")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var body map[string]json.RawMessage
+	decode(t, resp, &body)
+	var kpis map[string]json.RawMessage
+	if err := json.Unmarshal(body["kpis"], &kpis); err != nil {
+		t.Fatal(err)
+	}
+	lists := map[string]json.RawMessage{
+		"kpis.unpriced_regions": kpis["unpriced_regions"],
+		"sources":               body["sources"],
+		"by_cluster":            body["by_cluster"],
+		"by_account":            body["by_account"],
+		"by_tag":                body["by_tag"],
+	}
+	for name, value := range lists {
+		if trimmed := strings.TrimSpace(string(value)); !strings.HasPrefix(trimmed, "[") {
+			t.Errorf("%s = %s, want a JSON array (never null)", name, trimmed)
+		}
 	}
 }

@@ -1045,7 +1045,9 @@
         "action": "string",
         "actor": "string",
         "details": {
-          "$map": "any"
+          "$null": {
+            "$map": "any"
+          }
         },
         "id": "number",
         "ip": "string",
