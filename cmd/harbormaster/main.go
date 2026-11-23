@@ -25,6 +25,7 @@ commands:
   healthcheck   check that the server is healthy
   version       print version information
   create-admin  create an administrator account
+  revoke-tokens revoke access tokens, OAuth grants and codes; --all for everyone, --user <name> for one user
 `
 
 func main() {
@@ -70,6 +71,8 @@ func runWith(ctx context.Context, args []string, getenv func(string) string, std
 		return exitCode(runHealthcheck(ctx, getenv), stderr)
 	case command == "create-admin":
 		return exitCode(runCreateAdmin(ctx, args[1:], getenv, stdin, stdout), stderr)
+	case command == "revoke-tokens":
+		return exitCode(runRevokeTokens(ctx, args[1:], getenv, stdout), stderr)
 	default:
 		fmt.Fprint(stderr, usageText)
 		return 2
