@@ -2,6 +2,7 @@ package mcpgw
 
 import (
 	"context"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -400,5 +401,38 @@ func TestNewUpstream_RejectsBadBaseURLs(t *testing.T) {
 func TestRoute_String(t *testing.T) {
 	if got := (Route{Method: "GET", Pattern: "/api/services/{serviceId}"}).String(); got != "GET /api/services/{serviceId}" {
 		t.Errorf("String = %q", got)
+	}
+}
+
+// Harbormaster's internal ALB may carry a certificate from a private CA the gateway image does not know.
+func TestUpstream_TrustsTheConfiguredExtraCA(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(srv.Close)
+	caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+	call := Call{Route: Route{Method: "GET", Pattern: "/api/overview"}}
+
+	without, err := NewUpstreamWithCA(srv.URL, 5*time.Second, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := without.Do(context.Background(), "tok", "", call); err == nil {
+		t.Error("an unknown CA was trusted without HM_MCP_UPSTREAM_CA_PEM")
+	}
+
+	with, err := NewUpstreamWithCA(srv.URL, 5*time.Second, caPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := with.Do(context.Background(), "tok", "", call)
+	if err != nil || resp.Status != http.StatusOK {
+		t.Errorf("with the CA configured: resp %+v, err %v; want 200", resp, err)
+	}
+}
+
+func TestNewUpstreamWithCA_RejectsPEMWithoutCertificates(t *testing.T) {
+	if _, err := NewUpstreamWithCA("https://x.internal", time.Second, "garbage"); err == nil {
+		t.Error("garbage PEM accepted")
 	}
 }

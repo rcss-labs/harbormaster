@@ -3,6 +3,8 @@ package mcpgw
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,6 +77,17 @@ type Upstream struct {
 // may be nil; a given client is copied and its redirect policy and cookie jar
 // are overridden.
 func NewUpstream(baseURL string, defaultTimeout time.Duration, client *http.Client) (*Upstream, error) {
+	return newUpstream(baseURL, defaultTimeout, client, "")
+}
+
+// NewUpstreamWithCA is NewUpstream with its own client, whose TLS roots are the
+// system pool plus the PEM certificates in extraCAPEM (empty: the system pool
+// alone). The extra roots apply to this upstream client only.
+func NewUpstreamWithCA(baseURL string, defaultTimeout time.Duration, extraCAPEM string) (*Upstream, error) {
+	return newUpstream(baseURL, defaultTimeout, nil, extraCAPEM)
+}
+
+func newUpstream(baseURL string, defaultTimeout time.Duration, client *http.Client, extraCAPEM string) (*Upstream, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("upstream base URL: %w", err)
@@ -96,6 +109,16 @@ func NewUpstream(baseURL string, defaultTimeout time.Duration, client *http.Clie
 		// No proxy from the environment: the request goes straight to the configured host.
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
+		if extraCAPEM != "" {
+			roots, err := x509.SystemCertPool()
+			if err != nil {
+				roots = x509.NewCertPool()
+			}
+			if !roots.AppendCertsFromPEM([]byte(extraCAPEM)) {
+				return nil, errors.New("extra CA PEM holds no certificate")
+			}
+			transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		}
 		httpClient = http.Client{Transport: transport}
 	}
 	httpClient.Jar = nil

@@ -93,6 +93,7 @@ func TestServe_ConfigErrorExits2NamingTheVariable(t *testing.T) {
 		"no upstream":   {map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com"}, "HM_MCP_UPSTREAM_URL"},
 		"no public":     {map[string]string{"HM_MCP_UPSTREAM_URL": "https://hm.internal"}, "HM_MCP_PUBLIC_URL"},
 		"http upstream": {map[string]string{"HM_MCP_UPSTREAM_URL": "http://hm.internal", "HM_MCP_PUBLIC_URL": "https://mcp.example.com"}, "HM_MCP_UPSTREAM_URL"},
+		"bad ca pem":    {map[string]string{"HM_MCP_UPSTREAM_URL": "https://hm.internal", "HM_MCP_PUBLIC_URL": "https://mcp.example.com", "HM_MCP_UPSTREAM_CA_PEM": "not a certificate"}, "HM_MCP_UPSTREAM_CA_PEM"},
 		"bad max":       {map[string]string{"HM_MCP_UPSTREAM_URL": "https://hm.internal", "HM_MCP_PUBLIC_URL": "https://mcp.example.com", "HM_MCP_MAX_RESULT_BYTES": "5"}, "HM_MCP_MAX_RESULT_BYTES"},
 	} {
 		t.Run(name, func(t *testing.T) {
