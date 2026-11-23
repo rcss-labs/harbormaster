@@ -185,7 +185,7 @@ func TestValidate(t *testing.T) {
 		{name: "unparseable secret reference", mutate: addSecret("not-an-arn"), wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
 		{name: "non-admin adds out-of-prefix secretOptions", mutate: addLogSecret(ssmFrom), wantErr: "Changing secrets outside the existing prefixes needs a global admin"},
 		{name: "admin adds out-of-prefix secretOptions", admin: true, mutate: addLogSecret(ssmFrom)},
-		{name: "non-admin adds in-prefix secretOptions", mutate: addLogSecret(ssmNew)},
+		{name: "non-admin adds in-prefix secretOptions", base: func(d Definition) { firstContainer(d)["logConfiguration"] = map[string]any{"logDriver": "splunk"} }, mutate: addLogSecret(ssmNew)},
 		{name: "non-admin adds out-of-prefix repositoryCredentials", mutate: func(d Definition) {
 			firstContainer(d)["repositoryCredentials"] = map[string]any{"credentialsParameter": smOther}
 		}, wantErr: "Changing secrets outside the existing prefixes needs a global admin"},

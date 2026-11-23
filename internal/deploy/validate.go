@@ -103,7 +103,102 @@ func validateCanonical(base, draft Definition, admin bool, accountID string) err
 	if err := validateHostEscalations(base, draft); err != nil {
 		return err
 	}
-	return validateSecrets(base, draft, accountID)
+	if err := validateSecrets(base, draft, accountID); err != nil {
+		return err
+	}
+	return validateLogDestinations(base, draft)
+}
+
+const logDestinationMessage = "Changing where a container's logs go needs a global admin"
+
+// logSetup is one container's log driver and options as sent to ECS.
+type logSetup struct {
+	driver  string
+	options map[string]any
+}
+
+func logSetups(def Definition) []logSetup {
+	var setups []logSetup
+	containers, _ := def["containerDefinitions"].([]any)
+	for _, entry := range containers {
+		container, _ := entry.(map[string]any)
+		logConfig, _ := container["logConfiguration"].(map[string]any)
+		if logConfig == nil {
+			continue
+		}
+		driver, _ := logConfig["logDriver"].(string)
+		options, _ := logConfig["options"].(map[string]any)
+		setups = append(setups, logSetup{driver: driver, options: options})
+	}
+	return setups
+}
+
+// awslogsDestination is the (group, region) pair Harbormaster reads logs from. A missing region
+// is the region the service runs in, the same default the log view applies; base and draft
+// belong to the same service, so a missing region on both sides compares equal.
+func awslogsDestination(options map[string]any) (group, region string) {
+	group, _ = options["awslogs-group"].(string)
+	region, _ = options["awslogs-region"].(string)
+	return group, region
+}
+
+// hasFoldedLogKey reports whether options holds two keys that differ only in letter case, or a
+// key that spells awslogs-group/awslogs-region in a non-exact case. Harbormaster reads the exact
+// spelling, so either could hide a different destination from the check.
+func hasFoldedLogKey(options map[string]any) bool {
+	seen := map[string]bool{}
+	for key := range options {
+		folded := strings.ToLower(key)
+		if seen[folded] {
+			return true
+		}
+		seen[folded] = true
+		if (folded == "awslogs-group" || folded == "awslogs-region") && key != folded {
+			return true
+		}
+	}
+	return false
+}
+
+// validateLogDestinations lets a non-admin keep or remove log configuration but not redirect it:
+// a draft container must use a driver the base already uses; awslogs containers must keep one of
+// the base's (group, region) pairs; any other driver must keep the exact options (secretOptions
+// are checked with the secrets) of a base container with that driver, the stricter simple rule.
+func validateLogDestinations(base, draft Definition) error {
+	baseDrivers := map[string]bool{}
+	baseDestinations := map[[2]string]bool{}
+	var baseOthers []logSetup
+	for _, setup := range logSetups(base) {
+		baseDrivers[setup.driver] = true
+		if setup.driver == "awslogs" {
+			group, region := awslogsDestination(setup.options)
+			baseDestinations[[2]string{group, region}] = true
+		} else {
+			baseOthers = append(baseOthers, setup)
+		}
+	}
+	for _, setup := range logSetups(draft) {
+		if !baseDrivers[setup.driver] || hasFoldedLogKey(setup.options) {
+			return invalid("%s", logDestinationMessage)
+		}
+		if setup.driver == "awslogs" {
+			group, region := awslogsDestination(setup.options)
+			if !baseDestinations[[2]string{group, region}] {
+				return invalid("%s", logDestinationMessage)
+			}
+			continue
+		}
+		matched := len(setup.options) == 0
+		for _, existing := range baseOthers {
+			if existing.driver == setup.driver && reflect.DeepEqual(existing.options, setup.options) {
+				matched = true
+			}
+		}
+		if !matched {
+			return invalid("%s", logDestinationMessage)
+		}
+	}
+	return nil
 }
 
 // hasEssentialContainer treats a missing "essential" as true, the ECS default.
