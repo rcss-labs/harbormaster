@@ -86,6 +86,13 @@ func nullableField(shape any, key string) any {
 	return fields
 }
 
+// nullableItemField is nullableField for a field of the objects in the shape's "items" array.
+func nullableItemField(shape any, key string) any {
+	items := shape.(map[string]any)["items"].([]any)
+	nullableField(items[0], key)
+	return shape
+}
+
 // Known drift source: a nil Go slice serialises as null, but the shapes below say array. Handlers must emit
 // empty slices ([]) unless the field is deliberately nullable (see nullableField).
 // contractShapes lists every response body the SPA reads, keyed by the name the Vitest contract test uses.
@@ -111,7 +118,7 @@ func contractShapes() map[string]any {
 		"tagAssignments":     shapeOf(reflect.TypeFor[TagAssignmentsResponse]()),
 		"accounts":           shapeOf(reflect.TypeFor[AccountsDTO]()),
 		"accountTest":        shapeOf(reflect.TypeFor[AccountTestResponse]()),
-		"audit":              shapeOf(reflect.TypeFor[ListResponse[AuditEntryDTO]]()),
+		"audit":              nullableItemField(shapeOf(reflect.TypeFor[ListResponse[AuditEntryDTO]]()), "details"),
 		"serviceMetrics":     nullableField(shapeOf(reflect.TypeFor[ServiceMetricsDTO]()), "tasks_now"),
 		"clusterMetrics":     shapeOf(reflect.TypeFor[ClusterMetricsDTO]()),
 		"clustersMetrics":    shapeOf(reflect.TypeFor[ClustersMetricsDTO]()),
