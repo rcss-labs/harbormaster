@@ -64,6 +64,8 @@ func RetentionFrom(c config.Config) store.Retention {
 		AvailabilityDaily: c.Retention.AvailabilityDaily,
 		CapacityDaily:     c.Retention.CapacityDaily,
 		UtilDaily:         c.Retention.UtilDaily,
+		ScanImages:        c.Retention.ScanImages,
+		ScanRuns:          c.Retention.ScanRuns,
 		NotificationLog:   c.Retention.NotificationLog,
 	}
 }
