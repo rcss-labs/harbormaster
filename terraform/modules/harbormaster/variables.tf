@@ -494,6 +494,8 @@ variable "cache_alarm_actions" {
   default     = []
 }
 
+# Kept only so its validation rejects configurations that still set it; nothing else reads it.
+# tflint-ignore: terraform_unused_declarations
 variable "allow_split_without_cache" {
   description = "Deprecated, must stay false. The web, poller and coordinator roles refuse to start without a store (HM_KV_URL), so split_services always needs a cache_mode of \"create\" or \"external\"."
   type        = bool

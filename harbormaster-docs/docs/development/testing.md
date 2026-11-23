@@ -38,6 +38,27 @@ This page lists Harbormaster's test suites, what each needs, and how to run them
 
 `make test` never calls AWS.
 
+## Continuous integration
+
+GitHub Actions runs `.github/workflows/ci.yml` on every pull request and every push to `main`. Each check is its own job, and they run in parallel.
+
+| Job | Runs | Required to merge |
+|---|---|---|
+| `lint` | `make lint` | Yes |
+| `go-test` | `go test ./...` against Postgres, Valkey and Redis service containers | Yes |
+| `web-test` | Vitest (`npm --prefix web test -- --run`) | Yes |
+| `tf-check` | `make tf-check` with tflint | Yes |
+| `e2e` | `make e2e` (Playwright) | No, reported only |
+| `images` | Builds and runtime-checks the server, scanner and MCP images | No, reported only |
+| `vulncheck` | `make vulncheck`: fails on called advisories not listed, with a reason, in `tools/vulncheck-accepted.txt` | No, reported only |
+
+- `main` is protected: changes arrive through a pull request with one approval, and the four required checks must pass. Repository administrators can bypass these rules.
+- The `go-test` service images are pinned to the same versions as `make test-db` and `tools/kv-images.txt`. The job's first step fails if they drift, so change a pin in both places.
+- When `e2e` fails, its screenshots and traces are attached to the run as the `e2e-failures` artifact for 7 days.
+- `.github/workflows/soak.yml` runs `make soak` every Monday at 03:00 UTC. Start it by hand from the Actions tab with **Run workflow**.
+- Pull requests from forks run with a read-only token and no secrets.
+- If a check fails for a reason unrelated to the change, such as a known flaky test, rerun the failed job from the pull request's Checks tab. Report flaky tests as issues.
+
 ## Terminal integration test against real AWS
 
 `make test-it-exec` starts a terminal session in a real ECS task, runs an `echo`, runs `exit`, and checks that the session closes as ended by the agent. It makes real ECS and SSM calls. It needs AWS credentials and these variables:

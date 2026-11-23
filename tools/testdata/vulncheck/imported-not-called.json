@@ -1,0 +1,2 @@
+{"config":{"scanner_name":"govulncheck"}}
+{"finding":{"osv":"GO-2099-0002","trace":[{"module":"example.com/lib","package":"example.com/lib"}]}}

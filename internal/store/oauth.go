@@ -196,6 +196,9 @@ func (s *Store) RotateOAuthRefresh(ctx context.Context, publicID, secretHash str
 // nil maxLifetime applies none. The returned grant carries the clamped end.
 func (s *Store) RotateOAuthRefreshWithin(ctx context.Context, publicID, secretHash string, newAccess, newRefresh APIToken,
 	now time.Time, grace time.Duration, maxLifetime func(User) time.Duration) (OAuthGrant, error) {
+	// Postgres keeps timestamps at microsecond precision. Comparing a nanosecond "now" with a stored rotated_at would
+	// push a retry made exactly at the grace edge just past it, and revoke the grant as a reuse.
+	now = now.Truncate(time.Microsecond)
 	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return OAuthGrant{}, fmt.Errorf("begin: %w", err)

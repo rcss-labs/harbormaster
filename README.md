@@ -1,5 +1,6 @@
 # Harbormaster
 
+[![CI](https://github.com/rcss-labs/harbormaster/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rcss-labs/harbormaster/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/rcss-labs/harbormaster)](LICENSE)
 [![Go version](https://img.shields.io/github/go-mod/go-version/rcss-labs/harbormaster?logo=go)](go.mod)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](web/package.json)

@@ -168,7 +168,8 @@ staticcheck:
 
 # vulncheck scans the call graph of every package against the Go vulnerability database (needs network access).
 vulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+	tools/vulncheck_test.sh
+	tools/vulncheck.sh
 
 # release-check refuses an untagged HEAD and a -dirty VERSION.
 release-check:

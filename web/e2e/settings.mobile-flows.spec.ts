@@ -37,10 +37,13 @@ test('Users: a preset chosen in the permissions sheet is saved and the sheet sho
     await dev.click()
     await page.getByLabel('Preset for oncall on Dev').selectOption('Viewer')
     await expect(perms.getByRole('button', { name: 'oncall on Dev: Viewer' })).toBeVisible()
-    const data = await (await page.request.get('/api/permissions')).json()
-    const oncall = data.users.find((user: { username: string }) => user.username === 'oncall')
-    const devId = data.tags.find((tag: { name: string }) => tag.name === 'Dev').id
-    expect(oncall.perms[String(devId)]).toBe(1)
+    // The sheet shows the preset as soon as the save is sent; poll until the server has stored it.
+    await expect.poll(async () => {
+      const data = await (await page.request.get('/api/permissions')).json()
+      const oncall = data.users.find((user: { username: string }) => user.username === 'oncall')
+      const devId = data.tags.find((tag: { name: string }) => tag.name === 'Dev').id
+      return oncall.perms[String(devId)]
+    }).toBe(1)
     await expectPhoneLayoutClean(page)
   } finally {
     const data = await (await page.request.get('/api/permissions')).json()

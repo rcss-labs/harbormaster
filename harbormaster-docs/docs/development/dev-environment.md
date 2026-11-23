@@ -75,7 +75,7 @@ git checkout -- internal/web/dist/index.html
 | `make run`, `make run-mcp`, `make run-split` | Run locally |
 | `make e2e`, `make soak`, `make split-smoke` | Longer suites. See [Testing](testing.md) |
 | `make tf-check` | Validate every Terraform root. Never plans or applies |
-| `make vulncheck` | `govulncheck` on every package |
+| `make vulncheck` | `govulncheck` on every package; fails on called advisories not listed in `tools/vulncheck-accepted.txt` |
 
 For all targets read the `Makefile`.
 
