@@ -10,7 +10,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test lint test-db test-kv run run-mcp run-split split-smoke e2e tf-check test-it-exec staticcheck \
 	image check-image release release-check scanner-image check-scanner-image mcp-image check-mcp-image vulncheck icons check-notices soak \
-	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-down
+	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-sanity floci-down
 
 
 build:
@@ -224,6 +224,11 @@ floci-check:
 	git checkout -- internal/web/dist/index.html
 	tools/floci/prepare.sh
 	cd web && npx playwright test -c playwright.floci.config.ts
+
+# floci-sanity drives the write and core-feature paths (restart, scale, deploy, off-hours, permissions, admin, ...) through
+# the API of a running server (make floci-serve) and verifies each change in floci with the aws CLI.
+floci-sanity:
+	tools/floci/sanity.sh
 
 floci-down:
 	$(FLOCI_COMPOSE) down -v --remove-orphans
