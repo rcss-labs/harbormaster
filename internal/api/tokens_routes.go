@@ -16,4 +16,9 @@ func (s *Server) tokenRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/tokens/current", s.whoAmI, routeOptions{Token: auth.ScopeRead})
 	s.handle(mux, "GET /api/users/{id}/tokens", s.listUserTokens, routeOptions{Admin: true})
 	s.handle(mux, "DELETE /api/users/{id}/tokens/{tokenId}", s.deleteUserToken, routeOptions{Admin: true})
+	if s.oauthOn() {
+		// Connected apps (OAuth grants): session-only like the rest of token management.
+		s.handle(mux, "DELETE /api/oauth/grants/{id}", s.deleteGrant, routeOptions{})
+		s.handle(mux, "DELETE /api/users/{id}/oauth-grants/{grantId}", s.deleteUserGrant, routeOptions{Admin: true})
+	}
 }

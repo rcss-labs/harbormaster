@@ -91,6 +91,12 @@ func TestLoad_Defaults(t *testing.T) {
 		SnapshotCacheTTL: 30 * time.Second,
 		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
 		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
+		OAuthAccessTTL:   time.Hour,
+		OAuthClientHosts: []string{"claude.ai"},
+		OAuthRedirectURIs: []string{
+			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
+			"http://localhost/callback", "http://127.0.0.1/callback",
+		},
 		PageSizeDefault:      100,
 		PageSizeMax:          500,
 		MetricsCacheTTL:      60 * time.Second,
@@ -818,5 +824,89 @@ func TestLoad_TokenValidation(t *testing.T) {
 				t.Fatalf("err = %v, want it to name %s", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoad_OAuthDefaultsAndValidation(t *testing.T) {
+	load := func(extra map[string]string) (Config, error) {
+		env := map[string]string{"HM_DATABASE_URL": "postgres://example"}
+		for k, v := range extra {
+			env[k] = v
+		}
+		return Load(envFromMap(env))
+	}
+
+	cfg, err := load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuth || cfg.OAuthAccessTTL != time.Hour {
+		t.Fatalf("defaults: OAuth=%v ttl=%v, want off and 1h", cfg.OAuth, cfg.OAuthAccessTTL)
+	}
+	if !reflect.DeepEqual(cfg.OAuthClientHosts, []string{"claude.ai"}) {
+		t.Fatalf("client hosts = %v, want [claude.ai]", cfg.OAuthClientHosts)
+	}
+	wantRedirects := []string{
+		"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
+		"http://localhost/callback", "http://127.0.0.1/callback",
+	}
+	if !reflect.DeepEqual(cfg.OAuthRedirectURIs, wantRedirects) {
+		t.Fatalf("redirect URIs = %v, want %v", cfg.OAuthRedirectURIs, wantRedirects)
+	}
+
+	on := map[string]string{"HM_OAUTH": "true", "HM_API_TOKENS": "true", "HM_MCP_PUBLIC_URL": "https://mcp.example.com"}
+	with := func(k, v string) map[string]string {
+		m := map[string]string{}
+		for key, val := range on {
+			m[key] = val
+		}
+		m[k] = v
+		return m
+	}
+	without := func(k string) map[string]string {
+		m := map[string]string{}
+		for key, val := range on {
+			if key != k {
+				m[key] = val
+			}
+		}
+		return m
+	}
+	if cfg, err := load(on); err != nil || !cfg.OAuth {
+		t.Fatalf("valid OAuth config: %v (OAuth=%v)", err, cfg.OAuth)
+	}
+	failures := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"needs api tokens", without("HM_API_TOKENS"), "HM_API_TOKENS"},
+		{"needs public url", without("HM_MCP_PUBLIC_URL"), "HM_MCP_PUBLIC_URL"},
+		{"ttl below 5m", with("HM_OAUTH_ACCESS_TTL", "4m"), "HM_OAUTH_ACCESS_TTL"},
+		{"ttl above 24h", with("HM_OAUTH_ACCESS_TTL", "25h"), "HM_OAUTH_ACCESS_TTL"},
+		{"host with scheme", with("HM_OAUTH_CLIENT_HOSTS", "https://claude.ai"), "HM_OAUTH_CLIENT_HOSTS"},
+		{"host uppercase", with("HM_OAUTH_CLIENT_HOSTS", "Claude.ai"), "HM_OAUTH_CLIENT_HOSTS"},
+		{"redirect http off loopback", with("HM_OAUTH_REDIRECT_URIS", "http://evil.example/cb"), "HM_OAUTH_REDIRECT_URIS"},
+		{"redirect with query", with("HM_OAUTH_REDIRECT_URIS", "https://claude.ai/cb?x=1"), "HM_OAUTH_REDIRECT_URIS"},
+		{"redirect with fragment", with("HM_OAUTH_REDIRECT_URIS", "https://claude.ai/cb#x"), "HM_OAUTH_REDIRECT_URIS"},
+		{"redirect loopback with port", with("HM_OAUTH_REDIRECT_URIS", "http://localhost:8080/cb"), "HM_OAUTH_REDIRECT_URIS"},
+	}
+	for _, tc := range failures {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := load(tc.env); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one naming %s", err, tc.want)
+			}
+		})
+	}
+	// Bounds are inclusive.
+	for _, ttl := range []string{"5m", "24h"} {
+		if _, err := load(with("HM_OAUTH_ACCESS_TTL", ttl)); err != nil {
+			t.Fatalf("ttl %s refused: %v", ttl, err)
+		}
+	}
+	// Overrides replace the defaults.
+	cfg, err = load(with("HM_OAUTH_CLIENT_HOSTS", "a.example,b.example"))
+	if err != nil || !reflect.DeepEqual(cfg.OAuthClientHosts, []string{"a.example", "b.example"}) {
+		t.Fatalf("hosts override = %v, %v", cfg.OAuthClientHosts, err)
 	}
 }

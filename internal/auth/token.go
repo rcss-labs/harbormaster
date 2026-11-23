@@ -72,12 +72,27 @@ func TokenMaxTTL(cfg config.Config, user store.User, admin bool) time.Duration {
 	return cfg.TokenMaxTTL
 }
 
+// authenticatesAPI reports whether a token of kind may authenticate an API call: a personal token always, an OAuth
+// access token only while HM_OAUTH is on, an OAuth refresh token never (it is only ever exchanged at the token
+// endpoint).
+func (a *Service) authenticatesAPI(kind apitoken.Kind) bool {
+	switch kind {
+	case apitoken.KindPAT:
+		return true
+	case apitoken.KindOAuthAccess:
+		return a.cfg.OAuth
+	default:
+		return false
+	}
+}
+
 // AuthenticateToken resolves a raw bearer token to its stored row and user. It returns ErrUnauthenticated when the
-// token is malformed, unknown, expired, not a personal token of the read scope, its secret does not match, or its
-// user is gone. It records last use at most once a minute. Errors never carry the token or its secret.
+// token is malformed, unknown, expired, of a kind that may not call the API (see authenticatesAPI), not of the read
+// scope, its secret does not match, or its user is gone. It records last use at most once a minute, and for an OAuth
+// access token its grant's last use with it. Errors never carry the token or its secret.
 func (a *Service) AuthenticateToken(ctx context.Context, raw, ip string) (store.APIToken, store.User, error) {
 	parsed, ok := apitoken.Parse(raw)
-	if !ok || parsed.Kind != apitoken.KindPAT {
+	if !ok || !a.authenticatesAPI(parsed.Kind) {
 		return store.APIToken{}, store.User{}, ErrUnauthenticated
 	}
 	tok, err := a.store.GetAPITokenByPublicID(ctx, apitoken.DisplayID(parsed))
@@ -92,7 +107,7 @@ func (a *Service) AuthenticateToken(ctx context.Context, raw, ip string) (store.
 		return store.APIToken{}, store.User{}, ErrUnauthenticated
 	}
 	now := a.now()
-	if !now.Before(tok.ExpiresAt) || tok.Kind != string(apitoken.KindPAT) || tok.Scope != string(ScopeRead) {
+	if !now.Before(tok.ExpiresAt) || tok.Kind != string(parsed.Kind) || tok.Scope != string(ScopeRead) {
 		return store.APIToken{}, store.User{}, ErrUnauthenticated
 	}
 	user, err := a.store.GetUser(ctx, tok.UserID)
@@ -111,6 +126,11 @@ func (a *Service) AuthenticateToken(ctx context.Context, raw, ip string) (store.
 			return store.APIToken{}, store.User{}, err
 		}
 		tok.LastUsedAt, tok.LastUsedIP = &now, ip
+		if tok.GrantID != nil {
+			if err := a.store.TouchOAuthGrant(ctx, *tok.GrantID, now); err != nil {
+				return store.APIToken{}, store.User{}, err
+			}
+		}
 	}
 	return tok, user, nil
 }

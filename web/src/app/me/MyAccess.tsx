@@ -8,6 +8,7 @@ import { TagChip } from '../../components/TagChip'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { AccessTokensCard } from './AccessTokensCard'
+import { ConnectedAppsCard } from './ConnectedAppsCard'
 import styles from './myAccess.module.css'
 
 /** The signed-in user's permissions on each tag. Global admins can do everything, so they get no table. */
@@ -27,6 +28,7 @@ export function MyAccess() {
           </div>
         </div>
         <AccessTokensCard />
+        <ConnectedAppsCard />
       </>
     )
   }
@@ -107,6 +109,7 @@ export function MyAccess() {
       </div>
       )}
       <AccessTokensCard />
+      <ConnectedAppsCard />
     </>
   )
 }

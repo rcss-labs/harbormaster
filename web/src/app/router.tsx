@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { AnalyticsPage, AnalyticsRedirect } from './analytics/AnalyticsPage'
 import { ChangePassword } from './auth/ChangePassword'
 import { Login } from './auth/Login'
+import { OAuthConsent } from './auth/OAuthConsent'
 import { Setup } from './auth/Setup'
 import { useAuth } from './auth/AuthProvider'
 import { Cluster } from './clusters/Cluster'
@@ -70,6 +71,8 @@ export function AppRoutes() {
       </Route>
       <Route element={<RequireAuth />}>
         <Route path="password" element={<ChangePassword />} />
+        {/* OAuth consent for MCP connectors: signed in only, outside the shell; sign-in returns here with the query. */}
+        <Route path="oauth/authorize" element={<OAuthConsent />} />
         <Route element={<Shell />}>
           <Route index element={<Overview />} />
           <Route path="clusters" element={<Clusters />} />

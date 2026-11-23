@@ -44,14 +44,14 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `desired_count` | number | `2` | |
 | `upstream_url` | string | required | `HM_MCP_UPSTREAM_URL`; `https://`. |
 | `public_url` | string | required | `HM_MCP_PUBLIC_URL`; `https://` host, no path. |
-| `authorize_url` | string | `null` | `HM_MCP_AUTHORIZE_URL` (OAuth phase). |
+| `authorize_url` | string | `null` | `HM_MCP_AUTHORIZE_URL`: Harbormaster's private `https://` base URL, where users approve a connector. Setting it turns OAuth on in the gateway (metadata documents, `POST /oauth/token` relay); null leaves OAuth off. Harbormaster also needs `HM_OAUTH=true` (see below). |
 | `allowed_origins` | list(string) | `[]` | `HM_MCP_ALLOWED_ORIGINS`. |
 | `harbormaster_alb_security_group_id` | string | required | The harbormaster module's `security_group_ids.alb`. |
 | `log_retention_days` | number | `30` | Both log groups. |
 | `waf_rate_limit` | number | `300` | Requests per 5 minutes per IP; at least 10. |
 | `waf_common_count_rules` | list(string) | `SizeRestrictions_BODY`, `CrossSiteScripting_BODY`, `GenericRFI_BODY` | Common rule set rules that only count. |
 | `waf_oauth_rate_limit` | number | `60` | Per IP on `/oauth/`; used when `enable_oauth_paths`. |
-| `enable_oauth_paths` | bool | `false` | Adds the `/oauth/` rate rule (OAuth phase). |
+| `enable_oauth_paths` | bool | `false` | Adds the `/oauth/` rate rule. Set it together with `authorize_url`. |
 | `tags` | map(string) | `{}` | |
 
 ## Outputs
@@ -73,3 +73,7 @@ Blocked and counted requests are in the `aws-waf-logs-<name>` log group (`action
 ## Plans and applies
 
 Plans and applies run in TerraDuckTel. Locally, run only `terraform fmt` and `terraform validate` (`make tf-check`).
+
+## OAuth for claude.ai and Claude Desktop connectors
+
+Set `authorize_url` (Harbormaster's internal base URL) and `enable_oauth_paths = true` on this module, and on the Harbormaster module add `HM_OAUTH = "true"` to `extra_env` (it requires `HM_API_TOKENS=true` and `HM_MCP_PUBLIC_URL`, which the example already sets). The gateway then publishes `/.well-known/oauth-protected-resource` (also under `/mcp`) and `/.well-known/oauth-authorization-server`, points every 401 at them, and relays only `POST /oauth/token` to Harbormaster. The approval page stays on the private network. Optional extras go through the Harbormaster module's `extra_env`: `HM_OAUTH_ACCESS_TTL`, `HM_OAUTH_CLIENT_HOSTS`, `HM_OAUTH_REDIRECT_URIS`. The gateway setting `HM_MCP_AUTHORIZE_VIA_GATEWAY` (a redirect fallback if Claude refuses an authorization endpoint on another host) is not a module variable; add it only if the claude.ai spike in `docs/ops/mcp-runbook.md` shows it is needed.

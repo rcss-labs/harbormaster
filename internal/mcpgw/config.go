@@ -22,13 +22,18 @@ const (
 
 // Config is the gateway's whole configuration. It holds no secret.
 type Config struct {
-	Listen          string
-	UpstreamURL     string
-	PublicURL       string
-	AllowedOrigins  []string
-	TrustedProxy    bool
-	MaxResultBytes  int
-	UpstreamTimeout time.Duration
+	Listen      string
+	UpstreamURL string
+	PublicURL   string
+	// AuthorizeURL is Harbormaster's private base URL that hosts /oauth/authorize. Empty turns OAuth off.
+	AuthorizeURL string
+	// AuthorizeViaGateway publishes the gateway's own /oauth/authorize (a bare redirect to AuthorizeURL) as the
+	// authorization endpoint, for a client that refuses an endpoint on another host than the issuer.
+	AuthorizeViaGateway bool
+	AllowedOrigins      []string
+	TrustedProxy        bool
+	MaxResultBytes      int
+	UpstreamTimeout     time.Duration
 }
 
 // LoadConfig reads the HM_MCP_* settings through getenv and validates them.
@@ -58,6 +63,25 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.PublicURL = public
+
+	if raw := strings.TrimSpace(getenv("HM_MCP_AUTHORIZE_URL")); raw != "" {
+		authorize, err := parseBaseURL("HM_MCP_AUTHORIZE_URL", raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.AuthorizeURL = authorize
+	}
+
+	if raw := strings.TrimSpace(getenv("HM_MCP_AUTHORIZE_VIA_GATEWAY")); raw != "" {
+		via, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("HM_MCP_AUTHORIZE_VIA_GATEWAY must be true or false, got %q", raw)
+		}
+		if via && cfg.AuthorizeURL == "" {
+			return Config{}, fmt.Errorf("HM_MCP_AUTHORIZE_VIA_GATEWAY=true needs HM_MCP_AUTHORIZE_URL: the gateway's authorize redirect has no target")
+		}
+		cfg.AuthorizeViaGateway = via
+	}
 
 	for _, origin := range strings.Split(getenv("HM_MCP_ALLOWED_ORIGINS"), ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
@@ -95,6 +119,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 
 // MCPURL is the MCP endpoint clients connect to.
 func (c Config) MCPURL() string { return c.PublicURL + "/mcp" }
+
+// OAuthEnabled reports whether the gateway publishes OAuth metadata and relays the token endpoint.
+func (c Config) OAuthEnabled() bool { return c.AuthorizeURL != "" }
 
 // parseBaseURL validates a required base URL: https, or http only on a
 // loopback host; a host; no path, query, fragment or user info. It returns the
