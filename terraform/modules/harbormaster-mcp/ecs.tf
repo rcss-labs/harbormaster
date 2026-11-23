@@ -14,6 +14,14 @@ resource "aws_ecs_task_definition" "service" {
   }
 
   tags = local.tags
+
+  # A variable validation cannot read another variable on Terraform 1.5, so the check lives here.
+  lifecycle {
+    precondition {
+      condition     = !var.authorize_via_gateway || var.authorize_url != null
+      error_message = "authorize_via_gateway requires authorize_url to be set."
+    }
+  }
 }
 
 resource "aws_ecs_service" "service" {

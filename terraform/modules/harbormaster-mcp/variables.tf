@@ -106,6 +106,65 @@ variable "authorize_url" {
   default     = null
 }
 
+variable "authorize_via_gateway" {
+  description = "HM_MCP_AUTHORIZE_VIA_GATEWAY: redirect-through-gateway fallback for clients that refuse an authorization endpoint on another host. Turn it on only if the claude.ai spike needs it. Requires authorize_url."
+  type        = bool
+  default     = false
+}
+
+variable "max_result_bytes" {
+  description = "HM_MCP_MAX_RESULT_BYTES: cap on a tool result's size. Null uses the gateway default."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.max_result_bytes == null ? true : var.max_result_bytes > 0
+    error_message = "max_result_bytes must be positive."
+  }
+}
+
+variable "upstream_timeout" {
+  description = "HM_MCP_UPSTREAM_TIMEOUT: per-request timeout toward Harbormaster, a Go duration such as 20s. Null uses the gateway default."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.upstream_timeout == null ? true : can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$", var.upstream_timeout))
+    error_message = "upstream_timeout must be a duration such as 20s or 1m30s."
+  }
+}
+
+variable "upstream_ca_pem" {
+  description = "HM_MCP_UPSTREAM_CA_PEM: PEM of extra CAs that sign the internal load balancer's certificate. A CA certificate is public, so it is passed as a plain environment value (not a secret), but it adds to the task definition's size. Marked sensitive only to keep it out of plan output. Null leaves it unset."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "alarm_sns_topic_arns" {
+  description = "SNS topics notified by the CloudWatch alarms. Empty creates no alarms."
+  type        = list(string)
+  default     = []
+}
+
+variable "access_logs_bucket" {
+  description = "S3 bucket for the public load balancer's access logs. Null turns them off. The bucket and its policy (allowing the regional ELB log delivery) belong to the operator."
+  type        = string
+  default     = null
+}
+
+variable "access_logs_prefix" {
+  description = "Key prefix for the access logs in access_logs_bucket."
+  type        = string
+  default     = "harbormaster-mcp"
+}
+
+variable "deletion_protection" {
+  description = "Deletion protection on the public load balancer. Set false before destroying the module."
+  type        = bool
+  default     = true
+}
+
 variable "allowed_origins" {
   description = "HM_MCP_ALLOWED_ORIGINS: browser origins the gateway accepts, joined with commas."
   type        = list(string)

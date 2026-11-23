@@ -6,6 +6,16 @@ resource "aws_lb" "this" {
   security_groups            = [aws_security_group.alb.id]
   drop_invalid_header_fields = true
   idle_timeout               = 120
+  enable_deletion_protection = var.deletion_protection
+
+  dynamic "access_logs" {
+    for_each = var.access_logs_bucket == null ? [] : [1]
+    content {
+      bucket  = var.access_logs_bucket
+      prefix  = var.access_logs_prefix
+      enabled = true
+    }
+  }
 
   tags = local.tags
 }
