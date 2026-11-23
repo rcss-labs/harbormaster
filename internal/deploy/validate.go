@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -8,8 +9,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+
+	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 // ValidationError is a user-correctable problem with a task definition draft; the API maps it to 422 "invalid".
@@ -103,7 +108,106 @@ func validateCanonical(base, draft Definition, admin bool, accountID string) err
 	if err := validateHostEscalations(base, draft); err != nil {
 		return err
 	}
-	return validateSecrets(base, draft, accountID)
+	if err := validateSecrets(base, draft, accountID); err != nil {
+		return err
+	}
+	return validateLogDestinations(base, draft)
+}
+
+const logDestinationMessage = "Changing where a container's logs go needs a global admin"
+
+// logSetup is one container's name, log driver and options as sent to ECS.
+type logSetup struct {
+	container string
+	driver    string
+	options   map[string]any
+}
+
+func logSetups(def Definition) []logSetup {
+	var setups []logSetup
+	containers, _ := def["containerDefinitions"].([]any)
+	for _, entry := range containers {
+		container, _ := entry.(map[string]any)
+		logConfig, _ := container["logConfiguration"].(map[string]any)
+		if logConfig == nil {
+			continue
+		}
+		name, _ := container["name"].(string)
+		driver, _ := logConfig["logDriver"].(string)
+		options, _ := logConfig["options"].(map[string]any)
+		setups = append(setups, logSetup{container: name, driver: driver, options: options})
+	}
+	return setups
+}
+
+// awslogsDestination is where Harbormaster reads one container's logs: it scopes every read to
+// <awslogs-stream-prefix>/<container name>/ inside the group and region. A missing region is the
+// region the service runs in, the same default the log view applies; base and draft belong to the
+// same service, so a missing region on both sides compares equal.
+type awslogsDestination struct{ container, group, region, streamPrefix string }
+
+func awslogsDestinationOf(setup logSetup) awslogsDestination {
+	group, _ := setup.options["awslogs-group"].(string)
+	region, _ := setup.options["awslogs-region"].(string)
+	prefix, _ := setup.options["awslogs-stream-prefix"].(string)
+	return awslogsDestination{container: setup.container, group: group, region: region, streamPrefix: prefix}
+}
+
+// hasFoldedLogKey reports whether options holds two keys that differ only in letter case, or a
+// key that spells awslogs-group/-region/-stream-prefix in a non-exact case. Harbormaster reads the exact
+// spelling, so either could hide a different destination from the check.
+func hasFoldedLogKey(options map[string]any) bool {
+	seen := map[string]bool{}
+	for key := range options {
+		folded := strings.ToLower(key)
+		if seen[folded] {
+			return true
+		}
+		seen[folded] = true
+		if (folded == "awslogs-group" || folded == "awslogs-region" || folded == "awslogs-stream-prefix") && key != folded {
+			return true
+		}
+	}
+	return false
+}
+
+// validateLogDestinations lets a non-admin keep or remove log configuration but not redirect it:
+// a draft container must use a driver the base already uses; awslogs containers must keep one of
+// the base's (container name, group, region, stream prefix) tuples, since logs are read by that prefix; any other driver must keep the exact options (secretOptions
+// are checked with the secrets) of a base container with that driver, the stricter simple rule.
+func validateLogDestinations(base, draft Definition) error {
+	baseDrivers := map[string]bool{}
+	baseDestinations := map[awslogsDestination]bool{}
+	var baseOthers []logSetup
+	for _, setup := range logSetups(base) {
+		baseDrivers[setup.driver] = true
+		if setup.driver == "awslogs" {
+			baseDestinations[awslogsDestinationOf(setup)] = true
+		} else {
+			baseOthers = append(baseOthers, setup)
+		}
+	}
+	for _, setup := range logSetups(draft) {
+		if !baseDrivers[setup.driver] || hasFoldedLogKey(setup.options) {
+			return invalid("%s", logDestinationMessage)
+		}
+		if setup.driver == "awslogs" {
+			if !baseDestinations[awslogsDestinationOf(setup)] {
+				return invalid("%s", logDestinationMessage)
+			}
+			continue
+		}
+		matched := len(setup.options) == 0
+		for _, existing := range baseOthers {
+			if existing.driver == setup.driver && reflect.DeepEqual(existing.options, setup.options) {
+				matched = true
+			}
+		}
+		if !matched {
+			return invalid("%s", logDestinationMessage)
+		}
+	}
+	return nil
 }
 
 // hasEssentialContainer treats a missing "essential" as true, the ECS default.
@@ -499,4 +603,30 @@ func duplicateContainerName(containers []any) string {
 		seen[name] = true
 	}
 	return ""
+}
+
+// guardExistingRevisionLogs stops a non-admin from rolling the service onto an existing revision
+// that sends logs somewhere the deployed revision does not: that revision may have been registered
+// by an admin or by Terraform, and deploying it would expose its log destination like a new draft.
+func (s *Service) guardExistingRevisionLogs(ctx context.Context, subj authz.Subject, key model.ServiceKey, ecsAPI ECSClient, live ecstypes.Service, family string, revision int) error {
+	if subj.Admin {
+		return nil
+	}
+	deployed, err := s.deployedFrom(ctx, key, live)
+	if err != nil {
+		return err
+	}
+	out, err := ecsAPI.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
+		TaskDefinition: aws.String(fmt.Sprintf("%s:%d", family, revision))})
+	if err != nil {
+		return wrapAWS(err)
+	}
+	if out.TaskDefinition == nil {
+		return invalid("Revision :%d was not found", revision)
+	}
+	target, err := ToRegisterReady(*out.TaskDefinition)
+	if err != nil {
+		return err
+	}
+	return validateLogDestinations(deployed.Definition, target)
 }

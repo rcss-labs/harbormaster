@@ -108,10 +108,12 @@ module "harbormaster" {
   certificate_arn    = "arn:aws:acm:eu-west-1:<acct>:certificate/<certificate-id>"
   image              = "<acct>.dkr.ecr.eu-west-1.amazonaws.com/harbormaster:v1.0.0"
   base_url           = "https://harbormaster.example.com"
+  internal           = true
+  allowed_cidrs      = ["10.0.0.0/8"] # your VPN or office ranges
 }
 ```
 
-These five inputs are required. `public_subnet_ids` is also needed unless you set `internal = true`. The full input list is in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md), and [`terraform/examples/harbormaster/main.tf`](terraform/examples/harbormaster/main.tf) shows a complete call.
+These seven inputs are required: `internal` and `allowed_cidrs` (both have no default), plus `vpc_id`, `private_subnet_ids`, `certificate_arn`, `image` and `base_url`. `public_subnet_ids` is also needed unless you set `internal = true`. The full input list is in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md), and [`terraform/examples/harbormaster/main.tf`](terraform/examples/harbormaster/main.tf) shows a complete call.
 
 Plans and applies run in your Terraform runner (TerraDuckTel, env0, Terraform Cloud or similar); nothing is applied from a laptop. Apply the module with your Terraform pipeline.
 
@@ -862,7 +864,7 @@ The Terminal tab on a service page opens an interactive shell in a running task 
 - Each sign-in request is single use and expires after `HM_SAML_REQUEST_TTL`. Assertion and response IDs are recorded, so a captured response cannot be replayed. A binding cookie must match the request, so a response from another browser is refused.
 - The SP private key is stored encrypted in the database under `HM_SESSION_KEY`. SAML messages, certificate PEM and private keys are never written to logs. Audit entries carry fingerprints and field names only.
 - Image scanning: the scanner task holds only the `harbormaster-scan` role and its bucket, runs under its own execution role (not the server's), has no database URL, session key or `harbormaster-access` role, and everything it writes is validated under fixed size and shape limits before use. The pre-deploy gate is enforced on the server, not in the browser.
-- Task definition fields that can reach the container host are admin-only. Non-admins may keep or remove them relative to the deployed revision but cannot add or change them: task and execution roles, secrets outside existing prefixes, `environmentFiles`, FSx credentials, the FireLens S3 config, `credentialSpecs`, `privileged`, `linuxParameters.capabilities.add` and `devices`, `dockerSecurityOptions`, `systemControls`, `pidMode`/`ipcMode`/`networkMode` set to `host`, host volumes (`volumes[].host.sourcePath`), `dockerVolumeConfiguration` and `s3filesVolumeConfiguration`. A rejected draft returns 422 and nothing is registered.
+- Task definition fields that can reach the container host are admin-only. Non-admins may keep or remove them relative to the deployed revision but cannot add or change them: task and execution roles, secrets outside existing prefixes, log destinations (a new log driver, or an awslogs container whose name, `awslogs-group`, `awslogs-region` and `awslogs-stream-prefix` do not all match a container in the deployed revision, because logs are read by that group, region, prefix and container name; options such as `mode` and `max-buffer-size` can change; this also applies when deploying an existing revision), `environmentFiles`, FSx credentials, the FireLens S3 config, `credentialSpecs`, `privileged`, `linuxParameters.capabilities.add` and `devices`, `dockerSecurityOptions`, `systemControls`, `pidMode`/`ipcMode`/`networkMode` set to `host`, host volumes (`volumes[].host.sourcePath`), `dockerVolumeConfiguration` and `s3filesVolumeConfiguration`. A rejected draft returns 422 and nothing is registered.
 
 ## Development
 

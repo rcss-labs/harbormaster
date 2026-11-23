@@ -75,6 +75,15 @@ func (s *Service) Deploy(ctx context.Context, subj authz.Subject, key model.Serv
 	if revision == current {
 		return Rollout{}, &ValidationError{Message: fmt.Sprintf("Revision :%d is already deployed. Use Restart to replace its tasks.", revision)}
 	}
+	if !subj.Admin {
+		_, live, err := s.liveService(ctx, key)
+		if err != nil {
+			return Rollout{}, err
+		}
+		if err := s.guardExistingRevisionLogs(ctx, subj, key, api, live, family, revision); err != nil {
+			return Rollout{}, err
+		}
+	}
 	reference := fmt.Sprintf("%s:%d", family, revision)
 	out, err := api.UpdateService(ctx, &ecs.UpdateServiceInput{
 		Cluster: aws.String(key.Cluster), Service: aws.String(key.Service), TaskDefinition: aws.String(reference),

@@ -58,6 +58,8 @@ module "harbormaster" {
   image              = local.image
   base_url           = local.base_url
   internal           = local.harbormaster_internal
+  # Keep Harbormaster private: reach it over VPN or from the office. List your own ranges.
+  allowed_cidrs = ["10.0.0.0/8"]
 
   alb_ingress_security_group_ids = [module.harbormaster_mcp.task_security_group_id]
 

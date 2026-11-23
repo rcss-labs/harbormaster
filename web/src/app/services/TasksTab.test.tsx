@@ -83,7 +83,8 @@ describe('TasksTab', () => {
     )
     renderApp(`/services/${SERVICE_PAYMENTS.id}/tasks`)
     await screen.findByRole('table')
-    expect(filters.length).toBeGreaterThan(0)
+    // Another table on the service page can render before the tasks request goes out, so wait for the request itself.
+    await waitFor(() => expect(filters.length).toBeGreaterThan(0))
     expect(new Set(filters)).toEqual(new Set(['all']))
   })
 
