@@ -15,6 +15,10 @@ locals {
       HM_MCP_ALLOWED_ORIGINS = join(",", var.allowed_origins)
     },
     var.authorize_url == null ? {} : { HM_MCP_AUTHORIZE_URL = var.authorize_url },
+    var.authorize_via_gateway ? { HM_MCP_AUTHORIZE_VIA_GATEWAY = "true" } : {},
+    var.max_result_bytes == null ? {} : { HM_MCP_MAX_RESULT_BYTES = tostring(var.max_result_bytes) },
+    var.upstream_timeout == null ? {} : { HM_MCP_UPSTREAM_TIMEOUT = var.upstream_timeout },
+    var.upstream_ca_pem == null ? {} : { HM_MCP_UPSTREAM_CA_PEM = var.upstream_ca_pem },
   )
 
   container_definitions = [

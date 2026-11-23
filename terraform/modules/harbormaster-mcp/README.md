@@ -52,6 +52,14 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `waf_common_count_rules` | list(string) | `SizeRestrictions_BODY`, `CrossSiteScripting_BODY`, `GenericRFI_BODY` | Common rule set rules that only count. |
 | `waf_oauth_rate_limit` | number | `60` | Per IP on `/oauth/`; used when `enable_oauth_paths`. |
 | `enable_oauth_paths` | bool | `false` | Adds the `/oauth/` rate rule. Set it together with `authorize_url`. |
+| `authorize_via_gateway` | bool | `false` | `HM_MCP_AUTHORIZE_VIA_GATEWAY`. Requires `authorize_url` (checked by a precondition on the task definition). |
+| `max_result_bytes` | number | `null` | `HM_MCP_MAX_RESULT_BYTES`; null uses the gateway default. |
+| `upstream_timeout` | string | `null` | `HM_MCP_UPSTREAM_TIMEOUT`, a duration such as `20s`; null uses the gateway default. |
+| `upstream_ca_pem` | string (sensitive) | `null` | `HM_MCP_UPSTREAM_CA_PEM`: PEM of extra CAs for the internal load balancer's certificate. A CA certificate is public, so it goes in as a plain environment value (visible in the task definition; not a secret); it only adds to the task definition's size. Sensitive only to keep it out of plan output. |
+| `alarm_sns_topic_arns` | list(string) | `[]` | SNS topics for alarms. Empty creates no alarms. |
+| `access_logs_bucket` | string | `null` | S3 bucket for load balancer access logs; null is off. The bucket and its policy for regional ELB log delivery are yours to create. |
+| `access_logs_prefix` | string | `harbormaster-mcp` | Key prefix in that bucket. |
+| `deletion_protection` | bool | `true` | Deletion protection on the load balancer. Set `false` and apply before destroying. |
 | `tags` | map(string) | `{}` | |
 
 ## Outputs
@@ -65,6 +73,15 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `task_role_arn` | Task role (no policies). |
 | `log_group_name`, `waf_log_group_name` | Gateway and WAF log groups. |
 | `web_acl_arn` | The web ACL. |
+| `alarm_arns` | Map of alarm ARNs (`alb-5xx`, `target-5xx`, `unhealthy-hosts`, `waf-blocked`); empty without `alarm_sns_topic_arns`. |
+
+## Alarms, access logs and deletion protection
+
+With `alarm_sns_topic_arns` set, the module creates four CloudWatch alarms (5-minute periods, missing data not breaching, notifying on alarm and on recovery): `<name>-alb-5xx` (load balancer 5xx count at least 5), `<name>-target-5xx` (gateway 5xx count at least 5), `<name>-unhealthy-hosts` (any unhealthy target) and `<name>-waf-blocked` (WAF `BlockedRequests` at least 100). Thresholds are fixed; copy the module if you need different ones. Without topics no alarm exists.
+
+`access_logs_bucket` turns on load balancer access logs. The bucket (same region, with a policy that lets the regional ELB log delivery account write) is the operator's; the module does not create or manage it. `deletion_protection` defaults to true, so destroying the module needs a prior apply with it set to false.
+
+Warning: with the Harbormaster module's `internal = false` and `HM_API_TOKENS` on, personal tokens are accepted on Harbormaster's own public load balancer, bypassing this gateway's WAF and limiter. Keep Harbormaster internal.
 
 ## WAF tuning
 
