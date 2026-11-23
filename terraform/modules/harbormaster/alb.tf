@@ -1,6 +1,7 @@
 resource "aws_lb" "this" {
   name                       = local.name
   internal                   = var.internal
+  enable_deletion_protection = var.alb_deletion_protection
   load_balancer_type         = "application"
   subnets                    = var.internal ? var.private_subnet_ids : var.public_subnet_ids
   security_groups            = [aws_security_group.alb.id]
@@ -13,8 +14,8 @@ resource "aws_lb" "this" {
     # Access tokens are meant to reach Harbormaster only through the MCP gateway (WAF, bad-token limiter). With a
     # public load balancer a bearer token would be accepted straight from the internet, bypassing both.
     precondition {
-      condition     = var.internal || lower(lookup(var.extra_env, "HM_API_TOKENS", "false")) != "true"
-      error_message = "HM_API_TOKENS = \"true\" needs internal = true: tokens must reach Harbormaster only through the harbormaster-mcp gateway, not a public load balancer."
+      condition     = var.internal || !contains(["1", "t", "true"], lower(trimspace(lookup(var.extra_env, "HM_API_TOKENS", "false"))))
+      error_message = "HM_API_TOKENS on (any true value: true, 1, t) needs internal = true: tokens must reach Harbormaster only through the harbormaster-mcp gateway, not a public load balancer."
     }
   }
 }
