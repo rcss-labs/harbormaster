@@ -31,7 +31,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
-const homelab = "482109375512"
+const sandbox = "482109375512"
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
@@ -83,10 +83,10 @@ func scanRunnerFor(st *store.Store, scanner *fake.Scanner) *scanjob.Runner {
 	}
 }
 
-func createHomelab(t *testing.T, st *store.Store) {
+func createSandbox(t *testing.T, st *store.Store) {
 	t.Helper()
-	if _, err := st.CreateAccount(context.Background(), store.AWSAccount{Name: "a", AccountID: homelab,
-		RoleARN: "arn:aws:iam::" + homelab + ":role/x", ExternalID: "e", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
+	if _, err := st.CreateAccount(context.Background(), store.AWSAccount{Name: "a", AccountID: sandbox,
+		RoleARN: "arn:aws:iam::" + sandbox + ":role/x", ExternalID: "e", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -95,8 +95,8 @@ func requestScan(t *testing.T, st *store.Store, estate *fake.Estate) {
 	t.Helper()
 	digest := estate.ImageDigestFor("edge-nginx:1.27.2")
 	if _, _, err := st.UpsertRequestedScanImage(context.Background(), store.ScanImage{Digest: digest,
-		ImageRef: homelab + ".dkr.ecr.us-east-1.amazonaws.com/edge-nginx", Tag: "1.27.2", RegistryKind: scan.KindECR,
-		RegistryAccountID: homelab, RegistryRegion: "us-east-1", Repository: "edge-nginx"}, time.Now()); err != nil {
+		ImageRef: sandbox + ".dkr.ecr.us-east-1.amazonaws.com/edge-nginx", Tag: "1.27.2", RegistryKind: scan.KindECR,
+		RegistryAccountID: sandbox, RegistryRegion: "us-east-1", Repository: "edge-nginx"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -104,7 +104,7 @@ func requestScan(t *testing.T, st *store.Store, estate *fake.Estate) {
 // Two coordinators on one database: the standby runs nothing until the holder stops, then takes over within a tick.
 func TestCoordinator_TwoRunnersOneActive(t *testing.T) {
 	st := storetest.Open(t)
-	createHomelab(t, st)
+	createSandbox(t, st)
 	estate := fake.MockupEstate(time.Now)
 	aScanner, bScanner := fake.NewScanner(estate), fake.NewScanner(estate)
 	a := &coordinator.Runner{Store: st, Timing: timing(), Scan: scanRunnerFor(st, aScanner), Log: quiet()}
@@ -128,8 +128,8 @@ func TestCoordinator_TwoRunnersOneActive(t *testing.T) {
 	// b's jobs are running: a second request is launched by b, not a.
 	digest := estate.ImageDigestFor("edge-nginx:1.27.1")
 	if _, _, err := st.UpsertRequestedScanImage(context.Background(), store.ScanImage{Digest: digest,
-		ImageRef: homelab + ".dkr.ecr.us-east-1.amazonaws.com/edge-nginx", Tag: "1.27.1", RegistryKind: scan.KindECR,
-		RegistryAccountID: homelab, RegistryRegion: "us-east-1", Repository: "edge-nginx"}, time.Now()); err != nil {
+		ImageRef: sandbox + ".dkr.ecr.us-east-1.amazonaws.com/edge-nginx", Tag: "1.27.1", RegistryKind: scan.KindECR,
+		RegistryAccountID: sandbox, RegistryRegion: "us-east-1", Repository: "edge-nginx"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(aScanner.Launches()); got != 1 {
@@ -157,7 +157,7 @@ func (b *blockingBucket) Put(ctx context.Context, key string, body []byte) error
 func TestCoordinator_PausedHolderDoesNothingAfterTakeover(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	createHomelab(t, st)
+	createSandbox(t, st)
 	estate := fake.MockupEstate(time.Now)
 	scanner := fake.NewScanner(estate)
 	bucket := &blockingBucket{Bucket: scanner, entered: make(chan struct{}), release: make(chan struct{})}
@@ -218,9 +218,9 @@ func (s *countingSender) Send(context.Context, store.NotificationRoute, notify.S
 func TestCoordinator_OnlyTheHolderRunsEveryJob(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	createHomelab(t, st)
+	createSandbox(t, st)
 	estate := fake.MockupEstate(time.Now)
-	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelab, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandbox, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 
 	// Off-hours: an always-awake schedule selecting the service.
 	if _, err := storetest.Seed(st).UpsertServices(ctx, []model.Service{{Key: key, Status: "ACTIVE", Desired: 3, LaunchType: "FARGATE", TaskDefinitionARN: "arn:td/payments-api:1",
@@ -234,7 +234,7 @@ func TestCoordinator_OnlyTheHolderRunsEveryJob(t *testing.T) {
 	// Image platforms: a public image in the service's task definition.
 	const image = "public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"
 	raw, _ := json.Marshal(map[string]any{"ContainerDefinitions": []map[string]any{{"Name": "otel", "Image": image}}})
-	if err := st.UpsertTaskDefinition(ctx, model.TaskDefinitionRef{AccountID: homelab, Region: "us-east-1", ARN: "arn:td/payments-api:1", Family: "payments-api",
+	if err := st.UpsertTaskDefinition(ctx, model.TaskDefinitionRef{AccountID: sandbox, Region: "us-east-1", ARN: "arn:td/payments-api:1", Family: "payments-api",
 		Revision: 1, RequiresCompatibilities: []string{"FARGATE"}, Raw: raw}); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestCoordinator_OnlyTheHolderRunsEveryJob(t *testing.T) {
 		Config: store.NotificationConfig{URLHost: "hooks.example"}, SecretEnc: sealed, MinSeverity: "warning", Kinds: kinds, QuietTimezone: "UTC", NotifyResolved: true}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ReplaceAlerts(ctx, awsx.Target{AccountID: homelab, Region: "us-east-1"}, []model.Alert{{Key: key, Kind: "service_failing",
+	if err := st.ReplaceAlerts(ctx, awsx.Target{AccountID: sandbox, Region: "us-east-1"}, []model.Alert{{Key: key, Kind: "service_failing",
 		Severity: model.AlertDanger, Title: "payments-api failing", Text: "failing", At: time.Now(), Tab: "overview"}}); err != nil {
 		t.Fatal(err)
 	}

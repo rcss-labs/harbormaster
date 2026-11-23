@@ -37,7 +37,7 @@ func TestScanner_RunTaskWritesTheManifestAndResultsOfTheJob(t *testing.T) {
 	s := NewScanner(newFake().Estate)
 	s.FailPull("cert-renewer")
 	ctx := context.Background()
-	const host = homelabID + ".dkr.ecr.us-east-1.amazonaws.com/"
+	const host = sandboxID + ".dkr.ecr.us-east-1.amazonaws.com/"
 	edge := s.Estate.ImageDigestFor("edge-nginx:1.27.2")
 	renewer := s.Estate.ImageDigestFor("cert-renewer:0.2.1")
 	job := scan.Job{RunID: 9, Kind: scan.ModeScan, Images: []scan.JobImage{
@@ -145,7 +145,7 @@ func TestScanner_LargeLaunchEscapesFailTimeout(t *testing.T) {
 	s := NewScanner(newFake().Estate)
 	s.FailTimeout("edge-nginx")
 	ctx := context.Background()
-	const host = homelabID + ".dkr.ecr.us-east-1.amazonaws.com/"
+	const host = sandboxID + ".dkr.ecr.us-east-1.amazonaws.com/"
 	digest := s.Estate.ImageDigestFor("edge-nginx:1.27.2")
 	for _, runID := range []int64{1, 2} {
 		data, _ := json.Marshal(scan.Job{RunID: runID, Kind: scan.ModeScan, Images: []scan.JobImage{

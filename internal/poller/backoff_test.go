@@ -198,7 +198,7 @@ func TestIsThrottleInJoin(t *testing.T) {
 func TestLoop_AccountHealthKeepsLastGoodTimeAndError(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "homelab", AccountID: homelabAccount, RoleARN: "arn:aws:iam::482109375512:role/hm", ExternalID: "x", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
+	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "sandbox", AccountID: sandboxAccount, RoleARN: "arn:aws:iam::482109375512:role/hm", ExternalID: "x", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	clients := &denyingClients{Fake: fake.New(fake.MockupEstate(func() time.Time { return loopNow }))}
@@ -207,7 +207,7 @@ func TestLoop_AccountHealthKeepsLastGoodTimeAndError(t *testing.T) {
 		t.Fatal(err)
 	}
 	account := func() store.AWSAccount {
-		a, err := st.GetAccountByAccountID(ctx, homelabAccount)
+		a, err := st.GetAccountByAccountID(ctx, sandboxAccount)
 		if err != nil {
 			t.Fatal(err)
 		}

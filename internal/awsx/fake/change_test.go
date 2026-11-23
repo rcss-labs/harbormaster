@@ -16,7 +16,7 @@ import (
 )
 
 func TestFakeRegisterTaskDefinition_IncrementsRevisionAndKeepsTags(t *testing.T) {
-	api := ecsFor(t, newFake(), homelabID, "us-east-1")
+	api := ecsFor(t, newFake(), sandboxID, "us-east-1")
 	ctx := context.Background()
 	tags := []ecstypes.Tag{{Key: aws.String("owner"), Value: aws.String("sam")}}
 	out, err := api.RegisterTaskDefinition(ctx, &ecs.RegisterTaskDefinitionInput{
@@ -40,7 +40,7 @@ func TestFakeRegisterTaskDefinition_IncrementsRevisionAndKeepsTags(t *testing.T)
 }
 
 func TestFakeListTaskDefinitions_PrefixMatchesLikeAWS(t *testing.T) {
-	api := ecsFor(t, newFake(), homelabID, "us-east-1")
+	api := ecsFor(t, newFake(), sandboxID, "us-east-1")
 	ctx := context.Background()
 	for _, family := range []string{"api", "api", "api-worker"} {
 		if _, err := api.RegisterTaskDefinition(ctx, &ecs.RegisterTaskDefinitionInput{
@@ -83,7 +83,7 @@ func TestFakeListTaskDefinitions_PrefixMatchesLikeAWS(t *testing.T) {
 }
 
 func TestFakeStopTask_SetsReasonAndEvent(t *testing.T) {
-	api := ecsFor(t, newFake(), homelabID, "us-east-1")
+	api := ecsFor(t, newFake(), sandboxID, "us-east-1")
 	ctx := context.Background()
 	running, err := api.ListTasks(ctx, &ecs.ListTasksInput{Cluster: aws.String("core-services"), ServiceName: aws.String("notifications")})
 	if err != nil || len(running.TaskArns) == 0 {
@@ -124,7 +124,7 @@ func TestFakeStopTask_SetsReasonAndEvent(t *testing.T) {
 func TestFakeDescribeImages_SeededTagsNewestFirst(t *testing.T) {
 	f := newFake()
 	ctx := context.Background()
-	repo, err := f.ECR(ctx, awsx.Target{AccountID: homelabID, Region: "us-east-1"})
+	repo, err := f.ECR(ctx, awsx.Target{AccountID: sandboxID, Region: "us-east-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

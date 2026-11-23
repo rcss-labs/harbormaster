@@ -6,7 +6,7 @@ let username = 'sam'
 vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ me: { username } }) }))
 
 const service: Pin = { kind: 'service', id: 's1', name: 'payments-api', cluster: 'core-services' }
-const cluster: Pin = { kind: 'cluster', id: 'c1', name: 'core-services', account_name: 'homelab-admin', account_id: '482109375512' }
+const cluster: Pin = { kind: 'cluster', id: 'c1', name: 'core-services', account_name: 'sandbox-admin', account_id: '482109375512' }
 
 beforeEach(() => {
   localStorage.clear()

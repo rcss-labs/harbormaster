@@ -133,9 +133,9 @@ func (e *notifyEnv) received() string {
 }
 
 var (
-	nxKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
-	nyKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "auth"}
-	nzKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "background-jobs"}, Service: "image-resizer"}
+	nxKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	nyKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "auth"}
+	nzKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "background-jobs"}, Service: "image-resizer"}
 	nwKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: stagingAccountID, Region: "us-east-1", Cluster: "staging-web"}, Service: "web"}
 )
 
@@ -153,11 +153,11 @@ func (e *notifyEnv) seedAlertsAged(age time.Duration) {
 		mk(nxKey, "service_failing", model.AlertDanger, "payments-api: failing"),
 		mk(nyKey, "service_degraded", model.AlertWarning, "auth: degraded"),
 		mk(nzKey, "restart_loop", model.AlertWarning, "image-resizer: restart loop"),
-		mk(model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1"}}, "account_unreachable", model.AlertDanger, "homelab unreachable"),
+		mk(model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1"}}, "account_unreachable", model.AlertDanger, "sandbox unreachable"),
 		mk(nxKey, "rollout_in_progress", model.AlertInfo, "payments-api: rollout"),
 	}
 	staging := []model.Alert{mk(nwKey, "service_failing", model.AlertDanger, "web: failing")}
-	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}, home); err != nil {
+	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"}, home); err != nil {
 		e.t.Fatal(err)
 	}
 	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: stagingAccountID, Region: "us-east-1"}, staging); err != nil {
@@ -177,7 +177,7 @@ func (e *notifyEnv) syncIncidents(age time.Duration) {
 func (e *notifyEnv) seedOnlyAlert() {
 	e.t.Helper()
 	alert := model.Alert{Key: nxKey, Kind: "restart_loop", Severity: model.AlertWarning, Title: "payments-api: restart loop", Text: "t", At: time.Now(), Tab: "overview"}
-	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}, []model.Alert{alert}); err != nil {
+	if err := e.st.ReplaceAlerts(e.t.Context(), awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"}, []model.Alert{alert}); err != nil {
 		e.t.Fatal(err)
 	}
 	e.syncIncidents(0)
@@ -195,7 +195,7 @@ func (e *notifyEnv) seedActiveServices(keys ...model.ServiceKey) {
 	}
 }
 
-var nExtraKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "ledger"}
+var nExtraKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "ledger"}
 
 func (e *notifyEnv) preview(body map[string]any) NotificationPreviewDTO {
 	e.t.Helper()
@@ -673,10 +673,10 @@ func TestNotificationRoutes_ScopeRoundTripsWithNamesAndMissing(t *testing.T) {
 	if _, err := storetest.Seed(e.st).UpsertServices(t.Context(), []model.Service{{Key: nxKey, Status: "ACTIVE", Raw: []byte(`{}`), PolledAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
-	gone := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "deleted-svc"}
-	goneCluster := model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "retired"}
+	gone := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "deleted-svc"}
+	goneCluster := model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "retired"}
 	scope := []any{
-		accountScope(homelabAccountID, 2),
+		accountScope(sandboxAccountID, 2),
 		map[string]any{"kind": "account", "account_id": stagingAccountID, "region": "us-east-1", "threshold": 1},
 		clusterScope(nxKey.ClusterKey, 3),
 		clusterScope(goneCluster, 4),
@@ -703,11 +703,11 @@ func TestNotificationRoutes_ScopeRoundTripsWithNamesAndMissing(t *testing.T) {
 		}
 		return *sel.Threshold
 	}
-	if a, b := created.Scope[0], created.Scope[1]; threshold(a) != 2 || threshold(b) != 1 || a.AccountName != "homelab-admin" || a.Missing {
+	if a, b := created.Scope[0], created.Scope[1]; threshold(a) != 2 || threshold(b) != 1 || a.AccountName != "sandbox-admin" || a.Missing {
 		t.Errorf("account entries = %+v %+v", a, b)
 	}
 	present, missing := created.Scope[2], created.Scope[3]
-	if present.ClusterID != nxKey.ClusterKey.ID() || present.Cluster != "core-services" || threshold(present) != 3 || present.Missing || present.AccountName != "homelab-admin" || present.Region != "us-east-1" {
+	if present.ClusterID != nxKey.ClusterKey.ID() || present.Cluster != "core-services" || threshold(present) != 3 || present.Missing || present.AccountName != "sandbox-admin" || present.Region != "us-east-1" {
 		t.Errorf("cluster = %+v", present)
 	}
 	if !missing.Missing || threshold(missing) != 4 || missing.Cluster != "retired" {
@@ -774,12 +774,12 @@ func TestNotificationRoutes_ScopeValidation(t *testing.T) {
 		"unknown kind":           {[]any{map[string]any{"kind": "region", "account_id": "123456789012"}}, "One of the scope entries is not valid."},
 		"bad region":             {[]any{map[string]any{"kind": "account", "account_id": "123456789012", "region": "not a region!", "threshold": 1}}, "One of the scope entries is not valid."},
 		"threshold 0":            {[]any{clusterScope(nxKey.ClusterKey, 0)}, "A threshold must be between 1 and 500."},
-		"threshold 501":          {[]any{accountScope(homelabAccountID, 501)}, "A threshold must be between 1 and 500."},
+		"threshold 501":          {[]any{accountScope(sandboxAccountID, 501)}, "A threshold must be between 1 and 500."},
 		"negative threshold":     {[]any{clusterScope(nxKey.ClusterKey, -3)}, "A threshold must be between 1 and 500."},
 		"threshold on a service": {[]any{map[string]any{"kind": "service", "service_id": nxKey.ID(), "threshold": 2}}, "One of the scope entries is not valid."},
 		"threshold on a tag":     {[]any{map[string]any{"kind": "aws", "key": "env", "value": "x", "threshold": 2}}, "One of the scope entries is not valid."},
 		"same cluster twice":     {[]any{clusterScope(nxKey.ClusterKey, 1), clusterScope(nxKey.ClusterKey, 2)}, "A cluster or account can appear once per route."},
-		"same account twice":     {[]any{accountScope(homelabAccountID, 1), accountScope(homelabAccountID, 3)}, "A cluster or account can appear once per route."},
+		"same account twice":     {[]any{accountScope(sandboxAccountID, 1), accountScope(sandboxAccountID, 3)}, "A cluster or account can appear once per route."},
 	} {
 		in := e.webhookInput("scope", func(in map[string]any) { in["scope"] = tc.scope })
 		resp := e.admin.post("/api/notifications/routes", in)
@@ -792,7 +792,7 @@ func TestNotificationRoutes_ScopeValidation(t *testing.T) {
 		}
 	}
 	// The same account as all regions and as one region are two entries, and may both be saved.
-	both := []any{accountScope(homelabAccountID, 1), map[string]any{"kind": "account", "account_id": homelabAccountID, "region": "eu-west-1", "threshold": 2}}
+	both := []any{accountScope(sandboxAccountID, 1), map[string]any{"kind": "account", "account_id": sandboxAccountID, "region": "eu-west-1", "threshold": 2}}
 	if resp := e.admin.post("/api/notifications/routes", e.webhookInput("regions", func(in map[string]any) { in["scope"] = both })); resp.StatusCode != http.StatusOK {
 		t.Errorf("all regions plus one region = %d, want 200", resp.StatusCode)
 	}
@@ -813,10 +813,10 @@ func TestNotificationTargets_ListsAccountsClustersAndServices(t *testing.T) {
 	}
 	var got NotificationTargetsDTO
 	decode(t, e.admin.get("/api/notifications/targets"), &got)
-	if len(got.Accounts) != 2 || got.Accounts[0].Name != "homelab-admin" || len(got.Accounts[0].Regions) != 3 || got.Accounts[0].AccountID != homelabAccountID {
+	if len(got.Accounts) != 2 || got.Accounts[0].Name != "sandbox-admin" || len(got.Accounts[0].Regions) != 3 || got.Accounts[0].AccountID != sandboxAccountID {
 		t.Fatalf("accounts = %+v", got.Accounts)
 	}
-	if len(got.Clusters) != 2 || got.Clusters[0].ID != nxKey.ClusterKey.ID() || got.Clusters[0].Name != "core-services" || got.Clusters[0].AccountName != "homelab-admin" || got.Clusters[0].Region != "us-east-1" {
+	if len(got.Clusters) != 2 || got.Clusters[0].ID != nxKey.ClusterKey.ID() || got.Clusters[0].Name != "core-services" || got.Clusters[0].AccountName != "sandbox-admin" || got.Clusters[0].Region != "us-east-1" {
 		t.Fatalf("clusters = %+v", got.Clusters)
 	}
 	if len(got.Services) != 2 || got.Services[0].ID != nxKey.ID() || got.Services[0].Name != "payments-api" || got.Services[0].ClusterID != nxKey.ClusterKey.ID() || got.Services[0].Cluster != "core-services" {
@@ -848,7 +848,7 @@ func TestNotificationPreview_CountsOpenAlertsAndRenders(t *testing.T) {
 	everyKind := e.preview(e.webhookInput("draft", func(in map[string]any) {
 		in["kinds"] = []string{"service_failing", "service_degraded", "restart_loop", "account_unreachable"}
 	}))
-	if everyKind.MatchCount != 5 || !strings.Contains(matchTitles(everyKind), "homelab unreachable") {
+	if everyKind.MatchCount != 5 || !strings.Contains(matchTitles(everyKind), "sandbox unreachable") {
 		t.Errorf("an empty scope must include the account alert: %s", matchTitles(everyKind))
 	}
 
@@ -895,11 +895,11 @@ func TestNotificationPreview_ScopeIsExact(t *testing.T) {
 		t.Errorf("the rendered message must be the aggregated one: %s", cluster.JSON)
 	}
 
-	account := draft(accountScope(homelabAccountID, 1))
-	if len(account.Groups) != 1 || account.MatchCount != 0 || !account.Groups[0].Unreachable || account.Groups[0].Kind != "account" || account.Groups[0].Label != "homelab-admin" {
+	account := draft(accountScope(sandboxAccountID, 1))
+	if len(account.Groups) != 1 || account.MatchCount != 0 || !account.Groups[0].Unreachable || account.Groups[0].Kind != "account" || account.Groups[0].Label != "sandbox-admin" {
 		t.Errorf("account scope = %+v, want one group opened by the unreachable account", account.Groups)
 	}
-	if got := draft(map[string]any{"kind": "account", "account_id": homelabAccountID, "region": "eu-west-1", "threshold": 1}); got.NotificationCount != 0 || len(got.Groups) != 0 {
+	if got := draft(map[string]any{"kind": "account", "account_id": sandboxAccountID, "region": "eu-west-1", "threshold": 1}); got.NotificationCount != 0 || len(got.Groups) != 0 {
 		t.Errorf("another region's account scope = %+v, want nothing", got.Groups)
 	}
 	// A cluster entry never receives the account-level alert per alert.

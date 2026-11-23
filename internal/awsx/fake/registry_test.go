@@ -19,7 +19,7 @@ const ociIndexType = "application/vnd.oci.image.index.v1+json"
 
 func batchGet(t *testing.T, f *Fake, repository, tag string) (*ecr.BatchGetImageOutput, error) {
 	t.Helper()
-	return ecrForHomelab(t, f).BatchGetImage(context.Background(), &ecr.BatchGetImageInput{
+	return ecrForSandbox(t, f).BatchGetImage(context.Background(), &ecr.BatchGetImageInput{
 		RepositoryName: aws.String(repository),
 		ImageIds:       []ecrtypes.ImageIdentifier{{ImageTag: aws.String(tag)}},
 	})
@@ -27,7 +27,7 @@ func batchGet(t *testing.T, f *Fake, repository, tag string) (*ecr.BatchGetImage
 
 func describeOne(t *testing.T, f *Fake, repository, tag string) ecrtypes.ImageDetail {
 	t.Helper()
-	out, err := ecrForHomelab(t, f).DescribeImages(context.Background(), &ecr.DescribeImagesInput{
+	out, err := ecrForSandbox(t, f).DescribeImages(context.Background(), &ecr.DescribeImagesInput{
 		RepositoryName: aws.String(repository), ImageIds: []ecrtypes.ImageIdentifier{{ImageTag: aws.String(tag)}}})
 	if err != nil || len(out.ImageDetails) != 1 {
 		t.Fatalf("DescribeImages %s:%s = %+v, %v", repository, tag, out, err)

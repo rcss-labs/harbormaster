@@ -62,7 +62,7 @@ func serviceKey(target awsx.Target, cluster, service string) model.ServiceKey {
 }
 
 func TestTargetHealthLoop_WritesHealthyUnhealthy(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: euWestAccountRegion}
+	target := awsx.Target{AccountID: sandboxAccount, Region: euWestAccountRegion}
 	h := newObserveHarness(t, target)
 	key := serviceKey(target, "eu-apps", "catalog-api")
 
@@ -96,9 +96,9 @@ func TestTargetHealthLoop_WritesHealthyUnhealthy(t *testing.T) {
 }
 
 func TestTargetHealthLoop_TwoGroupsOneService(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	key := serviceKey(target, "core-services", "payments-api")
-	extraARN := "arn:aws:elasticloadbalancing:us-east-1:" + homelabAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
+	extraARN := "arn:aws:elasticloadbalancing:us-east-1:" + sandboxAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
 
 	estate := fake.MockupEstate(func() time.Time { return loopNow })
 	estate.AddTargetGroup(key, fake.TargetGroup{ARN: extraARN, Healthy: 1})
@@ -135,7 +135,7 @@ func TestTargetHealthLoop_TwoGroupsOneService(t *testing.T) {
 }
 
 func TestTargetHealthLoop_ThrottlePropagates(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	h := newObserveHarness(t, target)
 	h.fake.ThrottleELB = 1
 

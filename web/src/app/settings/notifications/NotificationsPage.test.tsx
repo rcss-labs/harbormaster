@@ -202,7 +202,7 @@ describe('NotificationsPage', () => {
     renderApp(PAGE)
     await userEvent.click(await screen.findByRole('button', { name: 'Add route' }))
     await userEvent.type(await screen.findByLabelText('Slack webhook URL'), 'https://hooks.slack.com/services/T/B/x')
-    await addScopeEntry('homelab', /^homelab-admin \(all regions\)/)
+    await addScopeEntry('sandbox', /^sandbox-admin \(all regions\)/)
     await addScopeEntry('core-services', /^core-services/)
     await addScopeEntry('payments', /^payments-api · core-services/)
     await addScopeEntry('Staging', /^Staging/)
@@ -282,7 +282,7 @@ describe('NotificationsPage', () => {
     const box = screen.getByRole('combobox', { name: 'Add to scope' })
     await userEvent.type(box, 'core-services')
     const options = await screen.findAllByRole('option')
-    expect(options.some((option) => /^core-services\b/.test(option.textContent ?? '') && !/·/.test(option.textContent?.split('homelab')[0] ?? ''))).toBe(false)
+    expect(options.some((option) => /^core-services\b/.test(option.textContent ?? '') && !/·/.test(option.textContent?.split('sandbox')[0] ?? ''))).toBe(false)
     expect(within(screen.getByRole('list', { name: 'Alerts from' })).getAllByRole('listitem')).toHaveLength(1)
   })
 

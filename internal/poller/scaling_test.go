@@ -10,7 +10,7 @@ import (
 )
 
 func TestScalingLoop_WritesTargetPoliciesScheduledActivities(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	h := newObserveHarness(t, target)
 	loop := &ScalingLoop{Store: h.store, Writer: h.writer(), Clients: h.fake, Every: 60 * time.Second, Now: func() time.Time { return loopNow }}
 	ctx := context.Background()
@@ -51,7 +51,7 @@ func TestScalingLoop_WritesTargetPoliciesScheduledActivities(t *testing.T) {
 }
 
 func TestCollectServiceScaling_ReadsOneServiceLive(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	h := newObserveHarness(t, target)
 	api, err := h.fake.AutoScaling(context.Background(), target)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestCollectServiceScaling_ReadsOneServiceLive(t *testing.T) {
 }
 
 func TestCollectServiceScalingConfigPartial(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	h := newObserveHarness(t, target)
 	api, err := h.fake.AutoScaling(context.Background(), target)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestCollectServiceScalingConfigPartial(t *testing.T) {
 }
 
 func TestScalingLoop_StoresReadablePartsWhenScheduledActionsFail(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	key := serviceKey(target, "core-services", "payments-api")
 	scheduledErr := errors.New("DescribeScheduledActions: UnsupportedOperation")
 	ctx := context.Background()

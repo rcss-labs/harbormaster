@@ -91,7 +91,7 @@ func runningTask(cluster, service, subnet, ip string, startedMinute int) model.T
 
 func testVPCs() []model.VPC {
 	return []model.VPC{
-		{AccountID: testAccount, Region: testRegion, VPCID: mainVPCID, Name: "homelab-main", CIDR: "10.20.0.0/16"},
+		{AccountID: testAccount, Region: testRegion, VPCID: mainVPCID, Name: "sandbox-main", CIDR: "10.20.0.0/16"},
 		{AccountID: testAccount, Region: testRegion, VPCID: sharedVPCID, Name: "shared-services", CIDR: "10.30.0.0/16"},
 		{AccountID: testAccount, Region: testRegion, VPCID: legacyVPCID, Name: "legacy-default", CIDR: "172.31.0.0/16", IsDefault: true},
 	}
@@ -109,7 +109,7 @@ func testSubnets() []model.Subnet {
 	}
 }
 
-// mainTasks are the 10 running tasks of homelab-main, as in network-tree.png:
+// mainTasks are the 10 running tasks of sandbox-main, as in network-tree.png:
 // private-1a 7 (core-services 5 across 4 services, background-jobs 2 across
 // 2 services), private-1b 3 (core-services, 3 services). public-1a is empty.
 func mainTasks() []model.Task {

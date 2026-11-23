@@ -135,7 +135,7 @@ func TestAnalyticsCost_ARM64NamesAccountForMissingPermission(t *testing.T) {
 	env.mark(t, "/edge-nginx:", "not_connected", "731022849906", false, false)
 	got := getCost(t, sam, "")
 	denied := armService(t, got, "catalog-api").Images[0]
-	if denied.Reason != "no_permission" || denied.Account != "homelab-admin" {
+	if denied.Reason != "no_permission" || denied.Account != "sandbox-admin" {
 		t.Fatalf("catalog-api image = %+v, want the account name, not its id", denied)
 	}
 	if offline := armService(t, got, "edge-nginx").Images[0]; offline.Reason != "not_connected" || offline.Account == "" || offline.Account == "731022849906" {

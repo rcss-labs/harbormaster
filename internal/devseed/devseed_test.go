@@ -184,8 +184,8 @@ func TestDevseed_TurnsOnPreDeployScanForEdgeNginxOnly(t *testing.T) {
 			t.Fatalf("apply #%d: %v", i+1, err)
 		}
 	}
-	homelab := model.ClusterKey{AccountID: "482109375512", Region: "eu-central-1", Cluster: "edge-proxy"}
-	if on, err := st.PreDeployScan(ctx, model.ServiceKey{ClusterKey: homelab, Service: "edge-nginx"}); err != nil || !on {
+	sandbox := model.ClusterKey{AccountID: "482109375512", Region: "eu-central-1", Cluster: "edge-proxy"}
+	if on, err := st.PreDeployScan(ctx, model.ServiceKey{ClusterKey: sandbox, Service: "edge-nginx"}); err != nil || !on {
 		t.Fatalf("edge-nginx pre-deploy scan = %v, %v; want on", on, err)
 	}
 	// payments-api stays off: the e2e flows change its image and would stop at the scan gate.

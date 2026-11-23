@@ -74,8 +74,8 @@ describe('scope keys', () => {
   })
 
   it('labels each kind', () => {
-    expect(scopeLabel(selector({ kind: 'account', account_id: '1', account_name: 'homelab-admin' }))).toBe('homelab-admin (all regions)')
-    expect(scopeLabel(selector({ kind: 'account', account_id: '1', account_name: 'homelab-admin', region: 'eu-west-1' }))).toBe('homelab-admin / eu-west-1')
+    expect(scopeLabel(selector({ kind: 'account', account_id: '1', account_name: 'sandbox-admin' }))).toBe('sandbox-admin (all regions)')
+    expect(scopeLabel(selector({ kind: 'account', account_id: '1', account_name: 'sandbox-admin', region: 'eu-west-1' }))).toBe('sandbox-admin / eu-west-1')
     expect(scopeLabel(CORE_SERVICES_CLUSTER)).toBe('core-services')
     expect(scopeLabel(IMAGE_RESIZER_SERVICE)).toBe('image-resizer · background-jobs')
     expect(scopeLabel(selector({ kind: 'aws', key: 'env', value: 'prod' }))).toBe('env=prod')
@@ -93,10 +93,10 @@ describe('scope options', () => {
     const options = scopeOptions(NOTIFICATION_TARGETS, OFFHOURS_TAGS, [])
     const accounts = options.filter((option) => option.group === 'Accounts').map((option) => option.label)
     expect(accounts).toEqual([
-      'homelab-admin (all regions)',
-      'homelab-admin / us-east-1',
-      'homelab-admin / eu-west-1',
-      'homelab-admin / eu-central-1',
+      'sandbox-admin (all regions)',
+      'sandbox-admin / us-east-1',
+      'sandbox-admin / eu-west-1',
+      'sandbox-admin / eu-central-1',
       'staging-example (all regions)',
       'staging-example / us-east-1',
     ])
@@ -318,9 +318,9 @@ describe('preview sentences', () => {
   it('names unreachable accounts and per-alert matches', () => {
     const preview: NotificationPreview = {
       ...NOTIFICATION_PREVIEW,
-      groups: [{ ...NOTIFICATION_PREVIEW_GROUPS.groups[0], label: 'homelab-admin', kind: 'account', unreachable: true }],
+      groups: [{ ...NOTIFICATION_PREVIEW_GROUPS.groups[0], label: 'sandbox-admin', kind: 'account', unreachable: true }],
     }
-    expect(previewLines(preview)).toEqual(['homelab-admin: unreachable', 'payments-api: service failing', 'image-resizer: restart loop'])
+    expect(previewLines(preview)).toEqual(['sandbox-admin: unreachable', 'payments-api: service failing', 'image-resizer: restart loop'])
   })
 
   it('shortens a long list of matching services', () => {

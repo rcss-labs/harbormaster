@@ -20,7 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/poller"
 )
 
-var imageResizerKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: homelabRegion, Cluster: "background-jobs"}, Service: "image-resizer"}
+var imageResizerKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: sandboxRegion, Cluster: "background-jobs"}, Service: "image-resizer"}
 
 // deployImage registers a new revision of the service's family whose main container uses
 // image, makes it the PRIMARY deployment in the fake and polls so the snapshot follows.
@@ -278,7 +278,7 @@ func tagNames(infos []deploy.ImageTagInfo) string {
 }
 
 func registryHost() string {
-	return homelabAccountID + ".dkr.ecr." + homelabRegion + ".amazonaws.com"
+	return sandboxAccountID + ".dkr.ecr." + sandboxRegion + ".amazonaws.com"
 }
 
 func TestImageTags_DefaultsToMainContainer(t *testing.T) {

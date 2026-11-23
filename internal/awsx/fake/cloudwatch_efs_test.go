@@ -23,7 +23,7 @@ func efsQuery(id, metric, stat, fsID string, period int32) cwtypes.MetricDataQue
 func efsFetch(t *testing.T, q cwtypes.MetricDataQuery, window time.Duration) cwtypes.MetricDataResult {
 	t.Helper()
 	// shared-certs (fs-0a6b33f0) lives in eu-central-1, every other fs in us-east-1 or eu-west-1.
-	target := homelabUSEast1
+	target := sandboxUSEast1
 	if q.MetricStat.Metric.Dimensions[0].Value != nil && *q.MetricStat.Metric.Dimensions[0].Value == "fs-0a6b33f0" {
 		target.Region = "eu-central-1"
 	}

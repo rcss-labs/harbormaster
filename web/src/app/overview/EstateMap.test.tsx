@@ -16,7 +16,7 @@ describe('EstateMap', () => {
     renderApp('/')
     const region = await map()
     const rows = await within(region).findAllByRole('group')
-    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['homelab-admin', 'staging-example'])
+    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['sandbox-admin', 'staging-example'])
     expect(within(rows[0]).getAllByRole('link')).toHaveLength(5)
     expect(within(rows[1]).getAllByRole('link')).toHaveLength(1)
   })

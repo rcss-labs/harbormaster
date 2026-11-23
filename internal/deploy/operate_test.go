@@ -29,7 +29,7 @@ func runningTaskARN(t *testing.T, h *harness, cluster string, service *string) s
 		 where account_id = $1 and region = $2 and cluster_name = $3
 		   and service_name is not distinct from $4 and last_status = 'RUNNING'
 		 order by task_arn limit 1`,
-		homelabAccountID, homelabRegion, cluster, service).Scan(&arn)
+		sandboxAccountID, sandboxRegion, cluster, service).Scan(&arn)
 	if err != nil {
 		t.Fatalf("running task in %s: %v", cluster, err)
 	}
@@ -144,7 +144,7 @@ func TestStopTask_ReasonAndLog(t *testing.T) {
 	payments := "payments-api"
 	arn := runningTaskARN(t, h, "core-services", &payments)
 
-	stopped, err := h.svc.StopTask(t.Context(), h.sam, homelabAccountID, homelabRegion, arn)
+	stopped, err := h.svc.StopTask(t.Context(), h.sam, sandboxAccountID, sandboxRegion, arn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestStopTask_StandaloneTaskLogsWithoutService(t *testing.T) {
 	h := newHarness(t)
 	arn := runningTaskARN(t, h, "ci-tools", nil)
 
-	if _, err := h.svc.StopTask(t.Context(), h.sam, homelabAccountID, homelabRegion, arn); err != nil {
+	if _, err := h.svc.StopTask(t.Context(), h.sam, sandboxAccountID, sandboxRegion, arn); err != nil {
 		t.Fatal(err)
 	}
 	var serviceIsNull bool
@@ -177,7 +177,7 @@ func TestStopTask_StandaloneTaskLogsWithoutService(t *testing.T) {
 		`select service_name is null, details->>'cluster', details->>'task_arn', text, details->>'op'
 		 from operation_log where account_id = $1 and region = $2 and cluster_name = 'ci-tools'
 		 order by id desc limit 1`,
-		homelabAccountID, homelabRegion).Scan(&serviceIsNull, &cluster, &loggedARN, &text, &op)
+		sandboxAccountID, sandboxRegion).Scan(&serviceIsNull, &cluster, &loggedARN, &text, &op)
 	if err != nil {
 		t.Fatal(err)
 	}

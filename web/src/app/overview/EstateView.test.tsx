@@ -73,7 +73,7 @@ describe('Estate layout', () => {
     renderApp('/')
     const region = await services()
     await user.click(await within(region).findByRole('radio', { name: 'Account' }))
-    expect(groupHeader(region, /homelab-admin/)).toBeInTheDocument()
+    expect(groupHeader(region, /sandbox-admin/)).toBeInTheDocument()
     expect(within(region).queryByRole('button', { name: /staging-example/ })).not.toBeInTheDocument()
     expect(within(region).getByText('1 healthy account hidden')).toBeInTheDocument()
     // Rows name their cluster when grouped by account.

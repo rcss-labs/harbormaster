@@ -18,13 +18,13 @@ import (
 )
 
 const (
-	homelabAccountID = "482109375512"
-	homelabRegion    = "us-east-1"
+	sandboxAccountID = "482109375512"
+	sandboxRegion    = "us-east-1"
 )
 
 var (
-	paymentsKey      = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: homelabRegion, Cluster: "core-services"}, Service: "payments-api"}
-	notificationsKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: homelabRegion, Cluster: "core-services"}, Service: "notifications"}
+	paymentsKey      = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: sandboxRegion, Cluster: "core-services"}, Service: "payments-api"}
+	notificationsKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: sandboxRegion, Cluster: "core-services"}, Service: "notifications"}
 )
 
 type harness struct {
@@ -45,7 +45,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := awsx.Target{AccountID: homelabAccountID, Region: homelabRegion}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: sandboxRegion}
 	if err := poller.PollOnce(t.Context(), st, f, poller.Config{MaxInFlight: 4}, target); err != nil {
 		t.Fatal(err)
 	}

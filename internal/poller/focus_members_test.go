@@ -16,8 +16,8 @@ import (
 func TestPoller_MemberRowCountsFocusedObjects(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "homelab", AccountID: homelabAccount,
-		RoleARN: "arn:aws:iam::" + homelabAccount + ":role/x", ExternalID: "e", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
+	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "sandbox", AccountID: sandboxAccount,
+		RoleARN: "arn:aws:iam::" + sandboxAccount + ":role/x", ExternalID: "e", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	reg := focus.NewMemoryRegistry(time.Now)

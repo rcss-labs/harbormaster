@@ -239,8 +239,8 @@ type discovered struct {
 
 func discover(t *testing.T, env *mcpEnv, c *gatewayClient) discovered {
 	t.Helper()
-	d := discovered{service: webFrontendID(), cluster: clusterID(homelabAccountID, "us-east-1", "core-services")}
-	d.vpc, d.vpcAccount, d.vpcRegion = vpcMain, homelabAccountID, "us-east-1"
+	d := discovered{service: webFrontendID(), cluster: clusterID(sandboxAccountID, "us-east-1", "core-services")}
+	d.vpc, d.vpcAccount, d.vpcRegion = vpcMain, sandboxAccountID, "us-east-1"
 	d.revision = 1
 
 	var tasks struct {
@@ -275,7 +275,7 @@ func TestMCP_EveryToolAnswersAgainstTheRealAPI(t *testing.T) {
 	c := env.client(t, secret)
 	d := discover(t, env, c)
 
-	scope := map[string]any{"account": homelabAccountID, "region": "us-east-1"}
+	scope := map[string]any{"account": sandboxAccountID, "region": "us-east-1"}
 	with := func(extra map[string]any) map[string]any {
 		out := map[string]any{}
 		for k, v := range scope {
@@ -322,7 +322,7 @@ func TestMCP_EveryToolAnswersAgainstTheRealAPI(t *testing.T) {
 		"get_delivery_analytics":    nil,
 		"get_operations_analytics":  nil,
 		"list_networks":             nil,
-		"list_region_vpcs":          {"account": homelabAccountID, "region": "us-east-1"},
+		"list_region_vpcs":          {"account": sandboxAccountID, "region": "us-east-1"},
 		"get_vpc_tree":              with(map[string]any{"vpc_id": d.vpc}),
 		"list_storage":              nil,
 		"search_config":             {"q": "web"},

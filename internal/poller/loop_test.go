@@ -21,10 +21,10 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
-const homelabAccount = "482109375512"
+const sandboxAccount = "482109375512"
 
 var (
-	loopTarget = awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+	loopTarget = awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 	loopNow    = time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 )
 
@@ -157,16 +157,16 @@ func TestLoop_RunningTasks_PaginatesAndChunks(t *testing.T) {
 func TestLoop_DescribeServicesBatchesOfTen(t *testing.T) {
 	estate := &fake.Estate{
 		Now:      func() time.Time { return loopNow },
-		Accounts: []fake.Account{{ID: homelabAccount, Name: "homelab-admin", Regions: []string{"us-east-1"}}},
+		Accounts: []fake.Account{{ID: sandboxAccount, Name: "sandbox-admin", Regions: []string{"us-east-1"}}},
 		Events:   map[string][]ecstypes.ServiceEvent{},
 	}
-	clusterARN := "arn:aws:ecs:us-east-1:" + homelabAccount + ":cluster/bulk"
-	estate.Clusters = []fake.Cluster{{AccountID: homelabAccount, Region: "us-east-1",
+	clusterARN := "arn:aws:ecs:us-east-1:" + sandboxAccount + ":cluster/bulk"
+	estate.Clusters = []fake.Cluster{{AccountID: sandboxAccount, Region: "us-east-1",
 		Cluster: ecstypes.Cluster{ClusterArn: aws.String(clusterARN), ClusterName: aws.String("bulk"), Status: aws.String("ACTIVE")}}}
 	for _, name := range []string{"s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09", "s10", "s11", "s12"} {
-		estate.Services = append(estate.Services, fake.Service{AccountID: homelabAccount, Region: "us-east-1", ClusterName: "bulk",
+		estate.Services = append(estate.Services, fake.Service{AccountID: sandboxAccount, Region: "us-east-1", ClusterName: "bulk",
 			Service: ecstypes.Service{ServiceName: aws.String(name), Status: aws.String("ACTIVE"),
-				ServiceArn: aws.String("arn:aws:ecs:us-east-1:" + homelabAccount + ":service/bulk/" + name)}})
+				ServiceArn: aws.String("arn:aws:ecs:us-east-1:" + sandboxAccount + ":service/bulk/" + name)}})
 	}
 	h := newHarness(t, estate)
 	h.runOnce(t)
@@ -248,7 +248,7 @@ func TestPollOnce_FillsStore(t *testing.T) {
 	if err := PollOnce(context.Background(), st, fake.New(estate), Config{MaxInFlight: 4}, loopTarget); err != nil {
 		t.Fatalf("PollOnce: %v", err)
 	}
-	keys, err := st.KnownTaskARNs(context.Background(), model.ClusterKey{AccountID: homelabAccount, Region: "us-east-1", Cluster: "core-services"}, "RUNNING")
+	keys, err := st.KnownTaskARNs(context.Background(), model.ClusterKey{AccountID: sandboxAccount, Region: "us-east-1", Cluster: "core-services"}, "RUNNING")
 	if err != nil || len(keys) == 0 {
 		t.Fatalf("no running tasks after PollOnce: %v %v", keys, err)
 	}

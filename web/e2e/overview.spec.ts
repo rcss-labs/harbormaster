@@ -116,6 +116,6 @@ test.describe('overview as omer', () => {
 
     await page.getByRole('button', { name: /^Scope:/ }).click()
     const options = await page.getByLabel('Account filter').locator('option').allTextContents()
-    expect(options.filter((name) => name !== 'All accounts').sort()).toEqual(['homelab-admin', 'staging-example'])
+    expect(options.filter((name) => name !== 'All accounts').sort()).toEqual(['sandbox-admin', 'staging-example'])
   })
 })

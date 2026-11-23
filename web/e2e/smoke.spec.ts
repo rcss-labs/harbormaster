@@ -1,7 +1,7 @@
 import { expect, test } from './fixtures/test'
 import { login, serviceId } from './helpers'
 
-const HOMELAB_ACCOUNT_ID = '482109375512'
+const SANDBOX_ACCOUNT_ID = '482109375512'
 
 test('admin walks the read-only product', async ({ page }) => {
   await login(page, 'sam')
@@ -31,7 +31,7 @@ test('admin walks the read-only product', async ({ page }) => {
   await page.getByRole('link', { name: 'Users & permissions' }).click()
   await expect(page.getByRole('button', { name: 'omer on Dev: Operator' })).toBeVisible()
   await page.getByRole('link', { name: /AWS accounts/ }).click()
-  await expect(page.getByRole('main').getByText('homelab-admin').first()).toBeVisible()
+  await expect(page.getByRole('main').getByText('sandbox-admin').first()).toBeVisible()
 
   await page.getByRole('button', { name: /^Account menu for/ }).click()
   await page.getByRole('button', { name: 'Sign out' }).click()
@@ -50,7 +50,7 @@ test('user sees only permitted clusters', async ({ page }) => {
   await expect(page.getByRole('row', { name: /ci-tools/ })).toBeVisible()
   await expect(page.getByRole('row', { name: /core-services/ })).toHaveCount(0)
 
-  await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}`)
+  await page.goto(`/services/${serviceId(SANDBOX_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')}`)
   await expect(page.getByText('No access')).toBeVisible()
 
   await page.goto('/tasks?filter=running')

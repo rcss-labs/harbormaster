@@ -49,7 +49,7 @@ func TestInvalidation_CommittedTaskWriteBumpsEvenWhenMarkingMissingFails(t *test
 func TestInvalidation_CommittedTargetHealthWriteBumpsEvenWhenTheDeleteFails(t *testing.T) {
 	cache := newRecordingCache()
 	h := genHarness(t, cache)
-	extra := "arn:aws:elasticloadbalancing:us-east-1:" + homelabAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
+	extra := "arn:aws:elasticloadbalancing:us-east-1:" + sandboxAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
 	h.estate.AddTargetGroup(paymentsAPI(), fake.TargetGroup{ARN: extra, Healthy: 1})
 	h.runOnce(t)
 	h.estate.RemoveTargetGroup(extra)

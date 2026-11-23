@@ -67,7 +67,7 @@ describe('MobileTopBar', () => {
     expect(chip).toHaveTextContent(`${total}/${total}`)
     await userEvent.setup().click(chip)
     const sheet = await screen.findByRole('dialog', { name: 'Data freshness' })
-    expect(sheet).toHaveTextContent('homelab-admin / eu-west-1')
+    expect(sheet).toHaveTextContent('sandbox-admin / eu-west-1')
   })
 
   it('offers search and drops the desktop-only buttons', async () => {

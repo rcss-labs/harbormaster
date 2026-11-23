@@ -125,7 +125,7 @@ func TestGetRevisions_Shape(t *testing.T) {
 	}
 	// Register revision 43 as sam so registered_by comes from revision_records.
 	svc := &deploy.Service{Store: st, Clients: fk, MaxDesiredCount: 50, Now: time.Now}
-	paymentsKey := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	paymentsKey := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 	deployed, err := svc.DeployedDefinition(t.Context(), paymentsKey)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestGetRevisions_Shape(t *testing.T) {
 			m[k] = v
 		}
 		if m["name"] == "payments-api" {
-			m["image"] = homelabAccountID + ".dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3"
+			m["image"] = sandboxAccountID + ".dkr.ecr.us-east-1.amazonaws.com/payments-api:1.18.3"
 		}
 		copied[i] = m
 	}
@@ -168,7 +168,7 @@ func TestGetRevisions_Shape(t *testing.T) {
 	}
 
 	var rolling revisionsBody
-	decode(t, admin.get("/api/services/"+serviceID(homelabAccountID, "us-east-1", "core-services", "notifications")+"/revisions"), &rolling)
+	decode(t, admin.get("/api/services/"+serviceID(sandboxAccountID, "us-east-1", "core-services", "notifications")+"/revisions"), &rolling)
 	if rolling.DeployedRevision != 9 || rolling.RollingOutRevision == nil || *rolling.RollingOutRevision != 10 {
 		t.Errorf("notifications deployed %d rolling out %v, want 9 and 10", rolling.DeployedRevision, rolling.RollingOutRevision)
 	}
@@ -325,7 +325,7 @@ func TestGetService_IncludesControllerAndStrategyText(t *testing.T) {
 	if got.StrategyText != want {
 		t.Errorf("strategy_text = %q, want %q", got.StrategyText, want)
 	}
-	notifications := getService(t, admin, serviceID(homelabAccountID, "us-east-1", "core-services", "notifications"))
+	notifications := getService(t, admin, serviceID(sandboxAccountID, "us-east-1", "core-services", "notifications"))
 	if notifications.Controller.Supported || notifications.Controller.Banner != "This service is deployed by CodeDeploy. Harbormaster shows it but can't deploy it yet." {
 		t.Errorf("notifications controller = %+v", notifications.Controller)
 	}

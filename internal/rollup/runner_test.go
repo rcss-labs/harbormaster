@@ -19,10 +19,10 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
-const homelab = "482109375512"
+const sandbox = "482109375512"
 
 var (
-	target = awsx.Target{AccountID: homelab, Region: "us-east-1"}
+	target = awsx.Target{AccountID: sandbox, Region: "us-east-1"}
 	// 10:00 UTC on 2026-03-10: today is the 10th and yesterday, the 9th, is the last complete day.
 	now = time.Date(2026, 3, 10, 10, 0, 0, 0, time.UTC)
 )
@@ -48,12 +48,12 @@ func newHarnessRegions(t *testing.T, regions ...string) *harness {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	f := fake.New(fake.MockupEstate(func() time.Time { return now }))
-	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "homelab", AccountID: homelab,
-		RoleARN: "arn:aws:iam::" + homelab + ":role/x", ExternalID: "e", Regions: regions, Enabled: true}); err != nil {
+	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "sandbox", AccountID: sandbox,
+		RoleARN: "arn:aws:iam::" + sandbox + ":role/x", ExternalID: "e", Regions: regions, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, region := range regions {
-		if err := poller.PollOnce(ctx, st, f, poller.Config{MaxInFlight: 4}, awsx.Target{AccountID: homelab, Region: region}); err != nil {
+		if err := poller.PollOnce(ctx, st, f, poller.Config{MaxInFlight: 4}, awsx.Target{AccountID: sandbox, Region: region}); err != nil {
 			t.Fatalf("poll mockup estate %s: %v", region, err)
 		}
 	}
@@ -75,7 +75,7 @@ func (h *harness) count(t *testing.T, query string, args ...any) int {
 
 func (h *harness) sample(t *testing.T, ts time.Time, service string, running, desired int) {
 	t.Helper()
-	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelab, Region: target.Region, Cluster: "core-services"}, Service: service}
+	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandbox, Region: target.Region, Cluster: "core-services"}, Service: service}
 	if err := storetest.Seed(h.st).InsertCountsHistory(context.Background(), ts, []model.Service{{Key: key, Running: running, Desired: desired}}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestRunner_LogsGapAndDoesNotFabricateRows(t *testing.T) {
 	// The last rollup was 10 days ago; the leader was down since.
 	if _, err := h.st.Pool.Exec(ctx,
 		`insert into service_availability_daily values ($1, $2, 'core-services', 'gateway', $3::date, 10, 10, 0, 0)`,
-		homelab, target.Region, day(-10).Format(time.DateOnly)); err != nil {
+		sandbox, target.Region, day(-10).Format(time.DateOnly)); err != nil {
 		t.Fatal(err)
 	}
 	h.sample(t, day(-8).Add(time.Hour), "gateway", 0, 1) // older than the backfill window, still present
@@ -204,7 +204,7 @@ func insightsServices(t *testing.T, h *harness) (withInsights, without int) {
 	t.Helper()
 	ctx := context.Background()
 	for _, region := range h.regions {
-		filter := store.TargetFilter{AccountID: homelab, Region: region}
+		filter := store.TargetFilter{AccountID: sandbox, Region: region}
 		clusters, err := h.st.ListClusters(ctx, filter, store.Visibility{Admin: true})
 		if err != nil {
 			t.Fatal(err)
@@ -229,7 +229,7 @@ func insightsServices(t *testing.T, h *harness) (withInsights, without int) {
 }
 
 func getMetricDataCalls(h *harness) uint64 {
-	return h.fake.CallCounts()[homelab+"|us-east-1|cloudwatch|GetMetricData"]
+	return h.fake.CallCounts()[sandbox+"|us-east-1|cloudwatch|GetMetricData"]
 }
 
 func TestUtilDay_OneLogicalBatchPerTarget(t *testing.T) {
@@ -238,7 +238,7 @@ func TestUtilDay_OneLogicalBatchPerTarget(t *testing.T) {
 	// Scale up to 600 insights services so the batch has to be chunked at 500 queries.
 	extra := make([]model.Service, 0, 600)
 	for i := 0; i < 600; i++ {
-		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelab, Region: target.Region, Cluster: "core-services"}, Service: fmt.Sprintf("bulk-%03d", i)}
+		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandbox, Region: target.Region, Cluster: "core-services"}, Service: fmt.Sprintf("bulk-%03d", i)}
 		extra = append(extra, model.Service{Key: key, Running: 1, Desired: 1, PolledAt: now})
 	}
 	if _, err := storetest.Seed(h.st).UpsertServices(ctx, extra); err != nil {

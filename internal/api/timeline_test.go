@@ -24,7 +24,7 @@ import (
 
 func paymentsKey() model.ServiceKey {
 	return model.ServiceKey{
-		ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"},
+		ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"},
 		Service:    "payments-api",
 	}
 }
@@ -482,7 +482,7 @@ func TestTimeline_ChangeLaneIsNotTruncatedWhenTheRangeIsComplete(t *testing.T) {
 
 func TestTimeline_ClampedAlertCarriesEvidenceAt(t *testing.T) {
 	c, st, _ := timelineFixture(t)
-	srvFake := serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "Old evidence")
+	srvFake := serviceAlert(sandboxAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "Old evidence")
 	srvFake.alert.At = time.Now().Add(-3 * time.Hour)
 	for _, target := range []awsx.Target{srvFake.target} {
 		if err := st.ReplaceAlerts(t.Context(), target, []model.Alert{srvFake.alert}); err != nil {

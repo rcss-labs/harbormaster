@@ -181,7 +181,7 @@ func (e *notifyEnv) openIncident(service string) int64 {
 	e.t.Helper()
 	var id int64
 	err := e.st.Pool.QueryRow(e.t.Context(), `insert into notification_incidents (account_id, region, cluster_name, service_name, kind, severity, title, text, opened_at)
-		values ($1, 'us-east-1', 'core-services', $2, 'service_failing', 'danger', 't', 't', now()) returning id`, homelabAccountID, service).Scan(&id)
+		values ($1, 'us-east-1', 'core-services', $2, 'service_failing', 'danger', 't', 't', now()) returning id`, sandboxAccountID, service).Scan(&id)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestNotificationDeliveries_AggregatedRowHasScopeAndClusterID(t *testing.T) 
 	if testRow.Scope != "" {
 		t.Errorf("a test message has scope %q, want none", testRow.Scope)
 	}
-	if agg.Scope != "cluster" || agg.ClusterID != nxKey.ClusterKey.ID() || agg.AccountID != homelabAccountID || agg.Region != "us-east-1" || agg.Service != "" || agg.ServiceID != "" || agg.Alert != group.AlertTitle {
+	if agg.Scope != "cluster" || agg.ClusterID != nxKey.ClusterKey.ID() || agg.AccountID != sandboxAccountID || agg.Region != "us-east-1" || agg.Service != "" || agg.ServiceID != "" || agg.Alert != group.AlertTitle {
 		t.Errorf("aggregated row = %+v", agg)
 	}
 	if perAlert.Scope != "service" || perAlert.ServiceID != nxKey.ID() || perAlert.ClusterID != nxKey.ClusterKey.ID() {
@@ -364,7 +364,7 @@ func TestNotificationDeliveries_RetryOfAResolvedAlertIsRefused(t *testing.T) {
 	}
 
 	// The alert goes away and, after the grace, the incident resolves.
-	if err := e.st.ReplaceAlerts(t.Context(), awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}, nil); err != nil {
+	if err := e.st.ReplaceAlerts(t.Context(), awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, at := range []time.Time{time.Now().Add(-10 * time.Minute), time.Now()} {

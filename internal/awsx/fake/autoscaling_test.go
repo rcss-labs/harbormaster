@@ -16,7 +16,7 @@ const emailSenderResource = "service/background-jobs/email-sender"
 
 func scalingAPI(t *testing.T, f *Fake) awsx.AutoScalingAPI {
 	t.Helper()
-	api, err := f.AutoScaling(context.Background(), homelabUSEast1)
+	api, err := f.AutoScaling(context.Background(), sandboxUSEast1)
 	if err != nil {
 		t.Fatal(err)
 	}

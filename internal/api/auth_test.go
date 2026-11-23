@@ -87,7 +87,7 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	ctx := t.Context()
 	for _, a := range []store.AWSAccount{
-		{Name: "homelab", AccountID: "111111111111", RoleARN: "arn:aws:iam::111111111111:role/r", ExternalID: "x", Regions: []string{"us-east-1", "eu-west-1"}, Enabled: true},
+		{Name: "sandbox", AccountID: "111111111111", RoleARN: "arn:aws:iam::111111111111:role/r", ExternalID: "x", Regions: []string{"us-east-1", "eu-west-1"}, Enabled: true},
 		{Name: "staging", AccountID: "222222222222", RoleARN: "arn:aws:iam::222222222222:role/r", ExternalID: "x", Regions: []string{"us-east-1"}, Enabled: true},
 	} {
 		if _, err := st.CreateAccount(ctx, a); err != nil {
@@ -130,7 +130,7 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 		t.Errorf("me tag must not emit inherited: %v", rawMe.Tags[0])
 	}
 
-	// View on Dev plus one cluster with a service in homelab/eu-west-1 only: omer sees exactly that account and region.
+	// View on Dev plus one cluster with a service in sandbox/eu-west-1 only: omer sees exactly that account and region.
 	omerUser, err := st.GetUserByUsername(ctx, "omer")
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestMe_ShapeForAdminAndUser(t *testing.T) {
 	decode(t, omer.get("/api/me"), &o2)
 	if len(o2.Accounts) != 1 || o2.Accounts[0].AccountID != "111111111111" ||
 		len(o2.Accounts[0].Regions) != 1 || o2.Accounts[0].Regions[0] != "eu-west-1" {
-		t.Fatalf("omer accounts = %+v, want homelab with eu-west-1 only", o2.Accounts)
+		t.Fatalf("omer accounts = %+v, want sandbox with eu-west-1 only", o2.Accounts)
 	}
 	if len(o2.Regions) != 1 || o2.Regions[0] != "eu-west-1" || o2.Perms[strconv.FormatInt(int64(dev.ID), 10)] != int(authz.View) {
 		t.Fatalf("omer regions=%v perms=%v", o2.Regions, o2.Perms)

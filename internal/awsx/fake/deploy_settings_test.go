@@ -16,7 +16,7 @@ import (
 
 func TestFakeUpdateService_AppliesExecAndDeploymentConfiguration(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	ctx := context.Background()
 	_, err := api.UpdateService(ctx, &ecs.UpdateServiceInput{
 		Cluster: aws.String("core-services"), Service: aws.String("payments-api"),
@@ -49,7 +49,7 @@ func TestFakeUpdateService_AppliesExecAndDeploymentConfiguration(t *testing.T) {
 	if !errors.As(err, &invalid) {
 		t.Fatalf("rollback without enable: err = %v, want InvalidParameterException", err)
 	}
-	edge := ecsFor(t, f, homelabID, "eu-central-1")
+	edge := ecsFor(t, f, sandboxID, "eu-central-1")
 	_, err = edge.UpdateService(ctx, &ecs.UpdateServiceInput{
 		Cluster: aws.String("edge-proxy"), Service: aws.String("cert-renewer"),
 		HealthCheckGracePeriodSeconds: aws.Int32(30)})
@@ -60,7 +60,7 @@ func TestFakeUpdateService_AppliesExecAndDeploymentConfiguration(t *testing.T) {
 
 func TestFakeRollout_NewTasksInheritExec(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "eu-central-1")
+	api := ecsFor(t, f, sandboxID, "eu-central-1")
 	if _, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Cluster: aws.String("edge-proxy"), Service: aws.String("cert-renewer"),
 		EnableExecuteCommand: aws.Bool(true), ForceNewDeployment: true}); err != nil {
@@ -96,7 +96,7 @@ func tagsOfRepository(t *testing.T, f *Fake, account, region, repository string)
 
 func TestFakeECR_DescribeImagesPerRepository(t *testing.T) {
 	f := newFake()
-	payments := tagsOfRepository(t, f, homelabID, "us-east-1", "payments-api")
+	payments := tagsOfRepository(t, f, sandboxID, "us-east-1", "payments-api")
 	if len(payments) != 24 || payments[0] != "1.18.4" || payments[2] != "1.18.2" || payments[23] != "1.16.1" {
 		t.Fatalf("payments-api tags = %v, want 24 newest first", payments)
 	}
@@ -113,11 +113,11 @@ func TestFakeECR_DescribeImagesPerRepository(t *testing.T) {
 		t.Fatalf("migrator tags = %v, want 6 newest first", migrator)
 	}
 	// The sidecar repository exists in the staging account only.
-	repo, _ := f.ECR(context.Background(), awsx.Target{AccountID: homelabID, Region: "us-east-1"})
+	repo, _ := f.ECR(context.Background(), awsx.Target{AccountID: sandboxID, Region: "us-east-1"})
 	_, err := repo.DescribeImages(context.Background(), &ecr.DescribeImagesInput{RepositoryName: aws.String("migrator")})
 	var notFound *ecrtypes.RepositoryNotFoundException
 	if !errors.As(err, &notFound) {
-		t.Fatalf("migrator in homelab: err = %v, want RepositoryNotFoundException", err)
+		t.Fatalf("migrator in sandbox: err = %v, want RepositoryNotFoundException", err)
 	}
 	if got := tagsOfRepository(t, f, stagingID, "us-east-1", "api"); len(got) == 0 {
 		t.Fatal("staging api repository has no tags")

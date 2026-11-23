@@ -180,7 +180,7 @@ func TestServiceTasks_ScopedAndInvisible(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	imageResizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
+	imageResizer := serviceID(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer")
 
 	sam := login(t, srv, "sam", testPassword)
 	// The six OOM stops are 4-64 min old; widen the window so all of them are listed.
@@ -240,8 +240,8 @@ func TestTasks_CarryAccountNameAndRegion(t *testing.T) {
 			t.Errorf("task %s: account_name %q region %q, want a name and %q", task.ShortID, task.AccountName, task.Region, key.Region)
 		}
 	}
-	if core := tasksByCluster(got.Items, "core-services"); len(core) == 0 || core[0].AccountName != "homelab-admin" || core[0].Region != "us-east-1" {
-		t.Errorf("core-services tasks = %+v, want account homelab-admin in us-east-1", core)
+	if core := tasksByCluster(got.Items, "core-services"); len(core) == 0 || core[0].AccountName != "sandbox-admin" || core[0].Region != "us-east-1" {
+		t.Errorf("core-services tasks = %+v, want account sandbox-admin in us-east-1", core)
 	}
 }
 
@@ -250,7 +250,7 @@ func TestTasks_StoppedErrorCountFollowsWindowAndScope(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	c := login(t, srv, "sam", testPassword)
-	resizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
+	resizer := serviceID(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer")
 
 	// errorStops counts the listed stopped tasks that failed, the definition the count must match.
 	errorStops := func(items []TaskDTO) int {
@@ -298,7 +298,7 @@ func TestServiceTasks_SummaryValues(t *testing.T) {
 		t.Fatalf("PUT status %d", resp.StatusCode)
 	}
 
-	resizer := getTasks(t, c, "/api/services/"+serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")+"/tasks?filter=all")
+	resizer := getTasks(t, c, "/api/services/"+serviceID(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer")+"/tasks?filter=all")
 	by := resizer.Summary.ByStatus
 	if by.StoppedError != 6 || by.RunningHealthy != 0 || by.RunningUnhealthy != 0 || by.StoppedNormal != 0 {
 		t.Errorf("image-resizer by_status = %+v", by)
@@ -310,7 +310,7 @@ func TestServiceTasks_SummaryValues(t *testing.T) {
 		t.Errorf("image-resizer runs nothing: by_az %+v by_cluster %+v", resizer.Summary.ByAZ, resizer.Summary.ByCluster)
 	}
 
-	catalog := getTasks(t, c, "/api/services/"+serviceID(homelabAccountID, "eu-west-1", "eu-apps", "catalog-api")+"/tasks?filter=all")
+	catalog := getTasks(t, c, "/api/services/"+serviceID(sandboxAccountID, "eu-west-1", "eu-apps", "catalog-api")+"/tasks?filter=all")
 	if catalog.Summary.ByStatus.RunningUnhealthy != 1 || catalog.Summary.ByStatus.RunningHealthy != 1 {
 		t.Errorf("catalog-api by_status = %+v", catalog.Summary.ByStatus)
 	}
@@ -350,7 +350,7 @@ func TestTasks_WindowFollowsSetting(t *testing.T) {
 		t.Errorf("stopped items/count = %d/%d, want %d", len(stopped.Items), stopped.Counts.Stopped, want)
 	}
 
-	resizer := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
+	resizer := serviceID(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer")
 	svc := getTasks(t, c, "/api/services/"+resizer+"/tasks?filter=all&limit=500")
 	var wantSvc int
 	for _, task := range stopped.Items {

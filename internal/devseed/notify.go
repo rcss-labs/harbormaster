@@ -51,7 +51,7 @@ func seedNotifications(ctx context.Context, st *store.Store, o options) error {
 		return nil
 	}
 	estate := fake.MockupEstate(time.Now)
-	homelab, staging := accountIDByName(estate, "homelab-admin"), accountIDByName(estate, "staging-example")
+	sandbox, staging := accountIDByName(estate, "sandbox-admin"), accountIDByName(estate, "staging-example")
 	allKinds := make([]string, len(notify.Kinds))
 	for i, k := range notify.Kinds {
 		allKinds[i] = k.Kind
@@ -73,13 +73,13 @@ func seedNotifications(ctx context.Context, st *store.Store, o options) error {
 			Name: "core-services to #core-alerts", Enabled: true, Destination: notify.DestSlack,
 			Config:      store.NotificationConfig{Label: "#core-alerts", URLHost: hostOf(o.notifyBaseURL)},
 			MinSeverity: "warning", Kinds: allKinds, QuietEnabled: true,
-			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: homelab, Region: "us-east-1", Cluster: "core-services", Threshold: 1}},
+			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: sandbox, Region: "us-east-1", Cluster: "core-services", Threshold: 1}},
 		}, ptr(hook("core-alerts"))},
 		{store.NotificationRoute{
 			Name: "image-resizer to Telegram", Enabled: true, Destination: notify.DestTelegram,
 			Config:      store.NotificationConfig{ChatID: "-1001234567890"},
 			MinSeverity: "warning", Kinds: allKinds,
-			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorService, AccountID: homelab, Region: "us-east-1", Cluster: "background-jobs", Service: "image-resizer"}},
+			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorService, AccountID: sandbox, Region: "us-east-1", Cluster: "background-jobs", Service: "image-resizer"}},
 		}, &notify.Secret{BotToken: demoTelegramBot}},
 		{store.NotificationRoute{
 			Name: "Staging account by email", Enabled: false, Destination: notify.DestEmail,
@@ -91,7 +91,7 @@ func seedNotifications(ctx context.Context, st *store.Store, o options) error {
 			Name: "Half of core-services down", Enabled: true, Destination: notify.DestPagerDuty,
 			Config:      store.NotificationConfig{Label: "On-call", PagerDutyRegion: "us"},
 			MinSeverity: "critical", Kinds: allKinds,
-			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: homelab, Region: "us-east-1", Cluster: "core-services", Threshold: 2}},
+			Scope: []store.NotificationSelector{{Kind: store.NotificationSelectorCluster, AccountID: sandbox, Region: "us-east-1", Cluster: "core-services", Threshold: 2}},
 		}, &notify.Secret{RoutingKey: demoPagerDutyKey}},
 		{store.NotificationRoute{
 			Name: "Everything else", Enabled: true, Destination: notify.DestSlack, Fallback: true,

@@ -121,7 +121,7 @@ func TestStopTask_RecordFailureAfterAWSAcceptedIsSuccessWithWarning(t *testing.T
 	h.svc.InTx = failAtCommit(h.store)
 	service := paymentsKey.Service
 	arn := runningTaskARN(t, h, paymentsKey.Cluster, &service)
-	got, err := h.svc.StopTask(t.Context(), h.sam, homelabAccountID, homelabRegion, arn)
+	got, err := h.svc.StopTask(t.Context(), h.sam, sandboxAccountID, sandboxRegion, arn)
 	if err != nil || !strings.Contains(got.Warning, "could not record") {
 		t.Fatalf("StopTask() = %+v, %v; want success with a warning", got, err)
 	}

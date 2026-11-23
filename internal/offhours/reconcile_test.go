@@ -33,7 +33,7 @@ func newReconcilerHarness(t *testing.T) *reconcilerHarness {
 	t.Helper()
 	h := &reconcilerHarness{applierHarness: newApplierHarness(t)}
 	h.rec = h.reconciler()
-	if _, err := h.store.CreateAccount(t.Context(), store.AWSAccount{Name: "homelab", AccountID: testAccountID,
+	if _, err := h.store.CreateAccount(t.Context(), store.AWSAccount{Name: "sandbox", AccountID: testAccountID,
 		RoleARN: "arn:aws:iam::" + testAccountID + ":role/x", ExternalID: "e", Regions: []string{testRegion}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

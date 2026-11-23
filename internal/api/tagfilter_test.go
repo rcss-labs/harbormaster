@@ -232,8 +232,8 @@ func TestTagFilter_Alerts(t *testing.T) {
 	pollAll(t, st, fk)
 	ids := lookupTagIDs(t, st)
 	replaceAlerts(t, st, fk,
-		serviceAlert(homelabAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
-		serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
+		serviceAlert(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
+		serviceAlert(sandboxAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
 	)
 	sam := login(t, srv, "sam", testPassword)
 
@@ -242,7 +242,7 @@ func TestTagFilter_Alerts(t *testing.T) {
 	allRegions := []string{"us-east-1", "eu-west-1", "eu-central-1"}
 	var accountAlerts []targetAlert
 	for _, region := range allRegions {
-		accountAlerts = append(accountAlerts, accountAlert(homelabAccountID, region, model.AlertInfo, "account notice "+region))
+		accountAlerts = append(accountAlerts, accountAlert(sandboxAccountID, region, model.AlertInfo, "account notice "+region))
 	}
 	replaceAlerts(t, st, fk, accountAlerts...)
 	for _, region := range allRegions {
@@ -253,7 +253,7 @@ func TestTagFilter_Alerts(t *testing.T) {
 		for _, tag := range []string{ids.Dev, ids.Staging, ids.Prod} {
 			hasCluster := false
 			for _, cluster := range listClusters(t, sam, "?"+tag).Items {
-				hasCluster = hasCluster || (cluster.AccountID == homelabAccountID && cluster.Region == region)
+				hasCluster = hasCluster || (cluster.AccountID == sandboxAccountID && cluster.Region == region)
 			}
 			if got := itemTitles(getAlertsBody(t, sam, "?"+tag)); slices.Contains(got, title) != hasCluster {
 				t.Errorf("%s under %s: alerts %v, visible want %v (a matching cluster exists: %v)", title, tag, got, hasCluster, hasCluster)
@@ -261,8 +261,8 @@ func TestTagFilter_Alerts(t *testing.T) {
 		}
 	}
 	replaceAlerts(t, st, fk,
-		serviceAlert(homelabAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
-		serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
+		serviceAlert(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
+		serviceAlert(sandboxAccountID, "us-east-1", "core-services", "payments-api", model.AlertWarning, "payments-api warning"),
 	)
 
 	staging := getAlertsBody(t, sam, "?"+ids.Staging)

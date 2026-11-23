@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	homelabID = "482109375512"
+	sandboxID = "482109375512"
 	stagingID = "731022849906"
 )
 
@@ -124,7 +124,7 @@ func TestMockupEstate_ImageIndexes(t *testing.T) {
 
 func TestFakeECS_ListTasksPaginates(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	all, err := api.ListTasks(context.Background(), &ecs.ListTasksInput{Cluster: aws.String("core-services")})
 	if err != nil {
 		t.Fatal(err)
@@ -161,10 +161,10 @@ func TestFakeECS_ListTasksPaginates(t *testing.T) {
 }
 
 func TestFakeECS_DescribeTasksRejectsOver100(t *testing.T) {
-	api := ecsFor(t, newFake(), homelabID, "us-east-1")
+	api := ecsFor(t, newFake(), sandboxID, "us-east-1")
 	arns := make([]string, 101)
 	for i := range arns {
-		arns[i] = "arn:aws:ecs:us-east-1:" + homelabID + ":task/core-services/missing"
+		arns[i] = "arn:aws:ecs:us-east-1:" + sandboxID + ":task/core-services/missing"
 	}
 	_, err := api.DescribeTasks(context.Background(), &ecs.DescribeTasksInput{Cluster: aws.String("core-services"), Tasks: arns})
 	if err == nil || !strings.Contains(err.Error(), "at most 100") {
@@ -182,7 +182,7 @@ func TestFakeECS_DescribeTasksRejectsOver100(t *testing.T) {
 
 func TestFake_ThrottleKnobAndCalls(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	f.Throttle = 2
 	in := &ecs.DescribeServicesInput{Cluster: aws.String("core-services"), Services: []string{"payments-api"}}
 	for i := 0; i < 2; i++ {
@@ -201,7 +201,7 @@ func TestFake_ThrottleKnobAndCalls(t *testing.T) {
 
 func TestFakeECS_ScopedToTarget(t *testing.T) {
 	f := newFake()
-	out, err := ecsFor(t, f, homelabID, "eu-west-1").ListClusters(context.Background(), &ecs.ListClustersInput{})
+	out, err := ecsFor(t, f, sandboxID, "eu-west-1").ListClusters(context.Background(), &ecs.ListClustersInput{})
 	if err != nil || len(out.ClusterArns) != 1 || !strings.HasSuffix(out.ClusterArns[0], ":cluster/eu-apps") {
 		t.Fatalf("eu-west-1 clusters = %v err=%v, want only eu-apps", out, err)
 	}
@@ -220,7 +220,7 @@ func TestFakeECS_ScopedToTarget(t *testing.T) {
 
 func TestFake_CredentialsForKnownAccount(t *testing.T) {
 	f := newFake()
-	p, err := f.Credentials(context.Background(), awsx.Target{AccountID: homelabID, Region: "us-east-1"})
+	p, err := f.Credentials(context.Background(), awsx.Target{AccountID: sandboxID, Region: "us-east-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestFake_CredentialsForKnownAccount(t *testing.T) {
 
 func TestFakeECS_NotificationsMidRolloutAndHelpers(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	out, err := api.DescribeServices(context.Background(), &ecs.DescribeServicesInput{Cluster: aws.String("core-services"), Services: []string{"notifications"}})
 	if err != nil || len(out.Services) != 1 {
 		t.Fatalf("describe: %v", err)
@@ -328,7 +328,7 @@ func contains(list []string, want string) bool {
 // under Mu (as later plans do) must neither change them nor race with readers.
 func TestFakeECS_ResultsDoNotAliasEstate(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	ctx := context.Background()
 	svcOut, err := api.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String("core-services"), Services: []string{"notifications"}})
 	if err != nil || len(svcOut.Services) != 1 {
@@ -388,13 +388,13 @@ func TestFakeECS_ResultsDoNotAliasEstate(t *testing.T) {
 
 func TestFake_ProbeAuthorisesKnownAccounts(t *testing.T) {
 	f := newFake()
-	ok := f.Probe(context.Background(), "arn:aws:iam::"+homelabID+":role/harbormaster-access", "ext", []string{"us-east-1", "eu-west-1"})
+	ok := f.Probe(context.Background(), "arn:aws:iam::"+sandboxID+":role/harbormaster-access", "ext", []string{"us-east-1", "eu-west-1"})
 	if len(ok) != 2 || !ok[0].OK || ok[0].Clusters != 3 || !ok[1].OK || ok[1].Clusters != 1 {
 		t.Fatalf("probe = %+v, want us-east-1:3 eu-west-1:1", ok)
 	}
-	for _, role := range []string{"arn:aws:iam::999999999999:role/x", "arn:aws:iam::" + homelabID + ":role/x"} {
+	for _, role := range []string{"arn:aws:iam::999999999999:role/x", "arn:aws:iam::" + sandboxID + ":role/x"} {
 		extID := "ext"
-		if strings.Contains(role, homelabID) {
+		if strings.Contains(role, sandboxID) {
 			extID = ""
 		}
 		bad := f.Probe(context.Background(), role, extID, []string{"us-east-1"})
@@ -409,7 +409,7 @@ func TestFakeDenyWrites(t *testing.T) {
 	f := newFake()
 	api := scalingAPI(t, f)
 	registerTarget(t, api, emailSenderResource, 1, 4)
-	f.DenyWrites(homelabID)
+	f.DenyWrites(sandboxID)
 
 	_, err := api.PutScheduledAction(ctx, &applicationautoscaling.PutScheduledActionInput{
 		ServiceNamespace: astypes.ServiceNamespaceEcs, ScalableDimension: astypes.ScalableDimensionECSServiceDesiredCount,

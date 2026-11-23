@@ -13,16 +13,16 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/execbridge"
 )
 
-var homelabEast = awsx.Target{AccountID: homelabID, Region: "us-east-1"}
+var sandboxEast = awsx.Target{AccountID: sandboxID, Region: "us-east-1"}
 
-// taskOfService returns the cluster, region and ARN of the idx-th RUNNING task of a service in the homelab account.
+// taskOfService returns the cluster, region and ARN of the idx-th RUNNING task of a service in the sandbox account.
 func taskOfService(t *testing.T, f *Fake, service string, idx int) (cluster, region, arn string) {
 	t.Helper()
 	f.Estate.Mu.Lock()
 	defer f.Estate.Mu.Unlock()
 	n := 0
 	for _, task := range f.Estate.Tasks {
-		if task.AccountID == homelabID && aws.ToString(task.Task.Group) == "service:"+service && aws.ToString(task.Task.LastStatus) == "RUNNING" {
+		if task.AccountID == sandboxID && aws.ToString(task.Task.Group) == "service:"+service && aws.ToString(task.Task.LastStatus) == "RUNNING" {
 			if n == idx {
 				return task.ClusterName, task.Region, aws.ToString(task.Task.TaskArn)
 			}
@@ -44,7 +44,7 @@ func execFake(t *testing.T) *Fake {
 
 func executeCommand(f *Fake, t *testing.T, cluster, region, arn, container string) (*ecs.ExecuteCommandOutput, error) {
 	t.Helper()
-	api := ecsFor(t, f, homelabID, region)
+	api := ecsFor(t, f, sandboxID, region)
 	return api.ExecuteCommand(context.Background(), &ecs.ExecuteCommandInput{
 		Cluster: aws.String(cluster), Task: aws.String(arn), Container: aws.String(container),
 		Command: aws.String("/bin/sh"), Interactive: true,
@@ -112,7 +112,7 @@ func TestFakeECS_ExecuteCommand_NoExecServer(t *testing.T) {
 func TestFakeSSM_TerminateSession_MarksTerminated(t *testing.T) {
 	f := execFake(t)
 	id, _, _ := f.ExecServer.Issue("arn", "c", "/bin/sh")
-	api, err := f.SSM(context.Background(), homelabEast)
+	api, err := f.SSM(context.Background(), sandboxEast)
 	if err != nil {
 		t.Fatal(err)
 	}

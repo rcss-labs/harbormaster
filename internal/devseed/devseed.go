@@ -191,7 +191,7 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 		}
 	}
 
-	if err := st.SetClusterTag(ctx, model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "us-east-1", Cluster: "core-services"}, prod.ID); err != nil {
+	if err := st.SetClusterTag(ctx, model.ClusterKey{AccountID: accountIDByName(estate, "sandbox-admin"), Region: "us-east-1", Cluster: "core-services"}, prod.ID); err != nil {
 		return fmt.Errorf("tag core-services: %w", err)
 	}
 	if err := st.SetClusterTag(ctx, model.ClusterKey{AccountID: accountIDByName(estate, "staging-example"), Region: "us-east-1", Cluster: "staging-web"}, staging.ID); err != nil {
@@ -200,14 +200,14 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 	// The Fargate Spot advisor only suggests services someone tagged non-production on purpose, so the two demo candidates
 	// carry an explicit Dev tag; every other untagged service is shown as untagged.
 	for _, tagged := range []struct{ region, cluster, service string }{{"eu-west-1", "eu-apps", "catalog-api"}, {"eu-central-1", "edge-proxy", "edge-nginx"}} {
-		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: tagged.region, Cluster: tagged.cluster}, Service: tagged.service}
+		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "sandbox-admin"), Region: tagged.region, Cluster: tagged.cluster}, Service: tagged.service}
 		if err := st.SetServiceTag(ctx, key, &dev.ID); err != nil {
 			return fmt.Errorf("tag %s: %w", tagged.service, err)
 		}
 	}
 	// An explicit service tag on an otherwise Dev cluster exercises the cluster-matching rule.
 	artifactProxy := model.ServiceKey{
-		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "us-east-1", Cluster: "ci-tools"},
+		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "sandbox-admin"), Region: "us-east-1", Cluster: "ci-tools"},
 		Service:    "artifact-proxy",
 	}
 	if err := st.SetServiceTag(ctx, artifactProxy, &prod.ID); err != nil {
@@ -216,7 +216,7 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 
 	// Only edge-nginx scans before deploy: the e2e flows change payments-api's image and would stop at the scan gate.
 	edgeNginx := model.ServiceKey{
-		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "homelab-admin"), Region: "eu-central-1", Cluster: "edge-proxy"},
+		ClusterKey: model.ClusterKey{AccountID: accountIDByName(estate, "sandbox-admin"), Region: "eu-central-1", Cluster: "edge-proxy"},
 		Service:    "edge-nginx",
 	}
 	if _, err := st.SetPreDeployScan(ctx, edgeNginx, true, 0, time.Now()); err != nil {
@@ -225,11 +225,11 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 
 	// Configured base images so `base:` config searches have results; web-frontend and web are the node:18 repos.
 	stagingAccount := accountIDByName(estate, "staging-example")
-	homelabAccount := accountIDByName(estate, "homelab-admin")
+	sandboxAccount := accountIDByName(estate, "sandbox-admin")
 	for key, base := range map[store.RepoKey]string{
-		{AccountID: homelabAccount, Region: "us-east-1", Repository: "web-frontend"}: "node:18-alpine",
+		{AccountID: sandboxAccount, Region: "us-east-1", Repository: "web-frontend"}: "node:18-alpine",
 		{AccountID: stagingAccount, Region: "us-east-1", Repository: "web"}:          "node:18-alpine",
-		{AccountID: homelabAccount, Region: "us-east-1", Repository: "auth-service"}: "node:20-alpine",
+		{AccountID: sandboxAccount, Region: "us-east-1", Repository: "auth-service"}: "node:20-alpine",
 	} {
 		if err := st.SetRepoBase(ctx, key, base, 0, time.Now()); err != nil {
 			return fmt.Errorf("seed base image for %s: %w", key.Repository, err)
@@ -242,7 +242,7 @@ func ForceApply(ctx context.Context, st *store.Store) error {
 // seedTerminalSession records that dana opened a terminal on catalog-api two days ago. It is the soft signal that makes the
 // Fargate Spot advisor list catalog-api with "Check first" instead of a plain suggestion.
 func seedTerminalSession(ctx context.Context, st *store.Store, estate *fake.Estate, userID int64) error {
-	account := accountIDByName(estate, "homelab-admin")
+	account := accountIDByName(estate, "sandbox-admin")
 	var seeded bool
 	if err := st.Pool.QueryRow(ctx,
 		`select exists (select 1 from operation_log where account_id = $1 and region = 'eu-west-1' and cluster_name = 'eu-apps'

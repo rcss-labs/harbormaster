@@ -161,7 +161,7 @@ func TestRegister_ValidationIs422(t *testing.T) {
 func TestRegister_NonAdminRoleChangeIs422(t *testing.T) {
 	env := newWriteEnv(t)
 	draft := draftFor(t, env.login("sam"))
-	draft["taskRoleArn"] = "arn:aws:iam::" + homelabAccountID + ":role/escalated"
+	draft["taskRoleArn"] = "arn:aws:iam::" + sandboxAccountID + ":role/escalated"
 	body := map[string]any{"base_revision": 42, "definition": draft}
 	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/revisions", body)
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -260,7 +260,7 @@ func TestDeploy_AlreadyDeployedIs422(t *testing.T) {
 
 func TestDeploy_RolloutRunningIs409(t *testing.T) {
 	env := newWriteEnv(t)
-	id := serviceID(homelabAccountID, "us-east-1", "core-services", "notifications")
+	id := serviceID(sandboxAccountID, "us-east-1", "core-services", "notifications")
 	resp := env.login("sam").post("/api/services/"+id+"/deploy", map[string]any{"revision": 8})
 	wantStatus(t, resp, http.StatusConflict)
 	if code, msg := errorCode(t, resp); code != "conflict" || msg != "A rollout is already running" {
@@ -278,7 +278,7 @@ func TestDeploy_CodeDeployServiceIs422WithBanner(t *testing.T) {
 		}
 	}
 	env.fk.Estate.Mu.Unlock()
-	id := serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")
+	id := serviceID(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer")
 	resp := env.login("sam").post("/api/services/"+id+"/deploy", map[string]any{"revision": 5})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	want := "This service is deployed by CodeDeploy. Harbormaster shows it but can't deploy it yet."
@@ -343,8 +343,8 @@ func TestStopTask_ServiceTagAndStandaloneClusterTag(t *testing.T) {
 	if standalone == "" || inProd == "" {
 		t.Fatalf("seed tasks not found: standalone %q prod %q", standalone, inProd)
 	}
-	standaloneID := model.TaskID(homelabAccountID, "us-east-1", standalone)
-	prodID := model.TaskID(homelabAccountID, "us-east-1", inProd)
+	standaloneID := model.TaskID(sandboxAccountID, "us-east-1", standalone)
+	prodID := model.TaskID(sandboxAccountID, "us-east-1", inProd)
 
 	// omer is Operator on Dev: may stop the Dev standalone task, but cannot see Prod tasks.
 	omer := env.login("omer")
@@ -430,8 +430,8 @@ func TestWrite_ThrottleIs503(t *testing.T) {
 // foldedKeyAttacks are drafts that try to slip a role or secret past the non-admin lock with a
 // key spelled in another letter case. encoding/json would decode them into the real field.
 func foldedKeyAttacks() map[string]func(draft map[string]any) {
-	const prodAdmin = "arn:aws:iam::" + homelabAccountID + ":role/prod-admin"
-	const stolen = "arn:aws:ssm:us-east-1:" + homelabAccountID + ":parameter/stolen/KEY"
+	const prodAdmin = "arn:aws:iam::" + sandboxAccountID + ":role/prod-admin"
+	const stolen = "arn:aws:ssm:us-east-1:" + sandboxAccountID + ":parameter/stolen/KEY"
 	first := func(draft map[string]any) map[string]any {
 		return draft["containerDefinitions"].([]any)[0].(map[string]any)
 	}
@@ -440,7 +440,7 @@ func foldedKeyAttacks() map[string]func(draft map[string]any) {
 		"executionRoleArn duplicate": func(d map[string]any) { d["executionrolearn"] = prodAdmin },
 		"taskRoleArn lone":           func(d map[string]any) { delete(d, "taskRoleArn"); d["taskrolearn"] = prodAdmin },
 		"secrets valueFrom duplicate": func(d map[string]any) {
-			first(d)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": "arn:aws:ssm:us-east-1:" + homelabAccountID + ":parameter/payments/DB_PASS", "valuefrom": stolen}}
+			first(d)["secrets"] = []any{map[string]any{"name": "X", "valueFrom": "arn:aws:ssm:us-east-1:" + sandboxAccountID + ":parameter/payments/DB_PASS", "valuefrom": stolen}}
 		},
 		"secrets valueFrom lone": func(d map[string]any) {
 			first(d)["secrets"] = []any{map[string]any{"name": "X", "valuefrom": stolen}}

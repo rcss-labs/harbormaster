@@ -189,7 +189,7 @@ func TestStorage_MountedByOmitsInvisibleServices(t *testing.T) {
 		}
 	}
 	renewer := model.ServiceKey{
-		ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"},
+		ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-central-1", Cluster: "edge-proxy"},
 		Service:    "cert-renewer",
 	}
 	if err := fx.store.SetServiceTag(t.Context(), renewer, &prod); err != nil {

@@ -89,7 +89,7 @@ Blocked and counted requests are in the `aws-waf-logs-<name>` log group (`action
 
 ## Plans and applies
 
-Plans and applies run in TerraDuckTel. Locally, run only `terraform fmt` and `terraform validate` (`make tf-check`).
+Run plan and apply with your Terraform workflow. To check changes locally without touching AWS, run `terraform fmt` and `terraform validate` (`make tf-check`).
 
 ## OAuth for claude.ai and Claude Desktop connectors
 

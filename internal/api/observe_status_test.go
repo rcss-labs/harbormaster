@@ -37,7 +37,7 @@ func TestServiceStatus_TargetUnhealthyWithoutTaskHealth(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"}
 	key := model.ServiceKey{
 		ClusterKey: model.ClusterKey{AccountID: target.AccountID, Region: target.Region, Cluster: "eu-apps"},
 		Service:    "catalog-api",
@@ -119,7 +119,7 @@ func TestPollerStatus_TiersListed(t *testing.T) {
 	pollAll(t, st, fk)
 	var got pollerBody
 	decode(t, login(t, srv, "sam", testPassword).get("/api/poller"), &got)
-	item := pollerItemFor(t, got, awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"})
+	item := pollerItemFor(t, got, awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"})
 	if len(item.Tiers) == 0 {
 		t.Fatalf("tiers empty: %+v", item)
 	}
@@ -136,7 +136,7 @@ func TestPollerStatus_NonCoreTierFailureKeepsCoreCurrent(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"}
 	if err := storetest.Seed(st).UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "scaling",
 		LastError: "DescribeScheduledActions: UnsupportedOperation", Interval: time.Minute, BaseInterval: time.Minute, Failures: 5}); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestPollerStatus_NonCoreTierFailureKeepsCoreCurrent(t *testing.T) {
 func TestPollerStatus_TierLabelsMerge(t *testing.T) {
 	srv, _, st := newTestServer(t)
 	seedAccounts(t, st)
-	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"}
 	older := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	newer := time.Now().UTC().Truncate(time.Second)
 	for _, loop := range []store.PollLoop{
@@ -188,7 +188,7 @@ func TestPollerStatus_NonAdminTierErrorHidden(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"}
 	now := time.Now()
 	// one non-failing blip names a resource, a failing tier names another
 	if err := storetest.Seed(st).UpsertPollLoop(t.Context(), store.PollLoop{Target: target, Tier: "network", LastOKAt: &now,

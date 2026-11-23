@@ -20,8 +20,8 @@ func (p *snapPair) listQueries(t *testing.T) []string {
 	prod := strconv.Itoa(int(p.tagID(t, "Prod")))
 	staging := strconv.Itoa(int(p.tagID(t, "Staging")))
 	return []string{
-		"", "?account=" + homelabAccountID, "?account=" + homelabAccountID + "&region=us-east-1", "?region=eu-west-1",
-		"?tag=" + prod, "?tag=" + prod + "&tag=" + staging, "?account=" + homelabAccountID + "&tag=" + staging,
+		"", "?account=" + sandboxAccountID, "?account=" + sandboxAccountID + "&region=us-east-1", "?region=eu-west-1",
+		"?tag=" + prod, "?tag=" + prod + "&tag=" + staging, "?account=" + sandboxAccountID + "&tag=" + staging,
 	}
 }
 
@@ -84,7 +84,7 @@ func (h hidingToken) Tokens(ctx context.Context, ks ...snapcache.GenKey) ([]stri
 func TestListClusters_OneSliceDownStillAnswers(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		p := newSnapPair(t, c)
-		p.reader.Cache = hidingToken{Cache: p.cache, hide: snapcache.GenKey{AccountID: homelabAccountID, Region: "us-east-1"}}
+		p.reader.Cache = hidingToken{Cache: p.cache, hide: snapcache.GenKey{AccountID: sandboxAccountID, Region: "us-east-1"}}
 		sameListBodies(t, p, "/api/clusters", "clusters")
 		if p.count(t, "slice", "bypass") == 0 {
 			t.Fatal("the slice without a token was not read from Postgres")

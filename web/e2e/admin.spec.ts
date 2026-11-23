@@ -168,14 +168,14 @@ test.describe('admin pages as sam', () => {
   test('AWS accounts: both rows with their role ARN, and a generated external ID', async ({ page }) => {
     await page.goto('/settings/accounts')
     await expect(page.getByRole('heading', { level: 2, name: 'AWS accounts' })).toBeVisible()
-    const homelab = page.getByRole('row').filter({ hasText: 'homelab-admin' })
-    await expect(homelab).toContainText('arn:aws:iam::482109375512:role/harbormaster-access')
-    await expect(homelab).toContainText('us-east-1, eu-west-1, eu-central-1')
+    const sandbox = page.getByRole('row').filter({ hasText: 'sandbox-admin' })
+    await expect(sandbox).toContainText('arn:aws:iam::482109375512:role/harbormaster-access')
+    await expect(sandbox).toContainText('us-east-1, eu-west-1, eu-central-1')
     const staging = page.getByRole('row').filter({ hasText: 'staging-example' })
     await expect(staging).toContainText('arn:aws:iam::731022849906:role/harbormaster-access')
     await expect(staging).toContainText('us-east-1')
     // Last check is relative time once the first poll has run.
-    await expect(homelab).toContainText('ago', { timeout: 30_000 })
+    await expect(sandbox).toContainText('ago', { timeout: 30_000 })
 
     await page.getByRole('button', { name: 'Connect account' }).click()
     const dialog = page.getByRole('dialog')

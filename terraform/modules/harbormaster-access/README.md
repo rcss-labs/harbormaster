@@ -8,7 +8,7 @@ There are up to three roles per account, all named from `role_name`: the access 
 
 1. Get the task role ARNs from the `harbormaster` module outputs (`task_role_arn` for the single service; `web_task_role_arn`, `poller_task_role_arn` and `coordinator_task_role_arn` for split services). Apply the `harbormaster` module first: IAM rejects a trust policy that names a role that does not exist.
 2. In the Harbormaster UI open *AWS accounts > Connect account* and copy the generated external ID (24 characters).
-3. Apply this module in the target account through TerraDuckTel, passing both values.
+3. Apply this module in the target account with your Terraform workflow, passing both values.
 4. Back in the UI, enter the `role_arn` output and press *Test and connect*.
 
 To move an account to split services, pass the three new ARNs as well, keeping `harbormaster_task_role_arn` until the legacy service is gone (see the upgrade runbook in the `harbormaster` module README). Once it is removed, set `harbormaster_task_role_arn = null`.

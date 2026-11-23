@@ -216,7 +216,7 @@ func TestTags_ImpactLists(t *testing.T) {
 	pollAll(t, st, fk)
 	sam := login(t, srv, "sam", testPassword)
 	prod := tagByName(t, sam, "Prod")
-	web := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "web-frontend"}
+	web := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "web-frontend"}
 	tagID := authzTag(prod.ID)
 	if err := st.SetServiceTag(t.Context(), web, &tagID); err != nil {
 		t.Fatal(err)
@@ -290,13 +290,13 @@ func TestAssignments_ClusterChangeWritesOplogForEachService(t *testing.T) {
 	staging := tagByName(t, sam, "Staging")
 
 	var as testAssignments
-	decode(t, sam.get("/api/tag-assignments?account="+homelabAccountID+"&region=us-east-1"), &as)
+	decode(t, sam.get("/api/tag-assignments?account="+sandboxAccountID+"&region=us-east-1"), &as)
 	var core int = -1
 	for i, c := range as.Clusters {
 		if c.Name == "core-services" {
 			core = i
 		}
-		if c.AccountName != "homelab-admin" || c.Region != "us-east-1" {
+		if c.AccountName != "sandbox-admin" || c.Region != "us-east-1" {
 			t.Fatalf("filter leaked cluster %+v", c)
 		}
 	}
@@ -386,7 +386,7 @@ func TestAssignments_ServiceInheritIsNull(t *testing.T) {
 	pollAll(t, st, fk)
 	sam := login(t, srv, "sam", testPassword)
 	staging := tagByName(t, sam, "Staging")
-	web := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "web-frontend"}
+	web := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "web-frontend"}
 	path := "/api/tag-assignments/services/" + web.ID()
 
 	resp := sam.do("PUT", path, map[string]any{"tag_id": staging.ID}, nil)

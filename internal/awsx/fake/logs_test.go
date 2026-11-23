@@ -26,7 +26,7 @@ func logsFor(t *testing.T, f *Fake, target awsx.Target) awsx.LogsAPI {
 }
 
 func TestFakeFilterLogEvents_PagesNewestLast(t *testing.T) {
-	api := logsFor(t, newFake(), homelabUSEast1)
+	api := logsFor(t, newFake(), sandboxUSEast1)
 	in := &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName:        aws.String(paymentsLogGroup),
 		LogStreamNamePrefix: aws.String("ecs/payments-api/"),
@@ -75,7 +75,7 @@ func TestFakeFilterLogEvents_PagesNewestLast(t *testing.T) {
 
 func TestFakeFilterLogEvents_StreamNamesUseRealTaskIDs(t *testing.T) {
 	f := newFake()
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(paymentsLogGroup),
 		StartTime:    aws.Int64(fixedNow.Add(-time.Hour).UnixMilli()),
@@ -99,7 +99,7 @@ func TestFakeFilterLogEvents_StreamNamesUseRealTaskIDs(t *testing.T) {
 }
 
 func TestFakeFilterLogEvents_GeneratedLinesCarryWarnAndErrorTokens(t *testing.T) {
-	api := logsFor(t, newFake(), homelabUSEast1)
+	api := logsFor(t, newFake(), sandboxUSEast1)
 	out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(paymentsLogGroup),
 		StartTime:    aws.Int64(fixedNow.Add(-time.Hour).UnixMilli()),
@@ -123,7 +123,7 @@ func TestFakeFilterLogEvents_GeneratedLinesCarryWarnAndErrorTokens(t *testing.T)
 }
 
 func TestFakeFilterLogEvents_UnknownGroupIsNotFound(t *testing.T) {
-	api := logsFor(t, newFake(), homelabUSEast1)
+	api := logsFor(t, newFake(), sandboxUSEast1)
 	_, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{LogGroupName: aws.String("/ecs/nope/nope")})
 	var notFound *logstypes.ResourceNotFoundException
 	if !errors.As(err, &notFound) {
@@ -142,7 +142,7 @@ func TestFakeFilterLogEvents_ExplicitLinesOverrideGeneratedPool(t *testing.T) {
 		})
 	}
 	f.Estate.SetLogLines(paymentsLogGroup, lines)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
 		LogGroupName: aws.String(paymentsLogGroup),
 		StartTime:    aws.Int64(fixedNow.Add(-72 * time.Hour).UnixMilli()),
@@ -169,7 +169,7 @@ func TestFakeFilterLogEvents_ExplicitLinesOverrideGeneratedPool(t *testing.T) {
 func TestFakeLiveTail_EmitsAndCloses(t *testing.T) {
 	f := newFake()
 	f.LiveTailInterval = 20 * time.Millisecond
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	in := &cloudwatchlogs.StartLiveTailInput{LogGroupIdentifiers: []string{paymentsLogGroup}}
 	stream, err := api.LiveTail(context.Background(), in)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestFakeLiveTail_InjectedStreamErrorSurfacesAfterClose(t *testing.T) {
 	f := newFake()
 	f.LiveTailInterval = 10 * time.Millisecond
 	f.LiveTailError = &logstypes.SessionStreamingException{Message: aws.String("SessionStreamingException")}
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	stream, err := api.LiveTail(context.Background(), &cloudwatchlogs.StartLiveTailInput{LogGroupIdentifiers: []string{paymentsLogGroup}})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestFakeLiveTail_InjectedStreamErrorSurfacesAfterClose(t *testing.T) {
 }
 
 func TestFakeFilterLogEvents_HealthLineWithinAnyShortWindow(t *testing.T) {
-	api := logsFor(t, newFake(), homelabUSEast1)
+	api := logsFor(t, newFake(), sandboxUSEast1)
 	// Every running task writes the pool's health check line at least every healthLineEvery slots, so a window of
 	// that many intervals always holds one; e2e and demos rely on seeing it without waiting for a lucky pick.
 	window := time.Duration(healthLineEvery) * logLineInterval
@@ -266,7 +266,7 @@ func TestFilterLogEvents_OrPatternMatchesAnyTerm(t *testing.T) {
 		lines = append(lines, LogLine{Stream: "ecs/payments-api/taskaaa", Timestamp: fixedNow.Add(-time.Duration(i+1) * time.Minute), Message: message})
 	}
 	f.Estate.SetLogLines(paymentsLogGroup, lines)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	filter := func(pattern string) []string {
 		out, err := api.FilterLogEvents(context.Background(), &cloudwatchlogs.FilterLogEventsInput{
 			LogGroupName:  aws.String(paymentsLogGroup),

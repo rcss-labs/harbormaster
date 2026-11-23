@@ -21,7 +21,7 @@ func efsFor(t *testing.T, f *Fake, target awsx.Target) awsx.EFSAPI {
 
 func TestFakeEFS_DescribeFileSystemsPaginates(t *testing.T) {
 	f := newFake()
-	api := efsFor(t, f, homelabUSEast1)
+	api := efsFor(t, f, sandboxUSEast1)
 	var names []string
 	var marker *string
 	pages := 0
@@ -46,7 +46,7 @@ func TestFakeEFS_DescribeFileSystemsPaginates(t *testing.T) {
 
 func TestFakeEFS_DescribeMountTargetsByFileSystem(t *testing.T) {
 	f := newFake()
-	api := efsFor(t, f, homelabUSEast1)
+	api := efsFor(t, f, sandboxUSEast1)
 	out, err := api.DescribeMountTargets(context.Background(), &efs.DescribeMountTargetsInput{FileSystemId: aws.String("fs-0c91a4e7")})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestFakeEFS_DescribeMountTargetsByFileSystem(t *testing.T) {
 
 func TestFakeEFS_AccessPoints(t *testing.T) {
 	f := newFake()
-	api := efsFor(t, f, homelabUSEast1)
+	api := efsFor(t, f, sandboxUSEast1)
 	out, err := api.DescribeAccessPoints(context.Background(), &efs.DescribeAccessPointsInput{FileSystemId: aws.String("fs-0c91a4e7")})
 	if err != nil || len(out.AccessPoints) != 1 {
 		t.Fatalf("aps %v err %v", out, err)
@@ -81,7 +81,7 @@ func TestFakeEFS_AccessPoints(t *testing.T) {
 func TestFakeEFS_ThrottleKnob(t *testing.T) {
 	f := newFake()
 	f.ThrottleEFS = 1
-	api := efsFor(t, f, homelabUSEast1)
+	api := efsFor(t, f, sandboxUSEast1)
 	if _, err := api.DescribeFileSystems(context.Background(), &efs.DescribeFileSystemsInput{}); !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want throttle", err)
 	}

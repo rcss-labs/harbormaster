@@ -89,7 +89,7 @@ func TestRegister_HappyPath_RecordsEverything(t *testing.T) {
 	if ops[0].Details["task_definition_arn"] != got.ARN || ops[0].Details["op"] != "task_definition" {
 		t.Fatalf("operation details = %v", ops[0].Details)
 	}
-	if _, err := h.store.GetTaskDefinition(t.Context(), homelabAccountID, homelabRegion, got.ARN); err != nil {
+	if _, err := h.store.GetTaskDefinition(t.Context(), sandboxAccountID, sandboxRegion, got.ARN); err != nil {
 		t.Fatalf("registered definition not stored: %v", err)
 	}
 }

@@ -85,7 +85,7 @@ func newBatchHarness(t *testing.T) (*metricsHarness, *targetGate) {
 }
 
 func notificationsID() string {
-	return serviceID(homelabAccountID, "us-east-1", "core-services", "notifications")
+	return serviceID(sandboxAccountID, "us-east-1", "core-services", "notifications")
 }
 
 func stagingAPIID() string {
@@ -93,7 +93,7 @@ func stagingAPIID() string {
 }
 
 func devEmailSenderID() string {
-	return serviceID(homelabAccountID, "us-east-1", "background-jobs", "email-sender")
+	return serviceID(sandboxAccountID, "us-east-1", "background-jobs", "email-sender")
 }
 
 func batchPath(ids ...string) string {
@@ -180,7 +180,7 @@ func TestServicesMetrics_OmitsInvisibleIds(t *testing.T) {
 // Even when the invisible service's own target is failing, nothing about it is reported.
 func TestServicesMetrics_InvisibleIdNeverNamedInErrors(t *testing.T) {
 	h, gate := newBatchHarness(t)
-	gate.throttle(awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"})
+	gate.throttle(awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"})
 	resp := login(t, h.srv, "omer", testPassword).get(batchPath(paymentsID()))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200 with nothing visible", resp.StatusCode)
@@ -195,7 +195,7 @@ func TestServicesMetrics_InvisibleIdNeverNamedInErrors(t *testing.T) {
 // An id the caller cannot see and an id that does not exist look the same: absent, never queried.
 func TestServicesMetrics_UnknownIdOmitted(t *testing.T) {
 	h, gate := newBatchHarness(t)
-	ghost := serviceID(homelabAccountID, "us-east-1", "core-services", "ghost-service")
+	ghost := serviceID(sandboxAccountID, "us-east-1", "core-services", "ghost-service")
 	out := getBatch(t, login(t, h.srv, "sam", testPassword), ghost, paymentsID())
 	if len(out.Items) != 1 || out.Items[paymentsID()].CPU == nil {
 		t.Errorf("items = %v; want only payments-api", out.Items)
@@ -260,7 +260,7 @@ func TestServicesMetrics_OneTargetThrottledStillServesOthers(t *testing.T) {
 // cluster with Insights off on a failed target is still reported as off (no query was needed).
 func TestServicesMetrics_PartialFailureKeepsDisabledReport(t *testing.T) {
 	h, gate := newBatchHarness(t)
-	gate.throttle(awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"})
+	gate.throttle(awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"})
 	out := getBatch(t, login(t, h.srv, "sam", testPassword), paymentsID(), edgeNginxID())
 	if out.Items[edgeNginxID()].Insights != "disabled" {
 		t.Errorf("items = %v; want edge-nginx reported as disabled", out.Items)
@@ -272,7 +272,7 @@ func TestServicesMetrics_PartialFailureKeepsDisabledReport(t *testing.T) {
 
 func TestServicesMetrics_EveryTargetThrottledIs503(t *testing.T) {
 	h, gate := newBatchHarness(t)
-	gate.throttle(awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}, awsx.Target{AccountID: stagingAccountID, Region: "us-east-1"})
+	gate.throttle(awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"}, awsx.Target{AccountID: stagingAccountID, Region: "us-east-1"})
 	resp := login(t, h.srv, "sam", testPassword).get(batchPath(paymentsID(), stagingAPIID()))
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", resp.StatusCode)
@@ -296,7 +296,7 @@ func TestServicesMetrics_CapAndEmpty422(t *testing.T) {
 
 	ids := make([]string, 101)
 	for i := range ids {
-		ids[i] = serviceID(homelabAccountID, "us-east-1", "core-services", "svc-"+strconv.Itoa(i))
+		ids[i] = serviceID(sandboxAccountID, "us-east-1", "core-services", "svc-"+strconv.Itoa(i))
 	}
 	resp = c.get(batchPath(ids...))
 	if resp.StatusCode != http.StatusUnprocessableEntity {

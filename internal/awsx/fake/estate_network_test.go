@@ -128,10 +128,10 @@ func TestFakeEstate_ServiceSecurityGroupsAreDescribable(t *testing.T) {
 func TestFakePaging_BadTokenDoesNotPanic(t *testing.T) {
 	f := newFake()
 	for _, tok := range []string{"-5", "abc"} {
-		if _, err := ec2For(t, f, homelabUSEast1).DescribeSubnets(context.Background(), &ec2.DescribeSubnetsInput{MaxResults: aws.Int32(2), NextToken: aws.String(tok)}); err != nil {
+		if _, err := ec2For(t, f, sandboxUSEast1).DescribeSubnets(context.Background(), &ec2.DescribeSubnetsInput{MaxResults: aws.Int32(2), NextToken: aws.String(tok)}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := efsFor(t, f, homelabUSEast1).DescribeFileSystems(context.Background(), &efs.DescribeFileSystemsInput{Marker: aws.String(tok)}); err != nil {
+		if _, err := efsFor(t, f, sandboxUSEast1).DescribeFileSystems(context.Background(), &efs.DescribeFileSystemsInput{Marker: aws.String(tok)}); err != nil {
 			t.Fatal(err)
 		}
 	}

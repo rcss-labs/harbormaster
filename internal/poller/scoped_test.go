@@ -85,7 +85,7 @@ func (h *loopHarness) recording(t *testing.T) *recordingECS {
 }
 
 func coreServices() model.ClusterKey {
-	return model.ClusterKey{AccountID: homelabAccount, Region: "us-east-1", Cluster: "core-services"}
+	return model.ClusterKey{AccountID: sandboxAccount, Region: "us-east-1", Cluster: "core-services"}
 }
 
 func TestSyncServicesIn_TouchesOnlyTheNamedCluster(t *testing.T) {
@@ -356,7 +356,7 @@ func (c recordingClients) ELB(ctx context.Context, t awsx.Target) (awsx.ELBAPI, 
 }
 
 func TestTargetHealth_RunServiceDescribesOnlyItsGroups(t *testing.T) {
-	target := awsx.Target{AccountID: homelabAccount, Region: euWestAccountRegion}
+	target := awsx.Target{AccountID: sandboxAccount, Region: euWestAccountRegion}
 	h := newObserveHarness(t, target)
 	key := serviceKey(target, "eu-apps", "catalog-api")
 	ctx := context.Background()

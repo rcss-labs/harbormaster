@@ -270,13 +270,13 @@ func TestServiceTasks_SameBodyWithCacheOnAndOff(t *testing.T) {
 
 func paymentsServiceID(t *testing.T, p *snapPair) string {
 	t.Helper()
-	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}.ID()
+	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}.ID()
 }
 
 func TestClusterRead_RevokeTakesEffectOnNextRequestWithWarmCache(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		p := newSnapPair(t, c)
-		cluster := model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
+		cluster := model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
 		viewer := login(t, p.on, "viewer", snapUserPassword)
 		for i := 0; i < 2; i++ {
 			if status, _ := body(t, viewer, "/api/clusters/"+cluster); status != http.StatusOK {
@@ -311,7 +311,7 @@ func TestServiceRead_TagReassignmentTakesEffectOnNextRequestWithWarmCache(t *tes
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		p := newSnapPair(t, c)
 		id := paymentsServiceID(t, p)
-		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 		viewer, operator := login(t, p.on, "viewer", snapUserPassword), login(t, p.on, "operator", snapUserPassword)
 		for i := 0; i < 2; i++ {
 			if status, _ := body(t, viewer, "/api/services/"+id); status != http.StatusOK {
@@ -346,7 +346,7 @@ func TestServiceRead_DeploymentOutcomeIsReadFromPostgres(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		p := newSnapPair(t, c)
 		id := paymentsServiceID(t, p)
-		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+		key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 		started := time.Now().Add(-10 * time.Minute)
 		if _, err := p.st.InsertDeploymentIfNew(t.Context(), store.DeploymentRecord{Key: key, DeploymentID: "ecs-svc/snapshot-test", Revision: 7, Kind: "deploy", StartedAt: started}); err != nil {
 			t.Fatal(err)
@@ -442,14 +442,14 @@ func TestClusterRead_DisconnectedAccountIsNotServedFromAWarmCache(t *testing.T) 
 		}
 		var account store.AWSAccount
 		for _, a := range accounts {
-			if a.AccountID == homelabAccountID {
+			if a.AccountID == sandboxAccountID {
 				account = a
 			}
 		}
 		if account.ID == 0 {
-			t.Fatal("the seeded estate has no homelab account row")
+			t.Fatal("the seeded estate has no sandbox account row")
 		}
-		cluster := model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
+		cluster := model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
 		admin := login(t, p.on, "sam", snapUserPassword)
 		for i := 0; i < 2; i++ {
 			if status, _ := body(t, admin, "/api/clusters/"+cluster); status != http.StatusOK {
@@ -470,7 +470,7 @@ func TestClusterRead_DisconnectedAccountIsNotServedFromAWarmCache(t *testing.T) 
 		var services ServiceListDTO
 		decode(t, admin.get("/api/services"), &services)
 		for _, item := range services.Items {
-			if item.AccountID == homelabAccountID {
+			if item.AccountID == sandboxAccountID {
 				t.Fatalf("the service list still shows %s of the disconnected account", item.Name)
 			}
 		}
@@ -497,7 +497,7 @@ func TestRead_StoreDownStillAnswersWithTodaysBodies(t *testing.T) {
 		p := newSnapPair(t, c)
 		p.reader.Cache = failingTokens{p.cache}
 		id := paymentsServiceID(t, p)
-		cluster := model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
+		cluster := model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}.ID()
 		on, off := login(t, p.on, "sam", snapUserPassword), login(t, p.off, "sam", snapUserPassword)
 		for _, path := range []string{"/api/clusters/" + cluster, "/api/services/" + id} {
 			gotStatus, got := body(t, on, path)

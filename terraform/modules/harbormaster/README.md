@@ -147,9 +147,9 @@ The poller and coordinator security groups are one keyed resource, `aws_security
 
 ## Upgrade: single service to split services
 
-These are TerraDuckTel runs: **nothing here is run locally.** Each numbered run is one trigger, in this order. Every change is backward compatible: the legacy single service keeps working until run 4 removes it, and rolling back is the reverse run. The module and image version are the same in every run, except where a run says otherwise.
+Each numbered step below is one Terraform plan and apply, run with your usual Terraform workflow, in this order. Every change is backward compatible: the legacy single service keeps working until run 4 removes it, and rolling back is the reverse run. The module and image version are the same in every run, except where a run says otherwise.
 
-For each run, "account and region" is where TerraDuckTel acts: the Harbormaster account (the homelab account, `admin`) in `<region>` for the main module, and each managed account for the access module. Fill in the placeholders in your workspace; this page does not know them.
+For each run, "account and region" is where Terraform acts: the account that hosts Harbormaster in `<region>` for the main module, and each managed account for the access module. Fill in the placeholders in your workspace; this page does not know them.
 
 ### Run 1: main module, new image, no variable changes
 
@@ -251,7 +251,7 @@ If `bootstrap_admin_password_secret_arn` is set, the admin is created from that 
 
 ## Single sign-on
 
-The module has no SSO inputs. SSO is configured in Harbormaster's Settings page after the module is applied, and it needs `HM_SESSION_KEY`, which the module already injects. Sign-in is browser-mediated: the identity provider posts its response through the user's browser to `{base_url}/api/auth/saml/acs`, so the IdP never calls the ALB directly. An internal ALB works, and `allowed_cidrs` only has to admit your users' networks. The one call the task makes itself is fetching a metadata URL, so the IdP must have a public `https` address, or upload its metadata XML instead. `base_url` is also the SP identity: changing it changes the SP entity ID and ACS URL, so update the IdP. See [Single sign-on (SAML)](../../../README.md#single-sign-on-saml) in the root README.
+The module has no SSO inputs. SSO is configured in Harbormaster's Settings page after the module is applied, and it needs `HM_SESSION_KEY`, which the module already injects. Sign-in is browser-mediated: the identity provider posts its response through the user's browser to `{base_url}/api/auth/saml/acs`, so the IdP never calls the ALB directly. An internal ALB works, and `allowed_cidrs` only has to admit your users' networks. The one call the task makes itself is fetching a metadata URL, so the IdP must have a public `https` address, or upload its metadata XML instead. `base_url` is also the SP identity: changing it changes the SP entity ID and ACS URL, so update the IdP. See [Single sign-on (SAML)](../../../harbormaster-docs/docs/install/single-sign-on.md).
 
 ## Database secret format
 

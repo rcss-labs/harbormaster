@@ -100,9 +100,9 @@ func TestAlerts_AdminSeesAllSorted(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	replaceAlerts(t, st, fk,
-		serviceAlert(homelabAccountID, "us-east-1", "core-services", "payments-api", model.AlertInfo, "payments-api info"),
-		serviceAlert(homelabAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
-		serviceAlert(homelabAccountID, "us-east-1", "core-services", "web-frontend", model.AlertWarning, "web-frontend warning"),
+		serviceAlert(sandboxAccountID, "us-east-1", "core-services", "payments-api", model.AlertInfo, "payments-api info"),
+		serviceAlert(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertDanger, "image-resizer danger"),
+		serviceAlert(sandboxAccountID, "us-east-1", "core-services", "web-frontend", model.AlertWarning, "web-frontend warning"),
 	)
 
 	body := getAlertsBody(t, login(t, srv, "sam", testPassword), "")
@@ -131,8 +131,8 @@ func TestAlerts_FiltersInvisibleServices(t *testing.T) {
 	pollAll(t, st, fk)
 	// notifications sits in core-services, which is tagged Prod; omer only has Dev and Staging.
 	replaceAlerts(t, st, fk,
-		serviceAlert(homelabAccountID, "us-east-1", "core-services", "notifications", model.AlertDanger, "notifications danger"),
-		serviceAlert(homelabAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertWarning, "image-resizer warning"),
+		serviceAlert(sandboxAccountID, "us-east-1", "core-services", "notifications", model.AlertDanger, "notifications danger"),
+		serviceAlert(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", model.AlertWarning, "image-resizer warning"),
 	)
 
 	omer := getAlertsBody(t, login(t, srv, "omer", testPassword), "")
@@ -154,20 +154,20 @@ func TestAlerts_AccountRegionFilter(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	replaceAlerts(t, st, fk,
-		serviceAlert(homelabAccountID, "us-east-1", "core-services", "web-frontend", model.AlertWarning, "homelab warning"),
+		serviceAlert(sandboxAccountID, "us-east-1", "core-services", "web-frontend", model.AlertWarning, "sandbox warning"),
 		serviceAlert(stagingAccountID, "us-east-1", "staging-web", "web", model.AlertDanger, "staging danger"),
 	)
 	sam := login(t, srv, "sam", testPassword)
 
-	homelab := getAlertsBody(t, sam, "?account="+homelabAccountID)
-	if got := itemTitles(homelab); len(got) != 1 || got[0] != "homelab warning" {
-		t.Fatalf("account filter item titles = %v; want only the homelab alert", got)
+	sandbox := getAlertsBody(t, sam, "?account="+sandboxAccountID)
+	if got := itemTitles(sandbox); len(got) != 1 || got[0] != "sandbox warning" {
+		t.Fatalf("account filter item titles = %v; want only the sandbox alert", got)
 	}
-	if homelab.Counts.Danger != 0 || homelab.Counts.Warning != 1 {
-		t.Errorf("account filter counts = %+v; want counts recomputed over the homelab alert only", homelab.Counts)
+	if sandbox.Counts.Danger != 0 || sandbox.Counts.Warning != 1 {
+		t.Errorf("account filter counts = %+v; want counts recomputed over the sandbox alert only", sandbox.Counts)
 	}
 
-	empty := getAlertsBody(t, sam, "?account="+homelabAccountID+"&region=eu-west-1")
+	empty := getAlertsBody(t, sam, "?account="+sandboxAccountID+"&region=eu-west-1")
 	if empty.Items == nil || len(empty.Items) != 0 {
 		t.Errorf("region with no alerts: items = %#v; want an empty non-nil list", empty.Items)
 	}
@@ -189,22 +189,22 @@ func TestAlerts_AccountUnreachableVisibleWhenAnyClusterVisible(t *testing.T) {
 			},
 		}
 	}
-	// omer (Dev Operator, Staging Viewer) sees homelab us-east-1 and eu-west-1 through their Dev clusters,
+	// omer (Dev Operator, Staging Viewer) sees sandbox us-east-1 and eu-west-1 through their Dev clusters,
 	// but not staging-example eu-west-1, which has no cluster at all.
-	// oncall (Staging and Prod only) sees homelab us-east-1 through core-services (Prod), but not eu-west-1,
+	// oncall (Staging and Prod only) sees sandbox us-east-1 through core-services (Prod), but not eu-west-1,
 	// whose only cluster eu-apps is Dev.
 	setPassword(t, st, "oncall")
 	replaceAlerts(t, st, fk,
-		unreachable(homelabAccountID, "us-east-1"),
-		unreachable(homelabAccountID, "eu-west-1"),
+		unreachable(sandboxAccountID, "us-east-1"),
+		unreachable(sandboxAccountID, "eu-west-1"),
 		unreachable(stagingAccountID, "eu-west-1"),
 	)
-	homelabUSEast := "unreachable " + homelabAccountID + " us-east-1"
-	homelabEUWest := "unreachable " + homelabAccountID + " eu-west-1"
+	sandboxUSEast := "unreachable " + sandboxAccountID + " us-east-1"
+	sandboxEUWest := "unreachable " + sandboxAccountID + " eu-west-1"
 
 	omer := getAlertsBody(t, login(t, srv, "omer", testPassword), "")
-	if got := itemTitles(omer); len(got) != 2 || !slices.Contains(got, homelabUSEast) || !slices.Contains(got, homelabEUWest) {
-		t.Fatalf("omer item titles = %v; want the two homelab accounts only", got)
+	if got := itemTitles(omer); len(got) != 2 || !slices.Contains(got, sandboxUSEast) || !slices.Contains(got, sandboxEUWest) {
+		t.Fatalf("omer item titles = %v; want the two sandbox accounts only", got)
 	}
 	if omer.Counts.Danger != 2 {
 		t.Errorf("omer counts.danger = %d; want 2", omer.Counts.Danger)
@@ -214,7 +214,7 @@ func TestAlerts_AccountUnreachableVisibleWhenAnyClusterVisible(t *testing.T) {
 	}
 
 	oncall := getAlertsBody(t, login(t, srv, "oncall", testPassword), "")
-	if got := itemTitles(oncall); len(got) != 1 || got[0] != homelabUSEast {
+	if got := itemTitles(oncall); len(got) != 1 || got[0] != sandboxUSEast {
 		t.Fatalf("oncall item titles = %v; want only the us-east-1 account", got)
 	}
 	if oncall.Counts.Danger != 1 {

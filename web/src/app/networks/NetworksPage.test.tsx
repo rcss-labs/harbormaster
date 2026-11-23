@@ -8,19 +8,19 @@ import { renderApp } from '../../test/renderApp'
 import { installPhoneMedia } from '../../test/phone'
 import { buildTree } from '../../test/treeFixture'
 
-const HOMELAB = '482109375512'
+const SANDBOX = '482109375512'
 const STAGING = '731022849906'
 const MAIN = 'vpc-0a41c7e29b3d'
 const SHARED = 'vpc-0b52d8f3ac4e'
 const STAGING_VPC = 'vpc-0c63e9a4bd5f'
-const SHARED_KEY = `${HOMELAB}/us-east-1/${SHARED}`
+const SHARED_KEY = `${SANDBOX}/us-east-1/${SHARED}`
 
 const NETWORKS: NetworksResponse = {
   polled_at: '2026-11-01T10:00:00Z',
   items: [
     {
-      account_id: HOMELAB,
-      account_name: 'homelab-admin',
+      account_id: SANDBOX,
+      account_name: 'sandbox-admin',
       regions: [
         { region: 'us-east-1', active_vpcs: 2, hidden_vpcs: 1, clusters: 3, tasks: 12, unplaced_tasks: 0 },
         { region: 'eu-west-1', active_vpcs: 0, hidden_vpcs: 0, clusters: 0, tasks: 0, unplaced_tasks: 0 },
@@ -35,10 +35,10 @@ const NETWORKS: NetworksResponse = {
 }
 
 const REGION_VPCS: Record<string, RegionVpcsResponse> = {
-  [`${HOMELAB}/us-east-1`]: {
+  [`${SANDBOX}/us-east-1`]: {
     polled_at: NETWORKS.polled_at,
     items: [
-      { vpc_id: MAIN, name: 'homelab-main', cidr: '10.20.0.0/16', subnets: 3, clusters: ['core-services', 'ci-tools'], tasks: 10 },
+      { vpc_id: MAIN, name: 'sandbox-main', cidr: '10.20.0.0/16', subnets: 3, clusters: ['core-services', 'ci-tools'], tasks: 10 },
       { vpc_id: SHARED, name: 'shared-services', cidr: '10.30.0.0/16', subnets: 2, clusters: ['jenkins'], tasks: 2 },
     ],
   },
@@ -49,10 +49,10 @@ const REGION_VPCS: Record<string, RegionVpcsResponse> = {
 }
 
 function tree(vpcId: string, overrides: Partial<VpcTreeResponse> = {}): VpcTreeResponse {
-  const name = vpcId === MAIN ? 'homelab-main' : vpcId === SHARED ? 'shared-services' : 'staging-vpc'
+  const name = vpcId === MAIN ? 'sandbox-main' : vpcId === SHARED ? 'shared-services' : 'staging-vpc'
   return {
     polled_at: NETWORKS.polled_at,
-    vpc: { vpc_id: vpcId, name, cidr: '10.20.0.0/16', account_id: HOMELAB, account_name: 'homelab-admin', region: 'us-east-1' },
+    vpc: { vpc_id: vpcId, name, cidr: '10.20.0.0/16', account_id: SANDBOX, account_name: 'sandbox-admin', region: 'us-east-1' },
     edges: [
       { kind: 'igw', id: 'igw-1' },
       { kind: 'nat', id: 'nat-1', subnet_id: 'subnet-aaa' },
@@ -94,9 +94,9 @@ describe('Networks VPC list', () => {
     serveEstate()
     renderApp('/networks')
     await screen.findByRole('region', { name: 'VPCs' })
-    expect(await within(vpcList()).findByRole('button', { name: /homelab-main/ })).toHaveTextContent('us-east-1 · 10.20.0.0/16')
-    expect(vpcButton(/homelab-main/)).toHaveTextContent('2 cl · 10 t')
-    expect(within(vpcList()).getByText('homelab-admin')).toBeInTheDocument()
+    expect(await within(vpcList()).findByRole('button', { name: /sandbox-main/ })).toHaveTextContent('us-east-1 · 10.20.0.0/16')
+    expect(vpcButton(/sandbox-main/)).toHaveTextContent('2 cl · 10 t')
+    expect(within(vpcList()).getByText('sandbox-admin')).toBeInTheDocument()
     expect(within(vpcList()).getByText('staging-example')).toBeInTheDocument()
     expect(vpcButton(/shared-services/)).toBeInTheDocument()
     expect(vpcButton(/staging-vpc/)).toBeInTheDocument()
@@ -112,8 +112,8 @@ describe('Networks VPC list', () => {
   it('selects the first VPC by default and shows its details', async () => {
     serveEstate()
     renderApp('/networks')
-    expect(await screen.findByRole('heading', { name: 'homelab-main', level: 2 })).toBeInTheDocument()
-    expect(vpcButton(/homelab-main/)).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('heading', { name: 'sandbox-main', level: 2 })).toBeInTheDocument()
+    expect(vpcButton(/sandbox-main/)).toHaveAttribute('aria-pressed', 'true')
     expect(vpcButton(/shared-services/)).toHaveAttribute('aria-pressed', 'false')
   })
 
@@ -130,10 +130,10 @@ describe('Networks VPC list', () => {
 
   it('an unknown ?vpc= key shows a no-access state instead of opening another VPC', async () => {
     serveEstate()
-    renderApp(`/networks?vpc=${encodeURIComponent(`${HOMELAB}/us-east-1/vpc-gone`)}`)
+    renderApp(`/networks?vpc=${encodeURIComponent(`${SANDBOX}/us-east-1/vpc-gone`)}`)
     expect(await screen.findByText('No running tasks you can see in this VPC.')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'homelab-main', level: 2 })).not.toBeInTheDocument()
-    expect(await within(vpcList()).findByRole('button', { name: /homelab-main/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByRole('heading', { name: 'sandbox-main', level: 2 })).not.toBeInTheDocument()
+    expect(await within(vpcList()).findByRole('button', { name: /sandbox-main/ })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('restores the selected VPC and the filter from the URL', async () => {
@@ -149,9 +149,9 @@ describe('Networks VPC list', () => {
     serveEstate()
     renderApp('/networks')
     await screen.findByRole('region', { name: 'VPCs' })
-    await within(vpcList()).findByRole('button', { name: /homelab-main/ })
+    await within(vpcList()).findByRole('button', { name: /sandbox-main/ })
     await user.type(screen.getByRole('searchbox', { name: 'Filter VPCs' }), 'staging-example')
-    await waitFor(() => expect(within(vpcList()).queryByRole('button', { name: /homelab-main/ })).not.toBeInTheDocument())
+    await waitFor(() => expect(within(vpcList()).queryByRole('button', { name: /sandbox-main/ })).not.toBeInTheDocument())
     expect(vpcButton(/staging-vpc/)).toBeInTheDocument()
     expect(screen.getByTestId('search').textContent).toContain('q=staging-example')
 
@@ -271,7 +271,7 @@ describe('Networks VPC detail', () => {
 describe('Networks deep links', () => {
   it('a VPC URL from before the redesign selects that VPC', async () => {
     serveEstate()
-    renderApp(`/networks/${HOMELAB}/us-east-1/${SHARED}`)
+    renderApp(`/networks/${SANDBOX}/us-east-1/${SHARED}`)
     expect(await screen.findByRole('heading', { name: 'shared-services', level: 2 })).toBeInTheDocument()
     expect(screen.getByTestId('location').textContent).toBe('/networks')
     expect(screen.getByTestId('search').textContent).toContain(`vpc=${encodeURIComponent(SHARED_KEY)}`)
@@ -284,7 +284,7 @@ describe('Networks deep links', () => {
     expect(await within(vpcList()).findByRole('button', { name: /staging-vpc/ })).toBeInTheDocument()
     expect(screen.getByTestId('location').textContent).toBe('/networks')
     expect(screen.getByRole('searchbox', { name: 'Filter VPCs' })).toHaveValue('eu-central-1')
-    expect(within(vpcList()).queryByRole('button', { name: /homelab-main/ })).not.toBeInTheDocument()
+    expect(within(vpcList()).queryByRole('button', { name: /sandbox-main/ })).not.toBeInTheDocument()
   })
 
   it('shows one stale-data notice naming Networks when its poll is failing', async () => {
@@ -294,8 +294,8 @@ describe('Networks deep links', () => {
         HttpResponse.json({
           items: [
             {
-              account_id: HOMELAB,
-              account_name: 'homelab-admin',
+              account_id: SANDBOX,
+              account_name: 'sandbox-admin',
               region: 'us-east-1',
               throttled: false,
               failing: false,
@@ -334,7 +334,7 @@ describe('Networks on phones', () => {
     serveEstate()
     renderApp('/networks')
     await screen.findByRole('region', { name: 'VPCs' })
-    expect(await within(vpcList()).findByRole('button', { name: /homelab-main/ })).toHaveTextContent(`${MAIN} · homelab-admin`)
+    expect(await within(vpcList()).findByRole('button', { name: /sandbox-main/ })).toHaveTextContent(`${MAIN} · sandbox-admin`)
   })
 
   it('opens no sheet on load, and a tapped VPC opens its details in a sheet titled with its name', async () => {
@@ -362,7 +362,7 @@ describe('Networks on phones', () => {
 
   it('an unknown ?vpc= key shows the no-access state on the page without a sheet', async () => {
     serveEstate()
-    renderApp(`/networks?vpc=${encodeURIComponent(`${HOMELAB}/us-east-1/vpc-gone`)}`)
+    renderApp(`/networks?vpc=${encodeURIComponent(`${SANDBOX}/us-east-1/vpc-gone`)}`)
     expect(await screen.findByText('No running tasks you can see in this VPC.')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })

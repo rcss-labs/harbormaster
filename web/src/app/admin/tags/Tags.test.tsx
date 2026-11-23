@@ -244,7 +244,7 @@ describe('Assignments list', () => {
     await screen.findByRole('button', { name: 'core-services' })
     const rows = screen.getAllByRole('row')
     const indexOfRow = (element: HTMLElement) => rows.indexOf(element.closest('tr') as HTMLElement)
-    const account = indexOfRow(groupHeaders('homelab-admin')[0])
+    const account = indexOfRow(groupHeaders('sandbox-admin')[0])
     const usEast = indexOfRow(groupHeaders('us-east-1')[0])
     const core = indexOfRow(screen.getByRole('button', { name: 'core-services' }))
     const euWest = indexOfRow(groupHeaders('eu-west-1')[0])
@@ -262,7 +262,7 @@ describe('Assignments list', () => {
   it('summarises each group with its cluster and service counts and the distinct tags inside it', async () => {
     renderApp('/settings/tags')
     await screen.findByRole('button', { name: 'core-services' })
-    const accountRow = groupRowOf('homelab-admin')
+    const accountRow = groupRowOf('sandbox-admin')
     expect(within(accountRow).getByText(/^5 clusters · \d+ services$/)).toBeInTheDocument()
     expect(within(accountRow).getByText('Prod')).toBeInTheDocument()
     expect(within(accountRow).getAllByText('Dev')).toHaveLength(1)
@@ -312,13 +312,13 @@ describe('Assignments list', () => {
     server.use(http.get('/api/tag-assignments', () => HttpResponse.json(split)))
     renderApp('/settings/tags')
     await screen.findByRole('button', { name: 'cluster-01' })
-    expect(groupHeaders('homelab-admin')).toHaveLength(1)
+    expect(groupHeaders('sandbox-admin')).toHaveLength(1)
     expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(15)
 
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
     const table = screen.getByRole('button', { name: 'cluster-16' }).closest('table') as HTMLElement
     const rows = within(table).getAllByRole('row').slice(1)
-    expect(rows[0]).toHaveTextContent(/^homelab-admin/)
+    expect(rows[0]).toHaveTextContent(/^sandbox-admin/)
     expect(rows[1]).toHaveTextContent(/^us-east-1/)
     expect(within(rows[2]).getByRole('button', { name: 'cluster-16' })).toBeInTheDocument()
     expect(screen.getAllByLabelText(/^Tag for cluster-/)).toHaveLength(5)

@@ -6,13 +6,13 @@ test.use({ ...asUser('sam'), viewport: { width: 390, height: 844 }, isMobile: tr
 
 // The network tier's first pass runs a few seconds after the server starts.
 const POLL_TIMEOUT = 30_000
-const HOMELAB_ACCOUNT_ID = '482109375512'
+const SANDBOX_ACCOUNT_ID = '482109375512'
 const MAIN_VPC = 'vpc-0a41c7e29b3d'
 
 test('the VPC list is clean at 390 px and opens no sheet on load', async ({ page }) => {
   watchPage(page)
   await page.goto('/networks')
-  await expect(page.getByRole('region', { name: 'VPCs' }).getByRole('button', { name: /homelab-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
+  await expect(page.getByRole('region', { name: 'VPCs' }).getByRole('button', { name: /sandbox-main/ })).toBeVisible({ timeout: POLL_TIMEOUT })
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expectPhoneLayoutClean(page)
 })
@@ -20,8 +20,8 @@ test('the VPC list is clean at 390 px and opens no sheet on load', async ({ page
 test('a VPC opens its subnets and placement in a sheet that stays within the screen', async ({ page }) => {
   watchPage(page)
   await page.goto('/networks')
-  await page.getByRole('region', { name: 'VPCs' }).getByRole('button', { name: /homelab-main/ }).click({ timeout: POLL_TIMEOUT })
-  const sheet = page.getByRole('dialog', { name: 'homelab-main' })
+  await page.getByRole('region', { name: 'VPCs' }).getByRole('button', { name: /sandbox-main/ }).click({ timeout: POLL_TIMEOUT })
+  const sheet = page.getByRole('dialog', { name: 'sandbox-main' })
   await expect(sheet).toBeVisible()
   await expect(sheet.getByRole('table', { name: 'Subnets' })).toBeVisible()
   await expectSheetWithinViewport(page)
@@ -33,8 +33,8 @@ test('a VPC opens its subnets and placement in a sheet that stays within the scr
 
 test('a deep link opens the VPC sheet at 390 px', async ({ page }) => {
   watchPage(page)
-  await page.goto(`/networks?vpc=${encodeURIComponent(`${HOMELAB_ACCOUNT_ID}/us-east-1/${MAIN_VPC}`)}`)
-  await expect(page.getByRole('dialog', { name: 'homelab-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
+  await page.goto(`/networks?vpc=${encodeURIComponent(`${SANDBOX_ACCOUNT_ID}/us-east-1/${MAIN_VPC}`)}`)
+  await expect(page.getByRole('dialog', { name: 'sandbox-main' })).toBeVisible({ timeout: POLL_TIMEOUT })
   await expectSheetWithinViewport(page)
   await expectPhoneLayoutClean(page)
 })

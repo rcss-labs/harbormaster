@@ -119,7 +119,7 @@ func TestAccessPolicies_CoverEachRolesCallsAndNothingBroader(t *testing.T) {
 	fk.Estate.Mu.Unlock()
 	fk.Estate.SetImageIndex("catalog-api", true) // the resolver reads its manifest with BatchGetImage
 
-	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "homelab", AccountID: account,
+	if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "sandbox", AccountID: account,
 		RoleARN: "arn:aws:iam::" + account + ":role/x", ExternalID: "e", Regions: []string{"us-east-1", "eu-west-1", "eu-central-1"}, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	homelab = "482109375512"
+	sandbox = "482109375512"
 	staging = "731022849906"
 )
 
@@ -179,7 +179,7 @@ func newFixture(t *testing.T) *fixture {
 	scanner := fake.NewScanner(estate)
 	fx := &fixture{t: t, st: st, estate: estate, scanner: scanner, clock: clk, source: &countingSource{DBSource: scanner}}
 	fx.runner = fx.newRunner()
-	for account, external := range map[string]string{homelab: "ext-home", staging: "ext-stage"} {
+	for account, external := range map[string]string{sandbox: "ext-home", staging: "ext-stage"} {
 		_, err := st.CreateAccount(context.Background(), store.AWSAccount{
 			Name: "acct-" + account, AccountID: account, RoleARN: "arn:aws:iam::" + account + ":role/harbormaster-access",
 			ExternalID: external, Regions: []string{"us-east-1"}, Enabled: true})
@@ -201,9 +201,9 @@ func (fx *fixture) cycle() {
 	}
 }
 
-// queue asks for a scan of repository:tag on behalf of one service in the homelab account.
+// queue asks for a scan of repository:tag on behalf of one service in the sandbox account.
 func (fx *fixture) queue(repository, tag string) string {
-	return fx.queueFor(homelab, repository, tag, fx.clock.Now())
+	return fx.queueFor(sandbox, repository, tag, fx.clock.Now())
 }
 
 func (fx *fixture) queueFor(account, repository, tag string, at time.Time) string {

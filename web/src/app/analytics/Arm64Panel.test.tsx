@@ -72,7 +72,7 @@ describe('ARM64 panel', () => {
 
   it('shows the per-account permission message', async () => {
     const panel = await armPanel()
-    expect(within(rowOf(panel, 'catalog-api')).getByText('The harbormaster-access role in homelab-admin cannot read image manifests. Update the access module to the latest version.')).toBeInTheDocument()
+    expect(within(rowOf(panel, 'catalog-api')).getByText('The harbormaster-access role in sandbox-admin cannot read image manifests. Update the access module to the latest version.')).toBeInTheDocument()
   })
 
   it('drafts ARM64 change sets with a Deploy link per service', async () => {

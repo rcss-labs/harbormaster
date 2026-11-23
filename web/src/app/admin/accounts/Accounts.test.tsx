@@ -130,7 +130,7 @@ describe('Accounts', () => {
       ),
     )
     renderApp('/settings/accounts')
-    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('sandbox-admin').closest('[role="row"]') as HTMLElement
     expect(await within(row).findByText('Slowed by AWS throttling')).toBeInTheDocument()
     const other = screen.getByText('staging-example', { selector: 'div' }).closest('[role="row"]') as HTMLElement
     expect(within(other).queryByText('Slowed by AWS throttling')).not.toBeInTheDocument()
@@ -150,7 +150,7 @@ describe('Accounts', () => {
       ),
     )
     renderApp('/settings/accounts')
-    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('sandbox-admin').closest('[role="row"]') as HTMLElement
     expect(await within(row).findByText('Data is 12 min old')).toBeInTheDocument()
     const details = within(row).getByText('Show AWS error').closest('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
@@ -172,7 +172,7 @@ describe('Accounts', () => {
       ),
     )
     renderApp('/settings/accounts')
-    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('sandbox-admin').closest('[role="row"]') as HTMLElement
     const details = (await within(row).findByText('Show AWS error')).closest('details') as HTMLDetailsElement
     expect(within(details).getByText('us-east-1: ExpiredToken')).toBeInTheDocument()
     expect(within(details).getByText('eu-west-1: AccessDenied: not authorized to assume harbormaster-access-poller')).toBeInTheDocument()
@@ -180,7 +180,7 @@ describe('Accounts', () => {
 
   it('shows nothing extra when every region is healthy', async () => {
     renderApp('/settings/accounts')
-    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('sandbox-admin').closest('[role="row"]') as HTMLElement
     await within(row).findByText('Connected')
     expect(within(row).queryByText(/^[a-z]+-[a-z]+-\d: /)).not.toBeInTheDocument()
     expect(within(row).queryByText('Show AWS error')).not.toBeInTheDocument()
@@ -198,7 +198,7 @@ describe('Accounts', () => {
       }),
     )
     renderApp('/settings/accounts')
-    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('homelab-admin').closest('[role="row"]') as HTMLElement
+    const row = within(await screen.findByRole('table', { name: 'AWS accounts' })).getByText('sandbox-admin').closest('[role="row"]') as HTMLElement
     fireEvent.click(within(row).getByRole('button', { name: 'Test now' }))
     expect(await screen.findByText(/eu-west-1: AccessDenied/)).toBeInTheDocument()
     // The same results stay on the row, under Show AWS error.

@@ -185,7 +185,7 @@ describe('Shell', () => {
     const [base] = POLLER.items
     const poller: PollerDTO = {
       items: [
-        { ...base, account_name: 'homelab', region: 'eu-west-1', failing: true, last_error: 'AccessDenied', last_ok_at: new Date(Date.now() - 7.5 * 60_000).toISOString() },
+        { ...base, account_name: 'sandbox', region: 'eu-west-1', failing: true, last_error: 'AccessDenied', last_ok_at: new Date(Date.now() - 7.5 * 60_000).toISOString() },
         { ...base, account_name: 'staging', region: 'us-east-1', throttled: true },
       ],
     }

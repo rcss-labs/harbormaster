@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	vpcMain   = "vpc-0a41c7e29b3d" // homelab-main
+	vpcMain   = "vpc-0a41c7e29b3d" // sandbox-main
 	vpcShared = "vpc-07de19a4c011" // shared-services
 	vpcLegacy = "vpc-5c1e0f2a"     // legacy-default (no tasks)
 )
@@ -112,8 +112,8 @@ func regionEntry(t *testing.T, acct NetworkAccountDTO, region string) NetworkReg
 	return NetworkRegionDTO{}
 }
 
-// Expected counts are derived from fake.MockupEstate (one poll): homelab-admin us-east-1 runs 14 tasks
-// in 3 clusters. homelab-main (3 subnets) hosts background-jobs and core-services (11 tasks, of which
+// Expected counts are derived from fake.MockupEstate (one poll): sandbox-admin us-east-1 runs 14 tasks
+// in 3 clusters. sandbox-main (3 subnets) hosts background-jobs and core-services (11 tasks, of which
 // core-services is the Prod one with 9); shared-services (2 subnets) hosts ci-tools (3 tasks incl. the
 // standalone release-build); legacy-default runs nothing and is hidden. The brief's 12/10/2 come from the
 // mockup screenshots and differ from the seeded estate.
@@ -130,11 +130,11 @@ const (
 func TestNetworks_AdminSeesAllAccountsAndDimmedRegions(t *testing.T) {
 	fx := newNetworkFixture(t)
 	out := getJSON[NetworksOverviewDTO](t, fx.admin, "/api/networks")
-	homelab := accountEntry(t, out, homelabAccountID)
-	if homelab.AccountName != "homelab-admin" || len(homelab.Regions) != 3 {
-		t.Fatalf("homelab = %+v", homelab)
+	sandbox := accountEntry(t, out, sandboxAccountID)
+	if sandbox.AccountName != "sandbox-admin" || len(sandbox.Regions) != 3 {
+		t.Fatalf("sandbox = %+v", sandbox)
 	}
-	east := regionEntry(t, homelab, "us-east-1")
+	east := regionEntry(t, sandbox, "us-east-1")
 	if east.ActiveVPCs != 2 || east.HiddenVPCs != 1 || east.UnplacedTasks != 0 {
 		t.Errorf("us-east-1 = %+v", east)
 	}
@@ -154,8 +154,8 @@ func TestNetworks_AdminSeesAllAccountsAndDimmedRegions(t *testing.T) {
 
 func TestNetworks_DevUserSeesOnlyDevTasks(t *testing.T) {
 	fx := newNetworkFixture(t)
-	admin := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, fx.admin, "/api/networks"), homelabAccountID), "us-east-1")
-	dev := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, fx.devOnly, "/api/networks"), homelabAccountID), "us-east-1")
+	admin := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, fx.admin, "/api/networks"), sandboxAccountID), "us-east-1")
+	dev := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, fx.devOnly, "/api/networks"), sandboxAccountID), "us-east-1")
 	if dev.Tasks >= admin.Tasks || dev.Tasks == 0 {
 		t.Errorf("dev tasks = %d, admin = %d; want 0 < dev < admin (core-services is Prod)", dev.Tasks, admin.Tasks)
 	}
@@ -172,7 +172,7 @@ func TestNetworks_DevUserSeesOnlyDevTasks(t *testing.T) {
 func TestNetworks_HiddenVPCsIsSameForEveryCaller(t *testing.T) {
 	fx := newNetworkFixture(t)
 	for name, c := range map[string]*apiClient{"admin": fx.admin, "none": fx.none, "prodOnly": fx.prodOnly, "devOnly": fx.devOnly} {
-		east := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, c, "/api/networks"), homelabAccountID), "us-east-1")
+		east := regionEntry(t, accountEntry(t, getJSON[NetworksOverviewDTO](t, c, "/api/networks"), sandboxAccountID), "us-east-1")
 		if east.HiddenVPCs != 1 {
 			t.Errorf("%s: hidden_vpcs = %d, want 1 (legacy-default only)", name, east.HiddenVPCs)
 		}
@@ -207,7 +207,7 @@ func TestNetworks_FilterByAccountAndRegion(t *testing.T) {
 
 func TestNetworkRegion_ListsActiveVPCsOnly(t *testing.T) {
 	fx := newNetworkFixture(t)
-	out := getJSON[NetworkRegionVPCsDTO](t, fx.admin, "/api/networks/"+homelabAccountID+"/us-east-1")
+	out := getJSON[NetworkRegionVPCsDTO](t, fx.admin, "/api/networks/"+sandboxAccountID+"/us-east-1")
 	byID := map[string]NetworkVPCCardDTO{}
 	for _, item := range out.Items {
 		byID[item.VPCID] = item
@@ -216,11 +216,11 @@ func TestNetworkRegion_ListsActiveVPCsOnly(t *testing.T) {
 		t.Error("legacy-default (no tasks) must be hidden")
 	}
 	main, shared := byID[vpcMain], byID[vpcShared]
-	if main.Name != "homelab-main" || main.CIDR != "10.20.0.0/16" || main.Subnets != 3 || main.Tasks != wantMainTasks {
-		t.Errorf("homelab-main = %+v", main)
+	if main.Name != "sandbox-main" || main.CIDR != "10.20.0.0/16" || main.Subnets != 3 || main.Tasks != wantMainTasks {
+		t.Errorf("sandbox-main = %+v", main)
 	}
 	if len(main.Clusters) != 2 || main.Clusters[0] != "background-jobs" || main.Clusters[1] != "core-services" {
-		t.Errorf("homelab-main clusters = %v", main.Clusters)
+		t.Errorf("sandbox-main clusters = %v", main.Clusters)
 	}
 	if shared.Name != "shared-services" || shared.Subnets != 2 || shared.Tasks != wantSharedTasks {
 		t.Errorf("shared-services = %+v", shared)
@@ -229,7 +229,7 @@ func TestNetworkRegion_ListsActiveVPCsOnly(t *testing.T) {
 
 func TestNetworkRegion_NoPermissionsIsEmptyList(t *testing.T) {
 	fx := newNetworkFixture(t)
-	out := getJSON[NetworkRegionVPCsDTO](t, fx.none, "/api/networks/"+homelabAccountID+"/us-east-1")
+	out := getJSON[NetworkRegionVPCsDTO](t, fx.none, "/api/networks/"+sandboxAccountID+"/us-east-1")
 	if out.Items == nil || len(out.Items) != 0 {
 		t.Errorf("items = %#v, want empty non-nil", out.Items)
 	}
@@ -260,12 +260,12 @@ func TestNetworkRegion_RegionNotScannedIs404(t *testing.T) {
 func TestVPCTree_RequiresAccountAndRegion(t *testing.T) {
 	fx := newNetworkFixture(t)
 	expectError(t, fx.admin, "/api/vpcs/"+vpcMain+"/tree", http.StatusUnprocessableEntity, "invalid")
-	expectError(t, fx.admin, "/api/vpcs/"+vpcMain+"/tree?account="+homelabAccountID, http.StatusUnprocessableEntity, "invalid")
+	expectError(t, fx.admin, "/api/vpcs/"+vpcMain+"/tree?account="+sandboxAccountID, http.StatusUnprocessableEntity, "invalid")
 }
 
 func TestVPCTree_InvisibleVPCIs404(t *testing.T) {
 	fx := newNetworkFixture(t)
-	q := "?account=" + homelabAccountID + "&region=us-east-1"
+	q := "?account=" + sandboxAccountID + "&region=us-east-1"
 	// prodOnly now sees shared-services: artifact-proxy is overridden to Prod in devseed.
 	expectError(t, fx.none, "/api/vpcs/"+vpcShared+"/tree"+q, http.StatusNotFound, "not_found")
 	expectError(t, fx.none, "/api/vpcs/"+vpcMain+"/tree"+q, http.StatusNotFound, "not_found")
@@ -275,8 +275,8 @@ func TestVPCTree_InvisibleVPCIs404(t *testing.T) {
 
 func TestVPCTree_ReturnsTreeEdgesSummary(t *testing.T) {
 	fx := newNetworkFixture(t)
-	out := getJSON[VPCTreeDTO](t, fx.admin, "/api/vpcs/"+vpcMain+"/tree?account="+homelabAccountID+"&region=us-east-1")
-	if out.VPC.VPCID != vpcMain || out.VPC.AccountName != "homelab-admin" || out.VPC.Region != "us-east-1" || out.VPC.CIDR != "10.20.0.0/16" {
+	out := getJSON[VPCTreeDTO](t, fx.admin, "/api/vpcs/"+vpcMain+"/tree?account="+sandboxAccountID+"&region=us-east-1")
+	if out.VPC.VPCID != vpcMain || out.VPC.AccountName != "sandbox-admin" || out.VPC.Region != "us-east-1" || out.VPC.CIDR != "10.20.0.0/16" {
 		t.Errorf("vpc = %+v", out.VPC)
 	}
 	endpoints := 0
@@ -301,7 +301,7 @@ func TestVPCTree_ReturnsTreeEdgesSummary(t *testing.T) {
 
 func TestVPCTree_ProdOnlySeesOnlyCoreServices(t *testing.T) {
 	fx := newNetworkFixture(t)
-	out := getJSON[VPCTreeDTO](t, fx.prodOnly, "/api/vpcs/"+vpcMain+"/tree?account="+homelabAccountID+"&region=us-east-1")
+	out := getJSON[VPCTreeDTO](t, fx.prodOnly, "/api/vpcs/"+vpcMain+"/tree?account="+sandboxAccountID+"&region=us-east-1")
 	clusters := clusterLabels(t, out)
 	if len(clusters) != 1 || clusters[0] != "core-services" {
 		t.Errorf("clusters = %v, want only core-services", clusters)

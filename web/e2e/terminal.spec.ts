@@ -1,10 +1,10 @@
 import { expect, test } from './fixtures/test'
 import { login, measureBoxes, serviceId } from './helpers'
 
-// Ids come from the fake estate (internal/awsx/fake/seed.go): all clusters live in the homelab account.
-const HOMELAB_ACCOUNT_ID = '482109375512'
-const paymentsApi = serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
-const certRenewer = serviceId(HOMELAB_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'cert-renewer')
+// Ids come from the fake estate (internal/awsx/fake/seed.go): all clusters live in the sandbox account.
+const SANDBOX_ACCOUNT_ID = '482109375512'
+const paymentsApi = serviceId(SANDBOX_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
+const certRenewer = serviceId(SANDBOX_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'cert-renewer')
 
 test('opens a terminal from the Tasks tab and runs hostname', async ({ page }) => {
   await login(page, 'sam')

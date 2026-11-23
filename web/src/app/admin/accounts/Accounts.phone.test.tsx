@@ -18,7 +18,7 @@ afterEach(async () => {
 describe('Accounts on a phone', () => {
   it('lists accounts as rows with id, regions, clusters and status', async () => {
     renderApp('/settings/accounts')
-    const name = await screen.findByText('homelab-admin')
+    const name = await screen.findByText('sandbox-admin')
     const row = name.closest('[role=row]') as HTMLElement
     expect(within(row).getByText('482109375512')).toBeInTheDocument()
     expect(within(row).getByText('Connected')).toBeInTheDocument()
@@ -27,8 +27,8 @@ describe('Accounts on a phone', () => {
 
   it('the actions sheet has Test now, Edit, Disconnect and Details', async () => {
     renderApp('/settings/accounts')
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions for homelab-admin' }))
-    const menu = screen.getByRole('menu', { name: 'Actions for homelab-admin' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for sandbox-admin' }))
+    const menu = screen.getByRole('menu', { name: 'Actions for sandbox-admin' })
     for (const label of ['Test now', 'Edit', 'Disconnect', 'Details']) {
       expect(within(menu).getByRole('menuitem', { name: label })).toBeInTheDocument()
     }
@@ -36,10 +36,10 @@ describe('Accounts on a phone', () => {
 
   it('Disconnect confirms with the desktop wording', async () => {
     renderApp('/settings/accounts')
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions for homelab-admin' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for sandbox-admin' }))
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Disconnect' }))
     expect(
-      await screen.findByText('Disconnect homelab-admin? Its clusters, services and tasks disappear from Harbormaster; tags and permissions are kept for 30 days.'),
+      await screen.findByText('Disconnect sandbox-admin? Its clusters, services and tasks disappear from Harbormaster; tags and permissions are kept for 30 days.'),
     ).toBeInTheDocument()
   })
 
@@ -50,9 +50,9 @@ describe('Accounts on a phone', () => {
       ),
     )
     renderApp('/settings/accounts')
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions for homelab-admin' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for sandbox-admin' }))
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Details' }))
-    const sheet = await screen.findByRole('dialog', { name: 'Details for homelab-admin' })
+    const sheet = await screen.findByRole('dialog', { name: 'Details for sandbox-admin' })
     expect(within(sheet).getByText('AccessDenied: not authorized to assume the role')).toBeInTheDocument()
     expect(within(sheet).getByText(/arn:aws:iam::482109375512:role\/harbormaster-access/)).toBeInTheDocument()
   })
@@ -66,7 +66,7 @@ describe('Accounts on a phone', () => {
       }),
     )
     renderApp('/settings/accounts')
-    fireEvent.click(await screen.findByRole('button', { name: 'Actions for homelab-admin' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for sandbox-admin' }))
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Test now' }))
     await waitFor(() => expect(bodies).toHaveLength(1))
     fireEvent.click(await screen.findByRole('button', { name: 'Connect account' }))

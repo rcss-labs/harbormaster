@@ -78,7 +78,7 @@ func newFocusFixture(t *testing.T, mutate func(*Server, *focusFixture)) *focusFi
 }
 
 func focusServiceKey(name string) model.ServiceKey {
-	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: name}
+	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: name}
 }
 
 func focusServiceObject(name string) focus.Object {

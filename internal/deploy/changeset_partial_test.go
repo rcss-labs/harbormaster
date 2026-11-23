@@ -62,7 +62,7 @@ func TestChangeSet_DetectsConcurrentEditToReadablePartWhileScheduledUnreadable(t
 	cs := toggleExec(t, h, baseChangeSet(t, h, paymentsKey))
 
 	// Someone else retunes the CPU policy after the client read the settings.
-	api, err := h.fake.AutoScaling(t.Context(), awsx.Target{AccountID: homelabAccountID, Region: homelabRegion})
+	api, err := h.fake.AutoScaling(t.Context(), awsx.Target{AccountID: sandboxAccountID, Region: sandboxRegion})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	homelab = awsx.Target{AccountID: "482109375512", Region: "us-east-1"}
+	sandbox = awsx.Target{AccountID: "482109375512", Region: "us-east-1"}
 	// 12:00:10 so the period floor is visible for 60 s and larger periods.
 	testNow = time.Date(2026, 10, 31, 12, 0, 10, 0, time.UTC)
 )
@@ -76,7 +76,7 @@ func TestFetch_BatchesOver500AndKeepsOrder(t *testing.T) {
 		queries[i] = cpuQuery(fmt.Sprintf("q%d", i))
 		queries[i].MetricName = fmt.Sprintf("m%d", i)
 	}
-	res, err := client.Fetch(context.Background(), homelab, Span1h, queries)
+	res, err := client.Fetch(context.Background(), sandbox, Span1h, queries)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestFetch_BatchesAgainstFakeRecordsThreeCalls(t *testing.T) {
 		queries[i] = cpuQuery(fmt.Sprintf("q%d", i))
 		queries[i].MetricName = fmt.Sprintf("m%d", i)
 	}
-	if _, err := client.Fetch(context.Background(), homelab, Span1h, queries); err != nil {
+	if _, err := client.Fetch(context.Background(), sandbox, Span1h, queries); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.Calls()["GetMetricData"]; got != 3 {
@@ -113,7 +113,7 @@ func TestFetch_FollowsNextToken(t *testing.T) {
 	f := newFakeClients()
 	f.CloudWatchPageSize = 1000
 	client := newTestClient(f)
-	res, err := client.Fetch(context.Background(), homelab, Span72h, []Query{cpuQuery("cpu")})
+	res, err := client.Fetch(context.Background(), sandbox, Span72h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestFetch_GridIsFlooredToPeriod(t *testing.T) {
 	client := newTestClient(stubClients{cw: &stubCloudWatch{answer: emptyAnswer}})
 	q := cpuQuery("cpu")
 	q.Period = 300
-	res, err := client.Fetch(context.Background(), homelab, Span1h, []Query{q})
+	res, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{q})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestFetch_AlignsPointsToGrid_NullForGaps(t *testing.T) {
 		}}}, nil
 	}}
 	client := newTestClient(stubClients{cw: stub})
-	res, err := client.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("cpu")})
+	res, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestFetch_AlignsPointsToGrid_NullForGaps(t *testing.T) {
 
 func TestFetch_NoDatapointsGivesNulls(t *testing.T) {
 	client := newTestClient(stubClients{cw: &stubCloudWatch{answer: emptyAnswer}})
-	res, err := client.Fetch(context.Background(), homelab, Span6h, []Query{cpuQuery("cpu")})
+	res, err := client.Fetch(context.Background(), sandbox, Span6h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestFetch_ThrottleWithoutCacheReturnsThrottleErr(t *testing.T) {
 	f := newFakeClients()
 	f.ThrottleCloudWatch = 1
 	client := newTestClient(f)
-	_, err := client.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("cpu")})
+	_, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err == nil || !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want a throttle error", err)
 	}
@@ -216,24 +216,24 @@ func TestFetch_MixedPeriodsRejected(t *testing.T) {
 	client := newTestClient(stubClients{cw: &stubCloudWatch{answer: emptyAnswer}})
 	a, b := cpuQuery("a"), cpuQuery("b")
 	b.Period = 300
-	if _, err := client.Fetch(context.Background(), homelab, Span1h, []Query{a, b}); err != ErrMixedPeriods {
+	if _, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{a, b}); err != ErrMixedPeriods {
 		t.Fatalf("err = %v, want ErrMixedPeriods", err)
 	}
 }
 
 func TestFetch_RejectsDuplicateAndIllegalIDs(t *testing.T) {
 	client := newTestClient(stubClients{cw: &stubCloudWatch{answer: emptyAnswer}})
-	if _, err := client.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("a"), cpuQuery("a")}); err == nil {
+	if _, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("a"), cpuQuery("a")}); err == nil {
 		t.Error("duplicate id accepted")
 	}
-	if _, err := client.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("Bad-Id")}); err == nil {
+	if _, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("Bad-Id")}); err == nil {
 		t.Error("illegal id accepted")
 	}
 }
 
 func TestFetch_StructLiteralClientDefaultsLogAndNow(t *testing.T) {
 	client := &Client{Clients: stubClients{cw: &stubCloudWatch{answer: emptyAnswer}}, TTL: time.Minute}
-	if _, err := client.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+	if _, err := client.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("cpu")}); err != nil {
 		t.Fatal(err)
 	}
 }

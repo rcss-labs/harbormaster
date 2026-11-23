@@ -26,7 +26,7 @@ func advance(f *Fake, n int) {
 // describe returns the service as the API reports it (with events).
 func describe(t *testing.T, f *Fake, cluster, name string) ecstypes.Service {
 	t.Helper()
-	out, err := ecsFor(t, f, homelabID, "us-east-1").DescribeServices(context.Background(),
+	out, err := ecsFor(t, f, sandboxID, "us-east-1").DescribeServices(context.Background(),
 		&ecs.DescribeServicesInput{Cluster: aws.String(cluster), Services: []string{name}})
 	if err != nil || len(out.Services) != 1 {
 		t.Fatalf("DescribeServices %s: %v %+v", name, err, out)
@@ -70,8 +70,8 @@ func registerRevision(t *testing.T, f *Fake, account, region, family string, mem
 
 func TestRollout_DeployCompletesAfterDesiredSteps(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
-	if got := registerRevision(t, f, homelabID, "us-east-1", "payments-api", "1024"); got != paymentsRev43 {
+	api := ecsFor(t, f, sandboxID, "us-east-1")
+	if got := registerRevision(t, f, sandboxID, "us-east-1", "payments-api", "1024"); got != paymentsRev43 {
 		t.Fatalf("registered %s, want %s", got, paymentsRev43)
 	}
 	out, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
@@ -121,7 +121,7 @@ func TestRollout_DeployCompletesAfterDesiredSteps(t *testing.T) {
 
 func TestUpdateService_StrategyPlacesTasksByBaseThenWeight(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	before := describe(t, f, "core-services", "payments-api")
 	if _, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Cluster: aws.String("core-services"), Service: aws.String("payments-api"), ForceNewDeployment: true,
@@ -157,7 +157,7 @@ func TestUpdateService_RejectsProviderTheClusterLacks(t *testing.T) {
 		}
 	}
 	f.Estate.Mu.Unlock()
-	_, err := ecsFor(t, f, homelabID, "us-east-1").UpdateService(context.Background(), &ecs.UpdateServiceInput{
+	_, err := ecsFor(t, f, sandboxID, "us-east-1").UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Cluster: aws.String("core-services"), Service: aws.String("payments-api"),
 		CapacityProviderStrategy: []ecstypes.CapacityProviderStrategyItem{{CapacityProvider: aws.String("FARGATE_SPOT"), Weight: 1}}})
 	var invalid *ecstypes.InvalidParameterException
@@ -171,7 +171,7 @@ func TestUpdateService_RejectsProviderTheClusterLacks(t *testing.T) {
 
 func TestRollout_ForceNewDeploymentKeepsRevision(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	before := describe(t, f, "core-services", "web-frontend")
 	if _, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Cluster: aws.String("core-services"), Service: aws.String("web-frontend"), ForceNewDeployment: true}); err != nil {
@@ -196,8 +196,8 @@ func TestRollout_ForceNewDeploymentKeepsRevision(t *testing.T) {
 
 func TestRollout_OOMFailsAndCircuitBreakerRollsBack(t *testing.T) {
 	f := newFake()
-	lowMemory := registerRevision(t, f, homelabID, "us-east-1", "image-resizer", "512")
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	lowMemory := registerRevision(t, f, sandboxID, "us-east-1", "image-resizer", "512")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	if !strings.HasSuffix(lowMemory, ":7") {
 		t.Fatalf("registered %s, want revision 7", lowMemory)
 	}
@@ -284,8 +284,8 @@ func TestRollout_OOMFailsAndCircuitBreakerRollsBack(t *testing.T) {
 // revision ran fine, only the new one does not. Without this the rollback itself fails and ECS ends up on the bad one.
 func TestRollout_ManualRollbackToCompletedRevisionDuringOOMRolloutSucceeds(t *testing.T) {
 	f := newFake()
-	lowMemory := registerRevision(t, f, homelabID, "us-east-1", "image-resizer", "512")
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	lowMemory := registerRevision(t, f, sandboxID, "us-east-1", "image-resizer", "512")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	update := func(target string) {
 		t.Helper()
 		if _, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
@@ -317,15 +317,15 @@ func TestRollout_ManualRollbackToCompletedRevisionDuringOOMRolloutSucceeds(t *te
 func dropPaymentsScaling(f *Fake) {
 	f.Estate.Mu.Lock()
 	defer f.Estate.Mu.Unlock()
-	delete(f.Estate.ScalingConfig, serviceKeyOf(homelabID, "us-east-1", "core-services", "payments-api"))
+	delete(f.Estate.ScalingConfig, serviceKeyOf(sandboxID, "us-east-1", "core-services", "payments-api"))
 }
 
 func TestRollout_LoweringDesiredMidRolloutStillCompletes(t *testing.T) {
 	f := newFake()
 	dropPaymentsScaling(f)
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	ctx := context.Background()
-	registerRevision(t, f, homelabID, "us-east-1", "payments-api", "1024")
+	registerRevision(t, f, sandboxID, "us-east-1", "payments-api", "1024")
 	if _, err := api.UpdateService(ctx, &ecs.UpdateServiceInput{
 		Cluster: aws.String("core-services"), Service: aws.String("payments-api"), TaskDefinition: aws.String(paymentsRev43)}); err != nil {
 		t.Fatal(err)
@@ -344,7 +344,7 @@ func TestRollout_LoweringDesiredMidRolloutStillCompletes(t *testing.T) {
 
 func TestRollout_DeploymentIDsAreUniqueWithinOneInstant(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	restart := func() string {
 		out, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 			Cluster: aws.String("core-services"), Service: aws.String("web-frontend"), ForceNewDeployment: true})
@@ -361,7 +361,7 @@ func TestRollout_DeploymentIDsAreUniqueWithinOneInstant(t *testing.T) {
 func TestRollout_DesiredCountReconciles(t *testing.T) {
 	f := newFake()
 	dropPaymentsScaling(f)
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	update := func(n int32) {
 		t.Helper()
 		out, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
@@ -403,7 +403,7 @@ func TestRollout_DesiredCountReconciles(t *testing.T) {
 
 func TestRollout_DesiredZeroCompletesImmediately(t *testing.T) {
 	f := newFake()
-	api := ecsFor(t, f, homelabID, "us-east-1")
+	api := ecsFor(t, f, sandboxID, "us-east-1")
 	ctx := context.Background()
 	in := func() *ecs.UpdateServiceInput {
 		return &ecs.UpdateServiceInput{Cluster: aws.String("core-services"), Service: aws.String("auth-service")}
@@ -439,7 +439,7 @@ func TestRollout_NotificationsFinishesSeededRollout(t *testing.T) {
 }
 
 func TestRollout_UpdateServiceRejectsUnknownService(t *testing.T) {
-	api := ecsFor(t, newFake(), homelabID, "us-east-1")
+	api := ecsFor(t, newFake(), sandboxID, "us-east-1")
 	_, err := api.UpdateService(context.Background(), &ecs.UpdateServiceInput{
 		Cluster: aws.String("core-services"), Service: aws.String("nope"), ForceNewDeployment: true})
 	var notFound *ecstypes.ServiceNotFoundException

@@ -12,9 +12,9 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 )
 
-func ecrForHomelab(t *testing.T, f *Fake) awsx.ECRAPI {
+func ecrForSandbox(t *testing.T, f *Fake) awsx.ECRAPI {
 	t.Helper()
-	api, err := f.ECR(context.Background(), awsx.Target{AccountID: homelabID, Region: "us-east-1"})
+	api, err := f.ECR(context.Background(), awsx.Target{AccountID: sandboxID, Region: "us-east-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func ecrForHomelab(t *testing.T, f *Fake) awsx.ECRAPI {
 
 func TestFakeDescribeImages_FiltersByTagAndDigest(t *testing.T) {
 	f := newFake()
-	api := ecrForHomelab(t, f)
+	api := ecrForSandbox(t, f)
 	ctx := context.Background()
 	wantDigest := f.Estate.ImageDigestFor("image-resizer:0.4.2")
 
@@ -69,7 +69,7 @@ func TestFakeDescribeImages_FiltersByTagAndDigest(t *testing.T) {
 
 func TestFakeMoveTag_ChangesTheResolvedDigest(t *testing.T) {
 	f := newFake()
-	api := ecrForHomelab(t, f)
+	api := ecrForSandbox(t, f)
 	ctx := context.Background()
 	resolve := func(tag string) string {
 		t.Helper()

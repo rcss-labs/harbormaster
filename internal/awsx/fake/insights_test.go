@@ -72,7 +72,7 @@ func rowField(row []logstypes.ResultField, name string) string {
 func TestStartQuery_RunsThenCompletesWithStats(t *testing.T) {
 	f := newFake()
 	lines := seedInsights(f)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	id, err := startInsights(t, api, "filter @message like \"GET\"\n| fields @timestamp, @message, @log, @logStream\n| sort @timestamp desc\n| limit 100")
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestStartQuery_RunsThenCompletesWithStats(t *testing.T) {
 		t.Fatalf("%d rows, want 4", len(second.Results))
 	}
 	row := second.Results[0]
-	if rowField(row, "@timestamp") != "2026-10-31 11:59:00.000" || rowField(row, "@log") != homelabID+":"+insightsGroup ||
+	if rowField(row, "@timestamp") != "2026-10-31 11:59:00.000" || rowField(row, "@log") != sandboxID+":"+insightsGroup ||
 		rowField(row, "@logStream") != "api/web/t1" || rowField(row, "@ptr") == "" {
 		t.Errorf("newest row = %v", row)
 	}
@@ -125,9 +125,9 @@ func scopeQuery(account string, prefixes ...string) string {
 func TestStartQuery_ScopeStageSelectsStreams(t *testing.T) {
 	f := newFake()
 	seedInsights(f)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 
-	id, err := startInsights(t, api, scopeQuery(homelabID, `worker\/`))
+	id, err := startInsights(t, api, scopeQuery(sandboxID, `worker\/`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestStartQuery_ScopeStageSelectsStreams(t *testing.T) {
 
 	// Two prefixes, a second clause for another group (matches nothing here), and a user stage after the scope.
 	q := fmt.Sprintf("filter (@log = %q and @logStream like /^(worker\\/|api\\/)/) or (@log = %q and @logStream like /^(x)/)\n| filter @message like \"job\"\n| fields @timestamp, @message, @log, @logStream\n| sort @timestamp desc\n| limit 100",
-		homelabID+":"+insightsGroup, homelabID+":/other")
+		sandboxID+":"+insightsGroup, sandboxID+":/other")
 	id, err = startInsights(t, api, q)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestStartQuery_ScopeStageSelectsStreams(t *testing.T) {
 func TestStartQuery_MessageFilterAndLimit(t *testing.T) {
 	f := newFake()
 	seedInsights(f)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	cases := []struct {
 		name, stage string
 		want        int
@@ -208,7 +208,7 @@ func TestStartQuery_MessageFilterAndLimit(t *testing.T) {
 func TestStartQuery_Validation(t *testing.T) {
 	f := newFake()
 	seedInsights(f)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	base := func() *cloudwatchlogs.StartQueryInput {
 		return &cloudwatchlogs.StartQueryInput{LogGroupNames: []string{insightsGroup}, StartTime: aws.Int64(100), EndTime: aws.Int64(200), QueryString: aws.String("limit 1")}
 	}
@@ -229,7 +229,7 @@ func TestStartQuery_Validation(t *testing.T) {
 
 func TestStartQuery_RejectsTooManyGroups(t *testing.T) {
 	f := newFake()
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	var groups []string
 	for i := range 51 {
 		groups = append(groups, fmt.Sprintf("/ecs/g/%d", i))
@@ -246,7 +246,7 @@ func TestStartQuery_RejectsTooManyGroups(t *testing.T) {
 func TestStartQuery_FailureKnobsAndCalls(t *testing.T) {
 	f := newFake()
 	seedInsights(f)
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	boom := errors.New("boom")
 	f.FailNext("StartQuery", boom)
 	if _, err := startInsights(t, api, "limit 1"); !errors.Is(err, boom) {
@@ -273,7 +273,7 @@ func TestStartQuery_AlwaysRunning(t *testing.T) {
 	f := newFake()
 	seedInsights(f)
 	f.InsightsAlwaysRunning = true
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	id, _ := startInsights(t, api, "limit 1")
 	for range 4 {
 		out, err := api.GetQueryResults(context.Background(), &cloudwatchlogs.GetQueryResultsInput{QueryId: aws.String(id)})
@@ -287,7 +287,7 @@ func TestStopQuery_CancelsAndIsRecorded(t *testing.T) {
 	f := newFake()
 	seedInsights(f)
 	f.InsightsAlwaysRunning = true
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	id, err := startInsights(t, api, "limit 1")
 	if err != nil {
 		t.Fatal(err)

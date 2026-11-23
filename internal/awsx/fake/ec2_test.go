@@ -33,7 +33,7 @@ func ec2For(t *testing.T, f *Fake, target awsx.Target) awsx.EC2API {
 
 func TestFakeEC2_DescribeSubnetsFiltersByVpc(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	out, err := api.DescribeSubnets(context.Background(), &ec2.DescribeSubnetsInput{
 		Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: []string{mainVpcID}}}})
 	if err != nil {
@@ -46,7 +46,7 @@ func TestFakeEC2_DescribeSubnetsFiltersByVpc(t *testing.T) {
 
 func TestFakeEC2_DescribeVpcEndpointsIncludesS3Decoy(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	out, err := api.DescribeVpcEndpoints(context.Background(), &ec2.DescribeVpcEndpointsInput{
 		Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: []string{mainVpcID}}}})
 	if err != nil {
@@ -69,7 +69,7 @@ func TestFakeEC2_DescribeVpcEndpointsIncludesS3Decoy(t *testing.T) {
 func TestFakeEC2_ThrottleKnob(t *testing.T) {
 	f := newFake()
 	f.ThrottleEC2 = 1
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	if _, err := api.DescribeVpcs(context.Background(), &ec2.DescribeVpcsInput{}); !awsx.IsThrottle(err) {
 		t.Fatalf("first call err = %v, want throttle", err)
 	}
@@ -85,7 +85,7 @@ func TestFakeEC2_FailNextHonoured(t *testing.T) {
 	f := newFake()
 	boom := errBoom{}
 	f.FailNext("DescribeNatGateways", boom)
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	if _, err := api.DescribeNatGateways(context.Background(), &ec2.DescribeNatGatewaysInput{}); err != boom {
 		t.Fatalf("err = %v, want injected", err)
 	}
@@ -97,7 +97,7 @@ func (errBoom) Error() string { return "boom" }
 
 func TestFakeEC2_AvailableIPsSubtractRunningTasks(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	out, err := api.DescribeSubnets(context.Background(), &ec2.DescribeSubnetsInput{SubnetIds: []string{"subnet-03f1a9c2"}})
 	if err != nil || len(out.Subnets) != 1 {
 		t.Fatalf("subnets %v err %v", out, err)
@@ -118,7 +118,7 @@ func TestFakeEC2_AvailableIPsSubtractRunningTasks(t *testing.T) {
 
 func TestFakeEC2_ScopedToAccountAndRegion(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, awsx.Target{AccountID: homelabID, Region: "eu-west-1"})
+	api := ec2For(t, f, awsx.Target{AccountID: sandboxID, Region: "eu-west-1"})
 	out, err := api.DescribeVpcs(context.Background(), &ec2.DescribeVpcsInput{})
 	if err != nil || len(out.Vpcs) != 1 || aws.ToString(out.Vpcs[0].VpcId) != "vpc-0f3392bb71e2" {
 		t.Fatalf("vpcs %v err %v", out, err)
@@ -127,7 +127,7 @@ func TestFakeEC2_ScopedToAccountAndRegion(t *testing.T) {
 
 func TestFakeEC2_PaginatesWithMaxResults(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	var ids []string
 	var token *string
 	pages := 0
@@ -152,7 +152,7 @@ func TestFakeEC2_PaginatesWithMaxResults(t *testing.T) {
 
 func TestFakeEC2_SecurityGroupsByGroupID(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	all, err := api.DescribeSecurityGroups(context.Background(), &ec2.DescribeSecurityGroupsInput{
 		Filters: []ec2types.Filter{{Name: aws.String("vpc-id"), Values: []string{mainVpcID}}}})
 	if err != nil || len(all.SecurityGroups) < 2 {
@@ -167,7 +167,7 @@ func TestFakeEC2_SecurityGroupsByGroupID(t *testing.T) {
 
 func TestFakeEC2_InternetGatewaysAndNatsByVpc(t *testing.T) {
 	f := newFake()
-	api := ec2For(t, f, homelabUSEast1)
+	api := ec2For(t, f, sandboxUSEast1)
 	igw, err := api.DescribeInternetGateways(context.Background(), &ec2.DescribeInternetGatewaysInput{
 		Filters: []ec2types.Filter{{Name: aws.String("attachment.vpc-id"), Values: []string{mainVpcID}}}})
 	if err != nil || len(igw.InternetGateways) != 1 {

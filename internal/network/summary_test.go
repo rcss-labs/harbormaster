@@ -48,11 +48,11 @@ func TestSummarizeVPCs_ActiveOnlySortedByName(t *testing.T) {
 		t.Fatalf("want 2 active VPCs, got %d", len(got))
 	}
 	main, shared := got[0], got[1]
-	if main.VPC.Name != "homelab-main" || shared.VPC.Name != "shared-services" {
+	if main.VPC.Name != "sandbox-main" || shared.VPC.Name != "shared-services" {
 		t.Fatalf("order: %s, %s", main.VPC.Name, shared.VPC.Name)
 	}
 	if main.Subnets != 3 || main.Tasks != 10 || !reflect.DeepEqual(main.Clusters, []string{"background-jobs", "core-services"}) {
-		t.Errorf("homelab-main: %+v", main)
+		t.Errorf("sandbox-main: %+v", main)
 	}
 	if shared.Subnets != 2 || shared.Tasks != 2 || !reflect.DeepEqual(shared.Clusters, []string{"ci-tools"}) {
 		t.Errorf("shared-services: %+v", shared)

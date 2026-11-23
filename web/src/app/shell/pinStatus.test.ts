@@ -4,9 +4,9 @@ import type { Pin } from './pins'
 import { pinStatus } from './pinStatus'
 
 const servicePin: Pin = { kind: 'service', id: SERVICE_PAYMENTS.id, name: 'payments-api', cluster: 'core-services' }
-const clusterPin: Pin = { kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'homelab-admin', account_id: '482109375512' }
+const clusterPin: Pin = { kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'sandbox-admin', account_id: '482109375512' }
 const goneService: Pin = { kind: 'service', id: 'gone-service', name: 'edge-nginx', cluster: 'edge-proxy' }
-const goneCluster: Pin = { kind: 'cluster', id: 'gone-cluster', name: 'old-cluster', account_name: 'homelab-admin', account_id: '1' }
+const goneCluster: Pin = { kind: 'cluster', id: 'gone-cluster', name: 'old-cluster', account_name: 'sandbox-admin', account_id: '1' }
 const loaded = CLUSTERS.items
 
 describe('pinStatus', () => {

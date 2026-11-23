@@ -42,7 +42,7 @@ test('freshness control reads all regions current on the healthy estate', async 
   await expect(freshness(page)).toHaveText(/^(\d+) of \1 regions current$/)
   await freshness(page).click()
   // Per-tier detail ("Current: ...") needs the tiers from the poller backend lane, so only the regions are asserted here.
-  await expect(page.getByRole('dialog', { name: 'Data freshness' })).toContainText('homelab-admin / eu-west-1')
+  await expect(page.getByRole('dialog', { name: 'Data freshness' })).toContainText('sandbox-admin / eu-west-1')
 })
 
 test('density toggle persists across a reload', async ({ page }) => {

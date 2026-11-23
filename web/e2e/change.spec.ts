@@ -1,11 +1,11 @@
 import { expect, test, type Page } from './fixtures/test'
 import { login, pickImageTag, reviewAndApply, serviceId } from './helpers'
 
-// Ids come from the fake estate (internal/awsx/fake/seed.go): both clusters live in the homelab account, us-east-1.
-const HOMELAB_ACCOUNT_ID = '482109375512'
+// Ids come from the fake estate (internal/awsx/fake/seed.go): both clusters live in the sandbox account, us-east-1.
+const SANDBOX_ACCOUNT_ID = '482109375512'
 const REGION = 'us-east-1'
-const paymentsApi = serviceId(HOMELAB_ACCOUNT_ID, REGION, 'core-services', 'payments-api')
-const imageResizer = serviceId(HOMELAB_ACCOUNT_ID, REGION, 'background-jobs', 'image-resizer')
+const paymentsApi = serviceId(SANDBOX_ACCOUNT_ID, REGION, 'core-services', 'payments-api')
+const imageResizer = serviceId(SANDBOX_ACCOUNT_ID, REGION, 'background-jobs', 'image-resizer')
 
 async function openOperationsLog(page: Page, id: string) {
   await page.goto(`/services/${id}/operations`)

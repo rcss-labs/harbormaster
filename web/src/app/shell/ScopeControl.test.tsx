@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ACCOUNT_HOMELAB, ACCOUNT_STAGING, ME_OMER } from '../../test/fixtures'
+import { ACCOUNT_SANDBOX, ACCOUNT_STAGING, ME_OMER } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
 
@@ -40,9 +40,9 @@ describe('ScopeControl', () => {
     expect(within(popover).getByLabelText('Account filter')).toBeInTheDocument()
     expect(within(popover).getByLabelText('Region filter')).toBeInTheDocument()
     expect(within(popover).getByRole('button', { name: 'Tag filter' })).toBeInTheDocument()
-    await user.selectOptions(within(popover).getByLabelText('Account filter'), ACCOUNT_HOMELAB.account_id)
-    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`account=${ACCOUNT_HOMELAB.account_id}`))
-    expect(await scopeButton()).toHaveTextContent(`${ACCOUNT_HOMELAB.name} · 3 regions · All tags`)
+    await user.selectOptions(within(popover).getByLabelText('Account filter'), ACCOUNT_SANDBOX.account_id)
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`account=${ACCOUNT_SANDBOX.account_id}`))
+    expect(await scopeButton()).toHaveTextContent(`${ACCOUNT_SANDBOX.name} · 3 regions · All tags`)
   })
 
   it('saves the current scope under a name and applies it later', async () => {

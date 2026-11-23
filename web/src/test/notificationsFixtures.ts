@@ -76,7 +76,7 @@ function route(fields: Partial<NotificationRoute> & Pick<NotificationRoute, 'id'
 export const CORE_SERVICES_CLUSTER = selector({
   kind: 'cluster',
   account_id: '482109375512',
-  account_name: 'homelab-admin',
+  account_name: 'sandbox-admin',
   region: 'us-east-1',
   cluster_id: 'NDgyMTA5Mzc1NTEyfHVzLWVhc3QtMXxjb3JlLXNlcnZpY2Vz',
   cluster: 'core-services',
@@ -86,7 +86,7 @@ export const CORE_SERVICES_CLUSTER = selector({
 export const IMAGE_RESIZER_SERVICE = selector({
   kind: 'service',
   account_id: '482109375512',
-  account_name: 'homelab-admin',
+  account_name: 'sandbox-admin',
   region: 'us-east-1',
   cluster_id: 'NDgyMTA5Mzc1NTEyfHVzLWVhc3QtMXxiYWNrZ3JvdW5kLWpvYnM',
   cluster: 'background-jobs',
@@ -152,7 +152,7 @@ export const ROUTE_WEBHOOK_SIGNED = route({
     selector({
       kind: 'service',
       account_id: '482109375512',
-      account_name: 'homelab-admin',
+      account_name: 'sandbox-admin',
       region: 'us-east-1',
       cluster: 'core-services',
       cluster_id: 'NDgyMTA5Mzc1NTEyfHVzLWVhc3QtMXxjb3JlLXNlcnZpY2Vz',
@@ -208,7 +208,7 @@ export const NOTIFICATION_PREVIEW: NotificationPreview = {
   sample: false,
   destination: 'slack',
   title: 'payments-api: service failing',
-  body: '0 of 3 tasks are running.\ncore-services · homelab-admin / us-east-1',
+  body: '0 of 3 tasks are running.\ncore-services · sandbox-admin / us-east-1',
   json: '',
   groups: [],
   notification_count: 2,
@@ -412,12 +412,12 @@ export const NOTIFICATION_SUMMARY_CLEAN: NotificationSummary = { failed_24h: 0, 
 
 export const NOTIFICATION_TARGETS: NotificationTargets = {
   accounts: [
-    { account_id: '482109375512', name: 'homelab-admin', regions: ['us-east-1', 'eu-west-1', 'eu-central-1'] },
+    { account_id: '482109375512', name: 'sandbox-admin', regions: ['us-east-1', 'eu-west-1', 'eu-central-1'] },
     { account_id: '731022849906', name: 'staging-example', regions: ['us-east-1'] },
   ],
   clusters: [
-    { id: CORE_SERVICES_CLUSTER.cluster_id, name: 'core-services', account_id: '482109375512', account_name: 'homelab-admin', region: 'us-east-1' },
-    { id: IMAGE_RESIZER_SERVICE.cluster_id, name: 'background-jobs', account_id: '482109375512', account_name: 'homelab-admin', region: 'us-east-1' },
+    { id: CORE_SERVICES_CLUSTER.cluster_id, name: 'core-services', account_id: '482109375512', account_name: 'sandbox-admin', region: 'us-east-1' },
+    { id: IMAGE_RESIZER_SERVICE.cluster_id, name: 'background-jobs', account_id: '482109375512', account_name: 'sandbox-admin', region: 'us-east-1' },
     { id: 'staging-web-cluster', name: 'staging-web', account_id: '731022849906', account_name: 'staging-example', region: 'us-east-1' },
   ],
   services: [
@@ -427,7 +427,7 @@ export const NOTIFICATION_TARGETS: NotificationTargets = {
       cluster: 'core-services',
       cluster_id: CORE_SERVICES_CLUSTER.cluster_id,
       account_id: '482109375512',
-      account_name: 'homelab-admin',
+      account_name: 'sandbox-admin',
       region: 'us-east-1',
     },
     {
@@ -436,7 +436,7 @@ export const NOTIFICATION_TARGETS: NotificationTargets = {
       cluster: 'background-jobs',
       cluster_id: IMAGE_RESIZER_SERVICE.cluster_id,
       account_id: '482109375512',
-      account_name: 'homelab-admin',
+      account_name: 'sandbox-admin',
       region: 'us-east-1',
     },
     {

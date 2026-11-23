@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	homelabAccountID = "482109375512"
+	sandboxAccountID = "482109375512"
 	stagingAccountID = "731022849906"
 )
 
@@ -49,17 +49,17 @@ var mainVPCSubnets = []seedSubnet{
 }
 
 var seedClusters = []seedCluster{
-	{"core-services", homelabAccountID, "us-east-1", true, mainVPCSubnets, false},
-	{"background-jobs", homelabAccountID, "us-east-1", true, mainVPCSubnets, false},
-	{"ci-tools", homelabAccountID, "us-east-1", true, []seedSubnet{
+	{"core-services", sandboxAccountID, "us-east-1", true, mainVPCSubnets, false},
+	{"background-jobs", sandboxAccountID, "us-east-1", true, mainVPCSubnets, false},
+	{"ci-tools", sandboxAccountID, "us-east-1", true, []seedSubnet{
 		{"subnet-0e1c88a1", "10.21.1.0/24", "us-east-1a", false},
 		{"subnet-02aa71f3", "10.21.3.0/24", "us-east-1c", false},
 	}, false},
-	{"eu-apps", homelabAccountID, "eu-west-1", true, []seedSubnet{
+	{"eu-apps", sandboxAccountID, "eu-west-1", true, []seedSubnet{
 		{"subnet-0a90f7c1", "10.30.1.0/24", "eu-west-1a", false},
 		{"subnet-0c6b1e92", "10.30.2.0/24", "eu-west-1b", false},
 	}, false},
-	{"edge-proxy", homelabAccountID, "eu-central-1", false, []seedSubnet{
+	{"edge-proxy", sandboxAccountID, "eu-central-1", false, []seedSubnet{
 		{"subnet-0d2e5a77", "10.40.1.0/24", "eu-central-1a", false},
 		{"subnet-0f61c3b8", "10.40.101.0/24", "eu-central-1a", true},
 	}, true},
@@ -308,7 +308,7 @@ func (sp serviceSpec) subnets() []seedSubnet {
 func MockupEstate(now func() time.Time) *Estate {
 	e := &Estate{Now: now, Events: map[string][]ecstypes.ServiceEvent{}}
 	e.Accounts = []Account{
-		{ID: homelabAccountID, Name: "homelab-admin", Regions: []string{"us-east-1", "eu-west-1", "eu-central-1"}},
+		{ID: sandboxAccountID, Name: "sandbox-admin", Regions: []string{"us-east-1", "eu-west-1", "eu-central-1"}},
 		{ID: stagingAccountID, Name: "staging-example", Regions: []string{"us-east-1"}},
 	}
 	sd := newSeeder(e, 20261031)
@@ -382,7 +382,7 @@ func (s *seeder) buildTaskDefinition(sp serviceSpec, revision int, tag string, r
 		Memory:                  aws.String(itoa(sp.memory)),
 		Status:                  ecstypes.TaskDefinitionStatusActive,
 		RegisteredAt:            aws.Time(registered),
-		RegisteredBy:            aws.String("terraform (TerraDuckTel)"),
+		RegisteredBy:            aws.String("terraform"),
 	}
 	if sp.efs != nil {
 		main.MountPoints = []ecstypes.MountPoint{{SourceVolume: aws.String(sp.efs.name), ContainerPath: aws.String(sp.efs.path), ReadOnly: aws.Bool(false)}}

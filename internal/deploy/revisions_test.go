@@ -81,7 +81,7 @@ func TestRevisions_ExactFamilyOnly(t *testing.T) {
 		copied.Family = aws.String(family)
 		copied.Revision = 1
 		copied.TaskDefinitionArn = aws.String(strings.Replace(aws.ToString(template.TaskDefinitionArn), "payments-api:42", family+":1", 1))
-		h.fake.Estate.TaskDefinitions = append(h.fake.Estate.TaskDefinitions, fake.TaskDefinition{AccountID: homelabAccountID, Region: homelabRegion, Definition: copied})
+		h.fake.Estate.TaskDefinitions = append(h.fake.Estate.TaskDefinitions, fake.TaskDefinition{AccountID: sandboxAccountID, Region: sandboxRegion, Definition: copied})
 	}
 	h.fake.Estate.Mu.Unlock()
 
@@ -203,7 +203,7 @@ func addTaskDefinitionCopy(t *testing.T, h *harness, family string, revision int
 	copied.Family = aws.String(family)
 	copied.Revision = int32(revision)
 	copied.TaskDefinitionArn = aws.String(strings.Replace(aws.ToString(template.TaskDefinitionArn), "payments-api:42", fmt.Sprintf("%s:%d", family, revision), 1))
-	h.fake.Estate.TaskDefinitions = append(h.fake.Estate.TaskDefinitions, fake.TaskDefinition{AccountID: homelabAccountID, Region: homelabRegion, Definition: copied})
+	h.fake.Estate.TaskDefinitions = append(h.fake.Estate.TaskDefinitions, fake.TaskDefinition{AccountID: sandboxAccountID, Region: sandboxRegion, Definition: copied})
 }
 
 func TestRevisionDefinition_FromStore(t *testing.T) {

@@ -14,11 +14,11 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 )
 
-var homelabEUWest1 = awsx.Target{AccountID: homelabID, Region: "eu-west-1"}
+var sandboxEUWest1 = awsx.Target{AccountID: sandboxID, Region: "eu-west-1"}
 
 func TestFakeTargetHealth_CatalogAPIHasOneUnhealthyTarget(t *testing.T) {
 	f := newFake()
-	api, err := f.ELB(context.Background(), homelabEUWest1)
+	api, err := f.ELB(context.Background(), sandboxEUWest1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,9 +49,9 @@ func TestFakeTargetHealth_CatalogAPIHasOneUnhealthyTarget(t *testing.T) {
 
 func TestFakeTargetGroups_AddAndRemoveSecondGroup(t *testing.T) {
 	f := newFake()
-	key := serviceKeyOf(homelabID, "us-east-1", "core-services", "payments-api")
+	key := serviceKeyOf(sandboxID, "us-east-1", "core-services", "payments-api")
 	f.Estate.AddTargetGroup(key, TargetGroup{Healthy: 3})
-	api, _ := f.ELB(context.Background(), homelabUSEast1)
+	api, _ := f.ELB(context.Background(), sandboxUSEast1)
 	all, err := api.DescribeTargetGroups(context.Background(), &elasticloadbalancingv2.DescribeTargetGroupsInput{})
 	// payments-api, web-frontend, auth-service, jenkins-controller + the added group.
 	if err != nil || len(all.TargetGroups) != 5 {
@@ -72,7 +72,7 @@ func TestFakeTargetGroups_AddAndRemoveSecondGroup(t *testing.T) {
 func TestFakeELB_ThrottleFlag(t *testing.T) {
 	f := newFake()
 	f.ThrottleELB = 1
-	api, _ := f.ELB(context.Background(), homelabUSEast1)
+	api, _ := f.ELB(context.Background(), sandboxUSEast1)
 	if _, err := api.DescribeTargetGroups(context.Background(), &elasticloadbalancingv2.DescribeTargetGroupsInput{}); !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want throttle", err)
 	}
@@ -82,7 +82,7 @@ func TestFakeELB_ThrottleFlag(t *testing.T) {
 }
 
 func TestFakeAutoScaling_PaymentsAPISetup(t *testing.T) {
-	api, err := newFake().AutoScaling(context.Background(), homelabUSEast1)
+	api, err := newFake().AutoScaling(context.Background(), sandboxUSEast1)
 	if err != nil {
 		t.Fatal(err)
 	}

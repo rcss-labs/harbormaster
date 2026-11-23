@@ -132,7 +132,7 @@ func TestConfigSearch_FindsByEachField(t *testing.T) {
 func TestConfigSearch_BaseImageFromRepositorySetting(t *testing.T) {
 	as, _, st := newConfigSearchServer(t)
 	sam := as("sam")
-	key := store.RepoKey{AccountID: homelabAccountID, Region: "us-east-1", Repository: "payments-api"}
+	key := store.RepoKey{AccountID: sandboxAccountID, Region: "us-east-1", Repository: "payments-api"}
 	if err := st.SetRepoBase(t.Context(), key, "node:22-alpine", 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestConfigSearch_ShellFiltersNarrow(t *testing.T) {
 	sam, omer := as("sam"), as("omer")
 	ids := lookupTagIDs(t, st)
 	q := "execrole:ecs-task-execution"
-	for _, extra := range []string{"account=" + stagingAccountID, "region=eu-central-1", "account=" + homelabAccountID + "&region=us-east-1", ids.Prod, ids.Staging} {
+	for _, extra := range []string{"account=" + stagingAccountID, "region=eu-central-1", "account=" + sandboxAccountID + "&region=us-east-1", ids.Prod, ids.Staging} {
 		got := getConfigSearch(t, sam, q, extra)
 		list := getServicesList(t, sam, "?"+extra)
 		if got.Searched != list.Total || len(got.Items) != list.Total {

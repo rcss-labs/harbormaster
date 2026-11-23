@@ -26,9 +26,9 @@ const (
 )
 
 var (
-	edgeNginxKey        = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}, Service: "edge-nginx"}
-	certRenewerID       = serviceID(homelabAccountID, "eu-central-1", "edge-proxy", "cert-renewer")
-	securityPaymentsKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	edgeNginxKey        = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}, Service: "edge-nginx"}
+	certRenewerID       = serviceID(sandboxAccountID, "eu-central-1", "edge-proxy", "cert-renewer")
+	securityPaymentsKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 )
 
 // securityEnv is a server with image scanning on and the fake scanner behind it.

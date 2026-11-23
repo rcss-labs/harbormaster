@@ -1,7 +1,7 @@
 import { expect, test, type Page } from './fixtures/test'
 import { login, serviceId } from './helpers'
 
-const HOMELAB_ACCOUNT_ID = '482109375512'
+const SANDBOX_ACCOUNT_ID = '482109375512'
 const STAGING_ACCOUNT_ID = '731022849906'
 
 // CSS-module class names are hashed in the production build, so match on the stable prefix.
@@ -58,7 +58,7 @@ test('edge-proxy says Container Insights is off', async ({ page }) => {
   const row = page.getByRole('row', { name: /edge-proxy/ })
   await expect(row.getByTitle('Container Insights is off').first()).toBeVisible({ timeout: POLL_TIMEOUT })
 
-  await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'edge-nginx')}/metrics`)
+  await page.goto(`/services/${serviceId(SANDBOX_ACCOUNT_ID, 'eu-central-1', 'edge-proxy', 'edge-nginx')}/metrics`)
   await expect(page.getByText(/Container Insights is off for edge-proxy/)).toBeVisible({ timeout: POLL_TIMEOUT })
   await expect(page.getByText(/containerInsights/)).toBeVisible({ timeout: POLL_TIMEOUT })
   await expect(page.getByText('CPU utilization')).toHaveCount(0)
@@ -66,7 +66,7 @@ test('edge-proxy says Container Insights is off', async ({ page }) => {
 
 test('metrics tab range switch', async ({ page }) => {
   await login(page, 'sam')
-  await page.goto(`/services/${serviceId(HOMELAB_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')}/metrics`)
+  await page.goto(`/services/${serviceId(SANDBOX_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')}/metrics`)
   await expect(card(page, 'CPU utilization')).toBeVisible({ timeout: POLL_TIMEOUT })
   await page.getByRole('main').getByRole('button', { name: '6h', exact: true }).click()
   await expect(page).toHaveURL(/range=6h/)
@@ -75,7 +75,7 @@ test('metrics tab range switch', async ({ page }) => {
 
 test('target health shows the unhealthy target', async ({ page }) => {
   await login(page, 'sam')
-  const catalog = serviceId(HOMELAB_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')
+  const catalog = serviceId(SANDBOX_ACCOUNT_ID, 'eu-west-1', 'eu-apps', 'catalog-api')
   await page.goto(`/services/${catalog}/overview`)
   const health = card(page, 'Target health')
   await expect(health.getByText(/Unhealthy targets\s*1/)).toBeVisible({ timeout: POLL_TIMEOUT })
@@ -83,7 +83,7 @@ test('target health shows the unhealthy target', async ({ page }) => {
 
 test('scaling tab shows min, max and scheduled actions', async ({ page }) => {
   await login(page, 'sam')
-  const payments = serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
+  const payments = serviceId(SANDBOX_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
   await page.goto(`/services/${payments}/scaling`)
   const autoScaling = card(page, 'Auto scaling')
   await expect(autoScaling).toContainText(/Minimum tasks\s*2/, { timeout: POLL_TIMEOUT })
@@ -95,7 +95,7 @@ test('scaling tab shows min, max and scheduled actions', async ({ page }) => {
 
 test('logs history, filter and live tail', async ({ page }) => {
   await login(page, 'oncall')
-  const payments = serviceId(HOMELAB_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
+  const payments = serviceId(SANDBOX_ACCOUNT_ID, 'us-east-1', 'core-services', 'payments-api')
   await page.goto(`/services/${payments}/logs`)
   const lines = page.locator(LOG_LINE)
   await expect(lines.first()).toBeVisible({ timeout: POLL_TIMEOUT })

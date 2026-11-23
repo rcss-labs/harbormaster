@@ -49,7 +49,7 @@ const UPLOADS: StorageItem = {
   name: 'uploads-archive',
   account_id: '482109375512',
   region: 'us-east-1',
-  vpc: { vpc_id: 'vpc-0b2', name: 'homelab-main' },
+  vpc: { vpc_id: 'vpc-0b2', name: 'sandbox-main' },
   size_bytes: 227204155801,
   throughput_mode: 'Elastic',
   performance_mode: 'generalPurpose',
@@ -195,7 +195,7 @@ describe('StoragePage', () => {
           items: [
             {
               account_id: JENKINS.account_id,
-              account_name: 'homelab-admin',
+              account_name: 'sandbox-admin',
               region: 'us-east-1',
               throttled: false,
               failing: false,

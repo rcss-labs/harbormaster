@@ -181,7 +181,7 @@ describe('pinned services and clusters', () => {
     const pinned = await screen.findByRole('navigation', { name: 'Pinned' })
     const link = within(pinned).getByRole('link', { name: /core-services/ })
     expect(link).toHaveAttribute('href', `/clusters/${CLUSTER_CORE.id}`)
-    expect(link).toHaveTextContent('homelab-admin · 482109375512')
+    expect(link).toHaveTextContent('sandbox-admin · 482109375512')
     expect(screen.getByRole('button', { name: 'Unpin core-services' })).toHaveAttribute('aria-pressed', 'true')
 
     await user.click(screen.getByRole('button', { name: 'Unpin core-services' }))
@@ -205,14 +205,14 @@ describe('pinned services and clusters', () => {
   it('shows a cluster on two lines: name, then account name and id, with its status colour', async () => {
     localStorage.setItem(
       'harbormaster-pinned:sam',
-      JSON.stringify([{ kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'homelab-admin', account_id: '482109375512' }]),
+      JSON.stringify([{ kind: 'cluster', id: CLUSTER_CORE.id, name: 'core-services', account_name: 'sandbox-admin', account_id: '482109375512' }]),
     )
     renderApp('/')
     const link = await within(await screen.findByRole('navigation', { name: 'Pinned' })).findByRole('link', { name: /core-services/ })
     expect(link).toHaveAttribute('href', `/clusters/${CLUSTER_CORE.id}`)
-    expect(within(link).getByText('homelab-admin · 482109375512')).toBeInTheDocument()
+    expect(within(link).getByText('sandbox-admin · 482109375512')).toBeInTheDocument()
     await waitFor(() => expect(link.querySelector('[data-kind]')).toHaveAttribute('data-kind', 'info'))
-    expect(link).toHaveAttribute('aria-label', 'core-services · Deploying · homelab-admin · 482109375512')
+    expect(link).toHaveAttribute('aria-label', 'core-services · Deploying · sandbox-admin · 482109375512')
   })
 
   it('marks a pin as Unavailable once the list loads without it, and offers to remove it', async () => {
@@ -220,7 +220,7 @@ describe('pinned services and clusters', () => {
       'harbormaster-pinned:sam',
       JSON.stringify([
         { id: 'abc', name: 'edge-nginx', cluster: 'edge-proxy' },
-        { kind: 'cluster', id: 'gone', name: 'old-cluster', account_name: 'homelab-admin', account_id: '1' },
+        { kind: 'cluster', id: 'gone', name: 'old-cluster', account_name: 'sandbox-admin', account_id: '1' },
       ]),
     )
     renderApp('/')

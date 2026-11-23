@@ -47,7 +47,7 @@ func serviceWithGroups(groups ...string) store.ServiceRow {
 	return store.ServiceRow{Service: model.Service{SecurityGroups: groups}}
 }
 
-var networkTarget = awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+var networkTarget = awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 
 func TestNormalizeEdges_KeepsOnlyEcsEndpoints(t *testing.T) {
 	var eps []ec2types.VpcEndpoint
@@ -109,7 +109,7 @@ func TestNameTag_FallsBackToID(t *testing.T) {
 	}{
 		{"no tags", nil, "vpc-1"},
 		{"empty name", []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String("")}}, "vpc-1"},
-		{"named", []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String("homelab-main")}}, "homelab-main"},
+		{"named", []ec2types.Tag{{Key: aws.String("Name"), Value: aws.String("sandbox-main")}}, "sandbox-main"},
 	}
 	for _, tc := range tests {
 		if got := nameTag(tc.tags, "vpc-1"); got != tc.want {

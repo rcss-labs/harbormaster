@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	homelab        = "482109375512"
-	resizerImage   = homelab + ".dkr.ecr.us-east-1.amazonaws.com/image-resizer:0.4.2"
-	catalogImage   = homelab + ".dkr.ecr.eu-west-1.amazonaws.com/catalog-api:4.1.0"
+	sandbox        = "482109375512"
+	resizerImage   = sandbox + ".dkr.ecr.us-east-1.amazonaws.com/image-resizer:0.4.2"
+	catalogImage   = sandbox + ".dkr.ecr.eu-west-1.amazonaws.com/catalog-api:4.1.0"
 	otelImage      = "public.ecr.aws/aws-observability/aws-otel-collector:v0.40.0"
 	recheck        = 24 * time.Hour
 	registryCalled = "the registry reader was called"
@@ -206,7 +206,7 @@ func TestResolver_AccessDeniedIsNoPermissionWithAccount(t *testing.T) {
 	e.fk.FailAlways("BatchGetImage", accessDenied())
 	e.cycle()
 	got := e.ref(catalogImage)
-	if got.Status != "no_permission" || got.Detail != homelab {
+	if got.Status != "no_permission" || got.Detail != sandbox {
 		t.Fatalf("image = %+v, want no_permission naming the account", got)
 	}
 	// A single manifest needs no BatchGetImage, so it is unaffected.
@@ -219,7 +219,7 @@ func TestResolver_DescribeImagesDeniedIsNoPermission(t *testing.T) {
 	e := newEnv(t)
 	e.fk.FailAlways("DescribeImages", accessDenied())
 	e.cycle()
-	if got := e.ref(resizerImage); got.Status != "no_permission" || got.Detail != homelab {
+	if got := e.ref(resizerImage); got.Status != "no_permission" || got.Detail != sandbox {
 		t.Fatalf("image = %+v, want no_permission", got)
 	}
 }
@@ -282,7 +282,7 @@ func TestResolver_PublicDigestMismatchIsError(t *testing.T) {
 
 func TestResolver_MissingTagIsNotFound(t *testing.T) {
 	e := newEnv(t)
-	missing := homelab + ".dkr.ecr.us-east-1.amazonaws.com/image-resizer:9.9.9"
+	missing := sandbox + ".dkr.ecr.us-east-1.amazonaws.com/image-resizer:9.9.9"
 	e.track(missing)
 	e.cycle()
 	if got := e.ref(missing); got.Status != "not_found" {
@@ -383,7 +383,7 @@ func TestResolver_FailureRetriesSpreadOut(t *testing.T) {
 	e.counting.failWith = errors.New("boom")
 	var images []string
 	for i := 0; i < 20; i++ {
-		image := fmt.Sprintf("%s.dkr.ecr.us-east-1.amazonaws.com/image-resizer:missing-%d", homelab, i)
+		image := fmt.Sprintf("%s.dkr.ecr.us-east-1.amazonaws.com/image-resizer:missing-%d", sandbox, i)
 		images = append(images, image)
 		e.track(image)
 	}

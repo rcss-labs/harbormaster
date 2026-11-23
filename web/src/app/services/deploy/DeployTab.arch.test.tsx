@@ -109,7 +109,7 @@ describe('DeployTab: ARM64', () => {
     ['no_arm64_in_index', 'no_arm64', '', `${PAYMENTS_IMAGE} has no arm64 build`],
     ['pending', 'unchecked', '', `${PAYMENTS_IMAGE} has not been checked yet`],
     ['registry_not_checked', 'unchecked', '', `${PAYMENTS_IMAGE} is in a registry Harbormaster does not check`],
-    ['no_permission', 'unchecked', 'homelab-admin', 'The harbormaster-access role in homelab-admin cannot read image manifests. Update the access module to the latest version.'],
+    ['no_permission', 'unchecked', 'sandbox-admin', 'The harbormaster-access role in sandbox-admin cannot read image manifests. Update the access module to the latest version.'],
     ['not_connected', 'unchecked', 'staging-example', `Connect AWS account staging-example to check ${PAYMENTS_IMAGE}`],
     ['not_found', 'unchecked', '', `${PAYMENTS_IMAGE} was not found`],
     ['denied', 'unchecked', '', `${PAYMENTS_IMAGE} could not be read`],

@@ -11,7 +11,7 @@ import (
 func scriptedResults(status logstypes.QueryStatus, bytesScanned float64) *cloudwatchlogs.GetQueryResultsOutput {
 	return &cloudwatchlogs.GetQueryResultsOutput{
 		Status:     status,
-		Results:    [][]logstypes.ResultField{resultRow("2026-10-31 11:59:00.000", "partial", homelabAccount+":/g/a", "api/web/t1")},
+		Results:    [][]logstypes.ResultField{resultRow("2026-10-31 11:59:00.000", "partial", sandboxAccount+":/g/a", "api/web/t1")},
 		Statistics: &logstypes.QueryStatistics{RecordsMatched: 7, BytesScanned: bytesScanned},
 	}
 }
@@ -21,7 +21,7 @@ func TestSearcher_StopsQueryWhenBytesScannedPassTheCap(t *testing.T) {
 	s.MaxBytes = 1000
 	spy.scripted = scriptedResults(logstypes.QueryStatusRunning, 2000)
 
-	res, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/")))
+	res, err := s.Search(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "api/web/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestSearcher_CapCountsBytesAcrossBatches(t *testing.T) {
 	spy.scripted = scriptedResults(logstypes.QueryStatusRunning, 600)
 
 	res, err := s.Search(context.Background(), searchReq(
-		svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/"),
+		svc("A", sandboxAccount, "us-east-1", "/g/a", "api/web/"),
 		svc("B", stagingAccount, "us-east-1", "/g/b", "api/web/")))
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestSearcher_DoesNotStopUnderTheCapOrWithoutOne(t *testing.T) {
 			}
 			spy.scripted = scriptedResults(logstypes.QueryStatusComplete, bytesScanned)
 
-			res, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/")))
+			res, err := s.Search(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "api/web/")))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,9 +87,9 @@ func TestSearcher_EstimateSumsStoredBytesOncePerGroup(t *testing.T) {
 	s, _ := newSearcher(f)
 
 	est, err := s.Estimate(context.Background(), searchReq(
-		svc("A", homelabAccount, "us-east-1", "/g/a", "a/"),
-		svc("S1", homelabAccount, "us-east-1", "/g/shared", "s1/"),
-		svc("S2", homelabAccount, "us-east-1", "/g/shared", "s2/"),
+		svc("A", sandboxAccount, "us-east-1", "/g/a", "a/"),
+		svc("S1", sandboxAccount, "us-east-1", "/g/shared", "s1/"),
+		svc("S2", sandboxAccount, "us-east-1", "/g/shared", "s2/"),
 		svc("T", stagingAccount, "us-east-1", "/g/stag", "t/"),
 		svc("Gone", stagingAccount, "us-east-1", "/g/missing", "x/")))
 	if err != nil {
@@ -108,7 +108,7 @@ func TestSearcher_EstimateOnlyCoversGivenServices(t *testing.T) {
 	f.Estate.SetLogGroupStoredBytes("/g/a", 1000)
 	f.Estate.SetLogGroupStoredBytes("/g/other", 999999)
 	s, spy := newSearcher(f)
-	est, err := s.Estimate(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "a/")))
+	est, err := s.Estimate(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "a/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestSearcher_EstimateFailedTargetIsUnknownNotAnError(t *testing.T) {
 	f.Estate.SetLogGroupStoredBytes("/g/a", 1000)
 	s, spy := newSearcher(f)
 	spy.failLogs = errAssume{}
-	est, err := s.Estimate(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "a/")))
+	est, err := s.Estimate(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "a/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestSearch_PerRequestMaxBytesLowersTheCap(t *testing.T) {
 				status = logstypes.QueryStatusComplete
 			}
 			spy.scripted = scriptedResults(status, tc.scannedBytes)
-			req := searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/"))
+			req := searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "api/web/"))
 			req.MaxBytes = tc.requestCap
 			res, err := s.Search(context.Background(), req)
 			if err != nil {

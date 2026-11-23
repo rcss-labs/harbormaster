@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	homelabAccountID = "482109375512"
+	sandboxAccountID = "482109375512"
 	stagingAccountID = "731022849906"
 )
 
@@ -78,7 +78,7 @@ func setPassword(t *testing.T, st *store.Store, username string) {
 func seedAccounts(t *testing.T, st *store.Store) {
 	t.Helper()
 	for _, a := range []store.AWSAccount{
-		{Name: "homelab-admin", AccountID: homelabAccountID, RoleARN: "arn:aws:iam::" + homelabAccountID + ":role/harbormaster-access", ExternalID: "x", Regions: []string{"us-east-1", "eu-west-1", "eu-central-1"}, Enabled: true},
+		{Name: "sandbox-admin", AccountID: sandboxAccountID, RoleARN: "arn:aws:iam::" + sandboxAccountID + ":role/harbormaster-access", ExternalID: "x", Regions: []string{"us-east-1", "eu-west-1", "eu-central-1"}, Enabled: true},
 		{Name: "staging-example", AccountID: stagingAccountID, RoleARN: "arn:aws:iam::" + stagingAccountID + ":role/harbormaster-access", ExternalID: "x", Regions: []string{"us-east-1"}, Enabled: true},
 	} {
 		if _, err := st.CreateAccount(t.Context(), a); err != nil {

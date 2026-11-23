@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	homelabAccount = "482109375512"
+	sandboxAccount = "482109375512"
 	stagingAccount = "731022849906"
 	sharedGroup    = "/ecs/test/shared"
 )
@@ -196,7 +196,7 @@ func TestSearcher_SharedGroupReturnsOnlySelectedStreams(t *testing.T) {
 	})
 	s, _ := newSearcher(f)
 	res, err := s.Search(context.Background(), searchReq(
-		svc("A", homelabAccount, "us-east-1", sharedGroup, "api/web/")))
+		svc("A", sandboxAccount, "us-east-1", sharedGroup, "api/web/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,8 +218,8 @@ func TestSearcher_MapsRowsToLongestMatchingPrefix(t *testing.T) {
 	f.Estate.SetLogLines(sharedGroup, []fake.LogLine{line("app/api/t1", time.Minute, "x")})
 	s, _ := newSearcher(f)
 	res, err := s.Search(context.Background(), searchReq(
-		svc("broad", homelabAccount, "us-east-1", sharedGroup, "app/"),
-		svc("narrow", homelabAccount, "us-east-1", sharedGroup, "app/api/")))
+		svc("broad", sandboxAccount, "us-east-1", sharedGroup, "app/"),
+		svc("narrow", sandboxAccount, "us-east-1", sharedGroup, "app/api/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,17 +235,17 @@ func TestSearcher_FansOutPerAccountAndLogRegion(t *testing.T) {
 	}
 	s, spy := newSearcher(f)
 	_, err := s.Search(context.Background(), searchReq(
-		svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"),
+		svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/"),
 		svc("B", stagingAccount, "us-east-1", "/g/b", "p/c/"),
-		svc("C", homelabAccount, "eu-west-1", "/g/c", "p/c/"), // awslogs-region differs from the service region
+		svc("C", sandboxAccount, "eu-west-1", "/g/c", "p/c/"), // awslogs-region differs from the service region
 	))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[awsx.Target]string{
-		{AccountID: homelabAccount, Region: "us-east-1"}: "/g/a",
+		{AccountID: sandboxAccount, Region: "us-east-1"}: "/g/a",
 		{AccountID: stagingAccount, Region: "us-east-1"}: "/g/b",
-		{AccountID: homelabAccount, Region: "eu-west-1"}: "/g/c",
+		{AccountID: sandboxAccount, Region: "eu-west-1"}: "/g/c",
 	}
 	if len(spy.starts) != 3 {
 		t.Fatalf("StartQuery calls = %d, want 3", len(spy.starts))
@@ -264,7 +264,7 @@ func TestSearcher_ChunksAt50Groups(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		g := fmt.Sprintf("/g/%02d", i)
 		f.Estate.SetLogLines(g, []fake.LogLine{line("p/c/t", time.Minute, "m")})
-		services = append(services, svc(fmt.Sprintf("s%02d", i), homelabAccount, "us-east-1", g, "p/c/"))
+		services = append(services, svc(fmt.Sprintf("s%02d", i), sandboxAccount, "us-east-1", g, "p/c/"))
 	}
 	s, spy := newSearcher(f)
 	res, err := s.Search(context.Background(), searchReq(services...))
@@ -295,7 +295,7 @@ func TestSearcher_MergesNewestFirstAndCaps(t *testing.T) {
 	f.Estate.SetLogLines("/g/stag", l2)
 	s, _ := newSearcher(f)
 	req := searchReq(
-		svc("H", homelabAccount, "us-east-1", "/g/home", "p/c/"),
+		svc("H", sandboxAccount, "us-east-1", "/g/home", "p/c/"),
 		svc("S", stagingAccount, "us-east-1", "/g/stag", "p/c/"))
 	req.MaxRows = 5
 	res, err := s.Search(context.Background(), req)
@@ -322,7 +322,7 @@ func TestSearcher_TruncatesLongMessagesOnRuneBoundary(t *testing.T) {
 	long := strings.Repeat("é", 3000) // 6000 bytes
 	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, long)})
 	s, _ := newSearcher(f)
-	res, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	res, err := s.Search(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestSearcher_AccessDeniedIsPerTarget(t *testing.T) {
 	s, spy := newSearcher(f)
 	spy.failStart[stagingAccount] = apiError{"AccessDeniedException"}
 	res, err := s.Search(context.Background(), searchReq(
-		svc("H", homelabAccount, "us-east-1", "/g/home", "p/c/"),
+		svc("H", sandboxAccount, "us-east-1", "/g/home", "p/c/"),
 		svc("S", stagingAccount, "us-east-1", "/g/stag", "p/c/")))
 	if err != nil {
 		t.Fatalf("a denied target must not fail the search: %v", err)
@@ -349,7 +349,7 @@ func TestSearcher_AccessDeniedIsPerTarget(t *testing.T) {
 		!strings.Contains(denied.Message, "cannot run Logs Insights queries") || !slices.Equal(denied.ServiceIDs, []string{"S"}) {
 		t.Errorf("denied target = %+v", denied)
 	}
-	if ok := targetState(t, res, awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}); ok.State != StateOK {
+	if ok := targetState(t, res, awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}); ok.State != StateOK {
 		t.Errorf("other target = %+v, want ok", ok)
 	}
 	if len(res.Rows) != 1 || res.Rows[0].ServiceID != "H" {
@@ -367,7 +367,7 @@ func TestSearcher_ThrottleAndOtherErrorsArePerTarget(t *testing.T) {
 	f.Estate.Accounts = append(f.Estate.Accounts, fake.Account{ID: "000000000000", Name: "x", Regions: []string{"us-east-1"}})
 	f.Estate.Mu.Unlock()
 	res, err := s.Search(context.Background(), searchReq(
-		svc("H", homelabAccount, "us-east-1", "/g/home", "p/c/"),
+		svc("H", sandboxAccount, "us-east-1", "/g/home", "p/c/"),
 		svc("S", stagingAccount, "us-east-1", "/g/stag", "p/c/"),
 		svc("X", "000000000000", "us-east-1", "/g/x", "p/c/")))
 	if err != nil {
@@ -390,7 +390,7 @@ func TestSearcher_AllClientsFailingIsAnError(t *testing.T) {
 	f := newSearchFake()
 	s, spy := newSearcher(f)
 	spy.failLogs = errors.New("assume role failed")
-	_, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	_, err := s.Search(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/")))
 	if err == nil {
 		t.Fatal("want an error when no target could start")
 	}
@@ -404,7 +404,7 @@ func TestSearcher_TimeoutStopsQueries(t *testing.T) {
 	s, _ := newSearcher(f)
 	s.Timeout = 20 * time.Millisecond
 	res, err := s.Search(context.Background(), searchReq(
-		svc("H", homelabAccount, "us-east-1", "/g/home", "p/c/"),
+		svc("H", sandboxAccount, "us-east-1", "/g/home", "p/c/"),
 		svc("S", stagingAccount, "us-east-1", "/g/stag", "p/c/")))
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +428,7 @@ func TestSearcher_CancelStopsQueries(t *testing.T) {
 	s, spy := newSearcher(f)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-	res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	res, err := s.Search(ctx, searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestSearcher_CancelDuringStartQueryStillStopsTheQuery(t *testing.T) {
 	s, spy := newSearcher(f)
 	ctx, cancel := context.WithCancel(context.Background())
 	spy.cancelDuringStart = cancel
-	res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	res, err := s.Search(ctx, searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestSearcher_MalformedQueryIsQueryError(t *testing.T) {
 	f := newSearchFake()
 	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
 	s, _ := newSearcher(f)
-	req := searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"))
+	req := searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/"))
 	req.Query = "filter @message like /(/"
 	_, err := s.Search(context.Background(), req)
 	var qe *QueryError
@@ -482,7 +482,7 @@ func TestSearcher_StopQueryDoesNotNeedALiveContextToBuildTheClient(t *testing.T)
 	s, spy := newSearcher(f)
 	spy.failLogsOnDoneCtx = true
 	s.Timeout = 20 * time.Millisecond
-	if _, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"))); err != nil {
+	if _, err := s.Search(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/"))); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.StoppedQueries(); len(got) != 1 {
@@ -497,15 +497,15 @@ func TestSearcher_DropsRowsOutsideTheSelectedScope(t *testing.T) {
 	spy.scripted = &cloudwatchlogs.GetQueryResultsOutput{
 		Status: logstypes.QueryStatusComplete,
 		Results: [][]logstypes.ResultField{
-			resultRow(ts, "keep", homelabAccount+":/g/a", "api/web/t1"),
-			resultRow(ts, "unselected stream", homelabAccount+":/g/a", "worker/job/t2"),
-			resultRow(ts, "wrong group", homelabAccount+":/g/other", "api/web/t1"),
+			resultRow(ts, "keep", sandboxAccount+":/g/a", "api/web/t1"),
+			resultRow(ts, "unselected stream", sandboxAccount+":/g/a", "worker/job/t2"),
+			resultRow(ts, "wrong group", sandboxAccount+":/g/other", "api/web/t1"),
 			resultRow(ts, "wrong account", stagingAccount+":/g/a", "api/web/t1"),
 			resultRow(ts, "no log", "", "api/web/t1"),
 		},
 		Statistics: &logstypes.QueryStatistics{RecordsMatched: 5},
 	}
-	res, err := s.Search(context.Background(), searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/")))
+	res, err := s.Search(context.Background(), searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "api/web/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +521,7 @@ func TestSearcher_KeepsRowsSeenWhileRunningOnTimeoutAndCancel(t *testing.T) {
 			s, spy := newSearcher(f)
 			spy.scripted = &cloudwatchlogs.GetQueryResultsOutput{
 				Status:     logstypes.QueryStatusRunning,
-				Results:    [][]logstypes.ResultField{resultRow("2026-10-31 11:59:00.000", "partial", homelabAccount+":/g/a", "api/web/t1")},
+				Results:    [][]logstypes.ResultField{resultRow("2026-10-31 11:59:00.000", "partial", sandboxAccount+":/g/a", "api/web/t1")},
 				Statistics: &logstypes.QueryStatistics{RecordsMatched: 7},
 			}
 			ctx := context.Background()
@@ -532,7 +532,7 @@ func TestSearcher_KeepsRowsSeenWhileRunningOnTimeoutAndCancel(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				go func() { time.Sleep(20 * time.Millisecond); cancel() }()
 			}
-			res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "api/web/")))
+			res, err := s.Search(ctx, searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "api/web/")))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -551,7 +551,7 @@ func TestSearcher_ClampsMaxRowsToInsightsLimit(t *testing.T) {
 	f := newSearchFake()
 	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
 	s, spy := newSearcher(f)
-	req := searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"))
+	req := searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/"))
 	req.MaxRows = 50000
 	if _, err := s.Search(context.Background(), req); err != nil {
 		t.Fatal(err)
@@ -566,8 +566,8 @@ func TestSearcher_SkipsServicesWithoutPrefixes(t *testing.T) {
 	f.Estate.SetLogLines("/g/a", []fake.LogLine{line("p/c/t", time.Minute, "h")})
 	s, _ := newSearcher(f)
 	res, err := s.Search(context.Background(), searchReq(
-		svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/"),
-		svc("noprefix", homelabAccount, "us-east-1", "/g/b")))
+		svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/"),
+		svc("noprefix", sandboxAccount, "us-east-1", "/g/b")))
 	if err != nil {
 		t.Fatalf("a service without prefixes must not fail the search: %v", err)
 	}
@@ -671,7 +671,7 @@ func TestSearcher_CancelReadsFinalStatisticsAfterStopQuery(t *testing.T) {
 	spy.scripted, spy.afterStop = running(100), running(5000)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-	res, err := s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	res, err := s.Search(ctx, searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -684,7 +684,7 @@ func TestSearcher_CancelReadsFinalStatisticsAfterStopQuery(t *testing.T) {
 	spy.scripted, spy.afterStop = running(7000), running(10)
 	ctx, cancel = context.WithCancel(context.Background())
 	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-	res, err = s.Search(ctx, searchReq(svc("A", homelabAccount, "us-east-1", "/g/a", "p/c/")))
+	res, err = s.Search(ctx, searchReq(svc("A", sandboxAccount, "us-east-1", "/g/a", "p/c/")))
 	if err != nil {
 		t.Fatal(err)
 	}

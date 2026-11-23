@@ -270,7 +270,7 @@ func TestServe_SingleProcessStillSendsNotificationsAndScans(t *testing.T) {
 		return count(`select count(*) from notification_deliveries where status = 'delivered'`) > 0
 	})
 
-	// Ask for a scan of an image of the demo's homelab account; the coordinator's scan runner launches it.
+	// Ask for a scan of an image of the demo's sandbox account; the coordinator's scan runner launches it.
 	var account string
 	if err := conn.QueryRow(ctx, `select account_id from aws_accounts where enabled order by id limit 1`).Scan(&account); err != nil {
 		t.Fatal(err)

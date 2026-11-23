@@ -151,7 +151,7 @@ test('freshness sheet names the regions', async ({ page }) => {
   await expect(freshnessChip(page)).toHaveText(/^\d+\/\d+$/)
   await freshnessChip(page).click()
   const sheet = page.getByRole('dialog', { name: 'Data freshness' })
-  await expect(sheet).toContainText('homelab-admin / eu-west-1')
+  await expect(sheet).toContainText('sandbox-admin / eu-west-1')
   await expect(sheet).toContainText('regions current')
   await page.getByRole('button', { name: 'Close' }).click()
   await expect(sheet).toHaveCount(0)

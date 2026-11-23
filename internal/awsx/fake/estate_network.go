@@ -91,21 +91,21 @@ type vpcSeed struct {
 var defaultVPCSubnet = seedSubnet{"subnet-6f0a1c3e", "172.31.0.0/20", "us-east-1a", true}
 
 var vpcSeeds = []vpcSeed{
-	{homelabAccountID, "us-east-1", "homelab-main", "vpc-0a41c7e29b3d", "10.20.0.0/16", false, true, []vpcSubnetSeed{
+	{sandboxAccountID, "us-east-1", "sandbox-main", "vpc-0a41c7e29b3d", "10.20.0.0/16", false, true, []vpcSubnetSeed{
 		{"private-1a", "subnet-03f1a9c2", 231, nil}, {"private-1b", "subnet-0b77e410", 236, nil}, {"public-1a", "subnet-09c2d5ee", 248, nil}}},
-	{homelabAccountID, "us-east-1", "shared-services", "vpc-07de19a4c011", "10.21.0.0/16", false, true, []vpcSubnetSeed{
+	{sandboxAccountID, "us-east-1", "shared-services", "vpc-07de19a4c011", "10.21.0.0/16", false, true, []vpcSubnetSeed{
 		{"tools-1a", "subnet-0e1c88a1", 247, nil}, {"tools-1c", "subnet-02aa71f3", 249, nil}}},
-	{homelabAccountID, "us-east-1", "legacy-default", "vpc-5c1e0f2a", "172.31.0.0/16", true, false, []vpcSubnetSeed{
+	{sandboxAccountID, "us-east-1", "legacy-default", "vpc-5c1e0f2a", "172.31.0.0/16", true, false, []vpcSubnetSeed{
 		{"default-1a", "subnet-6f0a1c3e", 4091, &defaultVPCSubnet}}},
-	{homelabAccountID, "eu-west-1", "eu-apps", "vpc-0f3392bb71e2", "10.30.0.0/16", false, true, []vpcSubnetSeed{
+	{sandboxAccountID, "eu-west-1", "eu-apps", "vpc-0f3392bb71e2", "10.30.0.0/16", false, true, []vpcSubnetSeed{
 		{"private-1a", "subnet-0a90f7c1", 240, nil}, {"private-1b", "subnet-0c6b1e92", 242, nil}}},
-	{homelabAccountID, "eu-central-1", "edge", "vpc-03b1d7f0c5a8", "10.40.0.0/16", false, true, []vpcSubnetSeed{
+	{sandboxAccountID, "eu-central-1", "edge", "vpc-03b1d7f0c5a8", "10.40.0.0/16", false, true, []vpcSubnetSeed{
 		{"private-1a", "subnet-0d2e5a77", 250, nil}, {"public-1a", "subnet-0f61c3b8", 248, nil}}},
 	{stagingAccountID, "us-east-1", "staging", "vpc-0b18e6cd2a91", "10.50.0.0/16", false, true, []vpcSubnetSeed{
 		{"private-a", "subnet-01f8a2d4", 249, nil}, {"private-b", "subnet-0e7c3b19", 250, nil}}},
 }
 
-// mainVPCEndpointServices are homelab-main's endpoints; the .s3 one is a
+// mainVPCEndpointServices are sandbox-main's endpoints; the .s3 one is a
 // gateway endpoint that consumers must filter out.
 var mainVPCEndpointServices = []string{"ecr.api", "ecr.dkr", "logs", "ssmmessages", "s3"}
 
@@ -120,10 +120,10 @@ type efsSeed struct {
 
 var efsSeeds = []efsSeed{
 	{"jenkins-home", "fs-0c91a4e7", "shared-services", 38.4, efstypes.ThroughputModeElastic, 0, "fsap-0a1b2c3d4e", "/jenkins", 1000},
-	{"reports-data", "fs-02e7d1c9", "homelab-main", 12.1, efstypes.ThroughputModeBursting, 0, "fsap-07f3e9a1c2", "/reports", 1001},
+	{"reports-data", "fs-02e7d1c9", "sandbox-main", 12.1, efstypes.ThroughputModeBursting, 0, "fsap-07f3e9a1c2", "/reports", 1001},
 	{"shared-certs", "fs-0a6b33f0", "edge", 0.02, efstypes.ThroughputModeBursting, 0, "fsap-0e44d18b7a", "/certs", 101},
 	{"search-index", "fs-0d18c2ab", "eu-apps", 74.9, efstypes.ThroughputModeProvisioned, 64, "fsap-03c7a9e5d1", "/index", 1000},
-	{"uploads-archive", "fs-07a2b9e1", "homelab-main", 211.6, efstypes.ThroughputModeElastic, 0, "", "", 0},
+	{"uploads-archive", "fs-07a2b9e1", "sandbox-main", 211.6, efstypes.ThroughputModeElastic, 0, "", "", 0},
 }
 
 // hexString returns n deterministic lowercase hex digits derived from key.
@@ -180,7 +180,7 @@ func seedNetwork(e *Estate) {
 				NatGatewayId: aws.String("nat-" + hexString("nat:"+v.id, 17)), VpcId: aws.String(v.id), SubnetId: aws.String(natSubnet),
 				State: ec2types.NatGatewayStateAvailable, ConnectivityType: ec2types.ConnectivityTypePublic, Tags: nameTag(v.name + "-nat")}})
 		}
-		if v.name == "homelab-main" {
+		if v.name == "sandbox-main" {
 			for _, svc := range mainVPCEndpointServices {
 				kind := ec2types.VpcEndpointTypeInterface
 				if svc == "s3" {

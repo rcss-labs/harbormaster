@@ -146,7 +146,7 @@ func TestRunner_StaleDBDefersAndReports(t *testing.T) {
 	fx.runner.DB = failingSource{}
 	putMirrorDB(t, fx.scanner, fx.clock.Now().Add(-144*time.Hour)) // 6 days
 	fresh := fx.queue(edge, edgeTag)
-	old := fx.queueFor(homelab, "payments-api", "1.18.2", fx.clock.Now().Add(-121*time.Hour))
+	old := fx.queueFor(sandbox, "payments-api", "1.18.2", fx.clock.Now().Add(-121*time.Hour))
 	fx.cycle()
 
 	if fx.runCount() != 0 {
@@ -345,7 +345,7 @@ func TestRunner_TimeoutRetriesLarge(t *testing.T) {
 
 func TestRunner_UnconnectedRegistryAccountFails(t *testing.T) {
 	fx := newFixture(t)
-	if _, err := fx.st.Pool.Exec(context.Background(), `delete from aws_accounts where account_id = $1`, homelab); err != nil {
+	if _, err := fx.st.Pool.Exec(context.Background(), `delete from aws_accounts where account_id = $1`, sandbox); err != nil {
 		t.Fatal(err)
 	}
 	digest := fx.queue(edge, edgeTag)
@@ -362,16 +362,16 @@ func TestRunner_UnconnectedRegistryAccountFails(t *testing.T) {
 func TestRunner_JobCarriesOnlyTheBatchAccounts(t *testing.T) {
 	fx := newFixture(t)
 	fx.runner.Cfg.BatchSize = 1
-	fx.queueFor(homelab, edge, edgeTag, fx.clock.Now().Add(-2*time.Hour))
+	fx.queueFor(sandbox, edge, edgeTag, fx.clock.Now().Add(-2*time.Hour))
 	fx.queueFor(staging, edge, edgeTag2, fx.clock.Now().Add(-time.Hour))
 	fx.cycle()
 
 	job := fx.job(1)
-	registry, ok := job.Registries[homelab]
-	if len(job.Registries) != 1 || !ok || registry.RoleARN != "arn:aws:iam::"+homelab+":role/harbormaster-scan" || registry.ExternalID != "ext-home" {
-		t.Fatalf("registries = %+v, want only the homelab account with its scan role and external id", job.Registries)
+	registry, ok := job.Registries[sandbox]
+	if len(job.Registries) != 1 || !ok || registry.RoleARN != "arn:aws:iam::"+sandbox+":role/harbormaster-scan" || registry.ExternalID != "ext-home" {
+		t.Fatalf("registries = %+v, want only the sandbox account with its scan role and external id", job.Registries)
 	}
-	if len(job.Images) != 1 || job.Images[0].AccountID != homelab {
+	if len(job.Images) != 1 || job.Images[0].AccountID != sandbox {
 		t.Fatalf("images = %+v, want the older request alone", job.Images)
 	}
 }
@@ -403,8 +403,8 @@ func TestRunner_UnexpectedDigestInManifestIsIgnored(t *testing.T) {
 	fx := newFixture(t)
 	script := &scriptedLauncher{bucket: fx.scanner}
 	fx.runner.Launcher = script
-	inJob := fx.queueFor(homelab, edge, edgeTag, fx.clock.Now().Add(-2*time.Hour))
-	outside := fx.queueFor(homelab, "payments-api", "1.18.2", fx.clock.Now().Add(-time.Hour))
+	inJob := fx.queueFor(sandbox, edge, edgeTag, fx.clock.Now().Add(-2*time.Hour))
+	outside := fx.queueFor(sandbox, "payments-api", "1.18.2", fx.clock.Now().Add(-time.Hour))
 	// The second image is queued but not part of the run: make it wait, so the first run takes only the first.
 	fx.runner.Cfg.BatchSize = 1
 	script.script = func(job scan.Job) map[string][]byte {

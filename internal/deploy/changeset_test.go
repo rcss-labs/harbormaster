@@ -16,7 +16,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-var reportWorkerKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: homelabRegion, Cluster: "background-jobs"}, Service: "report-worker"}
+var reportWorkerKey = model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: sandboxRegion, Cluster: "background-jobs"}, Service: "report-worker"}
 
 func ptr[T any](v T) *T { return &v }
 

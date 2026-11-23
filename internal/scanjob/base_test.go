@@ -11,7 +11,7 @@ import (
 
 func (fx *fixture) setBase(repository, ref string) {
 	fx.t.Helper()
-	key := store.RepoKey{AccountID: homelab, Region: "us-east-1", Repository: repository}
+	key := store.RepoKey{AccountID: sandbox, Region: "us-east-1", Repository: repository}
 	if err := fx.st.SetRepoBase(context.Background(), key, ref, 0, fx.clock.Now()); err != nil {
 		fx.t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRunner_JobCarriesTheRepositoryBaseAndItsECRAccount(t *testing.T) {
 	if !ok || base.RoleARN != "arn:aws:iam::"+staging+":role/harbormaster-scan" || base.ExternalID != "ext-stage" || base.Region != "us-east-1" {
 		t.Fatalf("registries = %+v, want the base account's scan role added", job.Registries)
 	}
-	if _, ok := job.Registries[homelab]; !ok {
+	if _, ok := job.Registries[sandbox]; !ok {
 		t.Fatalf("registries = %+v, want the image account kept", job.Registries)
 	}
 }

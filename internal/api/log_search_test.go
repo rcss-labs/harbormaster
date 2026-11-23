@@ -108,7 +108,7 @@ type searchBody struct {
 }
 
 func webFrontendID() string {
-	return serviceID(homelabAccountID, "us-east-1", "core-services", "web-frontend")
+	return serviceID(sandboxAccountID, "us-east-1", "core-services", "web-frontend")
 }
 
 func searchReq(ids ...string) map[string]any {
@@ -238,7 +238,7 @@ func TestLogSearch_Validation(t *testing.T) {
 	now := time.Now().UTC()
 	many := make([]string, 21)
 	for i := range many {
-		many[i] = serviceID(homelabAccountID, "us-east-1", "core-services", "svc-"+strings.Repeat("x", i+1))
+		many[i] = serviceID(sandboxAccountID, "us-east-1", "core-services", "svc-"+strings.Repeat("x", i+1))
 	}
 	custom := func(from, to time.Time) map[string]any {
 		return map[string]any{"service_ids": []string{paymentsID()}, "range": "custom", "from": from, "to": to, "query": ""}

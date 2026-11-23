@@ -47,7 +47,7 @@ describe('Services page on phones', () => {
     const row = await rowOf('payments-api')
     const line2 = row.querySelector('.hm-l2') as HTMLElement
     await waitFor(() => expect(line2).toHaveTextContent('CPU 41 %'))
-    for (const text of ['core-services', 'homelab', '3/3 tasks', ':42', '1.18.2', 'Mem 63 %']) {
+    for (const text of ['core-services', 'sandbox', '3/3 tasks', ':42', '1.18.2', 'Mem 63 %']) {
       expect(line2).toHaveTextContent(text)
     }
     // Status and tag are on the first line with the name.

@@ -46,7 +46,7 @@ func TestPollerStatus_AdminSeesOwnerAndEpoch(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	target := awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"}
 	owner := uuid.New()
 	l := claimSlice(t, st, target, owner)
 
@@ -75,7 +75,7 @@ func TestPollerStatus_NonAdminSeesNoOwner(t *testing.T) {
 	seedAccounts(t, st)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	claimSlice(t, st, awsx.Target{AccountID: homelabAccountID, Region: "eu-west-1"}, uuid.New())
+	claimSlice(t, st, awsx.Target{AccountID: sandboxAccountID, Region: "eu-west-1"}, uuid.New())
 
 	var got ownedPollerBody
 	decode(t, login(t, srv, "omer", testPassword).get("/api/poller"), &got)

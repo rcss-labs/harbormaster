@@ -27,8 +27,8 @@ func TestFake_OnCallReportsEveryCallWithItsSource(t *testing.T) {
 		defer mu.Unlock()
 		got = append(got, recordedCall{target, service, op, result, awsx.SourceFrom(ctx)})
 	}
-	target := awsx.Target{AccountID: homelabID, Region: "eu-west-1"}
-	ecsAPI := ecsFor(t, f, homelabID, "eu-west-1")
+	target := awsx.Target{AccountID: sandboxID, Region: "eu-west-1"}
+	ecsAPI := ecsFor(t, f, sandboxID, "eu-west-1")
 	if _, err := ecsAPI.ListClusters(awsx.WithSource(context.Background(), awsx.SourceFocus), &ecs.ListClustersInput{}); err != nil {
 		t.Fatal(err)
 	}

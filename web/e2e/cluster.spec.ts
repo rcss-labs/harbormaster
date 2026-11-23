@@ -49,7 +49,7 @@ test.describe('pinned clusters as oncall', () => {
     await page.getByRole('button', { name: 'Pin core-services' }).click()
     const pinned = page.getByRole('navigation', { name: 'Pinned' })
     const link = pinned.getByRole('link', { name: /core-services/ })
-    await expect(link).toContainText('homelab-admin · 482109375512')
+    await expect(link).toContainText('sandbox-admin · 482109375512')
     await expect(link).toHaveAttribute('href', /\/clusters\//)
 
     await page.getByRole('button', { name: 'Unpin core-services' }).click()

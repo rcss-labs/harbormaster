@@ -8,7 +8,7 @@ import { measureBoxes, pickImageTag, reviewAndApply, serviceId } from './helpers
 // noted. Revision numbers are read from the API instead of being hard-coded, so the order of files does not matter.
 test.describe.configure({ mode: 'serial' })
 
-const HOMELAB = '482109375512'
+const SANDBOX = '482109375512'
 const paymentsApi = serviceUrl(...SVC.paymentsApi, 'deploy')
 const imageResizer = serviceUrl(...SVC.imageResizer, 'deploy')
 const stagingApi = serviceUrl(...SVC.stagingApi, 'deploy')
@@ -16,7 +16,7 @@ const stagingApi = serviceUrl(...SVC.stagingApi, 'deploy')
 // settings and a Dev one without auto scaling for the Operate user.
 const emailSender = ['482109375512', 'us-east-1', 'background-jobs', 'email-sender'] as const
 const authService = ['482109375512', 'us-east-1', 'core-services', 'auth-service'] as const
-const searchIndexer = [HOMELAB, 'eu-west-1', 'eu-apps', 'search-indexer'] as const
+const searchIndexer = [SANDBOX, 'eu-west-1', 'eu-apps', 'search-indexer'] as const
 // The staging-web cluster's `web` service (Staging tag).
 const stagingWeb = ['731022849906', 'us-east-1', 'staging-web', 'web'] as const
 

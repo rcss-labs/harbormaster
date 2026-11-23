@@ -120,7 +120,7 @@ func TestLogsHistory_ContainerFilter(t *testing.T) {
 func paymentsTaskIDs(t *testing.T, st *store.Store) []string {
 	t.Helper()
 	rows, _, err := st.ListTasks(t.Context(), store.TaskQuery{
-		TargetFilter: store.TargetFilter{AccountID: homelabAccountID, Region: "us-east-1"},
+		TargetFilter: store.TargetFilter{AccountID: sandboxAccountID, Region: "us-east-1"},
 		Vis:          store.Visibility{Admin: true}, Cluster: "core-services", Service: "payments-api",
 	})
 	if err != nil {

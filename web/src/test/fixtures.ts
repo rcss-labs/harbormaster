@@ -109,7 +109,7 @@ export const TAG_STAGING = tag(2, 'Staging', 'amber')
 export const TAG_PROD = tag(3, 'Prod', 'red')
 const TAG_BY_NAME: Record<string, TagDTO> = { Dev: TAG_DEV, Staging: TAG_STAGING, Prod: TAG_PROD }
 
-export const ACCOUNT_HOMELAB = { id: 1, name: 'homelab-admin', account_id: '482109375512' }
+export const ACCOUNT_SANDBOX = { id: 1, name: 'sandbox-admin', account_id: '482109375512' }
 export const ACCOUNT_STAGING = { id: 2, name: 'staging-example', account_id: '731022849906' }
 const REGIONS = ['us-east-1', 'eu-west-1', 'eu-central-1']
 
@@ -123,18 +123,18 @@ const AZ_SUBNETS: Record<string, [string, string][]> = {
 
 interface ClusterDef {
   name: string
-  account: typeof ACCOUNT_HOMELAB
+  account: typeof ACCOUNT_SANDBOX
   region: string
   tag: string
   insights: boolean
   status: ClusterStatus
 }
 const CLUSTER_DEFS: ClusterDef[] = [
-  { name: 'core-services', account: ACCOUNT_HOMELAB, region: 'us-east-1', tag: 'Prod', insights: true, status: 'deploying' },
-  { name: 'background-jobs', account: ACCOUNT_HOMELAB, region: 'us-east-1', tag: 'Dev', insights: true, status: 'needs_attention' },
-  { name: 'ci-tools', account: ACCOUNT_HOMELAB, region: 'us-east-1', tag: 'Dev', insights: true, status: 'healthy' },
-  { name: 'eu-apps', account: ACCOUNT_HOMELAB, region: 'eu-west-1', tag: 'Dev', insights: true, status: 'degraded' },
-  { name: 'edge-proxy', account: ACCOUNT_HOMELAB, region: 'eu-central-1', tag: 'Dev', insights: false, status: 'healthy' },
+  { name: 'core-services', account: ACCOUNT_SANDBOX, region: 'us-east-1', tag: 'Prod', insights: true, status: 'deploying' },
+  { name: 'background-jobs', account: ACCOUNT_SANDBOX, region: 'us-east-1', tag: 'Dev', insights: true, status: 'needs_attention' },
+  { name: 'ci-tools', account: ACCOUNT_SANDBOX, region: 'us-east-1', tag: 'Dev', insights: true, status: 'healthy' },
+  { name: 'eu-apps', account: ACCOUNT_SANDBOX, region: 'eu-west-1', tag: 'Dev', insights: true, status: 'degraded' },
+  { name: 'edge-proxy', account: ACCOUNT_SANDBOX, region: 'eu-central-1', tag: 'Dev', insights: false, status: 'healthy' },
   { name: 'staging-web', account: ACCOUNT_STAGING, region: 'us-east-1', tag: 'Staging', insights: true, status: 'healthy' },
 ]
 
@@ -567,7 +567,7 @@ function clusterDetail(def: ClusterDef): ClusterDTO {
     tasks_history_72h: history(card.running, card.desired),
     stops_per_hour: stopsPerHour(def.name.length, def.status === 'needs_attention' || def.status === 'degraded' ? [20, 21, 22] : []),
     services_detail: services,
-    vpc: { vpc_id: 'vpc-0a41c7e29b3d', name: 'homelab-main' },
+    vpc: { vpc_id: 'vpc-0a41c7e29b3d', name: 'sandbox-main' },
     polled_at: FIXTURE_NOW,
   }
 }
@@ -643,7 +643,7 @@ function serviceDetail(def: ServiceDef): ServiceDTO {
     slots: slotsOf(def),
     networking: {
       subnets,
-      vpc: { vpc_id: 'vpc-0a41c7e29b3d', name: 'homelab-main' },
+      vpc: { vpc_id: 'vpc-0a41c7e29b3d', name: 'sandbox-main' },
       security_group_names: { [`sg-0${hex(`${def.name}-sg`, 8)}`]: def.name },
       security_groups: [`sg-0${hex(`${def.name}-sg`, 8)}`],
       assign_public_ip: def.name === 'edge-nginx',
@@ -773,7 +773,7 @@ function servicesInEffect(tagId: number): number {
 }
 
 const ME_ACCOUNTS = [
-  { ...ACCOUNT_HOMELAB, regions: REGIONS },
+  { ...ACCOUNT_SANDBOX, regions: REGIONS },
   { ...ACCOUNT_STAGING, regions: ['us-east-1'] },
 ]
 
@@ -949,7 +949,7 @@ export const ASSIGNMENTS: TagAssignmentsDTO = {
 // ---- accounts, audit, poller ----
 
 export const ACCOUNTS: AccountsDTO = {
-  items: [ACCOUNT_HOMELAB, ACCOUNT_STAGING].map((account, index) => ({
+  items: [ACCOUNT_SANDBOX, ACCOUNT_STAGING].map((account, index) => ({
     id: account.id,
     name: account.name,
     account_id: account.account_id,
@@ -1007,7 +1007,7 @@ function pollerTiers(overrides: Partial<Record<string, Partial<PollerTierDTO>>> 
 
 export const POLLER: PollerDTO = {
   items: [
-    ...REGIONS.map((region) => ({ account_id: ACCOUNT_HOMELAB.account_id, account_name: ACCOUNT_HOMELAB.name, region })),
+    ...REGIONS.map((region) => ({ account_id: ACCOUNT_SANDBOX.account_id, account_name: ACCOUNT_SANDBOX.name, region })),
     { account_id: ACCOUNT_STAGING.account_id, account_name: ACCOUNT_STAGING.name, region: 'us-east-1' },
   ].map((entry) => ({
     ...entry,
@@ -1026,8 +1026,8 @@ export const POLLER: PollerDTO = {
 export const POLLER_TIERS: PollerDTO = {
   items: [
     {
-      account_id: ACCOUNT_HOMELAB.account_id,
-      account_name: ACCOUNT_HOMELAB.name,
+      account_id: ACCOUNT_SANDBOX.account_id,
+      account_name: ACCOUNT_SANDBOX.name,
       region: 'eu-west-1',
       throttled: false,
       failing: false,
@@ -1203,7 +1203,7 @@ export const OVERVIEW_METRICS: OverviewMetricsDTO = {
 export const TARGET_HEALTH_EDGE: TargetHealthDTO = {
   groups: [
     {
-      target_group_arn: `arn:aws:elasticloadbalancing:eu-west-1:${ACCOUNT_HOMELAB.account_id}:targetgroup/edge-nginx/${hex('edge-nginx-tg', 16)}`,
+      target_group_arn: `arn:aws:elasticloadbalancing:eu-west-1:${ACCOUNT_SANDBOX.account_id}:targetgroup/edge-nginx/${hex('edge-nginx-tg', 16)}`,
       name: 'edge-nginx',
       healthy: 1,
       unhealthy: 1,
@@ -1282,7 +1282,7 @@ export const ALERTS: AlertsDTO = {
     {
       kind: 'account_unreachable',
       severity: 'danger',
-      title: 'homelab-admin / eu-west-1: unreachable',
+      title: 'sandbox-admin / eu-west-1: unreachable',
       text: 'AccessDenied: the role could not be assumed.',
       at: minutesAgo(3),
       service_id: '',
@@ -1350,7 +1350,7 @@ export const LOGS_HISTORY_PAYMENTS: LogsHistoryDTO = {
 export const TASK_DEFINITION_PAYMENTS: TaskDefinitionResponse = {
   family: 'payments-api',
   deployed_revision: 42,
-  task_definition_arn: `arn:aws:ecs:us-east-1:${ACCOUNT_HOMELAB.account_id}:task-definition/payments-api:42`,
+  task_definition_arn: `arn:aws:ecs:us-east-1:${ACCOUNT_SANDBOX.account_id}:task-definition/payments-api:42`,
   main_container: 'payments-api',
   definition: { family: 'payments-api', cpu: '512', memory: '1024', containerDefinitions: [{ name: 'payments-api', image: 'payments-api:1.18.2', essential: true }] },
   tags: [{ key: 'managed-by', value: 'terraform' }],
@@ -1404,14 +1404,14 @@ export const DEPLOY_SETTINGS_PAYMENTS: DeploySettingsResponse = {
   running_count: 3,
   max_desired: 50,
   enable_execute_command: true,
-  task_role_arn: `arn:aws:iam::${ACCOUNT_HOMELAB.account_id}:role/payments-api-task`,
+  task_role_arn: `arn:aws:iam::${ACCOUNT_SANDBOX.account_id}:role/payments-api-task`,
   deployment_configuration: { circuit_breaker: { enable: true, rollback: true }, minimum_healthy_percent: 100, maximum_percent: 200 },
   health_check_grace_period_seconds: 60,
   has_load_balancer: true,
   capacity: { launch_type: 'FARGATE', strategy: [], cluster_providers: ['FARGATE', 'FARGATE_SPOT'], editable: true, lock_reason: '' },
   target_groups: [
     {
-      arn: `arn:aws:elasticloadbalancing:us-east-1:${ACCOUNT_HOMELAB.account_id}:targetgroup/payments-api/0123456789abcdef`,
+      arn: `arn:aws:elasticloadbalancing:us-east-1:${ACCOUNT_SANDBOX.account_id}:targetgroup/payments-api/0123456789abcdef`,
       name: 'payments-api',
       resource_label: 'app/edge/50dc6c495c0c9188/targetgroup/payments-api/0123456789abcdef',
     },
@@ -1455,7 +1455,7 @@ export const DEPLOY_SETTINGS_PARTIAL: DeploySettingsResponse = {
 
 export const REVISION_DEFINITION_PAYMENTS_41: RevisionDefinitionResponse = {
   revision: 41,
-  arn: `arn:aws:ecs:us-east-1:${ACCOUNT_HOMELAB.account_id}:task-definition/payments-api:41`,
+  arn: `arn:aws:ecs:us-east-1:${ACCOUNT_SANDBOX.account_id}:task-definition/payments-api:41`,
   definition: {
     family: 'payments-api',
     cpu: '512',
@@ -1848,7 +1848,7 @@ export const ANALYTICS_CAPACITY: AnalyticsCapacity = {
   vcpu_by_account: {
     total: 14.5,
     slices: [
-      { key: '1', label: ACCOUNT_HOMELAB.name, value: 12 },
+      { key: '1', label: ACCOUNT_SANDBOX.name, value: 12 },
       { key: '2', label: ACCOUNT_STAGING.name, value: 2.5 },
     ],
   },
@@ -1861,7 +1861,7 @@ export const ANALYTICS_CAPACITY: AnalyticsCapacity = {
   },
   clusters: {
     rows: [
-      { cluster_id: analyticsCoreClusterId, cluster: 'core-services', account_id: '482109375512', account_name: ACCOUNT_HOMELAB.name, tag: TAG_PROD, tasks: 12, vcpu: 8, mem_gib: 18, share: 0.55, spot_share: 0.1 },
+      { cluster_id: analyticsCoreClusterId, cluster: 'core-services', account_id: '482109375512', account_name: ACCOUNT_SANDBOX.name, tag: TAG_PROD, tasks: 12, vcpu: 8, mem_gib: 18, share: 0.55, spot_share: 0.1 },
       { cluster_id: analyticsStagingClusterId, cluster: 'staging-web', account_id: '731022849906', account_name: ACCOUNT_STAGING.name, tag: TAG_STAGING, tasks: 4, vcpu: 2.5, mem_gib: 5, share: 0.17, spot_share: 0.5 },
     ],
     total: 2,
@@ -2001,7 +2001,7 @@ export const ANALYTICS_COST: AnalyticsCost = {
     { key: clusterId('482109375512', 'ap-south-1', 'eu-apps'), label: 'eu-apps', monthly: 0, spot_monthly: 0, unpriced_tasks: 2 },
   ],
   by_account: [
-    { key: ACCOUNT_HOMELAB.account_id, label: ACCOUNT_HOMELAB.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 2 },
+    { key: ACCOUNT_SANDBOX.account_id, label: ACCOUNT_SANDBOX.name, monthly: 41.04, spot_monthly: 0, unpriced_tasks: 2 },
     { key: ACCOUNT_STAGING.account_id, label: ACCOUNT_STAGING.name, monthly: 27.36, spot_monthly: 13.68, unpriced_tasks: 1 },
   ],
   by_tag: [
@@ -2128,7 +2128,7 @@ export const ANALYTICS_COST: AnalyticsCost = {
         tasks: 2,
         spot_tasks: 0,
         saving_monthly: 7.4,
-        images: [{ container: 'catalog-api', image: '482109375512.dkr.ecr.eu-west-1.amazonaws.com/catalog-api:4.1.0', state: 'unchecked', reason: 'no_permission', account: 'homelab-admin' }],
+        images: [{ container: 'catalog-api', image: '482109375512.dkr.ecr.eu-west-1.amazonaws.com/catalog-api:4.1.0', state: 'unchecked', reason: 'no_permission', account: 'sandbox-admin' }],
         auto_scaled: false,
         can_edit: false,
       },

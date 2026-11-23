@@ -25,7 +25,7 @@ func enrolPaymentsAsleep(t *testing.T, st *store.Store) {
 	}
 	err = st.InTx(t.Context(), func(tx store.Tx) error {
 		return st.UpsertOffHoursEnrolment(t.Context(), tx, store.OffHoursEnrolment{
-			Key:        model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"},
+			Key:        model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"},
 			ScheduleID: &sc.ID, SavedMin: 1, SavedMax: 4, State: "active"})
 	})
 	if err != nil {

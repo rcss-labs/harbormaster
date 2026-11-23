@@ -71,7 +71,7 @@ func TestAlerts_NextStepPerKind(t *testing.T) {
 	}
 	var rows []targetAlert
 	for kind, service := range services {
-		rows = append(rows, alertOfKind(kind, homelabAccountID, "us-east-1", clusters[service], service, now))
+		rows = append(rows, alertOfKind(kind, sandboxAccountID, "us-east-1", clusters[service], service, now))
 	}
 	replaceAlerts(t, st, fk, rows...)
 
@@ -105,9 +105,9 @@ func TestAlerts_AccountProblemNextStepIsAccounts(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	accountAlert := targetAlert{
-		target: serviceAlert(homelabAccountID, "us-east-1", "core-services", "x", model.AlertDanger, "t").target,
+		target: serviceAlert(sandboxAccountID, "us-east-1", "core-services", "x", model.AlertDanger, "t").target,
 		alert: model.Alert{
-			Key:  model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1"}},
+			Key:  model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1"}},
 			Kind: "account_unreachable", Severity: model.AlertDanger, Title: "unreachable", Text: "AccessDenied", At: time.Now().UTC(),
 		},
 	}
@@ -127,7 +127,7 @@ func appendOperationAt(t *testing.T, st *store.Store, cluster, service, source, 
 	_, err := st.Pool.Exec(t.Context(),
 		`insert into operation_log (account_id, region, cluster_name, service_name, source, text, ts)
 		 values ($1, 'us-east-1', $2, $3, $4, $5, $6)`,
-		homelabAccountID, cluster, service, source, text, at)
+		sandboxAccountID, cluster, service, source, text, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAlerts_JustBeforeFromOperationLog(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	alertAt := time.Now().UTC().Add(-time.Minute)
-	replaceAlerts(t, st, fk, alertOfKind("service_failing", homelabAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt))
+	replaceAlerts(t, st, fk, alertOfKind("service_failing", sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt))
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Changed image-resizer desired count to 0.", alertAt.Add(-10*time.Minute))
 
 	got := getContextAlerts(t, login(t, srv, "sam", testPassword))
@@ -155,7 +155,7 @@ func TestAlerts_JustBeforeOmittedWithoutChange(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	alertAt := time.Now().UTC().Add(-time.Minute)
-	replaceAlerts(t, st, fk, alertOfKind("service_failing", homelabAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt))
+	replaceAlerts(t, st, fk, alertOfKind("service_failing", sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt))
 	// None of these may be reported: ECS event, outside the 24h window, and after the alert.
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "ecs", "ECS did something", alertAt.Add(-time.Minute))
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Too old", alertAt.Add(-25*time.Hour))
@@ -175,8 +175,8 @@ func TestAlerts_RolloutInProgressHasNoJustBefore(t *testing.T) {
 	pollAll(t, st, fk)
 	alertAt := time.Now().UTC().Add(-time.Minute)
 	replaceAlerts(t, st, fk,
-		alertOfKind("rollout_in_progress", homelabAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt),
-		alertOfKind("service_failing", homelabAccountID, "us-east-1", "core-services", "web-frontend", alertAt),
+		alertOfKind("rollout_in_progress", sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt),
+		alertOfKind("service_failing", sandboxAccountID, "us-east-1", "core-services", "web-frontend", alertAt),
 	)
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Deployed :88", alertAt.Add(-time.Hour))
 	appendOperationAt(t, st, "core-services", "web-frontend", "harbormaster", "Deployed :12", alertAt.Add(-time.Hour))
@@ -202,8 +202,8 @@ func TestAlerts_JustBeforeNeverLeaksInvisibleServiceChanges(t *testing.T) {
 	alertAt := time.Now().UTC().Add(-time.Minute)
 	// notifications is Prod (omer cannot view it); image-resizer is Dev.
 	replaceAlerts(t, st, fk,
-		alertOfKind("service_failing", homelabAccountID, "us-east-1", "core-services", "notifications", alertAt),
-		alertOfKind("service_failing", homelabAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt),
+		alertOfKind("service_failing", sandboxAccountID, "us-east-1", "core-services", "notifications", alertAt),
+		alertOfKind("service_failing", sandboxAccountID, "us-east-1", "background-jobs", "image-resizer", alertAt),
 	)
 	appendOperationAt(t, st, "core-services", "notifications", "harbormaster", "SECRET-PROD-CHANGE", alertAt.Add(-time.Minute))
 	appendOperationAt(t, st, "background-jobs", "image-resizer", "harbormaster", "Dev change", alertAt.Add(-time.Minute))

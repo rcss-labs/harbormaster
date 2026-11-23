@@ -154,7 +154,7 @@ func paymentsObject() focus.Object {
 }
 
 func bulkCluster() model.ClusterKey {
-	return model.ClusterKey{AccountID: homelabAccount, Region: "us-east-1", Cluster: "bulk"}
+	return model.ClusterKey{AccountID: sandboxAccount, Region: "us-east-1", Cluster: "bulk"}
 }
 
 func mockupEstate() *fake.Estate { return fake.MockupEstate(func() time.Time { return loopNow }) }
@@ -275,17 +275,17 @@ func TestFocusManager_CappedObjectGetsOneCycleAndNoLoop(t *testing.T) {
 func bulkEstate(n int) *fake.Estate {
 	estate := &fake.Estate{
 		Now:      func() time.Time { return loopNow },
-		Accounts: []fake.Account{{ID: homelabAccount, Name: "homelab-admin", Regions: []string{"us-east-1"}}},
+		Accounts: []fake.Account{{ID: sandboxAccount, Name: "sandbox-admin", Regions: []string{"us-east-1"}}},
 		Events:   map[string][]ecstypes.ServiceEvent{},
 	}
-	clusterARN := "arn:aws:ecs:us-east-1:" + homelabAccount + ":cluster/bulk"
-	estate.Clusters = []fake.Cluster{{AccountID: homelabAccount, Region: "us-east-1",
+	clusterARN := "arn:aws:ecs:us-east-1:" + sandboxAccount + ":cluster/bulk"
+	estate.Clusters = []fake.Cluster{{AccountID: sandboxAccount, Region: "us-east-1",
 		Cluster: ecstypes.Cluster{ClusterArn: aws.String(clusterARN), ClusterName: aws.String("bulk"), Status: aws.String("ACTIVE")}}}
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("svc-%02d", i)
-		estate.Services = append(estate.Services, fake.Service{AccountID: homelabAccount, Region: "us-east-1", ClusterName: "bulk",
+		estate.Services = append(estate.Services, fake.Service{AccountID: sandboxAccount, Region: "us-east-1", ClusterName: "bulk",
 			Service: ecstypes.Service{ServiceName: aws.String(name), Status: aws.String("ACTIVE"),
-				ServiceArn: aws.String("arn:aws:ecs:us-east-1:" + homelabAccount + ":service/bulk/" + name)}})
+				ServiceArn: aws.String("arn:aws:ecs:us-east-1:" + sandboxAccount + ":service/bulk/" + name)}})
 	}
 	return estate
 }
@@ -384,7 +384,7 @@ func TestFocusManager_ReportsMetrics(t *testing.T) {
 	waitFor(t, 3*time.Second, "focus series", func() bool {
 		out := r.metrics()
 		return strings.Contains(out, `harbormaster_focus_objects{kind="service"} 1`) &&
-			strings.Contains(out, `harbormaster_focus_interval_seconds{account="`+homelabAccount+`",region="us-east-1"} 1`) &&
+			strings.Contains(out, `harbormaster_focus_interval_seconds{account="`+sandboxAccount+`",region="us-east-1"} 1`) &&
 			strings.Contains(out, `harbormaster_focus_cycle_duration_seconds_count{kind="service"}`)
 	})
 }
@@ -393,8 +393,8 @@ func TestFocusManager_NewOwnerPicksUpFocusAfterTakeover(t *testing.T) {
 	kvtest.Each(t, func(t *testing.T, c kv.Client) {
 		st := storetest.Open(t)
 		ctx := context.Background()
-		if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "homelab", AccountID: homelabAccount,
-			RoleARN: "arn:aws:iam::" + homelabAccount + ":role/x", ExternalID: "e", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
+		if _, err := st.CreateAccount(ctx, store.AWSAccount{Name: "sandbox", AccountID: sandboxAccount,
+			RoleARN: "arn:aws:iam::" + sandboxAccount + ":role/x", ExternalID: "e", Regions: []string{"us-east-1"}, Enabled: true}); err != nil {
 			t.Fatal(err)
 		}
 		reg, bus := focus.NewKVRegistry(c), signal.NewKVBus(c)

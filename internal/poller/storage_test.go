@@ -27,7 +27,7 @@ func (r *recordingStorageStore) ReplaceStorage(_ context.Context, _, _ string, f
 	return nil
 }
 
-var storageTarget = awsx.Target{AccountID: homelabAccount, Region: "us-east-1"}
+var storageTarget = awsx.Target{AccountID: sandboxAccount, Region: "us-east-1"}
 
 func TestThroughputModeLabel(t *testing.T) {
 	tests := []struct {

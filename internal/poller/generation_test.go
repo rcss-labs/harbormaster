@@ -272,7 +272,7 @@ func TestGeneration_TargetHealthChangeBumpsTheSlice(t *testing.T) {
 	h := genHarness(t, cache)
 	h.runOnce(t)
 	before := cache.snapshot()
-	extra := "arn:aws:elasticloadbalancing:us-east-1:" + homelabAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
+	extra := "arn:aws:elasticloadbalancing:us-east-1:" + sandboxAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
 	h.estate.AddTargetGroup(paymentsAPI(), fake.TargetGroup{ARN: extra, Unhealthy: 1})
 	h.runOnce(t)
 	moved := changedKeys(before, cache.snapshot())

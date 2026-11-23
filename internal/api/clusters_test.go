@@ -94,7 +94,7 @@ func TestCluster_InvisibleIs404(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	id := clusterID(homelabAccountID, "us-east-1", "core-services")
+	id := clusterID(sandboxAccountID, "us-east-1", "core-services")
 	if resp := login(t, srv, "omer", testPassword).get("/api/clusters/" + id); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("omer status %d, want 404", resp.StatusCode)
 	}
@@ -107,7 +107,7 @@ func TestCluster_SlotsAndReserved(t *testing.T) {
 	srv, fk, st := newTestServer(t)
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
-	resp := login(t, srv, "sam", testPassword).get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
+	resp := login(t, srv, "sam", testPassword).get("/api/clusters/" + clusterID(sandboxAccountID, "us-east-1", "core-services"))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
@@ -160,14 +160,14 @@ func TestClusterDetail_IncludesVPC(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	c := login(t, srv, "sam", testPassword)
-	resp := c.get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
+	resp := c.get("/api/clusters/" + clusterID(sandboxAccountID, "us-east-1", "core-services"))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
 	var got ClusterDTO
 	decode(t, resp, &got)
-	if got.VPC == nil || got.VPC.VPCID != vpcMain || got.VPC.Name != "homelab-main" {
-		t.Errorf("vpc = %+v, want %s homelab-main", got.VPC, vpcMain)
+	if got.VPC == nil || got.VPC.VPCID != vpcMain || got.VPC.Name != "sandbox-main" {
+		t.Errorf("vpc = %+v, want %s sandbox-main", got.VPC, vpcMain)
 	}
 }
 
@@ -202,7 +202,7 @@ func TestClusterDetail_CountsFargateSpotAndOtherCapacity(t *testing.T) {
 	fk.Estate.Mu.Unlock()
 	pollAll(t, st, fk)
 
-	resp := login(t, srv, "sam", testPassword).get("/api/clusters/" + clusterID(homelabAccountID, "us-east-1", "core-services"))
+	resp := login(t, srv, "sam", testPassword).get("/api/clusters/" + clusterID(sandboxAccountID, "us-east-1", "core-services"))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}

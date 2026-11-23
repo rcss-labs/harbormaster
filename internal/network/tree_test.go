@@ -13,7 +13,7 @@ import (
 func TestAssemble_MatchesScreenshotCounts(t *testing.T) {
 	tree := Assemble(mainInput())
 	root := tree.Root
-	if root.Kind != "vpc" || root.Key != "vpc:"+mainVPCID || root.Label != "homelab-main" {
+	if root.Kind != "vpc" || root.Key != "vpc:"+mainVPCID || root.Label != "sandbox-main" {
 		t.Errorf("root: %+v", root)
 	}
 	if root.Tasks != 10 || root.VPC.Zones != 2 {

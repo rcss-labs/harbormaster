@@ -30,5 +30,5 @@
   "status": "ACTIVE",
   "cpu": "1024",
   "memory": "2048",
-  "registeredBy": "terraform (TerraDuckTel)"
+  "registeredBy": "terraform"
 }

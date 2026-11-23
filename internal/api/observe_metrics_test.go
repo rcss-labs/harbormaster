@@ -134,8 +134,8 @@ func newMetricsHarness(t *testing.T, extraClusters int) *metricsHarness {
 	for i := range extraClusters {
 		name := "extra-" + string(rune('a'+i))
 		fk.Estate.Mu.Lock()
-		fk.Estate.Clusters = append(fk.Estate.Clusters, fake.Cluster{AccountID: homelabAccountID, Region: "us-east-1", Cluster: ecstypes.Cluster{
-			ClusterArn: aws.String("arn:aws:ecs:us-east-1:" + homelabAccountID + ":cluster/" + name), ClusterName: aws.String(name),
+		fk.Estate.Clusters = append(fk.Estate.Clusters, fake.Cluster{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: ecstypes.Cluster{
+			ClusterArn: aws.String("arn:aws:ecs:us-east-1:" + sandboxAccountID + ":cluster/" + name), ClusterName: aws.String(name),
 			Status:   aws.String("ACTIVE"),
 			Settings: []ecstypes.ClusterSetting{{Name: ecstypes.ClusterSettingNameContainerInsights, Value: aws.String("enabled")}},
 		}})
@@ -156,14 +156,14 @@ func newMetricsHarness(t *testing.T, extraClusters int) *metricsHarness {
 }
 
 func catalogID() string {
-	return serviceID(homelabAccountID, "eu-west-1", "eu-apps", "catalog-api")
+	return serviceID(sandboxAccountID, "eu-west-1", "eu-apps", "catalog-api")
 }
 
 func edgeNginxID() string {
-	return serviceID(homelabAccountID, "eu-central-1", "edge-proxy", "edge-nginx")
+	return serviceID(sandboxAccountID, "eu-central-1", "edge-proxy", "edge-nginx")
 }
 
-func coreServicesID() string { return clusterID(homelabAccountID, "us-east-1", "core-services") }
+func coreServicesID() string { return clusterID(sandboxAccountID, "us-east-1", "core-services") }
 
 func getServiceMetricsDTO(t *testing.T, c *apiClient, id, query string) ServiceMetricsDTO {
 	t.Helper()
@@ -314,7 +314,7 @@ func TestServiceMetrics_StaleWhenThrottledWarmCache(t *testing.T) {
 // averages p95 latency (seconds on the wire, milliseconds in the response).
 func TestServiceMetrics_TwoTargetGroupsSumRequestsAndAverageP95(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
+	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "payments-api"}
 	h.fake.Estate.AddTargetGroup(key, fake.TargetGroup{Healthy: 3})
 	pollAll(t, h.store, h.fake)
 
@@ -369,7 +369,7 @@ func TestClusterMetrics_OnlyVisibleServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hidden := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: homelabAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "notifications"}
+	hidden := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID, Region: "us-east-1", Cluster: "core-services"}, Service: "notifications"}
 	tagID := secret.ID
 	if err := h.store.SetServiceTag(t.Context(), hidden, &tagID); err != nil {
 		t.Fatal(err)
@@ -402,7 +402,7 @@ func TestClusterMetrics_OnlyVisibleServices(t *testing.T) {
 	if len(payments.CPU) != 72 || payments.CPUNow == nil || payments.ALB == nil || payments.ALB.ReqNow == nil {
 		t.Errorf("payments-api entry = %+v; want series, cpu_now and alb", payments)
 	}
-	if auth := out.Services[serviceID(homelabAccountID, "us-east-1", "core-services", "auth-service")]; auth.ALB == nil {
+	if auth := out.Services[serviceID(sandboxAccountID, "us-east-1", "core-services", "auth-service")]; auth.ALB == nil {
 		t.Error("auth-service (behind a load balancer) has no alb")
 	}
 
@@ -425,11 +425,11 @@ func TestClustersMetrics_PerVisibleCluster(t *testing.T) {
 	if _, ok := out.Items[coreServicesID()]; ok {
 		t.Error("core-services (Prod) is listed for omer")
 	}
-	euApps := out.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-west-1", Cluster: "eu-apps"}.ID()]
+	euApps := out.Items[model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-west-1", Cluster: "eu-apps"}.ID()]
 	if euApps.Insights != "enabled" || len(euApps.CPU) != 48 || len(euApps.Mem) != 48 || euApps.CPUNow == nil || euApps.MemNow == nil {
 		t.Errorf("eu-apps = insights %q, %d cpu points, now %v/%v; want enabled with 48 points", euApps.Insights, len(euApps.CPU), euApps.CPUNow, euApps.MemNow)
 	}
-	edge, ok := out.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()]
+	edge, ok := out.Items[model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()]
 	if !ok || edge.Insights != "disabled" || len(edge.CPU) != 0 || edge.CPUNow != nil {
 		t.Errorf("edge-proxy = %+v (listed %v); want disabled with empty series", edge, ok)
 	}
@@ -446,7 +446,7 @@ func TestClustersMetrics_DisabledClusterSerialisesEmptyArrays(t *testing.T) {
 		Items map[string]map[string]json.RawMessage `json:"items"`
 	}
 	decode(t, resp, &raw)
-	edge := raw.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()]
+	edge := raw.Items[model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()]
 	for _, key := range []string{"cpu", "mem"} {
 		if got := string(edge[key]); got != "[]" {
 			t.Errorf("edge-proxy %s = %s, want []", key, got)
@@ -456,7 +456,7 @@ func TestClustersMetrics_DisabledClusterSerialisesEmptyArrays(t *testing.T) {
 
 func TestClusterMetrics_DisabledClusterServicesSerialiseEmptyArrays(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	edgeID := model.ClusterKey{AccountID: homelabAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()
+	edgeID := model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-central-1", Cluster: "edge-proxy"}.ID()
 	resp := login(t, h.srv, "omer", testPassword).get("/api/clusters/" + edgeID + "/metrics")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
@@ -533,7 +533,7 @@ func TestTargetHealth_Groups(t *testing.T) {
 
 func TestTargetHealth_NoLoadBalancerIsEmpty(t *testing.T) {
 	h := newMetricsHarness(t, 0)
-	id := serviceID(homelabAccountID, "eu-west-1", "eu-apps", "search-indexer")
+	id := serviceID(sandboxAccountID, "eu-west-1", "eu-apps", "search-indexer")
 	resp := login(t, h.srv, "omer", testPassword).get("/api/services/" + id + "/target-health")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
@@ -561,11 +561,11 @@ func TestClustersMetrics_OneThrottledTargetStillServesOthers(t *testing.T) {
 	if len(core.CPU) == 0 || core.CPUNow == nil {
 		t.Errorf("core-services (healthy target) = %d cpu points, now %v; want its series", len(core.CPU), core.CPUNow)
 	}
-	euApps := out.Items[model.ClusterKey{AccountID: homelabAccountID, Region: "eu-west-1", Cluster: "eu-apps"}.ID()]
+	euApps := out.Items[model.ClusterKey{AccountID: sandboxAccountID, Region: "eu-west-1", Cluster: "eu-apps"}.ID()]
 	if len(euApps.CPU) != 0 || euApps.CPUNow != nil {
 		t.Errorf("eu-apps (throttled target) = %d cpu points, now %v; want empty", len(euApps.CPU), euApps.CPUNow)
 	}
-	if len(out.Errors) != 1 || out.Errors[0].AccountID != homelabAccountID || out.Errors[0].Region != "eu-west-1" || out.Errors[0].Code != "throttled" {
+	if len(out.Errors) != 1 || out.Errors[0].AccountID != sandboxAccountID || out.Errors[0].Region != "eu-west-1" || out.Errors[0].Code != "throttled" {
 		t.Errorf("errors = %+v; want one throttled entry for eu-west-1", out.Errors)
 	}
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 )
 
-var homelabUSEast1 = awsx.Target{AccountID: homelabID, Region: "us-east-1"}
+var sandboxUSEast1 = awsx.Target{AccountID: sandboxID, Region: "us-east-1"}
 
 func cloudWatchFor(t *testing.T, f *Fake, target awsx.Target) awsx.CloudWatchAPI {
 	t.Helper()
@@ -61,7 +61,7 @@ func sixHourInput(queries []cwtypes.MetricDataQuery) *cloudwatch.GetMetricDataIn
 }
 
 func TestFakeGetMetricData_ReturnsOneResultPerQueryInOrder(t *testing.T) {
-	api := cloudWatchFor(t, newFake(), homelabUSEast1)
+	api := cloudWatchFor(t, newFake(), sandboxUSEast1)
 	out, err := api.GetMetricData(context.Background(), sixHourInput(paymentsQueries()))
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestFakeGetMetricData_ReturnsOneResultPerQueryInOrder(t *testing.T) {
 }
 
 func TestFakeGetMetricData_IsDeterministic(t *testing.T) {
-	api := cloudWatchFor(t, newFake(), homelabUSEast1)
+	api := cloudWatchFor(t, newFake(), sandboxUSEast1)
 	first, err := api.GetMetricData(context.Background(), sixHourInput(paymentsQueries()))
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestFakeGetMetricData_IsDeterministic(t *testing.T) {
 }
 
 func TestFakeGetMetricData_RejectsOver500(t *testing.T) {
-	api := cloudWatchFor(t, newFake(), homelabUSEast1)
+	api := cloudWatchFor(t, newFake(), sandboxUSEast1)
 	queries := make([]cwtypes.MetricDataQuery, 501)
 	for i := range queries {
 		queries[i] = serviceMetricQuery(fmt.Sprintf("q%d", i), "CpuUtilized", "core-services", "payments-api", 300)
@@ -122,7 +122,7 @@ func TestFakeGetMetricData_RejectsOver500(t *testing.T) {
 func TestFakeGetMetricData_ThrottleFlag(t *testing.T) {
 	f := newFake()
 	f.ThrottleCloudWatch = 1
-	api := cloudWatchFor(t, f, homelabUSEast1)
+	api := cloudWatchFor(t, f, sandboxUSEast1)
 	if _, err := api.GetMetricData(context.Background(), sixHourInput(paymentsQueries())); !awsx.IsThrottle(err) {
 		t.Fatalf("first call err = %v, want throttle", err)
 	}
@@ -134,7 +134,7 @@ func TestFakeGetMetricData_ThrottleFlag(t *testing.T) {
 func TestFakeGetMetricData_PagesWhenOverPageSize(t *testing.T) {
 	f := newFake()
 	f.CloudWatchPageSize = 100 // 2 queries x 72 points = 144 > 100
-	api := cloudWatchFor(t, f, homelabUSEast1)
+	api := cloudWatchFor(t, f, sandboxUSEast1)
 	in := sixHourInput(paymentsQueries()[:2])
 	counts := map[string]int{}
 	pages := 0
@@ -158,7 +158,7 @@ func TestFakeGetMetricData_PagesWhenOverPageSize(t *testing.T) {
 }
 
 func TestFakeGetMetricData_ELBUnhealthyHostCountFollowsSeed(t *testing.T) {
-	api := cloudWatchFor(t, newFake(), awsx.Target{AccountID: homelabID, Region: "eu-west-1"})
+	api := cloudWatchFor(t, newFake(), awsx.Target{AccountID: sandboxID, Region: "eu-west-1"})
 	out, err := api.GetMetricData(context.Background(), sixHourInput([]cwtypes.MetricDataQuery{{
 		Id: aws.String("healthy_hosts"),
 		MetricStat: &cwtypes.MetricStat{
@@ -175,7 +175,7 @@ func TestFakeGetMetricData_ELBUnhealthyHostCountFollowsSeed(t *testing.T) {
 }
 
 func TestFakeGetMetricData_StoppedServiceReportsZeroCPUAndMemory(t *testing.T) {
-	api := cloudWatchFor(t, newFake(), homelabUSEast1)
+	api := cloudWatchFor(t, newFake(), sandboxUSEast1)
 	out, err := api.GetMetricData(context.Background(), sixHourInput([]cwtypes.MetricDataQuery{
 		serviceMetricQuery("cpu", "CpuUtilized", "background-jobs", "image-resizer", 300),
 		serviceMetricQuery("mem", "MemoryUtilized", "background-jobs", "image-resizer", 300),

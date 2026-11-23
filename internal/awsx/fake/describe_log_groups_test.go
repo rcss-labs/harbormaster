@@ -11,7 +11,7 @@ import (
 
 func TestFakeDescribeLogGroups_ReportsStoredBytes(t *testing.T) {
 	f := newFake()
-	api := logsFor(t, f, homelabUSEast1)
+	api := logsFor(t, f, sandboxUSEast1)
 	f.Estate.SetLogGroupStoredBytes("/ecs/test/big", 3<<30)
 	f.Estate.SetLogLines("/ecs/test/small", []LogLine{{Stream: "a/b/c", Timestamp: fixedNow.Add(-time.Minute), Message: "hello"}})
 

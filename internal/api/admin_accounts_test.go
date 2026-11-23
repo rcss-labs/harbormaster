@@ -10,7 +10,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
-const homelabRoleARN = "arn:aws:iam::482109375512:role/harbormaster-access"
+const sandboxRoleARN = "arn:aws:iam::482109375512:role/harbormaster-access"
 
 type testProbeResult struct {
 	Regions []struct {
@@ -28,7 +28,7 @@ func TestAccounts_TestUsesProber(t *testing.T) {
 
 	var known testProbeResult
 	decode(t, sam.post("/api/accounts/test", map[string]any{
-		"role_arn": homelabRoleARN, "external_id": "x", "regions": []string{"us-east-1", "eu-west-1"},
+		"role_arn": sandboxRoleARN, "external_id": "x", "regions": []string{"us-east-1", "eu-west-1"},
 	}), &known)
 	if len(known.Regions) != 2 {
 		t.Fatalf("regions = %+v, want 2 results", known.Regions)
@@ -51,7 +51,7 @@ func TestAccounts_CreateParsesAccountID(t *testing.T) {
 	sam := login(t, srv, "sam", testPassword)
 
 	resp := sam.post("/api/accounts", map[string]any{
-		"name": "homelab-admin", "role_arn": homelabRoleARN, "external_id": "x", "regions": []string{"us-east-1"},
+		"name": "sandbox-admin", "role_arn": sandboxRoleARN, "external_id": "x", "regions": []string{"us-east-1"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", resp.StatusCode)
@@ -61,8 +61,8 @@ func TestAccounts_CreateParsesAccountID(t *testing.T) {
 		Name      string `json:"name"`
 	}
 	decode(t, resp, &created)
-	if created.AccountID != "482109375512" || created.Name != "homelab-admin" {
-		t.Errorf("created = %+v, want account_id 482109375512 for homelab-admin", created)
+	if created.AccountID != "482109375512" || created.Name != "sandbox-admin" {
+		t.Errorf("created = %+v, want account_id 482109375512 for sandbox-admin", created)
 	}
 
 	resp = sam.post("/api/accounts", map[string]any{
@@ -160,8 +160,8 @@ func TestAccounts_NonAdmin403(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/accounts", nil},
 		{http.MethodGet, "/api/accounts/external-id", nil},
-		{http.MethodPost, "/api/accounts/test", map[string]any{"role_arn": homelabRoleARN, "external_id": "x", "regions": []string{"us-east-1"}}},
-		{http.MethodPost, "/api/accounts", map[string]any{"name": "a", "role_arn": homelabRoleARN, "external_id": "x", "regions": []string{"us-east-1"}}},
+		{http.MethodPost, "/api/accounts/test", map[string]any{"role_arn": sandboxRoleARN, "external_id": "x", "regions": []string{"us-east-1"}}},
+		{http.MethodPost, "/api/accounts", map[string]any{"name": "a", "role_arn": sandboxRoleARN, "external_id": "x", "regions": []string{"us-east-1"}}},
 		{http.MethodPatch, "/api/accounts/1", map[string]any{"name": "a", "regions": []string{"us-east-1"}}},
 		{http.MethodDelete, "/api/accounts/1", nil},
 		{http.MethodGet, "/api/audit", nil},

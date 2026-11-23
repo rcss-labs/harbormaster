@@ -151,7 +151,7 @@ func runtimeRoutes() []runtimeRoute {
 		{"/api/services/{serviceId}/arm64-readiness", "arm64Readiness", ""},
 		{"/api/networks", "networks", ""},
 		{"/api/networks/{account}/{region}", "networkRegion", ""},
-		{"/api/vpcs/{vpcId}/tree", "vpcTree", "?account=" + homelabAccountID + "&region=us-east-1"},
+		{"/api/vpcs/{vpcId}/tree", "vpcTree", "?account=" + sandboxAccountID + "&region=us-east-1"},
 		{"/api/storage", "storage", ""},
 		{"/api/analytics/delivery", "analyticsDelivery", ""},
 		{"/api/analytics/reliability", "analyticsReliability", ""},
@@ -202,7 +202,7 @@ var contractRuntimeSkips = map[string]string{
 var runtimePathParams = map[string]string{
 	"clusterId": "",
 	"serviceId": "",
-	"account":   homelabAccountID,
+	"account":   sandboxAccountID,
 	"region":    "us-east-1",
 	"vpcId":     vpcMain,
 	"revision":  "1",
@@ -211,7 +211,7 @@ var runtimePathParams = map[string]string{
 
 func resolveRuntimePath(pattern string) string {
 	params := runtimePathParams
-	params["clusterId"] = clusterID(homelabAccountID, "us-east-1", "core-services")
+	params["clusterId"] = clusterID(sandboxAccountID, "us-east-1", "core-services")
 	params["serviceId"] = paymentsID()
 	path := pattern
 	for name, value := range params {

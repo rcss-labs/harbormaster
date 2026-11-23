@@ -28,12 +28,12 @@ func TestFetch_ServesFromCacheWithinTTL(t *testing.T) {
 	now := testNow
 	client := clientWithStore(f, s, &now)
 	ctx := context.Background()
-	first, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")})
+	first, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now = testNow.Add(30 * time.Second)
-	second, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")})
+	second, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestFetch_ServesFromCacheWithinTTL(t *testing.T) {
 		}
 	}
 	now = testNow.Add(61 * time.Second)
-	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+	if _, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.Calls()["GetMetricData"]; got != 2 {
@@ -64,10 +64,10 @@ func TestFetch_CacheIsSharedAcrossClients(t *testing.T) {
 	fa, fb := newFakeClients(), newFakeClients()
 	now := testNow
 	a, b := clientWithStore(fa, s, &now), clientWithStore(fb, s, &now)
-	if _, err := a.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+	if _, err := a.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("cpu")}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := b.Fetch(context.Background(), homelab, Span1h, []Query{cpuQuery("other_id")})
+	res, err := b.Fetch(context.Background(), sandbox, Span1h, []Query{cpuQuery("other_id")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,13 +85,13 @@ func TestFetch_StaleOnThrottleWithCache(t *testing.T) {
 	now := testNow
 	client := clientWithStore(f, s, &now)
 	ctx := context.Background()
-	warm, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")})
+	warm, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now = testNow.Add(5 * time.Minute)
 	f.ThrottleCloudWatch = 1
-	res, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")})
+	res, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,12 +125,12 @@ func TestFetch_ErrorWhenCacheOlderThanMaxStale(t *testing.T) {
 	now := testNow
 	client := clientWithStore(f, s, &now)
 	ctx := context.Background()
-	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+	if _, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")}); err != nil {
 		t.Fatal(err)
 	}
 	now = testNow.Add(11 * time.Minute)
 	f.ThrottleCloudWatch = 1
-	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")}); !awsx.IsThrottle(err) {
+	if _, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")}); !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want throttle error", err)
 	}
 }
@@ -141,14 +141,14 @@ func TestFetch_StaleRequiresEveryUncachedQueryCached(t *testing.T) {
 	now := testNow
 	client := clientWithStore(f, s, &now)
 	ctx := context.Background()
-	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+	if _, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")}); err != nil {
 		t.Fatal(err)
 	}
 	now = testNow.Add(5 * time.Minute)
 	f.ThrottleCloudWatch = 1
 	mem := cpuQuery("mem")
 	mem.MetricName = "MemoryUtilized"
-	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu"), mem}); !awsx.IsThrottle(err) {
+	if _, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu"), mem}); !awsx.IsThrottle(err) {
 		t.Fatalf("err = %v, want throttle error (mem has no cache row)", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestFetch_StaleReasonIsAPIErrorMessageOnly(t *testing.T) {
 	now := testNow
 	client := clientWithStore(newFakeClients(), s, &now)
 	ctx := context.Background()
-	if _, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")}); err != nil {
+	if _, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")}); err != nil {
 		t.Fatal(err)
 	}
 	now = testNow.Add(5 * time.Minute)
@@ -166,7 +166,7 @@ func TestFetch_StaleReasonIsAPIErrorMessageOnly(t *testing.T) {
 		return nil, fmt.Errorf("operation error CloudWatch: GetMetricData, https response error StatusCode: 400, RequestID: abc: %w",
 			&smithy.GenericAPIError{Code: "InvalidParameterValue", Message: "The query is invalid."})
 	}}}
-	res, err := client.Fetch(ctx, homelab, Span1h, []Query{cpuQuery("cpu")})
+	res, err := client.Fetch(ctx, sandbox, Span1h, []Query{cpuQuery("cpu")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ func useStrategy(h *harness, key model.ServiceKey, items ...ecstypes.CapacityPro
 
 func repoll(t *testing.T, h *harness) {
 	t.Helper()
-	target := awsx.Target{AccountID: homelabAccountID, Region: homelabRegion}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: sandboxRegion}
 	if err := poller.PollOnce(t.Context(), h.store, h.fake, poller.Config{MaxInFlight: 4}, target); err != nil {
 		t.Fatal(err)
 	}

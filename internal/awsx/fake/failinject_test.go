@@ -30,7 +30,7 @@ func TestFake_FailInjection(t *testing.T) {
 	if _, err := api.DescribeScalingPolicies(context.Background(), &applicationautoscaling.DescribeScalingPoliciesInput{ServiceNamespace: astypes.ServiceNamespaceEcs}); err != nil {
 		t.Fatalf("DescribeScalingPolicies: %v", err)
 	}
-	elb, err := f.ELB(context.Background(), homelabUSEast1)
+	elb, err := f.ELB(context.Background(), sandboxUSEast1)
 	if err != nil {
 		t.Fatal(err)
 	}

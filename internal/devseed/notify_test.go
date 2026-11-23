@@ -51,12 +51,12 @@ func TestApply_SeedsDemoRoutesOnce(t *testing.T) {
 	}
 	core := byName["core-services to #core-alerts"]
 	if core.Destination != "slack" || !core.Enabled || !core.QuietEnabled || len(core.Scope) != 1 ||
-		core.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("homelab-admin"), Region: "us-east-1", Cluster: "core-services", Threshold: 1}) {
+		core.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("sandbox-admin"), Region: "us-east-1", Cluster: "core-services", Threshold: 1}) {
 		t.Errorf("core route = %+v", core)
 	}
 	telegram := byName["image-resizer to Telegram"]
 	if telegram.Destination != "telegram" || telegram.Config.ChatID != "-1001234567890" || !telegram.Enabled || len(telegram.Scope) != 1 ||
-		telegram.Scope[0] != (store.NotificationSelector{Kind: "service", AccountID: accountID("homelab-admin"), Region: "us-east-1", Cluster: "background-jobs", Service: "image-resizer"}) {
+		telegram.Scope[0] != (store.NotificationSelector{Kind: "service", AccountID: accountID("sandbox-admin"), Region: "us-east-1", Cluster: "background-jobs", Service: "image-resizer"}) {
 		t.Errorf("telegram route = %+v", telegram)
 	}
 	email := byName["Staging account by email"]
@@ -66,7 +66,7 @@ func TestApply_SeedsDemoRoutesOnce(t *testing.T) {
 	}
 	half := byName["Half of core-services down"]
 	if half.Destination != "pagerduty" || half.MinSeverity != "critical" || !half.Enabled || len(half.Scope) != 1 ||
-		half.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("homelab-admin"), Region: "us-east-1", Cluster: "core-services", Threshold: 2}) {
+		half.Scope[0] != (store.NotificationSelector{Kind: "cluster", AccountID: accountID("sandbox-admin"), Region: "us-east-1", Cluster: "core-services", Threshold: 2}) {
 		t.Errorf("half route = %+v, want the same cluster as the first route with a threshold of 2", half)
 	}
 	catchAll := byName["Everything else"]

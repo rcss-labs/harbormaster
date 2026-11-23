@@ -67,7 +67,7 @@ func TestTaskDefinition_TokenSeesValuesByDefault(t *testing.T) {
 
 // authServiceID is the mockup service that has both environment variables and secrets.
 func authServiceID() string {
-	return serviceID(homelabAccountID, "us-east-1", "core-services", "auth-service")
+	return serviceID(sandboxAccountID, "us-east-1", "core-services", "auth-service")
 }
 
 func TestTaskDefinition_TokenRedactedWhenSwitchOn(t *testing.T) {

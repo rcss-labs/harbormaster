@@ -56,7 +56,7 @@ func TestSearch_ShortQueryAndClusterHref(t *testing.T) {
 		t.Errorf("short query items = %#v, want empty non-nil", got.Items)
 	}
 	got := search(t, c, "core")
-	if len(got.Items) == 0 || got.Items[0].Kind != "cluster" || got.Items[0].Href != "/clusters/"+clusterID(homelabAccountID, "us-east-1", "core-services") {
+	if len(got.Items) == 0 || got.Items[0].Kind != "cluster" || got.Items[0].Href != "/clusters/"+clusterID(sandboxAccountID, "us-east-1", "core-services") {
 		t.Errorf("core search = %+v", got.Items)
 	}
 }
@@ -131,7 +131,7 @@ func TestPoller_OnlyVisibleTargets(t *testing.T) {
 	resp = login(t, srv, "omer", testPassword).get("/api/poller")
 	decode(t, resp, &omer)
 
-	// the estate polls 4 targets: homelab in three regions, staging in us-east-1
+	// the estate polls 4 targets: sandbox in three regions, staging in us-east-1
 	if len(admin.Items) != 4 {
 		t.Fatalf("admin poller items = %+v, want 4", admin.Items)
 	}
@@ -140,7 +140,7 @@ func TestPoller_OnlyVisibleTargets(t *testing.T) {
 			t.Errorf("item = %+v", item)
 		}
 	}
-	// omer sees every cluster except core-services, so all homelab regions remain, staging-web (Staging, view) too
+	// omer sees every cluster except core-services, so all sandbox regions remain, staging-web (Staging, view) too
 	if len(omer.Items) != 4 {
 		t.Errorf("omer poller items = %d, want 4", len(omer.Items))
 	}
@@ -155,7 +155,7 @@ func TestPoller_HidesTargetsWithoutVisibleClusters(t *testing.T) {
 		Items []PollerItemDTO `json:"items"`
 	}
 	decode(t, login(t, srv, "oncall", testPassword).get("/api/poller"), &got)
-	// oncall sees only core-services (homelab us-east-1) and staging-web (staging us-east-1)
+	// oncall sees only core-services (sandbox us-east-1) and staging-web (staging us-east-1)
 	if len(got.Items) != 2 {
 		t.Fatalf("oncall poller items = %+v, want 2", got.Items)
 	}
@@ -173,7 +173,7 @@ func TestPoller_LastErrorOnlyForAdminsOrFailingTargets(t *testing.T) {
 	pollAll(t, st, fk)
 	ctx := t.Context()
 	now := time.Now()
-	target := awsx.Target{AccountID: homelabAccountID, Region: "us-east-1"}
+	target := awsx.Target{AccountID: sandboxAccountID, Region: "us-east-1"}
 	// not failing: one failure with an error text naming a resource
 	if err := storetest.Seed(st).UpsertPollLoop(ctx, store.PollLoop{Target: target, Tier: "full_tasks", LastOKAt: &now,
 		LastError: "AccessDenied on arn:aws:ecs:secret", Interval: time.Second, BaseInterval: time.Second, Failures: 1}); err != nil {

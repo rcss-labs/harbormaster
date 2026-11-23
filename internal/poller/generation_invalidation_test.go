@@ -129,7 +129,7 @@ func TestInvalidation_NewServiceEventBumpsTheCluster(t *testing.T) {
 func TestInvalidation_FocusTargetHealthChangeBumpsTheCluster(t *testing.T) {
 	cache := newRecordingCache()
 	h := genHarness(t, cache)
-	extra := "arn:aws:elasticloadbalancing:us-east-1:" + homelabAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
+	extra := "arn:aws:elasticloadbalancing:us-east-1:" + sandboxAccount + ":targetgroup/payments-api-extra/0123456789abcdef"
 	h.estate.AddTargetGroup(paymentsAPI(), fake.TargetGroup{ARN: extra, Healthy: 1})
 	h.runOnce(t)
 	if _, err := h.loop.focusService(context.Background(), paymentsAPI(), 1); err != nil { // settle everything else

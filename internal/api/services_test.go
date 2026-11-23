@@ -12,7 +12,7 @@ func serviceID(account, region, cluster, name string) string {
 }
 
 func paymentsID() string {
-	return serviceID(homelabAccountID, "us-east-1", "core-services", "payments-api")
+	return serviceID(sandboxAccountID, "us-east-1", "core-services", "payments-api")
 }
 
 func getService(t *testing.T, c *apiClient, id string) ServiceDTO {
@@ -33,10 +33,10 @@ func TestService_DetailShape(t *testing.T) {
 	pollAll(t, st, fk)
 	got := getService(t, login(t, srv, "sam", testPassword), paymentsID())
 
-	if got.Name != "payments-api" || got.Cluster.Name != "core-services" || got.AccountID != homelabAccountID || got.Region != "us-east-1" {
+	if got.Name != "payments-api" || got.Cluster.Name != "core-services" || got.AccountID != sandboxAccountID || got.Region != "us-east-1" {
 		t.Errorf("identity = %s %s %s %s", got.Name, got.Cluster.Name, got.AccountID, got.Region)
 	}
-	if got.AccountName != "homelab-admin" || got.Tag.Name != "Prod" || got.Status != model.StatusSteady {
+	if got.AccountName != "sandbox-admin" || got.Tag.Name != "Prod" || got.Status != model.StatusSteady {
 		t.Errorf("account %q tag %q status %q", got.AccountName, got.Tag.Name, got.Status)
 	}
 	if len(got.RunningTasks) != 3 || len(got.Slots) != 3 {
@@ -89,7 +89,7 @@ func TestService_NotificationsRollout(t *testing.T) {
 	seedMockupTags(t, st)
 	pollAll(t, st, fk)
 	got := getService(t, login(t, srv, "sam", testPassword),
-		serviceID(homelabAccountID, "us-east-1", "core-services", "notifications"))
+		serviceID(sandboxAccountID, "us-east-1", "core-services", "notifications"))
 
 	if got.Status != model.StatusDeploying {
 		t.Errorf("status = %q, want deploying", got.Status)
@@ -123,7 +123,7 @@ func TestService_InvisibleIs404(t *testing.T) {
 
 	cases := []struct{ user, id string }{
 		{"omer", paymentsID()},
-		{"oncall", serviceID(homelabAccountID, "us-east-1", "background-jobs", "image-resizer")},
+		{"oncall", serviceID(sandboxAccountID, "us-east-1", "background-jobs", "image-resizer")},
 		{"sam", "not-a-service-id"},
 	}
 	for _, c := range cases {
@@ -160,8 +160,8 @@ func TestServiceDetail_IncludesVPCAndSecurityGroupNames(t *testing.T) {
 	pollAll(t, st, fk)
 	pollAll(t, st, fk) // the first network run can precede services, so SG names need a second pass
 	got := getService(t, login(t, srv, "sam", testPassword), paymentsID())
-	if got.Networking.VPC == nil || got.Networking.VPC.VPCID != vpcMain || got.Networking.VPC.Name != "homelab-main" {
-		t.Errorf("vpc = %+v, want %s homelab-main", got.Networking.VPC, vpcMain)
+	if got.Networking.VPC == nil || got.Networking.VPC.VPCID != vpcMain || got.Networking.VPC.Name != "sandbox-main" {
+		t.Errorf("vpc = %+v, want %s sandbox-main", got.Networking.VPC, vpcMain)
 	}
 	if got.Networking.SecurityGroupNames == nil || len(got.Networking.SecurityGroups) == 0 {
 		t.Fatalf("security groups %v names %v", got.Networking.SecurityGroups, got.Networking.SecurityGroupNames)
