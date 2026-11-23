@@ -35,13 +35,14 @@ const serverInstructions = "This server is read-only: its tools can look at the 
 // whoamiRoute validates a token for every MCP method other than tools/call.
 var whoamiRoute = Route{Method: http.MethodGet, Pattern: "/api/tokens/current"}
 
-// failureLimiter counts upstream 401s per client IP; a blocked IP gets 429
+// failureLimiter counts upstream 401s per client IP and token public id (with a higher per-IP ceiling across
+// ids); a blocked caller gets 429
 // without an upstream call. Malformed tokens never count: they cost
 // Harbormaster nothing.
 type failureLimiter interface {
-	Blocked(ip string) bool
-	Failed(ip string)
-	RetryAfter(ip string) time.Duration
+	Blocked(ip, tokenID string) bool
+	Failed(ip, tokenID string)
+	RetryAfter(ip, tokenID string) time.Duration
 }
 
 // requestState carries one HTTP request's identity into the SDK's tool
@@ -87,7 +88,7 @@ func NewHandler(cfg Config, up *Upstream, log *slog.Logger) http.Handler {
 		log = slog.New(slog.DiscardHandler)
 	}
 	up.maxBodyBytes = int64(upstreamReadCap(cfg.MaxResultBytes))
-	g := &gateway{cfg: cfg, up: up, log: log, limiter: newFailureLimiter(failureLimit, failureWindow, time.Now)}
+	g := &gateway{cfg: cfg, up: up, log: log, limiter: newFailureLimiter(failureLimit, failureIPCeiling, failureWindow, time.Now)}
 
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "harbormaster", Title: "Harbormaster", Version: Version},
@@ -186,8 +187,8 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	displayID := apitoken.DisplayID(parsed)
 
-	if g.limiter.Blocked(ip) {
-		g.writeBlocked(w, ip)
+	if g.limiter.Blocked(ip, displayID) {
+		g.writeBlocked(w, ip, displayID)
 		g.logRequest("", "", 0, started, ip, displayID, http.StatusTooManyRequests)
 		return
 	}
@@ -210,7 +211,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 			g.logRequest(method, "", 0, started, ip, displayID, http.StatusBadGateway)
 			return
 		case resp.Status == http.StatusUnauthorized:
-			g.limiter.Failed(ip)
+			g.limiter.Failed(ip, displayID)
 			g.writeUnauthorized(w)
 			g.logRequest(method, "", resp.Status, started, ip, displayID, http.StatusUnauthorized)
 			return
@@ -237,7 +238,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 
 	tool, upstreamStatus, unauthorized := state.snapshot()
 	if unauthorized {
-		g.limiter.Failed(ip)
+		g.limiter.Failed(ip, displayID)
 		g.writeUnauthorized(w)
 		g.logRequest(method, tool, upstreamStatus, started, ip, displayID, http.StatusUnauthorized)
 		return
@@ -316,8 +317,8 @@ func (g *gateway) logRequest(method, tool string, upstreamStatus int, started ti
 	g.log.Info("mcp request", attrs...)
 }
 
-func (g *gateway) writeBlocked(w http.ResponseWriter, ip string) {
-	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(g.limiter.RetryAfter(ip))))
+func (g *gateway) writeBlocked(w http.ResponseWriter, ip, tokenID string) {
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(g.limiter.RetryAfter(ip, tokenID))))
 	writeJSONError(w, http.StatusTooManyRequests, "rate_limited")
 }
 

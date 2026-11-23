@@ -932,3 +932,41 @@ func TestUpstreamReadCap(t *testing.T) {
 		t.Errorf("cap for 10000 = %d, want a small floor of at least 20000", got)
 	}
 }
+
+// A shared egress (corporate NAT, hosted connector) must not lose service for everyone because one client there
+// presents a bad token.
+func TestHandler_FailureLimitIsPerTokenNotPerIP(t *testing.T) {
+	h := newHarness(t, harnessOptions{upstream: func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}})
+	tokenOf := func() map[string]string {
+		raw, _, err := apitoken.Generate(apitoken.KindPAT)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]string{"Authorization": "Bearer " + raw}
+	}
+	bad := tokenOf()
+	for i := 0; i < failureLimit; i++ {
+		resp := h.rpc(t, bad, "tools/list", nil)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status %d, want 401", i, resp.StatusCode)
+		}
+		readBody(t, resp)
+	}
+	resp := h.rpc(t, bad, "tools/list", nil)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("the failing token after %d failures: status %d, want 429", failureLimit, resp.StatusCode)
+	}
+	readBody(t, resp)
+
+	before := len(h.upstream.seen())
+	resp = h.rpc(t, tokenOf(), "tools/list", nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("another token from the same IP: status %d, want 401 from upstream, not 429", resp.StatusCode)
+	}
+	readBody(t, resp)
+	if len(h.upstream.seen()) != before+1 {
+		t.Error("the other token's request never reached upstream")
+	}
+}
