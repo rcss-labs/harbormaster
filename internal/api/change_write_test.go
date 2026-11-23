@@ -555,3 +555,22 @@ func TestChangeBodies_TrailingJSONAndUnknownFieldsAreRejected(t *testing.T) {
 		t.Errorf("UpdateService called %d time(s), want none", got)
 	}
 }
+
+func TestRegister_NonAdminForeignLogGroupIs422AndNothingRegistered(t *testing.T) {
+	env := newWriteEnv(t)
+	draft := draftFor(t, env.login("sam"))
+	first := draft["containerDefinitions"].([]any)[0].(map[string]any)
+	logConfig := first["logConfiguration"].(map[string]any)
+	logConfig["options"].(map[string]any)["awslogs-group"] = "/ecs/prod/another-service"
+	body := map[string]any{"base_revision": 42, "definition": draft}
+	before := env.fk.Calls()["RegisterTaskDefinition"]
+	resp := env.login("deployer").post("/api/services/"+paymentsID()+"/revisions", body)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if code, msg := errorCode(t, resp); code != "invalid" || msg != "Changing where a container's logs go needs a global admin" {
+		t.Errorf("error = %s %q", code, msg)
+	}
+	if after := env.fk.Calls()["RegisterTaskDefinition"]; after != before {
+		t.Errorf("RegisterTaskDefinition called %d times for a rejected draft", after-before)
+	}
+	wantStatus(t, env.login("sam").post("/api/services/"+paymentsID()+"/revisions", body), http.StatusCreated)
+}

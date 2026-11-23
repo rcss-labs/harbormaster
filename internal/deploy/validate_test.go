@@ -504,3 +504,79 @@ func validate(base, draft Definition, admin bool, accountID string) error {
 	_, err := Prepare(base, draft, admin, accountID, nil)
 	return err
 }
+
+// A non-admin must not point a container's logs at another log group: Harbormaster reads
+// logs from the deployed definition with a role that can read every group.
+func TestValidate_LogDestination(t *testing.T) {
+	const logMsg = "Changing where a container's logs go needs a global admin"
+	awslogs := func(options map[string]any) map[string]any {
+		return map[string]any{"logDriver": "awslogs", "options": options}
+	}
+	group := func(name, region string) map[string]any {
+		options := map[string]any{"awslogs-group": name, "awslogs-stream-prefix": "ecs"}
+		if region != "" {
+			options["awslogs-region"] = region
+		}
+		return awslogs(options)
+	}
+	withLogs := func(logConfig map[string]any) func(Definition) {
+		return func(d Definition) { firstContainer(d)["logConfiguration"] = logConfig }
+	}
+	baseLogs := withLogs(group("/ecs/dev/payments", "us-east-1"))
+	secondContainerLogs := func(logConfig map[string]any) func(Definition) {
+		return func(d Definition) {
+			d["containerDefinitions"].([]any)[1].(map[string]any)["logConfiguration"] = logConfig
+		}
+	}
+	tests := []struct {
+		name    string
+		base    func(Definition)
+		mutate  func(Definition)
+		admin   bool
+		wantErr string
+	}{
+		{name: "non-admin changes group", base: baseLogs, mutate: withLogs(group("/ecs/prod/payments", "us-east-1")), wantErr: logMsg},
+		{name: "non-admin changes region", base: baseLogs, mutate: withLogs(group("/ecs/dev/payments", "eu-west-1")), wantErr: logMsg},
+		{name: "non-admin drops region the base set", base: baseLogs, mutate: withLogs(group("/ecs/dev/payments", "")), wantErr: logMsg},
+		{name: "non-admin upper-case group key", base: baseLogs, wantErr: logMsg, mutate: withLogs(awslogs(map[string]any{
+			"awslogs-group": "/ecs/dev/payments", "AWSLOGS-GROUP": "/ecs/prod/payments", "awslogs-region": "us-east-1"}))},
+		{name: "non-admin only upper-case group key", base: baseLogs, wantErr: logMsg, mutate: withLogs(awslogs(map[string]any{
+			"AWSLOGS-GROUP": "/ecs/prod/payments", "awslogs-region": "us-east-1"}))},
+		{name: "non-admin new container reuses base group", base: baseLogs, mutate: secondContainerLogs(group("/ecs/dev/payments", "us-east-1"))},
+		{name: "non-admin changes stream prefix and mode", base: baseLogs, mutate: withLogs(awslogs(map[string]any{
+			"awslogs-group": "/ecs/dev/payments", "awslogs-region": "us-east-1", "awslogs-stream-prefix": "new", "mode": "non-blocking"}))},
+		{name: "non-admin removes log configuration", base: baseLogs, mutate: func(d Definition) { delete(firstContainer(d), "logConfiguration") }},
+		{name: "admin changes group", admin: true, base: baseLogs, mutate: withLogs(group("/ecs/prod/payments", "us-east-1"))},
+		{name: "non-admin adds log configuration when base has none", mutate: withLogs(group("/ecs/prod/payments", "us-east-1")), wantErr: logMsg},
+		{name: "admin adds log configuration when base has none", admin: true, mutate: withLogs(group("/ecs/prod/payments", "us-east-1"))},
+		{name: "non-admin introduces a new driver", base: baseLogs, wantErr: logMsg,
+			mutate: withLogs(map[string]any{"logDriver": "splunk", "options": map[string]any{"splunk-url": "https://evil.example"}})},
+		{name: "non-admin changes non-awslogs options", wantErr: logMsg,
+			base:   withLogs(map[string]any{"logDriver": "splunk", "options": map[string]any{"splunk-url": "https://splunk.example"}}),
+			mutate: withLogs(map[string]any{"logDriver": "splunk", "options": map[string]any{"splunk-url": "https://evil.example"}})},
+		{name: "non-admin keeps non-awslogs options",
+			base:   withLogs(map[string]any{"logDriver": "splunk", "options": map[string]any{"splunk-url": "https://splunk.example"}}),
+			mutate: withLogs(map[string]any{"logDriver": "splunk", "options": map[string]any{"splunk-url": "https://splunk.example"}})},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base := validBase(t)
+			if tc.base != nil {
+				tc.base(base)
+			}
+			draft := cloneDefinition(t, base)
+			tc.mutate(draft)
+			err := validate(base, draft, tc.admin, testAccount)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			var validation *ValidationError
+			if !errors.As(err, &validation) || validation.Message != tc.wantErr {
+				t.Fatalf("Validate() = %v, want ValidationError %q", err, tc.wantErr)
+			}
+		})
+	}
+}
