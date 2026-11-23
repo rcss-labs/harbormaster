@@ -20,15 +20,24 @@ variable "public_subnet_ids" {
 }
 
 variable "internal" {
-  description = "Create an internal ALB in private_subnet_ids instead of an internet-facing one."
+  description = "Required. true puts Harbormaster on an internal ALB in private_subnet_ids (recommended; needed for HM_API_TOKENS). false creates an internet-facing ALB. There is no default, so an existing deployment that relied on the old default (false) must now set it explicitly instead of having its load balancer replaced."
   type        = bool
-  default     = false
 }
 
 variable "allowed_cidrs" {
-  description = "CIDR blocks allowed to reach the ALB."
+  description = "Required. CIDR blocks allowed to reach the ALB on 443. Use your VPN or office ranges; 0.0.0.0/0 makes the login page reachable from the whole internet."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = length(var.allowed_cidrs) > 0
+    error_message = "allowed_cidrs must list at least one CIDR block."
+  }
+}
+
+variable "alb_deletion_protection" {
+  description = "Turn on deletion protection for the ALB."
+  type        = bool
+  default     = true
 }
 
 variable "alb_ingress_security_group_ids" {

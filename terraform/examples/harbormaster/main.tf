@@ -26,6 +26,10 @@ module "harbormaster" {
   image              = local.image
   base_url           = local.base_url
 
+  # Keep Harbormaster private: reach it over VPN or from the office. List your own ranges.
+  internal      = true
+  allowed_cidrs = ["10.0.0.0/8"]
+
   # Split services (upgrade runbook: terraform/modules/harbormaster/README.md). Each step is a separate run; the
   # variables below are added one run at a time, never all at once.
   #   Run 3: split_services = true and a cache, with the legacy service still running.

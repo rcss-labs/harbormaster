@@ -108,10 +108,12 @@ module "harbormaster" {
   certificate_arn    = "arn:aws:acm:eu-west-1:<acct>:certificate/<certificate-id>"
   image              = "<acct>.dkr.ecr.eu-west-1.amazonaws.com/harbormaster:v1.0.0"
   base_url           = "https://harbormaster.example.com"
+  internal           = true
+  allowed_cidrs      = ["10.0.0.0/8"] # your VPN or office ranges
 }
 ```
 
-These five inputs are required. `public_subnet_ids` is also needed unless you set `internal = true`. The full input list is in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md), and [`terraform/examples/harbormaster/main.tf`](terraform/examples/harbormaster/main.tf) shows a complete call.
+These seven inputs are required: `internal` and `allowed_cidrs` (both have no default), plus `vpc_id`, `private_subnet_ids`, `certificate_arn`, `image` and `base_url`. `public_subnet_ids` is also needed unless you set `internal = true`. The full input list is in [`terraform/modules/harbormaster/README.md`](terraform/modules/harbormaster/README.md), and [`terraform/examples/harbormaster/main.tf`](terraform/examples/harbormaster/main.tf) shows a complete call.
 
 Plans and applies run in your Terraform runner (TerraDuckTel, env0, Terraform Cloud or similar); nothing is applied from a laptop. Apply the module with your Terraform pipeline.
 
