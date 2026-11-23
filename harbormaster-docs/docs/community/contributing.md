@@ -22,13 +22,13 @@ This page explains how to propose and submit changes to Harbormaster. It is for 
 
     Run the extra suites that touch your change (for example `make e2e` for UI flows, `make tf-check` for Terraform).
 6. **Commit with conventional commits:** `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `perf:`. Say why in the message body.
-7. **Open a pull request** against `main` and describe what changed, why, and how you tested it.
+7. **Open a pull request** against `main` and describe what changed, why, and how you tested it. CI runs on every pull request; `main` only accepts changes through a pull request whose `lint`, `go-test`, `web-test` and `tf-check` checks pass. See [Continuous integration](../development/testing.md#continuous-integration).
 
 ## Pull request checklist
 
 - [ ] The change is focused and linked to an issue when it is large.
 - [ ] Tests cover the new or fixed behavior.
-- [ ] `make lint test` passes.
+- [ ] `make lint test` passes locally, and the required CI checks are green.
 - [ ] Docs are updated if behavior, settings or Terraform inputs changed.
 - [ ] Third-party notices are updated if you add a bundled component (`tools/check-notices.sh` passes).
 - [ ] No secrets, credentials or real account IDs are included.
