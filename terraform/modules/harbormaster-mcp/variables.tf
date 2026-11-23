@@ -135,10 +135,9 @@ variable "upstream_timeout" {
 }
 
 variable "upstream_ca_pem" {
-  description = "HM_MCP_UPSTREAM_CA_PEM: PEM of extra CAs that sign the internal load balancer's certificate. A CA certificate is public, so it is passed as a plain environment value (not a secret), but it adds to the task definition's size. Marked sensitive only to keep it out of plan output. Null leaves it unset."
+  description = "HM_MCP_UPSTREAM_CA_PEM: PEM of extra CAs that sign the internal load balancer's certificate. A CA certificate is public, so it is passed as a plain environment value (not a secret), but it adds to the task definition's size. Not marked sensitive on purpose: that would mark the whole task definition sensitive and hide its image and environment changes in every plan. Null leaves it unset."
   type        = string
   default     = null
-  sensitive   = true
 }
 
 variable "alarm_sns_topic_arns" {

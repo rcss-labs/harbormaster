@@ -55,7 +55,7 @@ The tasks do have outbound 443 to `0.0.0.0/0` through the NAT gateway (image pul
 | `authorize_via_gateway` | bool | `false` | `HM_MCP_AUTHORIZE_VIA_GATEWAY`. Requires `authorize_url` (checked by a precondition on the task definition). |
 | `max_result_bytes` | number | `null` | `HM_MCP_MAX_RESULT_BYTES`; null uses the gateway default. |
 | `upstream_timeout` | string | `null` | `HM_MCP_UPSTREAM_TIMEOUT`, a duration such as `20s`; null uses the gateway default. |
-| `upstream_ca_pem` | string (sensitive) | `null` | `HM_MCP_UPSTREAM_CA_PEM`: PEM of extra CAs for the internal load balancer's certificate. A CA certificate is public, so it goes in as a plain environment value (visible in the task definition; not a secret); it only adds to the task definition's size. Sensitive only to keep it out of plan output. |
+| `upstream_ca_pem` | string | `null` | `HM_MCP_UPSTREAM_CA_PEM`: PEM of extra CAs for the internal load balancer's certificate. A CA certificate is public, so it goes in as a plain environment value (visible in the task definition; not a secret); it only adds to the task definition's size. Deliberately not sensitive, so plans keep showing the task definition's changes. |
 | `alarm_sns_topic_arns` | list(string) | `[]` | SNS topics for alarms. Empty creates no alarms. |
 | `access_logs_bucket` | string | `null` | S3 bucket for load balancer access logs; null is off. The bucket and its policy for regional ELB log delivery are yours to create. |
 | `access_logs_prefix` | string | `harbormaster-mcp` | Key prefix in that bucket. |
