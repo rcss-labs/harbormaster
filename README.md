@@ -379,6 +379,17 @@ An access token lets a script or an AI tool read Harbormaster as you, over the A
 - **Rate limit.** 120 requests in a burst, then 2 per second per user (HTTP 429 with `Retry-After`).
 - **Retention.** An expired token is deleted a day after it expires; the daily search ledger is kept 35 days.
 
+### Revoking every access token
+
+Turning `HM_API_TOKENS` or `HM_OAUTH` off stops tokens from working but deletes nothing: turning it back on revives every personal token, OAuth grant and pending authorization code that has not expired (up to 90 days). After an incident, delete them for real with the CLI, run in the same environment as the server (it needs only the database settings and works with both switches on or off):
+
+```sh
+harbormaster revoke-tokens --all           # every user's tokens, OAuth grants and pending codes, in one transaction
+harbormaster revoke-tokens --user alice    # one user's tokens, grants and codes
+```
+
+Without `--all` or `--user` the command prints its usage and exits 2 without deleting anything. It prints how many tokens, grants and codes it removed and writes one audit entry (`tokens_revoke_all`, or `tokens_revoke_user`) by actor `cli` with the counts, never a token value. Users then create new tokens or approve their connectors again.
+
 ## Terraform and Harbormaster deploys
 
 AWS is the source of truth, and Terraform will see a revision registered here as
