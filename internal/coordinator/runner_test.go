@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -423,11 +424,25 @@ func holdFor(t *testing.T, r *coordinator.Runner) {
 	t.Cleanup(func() { cancel(); wg.Wait() })
 }
 
+// Every configured retention period must reach the retention job. Setting each field to a distinct value through
+// reflection means a period added to the config later fails here until RetentionFrom carries it over.
 func TestRetentionFrom_MapsEveryPeriod(t *testing.T) {
-	cfg := config.Config{Retention: config.RetentionConfig{
-		AvailabilityDaily: 1 * time.Hour, CapacityDaily: 2 * time.Hour, UtilDaily: 3 * time.Hour, NotificationLog: 30 * 24 * time.Hour}}
-	got := coordinator.RetentionFrom(cfg)
-	if got.AvailabilityDaily != time.Hour || got.CapacityDaily != 2*time.Hour || got.UtilDaily != 3*time.Hour || got.NotificationLog != 30*24*time.Hour {
-		t.Fatalf("retention = %+v, want the configured periods carried over", got)
+	var cfg config.Config
+	configured := reflect.ValueOf(&cfg.Retention).Elem()
+	for i := 0; i < configured.NumField(); i++ {
+		configured.Field(i).Set(reflect.ValueOf(time.Duration(i+1) * time.Hour))
+	}
+
+	got := reflect.ValueOf(coordinator.RetentionFrom(cfg))
+	for i := 0; i < configured.NumField(); i++ {
+		name := configured.Type().Field(i).Name
+		carried := got.FieldByName(name)
+		if !carried.IsValid() {
+			t.Errorf("store.Retention has no field %s for the configured period", name)
+			continue
+		}
+		if want := configured.Field(i).Interface(); carried.Interface() != want {
+			t.Errorf("%s = %v, want %v carried over from config", name, carried.Interface(), want)
+		}
 	}
 }
