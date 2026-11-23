@@ -12,6 +12,10 @@ const OMER_TOKEN_NAME = 'floci-omer-token'
 const PHONE_TOKEN_NAME = 'floci-phone-token'
 const NAME_PREFIX = 'floci-'
 
+// The config's storageState (admin's session) also seeds request contexts, so a context meant to carry no cookie must
+// say so; otherwise omer's sign-in would present admin's cookie and end admin's session.
+const NO_COOKIES = { cookies: [], origins: [] }
+
 async function csrfOf(request: APIRequestContext): Promise<string> {
   const me = await request.get('/api/me')
   expect(me.status(), 'GET /api/me').toBe(200)
@@ -39,7 +43,7 @@ async function createOmerToken(admin: APIRequestContext, playwright: PlaywrightW
   expect(reset.status(), 'reset omer password').toBe(200)
   const temporary = ((await reset.json()) as { temporary_password: string }).temporary_password
 
-  const omerContext = await playwright.request.newContext({ baseURL })
+  const omerContext = await playwright.request.newContext({ baseURL, storageState: NO_COOKIES })
   try {
     const login = await omerContext.post('/api/auth/login', { data: { username: 'omer', password: temporary } })
     expect(login.status(), 'omer sign-in').toBe(200)
@@ -127,7 +131,7 @@ test.describe('access tokens (desktop)', () => {
     await expect(page.getByText('Command copied')).toBeVisible()
 
     // The token really works as a bearer on a read route (a fresh context: no cookie to fall back on).
-    const bare = await playwright.request.newContext({ baseURL })
+    const bare = await playwright.request.newContext({ baseURL, storageState: NO_COOKIES })
     try {
       const current = await bare.get('/api/tokens/current', { headers: { Authorization: `Bearer ${secret}` } })
       expect(current.status(), 'the new token reads /api/tokens/current').toBe(200)
@@ -180,7 +184,7 @@ test.describe('access tokens (desktop)', () => {
     await expect(card.getByText(TOKEN_NAME, { exact: true })).toHaveCount(0)
 
     expect(secret, 'the create test ran first').not.toBe('')
-    const bare = await playwright.request.newContext({ baseURL })
+    const bare = await playwright.request.newContext({ baseURL, storageState: NO_COOKIES })
     try {
       const current = await bare.get('/api/tokens/current', { headers: { Authorization: `Bearer ${secret}` } })
       expect(current.status(), 'the revoked token is refused').toBe(401)
@@ -194,7 +198,8 @@ test.describe('access tokens (desktop)', () => {
 
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/settings/users')
-    const row = page.getByRole('row').filter({ hasText: 'omer' })
+    // The permissions matrix has an omer row too; the users table's row is the one with his Actions menu.
+    const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Actions for omer' }) })
     await expect(row).toBeVisible()
     await row.getByRole('button', { name: 'Actions for omer' }).click()
     await page.getByRole('menuitem', { name: /^Access tokens \(\d+\)…$/ }).click()

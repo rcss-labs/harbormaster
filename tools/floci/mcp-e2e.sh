@@ -346,14 +346,14 @@ call_tool "$ADMIN_HDR" list_clusters '{"limit":50}'
 CLUSTERS_TEXT=$TEXT
 ADMIN_CLUSTER_COUNT=$(jq -r '.items | length' <<<"$CLUSTERS_TEXT" 2>/dev/null || echo 0)
 CORE_ID=$(jq -r '.items[]? | select(.name == "core-services") | .id' <<<"$CLUSTERS_TEXT" | head -n 1)
-call_tool "$ADMIN_HDR" list_services '{"limit":50}'
+call_tool "$ADMIN_HDR" list_services '{}'
 SERVICES_TEXT=$TEXT
 SERVICE_JSON=$(jq -c '[.items[]? | select(.name == "payments-api")][0] // .items[0] // empty' <<<"$SERVICES_TEXT" 2>/dev/null || true)
 SERVICE_ID=$(jq -r '.id // empty' <<<"${SERVICE_JSON:-null}")
 SERVICE_REVISION=$(jq -r '.revision // empty' <<<"${SERVICE_JSON:-null}")
 SERVICE_REGION=$(jq -r '.region // empty' <<<"${SERVICE_JSON:-null}")
 if [ -z "$SERVICE_ID" ] || [ -z "$CORE_ID" ]; then
-  fail "discover clusters and services" "no core-services cluster or no services ($ADMIN_CLUSTER_COUNT clusters); run make floci-seed and connect.sh"
+  fail "discover clusters and services" "no core-services cluster or no services ($ADMIN_CLUSTER_COUNT clusters; list_services isError=$IS_ERR rpc_error='$RPC_ERR' text='${TEXT:0:200}'); run make floci-seed and connect.sh"
   exit 1
 fi
 ok "discovered core-services ($ADMIN_CLUSTER_COUNT clusters visible), service $(jq -r '.name' <<<"$SERVICE_JSON") in $SERVICE_REGION"
@@ -391,7 +391,7 @@ tool_args() {
     whoami | get_overview | list_alerts | list_networks | list_storage | list_security | list_log_search_services) echo '{}' ;;
     list_clusters) echo '{"limit":50}' ;;
     get_cluster) jq -nc --arg c "$CORE_ID" '{cluster_id:$c}' ;;
-    list_services) echo '{"limit":20}' ;;
+    list_services) echo '{}' ;;
     list_tasks) echo '{"filter":"all","limit":20}' ;;
     search) echo '{"q":"payments"}' ;;
     search_config) echo '{"q":"payments"}' ;;
@@ -475,7 +475,10 @@ hm_bearer "$ADMIN_HDR" GET /api/users "" -b "$ADMIN_JAR"
 if [ "$STATUS" = 403 ] && body_has token_not_allowed; then ok "token + admin session cookie: cookie ignored, GET /api/users -> 403"; else fail "token + admin session cookie: cookie ignored" "HTTP $STATUS"; fi
 hm_bearer "$ADMIN_HDR" POST "/api/services/$SERVICE_ID/restart" '{}' -b "$ADMIN_JAR" -H "X-CSRF-Token: $(cat "$ADMIN_JAR.csrf")"
 if [ "$STATUS" = 403 ] && body_has token_not_allowed; then ok "token + session cookie + CSRF: restart still 403"; else fail "token + session cookie + CSRF: restart still 403" "HTTP $STATUS"; fi
-printf 'Authorization: Bearer hmp_%s\n' "$(openssl rand -hex 20)" >"$WORK/garbage.hdr"
+# A token-shaped unknown token (hmp_ + 12 base32 id + _ + 43 base64url secret): only that shape is a token request, any
+# other Authorization value is ignored and the session applies, by design.
+printf 'Authorization: Bearer hmp_%s_%s\n' "$(LC_ALL=C tr -dc 'a-z2-7' </dev/urandom | head -c 12)" \
+  "$(LC_ALL=C tr -dc 'A-Za-z0-9_-' </dev/urandom | head -c 43)" >"$WORK/garbage.hdr"
 hm_bearer "$WORK/garbage.hdr" GET /api/clusters "" -b "$ADMIN_JAR"
 expect_status "unknown hmp_ token + valid session cookie -> 401 (never falls back to the session)" 401
 
@@ -489,7 +492,7 @@ OMER_CLUSTER_COUNT=$(jq -r '.items | length' <<<"$TEXT" 2>/dev/null || echo -1)
 OMER_HAS_CORE=$(jq -r '[.items[]? | select(.name == "core-services")] | length' <<<"$TEXT" 2>/dev/null || echo -1)
 check "omer's list_clusters hides Prod core-services (admin sees it)" "$([ "$OMER_HAS_CORE" = 0 ] && echo 0 || echo 1)" "omer sees core-services ($OMER_HAS_CORE)"
 check "omer sees fewer clusters than admin ($OMER_CLUSTER_COUNT < $ADMIN_CLUSTER_COUNT)" "$([ "$OMER_CLUSTER_COUNT" -ge 0 ] && [ "$OMER_CLUSTER_COUNT" -lt "$ADMIN_CLUSTER_COUNT" ] && echo 0 || echo 1)" "omer $OMER_CLUSTER_COUNT, admin $ADMIN_CLUSTER_COUNT"
-call_tool "$OMER_HDR" list_services '{"limit":50}'
+call_tool "$OMER_HDR" list_services '{}'
 OMER_CORE_SERVICES=$(jq -r '[.items[]? | select((.cluster | if type == "object" then .name else . end) == "core-services")] | length' <<<"$TEXT" 2>/dev/null || echo -1)
 check "omer's list_services has no core-services service" "$([ "$OMER_CORE_SERVICES" = 0 ] && echo 0 || echo 1)" "count $OMER_CORE_SERVICES"
 call_tool "$OMER_HDR" get_cluster "$(jq -nc --arg c "$CORE_ID" '{cluster_id:$c}')"
