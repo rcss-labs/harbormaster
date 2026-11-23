@@ -52,7 +52,7 @@ GitHub Actions runs `.github/workflows/ci.yml` on every pull request and every p
 | `images` | Builds and runtime-checks the server, scanner and MCP images | No, reported only |
 | `vulncheck` | `make vulncheck`: fails on called advisories not listed, with a reason, in `tools/vulncheck-accepted.txt` | No, reported only |
 
-- `main` is protected: changes arrive through a pull request, and the four required checks must pass. This applies to administrators too.
+- `main` is protected: changes arrive through a pull request with one approval, and the four required checks must pass. Repository administrators can bypass these rules.
 - The `go-test` service images are pinned to the same versions as `make test-db` and `tools/kv-images.txt`. The job's first step fails if they drift, so change a pin in both places.
 - When `e2e` fails, its screenshots and traces are attached to the run as the `e2e-failures` artifact for 7 days.
 - `.github/workflows/soak.yml` runs `make soak` every Monday at 03:00 UTC. Start it by hand from the Actions tab with **Run workflow**.
