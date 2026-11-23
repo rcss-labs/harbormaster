@@ -1,0 +1,137 @@
+site_name: Harbormaster
+site_description: A web control center for AWS ECS
+repo_url: https://github.com/rcss-labs/harbormaster
+repo_name: rcss-labs/harbormaster
+edit_uri: edit/main/harbormaster-docs/docs/
+copyright: Copyright &copy; 2026 RCSS Labs. Released under the MIT licence.
+
+theme:
+  name: material
+  logo: assets/main_logo.png
+  favicon: assets/main_logo.png
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - What is Harbormaster: getting-started/what-is-harbormaster.md
+      - Concepts: getting-started/concepts.md
+      - Architecture: getting-started/architecture.md
+      - Quickstart (local): getting-started/quickstart-local.md
+      - Quickstart (AWS): getting-started/quickstart-aws.md
+  - Install:
+      - Prerequisites: install/prerequisites.md
+      - Build the image: install/build-image.md
+      - Deploy with Terraform: install/deploy-with-terraform.md
+      - First run: install/first-run.md
+      - Connect AWS accounts: install/connect-aws-accounts.md
+      - Single sign-on (SAML): install/single-sign-on.md
+      - Split services: install/split-services.md
+      - MCP gateway: install/mcp-gateway.md
+      - Upgrading: install/upgrading.md
+  - User guides:
+      - Navigating the web app: guides/navigating.md
+      - Overview, clusters and tasks: guides/overview-and-clusters.md
+      - Services: guides/services.md
+      - Deploy a change: guides/deploy-a-change.md
+      - Roll back: guides/roll-back.md
+      - Logs: guides/logs.md
+      - Log search: guides/log-search.md
+      - Config search: guides/config-search.md
+      - Terminal: guides/terminal.md
+      - Timeline: guides/timeline.md
+      - Scaling and off-hours: guides/scaling-and-off-hours.md
+      - Image security: guides/image-security.md
+      - Alert notifications: guides/alert-notifications.md
+      - Users, tags and permissions: guides/users-tags-permissions.md
+      - Access tokens: guides/access-tokens.md
+      - AI access (MCP): guides/ai-access-mcp.md
+      - Network and storage: guides/network-and-storage.md
+      - AWS accounts: guides/aws-accounts.md
+      - Audit log: guides/audit-log.md
+  - Operations:
+      - Health and metrics: operations/health-and-metrics.md
+      - High availability: operations/high-availability.md
+      - Throttling and limits: operations/throttling-and-limits.md
+      - AWS costs: operations/aws-costs.md
+      - Data retention: operations/data-retention.md
+      - Backup and restore: operations/backup-and-restore.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Runbooks:
+          - MCP gateway: operations/runbooks/mcp-gateway.md
+          - ECS API budget: operations/runbooks/ecs-api-budget.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Command line: reference/cli.md
+      - HTTP API: reference/api.md
+      - Permissions: reference/permissions.md
+      - Metrics: reference/metrics.md
+      - "Terraform: harbormaster": reference/terraform-harbormaster.md
+      - "Terraform: harbormaster-access": reference/terraform-access.md
+      - "Terraform: harbormaster-mcp": reference/terraform-mcp.md
+      - Glossary: reference/glossary.md
+      - FAQ: reference/faq.md
+  - Security:
+      - Security model: security/security-model.md
+      - IAM and AWS access: security/iam-and-aws-access.md
+      - Hardening checklist: security/hardening.md
+      - Reporting vulnerabilities: security/reporting-vulnerabilities.md
+  - Development:
+      - Development environment: development/dev-environment.md
+      - Repository layout: development/repository-layout.md
+      - Testing: development/testing.md
+      - Local AWS with floci: development/local-aws-with-floci.md
+      - Frontend: development/frontend.md
+      - Coding conventions: development/coding-conventions.md
+      - Release process: development/release-process.md
+      - Writing docs: development/writing-docs.md
+  - Community:
+      - Contributing: community/contributing.md
+      - Code of conduct: community/code-of-conduct.md
+      - Governance: community/governance.md
+      - Support: community/support.md
+      - Licence: community/license.md
+      - Changelog: community/changelog.md

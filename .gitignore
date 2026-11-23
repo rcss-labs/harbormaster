@@ -14,8 +14,8 @@ web/e2e/.auth/
 # IDE settings (local only)
 .idea/
 
-# Project docs are kept locally, not in the repository
-docs/
+# Internal design notes are kept locally, not in the repository (harbormaster-docs/ is the published documentation)
+/docs/
 
 # Local OS and tool state
 **/.DS_Store
