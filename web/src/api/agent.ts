@@ -184,3 +184,69 @@ export async function sendMessage(
   if (signal.aborted) return
   if (!finished) throw new ApiError('agent_unavailable', UNAVAILABLE, 503)
 }
+
+// ---- Admin settings and usage ----
+
+export interface AgentCatalogueModel {
+  id: string
+  input_per_mtok_micro_usd: number
+  output_per_mtok_micro_usd: number
+  context_tokens: number
+}
+export interface AgentChatModel {
+  provider: string
+  model: string
+  /** False when the operator no longer offers this model. */
+  available: boolean
+}
+export interface AgentSettingsDTO {
+  monthly_budget_usd: string
+  unredacted_providers: string[]
+  role_models: { chat?: AgentChatModel }
+  catalogue: { providers: { provider: string; models: AgentCatalogueModel[] }[] }
+  agent_reachable: boolean
+  spend: { month: string; settled_usd: string; reserved_usd: string }
+}
+export interface AgentSettingsUpdate {
+  monthly_budget_usd: string
+  unredacted_providers: string[]
+  role_models: { chat?: { provider: string; model: string } }
+}
+export interface AgentTestResult {
+  ok: boolean
+  kind: string
+  message: string
+}
+export interface AgentUsageDTO {
+  month: string
+  days: { day: string; role: string; runs: number; cost_usd: string; input_tokens: number; output_tokens: number }[]
+}
+
+const SETTINGS_KEY = ['agent', 'settings'] as const
+
+export function useAgentSettings() {
+  return useQuery({ queryKey: SETTINGS_KEY, queryFn: () => api.get<AgentSettingsDTO>('/api/agent/settings') })
+}
+
+export function useSaveAgentSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: AgentSettingsUpdate) => api.put<AgentSettingsDTO>('/api/agent/settings', body),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(SETTINGS_KEY, saved)
+      void queryClient.invalidateQueries({ queryKey: STATUS_KEY })
+    },
+  })
+}
+
+export function useTestAgentModel() {
+  return useMutation({
+    mutationFn: (body: { provider: string; model: string }) => api.post<AgentTestResult>('/api/agent/settings/test', body),
+  })
+}
+
+export function useAgentUsage() {
+  return useQuery({ queryKey: ['agent', 'usage'], queryFn: () => api.get<AgentUsageDTO>('/api/agent/usage') })
+}
+
+export const setUserAiChat = (userId: number, on: boolean) => api.post(`/api/users/${userId}/ai-chat`, { on })

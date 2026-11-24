@@ -345,3 +345,27 @@ describe('acting on yourself', () => {
     await waitFor(() => expect(configFetches).toBeGreaterThan(before))
   })
 })
+
+describe('AI chat switch', () => {
+  it('toggles AI chat for a user', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true })),
+      http.post(`/api/users/${OMER_ID}/ai-chat`, async ({ request }) => {
+        bodies.push(await request.json())
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderApp('/settings/users')
+    const toggle = await screen.findByRole('checkbox', { name: 'AI chat for omer' })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+    await waitFor(() => expect(bodies).toEqual([{ on: true }]))
+  })
+
+  it('hides the switch while the agent is off', async () => {
+    renderApp('/settings/users')
+    expect(await screen.findByText('omer', { selector: 'td div' })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'AI chat for omer' })).not.toBeInTheDocument()
+  })
+})
