@@ -1,15 +1,15 @@
 /* Logs tab: one panel that fills the window below the tabs (.hm-fill-col), with the log box scrolling inside it (.hm-fill-scroll). */
-.root { flex: 1 1 0; min-height: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.root { flex: 1 1 0; min-height: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
-.ctl { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: inherit; font: inherit; max-width: 100%; }
+.ctl { height: 32px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: inherit; font: inherit; max-width: 100%; }
 .search { width: 220px; flex: 0 1 220px; min-width: 0; }
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; color: inherit; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; color: inherit; }
 .btn:hover { background: var(--hover); }
 .status { margin-left: auto; color: var(--muted); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
 .mono { font-family: var(--mono); }
 .banners { display: flex; flex-direction: column; gap: 8px; padding: 8px var(--pad) 0; }
 .banners:empty { display: none; }
-.bannerAction { margin-left: 10px; }
+.bannerAction { margin-left: 12px; }
 .logs { background: var(--bg); font-family: var(--mono); font-size: 12px; line-height: 22px; padding: 4px 0; margin: 8px var(--pad) var(--pad); border: 1px solid var(--border); border-radius: var(--radius); }
 .older { display: block; margin: 0 12px 8px; }
 /* One row per line: fixed time and stream tracks that never wrap, and a message that wraps so long lines stay readable. */

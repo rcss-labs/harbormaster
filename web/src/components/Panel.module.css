@@ -1,11 +1,11 @@
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); min-width: 0; }
-.head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 40px; padding: 6px var(--pad); border-bottom: 1px solid var(--border); }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); min-width: 0; }
+.head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
 .head.tall { min-height: 44px; }
-.head.mid { min-height: 42px; }
-.legend { margin-left: auto; display: flex; align-items: center; gap: 14px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.head.mid { min-height: 44px; }
+.legend { margin-left: auto; display: flex; align-items: center; gap: 16px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
 .legend + .actions { margin-left: 0; }
-.foot { padding: 8px var(--pad); border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; border-radius: 0 0 var(--r) var(--r); }
-.title { font-size: 13px; font-weight: 600; margin: 0; }
+.foot { padding: 8px var(--pad); border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; border-radius: 0 0 var(--r-panel) var(--r-panel); }
+.title { font-size: 14px; line-height: 20px; font-weight: 500; margin: 0; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .actions { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .body { padding: var(--pad); }

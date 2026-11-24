@@ -1,39 +1,39 @@
 /* Clusters list and cluster detail (docs/redesign/README.md, screens 2 and 3). The page is a size container, so the
    two-column grid stacks when the main column, not the viewport, is under 1100px. */
-.page { display: flex; flex-direction: column; gap: 14px; min-width: 0; container-type: inline-size; }
-.pageHead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
-.pageHead h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+.page { display: flex; flex-direction: column; gap: 16px; min-width: 0; container-type: inline-size; }
+.pageHead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pageHead h1 { margin: 0; }
 .titles { display: grid; gap: 4px; min-width: 0; }
-.titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.monoTitle { font-family: var(--mono); letter-spacing: -0.02em; }
+.titleRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.monoTitle { font-family: var(--mono); }
 .meta { color: var(--muted); font-size: 12px; align-self: baseline; }
 .metaLine { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font: 12px var(--mono); color: var(--dim); }
 .metaLine > span:not(:only-child) { color: var(--muted); }
 .accentLink { color: var(--accent); }
 .actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
-.btn { height: 28px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .btn:hover { background: var(--hover-strong); }
 
 .filterBar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.tagSelect { height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; font-size: 12px; max-width: 100%; }
-.nameSearch { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; width: 260px; max-width: 100%; }
+.tagSelect { height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; font-size: 12px; max-width: 100%; }
+.nameSearch { height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; width: 260px; max-width: 100%; }
 
-.tablePanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; overflow: hidden; }
+.tablePanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); min-width: 0; overflow: hidden; }
 .note { font-size: 12px; color: var(--dim); }
 
-.twoCol { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.twoCol { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 @container (max-width: 1100px) {
   .twoCol { grid-template-columns: minmax(0, 1fr); }
 }
 .chartFrame { min-width: 0; overflow: hidden; }
 .stopsBlock { margin-top: 16px; }
-.stopsTitle { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+.stopsTitle { margin: 0 0 6px; font-size: 12px; font-weight: 500; }
 .count { font: 12px var(--mono); color: var(--muted); }
 .kpiSub { font: 400 12px var(--sans); letter-spacing: 0; color: var(--muted); margin-left: 6px; white-space: nowrap; }
 
 /* Tasks by service: one row per service, a stacked bar with a desired tick, then the running / desired count */
-.barList { display: grid; gap: 10px; min-width: 0; }
-.barRow { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; gap: 10px; align-items: center; min-width: 0; }
+.barList { display: grid; gap: 8px; min-width: 0; }
+.barRow { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; gap: 8px; align-items: center; min-width: 0; }
 .barName { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .barName:hover { color: var(--accent); }
 .barTrack { position: relative; min-width: 0; }
@@ -44,12 +44,12 @@
 .mono { font-family: var(--mono); font-size: 12px; }
 .muted { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .dim { color: var(--dim); }
-.nameCell { display: grid; line-height: 1.25; min-width: 0; }
-.clusterLink { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nameCell { display: grid; line-height: 16px; min-width: 0; }
+.clusterLink { font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clusterLink:hover { color: var(--accent); }
-.where { font: 12px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.svcPreview { display: flex; gap: 10px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
-.svcLink { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+.where { font: 12px/16px var(--sans); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svcPreview { display: flex; gap: 8px; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
+.svcLink { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
 .svcLink:hover { color: var(--text); }
 .svcDot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; flex: none; }
 .svcMore { font: 12px var(--mono); color: var(--dim); }
@@ -61,8 +61,8 @@
 .usageGap { flex: 1; }
 .usageNow { font: 12px var(--mono); width: 40px; text-align: right; }
 
-.noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-.noAccess h2 { margin: 0; font-size: 12.5px; }
+.noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); }
+.noAccess h2 { margin: 0; font-size: 13px; }
 .noAccess p { margin: 0; color: var(--muted); }
 
 /* Section chips: display contents keeps each section's panel as the grid or flex item it was. */

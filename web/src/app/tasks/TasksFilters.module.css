@@ -2,7 +2,7 @@
 .badge { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-size: 12px; line-height: 16px; text-align: center; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; color: var(--text-2); }
-.select { width: 100%; min-height: 44px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 400 16px var(--sans); }
+.select { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 400 16px var(--sans); }
 .fields { display: flex; flex-direction: column; }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .lab { font-size: 13px; font-weight: 500; color: var(--text-2); }

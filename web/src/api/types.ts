@@ -3,7 +3,7 @@
 
 export type Status = 'steady' | 'deploying' | 'degraded' | 'failing' | 'unhealthy_task' | 'scaled_to_zero'
 export type ClusterStatus = 'healthy' | 'degraded' | 'deploying' | 'needs_attention'
-export type TagColor = 'neutral' | 'red' | 'amber' | 'blue' | 'violet' | 'green'
+export type TagColor = 'neutral' | 'red' | 'orange' | 'amber' | 'brown' | 'lime' | 'green' | 'teal' | 'blue' | 'indigo' | 'violet' | 'pink'
 export type Health = 'HEALTHY' | 'UNHEALTHY' | 'UNKNOWN'
 /** FARGATE, FARGATE_SPOT, EXTERNAL, or the name of an EC2 capacity provider. */
 export type Capacity = string

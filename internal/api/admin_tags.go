@@ -22,7 +22,11 @@ const (
 	devDefaultMessage = "Dev is the default tag."
 )
 
-var tagColors = map[string]bool{"neutral": true, "red": true, "amber": true, "blue": true, "violet": true, "green": true}
+// tagColors matches the check on tags.color (migration 0215) and TAG_COLORS in the web app.
+var tagColors = map[string]bool{
+	"neutral": true, "red": true, "orange": true, "amber": true, "brown": true, "lime": true,
+	"green": true, "teal": true, "blue": true, "indigo": true, "violet": true, "pink": true,
+}
 
 // TagUserDTO is a non-admin user holding some permission on a tag.
 type TagUserDTO struct {

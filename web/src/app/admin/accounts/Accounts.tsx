@@ -159,7 +159,7 @@ export function Accounts() {
       key: 'role',
       header: 'Role Harbormaster assumes',
       phone: 'hidden',
-      width: 'minmax(220px, 2fr)',
+      width: 'minmax(180px, 2fr)',
       render: (account) => <span className={`${styles.mono} ${styles.small}`}>{account.role_arn}</span>,
     },
     { key: 'regions', header: 'Regions scanned', width: 'minmax(150px, 1fr)', render: (account) => account.regions.join(', ') },
@@ -174,7 +174,7 @@ export function Accounts() {
     {
       key: 'status',
       header: 'Status',
-      width: 'minmax(200px, 1.5fr)',
+      width: 'minmax(140px, 1.2fr)',
       render: (account) => (
         <AccountStatus account={account} polled={polledFor(account)} tested={testResults[account.id]} detail={phone ? 'none' : 'inline'} />
       ),
