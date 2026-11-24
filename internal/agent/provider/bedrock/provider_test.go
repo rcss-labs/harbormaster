@@ -330,6 +330,7 @@ func TestGenerate_MapsErrors(t *testing.T) {
 		{"forbidden", 403, "AccessDeniedException", "no access", nil, "auth", false, 0},
 		{"rate limited", 429, "ThrottlingException", "slow down", http.Header{"Retry-After": {"7"}}, "rate_limited", true, 7 * time.Second},
 		{"server error", 500, "InternalServerException", "oops", nil, "unavailable", true, 0},
+		{"bad gateway without error type", 502, "", "upstream", nil, "unavailable", true, 0},
 		{"unavailable", 503, "ServiceUnavailableException", "busy", nil, "unavailable", true, 0},
 		{"context length", 400, "ValidationException", "Input is too long for requested model.", nil, "context_too_long", false, 0},
 		{"other validation", 400, "ValidationException", "The provided model identifier is invalid.", nil, "invalid_request", false, 0},
@@ -379,10 +380,12 @@ func TestGenerate_MidStreamFailure_ReturnsUnavailableWithUsage(t *testing.T) {
 		fixture   string
 		retryable bool
 		wantText  string
+		wantUsage provider.Usage
 	}{
-		{"exception after text", "midstream_exception.json", false, "partial"},
-		{"exception before text", "early_exception.json", true, ""},
-		{"stream ends without stop", "truncated.json", false, "partial"},
+		{"exception after text", "midstream_exception.json", false, "partial", provider.Usage{}},
+		{"exception after usage", "exception_after_usage.json", false, "partial", provider.Usage{InputTokens: 9, OutputTokens: 2}},
+		{"exception before text", "early_exception.json", true, "", provider.Usage{}},
+		{"stream ends without stop", "truncated.json", false, "partial", provider.Usage{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -393,8 +396,11 @@ func TestGenerate_MidStreamFailure_ReturnsUnavailableWithUsage(t *testing.T) {
 			if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable != tc.retryable {
 				t.Fatalf("err = %#v", err)
 			}
-			if resp.Text != tc.wantText {
-				t.Fatalf("resp.Text = %q", resp.Text)
+			if resp.Text != tc.wantText || resp.Usage != tc.wantUsage {
+				t.Fatalf("resp = %+v", resp)
+			}
+			if len(deltas) > 0 && strings.Join(deltas, "") != tc.wantText {
+				t.Fatalf("deltas = %q", deltas)
 			}
 		})
 	}
@@ -419,24 +425,32 @@ func TestGenerate_MidStreamConnectionDrop_ReturnsUnavailable(t *testing.T) {
 }
 
 func TestGenerate_ContextCancel_ReturnsContextError(t *testing.T) {
-	started := make(chan struct{})
+	// The stream is open and has delivered text when the context is cancelled.
+	body := loadFixture(t, "truncated.json")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/vnd.amazon.eventstream")
-		w.WriteHeader(200)
+		_, _ = w.Write(body)
 		w.(http.Flusher).Flush()
-		close(started)
 		<-r.Context().Done()
 	}))
 	defer srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { <-started; cancel() }()
-	_, err := newTestProvider(t, srv.URL).Generate(ctx, simpleRequest(), nil)
-	if !errors.Is(err, context.Canceled) {
+	defer cancel()
+	_, err := newTestProvider(t, srv.URL).Generate(ctx, simpleRequest(), func(string) { cancel() })
+	var perr *provider.Error
+	if !errors.Is(err, context.Canceled) || errors.As(err, &perr) {
 		t.Fatalf("err = %#v", err)
 	}
+}
+
+func TestGenerate_CancelledBeforeRequest_ReturnsContextError(t *testing.T) {
+	srv, _ := streamServer(t, "text_only.json")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := newTestProvider(t, srv.URL).Generate(ctx, simpleRequest(), nil)
 	var perr *provider.Error
-	if errors.As(err, &perr) {
-		t.Fatalf("cancellation must not be a provider.Error: %v", err)
+	if !errors.Is(err, context.Canceled) || errors.As(err, &perr) {
+		t.Fatalf("err = %#v", err)
 	}
 }
 
@@ -537,5 +551,50 @@ func TestNew_RejectsBadRegion(t *testing.T) {
 		if _, err := New(Config{Region: region}); err == nil {
 			t.Fatalf("region %q accepted", region)
 		}
+	}
+}
+
+// The task role arrives through the container credentials endpoint; the
+// restricted HTTP client must still be able to fetch from it.
+func TestClient_UsesContainerCredentialsEndpoint(t *testing.T) {
+	var credHits atomic.Int32
+	creds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		credHits.Add(1)
+		if r.Header.Get("Authorization") != "fake-container-token" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"AccessKeyId":     "AKIDCONTAINER",
+			"SecretAccessKey": fakeSecret,
+			"Token":           "fake-session-token",
+			"Expiration":      time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		})
+	}))
+	defer creds.Close()
+	srv, got := streamServer(t, "text_only.json")
+	var authorization string
+	inner := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		inner.ServeHTTP(w, r)
+	})
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", creds.URL+"/creds")
+	t.Setenv("AWS_CONTAINER_AUTHORIZATION_TOKEN", "fake-container-token")
+
+	p, err := New(Config{Region: "us-east-1", Endpoint: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Generate(context.Background(), simpleRequest(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if credHits.Load() != 1 || !strings.Contains(authorization, "Credential=AKIDCONTAINER/") || got.path == "" {
+		t.Fatalf("credential hits = %d, authorization = %q", credHits.Load(), authorization)
 	}
 }
