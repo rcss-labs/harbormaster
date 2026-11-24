@@ -482,6 +482,8 @@ export interface UserDTO {
   display_name: string | null
   /** Unexpired personal access tokens; absent while tokens are off (HM_API_TOKENS=false). */
   token_count?: number
+  /** The user may use the agent chat. */
+  ai_chat: boolean
 }
 export interface UsersDTO {
   items: UserDTO[]

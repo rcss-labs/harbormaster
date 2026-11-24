@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
+import { setUserAiChat } from '../../../api/agent'
 import { api } from '../../../api/client'
 import type { PermissionsDTO, UserDTO } from '../../../api/types'
 import { Ago } from '../../../components/Ago'
@@ -145,11 +146,26 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
       refresh()
     },
   })
+  const setAiChat = useMutation({
+    mutationFn: ({ user, on }: { user: UserDTO; on: boolean }) => setUserAiChat(user.id, on),
+    onSuccess: (_result, { user }) => {
+      refresh()
+      refreshMe(user)
+    },
+    onError: (error) => {
+      fail(error)
+      refresh()
+    },
+  })
   const remove = useMutation({
     mutationFn: (user: UserDTO) => api.del(`/api/users/${user.id}`),
     onSuccess: refresh,
     onError: fail,
   })
+
+  // The switch only exists on servers where the agent is on.
+  const agentEnabled = auth.me?.agent_enabled ?? false
+  const aiChatPending = (user: UserDTO) => setAiChat.isPending && setAiChat.variables?.user.id === user.id
 
   const confirm = () => {
     if (!pending) return
@@ -182,6 +198,9 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
     // token_count is absent while tokens are off.
     if (user.token_count !== undefined) {
       entries.push({ key: 'tokens', label: `Access tokens (${user.token_count})…`, run: () => setViewingTokens(user) })
+    }
+    if (phone && agentEnabled) {
+      entries.push({ key: 'ai-chat', label: user.ai_chat ? 'Turn off AI chat' : 'Turn on AI chat', disabled: aiChatPending(user), run: () => setAiChat.mutate({ user, on: !user.ai_chat }) })
     }
     entries.push({ key: 'admin', label: user.admin ? 'Remove global admin' : 'Make global admin', run: () => setPending({ kind: 'admin', user }) })
     entries.push({
@@ -384,6 +403,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
             <th>Sign-in</th>
             <th>Role</th>
             <th>Can see</th>
+            {agentEnabled && <th>AI chat</th>}
             <th>Last sign-in</th>
             <th>Actions</th>
           </tr>
@@ -399,6 +419,17 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
               <td>{signInPills(user)}</td>
               <td>{user.admin ? <Pill kind="info">Global admin</Pill> : <Pill kind="mute">User</Pill>}</td>
               <td>{canSee(user)}</td>
+              {agentEnabled && (
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`AI chat for ${user.username}`}
+                    checked={user.ai_chat}
+                    disabled={aiChatPending(user)}
+                    onChange={(event) => setAiChat.mutate({ user, on: event.target.checked })}
+                  />
+                </td>
+              )}
               <td className={styles.muted}>{user.last_sign_in_at ? <Ago ts={user.last_sign_in_at} /> : 'never'}</td>
               <td className={tableClass.num}>
                 <div className={styles.menuWrap}>
@@ -428,7 +459,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
           {/* Room for the last rows' menus, which the scrolling table wrapper would otherwise clip. */}
           {menuFor !== null && (
             <tr aria-hidden="true">
-              <td colSpan={6} className={styles.menuRoom} />
+              <td colSpan={agentEnabled ? 7 : 6} className={styles.menuRoom} />
             </tr>
           )}
         </tbody>

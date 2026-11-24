@@ -3858,6 +3858,7 @@
     "items": [
       {
         "admin": "boolean",
+        "ai_chat": "boolean",
         "break_glass": "boolean",
         "can_see": [
           {

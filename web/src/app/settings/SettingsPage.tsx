@@ -8,6 +8,7 @@ import { Tags } from '../admin/tags/Tags'
 import { Users } from '../admin/users/Users'
 import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
+import { AgentSettings } from './agent/AgentSettings'
 import { HeaderActionSlot } from './HeaderAction'
 import { NotificationsPage } from './notifications/NotificationsPage'
 import { OffHoursPage } from './offhours/OffHoursPage'
@@ -15,7 +16,7 @@ import { SSOPage } from './sso/SSOPage'
 import { StoppedTasksCard } from './StoppedTasksCard'
 import styles from './settings.module.css'
 
-export type SettingsTab = 'general' | 'accounts' | 'users' | 'tags' | 'offhours' | 'notifications' | 'sso' | 'audit'
+export type SettingsTab = 'general' | 'accounts' | 'users' | 'tags' | 'offhours' | 'notifications' | 'sso' | 'agent' | 'audit'
 
 export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['general', 'General'],
@@ -25,10 +26,12 @@ export const SETTINGS_TABS: [SettingsTab, string][] = [
   ['offhours', 'Off-hours'],
   ['notifications', 'Notifications'],
   ['sso', 'Single sign-on'],
+  ['agent', 'AI agent'],
   ['audit', 'Audit log'],
 ]
 
-const isSettingsTab = (value: string | undefined): value is SettingsTab => SETTINGS_TABS.some(([key]) => key === value)
+/** The AI agent tab exists only on servers where the agent is switched on. */
+const tabsFor = (agentEnabled: boolean) => SETTINGS_TABS.filter(([key]) => key !== 'agent' || agentEnabled)
 
 function TabPanel({ tab }: { tab: SettingsTab }) {
   switch (tab) {
@@ -46,6 +49,8 @@ function TabPanel({ tab }: { tab: SettingsTab }) {
       return <Users />
     case 'sso':
       return <SSOPage />
+    case 'agent':
+      return <AgentSettings />
     case 'audit':
       return <Audit />
   }
@@ -55,8 +60,9 @@ export function SettingsPage() {
   const { tab } = useParams()
   const { me } = useAuth()
   const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
-  const activeTab = isSettingsTab(tab) ? tab : null
-  const tabLabel = SETTINGS_TABS.find(([key]) => key === activeTab)?.[1]
+  const visibleTabs = tabsFor(me?.agent_enabled ?? false)
+  const activeTab = visibleTabs.find(([key]) => key === tab)?.[0] ?? null
+  const tabLabel = visibleTabs.find(([key]) => key === activeTab)?.[1]
   useCrumbs(tabLabel ? [['Settings', '/settings/general'], [tabLabel]] : [['Settings']])
 
   if (!activeTab) return <Navigate to="/settings/general" replace />
@@ -71,7 +77,7 @@ export function SettingsPage() {
           <h1 className="hm-phone-title-sr">Settings</h1>
           <div role="group" aria-label="Tab actions" className={styles.actions} ref={setActionSlot} />
         </div>
-        <Tabs items={SETTINGS_TABS.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
+        <Tabs items={visibleTabs.map(([key, label]) => ({ key, label }))} active={activeTab} hrefFor={(key) => `/settings/${key}`} />
       </div>
       <div className={styles.panel}>
         <TabPanel tab={activeTab} />
