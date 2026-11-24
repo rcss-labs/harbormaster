@@ -278,15 +278,25 @@ func TestGenerate_ContextCancelReturnsCtxErr(t *testing.T) {
 
 func TestClient_DoesNotFollowRedirects(t *testing.T) {
 	var hits atomic.Int32
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
-	defer target.Close()
-	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
-	}))
-	defer redirector.Close()
-	_, err := newProvider(t, redirector.URL).Generate(context.Background(), simpleRequest(), nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/elsewhere", func(http.ResponseWriter, *http.Request) { hits.Add(1) })
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/elsewhere", http.StatusTemporaryRedirect)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	_, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
 	if err == nil || hits.Load() != 0 {
 		t.Fatalf("err %v, redirect target hits %d", err, hits.Load())
+	}
+}
+
+// Go's proxy logic bypasses loopback, so the env test below cannot prove the
+// proxy is off; check the transport directly.
+func TestClient_TransportIgnoresProxyEnvironment(t *testing.T) {
+	transport, ok := newHTTPClient().Transport.(*http.Transport)
+	if !ok || transport.Proxy != nil {
+		t.Fatalf("transport must have Proxy == nil, got %+v", newHTTPClient().Transport)
 	}
 }
 
