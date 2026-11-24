@@ -54,19 +54,20 @@ type Runner struct {
 // RetentionFrom maps the configured retention periods to the store's.
 func RetentionFrom(c config.Config) store.Retention {
 	return store.Retention{
-		StoppedTasks:      c.Retention.StoppedTasks,
-		ServiceEvents:     c.Retention.ServiceEvents,
-		CountsHistory:     c.Retention.CountsHistory,
-		OperationLog:      c.Retention.OperationLog,
-		DeploymentHistory: c.Retention.DeploymentHistory,
-		AuditLog:          c.Retention.AuditLog,
-		OrphanTags:        c.Retention.OrphanTags,
-		AvailabilityDaily: c.Retention.AvailabilityDaily,
-		CapacityDaily:     c.Retention.CapacityDaily,
-		UtilDaily:         c.Retention.UtilDaily,
-		ScanImages:        c.Retention.ScanImages,
-		ScanRuns:          c.Retention.ScanRuns,
-		NotificationLog:   c.Retention.NotificationLog,
+		StoppedTasks:       c.Retention.StoppedTasks,
+		ServiceEvents:      c.Retention.ServiceEvents,
+		CountsHistory:      c.Retention.CountsHistory,
+		OperationLog:       c.Retention.OperationLog,
+		DeploymentHistory:  c.Retention.DeploymentHistory,
+		AuditLog:           c.Retention.AuditLog,
+		OrphanTags:         c.Retention.OrphanTags,
+		AvailabilityDaily:  c.Retention.AvailabilityDaily,
+		CapacityDaily:      c.Retention.CapacityDaily,
+		UtilDaily:          c.Retention.UtilDaily,
+		ScanImages:         c.Retention.ScanImages,
+		ScanRuns:           c.Retention.ScanRuns,
+		NotificationLog:    c.Retention.NotificationLog,
+		AgentConversations: c.Retention.AgentConversations,
 	}
 }
 
