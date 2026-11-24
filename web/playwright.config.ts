@@ -8,6 +8,9 @@ const baseURL = `http://127.0.0.1:${port}`
 // HM_E2E_DEGRADED_PORT overrides it where the next port belongs to another worktree's lane.
 const degradedPort = process.env.HM_E2E_DEGRADED_PORT ?? String(Number(port) + 1)
 const degradedBaseURL = `http://127.0.0.1:${degradedPort}`
+// The agent service (a scripted fake model) runs beside the healthy server; HM_E2E_AGENT_PORT moves it for parallel worktrees.
+const agentPort = process.env.HM_E2E_AGENT_PORT ?? '8484'
+const agentURL = `http://127.0.0.1:${agentPort}`
 
 // `make e2e` creates a fresh hm_e2e schema and passes its URL in HM_E2E_DATABASE_URL.
 // Never fall back to the raw test database URL: the server would seed demo data into its public schema.
@@ -88,6 +91,19 @@ export default defineConfig({
   ],
   webServer: [
     {
+      command: '../bin/harbormaster-agent serve',
+      env: {
+        HM_AGENT_LISTEN: `127.0.0.1:${agentPort}`,
+        HM_AGENT_UPSTREAM_URL: baseURL, // run tokens are redeemed against the healthy server
+        HM_AGENT_FAKE_PROVIDER: 'true', // scripted model, no live call
+        HM_AGENT_TRUSTED_PROXY: 'false',
+      },
+      url: `${agentURL}/healthz`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
+    },
+    {
       command: '../bin/harbormaster serve --fake-aws',
       env: {
         ...serverEnv,
@@ -97,6 +113,7 @@ export default defineConfig({
         // The fake IdP and SP metadata use this origin; it must match the port Playwright serves on.
         HM_BASE_URL: baseURL,
         HM_DATABASE_URL: databaseURL,
+        HM_AGENT_URL: agentURL, // switches the AI agent on; devseed then gives sam the chat and the fake model
       },
       url: `${baseURL}/healthz`,
       reuseExistingServer: false,

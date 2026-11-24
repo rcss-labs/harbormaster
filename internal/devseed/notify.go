@@ -20,6 +20,7 @@ type options struct {
 	notifyBox     *secretbox.Box
 	notifyBaseURL string
 	notifyDemo    bool
+	agentDemo     bool
 }
 
 // WithNotifyDemo seeds the demo notification routes, sealed with box and posting to the in-process receiver under
