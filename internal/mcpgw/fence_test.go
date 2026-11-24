@@ -52,8 +52,8 @@ func TestGatewayHasOneHTTPClient(t *testing.T) {
 			continue
 		}
 		base := filepath.Base(file)
-		// upstream.go owns the client; the healthcheck's loopback client lives in the command's main.go.
-		if base == "upstream.go" || (base == "main.go" && strings.Contains(file, "cmd")) {
+		// The healthcheck's loopback client lives in the command's main.go; the tool package's client is checked by hmtools.
+		if base == "main.go" && strings.Contains(file, "cmd") {
 			continue
 		}
 		source, err := os.ReadFile(file)

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 // APIToken is a stored access token. SecretHash is sha256 of the secret; the secret itself is never stored.
 // PublicID is the display form (hmp_<id>, hmo_<id>, hmr_<id>) and is safe to log. GrantID is set exactly for the OAuth
-// kinds; RotatedAt is set on a refresh token once it has been exchanged for a new pair.
+// kinds; RotatedAt is set on a refresh token once it has been exchanged for a new pair. A run token's public id is
+// hma_<id>.
 type APIToken struct {
 	ID         int64
 	PublicID   string
@@ -27,19 +29,23 @@ type APIToken struct {
 	LastUsedIP string
 	GrantID    *int64
 	RotatedAt  *time.Time
+	// RunID and RedactEnv are set for a run token only: the agent run it belongs to, and whether environment values
+	// are hidden from it.
+	RunID     *uuid.UUID
+	RedactEnv bool
 }
 
 // ErrTokenLimit is returned by CreateAPIToken when the user already holds the maximum number of unexpired tokens.
 var ErrTokenLimit = errors.New("token limit reached")
 
 const apiTokenColumns = `id, public_id, user_id, kind, name, secret_hash, scope, auth_source,
-	created_at, expires_at, last_used_at, last_used_ip, grant_id, rotated_at`
+	created_at, expires_at, last_used_at, last_used_ip, grant_id, rotated_at, run_id, redact_env`
 
 func scanAPIToken(row pgx.Row) (APIToken, error) {
 	var t APIToken
 	var lastUsedIP *string
 	err := row.Scan(&t.ID, &t.PublicID, &t.UserID, &t.Kind, &t.Name, &t.SecretHash, &t.Scope, &t.AuthSource,
-		&t.CreatedAt, &t.ExpiresAt, &t.LastUsedAt, &lastUsedIP, &t.GrantID, &t.RotatedAt)
+		&t.CreatedAt, &t.ExpiresAt, &t.LastUsedAt, &lastUsedIP, &t.GrantID, &t.RotatedAt, &t.RunID, &t.RedactEnv)
 	t.LastUsedIP = derefString(lastUsedIP)
 	return t, err
 }
@@ -96,6 +102,35 @@ func (s *Store) CreateAPITokenWithin(ctx context.Context, t APIToken, maxPerUser
 		return APIToken{}, fmt.Errorf("commit: %w", err)
 	}
 	return created, nil
+}
+
+// CreateRunToken stores a run token (kind "run", with RunID). It takes no per-user limit and does not touch the
+// personal-token count: run tokens are not the user's to list or revoke. Returns ErrNotFound when the user is absent.
+func (s *Store) CreateRunToken(ctx context.Context, t APIToken) (APIToken, error) {
+	if t.Kind != "run" || t.RunID == nil {
+		return APIToken{}, errors.New("create run token: needs kind run and a run id")
+	}
+	created, err := scanAPIToken(s.Pool.QueryRow(ctx,
+		`insert into api_tokens (public_id, user_id, kind, name, secret_hash, scope, auth_source, expires_at, run_id, redact_env)
+		 select $1, id, $3, $4, $5, $6, coalesce(nullif($7, ''), 'password'), $8, $9, $10 from users where id = $2
+		 returning `+apiTokenColumns,
+		t.PublicID, t.UserID, t.Kind, t.Name, t.SecretHash, t.Scope, t.AuthSource, t.ExpiresAt, t.RunID, t.RedactEnv))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return APIToken{}, ErrNotFound
+	}
+	if err != nil {
+		return APIToken{}, fmt.Errorf("insert run token: %w", err)
+	}
+	return created, nil
+}
+
+// DeleteRunToken removes the run token of runID, if any. It is a no-op when there is none, so a run that ends twice
+// is fine.
+func (s *Store) DeleteRunToken(ctx context.Context, runID uuid.UUID) error {
+	if _, err := s.Pool.Exec(ctx, `delete from api_tokens where run_id = $1 and kind = 'run'`, runID); err != nil {
+		return fmt.Errorf("delete run token: %w", err)
+	}
+	return nil
 }
 
 // GetAPITokenByPublicID returns the token with publicID, or ErrNotFound when it is missing or expired.
@@ -222,7 +257,7 @@ func (s *Store) CountAPITokensByUser(ctx context.Context) (map[int64]int, error)
 
 // RevokedCredentials counts what DeleteAllAPICredentials removed.
 type RevokedCredentials struct {
-	Tokens int64 // every api_tokens row: personal, OAuth access and OAuth refresh
+	Tokens int64 // every api_tokens row: personal, OAuth access, OAuth refresh and run
 	Grants int64 // oauth_grants rows
 	Codes  int64 // unexchanged oauth_codes rows
 }

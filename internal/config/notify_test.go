@@ -136,3 +136,17 @@ func TestConfig_NotifySettleBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestConfig_AgentConversationRetention(t *testing.T) {
+	cfg, err := loadWith(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Retention.AgentConversations != 720*time.Hour {
+		t.Errorf("AgentConversations = %v, want 720h", cfg.Retention.AgentConversations)
+	}
+	cfg, err = loadWith(map[string]string{"HM_RETENTION_AGENT_CONVERSATIONS": "24h"})
+	if err != nil || cfg.Retention.AgentConversations != 24*time.Hour {
+		t.Errorf("override = %v, %v; want 24h", cfg.Retention.AgentConversations, err)
+	}
+}

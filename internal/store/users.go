@@ -36,6 +36,8 @@ type User struct {
 	PendingLinkExpiresAt   *time.Time
 	PendingLinkSetAt       *time.Time
 	PendingLinkSetByUserID *int64
+	// AIChat lets the user open the agent chat (admin-granted; the feature itself is off unless HM_AGENT_URL is set).
+	AIChat bool
 }
 
 // HasPassword reports whether the user can sign in with a password. PasswordHash is empty when
@@ -52,14 +54,14 @@ func (u User) PendingLinkActive(now time.Time) bool {
 
 const userColumns = `id, username, coalesce(password_hash, ''), is_admin, must_change_password, created_at, last_sign_in_at, locked_until,
 	break_glass, coalesce(idp_entity_id, ''), coalesce(external_id, ''), coalesce(external_id_format, ''), email, display_name,
-	coalesce(pending_link_name_id, ''), pending_link_expires_at, pending_link_set_at, pending_link_set_by_user_id`
+	coalesce(pending_link_name_id, ''), pending_link_expires_at, pending_link_set_at, pending_link_set_by_user_id, ai_chat`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Admin, &u.MustChangePassword,
 		&u.CreatedAt, &u.LastSignInAt, &u.LockedUntil,
 		&u.BreakGlass, &u.IdPEntityID, &u.ExternalID, &u.ExternalIDFormat, &u.Email, &u.DisplayName,
-		&u.PendingLinkNameID, &u.PendingLinkExpiresAt, &u.PendingLinkSetAt, &u.PendingLinkSetByUserID)
+		&u.PendingLinkNameID, &u.PendingLinkExpiresAt, &u.PendingLinkSetAt, &u.PendingLinkSetByUserID, &u.AIChat)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -473,6 +475,18 @@ func (s *Store) CreateBreakGlassAdmin(ctx context.Context, username, passwordHas
 func lockNameIDTx(ctx context.Context, tx pgx.Tx, nameID string) error {
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "sso-nameid:"+nameID); err != nil {
 		return fmt.Errorf("lock name id: %w", err)
+	}
+	return nil
+}
+
+// SetUserAIChat grants or revokes the user's access to the agent chat, or returns ErrNotFound.
+func (s *Store) SetUserAIChat(ctx context.Context, userID int64, on bool) error {
+	tag, err := s.Pool.Exec(ctx, `update users set ai_chat = $2 where id = $1`, userID, on)
+	if err != nil {
+		return fmt.Errorf("set user ai chat: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

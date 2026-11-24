@@ -1,7 +1,14 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -56,19 +63,20 @@ func TestLoad_Defaults(t *testing.T) {
 			IdleInterval:  5 * time.Minute,
 		},
 		Retention: RetentionConfig{
-			StoppedTasks:      168 * time.Hour,
-			ServiceEvents:     720 * time.Hour,
-			CountsHistory:     168 * time.Hour,
-			OperationLog:      2160 * time.Hour,
-			DeploymentHistory: 2160 * time.Hour,
-			AuditLog:          8760 * time.Hour,
-			OrphanTags:        720 * time.Hour,
-			AvailabilityDaily: 8760 * time.Hour,
-			CapacityDaily:     8760 * time.Hour,
-			UtilDaily:         2160 * time.Hour,
-			ScanImages:        168 * time.Hour,
-			ScanRuns:          720 * time.Hour,
-			NotificationLog:   720 * time.Hour,
+			StoppedTasks:       168 * time.Hour,
+			ServiceEvents:      720 * time.Hour,
+			CountsHistory:      168 * time.Hour,
+			OperationLog:       2160 * time.Hour,
+			DeploymentHistory:  2160 * time.Hour,
+			AuditLog:           8760 * time.Hour,
+			OrphanTags:         720 * time.Hour,
+			AvailabilityDaily:  8760 * time.Hour,
+			CapacityDaily:      8760 * time.Hour,
+			UtilDaily:          2160 * time.Hour,
+			ScanImages:         168 * time.Hour,
+			ScanRuns:           720 * time.Hour,
+			NotificationLog:    720 * time.Hour,
+			AgentConversations: 720 * time.Hour,
 		},
 		Scan: ScanConfig{
 			RoleName:    "harbormaster-scan",
@@ -91,7 +99,7 @@ func TestLoad_Defaults(t *testing.T) {
 		SnapshotCacheTTL: 30 * time.Second,
 		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
 		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
-		OAuthAccessTTL:   time.Hour,
+		OAuthAccessTTL: time.Hour, AgentRunTokenTTL: 15 * time.Minute,
 		OAuthClientHosts: []string{"claude.ai"},
 		OAuthRedirectURIs: []string{
 			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
@@ -816,6 +824,7 @@ func TestLoad_TokenValidation(t *testing.T) {
 		{"cidr match-all v4", map[string]string{"HM_MCP_GATEWAY_CIDRS": "0.0.0.0/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"cidr match-all v6", map[string]string{"HM_MCP_GATEWAY_CIDRS": "::/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"url no host", map[string]string{"HM_MCP_PUBLIC_URL": "https://"}, "HM_MCP_PUBLIC_URL"},
+		{"url bad port", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com:99999"}, "HM_MCP_PUBLIC_URL"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -909,4 +918,102 @@ func TestLoad_OAuthDefaultsAndValidation(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(cfg.OAuthClientHosts, []string{"a.example", "b.example"}) {
 		t.Fatalf("hosts override = %v, %v", cfg.OAuthClientHosts, err)
 	}
+}
+
+func TestLoad_AgentDefaults(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentEnabled() || cfg.AgentURL != "" || cfg.AgentCAPEM != "" || cfg.AgentRunTokenTTL != 15*time.Minute {
+		t.Errorf("agent defaults = %+v", cfg)
+	}
+	cfg, err = Load(tokenEnv(map[string]string{"HM_AGENT_URL": "https://agent.internal:8484", "HM_AGENT_RUN_TOKEN_TTL": "5m"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AgentEnabled() || cfg.AgentURL != "https://agent.internal:8484" || cfg.AgentRunTokenTTL != 5*time.Minute {
+		t.Errorf("agent cfg = %+v", cfg)
+	}
+}
+
+func TestLoad_AgentURLValidation(t *testing.T) {
+	valid := []string{
+		"https://agent.internal", "https://agent.internal:8484",
+		"http://localhost:8484", "http://127.0.0.1:8484", "http://[::1]:8484",
+	}
+	for _, u := range valid {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_URL": u})); err != nil {
+			t.Errorf("HM_AGENT_URL %q refused: %v", u, err)
+		}
+	}
+	invalid := map[string]string{
+		"http remote host":    "http://agent.internal:8484",
+		"http private ip":     "http://10.0.0.5:8484",
+		"scheme ftp":          "ftp://agent.internal",
+		"no scheme":           "agent.internal:8484",
+		"no host":             "https://",
+		"path":                "https://agent.internal/api",
+		"trailing slash":      "https://agent.internal/",
+		"query":               "https://agent.internal?a=b",
+		"fragment":            "https://agent.internal#x",
+		"userinfo":            "https://user:pw@agent.internal",
+		"loopback lookalike":  "http://localhost.example.com",
+		"http loopback path":  "http://localhost:8484/x",
+		"empty trailing hash": "https://agent.internal#",
+		"port zero":           "https://agent.internal:0",
+		"port too large":      "https://agent.internal:70000",
+		"port not a number":   "https://agent.internal:http",
+		"empty port":          "https://agent.internal:",
+		"no hostname":         "https://:8484",
+	}
+	for name, u := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(tokenEnv(map[string]string{"HM_AGENT_URL": u}))
+			if err == nil || !strings.Contains(err.Error(), "HM_AGENT_URL") {
+				t.Fatalf("HM_AGENT_URL %q: err = %v, want one naming HM_AGENT_URL", u, err)
+			}
+		})
+	}
+}
+
+func TestLoad_AgentRunTokenTTLAndCAValidation(t *testing.T) {
+	for _, ttl := range []string{"0s", "-1m", "59s", "61m", "24h"} {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_RUN_TOKEN_TTL": ttl})); err == nil ||
+			!strings.Contains(err.Error(), "HM_AGENT_RUN_TOKEN_TTL") {
+			t.Errorf("ttl %q: err = %v, want one naming HM_AGENT_RUN_TOKEN_TTL", ttl, err)
+		}
+	}
+	for _, ttl := range []string{"1m", "1h"} {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_RUN_TOKEN_TTL": ttl})); err != nil {
+			t.Errorf("ttl %q refused: %v", ttl, err)
+		}
+	}
+	if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_CA_PEM": "not a certificate"})); err == nil ||
+		!strings.Contains(err.Error(), "HM_AGENT_CA_PEM") {
+		t.Errorf("bad PEM: err = %v, want one naming HM_AGENT_CA_PEM", err)
+	}
+	cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_CA_PEM": testCertPEM(t)}))
+	if err != nil || cfg.AgentCAPEM == "" {
+		t.Errorf("valid PEM: cfg.AgentCAPEM set = %v, err = %v", cfg.AgentCAPEM != "", err)
+	}
+}
+
+// testCertPEM returns a throwaway self-signed certificate in PEM form.
+func testCertPEM(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test agent ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true,
+	}, &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test agent ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true},
+		&key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }

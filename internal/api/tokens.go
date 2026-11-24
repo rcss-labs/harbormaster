@@ -417,6 +417,11 @@ func (s *Server) deleteUserGrant(w http.ResponseWriter, r *http.Request) {
 func (s *Server) whoAmI(w http.ResponseWriter, r *http.Request) {
 	cred, _ := auth.CredentialFrom(r.Context())
 	if cred.Kind != auth.CredentialToken {
+		if !s.Cfg.APITokens {
+			// Only the agent is on: the route exists for run tokens alone, so a session sees it as absent.
+			s.fail(w, &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Not found."})
+			return
+		}
 		s.fail(w, &APIError{Status: http.StatusBadRequest, Code: "invalid", Message: "Call this with an access token."})
 		return
 	}

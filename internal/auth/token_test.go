@@ -61,6 +61,7 @@ func TestTokenMaxTTL_Table(t *testing.T) {
 
 func TestAuthenticateToken_Table(t *testing.T) {
 	svc, st := newTestService(t)
+	svc.cfg.APITokens = true
 	ctx := context.Background()
 	u := mustUser(t, st, "alice", false)
 	gone := mustUser(t, st, "gone", false)
@@ -111,6 +112,7 @@ func TestAuthenticateToken_Table(t *testing.T) {
 
 func TestAuthenticateToken_TouchesAtMostOncePerMinute(t *testing.T) {
 	svc, st := newTestService(t)
+	svc.cfg.APITokens = true
 	ctx := context.Background()
 	u := mustUser(t, st, "alice", false)
 	raw, tok := issueToken(t, st, u.ID, time.Now().Add(24*time.Hour))
@@ -144,6 +146,7 @@ func TestAuthenticateToken_TouchesAtMostOncePerMinute(t *testing.T) {
 
 func TestAuthenticateToken_ExpiryUsesTheServiceClock(t *testing.T) {
 	svc, st := newTestService(t)
+	svc.cfg.APITokens = true
 	u := mustUser(t, st, "alice", false)
 	raw, _ := issueToken(t, st, u.ID, time.Now().Add(time.Hour))
 	svc.now = func() time.Time { return time.Now().Add(2 * time.Hour) }

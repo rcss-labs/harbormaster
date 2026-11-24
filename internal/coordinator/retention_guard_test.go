@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/coordinator"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -43,5 +44,34 @@ func TestCoordinator_RetentionDoesNothingWithoutTheLease(t *testing.T) {
 	var n int
 	if err := st.Pool.QueryRow(ctx, `select count(*) from tasks`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("tasks = %d, %v; retention ran without the coordinator lease", n, err)
+	}
+}
+
+// Agent conversations are pruned by the configured retention, through RunRetention under the coordinator lease.
+func TestRetention_PrunesOldAgentConversations(t *testing.T) {
+	cfg := config.Config{Retention: config.RetentionConfig{AgentConversations: 24 * time.Hour}}
+	r := coordinator.RetentionFrom(cfg)
+	if r.AgentConversations != 24*time.Hour {
+		t.Fatalf("RetentionFrom AgentConversations = %v, want 24h", r.AgentConversations)
+	}
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u, err := st.CreateUser(ctx, "alice", "h", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.CreateAgentConversation(ctx, u.ID, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Pool.Exec(ctx, `update agent_conversations set updated_at = now() - interval '2 days' where id = $1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	res, err := st.RunRetention(ctx, time.Now(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["agent_conversations"] != 1 {
+		t.Fatalf("result = %v, want agent_conversations 1", res)
 	}
 }

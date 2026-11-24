@@ -15,6 +15,8 @@ type Retention struct {
 	ScanRuns, ScanImages time.Duration
 	// NotificationLog prunes the notification delivery log and long-resolved alert incidents.
 	NotificationLog time.Duration
+	// AgentConversations prunes agent chats not active for that long; their runs and usage stay.
+	AgentConversations time.Duration
 }
 
 // RetentionResult maps a table key ("tasks", "service_events", ...) to rows deleted.
@@ -89,6 +91,14 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 			return result, fmt.Errorf("retention scan_acceptances_pruned: %w", err)
 		}
 		result["scan_acceptances_pruned"] = tag.RowsAffected()
+	}
+
+	if r.AgentConversations > 0 {
+		n, err := s.DeleteAgentConversationsBefore(ctx, now.Add(-r.AgentConversations))
+		if err != nil {
+			return result, fmt.Errorf("retention agent_conversations: %w", err)
+		}
+		result["agent_conversations"] = n
 	}
 
 	pruned, err := s.PruneImagePlatforms(ctx, now.Add(-imagePlatformsRetention))
