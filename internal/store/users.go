@@ -481,12 +481,20 @@ func lockNameIDTx(ctx context.Context, tx pgx.Tx, nameID string) error {
 
 // SetUserAIChat grants or revokes the user's access to the agent chat, or returns ErrNotFound.
 func (s *Store) SetUserAIChat(ctx context.Context, userID int64, on bool) error {
-	tag, err := s.Pool.Exec(ctx, `update users set ai_chat = $2 where id = $1`, userID, on)
+	_, err := s.ChangeUserAIChat(ctx, userID, on)
+	return err
+}
+
+// ChangeUserAIChat is SetUserAIChat that also returns the value it replaced, read under the same row lock as the
+// write, so a caller that audits the change reports exactly what this call changed.
+func (s *Store) ChangeUserAIChat(ctx context.Context, userID int64, on bool) (was bool, err error) {
+	err = s.Pool.QueryRow(ctx, `update users u set ai_chat = $2 from (select id, ai_chat from users where id = $1 for update) old
+		where u.id = old.id returning old.ai_chat`, userID, on).Scan(&was)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("set user ai chat: %w", err)
+		return false, fmt.Errorf("set user ai chat: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return was, nil
 }

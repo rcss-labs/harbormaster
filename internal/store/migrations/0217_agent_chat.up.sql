@@ -8,7 +8,9 @@ alter table users add column ai_chat boolean not null default false;
 create table agent_settings (
   id boolean primary key default true check (id),
   monthly_budget_micro_usd bigint not null default 0 check (monthly_budget_micro_usd >= 0),
-  unredacted_providers text[] not null default '{}'
+  unredacted_providers text[] not null default '{}',
+  -- Raised by every save; a save made from an older read is refused, so two admins cannot overwrite each other.
+  version bigint not null default 1
 );
 insert into agent_settings (id) values (true);
 
@@ -55,7 +57,9 @@ create table agent_runs (
   tools text[] not null default '{}',
   started_at timestamptz not null default now(),
   finished_at timestamptz,
-  last_usage_at timestamptz
+  last_usage_at timestamptz,
+  -- Set in the transaction that writes the run's audit row, so a run is audited exactly once.
+  audited_at timestamptz
 );
 -- Spend sums are bounded by started_at (the UTC month).
 create index agent_runs_started_idx on agent_runs (started_at);
@@ -63,3 +67,5 @@ create index agent_runs_user_idx on agent_runs (user_id);
 create index agent_runs_conversation_idx on agent_runs (conversation_id);
 -- The stale sweep and spend sums look only at running runs.
 create index agent_runs_running_idx on agent_runs (started_at) where state = 'running';
+-- The reconcile pass looks for finished runs whose audit row is missing.
+create index agent_runs_unaudited_idx on agent_runs (finished_at) where audited_at is null and state <> 'running';

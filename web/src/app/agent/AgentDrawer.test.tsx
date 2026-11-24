@@ -102,6 +102,26 @@ describe('AgentDrawer', () => {
     expect(within(dialog).getByRole('textbox', { name: 'Message' })).toHaveValue('more')
   })
 
+  it.each([
+    ['interrupted', 'Stopped before finishing.'],
+    ['timeout', 'The agent took too long and was stopped.'],
+  ])('words the %s error code', async (code, copy) => {
+    const stream = openStream()
+    mockAgent()
+    server.use(
+      http.post('/api/agent/conversations', () => HttpResponse.json({ id: 5, title: '' })),
+      http.post('/api/agent/conversations/5/messages', () => stream.response()),
+    )
+    const user = userEvent.setup()
+    renderApp('/clusters')
+    const dialog = await openDrawer(user)
+    await user.type(await within(dialog).findByRole('textbox', { name: 'Message' }), 'hello{Enter}')
+    stream.send('error', { code, message: 'raw server text' })
+    stream.close()
+    expect(await within(dialog).findByText(copy)).toBeInTheDocument()
+    expect(within(dialog).queryByText('raw server text')).not.toBeInTheDocument()
+  })
+
   it('stop aborts and re-enables the input', async () => {
     const stream = openStream()
     mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })

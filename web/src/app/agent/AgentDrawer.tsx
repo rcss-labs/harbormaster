@@ -25,6 +25,10 @@ function errorCopy(code: string, message: string): string {
       return 'No model is set up yet. Ask an admin.'
     case 'agent_unavailable':
       return UNAVAILABLE
+    case 'interrupted':
+      return 'Stopped before finishing.'
+    case 'timeout':
+      return 'The agent took too long and was stopped.'
     default:
       return message || UNAVAILABLE
   }

@@ -1,6 +1,7 @@
 // Package coordinator runs the jobs that must have exactly one active instance: notifications, off-hours, image scans,
-// the ARM64 platform resolver, the deployment outcome log, the daily rollups and retention. They run only while this
-// process holds the coordinator lease, and each is told to check that lease right before an external side effect.
+// the ARM64 platform resolver, the deployment outcome log, the repair of AI agent runs, the daily rollups and retention.
+// They run only while this process holds the coordinator lease, and each is told to check that lease right before an
+// external side effect.
 package coordinator
 
 import (
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
@@ -39,6 +41,7 @@ type Runner struct {
 	Retention      store.Retention
 	RetentionEvery time.Duration
 	Outcomes       *deploy.OutcomeLogger
+	AgentRuns      *agentrun.Reconciler // set only while the AI agent is on
 	// Idle reports whether polling is idle; the image resolver stays quiet while it is.
 	Idle func() bool
 	// Bus carries kicks from web tasks. While this runner holds the lease it listens and wakes the named job; nil
@@ -79,7 +82,7 @@ func (r *Runner) log() *slog.Logger {
 }
 
 // Hold runs every job while the coordinator lease l is held: the scan runner, the off-hours reconciler, the image
-// resolver, the dispatcher and the outcome logger on their own goroutines, and the rollups then retention at once and
+// resolver, the dispatcher, the outcome logger and the agent run reconciler on their own goroutines, and the rollups then retention at once and
 // every RetentionEvery (rollups first, so retention never deletes rows a rollup still needs). It sets each job's guard
 // to a check of l, and returns when ctx ends and every job has stopped, clearing the guards.
 func (r *Runner) Hold(ctx context.Context, l store.Lease) {
@@ -100,6 +103,11 @@ func (r *Runner) Hold(ctx context.Context, l store.Lease) {
 	if r.Notify != nil {
 		r.Notify.Guard = guard
 		defer func() { r.Notify.Guard = nil }()
+	}
+
+	if r.AgentRuns != nil {
+		r.AgentRuns.Guard = guard
+		defer func() { r.AgentRuns.Guard = nil }()
 	}
 
 	var wg sync.WaitGroup
@@ -128,6 +136,9 @@ func (r *Runner) Hold(ctx context.Context, l store.Lease) {
 	}
 	if r.Outcomes != nil {
 		start(r.Outcomes.Run)
+	}
+	if r.AgentRuns != nil {
+		start(r.AgentRuns.Run)
 	}
 	if r.Bus != nil {
 		start(r.listenForKicks)
