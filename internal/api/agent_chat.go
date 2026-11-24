@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -60,50 +62,96 @@ func conversationID(r *http.Request) (int64, error) {
 	return id, nil
 }
 
-// AgentStatusDTO is the body of GET /api/agent/status.
+// AgentStatusDTO is the body of GET /api/agent/status. AgentReachable is whether the agent's catalogue could be
+// read just now; ModelConfigured comes from the stored settings and is only taken back when the agent answered and
+// does not offer the chosen model, so an agent that is down does not look like a missing setting.
 type AgentStatusDTO struct {
 	Enabled         bool `json:"enabled"`
 	CanChat         bool `json:"can_chat"`
 	ModelConfigured bool `json:"model_configured"`
 	BudgetExhausted bool `json:"budget_exhausted"`
+	AgentReachable  bool `json:"agent_reachable"`
+}
+
+const (
+	statusCatalogueTimeout = 5 * time.Second
+	statusNegativeCache    = 10 * time.Second
+)
+
+// agentReach remembers for a short while that the agent could not be reached, so a page that polls the status does
+// not queue behind a dead agent. It also holds the one-time warning about the run token lifetime.
+type agentReach struct {
+	mu        sync.Mutex
+	downUntil time.Time
+	ttlWarned sync.Once
+}
+
+func (a *agentReach) down(now time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return now.Before(a.downUntil)
+}
+
+func (a *agentReach) markDown(until time.Time) {
+	a.mu.Lock()
+	a.downUntil = until
+	a.mu.Unlock()
 }
 
 // agentStatus answers for any signed-in user; only a user who may chat is told more than that the agent is on.
 func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFrom(r.Context())
 	out := AgentStatusDTO{Enabled: s.Cfg.AgentEnabled(), CanChat: s.mayChat(r, user)}
-	if out.CanChat {
-		settings, err := s.Store.GetAgentSettings(r.Context())
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		chosenModel, cat, ok := s.chatModel(r, settings)
-		out.ModelConfigured = ok
-		settled, reserved, err := s.Store.AgentSpend(r.Context(), s.now())
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		// Exhausted means the next question would be refused: no room left for one run's reservation.
-		needed := int64(0)
-		if ok {
-			needed = chosenModel.MaxRunCostMicroUSD(cat.MaxRunTokens)
-		}
-		budget := settings.MonthlyBudgetMicroUSD
-		out.BudgetExhausted = budget <= 0 || settled > budget || reserved > budget-settled || needed > budget-settled-reserved
+	if !out.CanChat {
+		writeJSON(w, http.StatusOK, out)
+		return
 	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// chatModel resolves the model chosen for chat against the agent's catalogue.
-func (s *Server) chatModel(r *http.Request, settings store.AgentSettings) (agentclient.Model, agentclient.Catalogue, bool) {
-	cat, err := s.catalogue(r)
+	settings, err := s.Store.GetAgentSettings(r.Context())
 	if err != nil {
-		return agentclient.Model{}, agentclient.Catalogue{}, false
+		s.fail(w, err)
+		return
 	}
-	m, ok := findModel(cat, settings.RoleModels[chatRoleName])
-	return m, cat, ok
+	ref, chosen := settings.RoleModels[chatRoleName]
+	out.ModelConfigured = chosen
+
+	var chosenModel agentclient.Model
+	var cat agentclient.Catalogue
+	if !s.agentReach.down(s.now()) {
+		ctx, cancel := context.WithTimeout(r.Context(), statusCatalogueTimeout)
+		var catErr error
+		if s.Agent == nil {
+			catErr = agentclient.ErrAgentUnavailable
+		} else {
+			cat, catErr = s.Agent.Catalogue(ctx)
+		}
+		cancel()
+		if catErr != nil {
+			if r.Context().Err() == nil {
+				s.agentReach.markDown(s.now().Add(statusNegativeCache))
+			}
+		} else {
+			out.AgentReachable = true
+		}
+	}
+	var found bool
+	if out.AgentReachable && chosen {
+		chosenModel, found = findModel(cat, ref)
+		out.ModelConfigured = found
+	}
+
+	settled, reserved, err := s.Store.AgentSpend(r.Context(), s.now())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// Exhausted means the next question would be refused: no room left for one run's reservation.
+	needed := int64(0)
+	if found {
+		needed = chosenModel.MaxRunCostMicroUSD(cat.MaxRunTokens)
+	}
+	budget := settings.MonthlyBudgetMicroUSD
+	out.BudgetExhausted = budget <= 0 || settled > budget || reserved > budget-settled || needed > budget-settled-reserved
+	writeJSON(w, http.StatusOK, out)
 }
 
 func findModel(cat agentclient.Catalogue, ref store.AgentModelRef) (agentclient.Model, bool) {
@@ -206,6 +254,17 @@ func (s *Server) getAgentConversation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// warnIfTokenOutlivedByRun logs once when run tokens expire before a run at its longest could end.
+func (s *Server) warnIfTokenOutlivedByRun(runTimeout time.Duration) {
+	if s.Cfg.AgentRunTokenTTL >= runTimeout+time.Minute {
+		return
+	}
+	s.agentReach.ttlWarned.Do(func() {
+		s.log().Warn("agent run token lifetime is shorter than the run timeout plus a minute; long runs may lose their tools",
+			"run_token_ttl", s.Cfg.AgentRunTokenTTL, "run_timeout", runTimeout)
+	})
+}
+
 func nonNil(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -299,6 +358,10 @@ func (s *Server) postAgentMessage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Write a message of 1 to 8000 characters."))
 		return
 	}
+	if strings.ContainsRune(text, 0) {
+		s.fail(w, invalid("The message holds a character that cannot be sent."))
+		return
+	}
 
 	release, got, err := s.Limits.Acquire(r.Context(), limitAgentChat, user.ID, 1)
 	if err != nil {
@@ -335,13 +398,23 @@ func (s *Server) postAgentMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := s.now()
+	runTimeout := cat.RunTimeout
+	if runTimeout <= 0 {
+		runTimeout = defaultRunTimeout
+	}
+	s.warnIfTokenOutlivedByRun(runTimeout)
+
 	run := store.AgentRun{
 		ID: uuid.New(), Role: chatRoleName, UserID: &user.ID, ConversationID: &convID,
 		Provider: ref.Provider, Model: ref.Model,
 		ReservedMicroUSD: chosenModel.MaxRunCostMicroUSD(cat.MaxRunTokens),
 	}
-	if err := s.Store.ReserveAgentRun(r.Context(), run, max(2*cat.RunTimeout, minRunStaleAfter), now); err != nil {
+	// The reservation commits on a context of its own: a browser that leaves mid-call must not leave a half-known
+	// state behind, and a run that was reserved is always settled by its turn.
+	reserveCtx, cancelReserve := context.WithTimeout(context.WithoutCancel(r.Context()), settleStepTimeout)
+	err = s.Store.ReserveAgentRun(reserveCtx, run, max(2*runTimeout, minRunStaleAfter), s.now())
+	cancelReserve()
+	if err != nil {
 		if errors.Is(err, store.ErrBudgetExhausted) {
 			err = errBudget
 		}
@@ -352,7 +425,7 @@ func (s *Server) postAgentMessage(w http.ResponseWriter, r *http.Request) {
 	turn := &chatTurn{
 		s: s, r: r, user: user, run: run, text: text, page: pageContext(body), release: release,
 		redactEnv: !slices.Contains(settings.UnredactedProviders, ref.Provider),
-		timeout:   cat.RunTimeout,
+		timeout:   runTimeout,
 	}
 	turn.execute(w)
 }

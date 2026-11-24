@@ -73,6 +73,8 @@ export interface AgentStatusDTO {
   can_chat: boolean
   model_configured: boolean
   budget_exhausted: boolean
+  /** The agent answered its catalogue call just now; absent on older servers. */
+  agent_reachable?: boolean
 }
 export interface AgentConversationSummaryDTO {
   id: number

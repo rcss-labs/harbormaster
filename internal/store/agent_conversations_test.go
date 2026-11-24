@@ -102,3 +102,27 @@ func TestListAgentConversations_OnlyOwnAndAppendBumpsUpdatedAt(t *testing.T) {
 		t.Fatalf("updated_at not bumped: %v -> %v", before.UpdatedAt, after.UpdatedAt)
 	}
 }
+
+func TestSetAgentConversationTitleIfEmpty(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	alice, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	bob, _ := st.CreateUser(ctx, "bob", "h", false, false)
+	c, _ := st.CreateAgentConversation(ctx, alice.ID, "")
+	title := func() string {
+		got, err := st.GetAgentConversation(ctx, alice.ID, c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Title
+	}
+	if err := st.SetAgentConversationTitleIfEmpty(ctx, bob.ID, c.ID, "hijacked"); err != nil || title() != "" {
+		t.Fatalf("another user set the title: %q, %v", title(), err)
+	}
+	if err := st.SetAgentConversationTitleIfEmpty(ctx, alice.ID, c.ID, "first"); err != nil || title() != "first" {
+		t.Fatalf("owner title = %q, %v", title(), err)
+	}
+	if err := st.SetAgentConversationTitleIfEmpty(ctx, alice.ID, c.ID, "second"); err != nil || title() != "first" {
+		t.Fatalf("title overwritten: %q, %v", title(), err)
+	}
+}

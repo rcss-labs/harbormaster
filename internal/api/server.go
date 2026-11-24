@@ -135,6 +135,17 @@ type Server struct {
 	// AgentHeartbeat is how often an open chat stream gets a comment line to keep proxies from closing it
 	// (default 15s).
 	AgentHeartbeat time.Duration
+	// AgentWriteTimeout bounds one write of a chat stream to the browser (default 10s); a browser that does not read
+	// for that long is dropped and its run cancelled.
+	AgentWriteTimeout time.Duration
+	// AgentRunSlack is how long past the agent's own run timeout a turn waits before giving up (default 30s).
+	AgentRunSlack time.Duration
+	// agentReach remembers for a few seconds that the agent's catalogue could not be read, so a page full of status
+	// calls does not queue on a dead agent.
+	agentReach *agentReach
+	// agentEventHook, when set, sees each agent event before the turn handles it. TEST ONLY: it lets a test hold
+	// the event loop at a known point.
+	agentEventHook func(ctx context.Context, ev agentclient.Event)
 	// testTokenRoutes marks extra routes for tokens, by pattern. TEST ONLY: it exists so a test can prove that the
 	// read-only subject alone refuses a write route that was marked by mistake. Production code never sets it.
 	testTokenRoutes map[string]auth.Scope
@@ -186,6 +197,7 @@ func New(s Server) *Server {
 	s.focusOpens = &focusOpens{}
 	s.routeLog = &routeRecorder{byMux: map[*http.ServeMux][]routeInfo{}}
 	s.targetKeys, s.memberLines = &ttlCache[[]store.TargetFilter]{}, &ttlCache[string]{}
+	s.agentReach = &agentReach{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()
@@ -235,6 +247,12 @@ func New(s Server) *Server {
 	}
 	if s.AgentHeartbeat <= 0 {
 		s.AgentHeartbeat = 15 * time.Second
+	}
+	if s.AgentWriteTimeout <= 0 {
+		s.AgentWriteTimeout = 10 * time.Second
+	}
+	if s.AgentRunSlack <= 0 {
+		s.AgentRunSlack = 30 * time.Second
 	}
 	// plan 04: terminal
 	if s.ExecStartTimeout <= 0 {

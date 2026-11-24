@@ -47,7 +47,7 @@ func TestChat_StreamCannotBeBrokenOutOf(t *testing.T) {
 			t.Errorf("frame has %d lines: %q", len(f.Lines), f.Lines)
 		}
 	}
-	if frames[0].Data["delta"] != hostile {
+	if want := strings.ReplaceAll(hostile, "\r", ""); frames[0].Data["delta"] != want { // control characters are stripped
 		t.Errorf("delta = %q", frames[0].Data["delta"])
 	}
 	if strings.Contains(string(raw), "\r") {

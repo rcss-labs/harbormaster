@@ -30,6 +30,8 @@ type fakeAgent struct {
 	requests []capturedRun
 	// script answers a run. The default sends "Hi" and done.
 	script func(w http.ResponseWriter, r *http.Request, run capturedRun)
+	// catalogue overrides the default catalogue body.
+	catalogue string
 }
 
 type capturedRun struct {
@@ -49,7 +51,13 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 	fa.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/catalogue":
-			_, _ = w.Write([]byte(fakeCatalogue))
+			fa.mu.Lock()
+			body := fa.catalogue
+			fa.mu.Unlock()
+			if body == "" {
+				body = fakeCatalogue
+			}
+			_, _ = w.Write([]byte(body))
 		case "/v1/runs":
 			raw, _ := io.ReadAll(r.Body)
 			run := capturedRun{Bearer: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), Raw: string(raw)}
@@ -99,6 +107,7 @@ type chatEnv struct {
 	api   *Server
 	st    *store.Store
 	agent *fakeAgent
+	logs  *syncBuffer
 	sam   *apiClient // admin, no AIChat flag
 	omer  *apiClient // not an admin, AIChat granted
 }
@@ -107,7 +116,7 @@ type chatEnv struct {
 func newChatEnv(t *testing.T, mutate ...func(*Server)) *chatEnv {
 	t.Helper()
 	fa := newFakeAgent(t)
-	srv, api, _, st, _ := newServerCustomAPI(t, true, withAgent(func(s *Server) {
+	srv, api, _, st, logs := newServerCustomAPI(t, true, withAgent(func(s *Server) {
 		client, err := agentclient.New(fa.srv.URL, "")
 		if err != nil {
 			t.Fatal(err)
@@ -126,7 +135,7 @@ func newChatEnv(t *testing.T, mutate ...func(*Server)) *chatEnv {
 	if err := st.SetUserAIChat(t.Context(), omer.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	return &chatEnv{srv: srv, api: api, st: st, agent: fa,
+	return &chatEnv{srv: srv, api: api, st: st, agent: fa, logs: logs,
 		sam: login(t, srv, "sam", testPassword), omer: login(t, srv, "omer", testPassword)}
 }
 
