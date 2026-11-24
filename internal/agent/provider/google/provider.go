@@ -41,6 +41,7 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 		finish       genai.FinishReason
 		blockReason  genai.BlockedReason
 		streamErr    error
+		gotUsage     bool
 		emittedModel bool // any text or tool call has been received
 	)
 
@@ -50,8 +51,8 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 			break
 		}
 		if u := chunk.UsageMetadata; u != nil {
-			usage.InputTokens = int64(u.PromptTokenCount) + int64(u.ToolUsePromptTokenCount)
-			usage.OutputTokens = int64(u.CandidatesTokenCount) + int64(u.ThoughtsTokenCount)
+			gotUsage = true
+			usage = usageFrom(u)
 		}
 		if chunk.PromptFeedback != nil && chunk.PromptFeedback.BlockReason != "" {
 			blockReason = chunk.PromptFeedback.BlockReason
@@ -76,7 +77,11 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 				if id == "" {
 					id = newSyntheticID()
 				}
-				calls = append(calls, provider.ToolCall{ID: id, Name: part.FunctionCall.Name, Arguments: part.FunctionCall.Args})
+				call := provider.ToolCall{ID: id, Name: part.FunctionCall.Name, Arguments: part.FunctionCall.Args}
+				if len(part.FunctionCall.PartialArgs) > 0 {
+					call.Arguments, call.ArgError = nil, argErrorText
+				}
+				calls = append(calls, call)
 				parts = append(parts, part)
 				emittedModel = true
 			case part.Text != "" && !part.Thought:
@@ -106,23 +111,34 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 	if ctx.Err() != nil {
 		return resp, ctx.Err()
 	}
+	if !gotUsage {
+		// Without the vendor's usage the cost is unknown: treat it as a broken stream.
+		return resp, &provider.Error{Kind: "unavailable", Retryable: !emittedModel, Message: "the model stream ended early"}
+	}
 	if blockReason != "" && finish == "" {
-		return resp, &provider.Error{Kind: "invalid_request", Message: "the model refused the request (" + string(blockReason) + ")"}
+		return resp, declined()
 	}
 	if finish == "" {
 		return resp, &provider.Error{Kind: "unavailable", Retryable: !emittedModel, Message: "the model stream ended early"}
 	}
 
-	switch finish {
-	case genai.FinishReasonStop:
+	switch stopReasonOutcome(finish) {
+	case outcomeEnd:
 		resp.StopReason = "end"
 		if len(calls) > 0 {
 			resp.StopReason = "tool_use"
 		}
-	case genai.FinishReasonMaxTokens:
+	case outcomeCutOff:
 		resp.StopReason = "max_tokens"
+		// A call that was being written when the output ran out cannot be trusted.
+		if n := len(calls); n > 0 {
+			calls[n-1].Arguments, calls[n-1].ArgError = nil, argErrorText
+			resp.ToolCalls = calls
+		}
+	case outcomeDeclined:
+		return resp, declined()
 	default:
-		return resp, &provider.Error{Kind: "invalid_request", Message: "the model stopped without an answer (" + string(finish) + ")"}
+		return resp, &provider.Error{Kind: "invalid_request", Message: "The model stopped for an unknown reason."}
 	}
 
 	if len(parts) > 0 {
@@ -193,4 +209,49 @@ func looksLikeContextLength(msg string) bool {
 		}
 	}
 	return false
+}
+
+const argErrorText = "arguments were not a valid JSON object"
+
+func declined() error {
+	return &provider.Error{Kind: "invalid_request", Message: "The model declined to answer."}
+}
+
+type stopOutcome int
+
+const (
+	outcomeUnknown stopOutcome = iota
+	outcomeEnd
+	outcomeCutOff
+	outcomeDeclined
+)
+
+// stopReasonOutcome is the table of Gemini finish reasons. Anything not listed
+// is unknown and becomes an error, never a silent end.
+func stopReasonOutcome(r genai.FinishReason) stopOutcome {
+	switch r {
+	case genai.FinishReasonStop:
+		return outcomeEnd
+	case genai.FinishReasonMaxTokens, genai.FinishReasonContinuation:
+		return outcomeCutOff
+	case genai.FinishReasonSafety, genai.FinishReasonRecitation, genai.FinishReasonLanguage,
+		genai.FinishReasonBlocklist, genai.FinishReasonProhibitedContent, genai.FinishReasonSPII,
+		genai.FinishReasonImageSafety, genai.FinishReasonImageProhibitedContent,
+		genai.FinishReasonImageRecitation, genai.FinishReasonModelArmor:
+		return outcomeDeclined
+	}
+	return outcomeUnknown
+}
+
+// usageFrom never understates cost: thinking and tool-use prompt tokens are
+// counted, and any part of the vendor's total not covered by its breakdown is
+// added to the input. promptTokenCount already includes cached tokens, so
+// cachedContentTokenCount is not added again.
+func usageFrom(u *genai.GenerateContentResponseUsageMetadata) provider.Usage {
+	in := int64(u.PromptTokenCount) + int64(u.ToolUsePromptTokenCount)
+	out := int64(u.CandidatesTokenCount) + int64(u.ThoughtsTokenCount)
+	if extra := int64(u.TotalTokenCount) - in - out; extra > 0 {
+		in += extra
+	}
+	return provider.Usage{InputTokens: in, OutputTokens: out}
 }

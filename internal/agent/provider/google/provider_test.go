@@ -254,7 +254,7 @@ func TestGenerate_SendsToolResultInVendorForm(t *testing.T) {
 func TestGenerate_IgnoresUnparseableOpaque(t *testing.T) {
 	cap := &captured{}
 	srv := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
-	for i, opaque := range []string{`{"not":"ours"}`, `not json at all`, `[]`, `[{"inlineData":{}}]`} {
+	for i, opaque := range []string{`{"not":"ours"}`, `not json at all`, `[]`, `{}`, `[1]`, `[null]`, `"text"`, `[{"inlineData":{}}]`, `[{"type":"thinking","signature":"abc"}]`} {
 		req := simpleRequest()
 		req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: "earlier", Opaque: json.RawMessage(opaque)},
 			provider.Message{Role: provider.RoleUser, Text: "again"})
@@ -434,6 +434,7 @@ func TestGenerate_DoesNotRetryInsideTheSDK(t *testing.T) {
 			mu.Lock()
 			hits++
 			mu.Unlock()
+			w.Header().Set("Retry-After", "3")
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"error":{"code":1,"message":"x","status":"X"}}`))
 		}))
@@ -513,5 +514,155 @@ func TestClient_IgnoresEnvironmentOverrides(t *testing.T) {
 func TestNew_RequiresKey(t *testing.T) {
 	if _, err := New(Config{}); err == nil {
 		t.Fatal("expected an error for a missing key")
+	}
+}
+
+func chunk(finish, parts, usage string) []byte {
+	f := ""
+	if finish != "" {
+		f = `,"finishReason":"` + finish + `"`
+	}
+	u := ""
+	if usage != "" {
+		u = `,"usageMetadata":` + usage
+	}
+	return []byte(`data: {"candidates":[{"content":{"role":"model","parts":[` + parts + `]}` + f + `}]` + u + "}\n\n")
+}
+
+func TestGenerate_StopReasonTable(t *testing.T) {
+	const usage = `{"promptTokenCount":20,"candidatesTokenCount":3,"totalTokenCount":23}`
+	ok := map[string]string{"STOP": "end", "MAX_TOKENS": "max_tokens", "CONTINUATION": "max_tokens"}
+	for reason, want := range ok {
+		srv := sseServer(t, nil, 200, nil, chunk(reason, `{"text":"hi"}`, usage))
+		resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+		if err != nil || resp.StopReason != want {
+			t.Errorf("%s: stop=%q err=%v, want %q", reason, resp.StopReason, err, want)
+		}
+	}
+	declined := []string{"SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION", "MODEL_ARMOR"}
+	unknown := []string{"OTHER", "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL", "TOO_MANY_TOOL_CALLS",
+		"MISSING_THOUGHT_SIGNATURE", "MALFORMED_RESPONSE", "ESCALATION", "IMAGE_OTHER", "NO_IMAGE",
+		"PUP_LIMITED_DISABLED", "FINISH_REASON_UNSPECIFIED", "SOMETHING_NEW"}
+	check := func(reason, wantMsg string) {
+		srv := sseServer(t, nil, 200, nil, chunk(reason, `{"text":"partial"}`, usage))
+		resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+		var perr *provider.Error
+		if !errors.As(err, &perr) {
+			t.Errorf("%s: err = %v, want a provider.Error", reason, err)
+			return
+		}
+		if perr.Kind != "invalid_request" || perr.Retryable || perr.Message != wantMsg {
+			t.Errorf("%s: got %+v", reason, perr)
+		}
+		if resp.Usage.InputTokens != 20 || resp.Usage.OutputTokens != 3 || resp.StopReason == "end" {
+			t.Errorf("%s: response = %+v", reason, resp)
+		}
+	}
+	for _, r := range declined {
+		check(r, "The model declined to answer.")
+	}
+	for _, r := range unknown {
+		check(r, "The model stopped for an unknown reason.")
+	}
+}
+
+func TestGenerate_BlockedPromptIsDeclined(t *testing.T) {
+	body := `data: {"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":5,"totalTokenCount":5}}` + "\n\n"
+	srv := sseServer(t, nil, 200, nil, []byte(body))
+	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Message != "The model declined to answer." || perr.Retryable {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGenerate_TruncatedToolCall_SetsArgError(t *testing.T) {
+	call := `{"functionCall":{"name":"list_clusters","args":{"region":"eu-we"}}}`
+	srv := sseServer(t, nil, 200, nil, chunk("MAX_TOKENS", call, `{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13}`))
+	resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StopReason != "max_tokens" || len(resp.ToolCalls) != 1 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if tc := resp.ToolCalls[0]; tc.ArgError != "arguments were not a valid JSON object" || tc.Arguments != nil || tc.Name != "list_clusters" {
+		t.Errorf("call = %+v", tc)
+	}
+}
+
+func TestGenerate_PartialArgs_SetsArgError(t *testing.T) {
+	call := `{"functionCall":{"name":"get_service","partialArgs":[{"jsonPath":"$.name","stringValue":"ap","willContinue":true}]}}`
+	srv := sseServer(t, nil, 200, nil, chunk("STOP", call, `{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13}`))
+	resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ArgError == "" || resp.ToolCalls[0].Arguments != nil {
+		t.Errorf("calls = %+v", resp.ToolCalls)
+	}
+}
+
+func TestGenerate_ReplaysArgErrorCallWithoutArguments(t *testing.T) {
+	cap := &captured{}
+	srv := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
+	req := simpleRequest()
+	req.Messages = append(req.Messages,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "gemini-call-aa", Name: "get_service", ArgError: "arguments were not a valid JSON object"}}},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "gemini-call-aa", ToolName: "get_service", Text: "bad arguments", IsError: true})
+	if _, err := newProvider(t, srv).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cap.bodies[0], `"functionCall":{"name":"get_service"}`) {
+		t.Errorf("body = %s", cap.bodies[0])
+	}
+}
+
+func TestGenerate_MissingFinalUsage_IsAStreamBreak(t *testing.T) {
+	// Text was streamed and a finish reason arrived, but the vendor never reported usage.
+	srv := sseServer(t, nil, 200, nil, chunk("STOP", `{"text":"hello"}`, ""))
+	var deltas int
+	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), func(string) { deltas++ })
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable || deltas != 1 {
+		t.Fatalf("err = %v deltas=%d", err, deltas)
+	}
+	// Nothing streamed yet: the loop may retry.
+	srv = sseServer(t, nil, 200, nil, chunk("STOP", ``, ""))
+	_, err = newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	if !errors.As(err, &perr) || perr.Kind != "unavailable" || !perr.Retryable {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGenerate_UsageNeverUnderstated(t *testing.T) {
+	cases := []struct {
+		name, usage string
+		in, out     int64
+	}{
+		{"cached tokens are inside the prompt count", `{"promptTokenCount":100,"cachedContentTokenCount":40,"candidatesTokenCount":5,"thoughtsTokenCount":11,"totalTokenCount":116}`, 100, 16},
+		{"tool-use prompt tokens are added", `{"promptTokenCount":100,"toolUsePromptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":112}`, 107, 5},
+		{"tokens only in the total go to input", `{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":130}`, 123, 7},
+	}
+	for _, tc := range cases {
+		srv := sseServer(t, nil, 200, nil, chunk("STOP", `{"text":"ok"}`, tc.usage))
+		resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+		if err != nil || resp.Usage.InputTokens != tc.in || resp.Usage.OutputTokens != tc.out {
+			t.Errorf("%s: usage = %+v err=%v", tc.name, resp.Usage, err)
+		}
+	}
+}
+
+func TestGenerate_ClampsMaxOutputTokens(t *testing.T) {
+	cap := &captured{}
+	srv := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
+	req := simpleRequest()
+	req.MaxOutputTokens = int(^uint(0) >> 1)
+	if _, err := newProvider(t, srv).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cap.bodies[0], `"maxOutputTokens":2147483647`) {
+		t.Errorf("body = %s", cap.bodies[0])
 	}
 }

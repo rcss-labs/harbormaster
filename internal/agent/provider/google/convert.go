@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"strings"
 
 	"google.golang.org/genai"
@@ -31,7 +32,7 @@ func buildConfig(req provider.Request) *genai.GenerateContentConfig {
 		cfg.SystemInstruction = genai.NewContentFromText(req.System, genai.RoleUser)
 	}
 	if req.MaxOutputTokens > 0 {
-		cfg.MaxOutputTokens = int32(req.MaxOutputTokens)
+		cfg.MaxOutputTokens = int32(min(req.MaxOutputTokens, math.MaxInt32))
 	}
 	if len(req.Tools) > 0 {
 		decls := make([]*genai.FunctionDeclaration, 0, len(req.Tools))
@@ -98,6 +99,9 @@ func assistantParts(m provider.Message) []*genai.Part {
 	}
 	for _, tc := range m.ToolCalls {
 		fc := &genai.FunctionCall{Name: tc.Name, Args: tc.Arguments}
+		if tc.ArgError != "" || fc.Args == nil {
+			fc.Args = map[string]any{}
+		}
 		if !strings.HasPrefix(tc.ID, syntheticIDPrefix) {
 			fc.ID = tc.ID
 		}
