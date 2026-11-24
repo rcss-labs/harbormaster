@@ -60,6 +60,43 @@ export interface MeDTO {
   break_glass: boolean
   email: string | null
   display_name: string | null
+  /** The agent service is configured on this server. Absent on servers without it. */
+  agent_enabled?: boolean
+  /** This user may use the agent chat. */
+  ai_chat?: boolean
+}
+
+// ---- Agent chat ----
+
+export interface AgentStatusDTO {
+  enabled: boolean
+  can_chat: boolean
+  model_configured: boolean
+  budget_exhausted: boolean
+}
+export interface AgentConversationSummaryDTO {
+  id: number
+  title: string
+  updated_at: string
+}
+export interface AgentMessageDTO {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  tools: string[]
+  interrupted: boolean
+  created_at: string
+}
+export interface AgentConversationDTO {
+  id: number
+  title: string
+  messages: AgentMessageDTO[]
+}
+/** What the user is looking at; the server uses it to ground the question. */
+export interface AgentPageContext {
+  path: string
+  service_id?: string
+  cluster_id?: string
 }
 
 // ---- Shared ----

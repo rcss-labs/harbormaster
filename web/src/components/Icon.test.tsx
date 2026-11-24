@@ -29,8 +29,8 @@ describe('Icon', () => {
     expect(svg).toHaveClass('mine')
   })
 
-  it('has the 45 icons of the mockup set, and an unknown name is a type error', () => {
-    expect(Object.keys(ICONS)).toHaveLength(45)
+  it('has the 46 icons of the mockup set and the agent, and an unknown name is a type error', () => {
+    expect(Object.keys(ICONS)).toHaveLength(46)
     // @ts-expect-error not part of the icon set
     const unknown: IconName = 'not-an-icon'
     expect(unknown).toBe('not-an-icon')

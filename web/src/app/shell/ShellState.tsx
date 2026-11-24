@@ -33,6 +33,9 @@ interface ShellStateValue {
   paletteOpen: boolean
   openPalette: () => void
   closePalette: () => void
+  agentOpen: boolean
+  openAgent: () => void
+  closeAgent: () => void
   helpOpen: boolean
   openHelp: () => void
   closeHelp: () => void
@@ -56,6 +59,7 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
   const [sidebarChoice, setSidebarChoice] = useState<SidebarChoice>(readSidebarChoice)
   const [railOpen, setRailOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [agentOpen, setAgentOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   useEffect(() => {
@@ -78,6 +82,8 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
 
   const toggleRail = useCallback(() => setRailOpen((open) => !open), [])
   const closeRail = useCallback(() => setRailOpen(false), [])
+  const openAgent = useCallback(() => setAgentOpen(true), [])
+  const closeAgent = useCallback(() => setAgentOpen(false), [])
   const openHelp = useCallback(() => setHelpOpen(true), [])
   const closeHelp = useCallback(() => setHelpOpen(false), [])
   const openPalette = useCallback(() => setPaletteOpen(true), [])
@@ -112,11 +118,14 @@ export function ShellStateProvider({ children }: { children: ReactNode }) {
       paletteOpen,
       openPalette,
       closePalette,
+      agentOpen,
+      openAgent,
+      closeAgent,
       helpOpen,
       openHelp,
       closeHelp,
     }),
-    [windowWidth, layoutWidth, sidebarCollapsed, toggleSidebar, railOpen, toggleRail, closeRail, paletteOpen, openPalette, closePalette, helpOpen, openHelp, closeHelp],
+    [windowWidth, layoutWidth, sidebarCollapsed, toggleSidebar, railOpen, toggleRail, closeRail, paletteOpen, openPalette, closePalette, agentOpen, openAgent, closeAgent, helpOpen, openHelp, closeHelp],
   )
   return <ShellStateContext.Provider value={value}>{children}</ShellStateContext.Provider>
 }

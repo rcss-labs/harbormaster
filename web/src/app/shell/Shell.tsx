@@ -5,6 +5,7 @@ import { usePhone } from '../../components/usePhone'
 import { useVisualViewport } from '../../components/useVisualViewport'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../auth/AuthProvider'
+import { AgentDrawer } from '../agent/AgentDrawer'
 import { ActivityRail } from './ActivityRail'
 import { BottomTabBar } from './BottomTabBar'
 import { CommandPalette } from './CommandPalette'
@@ -88,6 +89,7 @@ function ShellFrame() {
         {phone && <BottomTabBar />}
       </div>
       <ActivityRail />
+      <AgentDrawer />
       {paletteOpen && <CommandPalette />}
       {!phone && helpOpen && <KeyboardHelp onClose={closeHelp} />}
     </div>
