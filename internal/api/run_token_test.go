@@ -32,11 +32,17 @@ func withAgent(mutate func(*Server)) func(*Server) {
 // runTokenClient returns a client that authenticates as username with a freshly minted run token.
 func runTokenClient(t *testing.T, srv *httptest.Server, api *Server, st *store.Store, username string) *apiClient {
 	t.Helper()
+	return runTokenClientRedacting(t, srv, api, st, username, true)
+}
+
+// runTokenClientRedacting is runTokenClient with the redaction the provider's setting would give.
+func runTokenClientRedacting(t *testing.T, srv *httptest.Server, api *Server, st *store.Store, username string, redactEnv bool) *apiClient {
+	t.Helper()
 	user, err := st.GetUserByUsername(t.Context(), username)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := api.Auth.MintRunToken(t.Context(), user, uuid.New(), true)
+	raw, err := api.Auth.MintRunToken(t.Context(), user, uuid.New(), redactEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
