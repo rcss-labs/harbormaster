@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -60,5 +60,16 @@ describe('tokens.css', () => {
     expect(css).toMatch(/--tag-red-text: var\(--bad\)/)
     expect(css).toMatch(/--tag-green-text: var\(--ok\)/)
     expect(css).toMatch(/--tag-amber-text: var\(--warn\)/)
+  })
+
+  // A misspelled token silently drops the declaration: meter tracks lost their background that way.
+  it('defines every custom property the stylesheets use', () => {
+    const root = join(__dirname, '..')
+    const sources = globSync('**/*.{css,ts,tsx}', { cwd: root }).map((file) => readFileSync(join(root, file), 'utf8'))
+    const styles = globSync('**/*.css', { cwd: root }).map((file) => readFileSync(join(root, file), 'utf8'))
+    const everything = sources.join('\n')
+    const used = new Set(styles.flatMap((sheet) => [...sheet.matchAll(/var\((--[a-z0-9-]+)\s*\)/g)].map((match) => match[1])))
+    const undefinedNames = [...used].filter((name) => !new RegExp(`${name}['"]?\\]?\\s*:|['"]${name}['"]`).test(everything))
+    expect(undefinedNames).toEqual([])
   })
 })

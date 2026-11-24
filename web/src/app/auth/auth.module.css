@@ -1,18 +1,21 @@
 /* Ported from docs/design/mockup/index.html: .login-wrap/.login-card/.field/.err/.hint/.brand. */
 .wrap { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; place-items: center; padding: 16px; overflow-y: auto; }
-.card { width: min(380px, 100%); padding: 24px; display: grid; gap: 14px; }
+.card { width: min(400px, 100%); padding: 32px; display: grid; gap: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
 .brand { display: grid; gap: 4px; justify-items: start; }
 .brandSub { font-size: 12px; color: var(--muted); }
-.title { margin: 0; font-size: 18px; }
+.title { margin: 0; font-size: 20px; line-height: 28px; }
 .sub { margin: 0; font-size: 13px; color: var(--muted); }
-.field { display: grid; gap: 5px; }
+.field { display: grid; gap: 4px; }
 .field > label { font-size: 12px; color: var(--muted); font-weight: 500; }
-.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
+.ctl { height: 40px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
 .err { font-size: 12px; color: var(--danger); }
 .hint { font-size: 12px; color: var(--muted); }
-.submit { justify-content: center; }
+.submit, .ssoBtn { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r); background: var(--accent); color: var(--accent-ink); font-weight: 500; text-decoration: none; cursor: pointer; }
+.submit:hover:not(:disabled), .ssoBtn:hover { filter: brightness(1.06); }
+.submit:disabled { opacity: 0.55; cursor: not-allowed; }
+.quiet { border-color: var(--border-strong); background: var(--raised); color: var(--text); }
+.quiet:hover:not(:disabled) { background: var(--hover); filter: none; }
 .loading { padding: 24px; color: var(--muted); }
-.ssoBtn { justify-content: center; text-decoration: none; }
 /* Phone: the card becomes a full-width form that follows the visible height, so the submit stays reachable above the keyboard. */
 @media (max-width: 700px) {
   .wrap { bottom: auto; height: var(--hm-vvh, 100dvh); place-items: start stretch; padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px)); }

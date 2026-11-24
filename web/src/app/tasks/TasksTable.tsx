@@ -145,7 +145,7 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, onOpen, on
   ]
 
   return (
-    <div className={rowStyles.rows}>
+    <div className={`${rowStyles.rows} ${styles.frame}`}>
       <DataTable
         label="Tasks"
         columns={columns}

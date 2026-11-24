@@ -5,8 +5,8 @@
 .group { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; }
 .head { position: sticky; top: 0; z-index: 2; background: var(--surface); }
 .row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 0 var(--pad); border-left: 3px solid transparent; }
-.head .row { min-height: 32px; border-bottom: 1px solid var(--border); }
-.body { min-height: var(--row); border-bottom: 1px solid var(--row-border); }
+.head .row { min-height: 36px; border-bottom: 1px solid var(--border); }
+.body { min-height: var(--row); padding-block: 2px; border-bottom: 1px solid var(--row-border); }
 .body:last-child { border-bottom: 0; }
 .body.bad { border-left-color: var(--bad); }
 .body.warn { border-left-color: var(--warn); }
@@ -18,7 +18,8 @@
 .td { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .right { text-align: right; justify-self: stretch; }
 /* The pinned actions column needs an opaque background so scrolled cells do not show through it. */
-.sticky { z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--border); overflow: visible; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; }
+.sticky { z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--row-border); overflow: visible; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; }
+.body .sticky { margin-block: -2px; }
 .body:hover .sticky { background: var(--hover); }
 .sortButton { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .sortButton:hover { color: var(--text); }

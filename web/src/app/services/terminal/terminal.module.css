@@ -2,14 +2,14 @@
 .session { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; margin: 0; font-size: 12px; }
 .session dt { color: var(--muted); }
 .session dd { margin: 0; text-align: right; font-family: var(--mono); }
-.sessionNote { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
-.root { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.sessionNote { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.root { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); }
 .side { min-width: 0; align-self: start; }
 .toolbar { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
 .field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
 .field select { height: 28px; padding: 0 8px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); font: 12px var(--mono); min-width: 0; max-width: 100%; }
 .field select:disabled { opacity: 0.6; }
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; white-space: nowrap; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); cursor: pointer; font-weight: 500; white-space: nowrap; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .danger { background: transparent; border-color: var(--danger-border); color: var(--danger); }

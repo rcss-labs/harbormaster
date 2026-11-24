@@ -1,29 +1,32 @@
 /* Shell v4: sidebar | main. The activity rail is a Drawer now, so it never takes a grid column. */
-.app { --side: 212px; display: grid; grid-template-columns: var(--side) minmax(0, 1fr); height: 100%; overflow: hidden; }
+.app { --side: 240px; display: grid; grid-template-columns: var(--side) minmax(0, 1fr); height: 100%; overflow: hidden; }
 .appCollapsed { --side: 52px; }
 
 /* The sidebar does not clip: the account popover opens upward and may spill past the 52px collapsed rail. */
 .sidebar { background: var(--chrome); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; z-index: 2; }
-.brand { min-height: 52px; flex: none; display: flex; flex-direction: column; justify-content: center; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--border); }
-.brand img { width: 26px; height: 26px; }
-.brand span { font-size: 13.5px; letter-spacing: -0.01em; }
+.brand { min-height: 56px; flex: none; display: flex; flex-direction: column; justify-content: center; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.brand img { width: 28px; height: 28px; }
+.brand span { font-size: 14px; }
 .brandSub { padding-left: 36px; margin-top: -6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.nav, .pinned { display: flex; flex-direction: column; gap: 1px; padding: 8px 6px; }
-.nav a { position: relative; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px; border-radius: var(--r); color: var(--muted); font-weight: 500; }
+.nav, .pinned { display: flex; flex-direction: column; gap: 2px; padding: 8px; }
+.nav a { position: relative; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--r); color: var(--muted); font-weight: 500; }
 .nav a:hover, .pinned a:hover { background: var(--hover); color: var(--text); }
-.nav a.active { background: var(--accent-soft); color: var(--accent); }
-.navIcon { flex: none; }
+/* The active row is a surface step; the accent stays on the icon alone. */
+.nav a.active { background: var(--active); color: var(--text); }
+.nav a.active .navIcon { color: var(--accent); }
+.navIcon { flex: none; transition: color var(--fast) var(--ease); }
 .navLabel { flex: 1; white-space: nowrap; }
 .counts { display: inline-flex; gap: 6px; align-items: baseline; }
-.count { font: 600 12px var(--mono); color: var(--muted); }
+.count { font: 500 12px var(--mono); color: var(--muted); }
 .countBad { color: var(--bad); }
 .countWarn { color: var(--warn); }
-.navSection { padding: 10px 8px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.navSection { padding: 20px 8px 8px; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--muted); }
 .pinned { padding-top: 0; min-height: 0; overflow: auto; }
+.pinned .navSection { padding-top: 8px; }
 .pinned a { display: flex; flex-direction: column; align-items: stretch; gap: 1px; min-height: 28px; padding: 4px 8px; border-radius: var(--r); color: var(--text-2); }
-.pinned a.active { background: var(--accent-soft); color: var(--accent); }
+.pinned a.active { background: var(--active); color: var(--text); }
 .pinTop { display: flex; align-items: flex-start; gap: 8px; }
-.pinMark { display: inline-flex; margin-top: 3px; flex: none; }
+.pinMark { display: inline-flex; margin-top: 4px; flex: none; }
 .pinName { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
 .pinItem { display: flex; align-items: flex-start; gap: 2px; }
 .pinItem > a { flex: 1; min-width: 0; }
@@ -31,12 +34,12 @@
 .pinRemove:hover, .pinRemove:focus-visible { opacity: 1; color: var(--text); background: var(--hover); }
 .pinMoves { flex: none; display: flex; flex-direction: column; margin-top: 2px; opacity: 0; }
 .pinItem:hover .pinMoves, .pinItem:focus-within .pinMoves { opacity: 1; }
-.pinMove { padding: 0 5px; border: 0; border-radius: var(--r); background: none; color: var(--muted); font: 11px/1.3 var(--sans); cursor: pointer; }
+.pinMove { padding: 0 4px; border: 0; border-radius: var(--r); background: none; color: var(--muted); font: 12px/1.3 var(--sans); cursor: pointer; }
 .pinMove:hover:not(:disabled), .pinMove:focus-visible { color: var(--text); background: var(--hover); }
 .pinMove:disabled { opacity: 0.3; cursor: default; }
 .pinDropTarget { box-shadow: inset 0 2px 0 var(--accent); }
 .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.pinDetail { padding-left: 18px; font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.pinDetail { padding-left: 16px; font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .pinnedEmpty { padding: 2px 8px; font-size: 12px; color: var(--muted); }
 .sideFoot { margin-top: auto; border-top: 1px solid var(--border); padding: 8px 6px; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
 .sideFoot strong { color: var(--text); font-weight: 500; }
@@ -45,13 +48,13 @@
 .accWrap > [role="group"] { top: auto; bottom: calc(100% + 4px); left: 0; }
 .accountBtn { width: 100%; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; font: inherit; text-align: left; }
 .accountBtn:hover, .accountBtn[aria-expanded="true"] { background: var(--hover); }
-.avatar { width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--active); display: grid; place-items: center; font: 600 12px var(--mono); color: var(--accent); }
+.avatar { width: 24px; height: 24px; flex: none; border-radius: 50%; background: var(--active); display: grid; place-items: center; font: 500 12px var(--mono); color: var(--text-2); }
 .userText { min-width: 0; line-height: 1.3; }
 .accountMenu { display: flex; flex-direction: column; gap: 2px; margin: -4px; }
-.menuItem { display: flex; align-items: center; height: 30px; padding: 0 8px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); cursor: pointer; font: inherit; font-weight: 500; text-align: left; }
+.menuItem { display: flex; align-items: center; height: 32px; padding: 0 8px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); cursor: pointer; font: inherit; font-weight: 500; text-align: left; }
 .menuItem:hover { background: var(--hover); }
 .menuDanger { color: var(--bad); margin-top: 2px; border-top: 1px solid var(--border); border-radius: 0 0 var(--r) var(--r); }
-.collapseBtn { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; font: inherit; }
+.collapseBtn { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; font: inherit; }
 .collapseBtn:hover { background: var(--hover); color: var(--text); }
 .collapseBtn .kbd { margin-left: auto; }
 
@@ -65,9 +68,9 @@
 
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* Crumbs wrap and shrink (min-width: 0) before they can overlap the search button; the search shrinks to 160px. */
-.topbar { min-height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--border); background: var(--chrome); position: relative; z-index: 3; }
+.topbar { min-height: 56px; flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--chrome); position: relative; z-index: 3; }
 .popAnchor { position: relative; flex: none; }
-.scopeBtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 280px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; }
+.scopeBtn { display: inline-flex; align-items: center; gap: 8px; height: 32px; max-width: 280px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; }
 .scopeBtn:hover { background: var(--hover); }
 .scopeText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scopePop { display: grid; gap: 12px; }
@@ -75,11 +78,11 @@
 .scopeFields .ctl { width: 100%; }
 /* The tag checkbox list opens inline, pushing "Saved scopes" down, instead of floating over it. */
 .scopeFields [role="group"] { position: static; margin-top: 4px; box-shadow: none; min-width: 0; width: 100%; }
-.scopeSaved { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.scopeSaved { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); }
 .chipMain, .chipX { border: 0; background: transparent; color: var(--text); cursor: pointer; font: inherit; }
-.chipMain { padding: 2px 4px 2px 10px; }
+.chipMain { padding: 2px 4px 2px 12px; }
 .chipX { display: inline-flex; align-items: center; padding: 2px 6px 2px 2px; color: var(--muted); }
 .chipMain:hover, .chipX:hover { color: var(--accent); }
 .scopeName { display: flex; gap: 6px; }
@@ -89,12 +92,12 @@
 .crumbs a:hover { color: var(--text); }
 .sep { color: var(--muted); }
 .here { color: var(--text); font-weight: 500; }
-.searchBtn { flex: 0 1 280px; min-width: 160px; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--muted); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; font: inherit; }
+.searchBtn { flex: 0 1 280px; min-width: 160px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--muted); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; font: inherit; }
 .searchBtn:hover { border-color: var(--muted); }
 .searchBtn svg { flex: none; }
 .searchText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.kbd { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 5px; flex: none; }
-.freshBtn { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); cursor: pointer; font: inherit; white-space: nowrap; }
+.kbd { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 4px; flex: none; }
+.freshBtn { display: inline-flex; align-items: center; height: 32px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--r); background: transparent; cursor: pointer; font: inherit; white-space: nowrap; }
 .freshBtn:hover { background: var(--hover); }
 .freshNote { margin-left: 6px; color: var(--muted); white-space: nowrap; }
 /* Only where the top bar has room: below this it would squeeze the breadcrumb. The popover always has the detail. */
@@ -103,65 +106,71 @@
 .freshRegion { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--row-border); }
 .freshCurrent { color: var(--muted); }
 .freshError { margin: 4px 0 0; padding: 6px 8px; border-radius: var(--r-s); background: var(--raised); font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.iconBtn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 6px; flex: none; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text-2); cursor: pointer; }
+.iconBtn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 6px; flex: none; border: 1px solid transparent; border-radius: var(--r); background: transparent; color: var(--muted); cursor: pointer; }
 .iconBtn:hover { background: var(--hover); color: var(--text); }
-.activityCount { font: 600 12px var(--mono); color: var(--bad); }
-.content { flex: 1; overflow: auto; padding: 16px 20px 32px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.activityCount { font: 500 12px var(--mono); color: var(--bad); }
+.content { flex: 1; overflow: auto; padding: 24px 24px 32px; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 /* The content area scrolls, so its children keep their natural height instead of shrinking (Tabs has overflow-x: auto, which would let it collapse). */
 .content > * { flex-shrink: 0; }
 
-.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: inherit; }
-.btn { height: 28px; padding: 0 10px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
+.ctl { height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: inherit; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
 .btn:hover:not(:disabled) { background: var(--hover); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.btnOn { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.btnOn { background: var(--active); color: var(--text); }
 
 /* Activity drawer body. */
-.railFilters { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.railFilters { padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .railList { display: grid; }
 .railEmpty { padding: 20px; text-align: center; color: var(--muted); }
-.railRow { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--row-border); }
+.railRow { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--row-border); }
 .railBody { display: grid; gap: 2px; min-width: 0; }
 .railTop { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-.railSubject { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.railSubject { font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .railSubject:hover { color: var(--accent); }
-.railCount { font: 600 12px var(--mono); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 4px; color: var(--text-2); }
+.railCount { font: 500 12px var(--mono); border: 1px solid var(--border-strong); border-radius: var(--r-s); padding: 0 4px; color: var(--text-2); }
 .railWhen { margin-left: auto; font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
 .railText { color: var(--text-2); overflow-wrap: anywhere; }
 .railActor { font: 12px var(--mono); color: var(--muted); }
 
 /* Keyboard shortcuts dialog. */
 .keys { display: grid; gap: 6px; margin: 0; }
-.keyRow { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 10px; }
+.keyRow { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 8px; }
 .keyRow dt, .keyRow dd { margin: 0; }
 
 /* Command palette */
 .paletteBackdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: calc(12vh / var(--hm-zoom, 1)); }
-.palette { width: 620px; max-width: calc(92vw / var(--hm-zoom, 1)); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--pop); overflow: hidden; }
-.paletteInput { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 46px; border-bottom: 1px solid var(--border); }
+.palette { width: 640px; max-width: calc(92vw / var(--hm-zoom, 1)); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-panel); box-shadow: var(--pop); overflow: hidden; }
+.paletteInput { display: flex; align-items: center; gap: 8px; padding: 0 16px; height: 48px; border-bottom: 1px solid var(--border); }
 .paletteInput input { flex: 1; height: 100%; border: 0; background: transparent; color: var(--text); outline: none; font-size: 14px; min-width: 0; }
 .paletteInput input::placeholder { color: var(--muted); }
-.paletteChevron { font: 600 12px var(--mono); color: var(--accent); }
+.paletteChevron { font: 500 12px var(--mono); color: var(--accent); }
 .paletteList { max-height: 400px; overflow: auto; padding: 6px; }
 .paletteGroup { padding: 8px 8px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
-.paletteOption { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 8px; border-radius: var(--r-s); cursor: pointer; }
+.paletteOption { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px; border-radius: var(--r-s); cursor: pointer; }
 .paletteActive { background: var(--active); }
 .paletteTag { width: 42px; flex: none; font: 500 12px var(--mono); color: var(--muted); }
 .paletteLabel { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .paletteSub { margin-left: auto; font: 12px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
 .paletteEmpty { padding: 20px; text-align: center; color: var(--muted); }
-.paletteFoot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border); font: 12px var(--mono); color: var(--muted); }
+.paletteFoot { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font: 12px var(--mono); color: var(--muted); }
 .paletteFootEnd { margin-left: auto; }
 
+/* Narrower desktops: the breadcrumb gets the room first, so it never needs a third line. */
+@media (max-width: 1439px) {
+  .app:not(.appCollapsed) { --side: 220px; }
+  .topbar { gap: 4px; padding: 8px 16px; }
+  .searchBtn { flex-basis: 160px; }
+}
 @media (max-width: 900px) {
   .content { padding: 12px; }
   .topbar { padding: 6px 12px; }
   .crumbs { display: none; }
 }
 
-.dialogField { display: grid; gap: 5px; }
+.dialogField { display: grid; gap: 4px; }
 .dialogField > span { font-size: 12px; color: var(--muted); font-weight: 500; }
-.dialogField input { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font-family: inherit; }
+.dialogField input { height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font-family: inherit; }
 .dialogError { min-height: 1.2em; margin-top: 8px; font-size: 12px; color: var(--bad); }
 
 /* Phone shell: a top bar on one row, the page in the middle, five tabs fixed to the bottom edge. */

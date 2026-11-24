@@ -67,7 +67,7 @@ export function Login() {
       busy={busy}
       onSubmit={submit}
     >
-      <a className={`btn primary ${styles.ssoBtn}`} href={`/api/auth/saml/login?return_to=${encodeURIComponent(safeReturnPath(intended))}`}>
+      <a className={styles.ssoBtn} href={`/api/auth/saml/login?return_to=${encodeURIComponent(safeReturnPath(intended))}`}>
         {sso.label}
       </a>
       {showPassword ? (

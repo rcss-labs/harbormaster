@@ -1,12 +1,12 @@
 /* Inline desired-count stepper in the sticky service header (prototype: DESIRED - n + Apply). */
-.stepper { display: inline-flex; align-items: center; height: 30px; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; background: var(--raised); }
-.stepperLabel { padding: 0 10px; font: 12px var(--mono); color: var(--dim); letter-spacing: 0.06em; }
+.stepper { display: inline-flex; align-items: center; height: 32px; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; background: var(--raised); }
+.stepperLabel { padding: 0 12px; font: 12px var(--sans); color: var(--muted); }
 .stepper button { width: 28px; height: 100%; border: 0; border-left: 1px solid var(--border-strong); background: transparent; color: inherit; cursor: pointer; font-size: 14px; }
 .stepper button:hover:not(:disabled) { background: var(--hover-strong); }
 .stepper button:disabled { opacity: 0.4; cursor: not-allowed; }
-.stepper input { width: 44px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--border-strong); background: transparent; color: inherit; text-align: center; font: 600 13px var(--mono); appearance: textfield; -moz-appearance: textfield; }
+.stepper input { width: 44px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--border-strong); background: transparent; color: inherit; text-align: center; font: 500 13px var(--mono); appearance: textfield; -moz-appearance: textfield; }
 .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { appearance: none; margin: 0; }
-.stepper .apply { width: auto; padding: 0 10px; border-left: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; }
+.stepper .apply { width: auto; padding: 0 12px; border-left: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 500; }
 .stepper .apply:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
 /* Phone: the desired-count sheet carries a 44 px stepper and a full-width apply button. */
 @media (max-width: 700px) {

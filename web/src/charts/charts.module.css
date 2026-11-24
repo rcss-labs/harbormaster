@@ -3,11 +3,11 @@
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 
-.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
-.hbars { display: grid; gap: 7px; }
-.hbar { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 2fr) minmax(52px, auto); gap: 10px; align-items: center; font-size: 12px; }
+.hbars { display: grid; gap: 8px; }
+.hbar { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(0, 2fr) minmax(52px, auto); gap: 8px; align-items: center; font-size: 12px; }
 .hbarL { display: grid; min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .hbarL a:hover { color: var(--accent); }
 .hbarTrack { position: relative; height: 7px; border-radius: 5px; background: var(--muted-soft); display: flex; overflow: visible; }
@@ -38,8 +38,8 @@
 .pchart .gl { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .pchart .mk { stroke: var(--info); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
 .pchart .mkdot { position: absolute; top: -1px; width: 9px; height: 9px; margin-left: -4px; border-radius: 50%; background: var(--info); cursor: default; }
-.pchart .mkl { position: absolute; top: -1px; transform: translateX(-50%); font: 12px var(--mono); color: var(--info); background: var(--surface); padding: 0 3px; white-space: nowrap; }
-.pchart .px { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--muted); padding-top: 3px; white-space: nowrap; }
+.pchart .mkl { position: absolute; top: -1px; transform: translateX(-50%); font: 12px var(--mono); color: var(--info); background: var(--surface); padding: 0 4px; white-space: nowrap; }
+.pchart .px { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--muted); padding-top: 4px; white-space: nowrap; }
 
 /* TimeSeriesChart: 150px plot with labels drawn inside; tooltip and crosshair are HTML overlays. */
 .ts { display: grid; gap: 4px; }
@@ -50,12 +50,12 @@
 .tsCross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-strong); pointer-events: none; }
 .tsDot { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 4px; border: 1.5px solid var(--surface); pointer-events: none; }
 .tsX { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--dim); white-space: nowrap; }
-.tip { position: absolute; top: 4px; margin: 0 10px; min-width: 170px; padding: 7px 9px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--raised); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); font-size: 12px; display: flex; flex-direction: column; gap: 3px; pointer-events: none; z-index: 2; }
-.tipTime { font: 500 10px var(--mono); color: var(--dim); margin-bottom: 2px; }
+.tip { position: absolute; top: 4px; margin: 0 12px; min-width: 170px; padding: 8px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--raised); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); font-size: 12px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; z-index: 2; }
+.tipTime { font: 500 12px var(--mono); color: var(--dim); margin-bottom: 2px; }
 .tipRow { display: flex; align-items: center; gap: 6px; }
 .tipRow i { width: 8px; height: 8px; border-radius: 2px; }
 .tipRow span { flex: 1; color: var(--text-2); }
-.tipRow b { font: 500 11px var(--mono); color: var(--text); }
+.tipRow b { font: 500 12px var(--mono); color: var(--text); }
 .tipTotal { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; }
 .tipTotal span { color: var(--muted); }
 
