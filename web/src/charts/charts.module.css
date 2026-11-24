@@ -30,7 +30,7 @@
 .timeline .ev.alt span { bottom: 36px; }
 
 /* Panel: y labels | plot, with x labels underneath. */
-.pchart { max-height: 340px; display: grid; grid-template-columns: 40px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 16px; column-gap: 6px; }
+.pchart { max-height: 340px; display: grid; grid-template-columns: var(--axis) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 16px; column-gap: 8px; }
 .pchart .py { position: relative; font: 12px var(--mono); color: var(--muted); }
 .pchart .py span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
 .pchart .pplot { position: relative; min-width: 0; border-bottom: 1px solid var(--border-strong); }
@@ -50,8 +50,9 @@
 .tsCross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-strong); pointer-events: none; }
 .tsDot { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 4px; border: 1.5px solid var(--surface); pointer-events: none; }
 .tsX { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--dim); white-space: nowrap; }
-.tip { position: absolute; top: 4px; margin: 0 12px; min-width: 170px; padding: 8px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--raised); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); font-size: 12px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; z-index: 2; }
-.tipTime { font: 500 12px var(--mono); color: var(--dim); margin-bottom: 2px; }
+.tip { position: absolute; top: 4px; margin: 0 12px; min-width: 236px; padding: 8px 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); box-shadow: var(--pop); font-size: 12px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; z-index: 2; }
+.tipTime { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 12px; font-weight: 500; color: var(--text); margin-bottom: 4px; white-space: nowrap; }
+.tipAge { font-weight: 400; color: var(--muted); }
 .tipRow { display: flex; align-items: center; gap: 6px; }
 .tipRow i { width: 8px; height: 8px; border-radius: 2px; }
 .tipRow span { flex: 1; color: var(--text-2); }
@@ -60,7 +61,8 @@
 .tipTotal span { color: var(--muted); }
 
 /* Bar chart x labels are centred under their column. */
-.pchart .pxBar { transform: translateX(-50%); }
+/* The first and last labels end flush with the plot; the ones between slide towards their column. */
+.pchart .pxBar { transform: translateX(calc(var(--at, 50) * -1%)); }
 
 /* Phones. The top y label (100%) sticks out 8 px above the plot, so a legend printed right above a chart must clear it. The dot that stands in
    for a marker label with no room sits below the two label rows, so it never lands on the label of a neighbouring marker. Bar chart x labels
@@ -70,5 +72,4 @@
   .legend { margin-bottom: 4px; }
   .pchart { margin-top: 8px; grid-template-rows: minmax(0, 1fr) auto; }
   .pchart .mkdot { top: 35px; }
-  .pchart .pxBar { transform: translateX(calc(var(--at, 50) * -1%)); }
 }

@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { usePhone } from '../components/usePhone'
 import styles from './charts.module.css'
-import { fmtNum } from './format'
+import { axisWidth, fmtNum } from './format'
 
 export interface LineSeries {
   name: string
@@ -166,7 +166,7 @@ export function LineChart({ series, unit = '%', max = 100, xLabels, height = 130
   const yLabels = [0, 2, 4].map((step) => ({ top: `${100 - (step / 4) * 100}%`, text: `${fmtNum((max * step) / 4)}${unit}` }))
 
   return (
-    <div className={styles.pchart} style={{ height: panelHeight }}>
+    <div className={styles.pchart} style={{ height: panelHeight, '--axis': axisWidth(yLabels.map((label) => label.text)) } as CSSProperties}>
       <div className={styles.py}>
         {yLabels.map((label) => (
           <span key={label.top} style={{ top: label.top }}>

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import styles from './charts.module.css'
-import { fmtNum, niceMax } from './format'
+import { axisWidth, fmtNum, niceMax } from './format'
 
 export interface BarPart {
   v: number
@@ -30,7 +30,7 @@ export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartPro
   const yLabels = [0, 1, 2].map((step) => ({ top: `${100 - (step / 2) * 100}%`, text: `${fmtNum((top * step) / 2)}${unit}` }))
 
   return (
-    <div className={styles.pchart} style={{ height: Math.min(MAX_HEIGHT, height) }}>
+    <div className={styles.pchart} style={{ height: Math.min(MAX_HEIGHT, height), '--axis': axisWidth(yLabels.map((label) => label.text)) } as CSSProperties}>
       <div className={styles.py}>
         {yLabels.map((label) => (
           <span key={label.top} style={{ top: label.top }}>
@@ -68,15 +68,14 @@ export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartPro
       </div>
       <div />
       <div className={styles.px} style={{ position: 'relative' }}>
-        {xLabels.map(([index, label]) => (
-          <span
-            key={index}
-            className={styles.pxBar}
-            style={{ position: 'absolute', left: `${((index + 0.5) / cols.length) * 100}%`, '--at': ((index + 0.5) / cols.length) * 100 } as CSSProperties}
-          >
-            {label}
-          </span>
-        ))}
+        {xLabels.map(([index, label]) => {
+          const at = cols.length > 1 ? (index / (cols.length - 1)) * 100 : 50
+          return (
+            <span key={index} className={styles.pxBar} style={{ position: 'absolute', left: `${at}%`, '--at': at } as CSSProperties}>
+              {label}
+            </span>
+          )
+        })}
       </div>
     </div>
   )

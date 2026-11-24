@@ -47,6 +47,14 @@ describe('chart primitives', () => {
     expect(Number(bottomPart.getAttribute('y')) + Number(bottomPart.getAttribute('height'))).toBe(100)
   })
 
+  it('charts reserve only the width their value labels need', () => {
+    const axis = (element: HTMLElement) => parseFloat((element.firstElementChild as HTMLElement).style.getPropertyValue('--axis'))
+    const bars = (v: number) => axis(renderWithProviders(<BarChart cols={[{ title: 'Mon', parts: [{ v, color: 'red' }] }]} xLabels={[[0, 'Mon']]} />).container)
+    const lines = (max: number) => axis(renderWithProviders(<LineChart series={[{ name: 'a', color: 'red', values: [1, 2] }]} max={max} unit="" xLabels={['a', 'b']} />).container)
+    expect(bars(1)).toBeLessThan(bars(5000))
+    expect(lines(4)).toBeLessThan(lines(50_000))
+  })
+
   it('BarChart never grows past 340px, however tall a caller asks', () => {
     const { container } = renderWithProviders(
       <BarChart cols={[{ title: 'Mon', parts: [{ v: 3, color: 'red' }] }]} xLabels={[[0, 'Mon']]} height={900} />,

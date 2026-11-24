@@ -22,3 +22,28 @@ export const XL72 = ['72 h ago', '48 h', '24 h', 'now']
 
 /** Short date for a bucket day from the API, which is a bare date or an RFC 3339 midnight ("2026-10-31T00:00:00Z"). */
 export const bucketDayLabel = (day: string): string => dayLabel(Date.parse(`${day.slice(0, 10)}T00:00:00`))
+
+/** One character of the 12px mono axis face, rounded up. */
+const AXIS_CHAR_PX = 7.3
+
+/** Width of the value axis: as wide as its longest label, so a chart of small numbers starts at the panel's edge. */
+export function axisWidth(labels: string[]): string {
+  return `${Math.ceil(Math.max(1, ...labels.map((label) => label.length)) * AXIS_CHAR_PX)}px`
+}
+
+const DAY_MS = 86_400_000
+
+/** Milliseconds between two neighbouring buckets; 0 for a single bucket. */
+export const bucketSpacing = (timestamps: string[]): number => (timestamps.length > 1 ? Date.parse(timestamps[1]) - Date.parse(timestamps[0]) : 0)
+
+/**
+ * Calendar date of a bucket for a tooltip: "Sat, Nov 21" for day-sized buckets (the API's own day, whatever the viewer's
+ * time zone), with the local time for shorter ones. The year is added once it is not the current one.
+ */
+export function bucketDateTime(timestamp: string, spacing: number, now: number): string {
+  const dayBucket = spacing >= DAY_MS
+  const at = dayBucket ? new Date(`${timestamp.slice(0, 10)}T00:00:00`) : new Date(timestamp)
+  const otherYear = at.getFullYear() !== new Date(now).getFullYear()
+  const date = at.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' as const } : {}) })
+  return dayBucket ? date : `${date}, ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+}

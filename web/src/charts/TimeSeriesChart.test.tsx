@@ -80,6 +80,26 @@ describe('TimeSeriesChart', () => {
     expect(points(line(container, 'a')).map(([, y]) => y)).toEqual([150, 75, 0])
   })
 
+  it('the tooltip of an hourly bucket gives its date and time besides the age', () => {
+    const times = timestamps(11)
+    chart({ timestamps: times, series: [{ key: 'a', label: 'Alpha', color: 'red', values: Array.from({ length: 11 }, (_, i) => i) }] })
+    hover(10)
+    const at = new Date(times[1])
+    expect(screen.getByRole('tooltip')).toHaveTextContent(at.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('9 h ago')
+  })
+
+  it('the tooltip of a day bucket gives the calendar day, with the year once it differs, and no time', () => {
+    const days = ['2025-12-30T00:00:00Z', '2025-12-31T00:00:00Z', '2026-01-01T00:00:00Z']
+    chart({ timestamps: days, now: Date.parse('2026-01-01T12:00:00Z') })
+    hover(0)
+    const day = new Date('2025-12-30T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    expect(screen.getByRole('tooltip')).toHaveTextContent(day)
+    expect(screen.getByRole('tooltip')).not.toHaveTextContent('00:00')
+    expect(screen.getByRole('tooltip')).toHaveTextContent('d ago')
+  })
+
   it('hover at 10% shows tooltip left-anchored; at 70% flips', () => {
     chart({ timestamps: timestamps(11), series: [{ key: 'a', label: 'Alpha', color: 'red', values: Array.from({ length: 11 }, (_, i) => i) }] })
     hover(10)
@@ -146,7 +166,7 @@ describe('TimeSeriesChart', () => {
     for (const clientX of [0, 100, 150, 200]) {
       fireEvent.mouseMove(plot, { clientX })
       const tip = screen.getByRole('tooltip')
-      // Offsets are bounded so the 190 px tooltip (170 px minimum plus its margins) stays inside 200 px.
+      // Offsets are bounded so the tooltip, shrunk to a plot narrower than its minimum, stays inside 200 px.
       const offset = parseFloat(tip.style.left || tip.style.right)
       const unit = (tip.style.left || tip.style.right).endsWith('px') ? 'px' : '%'
       const px = unit === 'px' ? offset : (offset / 100) * 200

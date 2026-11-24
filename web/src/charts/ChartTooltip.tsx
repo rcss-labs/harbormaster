@@ -10,8 +10,10 @@ export interface TooltipRow {
 interface ChartTooltipProps {
   /** Position of the hovered point across the plot, 0–100. */
   leftPercent: number
-  /** Relative time of the hovered bucket, e.g. "3 h ago". */
+  /** Date of the hovered bucket, e.g. "Sat, Nov 21". */
   title: string
+  /** Relative time of the hovered bucket, e.g. "3 h ago". */
+  age?: string
   rows: TooltipRow[]
   /** Shown as a separated last row (stacked charts). */
   total?: string
@@ -21,9 +23,9 @@ interface ChartTooltipProps {
 
 /** Past this share of the plot width the tooltip moves to the left of the crosshair. */
 const FLIP_AFTER_PERCENT = 60
-/** The tooltip's 170 px minimum width plus its 10 px side margins. */
-const TIP_FOOTPRINT_PX = 190
-const TIP_MARGIN_PX = 20
+/** The tooltip's 236 px minimum width plus its 12 px side margins. */
+const TIP_FOOTPRINT_PX = 260
+const TIP_MARGIN_PX = 24
 
 /** Offsets stay in percent (as on a wide plot) until the tooltip would leave the plot; then they are bounded in px. */
 function tooltipPosition(leftPercent: number, flip: boolean, plotWidth: number | null | undefined): CSSProperties {
@@ -37,12 +39,15 @@ function tooltipPosition(leftPercent: number, flip: boolean, plotWidth: number |
   return style
 }
 
-export function ChartTooltip({ leftPercent, title, rows, total, plotWidth }: ChartTooltipProps) {
+export function ChartTooltip({ leftPercent, title, age, rows, total, plotWidth }: ChartTooltipProps) {
   const flip = leftPercent > FLIP_AFTER_PERCENT
   const position = tooltipPosition(leftPercent, flip, plotWidth)
   return (
     <div role="tooltip" className={styles.tip} style={position}>
-      <div className={styles.tipTime}>{title}</div>
+      <div className={styles.tipTime}>
+        {title}
+        {age !== undefined && <span className={styles.tipAge}>{age}</span>}
+      </div>
       {rows.map((row) => (
         <div key={row.label} className={styles.tipRow}>
           <i style={{ background: row.color }} />
