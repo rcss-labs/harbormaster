@@ -45,6 +45,9 @@ func ParseCatalogue(raw string) (Catalogue, error) {
 	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
 		return nil, fmt.Errorf("provider catalogue is not valid JSON: %w", err)
 	}
+	if len(entries) == 0 {
+		return nil, errors.New("provider catalogue: no providers configured")
+	}
 	var out Catalogue
 	seenProvider := map[string]bool{}
 	for _, e := range entries {
@@ -97,14 +100,23 @@ func parsePrice(raw json.RawMessage) (int64, error) {
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return 0, errors.New("must be a decimal string such as \"3.00\", not a number")
 	}
-	whole, frac, _ := strings.Cut(s, ".")
-	if whole == "" || len(frac) > 6 || !allDigits(whole) || !allDigits(frac) || (strings.Contains(s, ".") && frac == "") {
-		return 0, fmt.Errorf("%q is not a decimal price with at most six decimals", s)
+	if strings.HasPrefix(s, "-") {
+		return 0, fmt.Errorf("%q must not be negative", s)
+	}
+	whole, frac, hasPoint := strings.Cut(s, ".")
+	if whole == "" || !allDigits(whole) || !allDigits(frac) || (hasPoint && frac == "") {
+		return 0, fmt.Errorf("%q is not a plain decimal such as \"3.00\"", s)
+	}
+	if len(frac) > 6 {
+		return 0, fmt.Errorf("%q has more than six decimals", s)
 	}
 	frac += strings.Repeat("0", 6-len(frac))
 	n, ok := new(big.Int).SetString(whole+frac, 10)
 	if !ok || !n.IsInt64() {
 		return 0, fmt.Errorf("%q is out of range", s)
+	}
+	if n.Sign() == 0 {
+		return 0, fmt.Errorf("%q must be greater than zero", s)
 	}
 	return n.Int64(), nil
 }
@@ -136,16 +148,17 @@ func (c Catalogue) Find(provider, model string) (Model, bool) {
 const microPerMTok = 1_000_000
 
 // CostMicroUSD is the price of u in micro-dollars, rounded up once on the total.
+// Negative token counts count as zero.
 func (m Model) CostMicroUSD(u Usage) int64 {
-	total := new(big.Int).Mul(big.NewInt(u.InputTokens), big.NewInt(m.InputMicroUSDPerMTok))
-	total.Add(total, new(big.Int).Mul(big.NewInt(u.OutputTokens), big.NewInt(m.OutputMicroUSDPerMTok)))
+	total := new(big.Int).Mul(big.NewInt(max(u.InputTokens, 0)), big.NewInt(m.InputMicroUSDPerMTok))
+	total.Add(total, new(big.Int).Mul(big.NewInt(max(u.OutputTokens, 0)), big.NewInt(m.OutputMicroUSDPerMTok)))
 	return ceilDivMTok(total)
 }
 
 // MaxRunCostMicroUSD bounds a run's cost: every token at the higher price.
 func (m Model) MaxRunCostMicroUSD(maxRunTokens int64) int64 {
 	price := max(m.InputMicroUSDPerMTok, m.OutputMicroUSDPerMTok)
-	return ceilDivMTok(new(big.Int).Mul(big.NewInt(maxRunTokens), big.NewInt(price)))
+	return ceilDivMTok(new(big.Int).Mul(big.NewInt(max(maxRunTokens, 0)), big.NewInt(price)))
 }
 
 // ceilDivMTok divides by one million, rounding up, saturating at MaxInt64.
