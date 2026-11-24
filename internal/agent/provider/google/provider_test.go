@@ -642,7 +642,7 @@ func TestGenerate_UsageNeverUnderstated(t *testing.T) {
 		in, out     int64
 	}{
 		{"cached tokens are inside the prompt count", `{"promptTokenCount":100,"cachedContentTokenCount":40,"candidatesTokenCount":5,"thoughtsTokenCount":11,"totalTokenCount":116}`, 100, 16},
-		{"tool-use prompt tokens are added", `{"promptTokenCount":100,"toolUsePromptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":112}`, 107, 5},
+		{"tool-use prompt tokens are added", `{"promptTokenCount":100,"toolUsePromptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":105}`, 107, 5},
 		{"tokens only in the total go to input", `{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":130}`, 123, 7},
 	}
 	for _, tc := range cases {
@@ -664,5 +664,20 @@ func TestGenerate_ClampsMaxOutputTokens(t *testing.T) {
 	}
 	if !strings.Contains(cap.bodies[0], `"maxOutputTokens":2147483647`) {
 		t.Errorf("body = %s", cap.bodies[0])
+	}
+}
+
+func TestGenerate_StreamEndsWithoutFinishReason_IsAStreamBreak(t *testing.T) {
+	usage := `{"promptTokenCount":4,"candidatesTokenCount":1,"totalTokenCount":5}`
+	srv := sseServer(t, nil, 200, nil, chunk("", ``, usage))
+	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != "unavailable" || !perr.Retryable {
+		t.Fatalf("before text: err = %v", err)
+	}
+	srv = sseServer(t, nil, 200, nil, chunk("", `{"text":"half"}`, usage))
+	_, err = newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable {
+		t.Fatalf("after text: err = %v", err)
 	}
 }
