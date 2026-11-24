@@ -20,7 +20,13 @@ export const CYCLE = [COLOR.accent, COLOR.warn, COLOR.ok, COLOR.info, COLOR.oran
 
 export const TAG_COLOR: Record<TagColor, string> = {
   red: COLOR.bad,
+  orange: 'var(--tag-orange)',
   amber: COLOR.warn,
+  brown: 'var(--tag-brown)',
+  lime: 'var(--tag-lime)',
+  teal: 'var(--tag-teal)',
+  indigo: 'var(--tag-indigo)',
+  pink: 'var(--tag-pink)',
   green: COLOR.ok,
   blue: COLOR.accent,
   violet: COLOR.info,

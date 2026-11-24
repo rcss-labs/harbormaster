@@ -2,7 +2,8 @@ import type { QueryClient } from '@tanstack/react-query'
 import { api } from '../../../api/client'
 import type { TagColor, TagDTO, TagItemDTO } from '../../../api/types'
 
-export const TAG_COLORS: TagColor[] = ['neutral', 'red', 'amber', 'blue', 'violet', 'green']
+/** Picker order: round the colour wheel, so neighbours are the ones to tell apart. */
+export const TAG_COLORS: TagColor[] = ['neutral', 'red', 'orange', 'amber', 'brown', 'lime', 'green', 'teal', 'blue', 'indigo', 'violet', 'pink']
 export const TAG_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9 _-]{0,23}$/
 export const TAG_NAME_MESSAGE = 'Use 1–24 letters, digits, spaces, hyphens or underscores, starting with a letter.'
 

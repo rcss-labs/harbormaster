@@ -130,14 +130,14 @@ export function ServicesTable({
     {
       key: 'cluster',
       header: COLUMN_LABELS.cluster,
-      width: 'minmax(110px,1fr)',
+      width: 'minmax(150px,1fr)',
       sortValue: sortBy('cluster'),
       phoneLabel: false,
       render: (service) =>
         phone ? (
           <span className={styles.mono}>{service.cluster.name}</span>
         ) : (
-          <Link to={`/clusters/${service.cluster.id}`} className={`${styles.mono} ${styles.link}`}>
+          <Link to={`/clusters/${service.cluster.id}`} className={`${styles.mono} ${styles.link}`} title={service.cluster.name}>
             {service.cluster.name}
           </Link>
         ),
@@ -145,7 +145,7 @@ export function ServicesTable({
     {
       key: 'account',
       header: COLUMN_LABELS.account,
-      width: 'minmax(120px,1fr)',
+      width: 'minmax(160px,1fr)',
       sortValue: sortBy('account'),
       phoneLabel: false,
       render: (service) =>
@@ -154,8 +154,8 @@ export function ServicesTable({
             {service.account_name} · {service.region}
           </span>
         ) : (
-          <span className={styles.two}>
-            {service.account_name}
+          <span className={styles.two} title={`${service.account_name} · ${service.region}`}>
+            <span>{service.account_name}</span>
             <small>{service.region}</small>
           </span>
         ),

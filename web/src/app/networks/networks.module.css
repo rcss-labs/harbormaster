@@ -1,41 +1,40 @@
 /* Networks: VPC list beside the selected VPC's detail (docs/redesign/README.md, screen 6). The page is a size
    container, so the layout stacks when the main column, not the viewport, is under 1100px. */
-.page { display: flex; flex-direction: column; gap: 14px; min-width: 0; container-type: inline-size; }
+.page { display: flex; flex-direction: column; gap: 16px; min-width: 0; container-type: inline-size; }
 .pageHead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.pageHead h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+.pageHead h1 { margin: 0; }
 .headMeta { color: var(--muted); font-size: 12px; }
 
 /* flex: none overrides hm-fill's flex-basis 0: the detail is taller than the window, so the grid must size to its content or the detail pane overlaps the VPC list. */
-.page .layout { flex: none; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: start; }
-.detail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.twoCol { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.page .layout { flex: none; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.twoCol { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 @container (max-width: 1100px) {
   .page .layout, .twoCol { grid-template-columns: minmax(0, 1fr); }
   .listScroll { max-height: 260px; }
 }
 
 /* VPC list */
-.listPanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; min-width: 0; }
+.listPanel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); overflow: hidden; min-width: 0; }
 .listSearch { padding: 8px; border-bottom: 1px solid var(--border); }
-.listSearch input { width: 100%; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--chrome); color: var(--text); font: inherit; }
+.listSearch input { width: 100%; height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--chrome); color: var(--text); font: inherit; }
 .listScroll { max-height: 640px; overflow: auto; }
 .listEmpty { padding: 16px 12px; color: var(--muted); text-align: center; }
 .listFoot { padding: 6px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--dim); }
 .groupHead { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; background: var(--chrome); border-bottom: 1px solid var(--row-border); font: 500 12px var(--mono); color: var(--dim); }
 .groupCount { margin-left: auto; }
-.vpcRow { width: 100%; display: grid; grid-template-columns: 3px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 0 12px 0 0; height: 42px; border: 0; border-bottom: 1px solid var(--row-border); background: transparent; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+.vpcRow { width: 100%; display: grid; grid-template-columns: 3px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 12px 8px 0; min-height: 48px; border: 0; border-bottom: 1px solid var(--row-border); background: transparent; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
 .vpcRow:hover { background: var(--hover); }
-.vpcOn { background: var(--accent-soft); }
-.vpcOn .vpcName { color: var(--accent); }
-.vpcStripe { align-self: stretch; background: transparent; }
+.vpcOn, .vpcOn:hover { background: var(--active); }
+.vpcStripe { align-self: stretch; margin-block: -8px; background: transparent; }
 .vpcOn .vpcStripe { background: var(--accent); }
 .vpcText { display: grid; line-height: 1.25; min-width: 0; }
 .vpcName { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vpcCounts { font: 12px var(--mono); color: var(--muted); text-align: right; white-space: nowrap; }
 
 /* Detail */
-.vpcHead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.vpcHead h2 { font: 600 15px var(--mono); margin: 0; }
+.vpcHead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.vpcHead h2 { font: 500 15px var(--mono); margin: 0; }
 .mono { font: 12px var(--mono); color: var(--muted); }
 .sub { font: 12px var(--mono); color: var(--dim); }
 .strong { font-weight: 500; color: var(--text); }
@@ -51,18 +50,19 @@
 .outline { list-style: none; margin: 0; padding: 0; max-height: 480px; overflow: auto; }
 .outlineRow { display: flex; align-items: center; border-bottom: 1px solid var(--row-border); padding-right: 12px; }
 .outlineRow:hover { background: var(--hover); }
-.outlineToggle, .outlineStatic { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 30px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 0; }
+.outlineToggle, .outlineStatic { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 32px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 4px 0; }
 .outlineToggle { cursor: pointer; }
 .chev { width: 10px; font: 12px var(--mono); color: var(--dim); flex: none; }
 .kind { font: 500 12px var(--mono); color: var(--dim); width: 56px; flex: none; }
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-.meta { font: 12px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The detail gives way before the name does. */
+.meta { flex-shrink: 100; font: 12px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .openLink { color: var(--accent); flex: none; padding-left: 8px; }
 .linkButton { border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
 
 /* Gateways */
 .gateways { margin: 0; display: grid; gap: 8px; font-size: 12px; }
-.gatewayRow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; }
+.gatewayRow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
 .gatewayRow dt { color: var(--muted); }
 .gatewayRow dd { margin: 0; font: 12px var(--mono); overflow-wrap: anywhere; }
 

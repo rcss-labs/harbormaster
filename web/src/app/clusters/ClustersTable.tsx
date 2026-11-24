@@ -64,7 +64,7 @@ function ServicePreview({ cluster }: { cluster: ClusterCardDTO }) {
 function UsageCell({ cluster, points, now, color }: { cluster: ClusterCardDTO; points: number[]; now: number | null | undefined; color: string }) {
   if (!cluster.container_insights) {
     return (
-      <span className={styles.dim} title={INSIGHTS_OFF}>
+      <span className={`${styles.mono} ${styles.dim}`} title={INSIGHTS_OFF}>
         –
       </span>
     )
@@ -93,7 +93,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
   const nameColumn: DataTableColumn<ClusterRow> = {
     key: 'name',
     header: 'Cluster',
-    width: 'minmax(0,1.3fr)',
+    width: 'minmax(220px,1.6fr)',
     sortValue: (r) => r.cluster.name,
     render: ({ cluster }): ReactNode =>
       phone ? (
@@ -105,7 +105,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
           <Link to={`/clusters/${cluster.id}`} className={styles.clusterLink}>
             {cluster.name}
           </Link>
-          <span className={styles.where}>
+          <span className={styles.where} title={`${cluster.account_name} · ${cluster.region}`}>
             {cluster.account_name} · {cluster.region}
           </span>
         </span>
@@ -136,7 +136,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
     {
       key: 'services',
       header: 'Services',
-      width: 'minmax(0,1.6fr)',
+      width: 'minmax(0,1.5fr)',
       phone: 'hidden',
       sortValue: (r) => r.cluster.services.length,
       render: ({ cluster }) => <ServicePreview cluster={cluster} />,
@@ -164,7 +164,8 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
       key: 'cpu',
       header: 'CPU 24h',
       phoneLabel: false,
-      width: 'minmax(0,1fr)',
+      width: 'minmax(0,0.75fr)',
+      align: 'right',
       sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.cpu_now ?? null) : null),
       render: ({ cluster, metrics }) =>
         phone ? (
@@ -177,7 +178,8 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
       key: 'mem',
       header: 'Memory 24h',
       phoneLabel: false,
-      width: 'minmax(0,1fr)',
+      width: 'minmax(0,0.75fr)',
+      align: 'right',
       sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.mem_now ?? null) : null),
       render: ({ cluster, metrics }) =>
         phone ? (

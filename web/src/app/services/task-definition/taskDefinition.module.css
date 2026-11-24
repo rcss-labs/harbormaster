@@ -1,25 +1,25 @@
 .diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); max-height: max(380px, calc(70dvh / var(--hm-zoom, 1))); overflow: auto; background: var(--raised); }
-.diff div { padding: 0 10px; white-space: pre; }
+.diff div { padding: 0 12px; white-space: pre; }
 .diff .add { background: var(--success-soft); color: var(--success); }
 .diff .del { background: var(--danger-soft); color: var(--danger); }
 .diff .gap { color: var(--muted); background: var(--muted-soft); }
 
 /* Task definition tab: ported from the mockup's sConfig rules (form-grid, field, ctl, editor, env-row, toolbar). */
-.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-bottom: 14px; }
-.stack { display: grid; gap: 12px; margin-bottom: 14px; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+.stack { display: grid; gap: 12px; margin-bottom: 16px; }
 .fieldset { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
-.field { display: grid; gap: 5px; }
+.field { display: grid; gap: 4px; }
 .field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
 .fieldError { color: var(--danger); font-size: 12px; }
-.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ctl { height: 30px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; font-size: 13px; min-width: 0; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ctl { height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; font-size: 13px; min-width: 0; }
 .mono { font-family: var(--mono); }
 .envRow { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
 .iconBtn { border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); border-radius: var(--radius); width: 30px; cursor: pointer; }
-.btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.btn { height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
-.editor { width: 100%; min-height: 420px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); box-sizing: border-box; }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.editor { width: 100%; min-height: 420px; resize: vertical; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); box-sizing: border-box; }
 .invalid { border-color: var(--danger); }
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .spacer { margin-left: auto; }
@@ -31,7 +31,7 @@
 /* JSON editor with a gutter that marks lines changed against the deployed definition. */
 .editorWrap { display: grid; grid-template-columns: 22px minmax(0, 1fr); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); overflow: hidden; }
 .editorWrap.invalidWrap { border-color: var(--danger); }
-.gutter { overflow: hidden; padding: 10px 0; font: 12px/1.5 var(--mono); color: var(--dim); background: var(--chrome); border-right: 1px solid var(--row-border); text-align: center; user-select: none; }
+.gutter { overflow: hidden; padding: 8px 0; font: 12px/1.5 var(--mono); color: var(--dim); background: var(--chrome); border-right: 1px solid var(--row-border); text-align: center; user-select: none; }
 .gutter div { height: 18px; }
 .gutter div[data-changed] { background: var(--success-soft); color: var(--success); }
 .gutter div[data-changed]::before { content: "+"; }
