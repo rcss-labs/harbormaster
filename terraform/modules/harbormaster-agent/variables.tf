@@ -30,12 +30,17 @@ variable "cluster_arn" {
 }
 
 variable "image" {
-  description = "Agent image, pinned to a tag or digest. A tag ending in :latest is refused."
+  description = "Agent image, pinned to a tag or digest. An image with neither, or with the tag latest (in any case), is refused."
   type        = string
 
   validation {
-    condition     = !endswith(var.image, ":latest")
-    error_message = "image must not end in :latest; pin a version tag or a digest."
+    condition     = can(regex("(@sha256:[0-9a-f]{64}|:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})$", var.image))
+    error_message = "image must end in a tag (repo:1.2.3) or a digest (repo@sha256:...)."
+  }
+
+  validation {
+    condition     = !can(regex("(?i):latest(@|$)", var.image))
+    error_message = "image must not use the latest tag; pin a version tag or a digest."
   }
 }
 
@@ -192,8 +197,8 @@ variable "limits" {
   }
 
   validation {
-    condition     = can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$", var.limits.run_timeout))
-    error_message = "limits.run_timeout must be a duration such as 5m or 90s."
+    condition     = can(regex("^(([1-9]|[1-9][0-9]|[12][0-9]{2}|300)s|[1-5]m|[1-4]m([1-9]|[1-5][0-9])s)$", var.limits.run_timeout))
+    error_message = "limits.run_timeout must be at most 5m, written as whole seconds (90s), whole minutes (5m) or both (2m30s)."
   }
 }
 

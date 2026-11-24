@@ -16,6 +16,7 @@ locals {
     {
       HM_AGENT_LISTEN              = ":${local.container_port}"
       HM_AGENT_UPSTREAM_URL        = var.upstream_url
+      HM_AGENT_TRUSTED_PROXY       = "true" # the internal load balancer is the one proxy in front
       HM_AGENT_PROVIDERS           = local.catalogue_json
       HM_AGENT_MAX_STEPS           = tostring(var.limits.max_steps)
       HM_AGENT_MAX_RUN_TOKENS      = tostring(var.limits.max_run_tokens)

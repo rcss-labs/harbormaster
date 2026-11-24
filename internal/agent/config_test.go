@@ -228,11 +228,11 @@ func TestLoadConfig_TrustedProxy(t *testing.T) {
 		return values
 	}
 	cfg, err := LoadConfig(env(base))
-	if err != nil || !cfg.TrustedProxy {
-		t.Errorf("default: %v, %v (the default is one trusted proxy)", cfg.TrustedProxy, err)
+	if err != nil || cfg.TrustedProxy {
+		t.Errorf("default: %v, %v (a proxy is trusted only when asked for)", cfg.TrustedProxy, err)
 	}
-	if cfg, err = LoadConfig(env(with("false"))); err != nil || cfg.TrustedProxy {
-		t.Errorf("false: %v, %v", cfg.TrustedProxy, err)
+	if cfg, err = LoadConfig(env(with("true"))); err != nil || !cfg.TrustedProxy {
+		t.Errorf("true: %v, %v", cfg.TrustedProxy, err)
 	}
 	if _, err = LoadConfig(env(with("sometimes"))); err == nil || !strings.Contains(err.Error(), "HM_AGENT_TRUSTED_PROXY") {
 		t.Errorf("bad value: err = %v", err)

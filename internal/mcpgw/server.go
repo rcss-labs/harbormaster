@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -398,28 +397,10 @@ func jsonRPCMethod(body []byte) (string, error) {
 	return method, nil
 }
 
-// clientIP is the peer address, unless trustedProxy says exactly one trusted
-// proxy (the load balancer) appends the real client address, in which case it
-// is the rightmost non-empty X-Forwarded-For entry. Same rule as
-// internal/api/scope.go (clientIP).
+// clientIP is the client address as hmtools.ClientAddr reads it: the peer, or,
+// behind the one trusted load balancer, the entry that balancer appended.
 func clientIP(r *http.Request, trustedProxy bool) string {
-	if trustedProxy {
-		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-		for i := len(hops) - 1; i >= 0; i-- {
-			if hop := strings.TrimSpace(hops[i]); hop != "" {
-				return hop
-			}
-		}
-	}
-	return peerIP(r)
-}
-
-func peerIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return hmtools.ClientAddr(r, trustedProxy)
 }
 
 // forwardedFor is the X-Forwarded-For sent upstream: exactly one entry. Behind
@@ -432,7 +413,7 @@ func forwardedFor(r *http.Request, trustedProxy bool) string {
 	if trustedProxy {
 		return clientIP(r, true)
 	}
-	return peerIP(r)
+	return clientIP(r, false)
 }
 
 // writeUnauthorized answers 401. With OAuth on, the challenge points at the

@@ -33,6 +33,7 @@ func blockedJunkHarness(t *testing.T, edit func(*Config)) (h *harness, release f
 	h = newHarness(t, harnessOptions{
 		edit: func(c *Config) {
 			c.TrustedProxy = true
+			c.MaxConcurrentRuns = 1 // the per-address bound is then the floor setChecks sets
 			if edit != nil {
 				edit(c)
 			}
@@ -182,7 +183,7 @@ func TestAuth_EveryPathGivesItsCheckSlotBack(t *testing.T) {
 	mode.Store("ok")
 	h := newHarness(t, harnessOptions{
 		providers: map[string]provider.Provider{"fake": fake.New(fake.Text("a", provider.Usage{InputTokens: 1, OutputTokens: 1}))},
-		edit:      func(c *Config) { c.TrustedProxy = true },
+		edit:      func(c *Config) { c.TrustedProxy = true; c.MaxConcurrentRuns = 1 },
 		whoami: func(w http.ResponseWriter, r *http.Request) {
 			switch mode.Load().(string) {
 			case "refused":
@@ -301,7 +302,7 @@ func TestAuth_AUserWithThousandsOfTagsStillWorks(t *testing.T) {
 
 func TestCheckLimiter_SlotsComeBackAndIdleAddressesAreForgotten(t *testing.T) {
 	setChecks(t, 2, 4, 50*time.Millisecond)
-	l := newCheckLimiter(whoamiGlobal)
+	l := newCheckLimiter(whoamiGlobal, whoamiPerAddress)
 	ctx := context.Background()
 
 	// Two holders at one address, one released: the address has room again while the other still holds.
@@ -343,5 +344,90 @@ func TestCheckLimiter_SlotsComeBackAndIdleAddressesAreForgotten(t *testing.T) {
 	defer l.mu.Unlock()
 	if len(l.addrs) != 0 {
 		t.Errorf("%d idle addresses are still tracked", len(l.addrs))
+	}
+}
+
+func TestCheckLimiter_AddressSlotComesBackWhenTheGlobalWaitTimesOut(t *testing.T) {
+	setChecks(t, 2, 2, 50*time.Millisecond)
+	l := newCheckLimiter(whoamiGlobal, whoamiPerAddress)
+	ctx := context.Background()
+	releaseA, okA := l.acquire(ctx, "a")
+	releaseB, okB := l.acquire(ctx, "b") // keeps address b tracked while the next call fails
+	if !okA || !okB {
+		t.Fatal("the first two checks were refused")
+	}
+	if _, ok := l.acquire(ctx, "b"); ok {
+		t.Fatal("a check got a slot with every global slot taken")
+	}
+	l.mu.Lock()
+	entry := l.addrs["b"]
+	held, users := len(entry.slots), entry.users
+	l.mu.Unlock()
+	if held != 1 || users != 1 {
+		t.Errorf("address b holds %d slots with %d users after the timed-out wait, want 1 and 1", held, users)
+	}
+	releaseA()
+	releaseB()
+}
+
+func TestCheckLimiter_ACancelledContextNeverTakesASlot(t *testing.T) {
+	setChecks(t, 2, 2, time.Second)
+	l := newCheckLimiter(whoamiGlobal, whoamiPerAddress)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 50; i++ { // select picks among ready cases at random, so one try could pass by luck
+		if release, ok := l.acquire(ctx, "a"); ok {
+			release()
+			t.Fatalf("attempt %d: a cancelled context got a slot", i)
+		}
+	}
+	l.mu.Lock()
+	tracked := len(l.addrs)
+	l.mu.Unlock()
+	if tracked != 0 || len(l.global) != 0 {
+		t.Errorf("%d addresses tracked and %d global slots held after cancelled attempts", tracked, len(l.global))
+	}
+}
+
+func TestCheckLimiter_PerAddressBoundFollowsTheRunLimit(t *testing.T) {
+	for _, row := range []struct{ runs, want int }{{1, 16}, {8, 16}, {9, 18}, {256, 512}} {
+		if got := perAddressBound(row.runs); got != row.want {
+			t.Errorf("runs %d: bound %d, want %d", row.runs, got, row.want)
+		}
+	}
+}
+
+func TestAuth_TheCallerAddressIsTheLastForwardedEntryAcrossHeaderLines(t *testing.T) {
+	setChecks(t, 4, 64, 300*time.Millisecond)
+	h, release := blockedJunkHarness(t, nil)
+	busy := new(atomic.Int32)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		junk := newRunToken(t, apitoken.KindRun)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			body := bytes.NewReader(h.runBody(nil))
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/runs", body)
+			req.Header.Set("Authorization", "Bearer "+junk)
+			// One line the caller wrote, one the proxy appended: only the second names the caller.
+			req.Header.Add("X-Forwarded-For", fmt.Sprintf("1.1.1.%d", i))
+			req.Header.Add("X-Forwarded-For", "10.0.0.7")
+			if resp, err := http.DefaultClient.Do(req); err == nil {
+				if resp.StatusCode == http.StatusTooManyRequests {
+					busy.Add(1)
+				}
+				resp.Body.Close()
+			}
+		}()
+	}
+	time.Sleep(600 * time.Millisecond)
+	arrivals := h.whoamiArrivals()
+	release()
+	wg.Wait()
+	if arrivals > 4 {
+		t.Errorf("%d checks from one caller behind a spoofed first line, want at most 4", arrivals)
 	}
 }

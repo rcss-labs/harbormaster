@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -80,7 +79,7 @@ func NewHandler(cfg Config, up *hmtools.Upstream, providers map[string]provider.
 		cfg: cfg, up: up, providers: providers, log: log,
 		tools:  NewUpstreamToolRunner(up, cfg.MaxResultBytes),
 		slots:  make(chan struct{}, max(cfg.MaxConcurrentRuns, 1)),
-		checks: newCheckLimiter(whoamiGlobal),
+		checks: newCheckLimiter(whoamiGlobal, perAddressBound(cfg.MaxConcurrentRuns)),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -235,7 +234,7 @@ func (s *server) authenticate(w http.ResponseWriter, r *http.Request) (bearer st
 	}
 	// Confirmations are limited per caller address and overall, so one host inventing tokens cannot
 	// starve the real callers. A request waits briefly for a slot.
-	releaseCheck, ok := s.checks.acquire(r.Context(), clientAddr(r, s.cfg.TrustedProxy))
+	releaseCheck, ok := s.checks.acquire(r.Context(), hmtools.ClientAddr(r, s.cfg.TrustedProxy))
 	if !ok {
 		w.Header().Set("Retry-After", "2")
 		writeError(w, http.StatusTooManyRequests, "agent_busy", "The agent is busy. Try again shortly.")
@@ -632,32 +631,20 @@ func whoamiTokenKind(body []byte) (kind string, ok bool) {
 	return "", true // a whole object that names no token
 }
 
-// clientAddr is the peer address, unless one trusted proxy (the internal load
-// balancer) is in front: then it is the rightmost non-empty X-Forwarded-For
-// entry, the address that proxy appended. Entries to its left are the caller's
-// claims and never count. The same rule as internal/mcpgw.
-func clientAddr(r *http.Request, trustedProxy bool) string {
-	if trustedProxy {
-		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-		for i := len(hops) - 1; i >= 0; i-- {
-			if hop := strings.TrimSpace(hops[i]); hop != "" {
-				return hop
-			}
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+// perAddressBound is how many token confirmations one caller address may have
+// in flight: whoamiPerAddress, or twice the run limit when that is larger, so a
+// caller can always fill every run slot it is allowed.
+func perAddressBound(maxConcurrentRuns int) int {
+	return max(whoamiPerAddress, 2*maxConcurrentRuns)
 }
 
-// checkLimiter bounds token confirmations in flight: whoamiPerAddress for one
-// caller address and a global total. It never keys on a token.
+// checkLimiter bounds token confirmations in flight: a per-address bound and a
+// global total. It never keys on a token.
 type checkLimiter struct {
-	global chan struct{}
-	mu     sync.Mutex
-	addrs  map[string]*addrChecks
+	global     chan struct{}
+	perAddress int
+	mu         sync.Mutex
+	addrs      map[string]*addrChecks
 }
 
 type addrChecks struct {
@@ -665,17 +652,20 @@ type addrChecks struct {
 	users int // holders and waiters
 }
 
-func newCheckLimiter(global int) *checkLimiter {
-	return &checkLimiter{global: make(chan struct{}, max(global, 1)), addrs: map[string]*addrChecks{}}
+func newCheckLimiter(global, perAddress int) *checkLimiter {
+	return &checkLimiter{global: make(chan struct{}, max(global, 1)), perAddress: max(perAddress, 1), addrs: map[string]*addrChecks{}}
 }
 
 // acquire waits up to whoamiWait (and no longer than ctx) for a slot for addr.
 // A true answer comes with the function that gives the slot back.
 func (l *checkLimiter) acquire(ctx context.Context, addr string) (release func(), ok bool) {
+	if ctx.Err() != nil { // select picks among ready cases at random: a done context must not win a slot
+		return nil, false
+	}
 	l.mu.Lock()
 	entry := l.addrs[addr]
 	if entry == nil {
-		entry = &addrChecks{slots: make(chan struct{}, max(whoamiPerAddress, 1))}
+		entry = &addrChecks{slots: make(chan struct{}, l.perAddress)}
 		l.addrs[addr] = entry
 	}
 	entry.users++
