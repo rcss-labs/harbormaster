@@ -17,6 +17,11 @@ resource "aws_lb" "this" {
       condition     = var.internal || !contains(["1", "t", "true"], lower(trimspace(lookup(var.extra_env, "HM_API_TOKENS", "false"))))
       error_message = "HM_API_TOKENS on (any true value: true, 1, t) needs internal = true: tokens must reach Harbormaster only through the harbormaster-mcp gateway, not a public load balancer."
     }
+    # Run tokens are minted for the agent and accepted wherever Harbormaster is reachable, so the agent needs a private ALB too.
+    precondition {
+      condition     = var.internal || trimspace(lookup(var.extra_env, "HM_AGENT_URL", "")) == ""
+      error_message = "HM_AGENT_URL needs internal = true: run tokens must never be accepted on a public load balancer."
+    }
   }
 }
 
