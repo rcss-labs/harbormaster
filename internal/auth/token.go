@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -42,6 +44,10 @@ type Credential struct {
 	TokenName     string
 	Scope         Scope
 	ExpiresAt     time.Time
+	// RunID and RedactEnv are set for a run token: the agent run it belongs to, and whether environment values are
+	// hidden from it.
+	RunID     *uuid.UUID
+	RedactEnv bool
 }
 
 type credentialKey struct{}
@@ -72,15 +78,18 @@ func TokenMaxTTL(cfg config.Config, user store.User, admin bool) time.Duration {
 	return cfg.TokenMaxTTL
 }
 
-// authenticatesAPI reports whether a token of kind may authenticate an API call: a personal token always, an OAuth
-// access token only while HM_OAUTH is on, an OAuth refresh token never (it is only ever exchanged at the token
+// authenticatesAPI reports whether a token of kind may authenticate an API call: a personal token only while
+// HM_API_TOKENS is on, an OAuth access token only while HM_OAUTH is on as well, a run token only while the agent is on
+// (independent of the other two switches), an OAuth refresh token never (it is only ever exchanged at the token
 // endpoint).
 func (a *Service) authenticatesAPI(kind apitoken.Kind) bool {
 	switch kind {
 	case apitoken.KindPAT:
-		return true
+		return a.cfg.APITokens
 	case apitoken.KindOAuthAccess:
-		return a.cfg.OAuth
+		return a.cfg.APITokens && a.cfg.OAuth
+	case apitoken.KindRun:
+		return a.cfg.AgentEnabled()
 	default:
 		return false
 	}
@@ -136,18 +145,30 @@ func (a *Service) AuthenticateToken(ctx context.Context, raw, ip string) (store.
 }
 
 // bearerToken returns the token from an "Authorization: Bearer <token>" header when the value has the exact shape of
-// a Harbormaster token. Any other Authorization header is not a token request.
-func bearerToken(r *http.Request) (string, bool) {
+// a Harbormaster token and a token of its kind may authenticate right now (see authenticatesAPI). Any other
+// Authorization header is not a token request and is ignored, so the cookie decides.
+func (a *Service) bearerToken(r *http.Request) (string, bool) {
 	header := r.Header.Get("Authorization")
 	const scheme = "bearer "
 	if len(header) <= len(scheme) || !strings.EqualFold(header[:len(scheme)], scheme) {
 		return "", false
 	}
 	raw := header[len(scheme):]
-	if _, ok := apitoken.Parse(raw); !ok {
+	parsed, ok := apitoken.Parse(raw)
+	if !ok || !a.tokenPathOpen(parsed.Kind) {
 		return "", false
 	}
 	return raw, true
+}
+
+// tokenPathOpen reports whether a bearer of kind takes the token path in Middleware: a run token while the agent is on,
+// every other kind while HM_API_TOKENS is on. A bearer whose switch is off is ignored like any other header, not
+// answered 401. Whether the kind may then authenticate is authenticatesAPI's decision.
+func (a *Service) tokenPathOpen(kind apitoken.Kind) bool {
+	if kind == apitoken.KindRun {
+		return a.cfg.AgentEnabled()
+	}
+	return a.cfg.APITokens
 }
 
 // writeTokenUnauthenticated answers a bearer token that did not resolve. It names no reason, so a caller cannot tell
@@ -187,6 +208,8 @@ func (a *Service) serveToken(w http.ResponseWriter, r *http.Request, next http.H
 		TokenName:     tok.Name,
 		Scope:         Scope(tok.Scope),
 		ExpiresAt:     tok.ExpiresAt,
+		RunID:         tok.RunID,
+		RedactEnv:     tok.RedactEnv,
 	}
 	ctx := context.WithValue(r.Context(), userKey{}, user)
 	ctx = context.WithValue(ctx, subjectKey{}, subject)
