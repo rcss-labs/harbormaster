@@ -23,6 +23,7 @@ type captured struct {
 	body json.RawMessage
 	auth string
 	path string
+	hits atomic.Int32
 }
 
 // serve replays a fixture and records the request.
@@ -35,6 +36,7 @@ func serve(t *testing.T, status int, fixture string, headers map[string]string) 
 	got := &captured{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		got.hits.Add(1)
 		got.body, got.auth, got.path = body, r.Header.Get("Authorization"), r.URL.Path
 		for k, v := range headers {
 			w.Header().Set(k, v)
@@ -252,10 +254,16 @@ func TestGenerate_BrokenStream(t *testing.T) {
 	}{{"broken_after_text.sse", false}, {"broken_before_text.sse", true}} {
 		srv, _ := serve(t, 200, tc.fixture, nil)
 		var deltas int
-		_, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), func(string) { deltas++ })
+		resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), func(string) { deltas++ })
 		var perr *provider.Error
 		if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable != tc.retryable {
 			t.Fatalf("%s: %v", tc.fixture, err)
+		}
+		// OpenAI reports usage only in the terminal event, so a broken stream
+		// carries none; the text already streamed stays in the Response.
+		wantDeltas := map[bool]int{true: 0, false: 1}[tc.retryable]
+		if deltas != wantDeltas || resp.Usage != (provider.Usage{}) || (wantDeltas == 1) != (resp.Text == "partial") {
+			t.Fatalf("%s: deltas %d usage %+v text %q", tc.fixture, deltas, resp.Usage, resp.Text)
 		}
 	}
 }
@@ -333,5 +341,120 @@ func TestClient_IgnoresEnvironmentOverrides(t *testing.T) {
 	if seen.Get("Authorization") != "Bearer "+fakeKey || seen.Get("OpenAI-Organization") != "" ||
 		seen.Get("OpenAI-Project") != "" || seen.Get("X-From-Env") != "" {
 		t.Fatalf("environment leaked into request headers: %v", seen)
+	}
+}
+
+func TestGenerate_SDKRetriesAreOff(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		fixture string
+		headers map[string]string
+	}{
+		{500, "error_500.json", nil},
+		{429, "error_429.json", map[string]string{"Retry-After": "0"}},
+	} {
+		srv, got := serve(t, tc.status, tc.fixture, tc.headers)
+		_, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+		if err == nil || got.hits.Load() != 1 {
+			t.Fatalf("status %d: err %v, server hits %d (want exactly 1)", tc.status, err, got.hits.Load())
+		}
+	}
+}
+
+func TestGenerate_MapsRequestFields(t *testing.T) {
+	srv, got := serve(t, 200, "text.sse", nil)
+	req := simpleRequest()
+	req.MaxOutputTokens = 321
+	schema := map[string]any{"type": "object", "properties": map[string]any{"cluster": map[string]any{"type": "string"}}, "required": []any{"cluster"}}
+	req.Tools = []provider.ToolDef{{Name: "list_services", Description: "List services", InputSchema: schema}}
+	if _, err := newProvider(t, srv.URL).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Model string           `json:"model"`
+		Max   int              `json:"max_output_tokens"`
+		Tools []map[string]any `json:"tools"`
+	}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Model != "test-model" || body.Max != 321 || len(body.Tools) != 1 {
+		t.Fatalf("body: %s", got.body)
+	}
+	tool := body.Tools[0]
+	wantSchema, _ := json.Marshal(schema)
+	gotSchema, _ := json.Marshal(tool["parameters"])
+	if tool["type"] != "function" || tool["name"] != "list_services" || tool["description"] != "List services" || string(gotSchema) != string(wantSchema) {
+		t.Fatalf("tool: %v", tool)
+	}
+}
+
+func TestGenerate_UsageCountsCachedAndReasoningTokensOnce(t *testing.T) {
+	srv, _ := serve(t, 200, "usage_detail.sse", nil)
+	resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	// input_tokens already includes cached tokens and output_tokens already
+	// includes reasoning tokens, so these totals never understate the cost.
+	if err != nil || resp.Usage.InputTokens != 100 || resp.Usage.OutputTokens != 50 {
+		t.Fatalf("usage %+v err %v", resp.Usage, err)
+	}
+}
+
+func TestGenerate_RefusalIsSurfacedAsText(t *testing.T) {
+	srv, _ := serve(t, 200, "refusal.sse", nil)
+	var deltas []string
+	resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), func(d string) { deltas = append(deltas, d) })
+	if err != nil || resp.Text != "I cannot help with that." || len(deltas) != 1 {
+		t.Fatalf("resp %+v deltas %v err %v", resp, deltas, err)
+	}
+}
+
+func TestOpaque_WrongShapeIsIgnored(t *testing.T) {
+	for _, raw := range []string{`[1]`, `[null]`, `{}`, `[]`, `"x"`, `[{}]`, `[{"type":"tool_use","id":"x"}]`,
+		`[{"type":"reasoning","id":"r"},1]`, `[{"content":[{"type":"thinking"}]}]`} {
+		if items := parseOpaque(json.RawMessage(raw)); items != nil {
+			t.Errorf("%s accepted: %v", raw, items)
+		}
+	}
+	if items := parseOpaque(json.RawMessage(`[{"type":"reasoning","id":"r"},{"type":"function_call","call_id":"c"}]`)); len(items) != 2 {
+		t.Errorf("valid opaque rejected: %v", items)
+	}
+}
+
+func TestGenerate_MalformedArgumentsSetArgError(t *testing.T) {
+	srv, _ := serve(t, 200, "badargs.sse", nil)
+	resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	if err != nil || len(resp.ToolCalls) != 3 {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	for _, call := range resp.ToolCalls[:2] {
+		if call.ArgError == "" || call.Arguments != nil {
+			t.Fatalf("call %s: want ArgError and nil Arguments, got %+v", call.ID, call)
+		}
+	}
+	if good := resp.ToolCalls[2]; good.ArgError != "" || good.Arguments["ok"] != true {
+		t.Fatalf("good call: %+v", good)
+	}
+}
+
+func TestGenerate_TruncatedToolCallWithMaxTokens(t *testing.T) {
+	srv, _ := serve(t, 200, "truncated_call.sse", nil)
+	resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	if err != nil || resp.StopReason != "max_tokens" || len(resp.ToolCalls) != 1 ||
+		resp.ToolCalls[0].ArgError == "" || resp.ToolCalls[0].Arguments != nil {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+}
+
+func TestGenerate_ReplaysCallWithArgErrorAsEmptyObject(t *testing.T) {
+	srv, got := serve(t, 200, "text.sse", nil)
+	req := simpleRequest()
+	req.Messages = append(req.Messages,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "t", ArgError: "arguments were not a valid JSON object"}}},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "call_1", Text: "bad arguments", IsError: true})
+	if _, err := newProvider(t, srv.URL).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got.body), `"arguments":"{}"`) {
+		t.Fatalf("body: %s", got.body)
 	}
 }
