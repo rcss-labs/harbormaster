@@ -220,3 +220,56 @@ func TestHarbormasterTokenShape(t *testing.T) {
 		}
 	}
 }
+
+func TestNameLooksSecret_GluedEnvironmentNames(t *testing.T) {
+	for name, want := range map[string]bool{
+		"DBPASS": true, "SMTPPASS": true, "CLIENTSECRET": true, "AUTHTOKEN": true, "ACCESSTOKEN": true,
+		"SECRETACCESSKEY": true, "AWSSECRETKEY": true, "CONNECTION_STRING": true, "connectionString": true,
+		"BYPASS_CACHE": false, "COMPASS_URL": false, "PASSTHROUGH": false, "PASSENGER_APP": false,
+		"TOKENIZER_MODEL": false, "KEYSPACE": false, "KEYSTORE_PATH": false, "PASSWORDLESS_LOGIN": false,
+		"SECRETSMANAGER_ENDPOINT": false, "AWS_REGION": false, "BYPASS": false, "COMPASS": false,
+	} {
+		if got := NameLooksSecret(name); got != want {
+			t.Errorf("NameLooksSecret(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// Free text is judged by a narrower name rule than environment names: counters and test output stay readable.
+func TestScrubText_FreeTextCountersAndWordsStayIdentical(t *testing.T) {
+	for _, text := range []string{
+		"max_tokens=4096", "tokens: 1200", "total_tokens=900 input_tokens=3",
+		`{"max_tokens":4096,"usage":{"output_tokens": 4}}`, "ratelimit-remaining-tokens: 149000",
+		"keys: 12 expired", "evicted keys=44", "missing keys: a", "secrets: 4 loaded", "pass: 3 fail: 1", "pass=true",
+		"--- PASS: TestX", "health check pass: ok", "proxy_pass: http://backend:8080",
+	} {
+		if got := ScrubText(text); got != text {
+			t.Errorf("ScrubText(%q) = %q, want it unchanged", text, got)
+		}
+	}
+}
+
+func TestScrubText_FreeTextSecretNamesStillRedacted(t *testing.T) {
+	for text, leaked := range map[string]string{
+		"DB_PASS=1234": "1234", "smtp.pass=hunter2": "hunter2", "password: 99887766": "99887766",
+		"API_KEYS=abc,def": "def", `{"client_secret":"x1"}`: "x1", "passphrase=open sesame": "open",
+		"DB_PASSWORDS=hunter2": "hunter2", "pgpassword=hunter2": "hunter2", "MYSQL_ROOTPASSWD=hunter2": "hunter2",
+		"aws_secret_access_key=hunter2": "hunter2", "AUTH_TOKENS=hunter2": "hunter2",
+	} {
+		if got := ScrubText(text); strings.Contains(got, leaked) {
+			t.Errorf("ScrubText(%q) = %q, leaked %q", text, got, leaked)
+		}
+	}
+}
+
+func TestScrubText_UnquotedValueStopsAtClosingBrackets(t *testing.T) {
+	for text, want := range map[string]string{
+		`{"password": hunter2}`:          `{"password": ` + Redacted + `}`,
+		`["token=hunter2"]`:              `["token=` + Redacted + `"]`,
+		`{"a":{"secret":hunter2},"b":1}`: `{"a":{"secret":` + Redacted + `},"b":1}`,
+	} {
+		if got := ScrubText(text); got != want {
+			t.Errorf("ScrubText(%q) = %q, want %q", text, got, want)
+		}
+	}
+}

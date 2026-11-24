@@ -241,6 +241,12 @@ func TestRedactEnvironment_FailsClosedOnUnexpectedShapes(t *testing.T) {
 			map[string]any{"Name": "API_KEY", "Value": real}}}}},
 		"non-string value": {"containerDefinitions": []any{map[string]any{"environment": []any{
 			map[string]any{"name": "HOST", "value": map[string]any{"x": real}}}}}},
+		"unexpected entry key": {"containerDefinitions": []any{map[string]any{"environment": []any{
+			map[string]any{"name": "HOST", "val": real}}}}},
+		"extra entry key": {"containerDefinitions": []any{map[string]any{"environment": []any{
+			map[string]any{"name": "HOST", "value": "db.internal", "note": real}}}}},
+		"two name keys": {"containerDefinitions": []any{map[string]any{"environment": []any{
+			map[string]any{"name": "HOST", "Name": "API_KEY", "value": real}}}}},
 		"duplicate names": {"containerDefinitions": []any{map[string]any{"environment": []any{
 			map[string]any{"name": "HOST", "value": "db.internal"}, map[string]any{"name": "HOST", "value": real + "-API_KEY=x"}}}}},
 	}
@@ -255,5 +261,25 @@ func TestRedactEnvironment_FailsClosedOnUnexpectedShapes(t *testing.T) {
 				t.Errorf("%s, mode %d: real value in %s", name, mode, raw)
 			}
 		}
+	}
+}
+
+// The second container is judged like the first, in both modes.
+func TestRedactEnvironment_SidecarContainer(t *testing.T) {
+	def := definitionWithEnv(map[string]any{"name": "HOST", "value": "db.internal"})
+	sidecar := def["containerDefinitions"].([]any)[1].(map[string]any)
+	sidecar["environment"] = append(sidecar["environment"].([]any), map[string]any{"name": "SIDE_API_KEY", "value": "abc"})
+	sideValues := func(mode envRedaction) []any {
+		out, _ := redactEnvironment(def, mode)
+		return out["containerDefinitions"].([]any)[1].(map[string]any)["environment"].([]any)
+	}
+	for i, entry := range sideValues(redactAll) {
+		if entry.(map[string]any)["value"] != "[redacted]" {
+			t.Errorf("all: sidecar entry %d = %v", i, entry)
+		}
+	}
+	got := sideValues(redactSecretShapes)
+	if got[0].(map[string]any)["value"] != "side-secret-value-1" || got[1].(map[string]any)["value"] != "[redacted]" {
+		t.Errorf("secret shapes: sidecar = %v", got)
 	}
 }

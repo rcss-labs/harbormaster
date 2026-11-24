@@ -20,6 +20,8 @@ var secretSegments = map[string]bool{
 	"auth": true, "authorization": true, "private": true, "cert": true, "dsn": true,
 	"keys": true, "apikeys": true, "tokens": true, "secrets": true, "passwords": true, "passwds": true,
 	"pass": true, "passphrase": true, "secretkey": true, "accesskey": true, "privatekey": true,
+	"clientsecret": true, "authtoken": true, "accesstoken": true, "secretaccesskey": true, "awssecretkey": true,
+	"connectionstring": true,
 }
 
 // boundary is a non-alphanumeric character or the start of the text. It is
@@ -70,24 +72,92 @@ var (
 // another pair's value is still found.
 var pairName = regexp.MustCompile(`(["']?)([A-Za-z0-9_.-]+)(["']?)[ \t]*[=:][ \t]*`)
 
-var unquotedValue = regexp.MustCompile(`^[^\s,;&"']+`)
+// unquotedValue ends at a closing brace or bracket so a value inside JSON does not swallow the rest of the object.
+var (
+	unquotedValue = regexp.MustCompile(`^[^\s,;&"'}\]]+`)
+	// listValue is the value of a plural name such as API_KEYS, which may hold a comma separated list.
+	listValue = regexp.MustCompile(`^[^\s;&"'}\]]+`)
+)
 
 var authScheme = regexp.MustCompile(`^(?i:bearer|basic)$`)
 
 var authToken = regexp.MustCompile(`^[ \t]+[A-Za-z0-9._~+/=-]+`)
 
-// NameLooksSecret reports whether a variable or field name suggests a secret.
-// Matching is by whole segment, split on _, - and . (and camelCase), so
-// KEYBOARD_LAYOUT and AUTHOR are not secret.
+// notPassWords end in "pass" without being a password name.
+var notPassWords = map[string]bool{
+	"bypass": true, "compass": true, "trespass": true, "surpass": true, "overpass": true, "underpass": true,
+	"encompass": true, "impass": true,
+}
+
+// NameLooksSecret reports whether an environment variable or field name suggests a secret. It is deliberately
+// wide because over-redacting a name is safe there; scrubbing free text uses the narrower pairNameKind.
+// Matching is by whole segment, split on _, - and . (and camelCase), so KEYBOARD_LAYOUT and AUTHOR are not secret.
 func NameLooksSecret(name string) bool {
-	for _, segment := range nameSegments(name) {
-		// A glued segment such as pgpassword or dbpassword ends in the word.
-		if secretSegments[segment] || strings.HasSuffix(segment, "password") || strings.HasSuffix(segment, "passwd") {
+	segments := nameSegments(name)
+	for i, segment := range segments {
+		if secretSegments[segment] || endsInPasswordWord(segment) {
+			return true
+		}
+		if strings.HasSuffix(segment, "pass") && !notPassWords[segment] {
+			return true
+		}
+		if segment == "connection" && i+1 < len(segments) && segments[i+1] == "string" {
 			return true
 		}
 	}
 	return false
 }
+
+// endsInPasswordWord matches glued names such as pgpassword, dbpassword and rootpasswd.
+func endsInPasswordWord(segment string) bool {
+	return strings.HasSuffix(segment, "password") || strings.HasSuffix(segment, "passwd")
+}
+
+// nameKind is how a name found in free text is judged.
+type nameKind int
+
+const (
+	nameClean nameKind = iota
+	nameSecret
+	// nameCounter is a plural such as max_tokens or API_KEYS: secret unless the value is a number or a boolean.
+	nameCounter
+)
+
+// freeTextSecrets are the segments that make a name in log text secret. Plurals and "pass" are handled apart.
+var freeTextSecrets = map[string]bool{
+	"key": true, "apikey": true, "apikeys": true, "token": true, "secret": true,
+	"password": true, "passwords": true, "passwd": true, "passwds": true, "passphrase": true, "pwd": true,
+	"credential": true, "credentials": true, "auth": true, "authorization": true, "private": true,
+	"cert": true, "dsn": true,
+}
+
+// pairNameKind judges a name in free text. It is narrower than NameLooksSecret: "tokens: 1200", "keys: 12" and
+// "--- PASS: TestX" are counters and test output, not secrets.
+func pairNameKind(name string) nameKind {
+	segments := nameSegments(name)
+	for _, segment := range segments {
+		if freeTextSecrets[segment] || endsInPasswordWord(segment) ||
+			strings.HasSuffix(segment, "secretkey") || strings.HasSuffix(segment, "accesskey") ||
+			strings.HasSuffix(segment, "privatekey") || strings.HasSuffix(segment, "apikey") {
+			return nameSecret
+		}
+	}
+	if len(segments) < 2 {
+		return nameClean
+	}
+	switch last := segments[len(segments)-1]; last {
+	case "pass":
+		if segments[len(segments)-2] == "proxy" {
+			return nameClean
+		}
+		return nameSecret
+	case "keys", "tokens", "secrets":
+		return nameCounter
+	}
+	return nameClean
+}
+
+var booleanValue = regexp.MustCompile(`^(?i:true|false|yes|no|on|off)$`)
 
 func nameSegments(name string) []string {
 	var segments []string
@@ -178,18 +248,25 @@ func looksLikePort(afterColon string) bool {
 func pairSpans(text string) [][2]int {
 	var spans [][2]int
 	for _, m := range pairName.FindAllStringSubmatchIndex(text, -1) {
-		if !NameLooksSecret(text[m[4]:m[5]]) {
+		kind := pairNameKind(text[m[4]:m[5]])
+		if kind == nameClean {
 			continue
 		}
-		start := m[1]
-		if span, ok := pairValueSpan(text, start); ok {
-			spans = append(spans, span)
+		span, ok := pairValueSpan(text, m[1], kind == nameCounter)
+		if !ok {
+			continue
 		}
+		if kind == nameCounter {
+			if value := text[span[0]:span[1]]; digitsOnly.MatchString(value) || booleanValue.MatchString(value) {
+				continue
+			}
+		}
+		spans = append(spans, span)
 	}
 	return spans
 }
 
-func pairValueSpan(text string, start int) ([2]int, bool) {
+func pairValueSpan(text string, start int, list bool) ([2]int, bool) {
 	if start >= len(text) {
 		return [2]int{}, false
 	}
@@ -206,7 +283,14 @@ func pairValueSpan(text string, start int) ([2]int, bool) {
 		}
 		return [2]int{start + 1, len(text)}, len(text) > start+1
 	}
-	value := unquotedValue.FindString(text[start:])
+	pattern := unquotedValue
+	if list {
+		pattern = listValue
+	}
+	value := pattern.FindString(text[start:])
+	if list {
+		value = strings.TrimRight(value, ",")
+	}
 	if value == "" {
 		return [2]int{}, false
 	}

@@ -68,8 +68,9 @@ type TaskDefinitionResponse struct {
 	Can               ChangeCanDTO     `json:"can"`
 	Tag               TagDTO           `json:"tag"`
 	PolledAt          time.Time        `json:"polled_at"`
-	// EnvironmentRedacted is true when any environment value was replaced for an access token, so a caller does not
-	// report "[redacted]" as a real value.
+	// EnvironmentRedacted is true when the environment values of this answer were redacted for an access token: all of
+	// them, or, for a run token whose provider was lifted, those that looked secret and at least one did. A caller
+	// must not report "[redacted]" as a real value.
 	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
@@ -100,7 +101,8 @@ type RevisionDefinitionResponse struct {
 	Definition   json.RawMessage `json:"definition"`
 	RegisteredAt time.Time       `json:"registered_at"`
 	RegisteredBy string          `json:"registered_by"`
-	// EnvironmentRedacted is true when any environment value was replaced for an access token.
+	// EnvironmentRedacted is true when the environment values of this answer were redacted for an access token (see
+	// TaskDefinitionResponse).
 	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
@@ -407,19 +409,26 @@ func redactEntries(raw any, mode envRedaction, hide func() any) any {
 			redacted[i] = hide()
 			continue
 		}
-		name := ""
+		// An entry spelled with both "name" and "Name" is secret when either name is.
+		nameSecret := false
 		for key, value := range entry {
-			if strings.EqualFold(key, "name") {
-				name, _ = value.(string)
+			if text, _ := value.(string); strings.EqualFold(key, "name") && secretshape.NameLooksSecret(text) {
+				nameSecret = true
 			}
 		}
 		copied := make(map[string]any, len(entry))
 		for key, value := range entry {
-			if strings.EqualFold(key, "value") && hidesValue(mode, name, value) {
+			switch {
+			case strings.EqualFold(key, "name"):
+				copied[key] = value
+			case strings.EqualFold(key, "value") && hidesValue(mode, nameSecret, value):
 				copied[key] = hide()
-				continue
+			case strings.EqualFold(key, "value"):
+				copied[key] = value
+			default:
+				// A key an environment entry should not have may carry a value too.
+				copied[key] = hide()
 			}
-			copied[key] = value
 		}
 		redacted[i] = copied
 	}
@@ -428,10 +437,10 @@ func redactEntries(raw any, mode envRedaction, hide func() any) any {
 
 // hidesValue reports whether the mode replaces one environment value. In secrets-only mode a value that is not a
 // string counts as secret.
-func hidesValue(mode envRedaction, name string, value any) bool {
+func hidesValue(mode envRedaction, nameSecret bool, value any) bool {
 	if mode != redactSecretShapes {
 		return true
 	}
 	text, ok := value.(string)
-	return !ok || secretshape.NameLooksSecret(name) || secretshape.ScrubText(text) != text
+	return !ok || nameSecret || secretshape.ScrubText(text) != text
 }
