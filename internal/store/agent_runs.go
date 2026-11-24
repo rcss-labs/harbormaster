@@ -7,9 +7,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ErrBudgetExhausted is returned when a run's reservation would take the month's spend over the budget.
+// ErrAgentRunNotRunning is returned when usage or a settle arrives for a run that is no longer running, typically
+// because the stale sweep failed it. Late figures are still recorded on a failed run (never lowered).
+var ErrAgentRunNotRunning = errors.New("agent run is not running")
+
 var ErrBudgetExhausted = errors.New("agent monthly budget exhausted")
 
 // AgentRun is one model run. Money is integer micro-dollars. UserID is nil once the user is deleted.
@@ -39,8 +45,8 @@ type AgentUsageDay struct {
 
 // spendSQL sums a month of runs: finished runs at cost, running ones at the larger of reservation and cost.
 const spendSQL = `select
-	coalesce(sum(cost_micro_usd) filter (where state <> 'running'), 0),
-	coalesce(sum(greatest(reserved_micro_usd, cost_micro_usd)) filter (where state = 'running'), 0)
+	least(coalesce(sum(cost_micro_usd::numeric) filter (where state <> 'running'), 0), 9223372036854775807::numeric)::bigint,
+	least(coalesce(sum(greatest(reserved_micro_usd, cost_micro_usd)::numeric) filter (where state = 'running'), 0), 9223372036854775807::numeric)::bigint
 	from agent_runs where started_at >= $1 and started_at < $2`
 
 func utcMonthBounds(t time.Time) (start, end time.Time) {
@@ -49,10 +55,37 @@ func utcMonthBounds(t time.Time) (start, end time.Time) {
 	return start, start.AddDate(0, 1, 0)
 }
 
+// retryDeadlock runs fn, and once more if Postgres picked it as a deadlock victim. Reserving locks the settings
+// row, then run rows and the conversation; deleting a conversation locks it, then the runs that reference it.
+func retryDeadlock(fn func() error) error {
+	err := fn()
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "40P01" {
+		return fn()
+	}
+	return err
+}
+
 // ReserveAgentRun inserts the run as running if its reservation fits the month's budget, else returns
-// ErrBudgetExhausted. The settings row lock serialises concurrent reservations. Stale runs are failed first and
-// that is committed even on refusal, so a crashed task's reservation is never held by a refused caller's rollback.
+// ErrBudgetExhausted. A budget of 0 refuses everything, a zero reservation included. The settings row lock
+// serialises concurrent reservations. Stale runs are failed first and that is committed even on refusal, so a
+// refused caller does not roll back the sweep. A ConversationID must belong to UserID, else ErrNotFound.
 func (s *Store) ReserveAgentRun(ctx context.Context, run AgentRun, staleAfter time.Duration, now time.Time) error {
+	if run.ReservedMicroUSD < 0 {
+		return fmt.Errorf("reserve agent run: negative reservation %d", run.ReservedMicroUSD)
+	}
+	return retryDeadlock(func() error { return s.reserveAgentRun(ctx, run, staleAfter, now) })
+}
+
+func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, staleAfter time.Duration, now time.Time) error {
+	if run.ConversationID != nil {
+		if run.UserID == nil {
+			return ErrNotFound
+		}
+		if _, err := s.GetAgentConversation(ctx, *run.UserID, *run.ConversationID); err != nil {
+			return err
+		}
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("reserve agent run: %w", err)
@@ -72,7 +105,7 @@ func (s *Store) ReserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 	if err := tx.QueryRow(ctx, spendSQL, start, end).Scan(&settled, &reserved); err != nil {
 		return fmt.Errorf("reserve agent run: spend: %w", err)
 	}
-	if settled+reserved+run.ReservedMicroUSD > budget {
+	if !fitsBudget(budget, settled, reserved, run.ReservedMicroUSD) {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("reserve agent run: %w", err)
 		}
@@ -94,22 +127,61 @@ func (s *Store) ReserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 	return nil
 }
 
-// RecordAgentRunUsage overwrites the running run's tokens and cost with cumulative values; they may go down.
-// It touches only running rows: a run already failed by the stale sweep keeps what it had.
+// fitsBudget reports whether settled+reserved+request stays within budget, without overflowing int64. All inputs
+// are non-negative. A budget of 0 fits nothing.
+func fitsBudget(budget, settled, reserved, request int64) bool {
+	if budget <= 0 || settled > budget {
+		return false
+	}
+	room := budget - settled
+	if reserved > room {
+		return false
+	}
+	return request <= room-reserved
+}
+
+// RecordAgentRunUsage records cumulative tokens and cost. On a running run it overwrites (figures may go down:
+// the loop reports a provisional worst case, then corrects it). On a run the stale sweep already failed it only
+// raises them, keeps the state, and returns ErrAgentRunNotRunning so the caller knows. A done run is unchanged
+// (also ErrAgentRunNotRunning); an unknown id is ErrNotFound.
 func (s *Store) RecordAgentRunUsage(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, costMicroUSD int64, now time.Time) error {
-	tag, err := s.Pool.Exec(ctx, `update agent_runs set input_tokens = $2, output_tokens = $3, cost_micro_usd = $4, last_usage_at = $5
-		where id = $1 and state = 'running'`, id, inputTokens, outputTokens, costMicroUSD, now)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("record agent run usage: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return s.agentRunMissing(ctx, id)
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var state string
+	if err := tx.QueryRow(ctx, `select state from agent_runs where id = $1 for update`, id).Scan(&state); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("record agent run usage: %w", err)
+	}
+	switch state {
+	case "running":
+		_, err = tx.Exec(ctx, `update agent_runs set input_tokens = $2, output_tokens = $3, cost_micro_usd = $4,
+			last_usage_at = greatest(last_usage_at, $5) where id = $1`, id, inputTokens, outputTokens, costMicroUSD, now)
+	case "failed":
+		_, err = tx.Exec(ctx, `update agent_runs set input_tokens = greatest(input_tokens, $2), output_tokens = greatest(output_tokens, $3),
+			cost_micro_usd = greatest(cost_micro_usd, $4), last_usage_at = greatest(last_usage_at, $5) where id = $1`,
+			id, inputTokens, outputTokens, costMicroUSD, now)
+	}
+	if err != nil {
+		return fmt.Errorf("record agent run usage: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("record agent run usage: %w", err)
+	}
+	if state != "running" {
+		return ErrAgentRunNotRunning
 	}
 	return nil
 }
 
 // SettleAgentRun finishes a running run as done or failed, keeping its last recorded cost; the unused
-// reservation is freed because only cost counts once a run is finished. Settling a finished run is a no-op.
+// reservation is freed because only cost counts once a run is finished. A run the stale sweep already failed
+// keeps state failed but records the tools, and returns ErrAgentRunNotRunning; a done run is unchanged (also
+// ErrAgentRunNotRunning). An unknown id is ErrNotFound.
 func (s *Store) SettleAgentRun(ctx context.Context, id uuid.UUID, state string, tools []string, now time.Time) error {
 	if state != "done" && state != "failed" {
 		return fmt.Errorf("settle agent run: invalid state %q", state)
@@ -117,25 +189,22 @@ func (s *Store) SettleAgentRun(ctx context.Context, id uuid.UUID, state string, 
 	if tools == nil {
 		tools = []string{}
 	}
-	tag, err := s.Pool.Exec(ctx, `update agent_runs set state = $2, tools = $3, finished_at = $4
-		where id = $1 and state = 'running'`, id, state, tools, now)
+	var prior string
+	err := s.Pool.QueryRow(ctx, `with prior as (select state from agent_runs where id = $1 for update),
+		upd as (update agent_runs set
+			state = case when state = 'running' then $2 else state end,
+			finished_at = case when state = 'running' then $4 else finished_at end,
+			tools = case when state in ('running', 'failed') then $3 else tools end
+			where id = $1 returning 1)
+		select state from prior`, id, state, tools, now).Scan(&prior)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("settle agent run: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return s.agentRunMissing(ctx, id)
-	}
-	return nil
-}
-
-// agentRunMissing returns ErrNotFound when no such run exists; an existing finished run is not an error.
-func (s *Store) agentRunMissing(ctx context.Context, id uuid.UUID) error {
-	var exists bool
-	if err := s.Pool.QueryRow(ctx, `select exists(select 1 from agent_runs where id = $1)`, id).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
+	if prior != "running" {
+		return ErrAgentRunNotRunning
 	}
 	return nil
 }

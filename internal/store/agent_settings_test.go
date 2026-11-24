@@ -30,3 +30,14 @@ func TestAgentSettings_RoundTrip(t *testing.T) {
 		t.Fatalf("got %+v, %v; want %+v", got, err, want)
 	}
 }
+
+func TestPutAgentSettings_ErrorsWhenNoSettingsRow(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	if _, err := st.Pool.Exec(ctx, `delete from agent_settings`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutAgentSettings(ctx, store.AgentSettings{MonthlyBudgetMicroUSD: 1}); err == nil {
+		t.Fatal("put with no settings row returned nil; the budget would silently stay unset")
+	}
+}

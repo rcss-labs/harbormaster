@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // AgentModelRef names the provider and model a role uses.
@@ -17,12 +19,18 @@ type AgentSettings struct {
 
 // GetAgentSettings returns the settings; the row is seeded by the migration.
 func (s *Store) GetAgentSettings(ctx context.Context) (AgentSettings, error) {
+	// One repeatable-read snapshot, so the budget and role models cannot come from two different saves.
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return AgentSettings{}, fmt.Errorf("get agent settings: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
 	out := AgentSettings{RoleModels: map[string]AgentModelRef{}}
-	if err := s.Pool.QueryRow(ctx, `select monthly_budget_micro_usd, unredacted_providers from agent_settings`).
+	if err := tx.QueryRow(ctx, `select monthly_budget_micro_usd, unredacted_providers from agent_settings`).
 		Scan(&out.MonthlyBudgetMicroUSD, &out.UnredactedProviders); err != nil {
 		return AgentSettings{}, fmt.Errorf("get agent settings: %w", err)
 	}
-	rows, err := s.Pool.Query(ctx, `select role, provider, model from agent_role_models`)
+	rows, err := tx.Query(ctx, `select role, provider, model from agent_role_models`)
 	if err != nil {
 		return AgentSettings{}, fmt.Errorf("get agent role models: %w", err)
 	}
@@ -35,7 +43,10 @@ func (s *Store) GetAgentSettings(ctx context.Context) (AgentSettings, error) {
 		}
 		out.RoleModels[role] = ref
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return AgentSettings{}, fmt.Errorf("get agent role models: %w", err)
+	}
+	return out, nil
 }
 
 // PutAgentSettings replaces the settings, role models included, in one transaction. It takes the same row lock
@@ -50,9 +61,13 @@ func (s *Store) PutAgentSettings(ctx context.Context, in AgentSettings) error {
 	if providers == nil {
 		providers = []string{}
 	}
-	if _, err := tx.Exec(ctx, `update agent_settings set monthly_budget_micro_usd = $1, unredacted_providers = $2`,
-		in.MonthlyBudgetMicroUSD, providers); err != nil {
+	tag, err := tx.Exec(ctx, `update agent_settings set monthly_budget_micro_usd = $1, unredacted_providers = $2`,
+		in.MonthlyBudgetMicroUSD, providers)
+	if err != nil {
 		return fmt.Errorf("put agent settings: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("put agent settings: settings row missing")
 	}
 	if _, err := tx.Exec(ctx, `delete from agent_role_models`); err != nil {
 		return fmt.Errorf("put agent role models: %w", err)

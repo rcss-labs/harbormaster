@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // AgentConversation is one user's chat thread.
@@ -77,7 +78,11 @@ func (s *Store) GetAgentConversation(ctx context.Context, userID, id int64) (Age
 
 // DeleteAgentConversation removes the user's conversation and its messages; another user's is ErrNotFound.
 func (s *Store) DeleteAgentConversation(ctx context.Context, userID, id int64) error {
-	tag, err := s.Pool.Exec(ctx, `delete from agent_conversations where id = $1 and user_id = $2`, id, userID)
+	var tag pgconn.CommandTag
+	err := retryDeadlock(func() (err error) {
+		tag, err = s.Pool.Exec(ctx, `delete from agent_conversations where id = $1 and user_id = $2`, id, userID)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("delete agent conversation: %w", err)
 	}
@@ -87,8 +92,11 @@ func (s *Store) DeleteAgentConversation(ctx context.Context, userID, id int64) e
 	return nil
 }
 
-// ListAgentMessages returns a conversation's messages in order. Callers check ownership first.
-func (s *Store) ListAgentMessages(ctx context.Context, conversationID int64) ([]AgentMessage, error) {
+// ListAgentMessages returns a conversation's messages in order, or ErrNotFound when it is not the user's.
+func (s *Store) ListAgentMessages(ctx context.Context, userID, conversationID int64) ([]AgentMessage, error) {
+	if _, err := s.GetAgentConversation(ctx, userID, conversationID); err != nil {
+		return nil, err
+	}
 	rows, err := s.Pool.Query(ctx, `select id, conversation_id, role, text, tools, interrupted, created_at
 		from agent_messages where conversation_id = $1 order by id`, conversationID)
 	if err != nil {
@@ -106,8 +114,8 @@ func (s *Store) ListAgentMessages(ctx context.Context, conversationID int64) ([]
 	return out, rows.Err()
 }
 
-// AppendAgentMessage stores a message and bumps the conversation's updated_at, which retention measures.
-func (s *Store) AppendAgentMessage(ctx context.Context, m AgentMessage) (AgentMessage, error) {
+// AppendAgentMessage stores a message in the user's conversation (ErrNotFound for anyone else's) and bumps the conversation's updated_at, which retention measures.
+func (s *Store) AppendAgentMessage(ctx context.Context, userID int64, m AgentMessage) (AgentMessage, error) {
 	tools := m.Tools
 	if tools == nil {
 		tools = []string{}
@@ -117,6 +125,14 @@ func (s *Store) AppendAgentMessage(ctx context.Context, m AgentMessage) (AgentMe
 		return AgentMessage{}, fmt.Errorf("append agent message: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	var owned int64
+	if err := tx.QueryRow(ctx, `select id from agent_conversations where id = $1 and user_id = $2 for update`,
+		m.ConversationID, userID).Scan(&owned); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AgentMessage{}, ErrNotFound
+		}
+		return AgentMessage{}, fmt.Errorf("append agent message: %w", err)
+	}
 	err = tx.QueryRow(ctx, `insert into agent_messages (conversation_id, role, text, tools, interrupted)
 		values ($1, $2, $3, $4, $5) returning id, created_at`,
 		m.ConversationID, m.Role, m.Text, tools, m.Interrupted).Scan(&m.ID, &m.CreatedAt)
@@ -135,7 +151,11 @@ func (s *Store) AppendAgentMessage(ctx context.Context, m AgentMessage) (AgentMe
 
 // DeleteAgentConversationsBefore removes conversations not active since t, messages included, and returns how many.
 func (s *Store) DeleteAgentConversationsBefore(ctx context.Context, t time.Time) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from agent_conversations where updated_at < $1`, t)
+	var tag pgconn.CommandTag
+	err := retryDeadlock(func() (err error) {
+		tag, err = s.Pool.Exec(ctx, `delete from agent_conversations where updated_at < $1`, t)
+		return err
+	})
 	if err != nil {
 		return 0, fmt.Errorf("delete agent conversations: %w", err)
 	}
