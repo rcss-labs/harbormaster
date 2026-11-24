@@ -2,6 +2,7 @@
 package config
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -174,6 +175,11 @@ type Config struct {
 	OAuthAccessTTL    time.Duration // lifetime of an OAuth access token
 	OAuthClientHosts  []string      // hosts a client_id metadata document URL may be on
 	OAuthRedirectURIs []string      // redirect URIs a client may use; http loopback entries match any port
+
+	// The AI agent (phase 1). Off unless AgentURL is set: no agent route exists and a run token does not authenticate.
+	AgentURL         string        // HM_AGENT_URL: the agent service's private base URL
+	AgentCAPEM       string        // HM_AGENT_CA_PEM: an extra root certificate for the agent's TLS certificate
+	AgentRunTokenTTL time.Duration // HM_AGENT_RUN_TOKEN_TTL: lifetime of a run token
 
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
@@ -416,6 +422,10 @@ func Load(getenv func(string) string) (Config, error) {
 		OAuthClientHosts:  reader.list("HM_OAUTH_CLIENT_HOSTS"),
 		OAuthRedirectURIs: reader.list("HM_OAUTH_REDIRECT_URIS"),
 
+		AgentURL:         strings.TrimSpace(reader.text("HM_AGENT_URL", "")),
+		AgentCAPEM:       strings.TrimSpace(reader.text("HM_AGENT_CA_PEM", "")),
+		AgentRunTokenTTL: reader.duration("HM_AGENT_RUN_TOKEN_TTL", 15*time.Minute),
+
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
 			Prefix: reader.text("HM_KV_PREFIX", "hm"),
@@ -497,6 +507,9 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := validateTokens(cfg); err != nil {
 		return Config{}, err
 	}
+	if err := validateAgent(cfg); err != nil {
+		return Config{}, err
+	}
 	if len(cfg.OAuthClientHosts) == 0 {
 		cfg.OAuthClientHosts = DefaultOAuthClientHosts()
 	}
@@ -533,15 +546,61 @@ func validateTokens(cfg Config) error {
 	if cfg.TokenLogSearchDailyGB < 0 {
 		return errors.New("HM_TOKEN_LOG_SEARCH_DAILY_GB: must be 0 (token log search off) or positive")
 	}
-	if cfg.MCPPublicURL != "" {
-		parsed, err := url.Parse(cfg.MCPPublicURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
-			parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" ||
-			strings.HasSuffix(cfg.MCPPublicURL, "/") || strings.ContainsAny(cfg.MCPPublicURL, "?#") {
-			return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
-		}
+	if cfg.MCPPublicURL != "" && !isBaseURL(cfg.MCPPublicURL, false) {
+		return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
 	}
 	return nil
+}
+
+// AgentEnabled reports whether the AI agent is on: HM_AGENT_URL is set.
+func (c Config) AgentEnabled() bool { return c.AgentURL != "" }
+
+// validateAgent checks the agent settings, whether or not the agent is on. The URL is https, or http for a loopback
+// host only (a local development agent), with no userinfo, path, query or fragment.
+func validateAgent(cfg Config) error {
+	if cfg.AgentRunTokenTTL < time.Minute || cfg.AgentRunTokenTTL > time.Hour {
+		return errors.New("HM_AGENT_RUN_TOKEN_TTL: must be between 1m and 1h")
+	}
+	if cfg.AgentURL != "" && !isBaseURL(cfg.AgentURL, true) {
+		return errors.New("HM_AGENT_URL: must be an https:// URL (http:// only for a loopback host) with no path, query or trailing slash")
+	}
+	if cfg.AgentCAPEM != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(cfg.AgentCAPEM)) {
+		return errors.New("HM_AGENT_CA_PEM: contains no PEM certificate")
+	}
+	return nil
+}
+
+// isBaseURL reports whether raw is a bare base URL: https (or http for a loopback host when loopbackHTTP), a hostname,
+// an optional valid port, and no userinfo, path, query, fragment or trailing slash.
+func isBaseURL(raw string, loopbackHTTP bool) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" ||
+		parsed.Fragment != "" || parsed.Opaque != "" || strings.HasSuffix(raw, "/") || strings.ContainsAny(raw, "?#") {
+		return false
+	}
+	if port := parsed.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return false
+		}
+	} else if strings.HasSuffix(parsed.Host, ":") {
+		return false // "host:" with an empty port
+	}
+	switch parsed.Scheme {
+	case "https":
+		return true
+	case "http":
+		return loopbackHTTP && isLoopbackHost(parsed.Hostname())
+	}
+	return false
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 // DefaultOAuthClientHosts is where Claude's client metadata documents are expected to live. Unverified against a real

@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-var rawShape = regexp.MustCompile(`^hm[por]_[a-z2-7]{12}_[A-Za-z0-9_-]{43}$`)
+var rawShape = regexp.MustCompile(`^hm[poar]_[a-z2-7]{12}_[A-Za-z0-9_-]{43}$`)
 
-var allKinds = []Kind{KindPAT, KindOAuthAccess, KindOAuthRefresh}
+var allKinds = []Kind{KindPAT, KindOAuthAccess, KindOAuthRefresh, KindRun}
 
 func TestGenerate_RoundTripsThroughParse(t *testing.T) {
 	for _, kind := range allKinds {
@@ -73,9 +73,31 @@ func TestDisplayID_NeverContainsTheSecret(t *testing.T) {
 		if strings.Contains(display, raw) {
 			t.Errorf("DisplayID returned the whole raw token %q", display)
 		}
-		wantPrefix := map[Kind]string{KindPAT: "hmp_", KindOAuthAccess: "hmo_", KindOAuthRefresh: "hmr_"}[kind]
+		wantPrefix := map[Kind]string{KindPAT: "hmp_", KindOAuthAccess: "hmo_", KindOAuthRefresh: "hmr_", KindRun: "hma_"}[kind]
 		if want := wantPrefix + parsed.ID; display != want {
 			t.Errorf("DisplayID = %q, want %q", display, want)
 		}
+	}
+}
+
+func TestParse_RunToken(t *testing.T) {
+	raw, generated, err := Generate(KindRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(raw, "hma_") {
+		t.Errorf("run token %q does not start with hma_", raw)
+	}
+	parsed, ok := Parse(raw)
+	if !ok || parsed.Kind != KindRun || parsed != generated {
+		t.Fatalf("Parse(%q) = %+v, %v; want a run token equal to %+v", raw, parsed, ok, generated)
+	}
+	if got := DisplayID(parsed); got != "hma_"+parsed.ID || strings.Contains(got, parsed.Secret) {
+		t.Errorf("DisplayID = %q", got)
+	}
+	// hmr_ stays the OAuth refresh prefix: the two never parse as each other.
+	refresh, _, _ := Generate(KindOAuthRefresh)
+	if p, ok := Parse(refresh); !ok || p.Kind != KindOAuthRefresh {
+		t.Errorf("refresh token parsed as %+v, %v", p, ok)
 	}
 }
