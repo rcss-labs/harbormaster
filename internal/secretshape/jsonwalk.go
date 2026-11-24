@@ -1,6 +1,7 @@
 package secretshape
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,9 +19,16 @@ const (
 	hideLists
 	// hideScalars hides scalars, and scalars in lists.
 	hideScalars
+	// hideOne is hideScalars for the name of one secret: an object is that secret too, and gets hideLeaves.
+	hideOne
+	// hideLeaves hides every scalar, including those of objects inside, except references to a secret kept elsewhere.
+	hideLeaves
 	// hideAll hides every scalar, including those of objects inside.
 	hideAll
 )
+
+// reference matches a string that says where a secret is kept.
+var reference = regexp.MustCompile(`^(?:arn:aws[a-z-]*:[a-z0-9-]+:[^\s=&]+|(?:\{\{resolve:)?(?:aws:)?(?:secretsmanager|ssm|ssm-secure):[^\s=&]+)$`)
 
 // jsonWalker finds the edits for one valid JSON value. It never re-encodes: strings are decoded with an offset map,
 // and only the secret part of a token is replaced, so everything else keeps its bytes.
@@ -37,6 +45,7 @@ type jsonWalker struct {
 func jsonEdits(text string, depth int) []edit {
 	w := &jsonWalker{text: text, depth: depth}
 	w.value(hideNothing)
+	sort.Slice(w.edits, func(i, j int) bool { return w.edits[i].start < w.edits[j].start })
 	if len(w.secretValues) == 0 {
 		return w.edits
 	}
@@ -60,6 +69,7 @@ func jsonEdits(text string, depth int) []edit {
 		}
 		w.pos, w.edits = r[0], nil
 		w.value(hideAll)
+		// In order already: only hideLeaves puts an edit aside.
 		edits = append(edits, w.edits...)
 	}
 	return append(edits, first[next:]...)
@@ -94,7 +104,11 @@ func (w *jsonWalker) value(hide hiding) {
 
 func (w *jsonWalker) object(hide hiding) {
 	var values [][2]int
-	secretName := false
+	secretName, counterName, refers := false, false, false
+	if hide == hideOne {
+		hide = hideLeaves
+	}
+	name := -1 // under hideLeaves, the position of a name that stays when the object refers to a secret
 	w.pos++
 	for w.space(); w.text[w.pos] != '}'; w.space() {
 		if w.text[w.pos] == ',' {
@@ -106,28 +120,69 @@ func (w *jsonWalker) object(hide hiding) {
 		w.pos++ // the colon
 		w.space()
 		start := w.pos
-		if w.text[start] == '"' && (strings.EqualFold(key, "name") || strings.EqualFold(key, "key")) {
+		isString := w.text[start] == '"'
+		isName := isString && strings.EqualFold(key, "name")
+		if isName || isString && strings.EqualFold(key, "key") {
 			label, _ := unescape(w.text[start+1 : stringEnd(w.text, start)])
-			secretName = secretName || NameLooksSecret(label)
+			kind := labelKind(label)
+			secretName = secretName || kind == nameSecret
+			counterName = counterName || kind == nameCounter && !listsNames(label)
 		}
-		w.value(memberHiding(key, hide, w.text[start]))
+		if isString && strings.EqualFold(key, "valueFrom") {
+			content, _ := unescape(w.text[start+1 : stringEnd(w.text, start)])
+			refers = refers || reference.MatchString(content)
+		}
+		if hide == hideLeaves && isName && name < 0 {
+			name = start
+			w.pos = stringEnd(w.text, start) + 1
+		} else {
+			w.value(memberHiding(key, hide, w.text[start]))
+		}
 		if strings.EqualFold(key, "value") {
 			values = append(values, [2]int{start, w.pos})
 		}
 	}
 	w.pos++
-	if secretName && hide != hideAll {
-		w.secretValues = append(w.secretValues, values...)
+	if name >= 0 {
+		end := w.pos
+		w.pos = name
+		if refers {
+			w.str(hideNothing)
+		} else {
+			w.str(hideLeaves)
+		}
+		w.pos = end
 	}
+	for _, v := range values {
+		if hide != hideAll && (secretName || counterName && w.holdsSecretItem(v)) {
+			w.secretValues = append(w.secretValues, v)
+		}
+	}
+}
+
+// holdsSecretItem reports whether the value in the range v is a string that is no counter, or a list of strings.
+func (w *jsonWalker) holdsSecretItem(v [2]int) bool {
+	raw := w.text[v[0]:v[1]]
+	if raw[0] == '[' {
+		return strings.HasPrefix(strings.TrimLeft(raw[1:], " \t\r\n"), `"`)
+	}
+	if raw[0] != '"' {
+		return false
+	}
+	content, _ := unescape(raw[1 : len(raw)-1])
+	return !harmlessCounterValue(firstItem(content))
 }
 
 // memberHiding is how the value of a member is treated; first is the value's first character.
 func memberHiding(key string, outer hiding, first byte) hiding {
-	if outer == hideAll {
-		return hideAll
+	if outer == hideAll || outer == hideLeaves {
+		return outer
 	}
 	switch pairNameKind(key) {
 	case nameSecret:
+		if namesOneSecret(key) {
+			return hideOne
+		}
 		return hideScalars
 	case nameCounter:
 		if first != '[' || !listsNames(key) {
@@ -142,6 +197,9 @@ func (w *jsonWalker) str(hide hiding) string {
 	start, end := w.pos+1, stringEnd(w.text, w.pos)
 	w.pos = end + 1
 	content, offsets := unescape(w.text[start:end])
+	if hide == hideLeaves && reference.MatchString(content) {
+		hide = hideNothing
+	}
 	if hide == hideLists && harmlessCounterValue(firstItem(content)) {
 		hide = hideNothing
 	}
@@ -169,7 +227,7 @@ func (w *jsonWalker) literal(hide hiding) {
 	if strings.IndexByte("tfn", token[0]) >= 0 {
 		return
 	}
-	if hide == hideScalars || hide == hideAll || ValueLooksSecret(token) {
+	if hide >= hideScalars || ValueLooksSecret(token) {
 		w.edits = append(w.edits, edit{start, w.pos, `"` + Redacted + `"`})
 	}
 }

@@ -1,10 +1,15 @@
 // Package secretshape detects names and values that look like secrets. It is
 // used to redact environment values and to scrub log text before it leaves
 // for a model provider. All matching uses Go's linear-time regexp engine.
+//
+// Known limit: in text that is not valid JSON, such as an answer cut at the
+// read cap, redaction never goes past the end of the line, so the later lines
+// of a list or object spread over several lines under a secret name stay.
 package secretshape
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -71,6 +76,12 @@ var (
 	arnSpan      = regexp.MustCompile(`\barn:aws[a-z-]*:[^\s"'<>,;]+`)
 )
 
+// Bounds on how far before a hex run the digest and image-tag checks look.
+const (
+	digestWindow = 16  // "sha512:" and then some
+	prefixWindow = 512 // an image reference such as registry/team/app:
+)
+
 // notPassWords end in "pass" without being a password name.
 var notPassWords = map[string]bool{
 	"bypass": true, "compass": true, "trespass": true, "surpass": true, "overpass": true, "underpass": true,
@@ -83,7 +94,8 @@ var notPassWords = map[string]bool{
 func NameLooksSecret(name string) bool {
 	segments := nameSegments(name)
 	for i, segment := range segments {
-		if secretSegments[segment] || endsInPasswordWord(segment) {
+		if secretSegments[segment] || strings.HasSuffix(segment, "password") || strings.HasSuffix(segment, "passwd") {
+			// The suffixes match glued names such as pgpassword, dbpassword and rootpasswd.
 			return true
 		}
 		if strings.HasSuffix(segment, "pass") && !notPassWords[segment] {
@@ -96,11 +108,6 @@ func NameLooksSecret(name string) bool {
 	return false
 }
 
-// endsInPasswordWord matches glued names such as pgpassword, dbpassword and rootpasswd.
-func endsInPasswordWord(segment string) bool {
-	return strings.HasSuffix(segment, "password") || strings.HasSuffix(segment, "passwd")
-}
-
 // nameKind is how a name found in free text is judged.
 type nameKind int
 
@@ -111,36 +118,109 @@ const (
 	nameCounter
 )
 
-// freeTextSecrets are the segments that make a name in log text secret. Plurals and "pass" are handled apart.
-var freeTextSecrets = map[string]bool{
-	"key": true, "apikey": true, "apikeys": true, "token": true, "secret": true,
-	"password": true, "passwords": true, "passwd": true, "passwds": true, "passphrase": true, "pwd": true,
-	"credential": true, "credentials": true, "auth": true, "authorization": true, "private": true,
-	"cert": true, "dsn": true,
+// strongWords make a name in log text secret as one of its segments or as the glued ending of one (pgpassword).
+// Plurals such as keys and tokens, and "pass", are handled apart.
+var strongWords = []string{
+	"password", "passwd", "pwd", "passphrase", "secret", "authorization", "credential", "apikey", "dsn",
+	"secretkey", "accesskey", "privatekey", "authtoken", "accesstoken", "connectionstring",
+}
+
+var strongPlurals = []string{"passwords", "passwds", "credentials", "apikeys"}
+
+// weakWords make a name secret as one of its segments, unless the name ends in a benign descriptor: key_id, token_ttl.
+var weakWords = map[string]bool{"token": true, "key": true, "auth": true, "cert": true, "private": true}
+
+var benignDescriptors = map[string]bool{
+	"id": true, "ids": true, "name": true, "names": true, "ttl": true, "count": true, "total": true, "type": true,
+	"size": true, "path": true, "file": true, "url": true, "uri": true, "arn": true, "version": true, "prefix": true,
+	"index": true, "expiry": true, "expires": true, "service": true, "subnets": true, "enabled": true, "status": true,
+	"limit": true, "per": true, "rate": true, "length": true, "hash": true, "fingerprint": true, "thumbprint": true,
+}
+
+// cursorWords before "token" make a pagination cursor: nextToken, next_page_token.
+var cursorWords = map[string]bool{"next": true, "page": true, "continuation": true, "pagination": true, "cursor": true}
+
+func endsInAny(segment string, words []string) bool {
+	for _, word := range words {
+		if strings.HasSuffix(segment, word) {
+			return true
+		}
+	}
+	return false
 }
 
 // pairNameKind judges a name in free text. It is narrower than NameLooksSecret: "tokens: 1200", "keys: 12" and
-// "--- PASS: TestX" are counters and test output, not secrets.
+// "--- PASS: TestX" are counters and test output, not secrets, and {"key":"Environment"} is a tag.
 func pairNameKind(name string) nameKind {
 	segments := nameSegments(name)
+	weak := false
 	for _, segment := range segments {
-		if freeTextSecrets[segment] || endsInPasswordWord(segment) ||
-			strings.HasSuffix(segment, "secretkey") || strings.HasSuffix(segment, "accesskey") ||
-			strings.HasSuffix(segment, "privatekey") || strings.HasSuffix(segment, "apikey") {
+		if endsInAny(segment, strongWords) || endsInAny(segment, strongPlurals) {
 			return nameSecret
 		}
+		weak = weak || weakWords[segment]
 	}
-	if len(segments) < 2 {
+	if len(segments) == 0 {
 		return nameClean
 	}
-	switch last := segments[len(segments)-1]; last {
+	before, last := segments[:len(segments)-1], segments[len(segments)-1]
+	if weak && !benignDescriptors[last] && !(last == "key" && len(before) == 0) && !isCursor(before, last) {
+		return nameSecret
+	}
+	if len(before) == 0 {
+		return nameClean
+	}
+	switch last {
 	case "pass":
-		if segments[len(segments)-2] == "proxy" {
+		if before[len(before)-1] == "proxy" {
 			return nameClean
 		}
 		return nameSecret
 	case "keys", "tokens", "secrets":
 		return nameCounter
+	}
+	return nameClean
+}
+
+func isCursor(before []string, last string) bool {
+	for _, segment := range before {
+		if !cursorWords[segment] {
+			return false
+		}
+	}
+	return last == "token" && len(before) > 0
+}
+
+// namesOneSecret reports whether a free-text name holds a strong word in the singular: what is under it, however
+// nested, is that secret.
+func namesOneSecret(name string) bool {
+	for _, segment := range nameSegments(name) {
+		if endsInAny(segment, strongWords) {
+			return true
+		}
+	}
+	return false
+}
+
+var environmentName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// labelKind judges the name in {"name": ..., "value": ...}. A name written like an environment variable is judged as
+// one; any other, which may be a service or a metric, must end in the secret word: db.password, not auth-service.
+func labelKind(label string) nameKind {
+	if environmentName.MatchString(label) {
+		if NameLooksSecret(label) {
+			return nameSecret
+		}
+		return nameClean
+	}
+	kind := pairNameKind(label)
+	if kind != nameSecret {
+		return kind
+	}
+	segments := nameSegments(label)
+	last := segments[len(segments)-1]
+	if endsInAny(last, strongWords) || endsInAny(last, strongPlurals) || weakWords[last] || last == "pass" {
+		return nameSecret
 	}
 	return nameClean
 }
@@ -217,7 +297,7 @@ func longRunSpans(text string) [][2]int {
 		if insideAny(arns, m) {
 			continue
 		}
-		if hexOnly.MatchString(run) && (digestPrefix.MatchString(text[:m[0]]) || isImageTag(text[:m[0]])) {
+		if hexOnly.MatchString(run) && hexRunIsDiagnostic(text, m[0]) {
 			continue
 		}
 		spans = append(spans, [2]int{m[0], m[1]})
@@ -225,13 +305,19 @@ func longRunSpans(text string) [][2]int {
 	return spans
 }
 
+// hexRunIsDiagnostic reports whether the hex run starting at start is a
+// digest or an image tag. It looks only at a short stretch before the run:
+// matching the whole text before every run would be quadratic on a big log.
+func hexRunIsDiagnostic(text string, start int) bool {
+	before := text[max(0, start-prefixWindow):start]
+	return digestPrefix.MatchString(before[max(0, len(before)-digestWindow):]) || isImageTag(before)
+}
+
+// insideAny reports whether inner lies within one of outer, which holds
+// sorted, non-overlapping spans.
 func insideAny(outer [][]int, inner []int) bool {
-	for _, o := range outer {
-		if o[0] <= inner[0] && inner[1] <= o[1] {
-			return true
-		}
-	}
-	return false
+	i := sort.Search(len(outer), func(i int) bool { return outer[i][0] > inner[0] })
+	return i > 0 && inner[1] <= outer[i-1][1]
 }
 
 // isImageTag reports whether the text before a run ends in "<repo path>:",

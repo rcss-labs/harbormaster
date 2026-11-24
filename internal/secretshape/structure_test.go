@@ -33,7 +33,7 @@ func requireValid(t *testing.T, label, text string) {
 func TestScrubText_SecretsAfterJSONEscapes(t *testing.T) {
 	for _, tt := range []struct{ literal, leaked string }{
 		{`"line1\ntoken=hunter2"`, "hunter2"},
-		{`"a\tkey=hunter2"`, "hunter2"},
+		{`"a\tauth_key=hunter2"`, "hunter2"},
 		{`"a\rpassword=hunter2"`, "hunter2"},
 		{`"a\bsecret: hunter2"`, "hunter2"},
 		{`"a\fauth=hunter2"`, "hunter2"},
@@ -157,7 +157,7 @@ func TestScrubText_PlainTextLists(t *testing.T) {
 		`{"lines":["API_KEYS=[abc, de","normal"],"n":1`: `{"lines":["API_KEYS=[[redacted]","normal"],"n":1`,
 		"API_KEYS=[abc, de\nnormal":                     "API_KEYS=[[redacted]\nnormal",
 		`max_tokens=[1, 2] missing_keys=[a,b]`:          `max_tokens=[1, 2] missing_keys=[a,b]`,
-		`"password": {"rotated": 1`:                     `"password": {"rotated": 1`,
+		`"auth": {"rotated": 1`:                         `"auth": {"rotated": 1`,
 		`password=[abc]defghi x`:                        `password=[redacted] x`,
 		`Authorization: Bearer hun}ter2, next`:          `Authorization: Bearer [redacted], next`,
 	} {
@@ -220,6 +220,11 @@ func TestScrubText_TimeGrowsWithTheInput(t *testing.T) {
 		"nested arrays":       nested("[", "1", "]"),
 		"nested objects":      nested(`{"abcdefghijklmnopqrstu":`, "1", "}"),
 		"nested secret pairs": nested(`{"name":"token","value":`, "1", "}"),
+		"open braces":         repeat("secret={"),
+		"open brace objects":  repeat(`"secret":{"`),
+		"nested secrets":      nested(`{"a_long_secret_name":`, "1", "}"),
+		"bracketed names":     repeat("a[b]"),
+		"hex runs":            repeat(fakeHex40 + " "),
 		"json strings":        func(n int) string { return "[" + repeat(`"password=a",`)(n) + "1]" },
 		"json lines":          repeat("{\"password\":\"a\"}\n"),
 		"json in json":        func(n int) string { return encode(t, encode(t, `{"a":"`+repeat("token=a ")(n/2)+`"}`, 1), 1) },
@@ -288,4 +293,81 @@ func decodedForms(text string) []string {
 		forms = append(forms, text)
 	}
 	return forms
+}
+
+// Names in free text and JSON members: strong words are secret anywhere, weak ones unless a benign word follows.
+func TestScrubText_NamesThatAreNotSecret(t *testing.T) {
+	for _, text := range []string{
+		`{"key":"Environment","value":"prod"}`, `{"key":"cpu","values":[1,2]}`, `key=prod x`, `?key=abc`,
+		`{"nextToken":"abc"}`, `{"next_token":"abc"}`, `{"pageToken":"abc","continuationToken":"d"}`,
+		`{"nextPageToken":"abc","pagination_token":"a","cursorToken":"b"}`, `next_token=abc`,
+		`{"name":"auth-service","value":12}`, `{"name":"auth-service","value":"abc"}`,
+		`{"name":"password-resets","value":12}`, `{"name":"max_tokens","value":4096}`, `{"name":"max_tokens","value":"4096"}`,
+		`{"name":"nextToken","value":"abc"}`, `{"key":"cost-center","value":"a1"}`,
+		`{"private_subnets":["subnet-1"]}`, `private_subnets=subnet-1`, `cert_path=/etc/tls`, `token_ttl=15m`, `key_id=abc`,
+		`{"cert_arn":"x","tokenType":"bearer-a","keyName":"b","auth_status":"ok","token_limit":5,"keyHash":"ab"}`,
+		`{"auth_enabled":"yes","auth_service":"b","token_rate":4,"key_fingerprint":"ab:cd"}`,
+		`{"auth_enabled":true,"password":false,"secret":null}`, `{"auth":{"mode":"sso","n":1}}`,
+		`{"secrets":[{"name":"DB","valueFrom":"arn:aws:secretsmanager:eu-west-1:123456789012:secret:db-AbCdEf"}]}`,
+		`{"secretOptions":[{"name":"splunk","valueFrom":"arn:aws:ssm:eu-west-1:123456789012:parameter/a"}]}`,
+		`{"secret":{"from":"arn:aws:secretsmanager:eu-west-1:123456789012:secret:a","also":"{{resolve:ssm:/a/b}}","on":true}}`,
+		`[auth]: starting worker`, `app[auth]: starting`, `labels[key]=prod`,
+	} {
+		if got := ScrubText(text); got != text {
+			t.Errorf("ScrubText(%s) = %s, want it unchanged", text, got)
+		}
+	}
+}
+
+func TestScrubText_NamesThatAreSecret(t *testing.T) {
+	for text, want := range map[string]string{
+		`token_value=abc123`: `token_value=[redacted]`,
+		`{"private_key_data":"abc","client-key-data":"d"}`: `{"private_key_data":"[redacted]","client-key-data":"[redacted]"}`,
+		`auth_token=abc`:                       `auth_token=[redacted]`,
+		`{"auth_token":"abc","authToken":5}`:   `{"auth_token":"[redacted]","authToken":"[redacted]"}`,
+		`signing_key=abc`:                      `signing_key=[redacted]`,
+		`{"token":"abc","auth":"d"}`:           `{"token":"[redacted]","auth":"[redacted]"}`,
+		`password_file=abc`:                    `password_file=[redacted]`,
+		`secret_name=abc`:                      `secret_name=[redacted]`,
+		`clientsecret=abc dbpwd=d myapikey: e`: `clientsecret=[redacted] dbpwd=[redacted] myapikey: [redacted]`,
+		`authtoken_ttl=abc`:                    `authtoken_ttl=[redacted]`,
+		`session_next_token=abc`:               `session_next_token=[redacted]`,
+
+		`{"name":"db.password","value":"a1"}`:                           `{"name":"db.password","value":"[redacted]"}`,
+		`{"name":"db.password","value":12}`:                             `{"name":"db.password","value":"[redacted]"}`,
+		`{"value":"a1","key":"X-Api-Key"}`:                              `{"value":"[redacted]","key":"X-Api-Key"}`,
+		`{"key":"API_KEY","value":"a1"}`:                                `{"key":"API_KEY","value":"[redacted]"}`,
+		`{"name":"AUTH_SERVICE","value":12}`:                            `{"name":"AUTH_SERVICE","value":"[redacted]"}`,
+		`{"name":"api_keys","value":"abc"}`:                             `{"name":"api_keys","value":"[redacted]"}`,
+		`{"name":"api_keys","value":["abc"]}`:                           `{"name":"api_keys","value":["[redacted]"]}`,
+		`{"name":"max_tokens","value":{"name":"DB_PASS","value":"a1"}}`: `{"name":"max_tokens","value":{"name":"DB_PASS","value":"[redacted]"}}`,
+
+		`{"password":{"plain":"x1","n":[1,"y"],"on":true}}`:                                   `{"password":{"plain":"[redacted]","n":["[redacted]","[redacted]"],"on":true}}`,
+		`{"secret":[{"plain":"x1"}]}`:                                                         `{"secret":[{"plain":"[redacted]"}]}`,
+		`{"db_secret":{"name":"x1","arn":"arn:aws:s3:::a b"}}`:                                `{"db_secret":{"name":"[redacted]","arn":"[redacted]"}}`,
+		`{"secret":"arn:aws:secretsmanager:eu-west-1:1:secret:a"}`:                            `{"secret":"[redacted]"}`,
+		`{"secret":{"name":"a","value":"arn:aws:ssm:x:1:y","valueFrom":"arn:aws:ssm:x:1:z"}}`: `{"secret":{"name":"a","value":"arn:aws:ssm:x:1:y","valueFrom":"arn:aws:ssm:x:1:z"}}`,
+
+		`user[password]=x next`:                        `user[password]=[redacted] next`,
+		`a[b]['auth_token'] = 'x y' next`:              `a[b]['auth_token'] = '[redacted]' next`,
+		`secret={abc def} x`:                           `secret=[redacted] x`,
+		`auth: {user a}:{pw} x`:                        `auth: [redacted] x`,
+		`{"m":"secret={abc def}","n":"after"}`:         `{"m":"secret=[redacted]","n":"after"}`,
+		`{"m":"secret={abc def","n":"after"`:           `{"m":"secret=[redacted]","n":"after"`,
+		`"password":{"plain":"a}1","n":{"x":2}},"b":3`: `"password":[redacted],"b":3`,
+		`"auth":{"mode":"sso"},"b":3`:                  `"auth":{"mode":"sso"},"b":3`,
+		`"name":"db.password","value":"a1","n":1`:      `"name":"db.password","value":"[redacted]","n":1`,
+		`"name":"auth-service","value":12,"n":1`:       `"name":"auth-service","value":12,"n":1`,
+	} {
+		got := ScrubText(text)
+		if got != want {
+			t.Errorf("ScrubText(%s)\n got %s\nwant %s", text, got, want)
+		}
+		if json.Valid([]byte(text)) {
+			requireValid(t, text, got)
+		}
+		if again := ScrubText(got); again != got {
+			t.Errorf("scrubbing %s again gave %s", got, again)
+		}
+	}
 }

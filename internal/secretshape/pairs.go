@@ -5,12 +5,16 @@ import (
 	"strings"
 )
 
-// pairName matches the name and operator of name=value, name: value and "name": "value". The value is parsed
-// separately so that a secret nested in another pair's value is still found.
-var pairName = regexp.MustCompile(`["']?([A-Za-z0-9_.-]+)["']?[ \t]*[=:][ \t]*`)
+// pairName matches the name and operator of name=value, name: value, "name": "value" and user[name]=value. The value is
+// parsed separately so that a secret nested in another pair's value is still found.
+var pairName = regexp.MustCompile(`(?:["']?([A-Za-z0-9_.-]+)["']?[ \t]*[=:]|[A-Za-z0-9_.\]-]\[["']?([A-Za-z0-9_.-]+)["']?\](?:\[\])?[ \t]*=)[ \t]*`)
 
 // namedValue matches {"name": "DB_PASSWORD", "value": up to the value.
 var namedValue = regexp.MustCompile(`(?i)["'](?:name|key)["']\s*:\s*["']([^"'\s]*)["']\s*,\s*["']value["']\s*:\s*`)
+
+// secretReference matches the ARN of a secret, with the JSON key and version ECS may add. The "secret:" and "password:"
+// in one are no pairs.
+var secretReference = regexp.MustCompile(`arn:aws[a-z-]*:secretsmanager:[a-z0-9-]*:[0-9]*:secret:[A-Za-z0-9/_+=.@!-]+(?::[A-Za-z0-9_.-]*){0,3}`)
 
 // harmlessCounter matches a number (signed, decimal, with a unit suffix), a ratio, a boolean or null.
 var harmlessCounter = regexp.MustCompile(`^(?i:[+-]?[0-9]+(?:\.[0-9]+)?(?:k|m|s|ms|%)?(?:/[0-9]+)?|n/m|true|false|yes|no|on|off|null)$`)
@@ -73,31 +77,37 @@ func itemEnd(text string, start int, ends func(byte) bool) int {
 func pairSpans(text string) [][2]int {
 	var spans [][2]int
 	for _, m := range namedValue.FindAllStringSubmatchIndex(text, -1) {
-		if NameLooksSecret(text[m[2]:m[3]]) {
-			if span, ok := secretSpan(text, m[1]); ok {
-				spans = append(spans, span)
-			}
+		if m[1] >= len(text) {
+			continue
 		}
+		label := text[m[2]:m[3]]
+		if span, ok := pairValueSpan(text, m[1], labelKind(label), label); ok {
+			spans = append(spans, span)
+		}
+	}
+	var references [][]int
+	if strings.Contains(text, ":secretsmanager:") {
+		references = secretReference.FindAllStringIndex(text, -1)
 	}
 	// A pair inside a value that is already hidden ends no later than that value does. Skipping it keeps the work
 	// proportional to the text when pairs are nested in pairs.
 	covered := 0
 	for _, m := range pairName.FindAllStringSubmatchIndex(text, -1) {
-		start := m[1]
-		name := text[m[2]:m[3]]
+		start, nameStart, nameEnd := m[1], m[2], m[3]
+		if nameStart < 0 {
+			nameStart, nameEnd = m[4], m[5]
+		}
+		name := text[nameStart:nameEnd]
 		kind := pairNameKind(name)
-		if kind == nameClean || start >= len(text) {
+		if kind == nameClean || start >= len(text) || insideAny(references, []int{nameStart, start}) && text[nameEnd] == ':' {
 			continue
 		}
 		var span [2]int
 		var ok bool
-		switch {
-		case start < covered:
+		if start < covered {
 			span, ok = schemeSpan(text, start)
-		case kind == nameCounter:
-			span, ok = counterSpan(text, start, listsNames(name))
-		default:
-			span, ok = secretSpan(text, start)
+		} else {
+			span, ok = pairValueSpan(text, start, kind, name)
 		}
 		if ok {
 			spans = append(spans, span)
@@ -107,11 +117,20 @@ func pairSpans(text string) [][2]int {
 	return spans
 }
 
-// secretSpan is the span to hide of the value at start of a pair with a secret name.
-func secretSpan(text string, start int) ([2]int, bool) {
-	if start >= len(text) {
-		return [2]int{}, false
+// pairValueSpan is the span to hide of the value at start, which the text holds under name.
+func pairValueSpan(text string, start int, kind nameKind, name string) ([2]int, bool) {
+	switch kind {
+	case nameSecret:
+		return secretSpan(text, start, namesOneSecret(name))
+	case nameCounter:
+		return counterSpan(text, start, listsNames(name))
 	}
+	return [2]int{}, false
+}
+
+// secretSpan is the span to hide of the value at start of a pair with a secret name. A JSON object is hidden only when
+// objects is set.
+func secretSpan(text string, start int, objects bool) ([2]int, bool) {
 	if isQuote(text[start]) {
 		return quotedSpan(text, start)
 	}
@@ -119,6 +138,13 @@ func secretSpan(text string, start int) ([2]int, bool) {
 		return span, true
 	}
 	span, found := unquotedSpan(text, start)
+	if text[start] == '{' {
+		if end := bracesEnd(text, start, objects); end > start {
+			// What follows the braces directly belongs to the value, as in {user}:{pw}.
+			end += len(trimClosers(text[end:valueEnd(text, end)]))
+			return [2]int{start, max(span[1], end)}, true
+		}
+	}
 	if opensList(text, start) && !(found && endsAfterList(text[span[0]:span[1]])) {
 		return withList(span, found, readList(text, start))
 	}
@@ -341,6 +367,43 @@ func closesList(text string, i int) bool {
 
 func startsObject(text string, i int) bool {
 	return i+1 < len(text) && (isQuote(text[i+1]) || isSpace(text[i+1]) || text[i+1] == '}' || text[i+1] == '\\')
+}
+
+// bracesEnd is the position behind the braces opened at start, or the end of the line or the quote around them when
+// nothing closes them. It is start when there is nothing to hide in them: no text, or a JSON object while objects is not
+// set.
+func bracesEnd(text string, start int, objects bool) int {
+	i := start + 1
+	for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
+		i++
+	}
+	if i >= len(text) || strings.IndexByte("}\r\n\\", text[i]) >= 0 {
+		return start
+	}
+	object := isQuote(text[i])
+	if object && !objects {
+		return start
+	}
+	for nesting := 1; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '{':
+			nesting++
+		case c == '}':
+			if nesting--; nesting == 0 {
+				return i + 1
+			}
+		case isQuote(c) && object:
+			if i = quotedEnd(text, i); i >= len(text) || text[i] == '\n' {
+				return i
+			}
+		case isQuote(c) || c == '\n' || c == '\r':
+			for text[i-1] == '\\' {
+				i--
+			}
+			return i
+		}
+	}
+	return len(text)
 }
 
 // endsAfterList reports whether value has text behind its balanced brackets, as in [abc]def: it is no list.
