@@ -41,6 +41,7 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 | `devseed` | Demo users, tags and history for `serve --fake-aws` |
 | `execbridge` | Browser terminal to ECS Exec bridge, speaking the SSM data-channel protocol |
 | `focus` | Tracks which pages are open so owning pollers read them often |
+| `hmtools` | The read-only MCP tool table and the one upstream client that calls Harbormaster for it, shared with the agent service |
 | `kv` | The one door to a Valkey or Redis server, limited to commands both engines share |
 | `lease` | Ownership of polling slices and the coordinator role |
 | `limits` | Cross-task limits: sessions per user, rate limits |

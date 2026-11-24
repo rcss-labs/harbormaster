@@ -1,4 +1,4 @@
-package mcpgw
+package hmtools
 
 // estateTools are whoami and the estate-wide reads: overview, clusters,
 // services, tasks and name search. Handlers are in internal/api (see the

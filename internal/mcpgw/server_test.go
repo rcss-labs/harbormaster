@@ -17,6 +17,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
+	"github.com/rcss-labs/harbormaster/internal/hmtools/hmtoolstest"
 )
 
 // syncLog is a goroutine-safe log sink.
@@ -40,7 +42,7 @@ func (l *syncLog) String() string {
 // gatewayHarness is a gateway over a stub Harbormaster.
 type gatewayHarness struct {
 	gateway  *httptest.Server
-	upstream *recordingServer
+	upstream *hmtoolstest.RecordingServer
 	log      *syncLog
 	token    string // a well-formed token
 	display  string // its public display id
@@ -60,7 +62,7 @@ func newHarness(t *testing.T, opts harnessOptions) *gatewayHarness {
 			_, _ = io.WriteString(w, `{"ok":true}`)
 		}
 	}
-	up := newRecordingServer(t, handler)
+	up := hmtoolstest.NewRecordingServer(t, handler)
 	cfg := Config{
 		Listen: ":0", UpstreamURL: up.URL, PublicURL: "https://mcp.example.com",
 		TrustedProxy: false, MaxResultBytes: 100000, UpstreamTimeout: 5 * time.Second,
@@ -68,7 +70,7 @@ func newHarness(t *testing.T, opts harnessOptions) *gatewayHarness {
 	if opts.mutateConfig != nil {
 		opts.mutateConfig(&cfg)
 	}
-	upstream, err := NewUpstream(cfg.UpstreamURL, cfg.UpstreamTimeout, nil)
+	upstream, err := hmtools.NewUpstream(cfg.UpstreamURL, cfg.UpstreamTimeout, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +193,7 @@ func TestHandler_OriginNotAllowed(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "origin_not_allowed") {
 		t.Errorf("status %d body %q, want 403 origin_not_allowed", resp.StatusCode, body)
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls, want 0 before anything else happens", n)
 	}
 }
@@ -260,7 +262,7 @@ func TestHandler_MissingOrMalformedTokenIs401WithoutUpstreamCall(t *testing.T) {
 			}
 		})
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls, want 0: garbage must never reach Harbormaster", n)
 	}
 }
@@ -274,7 +276,7 @@ func TestHandler_InitializeValidatesTheToken(t *testing.T) {
 		t.Errorf("status %d WWW-Authenticate %q, want 401 with the header", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
 	}
 	readBody(t, resp)
-	seen := h.upstream.seen()
+	seen := h.upstream.Seen()
 	if len(seen) != 1 || seen[0].EscapedPath != "/api/tokens/current" || seen[0].Header.Get("Authorization") != "Bearer "+h.token {
 		t.Errorf("upstream saw %+v, want one GET /api/tokens/current with the caller's bearer", seen)
 	}
@@ -283,12 +285,12 @@ func TestHandler_InitializeValidatesTheToken(t *testing.T) {
 func TestHandler_TokenCheckRunsForNonCallMethods(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	for _, method := range []string{"initialize", "tools/list", "ping"} {
-		before := len(h.upstream.seen())
+		before := len(h.upstream.Seen())
 		resp := h.rpc(t, h.authed(), method, map[string]any{
 			"protocolVersion": "2025-06-18", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "t", "version": "1"},
 		})
 		readBody(t, resp)
-		got := h.upstream.seen()[before:]
+		got := h.upstream.Seen()[before:]
 		if len(got) != 1 || got[0].EscapedPath != "/api/tokens/current" {
 			t.Errorf("%s: upstream saw %+v, want exactly the token check", method, got)
 		}
@@ -428,7 +430,7 @@ func TestHandler_CallForwardsTheBearerAndReturnsTheBody(t *testing.T) {
 	if result.IsError || result.Text != body {
 		t.Errorf("result = %+v, want the upstream body verbatim", result)
 	}
-	seen := h.upstream.seen()
+	seen := h.upstream.Seen()
 	if len(seen) != 1 {
 		t.Fatalf("%d upstream calls, want exactly one (tools/call goes straight to its route)", len(seen))
 	}
@@ -446,13 +448,13 @@ func TestHandler_CallForwardsTheBearerAndReturnsTheBody(t *testing.T) {
 func TestHandler_ToolArgumentsReachTheRoute(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	decodeToolResult(t, h.callTool(t, "list_tasks", map[string]any{"tag": []string{"1", "2"}, "q": "web", "limit": 5}))
-	got := h.upstream.seen()[0]
+	got := h.upstream.Seen()[0]
 	if got.EscapedPath != "/api/tasks" || got.Query != "filter=problems&limit=5&q=web&tag=1&tag=2" {
 		t.Errorf("upstream saw %s ?%s", got.EscapedPath, got.Query)
 	}
 	// A hostile id is one escaped segment of the declared route.
 	decodeToolResult(t, h.callTool(t, "get_service", map[string]any{"service_id": "../users"}))
-	if path := h.upstream.seen()[1].EscapedPath; path != "/api/services/..%2Fusers" {
+	if path := h.upstream.Seen()[1].EscapedPath; path != "/api/services/..%2Fusers" {
 		t.Errorf("hostile id reached %q", path)
 	}
 }
@@ -460,7 +462,7 @@ func TestHandler_ToolArgumentsReachTheRoute(t *testing.T) {
 func TestHandler_PostToolSendsTheBody(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	decodeToolResult(t, h.callTool(t, "search_logs", map[string]any{"service_ids": []string{"a"}, "query": "boom", "range": "24h"}))
-	got := h.upstream.seen()[0]
+	got := h.upstream.Seen()[0]
 	if got.Method != "POST" || got.EscapedPath != "/api/log-search" {
 		t.Fatalf("upstream saw %s %s", got.Method, got.EscapedPath)
 	}
@@ -636,7 +638,7 @@ func TestHandler_BadArgumentsAreAToolErrorWithoutUpstreamCall(t *testing.T) {
 			}
 		})
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls, want 0", n)
 	}
 }
@@ -645,7 +647,7 @@ func TestHandler_UnknownToolIsAnError(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	resp := h.callTool(t, "delete_service", map[string]any{"service_id": "x"})
 	body := readBody(t, resp)
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls for an unknown tool (%d: %s)", n, resp.StatusCode, body)
 	}
 	if strings.Contains(body, `"isError":false`) || !strings.Contains(body, "error") {
@@ -667,7 +669,7 @@ func TestHandler_GetIs405(t *testing.T) {
 		}
 		readBody(t, resp)
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls", n)
 	}
 }
@@ -694,7 +696,7 @@ func TestHandler_OversizedBodyIs413(t *testing.T) {
 		t.Errorf("chunked: status = %d, want 413", chunked.StatusCode)
 	}
 	readBody(t, chunked)
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls", n)
 	}
 }
@@ -797,7 +799,7 @@ func TestHandler_ForwardsTheChainUpstream(t *testing.T) {
 	headers := h.authed()
 	headers["X-Forwarded-For"] = "6.6.6.6, 203.0.113.7"
 	decodeToolResult(t, h.rpc(t, headers, "tools/call", map[string]any{"name": "get_overview"}))
-	got := h.upstream.seen()[0].Header.Get("X-Forwarded-For")
+	got := h.upstream.Seen()[0].Header.Get("X-Forwarded-For")
 	if got != "203.0.113.7" {
 		t.Errorf("X-Forwarded-For upstream = %q, want exactly the entry the load balancer appended", got)
 	}
@@ -807,7 +809,7 @@ func TestHandler_ForwardsTheChainUpstream(t *testing.T) {
 	headers = h2.authed()
 	headers["X-Forwarded-For"] = "203.0.113.7"
 	decodeToolResult(t, h2.rpc(t, headers, "tools/call", map[string]any{"name": "get_overview"}))
-	if got := h2.upstream.seen()[0].Header.Get("X-Forwarded-For"); strings.Contains(got, "203.0.113.7") {
+	if got := h2.upstream.Seen()[0].Header.Get("X-Forwarded-For"); strings.Contains(got, "203.0.113.7") {
 		t.Errorf("an untrusted client's X-Forwarded-For was forwarded: %q", got)
 	}
 }
@@ -835,7 +837,7 @@ func TestHandler_BatchIsRejectedWithoutUpstreamCall(t *testing.T) {
 			}
 		})
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls, want 0", n)
 	}
 }
@@ -862,7 +864,7 @@ func TestHandler_AmbiguousTopLevelKeysAreRejectedWithoutUpstreamCall(t *testing.
 			}
 		})
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls, want 0", n)
 	}
 }
@@ -886,7 +888,7 @@ func TestHandler_CaseVariantKeyAloneIsRejectedWithoutUpstreamCall(t *testing.T) 
 			}
 		})
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls, want 0", n)
 	}
 	// Control: the exact spelling is not rejected by the key checks.
@@ -906,7 +908,7 @@ func TestHandler_FakeTokenCannotBypassTheTokenCheck(t *testing.T) {
 			t.Errorf("%s: status %d, want 401", method, resp.StatusCode)
 		}
 	}
-	if n := len(h.upstream.seen()); n != 2 {
+	if n := len(h.upstream.Seen()); n != 2 {
 		t.Errorf("%d upstream calls, want one token check per request", n)
 	}
 }
@@ -918,17 +920,17 @@ func TestHandler_UpstreamBodyIsReadOnlyUpToTwiceTheResultCap(t *testing.T) {
 		upstream:     respondJSON(200, big),
 	})
 	result := decodeToolResult(t, h.callTool(t, "get_overview", nil))
-	want := fmt.Sprintf("(%d bytes)", upstreamReadCap(100000))
+	want := fmt.Sprintf("(%d bytes)", hmtools.UpstreamReadCap(100000))
 	if !result.IsError || !strings.Contains(result.Text, want) {
 		t.Errorf("text = %q, want a too-large error reporting %s", result.Text, want)
 	}
 }
 
 func TestUpstreamReadCap(t *testing.T) {
-	if got := upstreamReadCap(140000); got != 280000 {
+	if got := hmtools.UpstreamReadCap(140000); got != 280000 {
 		t.Errorf("cap for 140000 = %d, want 280000", got)
 	}
-	if got := upstreamReadCap(10000); got < 2*10000 || got > 1<<20 {
+	if got := hmtools.UpstreamReadCap(10000); got < 2*10000 || got > 1<<20 {
 		t.Errorf("cap for 10000 = %d, want a small floor of at least 20000", got)
 	}
 }
@@ -960,13 +962,13 @@ func TestHandler_FailureLimitIsPerTokenNotPerIP(t *testing.T) {
 	}
 	readBody(t, resp)
 
-	before := len(h.upstream.seen())
+	before := len(h.upstream.Seen())
 	resp = h.rpc(t, tokenOf(), "tools/list", nil)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("another token from the same IP: status %d, want 401 from upstream, not 429", resp.StatusCode)
 	}
 	readBody(t, resp)
-	if len(h.upstream.seen()) != before+1 {
+	if len(h.upstream.Seen()) != before+1 {
 		t.Error("the other token's request never reached upstream")
 	}
 }
