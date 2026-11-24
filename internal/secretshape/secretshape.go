@@ -61,6 +61,12 @@ var (
 	arnSpan      = regexp.MustCompile(`\barn:aws[a-z-]*:[^\s"'<>,;]+`)
 )
 
+// Bounds on how far before a hex run the digest and image-tag checks look.
+const (
+	digestWindow = 16  // "sha512:" and then some
+	prefixWindow = 512 // an image reference such as registry/team/app:
+)
+
 // pairName matches the name and operator of name=value, name: value and
 // "name": "value". The value is parsed separately so that a secret nested in
 // another pair's value is still found.
@@ -228,21 +234,24 @@ func longRunSpans(text string) [][2]int {
 		if insideAny(arns, m) {
 			continue
 		}
-		if hexOnly.MatchString(run) && (digestPrefix.MatchString(text[:m[0]]) || isImageTag(text[:m[0]])) {
-			continue
+		if hexOnly.MatchString(run) {
+			// Only a short stretch before the run matters; matching the whole
+			// text before every run would be quadratic on a large log.
+			before := text[max(0, m[0]-prefixWindow):m[0]]
+			if digestPrefix.MatchString(before[max(0, len(before)-digestWindow):]) || isImageTag(before) {
+				continue
+			}
 		}
 		spans = append(spans, [2]int{m[0], m[1]})
 	}
 	return spans
 }
 
+// insideAny reports whether inner lies within one of outer, which holds
+// sorted, non-overlapping spans.
 func insideAny(outer [][]int, inner []int) bool {
-	for _, o := range outer {
-		if o[0] <= inner[0] && inner[1] <= o[1] {
-			return true
-		}
-	}
-	return false
+	i := sort.Search(len(outer), func(i int) bool { return outer[i][0] > inner[0] })
+	return i > 0 && inner[1] <= outer[i-1][1]
 }
 
 // isImageTag reports whether the text before a run ends in "<repo path>:",

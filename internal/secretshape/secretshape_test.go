@@ -3,6 +3,7 @@ package secretshape
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Fake vendor-looking values are assembled from pieces so secret scanners
@@ -180,5 +181,25 @@ func TestScrubText_FindsSecretsInsideOtherText(t *testing.T) {
 		if got := ScrubText(tt.in); got != tt.want {
 			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
 		}
+	}
+}
+
+// A large log full of hex runs must be scanned in linear time: the digest and
+// image tag checks look at a bounded stretch before each run, not at the whole
+// text before it. longRunSpans is called directly so the other, linear, passes
+// of ScrubText do not hide the difference.
+func TestLongRunSpans_HexHeavyLogIsLinear(t *testing.T) {
+	line := fakeHex40 + " "
+	text := strings.Repeat(line, 4_000_000/len(line))
+
+	start := time.Now()
+	spans := longRunSpans(text)
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Errorf("longRunSpans of %d bytes took %v, want under 2s", len(text), elapsed)
+	}
+	if want := len(text) / len(line); len(spans) != want {
+		t.Errorf("found %d spans, want %d", len(spans), want)
 	}
 }
