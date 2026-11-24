@@ -1036,7 +1036,7 @@ func TestAgentTest_DrainCutsTheCallOff(t *testing.T) {
 		close(entered)
 		select {
 		case <-r.Context().Done():
-		case <-time.After(20 * time.Second):
+		case <-time.After(10 * time.Second): // the fake does not notice that its caller has gone
 		}
 	}
 	env.agent.mu.Unlock()
