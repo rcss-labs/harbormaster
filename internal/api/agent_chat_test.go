@@ -31,6 +31,8 @@ type fakeAgent struct {
 	requests []capturedRun
 	// script answers a run. The default sends "Hi" and done.
 	script func(w http.ResponseWriter, r *http.Request, run capturedRun)
+	// catalogue overrides the default catalogue body.
+	catalogue string
 }
 
 type capturedRun struct {
@@ -50,7 +52,13 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 	fa.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/catalogue":
-			_, _ = w.Write([]byte(fakeCatalogue))
+			fa.mu.Lock()
+			body := fa.catalogue
+			fa.mu.Unlock()
+			if body == "" {
+				body = fakeCatalogue
+			}
+			_, _ = w.Write([]byte(body))
 		case "/v1/runs":
 			raw, _ := io.ReadAll(r.Body)
 			run := capturedRun{Bearer: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), Raw: string(raw)}
@@ -100,6 +108,7 @@ type chatEnv struct {
 	api   *Server
 	st    *store.Store
 	agent *fakeAgent
+	logs  *syncBuffer
 	sam   *apiClient // admin, no AIChat flag
 	omer  *apiClient // not an admin, AIChat granted
 }
@@ -108,7 +117,7 @@ type chatEnv struct {
 func newChatEnv(t *testing.T, mutate ...func(*Server)) *chatEnv {
 	t.Helper()
 	fa := newFakeAgent(t)
-	srv, api, _, st, _ := newServerCustomAPI(t, true, withAgent(func(s *Server) {
+	srv, api, _, st, logs := newServerCustomAPI(t, true, withAgent(func(s *Server) {
 		client, err := agentclient.New(fa.srv.URL, "")
 		if err != nil {
 			t.Fatal(err)
@@ -127,7 +136,7 @@ func newChatEnv(t *testing.T, mutate ...func(*Server)) *chatEnv {
 	if err := st.SetUserAIChat(t.Context(), omer.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	return &chatEnv{srv: srv, api: api, st: st, agent: fa,
+	return &chatEnv{srv: srv, api: api, st: st, agent: fa, logs: logs,
 		sam: login(t, srv, "sam", testPassword), omer: login(t, srv, "omer", testPassword)}
 }
 
@@ -163,6 +172,20 @@ func messagesPath(id int64) string { return fmt.Sprintf("/api/agent/conversation
 
 func send(c *apiClient, id int64, text string) *http.Response {
 	return c.post(messagesPath(id), map[string]any{"text": text, "page": map[string]string{"path": "/", "service_id": "", "cluster_id": ""}})
+}
+
+// mergeText joins adjacent text events: how many a burst of deltas arrives in depends on how fast the browser reads.
+func mergeText(frames []sseFrame) []sseFrame {
+	var out []sseFrame
+	for _, f := range frames {
+		if n := len(out); n > 0 && f.Event == "text" && out[n-1].Event == "text" {
+			merged := map[string]any{"delta": out[n-1].Data["delta"].(string) + f.Data["delta"].(string)}
+			out[n-1] = sseFrame{Lines: out[n-1].Lines, Event: "text", Data: merged}
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // sseFrame is one server-sent event: its lines and the parsed event and data.
@@ -432,16 +455,19 @@ func TestChat_StreamsAndSavesTurn(t *testing.T) {
 	if resp.Header.Get("X-Accel-Buffering") != "no" {
 		t.Errorf("X-Accel-Buffering = %q, want no", resp.Header.Get("X-Accel-Buffering"))
 	}
-	frames := readSSE(t, resp)
-	want := []string{"text", "text", "tool_start", "tool_end", "notice", "text", "done"}
+	frames := mergeText(readSSE(t, resp))
+	want := []string{"text", "tool_start", "tool_end", "notice", "text", "done"}
 	if got := eventNames(frames); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("events = %v, want %v (usage must never reach the browser)", got, want)
 	}
-	if frames[2].Data["name"] != "get_service" || frames[3].Data["name"] != "get_service" || frames[3].Data["ok"] != true {
-		t.Errorf("tool frames = %v %v", frames[2].Data, frames[3].Data)
+	if frames[0].Data["delta"] != "Hello" || frames[4].Data["delta"] != " there" {
+		t.Errorf("text frames = %v %v", frames[0].Data, frames[4].Data)
 	}
-	if frames[4].Data["kind"] != "context_trimmed" {
-		t.Errorf("notice = %v", frames[4].Data)
+	if frames[1].Data["name"] != "get_service" || frames[2].Data["name"] != "get_service" || frames[2].Data["ok"] != true {
+		t.Errorf("tool frames = %v %v", frames[1].Data, frames[2].Data)
+	}
+	if frames[3].Data["kind"] != "context_trimmed" {
+		t.Errorf("notice = %v", frames[3].Data)
 	}
 
 	title, msgs := getMessages(t, env.sam, id)
@@ -637,18 +663,22 @@ func TestChat_SecondConcurrentTurnIs409(t *testing.T) {
 // chatCtxRequest sends a message with a context the test can cancel, the way a browser tab that closes does.
 func chatCtxRequest(t *testing.T, ctx context.Context, c *apiClient, id int64, text string) *http.Response {
 	t.Helper()
-	raw, _ := json.Marshal(map[string]any{"text": text, "page": map[string]string{}})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+messagesPath(id), strings.NewReader(string(raw)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CSRF-Token", c.csrf)
-	resp, err := c.http.Do(req)
+	resp, err := chatCtxRequestErr(ctx, c, id, text)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return resp
+}
+
+func chatCtxRequestErr(ctx context.Context, c *apiClient, id int64, text string) (*http.Response, error) {
+	raw, _ := json.Marshal(map[string]any{"text": text, "page": map[string]string{}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+messagesPath(id), strings.NewReader(string(raw)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", c.csrf)
+	return c.http.Do(req)
 }
 
 func TestChat_ClientDisconnectSettlesAndSavesInterrupted(t *testing.T) {
@@ -954,7 +984,8 @@ func TestChat_FailedSaveStillSettlesAndReleases(t *testing.T) {
 			t.Error("done was sent for an answer that was not saved")
 		}
 	}
-	if states := runStates(t, env.st); len(states) != 1 || states[0] != "failed" {
+	// The run is settled and costed before the answer is saved; only the browser's answer changes.
+	if states := runStates(t, env.st); len(states) != 1 || states[0] == "running" {
 		t.Errorf("run states = %v", states)
 	}
 	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
