@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
@@ -128,6 +129,12 @@ type Server struct {
 	// OAuth is the authorization server for MCP connectors; New builds it when HM_OAUTH is on, and its routes exist
 	// only then.
 	OAuth *oauthsrv.Service
+	// Agent is the client for the agent service; nil while HM_AGENT_URL is unset. The chat routes exist only when
+	// Cfg.AgentEnabled().
+	Agent *agentclient.Client
+	// AgentHeartbeat is how often an open chat stream gets a comment line to keep proxies from closing it
+	// (default 15s).
+	AgentHeartbeat time.Duration
 	// testTokenRoutes marks extra routes for tokens, by pattern. TEST ONLY: it exists so a test can prove that the
 	// read-only subject alone refuses a write route that was marked by mistake. Production code never sets it.
 	testTokenRoutes map[string]auth.Scope
@@ -138,6 +145,8 @@ const (
 	limitExec   = "exec"
 	limitTail   = "tail"
 	limitSearch = "search"
+	// limitAgentChat holds the one running chat turn a user may have.
+	limitAgentChat = "agent_chat"
 )
 
 // Names of the token buckets in Server.Rates.
@@ -223,6 +232,9 @@ func New(s Server) *Server {
 	if s.OAuth == nil && s.oauthOn() {
 		s.OAuth = oauthsrv.NewService(s.Store, s.Cfg)
 		s.OAuth.Now = s.Now
+	}
+	if s.AgentHeartbeat <= 0 {
+		s.AgentHeartbeat = 15 * time.Second
 	}
 	// plan 04: terminal
 	if s.ExecStartTimeout <= 0 {
@@ -429,6 +441,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 		s.tokenRoutes(mux) // access tokens: absent (404) while HM_API_TOKENS is off
 	} else if s.Cfg.AgentEnabled() {
 		s.whoAmIRoute(mux) // a run token still needs whoami; nothing else of token management exists
+	}
+	if s.Cfg.AgentEnabled() {
+		s.agentRoutes(mux) // the AI chat: absent (404) while HM_AGENT_URL is unset
 	}
 	if s.oauthOn() {
 		s.oauthRoutes(mux) // OAuth for MCP connectors: absent (404) while HM_OAUTH is off

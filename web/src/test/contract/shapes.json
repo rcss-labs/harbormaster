@@ -1687,6 +1687,8 @@
         }
       ],
       "admin": "boolean",
+      "agent_enabled": "boolean",
+      "ai_chat": "boolean",
       "break_glass": "boolean",
       "csrf_token": "string",
       "display_name": {
@@ -1758,6 +1760,8 @@
       }
     ],
     "admin": "boolean",
+    "agent_enabled": "boolean",
+    "ai_chat": "boolean",
     "break_glass": "boolean",
     "csrf_token": "string",
     "display_name": {
