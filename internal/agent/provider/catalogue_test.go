@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -39,19 +40,22 @@ func TestParseCatalogue_Rejects(t *testing.T) {
 	}
 	const ok = `"input_per_mtok_usd":"3.00","output_per_mtok_usd":"15.00","context_tokens":1000`
 	cases := map[string]struct{ raw, want string }{
-		"unknown provider":    {`[{"provider":"mystery","models":[{"id":"m",` + ok + `}]}]`, "provider"},
-		"duplicate model":     {`[{"provider":"anthropic","models":[{"id":"m",` + ok + `},{"id":"m",` + ok + `}]}]`, "duplicate"},
-		"missing input price": {model(`"output_per_mtok_usd":"15.00","context_tokens":1000`), "input_per_mtok_usd"},
-		"missing output":      {model(`"input_per_mtok_usd":"3.00","context_tokens":1000`), "output_per_mtok_usd"},
-		"float price":         {model(`"input_per_mtok_usd":3.0,"output_per_mtok_usd":"15.00","context_tokens":1000`), "input_per_mtok_usd"},
-		"exponent price":      {model(`"input_per_mtok_usd":"3e0","output_per_mtok_usd":"15.00","context_tokens":1000`), "input_per_mtok_usd"},
-		"negative price":      {model(`"input_per_mtok_usd":"-3.00","output_per_mtok_usd":"15.00","context_tokens":1000`), "input_per_mtok_usd"},
-		"too many decimals":   {model(`"input_per_mtok_usd":"3.0000001","output_per_mtok_usd":"15.00","context_tokens":1000`), "input_per_mtok_usd"},
-		"zero context":        {model(`"input_per_mtok_usd":"3.00","output_per_mtok_usd":"15.00","context_tokens":0`), "context_tokens"},
-		"negative context":    {model(`"input_per_mtok_usd":"3.00","output_per_mtok_usd":"15.00","context_tokens":-5`), "context_tokens"},
-		"empty models":        {`[{"provider":"anthropic","models":[]}]`, "models"},
-		"empty model id":      {`[{"provider":"anthropic","models":[{"id":"",` + ok + `}]}]`, "id"},
-		"not json":            {`nope`, ""},
+		"unknown provider":    {`[{"provider":"mystery","models":[{"id":"m",` + ok + `}]}]`, "unknown provider"},
+		"duplicate provider":  {`[{"provider":"openai","models":[{"id":"m",` + ok + `}]},{"provider":"openai","models":[{"id":"m",` + ok + `}]}]`, "duplicate provider"},
+		"duplicate model":     {`[{"provider":"anthropic","models":[{"id":"m",` + ok + `},{"id":"m",` + ok + `}]}]`, "duplicate model"},
+		"missing input price": {model(`"output_per_mtok_usd":"15.00","context_tokens":1000`), "input_per_mtok_usd: is required"},
+		"missing output":      {model(`"input_per_mtok_usd":"3.00","context_tokens":1000`), "output_per_mtok_usd: is required"},
+		"float price":         {model(`"input_per_mtok_usd":3.0,"output_per_mtok_usd":"15.00","context_tokens":1000`), "must be a decimal string"},
+		"exponent price":      {model(`"input_per_mtok_usd":"3e0","output_per_mtok_usd":"15.00","context_tokens":1000`), "not a plain decimal"},
+		"negative price":      {model(`"input_per_mtok_usd":"-3.00","output_per_mtok_usd":"15.00","context_tokens":1000`), "must not be negative"},
+		"zero price":          {model(`"input_per_mtok_usd":"0.00","output_per_mtok_usd":"15.00","context_tokens":1000`), "must be greater than zero"},
+		"too many decimals":   {model(`"input_per_mtok_usd":"3.0000001","output_per_mtok_usd":"15.00","context_tokens":1000`), "more than six decimals"},
+		"zero context":        {model(`"input_per_mtok_usd":"3.00","output_per_mtok_usd":"15.00","context_tokens":0`), "context_tokens must be a positive integer"},
+		"negative context":    {model(`"input_per_mtok_usd":"3.00","output_per_mtok_usd":"15.00","context_tokens":-5`), "context_tokens must be a positive integer"},
+		"empty models":        {`[{"provider":"anthropic","models":[]}]`, "has no models"},
+		"empty catalogue":     {`[]`, "no providers configured"},
+		"empty model id":      {`[{"provider":"anthropic","models":[{"id":"",` + ok + `}]}]`, "empty id"},
+		"not json":            {`nope`, "not valid JSON"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -95,5 +99,25 @@ func TestModel_MaxRunCostMicroUSD(t *testing.T) {
 	}
 	if got := (Model{InputMicroUSDPerMTok: 20_000_000, OutputMicroUSDPerMTok: 1}).MaxRunCostMicroUSD(1); got != 20 {
 		t.Fatalf("higher price is the input price, got %d", got)
+	}
+}
+
+func TestModel_NegativeTokensCountAsZero(t *testing.T) {
+	m := Model{InputMicroUSDPerMTok: 3_000_000, OutputMicroUSDPerMTok: 15_000_000}
+	if got := m.CostMicroUSD(Usage{InputTokens: -1_000_000, OutputTokens: 1_000_000}); got != 15_000_000 {
+		t.Fatalf("negative input must not reduce the cost, got %d", got)
+	}
+	if got := m.MaxRunCostMicroUSD(-5); got != 0 {
+		t.Fatalf("negative run tokens = %d, want 0", got)
+	}
+}
+
+func TestModel_CostSaturatesInsteadOfOverflowing(t *testing.T) {
+	m := Model{InputMicroUSDPerMTok: math.MaxInt64, OutputMicroUSDPerMTok: math.MaxInt64}
+	if got := m.CostMicroUSD(Usage{InputTokens: math.MaxInt64, OutputTokens: math.MaxInt64}); got != math.MaxInt64 {
+		t.Fatalf("cost = %d, want saturation at MaxInt64", got)
+	}
+	if got := m.MaxRunCostMicroUSD(math.MaxInt64); got != math.MaxInt64 {
+		t.Fatalf("max run cost = %d, want saturation at MaxInt64", got)
 	}
 }

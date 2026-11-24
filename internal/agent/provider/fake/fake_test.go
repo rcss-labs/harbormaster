@@ -111,3 +111,48 @@ func TestDemo_CallsOverviewThenAnswersInTwoSentences(t *testing.T) {
 		}
 	}
 }
+
+func TestFake_RawReturnsTheResponseAndStreamsItsText(t *testing.T) {
+	want := provider.Response{
+		Text:       "checking now",
+		ToolCalls:  []provider.ToolCall{{ID: "c1", Name: "list_services", Arguments: map[string]any{"env": "prod"}}},
+		Usage:      provider.Usage{InputTokens: 5, OutputTokens: 3},
+		StopReason: "max_tokens",
+		Opaque:     []byte(`{"sig":"x"}`),
+	}
+	p := fake.New(fake.Raw(want))
+	var streamed strings.Builder
+	got, err := p.Generate(context.Background(), provider.Request{}, func(d string) { streamed.WriteString(d) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != want.Text || got.StopReason != "max_tokens" || len(got.ToolCalls) != 1 || got.ToolCalls[0].Name != "list_services" ||
+		string(got.Opaque) != `{"sig":"x"}` || got.Usage != want.Usage {
+		t.Fatalf("got %+v", got)
+	}
+	if streamed.String() != "checking now" {
+		t.Fatalf("streamed %q", streamed.String())
+	}
+}
+
+func TestFake_RecordedRequestsAreDeepCopies(t *testing.T) {
+	p := fake.New(fake.Text("a", provider.Usage{}))
+	args := map[string]any{"nested": map[string]any{"k": "v"}}
+	schema := map[string]any{"type": "object"}
+	opaque := []byte(`{"a":1}`)
+	req := provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c", Arguments: args}}, Opaque: opaque}},
+		Tools:    []provider.ToolDef{{Name: "t", InputSchema: schema}},
+	}
+	_, _ = p.Generate(context.Background(), req, nil)
+	args["nested"].(map[string]any)["k"] = "changed"
+	req.Messages[0].ToolCalls[0].Name = "changed"
+	schema["type"] = "changed"
+	opaque[2] = 'Z'
+
+	got := p.Requests()[0]
+	if got.Messages[0].ToolCalls[0].Arguments["nested"].(map[string]any)["k"] != "v" || got.Messages[0].ToolCalls[0].Name != "" ||
+		got.Tools[0].InputSchema["type"] != "object" || string(got.Messages[0].Opaque) != `{"a":1}` {
+		t.Fatalf("recorded request was mutated through the caller's data: %+v", got)
+	}
+}
