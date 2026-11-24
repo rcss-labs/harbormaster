@@ -21,7 +21,7 @@ func agentRun(reserved int64) store.AgentRun {
 
 func setBudget(t *testing.T, st *store.Store, micro int64) {
 	t.Helper()
-	if err := st.PutAgentSettings(t.Context(), store.AgentSettings{MonthlyBudgetMicroUSD: micro}); err != nil {
+	if err := storetest.PutAgentSettings(t.Context(), st, store.AgentSettings{MonthlyBudgetMicroUSD: micro}); err != nil {
 		t.Fatal(err)
 	}
 }

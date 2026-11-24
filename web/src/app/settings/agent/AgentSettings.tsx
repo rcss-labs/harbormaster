@@ -65,6 +65,13 @@ function baselineOf(settings: AgentSettingsDTO): Draft {
   }
 }
 
+/** Per provider: what the admin ticked is added to the stored list and what they cleared is removed from it. */
+function mergeUnredacted(loaded: string[], mine: string[], stored: string[]): string[] {
+  const added = mine.filter((id) => !loaded.includes(id))
+  const removed = loaded.filter((id) => !mine.includes(id))
+  return [...new Set([...stored, ...added])].filter((id) => !removed.includes(id))
+}
+
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item))
 
 export function AgentSettings() {
@@ -141,7 +148,7 @@ export function AgentSettings() {
                 budget: mine.budget !== baseline.budget ? mine.budget : stored.budget,
                 provider: modelTouched ? mine.provider : stored.provider,
                 model: modelTouched ? mine.model : stored.model,
-                unredacted: sameList(mine.unredacted, baseline.unredacted) ? stored.unredacted : mine.unredacted,
+                unredacted: mergeUnredacted(baseline.unredacted, mine.unredacted, stored.unredacted),
               })
             })
           } else {

@@ -170,6 +170,83 @@ describe('AgentSettings', () => {
     expect(screen.queryByText('These settings were changed by someone else. Reload and try again.')).not.toBeInTheDocument()
   })
 
+  it('on a conflict merges redaction per provider and keeps only what was touched', async () => {
+    const loaded: AgentSettingsDTO = { ...SETTINGS, unredacted_providers: ['openai'] }
+    let stored: AgentSettingsDTO = loaded
+    const bodies: { version: number; unredacted_providers: string[]; monthly_budget_usd: string; role_models: unknown }[] = []
+    server.use(
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true, ai_chat: true })),
+      http.get('/api/agent/settings', () => HttpResponse.json(stored)),
+      http.get('/api/agent/usage', () => HttpResponse.json(USAGE)),
+      http.put('/api/agent/settings', async ({ request }) => {
+        const body = (await request.json()) as (typeof bodies)[number]
+        bodies.push(body)
+        if (body.version !== stored.version) {
+          return HttpResponse.json(
+            { error: { code: 'settings_changed', message: 'These settings were changed by someone else. Reload and try again.' } },
+            { status: 409 },
+          )
+        }
+        return HttpResponse.json(stored)
+      }),
+    )
+    renderApp('/settings/agent')
+    // This admin only ticks Anthropic.
+    const anthropic = await screen.findByRole('checkbox', { name: 'Send environment values to Anthropic' })
+    await userEvent.click(anthropic)
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Send environment values' }))
+    // Another admin turned openai's values off again, changed the allowance and the chat model.
+    stored = {
+      ...SETTINGS,
+      version: 4,
+      unredacted_providers: [],
+      monthly_budget_usd: '30.00',
+      role_models: { chat: { provider: 'anthropic', model: 'model-b', available: true } },
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Spent $1.25 and reserved $0.60 of $30.00 in 2026-11.')).toBeInTheDocument()
+    // openai stays off, anthropic (this admin's tick) stays on; untouched budget and model follow the stored values.
+    expect(screen.getByRole('checkbox', { name: 'Send environment values to OpenAI' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Send environment values to Anthropic' })).toBeChecked()
+    expect(screen.getByLabelText('Monthly allowance in US dollars')).toHaveValue('30.00')
+    expect(screen.getByLabelText('Model')).toHaveValue('model-b')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodies).toHaveLength(2))
+    expect(bodies[1]).toEqual({
+      version: 4,
+      monthly_budget_usd: '30.00',
+      unredacted_providers: ['anthropic'],
+      role_models: { chat: { provider: 'anthropic', model: 'model-b' } },
+    })
+  })
+
+  it('on a conflict a touched allowance and model stay as typed while the rest follows the stored values', async () => {
+    let stored: AgentSettingsDTO = SETTINGS
+    const bodies: unknown[] = []
+    server.use(
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true, ai_chat: true })),
+      http.get('/api/agent/settings', () => HttpResponse.json(stored)),
+      http.get('/api/agent/usage', () => HttpResponse.json(USAGE)),
+      http.put('/api/agent/settings', async ({ request }) => {
+        const body = (await request.json()) as { version: number }
+        bodies.push(body)
+        if (body.version !== stored.version) {
+          return HttpResponse.json({ error: { code: 'settings_changed', message: 'Changed.' } }, { status: 409 })
+        }
+        return HttpResponse.json(stored)
+      }),
+    )
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Model'), 'model-b')
+    // Meanwhile someone else lifts redaction for openai and changes the allowance.
+    stored = { ...SETTINGS, version: 4, monthly_budget_usd: '30.00', unredacted_providers: ['openai'] }
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Spent $1.25 and reserved $0.60 of $30.00 in 2026-11.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Model')).toHaveValue('model-b') // touched: stays
+    expect(screen.getByLabelText('Monthly allowance in US dollars')).toHaveValue('30.00') // untouched: follows
+    expect(screen.getByRole('checkbox', { name: 'Send environment values to OpenAI' })).toBeChecked() // untouched: follows
+  })
+
   it('a provider without a model blocks Save', async () => {
     useAgentMocks({ ...SETTINGS, role_models: {} })
     renderApp('/settings/agent')

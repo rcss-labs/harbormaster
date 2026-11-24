@@ -93,20 +93,6 @@ func (s *Store) UpdateAgentSettings(ctx context.Context, version int64, apply fu
 	return old, nil
 }
 
-// PutAgentSettings replaces the settings, role models included, in one transaction, whatever their version. It
-// takes the same row lock as ReserveAgentRun, so a budget change never interleaves with a reservation.
-func (s *Store) PutAgentSettings(ctx context.Context, in AgentSettings) error {
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("put agent settings: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := writeAgentSettings(ctx, tx, in); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 // writeAgentSettings replaces the settings row's values and the role models, and raises the version.
 func writeAgentSettings(ctx context.Context, tx pgx.Tx, in AgentSettings) error {
 	providers := in.UnredactedProviders

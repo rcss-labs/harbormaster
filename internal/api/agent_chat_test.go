@@ -20,6 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 // fakeAgent speaks the agent's wire format: GET /v1/catalogue and POST /v1/runs answering NDJSON.
@@ -136,7 +137,7 @@ func setChatSettings(t *testing.T, st *store.Store, budget int64, provider, mode
 	if modelID != "" {
 		in.RoleModels["chat"] = store.AgentModelRef{Provider: provider, Model: modelID}
 	}
-	if err := st.PutAgentSettings(t.Context(), in); err != nil {
+	if err := storetest.PutAgentSettings(t.Context(), st, in); err != nil {
 		t.Fatal(err)
 	}
 }
