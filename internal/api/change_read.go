@@ -12,6 +12,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -66,8 +67,8 @@ type TaskDefinitionResponse struct {
 	Can               ChangeCanDTO     `json:"can"`
 	Tag               TagDTO           `json:"tag"`
 	PolledAt          time.Time        `json:"polled_at"`
-	// EnvironmentRedacted is true when HM_TOKEN_REDACT_ENV replaced the environment values for an access token, so
-	// a caller does not report "[redacted]" as a real value.
+	// EnvironmentRedacted is true when any environment value was replaced for an access token, so a caller does not
+	// report "[redacted]" as a real value.
 	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
@@ -98,7 +99,7 @@ type RevisionDefinitionResponse struct {
 	Definition   json.RawMessage `json:"definition"`
 	RegisteredAt time.Time       `json:"registered_at"`
 	RegisteredBy string          `json:"registered_by"`
-	// EnvironmentRedacted is true when HM_TOKEN_REDACT_ENV replaced the environment values for an access token.
+	// EnvironmentRedacted is true when any environment value was replaced for an access token.
 	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
@@ -169,11 +170,7 @@ func (s *Server) getTaskDefinition(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	redacted := s.redactForToken(r)
-	definitionSource := deployed.Definition
-	if redacted {
-		definitionSource = redactEnvironment(definitionSource)
-	}
+	definitionSource, redacted := redactEnvironment(deployed.Definition, s.redactionFor(r))
 	definition, err := deploy.DefinitionJSON(definitionSource)
 	if err != nil {
 		s.fail(w, err)
@@ -245,11 +242,7 @@ func (s *Server) getRevisionDefinition(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	redacted := s.redactForToken(r)
-	definitionSource := found.Definition
-	if redacted {
-		definitionSource = redactEnvironment(definitionSource)
-	}
+	definitionSource, redacted := redactEnvironment(found.Definition, s.redactionFor(r))
 	definition, err := deploy.DefinitionJSON(definitionSource)
 	if err != nil {
 		s.fail(w, err)
@@ -308,30 +301,50 @@ func (s *Server) getDesiredCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// redactedValue replaces an environment value for an access token when HM_TOKEN_REDACT_ENV is on.
-const redactedValue = "[redacted]"
+// redactedValue replaces an environment value that must not reach the caller.
+const redactedValue = secretshape.Redacted
 
-// redactForToken reports whether this request's answer must hide environment values: only for an access token. A
-// personal or OAuth token is redacted while the switch is on (it is off by default, owner decision 9); a run token by
-// the flag it was minted with. A session is never redacted.
-func (s *Server) redactForToken(r *http.Request) bool {
+// envRedaction says which environment values an answer hides.
+type envRedaction int
+
+const (
+	redactNone         envRedaction = iota
+	redactAll                       // every value
+	redactSecretShapes              // only values whose name or content looks secret
+)
+
+// redactionFor decides the mode for this request. A session is never redacted. A personal or OAuth token is
+// redacted entirely while HM_TOKEN_REDACT_ENV is on (off by default, owner decision 9). A run token is redacted
+// entirely when that switch is on or its provider was not lifted, and otherwise only for secret-looking values:
+// the operator's switch is never weakened by an admin's per-provider lift.
+func (s *Server) redactionFor(r *http.Request) envRedaction {
 	cred, ok := auth.CredentialFrom(r.Context())
 	if !ok || cred.Kind != auth.CredentialToken {
-		return false
+		return redactNone
 	}
 	if cred.TokenKind == apitoken.KindRun {
-		return cred.RedactEnv
+		if s.Cfg.TokenRedactEnv || cred.RedactEnv {
+			return redactAll
+		}
+		return redactSecretShapes
 	}
-	return s.Cfg.TokenRedactEnv
+	if s.Cfg.TokenRedactEnv {
+		return redactAll
+	}
+	return redactNone
 }
 
-// redactEnvironment returns a copy of the task definition with every containerDefinitions[].environment[].value
-// replaced by "[redacted]". Names, secrets[].valueFrom and everything else are kept. The input is never modified:
-// definitions may be shared with a cache.
-func redactEnvironment(definition map[string]any) map[string]any {
+// redactEnvironment returns a copy of the task definition with containerDefinitions[].environment[].value replaced
+// by "[redacted]" as the mode says, and whether the answer should be flagged as redacted. Names, secrets[].valueFrom
+// and everything else are kept. The input is never modified: definitions may be shared with a cache.
+func redactEnvironment(definition map[string]any, mode envRedaction) (map[string]any, bool) {
+	if mode == redactNone {
+		return definition, false
+	}
+	replaced := mode == redactAll
 	containers, ok := definition["containerDefinitions"].([]any)
 	if !ok {
-		return definition
+		return definition, replaced
 	}
 	out := make(map[string]any, len(definition))
 	for key, value := range definition {
@@ -360,8 +373,9 @@ func redactEnvironment(definition map[string]any) map[string]any {
 				for key, value := range entry {
 					copiedEntry[key] = value
 				}
-				if _, has := copiedEntry["value"]; has {
+				if hides(mode, copiedEntry) {
 					copiedEntry["value"] = redactedValue
+					replaced = true
 				}
 				redactedEnvironment[j] = copiedEntry
 			}
@@ -370,5 +384,19 @@ func redactEnvironment(definition map[string]any) map[string]any {
 		redactedContainers[i] = copied
 	}
 	out["containerDefinitions"] = redactedContainers
-	return out
+	return out, replaced
+}
+
+// hides reports whether the mode replaces this environment entry's value.
+func hides(mode envRedaction, entry map[string]any) bool {
+	value, has := entry["value"]
+	if !has {
+		return false
+	}
+	if mode == redactAll {
+		return true
+	}
+	name, _ := entry["name"].(string)
+	text, _ := value.(string)
+	return secretshape.NameLooksSecret(name) || secretshape.ValueLooksSecret(text)
 }
