@@ -130,15 +130,6 @@ func TestRunToken_SubjectIsReadOnly(t *testing.T) {
 	}
 }
 
-func serveBearer(svc *Service, header string) (code int, called bool) {
-	h := svc.Middleware(RequireAuth(okHandler(&called)))
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/x", nil)
-	req.Header.Set("Authorization", header)
-	h.ServeHTTP(rec, req)
-	return rec.Code, called
-}
-
 // With only the agent on, a personal or OAuth bearer is not a token request: it is ignored like any other header
 // (no cookie here, so the request is anonymous 401, not a token 401 with WWW-Authenticate).
 func TestMiddleware_PATIgnoredWhenOnlyAgentEnabled(t *testing.T) {
@@ -170,6 +161,8 @@ func TestMiddleware_PATIgnoredWhenOnlyAgentEnabled(t *testing.T) {
 	}
 }
 
+// With the agent off a run token header is not a token request, whatever HM_API_TOKENS says: no token-path 401 and no
+// WWW-Authenticate, and a session cookie beside it is served.
 func TestMiddleware_RunTokenIgnoredWhenAgentDisabled(t *testing.T) {
 	svc, st := newAgentService(t)
 	u := mustUser(t, st, "alice", false)
@@ -177,19 +170,31 @@ func TestMiddleware_RunTokenIgnoredWhenAgentDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	res := mustLogin(t, svc, "alice", testPassword, "10.0.0.1", "ua")
+	serve := func(withCookie bool) (code int, called bool, www string) {
+		h := svc.Middleware(RequireAuth(okHandler(&called)))
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/x", nil)
+		req.Header.Set("Authorization", "Bearer "+raw)
+		if withCookie {
+			req.AddCookie(&http.Cookie{Name: CookieName, Value: res.SessionID})
+		}
+		h.ServeHTTP(rec, req)
+		return rec.Code, called, rec.Header().Get("WWW-Authenticate")
+	}
+	for _, apiTokens := range []bool{false, true} {
+		svc.cfg.APITokens = apiTokens
+		svc.cfg.AgentURL = ""
+		if code, called, www := serve(false); code != 401 || called || www != "" {
+			t.Errorf("agent off, tokens=%v: code=%d called=%v www=%q, want the header ignored (anonymous 401, no WWW-Authenticate)", apiTokens, code, called, www)
+		}
+		if code, called, _ := serve(true); code != 200 || !called {
+			t.Errorf("agent off, tokens=%v, with a session cookie: code=%d called=%v, want the session served", apiTokens, code, called)
+		}
+	}
 	svc.cfg.APITokens = false
-	svc.cfg.AgentURL = ""
-	if code, called := serveBearer(svc, "Bearer "+raw); code != 401 || called {
-		t.Fatalf("agent off, tokens off: code=%d called=%v, want anonymous 401", code, called)
-	}
-	// Tokens on but agent off: the run token takes the token path and is refused there.
-	svc.cfg.APITokens = true
-	if code, called := serveBearer(svc, "Bearer "+raw); code != 401 || called {
-		t.Fatalf("agent off, tokens on: code=%d called=%v, want 401", code, called)
-	}
 	svc.cfg.AgentURL = testAgentURL
-	svc.cfg.APITokens = false
-	if code, called := serveBearer(svc, "Bearer "+raw); code != 200 || !called {
+	if code, called, _ := serve(false); code != 200 || !called {
 		t.Fatalf("agent on, tokens off: code=%d called=%v, want 200", code, called)
 	}
 }
@@ -220,5 +225,73 @@ func TestRunToken_DeletedWithUserSessions(t *testing.T) {
 	}
 	if _, _, err := svc.AuthenticateToken(ctx, theirs, ""); err != nil {
 		t.Fatalf("another user's run token: %v", err)
+	}
+}
+
+// Which stored token kinds authenticate under every setting of HM_API_TOKENS, HM_OAUTH and the agent.
+func TestAuthenticateToken_KindsAcrossSettings(t *testing.T) {
+	svc, st := newAgentService(t)
+	u := mustUser(t, st, "alice", false)
+	pat, _ := issueToken(t, st, u.ID, time.Now().Add(time.Hour))
+	access, _, _ := oauthGrantFor(t, st, u)
+	run, err := svc.MintRunToken(t.Context(), u, uuid.New(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, apiTokens := range []bool{false, true} {
+		for _, oauth := range []bool{false, true} {
+			for _, agent := range []bool{false, true} {
+				svc.cfg.APITokens, svc.cfg.OAuth = apiTokens, oauth
+				svc.cfg.AgentURL = ""
+				if agent {
+					svc.cfg.AgentURL = testAgentURL
+				}
+				for kind, tc := range map[string]struct {
+					raw  string
+					want bool
+				}{
+					"pat":          {pat, apiTokens},
+					"oauth access": {access, apiTokens && oauth},
+					"run":          {run, agent},
+				} {
+					_, _, err := svc.AuthenticateToken(t.Context(), tc.raw, "")
+					if got := err == nil; got != tc.want {
+						t.Errorf("%s with APITokens=%v OAuth=%v agent=%v: authenticated=%v (err %v), want %v",
+							kind, apiTokens, oauth, agent, got, err, tc.want)
+					}
+					if err != nil && !errors.Is(err, ErrUnauthenticated) {
+						t.Errorf("%s: err = %v, want ErrUnauthenticated", kind, err)
+					}
+				}
+			}
+		}
+	}
+}
+
+// A run token minted for an SSO-linked user carries source saml and ends when the link ends.
+func TestRunToken_SAMLSourceEndsWithTheLink(t *testing.T) {
+	svc, st := newAgentService(t)
+	u := mustUser(t, st, "alice", false)
+	linked, err := st.BindSSOIdentity(t.Context(), store.BindSSO{UserID: u.ID, IdPEntityID: "idp", ExternalID: "alice@idp", ExternalIDFormat: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := svc.MintRunToken(t.Context(), linked, uuid.New(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, _ := apitoken.Parse(raw)
+	tok, err := st.GetAPITokenByPublicID(t.Context(), apitoken.DisplayID(parsed))
+	if err != nil || tok.AuthSource != "saml" {
+		t.Fatalf("stored token = %+v, %v; want auth_source saml", tok, err)
+	}
+	if _, _, err := svc.AuthenticateToken(t.Context(), raw, ""); err != nil {
+		t.Fatalf("before unlinking: %v", err)
+	}
+	if _, _, err := st.UnlinkSSO(t.Context(), u.ID, "unused-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.AuthenticateToken(t.Context(), raw, ""); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("after unlinking: err = %v, want ErrUnauthenticated", err)
 	}
 }

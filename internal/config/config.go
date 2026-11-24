@@ -543,13 +543,8 @@ func validateTokens(cfg Config) error {
 	if cfg.TokenLogSearchDailyGB < 0 {
 		return errors.New("HM_TOKEN_LOG_SEARCH_DAILY_GB: must be 0 (token log search off) or positive")
 	}
-	if cfg.MCPPublicURL != "" {
-		parsed, err := url.Parse(cfg.MCPPublicURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
-			parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" ||
-			strings.HasSuffix(cfg.MCPPublicURL, "/") || strings.ContainsAny(cfg.MCPPublicURL, "?#") {
-			return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
-		}
+	if cfg.MCPPublicURL != "" && !isBaseURL(cfg.MCPPublicURL, false) {
+		return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
 	}
 	return nil
 }
@@ -560,22 +555,40 @@ func (c Config) AgentEnabled() bool { return c.AgentURL != "" }
 // validateAgent checks the agent settings, whether or not the agent is on. The URL is https, or http for a loopback
 // host only (a local development agent), with no userinfo, path, query or fragment.
 func validateAgent(cfg Config) error {
-	if cfg.AgentRunTokenTTL <= 0 {
-		return errors.New("HM_AGENT_RUN_TOKEN_TTL: must be positive")
+	if cfg.AgentRunTokenTTL < time.Minute || cfg.AgentRunTokenTTL > time.Hour {
+		return errors.New("HM_AGENT_RUN_TOKEN_TTL: must be between 1m and 1h")
 	}
-	if cfg.AgentURL != "" {
-		parsed, err := url.Parse(cfg.AgentURL)
-		badShape := err != nil || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" ||
-			parsed.Fragment != "" || parsed.Opaque != "" || strings.HasSuffix(cfg.AgentURL, "/") ||
-			strings.ContainsAny(cfg.AgentURL, "?#")
-		if badShape || !(parsed.Scheme == "https" || (parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()))) {
-			return errors.New("HM_AGENT_URL: must be an https:// URL (http:// only for a loopback host) with no path, query or trailing slash")
-		}
+	if cfg.AgentURL != "" && !isBaseURL(cfg.AgentURL, true) {
+		return errors.New("HM_AGENT_URL: must be an https:// URL (http:// only for a loopback host) with no path, query or trailing slash")
 	}
 	if cfg.AgentCAPEM != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(cfg.AgentCAPEM)) {
 		return errors.New("HM_AGENT_CA_PEM: contains no PEM certificate")
 	}
 	return nil
+}
+
+// isBaseURL reports whether raw is a bare base URL: https (or http for a loopback host when loopbackHTTP), a hostname,
+// an optional valid port, and no userinfo, path, query, fragment or trailing slash.
+func isBaseURL(raw string, loopbackHTTP bool) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" ||
+		parsed.Fragment != "" || parsed.Opaque != "" || strings.HasSuffix(raw, "/") || strings.ContainsAny(raw, "?#") {
+		return false
+	}
+	if port := parsed.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return false
+		}
+	} else if strings.HasSuffix(parsed.Host, ":") {
+		return false // "host:" with an empty port
+	}
+	switch parsed.Scheme {
+	case "https":
+		return true
+	case "http":
+		return loopbackHTTP && isLoopbackHost(parsed.Hostname())
+	}
+	return false
 }
 
 // isLoopbackHost reports whether host is localhost or a loopback IP address.

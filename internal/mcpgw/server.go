@@ -178,6 +178,8 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	var parsed apitoken.Parsed
 	if ok {
 		parsed, ok = apitoken.Parse(bearer)
+		// Run tokens belong to the agent service, which calls Harbormaster directly; the public gateway never forwards one.
+		ok = ok && parsed.Kind != apitoken.KindRun
 	}
 	if !ok {
 		// A malformed token costs Harbormaster nothing: no upstream call, and it does not count as a failure.

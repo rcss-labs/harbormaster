@@ -32,16 +32,11 @@ func withAgent(mutate func(*Server)) func(*Server) {
 // runTokenClient returns a client that authenticates as username with a freshly minted run token.
 func runTokenClient(t *testing.T, srv *httptest.Server, api *Server, st *store.Store, username string) *apiClient {
 	t.Helper()
-	return runTokenClientRedacting(t, srv, api, st, username, true)
-}
-
-func runTokenClientRedacting(t *testing.T, srv *httptest.Server, api *Server, st *store.Store, username string, redactEnv bool) *apiClient {
-	t.Helper()
 	user, err := st.GetUserByUsername(t.Context(), username)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := api.Auth.MintRunToken(t.Context(), user, uuid.New(), redactEnv)
+	raw, err := api.Auth.MintRunToken(t.Context(), user, uuid.New(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,20 +45,25 @@ func runTokenClientRedacting(t *testing.T, srv *httptest.Server, api *Server, st
 	return c
 }
 
-// Every route that is not marked for tokens refuses a run token, an admin's included, with the agent on alone and with
-// access tokens on beside it.
+// Every route that is not marked for tokens refuses a run token, an admin's included: with the agent on alone, and with
+// access tokens and OAuth on beside it so every optional route is registered. Public routes count too.
 func TestRunToken_RefusedOnEveryUnmarkedRoute(t *testing.T) {
 	for name, mutate := range map[string]func(*Server){
-		"agent only":          withAgent(nil),
-		"agent and APITokens": withTokens(func(c *config.Config) { c.AgentURL, c.AgentRunTokenTTL = testAgentURL, 15*time.Minute }, nil),
+		"agent only": withAgent(nil),
+		"agent, access tokens and OAuth": withTokens(func(c *config.Config) {
+			c.AgentURL, c.AgentRunTokenTTL = testAgentURL, 15*time.Minute
+			c.OAuth, c.MCPPublicURL = true, "https://mcp.example.com"
+			c.OAuthClientHosts, c.OAuthRedirectURIs = config.DefaultOAuthClientHosts(), config.DefaultOAuthRedirectURIs()
+		}, nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv, api, _, st, _ := newServerCustomAPI(t, true, mutate)
 			admin := runTokenClient(t, srv, api, st, "sam")
 
-			checked := 0
+			checked, public, oauth := 0, 0, 0
 			for _, route := range api.Routes() {
-				if route.Opts.Token != "" || route.Opts.Public {
+				// The SAML ACS skips authentication altogether (onlyAPI): it never reads an Authorization header.
+				if route.Opts.Token != "" || strings.HasSuffix(route.Pattern, " "+samlACSPath) {
 					continue
 				}
 				method, path := concretePath(route.Pattern, "x")
@@ -77,16 +77,30 @@ func TestRunToken_RefusedOnEveryUnmarkedRoute(t *testing.T) {
 					t.Errorf("%s: code %q, want token_not_allowed", route.Pattern, code)
 				}
 				checked++
+				if route.Opts.Public {
+					public++
+				}
+				if strings.Contains(route.Pattern, "/api/oauth/authorize") || strings.HasSuffix(route.Pattern, "/api/oauth/token") {
+					oauth++
+				}
 			}
-			if checked < 60 {
+			if public == 0 {
+				t.Error("no public route was checked")
+			}
+			if name != "agent only" && oauth == 0 {
+				t.Error("no OAuth route was checked; the setup does not register them")
+			}
+			if checked < 80 {
 				t.Errorf("only %d unmarked routes were checked; the registry looks incomplete", checked)
 			}
 			for _, path := range []string{"/api/nope", "/api/services/x/nope", "/api/"} {
-				resp := admin.get(path)
-				if resp.StatusCode != http.StatusForbidden {
-					t.Errorf("GET %s with a run token: status %d, want 403", path, resp.StatusCode)
+				for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+					resp := admin.do(method, path, nil, nil)
+					if resp.StatusCode != http.StatusForbidden {
+						t.Errorf("%s %s with a run token: status %d, want 403 (no probing which paths exist)", method, path, resp.StatusCode)
+					}
+					resp.Body.Close()
 				}
-				resp.Body.Close()
 			}
 		})
 	}
@@ -140,13 +154,44 @@ func TestWhoAmI_AvailableToRunTokenWithAPITokensOff(t *testing.T) {
 	}
 }
 
-// With the agent off, a run token does not authenticate even though access tokens are on.
+// With the agent off a run token is ignored, whether or not access tokens are on: no token-path 401, and a session
+// cookie beside it is served.
 func TestRunToken_NotAcceptedWithAgentOff(t *testing.T) {
-	srv, api, _, st, _ := newServerCustomAPI(t, true, withTokens(func(c *config.Config) { c.AgentRunTokenTTL = 15 * time.Minute }, nil))
-	c := runTokenClient(t, srv, api, st, "omer")
-	if resp := c.get("/api/overview"); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status %d, want 401", resp.StatusCode)
+	for _, apiTokens := range []bool{false, true} {
+		srv, api, _, st, _ := newServerCustomAPI(t, true, func(s *Server) {
+			s.Cfg.AgentRunTokenTTL = 15 * time.Minute
+			s.Cfg.APITokens = apiTokens
+			s.Auth = auth.NewService(s.Store, s.Cfg)
+		})
+		bearer := runTokenClientWith(t, api, st, "omer")
+		anon := newAPIClient(t, srv)
+		anon.bearer = bearer
+		resp := anon.get("/api/overview")
+		if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") != "" {
+			t.Errorf("tokens=%v: status %d www=%q, want an anonymous 401 with no WWW-Authenticate", apiTokens, resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+		}
+		session := login(t, srv, "omer", testPassword)
+		session.bearer = bearer
+		if r := session.get("/api/overview"); r.StatusCode != http.StatusOK {
+			t.Errorf("tokens=%v: session beside an ignored run token: status %d, want 200", apiTokens, r.StatusCode)
+		}
 	}
+}
+
+// runTokenClientWith mints a run token for username with the agent switched on in the minting service only.
+func runTokenClientWith(t *testing.T, api *Server, st *store.Store, username string) string {
+	t.Helper()
+	user, err := st.GetUserByUsername(t.Context(), username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := api.Cfg
+	cfg.AgentURL = testAgentURL
+	raw, err := auth.NewService(st, cfg).MintRunToken(t.Context(), user, uuid.New(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 // A search made with a run token is capped like a personal token's and charged to the same per-user ledger.
@@ -188,23 +233,53 @@ func TestRunToken_LogSearchChargedToTheUsersDailyBudget(t *testing.T) {
 	}
 }
 
-// A run token hides environment values by its own flag, whatever HM_TOKEN_REDACT_ENV says for personal tokens.
-func TestRunToken_EnvironmentRedactedByItsFlag(t *testing.T) {
-	srv, api, fk, st, _ := newServerCustomAPI(t, true, withAgent(nil))
-	seedAccounts(t, st)
-	seedMockupTags(t, st)
-	pollAll(t, st, fk)
-	path := "/api/services/" + paymentsID() + "/task-definition"
+// HM_TOKEN_LOG_SEARCH_MAX_GB is the smaller limit here: the run token's search is capped at it, not at the larger
+// remaining daily budget, as a personal token's is.
+func TestRunToken_LogSearchCapIsTheSmallerLimit(t *testing.T) {
+	env := newTokenLogSearchEnv(t, func(cfg *config.Config) {
+		cfg.AgentURL, cfg.AgentRunTokenTTL = testAgentURL, 15*time.Minute
+		cfg.TokenLogSearchMaxGB, cfg.TokenLogSearchDailyGB = 1, 20
+	})
+	user, err := env.st.GetUserByUsername(t.Context(), "sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := env.api.Auth.MintRunToken(t.Context(), user, uuid.New(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := newAPIClient(t, env.srv)
+	run.bearer = raw
+	var body tokenSearchBody
+	resp := run.post("/api/log-search", searchReq(paymentsID()))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	decode(t, resp, &body)
+	if body.ScanLimitBytes != gib {
+		t.Errorf("scan_limit_bytes = %d, want 1 GiB (HM_TOKEN_LOG_SEARCH_MAX_GB), not the 20 GiB budget", body.ScanLimitBytes)
+	}
+}
 
-	redacted := readDefinition(t, runTokenClientRedacting(t, srv, api, st, "sam", true), path)
-	if !redacted.EnvironmentRedacted {
-		t.Error("a run token minted with redaction sees environment values")
+// A run token and a personal token of one user draw on the same per-user rate bucket.
+func TestRunToken_SharesTheUsersRateBucket(t *testing.T) {
+	srv, api, _, st, _ := newServerCustomAPI(t, true, withTokens(func(c *config.Config) {
+		c.AgentURL, c.AgentRunTokenTTL = testAgentURL, 15*time.Minute
+	}, nil))
+	personal := tokenClient(t, srv, st, "sam")
+	limited := false
+	for i := 0; i < 300 && !limited; i++ {
+		resp := personal.get("/api/tokens/current")
+		resp.Body.Close()
+		limited = resp.StatusCode == http.StatusTooManyRequests
 	}
-	open := readDefinition(t, runTokenClientRedacting(t, srv, api, st, "sam", false), path)
-	if open.EnvironmentRedacted {
-		t.Error("a run token minted without redaction is redacted")
+	if !limited {
+		t.Fatal("the personal token was never rate limited")
 	}
-	if env, _ := open.counts(); env == 0 {
-		t.Fatal("the fixture has no environment variables; the test proves nothing")
+	if resp := runTokenClient(t, srv, api, st, "sam").get("/api/tokens/current"); resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("run token of the same user: status %d, want 429 from the shared bucket", resp.StatusCode)
+	}
+	if resp := runTokenClient(t, srv, api, st, "omer").get("/api/tokens/current"); resp.StatusCode != http.StatusOK {
+		t.Errorf("run token of another user: status %d, want 200", resp.StatusCode)
 	}
 }

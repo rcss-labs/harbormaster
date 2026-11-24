@@ -823,6 +823,7 @@ func TestLoad_TokenValidation(t *testing.T) {
 		{"cidr match-all v4", map[string]string{"HM_MCP_GATEWAY_CIDRS": "0.0.0.0/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"cidr match-all v6", map[string]string{"HM_MCP_GATEWAY_CIDRS": "::/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"url no host", map[string]string{"HM_MCP_PUBLIC_URL": "https://"}, "HM_MCP_PUBLIC_URL"},
+		{"url bad port", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com:99999"}, "HM_MCP_PUBLIC_URL"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -959,6 +960,11 @@ func TestLoad_AgentURLValidation(t *testing.T) {
 		"loopback lookalike":  "http://localhost.example.com",
 		"http loopback path":  "http://localhost:8484/x",
 		"empty trailing hash": "https://agent.internal#",
+		"port zero":           "https://agent.internal:0",
+		"port too large":      "https://agent.internal:70000",
+		"port not a number":   "https://agent.internal:http",
+		"empty port":          "https://agent.internal:",
+		"no hostname":         "https://:8484",
 	}
 	for name, u := range invalid {
 		t.Run(name, func(t *testing.T) {
@@ -971,10 +977,15 @@ func TestLoad_AgentURLValidation(t *testing.T) {
 }
 
 func TestLoad_AgentRunTokenTTLAndCAValidation(t *testing.T) {
-	for _, ttl := range []string{"0s", "-1m"} {
+	for _, ttl := range []string{"0s", "-1m", "59s", "61m", "24h"} {
 		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_RUN_TOKEN_TTL": ttl})); err == nil ||
 			!strings.Contains(err.Error(), "HM_AGENT_RUN_TOKEN_TTL") {
 			t.Errorf("ttl %q: err = %v, want one naming HM_AGENT_RUN_TOKEN_TTL", ttl, err)
+		}
+	}
+	for _, ttl := range []string{"1m", "1h"} {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_RUN_TOKEN_TTL": ttl})); err != nil {
+			t.Errorf("ttl %q refused: %v", ttl, err)
 		}
 	}
 	if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_CA_PEM": "not a certificate"})); err == nil ||

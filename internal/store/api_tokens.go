@@ -257,7 +257,7 @@ func (s *Store) CountAPITokensByUser(ctx context.Context) (map[int64]int, error)
 
 // RevokedCredentials counts what DeleteAllAPICredentials removed.
 type RevokedCredentials struct {
-	Tokens int64 // every api_tokens row: personal, OAuth access and OAuth refresh
+	Tokens int64 // every api_tokens row: personal, OAuth access, OAuth refresh and run
 	Grants int64 // oauth_grants rows
 	Codes  int64 // unexchanged oauth_codes rows
 }

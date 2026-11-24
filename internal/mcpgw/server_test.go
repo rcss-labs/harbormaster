@@ -970,3 +970,23 @@ func TestHandler_FailureLimitIsPerTokenNotPerIP(t *testing.T) {
 		t.Error("the other token's request never reached upstream")
 	}
 }
+
+// A run token is for the agent service alone: the public gateway refuses it like any malformed bearer, before any
+// upstream call and without counting it as a failure.
+func TestHandler_RunTokenIs401WithoutUpstreamCall(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	raw, _, err := apitoken.Generate(apitoken.KindRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"initialize", "tools/list", "tools/call"} {
+		resp := h.rpc(t, map[string]string{"Authorization": "Bearer " + raw}, method, map[string]any{"name": "whoami"})
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401", method, resp.StatusCode)
+		}
+		readBody(t, resp)
+	}
+	if n := len(h.upstream.seen()); n != 0 {
+		t.Errorf("%d upstream calls, want 0: a run token must never be forwarded", n)
+	}
+}
