@@ -17,7 +17,6 @@ type fakeOps struct {
 	order  []string // a step's name when it ended well
 	starts map[string]time.Time
 	calls  map[string]int
-	last   []bool // the lastTry flags Settle was called with
 	saved  []bool // the saved flags Audit was called with
 	behave map[string]func(ctx context.Context, call int) error
 }
@@ -46,13 +45,8 @@ func (f *fakeOps) step(ctx context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeOps) DeleteToken(ctx context.Context) error { return f.step(ctx, "token") }
-func (f *fakeOps) Settle(ctx context.Context, lastTry bool) error {
-	f.mu.Lock()
-	f.last = append(f.last, lastTry)
-	f.mu.Unlock()
-	return f.step(ctx, "settle")
-}
+func (f *fakeOps) DeleteToken(ctx context.Context) error   { return f.step(ctx, "token") }
+func (f *fakeOps) Settle(ctx context.Context) error        { return f.step(ctx, "settle") }
 func (f *fakeOps) Save(ctx context.Context) (int64, error) { return 42, f.step(ctx, "save") }
 func (f *fakeOps) ReleaseSlot()                            { _ = f.step(context.Background(), "slot") }
 func (f *fakeOps) Audit(ctx context.Context, saved bool) error {
@@ -163,8 +157,8 @@ func TestFinisher_OrderAndParallel(t *testing.T) {
 		if took := time.Since(start); took != 9*time.Second || res.SaveErr != nil || res.MessageID != 42 {
 			t.Errorf("took %v, result %+v", took, res)
 		}
-		if !slices.Equal(ops.last, []bool{false}) {
-			t.Errorf("settle calls = %v, want one that is not the last try", ops.last)
+		if ops.calls["settle"] != 1 {
+			t.Errorf("%d settle calls", ops.calls["settle"])
 		}
 	})
 }
@@ -179,8 +173,8 @@ func TestFinisher_SettleIsRetriedOnceBeforeTheAudit(t *testing.T) {
 		return nil
 	}
 	(&Finisher{Ops: ops, Log: func(string, error) {}}).Finish(t.Context())
-	if !slices.Equal(ops.last, []bool{false, true}) || !slices.Equal(ops.ended()[len(ops.ended())-3:], []string{"slot", "settle", "audit"}) {
-		t.Errorf("settle calls %v, order %v", ops.last, ops.ended())
+	if ops.calls["settle"] != 2 || !slices.Equal(ops.ended()[len(ops.ended())-3:], []string{"slot", "settle", "audit"}) {
+		t.Errorf("settle calls %d, order %v", ops.calls["settle"], ops.ended())
 	}
 }
 

@@ -368,17 +368,30 @@ func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	select {
+	case <-s.draining: // no paid call is started once the server shuts down
+		finish(false)
+		s.fail(w, errAgentDown)
+		return
+	default:
+	}
 	// Detached from the request: the model is paid for its answer whether or not the admin waits for it.
 	result, err := agentrun.Within(context.WithoutCancel(r.Context()), testCallLimit, s.draining, func(ctx context.Context) (agentclient.TestResult, error) {
 		return s.Agent.Test(ctx, token, body.Provider, body.Model)
 	})
+	switch {
+	case err == nil && result.UsageKnown:
+		meter.See(agentrun.Usage{InputTokens: result.InputTokens, OutputTokens: result.OutputTokens, CostMicroUSD: result.CostMicroUSD})
+	case !errors.Is(err, agentclient.ErrNoPaidCall):
+		// What the call cost is unknown, so it counts as all that was set aside for it.
+		meter.See(agentrun.Usage{CostMicroUSD: run.ReservedMicroUSD})
+	}
 	if err != nil {
 		finish(false)
 		s.logRunError(run.ID, "agent test call failed", err)
 		s.fail(w, errAgentDown)
 		return
 	}
-	meter.See(agentrun.Usage{InputTokens: result.InputTokens, OutputTokens: result.OutputTokens, CostMicroUSD: result.CostMicroUSD})
 	if result.CostMicroUSD > run.ReservedMicroUSD {
 		// Never capped: the budget must know the real spend.
 		s.log().Warn("agent test cost above its reservation", "run_id", run.ID,

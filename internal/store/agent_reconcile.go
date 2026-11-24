@@ -47,8 +47,8 @@ func AgentRunAudit(run AgentRun, username, outcome string) AuditEntry {
 
 // AuditAgentRun writes a settled run's audit row and marks the run audited, in one transaction. A run that is
 // already audited is left alone (nil), so the turn and the reconcile pass may both call it. A running run is
-// ErrAgentRunRunning, an unknown one ErrNotFound. The row's outcome never contradicts the run's state: one that does
-// is replaced by the state.
+// ErrAgentRunRunning, an unknown one ErrNotFound. The audit row says what the run row says: the figures and tools are
+// the run's, and an outcome that contradicts its state is replaced by the state.
 func (s *Store) AuditAgentRun(ctx context.Context, runID uuid.UUID, e AuditEntry) error {
 	_, err := s.auditAgentRun(ctx, runID, e, "")
 	return err
@@ -63,7 +63,11 @@ func (s *Store) auditAgentRun(ctx context.Context, runID uuid.UUID, e AuditEntry
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var state string
 	var audited bool
-	err = tx.QueryRow(ctx, `select state, audited_at is not null from agent_runs where id = $1 for update `+lock, runID).Scan(&state, &audited)
+	var usage AgentUsage
+	var tools []string
+	err = tx.QueryRow(ctx, `select state, audited_at is not null, input_tokens, output_tokens, cost_micro_usd, tools
+		from agent_runs where id = $1 for update `+lock, runID).
+		Scan(&state, &audited, &usage.InputTokens, &usage.OutputTokens, &usage.CostMicroUSD, &tools)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows) && lock != "":
 		return false, nil
@@ -80,6 +84,8 @@ func (s *Store) auditAgentRun(ctx context.Context, runID uuid.UUID, e AuditEntry
 	for k, v := range e.Details {
 		details[k] = v
 	}
+	details["input_tokens"], details["output_tokens"], details["cost_micro_usd"] = usage.InputTokens, usage.OutputTokens, usage.CostMicroUSD
+	details["tools"] = tools
 	if (state == "done") != (details["outcome"] == "done") {
 		details["outcome"] = state
 	}

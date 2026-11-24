@@ -38,25 +38,30 @@ func newMeter(st UsageStore, draining <-chan struct{}) *Meter {
 	return &Meter{Store: st, RunID: uuid.New(), Now: time.Now, Draining: draining}
 }
 
-func TestMeter_KeepsTheLastFiguresAndFlushesWhatWasNotStored(t *testing.T) {
+func TestMeter_KeepsTheLastFiguresWhateverBecomesOfTheWrite(t *testing.T) {
 	st := &fakeUsageStore{}
 	m := newMeter(st, nil)
-	if _, ok := m.Last(); ok || m.Flush(t.Context()) != nil || len(st.writes) != 0 {
+	if _, ok := m.Last(); ok || m.Record(t.Context()) != nil || len(st.writes) != 0 {
 		t.Fatal("a meter that saw nothing wrote something")
 	}
 	m.See(Usage{5, 5, 1000})
-	if err := m.Record(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Flush(t.Context()); err != nil || len(st.writes) != 1 {
-		t.Fatalf("stored figures were written again: %v %v", st.writes, err)
-	}
-	m.See(Usage{4, 4, 500}) // a correction may lower the figures
-	if err := m.Flush(t.Context()); err != nil || len(st.writes) != 2 || st.writes[1] != (Usage{4, 4, 500}) {
+	if err := m.Record(t.Context()); err != nil || len(st.writes) != 1 || st.writes[0] != (Usage{5, 5, 1000}) {
 		t.Fatalf("writes = %v, %v", st.writes, err)
 	}
-	if last, ok := m.Last(); !ok || last != (Usage{4, 4, 500}) {
-		t.Errorf("last = %v", last)
+	for name, bad := range map[string]func(context.Context) error{
+		"fails":    func(context.Context) error { return errors.New("no") },
+		"panics":   func(context.Context) error { panic("boom") },
+		"sentinel": func(context.Context) error { return store.ErrAgentRunNotRunning },
+	} {
+		st.write = bad
+		m.See(Usage{4, 4, 777}) // a correction may lower the figures
+		err := m.Record(t.Context())
+		if err == nil || (name == "sentinel") != errors.Is(err, store.ErrAgentRunNotRunning) {
+			t.Errorf("%s: Record = %v", name, err)
+		}
+		if last, ok := m.Last(); !ok || last != (Usage{4, 4, 777}) {
+			t.Errorf("%s: last = %v", name, last)
+		}
 	}
 	m.See(Usage{-1, -2, -3})
 	if last, _ := m.Last(); last != (Usage{}) {
@@ -64,41 +69,13 @@ func TestMeter_KeepsTheLastFiguresAndFlushesWhatWasNotStored(t *testing.T) {
 	}
 }
 
-func TestMeter_AFailedOrPanickingWriteIsFlushedLater(t *testing.T) {
-	for name, bad := range map[string]func(context.Context) error{
-		"fails":  func(context.Context) error { return errors.New("no") },
-		"panics": func(context.Context) error { panic("boom") },
-	} {
-		st := &fakeUsageStore{write: bad}
-		m := newMeter(st, nil)
-		m.See(Usage{1, 2, 777})
-		if err := m.Record(t.Context()); err == nil {
-			t.Errorf("%s: Record returned nil", name)
-		}
-		if err := m.Flush(t.Context()); err == nil {
-			t.Errorf("%s: Flush returned nil", name)
-		}
-		st.write = nil
-		if err := m.Flush(t.Context()); err != nil || len(st.writes) != 1 || st.writes[0].CostMicroUSD != 777 {
-			t.Errorf("%s: writes = %v, %v", name, st.writes, err)
-		}
-	}
-}
-
-// The run was swept or settled by someone else: Record says so, and there is nothing left to flush.
-func TestMeter_SentinelIsReportedByRecordAndDoneForFlush(t *testing.T) {
-	st := &fakeUsageStore{write: func(context.Context) error { return store.ErrAgentRunNotRunning }}
-	m := newMeter(st, nil)
+func TestMeter_RecordsOnADeadContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	m := newMeter(&fakeUsageStore{write: func(ctx context.Context) error { return ctx.Err() }}, nil)
 	m.See(Usage{1, 1, 1})
-	if err := m.Record(t.Context()); !errors.Is(err, store.ErrAgentRunNotRunning) {
+	if err := m.Record(ctx); err != nil {
 		t.Errorf("Record = %v", err)
-	}
-	if err := m.Flush(t.Context()); err != nil {
-		t.Errorf("Flush after the sentinel = %v", err)
-	}
-	m.See(Usage{2, 2, 2})
-	if err := m.Flush(t.Context()); err != nil {
-		t.Errorf("Flush meeting the sentinel = %v", err)
 	}
 }
 
@@ -134,18 +111,4 @@ func TestMeter_AHangingWriteIsBoundedAndDrainShortensItInFlight(t *testing.T) {
 			})
 		})
 	}
-}
-
-// Flush takes at most half of the time its caller has, so a write that hangs leaves time to settle the run.
-func TestMeter_FlushLeavesHalfTheTime(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		m := newMeter(&fakeUsageStore{write: hang}, nil)
-		m.See(Usage{1, 1, 1})
-		ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
-		defer cancel()
-		start := time.Now()
-		if err := m.Flush(ctx); err == nil || time.Since(start) != 3*time.Second {
-			t.Errorf("Flush = %v after %v, want an error after 3s", err, time.Since(start))
-		}
-	})
 }

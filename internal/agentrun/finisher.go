@@ -21,9 +21,8 @@ var (
 type Operations interface {
 	// DeleteToken deletes the run token.
 	DeleteToken(ctx context.Context) error
-	// Settle stores the last usage and settles the run. When the usage cannot be stored it leaves the run running,
-	// to be tried again, unless lastTry.
-	Settle(ctx context.Context, lastTry bool) error
+	// Settle stores the last usage and settles the run, both or neither.
+	Settle(ctx context.Context) error
 	// Save saves the answer and returns its message id; it does nothing when there is nothing to save.
 	Save(ctx context.Context) (messageID int64, err error)
 	// ReleaseSlot lets the user start another run.
@@ -56,9 +55,7 @@ func (f *Finisher) Finish(ctx context.Context) Result {
 		parallel            sync.WaitGroup
 	)
 	parallel.Go(func() { tokenErr = f.step(ctx, parallelLimit, f.Ops.DeleteToken) })
-	parallel.Go(func() {
-		settleErr = f.step(ctx, parallelLimit, func(ctx context.Context) error { return f.Ops.Settle(ctx, false) })
-	})
+	parallel.Go(func() { settleErr = f.step(ctx, parallelLimit, f.Ops.Settle) })
 	parallel.Go(func() { res.MessageID, res.SaveErr = Within(ctx, parallelLimit, f.Draining, f.Ops.Save) })
 	parallel.Wait()
 	f.report("delete the run token", tokenErr)
@@ -73,7 +70,7 @@ func (f *Finisher) Finish(ctx context.Context) Result {
 		return nil
 	}))
 	if settleErr != nil {
-		f.report("settle the run again", f.step(ctx, settleRetryLimit, func(ctx context.Context) error { return f.Ops.Settle(ctx, true) }))
+		f.report("settle the run again", f.step(ctx, settleRetryLimit, f.Ops.Settle))
 	}
 	f.report("write the audit row", f.step(ctx, auditLimit, func(ctx context.Context) error {
 		return f.Ops.Audit(ctx, res.SaveErr == nil)

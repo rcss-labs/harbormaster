@@ -115,7 +115,7 @@ func TestReconcileAgentRuns_AuditsFinishedRunsAfterAMinute(t *testing.T) {
 	u, err := st.CreateUser(t.Context(), "gone", "h", false, false)
 	mustNoErr(t, err)
 	done := reserveAt(t, st, &u.ID, agentNow)
-	mustNoErr(t, st.SettleAgentRun(t.Context(), done.ID, "done", []string{"get_service"}, agentNow))
+	mustNoErr(t, st.SettleAgentRun(t.Context(), done.ID, "done", nil, []string{"get_service"}, agentNow))
 	mustNoErr(t, storetest.DeleteUser(t.Context(), st, u.ID))
 
 	if res := reconcile(t, st, agentNow.Add(59*time.Second)); res.Audited != 0 {
@@ -137,7 +137,7 @@ func TestReconcileAgentRuns_DeletesOnlyTokensWhoseRunIsOver(t *testing.T) {
 	u, err := st.CreateUser(t.Context(), "alice", "h", false, false)
 	mustNoErr(t, err)
 	live, settled := reserveAt(t, st, &u.ID, agentNow), reserveAt(t, st, &u.ID, agentNow)
-	mustNoErr(t, st.SettleAgentRun(t.Context(), settled.ID, "done", nil, agentNow))
+	mustNoErr(t, st.SettleAgentRun(t.Context(), settled.ID, "done", nil, nil, agentNow))
 	unknown := uuid.New()
 	for _, id := range []uuid.UUID{live.ID, settled.ID, unknown} {
 		tokenFor(t, st, u.ID, id)
@@ -168,7 +168,7 @@ func TestReconcileAgentRuns_SkipsLockedRows(t *testing.T) {
 	stale, staleHeld := reserveAt(t, st, &u.ID, agentNow), reserveAt(t, st, &u.ID, agentNow)
 	doneHeld, done := reserveAt(t, st, &u.ID, agentNow), reserveAt(t, st, &u.ID, agentNow)
 	for _, r := range []store.AgentRun{doneHeld, done} {
-		mustNoErr(t, st.SettleAgentRun(t.Context(), r.ID, "done", nil, agentNow))
+		mustNoErr(t, st.SettleAgentRun(t.Context(), r.ID, "done", nil, nil, agentNow))
 	}
 	tokenFor(t, st, u.ID, done.ID)
 	tokenFor(t, st, u.ID, doneHeld.ID)
@@ -221,7 +221,7 @@ func TestReconcileAgentRuns_EachPartRunsWhenAnotherFails(t *testing.T) {
 	u, err := st.CreateUser(t.Context(), "alice", "h", false, false)
 	mustNoErr(t, err)
 	stale, done := reserveAt(t, st, &u.ID, agentNow), reserveAt(t, st, &u.ID, agentNow)
-	mustNoErr(t, st.SettleAgentRun(t.Context(), done.ID, "done", nil, agentNow))
+	mustNoErr(t, st.SettleAgentRun(t.Context(), done.ID, "done", nil, nil, agentNow))
 	tokenFor(t, st, u.ID, done.ID)
 	for _, q := range []string{
 		`create function refuse() returns trigger language plpgsql as $$ begin raise exception 'refused'; end $$`,
@@ -245,8 +245,8 @@ func TestReconcileAgentRuns_OneUnwritableAuditRowDoesNotBlockTheRest(t *testing.
 	st := storetest.Open(t)
 	setBudget(t, st, 1_000_000)
 	bad, good := reserveAt(t, st, nil, agentNow), reserveAt(t, st, nil, agentNow)
-	mustNoErr(t, st.SettleAgentRun(t.Context(), bad.ID, "done", nil, agentNow))
-	mustNoErr(t, st.SettleAgentRun(t.Context(), good.ID, "done", nil, agentNow.Add(time.Second)))
+	mustNoErr(t, st.SettleAgentRun(t.Context(), bad.ID, "done", nil, nil, agentNow))
+	mustNoErr(t, st.SettleAgentRun(t.Context(), good.ID, "done", nil, nil, agentNow.Add(time.Second)))
 	for _, q := range []string{
 		fmt.Sprintf(`create function refuse() returns trigger language plpgsql as $$ begin if new.target = '%s' then raise exception 'refused'; end if; return new; end $$`, bad.ID),
 		`create trigger refuse before insert on audit_log for each row execute function refuse()`,
@@ -271,7 +271,7 @@ func TestReconcileAgentRuns_ConcurrentPassesAndALiveTurnAuditOnce(t *testing.T) 
 	var runs []store.AgentRun
 	for range 10 {
 		r := reserveAt(t, st, nil, agentNow)
-		mustNoErr(t, st.SettleAgentRun(t.Context(), r.ID, "done", nil, agentNow))
+		mustNoErr(t, st.SettleAgentRun(t.Context(), r.ID, "done", nil, nil, agentNow))
 		runs = append(runs, r)
 	}
 	var wg sync.WaitGroup
@@ -318,7 +318,7 @@ func TestAuditAgentRun_OnceAndOnlyForASettledRun(t *testing.T) {
 	if n := len(agentAuditRows(t, st)); n != 0 {
 		t.Fatalf("%d audit rows written", n)
 	}
-	mustNoErr(t, st.SettleAgentRun(t.Context(), run.ID, "done", nil, agentNow))
+	mustNoErr(t, st.SettleAgentRun(t.Context(), run.ID, "done", nil, nil, agentNow))
 	for range 2 {
 		mustNoErr(t, st.AuditAgentRun(t.Context(), run.ID, entry))
 	}
@@ -336,10 +336,24 @@ func TestAuditAgentRun_OutcomeAgreesWithTheRow(t *testing.T) {
 		st := storetest.Open(t)
 		setBudget(t, st, 1_000_000)
 		run := reserveAt(t, st, nil, agentNow)
-		mustNoErr(t, st.SettleAgentRun(t.Context(), run.ID, tc.state, nil, agentNow))
+		mustNoErr(t, st.SettleAgentRun(t.Context(), run.ID, tc.state, nil, nil, agentNow))
 		mustNoErr(t, st.AuditAgentRun(t.Context(), run.ID, store.AgentRunAudit(run, "", tc.given)))
 		if rows := agentAuditRows(t, st); len(rows) != 1 || rows[0].Details["outcome"] != tc.want {
 			t.Errorf("%s row, %s given: %+v, want outcome %s", tc.state, tc.given, rows, tc.want)
 		}
+	}
+}
+
+// The audit row says what the run row says, whatever figures its writer had.
+func TestAuditAgentRun_FiguresComeFromTheRow(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1_000_000)
+	run := reserveAt(t, st, nil, agentNow)
+	mustNoErr(t, st.SettleAgentRun(t.Context(), run.ID, "done", &store.AgentUsage{InputTokens: 1, OutputTokens: 2, CostMicroUSD: 70}, []string{"get_service"}, agentNow))
+	run.InputTokens, run.OutputTokens, run.CostMicroUSD = 9, 9, 999
+	mustNoErr(t, st.AuditAgentRun(t.Context(), run.ID, store.AgentRunAudit(run, "", "done")))
+	d := agentAuditRows(t, st)[0].Details
+	if d["input_tokens"] != float64(1) || d["output_tokens"] != float64(2) || d["cost_micro_usd"] != float64(70) || fmt.Sprint(d["tools"]) != "[get_service]" {
+		t.Errorf("audit = %v", d)
 	}
 }

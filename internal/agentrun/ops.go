@@ -13,7 +13,7 @@ import (
 // RunStore is what ending a run needs of the store.
 type RunStore interface {
 	UsageStore
-	SettleAgentRun(ctx context.Context, id uuid.UUID, state string, tools []string, now time.Time) error
+	SettleAgentRun(ctx context.Context, id uuid.UUID, state string, usage *store.AgentUsage, tools []string, now time.Time) error
 	DeleteRunToken(ctx context.Context, runID uuid.UUID) error
 	AuditAgentRun(ctx context.Context, runID uuid.UUID, e store.AuditEntry) error
 }
@@ -37,16 +37,16 @@ func (o *StoreOps) DeleteToken(ctx context.Context) error {
 }
 
 // Settle finishes the run. One that was swept meanwhile is not an error: the sweep kept the figures and the tools.
-func (o *StoreOps) Settle(ctx context.Context, lastTry bool) error {
-	usageErr := o.Meter.Flush(ctx)
-	if usageErr != nil && !lastTry {
-		return usageErr // a finished run's cost is final, so it is not finished before its cost is known
+func (o *StoreOps) Settle(ctx context.Context) error {
+	var usage *store.AgentUsage
+	if u, ok := o.Meter.Last(); ok {
+		usage = (*store.AgentUsage)(&u)
 	}
-	err := o.Store.SettleAgentRun(ctx, o.Run.ID, o.State, o.Tools, o.Now())
+	err := o.Store.SettleAgentRun(ctx, o.Run.ID, o.State, usage, o.Tools, o.Now())
 	if errors.Is(err, store.ErrAgentRunNotRunning) {
-		err = nil
+		return nil
 	}
-	return errors.Join(usageErr, err)
+	return err
 }
 
 func (o *StoreOps) Save(ctx context.Context) (int64, error) {
@@ -62,11 +62,10 @@ func (o *StoreOps) ReleaseSlot() {
 	}
 }
 
+// Audit writes the audit row; the store takes its figures from the run row.
 func (o *StoreOps) Audit(ctx context.Context, saved bool) error {
 	run := o.Run
 	run.Tools = o.Tools
-	u, _ := o.Meter.Last()
-	run.InputTokens, run.OutputTokens, run.CostMicroUSD = u.InputTokens, u.OutputTokens, u.CostMicroUSD
 	entry := store.AgentRunAudit(run, o.Username, o.Outcome)
 	entry.IP = o.IP
 	if o.SaveAnswer != nil {

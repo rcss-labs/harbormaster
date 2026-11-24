@@ -503,10 +503,21 @@ func TestAgentTest_EveryPathSettlesOnceAndDeletesTheToken(t *testing.T) {
 		"refused but billed": {func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"ok":false,"kind":"invalid_request","message":"Bad answer.","cost_micro_usd":50}`))
 		}, 200, "failed", 50, false, "invalid_request", false},
+		// The call was sent and what it cost is unknown: it settles at its reservation.
 		"agent errors": {func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) },
-			503, "failed", 0, false, "", true},
+			503, "failed", 6000, false, "", true},
 		"malformed answer": {func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`not json`)) },
-			503, "failed", 0, false, "", true},
+			503, "failed", 6000, false, "", true},
+		"hangs up": {func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }, 503, "failed", 6000, false, "", true},
+		"answer without a cost": {func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true,"kind":"ok"}`)) },
+			200, "done", 6000, true, "ok", false},
+		"answer with a negative cost": {func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"ok":true,"kind":"ok","cost_micro_usd":-5}`))
+		}, 200, "done", 6000, true, "ok", false},
+		// The agent refused before any paid call.
+		"token refused":   {func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }, 503, "failed", 0, false, "", true},
+		"model not found": {func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }, 503, "failed", 0, false, "", true},
+		"agent busy":      {func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) }, 503, "failed", 0, false, "", true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -583,7 +594,7 @@ func seedRun(t *testing.T, st *store.Store, role, state string, cost int64, when
 	if err := st.RecordAgentRunUsage(t.Context(), run.ID, 10, 5, cost, when); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SettleAgentRun(t.Context(), run.ID, state, nil, when); err != nil {
+	if err := st.SettleAgentRun(t.Context(), run.ID, state, nil, nil, when); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1051,6 +1062,31 @@ func TestAgentTest_DrainCutsTheCallOff(t *testing.T) {
 	env.api.BeginDrain()
 	if got := <-status; got != http.StatusServiceUnavailable || time.Since(start) > 8*time.Second {
 		t.Errorf("status %d after %v", got, time.Since(start))
+	}
+	wantTestRun(t, env, "failed", 6000) // it was sent, so what it cost is unknown
+}
+
+// An agent that cannot be reached was never paid.
+func TestAgentTest_UnreachableAgentIsFree(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	env.sam.get("/api/agent/settings").Body.Close() // the catalogue is cached from now on
+	env.agent.srv.Close()
+	resp := postTest(env.sam, "fake", "fake-1")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status %d, want 503", resp.StatusCode)
+	}
+	wantTestRun(t, env, "failed", 0)
+}
+
+// Once the server shuts down no paid call is started.
+func TestAgentTest_NotStartedWhileDraining(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	env.api.BeginDrain()
+	resp := postTest(env.sam, "fake", "fake-1")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || env.agent.testCalls() != 0 {
+		t.Errorf("status %d after %d calls, want 503 and none", resp.StatusCode, env.agent.testCalls())
 	}
 	wantTestRun(t, env, "failed", 0)
 }

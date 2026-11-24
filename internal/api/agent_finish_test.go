@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -384,6 +387,131 @@ func TestChat_LeavingIsAlwaysAnInterruption(t *testing.T) {
 			t.Errorf("outcome %s, want interrupted", outcome)
 		}
 	}
+}
+
+// Once the server shuts down no agent run is started, though its question was already accepted. A call that is started
+// and cancelled at once seldom reaches the agent, so the test counts the calls that are started.
+func TestChat_NotStartedWhileDraining(t *testing.T) {
+	env := newChatEnv(t)
+	var calls atomic.Int32
+	handler := env.api.Handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(countingContext{r.Context(), &calls}))
+	}))
+	t.Cleanup(srv.Close)
+	sam := login(t, srv, "sam", testPassword)
+	readSSE(t, send(sam, newConversation(t, sam), "hello"))
+	before := calls.Load()
+	if before == 0 || len(env.agent.runs()) != 1 {
+		t.Fatalf("%d calls counted for a run that reached the agent", before)
+	}
+	env.api.BeginDrain()
+	frames := readSSE(t, send(sam, newConversation(t, sam), "hello"))
+	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "interrupted" {
+		t.Errorf("last frame = %+v, want an error event interrupted", last)
+	}
+	if n := calls.Load() - before; n != 0 {
+		t.Errorf("%d agent calls were started", n)
+	}
+	if n := agentCount(t, env.st, `select count(*) from agent_runs where state = 'failed' and cost_micro_usd = 0`); n != 1 {
+		t.Errorf("%d runs settled at no cost, want one", n)
+	}
+	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
+		t.Errorf("%d run tokens left", n)
+	}
+}
+
+// countingContext counts the lookups that an outgoing HTTP round trip makes before anything else.
+type countingContext struct {
+	context.Context
+	calls *atomic.Int32
+}
+
+func (c countingContext) Value(key any) any {
+	if fmt.Sprintf("%T", key) == "httptrace.clientEventContextKey" {
+		c.calls.Add(1)
+	}
+	return c.Context.Value(key)
+}
+
+// A run that is found lost at the moment its time is up ends for the stronger reason.
+func TestChat_RunLostAsItsTimeIsUpIsATimeout(t *testing.T) {
+	var st atomic.Pointer[store.Store]
+	env := newChatEnv(t, func(s *Server) {
+		s.AgentRunSlack = 100 * time.Millisecond
+		s.agentEventHook = func(ctx context.Context, ev agentclient.Event) {
+			if ev.Type == "usage" {
+				_, _ = st.Load().Pool.Exec(ctx, `update agent_runs set state = 'failed', finished_at = now()`)
+				time.Sleep(1300 * time.Millisecond) // the one-second run is overdue before the usage is recorded
+			}
+		}
+	})
+	st.Store(env.st)
+	env.agent.catalogue = catalogueWithTimeout(1)
+	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
+		ndjson(w, `{"type":"usage","input_tokens":3,"output_tokens":4,"cost_micro_usd":70}`)
+		holdUntilGone(r)
+	})
+	frames := readSSE(t, send(env.sam, newConversation(t, env.sam), "hello"))
+	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "timeout" {
+		t.Errorf("last frame = %+v, want an error event timeout", last)
+	}
+	wantEnded(t, env, "failed", 70)
+}
+
+// A reservation whose answer never came may have been made: the run must not hold the allowance until it is stale.
+func TestChat_ReservationThatMayHaveBeenMadeIsSettled(t *testing.T) {
+	env := newChatEnv(t)
+	// The commit outlives the client's patience, shrugs off its cancel request and lands a moment after it.
+	execSQL(t, env.st, `create function slow_commit() returns trigger language plpgsql as $$ begin
+		perform pg_sleep(20); return null; exception when query_canceled then perform pg_sleep(0.4); return null; end $$`)
+	execSQL(t, env.st, `create constraint trigger slow_commit after insert on agent_runs deferrable initially deferred for each row execute function slow_commit()`)
+	id := newConversation(t, env.sam)
+	status := make(chan int, 1)
+	go func() {
+		resp := send(env.sam, id, "hello")
+		resp.Body.Close()
+		status <- resp.StatusCode
+	}()
+	waitFor(t, "the reservation to commit", func() bool {
+		return agentCount(t, env.st, `select count(*) from pg_stat_activity where wait_event = 'PgSleep' and datname = current_database()`) == 1
+	})
+	env.api.BeginDrain() // shortens the wait for the reservation to two seconds
+	if got := <-status; got != http.StatusInternalServerError {
+		t.Errorf("status %d, want 500", got)
+	}
+	if n := len(env.agent.runs()); n != 0 {
+		t.Errorf("the agent was called %d times", n)
+	}
+	if states := runStates(t, env.st); len(states) != 1 || states[0] != "failed" {
+		t.Errorf("run states = %v, want the run settled", states)
+	}
+	if slotsHeld(t, env, "sam") != 0 {
+		t.Error("slot still held")
+	}
+}
+
+// A panic outside every step (here in the log) must not leave the goroutine that writes the browser running.
+func TestChat_PanicOutsideAStepStopsTheBrowserWriter(t *testing.T) {
+	env := newChatEnv(t)
+	env.api.Log = slog.New(panickingLog{env.api.Log.Handler()})
+	resp := send(env.sam, newConversation(t, env.sam), "hello")
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	waitFor(t, "the browser writer to stop", func() bool {
+		stacks := make([]byte, 1<<20)
+		return !strings.Contains(string(stacks[:runtime.Stack(stacks, true)]), "(*browserWriter).loop")
+	})
+}
+
+// panickingLog panics on the line that says a run has finished.
+type panickingLog struct{ slog.Handler }
+
+func (p panickingLog) Handle(ctx context.Context, rec slog.Record) error {
+	if rec.Message == "agent run finished" {
+		panic("boom")
+	}
+	return p.Handler.Handle(ctx, rec)
 }
 
 // At shutdown a usage write that is already waiting for a lock may not hold up the end of the turn.

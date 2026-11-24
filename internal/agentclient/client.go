@@ -14,8 +14,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +30,8 @@ var (
 	ErrAgentBusy = errors.New("the agent is busy")
 	// ErrUnknownModel: the agent does not offer the requested provider and model.
 	ErrUnknownModel = errors.New("the agent does not offer that model")
+	// ErrNoPaidCall: it is certain that a failed test call called no model. It comes beside the error that says why.
+	ErrNoPaidCall = errors.New("no paid call was made")
 )
 
 const (
@@ -116,6 +120,8 @@ type TestResult struct {
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"`
 	CostMicroUSD int64  `json:"cost_micro_usd"`
+	// UsageKnown is false when the answer did not state a cost, or not a possible one.
+	UsageKnown bool `json:"-"`
 }
 
 // Client talks to one agent base URL and never follows a redirect.
@@ -220,11 +226,19 @@ func (c *Client) do(req *http.Request, notFoundIsUnknownModel bool) (*http.Respo
 		if notFoundIsUnknownModel {
 			return nil, ErrUnknownModel
 		}
-		return nil, fmt.Errorf("%w: status %d", ErrAgentUnavailable, resp.StatusCode)
+		return nil, &statusError{resp.StatusCode}
 	default:
-		return nil, fmt.Errorf("%w: status %d", ErrAgentUnavailable, resp.StatusCode)
+		return nil, &statusError{resp.StatusCode}
 	}
 }
+
+// statusError is an answer that says the agent did not do what was asked.
+type statusError struct{ code int }
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("%v: status %d", ErrAgentUnavailable, e.code)
+}
+func (e *statusError) Unwrap() error { return ErrAgentUnavailable }
 
 type catalogueWire struct {
 	Providers []struct {
@@ -339,11 +353,17 @@ func (c *Client) Run(ctx context.Context, bearer string, req RunRequest, onEvent
 	return fmt.Errorf("%w: stream ended early", ErrAgentUnavailable)
 }
 
-// Test asks the agent to make one small call to provider and model.
+// Test asks the agent to make one small call to provider and model. An error that is not ErrNoPaidCall may have been
+// paid for: the request was on its way, and the agent did not refuse it before calling the model.
 func (c *Client) Test(ctx context.Context, bearer, provider, model string) (TestResult, error) {
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, c.testTimeout)
 	defer cancel()
+	var connected atomic.Bool // whether the request may have left; a retry on a new connection starts over
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) { connected.Store(false) },
+		GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+	})
 	body := map[string]string{"provider": provider, "model": model}
 	req, err := c.newRequest(ctx, http.MethodPost, "/v1/test", bearer, body)
 	if err != nil {
@@ -351,12 +371,27 @@ func (c *Client) Test(ctx context.Context, bearer, provider, model string) (Test
 	}
 	resp, err := c.do(req, false)
 	if err != nil {
-		return TestResult{}, ownTimeout(parent, err)
+		err = ownTimeout(parent, err)
+		var status *statusError
+		refused := errors.Is(err, ErrAgentBusy) ||
+			(errors.As(err, &status) && (status.code == http.StatusUnauthorized || status.code == http.StatusNotFound))
+		if refused || !connected.Load() {
+			err = fmt.Errorf("%w: %w", ErrNoPaidCall, err)
+		}
+		return TestResult{}, err
 	}
 	defer resp.Body.Close()
-	var res TestResult
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&res); err != nil {
+	var answer struct {
+		TestResult
+		CostMicroUSD *int64 `json:"cost_micro_usd"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&answer); err != nil {
 		return TestResult{}, fmt.Errorf("%w: malformed test answer", ErrAgentUnavailable)
+	}
+	res := answer.TestResult
+	if answer.CostMicroUSD != nil {
+		res.CostMicroUSD = *answer.CostMicroUSD
+		res.UsageKnown = res.CostMicroUSD >= 0 && res.InputTokens >= 0 && res.OutputTokens >= 0
 	}
 	return res, nil
 }

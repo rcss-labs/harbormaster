@@ -24,6 +24,9 @@ const (
 	historyMaxBytes    = 700 << 10
 	// defaultRunTimeout stands in when the catalogue states none.
 	defaultRunTimeout = 5 * time.Minute
+	// A reservation that may have been made is looked for this many times, this far apart.
+	lostReservationLooks     = 4
+	lostReservationLookAgain = 250 * time.Millisecond
 )
 
 // setUpLimit bounds each database step before a run starts, the reservation included.
@@ -101,6 +104,11 @@ type turnStart struct {
 // execute prepares the turn, streams it and finishes it. It owns every exit, a panic included.
 func (t *chatTurn) execute(w http.ResponseWriter) {
 	t.meter = &agentrun.Meter{Store: t.s.Store, RunID: t.run.ID, Now: t.s.now, Draining: t.s.draining}
+	defer func() { // last, and whatever happens before it: nothing writes to the browser after the handler
+		if t.bw != nil {
+			t.bw.finish()
+		}
+	}()
 	defer func() {
 		rec := recover()
 		if rec != nil {
@@ -181,6 +189,11 @@ func (t *chatTurn) stream(w http.ResponseWriter) {
 	}
 	stops := []stop{{agentrun.TimedOut, overdue.Done()}, {agentrun.BrowserGone, t.r.Context().Done()},
 		{agentrun.BrowserGone, t.bw.broken}, {agentrun.Draining, t.s.draining}}
+
+	if reasons := known(stops); len(reasons) > 0 { // nothing is paid for that nobody will see
+		t.perform(t.turn.End(reasons...), stops)
+		return
+	}
 
 	done := make(chan struct{})
 	defer close(done)
@@ -340,7 +353,6 @@ func (t *chatTurn) finish() {
 	case res.code != "":
 		t.bw.event("error", map[string]string{"code": res.code, "message": res.message})
 	}
-	t.bw.finish()
 }
 
 // runOps is how a run of any role ends in the store.
@@ -366,15 +378,42 @@ func (s *Server) finishRun(r *http.Request, ops *agentrun.StoreOps) agentrun.Res
 }
 
 // reserveRun reserves a run. The reservation commits on a context of its own: a browser that leaves mid-call must not
-// leave a half-known state behind, and a run that was reserved is always settled by its turn (or the reconcile pass).
+// leave a half-known state behind, and a run that was reserved is settled by its turn, or here when the reservation
+// failed without saying whether it was made (or at the latest by the reconcile pass).
 func (s *Server) reserveRun(r *http.Request, run store.AgentRun, runTimeout time.Duration) error {
 	_, err := agentrun.Within(context.WithoutCancel(r.Context()), setUpLimit, s.draining, func(ctx context.Context) (struct{}, error) {
 		return struct{}{}, s.Store.ReserveAgentRun(ctx, run, max(2*runTimeout, minRunStaleAfter), s.now())
 	})
-	if errors.Is(err, store.ErrBudgetExhausted) {
+	switch {
+	case err == nil || errors.Is(err, store.ErrNotFound):
+		return err
+	case errors.Is(err, store.ErrBudgetExhausted):
 		return errBudget
 	}
+	s.settleLostReservation(r, run.ID)
 	return err
+}
+
+// settleLostReservation settles a run whose reservation failed in a way that does not say whether it was made. The
+// commit may still be under way, so a run that is not there is looked for a few more times. Its audit row is the
+// reconcile pass's to write.
+func (s *Server) settleLostReservation(r *http.Request, runID uuid.UUID) {
+	_, err := agentrun.Within(context.WithoutCancel(r.Context()), setUpLimit, s.draining, func(ctx context.Context) (struct{}, error) {
+		for looks := 1; ; looks++ {
+			err := s.Store.SettleAgentRun(ctx, runID, "failed", nil, nil, s.now())
+			if !errors.Is(err, store.ErrNotFound) || looks == lostReservationLooks {
+				return struct{}{}, err
+			}
+			select {
+			case <-ctx.Done():
+				return struct{}{}, ctx.Err()
+			case <-time.After(lostReservationLookAgain):
+			}
+		}
+	})
+	if err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrAgentRunNotRunning) {
+		s.logRunError(runID, "agent run: could not settle a reservation that may have been made", err)
+	}
 }
 
 // logRunError logs err against a run, with the stack when it was a panic.

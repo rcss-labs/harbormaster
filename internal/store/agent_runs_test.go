@@ -37,7 +37,7 @@ func TestReserveAgentRun_RefusesWhenBudgetWouldBeExceeded(t *testing.T) {
 	if err := st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 500, agentNow); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, agentNow); err != nil {
+	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow); err != nil {
 		t.Fatal(err)
 	}
 	// 500 settled so far: 500 more fits exactly, 501 does not.
@@ -163,7 +163,7 @@ func TestSettleAgentRun_FreesUnusedReservation(t *testing.T) {
 	if err := st.RecordAgentRunUsage(ctx, r.ID, 4, 4, 120, agentNow); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SettleAgentRun(ctx, r.ID, "done", []string{"list_services"}, agentNow.Add(time.Second)); err != nil {
+	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, []string{"list_services"}, agentNow.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	month := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -188,7 +188,7 @@ func TestAgentSpend_UsesUTCMonth(t *testing.T) {
 	if err := st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 10, lastSecond); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, lastSecond); err != nil {
+	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, nil, lastSecond); err != nil {
 		t.Fatal(err)
 	}
 	oct, nov := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -257,7 +257,7 @@ func TestRecordAgentRunUsage_DoneRunIsUnchanged(t *testing.T) {
 	r := agentRun(100)
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
 	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 2, 2, 50, agentNow))
-	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, agentNow))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow))
 	if err := st.RecordAgentRunUsage(ctx, r.ID, 9, 9, 99, agentNow.Add(time.Second)); !errors.Is(err, store.ErrAgentRunNotRunning) {
 		t.Fatalf("usage on done = %v, want ErrAgentRunNotRunning", err)
 	}
@@ -274,7 +274,7 @@ func TestSettleAgentRun_LateSettleDoesNotResurrectSweptRun(t *testing.T) {
 	r := agentRun(900)
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-2*time.Hour)))
 	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow)) // sweeps r
-	err := st.SettleAgentRun(ctx, r.ID, "done", []string{"list_services"}, agentNow)
+	err := st.SettleAgentRun(ctx, r.ID, "done", nil, []string{"list_services"}, agentNow)
 	if !errors.Is(err, store.ErrAgentRunNotRunning) {
 		t.Fatalf("late settle = %v, want ErrAgentRunNotRunning", err)
 	}
@@ -282,7 +282,7 @@ func TestSettleAgentRun_LateSettleDoesNotResurrectSweptRun(t *testing.T) {
 	if state != "failed" || len(tools) != 1 || tools[0] != "list_services" {
 		t.Fatalf("after late settle: state %s tools %v; want failed with tools recorded", state, tools)
 	}
-	if err := st.SettleAgentRun(ctx, uuid.New(), "done", nil, agentNow); !errors.Is(err, store.ErrNotFound) {
+	if err := st.SettleAgentRun(ctx, uuid.New(), "done", nil, nil, agentNow); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unknown id = %v, want ErrNotFound", err)
 	}
 }
@@ -362,7 +362,7 @@ func TestReserveAgentRun_IgnoresLastMonthsSpend(t *testing.T) {
 	r := agentRun(1000)
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, 24*time.Hour, oct))
 	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 1000, oct))
-	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, oct))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, oct))
 	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1000), 24*time.Hour, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)))
 }
 
@@ -375,7 +375,7 @@ func TestReserveAgentRun_NonUTCNowUsesUTCMonth(t *testing.T) {
 	r := agentRun(1000)
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, 24*time.Hour, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
 	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 1000, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
-	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
 	if s, _, _ := st.AgentSpend(ctx, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)); s != 1000 {
 		t.Fatalf("december spend = %d, want 1000", s)
 	}
@@ -400,7 +400,7 @@ func TestAgentSpend_UnchangedWhenUserAndConversationDeleted(t *testing.T) {
 	r.UserID, r.ConversationID = &u.ID, &c.ID
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
 	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 400, agentNow))
-	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, agentNow))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow))
 	mustNoErr(t, st.DeleteAgentConversation(ctx, u.ID, c.ID))
 	if _, err := st.Pool.Exec(ctx, `delete from users where id = $1`, u.ID); err != nil {
 		t.Fatal(err)
@@ -443,10 +443,10 @@ func TestSettleAgentRun_SecondSettleOfSweptRunKeepsTools(t *testing.T) {
 	r := agentRun(900)
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-2*time.Hour)))
 	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow)) // sweeps r
-	if err := st.SettleAgentRun(ctx, r.ID, "failed", []string{"list_services"}, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
+	if err := st.SettleAgentRun(ctx, r.ID, "failed", nil, []string{"list_services"}, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
 		t.Fatal(err)
 	}
-	if err := st.SettleAgentRun(ctx, r.ID, "failed", nil, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
+	if err := st.SettleAgentRun(ctx, r.ID, "failed", nil, nil, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
 		t.Fatal(err)
 	}
 	if _, _, _, _, tools, _ := runRow(t, st, r.ID); len(tools) != 1 || tools[0] != "list_services" {
@@ -488,5 +488,64 @@ func TestRetryDeadlock(t *testing.T) {
 	other := errors.New("boom")
 	if err := store.RetryDeadlock(func() error { calls++; return other }); !errors.Is(err, other) || calls != 1 {
 		t.Fatalf("other error: %v after %d calls, want it unretried", err, calls)
+	}
+}
+
+// Settling stores the last figures in the same statement: as given on a running run (they may correct a provisional
+// figure downwards), raised only on a failed one, never on a done one.
+func TestSettleAgentRun_WritesTheFiguresWithTheState(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prior string // how the run was settled before, if it was
+		usage *store.AgentUsage
+		want  store.AgentUsage
+		state string
+	}{
+		"running, lower":      {"", &store.AgentUsage{InputTokens: 5, OutputTokens: 5, CostMicroUSD: 50}, store.AgentUsage{InputTokens: 5, OutputTokens: 5, CostMicroUSD: 50}, "done"},
+		"running, higher":     {"", &store.AgentUsage{InputTokens: 15, OutputTokens: 15, CostMicroUSD: 150}, store.AgentUsage{InputTokens: 15, OutputTokens: 15, CostMicroUSD: 150}, "done"},
+		"running, none given": {"", nil, store.AgentUsage{InputTokens: 10, OutputTokens: 10, CostMicroUSD: 100}, "done"},
+		"failed, mixed":       {"failed", &store.AgentUsage{InputTokens: 5, OutputTokens: 15, CostMicroUSD: 150}, store.AgentUsage{InputTokens: 10, OutputTokens: 15, CostMicroUSD: 150}, "failed"},
+		"failed, lower":       {"failed", &store.AgentUsage{InputTokens: 15, OutputTokens: 5, CostMicroUSD: 50}, store.AgentUsage{InputTokens: 15, OutputTokens: 10, CostMicroUSD: 100}, "failed"},
+		"failed, none given":  {"failed", nil, store.AgentUsage{InputTokens: 10, OutputTokens: 10, CostMicroUSD: 100}, "failed"},
+		"done":                {"done", &store.AgentUsage{InputTokens: 15, OutputTokens: 15, CostMicroUSD: 150}, store.AgentUsage{InputTokens: 10, OutputTokens: 10, CostMicroUSD: 100}, "done"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := storetest.Open(t)
+			setBudget(t, st, 1_000_000)
+			r := agentRun(100)
+			mustNoErr(t, st.ReserveAgentRun(t.Context(), r, time.Hour, agentNow))
+			mustNoErr(t, st.RecordAgentRunUsage(t.Context(), r.ID, 10, 10, 100, agentNow))
+			if tc.prior != "" {
+				mustNoErr(t, st.SettleAgentRun(t.Context(), r.ID, tc.prior, nil, nil, agentNow))
+			}
+			err := st.SettleAgentRun(t.Context(), r.ID, "done", tc.usage, nil, agentNow.Add(time.Second))
+			if (tc.prior != "") != errors.Is(err, store.ErrAgentRunNotRunning) {
+				t.Errorf("settle = %v", err)
+			}
+			state, cost, in, out, _, _ := runRow(t, st, r.ID)
+			if got := (store.AgentUsage{InputTokens: in, OutputTokens: out, CostMicroUSD: cost}); got != tc.want || state != tc.state {
+				t.Errorf("run = %s %+v, want %s %+v", state, got, tc.state, tc.want)
+			}
+		})
+	}
+}
+
+// When the settlement is refused its figures are not half written, and the other way round.
+func TestSettleAgentRun_FiguresAndStateAreOneWrite(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1_000_000)
+	r := agentRun(100)
+	mustNoErr(t, st.ReserveAgentRun(t.Context(), r, time.Hour, agentNow))
+	for _, q := range []string{
+		`create function refuse() returns trigger language plpgsql as $$ begin raise exception 'refused'; end $$`,
+		`create trigger refuse before update on agent_runs for each row when (new.cost_micro_usd is distinct from old.cost_micro_usd) execute function refuse()`,
+	} {
+		_, err := st.Pool.Exec(t.Context(), q)
+		mustNoErr(t, err)
+	}
+	if err := st.SettleAgentRun(t.Context(), r.ID, "done", &store.AgentUsage{CostMicroUSD: 50}, nil, agentNow); err == nil {
+		t.Error("settle succeeded without its figures")
+	}
+	if state, cost, _, _, _, _ := runRow(t, st, r.ID); state != "running" || cost != 0 {
+		t.Errorf("run = %s cost %d, want it untouched", state, cost)
 	}
 }

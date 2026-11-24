@@ -22,9 +22,10 @@ const (
 	// progress: each frame has the whole of the write deadline.
 	maxTextFrame = 4 << 10
 	// flushIdle is how long the last events wait for a browser that has stopped reading; drainFlush is how long they
-	// get in all while the server shuts down.
-	flushIdle  = 30 * time.Second
-	drainFlush = 2 * time.Second
+	// get in all while the server shuts down, flushCeiling however steadily a browser reads.
+	flushIdle    = 30 * time.Second
+	flushCeiling = 10 * time.Minute
+	drainFlush   = 2 * time.Second
 )
 
 // browserWriter sends server-sent events to the browser from a goroutine of its own, so a slow browser never slows
@@ -232,17 +233,21 @@ func (b *browserWriter) signal() {
 
 // finish accepts no more events and returns once the writer has stopped, so nothing is written after the handler
 // returns. A browser that keeps reading gets everything; one that stops is given flushIdle, and the shutdown gives
-// either drainFlush in all.
+// either drainFlush in all. Nothing takes longer than flushCeiling.
 func (b *browserWriter) finish() {
 	b.mu.Lock()
 	b.closed = true
 	b.signal()
 	b.mu.Unlock()
-	b.setDeadline(func() { b.flushing = true })
+	b.setDeadline(func() { b.flushing, b.hardStop = true, time.Now().Add(flushCeiling) })
 	select {
 	case <-b.done:
 	case <-b.draining:
-		b.setDeadline(func() { b.hardStop = time.Now().Add(drainFlush) })
+		b.setDeadline(func() {
+			if stop := time.Now().Add(drainFlush); stop.Before(b.hardStop) {
+				b.hardStop = stop
+			}
+		})
 		<-b.done
 	}
 	b.setDeadline(func() { b.writeStart, b.hardStop = time.Now(), time.Now().Add(drainFlush) }) // for the server's own last bytes

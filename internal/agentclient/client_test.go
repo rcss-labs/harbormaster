@@ -344,3 +344,82 @@ func TestRun_LineOverOneMiBIsUnavailable(t *testing.T) {
 		t.Errorf("err = %v, events = %d", err, got)
 	}
 }
+
+// A failed test call says when it is certain that no model was called: the agent refused it before that, or it never
+// reached the agent. Anything else may have been paid for.
+func TestTest_SaysWhenNoPaidCallWasMade(t *testing.T) {
+	answer := func(status int, body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	hangUp := func(w http.ResponseWriter, r *http.Request) { panic(http.ErrAbortHandler) }
+	for name, tc := range map[string]struct {
+		handler http.HandlerFunc
+		free    bool
+		is      error
+	}{
+		"401":       {answer(401, "{}"), true, ErrAgentUnavailable},
+		"404":       {answer(404, "{}"), true, ErrAgentUnavailable},
+		"429":       {answer(429, "{}"), true, ErrAgentBusy},
+		"400":       {answer(400, "{}"), false, ErrAgentUnavailable},
+		"302":       {answer(302, ""), false, ErrAgentUnavailable},
+		"500":       {answer(500, "{}"), false, ErrAgentUnavailable},
+		"502":       {answer(502, "{}"), false, ErrAgentUnavailable},
+		"503":       {answer(503, "{}"), false, ErrAgentUnavailable},
+		"malformed": {answer(200, "not json"), false, ErrAgentUnavailable},
+		"hung up":   {hangUp, false, ErrAgentUnavailable},
+	} {
+		srv := httptest.NewServer(tc.handler)
+		c, _ := New(srv.URL, "")
+		_, err := c.Test(t.Context(), "tok", "fake", "fake-1")
+		if errors.Is(err, ErrNoPaidCall) != tc.free || !errors.Is(err, tc.is) {
+			t.Errorf("%s: %v, want no paid call = %v and %v", name, err, tc.free, tc.is)
+		}
+		srv.Close()
+	}
+
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	c, _ := New(gone.URL, "")
+	if _, err := c.Test(t.Context(), "tok", "fake", "fake-1"); !errors.Is(err, ErrNoPaidCall) || !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("unreachable: %v", err)
+	}
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	c, _ = New(srv.URL, "")
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() { <-entered; cancel() }()
+	if _, err := c.Test(ctx, "tok", "fake", "fake-1"); errors.Is(err, ErrNoPaidCall) || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled after it was sent: %v", err)
+	}
+	if _, err := c.Test(ctx, "tok", "fake", "fake-1"); !errors.Is(err, ErrNoPaidCall) || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled before it was sent: %v", err)
+	}
+}
+
+func TestTest_UsageIsKnownOnlyWhenTheAnswerStatesIt(t *testing.T) {
+	for body, known := range map[string]bool{
+		`{"ok":true,"input_tokens":1,"output_tokens":1,"cost_micro_usd":0}`:  true,
+		`{"ok":false,"kind":"auth","cost_micro_usd":7}`:                      true,
+		`{"ok":true,"input_tokens":1,"output_tokens":1}`:                     false,
+		`{"ok":true,"cost_micro_usd":null}`:                                  false,
+		`{"ok":true,"input_tokens":1,"output_tokens":1,"cost_micro_usd":-1}`: false,
+		`{}`: false,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		c, _ := New(srv.URL, "")
+		if res, err := c.Test(t.Context(), "tok", "fake", "fake-1"); err != nil || res.UsageKnown != known {
+			t.Errorf("%s: known %v, %v; want %v", body, res.UsageKnown, err, known)
+		}
+		srv.Close()
+	}
+}

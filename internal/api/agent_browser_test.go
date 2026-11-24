@@ -221,6 +221,19 @@ func TestBrowserWriter_DrainBoundsTheFinalFlushToTwoSeconds(t *testing.T) {
 	}
 }
 
+// However steadily a browser reads, the rest of an answer has ten minutes after the turn is over, not more.
+func TestBrowserWriter_TheFinalFlushHasACeiling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := &pacedWriter{perSecond: 1 << 10}
+		b := startTestWriter(w, nil)
+		b.text(strings.Repeat("x", 2<<20)) // over half an hour at this pace
+		time.Sleep(time.Minute)
+		start := time.Now()
+		b.finish()
+		within(t, "finish", time.Since(start), 10*time.Minute-time.Second, 10*time.Minute+time.Second)
+	})
+}
+
 func TestBrowserWriter_DrainDoesNotDisturbAStreamThatIsStillGoing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		draining := make(chan struct{})
