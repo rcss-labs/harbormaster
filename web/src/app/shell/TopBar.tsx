@@ -1,5 +1,6 @@
 import { Fragment } from 'react'
 import { Link } from 'react-router'
+import { useAgentAvailable } from '../../api/agent'
 import { useAlerts } from '../../api/observe'
 import { Icon } from '../../components/Icon'
 import { toggleDensity, useDensity } from '../density'
@@ -17,7 +18,8 @@ export { isMac, shortcutLabel } from './platform'
 
 export function TopBar() {
   const crumbs = useCrumbsValue()
-  const { railOpen, toggleRail, openPalette, openHelp } = useShellState()
+  const { railOpen, toggleRail, openPalette, openHelp, agentOpen, openAgent } = useShellState()
+  const agentAvailable = useAgentAvailable()
   const { filters } = useFilters()
   const alerts = useAlerts(filters)
   const density = useDensity()
@@ -45,6 +47,19 @@ export function TopBar() {
         <kbd className={styles.kbd}>{shortcutLabel()}</kbd>
       </button>
       <FreshnessControl />
+      {agentAvailable && (
+        <button
+          type="button"
+          className={`${styles.iconBtn} ${agentOpen ? styles.btnOn : ''}`}
+          aria-label="Ask AI"
+          aria-haspopup="dialog"
+          aria-expanded={agentOpen}
+          title="Ask AI"
+          onClick={openAgent}
+        >
+          <Icon name="sparkle" />
+        </button>
+      )}
       <button
         type="button"
         className={`${styles.iconBtn} ${railOpen ? styles.btnOn : ''}`}

@@ -6,6 +6,9 @@ export function setCsrfToken(token: string): void {
   csrfToken = token
 }
 
+/** The CSRF token for requests that bypass `apiFetch`, such as the agent's streaming POST. */
+export const getCsrfToken = (): string => csrfToken
+
 export class ApiError extends Error {
   code: string
   status: number

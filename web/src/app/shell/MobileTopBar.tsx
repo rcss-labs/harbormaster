@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { useAgentAvailable } from '../../api/agent'
 import { usePollerStatus } from '../../api/hooks'
 import { useDataProblems } from '../../api/observe'
 import { Icon } from '../../components/Icon'
@@ -23,7 +24,8 @@ export function MobileTopBar() {
   const crumbs = useCrumbsValue()
   const { me } = useAuth()
   const { filters } = useFilters()
-  const { openPalette } = useShellState()
+  const { openPalette, openAgent } = useShellState()
+  const agentAvailable = useAgentAvailable()
   const poller = usePollerStatus()
   const { current, total } = useDataProblems()
   const dark = useIsDark()
@@ -72,6 +74,11 @@ export function MobileTopBar() {
         <button type="button" className={`${styles.mIcon} ${styles.mFresh}`} aria-label={freshness} aria-haspopup="dialog" aria-expanded={freshOpen} onClick={() => setFreshOpen(true)}>
           <StatusDot bare kind={worstKind(poller.data.items)} />
           <span>{`${current}/${total}`}</span>
+        </button>
+      )}
+      {agentAvailable && (
+        <button type="button" className={styles.mIcon} aria-label="Ask AI" aria-haspopup="dialog" onClick={openAgent}>
+          <Icon name="sparkle" size={18} />
         </button>
       )}
       <button type="button" className={styles.mIcon} aria-label="Search or run a command" aria-haspopup="dialog" onClick={openPalette}>
