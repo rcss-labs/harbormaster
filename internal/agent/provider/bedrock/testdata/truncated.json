@@ -1,0 +1,4 @@
+[
+  {"type": "messageStart", "payload": {"role": "assistant"}},
+  {"type": "contentBlockDelta", "payload": {"contentBlockIndex": 0, "delta": {"text": "partial"}}}
+]
