@@ -1,6 +1,6 @@
 # Configuration reference
 
-Every environment variable that the three Harbormaster binaries read, with defaults and valid ranges. Use it when you run a binary directly or add extra environment to the Terraform module; the module already sets the variables it needs.
+Every environment variable that the four Harbormaster binaries read, with defaults and valid ranges. Use it when you run a binary directly or add extra environment to the Terraform module; the module already sets the variables it needs.
 
 ## How settings are read
 
@@ -17,6 +17,7 @@ The **Read by** column uses these names:
 | `harbormaster` | `harbormaster` | The server: `serve`, `migrate`, `create-admin`, `revoke-tokens` and `healthcheck` all load the same settings (see [CLI reference](cli.md)) |
 | `mcp` | `harbormaster-mcp` | The MCP gateway |
 | `scanner` | `harbormaster-scanner` | The image scan task |
+| `agent` | `harbormaster-agent` | The AI agent service |
 
 Roles (`all`, `web`, `poller`, `coordinator`) are explained in [Architecture](../getting-started/architecture.md). A variable marked `harbormaster` is read by every role unless the description says which role uses it.
 
@@ -106,6 +107,7 @@ Retention applies to the coordinator's cleanup job. See [Data retention](../oper
 | `HM_RETENTION_SCAN_IMAGES` | `168h` | `harbormaster` | How long a scan result is kept after the image was last requested. |
 | `HM_RETENTION_SCAN_RUNS` | `720h` | `harbormaster` | How long image scan run records are kept. |
 | `HM_RETENTION_NOTIFICATION_LOG` | `720h` | `harbormaster` | How long the notification delivery log and resolved alert incidents are kept. |
+| `HM_RETENTION_AGENT_CONVERSATIONS` | `720h` | `harbormaster` | How long an AI chat conversation is kept after its last activity. Its runs and usage stay. |
 
 ## Image security
 
@@ -217,6 +219,40 @@ These are the `harbormaster-mcp` container's variables. The gateway holds no sec
 | `HM_MCP_AUTHORIZE_URL` | none | `mcp` | Harbormaster's private base URL. Setting it turns OAuth on: the gateway serves the well-known metadata documents and relays `POST /oauth/token`. |
 | `HM_MCP_AUTHORIZE_VIA_GATEWAY` | `false` | `mcp` | Advertise the gateway's own `/oauth/authorize` (a redirect to `HM_MCP_AUTHORIZE_URL`). Needs `HM_MCP_AUTHORIZE_URL`. |
 
+## AI agent
+
+The agent is off unless `HM_AGENT_URL` is set. Variables marked `harbormaster` go on the Harbormaster tasks (web and coordinator, or all); variables marked `agent` go on the `harbormaster-agent` container. The agent's variables are all listed here, and the `harbormaster-agent` Terraform module sets most of them for you. See [Install the AI agent](../install/ai-agent.md) and [Terraform module: harbormaster-agent](terraform-agent.md).
+
+### Harbormaster settings
+
+| Variable | Default | Read by | Description |
+| --- | --- | --- | --- |
+| `HM_AGENT_URL` | none | `harbormaster` | The agent's private base URL. Setting it turns the AI agent on: the agent routes, the settings tab, the chat button and run tokens exist only then. `https://`, or `http://` on a loopback host only; no path, query, fragment or user info. Needs an internal load balancer. Web and coordinator tasks both need it. |
+| `HM_AGENT_CA_PEM` | none | `harbormaster` | PEM text of an extra CA that signs the agent's certificate, for the connection to the agent only. Invalid PEM stops startup. |
+| `HM_AGENT_RUN_TOKEN_TTL` | `15m` | `harbormaster` | Lifetime of a run token. `1m` to `1h`. A shorter value than the run timeout plus a minute is logged once, because long runs may then lose their tools. |
+
+### Agent settings
+
+| Variable | Default | Read by | Description |
+| --- | --- | --- | --- |
+| `HM_AGENT_LISTEN` | `:8484` | `agent` | Listen address (`host:port`). `harbormaster-agent healthcheck` uses its port. |
+| `HM_AGENT_UPSTREAM_URL` | required | `agent` | Harbormaster's internal base URL. `https://`, or `http://` on a loopback host only; no path, query, fragment or user info. |
+| `HM_AGENT_UPSTREAM_CA_PEM` | none | `agent` | PEM text of extra CA certificates for the connection to Harbormaster only. Invalid PEM stops startup. |
+| `HM_AGENT_TRUSTED_PROXY` | `false` | `agent` | Set `true` only behind exactly one trusted proxy, the agent's internal load balancer: the client address is then the `X-Forwarded-For` entry it appended. The Terraform module sets `true`. |
+| `HM_AGENT_PROVIDERS` | required | `agent` | The model catalogue as JSON: a list of `{"provider": "<id>", "models": [{"id", "input_per_mtok_usd", "output_per_mtok_usd", "context_tokens"}]}`. Providers are `anthropic`, `openai`, `google` and `bedrock`, each at most once with at least one model. Prices are decimal strings in US dollars per million tokens, such as `"3.00"`. Required unless `HM_AGENT_FAKE_PROVIDER=true`. |
+| `HM_AGENT_ANTHROPIC_API_KEY` | none | `agent` | Anthropic API key. Needed exactly when the catalogue lists `anthropic`. A secret. |
+| `HM_AGENT_OPENAI_API_KEY` | none | `agent` | OpenAI API key. Needed exactly when the catalogue lists `openai`. A secret. |
+| `HM_AGENT_GOOGLE_API_KEY` | none | `agent` | Google API key. Needed exactly when the catalogue lists `google`. A secret. |
+| `HM_AGENT_BEDROCK_REGION` | none | `agent` | Region of the Bedrock endpoint, such as `eu-west-1`. Needed exactly when the catalogue lists `bedrock`. Credentials come from the task role. |
+| `HM_AGENT_FAKE_PROVIDER` | `false` | `agent` | Adds a canned `fake` provider with one model. Refused unless `HM_AGENT_UPSTREAM_URL` is a loopback address. For local development only. |
+| `HM_AGENT_MAX_STEPS` | `20` | `agent` | Most steps in one run. 1 to 100. |
+| `HM_AGENT_MAX_RUN_TOKENS` | `200000` | `agent` | Token allowance of one run. 1000 to 2000000. A run always keeps room for a final answer. The worst case at the model's higher price is what a question reserves from the monthly allowance. |
+| `HM_AGENT_RUN_TIMEOUT` | `5m` | `agent` | Longest a run lasts. `5s` to `30m`. The Terraform module accepts at most `5m`, because its load balancer waits 600 seconds. |
+| `HM_AGENT_MAX_CONCURRENT_RUNS` | `8` | `agent` | Runs at once per agent task. 1 to 256. |
+| `HM_AGENT_MAX_RESULT_BYTES` | `100000` | `agent` | Largest tool result sent to the model. 10000 to 140000. |
+
+A key and a catalogue entry go together: a listed provider with no key, or a key with no listed models, stops startup. Errors name the variable and never repeat a key.
+
 ## Single sign-on (SAML)
 
 SAML is configured in the web app by a global admin and stored in the database. Only one environment variable applies; `HM_SESSION_KEY` is also required. See [Single sign-on](../install/single-sign-on.md).
@@ -264,4 +300,6 @@ Startup fails when any of these hold:
 - A split role (`web`, `poller`, `coordinator`) runs without `HM_KV_URL`.
 - `HM_OAUTH=true` without `HM_API_TOKENS=true` or `HM_MCP_PUBLIC_URL`.
 - `HM_SMTP_HOST` is set without a valid `HM_SMTP_FROM`, or only one of `HM_SMTP_USERNAME` and `HM_SMTP_PASSWORD` is set.
+- `HM_AGENT_URL` is not a valid base URL, `HM_AGENT_CA_PEM` holds no certificate, or `HM_AGENT_RUN_TOKEN_TTL` is outside 1 minute to 1 hour.
+- The agent has no `HM_AGENT_PROVIDERS`, a provider without its key or region (or the reverse), or `HM_AGENT_FAKE_PROVIDER=true` against a non-loopback upstream.
 - `HM_SCAN_ENABLED=true` (outside fake mode) on a coordinating task with any of the five launch settings missing.

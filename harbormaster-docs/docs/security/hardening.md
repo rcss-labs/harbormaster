@@ -45,6 +45,20 @@ This checklist is for platform engineers taking Harbormaster to production. Each
 - [ ] Set `HM_RETENTION_AUDIT_LOG` to match your audit requirements (default one year).
 - [ ] Alarm on the metrics in [Health and metrics](../operations/health-and-metrics.md). Protect `/metrics` with `HM_METRICS_TOKEN`.
 
+## AI agent
+
+Skip this section if you do not run the agent (`HM_AGENT_URL` unset).
+
+- [ ] **Internal load balancers.** Harbormaster `internal = true` and the agent's load balancer in private subnets. Do not add a public listener to the agent.
+- [ ] **Egress is fenced in the application only.** The agent's tasks may reach `0.0.0.0/0` on 443. For a stricter fence, put your own filter in front of the NAT gateway that allows only your providers and Harbormaster, or use Bedrock only and replace the `task_to_internet` rule with VPC endpoints.
+- [ ] **Keep redaction on for external providers.** Lift it only for a provider you accept receiving environment values, and only after you decide that. Secret-looking values are redacted either way. Log scrubbing is best effort.
+- [ ] **Few users.** Turn on AI chat only for users who need it. Review `user_ai_chat` audit entries.
+- [ ] **Keys.** Keep provider API keys in Secrets Manager only, one secret per provider. Rotate them as in the [runbook](../operations/runbooks/ai-agent.md). Give the execution role `kms:Decrypt` if a customer-managed key encrypts them.
+- [ ] **Allowance.** Set a monthly allowance you are happy to lose, and lower `limits.max_run_tokens` and `limits.max_steps` if the defaults are generous.
+- [ ] **Bedrock.** Use ECS container credentials. Do not set `AWS_ENDPOINT_URL_*` in the agent's environment: the STS and SSO credential clients honour them.
+- [ ] **Retention.** Review `HM_RETENTION_AGENT_CONVERSATIONS` (30 days by default).
+- [ ] **Alarms.** Set `alarm_sns_topic_arns` on the agent module.
+
 ## Related pages
 
 - [Security model](security-model.md)

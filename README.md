@@ -24,7 +24,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team one pla
 - **Debug**: logs and live tail, log search across services, config search, metrics, a per-service timeline, and a terminal into running tasks through ECS Exec
 - **Control access**: tag-based permissions checked on every request, SAML single sign-on, access tokens, and an audit log
 - **Stay ahead of problems**: image vulnerability scanning, off-hours schedules, and failure alerts to Slack, Telegram, PagerDuty, webhooks or email
-- **AI access**: a read-only MCP gateway so AI assistants can query the estate with the user's own permissions
+- **AI access**: a read-only MCP gateway so AI assistants can query the estate with the user's own permissions, and an optional AI chat in the web app that is read-only too, with a monthly spending allowance
 
 Harbormaster is one Go binary serving an embedded React app, backed by Postgres, with optional Valkey or Redis. It reaches AWS by assuming an IAM role in each managed account. See the [architecture](harbormaster-docs/docs/getting-started/architecture.md).
 
@@ -40,6 +40,8 @@ make run                                         # http://127.0.0.1:8480
 
 Sign in as `sam` / `harbormaster-e2e-1`. Details: [Quickstart (local)](harbormaster-docs/docs/getting-started/quickstart-local.md).
 
+To try the AI chat on a canned model with no provider key, start the app with `HM_AGENT=1 make run` and run `make run-agent` in a second terminal. See [Install the AI agent](harbormaster-docs/docs/install/ai-agent.md#try-it-locally).
+
 To run it in AWS, follow [Quickstart (AWS)](harbormaster-docs/docs/getting-started/quickstart-aws.md) and the [install guide](harbormaster-docs/docs/install/prerequisites.md).
 
 ## Documentation
@@ -47,7 +49,7 @@ To run it in AWS, follow [Quickstart (AWS)](harbormaster-docs/docs/getting-start
 | | |
 |---|---|
 | [Getting started](harbormaster-docs/docs/getting-started/what-is-harbormaster.md) | Concepts, architecture, quickstarts |
-| [Install](harbormaster-docs/docs/install/prerequisites.md) | Image, Terraform, AWS accounts, SSO, split services, MCP gateway, upgrades |
+| [Install](harbormaster-docs/docs/install/prerequisites.md) | Image, Terraform, AWS accounts, SSO, split services, MCP gateway, AI agent, upgrades |
 | [User guides](harbormaster-docs/docs/guides/navigating.md) | Deploy, roll back, logs, search, terminal, scaling, image security, alerts, permissions |
 | [Operations](harbormaster-docs/docs/operations/health-and-metrics.md) | Health, high availability, throttling, costs, retention, backups, troubleshooting |
 | [Reference](harbormaster-docs/docs/reference/configuration.md) | Configuration, CLI, HTTP API, permissions, metrics, Terraform modules |

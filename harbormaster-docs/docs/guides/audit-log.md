@@ -27,6 +27,7 @@ The service actions are in each service's operations log, not here, apart from t
 | Off-hours | `offhours_schedule_create`, `offhours_schedule_update`, `offhours_schedule_delete`, `offhours_sleep`, `offhours_wake` |
 | Notifications | `notification_route_create`, `notification_route_update`, `notification_route_delete`, `notification_delivery_retry` |
 | Image security | `security.setting`, `security.rescan`, `security.accept`, `security.accept_package`, `security.revoke`, `security.base_image`, `security.deploy_anyway` |
+| AI agent | `agent_run` (one per chat question or model test: run id, role, provider, model, tools used, tokens, cost in micro-dollars and outcome, never the text), `agent_settings_update` (old and new allowance, chat model and providers with redaction lifted), `user_ai_chat` (AI chat turned on or off for a user) |
 | Other | `settings_update`, `log_search` (who searched which services, over what range) |
 
 Entries never contain secrets: token names and ids are logged, never the token. Entries are kept for `HM_RETENTION_AUDIT_LOG` (8760 hours, one year, by default). See [Data retention](../operations/data-retention.md).

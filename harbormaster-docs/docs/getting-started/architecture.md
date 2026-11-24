@@ -98,6 +98,21 @@ The React app is built at image build time and embedded in the binary. Browsers 
 
 `harbormaster-mcp` is a thin, read-only translator. It speaks the Model Context Protocol on `POST /mcp`. Each tool call becomes one read request to Harbormaster's own API, carrying the caller's own access token. It holds no credentials, no database or cache access and no AWS permissions. It is the only public piece: Harbormaster stays on an internal load balancer. See [MCP gateway](../install/mcp-gateway.md) and [AI access with MCP](../guides/ai-access-mcp.md).
 
+## AI agent
+
+The optional AI agent (`harbormaster-agent`) answers chat questions about the estate. It is a separate service on its own internal load balancer, off unless `HM_AGENT_URL` is set.
+
+```text
+ browser --> web (chat API, saves messages) --HTTPS--> agent LB --> agent tasks
+                |                                                     |   |
+                |  internal ALB  <---- read-only run token -----------+   +--> model provider
+                +-- Postgres: conversations, runs, allowance            (Anthropic, OpenAI, Google,
+                                                                         or Bedrock through the task role)
+ coordinator: repairs interrupted runs and writes their audit rows
+```
+
+For each question, a web task reserves the worst-case cost from the monthly allowance, mints a read-only run token for the asking user, and streams the agent's answer to the browser. The agent loops between the model and the shared read-only tools. Each tool call is one read request to Harbormaster's internal load balancer, carrying the run token. The agent has no database, cache, SAML or AWS estate access. Provider keys live only in its environment. The coordinator repairs runs that were interrupted. See [AI chat](../guides/ai-agent-chat.md), [Install the AI agent](../install/ai-agent.md) and the [security model](../security/security-model.md#ai-agent).
+
 ## Scanner
 
 Image scanning runs Syft and Grype in a separate ECS task that the coordinator starts on demand. The scanner has its own image, its own execution role, a private S3 bucket for jobs and results, and a scan role in each connected account that can only pull images from ECR. It has no database URL, session key or access role. See [Image security](../guides/image-security.md).

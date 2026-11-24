@@ -31,6 +31,7 @@ An invalid duration stops the server at start with an error that names the varia
 | `HM_RETENTION_CAPACITY_DAILY` | `8760h` (365 days) | Daily cluster capacity rollups | Day older than the age |
 | `HM_RETENTION_UTIL_DAILY` | `2160h` (90 days) | Daily service utilisation rollups | Day older than the age |
 | `HM_RETENTION_NOTIFICATION_LOG` | `720h` (30 days) | Notification delivery log and resolved alert incidents | Older than the age. Deliveries of an incident that is still open are kept |
+| `HM_RETENTION_AGENT_CONVERSATIONS` | `720h` (30 days) | AI chat conversations: your messages, the answers and the names of tools used | No activity for the age. The run records (who, model, tools, tokens, cost) stay |
 | `HM_RETENTION_SCAN_IMAGES` | `168h` (7 days) | Image scan results | Not requested for the age |
 | `HM_RETENTION_SCAN_RUNS` | `720h` (30 days) | Image scan run records | Finished longer ago than the age |
 
@@ -48,12 +49,15 @@ These are not configurable.
 | Image platform records (ARM64 check) | Removed after 7 days without a task definition that mentions the image |
 | Expired access tokens | 1 day after expiry |
 | Daily token log-search ledger | 35 days |
+| AI agent run records | Kept after their conversation or user is gone, so usage history survives. The `agent_run` audit rows follow `HM_RETENTION_AUDIT_LOG` |
+| Run tokens | Expire after `HM_AGENT_RUN_TOKEN_TTL` (15 minutes by default) |
 | Expired sessions, SSO requests and assertion IDs, OAuth codes and grants | Removed once expired |
 
 ## What is not in the database
 
 - **Logs and metrics** stay in CloudWatch in your AWS accounts, under your own retention settings. Harbormaster reads them and does not copy them.
 - **Terminal sessions** are not recorded. The operations log records who opened a session, the task, the container, the command and how long it lasted. To keep a transcript, turn on Session Manager logging.
+- **Tool results** of the AI chat are never stored. Only the question, the answer and the tool names are. The model provider keeps what it keeps under its own terms: check them.
 - **Server logs** go to the CloudWatch log group of the module, with `log_retention_days` (default 30).
 - **Scan results** in S3 expire by lifecycle rule: `jobs/` after 7 days, `results/` after 30 and `grype-db/` after 10.
 

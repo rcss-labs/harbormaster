@@ -9,7 +9,7 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 | `cmd/` | The three binaries |
 | `internal/` | All Go packages (not importable from outside the module) |
 | `web/` | React single-page app, Vitest tests and Playwright e2e specs |
-| `terraform/` | Modules (`harbormaster`, `harbormaster-access`, `harbormaster-mcp`) and examples |
+| `terraform/` | Modules (`harbormaster`, `harbormaster-access`, `harbormaster-mcp`, `harbormaster-agent`) and examples |
 | `tools/` | Scripts for checks, smoke tests, image checks and the floci harness |
 | `docs/` | Design notes and ops runbooks |
 | `harbormaster-docs/` | This documentation site |
@@ -21,6 +21,7 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 | Package | Purpose |
 |---|---|
 | `cmd/harbormaster` | The server and embedded web UI. Commands include `serve`, `healthcheck`, `version` and `create-admin` |
+| `cmd/harbormaster-agent` | The AI agent service (`serve`, `healthcheck`, `version`). It has no database, cache or estate access and reads Harbormaster with run tokens |
 | `cmd/harbormaster-mcp` | The public, read-only MCP gateway. It holds no credentials and uses the caller's own token |
 | `cmd/harbormaster-scanner` | The scan task. Reads a job from the scan bucket, scans ECR images with Syft and Grype, writes results |
 
