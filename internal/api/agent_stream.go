@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -332,14 +334,10 @@ func (t *chatTurn) finish(res turnResult) {
 			state = "done"
 		}
 		_ = t.step("settle the run", func(ctx context.Context) error {
-			err := t.s.Store.SettleAgentRun(ctx, t.run.ID, state, nonNil(t.tools), t.s.now())
-			if errors.Is(err, store.ErrAgentRunNotRunning) {
-				return nil // the sweep got there first; it kept the figures and the tools
-			}
-			return err
+			return t.s.settleRun(ctx, t.run.ID, state, t.tools)
 		})
 		_ = t.step("delete the run token", func(ctx context.Context) error {
-			return t.s.Store.DeleteRunToken(ctx, t.run.ID)
+			return t.s.dropRunToken(ctx, t.run.ID)
 		})
 		_ = t.step("write the audit row", func(ctx context.Context) error {
 			return t.s.Store.Audit(ctx, store.AuditEntry{
@@ -369,19 +367,39 @@ func (t *chatTurn) finish(res turnResult) {
 	})
 }
 
-// step runs one finishing step on a context detached from the request, and turns a panic or an error into a log
-// line so the steps after it still run.
-func (t *chatTurn) step(name string, fn func(ctx context.Context) error) (err error) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.r.Context()), settleStepTimeout)
+// step runs one finishing step of the turn; see runStep.
+func (t *chatTurn) step(name string, fn func(ctx context.Context) error) error {
+	return t.s.runStep(t.r, t.run.ID, name, fn)
+}
+
+// runStep runs one step that ends a run (any role) on a context detached from the request, and turns a panic or
+// an error into a log line so the steps after it still run.
+func (s *Server) runStep(r *http.Request, runID uuid.UUID, name string, fn func(ctx context.Context) error) (err error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), settleStepTimeout)
 	defer cancel()
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("panic: %v", rec)
-			t.s.log().Error("agent turn step panicked", "step", name, "run_id", t.run.ID, "panic", rec, "stack", string(debug.Stack()))
+			s.log().Error("agent turn step panicked", "step", name, "run_id", runID, "panic", rec, "stack", string(debug.Stack()))
 		}
 	}()
 	if err = fn(ctx); err != nil {
-		t.s.log().Error("agent turn step failed", "step", name, "run_id", t.run.ID, "error", err)
+		s.log().Error("agent turn step failed", "step", name, "run_id", runID, "error", err)
 	}
 	return err
+}
+
+// settleRun finishes a run as done or failed. A run the stale sweep already failed is not an error: the sweep
+// kept the figures and the tools.
+func (s *Server) settleRun(ctx context.Context, runID uuid.UUID, state string, tools []string) error {
+	err := s.Store.SettleAgentRun(ctx, runID, state, nonNil(tools), s.now())
+	if errors.Is(err, store.ErrAgentRunNotRunning) {
+		return nil
+	}
+	return err
+}
+
+// dropRunToken deletes the run token minted for runID.
+func (s *Server) dropRunToken(ctx context.Context, runID uuid.UUID) error {
+	return s.Store.DeleteRunToken(ctx, runID)
 }
