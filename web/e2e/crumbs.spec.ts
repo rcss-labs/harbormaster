@@ -44,16 +44,29 @@ for (const [role, hasAskAI] of [['sam', true], ['dana', false]] as const) {
       expect(read.header.height, 'the header stays bounded').toBeLessThanOrEqual(300)
     })
 
-    // Measured with a 96px crumb box: the right-hand controls (Keyboard shortcuts, UI scale) end 49 to 130px past the
-    // window at 200 % on 1920px, with or without the Ask AI button. The box needs less than 96px or the bar needs a
-    // second row; either is a design call, so the check stays visible but off until then.
-    test.fixme('the controls stay in the window at 200 % with a long crumb', async ({ page }) => {
+    // No control may end up outside the window (a user at 200 % could not scale back): the bar wraps to a second row.
+    test('every control stays in the window at 200 % with a long crumb', async ({ page }) => {
       await openLongCrumb(page)
-      const overflow = await page.evaluate(() =>
-        Math.max(...[...document.querySelectorAll('header button')].map((el) => el.getBoundingClientRect().right - window.innerWidth)),
-      )
-      expect(overflow).toBeLessThanOrEqual(1)
+      const read = await page.evaluate(() => ({
+        innerWidth: window.innerWidth,
+        rights: [...document.querySelectorAll('header button, header a')].map((el) => el.getBoundingClientRect().right),
+        lefts: [...document.querySelectorAll('header button, header a')].map((el) => el.getBoundingClientRect().x),
+      }))
+      expect(Math.max(...read.rights)).toBeLessThanOrEqual(read.innerWidth + 1)
+      expect(Math.min(...read.lefts)).toBeGreaterThanOrEqual(-1)
+      await expect(page.getByRole('button', { name: 'Keyboard shortcuts' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'UI scale' })).toBeVisible()
     })
+
+    for (const width of [1280, 1440, 1920]) {
+      test(`the bar stays one row at ${width}px with usual names`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto('/clusters')
+        await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).getByText('Clusters')).toBeVisible()
+        const height = await page.evaluate(() => document.querySelector('header')!.getBoundingClientRect().height)
+        expect(height).toBeLessThanOrEqual(57)
+      })
+    }
 
     test('a focused crumb link shows its outline', async ({ page }) => {
       await openLongCrumb(page)
