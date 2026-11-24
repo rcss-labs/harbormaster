@@ -1,15 +1,15 @@
 .panel { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
-.btn { height: 28px; padding: 0 10px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .looking { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .messages { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .empty, .notice { margin: 0; color: var(--muted); font-size: 12px; }
-.problem { margin: 0; padding: 8px 10px; border: 1px solid var(--bad); border-radius: var(--r); color: var(--bad); font-size: 13px; }
-.userMsg { align-self: flex-end; max-width: 90%; padding: 8px 10px; border-radius: var(--r); background: var(--accent-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.problem { margin: 0; padding: 8px 12px; border: 1px solid var(--bad); border-radius: var(--r); color: var(--bad); font-size: 13px; }
+.userMsg { align-self: flex-end; max-width: 90%; padding: 8px 12px; border-radius: var(--r); background: var(--accent-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .agentMsg { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .tool { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--raised); color: var(--text-2); font: 11px var(--mono); }
@@ -19,15 +19,15 @@
 .answer p, .answer ul, .answer ol { margin: 0; }
 .answer ul, .answer ol { padding-left: 20px; }
 .answer code { font: 12px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--raised); }
-.codeBlock { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); background: var(--raised); overflow-x: auto; }
+.codeBlock { margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--raised); overflow-x: auto; }
 .codeBlock code { padding: 0; background: none; white-space: pre; }
 .composer { display: flex; align-items: flex-end; gap: 8px; width: 100%; }
-.input { flex: 1; min-width: 0; resize: none; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 13px/1.4 inherit; }
+.input { flex: 1; min-width: 0; resize: none; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); font: 13px/1.4 inherit; }
 .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .input:disabled { opacity: 0.6; }
 .convList { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .convRow { display: flex; align-items: center; gap: 8px; }
-.convOpen { flex: 1; min-width: 0; display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+.convOpen { flex: 1; min-width: 0; display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: inherit; }
 .convOpen:hover { background: var(--hover); }
 .convOpen[aria-current='true'] { border-color: var(--accent-line); }
 .convTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
