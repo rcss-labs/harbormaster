@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -304,99 +305,133 @@ func (s *Server) getDesiredCount(w http.ResponseWriter, r *http.Request) {
 // redactedValue replaces an environment value that must not reach the caller.
 const redactedValue = secretshape.Redacted
 
-// envRedaction says which environment values an answer hides.
+// envRedaction says which environment values an answer hides. The zero value hides everything, so a mode that
+// was never decided fails closed.
 type envRedaction int
 
 const (
-	redactNone         envRedaction = iota
-	redactAll                       // every value
-	redactSecretShapes              // only values whose name or content looks secret
+	redactAll          envRedaction = iota // every value
+	redactNone                             // no value
+	redactSecretShapes                     // only values whose name or content looks secret
 )
 
-// redactionFor decides the mode for this request. A session is never redacted. A personal or OAuth token is
-// redacted entirely while HM_TOKEN_REDACT_ENV is on (off by default, owner decision 9). A run token is redacted
-// entirely when that switch is on or its provider was not lifted, and otherwise only for secret-looking values:
-// the operator's switch is never weakened by an admin's per-provider lift.
+// redactionFor decides the mode for this request.
 func (s *Server) redactionFor(r *http.Request) envRedaction {
 	cred, ok := auth.CredentialFrom(r.Context())
-	if !ok || cred.Kind != auth.CredentialToken {
-		return redactNone
-	}
-	if cred.TokenKind == apitoken.KindRun {
-		if s.Cfg.TokenRedactEnv || cred.RedactEnv {
-			return redactAll
-		}
-		return redactSecretShapes
-	}
-	if s.Cfg.TokenRedactEnv {
-		return redactAll
-	}
-	return redactNone
+	return redactionMode(cred, ok, s.Cfg.TokenRedactEnv)
 }
 
-// redactEnvironment returns a copy of the task definition with containerDefinitions[].environment[].value replaced
-// by "[redacted]" as the mode says, and whether the answer should be flagged as redacted. Names, secrets[].valueFrom
-// and everything else are kept. The input is never modified: definitions may be shared with a cache.
+// redactionMode: a session is never redacted. A personal or OAuth access token is redacted entirely while
+// HM_TOKEN_REDACT_ENV is on (off by default, owner decision 9). A run token is redacted entirely when that switch
+// is on or its provider was not lifted, and otherwise only for secret-looking values: the operator's switch is
+// never weakened by an admin's per-provider lift. No credential or an unknown kind is redacted entirely.
+func redactionMode(cred auth.Credential, ok, tokenRedactEnv bool) envRedaction {
+	if !ok {
+		return redactAll
+	}
+	switch cred.Kind {
+	case auth.CredentialSession:
+		return redactNone
+	case auth.CredentialToken:
+		switch cred.TokenKind {
+		case apitoken.KindPAT, apitoken.KindOAuthAccess:
+			if tokenRedactEnv {
+				return redactAll
+			}
+			return redactNone
+		case apitoken.KindRun:
+			if tokenRedactEnv || cred.RedactEnv {
+				return redactAll
+			}
+			return redactSecretShapes
+		}
+	}
+	return redactAll
+}
+
+// redactEnvironment returns a copy of the task definition with the environment values replaced by "[redacted]" as
+// the mode says, and whether the answer should be flagged as redacted. Names, secrets[].valueFrom and everything
+// else are kept. The input is never modified: definitions may be shared with a cache. Any shape this code does not
+// expect (another type, another key casing, a non-string value) is replaced rather than passed through.
 func redactEnvironment(definition map[string]any, mode envRedaction) (map[string]any, bool) {
 	if mode == redactNone {
 		return definition, false
 	}
 	replaced := mode == redactAll
-	containers, ok := definition["containerDefinitions"].([]any)
-	if !ok {
-		return definition, replaced
+	hide := func() any {
+		replaced = true
+		return redactedValue
 	}
 	out := make(map[string]any, len(definition))
 	for key, value := range definition {
-		out[key] = value
-	}
-	redactedContainers := make([]any, len(containers))
-	for i, raw := range containers {
-		container, ok := raw.(map[string]any)
-		if !ok {
-			redactedContainers[i] = raw
+		if !strings.EqualFold(key, "containerDefinitions") {
+			out[key] = value
 			continue
 		}
-		copied := make(map[string]any, len(container))
-		for key, value := range container {
-			copied[key] = value
+		containers, ok := value.([]any)
+		if !ok {
+			out[key] = hide()
+			continue
 		}
-		if environment, ok := container["environment"].([]any); ok {
-			redactedEnvironment := make([]any, len(environment))
-			for j, rawEntry := range environment {
-				entry, ok := rawEntry.(map[string]any)
-				if !ok {
-					redactedEnvironment[j] = rawEntry
+		redactedContainers := make([]any, len(containers))
+		for i, raw := range containers {
+			container, ok := raw.(map[string]any)
+			if !ok {
+				redactedContainers[i] = hide()
+				continue
+			}
+			copied := make(map[string]any, len(container))
+			for field, fieldValue := range container {
+				if !strings.EqualFold(field, "environment") {
+					copied[field] = fieldValue
 					continue
 				}
-				copiedEntry := make(map[string]any, len(entry))
-				for key, value := range entry {
-					copiedEntry[key] = value
-				}
-				if hides(mode, copiedEntry) {
-					copiedEntry["value"] = redactedValue
-					replaced = true
-				}
-				redactedEnvironment[j] = copiedEntry
+				copied[field] = redactEntries(fieldValue, mode, hide)
 			}
-			copied["environment"] = redactedEnvironment
+			redactedContainers[i] = copied
 		}
-		redactedContainers[i] = copied
+		out[key] = redactedContainers
 	}
-	out["containerDefinitions"] = redactedContainers
 	return out, replaced
 }
 
-// hides reports whether the mode replaces this environment entry's value.
-func hides(mode envRedaction, entry map[string]any) bool {
-	value, has := entry["value"]
-	if !has {
-		return false
+func redactEntries(raw any, mode envRedaction, hide func() any) any {
+	entries, ok := raw.([]any)
+	if !ok {
+		return hide()
 	}
-	if mode == redactAll {
+	redacted := make([]any, len(entries))
+	for i, rawEntry := range entries {
+		entry, ok := rawEntry.(map[string]any)
+		if !ok {
+			redacted[i] = hide()
+			continue
+		}
+		name := ""
+		for key, value := range entry {
+			if strings.EqualFold(key, "name") {
+				name, _ = value.(string)
+			}
+		}
+		copied := make(map[string]any, len(entry))
+		for key, value := range entry {
+			if strings.EqualFold(key, "value") && hidesValue(mode, name, value) {
+				copied[key] = hide()
+				continue
+			}
+			copied[key] = value
+		}
+		redacted[i] = copied
+	}
+	return redacted
+}
+
+// hidesValue reports whether the mode replaces one environment value. In secrets-only mode a value that is not a
+// string counts as secret.
+func hidesValue(mode envRedaction, name string, value any) bool {
+	if mode != redactSecretShapes {
 		return true
 	}
-	name, _ := entry["name"].(string)
-	text, _ := value.(string)
-	return secretshape.NameLooksSecret(name) || secretshape.ValueLooksSecret(text)
+	text, ok := value.(string)
+	return !ok || secretshape.NameLooksSecret(name) || secretshape.ScrubText(text) != text
 }

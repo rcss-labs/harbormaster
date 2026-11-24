@@ -1,11 +1,15 @@
 package api
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
+	"github.com/rcss-labs/harbormaster/internal/apitoken"
+	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
 	"github.com/rcss-labs/harbormaster/internal/config"
 )
@@ -41,13 +45,28 @@ func (d definitionEnvironment) environmentValues() map[string]string {
 	return out
 }
 
-type redactCase struct {
-	redactAll     bool // HM_TOKEN_REDACT_ENV
-	runTokenFlag  bool // the run token's RedactEnv
-	personalToken bool
+// requireAllRedacted fails unless got has exactly the variables of real, every one of them [redacted].
+func requireAllRedacted(t *testing.T, got, real definitionEnvironment) {
+	t.Helper()
+	values, want := got.environmentValues(), real.environmentValues()
+	if len(want) == 0 || len(values) != len(want) {
+		t.Fatalf("got %d variables, the real definition has %d", len(values), len(want))
+	}
+	for name := range want {
+		if value, ok := values[name]; !ok || value != "[redacted]" {
+			t.Errorf("%s = %q, want [redacted]", name, value)
+		}
+	}
 }
 
-// readPlanted answers auth-service's definition (revision empty) or one revision to the client the case describes.
+type redactCase struct {
+	redactAll     bool // HM_TOKEN_REDACT_ENV is on
+	runTokenFlag  bool // the run token was minted with RedactEnv true (the provider was not lifted)
+	personalToken bool // use a personal token instead of a run token
+}
+
+// readPlanted answers auth-service's deployed definition (revisionPath empty) or that revision to the client the case
+// describes, and the same answer to a session for comparison.
 func readPlanted(t *testing.T, c redactCase, revisionPath string) (definitionEnvironment, definitionEnvironment) {
 	t.Helper()
 	srv, api, fk, st, _ := newServerCustomAPI(t, true, withAgent(withTokens(func(cfg *config.Config) { cfg.TokenRedactEnv = c.redactAll }, nil)))
@@ -71,15 +90,12 @@ func TestTaskDefinition_RunTokenRedactsAllValuesByDefault(t *testing.T) {
 	if !got.EnvironmentRedacted {
 		t.Error("environment_redacted is false")
 	}
-	for name, value := range got.environmentValues() {
-		if value != "[redacted]" {
-			t.Errorf("%s = %q, want [redacted]", name, value)
-		}
-	}
+	requireAllRedacted(t, got, real)
 	if _, wantSecrets := real.counts(); wantSecrets == 0 {
 		t.Fatal("fixture has no secrets references")
 	}
-	if _, gotSecrets := got.counts(); gotSecrets != func() int { _, s := real.counts(); return s }() {
+	_, realSecrets := real.counts()
+	if _, gotSecrets := got.counts(); gotSecrets != realSecrets {
 		t.Error("secret references were dropped")
 	}
 }
@@ -103,22 +119,18 @@ func TestTaskDefinition_RunTokenLiftedStillRedactsSecretShapes(t *testing.T) {
 			t.Errorf("%s = %q, changed from %q", name, value, wantValues[name])
 		}
 	}
-	if values["ISSUER"] == "[redacted]" {
-		t.Error("a harmless seeded variable was redacted in secrets-only mode")
+	if values["ISSUER"] != "https://auth.rcss.local" {
+		t.Errorf("ISSUER = %q, want its real value in secrets-only mode", values["ISSUER"])
 	}
 }
 
 // An operator's global switch is never weakened by an admin's per-provider lift.
 func TestTaskDefinition_RunTokenLiftIgnoredWhileGlobalSwitchOn(t *testing.T) {
-	got, _ := readPlanted(t, redactCase{redactAll: true, runTokenFlag: false}, "")
+	got, real := readPlanted(t, redactCase{redactAll: true, runTokenFlag: false}, "")
 	if !got.EnvironmentRedacted {
 		t.Error("environment_redacted is false")
 	}
-	for name, value := range got.environmentValues() {
-		if value != "[redacted]" {
-			t.Errorf("%s = %q, want [redacted]", name, value)
-		}
-	}
+	requireAllRedacted(t, got, real)
 }
 
 func TestTaskDefinition_PersonalTokenUnchanged(t *testing.T) {
@@ -136,18 +148,112 @@ func TestTaskDefinition_PersonalTokenUnchanged(t *testing.T) {
 }
 
 func TestRevision_RunTokenRedaction(t *testing.T) {
-	all, _ := readPlanted(t, redactCase{runTokenFlag: true}, "15")
+	all, realRevision := readPlanted(t, redactCase{runTokenFlag: true}, "15")
 	if !all.EnvironmentRedacted {
 		t.Error("revision: environment_redacted is false")
 	}
-	for name, value := range all.environmentValues() {
-		if value != "[redacted]" {
-			t.Errorf("revision %s = %q, want [redacted]", name, value)
-		}
-	}
+	requireAllRedacted(t, all, realRevision)
 	lifted, _ := readPlanted(t, redactCase{runTokenFlag: false}, "15")
 	values := lifted.environmentValues()
 	if !lifted.EnvironmentRedacted || values["DATABASE_HOST"] != "db.internal" || values["API_KEY"] != "[redacted]" || values["EXTRA"] != "[redacted]" {
 		t.Errorf("revision, lifted: %v redacted=%v", values, lifted.EnvironmentRedacted)
+	}
+}
+
+func TestRedactionFor_EveryBranch(t *testing.T) {
+	cases := []struct {
+		name     string
+		cred     *auth.Credential
+		switchOn bool
+		want     envRedaction
+	}{
+		{"no credential", nil, false, redactAll},
+		{"session", &auth.Credential{Kind: auth.CredentialSession}, true, redactNone},
+		{"pat, switch off", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindPAT}, false, redactNone},
+		{"pat, switch on", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindPAT}, true, redactAll},
+		{"oauth access, switch off", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindOAuthAccess}, false, redactNone},
+		{"oauth access, switch on", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindOAuthAccess}, true, redactAll},
+		{"run, not lifted", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindRun, RedactEnv: true}, false, redactAll},
+		{"run, lifted", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindRun}, false, redactSecretShapes},
+		{"run, lifted, switch on", &auth.Credential{Kind: auth.CredentialToken, TokenKind: apitoken.KindRun}, true, redactAll},
+		{"unknown token kind", &auth.Credential{Kind: auth.CredentialToken, TokenKind: "future"}, false, redactAll},
+		{"unknown credential kind", &auth.Credential{Kind: 99}, false, redactAll},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var cred auth.Credential
+			if c.cred != nil {
+				cred = *c.cred
+			}
+			if got := redactionMode(cred, c.cred != nil, c.switchOn); got != c.want {
+				t.Errorf("mode %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+func definitionWithEnv(entries ...any) map[string]any {
+	return map[string]any{"family": "f", "containerDefinitions": []any{
+		map[string]any{"name": "app", "environment": entries},
+		map[string]any{"name": "sidecar", "environment": []any{map[string]any{"name": "SIDE", "value": "side-secret-value-1"}}},
+	}}
+}
+
+func TestRedactEnvironment_SecretShapesByValue(t *testing.T) {
+	hidden := []string{
+		"Server=db;User Id=app;Password=hunter2",
+		"-Xmx512m -Dspring.datasource.password=hunter2",
+		`{"password":"hunter2"}`,
+		"https://x.example/hook?token=abc123def",
+	}
+	visible := []string{"db.internal:5432", "-Xmx512m", "eu-west-1",
+		"123456789012.dkr.ecr.eu-west-1.amazonaws.com/app:1.2.3", "arn:aws:iam::123456789012:role/app-task"}
+	var entries []any
+	for i, v := range append(append([]string{}, hidden...), visible...) {
+		entries = append(entries, map[string]any{"name": "VAR_" + string(rune('A'+i)), "value": v})
+	}
+	out, flagged := redactEnvironment(definitionWithEnv(entries...), redactSecretShapes)
+	if !flagged {
+		t.Error("not flagged")
+	}
+	got := out["containerDefinitions"].([]any)[0].(map[string]any)["environment"].([]any)
+	for i, v := range hidden {
+		if got[i].(map[string]any)["value"] != "[redacted]" {
+			t.Errorf("%q not hidden", v)
+		}
+	}
+	for i, v := range visible {
+		if got[len(hidden)+i].(map[string]any)["value"] != v {
+			t.Errorf("%q was hidden", v)
+		}
+	}
+}
+
+// With a mode other than none, a shape the code does not understand is hidden, never passed through.
+func TestRedactEnvironment_FailsClosedOnUnexpectedShapes(t *testing.T) {
+	const real = "real-value-9f8e7d"
+	cases := map[string]map[string]any{
+		"containerDefinitions not a list": {"containerDefinitions": map[string]any{"environment": []any{map[string]any{"name": "A", "value": real}}}},
+		"environment not a list":          {"containerDefinitions": []any{map[string]any{"name": "a", "environment": map[string]any{"A": real}}}},
+		"container not an object":         {"containerDefinitions": []any{real}},
+		"entry not an object":             {"containerDefinitions": []any{map[string]any{"environment": []any{real}}}},
+		"capitalised keys": {"ContainerDefinitions": []any{map[string]any{"Environment": []any{
+			map[string]any{"Name": "API_KEY", "Value": real}}}}},
+		"non-string value": {"containerDefinitions": []any{map[string]any{"environment": []any{
+			map[string]any{"name": "HOST", "value": map[string]any{"x": real}}}}}},
+		"duplicate names": {"containerDefinitions": []any{map[string]any{"environment": []any{
+			map[string]any{"name": "HOST", "value": "db.internal"}, map[string]any{"name": "HOST", "value": real + "-API_KEY=x"}}}}},
+	}
+	for name, def := range cases {
+		for _, mode := range []envRedaction{redactAll, redactSecretShapes} {
+			out, _ := redactEnvironment(def, mode)
+			raw, err := json.Marshal(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), real) {
+				t.Errorf("%s, mode %d: real value in %s", name, mode, raw)
+			}
+		}
 	}
 }

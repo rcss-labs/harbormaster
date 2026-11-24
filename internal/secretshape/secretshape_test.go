@@ -47,6 +47,23 @@ func TestNameLooksSecret(t *testing.T) {
 		{"LOG_LEVEL", false},
 		{"DATABASE_HOST", false},
 		{"", false},
+		{"API_KEYS", true},
+		{"AUTH_TOKENS", true},
+		{"APP_SECRETS", true},
+		{"ADMIN_PASSWORDS", true},
+		{"DB_PASS", true},
+		{"GPG_PASSPHRASE", true},
+		{"PGPASSWORD", true},
+		{"DBPASSWORD", true},
+		{"MYSQL_ROOTPASSWD", true},
+		{"SECRETKEY", true},
+		{"ACCESSKEY", true},
+		{"PRIVATEKEY", true},
+		{"APIKEYS", true},
+		{"BYPASS_CACHE", false},
+		{"PASSIVE_MODE", false},
+		{"KEYSPACE", false},
+		{"COMPASS_URL", false},
 	}
 	for _, tt := range tests {
 		if got := NameLooksSecret(tt.name); got != tt.want {
@@ -179,6 +196,27 @@ func TestScrubText_FindsSecretsInsideOtherText(t *testing.T) {
 	for _, tt := range tests {
 		if got := ScrubText(tt.in); got != tt.want {
 			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// Real tokens are prefix + 12 base32 characters + "_" + 43 base64url characters (see apitoken.Generate).
+func TestHarbormasterTokenShape(t *testing.T) {
+	const id = "abcd2345efgh"
+	// The first secret has no random-looking run, so only the token pattern can catch it.
+	secrets := []string{strings.Repeat("a", 43), "Qk3Zx9Lm2Pv7Rt4Wn8Yb5Jc1Hd6Gf0Sa-eAbCdEfGhI"}
+	for _, prefix := range []string{"hmp_", "hmo_", "hmr_", "hma_"} {
+		for _, secret := range secrets {
+			if len(secret) != 43 {
+				t.Fatalf("fixture secret is %d characters", len(secret))
+			}
+			token := prefix + id + "_" + secret
+			if !ValueLooksSecret(token) {
+				t.Errorf("%s token not detected", prefix)
+			}
+			if got := ScrubText("Authorization failed for " + token + " today"); got != "Authorization failed for "+Redacted+" today" {
+				t.Errorf("%s token: scrubbed to %q", prefix, got)
+			}
 		}
 	}
 }

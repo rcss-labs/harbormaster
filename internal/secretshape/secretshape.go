@@ -18,6 +18,8 @@ var secretSegments = map[string]bool{
 	"password": true, "passwd": true, "pwd": true,
 	"credential": true, "credentials": true,
 	"auth": true, "authorization": true, "private": true, "cert": true, "dsn": true,
+	"keys": true, "apikeys": true, "tokens": true, "secrets": true, "passwords": true, "passwds": true,
+	"pass": true, "passphrase": true, "secretkey": true, "accesskey": true, "privatekey": true,
 }
 
 // boundary is a non-alphanumeric character or the start of the text. It is
@@ -34,7 +36,9 @@ var valuePatterns = []*regexp.Regexp{
 	regexp.MustCompile(boundary + `(gh[po]_[A-Za-z0-9]{20,})`),
 	regexp.MustCompile(boundary + `(xox[bp]-[A-Za-z0-9-]{10,})`),
 	regexp.MustCompile(boundary + `(AIza[A-Za-z0-9_-]{30,})`),
-	regexp.MustCompile(boundary + `(hm[poar]_[A-Za-z0-9]{16,})`),
+	// Harbormaster tokens: prefix, 12 base32 characters, "_", 43 base64url characters. The second branch keeps
+	// shorter or malformed tokens caught.
+	regexp.MustCompile(boundary + `(hm[poar]_(?:[a-z2-7]{12}_[A-Za-z0-9_-]{43}|[A-Za-z0-9]{16,}))`),
 	// Standalone "Bearer <token>" as sent in an Authorization header.
 	regexp.MustCompile(boundary + `Bearer[ \t]+([A-Za-z0-9._~+/=-]+)`),
 }
@@ -77,7 +81,8 @@ var authToken = regexp.MustCompile(`^[ \t]+[A-Za-z0-9._~+/=-]+`)
 // KEYBOARD_LAYOUT and AUTHOR are not secret.
 func NameLooksSecret(name string) bool {
 	for _, segment := range nameSegments(name) {
-		if secretSegments[segment] {
+		// A glued segment such as pgpassword or dbpassword ends in the word.
+		if secretSegments[segment] || strings.HasSuffix(segment, "password") || strings.HasSuffix(segment, "passwd") {
 			return true
 		}
 	}
