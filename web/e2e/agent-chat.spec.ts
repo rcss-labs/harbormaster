@@ -79,8 +79,7 @@ test.describe('agent chat as sam', () => {
     await page.goto('/settings/agent')
     await expect(page.getByRole('combobox', { name: 'Model' })).toHaveValue('fake-1')
     await page.getByRole('button', { name: 'Test model' }).click()
-    await expect(page.getByRole('status').filter({ hasText: /\S/ })).not.toContainText(/fail|could not|error/i)
-    await expect(page.getByRole('status').filter({ hasText: /\S/ })).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: /\S/ })).toHaveText('The model answered.')
     await saveScreenshot(page, 'agent-settings.png')
   })
 })
@@ -89,26 +88,38 @@ test.describe('agent chat as a user without AI chat', () => {
   test.use(asUser('dana'))
 
   test('a user without AI chat sees no button', async ({ page }) => {
+    // The button is gated on /api/me, so wait for it: a check before the app knows would pass for any user.
+    const agentRequests: string[] = []
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/api/agent/')) agentRequests.push(request.url())
+    })
+    const meResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/me')
     await page.goto('/clusters')
+    const me = (await (await meResponse).json()) as { agent_enabled: boolean; ai_chat: boolean }
+    expect(me.agent_enabled, 'the agent is on').toBe(true)
+    expect(me.ai_chat, 'dana has no AI chat').toBe(false)
     await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
     await expect(askAI(page)).toHaveCount(0)
+    expect(agentRequests, 'no agent request is made').toEqual([])
   })
 })
 
-test.describe('pages with the agent on', () => {
-  test.use(asUser('dana'))
+for (const role of ['sam', 'dana'] as const) {
+  test.describe(`pages with the agent on, as ${role}`, () => {
+    test.use(asUser(role))
 
-  test('other pages log no console errors', async ({ page }) => {
-    const errors: string[] = []
-    page.on('console', (message) => {
-      if (message.type() === 'error') errors.push(message.text())
+    test('other pages log no console errors', async ({ page }) => {
+      const errors: string[] = []
+      page.on('console', (message) => {
+        if (message.type() === 'error') errors.push(message.text())
+      })
+      page.on('pageerror', (error) => errors.push(error.message))
+      for (const path of ['/clusters', '/services', '/tasks', '/settings/general']) {
+        await page.goto(path)
+        await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
+        await page.waitForLoadState('networkidle')
+      }
+      expect(errors).toEqual([])
     })
-    page.on('pageerror', (error) => errors.push(error.message))
-    for (const path of ['/clusters', '/services', '/tasks', '/settings/general']) {
-      await page.goto(path)
-      await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible()
-      await page.waitForLoadState('networkidle')
-    }
-    expect(errors).toEqual([])
   })
-})
+}

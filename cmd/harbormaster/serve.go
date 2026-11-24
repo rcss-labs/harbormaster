@@ -272,14 +272,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			return fmt.Errorf("notification secret box: %w", err)
 		}
 	}
-	var demoOptions []devseed.Option
-	if cfg.Notify.FakeDemo {
-		demoOptions = []devseed.Option{devseed.WithNotifyDemo(notifyBox, cfg.BaseURL)}
-	}
-
-	if cfg.AgentEnabled() {
-		demoOptions = append(demoOptions, devseed.WithAgentDemo())
-	}
+	demoOptions := demoSeedOptions(cfg, notifyBox)
 
 	var (
 		clients awsx.Clients
@@ -581,4 +574,17 @@ func imagePlatformResolver(cfg config.Config, st *store.Store, clients awsx.Clie
 		resolver.Public = &registry.Client{HTTP: registry.NewHTTPClient(safedial.Policy{}, nil)}
 	}
 	return resolver
+}
+
+// demoSeedOptions picks the extras fake AWS mode seeds: the demo notification routes, and the AI agent demo only when
+// the agent is switched on (HM_AGENT_URL).
+func demoSeedOptions(cfg config.Config, notifyBox *secretbox.Box) []devseed.Option {
+	var options []devseed.Option
+	if cfg.Notify.FakeDemo {
+		options = append(options, devseed.WithNotifyDemo(notifyBox, cfg.BaseURL))
+	}
+	if cfg.AgentEnabled() {
+		options = append(options, devseed.WithAgentDemo())
+	}
+	return options
 }

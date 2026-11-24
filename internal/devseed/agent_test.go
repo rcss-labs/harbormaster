@@ -73,3 +73,54 @@ func TestDevseed_AgentDemo_NothingSeededWithoutTheOption(t *testing.T) {
 		t.Fatalf("role models = %+v; want none", got.RoleModels)
 	}
 }
+
+func TestDevseed_AgentDemo_AdminClearingTheModelSurvivesARestart(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+
+	if err := devseed.Apply(ctx, st, true, devseed.WithAgentDemo()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	seeded, err := st.GetAgentSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateAgentSettings(ctx, seeded.Version, func(old store.AgentSettings) (store.AgentSettings, error) {
+		old.RoleModels = map[string]store.AgentModelRef{}
+		return old, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devseed.Apply(ctx, st, true, devseed.WithAgentDemo()); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	got, err := st.GetAgentSettings(ctx)
+	if err != nil || len(got.RoleModels) != 0 {
+		t.Fatalf("role models after restart = %+v, %v; want the admin's empty choice kept", got.RoleModels, err)
+	}
+}
+
+// A crash after chat access was granted but before the settings were saved leaves the settings untouched; the next
+// start finishes the seed.
+func TestDevseed_AgentDemo_FinishesAfterACrashBetweenTheTwoWrites(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+
+	if err := devseed.Apply(ctx, st, true); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	sam, err := st.GetUserByUsername(ctx, "sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetUserAIChat(ctx, sam.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := devseed.Apply(ctx, st, true, devseed.WithAgentDemo()); err != nil {
+		t.Fatalf("apply after the crash: %v", err)
+	}
+	got, err := st.GetAgentSettings(ctx)
+	if err != nil || got.MonthlyBudgetMicroUSD != 5_000_000 || got.RoleModels["chat"].Model != "fake-1" {
+		t.Fatalf("settings = %+v, %v; want the seed finished", got, err)
+	}
+}
