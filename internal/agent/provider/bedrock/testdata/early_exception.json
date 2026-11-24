@@ -1,0 +1,4 @@
+[
+  {"type": "messageStart", "payload": {"role": "assistant"}},
+  {"exception": "internalServerException", "payload": {"message": "vendor-detail-should-not-leak"}}
+]
