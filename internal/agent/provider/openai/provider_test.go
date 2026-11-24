@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/openai/openai-go/v3"
+
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 )
 
@@ -481,5 +483,19 @@ func TestBuildParams_ClampsMaxOutputTokens(t *testing.T) {
 	params := buildParams(req)
 	if got := params.MaxOutputTokens.Value; got <= 0 || got > math.MaxInt32 {
 		t.Fatalf("max_output_tokens %d not clamped", got)
+	}
+}
+
+// An API error can only arrive before any text on the wire, but the mapping
+// must still never mark a turn retryable once text has been emitted.
+func TestMapAPIError_NotRetryableAfterText(t *testing.T) {
+	for _, status := range []int{429, 500, 503} {
+		for _, emitted := range []bool{false, true} {
+			err := mapAPIError(&sdk.Error{StatusCode: status}, emitted)
+			var perr *provider.Error
+			if !errors.As(err, &perr) || perr.Retryable != !emitted {
+				t.Errorf("status %d emitted %v: %+v", status, emitted, err)
+			}
+		}
 	}
 }
