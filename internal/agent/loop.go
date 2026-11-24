@@ -178,7 +178,10 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 		r.messages = append(r.messages, provider.Message{
 			Role: provider.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls, Opaque: resp.Opaque,
 		})
-		turnBytes := r.requestBytes()
+		if !r.anyCallFits() {
+			r.stop("The run reached its limit and was stopped.")
+			return nil
+		}
 		for i, call := range resp.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -187,10 +190,9 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 				r.stop("The run took too long and was stopped.")
 				return nil
 			}
-			// Results only add to the next request, so a call that is refused
-			// without them is already known to be the final one.
-			_, gathering := r.gatheringCall(turnBytes)
-			msg, res := r.runTool(runCtx, call, i >= maxToolCallsPerTurn, !gathering)
+			// The final call shows its results too, so only the time kept for
+			// it can stop a tool.
+			msg, res := r.runTool(runCtx, call, i >= maxToolCallsPerTurn, r.lowTime())
 			r.messages = append(r.messages, msg)
 			r.results[len(r.messages)-1] = res
 		}
@@ -358,6 +360,9 @@ func (r *session) timeLeft() time.Duration {
 	return r.l.Limits.Timeout - r.l.clock().Sub(r.started)
 }
 
+// lowTime reports whether only the final call's share of the time is left.
+func (r *session) lowTime() bool { return r.timeLeft() <= r.l.Limits.Timeout/4 }
+
 func (l *Loop) clock() time.Time {
 	if l.now != nil {
 		return l.now()
@@ -403,7 +408,7 @@ func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit
 		name = tool.Name
 	}
 	if skip {
-		return r.resultMessage(call, name, "This tool was not run: the run had reached its limit.", true)
+		return r.resultMessage(call, name, "This tool was not run: the run had too little time left.", true)
 	}
 	r.emit(Event{Type: "tool_start", Tool: name})
 

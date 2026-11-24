@@ -288,24 +288,118 @@ func TestLoop_TokenAllowanceBoundsGatheringButNeverTheAnswer(t *testing.T) {
 	}
 	requireFinalAnswer(t, events, "ok")
 
-	// Spent outright: the tools asked for are not run, and the answer still comes.
+	// Spent outright: what the model asked for is still fetched, and the final
+	// call answers from it.
 	p, events, runner := setup(61_000)
 	if reqs := p.Requests(); len(reqs) != 2 || !isFinalRequest(reqs[1]) {
 		t.Fatalf("%d requests, want a final call that no token limit can stop", len(reqs))
 	}
 	requireFinalAnswer(t, events, "ok")
-	if n := len(runner.Calls()); n != 0 {
-		t.Errorf("tools ran %d times although the next call was the final one", n)
+	requireFetched(t, p.Requests()[1], runner, 1)
+}
+
+// requireFetched checks that a final request carries the results of every
+// tool call, as run.
+func requireFetched(t *testing.T, final provider.Request, runner *recordingRunner, runs int) {
+	t.Helper()
+	if n := len(runner.Calls()); n != runs {
+		t.Errorf("tools ran %d times, want %d", n, runs)
 	}
-	for _, e := range events {
-		if e.Type == "tool_start" || e.Type == "tool_end" {
-			t.Errorf("a tool that was not run emitted %s", e.Type)
+	requireVendorValid(t, final.Messages)
+	results := 0
+	for _, m := range final.Messages {
+		if m.Role == provider.RoleTool && !m.IsError && strings.Contains(m.Text, `{"clusters":2}`) {
+			results++
 		}
 	}
-	msgs := p.Requests()[1].Messages
-	requireVendorValid(t, msgs)
-	if res := msgs[len(msgs)-2]; res.Role != provider.RoleTool || !res.IsError || !strings.Contains(res.Text, "was not run") {
-		t.Errorf("result of the tool that was not run = %+v", res)
+	if results != runs {
+		t.Errorf("%d results in the final call, want %d", results, runs)
+	}
+}
+
+func TestLoop_ToolsRunBeforeTheFinalCall(t *testing.T) {
+	t.Run("two steps fetch once and answer", func(t *testing.T) {
+		p := twoCalls(provider.Usage{InputTokens: 10, OutputTokens: 5})
+		runner := &recordingRunner{}
+		events, err := run(t, newLoop(p, runner, func(l *Limits) { l.MaxSteps = 2 }), baseInput())
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireFinalAnswer(t, events, "ok")
+		requireFetched(t, p.Requests()[1], runner, 1)
+		want := []string{"usage*", "usage", "tool_start", "tool_end", "notice", "usage*", "text", "usage", "done"}
+		if !equalStrings(eventTypes(events), want) {
+			t.Errorf("events = %v, want %v", eventTypes(events), want)
+		}
+	})
+	t.Run("the money left is the reserve's", func(t *testing.T) {
+		in := baseInput()
+		probe := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
+		if _, err := run(t, newLoop(probe, &recordingRunner{}), in); err != nil {
+			t.Fatal(err)
+		}
+		bytes := wireBytes(probe.Requests()[0])
+		in.MaxCostMicroUSD = reserveOf(t, in) + worstCostOf(in.Model, bytes, 2000)
+		p := twoCalls(provider.Usage{InputTokens: bytes + 1000, OutputTokens: 2000})
+		runner := &recordingRunner{}
+		events, err := run(t, newLoop(p, runner), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireFinalAnswer(t, events, "ok")
+		requireFetched(t, p.Requests()[1], runner, 1)
+	})
+}
+
+// finalFailsOnce fails the first final call it sees, before any usage.
+type finalFailsOnce struct {
+	meteredProvider
+	failed []provider.Request
+}
+
+func (p *finalFailsOnce) Generate(ctx context.Context, req provider.Request, onText func(string)) (provider.Response, error) {
+	if isFinalRequest(req) && len(p.failed) == 0 {
+		p.failed = append(p.failed, req)
+		return provider.Response{}, &provider.Error{Kind: "unavailable", Retryable: true, Message: "Try again."}
+	}
+	return p.meteredProvider.Generate(ctx, req, onText)
+}
+
+func TestLoop_FinalCallThatFailsOnceIsRetriedFromTheReserve(t *testing.T) {
+	for _, price := range []struct{ in, out int64 }{{3_000_000, 3_000_000}, {3_000_000, 15_000_000}, {3_000_000, 1_000_000}} {
+		in := baseInput()
+		in.Model.InputMicroUSDPerMTok, in.Model.OutputMicroUSDPerMTok, in.Model.ContextTokens = price.in, price.out, 200_000
+		probe := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
+		if _, err := run(t, newLoop(probe, &recordingRunner{}), in); err != nil {
+			t.Fatal(err)
+		}
+		reserve := reserveOf(t, in)
+		in.MaxCostMicroUSD = 2*reserve + worstCostOf(in.Model, wireBytes(probe.Requests()[0]), 8192)
+		for _, density := range []float64{1, 4} {
+			for _, size := range []int{500, 30_000, 100_000} {
+				for _, calls := range []int{1, 8} {
+					t.Run(fmt.Sprintf("%d-%d/density %v/%d bytes/%d calls", price.in, price.out, density, size, calls), func(t *testing.T) {
+						t.Parallel()
+						p := &finalFailsOnce{meteredProvider: meteredProvider{density: density, calls: calls}}
+						events, err := run(t, newLoop(p, bigResults(size), func(l *Limits) { l.MaxSteps, l.MaxResultBytes = 2, 100_000 }), in)
+						if err != nil {
+							t.Fatal(err)
+						}
+						requireFinalAnswer(t, events, finalAnswer)
+						for _, e := range usageEvents(events) {
+							if e.CostMicroUSD > in.MaxCostMicroUSD {
+								t.Errorf("reported %d µ$, over the ceiling %d", e.CostMicroUSD, in.MaxCostMicroUSD)
+							}
+						}
+						retry := p.reqs[len(p.reqs)-1]
+						requireVendorValid(t, retry.Messages)
+						if len(p.failed) != 1 || len(p.reqs) != 2 || !isFinalRequest(retry) {
+							t.Errorf("%d failed and %d answered requests, want one final call failed and retried", len(p.failed), len(p.reqs))
+						}
+					})
+				}
+			}
+		}
 	}
 }
 

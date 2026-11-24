@@ -395,7 +395,7 @@ func TestLedger_FinalIsBoundByMoneyOnly(t *testing.T) {
 		l := ledger{model: m, ceiling: rng.Int63n(3_000_000), spentMicroUSD: rng.Int63n(1_000_000), usedIn: math.MaxInt64, usedOut: 5}
 		left := l.ceiling - l.spentMicroUSD
 		bytes := rng.Int63n(200_000)
-		c, ok := l.admitFinal(bytes)
+		c, ok := l.admitFinal(bytes, left)
 		if want := worstCostOf(m, bytes, 2048) <= left; ok != want {
 			t.Fatalf("admitted %v, want %v", ok, want)
 		}
@@ -403,9 +403,25 @@ func TestLedger_FinalIsBoundByMoneyOnly(t *testing.T) {
 			t.Fatalf("call = %+v with %d left", c, left)
 		}
 		most := rng.Int63n(200_000)
-		got := l.finalBytes(most)
+		got := l.finalBytes(most, left)
 		if got > most || (got >= 0 && worstCostOf(m, got, 2048) > left) || (got < most && worstCostOf(m, got+1, 2048) <= left) {
 			t.Fatalf("finalBytes(%d) = %d with %d left", most, got, left)
+		}
+	}
+}
+
+func TestLedger_FirstFinalAttemptLeavesTheReserveForARetry(t *testing.T) {
+	for _, tc := range []struct {
+		left  int64
+		retry bool
+		want  int64
+	}{
+		{1500, false, 1000}, {1000, false, 500}, {999, false, 999}, {500, false, 500}, {0, false, 0},
+		{1500, true, 1500}, {500, true, 500},
+	} {
+		l := ledger{model: testModel, ceiling: tc.left + 70, spentMicroUSD: 70, reserve: 500}
+		if got := l.finalMoney(tc.retry); got != tc.want {
+			t.Errorf("finalMoney(%v) with %d left = %d, want %d", tc.retry, tc.left, got, tc.want)
 		}
 	}
 }
@@ -447,7 +463,7 @@ func TestLedger_AbsurdUsageNeverWrapsAround(t *testing.T) {
 		if _, ok := l.admitGathering(1); ok {
 			t.Fatal("a gathering call was admitted")
 		}
-		if _, ok := l.admitFinal(1); ok {
+		if _, ok := l.admitFinal(1, l.finalMoney(true)); ok {
 			t.Fatal("a final call was admitted")
 		}
 	}
@@ -457,7 +473,7 @@ func TestLedger_AbsurdUsageNeverWrapsAround(t *testing.T) {
 	}
 	// Overspent is nothing left, not a little.
 	cheap := ledger{model: provider.Model{InputMicroUSDPerMTok: 1, OutputMicroUSDPerMTok: 1}, ceiling: 5, spentMicroUSD: 9}
-	if _, ok := cheap.admitFinal(1); ok {
+	if _, ok := cheap.admitFinal(1, cheap.finalMoney(false)); ok {
 		t.Error("a call was admitted with nothing left")
 	}
 	// Tokens alone: spending is fine, the allowance is gone.

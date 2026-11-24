@@ -75,9 +75,19 @@ func (l *ledger) admitGathering(requestBytes int64) (call, bool) {
 	return l.plan(requestBytes, minGatherOutput, most, l.left()-l.reserve)
 }
 
-// admitFinal plans the final call, which only the money left can refuse.
-func (l *ledger) admitFinal(requestBytes int64) (call, bool) {
-	return l.plan(requestBytes, minFinalOutput, maxFinalOutput, l.left())
+// finalMoney is what the final call may cost: all the money left, but a first
+// attempt leaves the reserve for its retry when there is enough for both.
+func (l *ledger) finalMoney(retry bool) int64 {
+	left := l.left()
+	if !retry && left-l.reserve >= l.reserve {
+		return left - l.reserve
+	}
+	return left
+}
+
+// admitFinal plans the final call, which only its money can refuse.
+func (l *ledger) admitFinal(requestBytes, money int64) (call, bool) {
+	return l.plan(requestBytes, minFinalOutput, maxFinalOutput, money)
 }
 
 // plan gives a call the largest output cap in [least, most] whose worst case
@@ -92,11 +102,11 @@ func (l *ledger) plan(requestBytes, least, most, budget int64) (call, bool) {
 	return call{bytes: requestBytes, estimate: estimateTokens(requestBytes), out: out, cost: l.worstCost(requestBytes, out)}, true
 }
 
-// finalBytes is the largest final request, up to most bytes, that the money
-// left pays for. It is negative when not even an empty one fits.
-func (l *ledger) finalBytes(most int64) int64 {
+// finalBytes is the largest final request, up to most bytes, that money pays
+// for. It is negative when not even an empty one fits.
+func (l *ledger) finalBytes(most, money int64) int64 {
 	return int64(sort.Search(int(most)+1, func(i int) bool {
-		return l.worstCost(int64(i), minFinalOutput) > l.left()
+		return l.worstCost(int64(i), minFinalOutput) > money
 	})) - 1
 }
 

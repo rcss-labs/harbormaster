@@ -177,21 +177,16 @@ func (r *session) finalInstruction() provider.Message {
 // planGathering plans an ordinary call with the messages as they stand, or
 // says that the next call must be the final one.
 func (r *session) planGathering() (call, bool) {
-	return r.gatheringCall(r.requestBytes())
-}
-
-// gatheringCall is planGathering for a request of the given size.
-func (r *session) gatheringCall(requestBytes int64) (call, bool) {
+	bytes := r.requestBytes()
 	lastStep := r.steps+1 >= r.l.Limits.MaxSteps
-	lowTime := r.timeLeft() <= r.l.Limits.Timeout/4
-	if lastStep || lowTime || requestBytes > r.contextBytes(charsPerTokenTrim) {
+	if lastStep || r.lowTime() || bytes > r.contextBytes(charsPerTokenTrim) {
 		return call{}, false
 	}
-	return r.ledger.admitGathering(requestBytes)
+	return r.ledger.admitGathering(bytes)
 }
 
-// planFinal builds the final call: whatever fits the money left and the
-// model's context. It reports false when not even the question fits.
+// planFinal builds the final call: whatever fits its money and the model's
+// context. It reports false when not even the question fits.
 func (r *session) planFinal() (call, []provider.Message, bool) {
 	instruction := r.finalInstruction()
 	history := make([]entry, len(r.messages))
@@ -199,12 +194,13 @@ func (r *session) planFinal() (call, []provider.Message, bool) {
 		history[i] = entry{msg: m, result: r.results[i]}
 	}
 	most := min(r.requestBytes()+messageBytes(instruction), r.contextBytes(bytesPerToken))
-	msgs := fitFinal(r.system, r.tools, history, r.ledger.finalBytes(most)-messageBytes(instruction))
+	money := r.ledger.finalMoney(r.notified) // notified by the first attempt, so this is the retry
+	msgs := fitFinal(r.system, r.tools, history, r.ledger.finalBytes(most, money)-messageBytes(instruction))
 	if msgs == nil {
 		return call{}, nil, false
 	}
 	msgs = append(msgs, instruction)
-	c, ok := r.ledger.admitFinal(r.frameBytes + messageBytes(msgs...))
+	c, ok := r.ledger.admitFinal(r.frameBytes+messageBytes(msgs...), money)
 	return c, msgs, ok
 }
 

@@ -333,8 +333,8 @@ func TestLoop_StepLimitMakesTheLastStepAFinalAnswer(t *testing.T) {
 	if n := len(p.Requests()); n != 3 {
 		t.Errorf("%d model calls, want 3", n)
 	}
-	if n := len(runner.Calls()); n != 1 {
-		t.Errorf("tools ran %d times, want 1: the second turn's call is followed by the final call, whose own are ignored", n)
+	if n := len(runner.Calls()); n != 2 {
+		t.Errorf("tools ran %d times, want 2: only the final reply's own call is ignored", n)
 	}
 	final := p.Requests()[2]
 	if len(final.Tools) == 0 {
