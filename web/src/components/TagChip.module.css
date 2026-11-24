@@ -5,6 +5,12 @@
 .c-blue { color: var(--tag-blue-text); border-color: var(--tag-blue-border); background: transparent; }
 .c-green { color: var(--tag-green-text); border-color: var(--tag-green-border); background: transparent; }
 .c-violet { color: var(--tag-violet-text); border-color: var(--tag-violet-border); background: transparent; }
+.c-orange { color: var(--tag-orange-text); border-color: var(--tag-orange-border); background: transparent; }
+.c-brown { color: var(--tag-brown-text); border-color: var(--tag-brown-border); background: transparent; }
+.c-lime { color: var(--tag-lime-text); border-color: var(--tag-lime-border); background: transparent; }
+.c-teal { color: var(--tag-teal-text); border-color: var(--tag-teal-border); background: transparent; }
+.c-indigo { color: var(--tag-indigo-text); border-color: var(--tag-indigo-border); background: transparent; }
+.c-pink { color: var(--tag-pink-text); border-color: var(--tag-pink-border); background: transparent; }
 .inh { border-style: dashed; }
 button.label { cursor: pointer; }
 button.label:hover { border-color: var(--accent); }

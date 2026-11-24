@@ -57,11 +57,22 @@
 .radioList label { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
 .radioList label:hover { background: var(--hover); }
 
+.colorGrid { display: grid; gap: 8px 16px; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
 /* Colour swatches for the colour picker; same palette as TagChip. */
-.chipLabel { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 4px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-strong); color: var(--muted); background: var(--raised); }
-.c-neutral { color: var(--muted); }
-.c-red { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-soft); }
-.c-amber { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 40%, transparent); background: var(--warning-soft); }
-.c-blue { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
-.c-violet { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); background: var(--info-soft); }
-.c-green { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); background: var(--success-soft); }
+.chipLabel { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 4px; font-size: 12px; font-weight: 500; border: 1px solid var(--border-strong); color: var(--muted); background: transparent; }
+.c-neutral { color: var(--tag-neutral-text); border-color: var(--tag-neutral-border); }
+.c-red { color: var(--tag-red-text); border-color: var(--tag-red-border); }
+.c-orange { color: var(--tag-orange-text); border-color: var(--tag-orange-border); }
+.c-amber { color: var(--tag-amber-text); border-color: var(--tag-amber-border); }
+.c-brown { color: var(--tag-brown-text); border-color: var(--tag-brown-border); }
+.c-lime { color: var(--tag-lime-text); border-color: var(--tag-lime-border); }
+.c-green { color: var(--tag-green-text); border-color: var(--tag-green-border); }
+.c-teal { color: var(--tag-teal-text); border-color: var(--tag-teal-border); }
+.c-blue { color: var(--tag-blue-text); border-color: var(--tag-blue-border); }
+.c-indigo { color: var(--tag-indigo-text); border-color: var(--tag-indigo-border); }
+.c-violet { color: var(--tag-violet-text); border-color: var(--tag-violet-border); }
+.c-pink { color: var(--tag-pink-text); border-color: var(--tag-pink-border); }
+@media (max-width: 700px) {
+  .colorGrid { gap: 0 16px; }
+  .colorGrid label { min-height: 44px; }
+}

@@ -1,6 +1,7 @@
 import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { TAG_COLORS } from '../app/admin/tags/tagApi'
 
 const css = readFileSync(join(__dirname, 'tokens.css'), 'utf8')
 
@@ -53,6 +54,18 @@ describe('tokens.css', () => {
     }
     for (const [legacy, current] of Object.entries(aliases)) {
       expect(css, `--${legacy}`).toContain(`--${legacy}: var(--${current});`)
+    }
+  })
+
+  it('gives every tag colour a text and border token, a chip style and a picker swatch', () => {
+    const chip = readFileSync(join(__dirname, '../components/TagChip.module.css'), 'utf8')
+    const picker = readFileSync(join(__dirname, '../app/admin/tags/tags.module.css'), 'utf8')
+    expect(TAG_COLORS).toHaveLength(12)
+    for (const color of TAG_COLORS) {
+      expect(css, color).toMatch(new RegExp(`--tag-${color}-text:`))
+      expect(css, color).toMatch(new RegExp(`--tag-${color}-border:`))
+      expect(chip, color).toContain(`.c-${color} {`)
+      expect(picker, color).toContain(`.c-${color} {`)
     }
   })
 
