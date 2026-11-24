@@ -3,6 +3,7 @@
 package fake
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -19,6 +20,7 @@ type Step struct {
 	usage     provider.Usage
 	err       error
 	block     bool
+	raw       *provider.Response
 }
 
 // Text is a turn that streams text and ends.
@@ -28,6 +30,10 @@ func Text(text string, usage provider.Usage) Step { return Step{text: text, usag
 func ToolCalls(usage provider.Usage, calls ...provider.ToolCall) Step {
 	return Step{toolCalls: calls, usage: usage}
 }
+
+// Raw is a turn that returns resp as given (text with tool calls, Opaque,
+// StopReason "max_tokens"). Its Text, if any, is streamed.
+func Raw(resp provider.Response) Step { return Step{raw: &resp} }
 
 // Fail is a turn that returns err (typically a *provider.Error).
 func Fail(err error) Step { return Step{err: err} }
@@ -93,23 +99,89 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 	if err := ctx.Err(); err != nil {
 		return provider.Response{}, err
 	}
+	if step.raw != nil {
+		resp := cloneResponse(*step.raw)
+		stream(resp.Text, onText)
+		return resp, nil
+	}
 	resp := provider.Response{Text: step.text, ToolCalls: step.toolCalls, Usage: step.usage, StopReason: "end"}
 	if len(step.toolCalls) > 0 {
 		resp.StopReason = "tool_use"
 	}
-	if onText != nil {
-		// Word-sized deltas: several pieces that join back to the text.
-		for _, piece := range strings.SplitAfter(step.text, " ") {
-			if piece != "" {
-				onText(piece)
-			}
-		}
-	}
+	stream(step.text, onText)
 	return resp, nil
 }
 
+// stream sends word-sized deltas: several pieces that join back to the text.
+func stream(text string, onText func(string)) {
+	if onText == nil {
+		return
+	}
+	for _, piece := range strings.SplitAfter(text, " ") {
+		if piece != "" {
+			onText(piece)
+		}
+	}
+}
+
 func cloneRequest(r provider.Request) provider.Request {
-	r.Messages = append([]provider.Message(nil), r.Messages...)
-	r.Tools = append([]provider.ToolDef(nil), r.Tools...)
+	msgs := make([]provider.Message, len(r.Messages))
+	for i, m := range r.Messages {
+		m.ToolCalls = cloneToolCalls(m.ToolCalls)
+		m.Opaque = bytes.Clone(m.Opaque)
+		msgs[i] = m
+	}
+	r.Messages = msgs
+	tools := make([]provider.ToolDef, len(r.Tools))
+	for i, t := range r.Tools {
+		t.InputSchema = deepCopyMap(t.InputSchema)
+		tools[i] = t
+	}
+	r.Tools = tools
 	return r
+}
+
+func cloneResponse(r provider.Response) provider.Response {
+	r.ToolCalls = cloneToolCalls(r.ToolCalls)
+	r.Opaque = bytes.Clone(r.Opaque)
+	return r
+}
+
+func cloneToolCalls(calls []provider.ToolCall) []provider.ToolCall {
+	if calls == nil {
+		return nil
+	}
+	out := make([]provider.ToolCall, len(calls))
+	for i, c := range calls {
+		c.Arguments = deepCopyMap(c.Arguments)
+		out[i] = c
+	}
+	return out
+}
+
+// deepCopyMap copies JSON-shaped values (maps, slices, scalars).
+func deepCopyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCopyValue(v)
+	}
+	return out
+}
+
+func deepCopyValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return deepCopyMap(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = deepCopyValue(e)
+		}
+		return out
+	default:
+		return v
+	}
 }
