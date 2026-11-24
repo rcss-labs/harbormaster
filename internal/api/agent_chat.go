@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"slices"
 	"strconv"
@@ -409,15 +408,7 @@ func (s *Server) postAgentMessage(w http.ResponseWriter, r *http.Request) {
 		Provider: ref.Provider, Model: ref.Model,
 		ReservedMicroUSD: chosenModel.MaxRunCostMicroUSD(cat.MaxRunTokens),
 	}
-	// The reservation commits on a context of its own: a browser that leaves mid-call must not leave a half-known
-	// state behind, and a run that was reserved is always settled by its turn.
-	reserveCtx, cancelReserve := context.WithTimeout(context.WithoutCancel(r.Context()), settleStepTimeout)
-	err = s.Store.ReserveAgentRun(reserveCtx, run, max(2*runTimeout, minRunStaleAfter), s.now())
-	cancelReserve()
-	if err != nil {
-		if errors.Is(err, store.ErrBudgetExhausted) {
-			err = errBudget
-		}
+	if err := s.reserveRun(r, run, runTimeout); err != nil {
 		s.fail(w, err)
 		return
 	}

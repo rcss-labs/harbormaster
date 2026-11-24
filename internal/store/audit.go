@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // AuditEntry is one row of the audit log. A zero TS is stamped by the database; empty
@@ -22,7 +24,12 @@ type AuditEntry struct {
 }
 
 // Audit appends an entry to the audit log.
-func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
+func (s *Store) Audit(ctx context.Context, e AuditEntry) error { return insertAudit(ctx, s.Pool, e) }
+
+// insertAudit appends an entry through db, the pool or a transaction the entry belongs to.
+func insertAudit(ctx context.Context, db interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}, e AuditEntry) error {
 	var ts *time.Time
 	if !e.TS.IsZero() {
 		ts = &e.TS
@@ -36,7 +43,7 @@ func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
 		text := string(encoded)
 		details = &text
 	}
-	_, err := s.Pool.Exec(ctx,
+	_, err := db.Exec(ctx,
 		`insert into audit_log (ts, actor_user_id, actor_username, action, target, summary, details, ip)
 		 values (coalesce($1, now()), $2, nullif($3, ''), $4, nullif($5, ''), $6, $7, nullif($8, ''))`,
 		ts, e.ActorUserID, e.ActorUsername, e.Action, e.Target, e.Summary, details, e.IP)

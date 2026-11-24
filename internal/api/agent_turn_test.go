@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/limits"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -153,6 +153,7 @@ func TestChat_StalledBrowserStopsTheRunAndKeepsLastFigures(t *testing.T) {
 	if state != "failed" || cost != 999 {
 		t.Errorf("run = %s cost %d, want failed 999\nserver log:\n%s", state, cost, env.logs.String())
 	}
+	waitFor(t, "the audit row", func() bool { return len(auditOutcomes(t, env.st)) == 1 }) // written after the slot is free
 	if d := auditDetails(t, env.st); d["cost_micro_usd"] != float64(999) || d["input_tokens"] != float64(7) || d["outcome"] != "interrupted" {
 		t.Errorf("audit = %v", d)
 	}
@@ -427,88 +428,6 @@ func TestChat_ModelTextIsNeverLogged(t *testing.T) {
 	}
 }
 
-// A browser write that blocks must give up at its deadline and say the stream broke.
-func TestBrowserWriter_AppliesTheWriteDeadlineAndReportsABreak(t *testing.T) {
-	w := newBlockingWriter()
-	defer w.release()
-	broken := make(chan struct{})
-	var once sync.Once
-	bw := startBrowserWriter(w, 150*time.Millisecond, time.Hour, func() { once.Do(func() { close(broken) }) })
-	start := time.Now()
-	if !bw.event("text", map[string]string{"delta": "x"}) {
-		t.Fatal("the first event was refused")
-	}
-	select {
-	case <-broken:
-	case <-time.After(3 * time.Second):
-		t.Fatal("a blocked write never gave up: no write deadline was set")
-	}
-	if took := time.Since(start); took < 100*time.Millisecond {
-		t.Errorf("gave up after %v, before the deadline", took)
-	}
-	if bw.event("text", map[string]string{"delta": "y"}) {
-		t.Error("an event was accepted on a broken stream")
-	}
-	bw.finish(0)
-}
-
-// blockingWriter is a ResponseWriter whose Write blocks until the deadline set through SetWriteDeadline.
-type blockingWriter struct {
-	header   http.Header
-	mu       sync.Mutex
-	deadline time.Time
-	stop     chan struct{}
-	once     sync.Once
-}
-
-func newBlockingWriter() *blockingWriter {
-	return &blockingWriter{header: http.Header{}, stop: make(chan struct{})}
-}
-func (w *blockingWriter) Header() http.Header { return w.header }
-func (w *blockingWriter) WriteHeader(int)     {}
-func (w *blockingWriter) release()            { w.once.Do(func() { close(w.stop) }) }
-func (w *blockingWriter) SetWriteDeadline(t time.Time) error {
-	w.mu.Lock()
-	w.deadline = t
-	w.mu.Unlock()
-	return nil
-}
-func (w *blockingWriter) Write(p []byte) (int, error) {
-	for { // a deadline set while the write is waiting counts, as it does on a network connection
-		w.mu.Lock()
-		d := w.deadline
-		w.mu.Unlock()
-		if !d.IsZero() && !time.Now().Before(d) {
-			return 0, os.ErrDeadlineExceeded
-		}
-		select {
-		case <-w.stop:
-			return 0, os.ErrClosed
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-}
-
-// A write that fails must tell the turn, which cancels the agent run.
-func TestBrowserWriter_ReportsAFailedWrite(t *testing.T) {
-	w := &failingWriter{header: http.Header{}}
-	broken := make(chan struct{}, 1)
-	bw := startBrowserWriter(w, time.Second, time.Hour, func() { broken <- struct{}{} })
-	bw.event("text", map[string]string{"delta": "x"})
-	select {
-	case <-broken:
-	case <-time.After(3 * time.Second):
-		t.Fatal("a failed write was not reported")
-	}
-	bw.finish(0)
-}
-
-type failingWriter struct{ header http.Header }
-
-func (w *failingWriter) Header() http.Header       { return w.header }
-func (w *failingWriter) WriteHeader(int)           {}
-func (w *failingWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
-
 func TestChat_RunsPastTheirDeadlineEndWithATimeoutError(t *testing.T) {
 	env := newChatEnv(t, func(s *Server) { s.AgentRunSlack = 100 * time.Millisecond })
 	env.agent.catalogue = catalogueWithTimeout(1)
@@ -728,8 +647,8 @@ func TestChat_AnswerOverTheCapIsCutWithAMarker(t *testing.T) {
 	}
 	_, msgs := getMessages(t, env.sam, id)
 	text := msgs[1].Text
-	if len(text) > maxSavedAnswerBytes+len(answerCapMarker) || !strings.HasSuffix(text, answerCapMarker) || len(text) < maxSavedAnswerBytes-2048 {
-		t.Errorf("saved %d bytes, suffix ok %v", len(text), strings.HasSuffix(text, answerCapMarker))
+	if len(text) > agentrun.MaxAnswerBytes+len(agentrun.AnswerCutMarker) || !strings.HasSuffix(text, agentrun.AnswerCutMarker) || len(text) < agentrun.MaxAnswerBytes-2048 {
+		t.Errorf("saved %d bytes, suffix ok %v", len(text), strings.HasSuffix(text, agentrun.AnswerCutMarker))
 	}
 }
 

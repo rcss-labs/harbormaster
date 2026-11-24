@@ -700,7 +700,7 @@ func TestChat_ClientDisconnectSettlesAndSavesInterrupted(t *testing.T) {
 	cancel()
 	resp.Body.Close()
 
-	// The slot is released last, so once it is free everything else must already be in place.
+	// The slot is released once the answer is saved and the run settled; only the audit row comes after it.
 	waitFor(t, "the slot to be released", func() bool { return slotsHeld(t, env, "sam") == 0 })
 	_, msgs := getMessages(t, env.sam, id)
 	if len(msgs) != 2 || msgs[1].Text != "partial answer" || !msgs[1].Interrupted {
@@ -712,7 +712,8 @@ func TestChat_ClientDisconnectSettlesAndSavesInterrupted(t *testing.T) {
 	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
 		t.Errorf("%d run tokens left", n)
 	}
-	if got := auditOutcomes(t, env.st); len(got) != 1 || got[0] != "interrupted" {
+	waitFor(t, "the audit row", func() bool { return len(auditOutcomes(t, env.st)) == 1 })
+	if got := auditOutcomes(t, env.st); got[0] != "interrupted" {
 		t.Errorf("audit outcomes = %v", got)
 	}
 }

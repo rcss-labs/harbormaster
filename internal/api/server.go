@@ -57,7 +57,7 @@ type Server struct {
 	Rates limits.Rate
 	// LogSearch runs Logs Insights searches across services; New defaults it from Clients and Cfg.
 	LogSearch *logs.Searcher
-	// draining is closed by BeginDrain when the process starts shutting down; running log searches watch it
+	// draining is closed by BeginDrain when the process starts shutting down; running log searches and agent runs watch it
 	// so they stop their Insights queries and audit inside the shutdown drain.
 	draining      chan struct{}
 	beginDrainOne *sync.Once
@@ -135,8 +135,8 @@ type Server struct {
 	// AgentHeartbeat is how often an open chat stream gets a comment line to keep proxies from closing it
 	// (default 15s).
 	AgentHeartbeat time.Duration
-	// AgentWriteTimeout bounds one write of a chat stream to the browser (default 10s); a browser that does not read
-	// for that long is dropped and its run cancelled.
+	// AgentWriteTimeout bounds one small write of a chat stream to the browser (default 10s); a browser that reads
+	// nothing for that long is dropped and its run cancelled.
 	AgentWriteTimeout time.Duration
 	// AgentRunSlack is how long past the agent's own run timeout a turn waits before giving up (default 30s).
 	AgentRunSlack time.Duration
@@ -505,7 +505,7 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-// BeginDrain tells running log searches to stop; call it when Shutdown begins. Safe to call more than once,
+// BeginDrain tells running log searches and AI agent runs to stop; call it when Shutdown begins. Safe to call more than once,
 // and a no-op on a Server that was not built by New.
 func (s *Server) BeginDrain() {
 	if s == nil || s.draining == nil || s.beginDrainOne == nil {

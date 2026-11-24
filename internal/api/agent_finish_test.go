@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -32,43 +33,175 @@ func holdLock(t *testing.T, st *store.Store, statement string) (release func()) 
 	return release
 }
 
-// slowStepEnv runs one turn whose script says "x", waits for the test to lock something, then ends the run with
-// done. It returns how long the turn took after the lock was taken, and the frames.
-func runWithLockedStep(t *testing.T, env *chatEnv, id int64, lock func() func(), settleFirst bool) (took time.Duration, frames []sseFrame, release func()) {
+// lockableRows are the rows a turn writes as it ends, and how another transaction holds them.
+var lockableRows = map[string]string{
+	"conversation": `select id from agent_conversations for update`,
+	"run":          `select id from agent_runs for update`,
+	"token":        `select id from api_tokens where kind = 'run' for update`,
+	"audit":        `lock table audit_log in access exclusive mode`,
+}
+
+// runWithLock runs one turn whose script says "x", lets the test lock something, then reports usage 70 and done.
+// The lock is given back after held. It returns the frames and how long the turn took from the lock on.
+func runWithLock(t *testing.T, env *chatEnv, id int64, statement string, held time.Duration) (took time.Duration, frames []sseFrame) {
 	t.Helper()
 	entered, locked := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
-		if settleFirst {
-			ndjson(w, `{"type":"usage","input_tokens":1,"output_tokens":1,"cost_micro_usd":50}`)
-		}
 		ndjson(w, `{"type":"text","delta":"x"}`)
 		once.Do(func() { close(entered) })
 		select {
 		case <-locked:
 		case <-time.After(8 * time.Second):
 		}
-		ndjson(w, `{"type":"done"}`)
+		ndjson(w, `{"type":"usage","input_tokens":3,"output_tokens":4,"cost_micro_usd":70}`, `{"type":"done"}`)
 	})
 	done := make(chan []sseFrame, 1)
 	go func() { done <- readSSE(t, send(env.sam, id, "hello")) }()
 	<-entered
-	if settleFirst {
-		waitFor(t, "the usage to be recorded", func() bool {
-			var c int64
-			_ = env.st.Pool.QueryRow(t.Context(), `select cost_micro_usd from agent_runs`).Scan(&c)
-			return c == 50
-		})
-	}
-	release = lock()
+	release := holdLock(t, env.st, statement)
 	start := time.Now()
+	time.AfterFunc(held, release)
 	close(locked)
 	select {
 	case frames = <-done:
-	case <-time.After(15 * time.Second):
+	case <-time.After(45 * time.Second):
 		t.Fatal("the turn never ended")
 	}
-	return time.Since(start), frames, release
+	took = time.Since(start)
+	if rest := held - took; rest > 0 {
+		time.Sleep(rest + 200*time.Millisecond)
+	}
+	return took, frames
+}
+
+func reconcileSoon(t *testing.T, env *chatEnv, after time.Duration) {
+	t.Helper()
+	if _, err := env.st.ReconcileAgentRuns(t.Context(), time.Hour, time.Now().Add(after)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// wantEnded checks what must be true of every run once it is over: settled at its cost, no token, one audit row
+// that agrees with the run row, the slot free.
+func wantEnded(t *testing.T, env *chatEnv, state string, cost int64) {
+	t.Helper()
+	if st, c, _ := runRow(t, env.st); st != state || c != cost {
+		t.Errorf("run = %s cost %d, want %s %d", st, c, state, cost)
+	}
+	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
+		t.Errorf("%d run tokens left", n)
+	}
+	outcomes := auditOutcomes(t, env.st)
+	if len(outcomes) != 1 {
+		t.Fatalf("audit rows = %v, want exactly one", outcomes)
+	}
+	if (outcomes[0] == "done") != (state == "done") {
+		t.Errorf("audit outcome %s for a run that is %s", outcomes[0], state)
+	}
+	if slotsHeld(t, env, "sam") != 0 {
+		t.Error("slot still held")
+	}
+}
+
+// A row that somebody else holds for three seconds delays an ordinary turn and loses nothing.
+func TestChat_RowLockedForThreeSecondsLosesNothing(t *testing.T) {
+	for name, statement := range lockableRows {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env := newChatEnv(t)
+			id := newConversation(t, env.sam)
+			_, frames := runWithLock(t, env, id, statement, 3*time.Second)
+			if last := frames[len(frames)-1]; last.Event != "done" {
+				t.Errorf("last frame = %+v, want done", last)
+			}
+			if _, msgs := getMessages(t, env.sam, id); len(msgs) != 2 || msgs[1].Text != "x" || msgs[1].Interrupted {
+				t.Errorf("messages = %+v, want the answer saved", msgs)
+			}
+			wantEnded(t, env, "done", 70)
+		})
+	}
+}
+
+// A row held for longer than any step waits: the turn still ends, and one reconcile pass does what it could not.
+func TestChat_RowLockedForFourteenSecondsIsRepairedByOnePass(t *testing.T) {
+	for name, statement := range lockableRows {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env := newChatEnv(t)
+			took, frames := runWithLock(t, env, newConversation(t, env.sam), statement, 14*time.Second)
+			if took > 35*time.Second {
+				t.Errorf("the turn took %v", took)
+			}
+			wantState := "done"
+			if name == "run" { // its usage could not be stored in ten seconds, so the run was stopped
+				wantState = "failed"
+			}
+			if name == "conversation" {
+				if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "internal" {
+					t.Errorf("last frame = %+v, want an error event: the answer was not saved", last)
+				}
+			}
+			reconcileSoon(t, env, 2*time.Minute)
+			wantEnded(t, env, wantState, 70)
+		})
+	}
+}
+
+// A failed save is the browser's bad news alone: the run was done and paid for, and its row and audit say so.
+func TestChat_FailedSaveIsInternalForTheBrowserAndDoneForTheRecord(t *testing.T) {
+	env := newChatEnv(t)
+	execSQL(t, env.st, `create function refuse_answer() returns trigger language plpgsql as $$ begin
+		if new.role = 'assistant' then raise exception 'no room'; end if; return new; end $$`)
+	execSQL(t, env.st, `create trigger refuse_answer before insert on agent_messages for each row execute function refuse_answer()`)
+	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
+		ndjson(w, `{"type":"text","delta":"x"}`, `{"type":"usage","input_tokens":1,"output_tokens":1,"cost_micro_usd":50}`, `{"type":"done"}`)
+	})
+	frames := readSSE(t, send(env.sam, newConversation(t, env.sam), "hello"))
+	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "internal" || strings.Contains(fmt.Sprint(eventNames(frames)), "done") {
+		t.Errorf("events = %v, last %+v; want an internal error and no done", eventNames(frames), last)
+	}
+	wantEnded(t, env, "done", 50)
+	if d := auditDetails(t, env.st); d["saved"] != false {
+		t.Errorf("audit = %v, want saved false", d)
+	}
+}
+
+// A process that dies mid-turn leaves a running run and a live token. One pass after the stale age repairs both, and
+// a turn that turns out to be alive after all adds nothing to the record.
+func TestChat_AbandonedTurnIsRepairedOnce(t *testing.T) {
+	stuck, resume := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	env := newChatEnv(t, func(s *Server) {
+		s.agentEventHook = func(_ context.Context, ev agentclient.Event) {
+			if ev.Type == "text" {
+				once.Do(func() { close(stuck) })
+				<-resume
+			}
+		}
+	})
+	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
+		ndjson(w, `{"type":"usage","input_tokens":3,"output_tokens":4,"cost_micro_usd":70}`, `{"type":"text","delta":"x"}`)
+		holdUntilGone(r)
+	})
+	done := make(chan []sseFrame, 1)
+	go func() { done <- readSSE(t, send(env.sam, newConversation(t, env.sam), "hello")) }()
+	<-stuck
+	reconcileSoon(t, env, 59*time.Minute)
+	if state, _, _ := runRow(t, env.st); state != "running" || agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`) != 1 {
+		t.Errorf("a live turn was touched before the stale age: run %s", state)
+	}
+	reconcileSoon(t, env, 61*time.Minute)
+	if got := auditOutcomes(t, env.st); len(got) != 1 || got[0] != "failed" {
+		t.Errorf("audit = %v", got)
+	}
+	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
+		t.Errorf("%d run tokens left", n)
+	}
+	close(resume)
+	<-done
+	reconcileSoon(t, env, 3*time.Hour)
+	wantEnded(t, env, "failed", 70)
 }
 
 func runState(t *testing.T, st *store.Store) string {
@@ -78,113 +211,6 @@ func runState(t *testing.T, st *store.Store) string {
 		t.Fatal(err)
 	}
 	return s
-}
-
-const slowStepLimit = 6 * time.Second // each step has at most 2.5 s; the unbounded wait is 10 s
-
-// A save that cannot get the conversation must not starve the settlement: the run is settled with its cost, the
-// token is gone, an audit row says the save failed, the slot is free, and the browser is not told it is done.
-func TestChat_SlowSaveDoesNotStarveSettlement(t *testing.T) {
-	env := newChatEnv(t)
-	id := newConversation(t, env.sam)
-	took, frames, release := runWithLockedStep(t, env, id, func() func() {
-		return holdLock(t, env.st, `select id from agent_conversations for update`)
-	}, true)
-	defer release()
-	if took > slowStepLimit {
-		t.Errorf("the turn took %v with the conversation locked", took)
-	}
-	if st := runState(t, env.st); st == "running" {
-		t.Error("the run was left running")
-	}
-	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
-		t.Errorf("%d run tokens left", n)
-	}
-	d := auditDetails(t, env.st)
-	if d["cost_micro_usd"] != float64(50) || d["saved"] != false {
-		t.Errorf("audit = %v, want cost 50 and saved false", d)
-	}
-	last := frames[len(frames)-1]
-	if last.Event != "error" || last.Data["code"] != "internal" {
-		t.Errorf("last frame = %+v, want an error event: the answer was not saved", last)
-	}
-	for _, f := range frames {
-		if f.Event == "done" {
-			t.Error("done was sent for an answer that was not saved")
-		}
-	}
-	if slotsHeld(t, env, "sam") != 0 {
-		t.Error("slot still held")
-	}
-}
-
-func TestChat_SlowSettleDoesNotStarveTheRest(t *testing.T) {
-	env := newChatEnv(t)
-	id := newConversation(t, env.sam)
-	took, _, release := runWithLockedStep(t, env, id, func() func() {
-		return holdLock(t, env.st, `select id from agent_runs for update`)
-	}, true)
-	defer release()
-	if took > slowStepLimit {
-		t.Errorf("the turn took %v with the run row locked", took)
-	}
-	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
-		t.Errorf("%d run tokens left", n)
-	}
-	if _, msgs := getMessages(t, env.sam, id); len(msgs) != 2 {
-		t.Errorf("messages = %+v, want the answer saved", msgs)
-	}
-	if n := agentCount(t, env.st, `select count(*) from audit_log where action = 'agent_run'`); n != 1 {
-		t.Errorf("%d audit rows", n)
-	}
-	if slotsHeld(t, env, "sam") != 0 {
-		t.Error("slot still held")
-	}
-}
-
-func TestChat_SlowTokenDeleteDoesNotStarveTheRest(t *testing.T) {
-	env := newChatEnv(t)
-	id := newConversation(t, env.sam)
-	took, _, release := runWithLockedStep(t, env, id, func() func() {
-		return holdLock(t, env.st, `select id from api_tokens where kind = 'run' for update`)
-	}, false)
-	defer release()
-	if took > slowStepLimit {
-		t.Errorf("the turn took %v with the token row locked", took)
-	}
-	if st := runState(t, env.st); st != "done" {
-		t.Errorf("run state = %s, want done", st)
-	}
-	if _, msgs := getMessages(t, env.sam, id); len(msgs) != 2 {
-		t.Errorf("messages = %+v, want the answer saved", msgs)
-	}
-	if n := agentCount(t, env.st, `select count(*) from audit_log where action = 'agent_run'`); n != 1 {
-		t.Errorf("%d audit rows", n)
-	}
-}
-
-func TestChat_SlowAuditDoesNotHoldTheTurn(t *testing.T) {
-	env := newChatEnv(t)
-	id := newConversation(t, env.sam)
-	took, frames, release := runWithLockedStep(t, env, id, func() func() {
-		return holdLock(t, env.st, `lock table audit_log in access exclusive mode`)
-	}, false)
-	defer release()
-	if took > slowStepLimit {
-		t.Errorf("the turn took %v with the audit log locked", took)
-	}
-	if last := frames[len(frames)-1]; last.Event != "done" {
-		t.Errorf("last frame = %+v, want done", last)
-	}
-	if st := runState(t, env.st); st != "done" {
-		t.Errorf("run state = %s", st)
-	}
-	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
-		t.Errorf("%d run tokens left", n)
-	}
-	if slotsHeld(t, env, "sam") != 0 {
-		t.Error("slot still held")
-	}
 }
 
 // A burst of tiny deltas must arrive whole, with done, however fast the agent sends them.
@@ -214,21 +240,21 @@ func TestChat_BurstOfTinyDeltasArrivesCompleteWithDone(t *testing.T) {
 	}
 }
 
-// A browser that reads slowly but does read is never dropped: the text it has not read yet is merged, and done
-// still arrives at the end.
-func TestChat_SlowReaderStillGetsEverythingAndDone(t *testing.T) {
-	env := newChatEnv(t)
+// A browser that reads slowly but does read is never dropped, however long the rest takes: 4 MB at 800 KB/s.
+func TestChat_SlowReaderGetsEverythingAndDone(t *testing.T) {
+	env := newChatEnv(t, func(s *Server) { s.AgentWriteTimeout = time.Second })
 	line := `{"type":"text","delta":"` + strings.Repeat("z", 1024) + `"}`
-	const n = 3000
+	const n = 4096
 	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
 		for i := 0; i < n; i++ {
-			ndjson(w, line)
+			fmt.Fprintln(w, line)
 		}
 		ndjson(w, `{"type":"done"}`)
 	})
 	resp := send(env.sam, newConversation(t, env.sam), "hello")
-	time.Sleep(700 * time.Millisecond) // the agent has long finished; nothing has been read yet
-	frames := readSSE(t, resp)
+	slow := &pacedBody{ReadCloser: resp.Body, perSecond: 800 << 10}
+	start := time.Now()
+	frames := readSSE(t, &http.Response{Body: slow})
 	total := 0
 	for _, f := range frames {
 		if f.Event == "text" {
@@ -241,58 +267,24 @@ func TestChat_SlowReaderStillGetsEverythingAndDone(t *testing.T) {
 	if last := frames[len(frames)-1]; last.Event != "done" {
 		t.Errorf("last frame = %+v, want done", last)
 	}
-}
-
-func TestBrowserWriter_MergesPendingTextAndAlwaysTakesControlFrames(t *testing.T) {
-	w := newBlockingWriter()
-	defer w.release()
-	bw := startBrowserWriter(w, time.Hour, time.Hour, func() {})
-	bw.event("notice", map[string]string{"kind": "context_trimmed"}) // the writer picks this one up and blocks on it
-	time.Sleep(50 * time.Millisecond)
-	for i := 0; i < 5000; i++ {
-		if !bw.text("abcd") {
-			t.Fatal("a delta was refused")
-		}
-	}
-	for _, name := range []string{"notice", "error", "done"} {
-		if !bw.event(name, map[string]string{}) {
-			t.Fatalf("%s was refused", name)
-		}
-	}
-	if n := bw.pendingItems(); n > 5 {
-		t.Errorf("%d items pending, want the deltas merged", n)
+	if took := time.Since(start); took < 4*time.Second {
+		t.Errorf("read in %v: the reader was not slow", took)
 	}
 }
 
-func TestBrowserWriter_RecoversFromAPanickingWrite(t *testing.T) {
-	broken := make(chan struct{}, 1)
-	bw := startBrowserWriter(&panickingWriter{header: http.Header{}}, time.Second, time.Hour, func() { broken <- struct{}{} })
-	bw.event("text", map[string]string{"delta": "x"})
-	select {
-	case <-broken:
-	case <-time.After(3 * time.Second):
-		t.Fatal("a panicking write was not reported")
-	}
-	bw.finish(0)
+// pacedBody reads at a steady pace.
+type pacedBody struct {
+	io.ReadCloser
+	perSecond int
 }
 
-type panickingWriter struct{ header http.Header }
-
-func (w *panickingWriter) Header() http.Header       { return w.header }
-func (w *panickingWriter) WriteHeader(int)           {}
-func (w *panickingWriter) Write([]byte) (int, error) { panic("write") }
-
-func TestBrowserWriter_FinishCutsShortAStalledWrite(t *testing.T) {
-	w := newBlockingWriter()
-	defer w.release()
-	bw := startBrowserWriter(w, time.Hour, time.Hour, func() {})
-	bw.event("text", map[string]string{"delta": "x"})
-	time.Sleep(50 * time.Millisecond)
-	start := time.Now()
-	bw.finish(200 * time.Millisecond)
-	if took := time.Since(start); took > 2*time.Second {
-		t.Errorf("finish took %v on a stalled write", took)
+func (p *pacedBody) Read(b []byte) (int, error) {
+	if len(b) > 16<<10 {
+		b = b[:16<<10]
 	}
+	n, err := p.ReadCloser.Read(b)
+	time.Sleep(time.Duration(n) * time.Second / time.Duration(p.perSecond))
+	return n, err
 }
 
 // done that arrives with the shutdown still counts: the answer was complete.
@@ -320,21 +312,30 @@ func TestChat_DoneBeatsDrain(t *testing.T) {
 	}
 }
 
-// At shutdown the usage write may not wait the usual ten seconds.
-func TestChat_UsageWriteAtDrainIsBoundedToTwoSeconds(t *testing.T) {
-	var api atomic.Pointer[Server]
-	env := newChatEnv(t, func(s *Server) {
-		s.agentEventHook = func(ctx context.Context, ev agentclient.Event) {
-			if ev.Type == "usage" {
-				api.Load().BeginDrain()
-				time.Sleep(100 * time.Millisecond)
+// An answer that had been read in full when the shutdown began is complete, though it was still waiting to be handled.
+func TestChat_DoneThatWasReadBeforeTheDrainCounts(t *testing.T) {
+	for range 6 { // which of two things that are both there a select picks is random
+		var api atomic.Pointer[Server]
+		env := newChatEnv(t, func(s *Server) {
+			s.agentEventHook = func(ctx context.Context, ev agentclient.Event) {
+				if ev.Type == "text" {
+					time.Sleep(100 * time.Millisecond) // done is read meanwhile, and waits
+					api.Load().BeginDrain()
+				}
 			}
+		})
+		api.Store(env.api)
+		frames := readSSE(t, send(env.sam, newConversation(t, env.sam), "hello"))
+		if last := frames[len(frames)-1]; last.Event != "done" {
+			t.Fatalf("last frame = %+v, want done", last)
 		}
-	})
-	api.Store(env.api)
-	id := newConversation(t, env.sam)
-	entered := make(chan struct{})
-	locked := make(chan struct{})
+	}
+}
+
+// At shutdown a usage write that is already waiting for a lock may not hold up the end of the turn.
+func TestChat_DrainWithAUsageWriteInFlightEndsInTime(t *testing.T) {
+	env := newChatEnv(t)
+	entered, locked := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
 		ndjson(w, `{"type":"text","delta":"x"}`)
@@ -344,54 +345,95 @@ func TestChat_UsageWriteAtDrainIsBoundedToTwoSeconds(t *testing.T) {
 		holdUntilGone(r)
 	})
 	done := make(chan []sseFrame, 1)
-	go func() { done <- readSSE(t, send(env.sam, id, "hello")) }()
+	go func() { done <- readSSE(t, send(env.sam, newConversation(t, env.sam), "hello")) }()
 	<-entered
 	release := holdLock(t, env.st, `select id from agent_runs for update`)
 	defer release()
-	start := time.Now()
 	close(locked)
+	waitFor(t, "the usage write to wait for the row", func() bool {
+		return agentCount(t, env.st, `select count(*) from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`) > 0
+	})
+	start := time.Now()
+	env.api.BeginDrain()
+	var frames []sseFrame
 	select {
-	case <-done:
-	case <-time.After(15 * time.Second):
+	case frames = <-done:
+	case <-time.After(25 * time.Second):
 		t.Fatal("the turn never ended")
 	}
-	if took := time.Since(start); took > 7*time.Second {
-		t.Errorf("the turn took %v: the usage write waited too long", took)
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("the turn took %v from the drain on", took)
+	}
+	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "interrupted" {
+		t.Errorf("last frame = %+v, want an error event interrupted", last)
+	}
+	release()
+	reconcileSoon(t, env, 61*time.Minute)
+	if got := auditOutcomes(t, env.st); len(got) != 1 {
+		t.Errorf("audit = %v", got)
+	}
+	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 || runState(t, env.st) != "failed" {
+		t.Errorf("%d run tokens left, run %s", n, runState(t, env.st))
 	}
 }
 
-// A tool the agent calls that this version does not know ends the turn with its own code, in the browser and in the
-// audit row, instead of being quietly dropped.
-func TestChat_UnknownToolEndsTheTurnAsUnknownTool(t *testing.T) {
+// A model that asks for a tool that does not exist is told so by the agent, which names it unknown_tool and goes on.
+// The turn goes on too, and everything after it counts, what it costs above all.
+func TestChat_UnknownToolIsANameLikeAnyOther(t *testing.T) {
 	env := newChatEnv(t)
-	var cancelled atomic.Bool
 	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
-		ndjson(w, `{"type":"text","delta":"before"}`, `{"type":"tool_start","tool":"made_up_tool"}`)
-		select {
-		case <-r.Context().Done():
-			cancelled.Store(true)
-		case <-time.After(5 * time.Second):
-		}
+		ndjson(w, `{"type":"tool_start","tool":"unknown_tool"}`, `{"type":"tool_end","tool":"unknown_tool","ok":false}`,
+			`{"type":"tool_start","tool":"made <b>up"}`, `{"type":"tool_end","tool":"made <b>up","ok":true}`,
+			`{"type":"usage","input_tokens":3,"output_tokens":4,"cost_micro_usd":900}`,
+			`{"type":"text","delta":"the answer"}`, `{"type":"done"}`)
 	})
 	id := newConversation(t, env.sam)
 	frames := readSSE(t, send(env.sam, id, "hello"))
-	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "unknown_tool" {
-		t.Fatalf("last frame = %+v, want an error event unknown_tool", last)
+	if got := strings.Join(eventNames(frames), ","); got != "tool_start,tool_end,tool_start,tool_end,text,done" {
+		t.Fatalf("events = %s", got)
 	}
-	for _, f := range frames {
-		if f.Event == "tool_start" {
-			t.Error("the unknown tool was relayed")
+	for _, f := range frames[:4] {
+		if f.Data["name"] != "unknown_tool" {
+			t.Errorf("tool frame = %+v", f)
 		}
 	}
-	if !cancelled.Load() {
-		t.Error("the agent run was not cancelled")
+	if _, msgs := getMessages(t, env.sam, id); len(msgs) != 2 || msgs[1].Text != "the answer" || msgs[1].Interrupted ||
+		strings.Join(msgs[1].Tools, ",") != "unknown_tool,unknown_tool" {
+		t.Errorf("messages = %+v", msgs)
 	}
-	if d := auditDetails(t, env.st); d["outcome"] != "unknown_tool" {
+	wantEnded(t, env, "done", 900)
+	if d := auditDetails(t, env.st); fmt.Sprint(d["tools"]) != "[unknown_tool unknown_tool]" || d["cost_micro_usd"] != float64(900) {
 		t.Errorf("audit = %v", d)
 	}
-	if st := runState(t, env.st); st != "failed" {
-		t.Errorf("run state = %s", st)
+}
+
+// Usage that was already sent when the turn ended is still charged.
+func TestChat_UsageAfterTheEndIsStillRecorded(t *testing.T) {
+	var api atomic.Pointer[Server]
+	var once sync.Once
+	env := newChatEnv(t, func(s *Server) {
+		s.agentEventHook = func(ctx context.Context, ev agentclient.Event) {
+			if ev.Type == "text" { // the drain ends the turn while the rest of the answer is still to be read
+				once.Do(func() { api.Load().BeginDrain(); time.Sleep(100 * time.Millisecond) })
+			}
+		}
+	})
+	api.Store(env.api)
+	var b strings.Builder
+	for i := range 200 {
+		fmt.Fprintf(&b, `{"type":"text","delta":"t%d "}`+"\n", i)
 	}
+	b.WriteString(`{"type":"usage","input_tokens":3,"output_tokens":4,"cost_micro_usd":333}` + "\n")
+	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
+		fmt.Fprint(w, b.String())
+		w.(http.Flusher).Flush()
+		holdUntilGone(r)
+	})
+	frames := readSSE(t, send(env.sam, newConversation(t, env.sam), "hello"))
+	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "interrupted" {
+		t.Errorf("last frame = %+v", last)
+	}
+	wantEnded(t, env, "failed", 333)
 }
 
 // The reservation commits on a context of its own: a browser that leaves while it waits still gets its run

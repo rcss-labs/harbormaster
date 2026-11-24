@@ -8,10 +8,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -25,6 +27,9 @@ const (
 	testRoleName       = "test"
 	testRunTokens      = 2000 // the "Test model" call reserves a run of this many tokens at the model's higher price
 )
+
+// testCallLimit bounds the "Test model" call; the client's own limit is shorter.
+var testCallLimit = agentrun.Limit{Normal: 2 * time.Minute, Draining: 2 * time.Second}
 
 // parseUSD reads a dollar amount such as "25", "25.5" or "25.50" into micro-dollars. Only digits and at most two
 // decimal places are accepted (no sign, exponent, spaces or separators), and the amount must not exceed 1,000,000.
@@ -310,8 +315,8 @@ type AgentTestResultDTO struct {
 }
 
 // testAgentModel makes one small paid call to the chosen model. It is a run with role "test", reserved and
-// settled like any other, so it counts toward the month's allowance. The run ends in one place (finishTestRun),
-// which settles it, deletes its token and runs once however the call ends.
+// settled like any other, so it counts toward the month's allowance, and it ends like any other (finishRun), once
+// however the call ends.
 func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 	var body agentModelChoice
 	if err := decodeStrictJSON(w, r, &body); err != nil {
@@ -336,49 +341,50 @@ func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 		ID: uuid.New(), Role: testRoleName, UserID: &actor.ID, Provider: body.Provider, Model: body.Model,
 		ReservedMicroUSD: chosen.MaxRunCostMicroUSD(testRunTokens),
 	}
-	if err := s.Store.ReserveAgentRun(r.Context(), run, max(2*cat.RunTimeout, minRunStaleAfter), s.now()); err != nil {
-		if errors.Is(err, store.ErrBudgetExhausted) {
-			err = errBudget
-		}
+	if err := s.reserveRun(r, run, cat.RunTimeout); err != nil {
 		s.fail(w, err)
 		return
 	}
 
-	var (
-		once   sync.Once
-		state  = "failed"
-		result agentclient.TestResult
-	)
-	finish := func() {
-		once.Do(func() { s.finishTestRun(r, run.ID, state, result) })
+	meter := &agentrun.Meter{Store: s.Store, RunID: run.ID, Now: s.now, Draining: s.draining}
+	var once sync.Once
+	finish := func(ok bool) {
+		once.Do(func() {
+			res := turnResult{outcome: "error"}
+			if ok {
+				res = turnResult{success: true, outcome: "done"}
+			}
+			s.finishRun(r, s.runOps(r, run, actor, meter, res))
+		})
 	}
-	defer finish() // a panic still settles the run and deletes its token
+	defer finish(false) // a panic still settles the run and deletes its token
 
-	token, err := s.Auth.MintRunToken(r.Context(), actor, run.ID, true)
+	token, err := agentrun.Within(r.Context(), setUpLimit, s.draining, func(ctx context.Context) (string, error) {
+		return s.Auth.MintRunToken(ctx, actor, run.ID, true)
+	})
 	if err != nil {
-		finish()
+		finish(false)
 		s.log().Error("agent test run token not minted", "run_id", run.ID, "error", err)
 		s.fail(w, err)
 		return
 	}
-	result, err = s.Agent.Test(r.Context(), token, body.Provider, body.Model)
+	// Detached from the request: the model is paid for its answer whether or not the admin waits for it.
+	result, err := agentrun.Within(context.WithoutCancel(r.Context()), testCallLimit, s.draining, func(ctx context.Context) (agentclient.TestResult, error) {
+		return s.Agent.Test(ctx, token, body.Provider, body.Model)
+	})
 	if err != nil {
-		finish()
-		if r.Context().Err() == nil {
-			s.log().Warn("agent test call failed", "run_id", run.ID, "error", err)
-		}
+		finish(false)
+		s.logRunError(run.ID, "agent test call failed", err)
 		s.fail(w, errAgentDown)
 		return
 	}
+	meter.See(agentrun.Usage{InputTokens: result.InputTokens, OutputTokens: result.OutputTokens, CostMicroUSD: result.CostMicroUSD})
 	if result.CostMicroUSD > run.ReservedMicroUSD {
 		// Never capped: the budget must know the real spend.
 		s.log().Warn("agent test cost above its reservation", "run_id", run.ID,
 			"cost_micro_usd", result.CostMicroUSD, "reserved_micro_usd", run.ReservedMicroUSD)
 	}
-	if result.OK {
-		state = "done"
-	}
-	finish()
+	finish(result.OK)
 	writeJSON(w, http.StatusOK, cleanTestResult(result))
 }
 
@@ -404,24 +410,6 @@ func boundedMessage(msg string) string {
 		return string(runes[:maxErrorMessageLen])
 	}
 	return msg
-}
-
-// finishTestRun records what the call cost, settles the run and deletes its token, each step whether or not the
-// one before it failed; they are the same steps a chat turn ends with.
-func (s *Server) finishTestRun(r *http.Request, runID uuid.UUID, state string, result agentclient.TestResult) {
-	_ = s.runStep(r, runID, "record the test cost", func(ctx context.Context) error {
-		if result.CostMicroUSD <= 0 && result.InputTokens <= 0 && result.OutputTokens <= 0 {
-			return nil
-		}
-		err := s.Store.RecordAgentRunUsage(ctx, runID, max(result.InputTokens, 0), max(result.OutputTokens, 0),
-			max(result.CostMicroUSD, 0), s.now())
-		if errors.Is(err, store.ErrAgentRunNotRunning) {
-			return nil
-		}
-		return err
-	})
-	_ = s.runStep(r, runID, "settle the run", func(ctx context.Context) error { return s.settleRun(ctx, runID, state, nil) })
-	_ = s.runStep(r, runID, "delete the run token", func(ctx context.Context) error { return s.dropRunToken(ctx, runID) })
 }
 
 // AgentUsageDayDTO is one day and role of finished usage.

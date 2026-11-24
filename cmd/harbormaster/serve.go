@@ -20,6 +20,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/api"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -475,6 +476,9 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 				Bus:      kicks.bus,
 				Log:      log,
 			}
+			if cfg.AgentEnabled() {
+				coordinatorRunner.AgentRuns = &agentrun.Reconciler{Store: st, Now: time.Now, Log: log}
+			}
 			pollerConfig.Coordinator = coordinatorRunner
 		}
 		pollerInstance = poller.New(st, clients, pollerConfig, log)
@@ -511,7 +515,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if apiServer != nil {
 		// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and
-		// audit on detached contexts), so deploys, writes, exec and tails keep their full drain.
+		// audit on detached contexts) and AI agent runs (they settle and save what was said), so deploys, writes, exec and tails keep their full drain.
 		httpServer.RegisterOnShutdown(apiServer.BeginDrain)
 	}
 

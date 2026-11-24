@@ -97,7 +97,7 @@ func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 		return fmt.Errorf("reserve agent run: lock settings: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `update agent_runs set state = 'failed', finished_at = $1
-		where state = 'running' and coalesce(last_usage_at, started_at) < $2`, now, now.Add(-staleAfter)); err != nil {
+		where `+staleAgentRunSQL, now, now.Add(-staleAfter)); err != nil {
 		return fmt.Errorf("reserve agent run: settle stale runs: %w", err)
 	}
 	start, end := utcMonthBounds(now)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -963,4 +964,93 @@ func TestSetUserAIChat_AuditShowsTheValueItReplaced(t *testing.T) {
 	if _, err := env.st.ChangeUserAIChat(t.Context(), 99999, true); err == nil {
 		t.Error("an unknown user did not fail")
 	}
+}
+
+// A test run ends like any other run: its cost survives a failed write, and it leaves exactly one audit row.
+func TestAgentTest_FailedUsageWriteIsRetriedAndTheRunIsAudited(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	failFirstUsageWrite(t, env.st)
+	resp := postTest(env.sam, "fake", "fake-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	wantTestRun(t, env, "done", 1234)
+	rows := settingsAuditRows(t, env.st, "agent_run")
+	if len(rows) != 1 || rows[0].ActorUsername != "sam" || rows[0].Details["role"] != "test" || rows[0].Details["cost_micro_usd"] != float64(1234) ||
+		rows[0].Details["outcome"] != "done" {
+		t.Errorf("audit rows = %+v", rows)
+	}
+}
+
+func wantTestRun(t *testing.T, env *settingsEnv, state string, cost int64) {
+	t.Helper()
+	if n, states := runRows(t, env.st, "test"); n != 1 || states != state {
+		t.Errorf("test runs = %d (%s), want one %s", n, states, state)
+	}
+	if settled, reserved, _ := env.st.AgentSpend(t.Context(), env.api.now()); settled != cost || reserved != 0 {
+		t.Errorf("spend = %d settled, %d reserved; want %d and 0", settled, reserved, cost)
+	}
+	if n := agentCount(t, env.st, `select count(*) from api_tokens where kind = 'run'`); n != 0 {
+		t.Errorf("%d run tokens left", n)
+	}
+}
+
+// An admin who leaves while the model answers has still paid for the answer.
+func TestAgentTest_CostIsRecordedWhenTheAdminLeaves(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	entered, left := make(chan struct{}), make(chan struct{})
+	env.agent.mu.Lock()
+	env.agent.onTest = func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-left
+		time.Sleep(200 * time.Millisecond) // let the server notice that the admin has gone
+		_, _ = w.Write([]byte(`{"ok":true,"kind":"ok","message":"The model answered.","cost_micro_usd":1234}`))
+	}
+	env.agent.mu.Unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, env.sam.base+"/api/agent/settings/test", strings.NewReader(`{"provider":"fake","model":"fake-1"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-CSRF-Token", env.sam.csrf)
+		if resp, err := env.sam.http.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-entered
+	cancel()
+	<-done
+	close(left)
+	waitFor(t, "the run to be audited", func() bool { return len(settingsAuditRows(t, env.st, "agent_run")) == 1 })
+	wantTestRun(t, env, "done", 1234)
+}
+
+// A shutdown does not wait for the model: the test call is cut off and its run settled.
+func TestAgentTest_DrainCutsTheCallOff(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	entered := make(chan struct{})
+	env.agent.mu.Lock()
+	env.agent.onTest = func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(20 * time.Second):
+		}
+	}
+	env.agent.mu.Unlock()
+	status := make(chan int, 1)
+	go func() {
+		resp := postTest(env.sam, "fake", "fake-1")
+		resp.Body.Close()
+		status <- resp.StatusCode
+	}()
+	<-entered
+	start := time.Now()
+	env.api.BeginDrain()
+	if got := <-status; got != http.StatusServiceUnavailable || time.Since(start) > 8*time.Second {
+		t.Errorf("status %d after %v", got, time.Since(start))
+	}
+	wantTestRun(t, env, "failed", 0)
 }
