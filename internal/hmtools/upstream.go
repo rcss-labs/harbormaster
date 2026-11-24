@@ -71,23 +71,33 @@ type Upstream struct {
 	defaultTimeout time.Duration
 	client         *http.Client
 	maxBodyBytes   int64
+	product        string
 }
 
 // NewUpstream returns the client for baseURL (scheme and host only). client
 // may be nil; a given client is copied and its redirect policy and cookie jar
 // are overridden.
 func NewUpstream(baseURL string, defaultTimeout time.Duration, client *http.Client) (*Upstream, error) {
-	return newUpstream(baseURL, defaultTimeout, client, "")
+	return newUpstream(baseURL, defaultTimeout, client, "", "")
 }
 
 // NewUpstreamWithCA is NewUpstream with its own client, whose TLS roots are the
 // system pool plus the PEM certificates in extraCAPEM (empty: the system pool
 // alone). The extra roots apply to this upstream client only.
 func NewUpstreamWithCA(baseURL string, defaultTimeout time.Duration, extraCAPEM string) (*Upstream, error) {
-	return newUpstream(baseURL, defaultTimeout, nil, extraCAPEM)
+	return newUpstream(baseURL, defaultTimeout, nil, extraCAPEM, "")
 }
 
-func newUpstream(baseURL string, defaultTimeout time.Duration, client *http.Client, extraCAPEM string) (*Upstream, error) {
+// NewUpstreamForProduct is NewUpstreamWithCA for another command: its requests
+// carry the User-Agent "<product>/<Version>" instead of the gateway's.
+func NewUpstreamForProduct(baseURL string, defaultTimeout time.Duration, extraCAPEM, product string) (*Upstream, error) {
+	return newUpstream(baseURL, defaultTimeout, nil, extraCAPEM, product)
+}
+
+func newUpstream(baseURL string, defaultTimeout time.Duration, client *http.Client, extraCAPEM, product string) (*Upstream, error) {
+	if product == "" {
+		product = "harbormaster-mcp"
+	}
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("upstream base URL: %w", err)
@@ -129,6 +139,7 @@ func newUpstream(baseURL string, defaultTimeout time.Duration, client *http.Clie
 		defaultTimeout: defaultTimeout,
 		client:         &httpClient,
 		maxBodyBytes:   maxUpstreamBodyBytes,
+		product:        product,
 	}, nil
 }
 
@@ -184,7 +195,7 @@ func (u *Upstream) Do(ctx context.Context, bearer, forwardedFor string, c Call) 
 	req.Header = http.Header{}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "harbormaster-mcp/"+Version)
+	req.Header.Set("User-Agent", u.product+"/"+Version)
 	if forwardedFor != "" {
 		req.Header.Set("X-Forwarded-For", forwardedFor)
 	}
@@ -286,7 +297,7 @@ func (u *Upstream) RelayToken(ctx context.Context, form []byte, forwardedFor str
 	req.Header = http.Header{}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "harbormaster-mcp/"+Version)
+	req.Header.Set("User-Agent", u.product+"/"+Version)
 	if forwardedFor != "" {
 		req.Header.Set("X-Forwarded-For", forwardedFor)
 	}
