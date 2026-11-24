@@ -115,7 +115,7 @@ func TestDemo_CallsOverviewThenAnswersInTwoSentences(t *testing.T) {
 func TestFake_RawReturnsTheResponseAndStreamsItsText(t *testing.T) {
 	want := provider.Response{
 		Text:       "checking now",
-		ToolCalls:  []provider.ToolCall{{ID: "c1", Name: "list_services", Arguments: map[string]any{"env": "prod"}}},
+		ToolCalls:  []provider.ToolCall{{ID: "c1", Name: "list_services", Arguments: map[string]any{"env": "prod"}}, {ID: "c2", Name: "x", ArgError: "bad args"}},
 		Usage:      provider.Usage{InputTokens: 5, OutputTokens: 3},
 		StopReason: "max_tokens",
 		Opaque:     []byte(`{"sig":"x"}`),
@@ -126,7 +126,7 @@ func TestFake_RawReturnsTheResponseAndStreamsItsText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Text != want.Text || got.StopReason != "max_tokens" || len(got.ToolCalls) != 1 || got.ToolCalls[0].Name != "list_services" ||
+	if got.Text != want.Text || got.StopReason != "max_tokens" || len(got.ToolCalls) != 2 || got.ToolCalls[1].ArgError != "bad args" || got.ToolCalls[1].Arguments != nil || got.ToolCalls[0].Name != "list_services" ||
 		string(got.Opaque) != `{"sig":"x"}` || got.Usage != want.Usage {
 		t.Fatalf("got %+v", got)
 	}
@@ -141,7 +141,7 @@ func TestFake_RecordedRequestsAreDeepCopies(t *testing.T) {
 	schema := map[string]any{"type": "object"}
 	opaque := []byte(`{"a":1}`)
 	req := provider.Request{
-		Messages: []provider.Message{{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c", Arguments: args}}, Opaque: opaque}},
+		Messages: []provider.Message{{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "c", Arguments: args}, {ID: "bad", ArgError: "arguments were not a JSON object"}}, Opaque: opaque}},
 		Tools:    []provider.ToolDef{{Name: "t", InputSchema: schema}},
 	}
 	_, _ = p.Generate(context.Background(), req, nil)
@@ -152,7 +152,7 @@ func TestFake_RecordedRequestsAreDeepCopies(t *testing.T) {
 
 	got := p.Requests()[0]
 	if got.Messages[0].ToolCalls[0].Arguments["nested"].(map[string]any)["k"] != "v" || got.Messages[0].ToolCalls[0].Name != "" ||
-		got.Tools[0].InputSchema["type"] != "object" || string(got.Messages[0].Opaque) != `{"a":1}` {
+		got.Messages[0].ToolCalls[1].ArgError != "arguments were not a JSON object" || got.Tools[0].InputSchema["type"] != "object" || string(got.Messages[0].Opaque) != `{"a":1}` {
 		t.Fatalf("recorded request was mutated through the caller's data: %+v", got)
 	}
 }
