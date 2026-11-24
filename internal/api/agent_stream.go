@@ -26,19 +26,22 @@ const (
 	// settleStepTimeout bounds each step that ends a turn. They run on a context detached from the request, so an
 	// aborted request still settles its run, deletes its token and saves what was said.
 	settleStepTimeout = 10 * time.Second
-	// finishBudget caps all the finishing steps of a turn together, so a turn always ends well inside the 15 second
-	// shutdown.
-	finishBudget = 8 * time.Second
+	// Each finishing step has its own deadline, from a fresh context; together they stay under 8 seconds, well
+	// inside the 15 second shutdown. Credentials and money come first so a slow later step cannot starve them.
+	tokenStepTimeout  = 1500 * time.Millisecond
+	settleStepBudget  = 2 * time.Second
+	usageStepTimeout  = time.Second // inside the settle step, so settling always keeps at least this much
+	saveStepTimeout   = 2500 * time.Millisecond
+	auditStepTimeout  = time.Second
+	drainUsageTimeout = 2 * time.Second
 	// finalFlush is how long the last events get to reach a browser that is still reading.
 	finalFlush = 2 * time.Second
-	// streamQueueSize is how many events may wait for the browser before it counts as stalled.
-	streamQueueSize = 1024
 	// maxSavedAnswerBytes caps the answer text kept for one turn; the marker is added once when it is passed.
 	maxSavedAnswerBytes = 256 << 10
 	answerCapMarker     = "\n\n[The answer was cut short because it grew too long.]"
 	maxErrorMessageLen  = 300
 	maxToolNameLen      = 64
-	// The agent refuses more than 400 messages or about 1 MiB of them; these leave margin.
+	// The agent refuses a request of more than 500 messages or 1 MiB; these leave margin.
 	historyMaxMessages = 400
 	historyMaxBytes    = 700 << 10
 	// defaultRunTimeout stands in when the catalogue states none.
@@ -82,31 +85,49 @@ func startSSE(w http.ResponseWriter) {
 }
 
 // browserWriter sends server-sent events to the browser from a goroutine of its own, so a slow browser never slows
-// the reading of the agent's events (which carry the usage the budget depends on). Events wait in a bounded queue;
-// a write that does not finish in writeTimeout, a failed write, or a full queue marks the stream broken and calls
-// onBroken. Every data line is JSON, which never holds a raw newline, so text from the model cannot end an event
-// early or start a forged one. The writer also sends the comment heartbeat.
+// the reading of the agent's events (which carry the usage the budget depends on). Adjacent text deltas that the
+// browser has not been sent yet are merged into one pending frame, so a burst of tiny deltas costs one write, and
+// the notice, error and done frames are always accepted: a browser that is merely slow loses nothing. Only a
+// write that does not finish in writeTimeout, a failed write, or a runaway amount of unsent text marks the stream
+// broken and calls onBroken. Every data line is JSON, which never holds a raw newline, so text from the model
+// cannot end an event early or start a forged one. The writer also sends the comment heartbeat.
 type browserWriter struct {
 	rc           *http.ResponseController
 	w            http.ResponseWriter
 	writeTimeout time.Duration
 	onBroken     func()
 
-	mu     sync.Mutex // guards queue sends and close
-	closed bool
-	queue  chan string
+	mu      sync.Mutex // guards items, pending and closed
+	items   []outItem
+	pending int // bytes of unsent text
+	closed  bool
+	wake    chan struct{}
 
 	broken        atomic.Bool
-	flushDeadline atomic.Int64 // unix nanos; zero until finish
+	flushDeadline atomic.Int64 // unix nanos; set once, by finish
 	done          chan struct{}
 }
 
-// startBrowserWriter starts the writer goroutine. onBroken is called, once, from the producer or the writer, when the
-// stream can no longer be trusted to reach the browser.
+// outItem is one unsent event; a text item holds the merged delta text instead of data.
+type outItem struct {
+	name string
+	data any
+	text []byte
+}
+
+const (
+	// maxPendingText is the most unsent text kept for one browser; past it the stream is broken.
+	maxPendingText = 16 << 20
+	// maxTextFrame is the largest text event written at once.
+	maxTextFrame = 64 << 10
+)
+
+// startBrowserWriter starts the writer goroutine. onBroken is called, once, when the stream can no longer be
+// trusted to reach the browser.
 func startBrowserWriter(w http.ResponseWriter, writeTimeout, heartbeat time.Duration, onBroken func()) *browserWriter {
 	b := &browserWriter{
 		w: w, rc: http.NewResponseController(w), writeTimeout: writeTimeout, onBroken: onBroken,
-		queue: make(chan string, streamQueueSize), done: make(chan struct{}),
+		wake: make(chan struct{}, 1), done: make(chan struct{}),
 	}
 	go b.loop(heartbeat)
 	return b
@@ -114,17 +135,26 @@ func startBrowserWriter(w http.ResponseWriter, writeTimeout, heartbeat time.Dura
 
 func (b *browserWriter) loop(heartbeat time.Duration) {
 	defer close(b.done)
+	defer func() {
+		if recover() != nil {
+			b.markBroken() // a write that panics must not take the process down, or leave the turn waiting
+		}
+	}()
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
 	for {
-		select {
-		case frame, ok := <-b.queue:
-			if !ok {
-				return
-			}
+		frame, ok, finished := b.next()
+		if ok {
 			if !b.write(frame) {
 				return
 			}
+			continue
+		}
+		if finished {
+			return
+		}
+		select {
+		case <-b.wake:
 		case <-ticker.C:
 			if !b.write(": keep-alive\n\n") {
 				return
@@ -133,15 +163,49 @@ func (b *browserWriter) loop(heartbeat time.Duration) {
 	}
 }
 
+// next pops the first unsent event as a frame. finished is true once the writer is closed and nothing is left.
+func (b *browserWriter) next() (frame string, ok, finished bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.items) == 0 {
+		return "", false, b.closed
+	}
+	it := &b.items[0]
+	var data any = it.data
+	if it.name == "text" && it.text != nil {
+		n := len(it.text)
+		if n > maxTextFrame {
+			n = maxTextFrame
+			for n > 0 && !utf8.RuneStart(it.text[n]) {
+				n--
+			}
+		}
+		data = map[string]string{"delta": string(it.text[:n])}
+		b.pending -= n
+		if n < len(it.text) {
+			it.text = it.text[n:]
+		} else {
+			b.items = b.items[1:]
+		}
+	} else {
+		b.items = b.items[1:]
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		raw = []byte("{}")
+	}
+	name := it.name
+	if len(b.items) == 0 {
+		b.items = nil
+	}
+	return fmt.Sprintf("event: %s\ndata: %s\n\n", name, raw), true, false
+}
+
 func (b *browserWriter) write(frame string) bool {
 	if b.broken.Load() {
 		return false
 	}
-	deadline := time.Now().Add(b.writeTimeout)
-	if fd := b.flushDeadline.Load(); fd != 0 && time.Unix(0, fd).Before(deadline) {
-		deadline = time.Unix(0, fd)
-	}
-	_ = b.rc.SetWriteDeadline(deadline)
+	b.setDeadline()
 	_, err := b.w.Write([]byte(frame))
 	if err == nil {
 		if err = b.rc.Flush(); errors.Is(err, http.ErrNotSupported) {
@@ -155,48 +219,87 @@ func (b *browserWriter) write(frame string) bool {
 	return true
 }
 
+// setDeadline gives the next write writeTimeout, or less once finish has set its flush deadline. It looks at the
+// flush deadline again after setting, so a deadline finish set in between is never overwritten by a later one.
+func (b *browserWriter) setDeadline() {
+	deadline := time.Now().Add(b.writeTimeout)
+	if fd := b.flushDeadline.Load(); fd != 0 && time.Unix(0, fd).Before(deadline) {
+		deadline = time.Unix(0, fd)
+	}
+	_ = b.rc.SetWriteDeadline(deadline)
+	if fd := b.flushDeadline.Load(); fd != 0 && time.Unix(0, fd).Before(deadline) {
+		_ = b.rc.SetWriteDeadline(time.Unix(0, fd))
+	}
+}
+
 func (b *browserWriter) markBroken() {
 	if b.broken.CompareAndSwap(false, true) && b.onBroken != nil {
 		b.onBroken()
 	}
 }
 
-// event queues one event without waiting. It reports false when the stream is broken or the browser has fallen so
-// far behind that the queue is full (which breaks it).
-func (b *browserWriter) event(name string, data any) bool {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return true // nothing the model sends can fail to encode; drop rather than break the stream
+func (b *browserWriter) signal() {
+	select {
+	case b.wake <- struct{}{}:
+	default:
 	}
-	frame := fmt.Sprintf("event: %s\ndata: %s\n\n", name, raw)
+}
+
+// text queues a text delta, merging it into the last unsent text event. It is refused only when the stream is
+// broken or closed, or far more text is waiting than any browser could be reading (which breaks the stream).
+func (b *browserWriter) text(delta string) bool {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed || b.broken.Load() {
+		b.mu.Unlock()
 		return false
 	}
-	select {
-	case b.queue <- frame:
-		return true
-	default:
+	if b.pending+len(delta) > maxPendingText {
+		b.mu.Unlock()
 		b.markBroken()
 		return false
 	}
+	if n := len(b.items); n > 0 && b.items[n-1].name == "text" && b.items[n-1].text != nil {
+		b.items[n-1].text = append(b.items[n-1].text, delta...)
+	} else {
+		b.items = append(b.items, outItem{name: "text", text: []byte(delta)})
+	}
+	b.pending += len(delta)
+	b.mu.Unlock()
+	b.signal()
+	return true
+}
+
+// event queues any other event. It is always accepted unless the stream is broken or closed.
+func (b *browserWriter) event(name string, data any) bool {
+	b.mu.Lock()
+	if b.closed || b.broken.Load() {
+		b.mu.Unlock()
+		return false
+	}
+	b.items = append(b.items, outItem{name: name, data: data})
+	b.mu.Unlock()
+	b.signal()
+	return true
 }
 
 func (b *browserWriter) isBroken() bool { return b.broken.Load() }
 
+// pendingItems is how many events wait to be written.
+func (b *browserWriter) pendingItems() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.items)
+}
+
 // finish stops accepting events, gives what is queued flush to reach the browser, and returns once the writer has
-// stopped, so nothing is written after the handler returns.
+// stopped, so nothing is written after the handler returns. The flush deadline is set once and cannot be moved.
 func (b *browserWriter) finish(flush time.Duration) {
 	b.mu.Lock()
-	if !b.closed {
-		b.closed = true
-		deadline := time.Now().Add(flush)
-		b.flushDeadline.Store(deadline.UnixNano())
-		_ = b.rc.SetWriteDeadline(deadline) // also cuts short a write already waiting on a stalled browser
-		close(b.queue)
-	}
+	b.closed = true
 	b.mu.Unlock()
+	b.flushDeadline.CompareAndSwap(0, time.Now().Add(flush).UnixNano())
+	_ = b.rc.SetWriteDeadline(time.Unix(0, b.flushDeadline.Load())) // also cuts short a write waiting on a stalled browser
+	b.signal()
 	<-b.done
 }
 
@@ -213,6 +316,7 @@ var (
 	resultDisconnected = turnResult{outcome: "interrupted"}
 	resultStopped      = turnResult{outcome: "interrupted", code: "interrupted", message: "This question was stopped before it finished. Try again."}
 	resultTimedOut     = turnResult{outcome: "error", code: "timeout", message: "The agent took too long and was stopped."}
+	resultUnknownTool  = turnResult{outcome: "unknown_tool", code: "unknown_tool", message: "The agent used a tool this version does not know. Ask an admin to update Harbormaster or the agent."}
 	resultUnexpected   = turnResult{outcome: "error", code: "agent_unavailable", message: agentUnavailableMsg}
 	resultSaveFailed   = turnResult{outcome: "error", code: "internal", message: "The answer could not be saved. Try again."}
 )
@@ -247,18 +351,17 @@ type chatTurn struct {
 	ended                bool // a done or error event arrived: nothing after it counts
 	succeeded            bool
 	agentErr             *agentclient.Event
+	badTool              bool // the agent named a tool this version does not know
 	stopped              bool // the run was swept or its usage could not be recorded, so it was cancelled
 	drained              atomic.Bool
 	cancelRun            context.CancelFunc
 
 	finishOnce sync.Once
-	finishAt   sync.Once
-	deadline   time.Time
 }
 
 type usageFigures struct{ input, output, cost int64 }
 
-// finishDeadlineKey carries the instant by which all finishing steps must be done.
+// finishDeadlineKey carries the instant by which one finishing step must be done.
 type finishDeadlineKey struct{}
 
 // execute prepares the turn, streams it and finishes it. It owns every exit, a panic included.
@@ -357,7 +460,7 @@ func (t *chatTurn) stream(w http.ResponseWriter) {
 		RunID: t.run.ID, Role: t.run.Role, Provider: t.run.Provider, Model: t.run.Model,
 		Messages: t.history, Page: t.page, MaxCostMicroUSD: t.run.ReservedMicroUSD,
 	}, t.onEvent)
-	if err != nil && t.r.Context().Err() == nil && !t.bw.isBroken() && !t.stopped && !t.drained.Load() {
+	if err != nil && t.r.Context().Err() == nil && !t.bw.isBroken() && !t.stopped && !t.badTool && !t.drained.Load() {
 		t.s.log().Warn("agent run failed", "run_id", t.run.ID, "error", err) // never any model text
 	}
 	t.finish(t.resultOf(err))
@@ -366,10 +469,12 @@ func (t *chatTurn) stream(w http.ResponseWriter) {
 // resultOf says how the stream ended, given the error Run returned.
 func (t *chatTurn) resultOf(err error) turnResult {
 	switch {
+	case t.succeeded: // an answer that was complete stays complete, whatever happened after it
+		return turnResult{success: true, outcome: "done"}
+	case t.badTool:
+		return resultUnknownTool
 	case t.stopped || t.drained.Load():
 		return resultStopped
-	case t.succeeded:
-		return turnResult{success: true, outcome: "done"}
 	case t.agentErr != nil:
 		return turnResult{outcome: "error", code: errorCodeFrom(t.agentErr.Code), message: errorMessageFrom(t.agentErr.Message)}
 	case t.r.Context().Err() != nil || t.bw.isBroken():
@@ -419,14 +524,20 @@ func (t *chatTurn) onEvent(ev agentclient.Event) {
 			return
 		}
 		t.keepAnswer(delta)
-		t.send("text", map[string]string{"delta": delta})
-	case "tool_start":
-		if name, ok := knownTool(ev.Tool); ok {
+		if !t.bw.text(delta) {
+			t.cancelRun()
+		}
+	case "tool_start", "tool_end":
+		name, ok := knownTool(ev.Tool)
+		if !ok { // the agent and this server disagree about the tools: say so rather than hide it
+			t.ended, t.badTool = true, true
+			t.cancelRun()
+			return
+		}
+		if ev.Type == "tool_start" {
 			t.tools = append(t.tools, name)
 			t.send("tool_start", map[string]string{"name": name})
-		}
-	case "tool_end":
-		if name, ok := knownTool(ev.Tool); ok {
+		} else {
 			t.send("tool_end", map[string]any{"name": name, "ok": ev.OK})
 		}
 	case "notice":
@@ -469,7 +580,11 @@ func (t *chatTurn) send(name string, data any) { t.bw.event(name, data) }
 // the agent run is cancelled at once.
 func (t *chatTurn) recordUsage(ev agentclient.Event) {
 	t.seen, t.haveSeen, t.seenStored = usageFigures{ev.InputTokens, ev.OutputTokens, ev.CostMicroUSD}, true, false
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.r.Context()), settleStepTimeout)
+	timeout := settleStepTimeout
+	if t.drained.Load() {
+		timeout = drainUsageTimeout // the server is shutting down: do not hold it up
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.r.Context()), timeout)
 	defer cancel()
 	if err := t.s.Store.RecordAgentRunUsage(ctx, t.run.ID, ev.InputTokens, ev.OutputTokens, ev.CostMicroUSD, t.s.now()); err != nil {
 		if errors.Is(err, store.ErrAgentRunNotRunning) {
@@ -484,14 +599,36 @@ func (t *chatTurn) recordUsage(ev agentclient.Event) {
 	t.seenStored = true
 }
 
-// finish ends the turn once; later calls do nothing. Each step runs whether or not an earlier one failed, and all
-// of them together are bounded by finishBudget.
+// finish ends the turn once; later calls do nothing. The steps run in order of what must not be lost: the run token
+// goes first, then the cost is recorded and the run settled, then the answer is saved, then the slot is freed, then
+// the audit row is written. Each has its own deadline on a fresh context detached from the request, so one that
+// hangs cannot starve the others, and each runs whether or not an earlier one failed.
 func (t *chatTurn) finish(res turnResult) {
 	t.finishOnce.Do(func() {
+		state := "failed"
+		if res.success {
+			state = "done"
+		}
+		_ = t.stepWithin("delete the run token", tokenStepTimeout, func(ctx context.Context) error {
+			return t.s.dropRunToken(ctx, t.run.ID)
+		})
+		_ = t.stepWithin("record usage and settle the run", settleStepBudget, func(ctx context.Context) error {
+			if t.haveSeen && !t.seenStored {
+				// The figures last seen are written even if writing them failed earlier; a swept run keeps the higher ones.
+				uctx, cancel := context.WithTimeout(ctx, usageStepTimeout)
+				err := t.s.Store.RecordAgentRunUsage(uctx, t.run.ID, t.seen.input, t.seen.output, t.seen.cost, t.s.now())
+				cancel()
+				if err != nil && !errors.Is(err, store.ErrAgentRunNotRunning) {
+					t.s.log().Error("agent turn step failed", "step", "record the last usage", "run_id", t.run.ID, "error", err)
+				}
+			}
+			return t.s.settleRun(ctx, t.run.ID, state, t.tools)
+		})
+
 		var saved store.AgentMessage
-		var saveErr error
+		saveErr := error(nil)
 		if res.success || len(t.answer) > 0 || len(t.tools) > 0 {
-			saveErr = t.step("save the answer", func(ctx context.Context) (err error) {
+			saveErr = t.stepWithin("save the answer", saveStepTimeout, func(ctx context.Context) (err error) {
 				saved, err = t.s.Store.AppendAgentMessage(ctx, t.user.ID, store.AgentMessage{
 					ConversationID: *t.run.ConversationID, Role: "assistant", Text: string(t.answer),
 					Tools: nonNil(t.tools), Interrupted: !res.success,
@@ -499,43 +636,25 @@ func (t *chatTurn) finish(res turnResult) {
 				return err
 			})
 			if res.success && saveErr != nil {
-				res = resultSaveFailed
+				res = resultSaveFailed // the run is settled and costed; only the browser's answer changes
 			}
 		}
-		if t.haveSeen && !t.seenStored {
-			_ = t.step("record the last usage", func(ctx context.Context) error {
-				err := t.s.Store.RecordAgentRunUsage(ctx, t.run.ID, t.seen.input, t.seen.output, t.seen.cost, t.s.now())
-				if errors.Is(err, store.ErrAgentRunNotRunning) {
-					return nil // a swept run keeps the higher figures
-				}
-				return err
-			})
-		}
-		state := "failed"
-		if res.success {
-			state = "done"
-		}
-		_ = t.step("settle the run", func(ctx context.Context) error {
-			return t.s.settleRun(ctx, t.run.ID, state, t.tools)
-		})
-		_ = t.step("delete the run token", func(ctx context.Context) error {
-			return t.s.dropRunToken(ctx, t.run.ID)
-		})
-		_ = t.step("write the audit row", func(ctx context.Context) error {
+		// The slot is freed before the browser hears the end, so its next question is not refused as busy.
+		t.release()
+
+		_ = t.stepWithin("write the audit row", auditStepTimeout, func(ctx context.Context) error {
 			return t.s.Store.Audit(ctx, store.AuditEntry{
 				ActorUserID: &t.user.ID, ActorUsername: t.user.Username,
 				Action: "agent_run", Target: t.run.ID.String(), Summary: "AI chat run", IP: t.s.clientIP(t.r),
 				Details: map[string]any{
 					"run_id": t.run.ID.String(), "role": t.run.Role, "provider": t.run.Provider, "model": t.run.Model,
 					"tools": nonNil(t.tools), "input_tokens": t.seen.input, "output_tokens": t.seen.output,
-					"cost_micro_usd": t.seen.cost, "outcome": res.outcome,
+					"cost_micro_usd": t.seen.cost, "outcome": res.outcome, "saved": saveErr == nil,
 				},
 			})
 		})
 		t.s.log().Info("agent run finished", "run_id", t.run.ID, "user_id", t.user.ID, "outcome", res.outcome,
 			"input_tokens", t.seen.input, "output_tokens", t.seen.output, "cost_micro_usd", t.seen.cost)
-		// The slot is freed before the browser hears the end, so its next question is not refused as busy.
-		t.release()
 
 		if t.bw == nil {
 			return
@@ -550,21 +669,15 @@ func (t *chatTurn) finish(res turnResult) {
 	})
 }
 
-// step runs one finishing step of the turn; see runStep.
-func (t *chatTurn) step(name string, fn func(ctx context.Context) error) error {
-	r := t.r.WithContext(context.WithValue(t.r.Context(), finishDeadlineKey{}, t.finishBy()))
+// stepWithin runs one finishing step with its own deadline; see runStep.
+func (t *chatTurn) stepWithin(name string, within time.Duration, fn func(ctx context.Context) error) error {
+	r := t.r.WithContext(context.WithValue(t.r.Context(), finishDeadlineKey{}, time.Now().Add(within)))
 	return t.s.runStep(r, t.run.ID, name, fn)
 }
 
-// finishBy is the instant the finishing steps must be done by, fixed when the first one starts.
-func (t *chatTurn) finishBy() time.Time {
-	t.finishAt.Do(func() { t.deadline = time.Now().Add(finishBudget) })
-	return t.deadline
-}
-
 // runStep runs one step that ends a run (any role) on a context detached from the request, and turns a panic or
-// an error into a log line so the steps after it still run. The step gets settleStepTimeout, and never runs past the
-// finishing deadline when the request carries one.
+// an error into a log line so the steps after it still run. The step gets settleStepTimeout, or less when the
+// request carries a finishDeadlineKey.
 func (s *Server) runStep(r *http.Request, runID uuid.UUID, name string, fn func(ctx context.Context) error) (err error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), settleStepTimeout)
 	defer cancel()
