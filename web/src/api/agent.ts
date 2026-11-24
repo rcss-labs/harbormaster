@@ -219,6 +219,8 @@ export interface AgentChatModel {
   available: boolean
 }
 export interface AgentSettingsDTO {
+  /** Echoed back on save; a save made from an older version is refused with 409 `settings_changed`. */
+  version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
   role_models: { chat?: AgentChatModel }
@@ -227,6 +229,7 @@ export interface AgentSettingsDTO {
   spend: { month: string; settled_usd: string; reserved_usd: string }
 }
 export interface AgentSettingsUpdate {
+  version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
   role_models: { chat?: { provider: string; model: string } }

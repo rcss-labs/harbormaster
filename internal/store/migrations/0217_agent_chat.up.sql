@@ -8,7 +8,9 @@ alter table users add column ai_chat boolean not null default false;
 create table agent_settings (
   id boolean primary key default true check (id),
   monthly_budget_micro_usd bigint not null default 0 check (monthly_budget_micro_usd >= 0),
-  unredacted_providers text[] not null default '{}'
+  unredacted_providers text[] not null default '{}',
+  -- Raised by every save; a save made from an older read is refused, so two admins cannot overwrite each other.
+  version bigint not null default 1
 );
 insert into agent_settings (id) values (true);
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/auth"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -110,6 +111,8 @@ type AgentSpendDTO struct {
 
 // AgentSettingsDTO is the body of GET and PUT /api/agent/settings.
 type AgentSettingsDTO struct {
+	// Version is echoed back by PUT; a save made from an older version is refused with 409 settings_changed.
+	Version             int64              `json:"version"`
 	MonthlyBudgetUSD    string             `json:"monthly_budget_usd"`
 	UnredactedProviders []string           `json:"unredacted_providers"`
 	RoleModels          AgentRoleModelsDTO `json:"role_models"`
@@ -130,6 +133,7 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 		return AgentSettingsDTO{}, err
 	}
 	out := AgentSettingsDTO{
+		Version:             settings.Version,
 		MonthlyBudgetUSD:    formatUSD(settings.MonthlyBudgetMicroUSD, false),
 		UnredactedProviders: append([]string{}, settings.UnredactedProviders...),
 		Spend: AgentSpendDTO{Month: s.now().UTC().Format("2006-01"),
@@ -167,11 +171,17 @@ type agentModelChoice struct {
 	Model    string `json:"model"`
 }
 
+// agentSettingsUpdate is the PUT body. A null or missing list, map or version decodes to nil, which is refused: a
+// save always states the whole form, so a client that forgets a field cannot silently clear it.
 type agentSettingsUpdate struct {
 	MonthlyBudgetUSD    string                      `json:"monthly_budget_usd"`
 	UnredactedProviders []string                    `json:"unredacted_providers"`
 	RoleModels          map[string]agentModelChoice `json:"role_models"`
+	Version             *int64                      `json:"version"`
 }
+
+var errSettingsChanged = &APIError{Status: http.StatusConflict, Code: "settings_changed",
+	Message: "These settings were changed by someone else. Reload and try again."}
 
 func modelLabel(ref store.AgentModelRef, ok bool) string {
 	if !ok {
@@ -180,14 +190,21 @@ func modelLabel(ref store.AgentModelRef, ok bool) string {
 	return ref.Provider + "/" + ref.Model
 }
 
-// putAgentSettings saves the allowance, redaction and chat model. A role model or provider that is new must be in
-// the agent's catalogue; one already stored may stay as it is although the operator no longer offers it, so an
-// admin can still change the allowance, and a removed provider can be dropped. While the agent cannot be asked,
-// only additions and changes of models or redaction are refused (503); removals still go through.
+// putAgentSettings saves the allowance, redaction and chat model. The form must carry the version it was loaded
+// at; the save reads the stored settings under the row lock and refuses (409) if they moved on. Everything that
+// depends on the stored values (what changed, the audit's old values) uses that locked read.
+//
+// A role model or provider that is new must be in the agent's catalogue; one already stored may stay as it is
+// although the operator no longer offers it, so an admin can still change the allowance, and a removed provider can
+// be dropped. While the agent cannot be asked, additions and changes are refused (503); removals still go through.
 func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	var body agentSettingsUpdate
-	if err := decodeJSON(w, r, &body); err != nil {
+	if err := decodeStrictJSON(w, r, &body); err != nil {
 		s.fail(w, err)
+		return
+	}
+	if body.UnredactedProviders == nil || body.RoleModels == nil || body.Version == nil {
+		s.fail(w, invalid("Send the allowance, the redaction list, the role models and the version."))
 		return
 	}
 	budget, ok := parseUSD(body.MonthlyBudgetUSD)
@@ -214,50 +231,50 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	old, err := s.Store.GetAgentSettings(r.Context())
+	// The catalogue is fetched before the transaction: the row lock is never held across a network call.
+	cat, catErr := s.catalogue(r)
+	if catErr != nil && r.Context().Err() == nil {
+		s.log().Warn("agent catalogue unavailable", "error", catErr)
+	}
+
+	old, err := s.Store.UpdateAgentSettings(r.Context(), *body.Version, func(old store.AgentSettings) (store.AgentSettings, error) {
+		oldChat, hadChat := old.RoleModels[chatRoleName]
+		chatChanged := (wantChat != nil) != hadChat || (wantChat != nil && *wantChat != oldChat)
+		// Only additions and changes need the agent's word; dropping a provider or the chat model is the safe direction.
+		unredactedAdded := slices.ContainsFunc(wantUnredacted, func(p string) bool { return !slices.Contains(old.UnredactedProviders, p) })
+		if (wantChat != nil && chatChanged) || unredactedAdded {
+			if catErr != nil {
+				return store.AgentSettings{}, errAgentDown
+			}
+			if wantChat != nil && chatChanged {
+				if _, offered := findModel(cat, *wantChat); !offered {
+					return store.AgentSettings{}, invalid("That model is not offered by the agent.")
+				}
+			}
+			for _, p := range wantUnredacted {
+				if !slices.Contains(old.UnredactedProviders, p) && !offersProvider(cat, p) {
+					return store.AgentSettings{}, invalid("The agent does not offer the provider " + p + ".")
+				}
+			}
+		}
+		next := store.AgentSettings{MonthlyBudgetMicroUSD: budget, UnredactedProviders: wantUnredacted, RoleModels: map[string]store.AgentModelRef{}}
+		for role, ref := range old.RoleModels {
+			next.RoleModels[role] = ref
+		}
+		delete(next.RoleModels, chatRoleName)
+		if wantChat != nil {
+			next.RoleModels[chatRoleName] = *wantChat
+		}
+		return next, nil
+	})
 	if err != nil {
+		if errors.Is(err, store.ErrAgentSettingsChanged) {
+			err = errSettingsChanged
+		}
 		s.fail(w, err)
 		return
 	}
 	oldChat, hadChat := old.RoleModels[chatRoleName]
-	chatChanged := (wantChat != nil) != hadChat || (wantChat != nil && *wantChat != oldChat)
-	// Only additions and changes need the agent's word; dropping a provider or the chat model is the safe direction.
-	unredactedAdded := slices.ContainsFunc(wantUnredacted, func(p string) bool { return !slices.Contains(old.UnredactedProviders, p) })
-	if (chatChanged && wantChat != nil) || unredactedAdded {
-		cat, err := s.catalogue(r)
-		if err != nil {
-			if r.Context().Err() == nil {
-				s.log().Warn("agent catalogue unavailable", "error", err)
-			}
-			s.fail(w, errAgentDown)
-			return
-		}
-		if wantChat != nil && chatChanged {
-			if _, offered := findModel(cat, *wantChat); !offered {
-				s.fail(w, invalid("That model is not offered by the agent."))
-				return
-			}
-		}
-		for _, p := range wantUnredacted {
-			if !slices.Contains(old.UnredactedProviders, p) && !offersProvider(cat, p) {
-				s.fail(w, invalid("The agent does not offer the provider "+p+"."))
-				return
-			}
-		}
-	}
-
-	next := store.AgentSettings{MonthlyBudgetMicroUSD: budget, UnredactedProviders: wantUnredacted, RoleModels: map[string]store.AgentModelRef{}}
-	for role, ref := range old.RoleModels {
-		next.RoleModels[role] = ref
-	}
-	delete(next.RoleModels, chatRoleName)
-	if wantChat != nil {
-		next.RoleModels[chatRoleName] = *wantChat
-	}
-	if err := s.Store.PutAgentSettings(r.Context(), next); err != nil {
-		s.fail(w, err)
-		return
-	}
 	s.auditAdmin(r, "agent_settings_update", "agent:settings", "Changed the AI agent settings.", map[string]any{
 		"old_budget_usd":           formatUSD(old.MonthlyBudgetMicroUSD, false),
 		"new_budget_usd":           formatUSD(budget, false),
@@ -297,7 +314,7 @@ type AgentTestResultDTO struct {
 // which settles it, deletes its token and runs once however the call ends.
 func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 	var body agentModelChoice
-	if err := decodeJSON(w, r, &body); err != nil {
+	if err := decodeStrictJSON(w, r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -338,9 +355,13 @@ func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 	defer finish() // a panic still settles the run and deletes its token
 
 	token, err := s.Auth.MintRunToken(r.Context(), actor, run.ID, true)
-	if err == nil {
-		result, err = s.Agent.Test(r.Context(), token, body.Provider, body.Model)
+	if err != nil {
+		finish()
+		s.log().Error("agent test run token not minted", "run_id", run.ID, "error", err)
+		s.fail(w, err)
+		return
 	}
+	result, err = s.Agent.Test(r.Context(), token, body.Provider, body.Model)
 	if err != nil {
 		finish()
 		if r.Context().Err() == nil {
@@ -349,11 +370,40 @@ func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errAgentDown)
 		return
 	}
+	if result.CostMicroUSD > run.ReservedMicroUSD {
+		// Never capped: the budget must know the real spend.
+		s.log().Warn("agent test cost above its reservation", "run_id", run.ID,
+			"cost_micro_usd", result.CostMicroUSD, "reserved_micro_usd", run.ReservedMicroUSD)
+	}
 	if result.OK {
 		state = "done"
 	}
 	finish()
-	writeJSON(w, http.StatusOK, AgentTestResultDTO{OK: result.OK, Kind: result.Kind, Message: result.Message})
+	writeJSON(w, http.StatusOK, cleanTestResult(result))
+}
+
+// testErrorKinds are the failure kinds the agent documents for a test call.
+var testErrorKinds = []string{"auth", "rate_limited", "unavailable", "invalid_request"}
+
+// cleanTestResult is what the browser is told of a test call: a known kind, and a message scrubbed of anything
+// secret-shaped and cut to the length of any other agent message. A failure with an unknown kind is "unavailable".
+func cleanTestResult(res agentclient.TestResult) AgentTestResultDTO {
+	message := secretshape.ScrubText(res.Message)
+	if res.OK {
+		return AgentTestResultDTO{OK: true, Kind: "ok", Message: boundedMessage(message)}
+	}
+	kind := res.Kind
+	if !slices.Contains(testErrorKinds, kind) {
+		kind = "unavailable"
+	}
+	return AgentTestResultDTO{OK: false, Kind: kind, Message: errorMessageFrom(message)}
+}
+
+func boundedMessage(msg string) string {
+	if runes := []rune(msg); len(runes) > maxErrorMessageLen {
+		return string(runes[:maxErrorMessageLen])
+	}
+	return msg
 }
 
 // finishTestRun records what the call cost, settles the run and deletes its token, each step whether or not the
@@ -414,7 +464,7 @@ func (s *Server) setUserAIChat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		On *bool `json:"on"`
 	}
-	if err := decodeJSON(w, r, &body); err != nil {
+	if err := decodeStrictJSON(w, r, &body); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -427,11 +477,12 @@ func (s *Server) setUserAIChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if err := s.Store.SetUserAIChat(r.Context(), id, *body.On); err != nil {
+	was, err := s.Store.ChangeUserAIChat(r.Context(), id, *body.On)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if target.AIChat != *body.On {
+	if was != *body.On {
 		summary := "Turned AI chat on for " + target.Username + "."
 		if !*body.On {
 			summary = "Turned AI chat off for " + target.Username + "."

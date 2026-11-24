@@ -26,6 +26,7 @@ const CATALOGUE: AgentSettingsDTO['catalogue'] = {
 }
 
 const SETTINGS: AgentSettingsDTO = {
+  version: 3,
   monthly_budget_usd: '25.00',
   unredacted_providers: [],
   role_models: { chat: { provider: 'anthropic', model: 'model-a', available: true } },
@@ -85,7 +86,7 @@ describe('AgentSettings', () => {
     await userEvent.type(allowance, '40')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ monthly_budget_usd: '40', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'model-b' } } }]),
+      expect(bodies).toEqual([{ monthly_budget_usd: '40', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'model-b' } }, version: 3 }]),
     )
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   })
@@ -108,7 +109,7 @@ describe('AgentSettings', () => {
     await userEvent.type(allowance, '30')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' } } }]),
+      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' } }, version: 3 }]),
     )
   })
 
@@ -127,7 +128,46 @@ describe('AgentSettings', () => {
     await userEvent.clear(allowance)
     await userEvent.type(allowance, '12.50')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: {} }]))
+    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: {}, version: 3 }]))
+  })
+
+  it('on a conflict shows the message, loads the stored settings and keeps what was typed', async () => {
+    let stored: AgentSettingsDTO = SETTINGS
+    const bodies: { version: number }[] = []
+    server.use(
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true, ai_chat: true })),
+      http.get('/api/agent/settings', () => HttpResponse.json(stored)),
+      http.get('/api/agent/usage', () => HttpResponse.json(USAGE)),
+      http.put('/api/agent/settings', async ({ request }) => {
+        const body = (await request.json()) as { version: number }
+        bodies.push(body)
+        if (body.version !== stored.version) {
+          return HttpResponse.json(
+            { error: { code: 'settings_changed', message: 'These settings were changed by someone else. Reload and try again.' } },
+            { status: 409 },
+          )
+        }
+        stored = { ...stored, version: 5, monthly_budget_usd: '40.00' }
+        return HttpResponse.json(stored)
+      }),
+    )
+    renderApp('/settings/agent')
+    const allowance = await screen.findByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '40')
+    // Someone else saves first: redaction lifted and a new allowance.
+    stored = { ...SETTINGS, version: 4, monthly_budget_usd: '30.00', unredacted_providers: ['openai'] }
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findAllByText('These settings were changed by someone else. Reload and try again.')).not.toHaveLength(0)
+    // The stored values are loaded, and the typed amount is still in the form.
+    expect(await screen.findByText('Spent $1.25 and reserved $0.60 of $30.00 in 2026-11.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Monthly allowance in US dollars')).toHaveValue('40')
+    expect(screen.getByRole('checkbox', { name: 'Send environment values to OpenAI' })).toBeChecked()
+    // Saving again sends the version just loaded.
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodies.map((body) => body.version)).toEqual([3, 4]))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(screen.queryByText('These settings were changed by someone else. Reload and try again.')).not.toBeInTheDocument()
   })
 
   it('a provider without a model blocks Save', async () => {

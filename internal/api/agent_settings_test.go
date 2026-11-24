@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -65,6 +66,7 @@ type settingsEnv struct {
 	agent *settingsAgent
 	sam   *apiClient // admin
 	omer  *apiClient // not an admin
+	logs  *syncBuffer
 }
 
 // newSettingsEnv builds a server with the agent on and a 10 USD budget with fake-1 chosen for chat. down points
@@ -75,7 +77,7 @@ func newSettingsEnv(t *testing.T, down bool) *settingsEnv {
 	if down {
 		sa.srv.Close()
 	}
-	srv, api, _, st, _ := newServerCustomAPI(t, true, withAgent(func(s *Server) {
+	srv, api, _, st, logs := newServerCustomAPI(t, true, withAgent(func(s *Server) {
 		client, err := agentclient.New(sa.srv.URL, "")
 		if err != nil {
 			t.Fatal(err)
@@ -84,11 +86,12 @@ func newSettingsEnv(t *testing.T, down bool) *settingsEnv {
 		s.AgentHeartbeat = time.Hour
 	}))
 	setChatSettings(t, st, 10_000_000, "fake", "fake-1", nil)
-	return &settingsEnv{srv: srv, st: st, api: api, agent: sa,
+	return &settingsEnv{srv: srv, st: st, api: api, agent: sa, logs: logs,
 		sam: login(t, srv, "sam", testPassword), omer: login(t, srv, "omer", testPassword)}
 }
 
 type settingsBody struct {
+	Version    int64                     `json:"version"`
 	Budget     string                    `json:"monthly_budget_usd"`
 	Unredacted []string                  `json:"unredacted_providers"`
 	RoleModels map[string]map[string]any `json:"role_models"`
@@ -119,7 +122,17 @@ func getSettings(t *testing.T, c *apiClient) settingsBody {
 	return out
 }
 
+// putSettings saves with the version the server reports now, as a form loaded just before would.
 func putSettings(c *apiClient, budget string, unredacted []string, chat map[string]string) *http.Response {
+	resp := c.get("/api/agent/settings")
+	var current struct {
+		Version int64 `json:"version"`
+	}
+	decode(c.t, resp, &current)
+	return putSettingsAt(c, current.Version, budget, unredacted, chat)
+}
+
+func putSettingsAt(c *apiClient, version int64, budget string, unredacted []string, chat map[string]string) *http.Response {
 	roles := map[string]any{}
 	if chat != nil {
 		roles["chat"] = chat
@@ -128,7 +141,7 @@ func putSettings(c *apiClient, budget string, unredacted []string, chat map[stri
 		unredacted = []string{}
 	}
 	return c.do(http.MethodPut, "/api/agent/settings", map[string]any{
-		"monthly_budget_usd": budget, "unredacted_providers": unredacted, "role_models": roles}, nil)
+		"monthly_budget_usd": budget, "unredacted_providers": unredacted, "role_models": roles, "version": version}, nil)
 }
 
 func fakeChat() map[string]string { return map[string]string{"provider": "fake", "model": "fake-1"} }
@@ -487,8 +500,8 @@ func TestAgentTest_EveryPathSettlesOnceAndDeletesTheToken(t *testing.T) {
 			_, _ = w.Write([]byte(`{"ok":false,"kind":"auth","message":"The provider refused the key.","cost_micro_usd":0}`))
 		}, 200, "failed", 0, false, "auth", false},
 		"refused but billed": {func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"ok":false,"kind":"model","message":"Bad answer.","cost_micro_usd":50}`))
-		}, 200, "failed", 50, false, "model", false},
+			_, _ = w.Write([]byte(`{"ok":false,"kind":"invalid_request","message":"Bad answer.","cost_micro_usd":50}`))
+		}, 200, "failed", 50, false, "invalid_request", false},
 		"agent errors": {func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) },
 			503, "failed", 0, false, "", true},
 		"malformed answer": {func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`not json`)) },
@@ -680,5 +693,274 @@ func TestSetUserAIChat_AdminOnlyAndAudited(t *testing.T) {
 	}
 	if resp := env.sam.post("/api/users/99999/ai-chat", map[string]bool{"on": true}); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("unknown user: status %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestAgentSettings_ReportsAndChecksVersion(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	first := getSettings(t, env.sam)
+	if first.Version < 1 {
+		t.Fatalf("version = %d, want at least 1", first.Version)
+	}
+	resp := putSettingsAt(env.sam, first.Version, "11", nil, fakeChat())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT at the current version: status %d", resp.StatusCode)
+	}
+	var saved settingsBody
+	decode(t, resp, &saved)
+	if saved.Version <= first.Version || getSettings(t, env.sam).Version != saved.Version {
+		t.Errorf("version after a save = %d (GET %d), want it raised above %d", saved.Version, getSettings(t, env.sam).Version, first.Version)
+	}
+	resp = putSettingsAt(env.sam, first.Version, "12", nil, fakeChat())
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("PUT at a stale version: status %d, want 409", resp.StatusCode)
+	}
+	code, msg := errorCode(t, resp)
+	if code != "settings_changed" || msg != "These settings were changed by someone else. Reload and try again." {
+		t.Errorf("conflict = %q %q", code, msg)
+	}
+	if stored, _ := env.st.GetAgentSettings(t.Context()); stored.MonthlyBudgetMicroUSD != 11_000_000 {
+		t.Errorf("a refused save changed the budget to %d", stored.MonthlyBudgetMicroUSD)
+	}
+	if n := len(settingsAuditRows(t, env.st, "agent_settings_update")); n != 1 {
+		t.Errorf("%d audit rows, want 1 (the refused save is not audited)", n)
+	}
+}
+
+func TestAgentSettings_StaleFormCannotRelift(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	setChatSettings(t, env.st, 10_000_000, "fake", "fake-1", []string{"fake"})
+	stale := getSettings(t, env.sam) // admin A opens the page: redaction lifted for fake
+	// Admin B turns redaction back on.
+	resp := putSettings(env.sam, "10", nil, fakeChat())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("B's save: status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	// A saves the old form, a new budget with redaction still lifted.
+	resp = putSettingsAt(env.sam, stale.Version, "20", stale.Unredacted, fakeChat())
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale save: status %d, want 409", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if got := getSettings(t, env.sam); len(got.Unredacted) != 0 || got.Budget != "10.00" {
+		t.Errorf("settings after the refused stale save = %+v", got)
+	}
+}
+
+func TestAgentSettings_ConcurrentSavesOneWins(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	v := getSettings(t, env.sam).Version
+	statuses := make(chan int, 2)
+	for _, budget := range []string{"21", "22"} {
+		go func() {
+			resp := putSettingsAt(env.sam, v, budget, nil, fakeChat())
+			resp.Body.Close()
+			statuses <- resp.StatusCode
+		}()
+	}
+	a, b := <-statuses, <-statuses
+	if !(a == http.StatusOK && b == http.StatusConflict) && !(a == http.StatusConflict && b == http.StatusOK) {
+		t.Errorf("statuses %d and %d, want one 200 and one 409", a, b)
+	}
+	if n := len(settingsAuditRows(t, env.st, "agent_settings_update")); n != 1 {
+		t.Errorf("%d audit rows, want 1", n)
+	}
+}
+
+func TestAgentSettings_BodyIsStrictAndComplete(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	v := getSettings(t, env.sam).Version
+	full := func() map[string]any {
+		return map[string]any{"monthly_budget_usd": "9", "unredacted_providers": []string{}, "role_models": map[string]any{}, "version": v}
+	}
+	cases := map[string]func(m map[string]any){
+		"unredacted missing":  func(m map[string]any) { delete(m, "unredacted_providers") },
+		"unredacted null":     func(m map[string]any) { m["unredacted_providers"] = nil },
+		"role models missing": func(m map[string]any) { delete(m, "role_models") },
+		"role models null":    func(m map[string]any) { m["role_models"] = nil },
+		"version missing":     func(m map[string]any) { delete(m, "version") },
+		"version null":        func(m map[string]any) { m["version"] = nil },
+		"misspelled key":      func(m map[string]any) { delete(m, "unredacted_providers"); m["unredacted_provider"] = []string{} },
+		"extra key":           func(m map[string]any) { m["extra"] = 1 },
+		"misspelled model key": func(m map[string]any) {
+			m["role_models"] = map[string]any{"chat": map[string]any{"provider": "fake", "modle": "fake-1"}}
+		},
+	}
+	for name, mutate := range cases {
+		body := full()
+		mutate(body)
+		resp := env.sam.do(http.MethodPut, "/api/agent/settings", body, nil)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status %d, want 422", name, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	if stored, _ := env.st.GetAgentSettings(t.Context()); stored.MonthlyBudgetMicroUSD != 10_000_000 {
+		t.Errorf("a refused body changed the budget to %d", stored.MonthlyBudgetMicroUSD)
+	}
+	resp := env.sam.post("/api/agent/settings/test", map[string]string{"provider": "fake", "modle": "fake-1"})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("test body with a misspelled key: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+	omer, _ := env.st.GetUserByUsername(t.Context(), "omer")
+	resp = env.sam.post(fmt.Sprintf("/api/users/%d/ai-chat", omer.ID), map[string]any{"on": true, "extra": 1})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("ai-chat body with an extra key: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+var agentSettingsRoutes = []struct{ method, path string }{
+	{"GET", "/api/agent/settings"}, {"PUT", "/api/agent/settings"}, {"POST", "/api/agent/settings/test"},
+	{"GET", "/api/agent/usage"}, {"POST", "/api/users/2/ai-chat"},
+}
+
+func TestAgentSettingsRoutes_AbsentWhenDisabled(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	c := login(t, srv, "sam", testPassword)
+	for _, r := range agentSettingsRoutes {
+		resp := c.do(r.method, r.path, map[string]any{"on": true}, nil)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s %s with the agent off: status %d, want 404", r.method, r.path, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestAgentSettingsRoutes_RefuseTokensAndMissingCSRF(t *testing.T) {
+	srv, api, _, st, _ := newServerCustomAPI(t, true, withTokens(func(c *config.Config) {
+		c.AgentURL, c.AgentRunTokenTTL = testAgentURL, 15*time.Minute
+	}, nil))
+	clients := map[string]*apiClient{
+		"personal token": tokenClient(t, srv, st, "sam"),
+		"run token":      runTokenClient(t, srv, api, st, "sam"),
+	}
+	for name, c := range clients {
+		for _, r := range agentSettingsRoutes {
+			resp := c.do(r.method, r.path, map[string]any{"on": true}, nil)
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("%s: %s %s: status %d, want 403", name, r.method, r.path, resp.StatusCode)
+				resp.Body.Close()
+				continue
+			}
+			if code, _ := errorCode(t, resp); code != "token_not_allowed" {
+				t.Errorf("%s: %s %s: code %q, want token_not_allowed", name, r.method, r.path, code)
+			}
+		}
+	}
+	sam := login(t, srv, "sam", testPassword)
+	for _, r := range agentSettingsRoutes {
+		if r.method == "GET" {
+			continue
+		}
+		resp := sam.do(r.method, r.path, map[string]any{"on": true}, map[string]string{"X-CSRF-Token": ""})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s without a CSRF token: status %d, want 403", r.method, r.path, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestAgentTest_CleansTheAnswer(t *testing.T) {
+	secret := "sk-" + "ant-api03-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefgh"
+	long := strings.Repeat("x", 1000)
+	cases := map[string]struct{ body, wantKind string }{
+		"rate_limited stays": {`{"ok":false,"kind":"rate_limited","message":"Slow down."}`, "rate_limited"},
+		"auth stays":         {`{"ok":false,"kind":"auth","message":"No."}`, "auth"},
+		"unknown kind":       {`{"ok":false,"kind":"<script>","message":"No."}`, "unavailable"},
+		"empty kind":         {`{"ok":false,"kind":"","message":"No."}`, "unavailable"},
+		"secret in message":  {`{"ok":false,"kind":"auth","message":"bad key ` + secret + ` sent"}`, "auth"},
+		"very long message":  {`{"ok":false,"kind":"auth","message":"` + long + `"}`, "auth"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			env := newSettingsEnv(t, false)
+			env.agent.mu.Lock()
+			env.agent.onTest = func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) }
+			env.agent.mu.Unlock()
+			resp := postTest(env.sam, "fake", "fake-1")
+			var out AgentTestResultDTO
+			decode(t, resp, &out)
+			if out.Kind != tc.wantKind {
+				t.Errorf("kind = %q, want %q", out.Kind, tc.wantKind)
+			}
+			if strings.Contains(out.Message, secret) || strings.Contains(out.Message, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") {
+				t.Errorf("message carries a secret: %q", out.Message)
+			}
+			if n := len([]rune(out.Message)); n > 300 || n == 0 {
+				t.Errorf("message length %d, want 1 to 300", n)
+			}
+		})
+	}
+}
+
+func TestAgentTest_CostAboveReservationIsRecordedInFullAndLogged(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	env.agent.mu.Lock()
+	env.agent.onTest = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"kind":"","message":"","cost_micro_usd":50000}`))
+	}
+	env.agent.mu.Unlock()
+	resp := postTest(env.sam, "fake", "fake-1")
+	resp.Body.Close()
+	if settled, _, _ := env.st.AgentSpend(t.Context(), env.api.now()); settled != 50_000 {
+		t.Errorf("settled = %d, want the full 50000 (never capped at the 6000 reserved)", settled)
+	}
+	if !strings.Contains(env.logs.String(), "above its reservation") {
+		t.Error("no log line for a cost above the reservation")
+	}
+}
+
+func TestAgentTest_MintFailureIsAnInternalError(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	if _, err := env.st.Pool.Exec(t.Context(), `alter table api_tokens rename to api_tokens_gone`); err != nil {
+		t.Fatal(err)
+	}
+	resp := postTest(env.sam, "fake", "fake-1")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status %d, want 500 (not the agent-unavailable answer)", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if env.agent.testCalls() != 0 {
+		t.Error("the agent was called without a token")
+	}
+	if n, states := runRows(t, env.st, "test"); n != 1 || states != "failed" {
+		t.Errorf("test runs = %d (%s), want one failed", n, states)
+	}
+	if !strings.Contains(env.logs.String(), "run token") {
+		t.Error("the mint failure was not logged")
+	}
+}
+
+func TestAgentUsage_DaysFollowUTCAcrossMidnight(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	now := env.api.now().UTC()
+	late := time.Date(now.Year(), now.Month(), 3, 23, 30, 0, 0, time.UTC)
+	early := late.Add(time.Hour) // 00:30 UTC on the 4th
+	seedRun(t, env.st, "chat", "done", 1_000_000, late)
+	seedRun(t, env.st, "chat", "done", 2_000_000, early)
+	var out AgentUsageDTO
+	decode(t, env.sam.get("/api/agent/usage"), &out)
+	if len(out.Days) != 2 || out.Days[0].Day != late.Format("2006-01-02") || out.Days[1].Day != early.Format("2006-01-02") ||
+		out.Days[0].CostUSD != "1.00" || out.Days[1].CostUSD != "2.00" {
+		t.Errorf("days = %+v, want the 23:30 and 00:30 UTC runs on two days", out.Days)
+	}
+}
+
+func TestSetUserAIChat_AuditShowsTheValueItReplaced(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	omer, _ := env.st.GetUserByUsername(t.Context(), "omer")
+	was, err := env.st.ChangeUserAIChat(t.Context(), omer.ID, true)
+	if err != nil || was {
+		t.Fatalf("first change: was %v, %v; want false", was, err)
+	}
+	was, err = env.st.ChangeUserAIChat(t.Context(), omer.ID, true)
+	if err != nil || !was {
+		t.Fatalf("second change: was %v, %v; want true", was, err)
+	}
+	if _, err := env.st.ChangeUserAIChat(t.Context(), 99999, true); err == nil {
+		t.Error("an unknown user did not fail")
 	}
 }

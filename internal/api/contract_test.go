@@ -185,6 +185,10 @@ func contractShapes() map[string]any {
 		"configSearch": shapeOf(reflect.TypeFor[ConfigSearchResponse]()),
 		// live page refresh
 		"focus": shapeOf(reflect.TypeFor[FocusDTO]()),
+		// AI agent admin settings
+		"agentSettings":   shapeOf(reflect.TypeFor[AgentSettingsDTO]()),
+		"agentUsage":      shapeOf(reflect.TypeFor[AgentUsageDTO]()),
+		"agentTestResult": shapeOf(reflect.TypeFor[AgentTestResultDTO]()),
 	}
 }
 
