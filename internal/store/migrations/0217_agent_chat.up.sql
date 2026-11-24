@@ -1,5 +1,6 @@
--- AI agent chat: per-user switch, conversations, runs with a firm monthly budget, and the admin settings.
--- Additive only: old tasks ignore these tables and the new column during a deploy.
+-- AI agent chat: the per-user switch (users.ai_chat), conversations and messages, runs, and the admin settings.
+-- Additive only: old tasks name their user columns explicitly and never read these tables, so they ignore all of it.
+-- The monthly budget lives in agent_settings; the spend it limits is summed from agent_runs.
 -- Tool results are never stored: agent_messages has no column able to hold one.
 alter table users add column ai_chat boolean not null default false;
 
@@ -56,6 +57,7 @@ create table agent_runs (
   finished_at timestamptz,
   last_usage_at timestamptz
 );
+-- Spend sums are bounded by started_at (the UTC month).
 create index agent_runs_started_idx on agent_runs (started_at);
 create index agent_runs_user_idx on agent_runs (user_id);
 create index agent_runs_conversation_idx on agent_runs (conversation_id);

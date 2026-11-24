@@ -163,3 +163,6 @@ func (s *Store) UpsertTargetHealth(ctx context.Context, rows []model.TargetHealt
 func (s *Store) DeleteTargetHealthNotIn(ctx context.Context, t awsx.Target, keep []string) error {
 	return deleteTargetHealthNotIn(ctx, s.Pool, t, keep)
 }
+
+// RetryDeadlock exposes retryDeadlock to the external tests.
+var RetryDeadlock = retryDeadlock

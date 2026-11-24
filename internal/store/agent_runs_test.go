@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
@@ -381,6 +382,10 @@ func TestReserveAgentRun_NonUTCNowUsesUTCMonth(t *testing.T) {
 	if s, _, _ := st.AgentSpend(ctx, novStart); s != 0 {
 		t.Fatalf("november spend = %d, want 0", s)
 	}
+	// December's budget is spent: a later reservation at the same non-UTC time must be refused.
+	if err := st.ReserveAgentRun(ctx, agentRun(1), 24*time.Hour, time.Date(2026, 11, 30, 23, 30, 0, 0, west)); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("reserve in december at non-UTC now = %v, want ErrBudgetExhausted", err)
+	}
 }
 
 func TestAgentSpend_UnchangedWhenUserAndConversationDeleted(t *testing.T) {
@@ -429,4 +434,59 @@ func TestReserveAgentRun_ConversationMustBeOwned(t *testing.T) {
 	}
 	r.UserID = &alice.ID
 	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+}
+
+func TestSettleAgentRun_SecondSettleOfSweptRunKeepsTools(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	r := agentRun(900)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-2*time.Hour)))
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow)) // sweeps r
+	if err := st.SettleAgentRun(ctx, r.ID, "failed", []string{"list_services"}, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatal(err)
+	}
+	if err := st.SettleAgentRun(ctx, r.ID, "failed", nil, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatal(err)
+	}
+	if _, _, _, _, tools, _ := runRow(t, st, r.ID); len(tools) != 1 || tools[0] != "list_services" {
+		t.Fatalf("tools after second settle = %v, want [list_services]", tools)
+	}
+}
+
+func TestAgentUsageByDay_SaturatesInsteadOfOverflowing(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	for i := 0; i < 2; i++ {
+		_, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, cost_micro_usd, input_tokens, output_tokens, started_at)
+			values ($1, 'chat', 'fake', 'm', 'done', $2, $2, $2, $3)`, uuid.New(), int64(math.MaxInt64), agentNow)
+		mustNoErr(t, err)
+	}
+	days, err := st.AgentUsageByDay(ctx, novStart)
+	if err != nil || len(days) != 1 || days[0].Runs != 2 || days[0].CostMicroUSD != math.MaxInt64 || days[0].InputTokens != math.MaxInt64 {
+		t.Fatalf("usage = %+v, %v", days, err)
+	}
+}
+
+func TestRetryDeadlock(t *testing.T) {
+	deadlock := &pgconn.PgError{Code: "40P01"}
+	calls := 0
+	if err := store.RetryDeadlock(func() error {
+		calls++
+		if calls == 1 {
+			return deadlock
+		}
+		return nil
+	}); err != nil || calls != 2 {
+		t.Fatalf("one deadlock: err %v after %d calls, want nil after 2", err, calls)
+	}
+	calls = 0
+	if err := store.RetryDeadlock(func() error { calls++; return deadlock }); err == nil || calls != 2 {
+		t.Fatalf("persistent deadlock: err %v after %d calls, want error after exactly 2", err, calls)
+	}
+	calls = 0
+	other := errors.New("boom")
+	if err := store.RetryDeadlock(func() error { calls++; return other }); !errors.Is(err, other) || calls != 1 {
+		t.Fatalf("other error: %v after %d calls, want it unretried", err, calls)
+	}
 }

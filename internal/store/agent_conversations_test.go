@@ -12,8 +12,10 @@ import (
 func TestGetAgentConversation_OtherUsersIsNotFound(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := t.Context()
-	alice, _ := st.CreateUser(ctx, "alice", "h", false, false)
-	bob, _ := st.CreateUser(ctx, "bob", "h", false, false)
+	alice, err := st.CreateUser(ctx, "alice", "h", false, false)
+	mustNoErr(t, err)
+	bob, err := st.CreateUser(ctx, "bob", "h", false, false)
+	mustNoErr(t, err)
 	c, err := st.CreateAgentConversation(ctx, alice.ID, "hello")
 	if err != nil {
 		t.Fatal(err)
@@ -48,9 +50,12 @@ func TestGetAgentConversation_OtherUsersIsNotFound(t *testing.T) {
 func TestDeleteAgentConversationsBefore(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := t.Context()
-	u, _ := st.CreateUser(ctx, "alice", "h", false, false)
-	oldC, _ := st.CreateAgentConversation(ctx, u.ID, "old")
-	newC, _ := st.CreateAgentConversation(ctx, u.ID, "new")
+	u, err := st.CreateUser(ctx, "alice", "h", false, false)
+	mustNoErr(t, err)
+	oldC, err := st.CreateAgentConversation(ctx, u.ID, "old")
+	mustNoErr(t, err)
+	newC, err := st.CreateAgentConversation(ctx, u.ID, "new")
+	mustNoErr(t, err)
 	if _, err := st.Pool.Exec(ctx, `update agent_conversations set updated_at = now() - interval '40 days' where id = $1`, oldC.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -77,8 +82,10 @@ func TestDeleteAgentConversationsBefore(t *testing.T) {
 func TestListAgentConversations_OnlyOwnAndAppendBumpsUpdatedAt(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := t.Context()
-	alice, _ := st.CreateUser(ctx, "alice", "h", false, false)
-	bob, _ := st.CreateUser(ctx, "bob", "h", false, false)
+	alice, err := st.CreateUser(ctx, "alice", "h", false, false)
+	mustNoErr(t, err)
+	bob, err := st.CreateUser(ctx, "bob", "h", false, false)
+	mustNoErr(t, err)
 	a1, err := st.CreateAgentConversation(ctx, alice.ID, "a1")
 	if err != nil {
 		t.Fatal(err)
@@ -93,11 +100,13 @@ func TestListAgentConversations_OnlyOwnAndAppendBumpsUpdatedAt(t *testing.T) {
 	if _, err := st.Pool.Exec(ctx, `update agent_conversations set updated_at = now() - interval '1 day' where id = $1`, a1.ID); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := st.GetAgentConversation(ctx, alice.ID, a1.ID)
+	before, err := st.GetAgentConversation(ctx, alice.ID, a1.ID)
+	mustNoErr(t, err)
 	if _, err := st.AppendAgentMessage(ctx, alice.ID, store.AgentMessage{ConversationID: a1.ID, Role: "user", Text: "hi"}); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := st.GetAgentConversation(ctx, alice.ID, a1.ID)
+	after, err := st.GetAgentConversation(ctx, alice.ID, a1.ID)
+	mustNoErr(t, err)
 	if !after.UpdatedAt.After(before.UpdatedAt) {
 		t.Fatalf("updated_at not bumped: %v -> %v", before.UpdatedAt, after.UpdatedAt)
 	}

@@ -12,11 +12,11 @@ import (
 )
 
 // ErrBudgetExhausted is returned when a run's reservation would take the month's spend over the budget.
+var ErrBudgetExhausted = errors.New("agent monthly budget exhausted")
+
 // ErrAgentRunNotRunning is returned when usage or a settle arrives for a run that is no longer running, typically
 // because the stale sweep failed it. Late figures are still recorded on a failed run (never lowered).
 var ErrAgentRunNotRunning = errors.New("agent run is not running")
-
-var ErrBudgetExhausted = errors.New("agent monthly budget exhausted")
 
 // AgentRun is one model run. Money is integer micro-dollars. UserID is nil once the user is deleted.
 type AgentRun struct {
@@ -119,6 +119,10 @@ func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 		(id, role, user_id, conversation_id, provider, model, state, reserved_micro_usd, tools, started_at)
 		values ($1, $2, $3, $4, $5, $6, 'running', $7, $8, $9)`,
 		run.ID, run.Role, run.UserID, run.ConversationID, run.Provider, run.Model, run.ReservedMicroUSD, tools, now); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" && run.ConversationID != nil {
+			return ErrNotFound // the conversation was deleted after the ownership check
+		}
 		return fmt.Errorf("reserve agent run: insert: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -194,7 +198,7 @@ func (s *Store) SettleAgentRun(ctx context.Context, id uuid.UUID, state string, 
 		upd as (update agent_runs set
 			state = case when state = 'running' then $2 else state end,
 			finished_at = case when state = 'running' then $4 else finished_at end,
-			tools = case when state in ('running', 'failed') then $3 else tools end
+			tools = case when state = 'running' or (state = 'failed' and cardinality($3::text[]) > 0) then $3 else tools end
 			where id = $1 returning 1)
 		select state from prior`, id, state, tools, now).Scan(&prior)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -222,8 +226,10 @@ func (s *Store) AgentSpend(ctx context.Context, monthStart time.Time) (settledMi
 // AgentUsageByDay returns the UTC month's finished usage per day and role.
 func (s *Store) AgentUsageByDay(ctx context.Context, monthStart time.Time) ([]AgentUsageDay, error) {
 	start, end := utcMonthBounds(monthStart)
-	rows, err := s.Pool.Query(ctx, `select (started_at at time zone 'UTC')::date, role, count(*), sum(cost_micro_usd),
-		sum(input_tokens), sum(output_tokens)
+	rows, err := s.Pool.Query(ctx, `select (started_at at time zone 'UTC')::date, role, count(*),
+		least(sum(cost_micro_usd::numeric), 9223372036854775807::numeric)::bigint,
+		least(sum(input_tokens::numeric), 9223372036854775807::numeric)::bigint,
+		least(sum(output_tokens::numeric), 9223372036854775807::numeric)::bigint
 		from agent_runs where state <> 'running' and started_at >= $1 and started_at < $2
 		group by 1, 2 order by 1, 2`, start, end)
 	if err != nil {
