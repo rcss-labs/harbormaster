@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -33,7 +34,10 @@ func lookupTool(name string) (hmtools.Tool, bool) {
 	return tool, ok
 }
 
-type upstreamToolRunner struct{ up *hmtools.Upstream }
+type upstreamToolRunner struct {
+	up      *hmtools.Upstream
+	readCap int
+}
 
 // NewUpstreamToolRunner runs tools against Harbormaster through up: one tool
 // call is one upstream request, built by the tool's own BuildCall. It bounds
@@ -41,7 +45,7 @@ type upstreamToolRunner struct{ up *hmtools.Upstream }
 // so call it before up serves other calls.
 func NewUpstreamToolRunner(up *hmtools.Upstream, maxResultBytes int) ToolRunner {
 	up.SetReadCap(maxResultBytes)
-	return upstreamToolRunner{up: up}
+	return upstreamToolRunner{up: up, readCap: hmtools.UpstreamReadCap(maxResultBytes)}
 }
 
 func (r upstreamToolRunner) Run(ctx context.Context, bearer, name string, args map[string]any) (string, bool) {
@@ -59,7 +63,7 @@ func (r upstreamToolRunner) Run(ctx context.Context, bearer, name string, args m
 	}
 	switch {
 	case resp.Status >= 200 && resp.Status <= 299:
-		return string(resp.Body), false
+		return answerText(resp.Body, r.readCap), false
 	case resp.Status >= 500 || (resp.Status >= 300 && resp.Status < 400):
 		return unavailableMessage, true
 	}
@@ -109,4 +113,23 @@ func upstreamErrorMessage(resp hmtools.Response) string {
 		}
 	}
 	return message
+}
+
+// unsafeTail is how far back from the read cap an answer is cut, so that a
+// secret cut in two by the cap cannot reach the scrubber as a harmless half.
+const unsafeTail = 4096
+
+// answerText returns an answer as text. An answer that reached the read cap
+// was cut at an arbitrary byte, so its tail is dropped back to the last line or
+// delimiter, and the model is told the answer was larger than could be read.
+func answerText(body []byte, readCap int) string {
+	if len(body) < readCap {
+		return string(body)
+	}
+	from := max(len(body)-unsafeTail, 0)
+	cut := from
+	if i := bytes.LastIndexAny(body[from:], "\n \t,;\"'{}[]()<>"); i >= 0 {
+		cut = from + i
+	}
+	return string(body[:cut]) + "\n[The answer was larger than could be read; the rest was left out.]"
 }

@@ -84,3 +84,22 @@ func TestUpstreamToolRunner_ServerErrorsHideTheBody(t *testing.T) {
 		t.Errorf("Run = %q, %v, want a generic unavailable error", text, isError)
 	}
 }
+
+func TestUpstreamToolRunner_AnswerCutAtTheReadCapNeverLeavesPartOfASecret(t *testing.T) {
+	// The read cap for 100,000 result bytes is 200,000. The token starts 20
+	// bytes before it, so the cap cuts it in the middle of its first part.
+	const readCap = 200_000
+	body := strings.Repeat("log line ok\n", (readCap-20)/12) + fakeJWT + "\n" + strings.Repeat("more output here\n", 2000)
+	runner, _ := newTestRunner(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+
+	text, isError := runner.Run(context.Background(), "run-token", "get_overview", nil)
+	if isError {
+		t.Fatalf("Run = %.80q, error", text)
+	}
+	if strings.Contains(text, "eyJ") {
+		t.Errorf("a piece of the token survived the cut at the read cap")
+	}
+	if !strings.HasSuffix(text, "the rest was left out.]") || !strings.Contains(text, "larger than") || strings.Contains(text, "more output here") {
+		t.Errorf("want a note that the answer was larger than could be read and nothing after the cut; got %d bytes", len(text))
+	}
+}

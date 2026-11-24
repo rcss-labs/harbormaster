@@ -234,17 +234,20 @@ func longRunSpans(text string) [][2]int {
 		if insideAny(arns, m) {
 			continue
 		}
-		if hexOnly.MatchString(run) {
-			// Only a short stretch before the run matters; matching the whole
-			// text before every run would be quadratic on a large log.
-			before := text[max(0, m[0]-prefixWindow):m[0]]
-			if digestPrefix.MatchString(before[max(0, len(before)-digestWindow):]) || isImageTag(before) {
-				continue
-			}
+		if hexOnly.MatchString(run) && hexRunIsDiagnostic(text, m[0]) {
+			continue
 		}
 		spans = append(spans, [2]int{m[0], m[1]})
 	}
 	return spans
+}
+
+// hexRunIsDiagnostic reports whether the hex run starting at start is a
+// digest or an image tag. It looks only at a short stretch before the run:
+// matching the whole text before every run would be quadratic on a big log.
+func hexRunIsDiagnostic(text string, start int) bool {
+	before := text[max(0, start-prefixWindow):start]
+	return digestPrefix.MatchString(before[max(0, len(before)-digestWindow):]) || isImageTag(before)
 }
 
 // insideAny reports whether inner lies within one of outer, which holds
