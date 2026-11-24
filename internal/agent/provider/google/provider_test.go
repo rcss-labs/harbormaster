@@ -254,14 +254,16 @@ func TestGenerate_SendsToolResultInVendorForm(t *testing.T) {
 func TestGenerate_IgnoresUnparseableOpaque(t *testing.T) {
 	cap := &captured{}
 	srv := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
-	req := simpleRequest()
-	req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: "earlier", Opaque: json.RawMessage(`{"not":"ours"}`)},
-		provider.Message{Role: provider.RoleUser, Text: "again"})
-	if _, err := newProvider(t, srv).Generate(context.Background(), req, nil); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(cap.bodies[0], `"earlier"`) {
-		t.Errorf("assistant text must be sent when Opaque is not ours: %s", cap.bodies[0])
+	for i, opaque := range []string{`{"not":"ours"}`, `not json at all`, `[]`, `[{"inlineData":{}}]`} {
+		req := simpleRequest()
+		req.Messages = append(req.Messages, provider.Message{Role: provider.RoleAssistant, Text: "earlier", Opaque: json.RawMessage(opaque)},
+			provider.Message{Role: provider.RoleUser, Text: "again"})
+		if _, err := newProvider(t, srv).Generate(context.Background(), req, nil); err != nil {
+			t.Fatalf("opaque %q: %v", opaque, err)
+		}
+		if !strings.Contains(cap.bodies[i], `"earlier"`) {
+			t.Errorf("opaque %q: assistant text must be sent when Opaque is not ours: %s", opaque, cap.bodies[i])
+		}
 	}
 }
 
@@ -382,17 +384,20 @@ func TestGenerate_ContextCancel_ReturnsContextError(t *testing.T) {
 }
 
 func TestClient_DoesNotFollowRedirects(t *testing.T) {
-	var hits int
 	var mu sync.Mutex
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	targetHits := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stolen", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		hits++
+		targetHits++
 		mu.Unlock()
-	}))
-	defer target.Close()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL+"/stolen", http.StatusTemporaryRedirect)
-	}))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write(fixture(t, "text.sse"))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/stolen", http.StatusTemporaryRedirect)
+	})
+	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
@@ -401,8 +406,61 @@ func TestClient_DoesNotFollowRedirects(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if hits != 0 {
-		t.Errorf("redirect target received %d requests", hits)
+	if targetHits != 0 {
+		t.Errorf("redirect target received %d requests", targetHits)
+	}
+}
+
+func TestClient_BuiltTransportHasNoProxy(t *testing.T) {
+	c := buildHTTPClient(nil)
+	rec, ok := c.Transport.(headerRecorder)
+	if !ok {
+		t.Fatalf("transport = %T", c.Transport)
+	}
+	tr, ok := rec.next.(*http.Transport)
+	if !ok {
+		t.Fatalf("inner transport = %T", rec.next)
+	}
+	if tr.Proxy != nil {
+		t.Error("the built transport must not use a proxy")
+	}
+}
+
+func TestGenerate_DoesNotRetryInsideTheSDK(t *testing.T) {
+	for _, status := range []int{429, 500, 503} {
+		var mu sync.Mutex
+		hits := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			hits++
+			mu.Unlock()
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"error":{"code":1,"message":"x","status":"X"}}`))
+		}))
+		_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+		srv.Close()
+		if err == nil {
+			t.Fatalf("status %d: expected an error", status)
+		}
+		mu.Lock()
+		if hits != 1 {
+			t.Errorf("status %d: server saw %d requests, want 1", status, hits)
+		}
+		mu.Unlock()
+	}
+}
+
+func TestGenerate_UsageCountsThinkingAndToolUseTokens(t *testing.T) {
+	// promptTokenCount already includes cached tokens, so cachedContentTokenCount
+	// is not added again; thinking and tool-use prompt tokens are separate fields.
+	body := `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":40,"toolUsePromptTokenCount":7,"candidatesTokenCount":5,"thoughtsTokenCount":11,"totalTokenCount":123}}` + "\n\n"
+	srv := sseServer(t, nil, 200, nil, []byte(body))
+	resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.InputTokens != 107 || resp.Usage.OutputTokens != 16 {
+		t.Errorf("usage = %+v", resp.Usage)
 	}
 }
 

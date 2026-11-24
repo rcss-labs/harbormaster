@@ -53,22 +53,7 @@ func newSDKClient(cfg Config) (*genai.Client, error) {
 		baseURL = vendorBaseURL
 	}
 
-	httpClient := &http.Client{}
-	if cfg.HTTPClient != nil {
-		*httpClient = *cfg.HTTPClient
-	}
-	if httpClient.Transport == nil {
-		httpClient.Transport = &http.Transport{
-			Proxy:                 nil, // never the environment's proxy
-			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-			ForceAttemptHTTP2:     true,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 2 * time.Minute,
-			IdleConnTimeout:       90 * time.Second,
-		}
-	}
-	httpClient.Transport = headerRecorder{next: httpClient.Transport}
-	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	httpClient := buildHTTPClient(cfg.HTTPClient)
 
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
 		APIKey:     cfg.APIKey,
@@ -85,4 +70,27 @@ func newSDKClient(cfg Config) (*genai.Client, error) {
 		return nil, fmt.Errorf("google provider: could not build the client")
 	}
 	return client, nil
+}
+
+// buildHTTPClient returns the client the SDK sends through: no environment
+// proxy, no redirect followed, Retry-After recorded.
+func buildHTTPClient(base *http.Client) *http.Client {
+	httpClient := &http.Client{}
+	if base != nil {
+		*httpClient = *base
+	}
+	if httpClient.Transport == nil {
+		httpClient.Transport = &http.Transport{
+			Proxy:                 nil, // never the environment's proxy
+			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 2 * time.Minute,
+			IdleConnTimeout:       90 * time.Second,
+		}
+	}
+	httpClient.Transport = headerRecorder{next: httpClient.Transport}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+	return httpClient
 }
