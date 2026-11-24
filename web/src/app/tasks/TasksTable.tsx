@@ -69,7 +69,7 @@ export function TasksTable({ rows, page, onPageChange, onToggleGroup, onOpen, on
           <TaskIdButton task={row.task} nested={row.nested} onOpen={onOpen} />
         ),
     },
-    { key: 'service', header: 'Service', width: 'minmax(0,1.1fr)', render: (row) => <ServiceCell task={lead(row)} /> },
+    { key: 'service', header: 'Service', width: 'minmax(200px,1.1fr)', render: (row) => <ServiceCell task={lead(row)} /> },
     { key: 'status', header: 'Status', width: '230px', render: (row) => <TaskStatusCell task={lead(row)} /> },
     { key: 'health', header: 'Health', width: '84px', render: (row) => <HealthCell task={lead(row)} /> },
     {

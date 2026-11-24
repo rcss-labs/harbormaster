@@ -21,27 +21,32 @@ interface ChartTooltipProps {
   plotWidth?: number | null
 }
 
-/** Past this share of the plot width the tooltip moves to the left of the crosshair. */
+/** Past this share of the plot width the tooltip prefers the left of the crosshair. */
 const FLIP_AFTER_PERCENT = 60
 /** The tooltip's 236 px minimum width plus its 12 px side margins. */
 const TIP_FOOTPRINT_PX = 260
 const TIP_MARGIN_PX = 24
+/** With less room than this beside the point, the tooltip stays inside the plot even though it covers the point. */
+const MIN_BESIDE_PX = 160
 
-/** Offsets stay in percent (as on a wide plot) until the tooltip would leave the plot; then they are bounded in px. */
-function tooltipPosition(leftPercent: number, flip: boolean, plotWidth: number | null | undefined): CSSProperties {
-  const offsetPercent = flip ? 100 - leftPercent : leftPercent
-  const edge = flip ? 'right' : 'left'
-  if (!plotWidth) return { [edge]: `${offsetPercent}%` }
-  const latest = Math.max(0, plotWidth - TIP_FOOTPRINT_PX)
-  const style: CSSProperties = (offsetPercent / 100) * plotWidth > latest ? { [edge]: `${latest}px` } : { [edge]: `${offsetPercent}%` }
-  // A plot narrower than the tooltip shrinks it rather than letting it overflow.
-  if (plotWidth < TIP_FOOTPRINT_PX) Object.assign(style, { minWidth: 0, maxWidth: Math.max(0, plotWidth - TIP_MARGIN_PX) })
-  return style
+/** Beside the hovered point on the side with room, shrunk when neither side has enough, and never outside the plot. */
+function tooltipPosition(leftPercent: number, plotWidth: number | null | undefined): CSSProperties {
+  const at = (flip: boolean): CSSProperties => (flip ? { right: `${100 - leftPercent}%` } : { left: `${leftPercent}%` })
+  const preferLeft = leftPercent > FLIP_AFTER_PERCENT
+  if (!plotWidth) return at(preferLeft)
+  const left = (leftPercent / 100) * plotWidth
+  const right = plotWidth - left
+  const fits = (flip: boolean) => (flip ? left : right) >= TIP_FOOTPRINT_PX
+  if (fits(preferLeft)) return at(preferLeft)
+  if (fits(!preferLeft)) return at(!preferLeft)
+  const room = Math.max(left, right)
+  if (room > MIN_BESIDE_PX) return { ...at(left > right), minWidth: 0, maxWidth: room - TIP_MARGIN_PX }
+  const style: CSSProperties = left > right ? { right: '0px' } : { left: '0px' }
+  return plotWidth < TIP_FOOTPRINT_PX ? { ...style, minWidth: 0, maxWidth: Math.max(0, plotWidth - TIP_MARGIN_PX) } : style
 }
 
 export function ChartTooltip({ leftPercent, title, age, rows, total, plotWidth }: ChartTooltipProps) {
-  const flip = leftPercent > FLIP_AFTER_PERCENT
-  const position = tooltipPosition(leftPercent, flip, plotWidth)
+  const position = tooltipPosition(leftPercent, plotWidth)
   return (
     <div role="tooltip" className={styles.tip} style={position}>
       <div className={styles.tipTime}>

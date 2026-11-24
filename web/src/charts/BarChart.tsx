@@ -69,7 +69,7 @@ export function BarChart({ cols, height = 100, xLabels, unit = '' }: BarChartPro
       <div />
       <div className={styles.px} style={{ position: 'relative' }}>
         {xLabels.map(([index, label]) => {
-          const at = cols.length > 1 ? (index / (cols.length - 1)) * 100 : 50
+          const at = ((index + 0.5) / cols.length) * 100
           return (
             <span key={index} className={styles.pxBar} style={{ position: 'absolute', left: `${at}%`, '--at': at } as CSSProperties}>
               {label}

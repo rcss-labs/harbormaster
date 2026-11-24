@@ -1,5 +1,5 @@
 import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '../test/setup'
 import { TimeSeriesChart } from './TimeSeriesChart'
 
@@ -90,14 +90,37 @@ describe('TimeSeriesChart', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('9 h ago')
   })
 
-  it('the tooltip of a day bucket gives the calendar day, with the year once it differs, and no time', () => {
-    const days = ['2025-12-30T00:00:00Z', '2025-12-31T00:00:00Z', '2026-01-01T00:00:00Z']
-    chart({ timestamps: days, now: Date.parse('2026-01-01T12:00:00Z') })
-    hover(0)
-    const day = new Date('2025-12-30T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-    expect(screen.getByRole('tooltip')).toHaveTextContent(day)
-    expect(screen.getByRole('tooltip')).not.toHaveTextContent('00:00')
-    expect(screen.getByRole('tooltip')).toHaveTextContent('d ago')
+  describe('day buckets west of UTC', () => {
+    beforeEach(() => vi.stubEnv('TZ', 'America/New_York'))
+    afterEach(() => vi.unstubAllEnvs())
+    const title = (day: string, year?: 'numeric') => new Date(`${day}T00:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year })
+
+    it('the tooltip gives the calendar day of the API, with the year once it differs, and no time', () => {
+      chart({ timestamps: ['2025-12-30T00:00:00Z', '2025-12-31T00:00:00Z', '2026-01-01T00:00:00Z'], now: Date.parse('2026-01-01T18:00:00Z') })
+      hover(0)
+      expect(screen.getByText(title('2025-12-30', 'numeric'))).toBeInTheDocument()
+    })
+
+    it('a daily series with a single bucket is still a day', () => {
+      chart({ timestamps: ['2026-11-21T00:00:00Z'], series: [{ key: 'a', label: 'Alpha', color: 'red', values: [1] }], now: Date.parse('2026-11-24T18:00:00Z') })
+      hover(0)
+      expect(screen.getByText(title('2026-11-21'))).toBeInTheDocument()
+    })
+  })
+
+  it('the tooltip stays beside the hovered point on a half-width plot', () => {
+    chart({ timestamps: timestamps(101), series: [{ key: 'a', label: 'Alpha', color: 'red', values: Array.from({ length: 101 }, (_, i) => i) }] })
+    const plot = screen.getByRole('group', { name: 'Chart' })
+    plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 540, height: 150, right: 540, bottom: 150, x: 0, y: 0, toJSON: () => ({}) })
+    // 56% of 540 px leaves less than the tooltip's width on the right, so it must sit on the left of the point.
+    fireEvent.mouseMove(plot, { clientX: 0.56 * 540 })
+    expect(parseFloat(screen.getByRole('tooltip').style.right)).toBeCloseTo(44)
+    // On a phone-width plot it shrinks to the side that has room instead of covering the point.
+    plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 330, height: 150, right: 330, bottom: 150, x: 0, y: 0, toJSON: () => ({}) })
+    fireEvent.mouseMove(plot, { clientX: 0.3 * 330 })
+    const tip = screen.getByRole('tooltip')
+    expect(parseFloat(tip.style.left)).toBeCloseTo(30)
+    expect(parseFloat(tip.style.maxWidth)).toBeLessThanOrEqual(0.7 * 330 - 24 + 0.01)
   })
 
   it('hover at 10% shows tooltip left-anchored; at 70% flips', () => {

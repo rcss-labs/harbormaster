@@ -30,6 +30,22 @@ describe('tokens.css', () => {
     expect(css).toMatch(/:root\[data-density="comfortable"\]\s*\{\s*--row: 44px;\s*--pad: 16px;/)
   })
 
+  it.each([
+    ['dark', ':root[data-theme="dark"] {'],
+    ['light', ':root[data-theme="light"] {'],
+  ])('%s: hover and active are visible steps from the surfaces they cover', (_name, selector) => {
+    const body = ruleBody(selector)
+    const luminance = (token: string) => {
+      const raw = body.match(new RegExp(`--${token}: #([0-9a-f]{3,6})`))![1]
+      const hex = raw.length === 3 ? [...raw].map((c) => c + c).join('') : raw
+      const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const contrast = (a: string, b: string) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05)
+    for (const surface of ['surface', 'raised']) expect(contrast('hover', surface), `hover on ${surface}`).toBeGreaterThanOrEqual(1.06)
+    expect(contrast('active', 'hover'), 'active on hover').toBeGreaterThanOrEqual(1.06)
+  })
+
   it('keeps the OS dark preference fallback', () => {
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme="light"\]\)/)
   })

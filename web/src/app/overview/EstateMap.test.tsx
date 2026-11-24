@@ -106,6 +106,16 @@ describe('EstateMap', () => {
     })
   })
 
+  it('tells accounts with the same name apart by their id', async () => {
+    const base = CLUSTERS.items[0]
+    const items = ['111111111111', '222222222222'].map((id) => ({ ...base, id: `c-${id}`, account_id: id, account_name: 'production', services: [] }))
+    server.use(http.get('/api/clusters', () => HttpResponse.json({ ...CLUSTERS, items })))
+    renderApp('/')
+    const region = await map()
+    expect(await within(region).findByRole('group', { name: 'production 111111111111' })).toHaveTextContent('111111111111')
+    expect(within(region).getByRole('group', { name: 'production 222222222222' })).toBeInTheDocument()
+  })
+
   it('opens the cluster when a cell is clicked', async () => {
     const user = userEvent.setup()
     renderApp('/')

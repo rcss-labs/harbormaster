@@ -89,7 +89,7 @@ function Quay({ region, clusters, compact }: { region: string; clusters: Cluster
       <span className={styles.quayName} aria-hidden="true">
         {region}
       </span>
-      <ul className={styles.berths} aria-label={region}>
+      <ul className={styles.berths} role="list" aria-label={region}>
         {named.map((cluster) => (
           <li key={cluster.id}>
             <Berth cluster={cluster} />
@@ -120,6 +120,7 @@ export function EstateMap() {
   const clusters = useClusters(filters).data?.items
   const rows = useMemo(() => byAccount(clusters ?? []), [clusters])
   const compact = (clusters?.length ?? 0) > MAX_NAMED_BERTHS
+  const sharedName = (row: AccountRow) => rows.some((other) => other.name === row.name && other.id !== row.id)
 
   const legend = (
     <span className={styles.legend}>
@@ -139,9 +140,10 @@ export function EstateMap() {
       ) : (
         <div className={compact ? styles.mapRowsCompact : styles.mapRows}>
           {rows.map((row) => (
-            <div key={row.id} className={styles.mapRow} role="group" aria-label={row.name}>
+            <div key={row.id} className={styles.mapRow} role="group" aria-label={sharedName(row) ? `${row.name} ${row.id}` : row.name}>
               <div className={styles.mapName}>
                 <span className={styles.mapAccount}>{row.name}</span>
+                {sharedName(row) && <span className={styles.mapId}>{row.id}</span>}
                 <span className={styles.mapSub}>{accountSummary(row.clusters)}</span>
               </div>
               <div className={compact ? styles.quaysCompact : styles.quays}>

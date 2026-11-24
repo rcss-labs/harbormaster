@@ -30,7 +30,7 @@
 .timeline .ev.alt span { bottom: 36px; }
 
 /* Panel: y labels | plot, with x labels underneath. */
-.pchart { max-height: 340px; display: grid; grid-template-columns: var(--axis) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 16px; column-gap: 8px; }
+.pchart { max-height: 340px; display: grid; grid-template-columns: var(--axis) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 20px; column-gap: 8px; margin-top: 8px; }
 .pchart .py { position: relative; font: 12px var(--mono); color: var(--muted); }
 .pchart .py span { position: absolute; right: 0; transform: translateY(-50%); white-space: nowrap; }
 .pchart .pplot { position: relative; min-width: 0; border-bottom: 1px solid var(--border-strong); }
@@ -60,8 +60,7 @@
 .tipTotal { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; }
 .tipTotal span { color: var(--muted); }
 
-/* Bar chart x labels are centred under their column. */
-/* The first and last labels end flush with the plot; the ones between slide towards their column. */
+/* A bar chart label starts at its column on the left, ends at it on the right, and is centred on it in the middle. */
 .pchart .pxBar { transform: translateX(calc(var(--at, 50) * -1%)); }
 
 /* Phones. The top y label (100%) sticks out 8 px above the plot, so a legend printed right above a chart must clear it. The dot that stands in
@@ -70,6 +69,6 @@
 @media (max-width: 700px) {
   /* The 8 px the top label needs sits inside the chart (margin-top), so a frame that hides overflow around it does not cut "100%" in half. */
   .legend { margin-bottom: 4px; }
-  .pchart { margin-top: 8px; grid-template-rows: minmax(0, 1fr) auto; }
+  .pchart { grid-template-rows: minmax(0, 1fr) auto; }
   .pchart .mkdot { top: 35px; }
 }

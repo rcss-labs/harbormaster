@@ -41,7 +41,8 @@ export const bucketSpacing = (timestamps: string[]): number => (timestamps.lengt
  * time zone), with the local time for shorter ones. The year is added once it is not the current one.
  */
 export function bucketDateTime(timestamp: string, spacing: number, now: number): string {
-  const dayBucket = spacing >= DAY_MS
+  // A lone bucket has no spacing; the API stamps day buckets at midnight UTC or as a bare date.
+  const dayBucket = spacing >= DAY_MS || (spacing === 0 && /^\d{4}-\d{2}-\d{2}(T00:00:00(\.0+)?Z)?$/.test(timestamp))
   const at = dayBucket ? new Date(`${timestamp.slice(0, 10)}T00:00:00`) : new Date(timestamp)
   const otherYear = at.getFullYear() !== new Date(now).getFullYear()
   const date = at.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', ...(otherYear ? { year: 'numeric' as const } : {}) })

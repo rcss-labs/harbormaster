@@ -74,7 +74,7 @@ test('the activity drawer is closed until asked for and closes on Escape', async
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Activity' })).toHaveCount(0)
-  // main fills everything beside the sidebar: 2560 - 212.
+  // main fills everything beside the sidebar: 2560 - 240.
   expect((await measureBox(page.getByRole('main'))).width).toBeGreaterThan(2300)
   await page.getByRole('button', { name: /^Activity/ }).click()
   await expect(page.getByRole('dialog', { name: 'Activity' })).toBeVisible()
