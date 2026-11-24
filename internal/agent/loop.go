@@ -10,11 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
@@ -100,8 +97,9 @@ type session struct {
 	tools    []provider.ToolDef
 	toolSize int
 	messages []provider.Message
-	nonce    string         // random per run: names the data tag
-	marker   *regexp.Regexp // the tag's name, in any letter case
+	results  map[int]*toolResult // tool results by index into messages
+	nonce    string              // random per run: names the data tag
+	marker   *regexp.Regexp      // the tag's name, in any letter case
 
 	steps   int
 	trimmed bool
@@ -115,7 +113,7 @@ type session struct {
 // returns nil once it has emitted done or error, and ctx.Err() without either
 // when ctx is cancelled.
 func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
-	r := &session{l: l, in: in, emit: emit}
+	r := &session{l: l, in: in, emit: emit, results: map[int]*toolResult{}}
 	r.nonce = l.newNonce()
 	r.marker = regexp.MustCompile(`(?i)tool_result_` + regexp.QuoteMeta(r.nonce))
 	system, ok := systemText(in.Role, in.Page, r.nonce)
@@ -152,7 +150,16 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 		}
 		r.trim()
 
-		resp, outcome := r.callModel(ctx, runCtx)
+		// The last step, a spent allowance or too little time left make this
+		// the final call: it answers from what has been fetched.
+		final := r.steps+1 >= l.Limits.MaxSteps || r.timeLow(runCtx)
+		if !final {
+			if _, why := r.plan(false); why != "" {
+				final = true
+			}
+		}
+
+		resp, outcome := r.callModel(ctx, runCtx, final)
 		switch outcome {
 		case outcomeCancelled:
 			return ctx.Err()
@@ -161,6 +168,11 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 		}
 		r.steps++
 
+		if final {
+			// Tool calls in the final reply are ignored; its text was streamed.
+			r.emit(Event{Type: "done"})
+			return nil
+		}
 		r.messages = append(r.messages, provider.Message{
 			Role: provider.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls, Opaque: resp.Opaque,
 		})
@@ -172,10 +184,9 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			r.emit(Event{Type: "done"})
 			return nil
 		}
-		if r.steps >= l.Limits.MaxSteps || r.tokensIn+r.tokensOut >= l.Limits.MaxRunTokens || r.cost >= in.MaxCostMicroUSD {
-			r.stop("The run reached its limit and was stopped.")
-			return nil
-		}
+		// Results that could not be used, with no room left for an answer
+		// beside them, are not fetched.
+		runTools := r.canUseResults(min(len(resp.ToolCalls), maxToolCallsPerTurn))
 		for i, call := range resp.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -184,7 +195,9 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 				r.stop("The run took too long and was stopped.")
 				return nil
 			}
-			r.messages = append(r.messages, r.runTool(runCtx, call, i >= maxToolCallsPerTurn))
+			msg, res := r.runTool(runCtx, call, i >= maxToolCallsPerTurn, !runTools)
+			r.messages = append(r.messages, msg)
+			r.results[len(r.messages)-1] = res
 		}
 	}
 }
@@ -224,6 +237,14 @@ func (r *session) trim() {
 	if !trimmed {
 		return
 	}
+	dropped := len(r.messages) - len(msgs)
+	shifted := map[int]*toolResult{}
+	for i, res := range r.results {
+		if i >= dropped {
+			shifted[i-dropped] = res
+		}
+	}
+	r.results = shifted
 	r.messages = msgs
 	if !r.trimmed {
 		r.trimmed = true
@@ -251,66 +272,18 @@ const (
 	outcomeCancelled
 )
 
-// callPlan is what one model call may use: the request to send, the token
-// estimate for the allowance, and the worst-case cost for the money ceiling.
-type callPlan struct {
-	req     provider.Request
-	estIn   int64 // 3 bytes per token, for the token allowance
-	maxOut  int64
-	worstIn int64 // one token per byte plus framing, for the cost
-	cost    int64 // provisional cost of this call alone
-}
-
-// plan sizes the next call. Money is held to the worst case (every byte a
-// token); tokens use the estimate. When the full output cap does not fit the
-// cost ceiling it is lowered, down to the floor, before the run stops. A
-// non-empty reason means the call may not be made.
-func (r *session) plan() (callPlan, string) {
-	bytes := int64(r.toolSize + len(r.system) + messageChars(r.messages))
-	p := callPlan{
-		estIn:   (bytes + charsPerTokenBudget - 1) / charsPerTokenBudget,
-		worstIn: bytes + framingTokens,
-	}
-	p.maxOut = min(maxOutputTokensPerCall, r.l.Limits.MaxRunTokens-r.tokensIn-r.tokensOut-p.estIn)
-	if p.maxOut < minOutputTokensPerCall {
-		return p, "The run reached its token limit and was stopped."
-	}
-	costOf := func(out int64) int64 {
-		return r.in.Model.CostMicroUSD(provider.Usage{InputTokens: p.worstIn, OutputTokens: out})
-	}
-	fits := func(out int64) bool { return r.cost+costOf(out) <= r.in.MaxCostMicroUSD }
-	if !fits(minOutputTokensPerCall) {
-		return p, "The run reached its cost limit and was stopped."
-	}
-	if !fits(p.maxOut) {
-		low, high := int64(minOutputTokensPerCall), p.maxOut
-		for low < high {
-			mid := (low + high + 1) / 2
-			if fits(mid) {
-				low = mid
-			} else {
-				high = mid - 1
-			}
-		}
-		p.maxOut = low
-	}
-	p.cost = costOf(p.maxOut)
-	p.req = provider.Request{
-		Model: r.in.Model.ID, System: r.system, Messages: slices.Clone(r.messages), Tools: r.tools,
-		MaxOutputTokens: int(p.maxOut),
-	}
-	return p, ""
-}
-
 // callModel makes one model call, with at most one retry. Before each attempt
 // it emits a provisional usage event whose figures already include the call's
 // worst case; a call that fails or reports nothing keeps that figure.
-func (r *session) callModel(ctx, runCtx context.Context) (provider.Response, outcome) {
+func (r *session) callModel(ctx, runCtx context.Context, final bool) (provider.Response, outcome) {
 	for attempt := 0; ; attempt++ {
-		p, why := r.plan()
+		p, why := r.planFor(final)
 		if why != "" {
 			r.stop(why)
 			return provider.Response{}, outcomeEnded
+		}
+		if final && attempt == 0 {
+			r.emit(Event{Type: "notice", Notice: noticeLimitReached, Message: "The run reached its limit, so this answer uses only what was found so far."})
 		}
 		r.emitUsage(r.tokensIn+p.estIn, r.tokensOut+p.maxOut, r.cost+p.cost, true)
 
@@ -367,7 +340,7 @@ func (r *session) callModel(ctx, runCtx context.Context) (provider.Response, out
 		}
 		// The retry must fit the limits as they now stand; if it does not,
 		// the user learns what went wrong, not that a limit was hit.
-		if _, why := r.plan(); why != "" {
+		if _, why := r.planFor(final); why != "" {
 			r.fail(perr.Kind, providerMessage(perr))
 			return provider.Response{}, outcomeEnded
 		}
@@ -415,7 +388,7 @@ func (r *session) emitUsage(in, out, cost int64, provisional bool) {
 
 // runTool answers one tool call from the model and returns the tool message
 // for it. Every failure here is a result for the model, not the end of the run.
-func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit bool) provider.Message {
+func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit, noRoom bool) (provider.Message, *toolResult) {
 	tool, known := lookupTool(call.Name)
 	name := "unknown_tool"
 	if known {
@@ -426,6 +399,8 @@ func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit
 	var text string
 	var isError bool
 	switch {
+	case noRoom:
+		text, isError = "This tool was not run: the run had no room left to use its answer.", true
 	case overLimit:
 		text, isError = "Too many tool calls in one turn. Ask for fewer at a time.", true
 	case !known:
@@ -441,10 +416,11 @@ func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit
 	}
 
 	r.emit(Event{Type: "tool_end", Tool: name, OK: !isError})
+	res := r.newResult(name, text)
 	return provider.Message{
 		Role: provider.RoleTool, ToolCallID: call.ID, ToolName: call.Name, IsError: isError,
-		Text: r.envelope(name, text),
-	}
+		Text: r.render(res),
+	}, res
 }
 
 // newNonce makes the random code that names this run's data tag, so tool
@@ -458,27 +434,4 @@ func (l *Loop) newNonce() string {
 		panic("agent: no randomness: " + err.Error())
 	}
 	return hex.EncodeToString(raw[:])
-}
-
-// envelope wraps tool output as data inside the run's random tag. The text is
-// scrubbed first, then the tag's name is removed from it, and only then is it
-// cut, so a cut cannot split a secret and the cap holds for what is sent.
-func (r *session) envelope(tool, text string) string {
-	limit := r.l.Limits.MaxResultBytes
-	if limit <= 0 {
-		limit = defaultResultBytes
-	}
-	text = secretshape.ScrubText(text)
-	text = r.marker.ReplaceAllString(text, "tool_result_[removed]")
-	note := ""
-	if total := len(text); total > limit {
-		cut := limit
-		for cut > 0 && !utf8.RuneStart(text[cut]) {
-			cut--
-		}
-		text = text[:cut]
-		note = "\n[truncated: " + strconv.Itoa(total-cut) + " of " + strconv.Itoa(total) + " bytes were left out]"
-	}
-	tag := "tool_result_" + r.nonce
-	return "<" + tag + " tool=\"" + tool + "\">\n" + text + note + "\n</" + tag + ">"
 }

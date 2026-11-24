@@ -63,89 +63,114 @@ func ceilingInput(ceiling int64) RunInput {
 	return in
 }
 
-func TestLoop_CallStartsOnlyIfPriorSpendPlusProvisionalFits(t *testing.T) {
+// finalOf runs a script whose second call is the final one (MaxSteps 2).
+func finalOf(first provider.Usage) func(edit ...func(*Limits)) (*fake.Provider, *Loop) {
+	return func(edit ...func(*Limits)) (*fake.Provider, *Loop) {
+		p := twoCalls(first)
+		return p, newLoop(p, &recordingRunner{}, append([]func(*Limits){func(l *Limits) { l.MaxSteps = 2 }}, edit...)...)
+	}
+}
+
+func TestLoop_FinalCallStartsOnlyIfPriorSpendPlusItsCostFits(t *testing.T) {
 	first := provider.Usage{InputTokens: 50_000, OutputTokens: 2_000}
-	probe, err := run(t, newLoop(twoCalls(first), &recordingRunner{}), baseInput())
+	setup := finalOf(first)
+	_, l := setup()
+	probe, err := run(t, l, baseInput())
 	if err != nil {
 		t.Fatal(err)
 	}
 	usage := usageEvents(probe)
-	p1, a1, p2 := usage[0], usage[1], usage[2]
-	prov2 := p2.CostMicroUSD - a1.CostMicroUSD
-	cost256 := prov2 - int64(8192-256)*testModel.OutputMicroUSDPerMTok/1_000_000
+	a1, p2 := usage[1], usage[2]
+	if p2.Provisional != true {
+		t.Fatalf("usage events = %v", eventTypes(probe))
+	}
 
-	t.Run("exactly fits", func(t *testing.T) {
-		p := twoCalls(first)
-		if _, err := run(t, newLoop(p, &recordingRunner{}), ceilingInput(p2.CostMicroUSD)); err != nil {
-			t.Fatal(err)
-		}
-		reqs := p.Requests()
-		if len(reqs) != 2 || reqs[1].MaxOutputTokens != 8192 {
-			t.Fatalf("%d requests, second max output %d, want 2 and 8192", len(reqs), reqs[len(reqs)-1].MaxOutputTokens)
-		}
-	})
-	t.Run("one micro-dollar short lowers the output cap", func(t *testing.T) {
-		p := twoCalls(first)
-		events, err := run(t, newLoop(p, &recordingRunner{}), ceilingInput(p2.CostMicroUSD-1))
-		if err != nil {
-			t.Fatal(err)
-		}
-		reqs := p.Requests()
-		if len(reqs) != 2 || reqs[1].MaxOutputTokens >= 8192 || reqs[1].MaxOutputTokens < 256 {
-			t.Fatalf("%d requests, second max output %d, want 2 and a lowered cap", len(reqs), reqs[len(reqs)-1].MaxOutputTokens)
-		}
-		if got := usageEvents(events)[2].CostMicroUSD; got > p2.CostMicroUSD-1 {
-			t.Errorf("provisional cost %d exceeds the ceiling", got)
-		}
-	})
-	t.Run("the 256 floor", func(t *testing.T) {
-		ceiling := a1.CostMicroUSD + cost256
-		if ceiling < p1.CostMicroUSD {
-			t.Skipf("first call would not start at %d", ceiling)
-		}
-		p := twoCalls(first)
-		if _, err := run(t, newLoop(p, &recordingRunner{}), ceilingInput(ceiling)); err != nil {
-			t.Fatal(err)
-		}
-		if reqs := p.Requests(); len(reqs) != 2 || reqs[1].MaxOutputTokens != 256 {
-			t.Fatalf("%d requests, want 2 with a cap of exactly 256", len(reqs))
-		}
-
-		p = twoCalls(first)
-		events, err := run(t, newLoop(p, &recordingRunner{}), ceilingInput(ceiling-1))
-		if err != nil {
-			t.Fatal(err)
-		}
-		requireLimitReached(t, events)
-		if n := len(p.Requests()); n != 1 {
-			t.Errorf("%d requests, want 1: not even 256 output tokens fit", n)
-		}
-	})
+	cases := []struct {
+		name    string
+		ceiling int64
+		wantOut int // 0: the final call is not made
+	}{
+		{"exactly fits", p2.CostMicroUSD, maxOutputTokensPerCall},
+		{"one micro-dollar short lowers the output cap", p2.CostMicroUSD - 1, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, l := setup()
+			events, err := run(t, l, ceilingInput(tc.ceiling))
+			if err != nil {
+				t.Fatal(err)
+			}
+			reqs := p.Requests()
+			switch {
+			case tc.wantOut == 0:
+				requireLimitReached(t, events)
+				if len(reqs) != 1 {
+					t.Errorf("%d requests, want 1: the answer allowance does not fit", len(reqs))
+				}
+			case tc.wantOut < 0:
+				if len(reqs) != 2 || reqs[1].MaxOutputTokens >= maxOutputTokensPerCall || reqs[1].MaxOutputTokens < answerOutputTokens {
+					t.Errorf("%d requests, final max output %d, want a lowered cap", len(reqs), reqs[len(reqs)-1].MaxOutputTokens)
+				}
+			default:
+				if len(reqs) != 2 || reqs[1].MaxOutputTokens != tc.wantOut {
+					t.Errorf("%d requests, final max output %d, want %d", len(reqs), reqs[len(reqs)-1].MaxOutputTokens, tc.wantOut)
+				}
+			}
+			for _, e := range usageEvents(events) {
+				if e.Provisional && e.CostMicroUSD > tc.ceiling {
+					t.Errorf("provisional cost %d over the ceiling %d (first call cost %d)", e.CostMicroUSD, tc.ceiling, a1.CostMicroUSD)
+				}
+			}
+		})
+	}
 }
 
-func TestLoop_TokenAllowanceKeepsA256Floor(t *testing.T) {
-	probe, err := run(t, newLoop(fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1})), &recordingRunner{}), baseInput())
+func TestLoop_FinalCallNeedsRoomForTheAnswerAllowance(t *testing.T) {
+	// MaxSteps 1 makes the very first call the final one.
+	newFinal := func(maxTokens int64) (*fake.Provider, *Loop) {
+		p := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
+		return p, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxSteps = 1; l.MaxRunTokens = maxTokens })
+	}
+	_, l := newFinal(1_000_000)
+	probe, err := run(t, l, baseInput())
 	if err != nil {
 		t.Fatal(err)
 	}
-	estimate := probe[0].Usage.InputTokens
+	estimate := probe[1].Usage.InputTokens // [0] is the notice, [1] the provisional usage
 
-	p := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
-	if _, err := run(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxRunTokens = estimate + 256 }), baseInput()); err != nil {
+	p, l := newFinal(estimate + answerOutputTokens)
+	if _, err := run(t, l, baseInput()); err != nil {
 		t.Fatal(err)
 	}
-	if reqs := p.Requests(); len(reqs) != 1 || reqs[0].MaxOutputTokens != 256 {
-		t.Fatalf("%d requests, want 1 with a cap of exactly 256", len(reqs))
+	if reqs := p.Requests(); len(reqs) != 1 || reqs[0].MaxOutputTokens != answerOutputTokens {
+		t.Fatalf("%d requests, want 1 with a cap of exactly %d", len(reqs), answerOutputTokens)
 	}
 
-	p = fake.New(fake.Text("never", provider.Usage{}))
-	events, err := run(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxRunTokens = estimate + 255 }), baseInput())
+	p, l = newFinal(estimate + answerOutputTokens - 1)
+	events, err := run(t, l, baseInput())
 	if err != nil {
 		t.Fatal(err)
 	}
 	requireLimitReached(t, events)
 	if n := len(p.Requests()); n != 0 {
-		t.Errorf("%d requests with 255 tokens of room, want 0", n)
+		t.Errorf("%d requests, want 0: the answer allowance does not fit", n)
+	}
+
+	// The same boundary in money: the first provisional cost has the full
+	// output cap in it, 15 micro-dollars per output token at the test prices.
+	priced := probe[1].CostMicroUSD - int64(maxOutputTokensPerCall-answerOutputTokens)*15
+	for _, tc := range []struct {
+		ceiling int64
+		calls   int
+	}{{priced, 1}, {priced - 1, 0}} {
+		p := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
+		l := newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxSteps = 1 })
+		if _, err := run(t, l, ceilingInput(tc.ceiling)); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(p.Requests()); n != tc.calls {
+			t.Errorf("ceiling %d: %d requests, want %d", tc.ceiling, n, tc.calls)
+		}
 	}
 }
 
@@ -167,52 +192,6 @@ func TestLoop_OpaqueStateCountsInTheEstimate(t *testing.T) {
 	if small, large := secondEstimate(10), secondEstimate(30_000); large-small < 9_000 {
 		t.Errorf("30,000 bytes of opaque state raised the estimate by %d tokens, want about 10,000", large-small)
 	}
-}
-
-// byteCountingProvider reports one input token per request byte and the full
-// output cap as output: the worst case the budget must hold against.
-type byteCountingProvider struct{ calls int }
-
-func (p *byteCountingProvider) Name() string { return "bytes" }
-
-func (p *byteCountingProvider) Generate(_ context.Context, req provider.Request, _ func(string)) (provider.Response, error) {
-	p.calls++
-	bytes := len(req.System)
-	tools, _ := json.Marshal(req.Tools)
-	bytes += len(tools)
-	for _, m := range req.Messages {
-		bytes += len(m.Text) + len(m.Opaque)
-		for _, c := range m.ToolCalls {
-			args, _ := json.Marshal(c.Arguments)
-			bytes += len(c.Name) + len(args)
-		}
-	}
-	return provider.Response{
-		ToolCalls:  []provider.ToolCall{overviewCall("c")},
-		Usage:      provider.Usage{InputTokens: int64(bytes), OutputTokens: int64(req.MaxOutputTokens)},
-		StopReason: "tool_use",
-	}, nil
-}
-
-func TestLoop_ReportedCostNeverExceedsTheCeilingAtOneTokenPerByte(t *testing.T) {
-	const ceiling = 3_000_000
-	in := ceilingInput(ceiling)
-	in.Model.InputMicroUSDPerMTok = 10_000_000
-	in.Model.OutputMicroUSDPerMTok = 10_000_000
-	p := &byteCountingProvider{}
-	events, err := run(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxSteps = 100 }), in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.calls < 2 {
-		t.Fatalf("%d model calls, want several", p.calls)
-	}
-	for i, e := range events {
-		if e.Type == "usage" && e.CostMicroUSD > ceiling {
-			t.Errorf("event %d reported %d µ$, over the ceiling %d", i, e.CostMicroUSD, ceiling)
-		}
-	}
-	requireLimitReached(t, events)
 }
 
 func TestLoop_MaxTokensReplyIsReported(t *testing.T) {

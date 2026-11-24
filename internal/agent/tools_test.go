@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/hmtools/hmtoolstest"
@@ -101,5 +102,16 @@ func TestUpstreamToolRunner_AnswerCutAtTheReadCapNeverLeavesPartOfASecret(t *tes
 	}
 	if !strings.HasSuffix(text, "the rest was left out.]") || !strings.Contains(text, "larger than") || strings.Contains(text, "more output here") {
 		t.Errorf("want a note that the answer was larger than could be read and nothing after the cut; got %d bytes", len(text))
+	}
+}
+
+func TestUpstreamToolRunner_TailDropNeverSplitsACharacter(t *testing.T) {
+	// No delimiter in the last 4096 bytes, and the drop point lands inside a
+	// two-byte character: the answer must stay valid UTF-8.
+	body := "x" + strings.Repeat("é", 100_000)
+	runner, _ := newTestRunner(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+	text, isError := runner.Run(context.Background(), "run-token", "get_overview", nil)
+	if isError || !utf8.ValidString(text) || !strings.HasSuffix(text, answerTooLargeNote) {
+		t.Errorf("Run valid UTF-8: %v, error %v, note at the end: %v", utf8.ValidString(text), isError, strings.HasSuffix(text, answerTooLargeNote))
 	}
 }

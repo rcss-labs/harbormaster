@@ -311,20 +311,30 @@ func TestLoop_MalformedArgumentsAreAToolErrorNotARequest(t *testing.T) {
 	}
 }
 
-func TestLoop_StopsAtMaxSteps(t *testing.T) {
+func TestLoop_StepLimitMakesTheLastStepAFinalAnswer(t *testing.T) {
 	step := fake.ToolCalls(provider.Usage{InputTokens: 10, OutputTokens: 5}, overviewCall("c"))
-	p := fake.New(step, step, step)
+	p := fake.New(step, fake.Raw(provider.Response{
+		Text: "Two clusters, no problems found.", ToolCalls: []provider.ToolCall{overviewCall("ignored")},
+		Usage: provider.Usage{InputTokens: 10, OutputTokens: 5}, StopReason: "tool_use",
+	}), step)
 	runner := &recordingRunner{}
 	events, err := run(t, newLoop(p, runner, func(l *Limits) { l.MaxSteps = 2 }), baseInput())
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireLimitReached(t, events)
+	requireFinalAnswer(t, events, "Two clusters, no problems found.")
 	if n := len(p.Requests()); n != 2 {
 		t.Errorf("%d model calls, want 2", n)
 	}
 	if n := len(runner.Calls()); n != 1 {
-		t.Errorf("tools ran %d times, want 1: the last turn's tools must not run after the step limit", n)
+		t.Errorf("tools ran %d times, want 1: tool calls in the final reply are ignored", n)
+	}
+	final := p.Requests()[1]
+	if len(final.Tools) == 0 {
+		t.Errorf("the final call must still carry the tool definitions")
+	}
+	if last := final.Messages[len(final.Messages)-1]; last.Role != provider.RoleUser || !strings.Contains(last.Text, limitLine) {
+		t.Errorf("last message of the final call = %+v, want the limit line as a user message", last)
 	}
 }
 
@@ -352,8 +362,8 @@ func TestLoop_CapsOutputTokensToTheRemainingAllowance(t *testing.T) {
 		fake.ToolCalls(provider.Usage{InputTokens: 9_000, OutputTokens: 1_000}, overviewCall("c1")),
 		fake.Text("ok", provider.Usage{InputTokens: 10, OutputTokens: 1}),
 	)
-	// The tool schemas alone are about 10,000 tokens, so after the first call only a few thousand remain.
-	_, err := run(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxRunTokens = 24_000 }), baseInput())
+	// The tool schemas alone are about 10,000 tokens and the answer allowance is reserved, so only some thousands remain.
+	_, err := run(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxRunTokens = 55_000 }), baseInput())
 	if err != nil {
 		t.Fatal(err)
 	}

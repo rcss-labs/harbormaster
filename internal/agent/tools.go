@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
 )
@@ -131,5 +132,8 @@ func answerText(body []byte, readCap int) string {
 	if i := bytes.LastIndexAny(body[from:], "\n \t,;\"'{}[]()<>"); i >= 0 {
 		cut = from + i
 	}
-	return string(body[:cut]) + "\n[The answer was larger than could be read; the rest was left out.]"
+	for cut > 0 && !utf8.RuneStart(body[cut]) {
+		cut--
+	}
+	return string(body[:cut]) + answerTooLargeNote
 }
