@@ -20,6 +20,10 @@ type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments map[string]any
+	// ArgError is set by the adapter when the model's arguments were not a valid
+	// JSON object; Arguments is then nil and the loop answers with a tool error
+	// instead of running the tool.
+	ArgError string
 }
 
 // Message is one turn of the conversation. A tool message carries its result
