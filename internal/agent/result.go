@@ -19,20 +19,20 @@ const resultPlaceholder = "[This tool result was left out: there was no room for
 type toolResult struct {
 	tag     string
 	tool    string
-	data    string // scrubbed, the run's code removed, cut to the result cap
+	data    string // scrubbed, the run's codes removed, cut to the result cap
 	omitted int    // bytes of the scrubbed answer that are not in data
 	readCap bool   // the answer reached the upstream read cap: more existed than was read
 }
 
-// newResult prepares a tool answer: scrub, then remove the run's code, and
-// only then cut, so a cut cannot split a secret and the cap holds for what is
+// newResult prepares a tool answer: scrub, then remove the run's codes,
+// and only then cut, so a cut cannot split a secret and the cap holds for what is
 // sent.
 func (r *session) newResult(tool, text string) *toolResult {
 	limit := r.l.Limits.MaxResultBytes
 	if limit <= 0 {
 		limit = defaultResultBytes
 	}
-	res := &toolResult{tag: "tool_result_" + r.nonce, tool: tool}
+	res := &toolResult{tag: "tool_result_" + r.tagCode, tool: tool}
 	if strings.HasSuffix(text, answerTooLargeNote) {
 		text = strings.TrimSuffix(text, answerTooLargeNote)
 		res.readCap = true
@@ -40,7 +40,7 @@ func (r *session) newResult(tool, text string) *toolResult {
 	// An invalid byte travels as a three-byte replacement, so it is replaced
 	// before anything is counted.
 	text = secretshape.ScrubText(strings.ToValidUTF8(text, "\uFFFD"))
-	text = r.code.ReplaceAllString(text, "[removed]")
+	text = r.codes.ReplaceAllString(text, "[removed]")
 	cut := cutAt(text, limit)
 	res.data, res.omitted = text[:cut], len(text)-cut
 	return res

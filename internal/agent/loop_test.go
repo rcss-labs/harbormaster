@@ -177,11 +177,11 @@ func usageEvents(events []Event) []Event {
 }
 
 // requireLimitReached checks a run that was stopped without an answer: a
-// limit_reached notice, the sentence saying so if a call had been made, done.
+// limit_reached notice, the sentence for a run without an answer, done.
 func requireLimitReached(t *testing.T, events []Event) {
 	t.Helper()
 	n := len(events)
-	if n >= 3 && events[n-2].Type == "text" && events[n-2].Delta == noAnswer {
+	if n >= 3 && events[n-2].Type == "text" && (events[n-2].Delta == noAnswer || strings.HasPrefix(events[n-2].Delta, "The question is too long")) {
 		events = append(slices.Clone(events[:n-2]), events[n-1])
 		n--
 	}

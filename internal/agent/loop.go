@@ -59,7 +59,7 @@ type Loop struct {
 	Tools    ToolRunner
 	Limits   Limits
 
-	// Test seams: nonce makes the run's random code, newTimer makes the wait
+	// Test seams: nonce makes each of the run's two random codes, newTimer makes the wait
 	// before a retry, now is the clock the time margins use. Nil means
 	// crypto/rand, time.NewTimer and time.Now.
 	nonce    func() string
@@ -82,6 +82,9 @@ const (
 // noAnswerText is the answer of a run that ends without one from the model.
 const noAnswerText = "The agent could not finish an answer within the limit."
 
+// noCallText is the answer of a run that made no call to the model.
+const noCallText = "The question is too long for this model, or the limit for one question is too small."
+
 // session is the state of one Loop.Run.
 type session struct {
 	l          *Loop
@@ -92,8 +95,9 @@ type session struct {
 	frameBytes int64 // of the system text and the tool definitions
 	messages   []provider.Message
 	results    map[int]*toolResult // tool results by index into messages
-	nonce      string              // random per run: names the data tag and marks the loop's own message
-	code       *regexp.Regexp      // the nonce, in any letter case
+	tagCode    string              // random per run: names the data tag
+	loopCode   string              // random per run: marks the loop's own message, never near tool text
+	codes      *regexp.Regexp      // both codes, in any letter case
 	started    time.Time
 	ledger     ledger
 
@@ -109,9 +113,9 @@ type session struct {
 // when ctx is cancelled.
 func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	r := &session{l: l, in: in, emit: emit, results: map[int]*toolResult{}, started: l.clock()}
-	r.nonce = l.newNonce()
-	r.code = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(r.nonce))
-	system, ok := systemText(in.Role, in.Page, r.nonce)
+	r.tagCode, r.loopCode = l.newNonce(), l.newNonce()
+	r.codes = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(r.tagCode) + `|` + regexp.QuoteMeta(r.loopCode))
+	system, ok := systemText(in.Role, in.Page, r.tagCode, r.loopCode)
 	if !ok {
 		r.fail("invalid_request", "This kind of run is not supported.")
 		return nil
@@ -212,11 +216,13 @@ func textOnly(history []provider.Message) []provider.Message {
 	return out
 }
 
-// stop ends the run at a limit. A run that has made a call never ends without
-// saying anything.
+// stop ends the run at a limit. A run never ends without saying anything.
 func (r *session) stop(message string) {
 	r.emit(Event{Type: "notice", Notice: noticeLimitReached, Message: message})
-	if r.steps > 0 && !r.spoke {
+	switch {
+	case r.steps == 0:
+		r.emit(Event{Type: "text", Delta: noCallText})
+	case !r.spoke:
 		r.emit(Event{Type: "text", Delta: noAnswerText})
 	}
 	r.emit(Event{Type: "done"})
@@ -441,8 +447,8 @@ func (r *session) resultMessage(call provider.ToolCall, name, text string, isErr
 	}, res
 }
 
-// newNonce makes the random code that names this run's data tag and marks the
-// loop's own message, so tool output can imitate neither.
+// newNonce makes a random code. Each run has two, so that nothing a tool
+// returns can close its own envelope or speak for the loop.
 func (l *Loop) newNonce() string {
 	if l.nonce != nil {
 		return l.nonce()

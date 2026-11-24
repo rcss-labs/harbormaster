@@ -168,10 +168,11 @@ func entryMessages(entries []entry) []provider.Message {
 }
 
 // finalInstruction is the loop's instruction for the final call. It is a
-// message of its own, never part of a tool result, and carries the run's
-// random code so that nothing a tool returned can imitate it.
+// message of its own, never part of a tool result, and begins with a code that
+// is removed from every tool result, so that nothing a tool returned can
+// imitate it.
 func (r *session) finalInstruction() provider.Message {
-	return provider.Message{Role: provider.RoleUser, Text: "[Message from the loop, code " + r.nonce + "] " + limitLine}
+	return provider.Message{Role: provider.RoleUser, Text: "[Message from the loop, code " + r.loopCode + "] " + limitLine}
 }
 
 // planGathering plans an ordinary call with the messages as they stand, or
