@@ -1,0 +1,3 @@
+event: response.completed
+data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp_fake8","object":"response","status":"completed","output":[{"type":"function_call","id":"fc_a","call_id":"call_a","name":"t","arguments":"{\"x\":","status":"completed"},{"type":"function_call","id":"fc_b","call_id":"call_b","name":"t","arguments":"[1,2]","status":"completed"},{"type":"function_call","id":"fc_c","call_id":"call_c","name":"t","arguments":"{\"ok\":true}","status":"completed"}],"usage":{"input_tokens":1,"input_tokens_details":{"cached_tokens":0},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2}}}
+
