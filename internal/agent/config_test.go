@@ -217,3 +217,24 @@ func TestLoadConfig_UpstreamMustBeExactlyWhatItLooksLike(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfig_TrustedProxy(t *testing.T) {
+	base := map[string]string{"HM_AGENT_UPSTREAM_URL": "https://hm.internal.example", "HM_AGENT_PROVIDERS": catalogueAnthropic, "HM_AGENT_ANTHROPIC_API_KEY": fakeKey}
+	with := func(value string) map[string]string {
+		values := map[string]string{"HM_AGENT_TRUSTED_PROXY": value}
+		for k, v := range base {
+			values[k] = v
+		}
+		return values
+	}
+	cfg, err := LoadConfig(env(base))
+	if err != nil || !cfg.TrustedProxy {
+		t.Errorf("default: %v, %v (the default is one trusted proxy)", cfg.TrustedProxy, err)
+	}
+	if cfg, err = LoadConfig(env(with("false"))); err != nil || cfg.TrustedProxy {
+		t.Errorf("false: %v, %v", cfg.TrustedProxy, err)
+	}
+	if _, err = LoadConfig(env(with("sometimes"))); err == nil || !strings.Contains(err.Error(), "HM_AGENT_TRUSTED_PROXY") {
+		t.Errorf("bad value: err = %v", err)
+	}
+}

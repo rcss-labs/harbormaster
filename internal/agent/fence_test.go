@@ -75,7 +75,7 @@ func TestAgentHasNoStrayHTTPClient(t *testing.T) {
 		return len(parts) == 3 && parts[0] == "provider" && parts[2] == "client.go"
 	}
 	checked := 0
-	for _, root := range []string{".", "../hmtools", "../../cmd/harbormaster-agent"} {
+	for _, root := range []string{".", "../hmtools", "../apitoken", "../secretshape", "../../cmd/harbormaster-agent"} {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err

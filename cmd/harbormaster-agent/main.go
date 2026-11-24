@@ -46,6 +46,7 @@ environment for serve:
   HM_AGENT_ANTHROPIC_API_KEY, HM_AGENT_OPENAI_API_KEY, HM_AGENT_GOOGLE_API_KEY, HM_AGENT_BEDROCK_REGION
     (each needed exactly when its provider is in the catalogue)
   HM_AGENT_LISTEN (default :8484)
+  HM_AGENT_TRUSTED_PROXY (default true; exactly one proxy, Harbormaster's internal load balancer, appends the caller's address to X-Forwarded-For)
   HM_AGENT_MAX_STEPS (20), HM_AGENT_MAX_RUN_TOKENS (200000), HM_AGENT_RUN_TIMEOUT (5m),
   HM_AGENT_MAX_CONCURRENT_RUNS (8), HM_AGENT_MAX_RESULT_BYTES (100000)
   HM_AGENT_FAKE_PROVIDER (default false; a canned model, only with a loopback upstream)
@@ -55,7 +56,7 @@ const (
 	readHeaderTimeout  = 10 * time.Second
 	readTimeout        = 30 * time.Second
 	idleTimeout        = 120 * time.Second
-	shutdownGrace      = 30 * time.Second
+	shutdownGrace      = 20 * time.Second
 	healthcheckTimeout = 3 * time.Second
 	defaultListen      = ":8484"
 	// handlerDrainWait is how long, after a forced close, running handlers get to write their last log lines.

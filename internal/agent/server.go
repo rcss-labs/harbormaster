@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -34,10 +35,16 @@ const (
 )
 
 const (
-	// whoamiSlotsMin is the least number of token confirmations allowed in flight.
-	whoamiSlotsMin = 16
 	// pastRunDeadline is how long after the run deadline its last events may still be written.
 	pastRunDeadline = 5 * time.Second
+)
+
+// Limits on token confirmations: per caller address, overall, and how long a request waits for a slot.
+// Variables so tests can shrink them.
+var (
+	whoamiPerAddress = 16
+	whoamiGlobal     = 256
+	whoamiWait       = time.Second
 )
 
 // whoamiTimeout bounds one token confirmation. A variable so a test can shorten it.
@@ -57,7 +64,7 @@ type server struct {
 	providers map[string]provider.Provider
 	log       *slog.Logger
 	slots     chan struct{}
-	checks    chan struct{}
+	checks    *checkLimiter
 
 	active   atomic.Int64
 	finished sync.Map // status -> *atomic.Int64
@@ -73,7 +80,7 @@ func NewHandler(cfg Config, up *hmtools.Upstream, providers map[string]provider.
 		cfg: cfg, up: up, providers: providers, log: log,
 		tools:  NewUpstreamToolRunner(up, cfg.MaxResultBytes),
 		slots:  make(chan struct{}, max(cfg.MaxConcurrentRuns, 1)),
-		checks: make(chan struct{}, max(4*cfg.MaxConcurrentRuns, whoamiSlotsMin)),
+		checks: newCheckLimiter(whoamiGlobal),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -226,14 +233,15 @@ func (s *server) authenticate(w http.ResponseWriter, r *http.Request) (bearer st
 		unauthenticated(w)
 		return "", false
 	}
-	select {
-	case s.checks <- struct{}{}:
-		defer func() { <-s.checks }()
-	default:
+	// Confirmations are limited per caller address and overall, so one host inventing tokens cannot
+	// starve the real callers. A request waits briefly for a slot.
+	releaseCheck, ok := s.checks.acquire(r.Context(), clientAddr(r, s.cfg.TrustedProxy))
+	if !ok {
 		w.Header().Set("Retry-After", "2")
 		writeError(w, http.StatusTooManyRequests, "agent_busy", "The agent is busy. Try again shortly.")
 		return "", false
 	}
+	defer releaseCheck()
 	// Harbormaster's slowness is the upstream's failure (502), never a refusal of the caller.
 	ctx, cancel := context.WithTimeout(r.Context(), whoamiTimeout)
 	defer cancel()
@@ -250,15 +258,11 @@ func (s *server) authenticate(w http.ResponseWriter, r *http.Request) (bearer st
 		s.log.Warn("token check failed", "reason", "upstream_status", "status", resp.Status)
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", "Harbormaster could not confirm the token.")
 	default:
-		var answer struct {
-			Token struct {
-				Kind string `json:"kind"`
-			} `json:"token"`
-		}
-		if json.Unmarshal(resp.Body, &answer) != nil {
+		kind, valid := whoamiTokenKind(resp.Body)
+		if !valid {
 			s.log.Warn("token check failed", "reason", "upstream_answer_not_json")
 			writeError(w, http.StatusBadGateway, "upstream_unavailable", "Harbormaster could not confirm the token.")
-		} else if answer.Token.Kind != string(apitoken.KindRun) {
+		} else if kind != string(apitoken.KindRun) {
 			unauthenticated(w)
 		} else {
 			return bearer, true
@@ -596,4 +600,119 @@ func (s *server) serveTest(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("test finished", "provider", req.Provider, "model", model.ID, "ok", answer.OK, "kind", answer.Kind,
 		"duration_ms", time.Since(started).Milliseconds(), "input_tokens", answer.InputTokens, "output_tokens", answer.OutputTokens)
 	writeJSON(w, answer)
+}
+
+// whoamiTokenKind reads token.kind from Harbormaster's whoami answer, decoding
+// only as far as "token": the rest (a user's thousands of tags) is never parsed,
+// and an answer cut off after it by the read cap still counts.
+func whoamiTokenKind(body []byte) (kind string, ok bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if first, err := decoder.Token(); err != nil || first != json.Delim('{') {
+		return "", false
+	}
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return "", false
+		}
+		if name, _ := key.(string); name == "token" {
+			var token struct {
+				Kind string `json:"kind"`
+			}
+			if decoder.Decode(&token) != nil {
+				return "", false
+			}
+			return token.Kind, true
+		}
+		var skipped json.RawMessage
+		if decoder.Decode(&skipped) != nil {
+			return "", false
+		}
+	}
+	return "", true // a whole object that names no token
+}
+
+// clientAddr is the peer address, unless one trusted proxy (the internal load
+// balancer) is in front: then it is the rightmost non-empty X-Forwarded-For
+// entry, the address that proxy appended. Entries to its left are the caller's
+// claims and never count. The same rule as internal/mcpgw.
+func clientAddr(r *http.Request, trustedProxy bool) string {
+	if trustedProxy {
+		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		for i := len(hops) - 1; i >= 0; i-- {
+			if hop := strings.TrimSpace(hops[i]); hop != "" {
+				return hop
+			}
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// checkLimiter bounds token confirmations in flight: whoamiPerAddress for one
+// caller address and a global total. It never keys on a token.
+type checkLimiter struct {
+	global chan struct{}
+	mu     sync.Mutex
+	addrs  map[string]*addrChecks
+}
+
+type addrChecks struct {
+	slots chan struct{}
+	users int // holders and waiters
+}
+
+func newCheckLimiter(global int) *checkLimiter {
+	return &checkLimiter{global: make(chan struct{}, max(global, 1)), addrs: map[string]*addrChecks{}}
+}
+
+// acquire waits up to whoamiWait (and no longer than ctx) for a slot for addr.
+// A true answer comes with the function that gives the slot back.
+func (l *checkLimiter) acquire(ctx context.Context, addr string) (release func(), ok bool) {
+	l.mu.Lock()
+	entry := l.addrs[addr]
+	if entry == nil {
+		entry = &addrChecks{slots: make(chan struct{}, max(whoamiPerAddress, 1))}
+		l.addrs[addr] = entry
+	}
+	entry.users++
+	l.mu.Unlock()
+	leave := func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if entry.users--; entry.users == 0 {
+			delete(l.addrs, addr)
+		}
+	}
+
+	timer := time.NewTimer(whoamiWait)
+	defer timer.Stop()
+	select {
+	case entry.slots <- struct{}{}:
+	case <-timer.C:
+		leave()
+		return nil, false
+	case <-ctx.Done():
+		leave()
+		return nil, false
+	}
+	select {
+	case l.global <- struct{}{}:
+	case <-timer.C:
+		<-entry.slots
+		leave()
+		return nil, false
+	case <-ctx.Done():
+		<-entry.slots
+		leave()
+		return nil, false
+	}
+	return func() {
+		<-l.global
+		<-entry.slots
+		leave()
+	}, true
 }

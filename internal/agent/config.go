@@ -70,6 +70,9 @@ type Config struct {
 	GoogleKey     Secret
 	BedrockRegion string
 	FakeProvider  bool
+	// TrustedProxy: exactly one trusted proxy (Harbormaster's internal load balancer) sits in front, and
+	// its appended X-Forwarded-For entry is the caller's address.
+	TrustedProxy bool
 
 	MaxSteps          int
 	MaxRunTokens      int64
@@ -127,6 +130,15 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("HM_AGENT_UPSTREAM_CA_PEM must hold at least one PEM-encoded CA certificate")
 		}
 		cfg.UpstreamCAPEM = raw
+	}
+
+	cfg.TrustedProxy = true
+	if raw := read("HM_AGENT_TRUSTED_PROXY"); raw != "" {
+		trusted, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("HM_AGENT_TRUSTED_PROXY must be true or false, got %q", raw)
+		}
+		cfg.TrustedProxy = trusted
 	}
 
 	if raw := read("HM_AGENT_FAKE_PROVIDER"); raw != "" {

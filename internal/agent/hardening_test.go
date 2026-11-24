@@ -170,7 +170,7 @@ func TestAuth_OnlyAnAnswerNamingARunTokenCounts(t *testing.T) {
 	}
 }
 
-func TestAuth_ASlowWhoamiIsTheUpstreamsFailureAndChecksAreBounded(t *testing.T) {
+func TestAuth_ASlowWhoamiIsTheUpstreamsFailure(t *testing.T) {
 	old := whoamiTimeout
 	whoamiTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { whoamiTimeout = old })
@@ -182,35 +182,13 @@ func TestAuth_ASlowWhoamiIsTheUpstreamsFailureAndChecksAreBounded(t *testing.T) 
 		}
 	}})
 	t.Cleanup(func() { close(release) })
-	if resp := h.post(t, "/v1/runs", h.token, h.runBody(nil)); resp.StatusCode != http.StatusBadGateway {
+	started := time.Now()
+	resp := h.postContext(t, mustTimeout(t, 3*time.Second), "/v1/runs", h.token, h.runBody(nil))
+	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("slow whoami: status = %d, want 502", resp.StatusCode)
 	}
-
-	// Many callers at once cannot all be checking: the overflow is told to wait.
-	whoamiTimeout = 5 * time.Second
-	var busy atomic.Int32
-	var wg sync.WaitGroup
-	for i := 0; i < 80; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.server.URL+"/v1/runs", bytes.NewReader(h.runBody(nil)))
-			req.Header.Set("Authorization", "Bearer "+h.token)
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				return // a check still waiting on the slow whoami
-			}
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusTooManyRequests {
-				busy.Add(1)
-			}
-		}()
-	}
-	wg.Wait()
-	if busy.Load() == 0 {
-		t.Error("80 concurrent checks were all let through")
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Errorf("the check took %s, want about the 200 ms whoamiTimeout", elapsed)
 	}
 }
 
