@@ -1,4 +1,4 @@
-package mcpgw
+package hmtools
 
 // serviceTools read one service in depth. Every one takes a service_id;
 // account, region and tag filters are not offered because the id already

@@ -13,7 +13,7 @@ import (
 func TestGatewayImportsNothingElseFromTheModule(t *testing.T) {
 	const module = "github.com/rcss-labs/harbormaster/"
 	allowed := map[string]bool{
-		module + "internal/mcpgw": true, module + "internal/apitoken": true, module + "cmd/harbormaster-mcp": true,
+		module + "internal/mcpgw": true, module + "internal/apitoken": true, module + "internal/hmtools": true, module + "cmd/harbormaster-mcp": true,
 	}
 	out, err := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", ".", "../../cmd/harbormaster-mcp").Output()
 	if err != nil {
@@ -22,7 +22,7 @@ func TestGatewayImportsNothingElseFromTheModule(t *testing.T) {
 	packages := strings.Fields(string(out))
 	for _, pkg := range packages {
 		if strings.HasPrefix(pkg, module) && !allowed[pkg] {
-			t.Errorf("gateway depends on %s; only internal/mcpgw and internal/apitoken are allowed", pkg)
+			t.Errorf("gateway depends on %s; only internal/mcpgw, internal/apitoken and internal/hmtools are allowed", pkg)
 		}
 		for _, banned := range []string{"jackc/pgx", "valkey-io", "aws-sdk-go-v2", "crewjam/saml"} {
 			if strings.Contains(pkg, banned) {
@@ -76,7 +76,7 @@ func TestGatewayHasOneHTTPClient(t *testing.T) {
 		t.Errorf("only %d source files checked; the glob is wrong", checked)
 	}
 	// And upstream.go itself builds exactly one client value.
-	source, err := os.ReadFile("upstream.go")
+	source, err := os.ReadFile("../hmtools/upstream.go")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-package mcpgw
+package hmtools
 
 // insightTools are the analytics tabs, networks, storage and config search.
 func insightTools() []Tool {

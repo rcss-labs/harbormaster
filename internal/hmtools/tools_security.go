@@ -1,4 +1,4 @@
-package mcpgw
+package hmtools
 
 // securityTools read image vulnerability scan results.
 func securityTools() []Tool {

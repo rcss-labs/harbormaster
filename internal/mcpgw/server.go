@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 )
 
 // maxRequestBodyBytes bounds one MCP request body.
@@ -33,7 +34,7 @@ const serverInstructions = "This server is read-only: its tools can look at the 
 	"Data comes from Harbormaster's last poll of AWS and carries polled_at, the time it was read."
 
 // whoamiRoute validates a token for every MCP method other than tools/call.
-var whoamiRoute = Route{Method: http.MethodGet, Pattern: "/api/tokens/current"}
+var whoamiRoute = hmtools.Route{Method: http.MethodGet, Pattern: "/api/tokens/current"}
 
 // failureLimiter counts upstream 401s per client IP and token public id (with a higher per-IP ceiling across
 // ids); a blocked caller gets 429
@@ -75,7 +76,7 @@ func (s *requestState) snapshot() (tool string, status int, unauthorized bool) {
 
 type gateway struct {
 	cfg     Config
-	up      *Upstream
+	up      *hmtools.Upstream
 	log     *slog.Logger
 	limiter failureLimiter
 	mcp     http.Handler
@@ -83,15 +84,15 @@ type gateway struct {
 
 // NewHandler serves POST /mcp (stateless Streamable HTTP, JSON responses),
 // GET /healthz (no upstream call) and 404 for anything else.
-func NewHandler(cfg Config, up *Upstream, log *slog.Logger) http.Handler {
+func NewHandler(cfg Config, up *hmtools.Upstream, log *slog.Logger) http.Handler {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	up.maxBodyBytes = int64(upstreamReadCap(cfg.MaxResultBytes))
+	up.SetReadCap(cfg.MaxResultBytes)
 	g := &gateway{cfg: cfg, up: up, log: log, limiter: newFailureLimiter(failureLimit, failureIPCeiling, failureWindow, time.Now)}
 
 	server := mcp.NewServer(
-		&mcp.Implementation{Name: "harbormaster", Title: "Harbormaster", Version: Version},
+		&mcp.Implementation{Name: "harbormaster", Title: "Harbormaster", Version: hmtools.Version},
 		// No SDK logger: the gateway logs only what it decides to (never a token, body or result).
 		// Tools are the only capability (no logging, and the tool list never changes at runtime).
 		&mcp.ServerOptions{
@@ -99,7 +100,7 @@ func NewHandler(cfg Config, up *Upstream, log *slog.Logger) http.Handler {
 			Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{ListChanged: false}},
 		},
 	)
-	for _, tool := range Tools() {
+	for _, tool := range hmtools.Tools() {
 		server.AddTool(sdkTool(tool), g.toolHandler(tool))
 	}
 	g.mcp = mcp.NewStreamableHTTPHandler(
@@ -109,7 +110,7 @@ func NewHandler(cfg Config, up *Upstream, log *slog.Logger) http.Handler {
 	return g
 }
 
-func sdkTool(t Tool) *mcp.Tool {
+func sdkTool(t hmtools.Tool) *mcp.Tool {
 	openWorld := false
 	return &mcp.Tool{
 		Name:        t.Name,
@@ -203,7 +204,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	if method != "tools/call" {
 		// One token check per non-call method, so a bad token is a real HTTP 401 at connect time.
-		resp, err := g.up.Do(r.Context(), state.bearer, state.forwardedFor, Call{Route: whoamiRoute})
+		resp, err := g.up.Do(r.Context(), state.bearer, state.forwardedFor, hmtools.Call{Route: whoamiRoute})
 		switch {
 		case err != nil:
 			g.log.Warn("token check failed", "client_ip", ip, "token", displayID, "error", describeTransportError(err))
@@ -248,7 +249,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 // toolHandler forwards one tool call to its single upstream route.
-func (g *gateway) toolHandler(tool Tool) mcp.ToolHandler {
+func (g *gateway) toolHandler(tool hmtools.Tool) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		state, ok := ctx.Value(requestStateKey{}).(*requestState)
 		if !ok {
@@ -268,7 +269,7 @@ func (g *gateway) toolHandler(tool Tool) mcp.ToolHandler {
 		call, err := tool.BuildCall(args)
 		if err != nil {
 			state.record(tool.Name, 0, false)
-			var argErr *ArgumentError
+			var argErr *hmtools.ArgumentError
 			if errors.As(err, &argErr) {
 				return toolError(argErr.Message), nil
 			}

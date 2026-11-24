@@ -161,7 +161,7 @@ func TestHandler_BlocksAnIPAfterTenUpstream401s(t *testing.T) {
 		t.Errorf("Retry-After = %q, want 1..60 seconds", resp.Header.Get("Retry-After"))
 	}
 	readBody(t, resp)
-	if n := len(h.upstream.seen()); n != 10 {
+	if n := len(h.upstream.Seen()); n != 10 {
 		t.Errorf("upstream saw %d requests, want 10 (the blocked one must not reach it)", n)
 	}
 	connect := h.rpc(t, h.authed(), "initialize", map[string]any{})
@@ -169,7 +169,7 @@ func TestHandler_BlocksAnIPAfterTenUpstream401s(t *testing.T) {
 		t.Errorf("initialize while blocked: %d, want 429", connect.StatusCode)
 	}
 	readBody(t, connect)
-	if n := len(h.upstream.seen()); n != 10 {
+	if n := len(h.upstream.Seen()); n != 10 {
 		t.Errorf("upstream saw %d requests after the blocked initialize", n)
 	}
 }
