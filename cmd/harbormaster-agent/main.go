@@ -46,7 +46,7 @@ environment for serve:
   HM_AGENT_ANTHROPIC_API_KEY, HM_AGENT_OPENAI_API_KEY, HM_AGENT_GOOGLE_API_KEY, HM_AGENT_BEDROCK_REGION
     (each needed exactly when its provider is in the catalogue)
   HM_AGENT_LISTEN (default :8484)
-  HM_AGENT_TRUSTED_PROXY (default true; exactly one proxy, Harbormaster's internal load balancer, appends the caller's address to X-Forwarded-For)
+  HM_AGENT_TRUSTED_PROXY (default false; true when exactly one proxy, Harbormaster's internal load balancer, appends the caller's address to X-Forwarded-For)
   HM_AGENT_MAX_STEPS (20), HM_AGENT_MAX_RUN_TOKENS (200000), HM_AGENT_RUN_TIMEOUT (5m),
   HM_AGENT_MAX_CONCURRENT_RUNS (8), HM_AGENT_MAX_RESULT_BYTES (100000)
   HM_AGENT_FAKE_PROVIDER (default false; a canned model, only with a loopback upstream)

@@ -132,7 +132,6 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		cfg.UpstreamCAPEM = raw
 	}
 
-	cfg.TrustedProxy = true
 	if raw := read("HM_AGENT_TRUSTED_PROXY"); raw != "" {
 		trusted, err := strconv.ParseBool(raw)
 		if err != nil {

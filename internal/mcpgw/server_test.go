@@ -786,6 +786,11 @@ func TestClientIP(t *testing.T) {
 		{"trailing empty entries skipped", req("10.0.0.5:1234", "1.2.3.4, ,"), true, "1.2.3.4"},
 		{"no header falls back to the peer", req("10.0.0.5:1234", ""), true, "10.0.0.5"},
 		{"peer without a port", req("10.0.0.5", ""), false, "10.0.0.5"},
+		{"second header line is the proxy's", func() *http.Request {
+			r := req("10.0.0.5:1234", "9.9.9.9, 8.8.8.8")
+			r.Header.Add("X-Forwarded-For", "1.2.3.4")
+			return r
+		}(), true, "1.2.3.4"},
 	}
 	for _, row := range rows {
 		if got := clientIP(row.r, row.trusted); got != row.want {
