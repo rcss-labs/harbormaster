@@ -35,6 +35,11 @@ describe('KpiStrip', () => {
     expect(container.querySelectorAll('svg')).toHaveLength(1)
   })
 
+  it('draws no sparkline when the trend is zero throughout', () => {
+    const { container } = render(<KpiStrip label="k" items={[{ label: 'Error stops', value: 0, spark: [0, 0, 0] }]} />)
+    expect(container.querySelector('svg')).toBeNull()
+  })
+
   it('href renders the cell as a link', () => {
     render(
       <MemoryRouter>

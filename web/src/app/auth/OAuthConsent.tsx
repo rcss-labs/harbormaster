@@ -111,7 +111,7 @@ export function OAuthConsent() {
         </strong>
       </p>
       <p className={styles.hint}>After you decide, you return to {view.redirect_host}.</p>
-      <button type="button" className={`btn ${styles.submit}`} disabled={busy} onClick={() => decide('deny')}>
+      <button type="button" className={`${styles.submit} ${styles.quiet}`} disabled={busy} onClick={() => decide('deny')}>
         Deny
       </button>
     </AuthCard>

@@ -37,8 +37,8 @@
   border-color: var(--danger);
 }
 .iconBtn {
-  height: 30px;
-  width: 30px;
+  height: 32px;
+  width: 32px;
   border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--raised);
@@ -57,7 +57,7 @@
 .healthGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 /* Image tag combobox */
@@ -91,9 +91,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px;
+  padding: 4px 12px;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .option[data-active='true'] {
   background: var(--hover-strong);
@@ -108,7 +108,7 @@
 .mark {
   padding: 0 6px;
   border-radius: var(--radius-chip);
-  font: 600 10.5px var(--mono);
+  font: 500 12px var(--mono);
   color: var(--text-2);
   background: var(--muted-soft);
 }
@@ -124,14 +124,14 @@
 .optionFoot {
   position: sticky;
   bottom: 0;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border-top: 1px solid var(--row-border);
   background: var(--chrome);
   font: 12px var(--mono);
   color: var(--dim);
 }
 .noMatches {
-  padding: 8px 10px;
+  padding: 8px 12px;
   font-size: 12px;
   color: var(--muted);
 }

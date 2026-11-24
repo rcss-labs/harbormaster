@@ -3,8 +3,8 @@
 .meta { color: var(--muted); font-size: 12px; }
 .stack { display: grid; gap: 12px; min-width: 0; }
 
-.search { height: 26px; min-width: 200px; flex: 0 1 280px; margin-left: auto; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; }
-.name { font-weight: 600; color: var(--text); }
+.search { height: 32px; min-width: 200px; flex: 0 1 280px; margin-left: auto; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-family: inherit; font-size: 12px; }
+.name { font-weight: 500; color: var(--text); }
 .sub { color: var(--dim); font-size: 12px; }
 .warn { color: var(--warning); font-size: 12px; }
 .mount { font-size: 12px; }
@@ -17,7 +17,7 @@
 .kv dt { color: var(--dim); }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 12px; overflow-wrap: anywhere; }
-.heading { margin: 8px 0 0; font-size: 13px; font-weight: 600; }
+.heading { margin: 8px 0 0; font-size: 13px; font-weight: 500; }
 
 @media (max-width: 700px) {
   .search { flex: 1 1 auto; min-width: 0; height: 44px; margin-left: 0; font-size: 16px; }

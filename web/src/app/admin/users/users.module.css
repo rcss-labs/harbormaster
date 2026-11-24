@@ -7,22 +7,22 @@
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .mono { font-family: var(--mono); font-size: 12px; }
-.name { font-weight: 600; }
+.name { font-weight: 500; }
 .num { text-align: right; white-space: nowrap; }
 
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .primary:hover { background: var(--accent); filter: brightness(1.07); }
-.sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.sm { height: 28px; padding: 0 8px; font-size: 12px; }
 .danger { color: var(--danger); }
 
-.legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend { display: flex; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .matrix td { vertical-align: top; }
 .matrix th { white-space: nowrap; }
 .pcell { position: relative; }
-.pbtn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.pbtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .pbtn:hover { background: var(--hover); }
 .pbtn .mono { color: var(--muted); }
 .ppop { display: grid; gap: 8px; }
@@ -33,15 +33,15 @@
 .menuItem:disabled { color: var(--muted); cursor: not-allowed; }
 .menuDanger { color: var(--danger); }
 
-.ctl { height: 26px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
-.ctlLg { height: 30px; font-size: inherit; padding: 0 8px; }
-.field { display: grid; gap: 5px; }
+.ctl { height: 28px; font-size: 12px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
+.ctlLg { height: 32px; font-size: inherit; padding: 0 8px; }
+.field { display: grid; gap: 4px; }
 .field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
 .check { display: flex; gap: 6px; align-items: center; }
 .hint { font-size: 12px; color: var(--muted); margin: 0; }
 .err { font-size: 12px; color: var(--danger); }
 .chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.secret { font-family: var(--mono); font-size: 14px; padding: 8px 10px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); user-select: all; }
+.secret { font-family: var(--mono); font-size: 14px; padding: 8px 12px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); user-select: all; }
 .menuRoom { height: 230px; padding: 0 !important; border: 0 !important; }
 
 /* Phone: rows, sheets and 44 px controls. */
@@ -49,7 +49,7 @@
 .legendRow { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px var(--pad); font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
 .canSee { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .permList { display: grid; gap: 8px; }
-.pbtnRow { display: flex; width: 100%; min-height: 52px; padding: 0 12px; font-size: 14px; gap: 10px; justify-content: flex-start; }
+.pbtnRow { display: flex; width: 100%; min-height: 52px; padding: 0 12px; font-size: 14px; gap: 8px; justify-content: flex-start; }
 .pbtnRow .mono { margin-left: auto; }
 @media (max-width: 700px) {
   .ctl, .ctlLg { font-size: 16px; }

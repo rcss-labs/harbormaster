@@ -1,10 +1,8 @@
-.pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.ok { color: var(--success); background: var(--success-soft); }
-.warn { color: var(--warning); background: var(--warning-soft); }
-.bad { color: var(--danger); background: var(--danger-soft); }
-.info { color: var(--info); background: var(--info-soft); }
-.expected { color: var(--expected); background: var(--expected-soft); }
-.mute { color: var(--muted); background: var(--muted-soft); }
-.info::before { animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.25; } }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-s); font-size: 12px; font-weight: 500; color: var(--text-2); white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+.ok::before { background: var(--success); }
+.warn::before { background: var(--warning); }
+.bad::before { background: var(--danger); }
+.info::before { background: var(--info); }
+.expected::before { background: var(--expected); }
+.mute::before { background: var(--muted); }

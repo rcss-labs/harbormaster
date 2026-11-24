@@ -7,7 +7,7 @@ import { usePhone } from './usePhone'
 export interface KpiItem {
   label: string
   value: ReactNode
-  /** Optional trend; drawn as a sparkline under the value. */
+  /** Optional trend; drawn as a sparkline under the value, unless it is zero throughout. */
   spark?: number[]
   sparkColor?: string
   /** Colour of the value, e.g. `var(--danger)` for a failing count. */
@@ -31,9 +31,9 @@ function CellBody({ item }: { item: KpiItem }) {
       <span className={styles.value} style={item.valueColor ? { color: item.valueColor } : undefined}>
         {item.value}
       </span>
-      {item.spark && item.spark.length > 0 && (
+      {item.spark?.some((value) => value !== 0) && (
         <span className={styles.spark}>
-          <Sparkline values={item.spark} color={item.sparkColor} fluid />
+          <Sparkline values={item.spark} color={item.sparkColor ?? 'var(--muted)'} fluid />
         </span>
       )}
     </>

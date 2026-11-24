@@ -84,7 +84,7 @@ export function TagDialog({ existing, onClose }: TagDialogProps) {
       </label>
       <div className={styles.field}>
         <span>Color</span>
-        <div className={styles.toolbar}>
+        <div className={styles.colorGrid}>
           {TAG_COLORS.map((option) => (
             <label key={option} className={styles.toolbar}>
               <input type="radio" name="tag-color" value={option} checked={color === option} onChange={() => setColor(option)} />
