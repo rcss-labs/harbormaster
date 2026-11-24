@@ -643,7 +643,7 @@ func TestGenerate_UsageNeverUnderstated(t *testing.T) {
 	}{
 		{"cached tokens are inside the prompt count", `{"promptTokenCount":100,"cachedContentTokenCount":40,"candidatesTokenCount":5,"thoughtsTokenCount":11,"totalTokenCount":116}`, 100, 16},
 		{"tool-use prompt tokens are added", `{"promptTokenCount":100,"toolUsePromptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":105}`, 107, 5},
-		{"tokens only in the total go to input", `{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":130}`, 123, 7},
+		{"tokens only in the total are priced as output", `{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":2,"totalTokenCount":130}`, 100, 30},
 	}
 	for _, tc := range cases {
 		srv := sseServer(t, nil, 200, nil, chunk("STOP", `{"text":"ok"}`, tc.usage))
@@ -680,4 +680,156 @@ func TestGenerate_StreamEndsWithoutFinishReason_IsAStreamBreak(t *testing.T) {
 	if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable {
 		t.Fatalf("after text: err = %v", err)
 	}
+}
+
+func TestGenerate_BlockedPromptWithoutUsageIsDeclined(t *testing.T) {
+	body := `data: {"promptFeedback":{"blockReason":"SAFETY"}}` + "\n\n"
+	srv := sseServer(t, nil, 200, nil, []byte(body))
+	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Message != "The model declined to answer." || perr.Retryable || perr.Kind != "invalid_request" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGenerate_ToolResultsFollowTheCallOrderEvenForTheSameName(t *testing.T) {
+	cap := &captured{}
+	srv := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
+	req := simpleRequest()
+	req.Messages = append(req.Messages,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+			{ID: "gemini-call-a", Name: "get_service", Arguments: map[string]any{"name": "one"}},
+			{ID: "gemini-call-b", Name: "get_service", Arguments: map[string]any{"name": "two"}},
+		}},
+		// Delivered out of order, as a concurrent tool runner might.
+		provider.Message{Role: provider.RoleTool, ToolCallID: "gemini-call-b", ToolName: "get_service", Text: "RESULT-TWO"},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "gemini-call-a", ToolName: "get_service", Text: "RESULT-ONE"},
+	)
+	if _, err := newProvider(t, srv).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	body := cap.bodies[0]
+	one, two := strings.Index(body, "RESULT-ONE"), strings.Index(body, "RESULT-TWO")
+	if one < 0 || two < 0 || one > two {
+		t.Errorf("results must follow call order: %s", body)
+	}
+}
+
+func TestGenerate_CutOffCallIsNotReplayedWithPartialArguments(t *testing.T) {
+	call := `{"functionCall":{"name":"list_clusters","args":{"region":"eu-we"}}}`
+	srv := sseServer(t, nil, 200, nil, chunk("MAX_TOKENS", call, `{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13}`))
+	first, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withOpaque := range []bool{true, false} {
+		cap := &captured{}
+		srv2 := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
+		assistant := provider.Message{Role: provider.RoleAssistant, ToolCalls: first.ToolCalls}
+		if withOpaque {
+			assistant.Opaque = first.Opaque
+		}
+		req := simpleRequest()
+		req.Messages = append(req.Messages, assistant,
+			provider.Message{Role: provider.RoleTool, ToolCallID: first.ToolCalls[0].ID, ToolName: "list_clusters", Text: "bad arguments", IsError: true})
+		if _, err := newProvider(t, srv2).Generate(context.Background(), req, nil); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(cap.bodies[0], "eu-we") || !strings.Contains(cap.bodies[0], `"functionCall":{"name":"list_clusters"}`) {
+			t.Errorf("withOpaque=%v: partial arguments replayed: %s", withOpaque, cap.bodies[0])
+		}
+	}
+}
+
+func TestGenerate_SendsSchemaKeywordsUnchanged(t *testing.T) {
+	cap := &captured{}
+	srv := sseServer(t, cap, 200, nil, fixture(t, "text.sse"))
+	req := simpleRequest()
+	req.Tools = []provider.ToolDef{{Name: "t", Description: "d", InputSchema: map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"mode"},
+		"properties": map[string]any{
+			"mode": map[string]any{"type": "string", "enum": []any{"fast", "slow"}, "default": "fast"},
+			"ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}},
+		},
+	}}}
+	if _, err := newProvider(t, srv).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Tools []struct {
+			FunctionDeclarations []struct {
+				ParametersJsonSchema map[string]any `json:"parametersJsonSchema"`
+			} `json:"functionDeclarations"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(cap.bodies[0]), &body); err != nil {
+		t.Fatal(err)
+	}
+	schema := body.Tools[0].FunctionDeclarations[0].ParametersJsonSchema
+	props := schema["properties"].(map[string]any)
+	mode := props["mode"].(map[string]any)
+	ids := props["ids"].(map[string]any)
+	if schema["additionalProperties"] != false || mode["default"] != "fast" || len(mode["enum"].([]any)) != 2 ||
+		ids["items"].(map[string]any)["type"] != "integer" || schema["required"].([]any)[0] != "mode" {
+		t.Errorf("schema changed on the way: %s", cap.bodies[0])
+	}
+}
+
+func TestGenerate_ThoughtPartsNeverReachTextOrOnText(t *testing.T) {
+	parts := `{"text":"SECRET-REASONING","thought":true},{"text":"answer"}`
+	srv := sseServer(t, nil, 200, nil, chunk("STOP", parts, `{"promptTokenCount":3,"candidatesTokenCount":1,"totalTokenCount":4}`))
+	var deltas []string
+	resp, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), func(d string) { deltas = append(deltas, d) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Text != "answer" || strings.Join(deltas, "") != "answer" {
+		t.Errorf("text = %q deltas = %v", resp.Text, deltas)
+	}
+}
+
+func TestGenerate_RetryAfterAsHTTPDate(t *testing.T) {
+	date := time.Now().Add(45 * time.Second).UTC().Format(http.TimeFormat)
+	srv := sseServer(t, nil, 429, http.Header{"Retry-After": {date}}, []byte(`{"error":{"code":429,"message":"x","status":"RESOURCE_EXHAUSTED"}}`))
+	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.RetryAfter < 30*time.Second || perr.RetryAfter > 46*time.Second {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGenerate_ConcurrentCallsKeepTheirOwnRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		secs := "2"
+		if strings.Contains(string(body), "second-caller") {
+			secs = "9"
+		}
+		w.Header().Set("Retry-After", secs)
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"error":{"code":429,"message":"x","status":"RESOURCE_EXHAUSTED"}}`))
+	}))
+	defer srv.Close()
+	p := newProvider(t, srv)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			text, want := "first-caller", 2*time.Second
+			if i%2 == 1 {
+				text, want = "second-caller", 9*time.Second
+			}
+			req := simpleRequest()
+			req.Messages = []provider.Message{{Role: provider.RoleUser, Text: text}}
+			_, err := p.Generate(context.Background(), req, nil)
+			var perr *provider.Error
+			if !errors.As(err, &perr) || perr.RetryAfter != want {
+				t.Errorf("%s: err = %v", text, err)
+			}
+		}(i)
+	}
+	wg.Wait()
 }

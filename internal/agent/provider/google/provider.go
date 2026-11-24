@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 		blockReason  genai.BlockedReason
 		streamErr    error
 		gotUsage     bool
+		lastCallPart = -1
 		emittedModel bool // any text or tool call has been received
 	)
 
@@ -82,7 +84,11 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 					call.Arguments, call.ArgError = nil, argErrorText
 				}
 				calls = append(calls, call)
+				if call.ArgError != "" {
+					part = withoutArgs(part)
+				}
 				parts = append(parts, part)
+				lastCallPart = len(parts) - 1
 				emittedModel = true
 			case part.Text != "" && !part.Thought:
 				text.WriteString(part.Text)
@@ -111,12 +117,12 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 	if ctx.Err() != nil {
 		return resp, ctx.Err()
 	}
+	if blockReason != "" && finish == "" {
+		return resp, declined()
+	}
 	if !gotUsage {
 		// Without the vendor's usage the cost is unknown: treat it as a broken stream.
 		return resp, &provider.Error{Kind: "unavailable", Retryable: !emittedModel, Message: "the model stream ended early"}
-	}
-	if blockReason != "" && finish == "" {
-		return resp, declined()
 	}
 	if finish == "" {
 		return resp, &provider.Error{Kind: "unavailable", Retryable: !emittedModel, Message: "the model stream ended early"}
@@ -134,6 +140,9 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 		if n := len(calls); n > 0 {
 			calls[n-1].Arguments, calls[n-1].ArgError = nil, argErrorText
 			resp.ToolCalls = calls
+			if lastCallPart >= 0 {
+				parts[lastCallPart] = withoutArgs(parts[lastCallPart])
+			}
 		}
 	case outcomeDeclined:
 		return resp, declined()
@@ -179,9 +188,7 @@ func mapError(err error, sink *retryAfterSink, emitted bool) error {
 		perr.Kind, perr.Message = "auth", "the provider rejected the credential"
 	case apiErr.Code == 429:
 		perr.Kind, perr.Retryable, perr.Message = "rate_limited", true, "the provider rate limit was reached"
-		if secs, convErr := strconv.Atoi(strings.TrimSpace(sink.value)); convErr == nil && secs > 0 {
-			perr.RetryAfter = time.Duration(secs) * time.Second
-		}
+		perr.RetryAfter = parseRetryAfter(sink.value)
 	case apiErr.Code >= 500:
 		perr.Kind, perr.Retryable, perr.Message = "unavailable", true, "the provider is unavailable"
 	case apiErr.Code == 400 && looksLikeContextLength(apiErr.Message):
@@ -245,13 +252,37 @@ func stopReasonOutcome(r genai.FinishReason) stopOutcome {
 
 // usageFrom never understates cost: thinking and tool-use prompt tokens are
 // counted, and any part of the vendor's total not covered by its breakdown is
-// added to the input. promptTokenCount already includes cached tokens, so
+// added to the output (the dearer price). promptTokenCount already includes cached tokens, so
 // cachedContentTokenCount is not added again.
 func usageFrom(u *genai.GenerateContentResponseUsageMetadata) provider.Usage {
 	in := int64(u.PromptTokenCount) + int64(u.ToolUsePromptTokenCount)
 	out := int64(u.CandidatesTokenCount) + int64(u.ThoughtsTokenCount)
 	if extra := int64(u.TotalTokenCount) - in - out; extra > 0 {
-		in += extra
+		out += extra
 	}
 	return provider.Usage{InputTokens: in, OutputTokens: out}
+}
+
+// withoutArgs copies a function-call part without its arguments, so a call that
+// was cut off is never replayed to the vendor with partial arguments.
+func withoutArgs(part *genai.Part) *genai.Part {
+	cp := *part
+	fc := *part.FunctionCall
+	fc.Args, fc.PartialArgs = nil, nil
+	cp.FunctionCall = &fc
+	return &cp
+}
+
+// parseRetryAfter reads both forms of the header: seconds and an HTTP date.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(v); err == nil {
+		if d := time.Until(at); d > 0 {
+			return d
+		}
+	}
+	return 0
 }

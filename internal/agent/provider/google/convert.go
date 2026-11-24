@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"sort"
 	"strings"
 
 	"google.golang.org/genai"
@@ -49,7 +50,9 @@ func buildConfig(req provider.Request) *genai.GenerateContentConfig {
 }
 
 // buildContents maps our messages to Gemini contents. Adjacent turns of the same
-// role are merged: parallel tool results must share one content.
+// role are merged: parallel tool results must share one content, and Gemini
+// pairs them with the calls by position, so they follow the call order of the
+// assistant turn that made them.
 func buildContents(msgs []provider.Message) []*genai.Content {
 	var out []*genai.Content
 	add := func(role genai.Role, parts ...*genai.Part) {
@@ -62,26 +65,56 @@ func buildContents(msgs []provider.Message) []*genai.Content {
 		}
 		out = append(out, &genai.Content{Role: string(role), Parts: parts})
 	}
-	for _, m := range msgs {
+	var callOrder []string // ids of the most recent assistant turn's calls
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
 		switch m.Role {
 		case provider.RoleUser:
 			add(genai.RoleUser, genai.NewPartFromText(m.Text))
 		case provider.RoleAssistant:
+			callOrder = callOrder[:0]
+			for _, tc := range m.ToolCalls {
+				callOrder = append(callOrder, tc.ID)
+			}
 			add(genai.RoleModel, assistantParts(m)...)
 		case provider.RoleTool:
-			fr := &genai.FunctionResponse{Name: m.ToolName}
-			if m.IsError {
-				fr.Response = map[string]any{"error": m.Text}
-			} else {
-				fr.Response = map[string]any{"output": m.Text}
+			j := i
+			for j < len(msgs) && msgs[j].Role == provider.RoleTool {
+				j++
 			}
-			if m.ToolCallID != "" && !strings.HasPrefix(m.ToolCallID, syntheticIDPrefix) {
-				fr.ID = m.ToolCallID
+			run := append([]provider.Message(nil), msgs[i:j]...)
+			sort.SliceStable(run, func(a, b int) bool {
+				return callIndex(callOrder, run[a].ToolCallID) < callIndex(callOrder, run[b].ToolCallID)
+			})
+			for _, tm := range run {
+				add(genai.RoleUser, toolResultPart(tm))
 			}
-			add(genai.RoleUser, &genai.Part{FunctionResponse: fr})
+			i = j - 1
 		}
 	}
 	return out
+}
+
+func callIndex(order []string, id string) int {
+	for i, v := range order {
+		if v == id {
+			return i
+		}
+	}
+	return len(order)
+}
+
+func toolResultPart(m provider.Message) *genai.Part {
+	fr := &genai.FunctionResponse{Name: m.ToolName}
+	if m.IsError {
+		fr.Response = map[string]any{"error": m.Text}
+	} else {
+		fr.Response = map[string]any{"output": m.Text}
+	}
+	if m.ToolCallID != "" && !strings.HasPrefix(m.ToolCallID, syntheticIDPrefix) {
+		fr.ID = m.ToolCallID
+	}
+	return &genai.Part{FunctionResponse: fr}
 }
 
 // assistantParts prefers the parts the model produced (Opaque), which carry its
