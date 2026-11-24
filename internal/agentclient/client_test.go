@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -254,5 +256,170 @@ func TestModel_MaxRunCostMicroUSD(t *testing.T) {
 	m := Model{InputMicroUSDPerMTok: 1_000_000, OutputMicroUSDPerMTok: 5_000_000}
 	if got := m.MaxRunCostMicroUSD(200_000); got != 1_000_000 {
 		t.Errorf("got %d, want 1000000", got)
+	}
+}
+
+// A timeout of the client's own derived context is the agent being slow, not the caller giving up.
+func TestCatalogue_OwnTimeoutIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // the server notices a closed connection only once the body is read
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	c.catalogueTimeout = 50 * time.Millisecond
+	if _, err := c.Catalogue(context.Background()); !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("Catalogue err = %v, want ErrAgentUnavailable", err)
+	}
+	c.testTimeout = 50 * time.Millisecond
+	if _, err := c.Test(context.Background(), "tok", "fake", "fake-1"); !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("Test err = %v, want ErrAgentUnavailable", err)
+	}
+}
+
+func TestCatalogue_CallerCancelIsNotUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	if _, err := c.Catalogue(ctx); !errors.Is(err, context.Canceled) || errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A slow catalogue call must not block other callers behind the cache mutex.
+func TestCatalogue_NetworkCallDoesNotHoldTheLock(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		_, _ = w.Write([]byte(`{"providers":[],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`))
+	}))
+	defer srv.Close()
+	defer close(release)
+	c, _ := New(srv.URL, "")
+	go func() { _, _ = c.Catalogue(context.Background()) }()
+	<-entered
+	locked := make(chan struct{})
+	go func() { c.mu.Lock(); defer c.mu.Unlock(); close(locked) }()
+	select {
+	case <-locked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cache mutex is held during the network call")
+	}
+}
+
+func TestCatalogueAndTest_404IsNotUnknownModel(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	if _, err := c.Catalogue(context.Background()); !errors.Is(err, ErrAgentUnavailable) || errors.Is(err, ErrUnknownModel) {
+		t.Errorf("Catalogue err = %v", err)
+	}
+	if _, err := c.Test(context.Background(), "tok", "fake", "fake-1"); !errors.Is(err, ErrAgentUnavailable) || errors.Is(err, ErrUnknownModel) {
+		t.Errorf("Test err = %v", err)
+	}
+}
+
+func TestRun_LineOverOneMiBIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"type":"text","delta":"`)
+		fmt.Fprint(w, strings.Repeat("a", 1<<20+10))
+		fmt.Fprintln(w, `"}`)
+		fmt.Fprintln(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	var got int
+	err := c.Run(context.Background(), "tok", sampleRequest(), func(Event) { got++ })
+	if !errors.Is(err, ErrAgentUnavailable) || got != 0 {
+		t.Errorf("err = %v, events = %d", err, got)
+	}
+}
+
+// A failed test call says when it is certain that no model was called: the agent refused it before that, or it never
+// reached the agent. Anything else may have been paid for.
+func TestTest_SaysWhenNoPaidCallWasMade(t *testing.T) {
+	answer := func(status int, body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	hangUp := func(w http.ResponseWriter, r *http.Request) { panic(http.ErrAbortHandler) }
+	for name, tc := range map[string]struct {
+		handler http.HandlerFunc
+		free    bool
+		is      error
+	}{
+		"401":       {answer(401, "{}"), true, ErrAgentUnavailable},
+		"404":       {answer(404, "{}"), true, ErrAgentUnavailable},
+		"429":       {answer(429, "{}"), true, ErrAgentBusy},
+		"400":       {answer(400, "{}"), false, ErrAgentUnavailable},
+		"302":       {answer(302, ""), false, ErrAgentUnavailable},
+		"500":       {answer(500, "{}"), false, ErrAgentUnavailable},
+		"502":       {answer(502, "{}"), false, ErrAgentUnavailable},
+		"503":       {answer(503, "{}"), false, ErrAgentUnavailable},
+		"malformed": {answer(200, "not json"), false, ErrAgentUnavailable},
+		"hung up":   {hangUp, false, ErrAgentUnavailable},
+	} {
+		srv := httptest.NewServer(tc.handler)
+		c, _ := New(srv.URL, "")
+		_, err := c.Test(t.Context(), "tok", "fake", "fake-1")
+		if errors.Is(err, ErrNoPaidCall) != tc.free || !errors.Is(err, tc.is) {
+			t.Errorf("%s: %v, want no paid call = %v and %v", name, err, tc.free, tc.is)
+		}
+		srv.Close()
+	}
+
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	c, _ := New(gone.URL, "")
+	if _, err := c.Test(t.Context(), "tok", "fake", "fake-1"); !errors.Is(err, ErrNoPaidCall) || !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("unreachable: %v", err)
+	}
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	c, _ = New(srv.URL, "")
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() { <-entered; cancel() }()
+	if _, err := c.Test(ctx, "tok", "fake", "fake-1"); errors.Is(err, ErrNoPaidCall) || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled after it was sent: %v", err)
+	}
+	if _, err := c.Test(ctx, "tok", "fake", "fake-1"); !errors.Is(err, ErrNoPaidCall) || !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled before it was sent: %v", err)
+	}
+}
+
+func TestTest_UsageIsKnownOnlyWhenTheAnswerStatesIt(t *testing.T) {
+	for body, known := range map[string]bool{
+		`{"ok":true,"input_tokens":1,"output_tokens":1,"cost_micro_usd":0}`:  true,
+		`{"ok":false,"kind":"auth","cost_micro_usd":7}`:                      true,
+		`{"ok":true,"input_tokens":1,"output_tokens":1}`:                     false,
+		`{"ok":true,"cost_micro_usd":null}`:                                  false,
+		`{"ok":true,"input_tokens":1,"output_tokens":1,"cost_micro_usd":-1}`: false,
+		`{}`: false,
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		c, _ := New(srv.URL, "")
+		if res, err := c.Test(t.Context(), "tok", "fake", "fake-1"); err != nil || res.UsageKnown != known {
+			t.Errorf("%s: known %v, %v; want %v", body, res.UsageKnown, err, known)
+		}
+		srv.Close()
 	}
 }

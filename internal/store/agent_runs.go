@@ -34,6 +34,9 @@ type AgentRun struct {
 	FinishedAt, LastUsageAt   *time.Time
 }
 
+// AgentUsage is a run's cumulative figures.
+type AgentUsage struct{ InputTokens, OutputTokens, CostMicroUSD int64 }
+
 // AgentUsageDay is one day and role of finished usage.
 type AgentUsageDay struct {
 	Day                       time.Time
@@ -97,7 +100,7 @@ func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 		return fmt.Errorf("reserve agent run: lock settings: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `update agent_runs set state = 'failed', finished_at = $1
-		where state = 'running' and coalesce(last_usage_at, started_at) < $2`, now, now.Add(-staleAfter)); err != nil {
+		where `+staleAgentRunSQL, now, now.Add(-staleAfter)); err != nil {
 		return fmt.Errorf("reserve agent run: settle stale runs: %w", err)
 	}
 	start, end := utcMonthBounds(now)
@@ -182,25 +185,33 @@ func (s *Store) RecordAgentRunUsage(ctx context.Context, id uuid.UUID, inputToke
 	return nil
 }
 
-// SettleAgentRun finishes a running run as done or failed, keeping its last recorded cost; the unused
-// reservation is freed because only cost counts once a run is finished. A run the stale sweep already failed
-// keeps state failed but records the tools, and returns ErrAgentRunNotRunning; a done run is unchanged (also
-// ErrAgentRunNotRunning). An unknown id is ErrNotFound.
-func (s *Store) SettleAgentRun(ctx context.Context, id uuid.UUID, state string, tools []string, now time.Time) error {
+// SettleAgentRun finishes a running run as done or failed, with its last figures in the same write (usage nil keeps
+// those recorded); the unused reservation is freed because only cost counts once a run is finished. The figures
+// follow RecordAgentRunUsage: a running run takes them as given, and a run the stale sweep already failed only has
+// them raised; it also records the tools, keeps its state, and returns ErrAgentRunNotRunning. A done run is
+// unchanged (also ErrAgentRunNotRunning). An unknown id is ErrNotFound.
+func (s *Store) SettleAgentRun(ctx context.Context, id uuid.UUID, state string, usage *AgentUsage, tools []string, now time.Time) error {
 	if state != "done" && state != "failed" {
 		return fmt.Errorf("settle agent run: invalid state %q", state)
 	}
 	if tools == nil {
 		tools = []string{}
 	}
+	var input, output, cost *int64
+	if usage != nil {
+		input, output, cost = &usage.InputTokens, &usage.OutputTokens, &usage.CostMicroUSD
+	}
 	var prior string
 	err := s.Pool.QueryRow(ctx, `with prior as (select state from agent_runs where id = $1 for update),
 		upd as (update agent_runs set
 			state = case when state = 'running' then $2 else state end,
 			finished_at = case when state = 'running' then $4 else finished_at end,
-			tools = case when state = 'running' or (state = 'failed' and cardinality($3::text[]) > 0) then $3 else tools end
+			tools = case when state = 'running' or (state = 'failed' and cardinality($3::text[]) > 0) then $3 else tools end,
+			input_tokens = case state when 'running' then coalesce($5::bigint, input_tokens) when 'failed' then greatest(input_tokens, $5) else input_tokens end,
+			output_tokens = case state when 'running' then coalesce($6::bigint, output_tokens) when 'failed' then greatest(output_tokens, $6) else output_tokens end,
+			cost_micro_usd = case state when 'running' then coalesce($7::bigint, cost_micro_usd) when 'failed' then greatest(cost_micro_usd, $7) else cost_micro_usd end
 			where id = $1 returning 1)
-		select state from prior`, id, state, tools, now).Scan(&prior)
+		select state from prior`, id, state, tools, now, input, output, cost).Scan(&prior)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}

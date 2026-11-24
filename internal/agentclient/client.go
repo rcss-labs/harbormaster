@@ -14,8 +14,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +30,8 @@ var (
 	ErrAgentBusy = errors.New("the agent is busy")
 	// ErrUnknownModel: the agent does not offer the requested provider and model.
 	ErrUnknownModel = errors.New("the agent does not offer that model")
+	// ErrNoPaidCall: it is certain that a failed test call called no model. It comes beside the error that says why.
+	ErrNoPaidCall = errors.New("no paid call was made")
 )
 
 const (
@@ -116,6 +120,8 @@ type TestResult struct {
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"`
 	CostMicroUSD int64  `json:"cost_micro_usd"`
+	// UsageKnown is false when the answer did not state a cost, or not a possible one.
+	UsageKnown bool `json:"-"`
 }
 
 // Client talks to one agent base URL and never follows a redirect.
@@ -123,6 +129,9 @@ type Client struct {
 	base   *url.URL
 	client *http.Client
 	now    func() time.Time
+
+	// catalogueTimeout and testTimeout bound those calls; fields so a test can shorten them.
+	catalogueTimeout, testTimeout time.Duration
 
 	mu        sync.Mutex
 	cached    Catalogue
@@ -165,7 +174,9 @@ func New(baseURL string, caPEM string) (*Client, error) {
 			Transport:     transport,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		now: time.Now,
+		now:              time.Now,
+		catalogueTimeout: catalogueTimeout,
+		testTimeout:      testTimeout,
 	}, nil
 }
 
@@ -193,8 +204,9 @@ func (c *Client) newRequest(ctx context.Context, method, path, bearer string, bo
 }
 
 // do sends req and maps a transport failure or any non-200 answer to a
-// sentinel error. On success the caller closes the body.
-func (c *Client) do(req *http.Request) (*http.Response, error) {
+// sentinel error; a 404 means an unknown model only for a run. On success the
+// caller closes the body.
+func (c *Client) do(req *http.Request, notFoundIsUnknownModel bool) (*http.Response, error) {
 	resp, err := c.client.Do(req)
 	if err != nil {
 		if ctxErr := req.Context().Err(); ctxErr != nil {
@@ -211,11 +223,22 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	case http.StatusTooManyRequests:
 		return nil, ErrAgentBusy
 	case http.StatusNotFound:
-		return nil, ErrUnknownModel
+		if notFoundIsUnknownModel {
+			return nil, ErrUnknownModel
+		}
+		return nil, &statusError{resp.StatusCode}
 	default:
-		return nil, fmt.Errorf("%w: status %d", ErrAgentUnavailable, resp.StatusCode)
+		return nil, &statusError{resp.StatusCode}
 	}
 }
+
+// statusError is an answer that says the agent did not do what was asked.
+type statusError struct{ code int }
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("%v: status %d", ErrAgentUnavailable, e.code)
+}
+func (e *statusError) Unwrap() error { return ErrAgentUnavailable }
 
 type catalogueWire struct {
 	Providers []struct {
@@ -233,27 +256,40 @@ type catalogueWire struct {
 	} `json:"limits"`
 }
 
-// Catalogue returns the agent's models and limits, cached for 60 seconds.
+// ownTimeout turns the expiry of a context the client derived itself into
+// ErrAgentUnavailable; the caller's own cancellation or deadline passes through.
+func ownTimeout(parent context.Context, err error) error {
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && parent.Err() == nil {
+		return fmt.Errorf("%w: timed out", ErrAgentUnavailable)
+	}
+	return err
+}
+
+// Catalogue returns the agent's models and limits, cached for 60 seconds. The
+// cache lock is not held during the network call.
 func (c *Client) Catalogue(ctx context.Context) (Catalogue, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.haveCache && c.now().Sub(c.cachedAt) < catalogueTTL {
-		return c.cached, nil
+		cached := c.cached
+		c.mu.Unlock()
+		return cached, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, catalogueTimeout)
+	c.mu.Unlock()
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, c.catalogueTimeout)
 	defer cancel()
 	req, err := c.newRequest(ctx, http.MethodGet, "/v1/catalogue", "", nil)
 	if err != nil {
 		return Catalogue{}, err
 	}
-	resp, err := c.do(req)
+	resp, err := c.do(req, false)
 	if err != nil {
-		return Catalogue{}, err
+		return Catalogue{}, ownTimeout(parent, err)
 	}
 	defer resp.Body.Close()
 	var wire catalogueWire
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&wire); err != nil {
-		return Catalogue{}, fmt.Errorf("%w: malformed catalogue", ErrAgentUnavailable)
+		return Catalogue{}, ownTimeout(parent, fmt.Errorf("%w: malformed catalogue", ErrAgentUnavailable))
 	}
 	cat := Catalogue{
 		MaxRunTokens: wire.Limits.MaxRunTokens,
@@ -271,7 +307,9 @@ func (c *Client) Catalogue(ctx context.Context) (Catalogue, error) {
 		}
 		cat.Providers = append(cat.Providers, pm)
 	}
+	c.mu.Lock()
 	c.cached, c.cachedAt, c.haveCache = cat, c.now(), true
+	c.mu.Unlock()
 	return cat, nil
 }
 
@@ -284,7 +322,7 @@ func (c *Client) Run(ctx context.Context, bearer string, req RunRequest, onEvent
 	if err != nil {
 		return err
 	}
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, true)
 	if err != nil {
 		return err
 	}
@@ -315,23 +353,45 @@ func (c *Client) Run(ctx context.Context, bearer string, req RunRequest, onEvent
 	return fmt.Errorf("%w: stream ended early", ErrAgentUnavailable)
 }
 
-// Test asks the agent to make one small call to provider and model.
+// Test asks the agent to make one small call to provider and model. An error that is not ErrNoPaidCall may have been
+// paid for: the request was on its way, and the agent did not refuse it before calling the model.
 func (c *Client) Test(ctx context.Context, bearer, provider, model string) (TestResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, testTimeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, c.testTimeout)
 	defer cancel()
+	var connected atomic.Bool // whether the request may have left; a retry on a new connection starts over
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) { connected.Store(false) },
+		GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+	})
 	body := map[string]string{"provider": provider, "model": model}
 	req, err := c.newRequest(ctx, http.MethodPost, "/v1/test", bearer, body)
 	if err != nil {
 		return TestResult{}, err
 	}
-	resp, err := c.do(req)
+	resp, err := c.do(req, false)
 	if err != nil {
+		err = ownTimeout(parent, err)
+		var status *statusError
+		refused := errors.Is(err, ErrAgentBusy) ||
+			(errors.As(err, &status) && (status.code == http.StatusUnauthorized || status.code == http.StatusNotFound))
+		if refused || !connected.Load() {
+			err = fmt.Errorf("%w: %w", ErrNoPaidCall, err)
+		}
 		return TestResult{}, err
 	}
 	defer resp.Body.Close()
-	var res TestResult
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&res); err != nil {
+	var answer struct {
+		TestResult
+		CostMicroUSD *int64 `json:"cost_micro_usd"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&answer); err != nil {
 		return TestResult{}, fmt.Errorf("%w: malformed test answer", ErrAgentUnavailable)
+	}
+	res := answer.TestResult
+	if answer.CostMicroUSD != nil {
+		res.CostMicroUSD = *answer.CostMicroUSD
+		res.UsageKnown = res.CostMicroUSD >= 0 && res.InputTokens >= 0 && res.OutputTokens >= 0
 	}
 	return res, nil
 }
