@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
+	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -310,10 +311,18 @@ func (s *Server) getDesiredCount(w http.ResponseWriter, r *http.Request) {
 // redactedValue replaces an environment value for an access token when HM_TOKEN_REDACT_ENV is on.
 const redactedValue = "[redacted]"
 
-// redactForToken reports whether this request's answer must hide environment values: only for an access token and
-// only while the switch is on (it is off by default, owner decision 9). A session is never redacted.
+// redactForToken reports whether this request's answer must hide environment values: only for an access token. A
+// personal or OAuth token is redacted while the switch is on (it is off by default, owner decision 9); a run token by
+// the flag it was minted with. A session is never redacted.
 func (s *Server) redactForToken(r *http.Request) bool {
-	return s.Cfg.TokenRedactEnv && auth.IsToken(r.Context())
+	cred, ok := auth.CredentialFrom(r.Context())
+	if !ok || cred.Kind != auth.CredentialToken {
+		return false
+	}
+	if cred.TokenKind == apitoken.KindRun {
+		return cred.RedactEnv
+	}
+	return s.Cfg.TokenRedactEnv
 }
 
 // redactEnvironment returns a copy of the task definition with every containerDefinitions[].environment[].value

@@ -21,6 +21,8 @@ const (
 	KindPAT          Kind = "pat"
 	KindOAuthAccess  Kind = "oauth_access"
 	KindOAuthRefresh Kind = "oauth_refresh"
+	// KindRun is a short-lived read-only token the agent service uses to call the read API as one user for one run.
+	KindRun Kind = "run"
 )
 
 // Parsed is the three parts of a token string.
@@ -41,6 +43,7 @@ var prefixes = map[Kind]string{
 	KindPAT:          "hmp_",
 	KindOAuthAccess:  "hmo_",
 	KindOAuthRefresh: "hmr_",
+	KindRun:          "hma_",
 }
 
 // base32Encoding is lowercase base32 without padding; the id alphabet is a-z2-7.
