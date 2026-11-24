@@ -254,12 +254,17 @@ func TestAuth_AWaitingRequestIsEndedByItsContext(t *testing.T) {
 }
 
 func TestRuns_TheConfiguredRunLimitsReachTheLoop(t *testing.T) {
-	// A token budget the tools alone exceed: no model call, a limit notice.
+	// A token budget the tools alone exceed: no gathering, one final call and a limit notice.
 	demo := fake.Demo()
 	h := newHarness(t, harnessOptions{providers: map[string]provider.Provider{"fake": demo}, edit: func(c *Config) { c.MaxRunTokens = 100 }})
 	events := readEvents(t, h.post(t, "/v1/runs", h.token, h.runBody(nil)))
-	if n := len(demo.Requests()); n != 0 || !hasNotice(events, "limit_reached") {
+	if n := len(demo.Requests()); n != 1 || !hasNotice(events, "limit_reached") {
 		t.Errorf("MaxRunTokens 100: %d model calls, events %+v", n, events)
+	}
+	for _, event := range events {
+		if event.Type == "tool_start" {
+			t.Errorf("MaxRunTokens 100: a tool ran: %+v", event)
+		}
 	}
 
 	// A run timeout shorter than the model's answer: the run is stopped, not left hanging.
