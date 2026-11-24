@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"math"
 
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -25,7 +26,7 @@ func buildParams(req provider.Request) responses.ResponseNewParams {
 		params.Instructions = sdk.String(req.System)
 	}
 	if req.MaxOutputTokens > 0 {
-		params.MaxOutputTokens = sdk.Int(int64(req.MaxOutputTokens))
+		params.MaxOutputTokens = sdk.Int(int64(min(req.MaxOutputTokens, math.MaxInt32)))
 	}
 	for _, tool := range req.Tools {
 		schema := tool.InputSchema

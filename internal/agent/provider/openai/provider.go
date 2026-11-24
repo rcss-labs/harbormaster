@@ -64,6 +64,11 @@ func (p *openaiProvider) Generate(ctx context.Context, req provider.Request, onT
 				onText(event.Delta)
 			}
 		case "response.completed", "response.incomplete":
+			// A terminal event without usage would price the turn at zero.
+			if !event.Response.Usage.JSON.InputTokens.Valid() || !event.Response.Usage.JSON.OutputTokens.Valid() {
+				resp.Text = text.String()
+				return resp, &provider.Error{Kind: "unavailable", Retryable: !emitted, Message: "the OpenAI response ended without usage"}
+			}
 			resp = finalResponse(event.Response, text.String(), event.Type == "response.incomplete")
 			done = true
 		case "response.failed":

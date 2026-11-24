@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -456,5 +457,29 @@ func TestGenerate_ReplaysCallWithArgErrorAsEmptyObject(t *testing.T) {
 	}
 	if !strings.Contains(string(got.body), `"arguments":"{}"`) {
 		t.Fatalf("body: %s", got.body)
+	}
+}
+
+func TestGenerate_MissingFinalUsageIsAMidStreamBreak(t *testing.T) {
+	for _, tc := range []struct {
+		fixture   string
+		retryable bool
+		text      string
+	}{{"completed_no_usage.sse", false, "text"}, {"completed_no_usage_no_text.sse", true, ""}} {
+		srv, _ := serve(t, 200, tc.fixture, nil)
+		resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+		var perr *provider.Error
+		if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable != tc.retryable || resp.Text != tc.text {
+			t.Fatalf("%s: resp %+v err %v", tc.fixture, resp, err)
+		}
+	}
+}
+
+func TestBuildParams_ClampsMaxOutputTokens(t *testing.T) {
+	req := simpleRequest()
+	req.MaxOutputTokens = math.MaxInt
+	params := buildParams(req)
+	if got := params.MaxOutputTokens.Value; got <= 0 || got > math.MaxInt32 {
+		t.Fatalf("max_output_tokens %d not clamped", got)
 	}
 }
