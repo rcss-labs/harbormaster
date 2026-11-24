@@ -792,6 +792,8 @@ export const ME_ADMIN: MeDTO = {
   break_glass: true,
   email: 'sam@example.test',
   display_name: 'Sam',
+  agent_enabled: false,
+  ai_chat: false,
 }
 
 export const ME_OMER: MeDTO = {
@@ -809,6 +811,8 @@ export const ME_OMER: MeDTO = {
   break_glass: false,
   email: null,
   display_name: null,
+  agent_enabled: false,
+  ai_chat: false,
 }
 
 /** A user who signs in only through SSO: linked identity, no password. */
@@ -827,6 +831,8 @@ export const ME_SSO_USER: MeDTO = {
   break_glass: false,
   email: 'alex@example.test',
   display_name: 'Alex',
+  agent_enabled: false,
+  ai_chat: false,
 }
 
 const plainTag = (t: TagDTO): TagDTO => ({ ...t, inherited: false })

@@ -37,6 +37,63 @@
       "service": "string"
     }
   },
+  "agentSettings": {
+    "agent_reachable": "boolean",
+    "catalogue": {
+      "providers": [
+        {
+          "models": [
+            {
+              "context_tokens": "number",
+              "id": "string",
+              "input_per_mtok_micro_usd": "number",
+              "output_per_mtok_micro_usd": "number"
+            }
+          ],
+          "provider": "string"
+        }
+      ]
+    },
+    "monthly_budget_usd": "string",
+    "role_models": {
+      "chat": {
+        "$optional": {
+          "$null": {
+            "available": "boolean",
+            "model": "string",
+            "provider": "string"
+          }
+        }
+      }
+    },
+    "spend": {
+      "month": "string",
+      "reserved_usd": "string",
+      "settled_usd": "string"
+    },
+    "unredacted_providers": [
+      "string"
+    ],
+    "version": "number"
+  },
+  "agentTestResult": {
+    "kind": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "agentUsage": {
+    "days": [
+      {
+        "cost_usd": "string",
+        "day": "string",
+        "input_tokens": "number",
+        "output_tokens": "number",
+        "role": "string",
+        "runs": "number"
+      }
+    ],
+    "month": "string"
+  },
   "alerts": {
     "counts": {
       "danger": "number",
@@ -1408,6 +1465,7 @@
     "temporary_password": "string",
     "user": {
       "admin": "boolean",
+      "ai_chat": "boolean",
       "break_glass": "boolean",
       "can_see": [
         {
@@ -1687,6 +1745,8 @@
         }
       ],
       "admin": "boolean",
+      "agent_enabled": "boolean",
+      "ai_chat": "boolean",
       "break_glass": "boolean",
       "csrf_token": "string",
       "display_name": {
@@ -1758,6 +1818,8 @@
       }
     ],
     "admin": "boolean",
+    "agent_enabled": "boolean",
+    "ai_chat": "boolean",
     "break_glass": "boolean",
     "csrf_token": "string",
     "display_name": {

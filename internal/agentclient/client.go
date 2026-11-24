@@ -124,6 +124,9 @@ type Client struct {
 	client *http.Client
 	now    func() time.Time
 
+	// catalogueTimeout and testTimeout bound those calls; fields so a test can shorten them.
+	catalogueTimeout, testTimeout time.Duration
+
 	mu        sync.Mutex
 	cached    Catalogue
 	cachedAt  time.Time
@@ -165,7 +168,9 @@ func New(baseURL string, caPEM string) (*Client, error) {
 			Transport:     transport,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		now: time.Now,
+		now:              time.Now,
+		catalogueTimeout: catalogueTimeout,
+		testTimeout:      testTimeout,
 	}, nil
 }
 
@@ -193,8 +198,9 @@ func (c *Client) newRequest(ctx context.Context, method, path, bearer string, bo
 }
 
 // do sends req and maps a transport failure or any non-200 answer to a
-// sentinel error. On success the caller closes the body.
-func (c *Client) do(req *http.Request) (*http.Response, error) {
+// sentinel error; a 404 means an unknown model only for a run. On success the
+// caller closes the body.
+func (c *Client) do(req *http.Request, notFoundIsUnknownModel bool) (*http.Response, error) {
 	resp, err := c.client.Do(req)
 	if err != nil {
 		if ctxErr := req.Context().Err(); ctxErr != nil {
@@ -211,7 +217,10 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	case http.StatusTooManyRequests:
 		return nil, ErrAgentBusy
 	case http.StatusNotFound:
-		return nil, ErrUnknownModel
+		if notFoundIsUnknownModel {
+			return nil, ErrUnknownModel
+		}
+		return nil, fmt.Errorf("%w: status %d", ErrAgentUnavailable, resp.StatusCode)
 	default:
 		return nil, fmt.Errorf("%w: status %d", ErrAgentUnavailable, resp.StatusCode)
 	}
@@ -233,27 +242,40 @@ type catalogueWire struct {
 	} `json:"limits"`
 }
 
-// Catalogue returns the agent's models and limits, cached for 60 seconds.
+// ownTimeout turns the expiry of a context the client derived itself into
+// ErrAgentUnavailable; the caller's own cancellation or deadline passes through.
+func ownTimeout(parent context.Context, err error) error {
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && parent.Err() == nil {
+		return fmt.Errorf("%w: timed out", ErrAgentUnavailable)
+	}
+	return err
+}
+
+// Catalogue returns the agent's models and limits, cached for 60 seconds. The
+// cache lock is not held during the network call.
 func (c *Client) Catalogue(ctx context.Context) (Catalogue, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.haveCache && c.now().Sub(c.cachedAt) < catalogueTTL {
-		return c.cached, nil
+		cached := c.cached
+		c.mu.Unlock()
+		return cached, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, catalogueTimeout)
+	c.mu.Unlock()
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, c.catalogueTimeout)
 	defer cancel()
 	req, err := c.newRequest(ctx, http.MethodGet, "/v1/catalogue", "", nil)
 	if err != nil {
 		return Catalogue{}, err
 	}
-	resp, err := c.do(req)
+	resp, err := c.do(req, false)
 	if err != nil {
-		return Catalogue{}, err
+		return Catalogue{}, ownTimeout(parent, err)
 	}
 	defer resp.Body.Close()
 	var wire catalogueWire
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&wire); err != nil {
-		return Catalogue{}, fmt.Errorf("%w: malformed catalogue", ErrAgentUnavailable)
+		return Catalogue{}, ownTimeout(parent, fmt.Errorf("%w: malformed catalogue", ErrAgentUnavailable))
 	}
 	cat := Catalogue{
 		MaxRunTokens: wire.Limits.MaxRunTokens,
@@ -271,7 +293,9 @@ func (c *Client) Catalogue(ctx context.Context) (Catalogue, error) {
 		}
 		cat.Providers = append(cat.Providers, pm)
 	}
+	c.mu.Lock()
 	c.cached, c.cachedAt, c.haveCache = cat, c.now(), true
+	c.mu.Unlock()
 	return cat, nil
 }
 
@@ -284,7 +308,7 @@ func (c *Client) Run(ctx context.Context, bearer string, req RunRequest, onEvent
 	if err != nil {
 		return err
 	}
-	resp, err := c.do(httpReq)
+	resp, err := c.do(httpReq, true)
 	if err != nil {
 		return err
 	}
@@ -317,16 +341,17 @@ func (c *Client) Run(ctx context.Context, bearer string, req RunRequest, onEvent
 
 // Test asks the agent to make one small call to provider and model.
 func (c *Client) Test(ctx context.Context, bearer, provider, model string) (TestResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, testTimeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, c.testTimeout)
 	defer cancel()
 	body := map[string]string{"provider": provider, "model": model}
 	req, err := c.newRequest(ctx, http.MethodPost, "/v1/test", bearer, body)
 	if err != nil {
 		return TestResult{}, err
 	}
-	resp, err := c.do(req)
+	resp, err := c.do(req, false)
 	if err != nil {
-		return TestResult{}, err
+		return TestResult{}, ownTimeout(parent, err)
 	}
 	defer resp.Body.Close()
 	var res TestResult

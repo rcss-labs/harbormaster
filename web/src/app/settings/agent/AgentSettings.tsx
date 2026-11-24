@@ -65,6 +65,13 @@ function baselineOf(settings: AgentSettingsDTO): Draft {
   }
 }
 
+/** Per provider: what the admin ticked is added to the stored list and what they cleared is removed from it. */
+function mergeUnredacted(loaded: string[], mine: string[], stored: string[]): string[] {
+  const added = mine.filter((id) => !loaded.includes(id))
+  const removed = loaded.filter((id) => !mine.includes(id))
+  return [...new Set([...stored, ...added])].filter((id) => !removed.includes(id))
+}
+
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item))
 
 export function AgentSettings() {
@@ -78,6 +85,7 @@ export function AgentSettings() {
   const [edited, setEdited] = useState<Draft | null>(null)
   const [testResult, setTestResult] = useState<TestOutcome | null>(null)
   const [liftingFor, setLiftingFor] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<string | null>(null)
 
   const data = settings.data
   const baseline = data ? baselineOf(data) : null
@@ -114,6 +122,7 @@ export function AgentSettings() {
   const submit = () => {
     save.mutate(
       {
+        version: data.version,
         monthly_budget_usd: draft.budget.trim(),
         unredacted_providers: draft.unredacted,
         role_models: draft.provider !== '' && draft.model !== '' ? { chat: { provider: draft.provider, model: draft.model } } : {},
@@ -122,9 +131,30 @@ export function AgentSettings() {
         onSuccess: () => {
           setEdited(null)
           setTestResult(null)
+          setConflict(null)
           toast.show('Saved.', 'ok')
         },
-        onError: (error) => toast.show(error.message, 'bad'),
+        onError: (error) => {
+          if (error instanceof ApiError && error.code === 'settings_changed') {
+            // Load what is stored now. The fields the admin changed stay as typed; the others follow the stored
+            // values, so a save does not quietly put back what someone else just changed.
+            setConflict(error.message)
+            const mine = draft
+            void settings.refetch().then((result) => {
+              if (!result.data) return
+              const stored = baselineOf(result.data)
+              const modelTouched = mine.provider !== baseline.provider || mine.model !== baseline.model
+              setEdited({
+                budget: mine.budget !== baseline.budget ? mine.budget : stored.budget,
+                provider: modelTouched ? mine.provider : stored.provider,
+                model: modelTouched ? mine.model : stored.model,
+                unredacted: mergeUnredacted(baseline.unredacted, mine.unredacted, stored.unredacted),
+              })
+            })
+          } else {
+            toast.show(error.message, 'bad')
+          }
+        },
       },
     )
   }
@@ -165,6 +195,12 @@ export function AgentSettings() {
         )
       ) : (
         <HeaderAction>{saveButton}</HeaderAction>
+      )}
+
+      {conflict && (
+        <Banner kind="warn">
+          <span>{conflict}</span> The stored settings are loaded below; your changes are still in the form. Check them, then save again.
+        </Banner>
       )}
 
       <Panel title="Status">

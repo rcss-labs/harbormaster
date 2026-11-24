@@ -52,6 +52,10 @@ type MeDTO struct {
 	BreakGlass  bool    `json:"break_glass"`
 	Email       *string `json:"email"`
 	DisplayName *string `json:"display_name"`
+	// AgentEnabled is true when the AI agent is configured on this server; AIChat when this user may also use its
+	// chat (an admin, or a user the admins allowed). Both are false while the agent is off.
+	AgentEnabled bool `json:"agent_enabled"`
+	AIChat       bool `json:"ai_chat"`
 }
 
 // ListResponse is the body of every paginated list endpoint. Next is null on the last page.
