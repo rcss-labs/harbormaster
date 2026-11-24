@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Fake vendor-looking values are assembled from pieces so secret scanners
@@ -363,5 +364,39 @@ func TestScrubText_RandomSecretsNeverLeakASixCharacterPiece(t *testing.T) {
 				t.Fatalf("secret %q: piece %q left in %q", secret, piece, out)
 			}
 		}
+	}
+}
+
+// Whether a hex run is a digest or an image tag depends only on a short
+// stretch before it. The check for a run at the end of a 4 MB log must not
+// read the megabytes before it: a scan that did would take seconds here, one
+// that does not takes microseconds, on any machine and under -race.
+func TestHexRunIsDiagnostic_DoesNotReadTheWholeLog(t *testing.T) {
+	line := fakeHex40 + " "
+	text := strings.Repeat(line, 4_000_000/len(line))
+	last := len(text) - len(line)
+
+	start := time.Now()
+	for i := 0; i < 100_000; i++ {
+		if hexRunIsDiagnostic(text, last) {
+			t.Fatal("a plain hex run is not a digest or image tag")
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("100,000 checks late in a %d byte log took %v, want well under a second", len(text), elapsed)
+	}
+
+	for name, before := range map[string]string{"digest": "image sha256:", "image tag": "pull registry.example.com/team/app:"} {
+		if !hexRunIsDiagnostic(before+fakeHex40, len(before)) {
+			t.Errorf("%s: not recognised", name)
+		}
+	}
+}
+
+// ScrubText of a 200 KB hex-heavy log finishes, redacting every run.
+func TestScrubText_HexHeavyLogFinishes(t *testing.T) {
+	text := strings.Repeat(fakeHex40+" ", 200_000/(len(fakeHex40)+1))
+	if got := ScrubText(text); strings.Contains(got, "0123456789abcdef") {
+		t.Errorf("hex runs were not redacted")
 	}
 }
