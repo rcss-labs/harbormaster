@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
+	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/api"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -403,7 +404,14 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		if kvHealth != nil {
 			storeHealth = kvHealth
 		}
+		var agentClient *agentclient.Client // stays nil while HM_AGENT_URL is unset
+		if cfg.AgentEnabled() {
+			if agentClient, err = agentclient.New(cfg.AgentURL, cfg.AgentCAPEM); err != nil {
+				return err
+			}
+		}
 		apiServer = api.New(api.Server{
+			Agent: agentClient,
 			Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 			Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
 			Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,

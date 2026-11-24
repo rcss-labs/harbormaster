@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -254,5 +256,91 @@ func TestModel_MaxRunCostMicroUSD(t *testing.T) {
 	m := Model{InputMicroUSDPerMTok: 1_000_000, OutputMicroUSDPerMTok: 5_000_000}
 	if got := m.MaxRunCostMicroUSD(200_000); got != 1_000_000 {
 		t.Errorf("got %d, want 1000000", got)
+	}
+}
+
+// A timeout of the client's own derived context is the agent being slow, not the caller giving up.
+func TestCatalogue_OwnTimeoutIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // the server notices a closed connection only once the body is read
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	c.catalogueTimeout = 50 * time.Millisecond
+	if _, err := c.Catalogue(context.Background()); !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("Catalogue err = %v, want ErrAgentUnavailable", err)
+	}
+	c.testTimeout = 50 * time.Millisecond
+	if _, err := c.Test(context.Background(), "tok", "fake", "fake-1"); !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("Test err = %v, want ErrAgentUnavailable", err)
+	}
+}
+
+func TestCatalogue_CallerCancelIsNotUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	if _, err := c.Catalogue(ctx); !errors.Is(err, context.Canceled) || errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A slow catalogue call must not block other callers behind the cache mutex.
+func TestCatalogue_NetworkCallDoesNotHoldTheLock(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		_, _ = w.Write([]byte(`{"providers":[],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`))
+	}))
+	defer srv.Close()
+	defer close(release)
+	c, _ := New(srv.URL, "")
+	go func() { _, _ = c.Catalogue(context.Background()) }()
+	<-entered
+	locked := make(chan struct{})
+	go func() { c.mu.Lock(); defer c.mu.Unlock(); close(locked) }()
+	select {
+	case <-locked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cache mutex is held during the network call")
+	}
+}
+
+func TestCatalogueAndTest_404IsNotUnknownModel(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	if _, err := c.Catalogue(context.Background()); !errors.Is(err, ErrAgentUnavailable) || errors.Is(err, ErrUnknownModel) {
+		t.Errorf("Catalogue err = %v", err)
+	}
+	if _, err := c.Test(context.Background(), "tok", "fake", "fake-1"); !errors.Is(err, ErrAgentUnavailable) || errors.Is(err, ErrUnknownModel) {
+		t.Errorf("Test err = %v", err)
+	}
+}
+
+func TestRun_LineOverOneMiBIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"type":"text","delta":"`)
+		fmt.Fprint(w, strings.Repeat("a", 1<<20+10))
+		fmt.Fprintln(w, `"}`)
+		fmt.Fprintln(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	var got int
+	err := c.Run(context.Background(), "tok", sampleRequest(), func(Event) { got++ })
+	if !errors.Is(err, ErrAgentUnavailable) || got != 0 {
+		t.Errorf("err = %v, events = %d", err, got)
 	}
 }
