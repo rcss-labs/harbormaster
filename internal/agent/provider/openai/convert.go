@@ -79,7 +79,7 @@ func assistantItems(m provider.Message) []responses.ResponseInputItemUnionParam 
 	}
 	for _, call := range m.ToolCalls {
 		args := call.Arguments
-		if args == nil {
+		if args == nil { // includes a call with ArgError: the vendor wants an object
 			args = map[string]any{}
 		}
 		encoded, _ := json.Marshal(args)
@@ -88,15 +88,27 @@ func assistantItems(m provider.Message) []responses.ResponseInputItemUnionParam 
 	return items
 }
 
+// opaqueItemTypes are the output item types buildOpaque writes.
+var opaqueItemTypes = map[string]bool{"reasoning": true, "message": true, "function_call": true}
+
 // parseOpaque returns the stored output items, or nil when raw is empty or not
-// something this adapter wrote.
+// exactly what buildOpaque writes: a non-empty array of objects whose type is
+// one we store.
 func parseOpaque(raw json.RawMessage) []json.RawMessage {
 	if len(raw) == 0 {
 		return nil
 	}
 	var items []json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil {
+	if err := json.Unmarshal(raw, &items); err != nil || len(items) == 0 {
 		return nil
+	}
+	for _, item := range items {
+		var head struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(item, &head); err != nil || !opaqueItemTypes[head.Type] {
+			return nil
+		}
 	}
 	return items
 }
@@ -107,8 +119,7 @@ func parseOpaque(raw json.RawMessage) []json.RawMessage {
 func buildOpaque(output []responses.ResponseOutputItemUnion) json.RawMessage {
 	var items []json.RawMessage
 	for _, item := range output {
-		switch item.Type {
-		case "reasoning", "message", "function_call":
+		if opaqueItemTypes[item.Type] {
 			items = append(items, json.RawMessage(item.RawJSON()))
 		}
 	}

@@ -54,7 +54,7 @@ func (p *openaiProvider) Generate(ctx context.Context, req provider.Request, onT
 	for stream.Next() {
 		event := stream.Current()
 		switch event.Type {
-		case "response.output_text.delta":
+		case "response.output_text.delta", "response.refusal.delta":
 			if event.Delta == "" {
 				continue
 			}
@@ -85,10 +85,11 @@ func (p *openaiProvider) Generate(ctx context.Context, req provider.Request, onT
 	if err := stream.Err(); err != nil {
 		var apiErr *sdk.Error
 		if errors.As(err, &apiErr) {
-			return resp, mapAPIError(apiErr)
+			return resp, mapAPIError(apiErr, emitted)
 		}
 	}
-	// The stream ended or broke without a terminal event.
+	// The stream ended or broke without a terminal event; keep what streamed.
+	resp.Text = text.String()
 	return resp, &provider.Error{
 		Kind:      "unavailable",
 		Retryable: !emitted,
@@ -106,12 +107,11 @@ func finalResponse(r responses.Response, text string, incomplete bool) provider.
 		if item.Type != "function_call" {
 			continue
 		}
-		call := provider.ToolCall{ID: item.CallID, Name: item.Name, Arguments: map[string]any{}}
-		if args := item.Arguments.OfString; strings.TrimSpace(args) != "" {
-			_ = json.Unmarshal([]byte(args), &call.Arguments)
-			if call.Arguments == nil {
-				call.Arguments = map[string]any{}
-			}
+		call := provider.ToolCall{ID: item.CallID, Name: item.Name}
+		if args, ok := parseArguments(item.Arguments.OfString); ok {
+			call.Arguments = args
+		} else {
+			call.ArgError = "arguments were not a valid JSON object"
 		}
 		resp.ToolCalls = append(resp.ToolCalls, call)
 	}
@@ -141,14 +141,14 @@ func eventError(code string, emitted bool) error {
 	return &provider.Error{Kind: "invalid_request", Message: "OpenAI rejected the request"}
 }
 
-func mapAPIError(e *sdk.Error) error {
+func mapAPIError(e *sdk.Error, emitted bool) error {
 	switch {
 	case e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden:
 		return &provider.Error{Kind: "auth", Message: "OpenAI rejected the credentials"}
 	case e.StatusCode == http.StatusTooManyRequests:
-		return &provider.Error{Kind: "rate_limited", Retryable: true, RetryAfter: retryAfter(e.Response), Message: "OpenAI rate limit reached"}
+		return &provider.Error{Kind: "rate_limited", Retryable: !emitted, RetryAfter: retryAfter(e.Response), Message: "OpenAI rate limit reached"}
 	case e.StatusCode >= 500:
-		return &provider.Error{Kind: "unavailable", Retryable: true, Message: "OpenAI is unavailable"}
+		return &provider.Error{Kind: "unavailable", Retryable: !emitted, Message: "OpenAI is unavailable"}
 	case e.Code == "context_length_exceeded":
 		return &provider.Error{Kind: "context_too_long", Message: "the conversation is too long for the model"}
 	}
@@ -166,4 +166,14 @@ func retryAfter(resp *http.Response) time.Duration {
 		return time.Duration(s * float64(time.Second))
 	}
 	return 0
+}
+
+// parseArguments decodes a JSON object; anything else, including truncated or
+// empty text, is reported as not ok.
+func parseArguments(raw string) (map[string]any, bool) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(raw), &args); err != nil || args == nil {
+		return nil, false
+	}
+	return args, true
 }
