@@ -12,6 +12,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team one pla
 | Try it on your laptop with fake AWS data, no credentials | [Quickstart (local)](getting-started/quickstart-local.md) |
 | Run it in your AWS estate | [Quickstart (AWS)](getting-started/quickstart-aws.md), then [Install](install/prerequisites.md) |
 | Use the web app day to day | [User guides](guides/navigating.md) |
+| Ask an AI chat about your estate, read-only | [AI chat](guides/ai-agent-chat.md) and [Install the AI agent](install/ai-agent.md) |
 | Run it in production | [Operations](operations/health-and-metrics.md) and the [hardening checklist](security/hardening.md) |
 | Look up a setting, flag, endpoint or Terraform input | [Reference](reference/configuration.md) |
 | Contribute code or docs | [Contributing](community/contributing.md) and [Development environment](development/dev-environment.md) |
@@ -20,7 +21,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team one pla
 ## How the docs are organised
 
 - **Getting started**: what Harbormaster is, the ideas behind it, its architecture and two quickstarts.
-- **Install**: building the image, deploying with Terraform, connecting AWS accounts, single sign-on, split services and the MCP gateway.
+- **Install**: building the image, deploying with Terraform, connecting AWS accounts, single sign-on, split services, the MCP gateway and the AI agent.
 - **User guides**: task-by-task how-tos for the web app, from deploying a change to sending failure alerts to Slack.
 - **Operations**: health, high availability, throttling, costs, retention, backups, troubleshooting and runbooks.
 - **Reference**: exact, complete tables for configuration, the command line, the HTTP API, permissions, metrics and the Terraform modules.

@@ -49,6 +49,17 @@ The Terraform module creates the following billable resources. Sizes are the def
 | Secrets Manager | Three or four secrets | None |
 | CloudWatch Logs | 30 days of retention | `log_retention_days` |
 | Image scanning (optional) | A scanner Fargate task per requested scan, an S3 bucket | `enable_image_scanning`, `HM_SCAN_*` |
+| AI agent (optional) | Two Fargate tasks of 512 CPU units and 1024 MiB, an internal load balancer, a log group, and the model provider's charges | `desired_count`, `cpu`, `memory` in the [agent module](../reference/terraform-agent.md) |
+
+### AI agent and model spend
+
+The agent's infrastructure is small. The model spend is the part to watch, and it is billed by your provider, not by AWS (unless you use Amazon Bedrock, where it appears on your AWS bill).
+
+- A question costs the tokens of every model call it makes. The tool definitions alone are about 10,000 input tokens on each call, and a question can make several calls, so even short questions use real tokens.
+- An admin sets a monthly allowance in **Settings > AI agent**. Harbormaster reserves a question's worst case (the run token limit at the model's higher price) before it starts and refuses the question when the allowance cannot cover it. The month is the UTC calendar month. An interrupted question can be charged more than it used, so the allowance can run ahead of the provider's bill.
+- Prices come from the catalogue you give the agent. Harbormaster hardcodes none, so update `model_providers` when a provider changes its prices, or the allowance will be counted at the old ones.
+- Bedrock: charges appear under Amazon Bedrock in Cost Explorer for the region in `bedrock_region`.
+- Lower `limits.max_run_tokens` and `limits.max_steps` to cap one question. Choose a smaller model for chat if answers are good enough.
 
 ### Cost tab estimates
 

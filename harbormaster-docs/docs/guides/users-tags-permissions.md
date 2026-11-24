@@ -68,8 +68,13 @@ Other row actions: **Reset password**, **Make global admin** or **Remove global 
 
 A global admin can do everything on every tag, including accept risk, and is the only role that manages users, tags, AWS accounts, off-hours schedules and notification routes. Grant it sparingly. An admin's access tokens are limited to 7 days.
 
+## AI chat
+
+When the AI agent is switched on, each user has an **AI chat** setting. It is off for new users. Turn it on for a user from their menu in **Settings > Users** (**Turn on AI chat**); turn it off the same way. Global admins can chat without it. The setting does not widen what the user can see: the chat acts with the user's own read-only access. Each change is audited as `user_ai_chat`. See [AI chat](ai-agent-chat.md).
+
 ## Next steps
 
 - [Access tokens](access-tokens.md)
 - [Permissions reference](../reference/permissions.md)
 - [Audit log](audit-log.md)
+- [AI chat](ai-agent-chat.md)

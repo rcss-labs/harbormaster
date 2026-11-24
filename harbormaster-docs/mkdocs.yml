@@ -71,6 +71,7 @@ nav:
       - Single sign-on (SAML): install/single-sign-on.md
       - Split services: install/split-services.md
       - MCP gateway: install/mcp-gateway.md
+      - AI agent: install/ai-agent.md
       - Upgrading: install/upgrading.md
   - User guides:
       - Navigating the web app: guides/navigating.md
@@ -89,6 +90,7 @@ nav:
       - Users, tags and permissions: guides/users-tags-permissions.md
       - Access tokens: guides/access-tokens.md
       - AI access (MCP): guides/ai-access-mcp.md
+      - AI chat: guides/ai-agent-chat.md
       - Network and storage: guides/network-and-storage.md
       - AWS accounts: guides/aws-accounts.md
       - Audit log: guides/audit-log.md
@@ -102,6 +104,7 @@ nav:
       - Troubleshooting: operations/troubleshooting.md
       - Runbooks:
           - MCP gateway: operations/runbooks/mcp-gateway.md
+          - AI agent: operations/runbooks/ai-agent.md
           - ECS API budget: operations/runbooks/ecs-api-budget.md
   - Reference:
       - Configuration: reference/configuration.md
@@ -112,6 +115,7 @@ nav:
       - "Terraform: harbormaster": reference/terraform-harbormaster.md
       - "Terraform: harbormaster-access": reference/terraform-access.md
       - "Terraform: harbormaster-mcp": reference/terraform-mcp.md
+      - "Terraform: harbormaster-agent": reference/terraform-agent.md
       - Glossary: reference/glossary.md
       - FAQ: reference/faq.md
   - Security:

@@ -71,6 +71,14 @@ A **break-glass** admin can sign in with a password while single sign-on is on. 
 
 A request authenticated by an access token is read-only whatever its user's permissions are. It may use only View and Logs, an admin's token included. This check runs before the admin shortcut, and it is a second layer behind the list of routes tokens may call. See [Access tokens](../guides/access-tokens.md).
 
+## Run tokens are read-only
+
+The AI agent calls Harbormaster with a run token (prefix `hma_`), minted for one question as the asking user. The same rule applies as for access tokens: only routes marked as readable by tokens, only View and Logs, an admin's included, checked before the admin shortcut. A run token is tied to one run, ends after `HM_AGENT_RUN_TOKEN_TTL` (15 minutes by default) and ends with the user's sessions. The public MCP gateway refuses it. A run token does not authenticate at all while `HM_AGENT_URL` is unset.
+
+## The AI chat flag
+
+Using the AI chat needs a per-user flag, **AI chat**, set by a global admin in **Settings > Users**. It is off for new users. Global admins can chat without it. The flag grants no data access: the chat sees only what the user's own tags allow. Only global admins can change the flag, the chat model, the allowance and the redaction setting. See [AI chat](../guides/ai-agent-chat.md).
+
 ## How tags match clusters, services and tasks
 
 A tag is a Harbormaster object (name, colour and a non-production flag). It is separate from AWS resource tags. Admins assign tags to **clusters** and to **services**.
