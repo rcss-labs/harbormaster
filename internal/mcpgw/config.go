@@ -4,10 +4,11 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 )
 
 // Defaults and bounds for the gateway settings (design, "Part 2: the gateway").
@@ -55,20 +56,20 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		cfg.Listen = listen
 	}
 
-	upstream, err := parseBaseURL("HM_MCP_UPSTREAM_URL", getenv("HM_MCP_UPSTREAM_URL"))
+	upstream, err := hmtools.ParseBaseURL("HM_MCP_UPSTREAM_URL", getenv("HM_MCP_UPSTREAM_URL"))
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.UpstreamURL = upstream
 
-	public, err := parseBaseURL("HM_MCP_PUBLIC_URL", getenv("HM_MCP_PUBLIC_URL"))
+	public, err := hmtools.ParseBaseURL("HM_MCP_PUBLIC_URL", getenv("HM_MCP_PUBLIC_URL"))
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.PublicURL = public
 
 	if raw := strings.TrimSpace(getenv("HM_MCP_AUTHORIZE_URL")); raw != "" {
-		authorize, err := parseBaseURL("HM_MCP_AUTHORIZE_URL", raw)
+		authorize, err := hmtools.ParseBaseURL("HM_MCP_AUTHORIZE_URL", raw)
 		if err != nil {
 			return Config{}, err
 		}
@@ -132,44 +133,3 @@ func (c Config) MCPURL() string { return c.PublicURL + "/mcp" }
 
 // OAuthEnabled reports whether the gateway publishes OAuth metadata and relays the token endpoint.
 func (c Config) OAuthEnabled() bool { return c.AuthorizeURL != "" }
-
-// parseBaseURL validates a required base URL: https, or http only on a
-// loopback host; a host; no path, query, fragment or user info. It returns the
-// URL as scheme://host[:port] with no trailing slash.
-func parseBaseURL(name, raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("%s is required", name)
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("%s is not a valid URL: %w", name, err)
-	}
-	if parsed.Host == "" || parsed.Hostname() == "" {
-		return "", fmt.Errorf("%s must be an absolute URL with a host, got %q", name, raw)
-	}
-	switch parsed.Scheme {
-	case "https":
-	case "http":
-		if !isLoopbackHost(parsed.Hostname()) {
-			return "", fmt.Errorf("%s must use https:// (http:// is allowed only for a loopback host), got %q", name, raw)
-		}
-	default:
-		return "", fmt.Errorf("%s must use https://, got %q", name, raw)
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return "", fmt.Errorf("%s must not contain user info, a query or a fragment, got %q", name, raw)
-	}
-	if parsed.Path != "" && parsed.Path != "/" {
-		return "", fmt.Errorf("%s must not have a path, got %q", name, raw)
-	}
-	return parsed.Scheme + "://" + parsed.Host, nil
-}
-
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}

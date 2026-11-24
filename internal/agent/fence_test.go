@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,50 +62,54 @@ func TestAgentImportsNothingElseFromTheModule(t *testing.T) {
 }
 
 // The only HTTP clients are the upstream's, one per provider package, and the command's loopback healthcheck.
+// Those files may each build one client; no file may use the package-level helpers or the default client.
 func TestAgentHasNoStrayHTTPClient(t *testing.T) {
-	forbidden := []string{"http.Get(", "http.Post(", "http.PostForm(", "http.Head(", "http.DefaultClient", "http.Client{"}
-	var files []string
-	for _, pattern := range []string{"*.go", "provider/*.go", "provider/*/*.go", "../hmtools/*.go", "../../cmd/harbormaster-agent/*.go"} {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			t.Fatal(err)
+	forbiddenAlways := []string{"http.Get(", "http.Post(", "http.PostForm(", "http.Head(", "http.DefaultClient"}
+	exemptFile := func(path string) bool {
+		slash := filepath.ToSlash(path)
+		if slash == "../hmtools/upstream.go" || slash == "../../cmd/harbormaster-agent/main.go" {
+			return true
 		}
-		files = append(files, matches...)
+		// provider/<name>/client.go and nothing deeper or shallower
+		parts := strings.Split(slash, "/")
+		return len(parts) == 3 && parts[0] == "provider" && parts[2] == "client.go"
 	}
 	checked := 0
-	for _, file := range files {
-		slash := filepath.ToSlash(file)
-		if strings.HasSuffix(slash, "_test.go") {
-			continue
-		}
-		if slash == "../hmtools/upstream.go" || slash == "../../cmd/harbormaster-agent/main.go" ||
-			(strings.HasPrefix(slash, "provider/") && filepath.Base(slash) == "client.go") {
-			continue
-		}
-		source, err := os.ReadFile(file)
+	for _, root := range []string{".", "../hmtools", "../../cmd/harbormaster-agent"} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			source, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			checked++
+			clients := 0
+			for _, line := range strings.Split(string(source), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "//") {
+					continue
+				}
+				for _, bad := range forbiddenAlways {
+					if strings.Contains(line, bad) {
+						t.Errorf("%s uses %s", path, bad)
+					}
+				}
+				clients += strings.Count(line, "http.Client{")
+			}
+			if limit := map[bool]int{true: 1, false: 0}[exemptFile(path)]; clients > limit {
+				t.Errorf("%s builds %d http.Client values, want at most %d", path, clients, limit)
+			}
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		checked++
-		for _, line := range strings.Split(string(source), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue
-			}
-			for _, bad := range forbidden {
-				if strings.Contains(line, bad) {
-					t.Errorf("%s uses %s", file, bad)
-				}
-			}
-		}
 	}
-	if checked < 15 {
-		t.Errorf("only %d source files checked; the globs are wrong", checked)
-	}
-	main, err := os.ReadFile("../../cmd/harbormaster-agent/main.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(main), "http.Client{"); n > 1 {
-		t.Errorf("the command's main.go declares %d http.Client values, want at most the healthcheck's 1", n)
+	if checked < 20 {
+		t.Errorf("only %d source files checked; the walk is wrong", checked)
 	}
 }

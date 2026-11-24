@@ -20,7 +20,6 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
-	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/hmtools/hmtoolstest"
 )
 
@@ -49,6 +48,7 @@ type harness struct {
 	upstream *hmtoolstest.RecordingServer
 	log      *syncLog
 	token    string
+	handler  http.Handler
 }
 
 type harnessOptions struct {
@@ -56,6 +56,8 @@ type harnessOptions struct {
 	catalogue   provider.Catalogue
 	edit        func(*Config)
 	upstreamAPI http.HandlerFunc // answers everything except whoami
+	whoami      http.HandlerFunc // replaces the whoami answer
+	logHook     func(slog.Handler) slog.Handler
 }
 
 func newRunToken(t *testing.T, kind apitoken.Kind) string {
@@ -72,12 +74,16 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	h := &harness{log: &syncLog{}, token: newRunToken(t, apitoken.KindRun)}
 	h.upstream = hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/tokens/current" {
+			if opts.whoami != nil {
+				opts.whoami(w, r)
+				return
+			}
 			if r.Header.Get("Authorization") != "Bearer "+h.token {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = io.WriteString(w, `{"error":{"code":"unauthenticated","message":"no"}}`)
 				return
 			}
-			_, _ = io.WriteString(w, `{"id":"x"}`)
+			_, _ = io.WriteString(w, `{"token":{"kind":"run"}}`)
 			return
 		}
 		if opts.upstreamAPI != nil {
@@ -86,10 +92,6 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		}
 		_, _ = io.WriteString(w, `{"clusters":2}`)
 	})
-	up, err := hmtools.NewUpstreamWithCA(h.upstream.URL, 5*time.Second, "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	catalogue := opts.catalogue
 	if catalogue == nil {
 		catalogue = provider.Catalogue{{Provider: "fake", Models: []provider.Model{fakeModel}}}
@@ -102,10 +104,20 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 		Catalogue: catalogue, MaxSteps: 10, MaxRunTokens: 100_000, RunTimeout: time.Minute,
 		MaxConcurrentRuns: 4, MaxResultBytes: 100_000,
 	}
+	cfg.UpstreamURL = h.upstream.URL
 	if opts.edit != nil {
 		opts.edit(&cfg)
 	}
-	h.server = httptest.NewServer(NewHandler(cfg, up, providers, slog.New(slog.NewJSONHandler(h.log, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+	up, err := NewUpstream(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logHandler slog.Handler = slog.NewJSONHandler(h.log, &slog.HandlerOptions{Level: slog.LevelDebug})
+	if opts.logHook != nil {
+		logHandler = opts.logHook(logHandler)
+	}
+	h.handler = NewHandler(cfg, up, providers, slog.New(logHandler))
+	h.server = httptest.NewServer(h.handler)
 	t.Cleanup(h.server.Close)
 	return h
 }
@@ -522,6 +534,11 @@ func TestTest_ReportsProviderErrorKind(t *testing.T) {
 	a, _ = call(fake.New(fake.Fail(&provider.Error{Kind: "auth"})))
 	if a.OK || a.Kind != "auth" || a.Message == "" {
 		t.Errorf("auth failure = %+v", a)
+	}
+	// A call that reports no usage is charged the provisional (R52): request bytes + 1000 in, 16 out, at 1 micro-dollar per token.
+	wantIn := int64(len("You are a connectivity check.")+len(testPrompt)) + 1000
+	if a.InputTokens != wantIn || a.OutputTokens != 16 || a.CostMicroUSD != wantIn+16 {
+		t.Errorf("provisional charge = %+v, want %d in, 16 out, %d micro-dollars", a, wantIn, wantIn+16)
 	}
 	a, _ = call(fake.New(fake.Fail(&provider.Error{Kind: "rate_limited", Retryable: true, RetryAfter: time.Hour})))
 	if a.OK || a.Kind != "rate_limited" {

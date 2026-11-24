@@ -33,6 +33,20 @@ const (
 	testPrompt              = "Reply with the single word: ok"
 )
 
+const (
+	// whoamiSlotsMin is the least number of token confirmations allowed in flight.
+	whoamiSlotsMin = 16
+	// pastRunDeadline is how long after the run deadline its last events may still be written.
+	pastRunDeadline = 5 * time.Second
+)
+
+// whoamiTimeout bounds one token confirmation. A variable so a test can shorten it.
+var whoamiTimeout = 10 * time.Second
+
+// writeStallTimeout is how long one write to a run's reader may block. A
+// variable so a test can shorten it.
+var writeStallTimeout = 20 * time.Second
+
 // whoamiRoute is how a run token is confirmed with Harbormaster.
 var whoamiRoute = hmtools.Route{Method: http.MethodGet, Pattern: "/api/tokens/current"}
 
@@ -43,6 +57,7 @@ type server struct {
 	providers map[string]provider.Provider
 	log       *slog.Logger
 	slots     chan struct{}
+	checks    chan struct{}
 
 	active   atomic.Int64
 	finished sync.Map // status -> *atomic.Int64
@@ -56,8 +71,9 @@ func NewHandler(cfg Config, up *hmtools.Upstream, providers map[string]provider.
 	}
 	s := &server{
 		cfg: cfg, up: up, providers: providers, log: log,
-		tools: NewUpstreamToolRunner(up, cfg.MaxResultBytes),
-		slots: make(chan struct{}, max(cfg.MaxConcurrentRuns, 1)),
+		tools:  NewUpstreamToolRunner(up, cfg.MaxResultBytes),
+		slots:  make(chan struct{}, max(cfg.MaxConcurrentRuns, 1)),
+		checks: make(chan struct{}, max(4*cfg.MaxConcurrentRuns, whoamiSlotsMin)),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -71,20 +87,47 @@ func NewHandler(cfg Config, up *hmtools.Upstream, providers map[string]provider.
 	return s.guard(mux)
 }
 
-// guard marks every response uncacheable and turns a panic outside a run into a 500.
+// guard marks every response uncacheable and turns a panic outside a run into
+// a 500 when nothing has been sent yet. After the status line is out, a second
+// header would only corrupt the stream, so the panic is just logged.
 func (s *server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		sw := &statusWriter{ResponseWriter: w}
 		defer func() {
 			if p := recover(); p != nil {
+				if p == http.ErrAbortHandler {
+					panic(p)
+				}
 				s.log.Error("request panicked", "path", r.URL.Path, "panic_type", fmt.Sprintf("%T", p), "frames", panicFrames())
-				writeError(w, http.StatusInternalServerError, "internal", "The agent failed unexpectedly.")
+				if !sw.wrote {
+					writeError(w, http.StatusInternalServerError, "internal", "The agent failed unexpectedly.")
+				}
 			}
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(sw, r)
 	})
 }
+
+// statusWriter remembers whether the response has started.
+type statusWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.wrote = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(p []byte) (int, error) {
+	w.wrote = true
+	return w.ResponseWriter.Write(p)
+}
+
+// Unwrap lets http.ResponseController reach the real writer's flush and deadlines.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // panicFrames names the functions on the stack of a panic. Names only: no
 // arguments and no panic value, which may carry content.
@@ -183,7 +226,18 @@ func (s *server) authenticate(w http.ResponseWriter, r *http.Request) (bearer st
 		unauthenticated(w)
 		return "", false
 	}
-	resp, err := s.up.Do(r.Context(), bearer, "", hmtools.Call{Route: whoamiRoute})
+	select {
+	case s.checks <- struct{}{}:
+		defer func() { <-s.checks }()
+	default:
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusTooManyRequests, "agent_busy", "The agent is busy. Try again shortly.")
+		return "", false
+	}
+	// Harbormaster's slowness is the upstream's failure (502), never a refusal of the caller.
+	ctx, cancel := context.WithTimeout(r.Context(), whoamiTimeout)
+	defer cancel()
+	resp, err := s.up.Do(ctx, bearer, "", hmtools.Call{Route: whoamiRoute})
 	switch {
 	case err != nil:
 		if r.Context().Err() == nil {
@@ -196,7 +250,19 @@ func (s *server) authenticate(w http.ResponseWriter, r *http.Request) (bearer st
 		s.log.Warn("token check failed", "reason", "upstream_status", "status", resp.Status)
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", "Harbormaster could not confirm the token.")
 	default:
-		return bearer, true
+		var answer struct {
+			Token struct {
+				Kind string `json:"kind"`
+			} `json:"token"`
+		}
+		if json.Unmarshal(resp.Body, &answer) != nil {
+			s.log.Warn("token check failed", "reason", "upstream_answer_not_json")
+			writeError(w, http.StatusBadGateway, "upstream_unavailable", "Harbormaster could not confirm the token.")
+		} else if answer.Token.Kind != string(apitoken.KindRun) {
+			unauthenticated(w)
+		} else {
+			return bearer, true
+		}
 	}
 	return "", false
 }
@@ -219,6 +285,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(v); err != nil || decoder.More() {
 		writeError(w, http.StatusBadRequest, "invalid_request", "The request body is not one JSON object.")
 		return false
@@ -327,8 +394,9 @@ func (s *server) serveRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateRun(req *runRequest) string {
-	if _, err := uuid.Parse(req.RunID); err != nil {
-		return "run_id must be a UUID."
+	// Canonical form only: the id goes into log lines.
+	if id, err := uuid.Parse(req.RunID); err != nil || id.String() != req.RunID {
+		return "run_id must be a lowercase UUID."
 	}
 	if _, ok := roleFrames[req.Role]; !ok {
 		return "This kind of run is not supported."
@@ -347,8 +415,9 @@ func validateRun(req *runRequest) string {
 			return "Each message role must be user or assistant."
 		}
 	}
-	if req.Messages[len(req.Messages)-1].Role != string(provider.RoleUser) {
-		return "The last message must be from the user."
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != string(provider.RoleUser) || strings.TrimSpace(last.Text) == "" {
+		return "The last message must be a question from the user."
 	}
 	return ""
 }
@@ -363,10 +432,33 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request, prov provider.Pr
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
-	if flusher != nil {
-		flusher.Flush()
+	controller := http.NewResponseController(w)
+
+	// A reader that stops reading must not hold the slot: each write has a
+	// deadline, and a failed write ends the run.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	runDeadline := started.Add(s.cfg.RunTimeout)
+	writeFailed := false
+	write := func(line []byte) {
+		if writeFailed {
+			return
+		}
+		deadline := time.Now().Add(writeStallTimeout)
+		if limit := runDeadline.Add(pastRunDeadline); limit.Before(deadline) {
+			deadline = limit
+		}
+		_ = controller.SetWriteDeadline(deadline)
+		_, err := w.Write(line)
+		if err == nil {
+			err = controller.Flush()
+		}
+		if err != nil {
+			writeFailed = true
+			cancel()
+		}
 	}
+	write(nil)
 
 	var (
 		mu                   sync.Mutex
@@ -394,10 +486,7 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request, prov provider.Pr
 			finalType, finalCode = ev.Type, ev.Code
 		}
 		line, _ := json.Marshal(toWire(ev))
-		_, _ = w.Write(append(line, '\n'))
-		if flusher != nil {
-			flusher.Flush()
-		}
+		write(append(line, '\n'))
 	}
 
 	loop := &Loop{
@@ -413,7 +502,7 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request, prov provider.Pr
 				emit(Event{Type: "error", Code: "internal", Message: "The run failed unexpectedly."})
 			}
 		}()
-		_ = loop.Run(r.Context(), input, emit)
+		_ = loop.Run(ctx, input, emit)
 	}()
 
 	status := "cancelled"
@@ -477,16 +566,24 @@ func (s *server) serveTest(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), min(testCallTimeout, s.cfg.RunTimeout))
 	defer cancel()
+	system := "You are a connectivity check."
 	resp, err := prov.Generate(ctx, provider.Request{
-		Model: model.ID, System: "You are a connectivity check.", MaxOutputTokens: testCallMaxOutputTokens,
+		Model: model.ID, System: system, MaxOutputTokens: testCallMaxOutputTokens,
 		Messages: []provider.Message{{Role: provider.RoleUser, Text: testPrompt}},
 	}, nil)
 
-	answer := testAnswer{OK: err == nil}
-	if err == nil {
-		answer.InputTokens, answer.OutputTokens = resp.Usage.InputTokens, resp.Usage.OutputTokens
-		answer.CostMicroUSD = model.CostMicroUSD(resp.Usage)
-	} else {
+	// What the vendor reported is charged, also beside an error. A call that
+	// reports nothing is charged a provisional: one token per request byte plus
+	// 1000, and the whole output allowance.
+	usage := resp.Usage
+	if usage.InputTokens <= 0 && usage.OutputTokens <= 0 {
+		usage = provider.Usage{InputTokens: int64(len(system)+len(testPrompt)) + 1000, OutputTokens: testCallMaxOutputTokens}
+	}
+	answer := testAnswer{
+		OK: err == nil, InputTokens: max(usage.InputTokens, 0), OutputTokens: max(usage.OutputTokens, 0),
+		CostMicroUSD: model.CostMicroUSD(usage),
+	}
+	if err != nil {
 		var perr *provider.Error
 		if errors.As(err, &perr) {
 			answer.Kind = perr.Kind

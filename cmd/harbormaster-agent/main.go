@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -57,8 +58,8 @@ const (
 	shutdownGrace      = 30 * time.Second
 	healthcheckTimeout = 3 * time.Second
 	defaultListen      = ":8484"
-	// upstreamTimeout bounds one tool call to Harbormaster.
-	upstreamTimeout = 30 * time.Second
+	// handlerDrainWait is how long, after a forced close, running handlers get to write their last log lines.
+	handlerDrainWait = 2 * time.Second
 )
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv)) }
@@ -98,7 +99,7 @@ func serve(ctx context.Context, stderr io.Writer, getenv func(string) string) in
 		logger.Error("invalid configuration", "err", err.Error())
 		return 2
 	}
-	upstream, err := hmtools.NewUpstreamWithCA(cfg.UpstreamURL, upstreamTimeout, cfg.UpstreamCAPEM)
+	upstream, err := agent.NewUpstream(cfg)
 	if err != nil {
 		logger.Error("invalid configuration", "err", "HM_AGENT_UPSTREAM_URL: "+err.Error())
 		return 2
@@ -122,8 +123,17 @@ func serve(ctx context.Context, stderr io.Writer, getenv func(string) string) in
 	return serveListener(ctx, listener, agent.NewHandler(cfg, upstream, providers, logger), logger, shutdownGrace)
 }
 
+// The provider constructors, variables so a test can see what each is given.
+var (
+	newAnthropic = anthropic.New
+	newOpenAI    = openai.New
+	newGoogle    = google.New
+	newBedrock   = bedrock.New
+)
+
 // buildProviders builds each catalogue provider whose credential is set. The
-// provider packages pin their own endpoints: nothing here sets one.
+// provider packages pin their own endpoints: nothing here sets one (a test
+// reads this file to keep it so).
 func buildProviders(cfg agent.Config) (map[string]provider.Provider, error) {
 	providers := map[string]provider.Provider{}
 	for _, entry := range cfg.Catalogue {
@@ -133,13 +143,13 @@ func buildProviders(cfg agent.Config) (map[string]provider.Provider, error) {
 		)
 		switch entry.Provider {
 		case "anthropic":
-			built, err = anthropic.New(anthropic.Config{APIKey: cfg.AnthropicKey.Reveal()})
+			built, err = newAnthropic(anthropic.Config{APIKey: cfg.AnthropicKey.Reveal()})
 		case "openai":
-			built, err = openai.New(openai.Config{APIKey: cfg.OpenAIKey.Reveal()})
+			built, err = newOpenAI(openai.Config{APIKey: cfg.OpenAIKey.Reveal()})
 		case "google":
-			built, err = google.New(google.Config{APIKey: cfg.GoogleKey.Reveal()})
+			built, err = newGoogle(google.Config{APIKey: cfg.GoogleKey.Reveal()})
 		case "bedrock":
-			built, err = bedrock.New(bedrock.Config{Region: cfg.BedrockRegion})
+			built, err = newBedrock(bedrock.Config{Region: cfg.BedrockRegion})
 		case "fake":
 			built = fake.Demo()
 		default:
@@ -159,12 +169,18 @@ func buildProviders(cfg agent.Config) (map[string]provider.Provider, error) {
 // lets running streams finish for up to grace. A stream still running after
 // that is cut off and the exit code is 1.
 func serveListener(ctx context.Context, l net.Listener, handler http.Handler, logger *slog.Logger, grace time.Duration) int {
+	var inflight atomic.Int64
+	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inflight.Add(1)
+		defer inflight.Add(-1)
+		handler.ServeHTTP(w, r)
+	})
 	server := &http.Server{
-		Handler:           handler,
+		Handler:           counted,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,
-		// No WriteTimeout: a run streams for minutes. The run's own timeout bounds it.
+		// No WriteTimeout: a run streams for minutes. The handler sets a deadline per write instead.
 	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(l) }()
@@ -183,6 +199,11 @@ func serveListener(ctx context.Context, l net.Listener, handler http.Handler, lo
 		logger.Error("shutdown incomplete: closing running streams", "err", err.Error())
 		_ = server.Close()
 		code = 1
+		// Close does not wait for handlers: give the cut-off runs a moment to log how they ended.
+		deadline := time.Now().Add(handlerDrainWait)
+		for inflight.Load() > 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server stopped", "err", err.Error())

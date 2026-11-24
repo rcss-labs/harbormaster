@@ -167,3 +167,53 @@ func TestLoadConfig_ErrorTextNeverContainsAKeyValue(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfig_TheFakeProviderIsNeverListedBeside(t *testing.T) {
+	fakeEntry := `[{"provider":"fake","models":[{"id":"fake-1","input_per_mtok_usd":"1","output_per_mtok_usd":"1","context_tokens":1000}]}]`
+	// Without the switch, a catalogue naming it is an error, whatever the upstream is.
+	for _, upstream := range []string{"http://127.0.0.1:8080", "https://hm.internal.example"} {
+		_, err := LoadConfig(env(map[string]string{"HM_AGENT_UPSTREAM_URL": upstream, "HM_AGENT_PROVIDERS": fakeEntry}))
+		if err == nil || !strings.Contains(err.Error(), "HM_AGENT_FAKE_PROVIDER") {
+			t.Errorf("%s: err = %v", upstream, err)
+		}
+	}
+	// With the switch it would be listed twice.
+	_, err := LoadConfig(env(map[string]string{"HM_AGENT_UPSTREAM_URL": "http://127.0.0.1:8080", "HM_AGENT_PROVIDERS": fakeEntry, "HM_AGENT_FAKE_PROVIDER": "true"}))
+	if err == nil || !strings.Contains(err.Error(), "HM_AGENT_PROVIDERS") {
+		t.Errorf("fake listed and switched on: err = %v", err)
+	}
+}
+
+func TestLoadConfig_UpstreamMustBeExactlyWhatItLooksLike(t *testing.T) {
+	for _, upstream := range []string{
+		"http://hm.internal.example",           // plain http off loopback
+		"http://127.0.0.1.evil.example",        // loopback by prefix
+		"http://localhost.evil.example",        // loopback by prefix
+		"http://evil-localhost",                // loopback by suffix
+		"http://user:secretpw@127.0.0.1:8080",  // user info
+		"https://user:secretpw@hm.example.com", // user info
+		"https://hm.example.com/api",           // path
+		"https://hm.example.com?x=1",           // query
+		"ftp://hm.example.com",
+	} {
+		_, err := LoadConfig(env(map[string]string{"HM_AGENT_UPSTREAM_URL": upstream, "HM_AGENT_FAKE_PROVIDER": "true"}))
+		if err == nil || !strings.Contains(err.Error(), "HM_AGENT_UPSTREAM_URL") && !strings.Contains(err.Error(), "HM_AGENT_FAKE_PROVIDER") {
+			t.Errorf("%s: err = %v", upstream, err)
+		}
+		if err != nil && strings.Contains(err.Error(), "secretpw") {
+			t.Errorf("%s: the error echoes the URL's credential", upstream)
+		}
+	}
+	// A loopback-looking name on https is still not loopback: the fake provider stays refused.
+	for _, upstream := range []string{"https://127.0.0.1.evil.example", "https://localhost.evil.example", "https://hm.example.com"} {
+		_, err := LoadConfig(env(map[string]string{"HM_AGENT_UPSTREAM_URL": upstream, "HM_AGENT_FAKE_PROVIDER": "true"}))
+		if err == nil || !strings.Contains(err.Error(), "HM_AGENT_FAKE_PROVIDER") {
+			t.Errorf("%s: err = %v, want the fake provider refused", upstream, err)
+		}
+	}
+	for _, upstream := range []string{"http://localhost:8080", "http://LOCALHOST:8080", "http://127.0.0.1:1", "http://[::1]:8080"} {
+		if _, err := LoadConfig(env(map[string]string{"HM_AGENT_UPSTREAM_URL": upstream, "HM_AGENT_FAKE_PROVIDER": "true"})); err != nil {
+			t.Errorf("%s: %v", upstream, err)
+		}
+	}
+}

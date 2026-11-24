@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/x509"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 )
 
 // Defaults and bounds for the agent's settings.
@@ -30,15 +32,29 @@ const (
 	maxMaxResultBytes        = 140000
 )
 
-// Secret is a credential. It prints as [redacted] however it is formatted or
-// logged; Reveal is the only way to read it.
-type Secret string
+// Secret is a credential. Its value sits behind a function, so reflection-
+// based printing shows only a func pointer, and every fmt verb prints
+// [redacted]. Reveal is the only way to read it.
+type Secret struct{ reveal func() string }
 
+// NewSecret holds value as a Secret.
+func NewSecret(value string) Secret { return Secret{reveal: func() string { return value }} }
+
+func (s Secret) Reveal() string {
+	if s.reveal == nil {
+		return ""
+	}
+	return s.reveal()
+}
+
+// IsSet reports whether the secret holds a value.
+func (s Secret) IsSet() bool { return s.Reveal() != "" }
+
+func (Secret) Format(f fmt.State, _ rune)   { _, _ = io.WriteString(f, "[redacted]") }
 func (Secret) String() string               { return "[redacted]" }
 func (Secret) GoString() string             { return "[redacted]" }
 func (Secret) MarshalJSON() ([]byte, error) { return []byte(`"[redacted]"`), nil }
 func (Secret) MarshalText() ([]byte, error) { return []byte("[redacted]"), nil }
-func (s Secret) Reveal() string             { return string(s) }
 
 // Config is the agent's whole configuration. Its keys are Secrets, so a
 // formatted or logged Config shows none.
@@ -67,11 +83,11 @@ type Config struct {
 func (c Config) Credential(providerID string) (variable string, set bool) {
 	switch providerID {
 	case "anthropic":
-		return "HM_AGENT_ANTHROPIC_API_KEY", c.AnthropicKey != ""
+		return "HM_AGENT_ANTHROPIC_API_KEY", c.AnthropicKey.IsSet()
 	case "openai":
-		return "HM_AGENT_OPENAI_API_KEY", c.OpenAIKey != ""
+		return "HM_AGENT_OPENAI_API_KEY", c.OpenAIKey.IsSet()
 	case "google":
-		return "HM_AGENT_GOOGLE_API_KEY", c.GoogleKey != ""
+		return "HM_AGENT_GOOGLE_API_KEY", c.GoogleKey.IsSet()
 	case "bedrock":
 		return "HM_AGENT_BEDROCK_REGION", c.BedrockRegion != ""
 	case "fake":
@@ -101,7 +117,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		}
 		cfg.Listen = listen
 	}
-	upstream, err := parseBaseURL("HM_AGENT_UPSTREAM_URL", getenv("HM_AGENT_UPSTREAM_URL"))
+	upstream, err := hmtools.ParseBaseURL("HM_AGENT_UPSTREAM_URL", getenv("HM_AGENT_UPSTREAM_URL"))
 	if err != nil {
 		return Config{}, err
 	}
@@ -149,9 +165,9 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		}
 	}
 
-	cfg.AnthropicKey = Secret(read("HM_AGENT_ANTHROPIC_API_KEY"))
-	cfg.OpenAIKey = Secret(read("HM_AGENT_OPENAI_API_KEY"))
-	cfg.GoogleKey = Secret(read("HM_AGENT_GOOGLE_API_KEY"))
+	cfg.AnthropicKey = NewSecret(read("HM_AGENT_ANTHROPIC_API_KEY"))
+	cfg.OpenAIKey = NewSecret(read("HM_AGENT_OPENAI_API_KEY"))
+	cfg.GoogleKey = NewSecret(read("HM_AGENT_GOOGLE_API_KEY"))
 	cfg.BedrockRegion = read("HM_AGENT_BEDROCK_REGION")
 	if region := cfg.BedrockRegion; region != "" && !validRegion(region) {
 		return Config{}, fmt.Errorf("HM_AGENT_BEDROCK_REGION must look like eu-west-1")
@@ -221,48 +237,15 @@ func validRegion(region string) bool {
 	return strings.Contains(region, "-")
 }
 
-// parseBaseURL validates a required base URL: https, or http only on a
-// loopback host; no path, query, fragment or user info. It returns
-// scheme://host[:port].
-func parseBaseURL(name, raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("%s is required", name)
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("%s is not a valid URL", name)
-	}
-	if parsed.Host == "" || parsed.Hostname() == "" {
-		return "", fmt.Errorf("%s must be an absolute URL with a host, got %q", name, raw)
-	}
-	switch parsed.Scheme {
-	case "https":
-	case "http":
-		if !isLoopbackHost(parsed.Hostname()) {
-			return "", fmt.Errorf("%s must use https:// (http:// is allowed only for a loopback host), got %q", name, raw)
-		}
-	default:
-		return "", fmt.Errorf("%s must use https://, got %q", name, raw)
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return "", fmt.Errorf("%s must not contain user info, a query or a fragment", name)
-	}
-	if parsed.Path != "" && parsed.Path != "/" {
-		return "", fmt.Errorf("%s must not have a path, got %q", name, raw)
-	}
-	return parsed.Scheme + "://" + parsed.Host, nil
-}
-
 func upstreamIsLoopback(base string) bool {
 	parsed, err := url.Parse(base)
-	return err == nil && isLoopbackHost(parsed.Hostname())
+	return err == nil && hmtools.IsLoopbackHost(parsed.Hostname())
 }
 
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+// upstreamTimeout bounds one tool call to Harbormaster.
+const upstreamTimeout = 30 * time.Second
+
+// NewUpstream is the agent's one client for Harbormaster, sending its own User-Agent.
+func NewUpstream(cfg Config) (*hmtools.Upstream, error) {
+	return hmtools.NewUpstreamForProduct(cfg.UpstreamURL, upstreamTimeout, cfg.UpstreamCAPEM, "harbormaster-agent")
 }
