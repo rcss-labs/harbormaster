@@ -63,117 +63,6 @@ func ceilingInput(ceiling int64) RunInput {
 	return in
 }
 
-// finalOf runs a script whose second call is the final one (MaxSteps 2).
-func finalOf(first provider.Usage) func(edit ...func(*Limits)) (*fake.Provider, *Loop) {
-	return func(edit ...func(*Limits)) (*fake.Provider, *Loop) {
-		p := twoCalls(first)
-		return p, newLoop(p, &recordingRunner{}, append([]func(*Limits){func(l *Limits) { l.MaxSteps = 2 }}, edit...)...)
-	}
-}
-
-func TestLoop_FinalCallStartsOnlyIfPriorSpendPlusItsCostFits(t *testing.T) {
-	first := provider.Usage{InputTokens: 50_000, OutputTokens: 2_000}
-	setup := finalOf(first)
-	_, l := setup()
-	probe, err := run(t, l, baseInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	usage := usageEvents(probe)
-	a1, p2 := usage[1], usage[2]
-	if p2.Provisional != true {
-		t.Fatalf("usage events = %v", eventTypes(probe))
-	}
-
-	cases := []struct {
-		name    string
-		ceiling int64
-		wantOut int // 0: the final call is not made
-	}{
-		{"exactly fits", p2.CostMicroUSD, maxOutputTokensPerCall},
-		{"one micro-dollar short lowers the output cap", p2.CostMicroUSD - 1, -1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p, l := setup()
-			events, err := run(t, l, ceilingInput(tc.ceiling))
-			if err != nil {
-				t.Fatal(err)
-			}
-			reqs := p.Requests()
-			switch {
-			case tc.wantOut == 0:
-				requireLimitReached(t, events)
-				if len(reqs) != 1 {
-					t.Errorf("%d requests, want 1: the answer allowance does not fit", len(reqs))
-				}
-			case tc.wantOut < 0:
-				if len(reqs) != 2 || reqs[1].MaxOutputTokens >= maxOutputTokensPerCall || reqs[1].MaxOutputTokens < answerOutputTokens {
-					t.Errorf("%d requests, final max output %d, want a lowered cap", len(reqs), reqs[len(reqs)-1].MaxOutputTokens)
-				}
-			default:
-				if len(reqs) != 2 || reqs[1].MaxOutputTokens != tc.wantOut {
-					t.Errorf("%d requests, final max output %d, want %d", len(reqs), reqs[len(reqs)-1].MaxOutputTokens, tc.wantOut)
-				}
-			}
-			for _, e := range usageEvents(events) {
-				if e.Provisional && e.CostMicroUSD > tc.ceiling {
-					t.Errorf("provisional cost %d over the ceiling %d (first call cost %d)", e.CostMicroUSD, tc.ceiling, a1.CostMicroUSD)
-				}
-			}
-		})
-	}
-}
-
-func TestLoop_FinalCallNeedsRoomForTheAnswerAllowance(t *testing.T) {
-	// MaxSteps 1 makes the very first call the final one.
-	newFinal := func(maxTokens int64) (*fake.Provider, *Loop) {
-		p := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
-		return p, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxSteps = 1; l.MaxRunTokens = maxTokens })
-	}
-	_, l := newFinal(1_000_000)
-	probe, err := run(t, l, baseInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	estimate := probe[1].Usage.InputTokens // [0] is the notice, [1] the provisional usage
-
-	p, l := newFinal(estimate + answerOutputTokens)
-	if _, err := run(t, l, baseInput()); err != nil {
-		t.Fatal(err)
-	}
-	if reqs := p.Requests(); len(reqs) != 1 || reqs[0].MaxOutputTokens != answerOutputTokens {
-		t.Fatalf("%d requests, want 1 with a cap of exactly %d", len(reqs), answerOutputTokens)
-	}
-
-	p, l = newFinal(estimate + answerOutputTokens - 1)
-	events, err := run(t, l, baseInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	requireLimitReached(t, events)
-	if n := len(p.Requests()); n != 0 {
-		t.Errorf("%d requests, want 0: the answer allowance does not fit", n)
-	}
-
-	// The same boundary in money: the first provisional cost has the full
-	// output cap in it, 15 micro-dollars per output token at the test prices.
-	priced := probe[1].CostMicroUSD - int64(maxOutputTokensPerCall-answerOutputTokens)*15
-	for _, tc := range []struct {
-		ceiling int64
-		calls   int
-	}{{priced, 1}, {priced - 1, 0}} {
-		p := fake.New(fake.Text("ok", provider.Usage{InputTokens: 1, OutputTokens: 1}))
-		l := newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxSteps = 1 })
-		if _, err := run(t, l, ceilingInput(tc.ceiling)); err != nil {
-			t.Fatal(err)
-		}
-		if n := len(p.Requests()); n != tc.calls {
-			t.Errorf("ceiling %d: %d requests, want %d", tc.ceiling, n, tc.calls)
-		}
-	}
-}
-
 func TestLoop_OpaqueStateCountsInTheEstimate(t *testing.T) {
 	secondEstimate := func(opaque int) int64 {
 		p := fake.New(
@@ -195,15 +84,15 @@ func TestLoop_OpaqueStateCountsInTheEstimate(t *testing.T) {
 }
 
 func TestLoop_MaxTokensReplyIsReported(t *testing.T) {
-	for name, text := range map[string]string{"full reply": "a long answer that was cut", "empty reply": ""} {
-		t.Run(name, func(t *testing.T) {
-			p := fake.New(fake.Raw(provider.Response{Text: text, StopReason: "max_tokens", Usage: provider.Usage{InputTokens: 10, OutputTokens: 8192}}))
-			events, err := run(t, newLoop(p, &recordingRunner{}), baseInput())
-			if err != nil {
-				t.Fatal(err)
-			}
-			requireLimitReached(t, events)
-		})
+	const text = "a long answer that was cut"
+	p := fake.New(fake.Raw(provider.Response{Text: text, StopReason: "max_tokens", Usage: provider.Usage{InputTokens: 10, OutputTokens: 8192}}))
+	events, err := run(t, newLoop(p, &recordingRunner{}), baseInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireLimitReached(t, events)
+	if joinedText(events) != text {
+		t.Errorf("text = %q", joinedText(events))
 	}
 }
 

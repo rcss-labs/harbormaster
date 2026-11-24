@@ -115,3 +115,17 @@ func TestUpstreamToolRunner_TailDropNeverSplitsACharacter(t *testing.T) {
 		t.Errorf("Run valid UTF-8: %v, error %v, note at the end: %v", utf8.ValidString(text), isError, strings.HasSuffix(text, answerTooLargeNote))
 	}
 }
+
+func TestUpstreamToolRunner_AnswerCutAtTheReadCapNeverLeavesPartOfAPassword(t *testing.T) {
+	// The cap falls inside the password of a connection URL, after punctuation
+	// that is legal in a password.
+	const readCap = 200_000
+	url := "postgres://app:" + "Hunter" + "2,fake;pw'x(y"
+	body := strings.Repeat("log line ok\n", (readCap-len(url)-2)/12) + `"` + url
+	body += strings.Repeat("z", readCap-len(body)) + "zzzz@db.example/app\n"
+	runner, _ := newTestRunner(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+	text, isError := runner.Run(context.Background(), "run-token", "get_overview", nil)
+	if isError || strings.Contains(text, "Hunter") {
+		t.Errorf("part of the password survived: ...%s", text[max(0, len(text)-160):])
+	}
+}

@@ -1,261 +1,153 @@
 package agent
 
 import (
-	"context"
-	"slices"
-	"strconv"
-	"strings"
-	"time"
-	"unicode/utf8"
+	"encoding/json"
+	"math"
+	"sort"
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
-	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
 const (
-	// answerOutputTokens is the output the final call must be able to use.
-	answerOutputTokens = 2048
-	// minResultBytes is the least a shrunk tool result keeps.
-	minResultBytes = 2048
+	// A gathering call is given between minGatherOutput and maxGatherOutput
+	// tokens of reply, a final call between minFinalOutput and maxFinalOutput.
+	minGatherOutput = 1024
+	maxGatherOutput = 8192
+	minFinalOutput  = 2048
+	maxFinalOutput  = 4096
+
+	// reserveDataBytes is the room for tool results and history that the
+	// answer reserve pays for.
+	reserveDataBytes = 32 * 1024
+
+	// Money assumes one token per byte, plus framingTokens per request. The
+	// token allowance uses an estimate of bytesPerToken instead.
+	framingTokens = 1000
+	bytesPerToken = 3
 )
 
-// limitLine is the loop's own instruction for the final call.
-const limitLine = "You have reached the limit for this question. Answer now from what you have, say what is missing, and do not call tools."
+// ledger holds what a run has spent and decides what the next call may use.
+// Its figures are those the vendor reported; a call that reported none counts
+// at its worst case. It does no I/O.
+type ledger struct {
+	model     provider.Model
+	ceiling   int64 // micro-dollars
+	maxTokens int64
+	reserve   int64 // micro-dollars kept for the final answer, fixed at the start of the run
 
-// answerTooLargeNote ends a tool answer that reached the upstream read cap.
-const answerTooLargeNote = "\n[The answer was larger than could be read; the rest was left out.]"
-
-const (
-	// resultSlack is what the data tag and the truncation note add around a result.
-	resultSlack = 256
-	// outputBytesPerToken is how many bytes of a reply are assumed per output
-	// token when sizing the input of the call that follows it.
-	outputBytesPerToken = 4
-)
-
-// toolResult is a tool answer as the loop keeps it, so that it can be shown
-// in full, cut to the result cap, or shrunk later to make room for an answer.
-type toolResult struct {
-	tool    string
-	data    string // scrubbed, tag-neutralised, cut to the result cap
-	omitted int    // bytes of the scrubbed answer that are not in data
-	readCap bool   // the answer reached the upstream read cap: more existed than was read
-	shown   int    // how much of data is currently shown
+	spentMicroUSD   int64
+	usedIn, usedOut int64
 }
 
-// render is the tool message text: the shown data inside the run's tag,
-// followed by a note in the loop's own words when anything was left out.
-func (r *session) render(res *toolResult) string {
-	left := res.omitted + len(res.data) - res.shown
-	total := res.omitted + len(res.data)
-	note := ""
-	switch {
-	case left > 0 && res.readCap:
-		note = "\n[truncated: at least " + strconv.Itoa(left) + " of at least " + strconv.Itoa(total) +
-			" bytes were left out; the answer was larger than could be read]"
-	case left > 0:
-		note = "\n[truncated: " + strconv.Itoa(left) + " of " + strconv.Itoa(total) + " bytes were left out]"
-	case res.readCap:
-		note = answerTooLargeNote
-	}
-	tag := "tool_result_" + r.nonce
-	return "<" + tag + " tool=\"" + res.tool + "\">\n" + res.data[:res.shown] + note + "\n</" + tag + ">"
+// call is what one model call is planned to use.
+type call struct {
+	bytes    int64 // of the request
+	estimate int64 // of its input tokens, for the token allowance
+	out      int64 // output cap
+	cost     int64 // worst case, in micro-dollars
 }
 
-// newResult prepares a tool answer: scrub, then remove the tag's name, and
-// only then cut, so a cut cannot split a secret and the cap holds for what is
-// sent.
-func (r *session) newResult(tool, text string) *toolResult {
-	limit := r.l.Limits.MaxResultBytes
-	if limit <= 0 {
-		limit = defaultResultBytes
-	}
-	res := &toolResult{tool: tool}
-	if strings.HasSuffix(text, answerTooLargeNote) {
-		text = strings.TrimSuffix(text, answerTooLargeNote)
-		res.readCap = true
-	}
-	text = secretshape.ScrubText(text)
-	text = r.marker.ReplaceAllString(text, "tool_result_[removed]")
-	cut := cutAt(text, limit)
-	res.data, res.omitted, res.shown = text[:cut], len(text)-cut, cut
-	return res
+// worstCost is the most a call of requestBytes with out tokens of reply can cost.
+func (l *ledger) worstCost(requestBytes, out int64) int64 {
+	return l.model.CostMicroUSD(provider.Usage{InputTokens: requestBytes + framingTokens, OutputTokens: out})
 }
 
-// cutAt returns where to cut text to at most n bytes without splitting a character.
-func cutAt(text string, n int) int {
-	if len(text) <= n {
-		return len(text)
-	}
-	for n > 0 && !utf8.RuneStart(text[n]) {
-		n--
-	}
-	return n
+// keepForAnswer fixes the reserve: the worst case of the smallest final call
+// that still has room for something to answer from.
+func (l *ledger) keepForAnswer(smallestFinalBytes int64) {
+	l.reserve = l.worstCost(smallestFinalBytes+reserveDataBytes, minFinalOutput)
 }
 
-// finalMessage is the loop's instruction for the final call. It is a message
-// of its own, never part of a tool result, and carries the run's random code
-// so that nothing a tool returned can imitate it.
-func (r *session) finalMessage() provider.Message {
-	return provider.Message{Role: provider.RoleUser, Text: "[Message from the loop, code " + r.nonce + "] " + limitLine}
+func (l *ledger) left() int64 { return max(l.ceiling-l.spentMicroUSD, 0) }
+
+func (l *ledger) holdsReserve() bool { return l.reserve <= l.left() }
+
+// admitGathering plans an ordinary call, or refuses it: after its worst case
+// the reserve must still be there, and its estimated input must fit the
+// token allowance.
+func (l *ledger) admitGathering(requestBytes int64) (call, bool) {
+	unused := l.maxTokens - addCapped(l.usedIn, l.usedOut)
+	estimate := estimateTokens(requestBytes)
+	if estimate > unused {
+		return call{}, false
+	}
+	most := min(maxGatherOutput, max(minGatherOutput, unused-estimate))
+	return l.plan(requestBytes, minGatherOutput, most, l.left()-l.reserve)
 }
 
-// callPlan is what one model call may use: the request to send, the token
-// estimate for the allowance, and the worst-case cost for the money ceiling.
-type callPlan struct {
-	req     provider.Request
-	estIn   int64 // 3 bytes per token, for the token allowance
-	maxOut  int64
-	worstIn int64 // one token per byte plus framing, for the cost
-	cost    int64 // provisional cost of this call alone
+// admitFinal plans the final call, which only the money left can refuse.
+func (l *ledger) admitFinal(requestBytes int64) (call, bool) {
+	return l.plan(requestBytes, minFinalOutput, maxFinalOutput, l.left())
 }
 
-func ceilDiv(a, b int64) int64 { return (a + b - 1) / b }
-
-// floorMessageChars is the size the messages could be shrunk to: every tool
-// result cut to its minimum.
-func (r *session) floorMessageChars() int64 {
-	var chars int64
-	for i, m := range r.messages {
-		if res := r.results[i]; res != nil {
-			shrunk := *res
-			shrunk.shown = min(res.shown, cutAt(res.data, minResultBytes))
-			m.Text = r.render(&shrunk)
-		}
-		chars += int64(messageChars([]provider.Message{m}))
+// plan gives a call the largest output cap in [least, most] whose worst case
+// is at most budget.
+func (l *ledger) plan(requestBytes, least, most, budget int64) (call, bool) {
+	if l.worstCost(requestBytes, least) > budget {
+		return call{}, false
 	}
-	return chars
+	out := least + int64(sort.Search(int(most-least), func(i int) bool {
+		return l.worstCost(requestBytes, least+int64(i)+1) > budget
+	}))
+	return call{bytes: requestBytes, estimate: estimateTokens(requestBytes), out: out, cost: l.worstCost(requestBytes, out)}, true
 }
 
-// answerBytes is the input of a final call made after one more ordinary call
-// that produces up to out tokens and up to results tool results: everything
-// shrunk to its minimum, which is the least the final call can need.
-func (r *session) answerBytes(out int64, results int) int64 {
-	line := int64(messageChars([]provider.Message{r.finalMessage()}))
-	return int64(r.toolSize+len(r.system)) + r.floorMessageChars() + out*outputBytesPerToken +
-		int64(results)*(minResultBytes+resultSlack) + line
+// finalBytes is the largest final request, up to most bytes, that the money
+// left pays for. It is negative when not even an empty one fits.
+func (l *ledger) finalBytes(most int64) int64 {
+	return int64(sort.Search(int(most)+1, func(i int) bool {
+		return l.worstCost(int64(i), minFinalOutput) > l.left()
+	})) - 1
 }
 
-// fits reports whether a call with input worstIn/estIn and output cap out
-// leaves the run inside its limits; for an ordinary call it also keeps what a
-// final answer would need afterwards (reserveBytes of input).
-func (r *session) fits(estIn, worstIn, out, reserveBytes int64) (tokensOK, costOK bool) {
-	tokens := r.tokensIn + r.tokensOut + estIn + out
-	cost := r.cost + r.in.Model.CostMicroUSD(provider.Usage{InputTokens: worstIn, OutputTokens: out})
-	if reserveBytes > 0 {
-		tokens += ceilDiv(reserveBytes, charsPerTokenBudget) + answerOutputTokens
-		cost += r.in.Model.CostMicroUSD(provider.Usage{InputTokens: reserveBytes + framingTokens, OutputTokens: answerOutputTokens})
-	}
-	return tokens <= r.l.Limits.MaxRunTokens, cost <= r.in.MaxCostMicroUSD
+// provisional is the run's usage and cost if c uses everything it may.
+func (l *ledger) provisional(c call) (provider.Usage, int64) {
+	return provider.Usage{InputTokens: addCapped(l.usedIn, c.estimate), OutputTokens: addCapped(l.usedOut, c.out)},
+		addCapped(l.spentMicroUSD, c.cost)
 }
 
-// plan sizes the next call. Money is held to the worst case (every byte a
-// token); tokens use the estimate. An ordinary call must leave room for a
-// final answer (answerOutputTokens plus the input of one last call); the final
-// call must itself fit with at least answerOutputTokens. The output cap is
-// lowered, down to the floor, before the call is refused; a non-empty reason
-// means the call may not be made.
-func (r *session) plan(final bool) (callPlan, string) {
-	msgs := r.messages
-	if final {
-		msgs = append(slices.Clone(msgs), r.finalMessage())
+// settle books a finished call. A figure the vendor did not report stays at
+// its worst case: a reply is never free. A call that failed books the larger
+// of the two, because what a broken stream reported may be only a part.
+func (l *ledger) settle(c call, reported provider.Usage, failed bool) {
+	in, costIn := reported.InputTokens, reported.InputTokens
+	if in <= 0 || failed {
+		in, costIn = max(in, c.estimate), max(costIn, c.bytes+framingTokens)
 	}
-	bytes := int64(r.toolSize + len(r.system) + messageChars(msgs))
-	p := callPlan{estIn: ceilDiv(bytes, charsPerTokenBudget), worstIn: bytes + framingTokens}
-	floor := int64(minOutputTokensPerCall)
-	if final {
-		floor = answerOutputTokens
+	out := reported.OutputTokens
+	if out <= 0 || failed {
+		out = max(out, c.out)
 	}
-	fitsAt := func(out int64) (bool, bool) {
-		reserve := int64(0)
-		if !final {
-			reserve = r.answerBytes(out, maxToolCallsPerTurn)
-		}
-		return r.fits(p.estIn, p.worstIn, out, reserve)
+	l.usedIn = addCapped(l.usedIn, in)
+	l.usedOut = addCapped(l.usedOut, out)
+	l.spentMicroUSD = addCapped(l.spentMicroUSD, l.model.CostMicroUSD(provider.Usage{InputTokens: costIn, OutputTokens: out}))
+}
+
+func estimateTokens(bytes int64) int64 { return (bytes + bytesPerToken - 1) / bytesPerToken }
+
+// addCapped adds two figures that are not negative and stays at the largest
+// int64 instead of wrapping: a vendor may report anything.
+func addCapped(a, b int64) int64 {
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
 	}
-	if tokensOK, costOK := fitsAt(floor); !tokensOK || !costOK {
-		if !tokensOK {
-			return p, "The run reached its token limit and was stopped."
-		}
-		return p, "The run reached its cost limit and was stopped."
-	}
-	low, high := floor, int64(maxOutputTokensPerCall)
-	for low < high {
-		mid := (low + high + 1) / 2
-		if tokensOK, costOK := fitsAt(mid); tokensOK && costOK {
-			low = mid
-		} else {
-			high = mid - 1
+	return a + b
+}
+
+// frameBytes is the part of every request that is not messages.
+func frameBytes(system string, tools []provider.ToolDef) int64 {
+	encoded, _ := json.Marshal(tools)
+	return int64(len(system) + len(encoded))
+}
+
+func messageBytes(msgs ...provider.Message) int64 {
+	n := 0
+	for _, m := range msgs {
+		n += len(m.Text) + len(m.ToolName) + len(m.ToolCallID) + len(m.Opaque) + 8
+		for _, c := range m.ToolCalls {
+			args, _ := json.Marshal(c.Arguments)
+			n += len(c.ID) + len(c.Name) + len(args) + len(c.ArgError) + 8
 		}
 	}
-	p.maxOut = low
-	p.cost = r.in.Model.CostMicroUSD(provider.Usage{InputTokens: p.worstIn, OutputTokens: p.maxOut})
-	p.req = provider.Request{
-		Model: r.in.Model.ID, System: r.system, Messages: slices.Clone(msgs), Tools: r.tools,
-		MaxOutputTokens: int(p.maxOut),
-	}
-	return p, ""
-}
-
-// planFinal plans the final call, shrinking tool results until it fits: this
-// turn's first, largest first, then older turns', each down to minResultBytes.
-func (r *session) planFinal() (callPlan, string) {
-	for {
-		p, why := r.plan(true)
-		if why == "" || !r.shrinkOne() {
-			return p, why
-		}
-	}
-}
-
-func (r *session) planFor(final bool) (callPlan, string) {
-	if final {
-		return r.planFinal()
-	}
-	return r.plan(false)
-}
-
-// shrinkOne cuts the largest result that is above the minimum, preferring the
-// results of the turn in progress, and reports whether there was one.
-func (r *session) shrinkOne() bool {
-	turn := 0
-	for i, m := range r.messages {
-		if m.Role == provider.RoleAssistant {
-			turn = i + 1
-		}
-	}
-	pick := func(from, to int) *toolResult {
-		var best *toolResult
-		bestIndex := -1
-		for i := from; i < to; i++ {
-			res := r.results[i]
-			if res == nil || res.shown <= cutAt(res.data, minResultBytes) {
-				continue
-			}
-			if best == nil || res.shown > best.shown {
-				best, bestIndex = res, i
-			}
-		}
-		if best != nil {
-			best.shown = cutAt(best.data, minResultBytes)
-			r.messages[bestIndex].Text = r.render(best)
-		}
-		return best
-	}
-	return pick(turn, len(r.messages)) != nil || pick(0, turn) != nil
-}
-
-// canUseResults reports whether n more tool results, even at their minimum,
-// leave room for a final answer.
-func (r *session) canUseResults(n int) bool {
-	bytes := r.answerBytes(0, n)
-	tokensOK, costOK := r.fits(ceilDiv(bytes, charsPerTokenBudget), bytes+framingTokens, answerOutputTokens, 0)
-	return tokensOK && costOK
-}
-
-// timeLow reports whether less than a fifth of the run's time is left, which
-// makes the next call the final one while there is still time to answer.
-func (r *session) timeLow(runCtx context.Context) bool {
-	deadline, ok := runCtx.Deadline()
-	return ok && r.steps > 0 && time.Until(deadline) < r.l.Limits.Timeout/5
+	return int64(n)
 }

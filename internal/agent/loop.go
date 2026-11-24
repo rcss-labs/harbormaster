@@ -7,9 +7,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,63 +59,58 @@ type Loop struct {
 	Tools    ToolRunner
 	Limits   Limits
 
-	// Test seams: nonce makes the data tag's random code, newTimer makes the
-	// wait before a retry. Nil means crypto/rand and time.NewTimer.
+	// Test seams: nonce makes the run's random code, newTimer makes the wait
+	// before a retry, now is the clock the time margins use. Nil means
+	// crypto/rand, time.NewTimer and time.Now.
 	nonce    func() string
 	newTimer func(time.Duration) *time.Timer
+	now      func() time.Time
 }
 
 const (
 	noticeContextTrimmed = "context_trimmed"
 	noticeLimitReached   = "limit_reached"
 
-	// maxOutputTokensPerCall caps one reply; below minOutputTokensPerCall of
-	// room the run stops instead of asking for a uselessly short answer.
-	maxOutputTokensPerCall = 8192
-	minOutputTokensPerCall = 256
-
-	// charsPerTokenBudget is the estimate for the token allowance. Money does
-	// not use it: cost assumes one token per byte.
-	charsPerTokenBudget = 3
-	charsPerTokenTrim   = 4
-	trimFraction        = 0.8
-
-	// framingTokens is added to the worst-case input of every call.
-	framingTokens = 1000
+	charsPerTokenTrim = 4
+	trimFraction      = 0.8
 
 	maxRetryWait        = 20 * time.Second
 	maxToolCallsPerTurn = 8
 	defaultResultBytes  = 100_000
 )
 
+// noAnswerText is the answer of a run that ends without one from the model.
+const noAnswerText = "The agent could not finish an answer within the limit."
+
 // session is the state of one Loop.Run.
 type session struct {
-	l        *Loop
-	in       RunInput
-	emit     func(Event)
-	system   string
-	tools    []provider.ToolDef
-	toolSize int
-	messages []provider.Message
-	results  map[int]*toolResult // tool results by index into messages
-	nonce    string              // random per run: names the data tag
-	marker   *regexp.Regexp      // the tag's name, in any letter case
+	l          *Loop
+	in         RunInput
+	emit       func(Event)
+	system     string
+	tools      []provider.ToolDef
+	frameBytes int64 // of the system text and the tool definitions
+	messages   []provider.Message
+	results    map[int]*toolResult // tool results by index into messages
+	nonce      string              // random per run: names the data tag and marks the loop's own message
+	code       *regexp.Regexp      // the nonce, in any letter case
+	started    time.Time
+	ledger     ledger
 
-	steps   int
-	trimmed bool
-
-	// Figures of finished calls. A call that failed, or reported no usage,
-	// stays in here at its provisional figure.
-	tokensIn, tokensOut, cost int64
+	steps    int
+	trimmed  bool
+	final    bool // the next call is the final one
+	notified bool // limit_reached was emitted for the final call
+	spoke    bool // the reply in progress, or the last one, has text for the user
 }
 
 // Run drives one conversation turn to its end, reporting through emit. It
 // returns nil once it has emitted done or error, and ctx.Err() without either
 // when ctx is cancelled.
 func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
-	r := &session{l: l, in: in, emit: emit, results: map[int]*toolResult{}}
+	r := &session{l: l, in: in, emit: emit, results: map[int]*toolResult{}, started: l.clock()}
 	r.nonce = l.newNonce()
-	r.marker = regexp.MustCompile(`(?i)tool_result_` + regexp.QuoteMeta(r.nonce))
+	r.code = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(r.nonce))
 	system, ok := systemText(in.Role, in.Page, r.nonce)
 	if !ok {
 		r.fail("invalid_request", "This kind of run is not supported.")
@@ -130,8 +125,14 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	for _, tool := range hmtools.Tools() {
 		r.tools = append(r.tools, provider.ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema()})
 	}
-	encoded, _ := json.Marshal(r.tools)
-	r.toolSize = len(encoded)
+	r.frameBytes = frameBytes(r.system, r.tools)
+	r.ledger = ledger{model: in.Model, ceiling: max(in.MaxCostMicroUSD, 0), maxTokens: l.Limits.MaxRunTokens}
+	question := r.messages[len(r.messages)-1]
+	r.ledger.keepForAnswer(r.frameBytes + messageBytes(question, r.finalInstruction()))
+	if l.Limits.MaxSteps <= 0 || l.Limits.MaxRunTokens <= 0 || !r.ledger.holdsReserve() {
+		r.stop("The limit for this run is too small for an answer.")
+		return nil
+	}
 
 	runCtx, cancel := context.WithTimeout(ctx, l.Limits.Timeout)
 	defer cancel()
@@ -144,49 +145,40 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			r.stop("The run took too long and was stopped.")
 			return nil
 		}
-		if r.steps >= l.Limits.MaxSteps {
-			r.stop("The run reached its step limit and was stopped.")
-			return nil
-		}
-		r.trim()
-
-		// The last step, a spent allowance or too little time left make this
-		// the final call: it answers from what has been fetched.
-		final := r.steps+1 >= l.Limits.MaxSteps || r.timeLow(runCtx)
-		if !final {
-			if _, why := r.plan(false); why != "" {
-				final = true
-			}
-		}
-
-		resp, outcome := r.callModel(ctx, runCtx, final)
+		resp, outcome := r.callModel(ctx, runCtx)
 		switch outcome {
 		case outcomeCancelled:
 			return ctx.Err()
 		case outcomeEnded:
 			return nil
 		}
-		r.steps++
 
-		if final {
+		if r.final {
 			// Tool calls in the final reply are ignored; its text was streamed.
-			r.emit(Event{Type: "done"})
-			return nil
-		}
-		r.messages = append(r.messages, provider.Message{
-			Role: provider.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls, Opaque: resp.Opaque,
-		})
-		if len(resp.ToolCalls) == 0 {
-			if resp.StopReason == "max_tokens" {
-				r.stop("The reply was cut short by the output limit.")
-				return nil
+			if !r.spoke {
+				r.emit(Event{Type: "text", Delta: noAnswerText})
 			}
 			r.emit(Event{Type: "done"})
 			return nil
 		}
-		// Results that could not be used, with no room left for an answer
-		// beside them, are not fetched.
-		runTools := r.canUseResults(min(len(resp.ToolCalls), maxToolCallsPerTurn))
+		if len(resp.ToolCalls) == 0 {
+			switch {
+			case !r.spoke:
+				// Nothing to show for the call: ask for the answer outright.
+				r.final = true
+				continue
+			case resp.StopReason == "max_tokens":
+				r.stop("The reply was cut short by the output limit.")
+			default:
+				r.emit(Event{Type: "done"})
+			}
+			return nil
+		}
+		r.spoke = false
+		r.messages = append(r.messages, provider.Message{
+			Role: provider.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls, Opaque: resp.Opaque,
+		})
+		turnBytes := r.requestBytes()
 		for i, call := range resp.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -195,7 +187,10 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 				r.stop("The run took too long and was stopped.")
 				return nil
 			}
-			msg, res := r.runTool(runCtx, call, i >= maxToolCallsPerTurn, !runTools)
+			// Results only add to the next request, so a call that is refused
+			// without them is already known to be the final one.
+			_, gathering := r.gatheringCall(turnBytes)
+			msg, res := r.runTool(runCtx, call, i >= maxToolCallsPerTurn, !gathering)
 			r.messages = append(r.messages, msg)
 			r.results[len(r.messages)-1] = res
 		}
@@ -215,8 +210,13 @@ func textOnly(history []provider.Message) []provider.Message {
 	return out
 }
 
+// stop ends the run at a limit. A run that has made a call never ends without
+// saying anything.
 func (r *session) stop(message string) {
 	r.emit(Event{Type: "notice", Notice: noticeLimitReached, Message: message})
+	if r.steps > 0 && !r.spoke {
+		r.emit(Event{Type: "text", Delta: noAnswerText})
+	}
 	r.emit(Event{Type: "done"})
 }
 
@@ -228,12 +228,8 @@ func (r *session) fail(code, message string) {
 // trim drops the oldest turns while the conversation would use more than 80%
 // of the model's context window, and says so once.
 func (r *session) trim() {
-	limit := int64(float64(r.in.Model.ContextTokens) * trimFraction)
-	overhead := len(r.system) + r.toolSize
-	size := func(msgs []provider.Message) int64 {
-		return int64((overhead + messageChars(msgs) + charsPerTokenTrim - 1) / charsPerTokenTrim)
-	}
-	msgs, trimmed := trimTurns(r.messages, size, limit)
+	size := func(msgs []provider.Message) int64 { return r.frameBytes + messageBytes(msgs...) }
+	msgs, trimmed := trimTurns(r.messages, size, r.contextBytes(charsPerTokenTrim))
 	if !trimmed {
 		return
 	}
@@ -252,18 +248,6 @@ func (r *session) trim() {
 	}
 }
 
-func messageChars(msgs []provider.Message) int {
-	chars := 0
-	for _, m := range msgs {
-		chars += len(m.Text) + len(m.ToolName) + len(m.ToolCallID) + len(m.Opaque) + 8
-		for _, c := range m.ToolCalls {
-			args, _ := json.Marshal(c.Arguments)
-			chars += len(c.ID) + len(c.Name) + len(args) + len(c.ArgError) + 8
-		}
-	}
-	return chars
-}
-
 type outcome int
 
 const (
@@ -272,54 +256,24 @@ const (
 	outcomeCancelled
 )
 
-// callModel makes one model call, with at most one retry. Before each attempt
-// it emits a provisional usage event whose figures already include the call's
-// worst case; a call that fails or reports nothing keeps that figure.
-func (r *session) callModel(ctx, runCtx context.Context, final bool) (provider.Response, outcome) {
-	for attempt := 0; ; attempt++ {
-		p, why := r.planFor(final)
-		if why != "" {
-			r.stop(why)
+// callModel makes the next model call, with at most one retry. Every attempt
+// is planned afresh: a gathering call, or its retry, that is not admitted
+// becomes the final call, which has a retry of its own.
+func (r *session) callModel(ctx, runCtx context.Context) (provider.Response, outcome) {
+	for retried := false; ; {
+		c, msgs, ok := r.nextCall()
+		if !ok {
+			r.stop("The run reached its limit and was stopped.")
 			return provider.Response{}, outcomeEnded
 		}
-		if final && attempt == 0 {
+		if r.final && !r.notified {
+			r.notified, retried = true, false
 			r.emit(Event{Type: "notice", Notice: noticeLimitReached, Message: "The run reached its limit, so this answer uses only what was found so far."})
 		}
-		r.emitUsage(r.tokensIn+p.estIn, r.tokensOut+p.maxOut, r.cost+p.cost, true)
-
-		streamed := false
-		resp, err := r.l.Provider.Generate(runCtx, p.req, func(delta string) {
-			streamed = true
-			r.emit(Event{Type: "text", Delta: delta})
-		})
+		resp, streamed, err := r.attempt(runCtx, c, msgs)
 		if err == nil {
-			if !streamed && resp.Text != "" {
-				r.emit(Event{Type: "text", Delta: resp.Text})
-			}
-			// A field the vendor left at zero keeps its provisional figure: a
-			// reply is never free.
-			in, out, costIn, costOut := resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.InputTokens, resp.Usage.OutputTokens
-			if in <= 0 {
-				in, costIn = p.estIn, p.worstIn
-			}
-			if out <= 0 {
-				out, costOut = p.maxOut, p.maxOut
-			}
-			r.tokensIn += in
-			r.tokensOut += out
-			r.cost += r.in.Model.CostMicroUSD(provider.Usage{InputTokens: costIn, OutputTokens: costOut})
-			r.emitUsage(r.tokensIn, r.tokensOut, r.cost, false)
 			return resp, outcomeOK
 		}
-
-		// A failed call keeps the larger of its provisional figure and what
-		// the vendor reported, field by field: it may have done and billed
-		// the work.
-		r.tokensIn += max(p.estIn, resp.Usage.InputTokens)
-		r.tokensOut += max(p.maxOut, resp.Usage.OutputTokens)
-		r.cost += r.in.Model.CostMicroUSD(provider.Usage{
-			InputTokens: max(p.worstIn, resp.Usage.InputTokens), OutputTokens: max(p.maxOut, resp.Usage.OutputTokens),
-		})
 		if ctx.Err() != nil {
 			return provider.Response{}, outcomeCancelled
 		}
@@ -333,17 +287,11 @@ func (r *session) callModel(ctx, runCtx context.Context, final bool) (provider.R
 			return provider.Response{}, outcomeEnded
 		}
 		wait := min(max(perr.RetryAfter, 0), maxRetryWait)
-		deadline, hasDeadline := runCtx.Deadline()
-		if !perr.Retryable || attempt > 0 || streamed || (hasDeadline && time.Until(deadline) <= wait) {
+		if !perr.Retryable || retried || streamed || r.timeLeft() <= wait || !r.anyCallFits() {
 			r.fail(perr.Kind, providerMessage(perr))
 			return provider.Response{}, outcomeEnded
 		}
-		// The retry must fit the limits as they now stand; if it does not,
-		// the user learns what went wrong, not that a limit was hit.
-		if _, why := r.planFor(final); why != "" {
-			r.fail(perr.Kind, providerMessage(perr))
-			return provider.Response{}, outcomeEnded
-		}
+		retried = true
 		timer := r.timer(wait)
 		select {
 		case <-timer.C:
@@ -356,6 +304,65 @@ func (r *session) callModel(ctx, runCtx context.Context, final bool) (provider.R
 			return provider.Response{}, outcomeEnded
 		}
 	}
+}
+
+// nextCall plans the next call. Once a gathering call is refused, every call
+// is the final one.
+func (r *session) nextCall() (call, []provider.Message, bool) {
+	if !r.final {
+		r.trim()
+		if c, ok := r.planGathering(); ok {
+			return c, slices.Clone(r.messages), true
+		}
+		r.final = true
+	}
+	return r.planFinal()
+}
+
+// anyCallFits reports whether the money left pays for another call. A
+// gathering call always leaves enough for the final one, so only that counts.
+func (r *session) anyCallFits() bool {
+	_, _, ok := r.planFinal()
+	return ok
+}
+
+// attempt makes one request. It emits a provisional usage event first, whose
+// figures already include the call's worst case, and the actual usage after.
+func (r *session) attempt(runCtx context.Context, c call, msgs []provider.Message) (resp provider.Response, streamed bool, err error) {
+	r.steps++
+	r.spoke = false
+	usage, cost := r.ledger.provisional(c)
+	r.emitUsage(usage, cost, true)
+
+	say := func(delta string) {
+		streamed = true
+		r.spoke = r.spoke || strings.TrimSpace(delta) != ""
+		r.emit(Event{Type: "text", Delta: delta})
+	}
+	resp, err = r.l.Provider.Generate(runCtx, provider.Request{
+		Model: r.in.Model.ID, System: r.system, Messages: msgs, Tools: r.tools, MaxOutputTokens: int(c.out),
+	}, say)
+	r.ledger.settle(c, resp.Usage, err != nil)
+	if err != nil {
+		return resp, streamed, err
+	}
+	if !streamed && resp.Text != "" {
+		say(resp.Text)
+	}
+	r.emitUsage(provider.Usage{InputTokens: r.ledger.usedIn, OutputTokens: r.ledger.usedOut}, r.ledger.spentMicroUSD, false)
+	return resp, streamed, nil
+}
+
+// timeLeft is what remains of the run's time.
+func (r *session) timeLeft() time.Duration {
+	return r.l.Limits.Timeout - r.l.clock().Sub(r.started)
+}
+
+func (l *Loop) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now()
 }
 
 func (r *session) timer(d time.Duration) *time.Timer {
@@ -382,25 +389,27 @@ func providerMessage(e *provider.Error) string {
 	return "The model provider is unavailable. Try again shortly."
 }
 
-func (r *session) emitUsage(in, out, cost int64, provisional bool) {
-	r.emit(Event{Type: "usage", Usage: &provider.Usage{InputTokens: in, OutputTokens: out}, CostMicroUSD: cost, Provisional: provisional})
+func (r *session) emitUsage(usage provider.Usage, cost int64, provisional bool) {
+	r.emit(Event{Type: "usage", Usage: &usage, CostMicroUSD: cost, Provisional: provisional})
 }
 
 // runTool answers one tool call from the model and returns the tool message
-// for it. Every failure here is a result for the model, not the end of the run.
-func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit, noRoom bool) (provider.Message, *toolResult) {
+// for it. Every failure here is a result for the model, not the end of the
+// run. With skip, the tool is not run at all and nothing is reported.
+func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit, skip bool) (provider.Message, *toolResult) {
 	tool, known := lookupTool(call.Name)
 	name := "unknown_tool"
 	if known {
 		name = tool.Name
+	}
+	if skip {
+		return r.resultMessage(call, name, "This tool was not run: the run had reached its limit.", true)
 	}
 	r.emit(Event{Type: "tool_start", Tool: name})
 
 	var text string
 	var isError bool
 	switch {
-	case noRoom:
-		text, isError = "This tool was not run: the run had no room left to use its answer.", true
 	case overLimit:
 		text, isError = "Too many tool calls in one turn. Ask for fewer at a time.", true
 	case !known:
@@ -416,15 +425,19 @@ func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit
 	}
 
 	r.emit(Event{Type: "tool_end", Tool: name, OK: !isError})
+	return r.resultMessage(call, name, text, isError)
+}
+
+func (r *session) resultMessage(call provider.ToolCall, name, text string, isError bool) (provider.Message, *toolResult) {
 	res := r.newResult(name, text)
 	return provider.Message{
 		Role: provider.RoleTool, ToolCallID: call.ID, ToolName: call.Name, IsError: isError,
-		Text: r.render(res),
+		Text: res.render(len(res.data)),
 	}, res
 }
 
-// newNonce makes the random code that names this run's data tag, so tool
-// output cannot write the tag that closes its own envelope.
+// newNonce makes the random code that names this run's data tag and marks the
+// loop's own message, so tool output can imitate neither.
 func (l *Loop) newNonce() string {
 	if l.nonce != nil {
 		return l.nonce()

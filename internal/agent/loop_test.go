@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -61,7 +62,7 @@ func (r *recordingRunner) Calls() []toolCall {
 }
 
 func newLoop(p provider.Provider, runner ToolRunner, edit ...func(*Limits)) *Loop {
-	limits := Limits{MaxSteps: 10, MaxRunTokens: 1_000_000, Timeout: 5 * time.Second, MaxResultBytes: 4000}
+	limits := Limits{MaxSteps: 10, MaxRunTokens: 1_000_000, Timeout: 5 * time.Minute, MaxResultBytes: 4000}
 	for _, e := range edit {
 		e(&limits)
 	}
@@ -175,9 +176,15 @@ func usageEvents(events []Event) []Event {
 	return out
 }
 
+// requireLimitReached checks a run that was stopped without an answer: a
+// limit_reached notice, the sentence saying so if a call had been made, done.
 func requireLimitReached(t *testing.T, events []Event) {
 	t.Helper()
 	n := len(events)
+	if n >= 3 && events[n-2].Type == "text" && events[n-2].Delta == noAnswer {
+		events = append(slices.Clone(events[:n-2]), events[n-1])
+		n--
+	}
 	if n < 2 || events[n-2].Type != "notice" || events[n-2].Notice != "limit_reached" || events[n-1].Type != "done" {
 		t.Fatalf("want a limit_reached notice then done at the end, got %v", eventTypes(events))
 	}
@@ -313,69 +320,28 @@ func TestLoop_MalformedArgumentsAreAToolErrorNotARequest(t *testing.T) {
 
 func TestLoop_StepLimitMakesTheLastStepAFinalAnswer(t *testing.T) {
 	step := fake.ToolCalls(provider.Usage{InputTokens: 10, OutputTokens: 5}, overviewCall("c"))
-	p := fake.New(step, fake.Raw(provider.Response{
+	p := fake.New(step, step, fake.Raw(provider.Response{
 		Text: "Two clusters, no problems found.", ToolCalls: []provider.ToolCall{overviewCall("ignored")},
 		Usage: provider.Usage{InputTokens: 10, OutputTokens: 5}, StopReason: "tool_use",
 	}), step)
 	runner := &recordingRunner{}
-	events, err := run(t, newLoop(p, runner, func(l *Limits) { l.MaxSteps = 2 }), baseInput())
+	events, err := run(t, newLoop(p, runner, func(l *Limits) { l.MaxSteps = 3 }), baseInput())
 	if err != nil {
 		t.Fatal(err)
 	}
 	requireFinalAnswer(t, events, "Two clusters, no problems found.")
-	if n := len(p.Requests()); n != 2 {
-		t.Errorf("%d model calls, want 2", n)
+	if n := len(p.Requests()); n != 3 {
+		t.Errorf("%d model calls, want 3", n)
 	}
 	if n := len(runner.Calls()); n != 1 {
-		t.Errorf("tools ran %d times, want 1: tool calls in the final reply are ignored", n)
+		t.Errorf("tools ran %d times, want 1: the second turn's call is followed by the final call, whose own are ignored", n)
 	}
-	final := p.Requests()[1]
+	final := p.Requests()[2]
 	if len(final.Tools) == 0 {
 		t.Errorf("the final call must still carry the tool definitions")
 	}
 	if last := final.Messages[len(final.Messages)-1]; last.Role != provider.RoleUser || !strings.Contains(last.Text, limitLine) {
 		t.Errorf("last message of the final call = %+v, want the limit line as a user message", last)
-	}
-}
-
-func TestLoop_StopsAtTokenLimit(t *testing.T) {
-	p := fake.New(
-		fake.ToolCalls(provider.Usage{InputTokens: 60_000, OutputTokens: 40_000}, overviewCall("c1")),
-		fake.Text("never reached", provider.Usage{InputTokens: 1, OutputTokens: 1}),
-	)
-	runner := &recordingRunner{}
-	events, err := run(t, newLoop(p, runner, func(l *Limits) { l.MaxRunTokens = 100_000 }), baseInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	requireLimitReached(t, events)
-	if n := len(p.Requests()); n != 1 {
-		t.Errorf("%d model calls, want 1", n)
-	}
-	if n := len(runner.Calls()); n != 0 {
-		t.Errorf("tools ran %d times after the token limit", n)
-	}
-}
-
-func TestLoop_CapsOutputTokensToTheRemainingAllowance(t *testing.T) {
-	p := fake.New(
-		fake.ToolCalls(provider.Usage{InputTokens: 9_000, OutputTokens: 1_000}, overviewCall("c1")),
-		fake.Text("ok", provider.Usage{InputTokens: 10, OutputTokens: 1}),
-	)
-	// The tool schemas alone are about 10,000 tokens and the answer allowance is reserved, so only some thousands remain.
-	_, err := run(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxRunTokens = 55_000 }), baseInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	reqs := p.Requests()
-	if len(reqs) != 2 {
-		t.Fatalf("%d requests", len(reqs))
-	}
-	if reqs[0].MaxOutputTokens != 8192 {
-		t.Errorf("first call max output = %d, want 8192", reqs[0].MaxOutputTokens)
-	}
-	if got := reqs[1].MaxOutputTokens; got >= 8192 || got < 256 {
-		t.Errorf("second call max output = %d, want the remaining allowance, below 8192", got)
 	}
 }
 

@@ -121,15 +121,16 @@ func upstreamErrorMessage(resp hmtools.Response) string {
 const unsafeTail = 4096
 
 // answerText returns an answer as text. An answer that reached the read cap
-// was cut at an arbitrary byte, so its tail is dropped back to the last line or
-// delimiter, and the model is told the answer was larger than could be read.
+// was cut at an arbitrary byte, so its tail is dropped back to the last
+// whitespace or double quote (other punctuation may be inside a password), and
+// the model is told the answer was larger than could be read.
 func answerText(body []byte, readCap int) string {
 	if len(body) < readCap {
 		return string(body)
 	}
 	from := max(len(body)-unsafeTail, 0)
 	cut := from
-	if i := bytes.LastIndexAny(body[from:], "\n \t,;\"'{}[]()<>"); i >= 0 {
+	if i := bytes.LastIndexAny(body[from:], " \t\r\n\""); i >= 0 {
 		cut = from + i
 	}
 	for cut > 0 && !utf8.RuneStart(body[cut]) {
