@@ -105,4 +105,43 @@ describe('sendMessage', () => {
     const failure = await sendMessage(7, 'hi', PAGE, handlers(), new AbortController().signal).catch((error: unknown) => error)
     expect(failure).toMatchObject({ code: 'agent_unavailable' })
   })
+
+  it('stops reading and cancels the stream after done', async () => {
+    let cancelled = false
+    server.use(
+      http.post('/api/agent/conversations/7/messages', () =>
+        new HttpResponse(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(encoder.encode('event: done\ndata: {"message_id":1}\n\nevent: text\ndata: {"delta":"late"}\n\n'))
+            },
+            cancel() {
+              cancelled = true
+            },
+          }),
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        ),
+      ),
+    )
+    const h = handlers()
+    const outcome = await Promise.race([
+      sendMessage(7, 'hi', PAGE, h, new AbortController().signal).then(() => 'resolved'),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 1000)),
+    ])
+    expect(outcome).toBe('resolved')
+    expect(cancelled).toBe(true)
+    expect(h.onText).not.toHaveBeenCalled()
+  })
+
+  it('does not report a throwing handler as unavailable', async () => {
+    server.use(http.post('/api/agent/conversations/7/messages', () => sse(['event: text\ndata: {"delta":"x"}\n\n'])))
+    const h = handlers()
+    ;(h.onText as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('handler bug')
+    })
+    const failure = await sendMessage(7, 'hi', PAGE, h, new AbortController().signal).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).not.toBeInstanceOf(ApiError)
+    expect((failure as Error).message).toBe('handler bug')
+  })
 })

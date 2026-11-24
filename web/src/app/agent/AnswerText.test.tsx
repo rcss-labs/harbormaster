@@ -46,4 +46,18 @@ describe('AnswerText', () => {
     expect(container).toHaveTextContent('<script>alert(1)</script>')
     expect(container).toHaveTextContent('<img src=x onerror=alert(1)>')
   })
+
+  it('api paths are plain text', () => {
+    const { container } = show('[a](/api/auth/logout) [b](/API/x) [c](/api?x=1) [ok](/apis/x)')
+    expect(container.querySelectorAll('a')).toHaveLength(1)
+    expect(screen.getByRole('link', { name: 'ok' })).toBeInTheDocument()
+    expect(container).toHaveTextContent('/api/auth/logout')
+  })
+
+  it.each(['[', '*', '**', '`', '![', '(', '[](', ']'])('stays fast on 50,000 of %s', (opener) => {
+    const started = performance.now()
+    const { container } = show(opener.repeat(50_000))
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(container.querySelector('a, img')).toBeNull()
+  })
 })

@@ -5,6 +5,14 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { SERVICE_PAYMENTS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { renderApp } from '../../test/renderApp'
+import { AuthProvider } from '../auth/AuthProvider'
+import { ToastProvider } from '../../components/Toast'
+import { ShellStateProvider, useShellState } from '../shell/ShellState'
+import { AgentDrawer } from './AgentDrawer'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
+import { useEffect } from 'react'
 import { mockAgent, openStream, STATUS_OK } from './agentTestKit'
 
 beforeEach(() => {
@@ -167,5 +175,131 @@ describe('AgentDrawer', () => {
     await user.type(within(dialog).getByRole('textbox', { name: 'Message' }), 'status?{Enter}')
     await waitFor(() => expect(sent).toBeDefined())
     expect(sent).toEqual({ text: 'status?', page: { path: `/services/${encodeURIComponent(SERVICE_PAYMENTS.id)}/overview`, service_id: SERVICE_PAYMENTS.id } })
+  })
+
+  describe('while a turn is live', () => {
+    const savedUser = message(40, 'user', 'live question')
+    const savedAnswer = message(41, 'assistant', 'streamed answer')
+    const refocus = () => window.dispatchEvent(new Event('visibilitychange'))
+
+    it('shows the question once for an existing conversation, even when a refetch returns it', async () => {
+      const stream = openStream()
+      let finished = false
+      let posted = false
+      let reads = 0
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      server.use(
+        http.get('/api/agent/conversations/2', () => {
+          reads++
+          const messages = [...DETAILS[0].messages, ...(posted ? [savedUser] : []), ...(finished ? [savedAnswer] : [])]
+          return HttpResponse.json({ ...DETAILS[0], messages })
+        }),
+        http.post('/api/agent/conversations/2/messages', () => {
+          posted = true // the server keeps the question before the first byte
+          return stream.response()
+        }),
+      )
+      const user = userEvent.setup()
+      renderApp('/clusters')
+      const dialog = await openDrawer(user)
+      await within(dialog).findByText('CPU is saturated.')
+      await user.type(within(dialog).getByRole('textbox', { name: 'Message' }), 'live question{Enter}')
+      stream.send('text', { delta: 'streamed answer' })
+      await within(dialog).findByText('streamed answer')
+      const before = reads
+      refocus()
+      await waitFor(() => expect(reads).toBeGreaterThan(before))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(within(dialog).getAllByText('live question')).toHaveLength(1)
+      expect(within(dialog).getAllByText('streamed answer')).toHaveLength(1)
+      finished = true
+      stream.send('done', { message_id: 41 })
+      stream.close()
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      expect(within(dialog).getAllByText('live question')).toHaveLength(1)
+      expect(within(dialog).getAllByText('streamed answer')).toHaveLength(1)
+    })
+
+    it('shows the question once and keeps the text for a new conversation whose fetch returns it', async () => {
+      const stream = openStream()
+      let finished = false
+      let reads = 0
+      mockAgent()
+      server.use(
+        http.post('/api/agent/conversations', () => HttpResponse.json({ id: 5, title: '' })),
+        http.get('/api/agent/conversations/5', () => {
+          reads++
+          return HttpResponse.json({ id: 5, title: 't', messages: [savedUser, ...(finished ? [savedAnswer] : [])] })
+        }),
+        http.post('/api/agent/conversations/5/messages', () => stream.response()),
+      )
+      const user = userEvent.setup()
+      renderApp('/clusters')
+      const dialog = await openDrawer(user)
+      await user.type(await within(dialog).findByRole('textbox', { name: 'Message' }), 'live question{Enter}')
+      await waitFor(() => expect(reads).toBeGreaterThan(0))
+      stream.send('text', { delta: 'streamed answer' })
+      await within(dialog).findByText('streamed answer')
+      refocus()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(within(dialog).getAllByText('live question')).toHaveLength(1)
+      expect(within(dialog).getAllByText('streamed answer')).toHaveLength(1)
+      finished = true
+      stream.send('done', { message_id: 41 })
+      stream.close()
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      expect(within(dialog).getAllByText('live question')).toHaveLength(1)
+      expect(within(dialog).getAllByText('streamed answer')).toHaveLength(1)
+    })
+  })
+
+  it('says when a conversation no longer exists', async () => {
+    mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: [] })
+    const user = userEvent.setup()
+    renderApp('/clusters')
+    const dialog = await openDrawer(user)
+    expect(await within(dialog).findByText('This conversation no longer exists.')).toBeInTheDocument()
+  })
+
+  it('says when the conversations could not be loaded', async () => {
+    mockAgent()
+    server.use(http.get('/api/agent/conversations', () => HttpResponse.json({ error: { code: 'x', message: 'boom' } }, { status: 500 })))
+    const user = userEvent.setup()
+    renderApp('/clusters')
+    const dialog = await openDrawer(user)
+    expect(await within(dialog).findByText('Could not load the conversation. Try again.')).toBeInTheDocument()
+  })
+
+  it('renders nothing and asks for nothing when the agent is not available', async () => {
+    let asked = 0
+    mockAgent({ status: { ...STATUS_OK, can_chat: false } })
+    server.use(
+      http.get('/api/agent/conversations', () => {
+        asked++
+        return HttpResponse.json({ items: [] })
+      }),
+    )
+    function OpenOnMount() {
+      const { openAgent } = useShellState()
+      useEffect(openAgent, [openAgent])
+      return null
+    }
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <ToastProvider>
+            <AuthProvider>
+              <ShellStateProvider>
+                <OpenOnMount />
+                <AgentDrawer />
+              </ShellStateProvider>
+            </AuthProvider>
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(asked).toBe(0)
   })
 })

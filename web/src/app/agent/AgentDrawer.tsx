@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { conversationKey, CONVERSATIONS_KEY, createConversation, sendMessage, useConversation, useConversations, useDeleteConversation } from '../../api/agent'
+import { conversationKey, useAgentAvailable, CONVERSATIONS_KEY, createConversation, sendMessage, useConversation, useConversations, useDeleteConversation } from '../../api/agent'
 import { ApiError } from '../../api/client'
 import type { AgentConversationSummaryDTO, AgentMessageDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
@@ -30,6 +30,8 @@ function errorCopy(code: string, message: string): string {
   }
 }
 
+const LOAD_FAILED = 'Could not load the conversation. Try again.'
+
 const NOTICE_COPY: Record<string, string> = {
   context_trimmed: "Earlier messages were left out to fit the model's limit.",
   limit_reached: 'The agent reached its limit for one question and stopped here.',
@@ -42,6 +44,8 @@ interface ToolRun {
 
 /** The turn in flight: what the user asked and what has streamed back so far. */
 interface LiveTurn {
+  /** The conversation as it was when the question was sent. While the turn is live this, not a fetch, is what shows. */
+  before: AgentMessageDTO[]
   question: string
   text: string
   tools: ToolRun[]
@@ -52,7 +56,8 @@ const byNewest = (a: AgentConversationSummaryDTO, b: AgentConversationSummaryDTO
 /** The panel exists only while open, so closing it aborts a running question and the next opening starts from the latest conversation. */
 export function AgentDrawer() {
   const { agentOpen } = useShellState()
-  return agentOpen ? <OpenAgentDrawer /> : null
+  const available = useAgentAvailable()
+  return agentOpen && available ? <OpenAgentDrawer /> : null
 }
 
 function OpenAgentDrawer() {
@@ -77,6 +82,13 @@ function OpenAgentDrawer() {
   const currentId = chosen !== undefined ? chosen : (sorted[0]?.id ?? null)
   const conversation = useConversation(currentId)
   const running = live !== null
+  const loadError = conversation.isError
+    ? conversation.error instanceof ApiError && conversation.error.status === 404
+      ? 'This conversation no longer exists.'
+      : LOAD_FAILED
+    : chosen === undefined && conversations.isError
+      ? LOAD_FAILED
+      : null
 
   useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => {
@@ -95,7 +107,7 @@ function OpenAgentDrawer() {
     setDraft('')
     setNotices([])
     setProblem(null)
-    setLive({ question: text, text: '', tools: [] })
+    setLive({ before: conversation.data?.messages ?? [], question: text, text: '', tools: [] })
     const controller = new AbortController()
     abortRef.current = controller
     let id = currentId
@@ -137,7 +149,7 @@ function OpenAgentDrawer() {
         controller.signal,
       )
     } catch (error) {
-      setProblem(error instanceof ApiError ? errorCopy(error.code, error.message) : UNAVAILABLE)
+      setProblem(error instanceof ApiError ? errorCopy(error.code, error.message) : error instanceof TypeError ? UNAVAILABLE : 'Something went wrong. Try again.')
       // Nothing came back and the question may not have been kept: give the text back to edit and send again.
       if (!streamed) setDraft(text)
     }
@@ -146,7 +158,7 @@ function OpenAgentDrawer() {
     }
     abortRef.current = null
     setLive(null)
-  }, [draft, running, currentId, page, queryClient])
+  }, [draft, running, currentId, page, queryClient, conversation.data])
 
   const stop = () => abortRef.current?.abort()
 
@@ -229,18 +241,32 @@ function OpenAgentDrawer() {
             </button>
           </div>
           {view === 'list' ? (
-            <ConversationList items={sorted} loading={conversations.isPending} currentId={currentId} onOpen={open} onDelete={setToDelete} />
+            <ConversationList items={sorted} loading={conversations.isPending} failed={conversations.isError} currentId={currentId} onOpen={open} onDelete={setToDelete} />
           ) : (
             <>
               {label && <p className={styles.looking}>{`Looking at: ${label}`}</p>}
               <div ref={scrollRef} className={styles.messages} aria-live="polite">
-                {!ready || (currentId !== null && conversation.isPending) ? (
+                {live ? (
+                  <>
+                    {live.before.map((message) => <Message key={message.id} message={message} />)}
+                    <LiveMessages turn={live} />
+                    {notices.map((notice) => (
+                      <p key={notice} className={styles.notice}>
+                        {notice}
+                      </p>
+                    ))}
+                  </>
+                ) : !ready || (currentId !== null && conversation.isPending) ? (
                   <Skeleton lines={3} label="Loading conversation" />
                 ) : (
                   <>
-                    {currentId === null && !live && <p className={styles.empty}>Ask a question about what you are looking at.</p>}
+                    {loadError && (
+                      <p className={styles.problem} role="alert">
+                        {loadError}
+                      </p>
+                    )}
+                    {currentId === null && !loadError && <p className={styles.empty}>Ask a question about what you are looking at.</p>}
                     {conversation.data?.messages.map((message) => <Message key={message.id} message={message} />)}
-                    {live && <LiveMessages turn={live} />}
                     {notices.map((notice) => (
                       <p key={notice} className={styles.notice}>
                         {notice}
@@ -314,16 +340,19 @@ function LiveMessages({ turn }: { turn: LiveTurn }) {
 function ConversationList({
   items,
   loading,
+  failed,
   currentId,
   onOpen,
   onDelete,
 }: {
   items: AgentConversationSummaryDTO[]
   loading: boolean
+  failed: boolean
   currentId: number | null
   onOpen: (id: number) => void
   onDelete: (item: AgentConversationSummaryDTO) => void
 }) {
+  if (failed) return <p className={styles.problem} role="alert">{LOAD_FAILED}</p>
   if (loading) return <Skeleton lines={3} label="Loading conversations" />
   if (items.length === 0) return <p className={styles.empty}>No conversations yet.</p>
   return (

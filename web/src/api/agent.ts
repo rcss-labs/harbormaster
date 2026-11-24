@@ -127,6 +127,8 @@ export async function sendMessage(
   const csrf = getCsrfToken()
   if (csrf) headers.set('X-CSRF-Token', csrf)
   let finished = false
+  let handlerThrew = false
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   try {
     const response = await fetch(`/api/agent/conversations/${conversationId}/messages`, {
       method: 'POST',
@@ -150,9 +152,19 @@ export async function sendMessage(
     }
     if (!response.body) throw new ApiError('agent_unavailable', UNAVAILABLE, 503)
 
-    const reader = response.body.getReader()
+    reader = response.body.getReader()
+    const activeReader = reader
     const decoder = new TextDecoder()
     let buffer = ''
+    // A handler's own failure is not a stream failure: it passes through unchanged.
+    const deliver = (frame: { type: string; data: unknown }) => {
+      try {
+        return dispatchEvent(frame.type, frame.data, handlers) !== null
+      } catch (error) {
+        handlerThrew = true
+        throw error
+      }
+    }
     const drain = (final: boolean) => {
       // A CR at the very end may be half of a CRLF split across chunks, so it waits for the next chunk.
       buffer = buffer.replace(/\r\n/g, '\n').replace(final ? /\r/g : /\r(?!$)/g, '\n')
@@ -160,23 +172,30 @@ export async function sendMessage(
       while ((end = buffer.indexOf('\n\n')) !== -1) {
         const frame = parseFrame(buffer.slice(0, end))
         buffer = buffer.slice(end + 2)
-        if (frame && dispatchEvent(frame.type, frame.data, handlers)) finished = true
+        if (frame && deliver(frame)) finished = true
+        if (finished) return
       }
       if (final && buffer.trim() !== '') {
         const frame = parseFrame(buffer)
         buffer = ''
-        if (frame && dispatchEvent(frame.type, frame.data, handlers)) finished = true
+        if (frame && deliver(frame)) finished = true
       }
     }
     for (;;) {
-      const { done, value } = await reader.read()
+      const { done, value } = await activeReader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       drain(false)
+      if (finished) {
+        await activeReader.cancel().catch(() => {}) // nothing after done or error is wanted
+        return
+      }
     }
     buffer += decoder.decode()
     drain(true)
   } catch (error) {
+    void reader?.cancel().catch(() => {})
+    if (handlerThrew) throw error
     if (signal.aborted) return
     if (error instanceof ApiError) throw error
     throw new ApiError('agent_unavailable', UNAVAILABLE, 503)
