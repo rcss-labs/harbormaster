@@ -231,6 +231,8 @@ The agent is off unless `HM_AGENT_URL` is set. Variables marked `harbormaster` g
 | `HM_AGENT_CA_PEM` | none | `harbormaster` | PEM text of an extra CA that signs the agent's certificate, for the connection to the agent only. Invalid PEM stops startup. |
 | `HM_AGENT_RUN_TOKEN_TTL` | `15m` | `harbormaster` | Lifetime of a run token. `1m` to `1h`. A shorter value than the run timeout plus a minute is logged once, because long runs may then lose their tools. |
 
+Redaction of environment values in the agent's tool results: an admin can lift it per provider in **Settings > AI agent**, but `HM_TOKEN_REDACT_ENV=true` (see [Access tokens and OAuth](#access-tokens-and-oauth)) overrides every lift and redacts all of them. Secret-looking values are redacted in either case.
+
 ### Agent settings
 
 | Variable | Default | Read by | Description |

@@ -9,9 +9,9 @@ Plans and applies run in your deployment system. Nothing below runs `terraform p
 | Step | What | How to verify |
 | --- | --- | --- |
 | 1 | Ship the Harbormaster release with `HM_AGENT_URL` unset. Nothing changes | `GET /api/agent/status` answers `404`. There is no **Ask AI** button |
-| 2 | Run the agent module and add its `task_security_group_id` to the Harbormaster module's `alb_ingress_security_group_ids` | The agent's target group is healthy (alarm `<name>-unhealthy-hosts` stays quiet) |
+| 2 | Run the agent module and add its `task_security_group_id` to the Harbormaster module's `alb_ingress_security_group_ids` | The agent's target group is healthy in the console (the `<name>-unhealthy-hosts` alarm exists only if you set `alarm_sns_topic_arns`) |
 | 3 | Set `HM_AGENT_URL` (module `extra_env`) and apply. All Harbormaster tasks that run the web or coordinator role must get it | **Settings > AI agent** shows **Reachable** |
-| 4 | Choose a model, run **Test model**, set a small allowance (for example a few dollars) | The test answers. Usage shows the call |
+| 4 | Set a small allowance (for example a few dollars) first, because an allowance of 0 refuses the test. Then choose a model and run **Test model** | The test answers. Usage shows the call |
 | 5 | Turn on **AI chat** for yourself or a small group first. Ask the acceptance questions in section 2 | Section 2 |
 | 6 | Widen access. Watch spend for a week before you raise the allowance | Section 4 |
 
@@ -28,7 +28,7 @@ Plans and applies run in your deployment system. Nothing below runs `terraform p
 - [ ] Ask about a service the user cannot see. The chat finds nothing.
 - [ ] The audit log shows an `agent_run` entry for each question, with provider, model, tools, tokens and cost, and no text.
 - [ ] The public MCP gateway refuses a run token. A run token presented to it is never forwarded.
-- [ ] `alarm_sns_topic_arns` is set on the agent module, so the three alarms notify someone.
+- [ ] `alarm_sns_topic_arns` is set on the agent module. The three alarms exist only when it is set.
 
 ## 3. Chat is unavailable
 
@@ -66,7 +66,9 @@ Status checks stop asking a dead agent for about ten seconds after a failure, so
 
 ## 5. Interrupted and stale runs
 
-A question stops early when Harbormaster restarts, the browser disconnects or the agent fails. The answer is marked interrupted and the user can ask again. The coordinator's repair job runs every minute. It fails runs that stopped reporting usage, settles their cost and writes the missing `agent_run` audit rows. It runs on the coordinator, so coordinator tasks need `HM_AGENT_URL` too: without it, the missing audit rows are not written, and a run that stopped mid-way is failed only when a later question reserves allowance.
+A question stops early when Harbormaster restarts, the browser disconnects or the agent fails. The answer is marked interrupted and the user can ask again. The coordinator's repair job runs every minute. It fails runs that stopped reporting usage, settles their cost and writes the missing `agent_run` audit rows. It runs on the coordinator, so coordinator tasks need `HM_AGENT_URL` too.
+
+A run that stops reporting usage keeps its reservation held against the allowance until it is given up. The repair job gives up a run after 1 hour without usage. The next reservation by any question does it sooner: after twice the run timeout, and at least 10 minutes. Without the repair job, the missing audit rows are not written and only a later reservation clears such a run.
 
 If the audit log lacks `agent_run` rows, check that a coordinator task is running and has `HM_AGENT_URL`.
 
@@ -83,7 +85,7 @@ If the audit log lacks `agent_run` rows, check that a coordinator task is runnin
 3. Revoke the old key at the provider.
 4. Run **Test model** in **Settings > AI agent**.
 
-Running questions end early during the deployment. Keys never appear in Postgres, logs, audit rows or browser responses.
+Running questions end early during the deployment. Keys are kept out of Postgres, logs, audit rows and browser responses by design; provider error text is scrubbed best effort.
 
 ## 7. Turn the agent off
 
@@ -94,8 +96,8 @@ To stop only one user, turn **AI chat** off for them.
 
 ## 8. What to alarm on
 
-- The module's alarms: `<name>-alb-5xx`, `<name>-target-5xx`, `<name>-unhealthy-hosts`.
-- The agent's own metrics on `/metrics`: `harbormaster_agent_runs_total{status="done|error|cancelled|panic"}` and `harbormaster_agent_runs_active`. A rise in `panic` or `error` is worth a look at the log group.
+- The module's alarms, which exist only with `alarm_sns_topic_arns`: `<name>-alb-5xx`, `<name>-target-5xx`, `<name>-unhealthy-hosts`.
+- The agent's own metrics on `/metrics`: `harbormaster_agent_runs_total{status="done|error|cancelled|panic"}` and `harbormaster_agent_runs_active`. `/metrics` needs no authentication and is served on the task port (8484). The agent's load balancer admits only Harbormaster's web tasks, so a scraper needs a path you add yourself, for example a rule on the task security group, or read the log group instead. A rise in `panic` or `error` is worth a look at the log group.
 - Budget: check **Settings > AI agent** weekly, or read `agent_run` audit rows.
 
 ## Next steps

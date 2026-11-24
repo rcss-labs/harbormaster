@@ -102,8 +102,8 @@ The AI agent is off unless `HM_AGENT_URL` is set. With it unset there is no agen
 - **Read-only.** The agent changes nothing. It has no tool, route or code path that writes to AWS or to Harbormaster's data. Its tools are the same read-only table as the MCP gateway's, and each tool call is one read request to Harbormaster.
 - **Only as the asking user.** Each question gets a run token for that user, tied to one run. It is read-only like an access token: only the routes tokens may call, only View and Logs, an admin's included. It expires after `HM_AGENT_RUN_TOKEN_TTL` (15 minutes by default) and ends with the user's sessions. The public MCP gateway refuses it.
 - **No estate code in the agent.** The agent service imports no database, cache, SAML or AWS estate code. Its only AWS SDK client is Bedrock runtime. It has no database URL, session key or access role.
-- **Internal load balancers only.** The agent may be enabled only when Harbormaster's load balancer is internal, so run tokens are never accepted on a public one. The agent has an internal load balancer of its own that admits only Harbormaster's web tasks.
-- **Keys stay in the agent.** Provider API keys exist only in the agent task's environment, injected from Secrets Manager. They never appear in Postgres, the main app, a log line, an error message, an audit row or a browser response.
+- **Internal load balancers only.** The Terraform module refuses to set `HM_AGENT_URL` unless Harbormaster's load balancer is internal, so run tokens are never accepted on a public one. The application itself does not check this: if you run it without the module, keeping the load balancer internal is up to you. The agent has an internal load balancer of its own that admits only Harbormaster's web tasks.
+- **Keys stay in the agent.** Provider API keys exist only in the agent task's environment, injected from Secrets Manager. They are kept out of Postgres, the main app, logs, error messages, audit rows and browser responses by design: keys are held in a type that prints as `[redacted]`, and the agent's error texts are fixed and never repeat a key. Error text that comes from a provider is scrubbed for secret-shaped values on a best-effort basis.
 - **A budget bounds the cost.** A monthly allowance, set by an admin, is enforced with reservations and worst-case accounting. See [AWS costs](../operations/aws-costs.md#ai-agent-and-model-spend).
 
 ### Text from your estate is untrusted
@@ -113,14 +113,15 @@ Logs, task definitions, tags and service names are written by applications, and 
 ### What is redacted, and what leaves the network
 
 - Environment values from task definitions are replaced with `[redacted]` for every provider unless an admin lifted that for that provider in **Settings > AI agent**. Values that look like secrets (cloud keys, tokens, private keys, passwords in URLs, values under secret-looking names) are always redacted.
-- Tool results are scrubbed for secret-shaped text before they go to the model, and the page context the browser sends is cleaned the same way. Scrubbing is best effort. It uses patterns, so a secret with an unusual shape can pass, and in text that is not valid JSON (an answer cut at the size cap) redaction stops at the end of the line, so later lines of a multi-line list under a secret name can stay. Treat logs as possibly sensitive and keep redaction on.
+- Tool results are scrubbed for secret-shaped text before they go to the model, and the page context the browser sends is cleaned the same way. Scrubbing is best effort and has documented limits. It uses patterns, so a secret with an unusual shape can pass. In text that is not valid JSON, such as an answer cut at the size cap, redaction never goes past the end of the line, so the later lines of a list or object spread over several lines under a secret name stay. A value that comes before its name, as in `"value":"x","name":"DB_PASSWORD"`, is found only in valid JSON. Text glued to a redaction without a separator may be hidden only by a second pass. A multi-line list under a secret name whose later lines start with `\`, `]` or `}` can also stay. <!-- TODO(docs): verify the last limit against internal/secretshape; the package comment does not list it --> Treat logs as possibly sensitive and keep redaction on.
+- `HM_TOKEN_REDACT_ENV=true` overrides an admin's per-provider lift: environment values are then redacted for every provider. The operator can force full redaction this way.
 - Tool results are never written to Postgres. Saved are the user's text, the answer and the tool names, for `HM_RETENTION_AGENT_CONVERSATIONS` (30 days by default).
 
 What leaves your network for each provider, for every question: the system text, the conversation (your newest messages that fit), the tool definitions, and the scrubbed results of the tools the model called, including log lines the user may see.
 
 | Provider | Destination | Notes |
 | --- | --- | --- |
-| Anthropic | `api.anthropic.com` | Over the internet through your NAT gateway. Governed by Anthropic's terms |
+| Anthropic | `api.anthropic.com` (the Anthropic SDK's default host) | Over the internet through your NAT gateway. Governed by Anthropic's terms |
 | OpenAI | `api.openai.com` | Over the internet through your NAT gateway. Governed by OpenAI's terms |
 | Google | `generativelanguage.googleapis.com` | Over the internet through your NAT gateway. Governed by Google's terms |
 | Amazon Bedrock | The regional `bedrock-runtime` endpoint | Stays with AWS, under your account and the task role. Governed by your AWS and model terms |
@@ -129,7 +130,7 @@ Check each provider's data handling terms before you enable it.
 
 ### Egress is fenced in the application only
 
-The agent's tasks have outbound 443 to anywhere, because security groups cannot filter by hostname. That the agent dials only the configured providers and Harbormaster is a property of its code, which fixes each provider's address, refuses redirects and ignores proxy settings. It is not enforced by the network. See [Hardening checklist](hardening.md#ai-agent) for stricter options.
+The agent's tasks have outbound 443 to anywhere, because security groups cannot filter by hostname. Provider calls and calls to Harbormaster go to fixed hosts: each provider's address is fixed in code, redirects are refused and proxy settings are ignored. That is a property of the code, not enforced by the network. The AWS credential chain (container credentials endpoint, STS, SSO) is separate: for STS and SSO it follows the `AWS_ENDPOINT_URL_*` variables, so keep those out of the agent's environment. See [Hardening checklist](hardening.md#ai-agent) for stricter options.
 
 ### Audit
 

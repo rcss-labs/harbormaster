@@ -64,6 +64,7 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
     module "harbormaster" {
       # ... existing inputs, with internal = true ...
 
+      # append to any groups already listed (for example the MCP gateway's)
       alb_ingress_security_group_ids = [module.harbormaster_agent.task_security_group_id]
 
       extra_env = {
@@ -76,7 +77,7 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
 
 3. Apply in your deployment system. Nothing here runs `terraform plan` or `terraform apply` locally.
 
-4. Sign in as a global admin and open **Settings > AI agent**. The status should read **Reachable**. Choose a provider and model, then use **Test model**. Set a monthly allowance. It starts at 0, which refuses every question.
+4. Sign in as a global admin and open **Settings > AI agent**. The status should read **Reachable**. Set a monthly allowance first: it starts at 0, which refuses every question, and the model test too. Then choose a provider and model and use **Test model**.
 
 5. Turn on **AI chat** for users in **Settings > Users**. See [AI chat](../guides/ai-agent-chat.md).
 

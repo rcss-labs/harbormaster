@@ -6,7 +6,7 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 
 | Path | Contents |
 |---|---|
-| `cmd/` | The three binaries |
+| `cmd/` | The four binaries |
 | `internal/` | All Go packages (not importable from outside the module) |
 | `web/` | React single-page app, Vitest tests and Playwright e2e specs |
 | `terraform/` | Modules (`harbormaster`, `harbormaster-access`, `harbormaster-mcp`, `harbormaster-agent`) and examples |

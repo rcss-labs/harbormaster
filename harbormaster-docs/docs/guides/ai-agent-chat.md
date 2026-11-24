@@ -8,7 +8,7 @@ The chat is read-only. It can look at your estate and explain what it sees. It c
 
 - **Only what you may see.** Each question runs with a short-lived, read-only token for you. The chat sees the clusters and services on your tags, and log lines only where you have Logs. An admin's chat has no more reach than the admin's own read access.
 - **The same read-only tools as the MCP gateway.** It can read the estate, task definitions, scaling, timelines, metrics, alerts, logs, image security, analytics, networks and storage. See [AI access (MCP)](ai-access-mcp.md#tools) for the list.
-- **Environment values are hidden by default.** Environment variable values in task definitions reach the model as `[redacted]` unless an admin lifted that for the model's provider. Values that look like secrets are always redacted, and log text is scrubbed for secret-looking values before it leaves for the provider. Scrubbing is best effort: it can miss a secret that has an unusual shape. See [Security model](../security/security-model.md#ai-agent).
+- **Environment values are hidden by default.** Environment variable values in task definitions reach the model as `[redacted]` unless an admin lifted that for the model's provider. Values that look like secrets are always redacted, and log text is scrubbed for secret-looking values before it leaves for the provider. If your operator sets `HM_TOKEN_REDACT_ENV=true`, environment values stay redacted whatever an admin lifts. Scrubbing is best effort: it can miss a secret that has an unusual shape. See [Security model](../security/security-model.md#ai-agent).
 
 ## Get access
 
@@ -26,7 +26,7 @@ If you do not have access, the **Ask AI** button does not appear.
 2. Type a question of 1 to 8000 characters, for example "Which services in production are unhealthy, and why?". The chat knows which page you are on and uses it as a hint, so "what is wrong here?" works on a service page.
 3. The answer streams in. The tools the chat used are shown as chips with the answer.
 
-You may have one question in progress at a time. A new question waits until the last one has finished.
+You may have one question in progress at a time. A second question while one is running is refused with a message to wait, not queued.
 
 Check it worked: ask "who am I and what can I see?". The answer should match **My access**.
 
@@ -34,7 +34,7 @@ Check it worked: ask "who am I and what can I see?". The answer should match **M
 
 Each question is a run with limits set by your operator:
 
-- At most 20 steps (model calls and tool calls), 200000 tokens and 5 minutes by default.
+- At most 20 steps, 200000 tokens and 5 minutes by default. A step is one model call. The model may ask for at most 8 tool calls in one turn, and extra calls in that turn are refused.
 - Every run keeps room for a final answer. When a limit is close, the chat stops gathering data and answers from what it has, and says what is missing.
 - A long conversation sends only its newest messages to the model. When earlier messages are left out, the chat says so.
 - Tool definitions alone take about 10,000 input tokens on every model call, so even a short question uses real tokens.
@@ -72,7 +72,7 @@ A model can misread data, miss something it was not shown, or state a guess as a
 - Turn chat on or off for a user in **Settings > Users**. Each change is audited as `user_ai_chat`.
 - Choose the model, set the allowance, lift redaction for a provider and read usage in **Settings > AI agent**. Each save is audited as `agent_settings_update`.
 - **Test model** makes one small paid call to the chosen model. It counts against the allowance.
-- Lift redaction only for a provider you accept receiving environment values. Keep it on for any provider outside your own AWS account.
+- Lift redaction only for a provider you accept receiving environment values. Keep it on for any provider outside your own AWS account. An operator who sets `HM_TOKEN_REDACT_ENV=true` forces full redaction for every provider, and an admin's lift then has no effect.
 
 ## Next steps
 
