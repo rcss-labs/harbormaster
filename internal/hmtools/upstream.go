@@ -1,4 +1,4 @@
-package mcpgw
+package hmtools
 
 import (
 	"bytes"
@@ -20,16 +20,16 @@ import (
 var Version = "dev"
 
 // maxUpstreamBodyBytes is the default bound on how much of an upstream answer
-// is read. NewHandler lowers it to upstreamReadCap(MaxResultBytes).
+// is read. SetReadCap lowers it to UpstreamReadCap(maxResultBytes).
 const maxUpstreamBodyBytes = 8 << 20
 
 // minUpstreamReadCap is the floor of the per-answer read cap.
 const minUpstreamReadCap = 64 << 10
 
-// upstreamReadCap is how much of one upstream answer is read: twice the result
+// UpstreamReadCap is how much of one upstream answer is read: twice the result
 // cap, so an oversized answer is still seen as oversized but many concurrent
 // calls cannot each hold megabytes in memory.
-func upstreamReadCap(maxResultBytes int) int {
+func UpstreamReadCap(maxResultBytes int) int {
 	return min(max(2*maxResultBytes, minUpstreamReadCap), maxUpstreamBodyBytes)
 }
 
@@ -130,6 +130,12 @@ func newUpstream(baseURL string, defaultTimeout time.Duration, client *http.Clie
 		client:         &httpClient,
 		maxBodyBytes:   maxUpstreamBodyBytes,
 	}, nil
+}
+
+// SetReadCap bounds how much of one answer is read to the cap for a result cap of
+// maxResultBytes. It is set once, before the gateway serves calls.
+func (u *Upstream) SetReadCap(maxResultBytes int) {
+	u.maxBodyBytes = int64(UpstreamReadCap(maxResultBytes))
 }
 
 // Do sends c to Harbormaster with the caller's bearer token. The returned

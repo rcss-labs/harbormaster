@@ -1,4 +1,4 @@
-package mcpgw
+package hmtools
 
 import (
 	"context"
@@ -11,47 +11,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rcss-labs/harbormaster/internal/hmtools/hmtoolstest"
 )
-
-// recordedRequest is what a stub upstream saw.
-type recordedRequest struct {
-	Method, EscapedPath, Query string
-	Header                     http.Header
-	Body                       string
-}
-
-// recordingServer answers every request with handler (default 200 {}) and remembers each request.
-type recordingServer struct {
-	*httptest.Server
-	mu       sync.Mutex
-	requests []recordedRequest
-}
-
-func newRecordingServer(t *testing.T, handler http.HandlerFunc) *recordingServer {
-	t.Helper()
-	rs := &recordingServer{}
-	rs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		rs.mu.Lock()
-		rs.requests = append(rs.requests, recordedRequest{
-			Method: r.Method, EscapedPath: r.URL.EscapedPath(), Query: r.URL.RawQuery, Header: r.Header.Clone(), Body: string(body),
-		})
-		rs.mu.Unlock()
-		if handler != nil {
-			handler(w, r)
-			return
-		}
-		_, _ = io.WriteString(w, `{}`)
-	}))
-	t.Cleanup(rs.Close)
-	return rs
-}
-
-func (rs *recordingServer) seen() []recordedRequest {
-	rs.mu.Lock()
-	defer rs.mu.Unlock()
-	return append([]recordedRequest(nil), rs.requests...)
-}
 
 func newTestUpstream(t *testing.T, base string) *Upstream {
 	t.Helper()
@@ -63,7 +25,7 @@ func newTestUpstream(t *testing.T, base string) *Upstream {
 }
 
 func TestUpstream_BuildsThePathAndQuery(t *testing.T) {
-	rs := newRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, rs.URL)
 	resp, err := up.Do(context.Background(), "tok", "1.2.3.4", Call{
 		Route: Route{Method: "GET", Pattern: "/api/services/{serviceId}/revisions/{revision}"},
@@ -76,7 +38,7 @@ func TestUpstream_BuildsThePathAndQuery(t *testing.T) {
 	if resp.Status != 200 {
 		t.Fatalf("status = %d", resp.Status)
 	}
-	got := rs.seen()
+	got := rs.Seen()
 	if len(got) != 1 {
 		t.Fatalf("requests = %d", len(got))
 	}
@@ -90,7 +52,7 @@ func TestUpstream_BuildsThePathAndQuery(t *testing.T) {
 }
 
 func TestUpstream_PostSendsTheJSONBody(t *testing.T) {
-	rs := newRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, rs.URL)
 	_, err := up.Do(context.Background(), "tok", "", Call{
 		Route: Route{Method: "POST", Pattern: "/api/log-search"}, Body: map[string]any{"query": "x"},
@@ -98,14 +60,14 @@ func TestUpstream_PostSendsTheJSONBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := rs.seen()[0]
+	got := rs.Seen()[0]
 	if got.Method != "POST" || got.Body != `{"query":"x"}` || got.Header.Get("Content-Type") != "application/json" {
 		t.Errorf("post = %s %q content-type %q", got.Method, got.Body, got.Header.Get("Content-Type"))
 	}
 }
 
 func TestUpstream_MissingPathValueIsAnErrorBeforeAnyRequest(t *testing.T) {
-	rs := newRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, rs.URL)
 	for _, values := range []map[string]string{nil, {"serviceId": ""}, {"other": "x"}, {"serviceId": ".."}, {"serviceId": "."}} {
 		_, err := up.Do(context.Background(), "tok", "", Call{
@@ -115,7 +77,7 @@ func TestUpstream_MissingPathValueIsAnErrorBeforeAnyRequest(t *testing.T) {
 			t.Errorf("values %v: want an error", values)
 		}
 	}
-	if n := len(rs.seen()); n != 0 {
+	if n := len(rs.Seen()); n != 0 {
 		t.Errorf("%d requests were sent, want 0", n)
 	}
 }
@@ -185,12 +147,12 @@ func TestUpstream_PathArgumentsCannotChangeTheRoute(t *testing.T) {
 }
 
 func TestUpstream_SendsOnlyTheExpectedHeaders(t *testing.T) {
-	rs := newRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, rs.URL)
 	if _, err := up.Do(context.Background(), "secret-token", "9.9.9.9", Call{Route: Route{Method: "GET", Pattern: "/api/overview"}}); err != nil {
 		t.Fatal(err)
 	}
-	header := rs.seen()[0].Header
+	header := rs.Seen()[0].Header
 	want := map[string]string{
 		"Authorization":   "Bearer secret-token",
 		"Accept":          "application/json",
@@ -215,7 +177,7 @@ func TestUpstream_SendsOnlyTheExpectedHeaders(t *testing.T) {
 
 func TestUpstream_NeverSendsACookie(t *testing.T) {
 	// The server sets a cookie on the first answer; the second request must not carry it back.
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "hm_session", Value: "abc"})
 		_, _ = io.WriteString(w, `{}`)
 	})
@@ -225,7 +187,7 @@ func TestUpstream_NeverSendsACookie(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, req := range rs.seen() {
+	for _, req := range rs.Seen() {
 		if req.Header.Get("Cookie") != "" {
 			t.Errorf("a cookie was sent: %q", req.Header.Get("Cookie"))
 		}
@@ -233,7 +195,7 @@ func TestUpstream_NeverSendsACookie(t *testing.T) {
 }
 
 func TestUpstream_ParsesTheErrorEnvelope(t *testing.T) {
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "17")
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = io.WriteString(w, `{"error":{"code":"forbidden","message":"No access to that tag."}}`)
@@ -249,7 +211,7 @@ func TestUpstream_ParsesTheErrorEnvelope(t *testing.T) {
 }
 
 func TestUpstream_NonJSONErrorBodyStillAnswers(t *testing.T) {
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = io.WriteString(w, `<html>bad gateway</html>`)
 	})
@@ -261,8 +223,8 @@ func TestUpstream_NonJSONErrorBodyStillAnswers(t *testing.T) {
 }
 
 func TestUpstream_OnlyEverCallsTheConfiguredHost(t *testing.T) {
-	configured := newRecordingServer(t, nil)
-	other := newRecordingServer(t, nil)
+	configured := hmtoolstest.NewRecordingServer(t, nil)
+	other := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, configured.URL)
 
 	hostile := []string{
@@ -280,30 +242,30 @@ func TestUpstream_OnlyEverCallsTheConfiguredHost(t *testing.T) {
 			Body:  map[string]any{"query": value, "service_ids": []string{value}},
 		})
 	}
-	if n := len(other.seen()); n != 0 {
+	if n := len(other.Seen()); n != 0 {
 		t.Errorf("the other server received %d requests, want 0", n)
 	}
-	if n := len(configured.seen()); n != len(hostile)*2 {
+	if n := len(configured.Seen()); n != len(hostile)*2 {
 		t.Errorf("the configured server received %d requests, want %d", n, len(hostile)*2)
 	}
 }
 
 func TestUpstream_RefusesAPatternOutsideAPI(t *testing.T) {
-	rs := newRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, rs.URL)
 	for _, pattern := range []string{"/healthz", "//other.example/api/x", "api/x", "http://other.example/api/x"} {
 		if _, err := up.Do(context.Background(), "tok", "", Call{Route: Route{Method: "GET", Pattern: pattern}}); err == nil {
 			t.Errorf("pattern %q: want an error", pattern)
 		}
 	}
-	if n := len(rs.seen()); n != 0 {
+	if n := len(rs.Seen()); n != 0 {
 		t.Errorf("%d requests sent", n)
 	}
 }
 
 func TestUpstream_TimeoutIsAnError(t *testing.T) {
 	release := make(chan struct{})
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-release:
 		case <-r.Context().Done():
@@ -324,8 +286,8 @@ func TestUpstream_TimeoutIsAnError(t *testing.T) {
 }
 
 func TestUpstream_DoesNotFollowRedirects(t *testing.T) {
-	target := newRecordingServer(t, nil)
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	target := hmtoolstest.NewRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target.URL+"/api/overview", http.StatusFound)
 	})
 	up := newTestUpstream(t, rs.URL)
@@ -336,14 +298,14 @@ func TestUpstream_DoesNotFollowRedirects(t *testing.T) {
 	if resp.Status != http.StatusFound {
 		t.Errorf("status = %d, want the 302 itself", resp.Status)
 	}
-	if n := len(target.seen()); n != 0 {
+	if n := len(target.Seen()); n != 0 {
 		t.Errorf("the redirect target received %d requests (the bearer token would have leaked)", n)
 	}
 }
 
 func TestUpstream_RedirectPolicyIsKeptWhenAClientIsGiven(t *testing.T) {
-	target := newRecordingServer(t, nil)
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	target := hmtoolstest.NewRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target.URL+"/api/overview", http.StatusFound)
 	})
 	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return nil }}
@@ -352,26 +314,26 @@ func TestUpstream_RedirectPolicyIsKeptWhenAClientIsGiven(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp, err := up.Do(context.Background(), "tok", "", Call{Route: Route{Method: "GET", Pattern: "/api/overview"}})
-	if err != nil || resp.Status != http.StatusFound || len(target.seen()) != 0 {
-		t.Errorf("resp = %+v err = %v target hits = %d", resp, err, len(target.seen()))
+	if err != nil || resp.Status != http.StatusFound || len(target.Seen()) != 0 {
+		t.Errorf("resp = %+v err = %v target hits = %d", resp, err, len(target.Seen()))
 	}
 }
 
 func TestUpstream_RefusesOtherMethods(t *testing.T) {
-	rs := newRecordingServer(t, nil)
+	rs := hmtoolstest.NewRecordingServer(t, nil)
 	up := newTestUpstream(t, rs.URL)
 	for _, method := range []string{"DELETE", "PUT", "PATCH", ""} {
 		if _, err := up.Do(context.Background(), "tok", "", Call{Route: Route{Method: method, Pattern: "/api/overview"}}); err == nil {
 			t.Errorf("method %q: want an error", method)
 		}
 	}
-	if n := len(rs.seen()); n != 0 {
+	if n := len(rs.Seen()); n != 0 {
 		t.Errorf("%d requests sent", n)
 	}
 }
 
 func TestUpstream_BodyIsCapped(t *testing.T) {
-	rs := newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+	rs := hmtoolstest.NewRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		chunk := strings.Repeat("a", 1<<20)
 		for range 10 {
 			_, _ = io.WriteString(w, chunk)

@@ -18,6 +18,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx/fake"
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/mcpgw"
 	"github.com/rcss-labs/harbormaster/internal/oauthsrv"
@@ -77,7 +78,7 @@ func newMCPEnvWith(t *testing.T, docs *oauthDocs) *mcpEnv {
 	env.sam = login(t, srv, "sam", testPassword)
 	env.omer = login(t, srv, "omer", testPassword)
 
-	upstream, err := mcpgw.NewUpstream(srv.URL, 20*time.Second, nil)
+	upstream, err := hmtools.NewUpstream(srv.URL, 20*time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestTokenRoutes_MatchTheGatewayTable(t *testing.T) {
 		}
 	}
 	sort.Strings(marked)
-	want := mcpgw.UpstreamRoutes()
+	want := hmtools.UpstreamRoutes()
 	if !slices.Equal(marked, want) {
 		inTable := map[string]bool{}
 		for _, r := range want {
@@ -327,7 +328,7 @@ func TestMCP_EveryToolAnswersAgainstTheRealAPI(t *testing.T) {
 		"list_storage":              nil,
 		"search_config":             {"q": "web"},
 	}
-	tools := mcpgw.Tools()
+	tools := hmtools.Tools()
 	if len(args) != len(tools) {
 		t.Fatalf("the argument table has %d entries for %d tools", len(args), len(tools))
 	}
