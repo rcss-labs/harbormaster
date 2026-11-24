@@ -186,7 +186,7 @@ export function AgentSettings() {
             )}
             <div className={styles.windowRow}>
               <label htmlFor="agent-provider">Provider</label>
-              <select
+              <select className={styles.select}
                 id="agent-provider"
                 value={draft.provider}
                 onChange={(event) => patch({ provider: event.target.value, model: '' })}
@@ -199,7 +199,7 @@ export function AgentSettings() {
                 ))}
               </select>
               <label htmlFor="agent-model">Model</label>
-              <select id="agent-model" value={draft.model} disabled={draft.provider === ''} onChange={(event) => patch({ model: event.target.value })}>
+              <select id="agent-model" className={styles.select} value={draft.model} disabled={draft.provider === ''} onChange={(event) => patch({ model: event.target.value })}>
                 <option value="">Choose a model</option>
                 {models.map((model) => (
                   <option key={model.id} value={model.id}>

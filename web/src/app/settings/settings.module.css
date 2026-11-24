@@ -5,6 +5,7 @@
 .panel { margin-top: 16px; display: grid; gap: 12px; min-width: 0; }
 .windowRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .windowInput { width: 88px; height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
+.select { height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; max-width: 100%; }
 .error { color: var(--danger); font-size: 12px; margin: 8px 0 0; }
 .hint { color: var(--muted); font-size: 12px; margin: 0; }
 .btn { height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
