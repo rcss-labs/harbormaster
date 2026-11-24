@@ -64,7 +64,7 @@ function ServicePreview({ cluster }: { cluster: ClusterCardDTO }) {
 function UsageCell({ cluster, points, now, color }: { cluster: ClusterCardDTO; points: number[]; now: number | null | undefined; color: string }) {
   if (!cluster.container_insights) {
     return (
-      <span className={styles.dim} title={INSIGHTS_OFF}>
+      <span className={`${styles.mono} ${styles.dim}`} title={INSIGHTS_OFF}>
         –
       </span>
     )
@@ -165,6 +165,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
       header: 'CPU 24h',
       phoneLabel: false,
       width: 'minmax(0,0.75fr)',
+      align: 'right',
       sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.cpu_now ?? null) : null),
       render: ({ cluster, metrics }) =>
         phone ? (
@@ -178,6 +179,7 @@ function columns(phone: boolean): DataTableColumn<ClusterRow>[] {
       header: 'Memory 24h',
       phoneLabel: false,
       width: 'minmax(0,0.75fr)',
+      align: 'right',
       sortValue: (r) => (r.cluster.container_insights ? (r.metrics?.mem_now ?? null) : null),
       render: ({ cluster, metrics }) =>
         phone ? (

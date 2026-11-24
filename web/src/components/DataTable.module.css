@@ -21,7 +21,9 @@
 .sticky { z-index: 1; background: var(--surface); box-shadow: -1px 0 0 var(--row-border); overflow: visible; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; }
 .body .sticky { margin-block: -2px; }
 .body:hover .sticky { background: var(--hover); }
-.sortButton { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.sortButton { all: unset; cursor: pointer; display: inline-flex; vertical-align: top; align-items: center; gap: 4px; }
+/* The arrow goes before a right-aligned label, so the label ends where the numbers below it end. */
+.right .sortButton { flex-direction: row-reverse; }
 .sortButton:hover { color: var(--text); }
 .sortButton:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arrow { font-size: 12px; min-width: 10px; }
