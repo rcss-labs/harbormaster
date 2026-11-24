@@ -54,6 +54,8 @@ type RetentionConfig struct {
 	ScanRuns   time.Duration
 	// Alert notification delivery log and resolved incidents.
 	NotificationLog time.Duration
+	// Agent chat conversations, by last activity.
+	AgentConversations time.Duration
 }
 
 // AnalyticsConfig toggles optional analytics collection.
@@ -332,19 +334,20 @@ func Load(getenv func(string) string) (Config, error) {
 			IdleInterval:  reader.duration("HM_POLL_IDLE_INTERVAL", 5*time.Minute),
 		},
 		Retention: RetentionConfig{
-			StoppedTasks:      reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),
-			ServiceEvents:     reader.duration("HM_RETENTION_SERVICE_EVENTS", 720*time.Hour),
-			CountsHistory:     reader.duration("HM_RETENTION_COUNTS_HISTORY", 168*time.Hour),
-			OperationLog:      reader.duration("HM_RETENTION_OPERATION_LOG", 2160*time.Hour),
-			DeploymentHistory: reader.duration("HM_RETENTION_DEPLOYMENT_HISTORY", 2160*time.Hour),
-			AuditLog:          reader.duration("HM_RETENTION_AUDIT_LOG", 8760*time.Hour),
-			OrphanTags:        reader.duration("HM_RETENTION_ORPHAN_TAGS", 720*time.Hour),
-			AvailabilityDaily: reader.duration("HM_RETENTION_AVAILABILITY_DAILY", 8760*time.Hour),
-			CapacityDaily:     reader.duration("HM_RETENTION_CAPACITY_DAILY", 8760*time.Hour),
-			UtilDaily:         reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
-			ScanImages:        reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
-			ScanRuns:          reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
-			NotificationLog:   reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
+			StoppedTasks:       reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),
+			ServiceEvents:      reader.duration("HM_RETENTION_SERVICE_EVENTS", 720*time.Hour),
+			CountsHistory:      reader.duration("HM_RETENTION_COUNTS_HISTORY", 168*time.Hour),
+			OperationLog:       reader.duration("HM_RETENTION_OPERATION_LOG", 2160*time.Hour),
+			DeploymentHistory:  reader.duration("HM_RETENTION_DEPLOYMENT_HISTORY", 2160*time.Hour),
+			AuditLog:           reader.duration("HM_RETENTION_AUDIT_LOG", 8760*time.Hour),
+			OrphanTags:         reader.duration("HM_RETENTION_ORPHAN_TAGS", 720*time.Hour),
+			AvailabilityDaily:  reader.duration("HM_RETENTION_AVAILABILITY_DAILY", 8760*time.Hour),
+			CapacityDaily:      reader.duration("HM_RETENTION_CAPACITY_DAILY", 8760*time.Hour),
+			UtilDaily:          reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
+			ScanImages:         reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
+			ScanRuns:           reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
+			NotificationLog:    reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
+			AgentConversations: reader.duration("HM_RETENTION_AGENT_CONVERSATIONS", 720*time.Hour),
 		},
 		Scan: ScanConfig{
 			Enabled:           reader.boolean("HM_SCAN_ENABLED", false),
