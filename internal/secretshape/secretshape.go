@@ -5,7 +5,6 @@ package secretshape
 
 import (
 	"regexp"
-	"sort"
 	"strings"
 	"unicode"
 )
@@ -29,20 +28,25 @@ var secretSegments = map[string]bool{
 // hide env_AKIA... from \b.
 const boundary = `(^|[^A-Za-z0-9])`
 
-// valuePatterns match a secret on its own; group 2 is the secret.
-var valuePatterns = []*regexp.Regexp{
-	regexp.MustCompile(boundary + `((?:AKIA|ASIA)[A-Z0-9]{16})`),
-	regexp.MustCompile(`()(-----BEGIN [A-Z0-9 ]+-----)`),
-	regexp.MustCompile(boundary + `(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)`),
-	regexp.MustCompile(boundary + `(sk-[A-Za-z0-9_-]{16,})`),
-	regexp.MustCompile(boundary + `(gh[po]_[A-Za-z0-9]{20,})`),
-	regexp.MustCompile(boundary + `(xox[bp]-[A-Za-z0-9-]{10,})`),
-	regexp.MustCompile(boundary + `(AIza[A-Za-z0-9_-]{30,})`),
+// valuePatterns match a secret on its own; group 2 is the secret. A pattern is tried only on text that contains its hint,
+// which is far cheaper to look for.
+var valuePatterns = []struct {
+	hint    string
+	pattern *regexp.Regexp
+}{
+	{"AKIA", regexp.MustCompile(boundary + `(AKIA[A-Z0-9]{16})`)},
+	{"ASIA", regexp.MustCompile(boundary + `(ASIA[A-Z0-9]{16})`)},
+	{"-----BEGIN", regexp.MustCompile(`()(-----BEGIN [A-Z0-9 ]+-----)`)},
+	{"eyJ", regexp.MustCompile(boundary + `(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)`)},
+	{"sk-", regexp.MustCompile(boundary + `(sk-[A-Za-z0-9_-]{16,})`)},
+	{"gh", regexp.MustCompile(boundary + `(gh[po]_[A-Za-z0-9]{20,})`)},
+	{"xox", regexp.MustCompile(boundary + `(xox[bp]-[A-Za-z0-9-]{10,})`)},
+	{"AIza", regexp.MustCompile(boundary + `(AIza[A-Za-z0-9_-]{30,})`)},
 	// Harbormaster tokens: prefix, 12 base32 characters, "_", 43 base64url characters. The second branch keeps
 	// shorter or malformed tokens caught.
-	regexp.MustCompile(boundary + `(hm[poar]_(?:[a-z2-7]{12}_[A-Za-z0-9_-]{43}|[A-Za-z0-9]{16,}))`),
+	{"hm", regexp.MustCompile(boundary + `(hm[poar]_(?:[a-z2-7]{12}_[A-Za-z0-9_-]{43}|[A-Za-z0-9]{16,}))`)},
 	// Standalone "Bearer <token>" as sent in an Authorization header.
-	regexp.MustCompile(boundary + `Bearer[ \t]+([A-Za-z0-9._~+/=-]+)`),
+	{"Bearer", regexp.MustCompile(boundary + `Bearer[ \t]+([A-Za-z0-9._~+/=-]+)`)},
 }
 
 // urlUserinfo matches scheme://user:password@; group 2 is the password. The
@@ -66,19 +70,6 @@ var (
 	digestPrefix = regexp.MustCompile(`sha[0-9]+:$`)
 	arnSpan      = regexp.MustCompile(`\barn:aws[a-z-]*:[^\s"'<>,;]+`)
 )
-
-// pairName matches the name and operator of name=value, name: value and
-// "name": "value". The value is parsed separately so that a secret nested in
-// another pair's value is still found.
-var pairName = regexp.MustCompile(`((?:\\*["'])?)([A-Za-z0-9_.-]+)((?:\\*["'])?)[ \t]*[=:][ \t]*`)
-
-// unquotedValue is a run of characters up to whitespace, a separator or a quote. Brackets inside it belong to the
-// value; only a trailing run of unbalanced closing brackets is JSON structure (see trimClosers).
-var unquotedValue = regexp.MustCompile(`^[^\s,;&"']+`)
-
-var authScheme = regexp.MustCompile(`^(?i:bearer|basic)$`)
-
-var authToken = regexp.MustCompile(`^[ \t]+[A-Za-z0-9._~+/=-]+`)
 
 // notPassWords end in "pass" without being a password name.
 var notPassWords = map[string]bool{
@@ -154,80 +145,6 @@ func pairNameKind(name string) nameKind {
 	return nameClean
 }
 
-// harmlessCounterValue reports whether the first item of a plural-named value is a number (signed, decimal, with a
-// unit suffix), n/m, a boolean, null, or the start of a JSON array or object: none of those is a secret.
-var harmlessCounter = regexp.MustCompile(`^(?i:[+-]?[0-9]+(?:\.[0-9]+)?(?:k|m|s|ms|%)?|n/m|true|false|yes|no|on|off|null)$`)
-
-func harmlessCounterValue(first string) bool {
-	return harmlessCounter.MatchString(first) || strings.HasPrefix(first, "[") || strings.HasPrefix(first, "{")
-}
-
-// listEnd extends a span over the comma separated items that follow it.
-func listEnd(text string, span [2]int) int {
-	end := span[1]
-	for end < len(text) && text[end] == ',' {
-		item := unquotedValue.FindString(text[end+1:])
-		if item == "" {
-			break
-		}
-		end += 1 + len(trimClosers(item))
-	}
-	return end
-}
-
-// trimClosers removes the trailing closing brackets of value that no opening bracket inside it balances: in
-// {"password": hunter2} the value is hunter2} and the brace is the object's, in {user}:{pw} both are the value's.
-func trimClosers(value string) string {
-	for len(value) > 0 {
-		last := value[len(value)-1]
-		var open byte
-		switch last {
-		case '}':
-			open = '{'
-		case ']':
-			open = '['
-		default:
-			return value
-		}
-		if strings.Count(value, string(open)) >= strings.Count(value, string(last)) {
-			return value
-		}
-		value = value[:len(value)-1]
-	}
-	return value
-}
-
-// escapedValueSpan finds a value opened by backslashes and a quote, as in a JSON string inside a JSON string. It
-// closes at the first quote preceded by exactly as many backslashes as the opener had, so a deeper escaped quote
-// inside the value does not end it.
-func escapedValueSpan(text string, start int) ([2]int, bool) {
-	n := 0
-	for start+n < len(text) && text[start+n] == '\\' {
-		n++
-	}
-	if start+n >= len(text) || (text[start+n] != '"' && text[start+n] != '\'') {
-		return [2]int{}, false
-	}
-	quote := text[start+n]
-	begin := start + n + 1
-	for i := begin; i < len(text); i++ {
-		if text[i] == '\n' {
-			return [2]int{begin, i}, i > begin
-		}
-		if text[i] != quote {
-			continue
-		}
-		run := 0
-		for j := i - 1; j >= begin && text[j] == '\\'; j-- {
-			run++
-		}
-		if run == n {
-			return [2]int{begin, i - n}, i-n > begin
-		}
-	}
-	return [2]int{begin, len(text)}, len(text) > begin
-}
-
 func nameSegments(name string) []string {
 	var segments []string
 	var current []rune
@@ -259,48 +176,23 @@ func ValueLooksSecret(value string) bool {
 	return len(valueSpans(value)) > 0
 }
 
-// ScrubText replaces each secret-shaped span in text with Redacted and leaves
-// the rest byte-identical.
-func ScrubText(text string) string {
-	spans := append(pairSpans(text), valueSpans(text)...)
-	if len(spans) == 0 {
-		return text
-	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
-	var merged [][2]int
-	for _, span := range spans {
-		if n := len(merged); n > 0 && span[0] <= merged[n-1][1] {
-			if span[1] > merged[n-1][1] {
-				merged[n-1][1] = span[1]
-			}
-			continue
-		}
-		merged = append(merged, span)
-	}
-	var out strings.Builder
-	last := 0
-	for _, span := range merged {
-		out.WriteString(text[last:span[0]])
-		out.WriteString(Redacted)
-		last = span[1]
-	}
-	out.WriteString(text[last:])
-	return out.String()
-}
-
 // valueSpans returns the spans that are secret regardless of any name.
 func valueSpans(text string) [][2]int {
 	var spans [][2]int
 	for _, p := range valuePatterns {
-		for _, m := range p.FindAllStringSubmatchIndex(text, -1) {
+		if !strings.Contains(text, p.hint) {
+			continue
+		}
+		for _, m := range p.pattern.FindAllStringSubmatchIndex(text, -1) {
 			spans = append(spans, [2]int{m[4], m[5]})
 		}
 	}
-	for _, m := range urlUserinfo.FindAllStringSubmatchIndex(text, -1) {
-		if looksLikePort(text[m[4]:m[5]]) {
-			continue
+	if strings.Contains(text, "://") {
+		for _, m := range urlUserinfo.FindAllStringSubmatchIndex(text, -1) {
+			if !looksLikePort(text[m[4]:m[5]]) {
+				spans = append(spans, [2]int{m[4], m[5]})
+			}
 		}
-		spans = append(spans, [2]int{m[4], m[5]})
 	}
 	return append(spans, longRunSpans(text)...)
 }
@@ -310,80 +202,6 @@ func valueSpans(text string) [][2]int {
 func looksLikePort(afterColon string) bool {
 	slash := strings.IndexByte(afterColon, '/')
 	return slash > 0 && digitsOnly.MatchString(afterColon[:slash])
-}
-
-// pairSpans returns the value of every secret-named pair, wherever the pair
-// appears, including inside another pair's value or a query string.
-func pairSpans(text string) [][2]int {
-	var spans [][2]int
-	for _, m := range pairName.FindAllStringSubmatchIndex(text, -1) {
-		kind := pairNameKind(text[m[4]:m[5]])
-		if kind == nameClean {
-			continue
-		}
-		span, ok := pairValueSpan(text, m[1])
-		if !ok {
-			continue
-		}
-		if kind == nameCounter {
-			// A counter or list: only the first item is judged, and a secret list is hidden whole.
-			first := text[span[0]:span[1]]
-			if comma := strings.IndexByte(first, ','); comma >= 0 {
-				first = first[:comma]
-			}
-			if harmlessCounterValue(first) {
-				continue
-			}
-			span[1] = listEnd(text, span)
-		}
-		spans = append(spans, span)
-	}
-	return spans
-}
-
-func pairValueSpan(text string, start int) ([2]int, bool) {
-	if start >= len(text) {
-		return [2]int{}, false
-	}
-	if quote := text[start]; quote == '"' || quote == '\'' {
-		for i := start + 1; i < len(text); i++ {
-			switch text[i] {
-			case '\\':
-				i++
-			case quote:
-				return [2]int{start + 1, i}, i > start+1
-			case '\n':
-				return [2]int{start + 1, i}, i > start+1
-			}
-		}
-		return [2]int{start + 1, len(text)}, len(text) > start+1
-	}
-	if text[start] == '\\' {
-		if span, ok := escapedValueSpan(text, start); ok {
-			return span, true
-		}
-	}
-	value := unquotedValue.FindString(text[start:])
-	if value == "" {
-		return [2]int{}, false
-	}
-	end := start + len(value)
-	if trimmed := trimClosers(value); trimmed == "" {
-		// Only brackets: JSON structure when the text ends or a separator follows, otherwise a secret.
-		if end >= len(text) || strings.IndexByte(", \t\r\n", text[end]) >= 0 {
-			return [2]int{}, false
-		}
-	} else {
-		end = start + len(trimmed)
-		value = trimmed
-	}
-	if authScheme.MatchString(value) {
-		// "Authorization: Bearer <token>": the credential follows the scheme.
-		if token := authToken.FindString(text[end:]); token != "" {
-			return [2]int{end + len(token) - len(strings.TrimLeft(token, " \t")), end + len(token)}, true
-		}
-	}
-	return [2]int{start, end}, true
 }
 
 // longRunSpans finds random-looking tokens, skipping identifiers that are
