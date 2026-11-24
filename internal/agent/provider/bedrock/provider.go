@@ -4,6 +4,7 @@ package bedrock
 
 import (
 	"context"
+	"math"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
@@ -30,7 +31,10 @@ func (p *Provider) Name() string { return "bedrock" }
 type toolCallBuilder struct {
 	id, name string
 	input    strings.Builder
+	closed   bool
 }
+
+const argErrorText = "arguments were not a valid JSON object"
 
 func (p *Provider) Generate(ctx context.Context, req provider.Request, onText func(string)) (provider.Response, error) {
 	input := &bedrockruntime.ConverseStreamInput{
@@ -42,7 +46,7 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 		input.System = []types.SystemContentBlock{&types.SystemContentBlockMemberText{Value: req.System}}
 	}
 	if req.MaxOutputTokens > 0 {
-		max := int32(req.MaxOutputTokens)
+		max := int32(min(req.MaxOutputTokens, math.MaxInt32))
 		input.InferenceConfig = &types.InferenceConfiguration{MaxTokens: &max}
 	}
 
@@ -61,6 +65,7 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 		reasoning = map[int32]*reasoningState{}
 		reasonIdx []int32
 		stopped   bool
+		gotUsage  bool
 		stop      types.StopReason
 	)
 	for event := range stream.Events() {
@@ -102,12 +107,17 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 					r.Redacted = append(r.Redacted, rd.Value...)
 				}
 			}
+		case *types.ConverseStreamOutputMemberContentBlockStop:
+			if b := tools[derefInt32(ev.Value.ContentBlockIndex)]; b != nil {
+				b.closed = true
+			}
 		case *types.ConverseStreamOutputMemberMessageStop:
 			stopped = true
 			stop = ev.Value.StopReason
 		case *types.ConverseStreamOutputMemberMetadata:
 			if u := ev.Value.Usage; u != nil {
-				resp.Usage = provider.Usage{InputTokens: int64(derefInt32(u.InputTokens)), OutputTokens: int64(derefInt32(u.OutputTokens))}
+				resp.Usage = usageFrom(u)
+				gotUsage = true
 			}
 		}
 	}
@@ -129,19 +139,23 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 	if ctx.Err() != nil {
 		return resp, ctx.Err()
 	}
-	if !stopped {
+	// Without the final usage the turn's cost is unknown: not a success.
+	if !stopped || !gotUsage {
 		return interrupted()
 	}
 
 	for _, idx := range toolOrder {
 		b := tools[idx]
+		call := provider.ToolCall{ID: b.id, Name: b.name}
+		// A call cut off before its block closed is never trusted, even if
+		// the partial text happens to parse.
 		args, err := parseToolArguments(b.input.String())
-		if err != nil {
-			e := newError("unavailable", resp.Text == "", 0)
-			e.Message = "the model returned malformed tool arguments"
-			return resp, e
+		if err != nil || !b.closed {
+			call.ArgError = argErrorText
+		} else {
+			call.Arguments = args
 		}
-		resp.ToolCalls = append(resp.ToolCalls, provider.ToolCall{ID: b.id, Name: b.name, Arguments: args})
+		resp.ToolCalls = append(resp.ToolCalls, call)
 	}
 	var states []reasoningState
 	for _, idx := range reasonIdx {
@@ -149,19 +163,27 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 	}
 	resp.Opaque = encodeReasoning(states)
 
+	// Every stop reason is mapped on purpose; an unlisted one is an error, never
+	// a silent "end".
 	switch stop {
+	case types.StopReasonEndTurn, types.StopReasonStopSequence:
+		resp.StopReason = "end"
 	case types.StopReasonToolUse:
 		resp.StopReason = "tool_use"
-	case types.StopReasonMaxTokens:
+	case types.StopReasonMaxTokens, types.StopReasonModelContextWindowExceeded:
 		resp.StopReason = "max_tokens"
-	case types.StopReasonModelContextWindowExceeded:
-		return resp, newError("context_too_long", false, 0)
+	case types.StopReasonGuardrailIntervened, types.StopReasonContentFiltered, "refusal":
+		e := newError("invalid_request", false, 0)
+		e.Message = "The model declined to answer."
+		return resp, e
 	case types.StopReasonMalformedModelOutput, types.StopReasonMalformedToolUse:
 		e := newError("unavailable", resp.Text == "", 0)
 		e.Message = "the model returned malformed output"
 		return resp, e
 	default:
-		resp.StopReason = "end"
+		e := newError("invalid_request", false, 0)
+		e.Message = "The model stopped for an unknown reason."
+		return resp, e
 	}
 	return resp, nil
 }
@@ -178,4 +200,16 @@ func derefInt32(v *int32) int32 {
 		return 0
 	}
 	return *v
+}
+
+// usageFrom reports every billed token and never fewer. Cache reads and writes
+// are billed on top of inputTokens, and any token the total counts that the
+// parts do not (reasoning) is attributed to output, the dearer side.
+func usageFrom(u *types.TokenUsage) provider.Usage {
+	in := int64(derefInt32(u.InputTokens)) + int64(derefInt32(u.CacheReadInputTokens)) + int64(derefInt32(u.CacheWriteInputTokens))
+	out := int64(derefInt32(u.OutputTokens))
+	if extra := int64(derefInt32(u.TotalTokens)) - in - out; extra > 0 {
+		out += extra
+	}
+	return provider.Usage{InputTokens: in, OutputTokens: out}
 }

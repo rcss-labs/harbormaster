@@ -66,7 +66,8 @@ func mapError(ctx context.Context, err error) error {
 	case status >= 300:
 		return newError("invalid_request", false, 0)
 	}
-	if strings.Contains(err.Error(), "failed to retrieve credentials") || strings.Contains(err.Error(), "get credentials") {
+	var credErr *credentialsError
+	if errors.As(err, &credErr) {
 		return newError("auth", false, 0)
 	}
 	// Transport failure before any response.

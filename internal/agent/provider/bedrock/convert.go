@@ -102,11 +102,8 @@ func parseToolArguments(raw string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	var args map[string]any
-	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+	if err := json.Unmarshal([]byte(raw), &args); err != nil || args == nil {
 		return nil, fmt.Errorf("tool arguments are not a JSON object")
-	}
-	if args == nil {
-		args = map[string]any{}
 	}
 	return args, nil
 }

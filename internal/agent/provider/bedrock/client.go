@@ -77,6 +77,7 @@ func newClient(cfg Config) (*bedrockruntime.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bedrock: load aws config: %w", err)
 	}
+	awsCfg.Credentials = typedCredentials{awsCfg.Credentials}
 	return bedrockruntime.NewFromConfig(awsCfg, func(o *bedrockruntime.Options) {
 		o.BaseEndpoint = nil
 		o.EndpointResolverV2 = fixedEndpoint{uri: *uri}
@@ -93,4 +94,21 @@ func validRegion(r string) bool {
 		}
 	}
 	return true
+}
+
+// credentialsError marks a failure to obtain credentials so it can be told
+// apart from other errors without matching on text.
+type credentialsError struct{ err error }
+
+func (e *credentialsError) Error() string { return "credentials: " + e.err.Error() }
+func (e *credentialsError) Unwrap() error { return e.err }
+
+type typedCredentials struct{ inner aws.CredentialsProvider }
+
+func (t typedCredentials) Retrieve(ctx context.Context) (aws.Credentials, error) {
+	creds, err := t.inner.Retrieve(ctx)
+	if err != nil {
+		return creds, &credentialsError{err}
+	}
+	return creds, nil
 }

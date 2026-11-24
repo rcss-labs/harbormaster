@@ -6,14 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 
@@ -36,6 +39,11 @@ func loadFixture(t *testing.T, name string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return encodeFixture(t, raw)
+}
+
+func encodeFixture(t *testing.T, raw []byte) []byte {
+	t.Helper()
 	var events []fixtureEvent
 	if err := json.Unmarshal(raw, &events); err != nil {
 		t.Fatal(err)
@@ -68,7 +76,21 @@ type captured struct {
 // streamServer replays a fixture and records the last request.
 func streamServer(t *testing.T, fixture string) (*httptest.Server, *captured) {
 	t.Helper()
-	body := loadFixture(t, fixture)
+	return serveBody(t, loadFixture(t, fixture))
+}
+
+// streamServerWithStop replays a fixture with its end_turn stop reason replaced.
+func streamServerWithStop(t *testing.T, fixture, stopReason string) (*httptest.Server, *captured) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return serveBody(t, encodeFixture(t, bytes.ReplaceAll(raw, []byte("end_turn"), []byte(stopReason))))
+}
+
+func serveBody(t *testing.T, body []byte) (*httptest.Server, *captured) {
+	t.Helper()
 	got := &captured{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.path = r.URL.EscapedPath()
@@ -80,8 +102,25 @@ func streamServer(t *testing.T, fixture string) (*httptest.Server, *captured) {
 	return srv, got
 }
 
+// isolateAWSEnv keeps the developer's ~/.aws and AWS_* variables out of a test.
+func isolateAWSEnv(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(home, "no-config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(home, "no-credentials"))
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_DEFAULT_PROFILE", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	return home
+}
+
 func newTestProvider(t *testing.T, endpoint string) provider.Provider {
 	t.Helper()
+	isolateAWSEnv(t)
 	p, err := New(Config{
 		Region:      "us-east-1",
 		Endpoint:    endpoint,
@@ -152,11 +191,11 @@ func TestGenerate_ToolCall_ParsesArguments(t *testing.T) {
 	}
 	first := resp.ToolCalls[0]
 	if first.ID != "tooluse_abc" || first.Name != "list_services" ||
-		first.Arguments["cluster"] != "prod" || first.Arguments["limit"] != float64(3) {
+		first.Arguments["cluster"] != "prod" || first.Arguments["limit"] != float64(3) || first.ArgError != "" {
 		t.Fatalf("first = %+v", first)
 	}
 	second := resp.ToolCalls[1]
-	if second.ID != "tooluse_def" || second.Name != "no_args" || len(second.Arguments) != 0 || second.Arguments == nil {
+	if second.ID != "tooluse_def" || second.Name != "no_args" || len(second.Arguments) != 0 || second.Arguments == nil || second.ArgError != "" {
 		t.Fatalf("second = %+v", second)
 	}
 }
@@ -502,6 +541,7 @@ func (rt *recordingTransport) RoundTrip(r *http.Request) (*http.Response, error)
 }
 
 func TestClient_IgnoresEnvironmentOverrides(t *testing.T) {
+	home := isolateAWSEnv(t)
 	var hostileHits atomic.Int32
 	hostile := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hostileHits.Add(1) }))
 	defer hostile.Close()
@@ -510,6 +550,13 @@ func TestClient_IgnoresEnvironmentOverrides(t *testing.T) {
 	} {
 		t.Setenv(name, hostile.URL)
 	}
+	// Shared config can also redirect a service through a [services] section.
+	configFile := filepath.Join(home, "config")
+	sharedConfig := "[default]\nservices = hostile\n\n[services hostile]\nbedrock-runtime =\n  endpoint_url = " + hostile.URL + "\n"
+	if err := os.WriteFile(configFile, []byte(sharedConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", configFile)
 	t.Setenv("AWS_USE_FIPS_ENDPOINT", "true")
 	t.Setenv("AWS_USE_DUALSTACK_ENDPOINT", "true")
 
@@ -580,10 +627,14 @@ func TestClient_UsesContainerCredentialsEndpoint(t *testing.T) {
 		inner.ServeHTTP(w, r)
 	})
 
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("AWS_ACCESS_KEY_ID", "")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	isolateAWSEnv(t)
+	// Endpoint overrides must not reach the credentials fetch either.
+	var hostileHits atomic.Int32
+	hostile := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hostileHits.Add(1) }))
+	defer hostile.Close()
+	for _, name := range []string{"AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "AWS_ENDPOINT_URL_STS", "AWS_EC2_METADATA_SERVICE_ENDPOINT", "HTTPS_PROXY", "HTTP_PROXY"} {
+		t.Setenv(name, hostile.URL)
+	}
 	t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", creds.URL+"/creds")
 	t.Setenv("AWS_CONTAINER_AUTHORIZATION_TOKEN", "fake-container-token")
 
@@ -594,7 +645,296 @@ func TestClient_UsesContainerCredentialsEndpoint(t *testing.T) {
 	if _, err := p.Generate(context.Background(), simpleRequest(), nil); err != nil {
 		t.Fatal(err)
 	}
+	if hostileHits.Load() != 0 {
+		t.Fatal("the hostile server was contacted")
+	}
 	if credHits.Load() != 1 || !strings.Contains(authorization, "Credential=AKIDCONTAINER/") || got.path == "" {
 		t.Fatalf("credential hits = %d, authorization = %q", credHits.Load(), authorization)
+	}
+}
+
+func TestGenerate_MalformedToolArguments_SetsArgError(t *testing.T) {
+	cases := []struct {
+		name, fixture, stop string
+	}{
+		{"not json", "tool_malformed.json", "tool_use"},
+		{"not an object", "tool_not_object.json", "tool_use"},
+		{"null", "tool_null.json", "tool_use"},
+		{"string", "tool_string.json", "tool_use"},
+		{"cut off by max tokens", "tool_truncated.json", "max_tokens"},
+		{"cut off but parseable", "tool_unclosed_parseable.json", "max_tokens"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := streamServer(t, tc.fixture)
+			resp, err := newTestProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(resp.ToolCalls) != 1 {
+				t.Fatalf("tool calls = %+v", resp.ToolCalls)
+			}
+			call := resp.ToolCalls[0]
+			if call.ID != "tooluse_bad" || call.Name != "list_services" || call.Arguments != nil ||
+				call.ArgError != "arguments were not a valid JSON object" {
+				t.Fatalf("call = %+v", call)
+			}
+			if resp.StopReason != tc.stop {
+				t.Fatalf("StopReason = %q", resp.StopReason)
+			}
+		})
+	}
+}
+
+func TestGenerate_ReplaysArgErrorCallAsEmptyObject(t *testing.T) {
+	srv, got := streamServer(t, "text_only.json")
+	req := simpleRequest()
+	req.Messages = append(req.Messages,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "tu_bad", Name: "list_services", ArgError: "arguments were not a valid JSON object"}}},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "tu_bad", Text: "error", IsError: true},
+	)
+	if _, err := newTestProvider(t, srv.URL).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Messages []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatal(err)
+	}
+	use := body.Messages[1].Content[0]["toolUse"].(map[string]any)
+	if in, ok := use["input"].(map[string]any); !ok || len(in) != 0 || use["toolUseId"] != "tu_bad" {
+		t.Fatalf("toolUse = %v", use)
+	}
+}
+
+func TestGenerate_NeverRetries_CountsServerHits(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		errType string
+		header  http.Header
+	}{
+		{"500", 500, "InternalServerException", nil},
+		{"429 with Retry-After", 429, "ThrottlingException", http.Header{"Retry-After": {"1"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				for k, v := range tc.header {
+					w.Header()[k] = v
+				}
+				w.Header().Set("X-Amzn-Errortype", tc.errType)
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			if _, err := newTestProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil); err == nil {
+				t.Fatal("want error")
+			}
+			if hits.Load() != 1 {
+				t.Fatalf("server hits = %d, want exactly 1", hits.Load())
+			}
+		})
+	}
+}
+
+func TestGenerate_IgnoresWrongShapeOpaque(t *testing.T) {
+	cases := map[string]string{
+		"number element":         `[1]`,
+		"null element":           `[null]`,
+		"object":                 `{}`,
+		"empty array":            `[]`,
+		"string":                 `"x"`,
+		"other vendor shape":     `[{"type":"reasoning","id":"rs_1","encrypted_content":"abc"}]`,
+		"empty element":          `[{}]`,
+		"invalid json":           `not json`,
+		"bad base64":             `[{"redacted":"!!!not-base64"}]`,
+		"text without signature": `[{"text":"unsigned thought"}]`,
+	}
+	for name, opaque := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv, got := streamServer(t, "text_only.json")
+			req := simpleRequest()
+			req.Messages = append(req.Messages,
+				provider.Message{Role: provider.RoleAssistant, Text: "earlier", Opaque: json.RawMessage(opaque)},
+				provider.Message{Role: provider.RoleUser, Text: "more"})
+			if _, err := newTestProvider(t, srv.URL).Generate(context.Background(), req, nil); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(got.body), "reasoningContent") {
+				t.Fatalf("unexpected reasoning in %s", got.body)
+			}
+		})
+	}
+}
+
+func TestGenerate_UsageNeverUnderstatesCost(t *testing.T) {
+	cases := []struct {
+		name, fixture string
+		want          provider.Usage
+	}{
+		// Cache reads and writes are billed input beyond inputTokens.
+		{"cached tokens counted as input", "usage_cached.json", provider.Usage{InputTokens: 130, OutputTokens: 5}},
+		// Tokens the total reports but the parts do not (reasoning) are billed as output.
+		{"unaccounted total counted as output", "usage_unaccounted.json", provider.Usage{InputTokens: 10, OutputTokens: 30}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := streamServer(t, tc.fixture)
+			resp, err := newTestProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Usage != tc.want {
+				t.Fatalf("usage = %+v, want %+v", resp.Usage, tc.want)
+			}
+		})
+	}
+}
+
+func TestGenerate_StreamWithoutFinalUsage_IsAMidStreamBreak(t *testing.T) {
+	srv, _ := streamServer(t, "text_no_usage.json")
+	resp, err := newTestProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != "unavailable" || perr.Retryable {
+		t.Fatalf("err = %#v", err)
+	}
+	if resp.Text != "partial" {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestGenerate_StopReasons(t *testing.T) {
+	const declined = "The model declined to answer."
+	cases := []struct {
+		stop       string
+		wantReason string
+		wantKind   string
+		wantText   string
+	}{
+		{"end_turn", "end", "", ""},
+		{"stop_sequence", "end", "", ""},
+		{"max_tokens", "max_tokens", "", ""},
+		// A context-window cut-off is a cut-off, not a failure of the request.
+		{"model_context_window_exceeded", "max_tokens", "", ""},
+		{"guardrail_intervened", "", "invalid_request", declined},
+		{"content_filtered", "", "invalid_request", declined},
+		{"refusal", "", "invalid_request", declined},
+		{"malformed_model_output", "", "unavailable", "the model returned malformed output"},
+		{"malformed_tool_use", "", "unavailable", "the model returned malformed output"},
+		{"a_value_from_the_future", "", "invalid_request", "The model stopped for an unknown reason."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.stop, func(t *testing.T) {
+			srv, _ := streamServerWithStop(t, "text_only.json", tc.stop)
+			resp, err := newTestProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+			if tc.wantKind == "" {
+				if err != nil || resp.StopReason != tc.wantReason {
+					t.Fatalf("resp = %+v, err = %v", resp, err)
+				}
+				return
+			}
+			var perr *provider.Error
+			if !errors.As(err, &perr) || perr.Kind != tc.wantKind || perr.Retryable || perr.Message != tc.wantText {
+				t.Fatalf("err = %#v", err)
+			}
+			if resp.Usage.OutputTokens == 0 {
+				t.Fatalf("usage was dropped: %+v", resp)
+			}
+		})
+	}
+}
+
+func TestGenerate_UnsignedReasoningIsNotReplayed(t *testing.T) {
+	srv, got := streamServer(t, "reasoning_nosig.json")
+	p := newTestProvider(t, srv.URL)
+	resp, err := p.Generate(context.Background(), simpleRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Opaque) != 0 {
+		t.Fatalf("unsigned reasoning captured: %s", resp.Opaque)
+	}
+	// Even if such state is handed back, it is not replayed.
+	req := simpleRequest()
+	req.Messages = append(req.Messages,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: resp.ToolCalls, Opaque: json.RawMessage(`[{"text":"unsigned thought"}]`)},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "tooluse_r", Text: "ok"})
+	if _, err := p.Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got.body), "reasoningContent") || strings.Contains(string(got.body), "unsigned thought") {
+		t.Fatalf("unsigned reasoning replayed: %s", got.body)
+	}
+}
+
+func TestGenerate_RedactedReasoningRoundTrips(t *testing.T) {
+	srv, got := streamServer(t, "reasoning_redacted.json")
+	p := newTestProvider(t, srv.URL)
+	resp, err := p.Generate(context.Background(), simpleRequest(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := simpleRequest()
+	req.Messages = append(req.Messages,
+		provider.Message{Role: provider.RoleAssistant, ToolCalls: resp.ToolCalls, Opaque: resp.Opaque},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "tooluse_r", Text: "ok"})
+	if _, err := p.Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Messages []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatal(err)
+	}
+	rc, ok := body.Messages[1].Content[0]["reasoningContent"].(map[string]any)
+	if !ok || rc["redactedContent"] != "AQIDBA==" {
+		t.Fatalf("redacted content not replayed: %v", body.Messages[1].Content)
+	}
+}
+
+func TestGenerate_CredentialFailureIsAuth(t *testing.T) {
+	srv, _ := streamServer(t, "text_only.json")
+	p, err := New(Config{
+		Region:   "us-east-1",
+		Endpoint: srv.URL,
+		Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+			return aws.Credentials{}, errors.New("no role here")
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != "auth" || perr.Retryable || strings.Contains(err.Error(), "no role here") {
+		t.Fatalf("err = %#v", err)
+	}
+}
+
+func TestGenerate_ClampsMaxOutputTokens(t *testing.T) {
+	srv, got := streamServer(t, "text_only.json")
+	req := simpleRequest()
+	req.MaxOutputTokens = math.MaxInt
+	if _, err := newTestProvider(t, srv.URL).Generate(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		InferenceConfig struct {
+			MaxTokens int64 `json:"maxTokens"`
+		} `json:"inferenceConfig"`
+	}
+	if err := json.Unmarshal(got.body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.InferenceConfig.MaxTokens != math.MaxInt32 {
+		t.Fatalf("maxTokens = %d", body.InferenceConfig.MaxTokens)
 	}
 }

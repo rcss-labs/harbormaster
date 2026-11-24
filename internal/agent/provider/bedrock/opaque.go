@@ -15,11 +15,23 @@ type reasoningState struct {
 	Redacted  []byte `json:"redacted,omitempty"`
 }
 
+// replayable reports whether Converse accepts the block back: reasoning text
+// only with its signature, or redacted bytes.
+func (s reasoningState) replayable() bool {
+	return len(s.Redacted) > 0 || (s.Text != "" && s.Signature != "")
+}
+
 func encodeReasoning(blocks []reasoningState) json.RawMessage {
-	if len(blocks) == 0 {
+	var keep []reasoningState
+	for _, b := range blocks {
+		if b.replayable() {
+			keep = append(keep, b)
+		}
+	}
+	if len(keep) == 0 {
 		return nil
 	}
-	raw, err := json.Marshal(blocks)
+	raw, err := json.Marshal(keep)
 	if err != nil {
 		return nil
 	}
@@ -43,12 +55,9 @@ func opaqueBlocks(raw json.RawMessage) []types.ContentBlock {
 			out = append(out, &types.ContentBlockMemberReasoningContent{
 				Value: &types.ReasoningContentBlockMemberRedactedContent{Value: s.Redacted},
 			})
-		case s.Text != "":
+		case s.replayable():
 			text, sig := s.Text, s.Signature
-			rt := types.ReasoningTextBlock{Text: &text}
-			if sig != "" {
-				rt.Signature = &sig
-			}
+			rt := types.ReasoningTextBlock{Text: &text, Signature: &sig}
 			out = append(out, &types.ContentBlockMemberReasoningContent{
 				Value: &types.ReasoningContentBlockMemberReasoningText{Value: rt},
 			})
