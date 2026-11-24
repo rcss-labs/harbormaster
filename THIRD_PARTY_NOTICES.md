@@ -334,3 +334,217 @@ Licences for Go modules and npm packages are in each module's or package's sourc
 - Copyright: Anchore, Inc.
 - Source: https://github.com/anchore/grype (licence file: `LICENSE` at tag v0.121.2)
 - Note: not vendored and not a Go module dependency. The release binary is downloaded at image build time, verified with cosign and its signed checksums, and shipped unmodified at `/usr/local/bin/grype` in the scanner image (`Dockerfile.scanner`). The licence from the verified release tarball is at `/licenses/grype` in the image. The statically linked dependencies of the binary are listed in the project's own release notices.
+
+### github.com/anthropics/anthropic-sdk-go
+
+- Version: v1.84.0
+- Licence: MIT
+- Copyright: Copyright 2023 Anthropic, PBC.
+- Source: https://github.com/anthropics/anthropic-sdk-go (licence file: `LICENSE` at tag v1.84.0)
+- Note: the Anthropic provider of the agent (`internal/agent/provider/anthropic`).
+
+### github.com/openai/openai-go/v3
+
+- Version: v3.106.0
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Source: https://github.com/openai/openai-go (licence file: `LICENSE` at tag v3.106.0)
+- Note: the OpenAI provider of the agent (`internal/agent/provider/openai`).
+
+### google.golang.org/genai
+
+- Version: v1.79.1
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Copyright 2024 and 2026 Google LLC
+- Source: https://github.com/googleapis/go-genai (licence file: `LICENSE` at tag v1.79.1)
+- Note: the Google provider of the agent (`internal/agent/provider/google`).
+
+### github.com/aws/aws-sdk-go-v2 and its sub-modules
+
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved. Copyright 2014-2015 Stripe, Inc. (from the NOTICE, copied at `third_party/licenses/aws-sdk-go-v2-NOTICE.txt`)
+- Source: https://github.com/aws/aws-sdk-go-v2 (licence file: `LICENSE.txt` at each module's tag)
+- Versions:
+  - github.com/aws/aws-sdk-go-v2 v1.48.0
+  - github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.27
+  - github.com/aws/aws-sdk-go-v2/config v1.33.13
+  - github.com/aws/aws-sdk-go-v2/credentials v1.20.13
+  - github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.5
+  - github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.12
+  - github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.12
+  - github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.8
+  - github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.64.0
+  - github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23
+  - github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.8
+  - github.com/aws/aws-sdk-go-v2/service/signin v1.12.1
+  - github.com/aws/aws-sdk-go-v2/service/sso v1.39.1
+  - github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.1
+  - github.com/aws/aws-sdk-go-v2/service/sts v1.51.6
+- Note: the AWS SDK behind the agent's Bedrock provider (`service/bedrockruntime`) and its credential and endpoint chain.
+
+### github.com/aws/smithy-go
+
+- Version: v1.28.9
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. (from the NOTICE, copied at `third_party/licenses/smithy-go-NOTICE.txt`)
+- Source: https://github.com/aws/smithy-go (licence file: `LICENSE` at tag v1.28.9)
+- Note: dependency of the AWS SDK modules above.
+
+### cloud.google.com/go, cloud.google.com/go/auth and cloud.google.com/go/compute/metadata
+
+- Versions: v0.116.0, v0.18.2 and v0.9.0
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Copyright Google LLC
+- Source: https://github.com/googleapis/google-cloud-go (licence file: `LICENSE` at each module's tag)
+- Note: dependencies of the Google provider (`google.golang.org/genai`) for authentication.
+
+### github.com/googleapis/enterprise-certificate-proxy and github.com/google/s2a-go
+
+- Versions: v0.3.11 and v0.1.9
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: s2a-go: Copyright 2021 Google LLC
+- Source: https://github.com/googleapis/enterprise-certificate-proxy and https://github.com/google/s2a-go (licence file: `LICENSE` at each tag)
+- Note: dependencies of the Google Cloud authentication modules.
+
+### github.com/googleapis/gax-go/v2
+
+- Version: v2.17.0
+- Licence: BSD-3-Clause
+- Copyright: Copyright 2016, Google Inc.
+- Source: https://github.com/googleapis/gax-go (licence file: `LICENSE` at tag v2.17.0)
+- Note: dependency of the Google Cloud modules.
+
+### google.golang.org/genproto/googleapis/rpc
+
+- Version: v0.0.0-20260526163538-3dc84a4a5aaa
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Source: https://github.com/googleapis/go-genproto (licence file: `LICENSE` at the pinned commit)
+- Note: dependency of google.golang.org/grpc.
+
+### google.golang.org/grpc
+
+- Version: v1.83.1
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Copyright 2014 gRPC authors. (from the NOTICE, copied at `third_party/licenses/grpc-NOTICE.txt`)
+- Source: https://github.com/grpc/grpc-go (licence file: `LICENSE` at tag v1.83.1)
+- Note: dependency of the Google Cloud modules.
+
+### google.golang.org/protobuf
+
+- Version: v1.36.11
+- Licence: BSD-3-Clause
+- Copyright: Copyright (c) 2018 The Go Authors.
+- Source: https://github.com/protocolbuffers/protobuf-go (licence file: `LICENSE` at tag v1.36.11)
+
+### github.com/google/uuid
+
+- Version: v1.6.0
+- Licence: BSD-3-Clause
+- Copyright: Copyright (c) 2009,2014 Google Inc.
+- Source: https://github.com/google/uuid (licence file: `LICENSE` at tag v1.6.0)
+
+### github.com/google/go-cmp
+
+- Version: v0.7.0
+- Licence: BSD-3-Clause
+- Copyright: Copyright (c) 2017 The Go Authors.
+- Source: https://github.com/google/go-cmp (licence file: `LICENSE` at tag v0.7.0)
+- Note: dependency of google.golang.org/genai.
+
+### github.com/bahlo/generic-list-go
+
+- Version: v0.2.0
+- Licence: BSD-3-Clause
+- Copyright: Copyright (c) 2009 The Go Authors.
+- Source: https://github.com/bahlo/generic-list-go (licence file: `LICENSE` at tag v0.2.0)
+- Note: dependency of anthropics/anthropic-sdk-go.
+
+### golang.org/x/crypto, golang.org/x/net, golang.org/x/sync, golang.org/x/sys and golang.org/x/text
+
+- Versions: v0.59.0, v0.62.0, v0.25.0, v0.50.0 and v0.44.0
+- Licence: BSD-3-Clause
+- Copyright: Copyright 2009 The Go Authors.
+- Source: https://go.googlesource.com (licence file: `LICENSE` at each tag)
+
+### github.com/gorilla/websocket
+
+- Version: v1.5.3
+- Licence: BSD-2-Clause
+- Copyright: Copyright (c) 2013 The Gorilla WebSocket Authors.
+- Source: https://github.com/gorilla/websocket (licence file: `LICENSE` at tag v1.5.3)
+- Note: dependency of google.golang.org/genai.
+
+### github.com/coder/websocket
+
+- Version: v1.8.15
+- Licence: ISC (copy at `third_party/licenses/ISC-coder-websocket.txt`)
+- Copyright: Copyright (c) 2025 Coder
+- Source: https://github.com/coder/websocket (licence file: `LICENSE.txt` at tag v1.8.15)
+- Note: used by internal/api (the main app already ships it).
+
+### github.com/go-logr/logr, github.com/go-logr/stdr and github.com/pb33f/ordered-map/v2
+
+- Versions: v1.4.4, v1.2.2 and v2.3.1
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: logr and stdr: Copyright The logr Authors
+- Source: https://github.com/go-logr/logr, https://github.com/go-logr/stdr and https://github.com/pb33f/ordered-map (licence file: `LICENSE` at each tag)
+- Note: logr and stdr are logging dependencies of the OpenTelemetry modules; ordered-map is a dependency of anthropics/anthropic-sdk-go.
+
+### go.opentelemetry.io/otel, go.opentelemetry.io/otel/log, go.opentelemetry.io/otel/metric, go.opentelemetry.io/otel/trace, go.opentelemetry.io/auto/sdk and go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
+
+- Versions: v1.47.0 (otel, log, metric, trace), v1.2.1 (auto/sdk) and v0.61.0 (otelhttp)
+- Licence: Apache-2.0 (Apache License, Version 2.0; the standard text is the copy at `third_party/licenses/session-manager-plugin-APACHE-2.0.txt`, not duplicated)
+- Copyright: Copyright The OpenTelemetry Authors
+- Source: https://github.com/open-telemetry/opentelemetry-go and https://github.com/open-telemetry/opentelemetry-go-contrib (licence file: `LICENSE` at each tag)
+- Note: tracing and metrics API used by the agent provider HTTP clients.
+
+### go.yaml.in/yaml/v4
+
+- Version: v4.0.0-rc.2
+- Licence: MIT and Apache-2.0, as stated in its `LICENSE`: the files ported from libyaml are MIT; the remaining files are Apache-2.0. The Apache NOTICE is copied at `third_party/licenses/yaml-v4-NOTICE.txt`.
+- Copyright: Copyright (c) 2006-2010 Kirill Simonov; Copyright 2011-2016 Canonical Ltd.
+- Source: https://github.com/yaml/go-yaml (licence file: `LICENSE` at tag v4.0.0-rc.2)
+
+### github.com/buger/jsonparser
+
+- Version: v1.1.2
+- Licence: MIT
+- Copyright: Copyright (c) 2016 Leonid Bugaev
+- Source: https://github.com/buger/jsonparser (licence file: `LICENSE` at tag v1.1.2)
+
+### github.com/tidwall/gjson, github.com/tidwall/match, github.com/tidwall/pretty and github.com/tidwall/sjson
+
+- Versions: v1.20.1, v1.1.1, v1.2.1 and v1.2.5
+- Licence: MIT
+- Copyright: Copyright (c) 2016 Josh Baker (gjson, match, sjson); Copyright (c) 2017 Josh Baker (pretty)
+- Source: https://github.com/tidwall/gjson, https://github.com/tidwall/match, https://github.com/tidwall/pretty and https://github.com/tidwall/sjson (licence file: `LICENSE` at each tag)
+
+### github.com/felixge/httpsnoop
+
+- Version: v1.0.4
+- Licence: MIT
+- Copyright: Copyright (c) 2016 Felix Geisendörfer (felix@debuggable.com)
+- Source: https://github.com/felixge/httpsnoop (licence file: `LICENSE.txt` at tag v1.0.4)
+- Note: dependency of google.golang.org/genai (via the Google Cloud auth transport).
+
+### github.com/cespare/xxhash/v2
+
+- Version: v2.3.0
+- Licence: MIT
+- Copyright: Copyright (c) 2016 Caleb Spare
+- Source: https://github.com/cespare/xxhash (licence file: `LICENSE.txt` at tag v2.3.0)
+
+### github.com/invopop/jsonschema
+
+- Version: v0.14.0
+- Licence: MIT
+- Copyright: Copyright (C) 2014 Alec Thomas
+- Source: https://github.com/invopop/jsonschema (licence file: `COPYING` at tag v0.14.0)
+- Note: dependency of anthropics/anthropic-sdk-go.
+
+### github.com/standard-webhooks/standard-webhooks/libraries
+
+- Version: v0.0.1
+- Licence: MIT
+- Copyright: Copyright (c) 2023 Svix (https://www.svix.com)
+- Source: https://github.com/standard-webhooks/standard-webhooks (licence file: `LICENSE` at tag v0.0.1)
+- Note: dependency of anthropics/anthropic-sdk-go.
