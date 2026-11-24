@@ -511,3 +511,27 @@ func TestCreateBreakGlassAdmin(t *testing.T) {
 		t.Fatalf("duplicate err = %v, want ErrConflict", err)
 	}
 }
+
+func TestSetUserAIChat(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	u, err := st.CreateUser(ctx, "alice", "h", false, false)
+	if err != nil || u.AIChat {
+		t.Fatalf("new user AIChat = %v, %v; want false", u.AIChat, err)
+	}
+	if err := st.SetUserAIChat(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.GetUser(ctx, u.ID); !got.AIChat {
+		t.Fatal("AIChat not set")
+	}
+	if err := st.SetUserAIChat(ctx, u.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.GetUser(ctx, u.ID); got.AIChat {
+		t.Fatal("AIChat not cleared")
+	}
+	if err := st.SetUserAIChat(ctx, 999999, true); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown user = %v, want ErrNotFound", err)
+	}
+}
