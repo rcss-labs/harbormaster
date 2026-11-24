@@ -332,6 +332,60 @@ func TestChat_DoneThatWasReadBeforeTheDrainCounts(t *testing.T) {
 	}
 }
 
+// Our own code failing on one event ends the turn, but what the run costs is still read and recorded.
+func TestChat_PanicOnAnEventStillCountsTheUsageAfterIt(t *testing.T) {
+	env := newChatEnv(t, func(s *Server) {
+		s.agentEventHook = func(_ context.Context, ev agentclient.Event) {
+			if ev.Type == "text" {
+				panic("boom")
+			}
+		}
+	})
+	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
+		ndjson(w, `{"type":"tool_start","tool":"get_service"}`, `{"type":"text","delta":"x"}`,
+			`{"type":"usage","input_tokens":3,"output_tokens":4,"cost_micro_usd":333}`)
+		holdUntilGone(r)
+	})
+	frames := readSSE(t, send(env.sam, newConversation(t, env.sam), "hello"))
+	if last := frames[len(frames)-1]; last.Event != "error" || last.Data["code"] != "agent_unavailable" {
+		t.Errorf("last frame = %+v", last)
+	}
+	wantEnded(t, env, "failed", 333)
+	if strings.Contains(env.logs.String(), "boom") {
+		t.Error("the panic's value was logged")
+	}
+}
+
+// Only the turn cancels the agent run: a browser that leaves is an interruption, not an agent that failed.
+func TestChat_LeavingIsAlwaysAnInterruption(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	env := newChatEnv(t, func(s *Server) {
+		s.agentEventHook = func(ctx context.Context, ev agentclient.Event) {
+			entered <- struct{}{}
+			<-ctx.Done()
+			time.Sleep(50 * time.Millisecond) // whatever follows the request's end by itself has happened now
+		}
+	})
+	env.agent.setScript(func(w http.ResponseWriter, r *http.Request, _ capturedRun) {
+		ndjson(w, `{"type":"text","delta":"x"}`)
+		holdUntilGone(r)
+	})
+	id := newConversation(t, env.sam)
+	for i := range 6 { // which of two things that are both there a select picks is random
+		ctx, cancel := context.WithCancel(t.Context())
+		resp := chatCtxRequest(t, ctx, env.sam, id, "hello")
+		<-entered
+		cancel()
+		resp.Body.Close()
+		waitFor(t, "the audit row", func() bool { return len(auditOutcomes(t, env.st)) == i+1 })
+	}
+	for _, outcome := range auditOutcomes(t, env.st) {
+		if outcome != "interrupted" {
+			t.Errorf("outcome %s, want interrupted", outcome)
+		}
+	}
+}
+
 // At shutdown a usage write that is already waiting for a lock may not hold up the end of the turn.
 func TestChat_DrainWithAUsageWriteInFlightEndsInTime(t *testing.T) {
 	env := newChatEnv(t)

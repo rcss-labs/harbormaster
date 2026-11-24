@@ -146,7 +146,7 @@ func TestBrowserWriter_FramesAreSmallAndNeverSplitARune(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &pacedWriter{}
 		b := startTestWriter(w, nil)
-		answer := strings.Repeat("x€", 30_000)
+		answer := strings.Repeat("€", 30_000) // three bytes each, so frames end inside one
 		b.text(answer)
 		b.finish()
 		text, _ := w.received(t)
@@ -276,6 +276,29 @@ func TestBrowserWriter_PendingIsMergedAndBounded(t *testing.T) {
 		}
 		if b.text("late") {
 			t.Error("text was accepted after finish")
+		}
+	})
+}
+
+// The bounds are on what waits, not on what was sent: a browser that keeps up gets any amount.
+func TestBrowserWriter_WhatWasSentNoLongerCounts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := &pacedWriter{}
+		b := startTestWriter(w, nil)
+		chunk := strings.Repeat("z", 1<<20)
+		const chunks, tools = 12, 10_000
+		for range chunks {
+			b.text(chunk)
+			synctest.Wait()
+		}
+		for range tools {
+			b.event("tool_start", map[string]string{"name": "get_service"})
+			synctest.Wait()
+		}
+		b.finish()
+		text, events := w.received(t)
+		if len(text) != chunks*len(chunk) || len(events) != tools {
+			t.Errorf("received %d bytes of %d and %d events of %d", len(text), chunks*len(chunk), len(events), tools)
 		}
 	})
 }
