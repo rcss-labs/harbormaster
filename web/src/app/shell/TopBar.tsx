@@ -41,47 +41,49 @@ export function TopBar() {
           ),
         )}
       </nav>
-      <button type="button" className={styles.searchBtn} aria-haspopup="dialog" onClick={openPalette}>
-        <Icon name="search" />
-        <span className={styles.searchText}>Search or run a command…</span>
-        <kbd className={styles.kbd}>{shortcutLabel()}</kbd>
-      </button>
-      <FreshnessControl />
-      {agentAvailable && (
+      <div className={styles.tools}>
+        <button type="button" className={styles.searchBtn} aria-haspopup="dialog" onClick={openPalette}>
+          <Icon name="search" />
+          <span className={styles.searchText}>Search or run a command…</span>
+          <kbd className={styles.kbd}>{shortcutLabel()}</kbd>
+        </button>
+        <FreshnessControl />
+        {agentAvailable && (
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${agentOpen ? styles.btnOn : ''}`}
+            aria-label="Ask AI"
+            aria-haspopup="dialog"
+            aria-expanded={agentOpen}
+            title="Ask AI"
+            onClick={openAgent}
+          >
+            <Icon name="sparkle" />
+          </button>
+        )}
         <button
           type="button"
-          className={`${styles.iconBtn} ${agentOpen ? styles.btnOn : ''}`}
-          aria-label="Ask AI"
+          className={`${styles.iconBtn} ${railOpen ? styles.btnOn : ''}`}
+          aria-label={problems > 0 ? `Activity, ${problems} ${problems === 1 ? 'problem' : 'problems'}` : 'Activity'}
           aria-haspopup="dialog"
-          aria-expanded={agentOpen}
-          title="Ask AI"
-          onClick={openAgent}
+          aria-expanded={railOpen}
+          title="Activity"
+          onClick={toggleRail}
         >
-          <Icon name="sparkle" />
+          <Icon name="activity" />
+          {problems > 0 && <span className={styles.activityCount}>{problems}</span>}
         </button>
-      )}
-      <button
-        type="button"
-        className={`${styles.iconBtn} ${railOpen ? styles.btnOn : ''}`}
-        aria-label={problems > 0 ? `Activity, ${problems} ${problems === 1 ? 'problem' : 'problems'}` : 'Activity'}
-        aria-haspopup="dialog"
-        aria-expanded={railOpen}
-        title="Activity"
-        onClick={toggleRail}
-      >
-        <Icon name="activity" />
-        {problems > 0 && <span className={styles.activityCount}>{problems}</span>}
-      </button>
-      <button type="button" className={styles.iconBtn} aria-label="Toggle row density" title={`Row density: ${density}`} onClick={toggleDensity}>
-        <Icon name="density" />
-      </button>
-      <button type="button" className={styles.iconBtn} aria-label="Toggle theme" title="Theme" onClick={toggleTheme}>
-        <Icon name="sun" />
-      </button>
-      <ScaleControl />
-      <button type="button" className={styles.iconBtn} aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={openHelp}>
-        <Icon name="help" />
-      </button>
+        <button type="button" className={styles.iconBtn} aria-label="Toggle row density" title={`Row density: ${density}`} onClick={toggleDensity}>
+          <Icon name="density" />
+        </button>
+        <button type="button" className={styles.iconBtn} aria-label="Toggle theme" title="Theme" onClick={toggleTheme}>
+          <Icon name="sun" />
+        </button>
+        <ScaleControl />
+        <button type="button" className={styles.iconBtn} aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={openHelp}>
+          <Icon name="help" />
+        </button>
+      </div>
     </header>
   )
 }

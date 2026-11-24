@@ -17,7 +17,7 @@ This page lists Harbormaster's test suites, what each needs, and how to run them
 | Go unit tests and web unit tests | `make test` | Go and Node. Database-backed tests need Postgres |
 | Postgres-backed tests | `make test-db`, export `HM_TEST_DATABASE_URL`, then `make test` | Docker |
 | Valkey and Redis tests | `make test-kv`, export `HM_TEST_KV_URLS`, then `make test` | Docker. The tests skip when the variable is unset |
-| End-to-end (Playwright) | `make e2e` | `HM_TEST_DATABASE_URL`, `cd web && npx playwright install chromium`, port 8481 free |
+| End-to-end (Playwright) | `make e2e` | `HM_TEST_DATABASE_URL`, `cd web && npx playwright install chromium`, ports 8481 and 8484 free (8484 runs the agent on its fake model) |
 | Split smoke | `make split-smoke [ENGINE=valkey\|redis]` | Docker, curl, jq, python3, `HM_TEST_DATABASE_URL`. About two minutes |
 | Soak | `make soak` | `HM_TEST_DATABASE_URL`. About 35 minutes |
 | Terraform check | `make tf-check` | `terraform` on PATH; `tflint` optional |

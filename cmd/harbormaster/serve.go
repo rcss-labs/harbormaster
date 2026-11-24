@@ -272,10 +272,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			return fmt.Errorf("notification secret box: %w", err)
 		}
 	}
-	var notifyDemo []devseed.Option
-	if cfg.Notify.FakeDemo {
-		notifyDemo = []devseed.Option{devseed.WithNotifyDemo(notifyBox, cfg.BaseURL)}
-	}
+	demoOptions := demoSeedOptions(cfg, notifyBox)
 
 	var (
 		clients awsx.Clients
@@ -313,7 +310,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		// The demo data, the fake IdP and the sign-in belong to the task that serves the API. Every process has its own
 		// fake estate (it lives in memory), so a split fake install shows leases, kicks and health, not write flows.
 		if role.ServesAPI() {
-			if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, notifyDemo...); err != nil {
+			if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, demoOptions...); err != nil {
 				return fmt.Errorf("seed demo data: %w", err)
 			}
 			idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
@@ -577,4 +574,17 @@ func imagePlatformResolver(cfg config.Config, st *store.Store, clients awsx.Clie
 		resolver.Public = &registry.Client{HTTP: registry.NewHTTPClient(safedial.Policy{}, nil)}
 	}
 	return resolver
+}
+
+// demoSeedOptions picks the extras fake AWS mode seeds: the demo notification routes, and the AI agent demo only when
+// the agent is switched on (HM_AGENT_URL).
+func demoSeedOptions(cfg config.Config, notifyBox *secretbox.Box) []devseed.Option {
+	var options []devseed.Option
+	if cfg.Notify.FakeDemo {
+		options = append(options, devseed.WithNotifyDemo(notifyBox, cfg.BaseURL))
+	}
+	if cfg.AgentEnabled() {
+		options = append(options, devseed.WithAgentDemo())
+	}
+	return options
 }

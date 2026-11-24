@@ -66,6 +66,9 @@ func Apply(ctx context.Context, st *store.Store, offHoursDemoEnabled bool, opts 
 	if err := seedNotifications(ctx, st, o); err != nil {
 		return err
 	}
+	if err := seedAgent(ctx, st, o, sam.ID); err != nil {
+		return err
+	}
 	return SeedAnalyticsHistory(ctx, st, time.Now())
 }
 

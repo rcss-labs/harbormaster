@@ -87,6 +87,10 @@ e2e:
 		echo "make e2e: port $$e2e_port is already in use; stop the process listening on it" >&2; \
 		exit 2; \
 	fi
+	@agent_port="$${HM_E2E_AGENT_PORT:-8484}"; if lsof -iTCP:"$$agent_port" -sTCP:LISTEN >/dev/null 2>&1; then \
+		echo "make e2e: port $$agent_port (the agent) is already in use; stop the process listening on it" >&2; \
+		exit 2; \
+	fi
 	$(MAKE) build
 	@e2e_url="$$(go run ./tools/e2eschema)" || { echo "make e2e: could not prepare the e2e schema" >&2; exit 1; }; \
 	cd web && rm -rf test-results && { HM_E2E_DATABASE_URL="$$e2e_url" npx playwright test; status=$$?; \
