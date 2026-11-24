@@ -331,15 +331,25 @@ func TestAgentSettings_AgentUnreachable(t *testing.T) {
 		t.Errorf("budget-only save with the agent down: status %d, want 200", resp.StatusCode)
 	}
 	resp.Body.Close()
+	// R54: additions and changes need the agent; removals in the safe direction do not.
 	for name, resp := range map[string]*http.Response{
-		"model changed":      putSettings(env.sam, "11", nil, map[string]string{"provider": "fake", "model": "fake-2"}),
-		"redaction changed":  putSettings(env.sam, "11", []string{"fake"}, fakeChat()),
-		"chat model removed": putSettings(env.sam, "11", nil, nil),
+		"model changed":    putSettings(env.sam, "11", nil, map[string]string{"provider": "fake", "model": "fake-2"}),
+		"redaction lifted": putSettings(env.sam, "11", []string{"fake"}, fakeChat()),
 	} {
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Errorf("%s with the agent down: status %d, want 503", name, resp.StatusCode)
 		}
 		resp.Body.Close()
+	}
+	setChatSettings(t, env.st, 10_000_000, "fake", "fake-1", []string{"fake", "gone"})
+	resp = putSettings(env.sam, "11", []string{"gone"}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("dropping a provider and the chat model with the agent down: status %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+	got = getSettings(t, env.sam)
+	if _, has := got.RoleModels["chat"]; has || len(got.Unredacted) != 1 || got.Unredacted[0] != "gone" {
+		t.Errorf("after removals = %+v", got)
 	}
 }
 

@@ -173,11 +173,6 @@ type agentSettingsUpdate struct {
 	RoleModels          map[string]agentModelChoice `json:"role_models"`
 }
 
-// sameSet reports whether a and b hold the same entries, in any order.
-func sameSet(a, b []string) bool {
-	return len(a) == len(b) && !slices.ContainsFunc(a, func(x string) bool { return !slices.Contains(b, x) })
-}
-
 func modelLabel(ref store.AgentModelRef, ok bool) string {
 	if !ok {
 		return ""
@@ -188,7 +183,7 @@ func modelLabel(ref store.AgentModelRef, ok bool) string {
 // putAgentSettings saves the allowance, redaction and chat model. A role model or provider that is new must be in
 // the agent's catalogue; one already stored may stay as it is although the operator no longer offers it, so an
 // admin can still change the allowance, and a removed provider can be dropped. While the agent cannot be asked,
-// only a request that leaves the models and redaction unchanged is accepted.
+// only additions and changes of models or redaction are refused (503); removals still go through.
 func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	var body agentSettingsUpdate
 	if err := decodeJSON(w, r, &body); err != nil {
@@ -226,8 +221,9 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	oldChat, hadChat := old.RoleModels[chatRoleName]
 	chatChanged := (wantChat != nil) != hadChat || (wantChat != nil && *wantChat != oldChat)
-	unredactedChanged := !sameSet(wantUnredacted, old.UnredactedProviders)
-	if chatChanged || unredactedChanged {
+	// Only additions and changes need the agent's word; dropping a provider or the chat model is the safe direction.
+	unredactedAdded := slices.ContainsFunc(wantUnredacted, func(p string) bool { return !slices.Contains(old.UnredactedProviders, p) })
+	if (chatChanged && wantChat != nil) || unredactedAdded {
 		cat, err := s.catalogue(r)
 		if err != nil {
 			if r.Context().Err() == nil {
@@ -236,7 +232,7 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, errAgentDown)
 			return
 		}
-		if chatChanged && wantChat != nil {
+		if wantChat != nil && chatChanged {
 			if _, offered := findModel(cat, *wantChat); !offered {
 				s.fail(w, invalid("That model is not offered by the agent."))
 				return
