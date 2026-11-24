@@ -24,7 +24,7 @@ Buttons on the right:
 
 - **Deploy** opens the Deploy tab. It is greyed out without Edit, Deploy or Operate.
 - **Scan for vulnerabilities** scans the images the service runs now. See [Image security](image-security.md).
-- A **DESIRED** stepper changes the desired count. It needs Operate and asks for confirmation. A warning appears when the new count is outside the auto scaling range.
+- A **Desired** stepper changes the desired count. It needs Operate and asks for confirmation. A warning appears when the new count is outside the auto scaling range.
 - **Restart** starts a new deployment of the same revision. It needs Operate. It is disabled while a rollout runs.
 - **AWS console** opens the service in the AWS console.
 

@@ -3,13 +3,13 @@
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--row-border);
   border-radius: var(--radius);
 }
 .gateHeading {
   margin: 0;
-  font: 600 12px/1.5 var(--sans);
+  font: 500 12px/1.5 var(--sans);
   color: var(--dim);
 }
 .gateBody {
@@ -32,7 +32,7 @@
   font-size: 13px;
 }
 .gateContainer {
-  font-weight: 600;
+  font-weight: 500;
 }
 .gateImage {
   min-width: 0;

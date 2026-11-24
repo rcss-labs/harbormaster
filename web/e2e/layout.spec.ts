@@ -11,7 +11,7 @@ test('wide screens fill the content width', async ({ page }) => {
   const main = page.getByRole('main')
   await expect(main.getByRole('list', { name: 'Estate key figures' }).getByText('Tasks', { exact: true })).toBeVisible()
 
-  // Grid is sidebar | main; the activity rail is a drawer and no longer docks: 2560 - 212 = 2348.
+  // Grid is sidebar | main; the activity rail is a drawer and no longer docks: 2560 - 240 = 2320.
   const mainBox = await measureBox(main)
   expect(mainBox.width).toBeGreaterThan(2300)
 
