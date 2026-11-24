@@ -70,14 +70,11 @@ var (
 // pairName matches the name and operator of name=value, name: value and
 // "name": "value". The value is parsed separately so that a secret nested in
 // another pair's value is still found.
-var pairName = regexp.MustCompile(`(["']?)([A-Za-z0-9_.-]+)(["']?)[ \t]*[=:][ \t]*`)
+var pairName = regexp.MustCompile(`((?:\\*["'])?)([A-Za-z0-9_.-]+)((?:\\*["'])?)[ \t]*[=:][ \t]*`)
 
-// unquotedValue ends at a closing brace or bracket so a value inside JSON does not swallow the rest of the object.
-var (
-	unquotedValue = regexp.MustCompile(`^[^\s,;&"'}\]]+`)
-	// listValue is the value of a plural name such as API_KEYS, which may hold a comma separated list.
-	listValue = regexp.MustCompile(`^[^\s;&"'}\]]+`)
-)
+// unquotedValue is a run of characters up to whitespace, a separator or a quote. Brackets inside it belong to the
+// value; only a trailing run of unbalanced closing brackets is JSON structure (see trimClosers).
+var unquotedValue = regexp.MustCompile(`^[^\s,;&"']+`)
 
 var authScheme = regexp.MustCompile(`^(?i:bearer|basic)$`)
 
@@ -157,7 +154,79 @@ func pairNameKind(name string) nameKind {
 	return nameClean
 }
 
-var booleanValue = regexp.MustCompile(`^(?i:true|false|yes|no|on|off)$`)
+// harmlessCounterValue reports whether the first item of a plural-named value is a number (signed, decimal, with a
+// unit suffix), n/m, a boolean, null, or the start of a JSON array or object: none of those is a secret.
+var harmlessCounter = regexp.MustCompile(`^(?i:[+-]?[0-9]+(?:\.[0-9]+)?(?:k|m|s|ms|%)?|n/m|true|false|yes|no|on|off|null)$`)
+
+func harmlessCounterValue(first string) bool {
+	return harmlessCounter.MatchString(first) || strings.HasPrefix(first, "[") || strings.HasPrefix(first, "{")
+}
+
+// listEnd extends a span over the comma separated items that follow it.
+func listEnd(text string, span [2]int) int {
+	end := span[1]
+	for end < len(text) && text[end] == ',' {
+		item := unquotedValue.FindString(text[end+1:])
+		if item == "" {
+			break
+		}
+		end += 1 + len(trimClosers(item))
+	}
+	return end
+}
+
+// trimClosers removes the trailing closing brackets of value that no opening bracket inside it balances: in
+// {"password": hunter2} the value is hunter2} and the brace is the object's, in {user}:{pw} both are the value's.
+func trimClosers(value string) string {
+	for len(value) > 0 {
+		last := value[len(value)-1]
+		var open byte
+		switch last {
+		case '}':
+			open = '{'
+		case ']':
+			open = '['
+		default:
+			return value
+		}
+		if strings.Count(value, string(open)) >= strings.Count(value, string(last)) {
+			return value
+		}
+		value = value[:len(value)-1]
+	}
+	return value
+}
+
+// escapedValueSpan finds a value opened by backslashes and a quote, as in a JSON string inside a JSON string. It
+// closes at the first quote preceded by exactly as many backslashes as the opener had, so a deeper escaped quote
+// inside the value does not end it.
+func escapedValueSpan(text string, start int) ([2]int, bool) {
+	n := 0
+	for start+n < len(text) && text[start+n] == '\\' {
+		n++
+	}
+	if start+n >= len(text) || (text[start+n] != '"' && text[start+n] != '\'') {
+		return [2]int{}, false
+	}
+	quote := text[start+n]
+	begin := start + n + 1
+	for i := begin; i < len(text); i++ {
+		if text[i] == '\n' {
+			return [2]int{begin, i}, i > begin
+		}
+		if text[i] != quote {
+			continue
+		}
+		run := 0
+		for j := i - 1; j >= begin && text[j] == '\\'; j-- {
+			run++
+		}
+		if run == n {
+			return [2]int{begin, i - n}, i-n > begin
+		}
+	}
+	return [2]int{begin, len(text)}, len(text) > begin
+}
 
 func nameSegments(name string) []string {
 	var segments []string
@@ -252,21 +321,27 @@ func pairSpans(text string) [][2]int {
 		if kind == nameClean {
 			continue
 		}
-		span, ok := pairValueSpan(text, m[1], kind == nameCounter)
+		span, ok := pairValueSpan(text, m[1])
 		if !ok {
 			continue
 		}
 		if kind == nameCounter {
-			if value := text[span[0]:span[1]]; digitsOnly.MatchString(value) || booleanValue.MatchString(value) {
+			// A counter or list: only the first item is judged, and a secret list is hidden whole.
+			first := text[span[0]:span[1]]
+			if comma := strings.IndexByte(first, ','); comma >= 0 {
+				first = first[:comma]
+			}
+			if harmlessCounterValue(first) {
 				continue
 			}
+			span[1] = listEnd(text, span)
 		}
 		spans = append(spans, span)
 	}
 	return spans
 }
 
-func pairValueSpan(text string, start int, list bool) ([2]int, bool) {
+func pairValueSpan(text string, start int) ([2]int, bool) {
 	if start >= len(text) {
 		return [2]int{}, false
 	}
@@ -283,18 +358,25 @@ func pairValueSpan(text string, start int, list bool) ([2]int, bool) {
 		}
 		return [2]int{start + 1, len(text)}, len(text) > start+1
 	}
-	pattern := unquotedValue
-	if list {
-		pattern = listValue
+	if text[start] == '\\' {
+		if span, ok := escapedValueSpan(text, start); ok {
+			return span, true
+		}
 	}
-	value := pattern.FindString(text[start:])
-	if list {
-		value = strings.TrimRight(value, ",")
-	}
+	value := unquotedValue.FindString(text[start:])
 	if value == "" {
 		return [2]int{}, false
 	}
 	end := start + len(value)
+	if trimmed := trimClosers(value); trimmed == "" {
+		// Only brackets: JSON structure when the text ends or a separator follows, otherwise a secret.
+		if end >= len(text) || strings.IndexByte(", \t\r\n", text[end]) >= 0 {
+			return [2]int{}, false
+		}
+	} else {
+		end = start + len(trimmed)
+		value = trimmed
+	}
 	if authScheme.MatchString(value) {
 		// "Authorization: Bearer <token>": the credential follows the scheme.
 		if token := authToken.FindString(text[end:]); token != "" {

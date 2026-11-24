@@ -1,6 +1,8 @@
 package secretshape
 
 import (
+	"encoding/json"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -267,9 +269,99 @@ func TestScrubText_UnquotedValueStopsAtClosingBrackets(t *testing.T) {
 		`{"password": hunter2}`:          `{"password": ` + Redacted + `}`,
 		`["token=hunter2"]`:              `["token=` + Redacted + `"]`,
 		`{"a":{"secret":hunter2},"b":1}`: `{"a":{"secret":` + Redacted + `},"b":1}`,
+		`{"password":hunter2}}`:          `{"password":` + Redacted + `}}`,
+		`{"x":[password=hunter2]}`:       `{"x":[password=` + Redacted + `]}`,
+		`{"password":}`:                  `{"password":}`,
 	} {
 		if got := ScrubText(text); got != want {
 			t.Errorf("ScrubText(%q) = %q, want %q", text, got, want)
+		}
+	}
+}
+
+// Brackets inside a secret are part of it: nothing after the first one may leak.
+func TestScrubText_BracketsInsideSecretsDoNotTruncate(t *testing.T) {
+	for text, want := range map[string]string{
+		"password=}abcdef":                "password=" + Redacted,
+		"password=]abcdef":                "password=" + Redacted,
+		"password=ab}cd-ef":               "password=" + Redacted,
+		"password: a]bcdef":               "password: " + Redacted,
+		"DB_PASSWORD=p[0]rest":            "DB_PASSWORD=" + Redacted,
+		"secret={abc}def":                 "secret=" + Redacted,
+		"pwd=x}}yz":                       "pwd=" + Redacted,
+		"secret_tokens=a}b":               "secret_tokens=" + Redacted,
+		"token=abc}def&x=1":               "token=" + Redacted + "&x=1",
+		"https://x/y?token=ab]cd":         "https://x/y?token=" + Redacted,
+		"Server=db;Password=hu}nter2;X=1": "Server=db;Password=" + Redacted + ";X=1",
+		"auth: {user}:{pw}":               "auth: " + Redacted,
+		"api_key=${X}realtail":            "api_key=" + Redacted,
+	} {
+		got := ScrubText(text)
+		if got != want {
+			t.Errorf("ScrubText(%q) = %q, want %q", text, got, want)
+		}
+	}
+}
+
+// Log lines arrive as JSON strings inside JSON: escaped quotes must not hide a pair.
+func TestScrubText_EscapedJSON(t *testing.T) {
+	for text, want := range map[string]string{
+		`{\"password\":\"hunter2\"}`:               `{\"password\":\"` + Redacted + `\"}`,
+		`{\\\"password\\\":\\\"hunter2\\\"}`:       `{\\\"password\\\":\\\"` + Redacted + `\\\"}`,
+		`\"token\": \"abc\\\"def\"`:                `\"token\": \"` + Redacted + `\"`,
+		`"message":"{\"db\":{\"secret\":\"x1\"}}"`: `"message":"{\"db\":{\"secret\":\"` + Redacted + `\"}}"`,
+	} {
+		if got := ScrubText(text); got != want {
+			t.Errorf("ScrubText(%s) = %s, want %s", text, got, want)
+		}
+	}
+	answer := `{"lines":["{\"password\":\"hunter2\"}","x"],"message":"{\"db\":{\"secret\":\"x1\"}}","t":"\"token\": \"abc\\\"def\"","n":1}`
+	if !json.Valid([]byte(answer)) {
+		t.Fatal("fixture is not valid JSON")
+	}
+	got := ScrubText(answer)
+	if !json.Valid([]byte(got)) {
+		t.Errorf("scrubbed answer is not valid JSON: %s", got)
+	}
+	for _, leaked := range []string{"hunter2", "x1", "abc"} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("%q survived in %s", leaked, got)
+		}
+	}
+}
+
+func TestScrubText_CounterNamesJudgeTheFirstItem(t *testing.T) {
+	for _, text := range []string{
+		`"missing_keys":["a","b"]`, "max_tokens=-5", "tokens: 1.5", "total_tokens=12k", "ttl_secrets: 30s", "keys: 90%",
+		"api_keys=n/m", "api_keys=null", "api_keys=false,true", "api_keys=12,34", "api_keys=1.5ms,2ms",
+	} {
+		if got := ScrubText(text); got != text {
+			t.Errorf("ScrubText(%q) = %q, want it unchanged", text, got)
+		}
+	}
+	if got := ScrubText("API_KEYS=abc,def"); strings.Contains(got, "def") || strings.Contains(got, "abc") {
+		t.Errorf("a list whose first item is not a number leaked: %q", got)
+	}
+}
+
+func TestScrubText_RandomSecretsNeverLeakASixCharacterPiece(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	var alphabet []byte
+	for c := byte('!'); c <= '~'; c++ {
+		if !strings.ContainsRune(`"',;&`, rune(c)) {
+			alphabet = append(alphabet, c)
+		}
+	}
+	for i := 0; i < 2000; i++ {
+		secret := make([]byte, 8+rng.Intn(24))
+		for j := range secret {
+			secret[j] = alphabet[rng.Intn(len(alphabet))]
+		}
+		out := ScrubText("password=" + string(secret))
+		for j := 0; j+6 <= len(secret); j++ {
+			if piece := string(secret[j : j+6]); strings.Contains(out, piece) {
+				t.Fatalf("secret %q: piece %q left in %q", secret, piece, out)
+			}
 		}
 	}
 }
