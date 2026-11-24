@@ -17,10 +17,14 @@ const (
 	hideNothing hiding = iota
 	// hideLists hides list items and scalars that are not counters.
 	hideLists
+	// hideStrings hides strings, including those of objects inside, except references to a secret kept elsewhere.
+	hideStrings
 	// hideScalars hides scalars, and scalars in lists.
 	hideScalars
 	// hideOne is hideScalars for the name of one secret: an object is that secret too, and gets hideLeaves.
 	hideOne
+	// hideMany is hideScalars for the name of several secrets: an object of them gets hideStrings.
+	hideMany
 	// hideLeaves hides every scalar, including those of objects inside, except references to a secret kept elsewhere.
 	hideLeaves
 	// hideAll hides every scalar, including those of objects inside.
@@ -69,7 +73,7 @@ func jsonEdits(text string, depth int) []edit {
 		}
 		w.pos, w.edits = r[0], nil
 		w.value(hideAll)
-		// In order already: only hideLeaves puts an edit aside.
+		// In order already: only hidden leaves put an edit aside.
 		edits = append(edits, w.edits...)
 	}
 	return append(edits, first[next:]...)
@@ -105,10 +109,14 @@ func (w *jsonWalker) value(hide hiding) {
 func (w *jsonWalker) object(hide hiding) {
 	var values [][2]int
 	secretName, counterName, refers := false, false, false
-	if hide == hideOne {
+	switch hide {
+	case hideOne:
 		hide = hideLeaves
+	case hideMany:
+		hide = hideStrings
 	}
-	name := -1 // under hideLeaves, the position of a name that stays when the object refers to a secret
+	leaves := hide == hideLeaves || hide == hideStrings
+	name := -1 // when leaves are hidden, the position of a name that stays when the object refers to a secret
 	w.pos++
 	for w.space(); w.text[w.pos] != '}'; w.space() {
 		if w.text[w.pos] == ',' {
@@ -132,10 +140,13 @@ func (w *jsonWalker) object(hide hiding) {
 			content, _ := unescape(w.text[start+1 : stringEnd(w.text, start)])
 			refers = refers || reference.MatchString(content)
 		}
-		if hide == hideLeaves && isName && name < 0 {
+		switch {
+		case leaves && isName && name < 0:
 			name = start
 			w.pos = stringEnd(w.text, start) + 1
-		} else {
+		case isString && strings.EqualFold(key, "credentialsParameter") && reference.MatchString(w.text[start+1:stringEnd(w.text, start)]):
+			w.str(hideNothing)
+		default:
 			w.value(memberHiding(key, hide, w.text[start]))
 		}
 		if strings.EqualFold(key, "value") {
@@ -149,7 +160,7 @@ func (w *jsonWalker) object(hide hiding) {
 		if refers {
 			w.str(hideNothing)
 		} else {
-			w.str(hideLeaves)
+			w.str(hide)
 		}
 		w.pos = end
 	}
@@ -170,7 +181,7 @@ func (w *jsonWalker) holdsSecretItem(v [2]int) bool {
 		return false
 	}
 	content, _ := unescape(raw[1 : len(raw)-1])
-	return !harmlessCounterValue(firstItem(content))
+	return !harmlessCounterValue(content)
 }
 
 // memberHiding is how the value of a member is treated; first is the value's first character.
@@ -178,10 +189,26 @@ func memberHiding(key string, outer hiding, first byte) hiding {
 	if outer == hideAll || outer == hideLeaves {
 		return outer
 	}
+	own := nameHiding(key, first)
+	if outer == hideStrings && own != hideOne && (own < hideScalars || first == '{' || first == '[') {
+		return hideStrings
+	}
+	return own
+}
+
+func nameHiding(key string, first byte) hiding {
+	if first == '{' && holdsSecretMap(key) {
+		return hideStrings
+	}
 	switch pairNameKind(key) {
 	case nameSecret:
-		if namesOneSecret(key) {
+		switch {
+		case first == '{' && !hidesObject(key):
+			return hideNothing
+		case namesOneSecret(key):
 			return hideOne
+		case hidesObject(key):
+			return hideMany
 		}
 		return hideScalars
 	case nameCounter:
@@ -197,10 +224,10 @@ func (w *jsonWalker) str(hide hiding) string {
 	start, end := w.pos+1, stringEnd(w.text, w.pos)
 	w.pos = end + 1
 	content, offsets := unescape(w.text[start:end])
-	if hide == hideLeaves && reference.MatchString(content) {
+	if (hide == hideLeaves || hide == hideStrings) && reference.MatchString(content) {
 		hide = hideNothing
 	}
-	if hide == hideLists && harmlessCounterValue(firstItem(content)) {
+	if hide == hideLists && harmlessCounterValue(content) {
 		hide = hideNothing
 	}
 	if hide != hideNothing {

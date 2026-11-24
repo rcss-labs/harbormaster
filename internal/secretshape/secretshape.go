@@ -4,7 +4,10 @@
 //
 // Known limit: in text that is not valid JSON, such as an answer cut at the
 // read cap, redaction never goes past the end of the line, so the later lines
-// of a list or object spread over several lines under a secret name stay.
+// of a list or object spread over several lines under a secret name stay. A
+// value that comes before its name, as in "value":"x","name":"DB_PASSWORD", is
+// found only in valid JSON. Text glued to a redaction without a separator may
+// be hidden by a second pass only.
 package secretshape
 
 import (
@@ -135,6 +138,13 @@ var benignDescriptors = map[string]bool{
 	"size": true, "path": true, "file": true, "url": true, "uri": true, "arn": true, "version": true, "prefix": true,
 	"index": true, "expiry": true, "expires": true, "service": true, "subnets": true, "enabled": true, "status": true,
 	"limit": true, "per": true, "rate": true, "length": true, "hash": true, "fingerprint": true, "thumbprint": true,
+	"arns": true, "policy": true, "ip": true, "ips": true,
+}
+
+// strongBenign are the descriptors that clear strong words too: secret_name, password_file.
+var strongBenign = map[string]bool{
+	"name": true, "names": true, "arn": true, "arns": true, "count": true, "file": true, "path": true, "version": true,
+	"ttl": true, "length": true, "policy": true, "type": true,
 }
 
 // cursorWords before "token" make a pagination cursor: nextToken, next_page_token.
@@ -153,17 +163,17 @@ func endsInAny(segment string, words []string) bool {
 // "--- PASS: TestX" are counters and test output, not secrets, and {"key":"Environment"} is a tag.
 func pairNameKind(name string) nameKind {
 	segments := nameSegments(name)
-	weak := false
-	for _, segment := range segments {
-		if endsInAny(segment, strongWords) || endsInAny(segment, strongPlurals) {
-			return nameSecret
-		}
-		weak = weak || weakWords[segment]
-	}
 	if len(segments) == 0 {
 		return nameClean
 	}
 	before, last := segments[:len(segments)-1], segments[len(segments)-1]
+	weak := false
+	for _, segment := range segments {
+		if !strongBenign[last] && (endsInAny(segment, strongWords) || endsInAny(segment, strongPlurals)) {
+			return nameSecret
+		}
+		weak = weak || weakWords[segment]
+	}
 	if weak && !benignDescriptors[last] && !(last == "key" && len(before) == 0) && !isCursor(before, last) {
 		return nameSecret
 	}
@@ -183,6 +193,9 @@ func pairNameKind(name string) nameKind {
 }
 
 func isCursor(before []string, last string) bool {
+	if len(before) == 2 && before[0] == "next" && (before[1] == "forward" || before[1] == "backward") {
+		return last == "token"
+	}
 	for _, segment := range before {
 		if !cursorWords[segment] {
 			return false
@@ -200,6 +213,23 @@ func namesOneSecret(name string) bool {
 		}
 	}
 	return false
+}
+
+// hidesObject reports whether an object under a free-text name holds nothing but that secret, or those secrets.
+func hidesObject(name string) bool {
+	for _, segment := range nameSegments(name) {
+		if endsInAny(segment, strongWords) || endsInAny(segment, strongPlurals) {
+			return !strings.EqualFold(name, "authorizationConfig")
+		}
+	}
+	return false
+}
+
+// holdsSecretMap reports whether an object under name maps names to secrets. A list under it, as in an ECS container,
+// holds references.
+func holdsSecretMap(name string) bool {
+	segments := nameSegments(name)
+	return len(segments) > 0 && segments[len(segments)-1] == "secrets"
 }
 
 var environmentName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
