@@ -1,6 +1,8 @@
 package secretshape
 
 import (
+	"encoding/json"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -47,6 +49,23 @@ func TestNameLooksSecret(t *testing.T) {
 		{"LOG_LEVEL", false},
 		{"DATABASE_HOST", false},
 		{"", false},
+		{"API_KEYS", true},
+		{"AUTH_TOKENS", true},
+		{"APP_SECRETS", true},
+		{"ADMIN_PASSWORDS", true},
+		{"DB_PASS", true},
+		{"GPG_PASSPHRASE", true},
+		{"PGPASSWORD", true},
+		{"DBPASSWORD", true},
+		{"MYSQL_ROOTPASSWD", true},
+		{"SECRETKEY", true},
+		{"ACCESSKEY", true},
+		{"PRIVATEKEY", true},
+		{"APIKEYS", true},
+		{"BYPASS_CACHE", false},
+		{"PASSIVE_MODE", false},
+		{"KEYSPACE", false},
+		{"COMPASS_URL", false},
 	}
 	for _, tt := range tests {
 		if got := NameLooksSecret(tt.name); got != tt.want {
@@ -179,6 +198,170 @@ func TestScrubText_FindsSecretsInsideOtherText(t *testing.T) {
 	for _, tt := range tests {
 		if got := ScrubText(tt.in); got != tt.want {
 			t.Errorf("%s:\n got %q\nwant %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// Real tokens are prefix + 12 base32 characters + "_" + 43 base64url characters (see apitoken.Generate).
+func TestHarbormasterTokenShape(t *testing.T) {
+	const id = "abcd2345efgh"
+	// The first secret has no random-looking run, so only the token pattern can catch it.
+	secrets := []string{strings.Repeat("a", 43), "Qk3Zx9Lm2Pv7Rt4Wn8Yb5Jc1Hd6Gf0Sa-eAbCdEfGhI"}
+	for _, prefix := range []string{"hmp_", "hmo_", "hmr_", "hma_"} {
+		for _, secret := range secrets {
+			if len(secret) != 43 {
+				t.Fatalf("fixture secret is %d characters", len(secret))
+			}
+			token := prefix + id + "_" + secret
+			if !ValueLooksSecret(token) {
+				t.Errorf("%s token not detected", prefix)
+			}
+			if got := ScrubText("Authorization failed for " + token + " today"); got != "Authorization failed for "+Redacted+" today" {
+				t.Errorf("%s token: scrubbed to %q", prefix, got)
+			}
+		}
+	}
+}
+
+func TestNameLooksSecret_GluedEnvironmentNames(t *testing.T) {
+	for name, want := range map[string]bool{
+		"DBPASS": true, "SMTPPASS": true, "CLIENTSECRET": true, "AUTHTOKEN": true, "ACCESSTOKEN": true,
+		"SECRETACCESSKEY": true, "AWSSECRETKEY": true, "CONNECTION_STRING": true, "connectionString": true,
+		"BYPASS_CACHE": false, "COMPASS_URL": false, "PASSTHROUGH": false, "PASSENGER_APP": false,
+		"TOKENIZER_MODEL": false, "KEYSPACE": false, "KEYSTORE_PATH": false, "PASSWORDLESS_LOGIN": false,
+		"SECRETSMANAGER_ENDPOINT": false, "AWS_REGION": false, "BYPASS": false, "COMPASS": false,
+	} {
+		if got := NameLooksSecret(name); got != want {
+			t.Errorf("NameLooksSecret(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// Free text is judged by a narrower name rule than environment names: counters and test output stay readable.
+func TestScrubText_FreeTextCountersAndWordsStayIdentical(t *testing.T) {
+	for _, text := range []string{
+		"max_tokens=4096", "tokens: 1200", "total_tokens=900 input_tokens=3",
+		`{"max_tokens":4096,"usage":{"output_tokens": 4}}`, "ratelimit-remaining-tokens: 149000",
+		"keys: 12 expired", "evicted keys=44", "missing keys: a", "secrets: 4 loaded", "pass: 3 fail: 1", "pass=true",
+		"--- PASS: TestX", "health check pass: ok", "proxy_pass: http://backend:8080",
+	} {
+		if got := ScrubText(text); got != text {
+			t.Errorf("ScrubText(%q) = %q, want it unchanged", text, got)
+		}
+	}
+}
+
+func TestScrubText_FreeTextSecretNamesStillRedacted(t *testing.T) {
+	for text, leaked := range map[string]string{
+		"DB_PASS=1234": "1234", "smtp.pass=hunter2": "hunter2", "password: 99887766": "99887766",
+		"API_KEYS=abc,def": "def", `{"client_secret":"x1"}`: "x1", "passphrase=open sesame": "open",
+		"DB_PASSWORDS=hunter2": "hunter2", "pgpassword=hunter2": "hunter2", "MYSQL_ROOTPASSWD=hunter2": "hunter2",
+		"aws_secret_access_key=hunter2": "hunter2", "AUTH_TOKENS=hunter2": "hunter2",
+	} {
+		if got := ScrubText(text); strings.Contains(got, leaked) {
+			t.Errorf("ScrubText(%q) = %q, leaked %q", text, got, leaked)
+		}
+	}
+}
+
+func TestScrubText_UnquotedValueStopsAtClosingBrackets(t *testing.T) {
+	for text, want := range map[string]string{
+		`{"password": hunter2}`:          `{"password": ` + Redacted + `}`,
+		`["token=hunter2"]`:              `["token=` + Redacted + `"]`,
+		`{"a":{"secret":hunter2},"b":1}`: `{"a":{"secret":` + Redacted + `},"b":1}`,
+		`{"password":hunter2}}`:          `{"password":` + Redacted + `}}`,
+		`{"x":[password=hunter2]}`:       `{"x":[password=` + Redacted + `]}`,
+		`{"password":}`:                  `{"password":}`,
+	} {
+		if got := ScrubText(text); got != want {
+			t.Errorf("ScrubText(%q) = %q, want %q", text, got, want)
+		}
+	}
+}
+
+// Brackets inside a secret are part of it: nothing after the first one may leak.
+func TestScrubText_BracketsInsideSecretsDoNotTruncate(t *testing.T) {
+	for text, want := range map[string]string{
+		"password=}abcdef":                "password=" + Redacted,
+		"password=]abcdef":                "password=" + Redacted,
+		"password=ab}cd-ef":               "password=" + Redacted,
+		"password: a]bcdef":               "password: " + Redacted,
+		"DB_PASSWORD=p[0]rest":            "DB_PASSWORD=" + Redacted,
+		"secret={abc}def":                 "secret=" + Redacted,
+		"pwd=x}}yz":                       "pwd=" + Redacted,
+		"secret_tokens=a}b":               "secret_tokens=" + Redacted,
+		"token=abc}def&x=1":               "token=" + Redacted + "&x=1",
+		"https://x/y?token=ab]cd":         "https://x/y?token=" + Redacted,
+		"Server=db;Password=hu}nter2;X=1": "Server=db;Password=" + Redacted + ";X=1",
+		"auth: {user}:{pw}":               "auth: " + Redacted,
+		"api_key=${X}realtail":            "api_key=" + Redacted,
+	} {
+		got := ScrubText(text)
+		if got != want {
+			t.Errorf("ScrubText(%q) = %q, want %q", text, got, want)
+		}
+	}
+}
+
+// Log lines arrive as JSON strings inside JSON: escaped quotes must not hide a pair.
+func TestScrubText_EscapedJSON(t *testing.T) {
+	for text, want := range map[string]string{
+		`{\"password\":\"hunter2\"}`:               `{\"password\":\"` + Redacted + `\"}`,
+		`{\\\"password\\\":\\\"hunter2\\\"}`:       `{\\\"password\\\":\\\"` + Redacted + `\\\"}`,
+		`\"token\": \"abc\\\"def\"`:                `\"token\": \"` + Redacted + `\"`,
+		`"message":"{\"db\":{\"secret\":\"x1\"}}"`: `"message":"{\"db\":{\"secret\":\"` + Redacted + `\"}}"`,
+	} {
+		if got := ScrubText(text); got != want {
+			t.Errorf("ScrubText(%s) = %s, want %s", text, got, want)
+		}
+	}
+	answer := `{"lines":["{\"password\":\"hunter2\"}","x"],"message":"{\"db\":{\"secret\":\"x1\"}}","t":"\"token\": \"abc\\\"def\"","n":1}`
+	if !json.Valid([]byte(answer)) {
+		t.Fatal("fixture is not valid JSON")
+	}
+	got := ScrubText(answer)
+	if !json.Valid([]byte(got)) {
+		t.Errorf("scrubbed answer is not valid JSON: %s", got)
+	}
+	for _, leaked := range []string{"hunter2", "x1", "abc"} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("%q survived in %s", leaked, got)
+		}
+	}
+}
+
+func TestScrubText_CounterNamesJudgeTheFirstItem(t *testing.T) {
+	for _, text := range []string{
+		`"missing_keys":["a","b"]`, "max_tokens=-5", "tokens: 1.5", "total_tokens=12k", "ttl_secrets: 30s", "keys: 90%",
+		"api_keys=n/m", "api_keys=null", "api_keys=false,true", "api_keys=12,34", "api_keys=1.5ms,2ms",
+	} {
+		if got := ScrubText(text); got != text {
+			t.Errorf("ScrubText(%q) = %q, want it unchanged", text, got)
+		}
+	}
+	if got := ScrubText("API_KEYS=abc,def"); strings.Contains(got, "def") || strings.Contains(got, "abc") {
+		t.Errorf("a list whose first item is not a number leaked: %q", got)
+	}
+}
+
+func TestScrubText_RandomSecretsNeverLeakASixCharacterPiece(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	var alphabet []byte
+	for c := byte('!'); c <= '~'; c++ {
+		if !strings.ContainsRune(`"',;&`, rune(c)) {
+			alphabet = append(alphabet, c)
+		}
+	}
+	for i := 0; i < 2000; i++ {
+		secret := make([]byte, 8+rng.Intn(24))
+		for j := range secret {
+			secret[j] = alphabet[rng.Intn(len(alphabet))]
+		}
+		out := ScrubText("password=" + string(secret))
+		for j := 0; j+6 <= len(secret); j++ {
+			if piece := string(secret[j : j+6]); strings.Contains(out, piece) {
+				t.Fatalf("secret %q: piece %q left in %q", secret, piece, out)
+			}
 		}
 	}
 }
