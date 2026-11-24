@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/rcss-labs/harbormaster/internal/agent/provider"
+	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/hmtools/hmtoolstest"
 )
@@ -127,5 +130,62 @@ func TestUpstreamToolRunner_AnswerCutAtTheReadCapNeverLeavesPartOfAPassword(t *t
 	text, isError := runner.Run(context.Background(), "run-token", "get_overview", nil)
 	if isError || strings.Contains(text, "Hunter") {
 		t.Errorf("part of the password survived: ...%s", text[max(0, len(text)-160):])
+	}
+}
+
+func TestLoop_JSONCutAtTheReadCapNeverSendsPartOfASecret(t *testing.T) {
+	// The answer is JSON with a log line near the read cap. The secret in that
+	// line slides across the cap one byte at a time, so it is cut everywhere.
+	const readCap = 64 << 10 // for small result caps
+	password := "Zq7" + "fakeHunter, pw;tail(9"
+	inner := func(v any) string {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	for name, tc := range map[string]struct {
+		line   string
+		secret []string // none of these may be sent
+	}{
+		"token":                      {"auth " + fakeJWT + " ok", []string{"eyJ", "c2lnbm"}},
+		"password in JSON in string": {inner(map[string]string{"password": password, "user": "app"}), []string{"Zq7", "fakeHu", "nter, p", "tail(9"}},
+		"password two strings deep":  {inner(map[string]string{"msg": inner(map[string]string{"password": password, "user": "app"})}), []string{"Zq7", "fakeHu", "nter, p", "tail(9"}},
+		"token in JSON in string":    {inner(map[string]string{"header": "Bearer " + fakeJWT}), []string{"eyJ", "c2lnbm"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			encoded := inner(tc.line)
+			var body string
+			runner, _ := newTestRunner(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) })
+			up := runner.(upstreamToolRunner).up
+			runner = NewUpstreamToolRunner(up, 1000)
+			for before := 0; before <= len(encoded)+12; before++ {
+				const filler = `"all is well here",`
+				head := `{"events":[` + strings.Repeat(filler, (readCap-before-60)/len(filler))
+				head += inner(strings.Repeat("x", max(0, readCap-before-len(head)-3))) + ","
+				body = head + encoded + `,"the end` + strings.Repeat(" more", 2000) + `"]}`
+				p := fake.New(
+					fake.ToolCalls(provider.Usage{InputTokens: 10, OutputTokens: 5}, overviewCall("c1")),
+					fake.Text("Done.", provider.Usage{InputTokens: 10, OutputTokens: 5}),
+				)
+				// The loop's own result cap is far above the read cap, so that
+				// what is near the read cap is sent.
+				if _, err := run(t, newLoop(p, runner, func(l *Limits) { l.MaxResultBytes = 400_000 }), baseInput()); err != nil {
+					t.Fatal(err)
+				}
+				sent := p.Requests()[1].Messages
+				text := sent[len(sent)-1].Text
+				if !strings.Contains(text, "larger than could be read") {
+					t.Fatalf("%d bytes before the cap: the answer was not cut, so this proves nothing", before)
+				}
+				for _, piece := range tc.secret {
+					if i := strings.Index(text, piece); i >= 0 {
+						t.Fatalf("%d bytes before the cap: %q was sent: %q", before, piece, text[max(0, i-60):min(len(text), i+60)])
+					}
+				}
+			}
+		})
 	}
 }

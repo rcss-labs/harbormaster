@@ -39,7 +39,7 @@ func (r *session) newResult(tool, text string) *toolResult {
 	}
 	// An invalid byte travels as a three-byte replacement, so it is replaced
 	// before anything is counted.
-	text = secretshape.ScrubText(strings.ToValidUTF8(text, "�"))
+	text = secretshape.ScrubText(strings.ToValidUTF8(text, "\uFFFD"))
 	text = r.code.ReplaceAllString(text, "[removed]")
 	cut := cutAt(text, limit)
 	res.data, res.omitted = text[:cut], len(text)-cut

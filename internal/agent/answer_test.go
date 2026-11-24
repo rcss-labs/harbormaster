@@ -572,6 +572,22 @@ func TestLoop_AQuarterOfTheTimeIsKeptForTheAnswer(t *testing.T) {
 	if n := len(runner.Calls()); n != 1 {
 		t.Errorf("tools ran %d times, want 1: the second of the turn would eat the answer's time", n)
 	}
+	starts, skipped := 0, 0
+	for _, e := range events {
+		if e.Type == "tool_start" || e.Type == "tool_end" {
+			starts++
+		}
+	}
+	msgs := p.Requests()[1].Messages
+	requireVendorValid(t, msgs)
+	for _, m := range msgs {
+		if m.Role == provider.RoleTool && m.IsError && strings.Contains(m.Text, "was not run") {
+			skipped++
+		}
+	}
+	if starts != 2 || skipped != 1 {
+		t.Errorf("%d tool events and %d results saying the tool was not run, want 2 and 1", starts, skipped)
+	}
 
 	p, _, _ = slowRun(t, 37*time.Second) // two tools take 74 s: 26 s remain
 	if reqs := p.Requests(); len(reqs) < 2 || isFinalRequest(reqs[1]) {
