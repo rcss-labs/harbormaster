@@ -427,6 +427,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.configSearchRoutes(mux) // estate-wide config search
 	if s.Cfg.APITokens {
 		s.tokenRoutes(mux) // access tokens: absent (404) while HM_API_TOKENS is off
+	} else if s.Cfg.AgentEnabled() {
+		s.whoAmIRoute(mux) // a run token still needs whoami; nothing else of token management exists
 	}
 	if s.oauthOn() {
 		s.oauthRoutes(mux) // OAuth for MCP connectors: absent (404) while HM_OAUTH is off
