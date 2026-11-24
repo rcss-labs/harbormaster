@@ -9,7 +9,7 @@ Plans and applies run in your deployment system. Nothing below runs `terraform p
 | Step | What | How to verify |
 | --- | --- | --- |
 | 1 | Ship the Harbormaster release with `HM_AGENT_URL` unset. Nothing changes | `GET /api/agent/status` answers `404`. There is no **Ask AI** button |
-| 2 | Run the agent module and add its `task_security_group_id` to the Harbormaster module's `alb_ingress_security_group_ids` | The agent's target group is healthy in the console (the `<name>-unhealthy-hosts` alarm exists only if you set `alarm_sns_topic_arns`) |
+| 2 | Run the agent module and add its `task_security_group_id` to the Harbormaster module's `alb_ingress_security_group_ids` | In the agent's ECS service, `runningCount` equals `desiredCount` and its target group has healthy targets (the `<name>-unhealthy-hosts` alarm exists only if you set `alarm_sns_topic_arns`) |
 | 3 | Set `HM_AGENT_URL` (module `extra_env`) and apply. All Harbormaster tasks that run the web or coordinator role must get it | **Settings > AI agent** shows **Reachable** |
 | 4 | Set a small allowance (for example a few dollars) first, because an allowance of 0 refuses the test. Then choose a model and run **Test model** | The test answers. Usage shows the call |
 | 5 | Turn on **AI chat** for yourself or a small group first. Ask the acceptance questions in section 2 | Section 2 |

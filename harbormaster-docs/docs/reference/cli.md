@@ -1,6 +1,6 @@
 # Command-line reference
 
-Commands, flags and exit codes of the three Harbormaster binaries: `harbormaster`, `harbormaster-mcp` and `harbormaster-scanner`. Use it when you run the binaries directly, write container commands or debug a failing start.
+Commands, flags and exit codes of the four Harbormaster binaries: `harbormaster`, `harbormaster-mcp`, `harbormaster-scanner` and `harbormaster-agent`. Use it when you run the binaries directly, write container commands or debug a failing start.
 
 All settings come from environment variables, not flags. See the [configuration reference](configuration.md). The container images set the entry point to the binary, so `docker run <image> <command>` runs a command below.
 
@@ -149,6 +149,49 @@ Sends `GET /healthz` to `127.0.0.1` on the port of `HM_MCP_LISTEN`, with a 3 sec
 ### version
 
 Prints `harbormaster-mcp <version> <commit>`.
+
+## harbormaster-agent
+
+The AI agent service. Its image runs `harbormaster-agent serve`.
+
+```text
+usage: harbormaster-agent <command>
+
+commands:
+  serve        serve the agent API on HM_AGENT_LISTEN
+  healthcheck  exit 0 when the local agent answers /healthz, 1 otherwise
+  version      print the version and commit
+```
+
+`-h`, `--help` and `help` print the usage to standard output and exit 0. No command or an unknown command prints it to standard error and exits 2.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | `serve`: clean shutdown after `SIGINT` or `SIGTERM`. `healthcheck`, `version`, `help`: success. |
+| `1` | `serve`: runtime failure or incomplete shutdown. `healthcheck`: the agent did not answer 200. |
+| `2` | `serve`: configuration error (the message names the variable). Also usage errors. |
+
+### serve
+
+```text
+harbormaster-agent serve
+```
+
+Listens on `HM_AGENT_LISTEN` (default `:8484`) and serves chat runs for Harbormaster. Shutdown has a 20 second grace. Variables are in the [AI agent](configuration.md#ai-agent) table.
+
+### healthcheck
+
+```text
+harbormaster-agent healthcheck
+```
+
+Sends `GET /healthz` to the local agent with a 3 second timeout. Exit 0 on HTTP 200, otherwise 1.
+
+### version
+
+Prints `harbormaster-agent <version> <commit>`.
 
 ## harbormaster-scanner
 

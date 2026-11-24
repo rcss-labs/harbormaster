@@ -84,7 +84,7 @@ The module also sets `HM_AGENT_LISTEN=:8484` and `HM_AGENT_TRUSTED_PROXY=true`: 
 
 ## Egress is fenced in the application
 
-The tasks have outbound 443 to `0.0.0.0/0`, because security groups cannot filter by hostname and providers' addresses change. That the agent dials only the configured providers and Harbormaster is therefore a property of its code, not of the network. For a stricter fence, see [Hardening checklist](../security/hardening.md#ai-agent).
+The tasks have outbound 443 to `0.0.0.0/0`, because security groups cannot filter by hostname and providers' addresses change. Provider calls and calls to Harbormaster go to fixed hosts, which is a property of the agent's code, not of the network. The AWS credential chain (container credentials endpoint, STS, SSO) is separate, and the STS and SSO clients follow `AWS_ENDPOINT_URL_*` through it. For a stricter fence, see [Hardening checklist](../security/hardening.md#ai-agent).
 
 ## KMS-encrypted secrets
 
