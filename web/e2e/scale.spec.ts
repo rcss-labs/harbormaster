@@ -59,9 +59,9 @@ test.describe('Auto', () => {
     expect(await dataScale(page)).toBe('150')
     await expectFillsWindow(page)
 
-    // 3840 / 1.5 = 2560 layout px: the main column is 2560 minus the 212 px sidebar, as in layout.spec.ts at 2560.
+    // 3840 / 1.5 = 2560 layout px: the main column is 2560 minus the 240 px sidebar, as in layout.spec.ts at 2560.
     const layoutWidth = await main.evaluate((element) => element.clientWidth)
-    expect(Math.abs(layoutWidth - (2560 - 212))).toBeLessThanOrEqual(40)
+    expect(Math.abs(layoutWidth - (2560 - 240))).toBeLessThanOrEqual(40)
     await expect(page.getByRole('button', { name: /sidebar$/i })).toHaveAttribute('aria-expanded', 'true')
 
     // The two-column split of the wide overview is side by side.

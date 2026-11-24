@@ -1,40 +1,49 @@
 /* Services page: a flat list of every visible service. The page fills the main column; no max-width. */
-.page { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .pageHead { display: grid; gap: 2px; }
-.pageHead h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; }
+.pageHead h1 { margin: 0; }
 .sub { color: var(--muted); font-size: 13px; }
 
-.views { padding: 8px var(--pad) 0; border-bottom: 1px solid var(--border); }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px var(--pad); border-bottom: 1px solid var(--border); }
-.search { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; flex: 1 1 240px; min-width: 160px; }
+.views { padding: 8px var(--pad); border-bottom: 1px solid var(--border); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px var(--pad); border-bottom: 1px solid var(--border); }
+.search { height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--raised); color: var(--text); font: inherit; flex: 1 1 240px; min-width: 160px; }
 .pushRight { margin-left: auto; }
 
-.nameCell { display: grid; line-height: 1.3; min-width: 0; }
-.nameLink { font: 600 13px var(--mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nameCell { display: grid; line-height: 16px; min-width: 0; }
+.nameLink { font: 500 13px/16px var(--sans); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nameLink:hover { color: var(--accent); }
-.why { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.why { font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mono { font-family: var(--mono); font-size: 12px; }
 .mono.bad { color: var(--bad); }
-.link { color: var(--accent); }
-.two { display: grid; line-height: 1.3; }
+.link { color: var(--text-2); }
+@media (min-width: 701px) {
+  .link { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+.link:hover { color: var(--accent); }
+/* Every row is the same height: long names end in an ellipsis, with the full text in the tooltip. */
+.two { display: grid; line-height: 16px; min-width: 0; }
+.two > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .two small { font: 12px var(--mono); color: var(--muted); }
 .nowrap { white-space: nowrap; }
 
-.actions { display: flex; align-items: center; gap: 6px; }
-.btn { height: 26px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; }
+.actions { display: flex; align-items: center; gap: 0; padding-left: 4px; }
+/* Row actions are text until the pointer or the keyboard reaches them, so the rows read as data. */
+.actions .btn, .actions [aria-pressed='false'] { height: 28px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--muted); }
+.actions .btn:hover:not(:disabled), .actions [aria-pressed='false']:hover { background: var(--active); color: var(--text); }
+.btn { height: 28px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; }
 .btn:hover { background: var(--hover-strong); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .btnPrimary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btnPrimary:hover { background: var(--accent); filter: brightness(1.08); }
 .btnPrimary:disabled { filter: none; }
 
-.empty { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.empty { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .note { color: var(--muted); font-size: 12px; }
 
-.drawerBody { display: grid; gap: 14px; }
+.drawerBody { display: grid; gap: 16px; }
 .openGroup { display: grid; gap: 6px; }
-.openLabel { font-size: 12px; font-weight: 600; color: var(--muted); }
+.openLabel { font-size: 12px; font-weight: 500; color: var(--muted); }
 .openLinks { display: flex; flex-wrap: wrap; gap: 6px; }
 .tagNote { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .footBtns { display: flex; gap: 8px; justify-content: flex-end; }
@@ -44,7 +53,7 @@
 /* Phone only: figures sit in the row's second line, the alert gets a line of its own, and the actions are one button. */
 .moreButton { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--r); background: none; color: var(--text-2); cursor: pointer; }
 .phoneWhy { flex: 1 1 100%; color: var(--muted); }
-.phoneFilters { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.phoneFilters { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .phoneSearchRow { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
 .phoneSearchRow .search { flex: 1 1 auto; min-width: 0; height: 44px; font-size: 16px; }
 @media (max-width: 700px) {

@@ -1,10 +1,10 @@
-.banner { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: var(--r); border: 1px solid; font-size: 13px; color: var(--text); }
+.banner { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; border-radius: var(--r); border: 1px solid; font-size: 13px; color: var(--text); }
 .banner > svg { margin-top: 2px; }
-.compact { padding: 4px 10px; align-items: center; font-size: 12px; }
+.compact { padding: 4px 12px; align-items: center; font-size: 12px; }
 .compact > svg { margin-top: 0; }
 .text { flex: 1 1 200px; min-width: 0; }
 .action { flex: none; }
-.info { background: var(--accent-soft); border-color: var(--accent-line); }
+.info { background: var(--surface); border-color: var(--border-strong); }
 .info > svg { color: var(--accent); }
 .warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
 .warn > svg { color: var(--warn); }

@@ -103,7 +103,7 @@ function DesiredStepper({ serviceId, service, disabledTitle }: StepperProps) {
   return (
     <>
       <div className={stepperStyles.stepper} role="group" aria-label="Desired count" title={disabledTitle}>
-        <span className={stepperStyles.stepperLabel}>DESIRED</span>
+        <span className={stepperStyles.stepperLabel}>Desired</span>
         <button
           type="button"
           aria-label="Decrease desired count"

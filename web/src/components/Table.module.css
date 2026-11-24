@@ -1,7 +1,7 @@
 .table-wrap { overflow-x: auto; }
 .t { width: 100%; border-collapse: collapse; }
-.t th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 7px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.t td { padding: 7px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.t th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.t td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .t tr:last-child td { border-bottom: 0; }
 .t tbody tr.link { cursor: pointer; }
 .t tbody tr.link:hover td { background: var(--hover); }

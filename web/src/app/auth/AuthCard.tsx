@@ -22,7 +22,7 @@ export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit,
   }
   return (
     <main className={styles.wrap}>
-      <form className={`card ${styles.card}`} onSubmit={handleSubmit} noValidate>
+      <form className={styles.card} onSubmit={handleSubmit} noValidate>
         <div className={styles.brand}>
           <Brand variant="signin" />
           <div className={styles.brandSub}>ECS control center</div>
@@ -37,7 +37,7 @@ export function AuthCard({ title, sub, error, info, submitLabel, busy, onSubmit,
           </div>
         )}
         {submitLabel && (
-          <button className={`btn primary ${styles.submit}`} type="submit" disabled={busy}>
+          <button className={styles.submit} type="submit" disabled={busy}>
             {submitLabel}
           </button>
         )}

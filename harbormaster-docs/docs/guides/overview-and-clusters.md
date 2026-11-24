@@ -25,7 +25,7 @@ The **Layout** switch at the top right has two views.
 **Triage** (the default) answers "what is wrong right now?"
 
 - **Needs attention** lists current alerts, worst first. Each row has a severity (**Failing**, **Warning** or **In progress**), the service, the cluster, the cause and a suggested next step as a link. When a change happened just before the problem, the row says `Just before: ...`. Use the **All**, **Failing**, **Warning** and **In progress** filter to narrow the list. Account-level alerts (for example an unreachable account) appear in the same list. Global admins get an **Open accounts** action on them.
-- **Estate map** draws one cell per cluster, coloured by status.
+- **Estate map** groups clusters by account and region. With up to 24 clusters, each one is named and shows its running and desired tasks with a load line. With more, up to four clusters per region that need attention or are degraded keep their name, and the rest are cells coloured by status. Select a cluster to open it.
 - **Busiest clusters, CPU** ranks clusters by CPU, with a link to **All clusters**.
 - **Task stops per hour, 24 h** and **Why tasks stopped, 3 days** show how often tasks stop and the main reasons.
 

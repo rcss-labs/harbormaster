@@ -1,6 +1,6 @@
 import { ChartTooltip } from './ChartTooltip'
 import styles from './charts.module.css'
-import { fmtNum, niceMax } from './format'
+import { bucketDateTime, bucketSpacing, fmtNum, niceMax } from './format'
 import { useChartHover } from './useChartHover'
 import { formatAgo, useNow } from '../components/Ago'
 
@@ -69,7 +69,7 @@ function relativeLabel(timestamps: string[], index: number, now: number): string
   const time = Date.parse(timestamps[index])
   const age = now - time
   if (age < 60_000) return 'now'
-  const spacing = timestamps.length > 1 ? Date.parse(timestamps[1]) - Date.parse(timestamps[0]) : 0
+  const spacing = bucketSpacing(timestamps)
   if (spacing >= DAY_MS && age < spacing) return 'today'
   return formatAgo(time, now)
 }
@@ -213,7 +213,8 @@ export function TimeSeriesChart({
             <ChartTooltip
               leftPercent={leftPercent}
               plotWidth={plotWidth}
-              title={relativeLabel(timestamps, hovered, now ?? liveNow)}
+              title={bucketDateTime(timestamps[hovered], bucketSpacing(timestamps), now ?? liveNow)}
+              age={relativeLabel(timestamps, hovered, now ?? liveNow)}
               rows={series.map((line) => {
                 const value = line.values[hovered]
                 return { label: line.label, color: colorOf(line), value: value === null || value === undefined ? '–' : yFormat(value) }

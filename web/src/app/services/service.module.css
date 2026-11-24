@@ -1,21 +1,21 @@
 /* Ported from the mockup's page-head, grid, tile sub, bar, task-meter, tabs and no-access rules (docs/design/mockup/index.html). */
-/* Sticky header + tabs. The shell content area has 16px 20px padding, so bleed out to its edges and stick at its top. */
-.stickyHead { position: sticky; top: -16px; z-index: 5; margin: -16px -20px 0; padding: 12px 20px 0; background: var(--bg); border-bottom: 1px solid var(--border); }
+/* Sticky header + tabs. The shell content area has 24px padding, so bleed out to its edges and stick at its top. */
+.stickyHead { position: sticky; top: -24px; z-index: 5; margin: -24px -24px 0; padding: 20px 24px 0; background: var(--bg); border-bottom: 1px solid var(--border); }
 .stickyHead nav { margin: 0 -6px; border-bottom: 0; }
-.pageHead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
-.titleRow h1 { font: 600 18px var(--mono); letter-spacing: -0.02em; margin: 0; }
+.pageHead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; }
+.titleRow h1 { font: 500 20px/28px var(--mono); margin: 0; }
 .meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-family: var(--mono); font-size: 12px; color: var(--dim); }
 .meta > span { color: var(--muted); }
 .meta > span::before { content: "·"; margin-right: 8px; color: var(--dim); }
 .titles { display: grid; gap: 6px; min-width: 0; }
-.titleRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.titleRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
-.btn { height: 30px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; color: inherit; }
+.btn { height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--border-strong); background: var(--raised); cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none; color: inherit; }
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .accentLink { color: var(--accent); }
 
-.grid { display: grid; gap: 14px; }
+.grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); }
 .g4 { grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
 .gWide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
@@ -30,39 +30,39 @@
 .danger { color: var(--danger); }
 .warning { color: var(--warning); }
 .pushRight { margin-left: auto; }
-.afterBar { margin-top: 14px; }
+.afterBar { margin-top: 16px; }
 .empty { color: var(--muted); text-align: center; padding: 16px; }
 
 /* Wraps the active tab so long panels (logs, terminal) can fill the remaining viewport height. */
-.tabPanel { flex: 1 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.tabPanel { flex: 1 0 auto; display: flex; flex-direction: column; gap: 16px; }
 
-.deployCard { display: grid; gap: 10px; }
+.deployCard { display: grid; gap: 8px; }
 .bar { height: 10px; border-radius: 5px; background: var(--muted-soft); overflow: hidden; display: flex; }
-.bar span { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.bar span { display: block; height: 100%; background: var(--accent); }
 .bar span.old { background: var(--border-strong); }
 
 .taskRows { display: grid; gap: 8px; }
 .taskRow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 12px; }
 
-.noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
-.noAccess h2 { margin: 0; font-size: 12.5px; }
+.noAccess { padding: 48px; display: grid; gap: 6px; justify-items: center; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); }
+.noAccess h2 { margin: 0; font-size: 13px; }
 .noAccess p { margin: 0; color: var(--muted); }
 
 /* Operations tab toolbar, panel and load-more rules (mockup sOps() and .toolbar). */
 .opsToolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .toggle { display: inline-flex; gap: 6px; align-items: center; }
 .end { margin-left: auto; }
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); min-width: 0; }
-.more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--border); }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-panel); min-width: 0; }
+.more { display: flex; justify-content: center; padding: 12px; border-top: 1px solid var(--border); }
 
 /* Metrics tab toolbar: range selector and resolution text (mockup sMetrics()). */
 .metricsToolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 /* Pending revision banner (plan 02, task 16) */
 .pendingBanner { display: flex; align-items: center; gap: 12px; width: 100%; }
 .pendingBanner > span { flex: 1; }
-.pendingDeploy { height: 26px; padding: 0 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.pendingDeploy { height: 28px; padding: 0 12px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 13px; cursor: pointer; }
 .pendingDeploy:disabled { opacity: 0.5; cursor: not-allowed; }
-.metricsGrid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.metricsGrid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .metricsGrid { grid-template-columns: minmax(0, 1fr); } }
 /* Logs and terminal run to the bottom of the window: cancel the content area's whole bottom padding (32px) so the panel ends at the window edge and its inner log/terminal area sits within one panel padding of it. */
 .tabPanelFill { margin-bottom: -32px; }
@@ -97,6 +97,6 @@
   .smallBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
-.btnPrimary { height: 30px; padding: 0 14px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
+.btnPrimary { height: 32px; padding: 0 16px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 500; display: inline-flex; align-items: center; white-space: nowrap; text-decoration: none; }
 .btnPrimary:hover:not(:disabled) { filter: brightness(1.1); }
 .btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }

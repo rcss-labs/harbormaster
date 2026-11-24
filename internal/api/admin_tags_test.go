@@ -110,7 +110,7 @@ func TestTags_CreateValidateConflict(t *testing.T) {
 			t.Fatalf("%q: message %q", name, msg)
 		}
 	}
-	resp := sam.post("/api/tags", map[string]any{"name": "QA", "color": "pink"})
+	resp := sam.post("/api/tags", map[string]any{"name": "QA", "color": "magenta"})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("bad colour status %d", resp.StatusCode)
 	}
@@ -135,6 +135,23 @@ func TestTags_CreateValidateConflict(t *testing.T) {
 	}
 	if _, msg := errorCode(t, resp); msg != "A tag called qa already exists." {
 		t.Fatalf("conflict message %q", msg)
+	}
+}
+
+// Every colour the picker offers must be accepted by the API and by the database's own check.
+func TestTags_EveryColourIsStored(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	sam := login(t, srv, "sam", testPassword)
+	for _, colour := range []string{"neutral", "red", "orange", "amber", "brown", "lime", "green", "teal", "blue", "indigo", "violet", "pink"} {
+		resp := sam.post("/api/tags", map[string]any{"name": "Tag " + colour, "color": colour})
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("%s: status %d", colour, resp.StatusCode)
+		}
+		var created testTagItem
+		decode(t, resp, &created)
+		if created.Color != colour {
+			t.Fatalf("stored colour %q, want %q", created.Color, colour)
+		}
 	}
 }
 
