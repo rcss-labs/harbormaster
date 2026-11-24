@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -30,6 +31,11 @@ type Message struct {
 	ToolCallID string
 	ToolName   string
 	IsError    bool
+	// Opaque is adapter-private state the vendor requires to be echoed back with
+	// this assistant turn (reasoning items, thought signatures). The loop copies
+	// it from Response to the assistant Message unchanged; it lives in memory for
+	// one run only and is never logged, stored or sent to another provider.
+	Opaque json.RawMessage
 }
 
 type ToolDef struct {
@@ -57,6 +63,11 @@ type Response struct {
 	Usage     Usage
 	// StopReason is one of "end", "tool_use" or "max_tokens".
 	StopReason string
+	// Opaque is adapter-private state the vendor requires to be echoed back with
+	// this assistant turn (reasoning items, thought signatures). The loop copies
+	// it from Response to the assistant Message unchanged; it lives in memory for
+	// one run only and is never logged, stored or sent to another provider.
+	Opaque json.RawMessage
 }
 
 // Provider generates one model turn. onText, when not nil, receives text as it
