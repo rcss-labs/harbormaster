@@ -88,7 +88,10 @@ trap 'stop_all; exit "$status"' INT TERM
 trap 'stop_all' EXIT
 
 # Web first: it migrates and seeds the demo accounts, which the poller and coordinator then pick up at once.
-procs_start web "$web_addr" -
+# HM_AGENT=1 switches the chat on for the web process; start the agent with make run-agent.
+agent_env=()
+if [[ "${HM_AGENT:-}" == 1 ]]; then agent_env=(HM_AGENT_URL=http://127.0.0.1:8484); fi
+procs_start web "$web_addr" - ${agent_env[@]+"${agent_env[@]}"}
 if ! procs_wait_healthy "$web_addr" 60; then
 	echo "run-split: web did not become healthy" >&2
 	status=1

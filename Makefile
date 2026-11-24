@@ -9,7 +9,7 @@ endif
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test lint test-db test-kv run run-mcp run-split split-smoke e2e tf-check test-it-exec staticcheck \
-	image check-image release release-check scanner-image check-scanner-image mcp-image check-mcp-image vulncheck icons check-notices soak \
+	image check-image release release-check scanner-image check-scanner-image mcp-image check-mcp-image agent-image check-agent-image run-agent vulncheck icons check-notices soak \
 	floci-selfcheck floci-up floci-seed floci-serve floci-check floci-mcp-check floci-sanity floci-down
 
 
@@ -17,6 +17,7 @@ build:
 	if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi
 	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster ./cmd/harbormaster
 	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster-mcp ./cmd/harbormaster-mcp
+	go build -ldflags "$(LDFLAGS)" -o bin/harbormaster-agent ./cmd/harbormaster-agent
 
 test:
 	go test -timeout 30m ./...
@@ -52,11 +53,16 @@ test-kv:
 	@echo "export HM_TEST_KV_URLS=redis://127.0.0.1:63791,redis://127.0.0.1:63792"
 
 run:
-	HM_FAKE_AWS=1 HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
+	HM_FAKE_AWS=1 $(if $(filter 1,$(HM_AGENT)),HM_AGENT_URL=http://127.0.0.1:8484 )HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
 
 # run-mcp runs the MCP gateway against a local `make run` (Harbormaster on 8480); see README "Run the gateway locally".
 run-mcp:
 	HM_MCP_LISTEN=127.0.0.1:8481 HM_MCP_UPSTREAM_URL=http://127.0.0.1:8480 HM_MCP_PUBLIC_URL=http://127.0.0.1:8481 HM_MCP_TRUSTED_PROXY=false go run ./cmd/harbormaster-mcp serve
+
+# run-agent runs the agent service on a canned model against a local `make run` (Harbormaster on 8480). Start that
+# with HM_AGENT=1 make run to switch the chat on; the fake provider needs the loopback upstream used here.
+run-agent:
+	HM_AGENT_LISTEN=127.0.0.1:8484 HM_AGENT_UPSTREAM_URL=http://127.0.0.1:8480 HM_AGENT_FAKE_PROVIDER=true HM_AGENT_TRUSTED_PROXY=false go run ./cmd/harbormaster-agent serve
 
 # run-split runs web (8480), poller (8482) and coordinator (8483) as three processes on fake AWS data; see tools/run-split.sh.
 run-split:
@@ -153,12 +159,30 @@ check-mcp-image:
 		tools/check-mcp-image.sh harbormaster-mcp:$(VERSION)-check $(VERSION); \
 	fi
 
+# agent-image builds the agent service image (Dockerfile.agent): the harbormaster-agent binary alone on distroless. Nothing is pushed.
+agent-image:
+	docker build -f Dockerfile.agent --platform linux/$(ARCH) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-agent:$(VERSION) .
+
+# check-agent-image follows check-scanner-image: runtime checks on the shipped image when this host can execute it,
+# otherwise static checks on it and runtime checks on a native build of the same Dockerfile.
+check-agent-image:
+	@if tools/check-agent-image.sh --can-run harbormaster-agent:$(VERSION) $(VERSION); then \
+		tools/check-agent-image.sh harbormaster-agent:$(VERSION) $(VERSION); \
+	else \
+		native="$$(docker info --format '{{.Architecture}}' | sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/')"; \
+		echo "check-agent-image: host cannot run harbormaster-agent:$(VERSION); static checks on it, runtime checks on a native $$native build"; \
+		CHECK_IMAGE_STATIC_ONLY=1 tools/check-agent-image.sh harbormaster-agent:$(VERSION) $(VERSION) && \
+		docker build -q -f Dockerfile.agent --platform linux/$$native --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t harbormaster-agent:$(VERSION)-check . >/dev/null && \
+		tools/check-agent-image.sh harbormaster-agent:$(VERSION)-check $(VERSION); \
+	fi
+
 # release runs its prerequisites in order (do not use make -j). The build step generates the web app,
 # so restore the tracked placeholder afterwards: git checkout -- internal/web/dist/index.html
-release: lint test vulncheck build image check-image scanner-image check-scanner-image mcp-image check-mcp-image
+release: lint test vulncheck build image check-image scanner-image check-scanner-image mcp-image check-mcp-image agent-image check-agent-image
 	@echo "image: harbormaster:$(VERSION)"
 	@echo "scanner image: harbormaster-scanner:$(VERSION)"
 	@echo "mcp image: harbormaster-mcp:$(VERSION)"
+	@echo "agent image: harbormaster-agent:$(VERSION)"
 	bin/harbormaster version
 
 # staticcheck runs the pinned analyser with staticcheck.conf (its defaults minus ST1005). A finding that is
