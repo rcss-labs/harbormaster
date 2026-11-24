@@ -8,6 +8,7 @@ import {
   type AgentSettingsDTO,
   type AgentTestResult,
 } from '../../../api/agent'
+import { ApiError } from '../../../api/client'
 import { Banner } from '../../../components/Banner'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
 import { Meter } from '../../../components/Meter'
@@ -20,8 +21,8 @@ import { useStickyBar } from '../useStickyBar'
 import styles from '../settings.module.css'
 import { UsageTable } from './UsageTable'
 
-// Where an operator finds how providers are set up.
-const INSTALL_GUIDE_URL = 'https://github.com/rcss-labs/harbormaster/blob/main/harbormaster-docs/docs/install/deploy-with-terraform.md'
+// The install guide lives in the repository docs; the app has no docs site of its own.
+const INSTALL_GUIDE_URL = 'https://github.com/rcss-labs/harbormaster/blob/main/harbormaster-docs/docs/install/ai-agent.md'
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -34,10 +35,14 @@ const providerName = (id: string) => PROVIDER_NAMES[id] ?? id
 
 const ALLOWANCE_PATTERN = /^\d+(\.\d{1,2})?$/
 
-/** Prices arrive as micro-dollars per million tokens. */
+/** Prices arrive as micro-dollars per million tokens; integer arithmetic keeps them exact. */
 function dollarsPerMillion(micro: number): string {
-  const dollars = micro / 1_000_000
-  return `$${Number.isInteger(dollars * 100) ? dollars.toFixed(2) : String(dollars)}`
+  const whole = Math.floor(micro / 1_000_000)
+  const fraction = String(micro % 1_000_000)
+    .padStart(6, '0')
+    .replace(/0+$/, '')
+    .padEnd(2, '0')
+  return `$${whole.toLocaleString('en-US')}.${fraction}`
 }
 
 interface Draft {
@@ -47,13 +52,15 @@ interface Draft {
   unredacted: string[]
 }
 
+type TestOutcome = AgentTestResult & { provider: string; model: string }
+
 function baselineOf(settings: AgentSettingsDTO): Draft {
   const chat = settings.role_models.chat
   return {
     budget: settings.monthly_budget_usd,
+    // A model the operator dropped stays in the draft: it is resubmitted unchanged until the admin chooses another.
     provider: chat?.provider ?? '',
-    // A model the operator dropped is not carried into the draft, so the admin has to choose again.
-    model: chat?.available ? chat.model : '',
+    model: chat?.model ?? '',
     unredacted: settings.unredacted_providers,
   }
 }
@@ -69,16 +76,14 @@ export function AgentSettings() {
   const phone = usePhone()
   useStickyBar(phone)
   const [edited, setEdited] = useState<Draft | null>(null)
-  const [testResult, setTestResult] = useState<AgentTestResult | null>(null)
+  const [testResult, setTestResult] = useState<TestOutcome | null>(null)
   const [liftingFor, setLiftingFor] = useState<string | null>(null)
 
   const data = settings.data
   const baseline = data ? baselineOf(data) : null
   const draft = edited ?? baseline
   const patch = (change: Partial<Draft>) => {
-    if (!draft) return
-    setEdited({ ...draft, ...change })
-    setTestResult(null)
+    if (draft) setEdited({ ...draft, ...change })
   }
 
   if (settings.isError) {
@@ -93,19 +98,25 @@ export function AgentSettings() {
   const chosenModel = models.find((model) => model.id === draft.model)
   const budgetValid = ALLOWANCE_PATTERN.test(draft.budget.trim())
   const dirty = draft.budget !== baseline.budget || draft.provider !== baseline.provider || draft.model !== baseline.model || !sameList(draft.unredacted, baseline.unredacted)
-  const canSave = dirty && budgetValid && draft.model !== '' && !save.isPending
+  // A provider without a model is half a choice; no provider at all is fine and leaves chat out of the request.
+  const modelChosen = draft.provider === '' || draft.model !== ''
+  const canSave = dirty && budgetValid && modelChosen && !save.isPending
+  const stillStale = staleModel && draft.provider === baseline.provider && draft.model === baseline.model
 
   const settled = Number(data.spend.settled_usd)
   const reserved = Number(data.spend.reserved_usd)
   const budget = Number(data.monthly_budget_usd)
   const usedPct = budget > 0 ? ((settled + reserved) / budget) * 100 : 0
 
+  // Providers shown in the redaction section: the catalogue plus any stored one the operator no longer offers.
+  const redactionProviders = [...providers.map((entry) => entry.provider), ...draft.unredacted.filter((id) => !providers.some((entry) => entry.provider === id))]
+
   const submit = () => {
     save.mutate(
       {
         monthly_budget_usd: draft.budget.trim(),
         unredacted_providers: draft.unredacted,
-        role_models: { chat: { provider: draft.provider, model: draft.model } },
+        role_models: draft.provider !== '' && draft.model !== '' ? { chat: { provider: draft.provider, model: draft.model } } : {},
       },
       {
         onSuccess: () => {
@@ -120,19 +131,21 @@ export function AgentSettings() {
 
   const runTest = () => {
     setTestResult(null)
-    test.mutate(
-      { provider: draft.provider, model: draft.model },
-      {
-        onSuccess: setTestResult,
-        onError: (error) => setTestResult({ ok: false, kind: 'error', message: error.message }),
-      },
-    )
+    const tested = { provider: draft.provider, model: draft.model }
+    test.mutate(tested, {
+      onSuccess: (result) => setTestResult({ ...result, ...tested }),
+      onError: (error) =>
+        setTestResult({ ok: false, kind: 'error', message: error instanceof ApiError ? error.message : 'The test could not run. Try again.', ...tested }),
+    })
   }
 
   const toggleUnredacted = (provider: string, on: boolean) => {
     if (on) setLiftingFor(provider)
     else patch({ unredacted: draft.unredacted.filter((entry) => entry !== provider) })
   }
+
+  // A result that arrives after another model was chosen is not about the current choice.
+  const shownResult = testResult && testResult.provider === draft.provider && testResult.model === draft.model ? testResult : null
 
   const saveButton = (
     <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canSave} onClick={submit}>
@@ -162,103 +175,95 @@ export function AgentSettings() {
             </>
           ) : (
             <>
-              <Pill kind="bad">Not reachable</Pill> The agent is not reachable. Chat and model changes wait until it is back.
+              <Pill kind="bad">Not reachable</Pill> The agent is not reachable. Allowance and usage still work; changing models or sensitive values waits until it is back.
             </>
           )}
         </p>
-        {providers.length === 0 ? (
-          <p>
-            No model provider is enabled. Your operator sets providers up at install time.{' '}
-            <a href={INSTALL_GUIDE_URL} target="_blank" rel="noreferrer">
-              Install guide
-            </a>
-          </p>
-        ) : (
+        {providers.length > 0 ? (
           <p className={styles.hint}>Providers your operator enabled: {providers.map((entry) => providerName(entry.provider)).join(', ')}.</p>
+        ) : (
+          data.agent_reachable && (
+            <p>
+              No model provider is enabled. Your operator sets providers up at install time.{' '}
+              <a href={INSTALL_GUIDE_URL} target="_blank" rel="noreferrer">
+                Install guide
+              </a>
+            </p>
+          )
         )}
       </Panel>
 
       {providers.length > 0 && (
-        <>
-          <Panel title="Model for chat">
-            {staleModel && (
-              <Banner kind="warn">This model is no longer offered by the operator. Choose another.</Banner>
-            )}
-            <div className={styles.windowRow}>
-              <label htmlFor="agent-provider">Provider</label>
-              <select className={styles.select}
-                id="agent-provider"
-                value={draft.provider}
-                onChange={(event) => patch({ provider: event.target.value, model: '' })}
-              >
-                <option value="">Choose a provider</option>
-                {providers.map((entry) => (
-                  <option key={entry.provider} value={entry.provider}>
-                    {providerName(entry.provider)}
-                  </option>
-                ))}
-              </select>
-              <label htmlFor="agent-model">Model</label>
-              <select id="agent-model" className={styles.select} value={draft.model} disabled={draft.provider === ''} onChange={(event) => patch({ model: event.target.value })}>
-                <option value="">Choose a model</option>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.id}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className={styles.btn} disabled={draft.model === '' || test.isPending} onClick={runTest}>
-                Test model
-              </button>
-            </div>
-            {chosenModel && (
-              <p className={styles.hint}>
-                {`Input ${dollarsPerMillion(chosenModel.input_per_mtok_micro_usd)} per million tokens, output ${dollarsPerMillion(chosenModel.output_per_mtok_micro_usd)} per million tokens.`}
-              </p>
-            )}
-            {testResult && (
-              <p role="status" className={testResult.ok ? styles.hint : styles.error}>
-                {testResult.ok ? testResult.message || 'The model answered.' : testResult.message}
-              </p>
-            )}
-          </Panel>
+        <Panel title="Model for chat">
+          {staleModel && stillStale && <Banner kind="warn">This model is no longer offered by the operator. Choose another.</Banner>}
+          <div className={styles.windowRow}>
+            <label htmlFor="agent-provider">Provider</label>
+            <select id="agent-provider" className={styles.select} value={draft.provider} onChange={(event) => patch({ provider: event.target.value, model: '' })}>
+              <option value="">Choose a provider</option>
+              {providers.map((entry) => (
+                <option key={entry.provider} value={entry.provider}>
+                  {providerName(entry.provider)}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="agent-model">Model</label>
+            <select id="agent-model" className={styles.select} value={draft.model} disabled={draft.provider === ''} onChange={(event) => patch({ model: event.target.value })}>
+              <option value="">Choose a model</option>
+              {draft.model !== '' && !models.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}
+              {models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.id}
+                </option>
+              ))}
+            </select>
+            <button type="button" className={styles.btn} disabled={!chosenModel || test.isPending} onClick={runTest}>
+              Test model
+            </button>
+          </div>
+          <p className={styles.hint}>A test makes one small paid call.</p>
+          {chosenModel && (
+            <p className={styles.hint}>
+              {`Input ${dollarsPerMillion(chosenModel.input_per_mtok_micro_usd)} per million tokens, output ${dollarsPerMillion(chosenModel.output_per_mtok_micro_usd)} per million tokens.`}
+            </p>
+          )}
+          <p role="status" className={shownResult && !shownResult.ok ? styles.error : styles.hint}>
+            {shownResult ? (shownResult.ok ? shownResult.message || 'The model answered.' : shownResult.message) : ''}
+          </p>
+        </Panel>
+      )}
 
-          <Panel title="Monthly allowance">
-            <div className={styles.windowRow}>
-              <span>$</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                aria-label="Monthly allowance in US dollars"
-                className={styles.windowInput}
-                value={draft.budget}
-                onChange={(event) => patch({ budget: event.target.value })}
-              />
-              <span>per month</span>
-            </div>
-            {!budgetValid && (
-              <p role="alert" className={styles.error}>
-                Enter an amount in dollars, such as 25.00.
-              </p>
-            )}
-            <p>{`Spent $${data.spend.settled_usd} and reserved $${data.spend.reserved_usd} of $${data.monthly_budget_usd} in ${data.spend.month}.`}</p>
-            <Meter pct={usedPct} color={usedPct >= 90 ? 'var(--danger)' : 'var(--accent)'} />
-          </Panel>
+      <Panel title="Monthly allowance">
+        <div className={styles.windowRow}>
+          <span>$</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            aria-label="Monthly allowance in US dollars"
+            className={styles.windowInput}
+            value={draft.budget}
+            onChange={(event) => patch({ budget: event.target.value })}
+          />
+          <span>per month</span>
+        </div>
+        {!budgetValid && (
+          <p role="alert" className={styles.error}>
+            Enter an amount in dollars, such as 25.00.
+          </p>
+        )}
+        <p>{`Spent $${data.spend.settled_usd} and reserved $${data.spend.reserved_usd} of $${data.monthly_budget_usd} in ${data.spend.month}.`}</p>
+        <Meter pct={usedPct} color={usedPct >= 90 ? 'var(--danger)' : 'var(--accent)'} />
+      </Panel>
 
-          <Panel title="Sensitive values">
-            {providers.map((entry) => (
-              <label key={entry.provider} className={styles.windowRow}>
-                <input
-                  type="checkbox"
-                  checked={draft.unredacted.includes(entry.provider)}
-                  onChange={(event) => toggleUnredacted(entry.provider, event.target.checked)}
-                />
-                <span>{`Send environment values to ${providerName(entry.provider)}`}</span>
-              </label>
-            ))}
-            <p className={styles.hint}>Values that look like secrets are always hidden.</p>
-          </Panel>
-        </>
+      {redactionProviders.length > 0 && (
+        <Panel title="Sensitive values">
+          {redactionProviders.map((provider) => (
+            <label key={provider} className={styles.windowRow}>
+              <input type="checkbox" checked={draft.unredacted.includes(provider)} onChange={(event) => toggleUnredacted(provider, event.target.checked)} />
+              <span>{`Send environment values to ${providerName(provider)}`}</span>
+            </label>
+          ))}
+          <p className={styles.hint}>Values that look like secrets are always hidden.</p>
+        </Panel>
       )}
 
       <UsageTable usage={usage.data} loading={usage.isPending} error={usage.isError} />

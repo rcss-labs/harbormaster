@@ -165,6 +165,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
 
   // The switch only exists on servers where the agent is on.
   const agentEnabled = auth.me?.agent_enabled ?? false
+  const aiChatPending = (user: UserDTO) => setAiChat.isPending && setAiChat.variables?.user.id === user.id
 
   const confirm = () => {
     if (!pending) return
@@ -199,7 +200,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
       entries.push({ key: 'tokens', label: `Access tokens (${user.token_count})…`, run: () => setViewingTokens(user) })
     }
     if (phone && agentEnabled) {
-      entries.push({ key: 'ai-chat', label: user.ai_chat ? 'Turn off AI chat' : 'Turn on AI chat', run: () => setAiChat.mutate({ user, on: !user.ai_chat }) })
+      entries.push({ key: 'ai-chat', label: user.ai_chat ? 'Turn off AI chat' : 'Turn on AI chat', disabled: aiChatPending(user), run: () => setAiChat.mutate({ user, on: !user.ai_chat }) })
     }
     entries.push({ key: 'admin', label: user.admin ? 'Remove global admin' : 'Make global admin', run: () => setPending({ kind: 'admin', user }) })
     entries.push({
@@ -424,7 +425,7 @@ export function UsersTable({ users, meId, ssoConfigured = false, permissions }: 
                     type="checkbox"
                     aria-label={`AI chat for ${user.username}`}
                     checked={user.ai_chat}
-                    disabled={setAiChat.isPending}
+                    disabled={aiChatPending(user)}
                     onChange={(event) => setAiChat.mutate({ user, on: event.target.checked })}
                   />
                 </td>

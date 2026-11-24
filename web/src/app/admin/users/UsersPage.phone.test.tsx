@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SSO_CONFIGURED_OFF } from '../../../test/fixtures'
+import { ME_ADMIN, SSO_CONFIGURED_OFF } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { installPhoneMedia } from '../../../test/phone'
 import { renderApp } from '../../../test/renderApp'
@@ -196,5 +196,28 @@ describe('Users on a phone', () => {
     const sheet = await screen.findByRole('dialog', { name: 'Edit permissions for omer' })
     await within(sheet).findByRole('button', { name: 'omer on Dev: Operator' })
     expect(within(sheet).getAllByText(/^\d+ services$/)).toHaveLength(3)
+  })
+})
+
+describe('AI chat on a phone', () => {
+  it('turns AI chat on from the actions sheet', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true })),
+      http.post(`/api/users/${OMER_ID}/ai-chat`, async ({ request }) => {
+        bodies.push(await request.json())
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderApp('/settings/users')
+    const menu = await openActions('omer')
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Turn on AI chat' }))
+    await waitFor(() => expect(bodies).toEqual([{ on: true }]))
+  })
+
+  it('has no AI chat entry while the agent is off', async () => {
+    renderApp('/settings/users')
+    const menu = await openActions('omer')
+    expect(within(menu).queryByRole('menuitem', { name: /AI chat/ })).not.toBeInTheDocument()
   })
 })

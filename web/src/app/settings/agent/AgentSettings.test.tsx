@@ -90,11 +90,103 @@ describe('AgentSettings', () => {
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   })
 
-  it('shows a stale model warning', async () => {
-    useAgentMocks({ ...SETTINGS, role_models: { chat: { provider: 'anthropic', model: 'retired', available: false } } })
+  it('shows a stale model warning and still saves other settings with it unchanged', async () => {
+    const stale = { ...SETTINGS, role_models: { chat: { provider: 'anthropic', model: 'retired', available: false } } }
+    useAgentMocks(stale)
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/agent/settings', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ ...stale, monthly_budget_usd: '30' })
+      }),
+    )
     renderApp('/settings/agent')
     expect(await screen.findByText('This model is no longer offered by the operator. Choose another.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    const allowance = screen.getByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '30')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' } } }]),
+    )
+  })
+
+  it('saves an allowance change without a chat model and omits chat', async () => {
+    const none = { ...SETTINGS, role_models: {} }
+    useAgentMocks(none)
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/agent/settings', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json(none)
+      }),
+    )
+    renderApp('/settings/agent')
+    const allowance = await screen.findByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '12.50')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: {} }]))
+  })
+
+  it('a provider without a model blocks Save', async () => {
+    useAgentMocks({ ...SETTINGS, role_models: {} })
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Provider'), 'openai')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await userEvent.selectOptions(screen.getByLabelText('Model'), 'model-c')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('when the agent is unreachable, says so and keeps allowance, usage and stored redaction usable', async () => {
+    useAgentMocks({
+      ...SETTINGS,
+      agent_reachable: false,
+      catalogue: { providers: [] },
+      role_models: {},
+      unredacted_providers: ['openai'],
+    })
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/agent/settings', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ error: { code: 'agent_unavailable', message: 'The agent is unavailable. Try again shortly.' } }, { status: 503 })
+      }),
+    )
+    renderApp('/settings/agent')
+    expect(await screen.findByText(/The agent is not reachable/)).toBeInTheDocument()
+    expect(screen.queryByText(/No model provider is enabled/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Monthly allowance in US dollars')).toBeInTheDocument()
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    const stored = screen.getByRole('checkbox', { name: 'Send environment values to OpenAI' })
+    expect(stored).toBeChecked()
+    await userEvent.click(stored)
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(await screen.findByText('The agent is unavailable. Try again shortly.')).toBeInTheDocument()
+  })
+
+  it('formats prices from micro-dollars', async () => {
+    const cheap = {
+      ...SETTINGS,
+      catalogue: {
+        providers: [
+          {
+            provider: 'anthropic',
+            models: [
+              { id: 'model-a', input_per_mtok_micro_usd: 0, output_per_mtok_micro_usd: 70_000, context_tokens: 1 },
+              { id: 'model-big', input_per_mtok_micro_usd: 1_234_567_890_000, output_per_mtok_micro_usd: 1_500_000, context_tokens: 1 },
+            ],
+          },
+        ],
+      },
+    }
+    useAgentMocks(cheap)
+    renderApp('/settings/agent')
+    expect(await screen.findByText('Input $0.00 per million tokens, output $0.07 per million tokens.')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('Model'), 'model-big')
+    expect(screen.getByText('Input $1,234,567.89 per million tokens, output $1.50 per million tokens.')).toBeInTheDocument()
   })
 
   it('test model shows the provider error', async () => {
@@ -103,8 +195,55 @@ describe('AgentSettings', () => {
       http.post('/api/agent/settings/test', () => HttpResponse.json({ ok: false, kind: 'auth', message: 'The provider rejected the key.' })),
     )
     renderApp('/settings/agent')
+    expect(await screen.findByText('A test makes one small paid call.')).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('button', { name: 'Test model' }))
     expect(await screen.findByText('The provider rejected the key.')).toBeInTheDocument()
+  })
+
+  it('test model shows success', async () => {
+    useAgentMocks()
+    server.use(http.post('/api/agent/settings/test', () => HttpResponse.json({ ok: true, kind: 'ok', message: 'The model answered.' })))
+    renderApp('/settings/agent')
+    await userEvent.click(await screen.findByRole('button', { name: 'Test model' }))
+    expect(await screen.findByText('The model answered.')).toBeInTheDocument()
+  })
+
+  it('test model shows the budget message on 402', async () => {
+    useAgentMocks()
+    server.use(
+      http.post('/api/agent/settings/test', () =>
+        HttpResponse.json({ error: { code: 'budget_exhausted', message: 'The monthly allowance is used up.' } }, { status: 402 }),
+      ),
+    )
+    renderApp('/settings/agent')
+    await userEvent.click(await screen.findByRole('button', { name: 'Test model' }))
+    expect(await screen.findByText('The monthly allowance is used up.')).toBeInTheDocument()
+  })
+
+  it('test model shows a message when the request fails', async () => {
+    useAgentMocks()
+    server.use(http.post('/api/agent/settings/test', () => HttpResponse.error()))
+    renderApp('/settings/agent')
+    await userEvent.click(await screen.findByRole('button', { name: 'Test model' }))
+    expect(await screen.findByText('The test could not run. Try again.')).toBeInTheDocument()
+  })
+
+  it('ignores a test result that arrives after another model was chosen', async () => {
+    useAgentMocks()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    server.use(
+      http.post('/api/agent/settings/test', async () => {
+        await gate
+        return HttpResponse.json({ ok: true, kind: 'ok', message: 'Late answer for model a.' })
+      }),
+    )
+    renderApp('/settings/agent')
+    await userEvent.click(await screen.findByRole('button', { name: 'Test model' }))
+    await userEvent.selectOptions(screen.getByLabelText('Model'), 'model-b')
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.queryByText('Late answer for model a.')).not.toBeInTheDocument()
   })
 
   it('lifting redaction asks to confirm', async () => {
@@ -130,11 +269,21 @@ describe('AgentSettings', () => {
     expect((bodies[0] as { unredacted_providers: string[] }).unredacted_providers).toEqual(['openai'])
   })
 
+  it('cancel leaves redaction off and shows stored providers that left the catalogue', async () => {
+    useAgentMocks({ ...SETTINGS, unredacted_providers: ['gone'] })
+    renderApp('/settings/agent')
+    const toggle = await screen.findByRole('checkbox', { name: 'Send environment values to OpenAI' })
+    await userEvent.click(toggle)
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Send environment values to gone' })).toBeChecked()
+  })
+
   it('empty catalogue shows the operator message', async () => {
     useAgentMocks({ ...SETTINGS, catalogue: { providers: [] }, role_models: {} })
     renderApp('/settings/agent')
     expect(await screen.findByText('No model provider is enabled. Your operator sets providers up at install time.')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute('href', expect.stringContaining('install'))
+    expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute('href', 'https://github.com/rcss-labs/harbormaster/blob/main/harbormaster-docs/docs/install/ai-agent.md')
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument()
   })
 })
