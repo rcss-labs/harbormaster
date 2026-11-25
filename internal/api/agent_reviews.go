@@ -681,7 +681,7 @@ func (s *Server) runAgentReviewNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	run, err := s.Store.RequestManualReviewRun(ctx, id, "Run on "+now.UTC().Format("2 Jan 2006, 15:04")+" UTC", now)
+	run, err := s.Store.RequestManualReviewRun(ctx, id, "Run on "+now.UTC().Format("2 Jan 2006, 15:04")+" UTC", false, now)
 	switch {
 	case errors.Is(err, store.ErrConflict):
 		s.fail(w, errReviewBusy)

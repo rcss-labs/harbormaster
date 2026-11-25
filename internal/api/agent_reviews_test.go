@@ -881,7 +881,7 @@ func TestAgentReviewRuns_AdminListWithCostOfBothAttempts(t *testing.T) {
 	b := e.create(e.input(with("name", "B")))
 	var ids []int64
 	for i, review := range []ReviewDTO{a, a, b} {
-		run, err := e.st.RequestManualReviewRun(t.Context(), review.ID, fmt.Sprintf("Manual run %d", i), e.now.Add(time.Duration(i)*time.Minute))
+		run, err := e.st.RequestManualReviewRun(t.Context(), review.ID, fmt.Sprintf("Manual run %d", i), false, e.now.Add(time.Duration(i)*time.Minute))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1090,7 +1090,7 @@ func TestAgentSettings_StaleReviewerModelIsFlaggedAndSavable(t *testing.T) {
 func TestNotificationDeliveries_CarryTheReviewRunOfAReviewRow(t *testing.T) {
 	e := newReviewsEnv(t, false)
 	review := e.create(e.input())
-	run, err := e.st.RequestManualReviewRun(t.Context(), review.ID, "Manual run", e.now)
+	run, err := e.st.RequestManualReviewRun(t.Context(), review.ID, "Manual run", false, e.now)
 	if err != nil {
 		t.Fatal(err)
 	}

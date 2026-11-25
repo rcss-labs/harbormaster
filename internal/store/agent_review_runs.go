@@ -14,7 +14,7 @@ import (
 // reviewRunReasons are the fixed reasons a review run may end with. Checked in Go, so a new reason needs no migration.
 var reviewRunReasons = map[string]bool{
 	"budget": true, "not_visible": true, "not_configured": true, "rate_limited": true, "missed": true, "disabled": true,
-	"agent_unavailable": true, "limit_reached": true, "no_result": true, "interrupted": true, "error": true,
+	"agent_unavailable": true, "limit_reached": true, "no_result": true, "interrupted": true, "error": true, "instructions": true,
 }
 
 const (
@@ -50,6 +50,10 @@ type ReviewRun struct {
 	DeliveryPlannedAt     *time.Time
 	RequestedAt           time.Time
 	StartedAt, FinishedAt *time.Time
+	// Instructions is the copy of the review's text made when the run first started; Test marks a manual run that
+	// is stored and never sent.
+	Instructions string
+	Test         bool
 }
 
 // ReviewClaim is the fence of one claim. ClaimReviewRun returns it; every later write by the holder must carry it.
@@ -90,17 +94,19 @@ type ReviewStart struct {
 	Provider, Model, ScopeLabel, Range string
 	CoveredTags                        []int64
 	ServicesTotal                      int
+	// Instructions is copied to the row by the first start only.
+	Instructions string
 }
 
 const reviewRunColumns = `id, review_id, review_name, review_type, period_key, period_label, scheduled_for, manual, state, reason,
 	attempts, claim_seq, claimed_until, run_id, prev_run_id, provider, model, scope_label, covered_tags, services_total, range,
-	summary, summary_replaced, evidence_dropped, delivery_planned_at, requested_at, started_at, finished_at`
+	summary, summary_replaced, evidence_dropped, delivery_planned_at, requested_at, started_at, finished_at, instructions, test`
 
 func scanReviewRun(row pgx.Row) (ReviewRun, error) {
 	var r ReviewRun
 	err := row.Scan(&r.ID, &r.ReviewID, &r.ReviewName, &r.ReviewType, &r.PeriodKey, &r.PeriodLabel, &r.ScheduledFor, &r.Manual, &r.State, &r.Reason,
 		&r.Attempts, &r.ClaimSeq, &r.ClaimedUntil, &r.RunID, &r.PrevRunID, &r.Provider, &r.Model, &r.ScopeLabel, &r.CoveredTags, &r.ServicesTotal, &r.Range,
-		&r.Summary, &r.SummaryReplaced, &r.EvidenceDropped, &r.DeliveryPlannedAt, &r.RequestedAt, &r.StartedAt, &r.FinishedAt)
+		&r.Summary, &r.SummaryReplaced, &r.EvidenceDropped, &r.DeliveryPlannedAt, &r.RequestedAt, &r.StartedAt, &r.FinishedAt, &r.Instructions, &r.Test)
 	if r.CoveredTags == nil {
 		r.CoveredTags = []int64{}
 	}
@@ -167,9 +173,10 @@ func (s *Store) RecordDueReviewRuns(ctx context.Context, due []DueReview, now ti
 	return created, nil
 }
 
-// RequestManualReviewRun queues a run of a review now, enabled or not. ErrConflict when the review already has a
+// RequestManualReviewRun queues a run of a review now, enabled or not. A test run is stored and never sent: it is
+// marked planned when made, so no delivery is planned for it. ErrConflict when the review already has a
 // requested or running run, ErrNotFound for an unknown review.
-func (s *Store) RequestManualReviewRun(ctx context.Context, reviewID int64, periodLabel string, now time.Time) (ReviewRun, error) {
+func (s *Store) RequestManualReviewRun(ctx context.Context, reviewID int64, periodLabel string, test bool, now time.Time) (ReviewRun, error) {
 	if err := checkInvestigationText("period label", periodLabel, 200, 0); err != nil {
 		return ReviewRun{}, err
 	}
@@ -189,9 +196,11 @@ func (s *Store) RequestManualReviewRun(ctx context.Context, reviewID int64, peri
 		return ReviewRun{}, ErrConflict
 	}
 	run, err := scanReviewRun(tx.QueryRow(ctx, `insert into agent_review_runs
-		(review_id, review_name, review_type, period_key, period_label, scheduled_for, manual, requested_at)
-		select r.id, r.name, r.type, 'x:' || $2::text, $3, $4, true, $4 from agent_reviews r where r.id = $1 for share of r
-		returning `+reviewRunColumns, reviewID, uuid.NewString(), periodLabel, now))
+		(review_id, review_name, review_type, period_key, period_label, scheduled_for, manual, requested_at, test, delivery_planned_at)
+		select r.id, r.name, r.type, 'x:' || $2::text, $3, $4::timestamptz, true, $4::timestamptz, $5::boolean,
+		       case when $5::boolean then $4::timestamptz end
+		from agent_reviews r where r.id = $1 for share of r
+		returning `+reviewRunColumns, reviewID, uuid.NewString(), periodLabel, now, test))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ReviewRun{}, ErrNotFound
 	}
@@ -281,13 +290,15 @@ func (s *Store) fencedReviewUpdate(ctx context.Context, what string, c ReviewCla
 	return nil
 }
 
-// StartReviewRun records the agent run of the claimed attempt at now and keeps the first attempt's run id as
+// StartReviewRun records the agent run of the claimed attempt at now, stores no covered tags for a test run (phase 3 readers
+// decide by tags and know no test runs, so only admins see it), copies start.Instructions to the row while its
+// copy is empty (a later start, by a retry or another holder, leaves the first copy), and keeps the first attempt's run id as
 // prev_run_id on the second, so both paid attempts are costed; a run given back free on the first attempt is not kept. ErrConflict when the claim is stale.
 func (s *Store) StartReviewRun(ctx context.Context, c ReviewClaim, start ReviewStart, now time.Time) error {
 	for _, f := range []struct {
 		name, text string
 		max        int
-	}{{"provider", start.Provider, 200}, {"model", start.Model, 200}, {"scope label", start.ScopeLabel, maxReviewScopeLabelRunes}, {"range", start.Range, maxReviewRangeRunes}} {
+	}{{"provider", start.Provider, 200}, {"model", start.Model, 200}, {"scope label", start.ScopeLabel, maxReviewScopeLabelRunes}, {"range", start.Range, maxReviewRangeRunes}, {"instructions", start.Instructions, maxReviewInstructionRunes}} {
 		if err := checkInvestigationText(f.name, f.text, f.max, 0); err != nil {
 			return err
 		}
@@ -299,8 +310,9 @@ func (s *Store) StartReviewRun(ctx context.Context, c ReviewClaim, start ReviewS
 	return s.fencedReviewUpdate(ctx, "start review run", c, `prev_run_id = case when attempts = 2 and run_id is distinct from $4 then coalesce(prev_run_id, run_id)
 				when attempts = 2 then prev_run_id end,
 		run_id = $4, provider = $5, model = $6,
-		scope_label = $7, range = $8, covered_tags = $9, services_total = $10, started_at = $11`,
-		start.RunID, start.Provider, start.Model, start.ScopeLabel, start.Range, tags, start.ServicesTotal, now)
+		scope_label = $7, range = $8, covered_tags = case when test then '{}'::bigint[] else $9::bigint[] end, services_total = $10, started_at = $11,
+		instructions = case when instructions = '' then $12 else instructions end`,
+		start.RunID, start.Provider, start.Model, start.ScopeLabel, start.Range, tags, start.ServicesTotal, now, start.Instructions)
 }
 
 // RenewReviewRun extends the lease of a claim to now + lease. ErrConflict when the claim is stale.
