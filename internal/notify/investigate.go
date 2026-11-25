@@ -51,9 +51,6 @@ func (d *Dispatcher) warnInvestigation(what string, err any) {
 // later. A step that fails does not stop the ones after it: rows planned by an earlier cycle or another task may be
 // due. A cancelled ctx is a shutdown, not an error.
 func (d *Dispatcher) afterSend(ctx context.Context, now time.Time, names map[string]string) {
-	if ctx.Err() != nil {
-		return
-	}
 	defer func() {
 		if r := recover(); r != nil {
 			count := d.investigationErrors.Add(1)

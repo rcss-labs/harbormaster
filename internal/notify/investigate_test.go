@@ -951,16 +951,15 @@ func TestDispatcher_BlockedDiagnosisLookupsLeaveThePoolToAlerts(t *testing.T) {
 			}
 		})
 	}}, 4)
-	cycleB := make(chan struct{})
+	var cycleB sync.WaitGroup
 	t.Cleanup(func() {
 		cancel()
 		lock.Rollback(context.Background()) //nolint:errcheck
-		<-cycleB
+		cycleB.Wait()
 		e.d.Wait()
 	})
 	e.advance(time.Second)
 	if err := e.cycleWithCtx(ctx, 10*time.Second); err != nil {
-		close(cycleB)
 		t.Fatal(err)
 	}
 	blocked := func() bool {
@@ -972,7 +971,7 @@ func TestDispatcher_BlockedDiagnosisLookupsLeaveThePoolToAlerts(t *testing.T) {
 	}
 
 	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger), alert(svcY, "service_failing", model.AlertDanger))
-	go func() { defer close(cycleB); e.d.Cycle(ctx) }() //nolint:errcheck
+	cycleB.Go(func() { e.d.Cycle(ctx) }) //nolint:errcheck
 	e.eventually(5*time.Second, "the new opened message while diagnosis lookups block", func() bool { return e.sender.count("r0", EventOpened) == 2 })
 }
 
