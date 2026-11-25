@@ -20,8 +20,8 @@ interface TimelineLanesProps {
   laneStates: Record<TimelineLane, LaneRowState>
   onSelect: (group: MarkerGroup) => void
   /** Where investigations were requested, as a row of their own; absent when the agent is off or there are none in range. */
-  investigations?: { id: number; pct: number; label: string }[]
-  onSelectInvestigation?: (id: number) => void
+  investigations?: MarkerGroup[]
+  onSelectInvestigation?: (group: MarkerGroup) => void
 }
 
 const LANE_ORDER = Object.keys(LANES) as TimelineLane[]
@@ -85,17 +85,22 @@ export function TimelineLanes({ groups, from, to, selectedId, laneStates, onSele
           <div className={styles.laneRow}>
             <div className={styles.laneLabel}>Investigations</div>
             <div className={styles.laneTrack}>
-              {investigations.map((marker) => (
-                <button
-                  key={marker.id}
-                  type="button"
-                  className={`${styles.marker} ${styles.acc}`}
-                  style={{ left: `${marker.pct}%` }}
-                  title={marker.label}
-                  aria-label={marker.label}
-                  onClick={() => onSelectInvestigation?.(marker.id)}
-                />
-              ))}
+              {investigations.map((group) => {
+                const label = `${formatEventTime(group.items[0].at, withDate)} Investigation`
+                return (
+                  <button
+                    key={group.items[0].id}
+                    type="button"
+                    className={`${styles.marker} ${styles.acc}`}
+                    style={{ left: `${group.pct}%` }}
+                    title={label}
+                    aria-label={label}
+                    onClick={() => onSelectInvestigation?.(group)}
+                  >
+                    {group.items.length > 1 && group.items.length}
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}

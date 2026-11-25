@@ -298,4 +298,49 @@ describe('TimelineTab investigations', () => {
     expect(screen.queryByRole('region', { name: 'Investigations' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Investigation' })).not.toBeInTheDocument()
   })
+
+  it('shows not found in the drawer without Retry, and closing removes the parameter', async () => {
+    mockInvestigations()
+    renderApp(`${route}?investigation=999`)
+    const user = userEvent.setup()
+
+    const drawer = await screen.findByRole('dialog', { name: 'Investigation' })
+    expect(await within(drawer).findByText('This investigation was not found.')).toBeInTheDocument()
+    expect(within(drawer).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+
+    await user.click(within(drawer).getByRole('button', { name: 'Close panel' }))
+    expect(screen.getByTestId('search')).not.toHaveTextContent('investigation=')
+  })
+
+  it.each([
+    [403, 'forbidden', 'You do not have permission to read this investigation.', false],
+    [503, 'unavailable', 'The agent is not available right now.', true],
+    [500, 'error', 'The investigation could not be read.', true],
+  ])('shows a distinct drawer message for %s', async (status, code, text, retry) => {
+    mockInvestigations()
+    server.use(http.get('/api/investigations/:id', () => HttpResponse.json({ error: { code, message: 'x' } }, { status })))
+    renderApp(`${route}?investigation=7`)
+
+    const drawer = await screen.findByRole('dialog', { name: 'Investigation' })
+    expect(await within(drawer).findByText(text)).toBeInTheDocument()
+    expect(within(drawer).queryByRole('button', { name: 'Retry' }) !== null).toBe(retry)
+  })
+
+  it('says when the list could not be read', async () => {
+    mockInvestigations()
+    server.use(http.get('/api/services/:id/investigations', () => HttpResponse.json({ error: { code: 'error', message: 'x' } }, { status: 500 })))
+    renderApp(route)
+
+    const section = await screen.findByRole('region', { name: 'Investigations' })
+    expect(await within(section).findByText('The investigations could not be read.')).toBeInTheDocument()
+  })
+
+  it('groups investigation markers that sit close together like the other lanes', async () => {
+    const close = { ...INVESTIGATION_DONE, id: 8, requested_at: '2026-11-07T11:31:00Z' }
+    mockInvestigations([INVESTIGATION_DONE, close])
+    renderApp(route)
+
+    const marker = await screen.findByRole('button', { name: /^\d\d:\d\d Investigation$/ })
+    expect(marker).toHaveTextContent('2')
+  })
 })

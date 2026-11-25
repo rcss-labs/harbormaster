@@ -19,7 +19,6 @@
 .rowButton { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; font: inherit; }
 .rowButton:hover { text-decoration: underline; }
 .firstLine { color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
-.stateLink { color: var(--accent); cursor: pointer; }
 @media (max-width: 700px) {
   .row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }

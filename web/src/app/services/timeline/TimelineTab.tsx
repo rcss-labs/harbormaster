@@ -13,7 +13,7 @@ import { Table } from '../../../components/Table'
 import { Toggle } from '../../../components/Toggle'
 import { usePhone } from '../../../components/usePhone'
 import { InvestigationDrawer } from '../../investigations/InvestigationDrawer'
-import { InvestigationList } from '../../investigations/InvestigationList'
+import { InvestigationList, InvestigationListError } from '../../investigations/InvestigationList'
 import { queryPanelError } from '../panelError'
 import { LANES, PHONE_GROUP_DISTANCE_PCT, RANGES, formatEventTime, groupMarkers, logEvents, smallestRangeContaining, type MarkerGroup } from './model'
 import { TimelineBanner } from './TimelineBanner'
@@ -57,7 +57,8 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
       { replace: true },
     )
 
-  const investigations = useServiceInvestigations(serviceId).data?.items ?? []
+  const investigationsQuery = useServiceInvestigations(serviceId)
+  const investigations = investigationsQuery.data?.items ?? []
   const { me } = useAuth()
   const openInvestigation = me?.agent_enabled ? parseInvestigationId(searchParams.get('investigation')) : null
 
@@ -79,11 +80,25 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const laneEvents: Record<TimelineLane, TimelineEvent[]> = { change: [], stop: [], alert: [], logs: logLaneEvents, access: [] }
   for (const event of data?.events ?? []) laneEvents[event.lane].push(event)
 
-  const investigationMarkers = investigations.flatMap((item) => {
-    const at = Date.parse(item.requested_at)
-    if (!data || at < from || at > to) return []
-    return [{ id: item.id, pct: ((at - from) / (to - from)) * 100, label: `${formatEventTime(item.requested_at, withDate)} Investigation` }]
-  })
+  // Grouped like the other lanes: the grouping takes events, so each request is shaped as one.
+  const investigationMarkers = investigations
+    .filter((item) => data !== undefined && Date.parse(item.requested_at) >= from && Date.parse(item.requested_at) <= to)
+    .map((item): TimelineEvent => ({
+      id: String(item.id),
+      lane: 'change',
+      severity: 'change',
+      title: 'Investigation',
+      actor: '',
+      detail: '',
+      op: '',
+      task_id: '',
+      at: item.requested_at,
+      evidence_at: null,
+      diff: [],
+      from_revision: null,
+      to_revision: null,
+    }))
+  const investigationGroups = groupMarkers(investigationMarkers, from, to, phone ? PHONE_GROUP_DISTANCE_PCT : undefined)
 
   const groups = Object.fromEntries(LANE_ORDER.map((lane) => [lane, groupMarkers(laneEvents[lane], from, to, phone ? PHONE_GROUP_DISTANCE_PCT : undefined)])) as Record<TimelineLane, MarkerGroup[]>
 
@@ -197,8 +212,8 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
                 selectedId={selectedId}
                 laneStates={laneStates}
                 onSelect={(group) => select(group.items[0].id, group.items[0].lane)}
-                investigations={investigationMarkers}
-                onSelectInvestigation={chooseInvestigation}
+                investigations={investigationGroups}
+                onSelectInvestigation={(group) => chooseInvestigation(Number(group.items[0].id))}
               />
             ) : (
               <>
@@ -214,6 +229,7 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
               ))}
             </ul>
           )}
+          {investigationsQuery.isError && investigations.length === 0 && <InvestigationListError onRetry={() => void investigationsQuery.refetch()} />}
           {investigations.length > 0 && <InvestigationList items={investigations} withDate={withDate} onOpen={chooseInvestigation} />}
           {data && anyLaneOn && (
             <Panel title="Events" sub={<span className={styles.count}>{visibleEvents.length} events in range</span>} flush>

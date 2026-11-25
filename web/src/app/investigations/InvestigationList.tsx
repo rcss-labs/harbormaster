@@ -28,3 +28,12 @@ export function InvestigationList({ items, withDate, onOpen }: { items: Investig
     </Panel>
   )
 }
+
+/** The list's own read failure, in the same panel so the rest of the timeline stays usable. */
+export function InvestigationListError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Panel title="Investigations" error={{ message: 'The investigations could not be read.', onRetry }}>
+      {null}
+    </Panel>
+  )
+}

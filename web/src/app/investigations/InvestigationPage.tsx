@@ -3,8 +3,8 @@ import { ApiError } from '../../api/client'
 import { useIncidentInvestigation, useInvestigation } from '../../api/investigations'
 import { EmptyState } from '../../components/EmptyState'
 import { Panel } from '../../components/Panel'
-import { queryPanelError } from '../services/panelError'
 import { useAuth } from '../auth/AuthProvider'
+import { InvestigationError } from './InvestigationError'
 import { InvestigationView } from './InvestigationView'
 
 /** `/investigations/:id` and `/investigations/incident/:incidentId`: where notifications and the admin list lead. */
@@ -30,8 +30,8 @@ export function InvestigationPage({ byIncident = false }: { byIncident?: boolean
     )
   }
   return (
-    <Panel title="Investigation" loading={query.isPending} error={queryPanelError(query, 'The investigation could not be read.')}>
-      {query.data && <InvestigationView investigation={query.data} />}
+    <Panel title="Investigation" loading={query.isPending}>
+      {query.data ? <InvestigationView investigation={query.data} /> : <InvestigationError error={query.error} onRetry={() => void query.refetch()} />}
     </Panel>
   )
 }

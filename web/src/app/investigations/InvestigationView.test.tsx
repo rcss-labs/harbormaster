@@ -82,4 +82,32 @@ describe('InvestigationView', () => {
 
     expect(screen.getByText("Not investigated: this month's AI allowance is used up.")).toBeInTheDocument()
   })
+
+  it('captions the summary as AI-written, but not the fixed sentence', () => {
+    const caption = 'Written by AI from what its identity may read. Check it before acting.'
+    const { unmount } = show()
+    expect(screen.getByText(caption)).toBeInTheDocument()
+    unmount()
+
+    show({ summary: 'The investigation finished. Open it in Harbormaster to read the findings.', summary_replaced: true })
+    expect(screen.queryByText(caption)).not.toBeInTheDocument()
+  })
+
+  it('renders nothing for an empty note or excerpt, and no excerpt for an unknown action', () => {
+    const base = INVESTIGATION_DONE.evidence[0]
+    const { container } = show({
+      evidence: [
+        { ...base, ordinal: 1, note: '', excerpt: 'only the excerpt' },
+        { ...base, ordinal: 2, note: 'only the note', excerpt: '' },
+        { ...base, ordinal: 3, action: 'delete', note: 'secret note', excerpt: 'secret excerpt' },
+      ],
+    })
+
+    expect(container.querySelectorAll('pre')).toHaveLength(1)
+    expect(screen.getByText('only the excerpt')).toBeInTheDocument()
+    expect(screen.getByText('only the note')).toBeInTheDocument()
+    expect(screen.queryByText('secret excerpt')).not.toBeInTheDocument()
+    expect(screen.queryByText('secret note')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('p:empty')).toHaveLength(0)
+  })
 })
