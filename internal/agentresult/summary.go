@@ -72,7 +72,7 @@ func CheckSummary(summary string, corpus *Corpus) (clean string, replaced bool) 
 // are accepted; anything else gets the investigation sentence, so a caller cannot make the check hand back its own text.
 func CheckSummaryAs(summary string, corpus *Corpus, replacement string) (clean string, replaced bool) {
 	replacement = knownReplacement(replacement)
-	if !passesBasics(summary, SummaryCap) || hasImageMarkup(summary) || corpus == nil || corpus.Full() || corpus.HasRunIn(summary) {
+	if !passesBasics(summary, SummaryCap) || hasImageMarkup(summary) || corpus == nil || corpus.Full() || corpus.hasRunAllowing(summary) {
 		return replacement, true
 	}
 	return summary, false

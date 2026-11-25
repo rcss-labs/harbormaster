@@ -74,3 +74,29 @@ func isHarbormasterID(piece string) bool {
 func fieldHoldsSecret(field string) bool {
 	return len(patternSpans(field)) > 0
 }
+
+// IDNames returns the names a well-formed Harbormaster id decodes to: the cluster and the service (empty for a cluster
+// id). A task id gives the cluster only when its ARN carries one (task/<cluster>/<task>). ok is false for anything that
+// is not such an id, with the same test the scrubber uses to let an id stand.
+func IDNames(id string) (cluster, service string, ok bool) {
+	if !isHarbormasterID(id) {
+		return "", "", false
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(id)
+	if err != nil {
+		return "", "", false
+	}
+	fields := strings.Split(string(raw), "|")
+	switch {
+	case len(fields) == 4:
+		return fields[2], fields[3], true
+	case strings.HasPrefix(fields[2], "arn:"):
+		if arn := idTaskARN.FindStringSubmatch(fields[2]); arn != nil && arn[3] != "" {
+			_, path, _ := strings.Cut(fields[2], ":task/")
+			cluster, _, _ = strings.Cut(path, "/")
+			return cluster, "", true
+		}
+		return "", "", true
+	}
+	return fields[2], "", true
+}

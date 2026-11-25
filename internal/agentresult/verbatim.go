@@ -6,7 +6,6 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
-	"testing"
 	"unicode"
 	"unicode/utf8"
 )
@@ -41,33 +40,12 @@ type Corpus struct {
 	raw  int    // raw bytes offered so far
 	full bool
 
-	exemptNames bool // string values under the members of exemptMembers are not stored
-	added       bool // Add has been called
-}
-
-// exemptMembers are the JSON member names whose short string values name a service or cluster rather than quote a log.
-var exemptMembers = map[string]bool{"service": true, "cluster": true, "name": true, "label": true}
-
-// exemptValueMax is the longest value, in bytes, that an exempt member may hold and stay unstored.
-const exemptValueMax = 128
-
-// ExemptNames makes the corpus leave out the string values held directly by a JSON member named service, cluster,
-// name or label (at most 128 bytes), so a summary may name the services it reviews. Call it before the first Add.
-func (c *Corpus) ExemptNames() {
-	if c.added {
-		// A late call must not weaken the check: the corpus stays strict. Tests learn of the mistake.
-		if testing.Testing() {
-			panic("agentresult: ExemptNames called after Add")
-		}
-		return
-	}
-	c.exemptNames = true
+	allowed map[string]bool // lowercased names the copy check of a summary lets stand, see AllowNames
 }
 
 // Add keeps the string values of a run's read text: every string value of a JSON body (keys are not values), the
 // whole text otherwise. Past CorpusCap raw bytes nothing more is stored and the corpus is Full.
 func (c *Corpus) Add(text string) {
-	c.added = true
 	if c.full {
 		return
 	}
@@ -79,7 +57,7 @@ func (c *Corpus) Add(text string) {
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed != "" && (trimmed[0] == '{' || trimmed[0] == '[') {
-		if values, ok := jsonStringValues(trimmed, c.exemptNames); ok {
+		if values, ok := jsonStringValues(trimmed); ok {
 			for _, v := range values {
 				c.store(v)
 			}
@@ -90,12 +68,10 @@ func (c *Corpus) Add(text string) {
 }
 
 // jsonStringValues returns every string value of the JSON in text, in order, with duplicate keys' values all kept
-// and keys left out. With exempt, a string of at most exemptValueMax bytes held directly by a member named in
-// exemptMembers is left out too: not one inside an object or array under that member. ok is false when text is not JSON.
-func jsonStringValues(text string, exempt bool) (values []string, ok bool) {
+// and keys left out. ok is false when text is not JSON.
+func jsonStringValues(text string) (values []string, ok bool) {
 	dec := json.NewDecoder(strings.NewReader(text))
 	var inObject, expectKey []bool // one entry per open container
-	var member []string            // the key of the member being read, per open container
 	valueDone := func() {
 		if n := len(inObject); n > 0 && inObject[n-1] {
 			expectKey[n-1] = true
@@ -114,19 +90,13 @@ func jsonStringValues(text string, exempt bool) (values []string, ok bool) {
 			if v == '{' || v == '[' {
 				inObject = append(inObject, v == '{')
 				expectKey = append(expectKey, v == '{')
-				member = append(member, "")
 				continue
 			}
-			inObject, expectKey, member = inObject[:len(inObject)-1], expectKey[:len(expectKey)-1], member[:len(member)-1]
+			inObject, expectKey = inObject[:len(inObject)-1], expectKey[:len(expectKey)-1]
 			valueDone()
 		case string:
 			if n := len(inObject); n > 0 && inObject[n-1] && expectKey[n-1] {
 				expectKey[n-1] = false // a key
-				member[n-1] = v
-				continue
-			}
-			if n := len(inObject); exempt && n > 0 && inObject[n-1] && exemptMembers[member[n-1]] && len(v) <= exemptValueMax {
-				valueDone()
 				continue
 			}
 			values = append(values, v)
@@ -176,6 +146,94 @@ func unescapeJSON(text string) string {
 		}
 	}
 	return out.String()
+}
+
+// maxAllowedNames bounds the allow list; beyond it no more names are added.
+const maxAllowedNames = 10_000
+
+// maxAllowedNameLength is the longest name AllowNames takes.
+const maxAllowedNameLength = 128
+
+// maskRune stands for an allowed name in a candidate. Normalize never produces it and the corpus never holds it, so no
+// window that contains it can match.
+const maskRune = '\x00'
+
+func isNameByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
+}
+
+// AllowNames lets a summary name the given services and clusters whole, however long the names are: in the copy check
+// of CheckSummary a token that is one of them is not counted as copied text. A name is one token of letters, digits,
+// hyphens and underscores, at most 128 characters; anything else is ignored. Names are compared without regard to
+// case. At most 10,000 are kept. The corpus itself is unchanged, so text around a name is still checked.
+func (c *Corpus) AllowNames(names ...string) {
+	for _, name := range names {
+		if len(c.allowed) >= maxAllowedNames {
+			return
+		}
+		if name == "" || len(name) > maxAllowedNameLength {
+			continue
+		}
+		valid := true
+		for i := 0; i < len(name); i++ {
+			if !isNameByte(name[i]) {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		if c.allowed == nil {
+			c.allowed = make(map[string]bool)
+		}
+		c.allowed[strings.ToLower(name)] = true
+	}
+}
+
+// normalizeMasked is Normalize that puts maskRune in place of each whole token (a maximal run of letters, digits,
+// hyphens and underscores) that is an allowed name.
+func (c *Corpus) normalizeMasked(text string) string {
+	var out strings.Builder
+	out.Grow(len(text))
+	pendingSpace := false
+	for i := 0; i < len(text); {
+		if isNameByte(text[i]) {
+			end := i + 1
+			for end < len(text) && isNameByte(text[end]) {
+				end++
+			}
+			if end-i <= maxAllowedNameLength && c.allowed[strings.ToLower(text[i:end])] {
+				out.WriteRune(maskRune)
+				pendingSpace = false
+				i = end
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if pendingSpace && out.Len() > 0 && out.String()[out.Len()-1] != byte(maskRune) {
+				out.WriteByte(' ')
+			}
+			pendingSpace = false
+			out.WriteRune(unicode.ToLower(r))
+		} else {
+			pendingSpace = true
+		}
+	}
+	return out.String()
+}
+
+// hasRunAllowing is HasRunIn with the allowed names masked in the candidate first.
+func (c *Corpus) hasRunAllowing(candidate string) bool {
+	if len(c.allowed) == 0 {
+		return c.HasRunIn(candidate)
+	}
+	if c.hasRun(c.normalizeMasked(candidate)) {
+		return true
+	}
+	return strings.IndexByte(candidate, '\\') >= 0 && c.hasRun(c.normalizeMasked(unescapeJSON(candidate)))
 }
 
 // Full reports that the corpus passed its cap, so the copy check cannot vouch for anything.

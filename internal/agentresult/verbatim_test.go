@@ -2,6 +2,7 @@ package agentresult
 
 import (
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -307,156 +308,200 @@ func TestCorpus_LongSecondKeyIsNotAValue(t *testing.T) {
 	}
 }
 
-const longServiceName = "payments-checkout-settlement-reconciliation-worker-eu" // 53 chars: over one run
+const longServiceName = "payments-checkout-settlement-reconciliation-worker-eu" // over one run
 
-func exemptCorpusOf(texts ...string) *Corpus {
-	c := &Corpus{}
-	c.ExemptNames()
-	for _, text := range texts {
-		c.Add(text)
-	}
+// nameCorpus holds a body that carries the service name under several members.
+func nameCorpus(allow ...string) *Corpus {
+	c := corpusOf(`{"service":"` + longServiceName + `","cluster":"` + longServiceName + `","message":"` + copiedSentence + `"}`)
+	c.AllowNames(allow...)
 	return c
 }
 
-func TestCorpus_ExemptNamesLetsALongServiceNamePass(t *testing.T) {
-	name := strings.Repeat("checkout-", 7)[:60]
-	summary := "The " + name + " service restarted; " + name + " is healthy again."
-	c := exemptCorpusOf(`{"service":"` + name + `","state":"ok"}`)
-	if got, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); replaced || got != summary {
-		t.Fatalf("service name refused: %q, replaced %v", got, replaced)
+const copiedSentence = "connection to the settlement ledger replica was refused after three retries"
+
+func TestAllowNames_ALongServiceNamePassesOnlyWhenAllowed(t *testing.T) {
+	summary := "The " + longServiceName + " service restarted; " + longServiceName + " is healthy again."
+	if got, replaced := CheckSummaryAs(summary, nameCorpus(), ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
+		t.Errorf("not allowed: kept %q", got)
 	}
-	for _, member := range []string{"cluster", "name", "label"} {
-		c = exemptCorpusOf(`{"` + member + `":"` + name + `"}`)
-		if _, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); replaced {
-			t.Errorf("%s: refused", member)
-		}
+	if got, replaced := CheckSummaryAs(summary, nameCorpus(longServiceName), ReplacementReviewSummary); replaced || got != summary {
+		t.Errorf("allowed: got %q, replaced %v", got, replaced)
 	}
-	// Names inside an array of objects, at depth.
-	c = exemptCorpusOf(`{"items":[{"meta":{"service":"` + name + `"}}]}`)
-	if _, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); replaced {
-		t.Error("nested member refused")
+	if got, replaced := CheckSummary(summary, nameCorpus(longServiceName)); replaced || got != summary {
+		t.Errorf("allowed, investigation sentence: got %q, replaced %v", got, replaced)
 	}
 }
 
-func TestCorpus_ExemptNamesStillCatchesTheSameTextElsewhere(t *testing.T) {
-	name := strings.Repeat("checkout-", 7)[:60]
-	summary := "The " + name + " service restarted."
-	for _, body := range []string{
-		`{"message":"` + name + `"}`,
-		`{"service":{"message":"` + name + `"}}`,      // an object under the member is not exempt
-		`{"service":["` + name + `"]}`,                // neither is an array
-		`{"service":"short","detail":"` + name + `"}`, // a later member
-		`{"servicex":"` + name + `"}`,
-		`{"Service":"` + name + `"}`,
-		`plain text ` + name,
-		`[{"message":"` + name + `"}]`,
+func TestAllowNames_CopiedTextAroundAnAllowedNameIsStillCaught(t *testing.T) {
+	c := nameCorpus(longServiceName, "other-service-with-a-long-name-for-tests")
+	for name, summary := range map[string]string{
+		"after":   longServiceName + " said: " + copiedSentence,
+		"before":  copiedSentence + " in " + longServiceName,
+		"between": "other-service-with-a-long-name-for-tests " + copiedSentence + " " + longServiceName,
+		"inside":  "The " + longServiceName + " " + copiedSentence + " and more.",
+		"alone":   copiedSentence,
 	} {
-		c := exemptCorpusOf(body)
 		if got, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
-			t.Errorf("%s: kept %q", body, got)
+			t.Errorf("%s: kept %q", name, got)
 		}
 	}
-	// The value of a key is not mistaken for a key: the name sits under "note", after a member named "name".
-	c := exemptCorpusOf(`{"name":"x","note":"` + name + `"}`)
-	if _, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); !replaced {
-		t.Error("value after an exempt member was exempt too")
+	// Two allowed names next to each other, with nothing copied, pass.
+	if _, replaced := CheckSummaryAs(longServiceName+" and "+longServiceName+" "+longServiceName, c, ReplacementReviewSummary); replaced {
+		t.Error("adjacent names refused")
 	}
 }
 
-func TestCorpus_ExemptNamesStopsAt128Bytes(t *testing.T) {
-	at := strings.Repeat("alpha-", 10) + "beta-gamma-delta " + strings.Repeat("omega-", 8) + "psi" // 128 bytes
-	over := at + "c"                                                                               // 129 bytes
-	atSummary := "It named " + at + " here."
-	if _, replaced := CheckSummaryAs(atSummary, exemptCorpusOf(`{"name":"`+at+`"}`), ReplacementReviewSummary); replaced {
-		t.Error("128 bytes was stored")
-	}
-	if _, replaced := CheckSummaryAs("It named "+over+" here.", exemptCorpusOf(`{"name":"`+over+`"}`), ReplacementReviewSummary); !replaced {
-		t.Error("129 bytes was exempt")
-	}
-	// The bound is on bytes, not characters: 64 two-byte letters are 128 bytes, 65 are 130.
-	two, three := strings.Repeat("é", 64), strings.Repeat("é", 65)
-	if _, replaced := CheckSummaryAs("It named "+two+" here.", exemptCorpusOf(`{"name":"`+two+`"}`), ReplacementReviewSummary); replaced {
-		t.Error("128 bytes of two-byte letters was stored")
-	}
-	if _, replaced := CheckSummaryAs("It named "+three+" here.", exemptCorpusOf(`{"name":"`+three+`"}`), ReplacementReviewSummary); !replaced {
-		t.Error("130 bytes of two-byte letters was exempt")
-	}
-}
-
-func TestCorpus_ExemptNamesStillScrubs(t *testing.T) {
-	secret := "AKIA" + "IOSFODNN7EXAMPLE"
-	c := exemptCorpusOf(`{"name":"` + secret + `"}`)
-	if got, replaced := CheckSummaryAs("The role used "+secret+" to start.", c, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
-		t.Fatalf("got %q, replaced %v", got, replaced)
-	}
-}
-
-func TestCorpus_WithoutExemptionNothingChanged(t *testing.T) {
-	name := strings.Repeat("checkout-", 7)[:60]
-	summary := "The " + name + " service restarted."
-	for _, body := range []string{
-		`{"service":"` + name + `"}`, `{"cluster":"` + name + `"}`, `{"name":"` + name + `"}`, `{"label":"` + name + `"}`,
-		`{"a":{"service":"` + name + `"}}`,
-	} {
-		c := corpusOf(body)
-		if got, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
-			t.Errorf("%s: kept %q", body, got)
-		}
-		if got, replaced := CheckSummary(summary, c); !replaced || got != ReplacementSummary {
-			t.Errorf("%s: CheckSummary kept %q", body, got)
+func TestAllowNames_TheSameSentenceUnderAnyMemberIsCaught(t *testing.T) {
+	for _, member := range []string{"message", "definition", "env", "dockerLabels", "service", "name"} {
+		c := corpusOf(`{"` + member + `":"` + copiedSentence + ` on ` + longServiceName + `"}`)
+		c.AllowNames(longServiceName)
+		got, replaced := CheckSummaryAs("It failed: "+copiedSentence+" on "+longServiceName, c, ReplacementReviewSummary)
+		if !replaced || got != ReplacementReviewSummary {
+			t.Errorf("%s: kept %q", member, got)
 		}
 	}
 }
 
-func TestCorpus_ExemptValuesCountTowardTheCap(t *testing.T) {
-	c := exemptCorpusOf(`{"service":"` + strings.Repeat("a", 100) + `"}`)
-	c.Add(strings.Repeat(" ", CorpusCap-200))
-	if c.Full() {
-		t.Fatal("full before the cap")
+func TestAllowNames_OnlyBareNamesCanBeAllowed(t *testing.T) {
+	forbidden := []string{
+		"two words that make a long enough run for a copy",
+		"dotted.service.name.that.is.long.enough.here",
+		"path/to/some/long/service/name/for/the/check",
+		"someone.with.a.long.address@example.com",
+		"name with\ttab and a long enough length here",
+		"ünïcode-service-name-that-is-long-enough-here",
+		"", strings.Repeat("a", 129),
 	}
-	c.Add(`{"service":"` + strings.Repeat("b", 100) + `"}`)
-	if !c.Full() {
-		t.Fatal("exempt values were not counted toward the cap")
-	}
-	if _, replaced := CheckSummaryAs("fine summary", c, ReplacementReviewSummary); !replaced {
-		t.Error("a full corpus vouched for a summary")
-	}
-}
-
-func TestCorpus_ExemptNamesLinearOnLargeBodies(t *testing.T) {
-	big := func(n int) string {
-		return strings.Repeat(`{"service":"s","list":[{"name":"n","x":`, n/40) + "1" + strings.Repeat("}]}", n/40)
-	}
-	flat := func(n int) string {
-		return "[" + strings.Repeat(`{"label":"l","message":"m"},`, n/27) + `{"label":"z"}]`
-	}
-	for name, gen := range map[string]func(int) string{"nested": big, "flat": flat} {
-		small, large := gen(25_000), gen(CorpusCap*9/10)
-		ts := timeOf(func() { c := exemptCorpusOf(small); _ = c.HasRunIn(longServiceName + longServiceName) })
-		var c *Corpus
-		tl := timeOf(func() { c = exemptCorpusOf(large); _ = c.HasRunIn(longServiceName + longServiceName) })
-		if c.Full() {
-			t.Fatalf("%s: input over the cap", name)
+	for _, name := range forbidden {
+		c := corpusOf(name)
+		c.AllowNames(name)
+		if len(name) >= VerbatimRun && !c.HasRunIn(name) {
+			t.Fatalf("setup: %q not in the corpus", name)
 		}
-		if tl > 100*ts+50*time.Millisecond || tl > 2*time.Second {
-			t.Errorf("%s: about 2 MiB took %v against %v for 25 KB", name, tl, ts)
+		if _, replaced := CheckSummaryAs("About "+name+" here.", c, ReplacementReviewSummary); !replaced && len(Normalize(name)) >= VerbatimRun {
+			t.Errorf("%q was allowed", name)
+		}
+	}
+	// 128 characters is the longest name, 129 is ignored.
+	long128, long129 := strings.Repeat("abcd-efgh-", 12)+"abcd-efg", strings.Repeat("abcd-efgh-", 12)+"abcd-efgh"
+	if len(long128) != 128 || len(long129) != 129 {
+		t.Fatal("setup lengths")
+	}
+	for name, want := range map[string]bool{long128: false, long129: true} {
+		c := corpusOf(name)
+		c.AllowNames(name)
+		if _, replaced := CheckSummary("Name "+name+".", c); replaced != want {
+			t.Errorf("%d characters: replaced %v, want %v", len(name), replaced, want)
 		}
 	}
 }
 
-func TestCorpus_ExemptNamesAfterAddPanicsAndStaysStrict(t *testing.T) {
-	name := strings.Repeat("checkout-", 7)[:60]
-	c := &Corpus{}
-	c.Add(`{"service":"` + name + `"}`)
-	func() {
-		defer func() {
-			if recover() == nil {
-				t.Error("a late ExemptNames did not panic under test")
-			}
-		}()
-		c.ExemptNames()
-	}()
-	if !c.HasRunIn(name) {
-		t.Error("the corpus was not left strict")
+func TestAllowNames_CaseAndPrefixes(t *testing.T) {
+	c := nameCorpus("Payments-Checkout-Settlement-Reconciliation-Worker-EU")
+	if _, replaced := CheckSummary("See "+strings.ToUpper(longServiceName)+" and "+longServiceName+".", c); replaced {
+		t.Error("case differences were not folded")
+	}
+	// A name that is a prefix of another does not allow the longer one.
+	prefix := "payments-checkout-settlement-reconciliation"
+	c = corpusOf(`{"service":"` + longServiceName + `"}`)
+	c.AllowNames(prefix)
+	if _, replaced := CheckSummary("Look at "+longServiceName+".", c); !replaced {
+		t.Error("a prefix allowed the longer name")
+	}
+	// The longer name does not allow its prefix either.
+	c = corpusOf(`{"service":"` + prefix + `"}`)
+	c.AllowNames(longServiceName)
+	if _, replaced := CheckSummary("Look at "+prefix+".", c); !replaced {
+		t.Error("a name allowed its own prefix")
+	}
+	// A token inside a longer token is not masked.
+	c = corpusOf(`{"service":"` + longServiceName + `"}`)
+	c.AllowNames(longServiceName)
+	if _, replaced := CheckSummary("Look at x"+longServiceName+"y.", c); !replaced {
+		t.Error("a name inside a longer token was masked")
+	}
+}
+
+func TestAllowNames_NotesStayStrictAndNothingChangesWithoutIt(t *testing.T) {
+	c := nameCorpus(longServiceName)
+	if got := CheckNote("The "+longServiceName+" restarted.", c); got != ReplacementNote {
+		t.Errorf("note kept %q", got)
+	}
+	if !c.HasRunIn(longServiceName) {
+		t.Error("HasRunIn was changed by AllowNames")
+	}
+	// No names, only invalid names: the same as a corpus without the call.
+	d := nameCorpus("", "two words", strings.Repeat("a", 129))
+	if _, replaced := CheckSummary("The "+longServiceName+" restarted.", d); !replaced {
+		t.Error("invalid names allowed something")
+	}
+	e := nameCorpus()
+	for _, text := range []string{copiedSentence, "It logged: " + copiedSentence, "The " + longServiceName + " restarted."} {
+		a, ra := CheckSummary(text, e)
+		b, rb := CheckSummary(text, nameCorpus())
+		if a != b || ra != rb || !ra {
+			t.Errorf("%q: %q %v / %q %v", text, a, ra, b, rb)
+		}
+	}
+}
+
+func TestAllowNames_ListCapAndLateCalls(t *testing.T) {
+	c := corpusOf(`{"service":"` + longServiceName + `"}`)
+	names := make([]string, 0, 10_001)
+	for i := 0; i < 10_000; i++ {
+		names = append(names, "svc-"+strconv.Itoa(i))
+	}
+	c.AllowNames(names...)
+	c.AllowNames(longServiceName) // past 10,000: not added
+	if _, replaced := CheckSummary("About "+longServiceName+".", c); !replaced {
+		t.Error("the 10,001st name was added")
+	}
+	// Callable at any time: after Add, and twice.
+	d := corpusOf(`{"service":"` + longServiceName + `"}`)
+	d.AllowNames(longServiceName)
+	d.Add(`{"other":"x"}`)
+	d.AllowNames("svc-1")
+	if _, replaced := CheckSummary("About "+longServiceName+".", d); replaced {
+		t.Error("an allowed name was refused after a later Add")
+	}
+}
+
+func TestAllowNames_LinearWithTenThousandNamesAndAHostileCandidate(t *testing.T) {
+	build := func(n int) (*Corpus, string) {
+		var body strings.Builder
+		body.WriteString(`["`)
+		body.WriteString(longServiceName)
+		for body.Len() < n {
+			body.WriteString(`","a b c d e f g h `)
+		}
+		body.WriteString(`"]`)
+		c := corpusOf(body.String())
+		names := make([]string, 0, 10_000)
+		for i := 0; i < 10_000; i++ {
+			names = append(names, "service-number-"+strconv.Itoa(i))
+		}
+		c.AllowNames(names...)
+		c.AllowNames(longServiceName)
+		// Every character of the candidate is part of an allowed-looking token, or a near miss of one.
+		hostile := strings.Repeat("service-number-1 service-number-2x "+longServiceName+" "+strings.Repeat("a", 31)+"b ", 1200/100)
+		return c, hostile
+	}
+	cs, hs := build(100_000)
+	cl, hl := build(CorpusCap - 1000)
+	if cl.Full() {
+		t.Fatal("corpus over the cap")
+	}
+	ts := timeOf(func() { _ = cs.hasRunAllowing(hs) })
+	tl := timeOf(func() { _ = cl.hasRunAllowing(hl) })
+	if tl > 40*ts+20*time.Millisecond || tl > 2*time.Second {
+		t.Errorf("2 MiB corpus took %v against %v for 100 KB", tl, ts)
+	}
+	// A candidate built only of tokens, at the summary cap, over a large corpus.
+	big := strings.Repeat("service-number-77 ", 1200/18)
+	if tb := timeOf(func() { _ = cl.hasRunAllowing(big) }); tb > 2*time.Second {
+		t.Errorf("token-only candidate took %v", tb)
+	}
+	if cl.hasRunAllowing(big) {
+		t.Error("allowed tokens counted as a copy")
 	}
 }
