@@ -139,6 +139,93 @@ describe('AgentDrawer', () => {
     expect(within(dialog).queryByText(/unavailable/)).not.toBeInTheDocument()
   })
 
+  describe('after Stop or a failed refetch', () => {
+    const savedUser = message(40, 'user', 'go')
+    const savedAnswer = message(41, 'assistant', 'The saved answer.', { interrupted: true })
+
+    /** A conversation 2 whose GET answers by `phase`: 'old' is as before the question, 'down' fails, 'saved' holds the new answer. */
+    const mockConversation = (phase: () => 'old' | 'down' | 'saved') => {
+      let reads = 0
+      server.use(
+        http.get('/api/agent/conversations/2', () => {
+          reads++
+          const now = phase()
+          if (now === 'down') return HttpResponse.json({ error: { code: 'internal', message: 'Boom.' } }, { status: 500 })
+          return HttpResponse.json({ ...DETAILS[0], messages: now === 'saved' ? [...DETAILS[0].messages, savedUser, savedAnswer] : DETAILS[0].messages })
+        }),
+      )
+      return () => reads
+    }
+
+    const startAndStop = async (stream: ReturnType<typeof openStream>) => {
+      const user = userEvent.setup()
+      renderApp('/clusters')
+      const dialog = await openDrawer(user)
+      await within(dialog).findByText('CPU is saturated.')
+      await user.type(within(dialog).getByRole('textbox', { name: 'Message' }), 'go{Enter}')
+      stream.send('text', { delta: 'partial answer' })
+      await within(dialog).findByText('partial answer')
+      await user.click(within(dialog).getByRole('button', { name: 'Stop' }))
+      return dialog
+    }
+
+    it('keeps the partial answer when the server saves late, then shows the saved one once', async () => {
+      const stream = openStream()
+      let saved = false
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      mockConversation(() => (saved ? 'saved' : 'old'))
+      server.use(http.post('/api/agent/conversations/2/messages', () => stream.response()))
+      const dialog = await startAndStop(stream)
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      expect(within(dialog).getByText('partial answer')).toBeInTheDocument()
+      expect(within(dialog).getByText('Stopped before finishing.')).toBeInTheDocument()
+      saved = true
+      expect(await within(dialog).findByText('The saved answer.', {}, { timeout: 4000 })).toBeInTheDocument()
+      expect(within(dialog).queryByText('partial answer')).not.toBeInTheDocument()
+      expect(within(dialog).getAllByText('go')).toHaveLength(1)
+      expect(within(dialog).getAllByText('The saved answer.')).toHaveLength(1)
+      // The saved message carries its own "stopped" note: one, not two.
+      expect(within(dialog).getAllByText('Stopped before finishing.')).toHaveLength(1)
+    })
+
+    it('keeps the partial answer when the refetch fails, and recovers on the delayed one', async () => {
+      const stream = openStream()
+      let phase: 'old' | 'down' | 'saved' = 'down'
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      server.use(http.post('/api/agent/conversations/2/messages', () => stream.response()))
+      const dialog = await startAndStop(stream)
+      // The first read is the one before the question; from now on reads fail.
+      mockConversation(() => phase)
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      expect(within(dialog).getByText('partial answer')).toBeInTheDocument()
+      expect(within(dialog).getByText('Stopped before finishing.')).toBeInTheDocument()
+      phase = 'saved'
+      expect(await within(dialog).findByText('The saved answer.', {}, { timeout: 4000 })).toBeInTheDocument()
+      expect(within(dialog).queryByText('partial answer')).not.toBeInTheDocument()
+    })
+
+    it('a normal end shows the saved answer at once, with no stopped note', async () => {
+      const stream = openStream()
+      let saved = false
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      mockConversation(() => (saved ? 'saved' : 'old'))
+      server.use(http.post('/api/agent/conversations/2/messages', () => stream.response()))
+      const user = userEvent.setup()
+      renderApp('/clusters')
+      const dialog = await openDrawer(user)
+      await within(dialog).findByText('CPU is saturated.')
+      await user.type(within(dialog).getByRole('textbox', { name: 'Message' }), 'go{Enter}')
+      stream.send('text', { delta: 'partial answer' })
+      await within(dialog).findByText('partial answer')
+      saved = true
+      stream.send('done', { message_id: 41 })
+      stream.close()
+      expect(await within(dialog).findByText('The saved answer.')).toBeInTheDocument()
+      expect(within(dialog).queryByText('partial answer')).not.toBeInTheDocument()
+      expect(within(dialog).getAllByText('go')).toHaveLength(1)
+    })
+  })
+
   it('lists and reopens a conversation', async () => {
     mockAgent({ conversations: CONVERSATIONS, details: DETAILS })
     const user = userEvent.setup()

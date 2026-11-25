@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { conversationKey, useAgentAvailable, CONVERSATIONS_KEY, createConversation, sendMessage, useConversation, useConversations, useDeleteConversation } from '../../api/agent'
 import { ApiError } from '../../api/client'
-import type { AgentConversationSummaryDTO, AgentMessageDTO } from '../../api/types'
+import type { AgentConversationDTO, AgentConversationSummaryDTO, AgentMessageDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Drawer } from '../../components/Drawer'
@@ -13,6 +13,10 @@ import { usePageContext } from './usePageContext'
 import styles from './agent.module.css'
 
 const UNAVAILABLE = "The agent is unavailable. Try again shortly."
+const STOPPED = 'Stopped before finishing.'
+
+/** How long after a turn ends without its saved answer the conversation is read once more: a server may save a stopped answer late. */
+const LATE_SAVE_RECHECK_MS = 1500
 
 /** User-facing words for an error code; the server's own message is kept only where it carries the detail (the budget). */
 function errorCopy(code: string, message: string): string {
@@ -26,7 +30,7 @@ function errorCopy(code: string, message: string): string {
     case 'agent_unavailable':
       return UNAVAILABLE
     case 'interrupted':
-      return 'Stopped before finishing.'
+      return STOPPED
     case 'timeout':
       return 'The agent took too long and was stopped.'
     default:
@@ -53,7 +57,13 @@ interface LiveTurn {
   question: string
   text: string
   tools: ToolRun[]
+  /** The stream is over but the saved answer has not been seen yet, so what streamed stays on screen. */
+  ended?: boolean
+  /** The run finished normally: the answer is whole even if the saved copy has not been read back yet. */
+  completed?: boolean
 }
+
+const highestAssistantId = (messages: AgentMessageDTO[]) => messages.reduce((top, message) => (message.role === 'assistant' ? Math.max(top, message.id) : top), 0)
 
 const byNewest = (a: AgentConversationSummaryDTO, b: AgentConversationSummaryDTO) => b.updated_at.localeCompare(a.updated_at)
 
@@ -79,13 +89,14 @@ function OpenAgentDrawer() {
   const [problem, setProblem] = useState<string | null>(null)
   const [toDelete, setToDelete] = useState<AgentConversationSummaryDTO | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const recheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const sorted = useMemo(() => [...(conversations.data?.items ?? [])].sort(byNewest), [conversations.data])
   const currentId = chosen !== undefined ? chosen : (sorted[0]?.id ?? null)
   const conversation = useConversation(currentId)
-  const running = live !== null
+  const running = live !== null && !live.ended
   const loadError = conversation.isError
     ? conversation.error instanceof ApiError && conversation.error.status === 404
       ? 'This conversation no longer exists.'
@@ -94,7 +105,13 @@ function OpenAgentDrawer() {
       ? LOAD_FAILED
       : null
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      if (recheckRef.current) clearTimeout(recheckRef.current)
+    },
+    [],
+  )
   useEffect(() => {
     const list = scrollRef.current
     if (list) list.scrollTop = list.scrollHeight
@@ -111,11 +128,15 @@ function OpenAgentDrawer() {
     setDraft('')
     setNotices([])
     setProblem(null)
-    setLive({ before: conversation.data?.messages ?? [], question: text, text: '', tools: [] })
+    if (recheckRef.current) clearTimeout(recheckRef.current)
+    const shown = conversation.data?.messages ?? []
+    const answersSeen = highestAssistantId(shown)
+    setLive({ before: shown, question: text, text: '', tools: [] })
     const controller = new AbortController()
     abortRef.current = controller
     let id = currentId
     let streamed = false
+    let completed = false
     try {
       if (id === null) {
         id = (await createConversation()).id
@@ -147,7 +168,9 @@ function OpenAgentDrawer() {
             const copy = NOTICE_COPY[kind]
             if (copy) setNotices((current) => (current.includes(copy) ? current : [...current, copy]))
           },
-          onDone: () => {},
+          onDone: () => {
+            completed = true
+          },
           onError: (code, message) => setProblem(errorCopy(code, message)),
         },
         controller.signal,
@@ -161,7 +184,23 @@ function OpenAgentDrawer() {
       await Promise.all([queryClient.invalidateQueries({ queryKey: conversationKey(id) }), queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY })])
     }
     abortRef.current = null
-    setLive(null)
+    // The saved answer normally comes with the refetch above. After Stop, or when the refetch failed, it may not be there
+    // yet: keep what streamed on screen, and read the conversation once more shortly.
+    const savedAnswerIsIn = (conversationId: number) =>
+      highestAssistantId(queryClient.getQueryData<AgentConversationDTO>(conversationKey(conversationId))?.messages ?? []) > answersSeen
+    if (id === null || !streamed || savedAnswerIsIn(id)) {
+      setLive(null)
+      return
+    }
+    setLive((turn) => turn && { ...turn, ended: true, completed })
+    const conversationId = id
+    recheckRef.current = setTimeout(() => {
+      void (async () => {
+        await queryClient.refetchQueries({ queryKey: conversationKey(conversationId), exact: true })
+        if (savedAnswerIsIn(conversationId)) setLive(null)
+        void queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY })
+      })()
+    }, LATE_SAVE_RECHECK_MS)
   }, [draft, running, currentId, page, queryClient, conversation.data])
 
   const stop = () => abortRef.current?.abort()
@@ -173,13 +212,19 @@ function OpenAgentDrawer() {
     }
   }
 
+  const leaveLiveTurn = () => {
+    if (recheckRef.current) clearTimeout(recheckRef.current)
+    setLive(null)
+  }
   const startNew = () => {
+    leaveLiveTurn()
     setChosen(null)
     setNotices([])
     setProblem(null)
     setView('chat')
   }
   const open = (id: number) => {
+    leaveLiveTurn()
     setChosen(id)
     setNotices([])
     setProblem(null)
@@ -254,11 +299,17 @@ function OpenAgentDrawer() {
                   <>
                     {live.before.map((message) => <Message key={message.id} message={message} />)}
                     <LiveMessages turn={live} />
+                    {live.ended && !live.completed && <p className={styles.notice}>{STOPPED}</p>}
                     {notices.map((notice) => (
                       <p key={notice} className={styles.notice}>
                         {notice}
                       </p>
                     ))}
+                    {live.ended && problem && problem !== STOPPED && (
+                      <p className={styles.problem} role="alert">
+                        {problem}
+                      </p>
+                    )}
                   </>
                 ) : !ready || (currentId !== null && conversation.isPending) ? (
                   <Skeleton lines={3} label="Loading conversation" />
