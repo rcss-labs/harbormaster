@@ -26,3 +26,6 @@ alter table agent_review_runs add column instructions text not null default '';
 alter table agent_review_runs add constraint agent_review_runs_instructions_length check (char_length(instructions) <= 2000);
 alter table agent_review_runs add column test boolean not null default false;
 alter table agent_review_runs add constraint agent_review_runs_test_manual check (not test or manual);
+-- A test run covers no tags (readers decide by tags and know no test runs). A phase 3 task that claims a test row
+-- during a rolling deploy writes tags at start; this check refuses that start before any model call is made.
+alter table agent_review_runs add constraint agent_review_runs_test_no_tags check (not test or covered_tags = '{}');
