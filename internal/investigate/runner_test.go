@@ -687,14 +687,18 @@ func TestJob_StoppedDuringSetUpGivesTheClaimBack(t *testing.T) {
 }
 
 func TestJob_TheClaimCoversTheWholeRun(t *testing.T) {
-	f := newFixture(t)
-	f.agent.runTimeout = 20 * time.Minute
-	id := f.request("checkout-api")
-	var until *time.Time
-	f.agent.set(func(c *call) { until = f.inv(id).ClaimedUntil; c.send(goodRun("Fine.")...) })
-	f.runTo(id, "done")
-	if until == nil || !until.Equal(f.clock.now().Add(21*time.Minute)) {
-		t.Errorf("claimed until %v, want 21 minutes from now", until)
+	for timeout, want := range map[time.Duration]time.Duration{time.Minute: 6 * time.Minute, 20 * time.Minute: 21 * time.Minute} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			f := newFixture(t)
+			f.agent.runTimeout = timeout
+			id := f.request("checkout-api")
+			var until *time.Time
+			f.agent.set(func(c *call) { until = f.inv(id).ClaimedUntil; c.send(goodRun("Fine.")...) })
+			f.runTo(id, "done")
+			if until == nil || !until.Equal(f.clock.now().Add(want)) {
+				t.Errorf("claimed until %v, want in %v", until, want)
+			}
+		})
 	}
 }
 

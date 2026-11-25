@@ -172,7 +172,9 @@ func TestFinisher_SettleIsRetriedOnceBeforeTheAudit(t *testing.T) {
 		}
 		return nil
 	}
-	(&Finisher{Ops: ops, Log: func(string, error) {}}).Finish(t.Context())
+	if res := (&Finisher{Ops: ops, Log: func(string, error) {}}).Finish(t.Context()); res.SettleErr != nil {
+		t.Errorf("SettleErr = %v after a retry that worked", res.SettleErr)
+	}
 	if ops.calls["settle"] != 2 || !slices.Equal(ops.ended()[len(ops.ended())-3:], []string{"slot", "settle", "audit"}) {
 		t.Errorf("settle calls %d, order %v", ops.calls["settle"], ops.ended())
 	}

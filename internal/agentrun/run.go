@@ -187,17 +187,25 @@ func (r *Runner) Ops(run store.AgentRun, actor Actor, ip string, meter *Meter, e
 
 // Finish ends a run of any role; see Finisher for the steps. It works on a ctx that has ended.
 func (r *Runner) Finish(ctx context.Context, ops *StoreOps) Result {
+	ended := r.finish(ctx, ops)
+	r.logFinished(ops)
+	return ended
+}
+
+func (r *Runner) finish(ctx context.Context, ops *StoreOps) Result {
 	f := Finisher{Ops: ops, Draining: r.Draining, Log: func(step string, err error) {
 		r.LogRunError(ops.Run.ID, "agent run: could not "+step, err)
 	}}
-	ended := f.Finish(ctx)
+	return f.Finish(ctx)
+}
+
+func (r *Runner) logFinished(ops *StoreOps) {
 	var u Usage
 	if ops.Meter != nil {
 		u, _ = ops.Meter.Last()
 	}
 	r.log().Info("agent run finished", "run_id", ops.Run.ID, "role", ops.Run.Role, "user_id", ops.Run.UserID, "outcome", ops.Outcome,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens, "cost_micro_usd", u.CostMicroUSD)
-	return ended
 }
 
 // LogRunError logs err against a run, with the stack when it was a panic.
@@ -212,9 +220,14 @@ func (r *Runner) LogRunError(runID uuid.UUID, what string, err error) {
 
 // End ends a run that has no meter known to this process: one left by an earlier holder, or an orphan. The run is
 // settled with the figures its row has, its token is deleted, and its audit row (with details added) is written, in the
-// steps of Finish.
+// steps of Finish. A run that had ended before keeps its ending and is not reported as finished again; one whose
+// SettleErr is not nil may still be running, unless that is store.ErrNotFound.
 func (r *Runner) End(ctx context.Context, run store.AgentRun, actor Actor, ip string, end Ending, details map[string]any) Result {
 	ops := r.Ops(run, actor, ip, nil, end)
 	ops.Details = details
-	return r.Finish(ctx, ops)
+	ended := r.finish(ctx, ops)
+	if ended.SettleErr == nil && !ops.endedBefore.Load() {
+		r.logFinished(ops)
+	}
+	return ended
 }

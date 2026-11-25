@@ -146,11 +146,13 @@ type fakeAgent struct {
 	models          []string
 	catalogueStatus int
 	runTimeout      time.Duration
+	maxRunTokens    int64
+	outputPrice     int64
 	active, most    int
 }
 
 func newFakeAgent(t *testing.T) *fakeAgent {
-	a := &fakeAgent{roles: []string{"chat", "investigator", "test"}, models: []string{testModel}, catalogueStatus: http.StatusOK, runTimeout: time.Minute}
+	a := &fakeAgent{roles: []string{"chat", "investigator", "test"}, models: []string{testModel}, catalogueStatus: http.StatusOK, runTimeout: time.Minute, maxRunTokens: 200_000, outputPrice: 15_000_000}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/catalogue", func(w http.ResponseWriter, _ *http.Request) {
 		a.mu.Lock()
@@ -161,11 +163,11 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 		}
 		var models []map[string]any
 		for _, id := range a.models {
-			models = append(models, map[string]any{"id": id, "input_per_mtok_micro_usd": 3_000_000, "output_per_mtok_micro_usd": 15_000_000, "context_tokens": 200_000})
+			models = append(models, map[string]any{"id": id, "input_per_mtok_micro_usd": a.outputPrice / 5, "output_per_mtok_micro_usd": a.outputPrice, "context_tokens": 200_000})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"providers": []map[string]any{{"provider": testProvider, "models": models}}, "roles": a.roles,
-			"limits": map[string]any{"max_run_tokens": 200_000, "run_timeout_seconds": int(a.runTimeout.Seconds())},
+			"limits": map[string]any{"max_run_tokens": a.maxRunTokens, "run_timeout_seconds": int(a.runTimeout.Seconds())},
 		})
 	})
 	mux.HandleFunc("POST /v1/runs", func(w http.ResponseWriter, r *http.Request) {
@@ -436,6 +438,19 @@ func (f *fixture) runToRelease(id int64) store.Investigation {
 	})
 	stop()
 	return f.inv(id)
+}
+
+// waitLong is wait for what takes as long as the limits of the steps that end a run.
+func (f *fixture) waitLong(what string, cond func() bool) {
+	f.t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	f.t.Fatalf("timed out waiting for %s", what)
 }
 
 func (f *fixture) anyRunning() bool {

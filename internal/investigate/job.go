@@ -3,6 +3,7 @@ package investigate
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"sync"
 	"time"
@@ -23,6 +24,10 @@ const (
 	retryBusy        = 30 * time.Second
 	retryVendor      = 5 * time.Minute
 	maxAttempts      = 2
+
+	// storeTry is how long each write that stores a result may take; three of them fit in the time the end of a run
+	// gives the saving of an answer (10 s).
+	storeTry = 3 * time.Second
 
 	// Codes of the agent's error event that mean something here.
 	codeNoResult    = "no_result"
@@ -94,7 +99,7 @@ type plan struct {
 	token     string
 }
 
-// execute runs the job to its end. A panic anywhere ends it as failed, and never the process.
+// execute runs the job to its end. A panic before the end makes it a failed one; none ends the process.
 func (j *job) execute(ctx context.Context) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -175,13 +180,18 @@ func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
 	if j.identity, err = within(ctx, j.r.Store.EnsureAgentIdentity); err != nil {
 		return p, j.unready(ctx, "load the agent identity", err)
 	}
-	j.endPreviousRun(ctx)
+	if err := j.endPreviousRun(ctx); err != nil {
+		// It may still hold its reservation, or cost more: no second run beside it.
+		j.logError("investigate: the previous run is not settled", err)
+		end := ending{kind: endReleased, word: reasonInterrupted, retryIn: retryUnavailable}
+		return p, &end
+	}
 
 	now := j.r.now()
 	if j.r.PerHour <= 0 {
 		return skip(reasonRateLimited)
 	}
-	if j.claim.Attempt == 1 {
+	if j.inv.StartedAt == nil { // no run was ever started for it, whatever became of its attempts
 		if j.r.MaxWait > 0 && now.Sub(j.inv.RequestedAt) > j.r.MaxWait {
 			return skip(reasonExpired)
 		}
@@ -223,9 +233,8 @@ func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
 		return p, &end
 	}
 	chosenModel, offered := cat.Find(ref.Provider, ref.Model)
-	reservation := chosenModel.MaxRunCostMicroUSD(cat.MaxRunTokens)
-	// A run whose worst case is not known must not start.
-	if !offered || !cat.Supports(roleName) || cat.MaxRunTokens <= 0 || reservation < 0 {
+	reservation, known := worstCase(chosenModel, cat.MaxRunTokens)
+	if !offered || !cat.Supports(roleName) || !known {
 		return skip(reasonNotConfigured)
 	}
 
@@ -240,16 +249,31 @@ func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
 	}, nil
 }
 
+// worstCase is the most a run can cost. It is not known, and such a run must not start, when the agent states no
+// price or no limit, or a product of the two that no sum can hold.
+func worstCase(m agentclient.Model, maxRunTokens int64) (microUSD int64, known bool) {
+	price := max(m.InputMicroUSDPerMTok, m.OutputMicroUSDPerMTok)
+	if maxRunTokens <= 0 || price <= 0 || price > math.MaxInt64/maxRunTokens {
+		return 0, false
+	}
+	microUSD = m.MaxRunCostMicroUSD(maxRunTokens)
+	return microUSD, microUSD > 0
+}
+
 func agentText(text string) string { return agentresult.CutExcerpt(secretshape.ScrubText(text)) }
 
 // endPreviousRun ends the run of an earlier holder that did not live to do it: it keeps the figures last recorded.
-// One that was ended already stays as it is.
-func (j *job) endPreviousRun(ctx context.Context) {
+// One that was ended already, or is gone, stays as it is. An error means that it may still be running.
+func (j *job) endPreviousRun(ctx context.Context) error {
 	if j.inv.RunID == nil {
-		return
+		return nil
 	}
 	run := store.AgentRun{ID: *j.inv.RunID, Role: roleName, UserID: &j.identity.ID, Provider: j.inv.Provider, Model: j.inv.Model}
-	j.runs.End(ctx, run, j.actor(), "", agentrun.Ending{Outcome: reasonInterrupted}, j.details())
+	err := j.runs.End(ctx, run, j.actor(), "", agentrun.Ending{Outcome: reasonInterrupted}, j.details()).SettleErr
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (j *job) actor() agentrun.Actor { return agentrun.Actor{Name: j.identity.Username} }
@@ -407,7 +431,8 @@ func (j *job) outcome() ending {
 }
 
 // busy gives the attempt back: the agent refused before it did anything. A first attempt that waited too long is
-// skipped when it is claimed next; a second one is not looked at for its age any more, so it ends here.
+// skipped when it is claimed next. A second one keeps the start it recorded, so its age is not looked at there any
+// more: it ends here.
 func (j *job) busy() ending {
 	waited := j.r.now().Add(retryBusy).Sub(j.inv.RequestedAt)
 	if j.claim.Attempt > 1 && j.r.MaxWait > 0 && waited > j.r.MaxWait {
@@ -474,18 +499,36 @@ func (j *job) settle(ctx context.Context) error {
 	}
 }
 
-// storeResult checks the agent's result against what the identity may read now and stores it. One that cannot be
-// stored fails the investigation rather than leaving it running.
+// storeResult checks the agent's result against what the identity may read now and stores it. The result is paid for,
+// so one bad write is tried again. One that cannot be stored fails the investigation rather than leaving it running.
+// Each of the three has its own time, so that one that hangs leaves some for the next.
 func (j *job) storeResult(ctx context.Context) error {
-	see, err := j.r.sightOf(ctx, j.identity.ID)
-	if err == nil {
-		accepted := Accept(*j.result, see.can)
-		if err = see.err; err == nil {
-			err = j.r.Store.FinishInvestigation(ctx, j.claim, store.InvestigationDone, "", &accepted, j.r.now())
+	var err error
+	for range 2 {
+		err = j.inTime(ctx, j.storeOnce)
+		if err == nil || errors.Is(err, store.ErrConflict) {
+			return err // a conflict: another holder has it, and the result is discarded
 		}
 	}
-	if err == nil || errors.Is(err, store.ErrConflict) {
-		return err // a conflict: another holder has it, and the result is discarded
+	return errors.Join(err, j.inTime(ctx, func(ctx context.Context) error {
+		return j.r.Store.FinishInvestigation(ctx, j.claim, store.InvestigationFailed, reasonError, nil, j.r.now())
+	}))
+}
+
+func (j *job) inTime(ctx context.Context, fn func(ctx context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, storeTry)
+	defer cancel()
+	return fn(ctx)
+}
+
+func (j *job) storeOnce(ctx context.Context) error {
+	see, err := j.r.sightOf(ctx, j.identity.ID)
+	if err != nil {
+		return err
 	}
-	return errors.Join(err, j.r.Store.FinishInvestigation(ctx, j.claim, store.InvestigationFailed, reasonError, nil, j.r.now()))
+	accepted := Accept(*j.result, see.can)
+	if see.err != nil {
+		return see.err
+	}
+	return j.r.Store.FinishInvestigation(ctx, j.claim, store.InvestigationDone, "", &accepted, j.r.now())
 }
