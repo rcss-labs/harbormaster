@@ -69,6 +69,12 @@ func TestInvalidScheduleNeverGivesATime(t *testing.T) {
 	if at, err := Next(bad, now); err == nil || !at.IsZero() {
 		t.Errorf("Next: %v %v", at, err)
 	}
+	if k := PeriodKey(bad, now); k != "" {
+		t.Errorf("PeriodKey %q", k)
+	}
+	if l := PeriodLabel(bad, now); l != "" {
+		t.Errorf("PeriodLabel %q", l)
+	}
 }
 
 // wall builds an instant from a local wall time in a zone that is known to be unambiguous.
@@ -342,6 +348,18 @@ func TestLast_DoesNotDependOnTheZoneOfNow(t *testing.T) {
 	}
 }
 
+// Kiritimati (+14) is already on 26 Nov when Pago Pago (-11) is still on 25 Nov; reading
+// the date of now in its own zone would pick the wrong day.
+func TestLast_ZoneOfNowDoesNotChangeTheDay(t *testing.T) {
+	s := Schedule{Cadence: "daily", AtMinute: 15, Timezone: "Pacific/Kiritimati"}
+	now := time.Date(2026, 11, 25, 10, 30, 0, 0, time.UTC)
+	want := time.Date(2026, 11, 25, 10, 15, 0, 0, time.UTC)
+	got, err := Last(s, now.In(mustLoc(t, "Pacific/Pago_Pago")))
+	if err != nil || got.IsZero() || !got.Equal(want) {
+		t.Fatalf("Last: %v %v, want %s", got, err, want)
+	}
+}
+
 func TestOccurrence_LordHoweHalfHourChanges(t *testing.T) {
 	// Spring: 4 Oct 2026 02:00 +10:30 becomes 02:30 +11:00, so 02:15 does not exist.
 	spring := Schedule{Cadence: "daily", AtMinute: 2*60 + 15, Timezone: "Australia/Lord_Howe"}
@@ -491,5 +509,39 @@ func TestRangeAndRunsPerMonth(t *testing.T) {
 	}
 	if err := Validate(Schedule{Cadence: "bogus", Timezone: "UTC"}); err == nil {
 		t.Error("Validate must refuse an unknown cadence")
+	}
+}
+
+func TestCanonicalZoneName_Refusals(t *testing.T) {
+	for _, name := range []string{"localtime", "LocalTime", "posix/UTC", "right/UTC", "Europe//Berlin", ".."} {
+		if err := canonicalZoneName(name); err == nil {
+			t.Errorf("%q passed", name)
+		}
+	}
+	if err := canonicalZoneName("Europe/Berlin"); err != nil {
+		t.Error(err)
+	}
+}
+
+// Apia skipped Friday 30 Dec 2011, so a Friday midnight schedule runs at the instant
+// Saturday starts. It keeps the Friday's week, and runs once.
+func TestPeriodKey_WeeklyAcrossASkippedWeekday(t *testing.T) {
+	s := Schedule{Cadence: "weekly", AtMinute: 0, Weekday: 5, Timezone: "Pacific/Apia"}
+	at, err := Next(s, time.Date(2011, 12, 29, 21, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2011, 12, 30, 10, 0, 0, 0, time.UTC); !at.Equal(want) {
+		t.Fatalf("occurrence %s, want %s", at, want)
+	}
+	if k, l := PeriodKey(s, at), PeriodLabel(s, at); k != "w:2011-W52" || l != "Week 52, 2011" {
+		t.Errorf("key %s label %s", k, l)
+	}
+	next, _ := Next(s, at)
+	if want := time.Date(2012, 1, 5, 10, 0, 0, 0, time.UTC); !next.Equal(want) {
+		t.Errorf("next %s, want %s", next, want)
+	}
+	if k := PeriodKey(s, next); k != "w:2012-W01" {
+		t.Errorf("next key %s", k)
 	}
 }

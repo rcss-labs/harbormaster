@@ -32,7 +32,7 @@ const searchDays = 70
 var zones sync.Map // name -> *time.Location
 
 // location loads a canonical IANA zone name. Names that would reach the host
-// zone, a file outside the zone database or an alias of one are refused.
+// zone or a file outside the zone database are refused.
 func location(name string) (*time.Location, error) {
 	if err := canonicalZoneName(name); err != nil {
 		return nil, fmt.Errorf("timezone %q: %w", name, err)
@@ -43,9 +43,6 @@ func location(name string) (*time.Location, error) {
 	loc, err := time.LoadLocation(name)
 	if err != nil {
 		return nil, fmt.Errorf("timezone %q: %w", name, err)
-	}
-	if loc.String() != name {
-		return nil, fmt.Errorf("timezone %q is not a canonical zone name", name)
 	}
 	zones.Store(name, loc)
 	return loc, nil
