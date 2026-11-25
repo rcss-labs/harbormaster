@@ -34,7 +34,7 @@ var anyKindUsersQueries = map[string]string{
 
 var (
 	usersTableRef = regexp.MustCompile(`(?i)\b(from|join|update|into)\s+users\b`)
-	kindRule      = regexp.MustCompile(`(?i)\bkind\s*(=|<>|!=|\bin\b)\s*\(?\s*'(human|agent)'`)
+	kindRule      = regexp.MustCompile(`(?i)\bkind\s*(=|\bin\b)\s*\(?\s*'(human|agent)'`)
 	kindInsert    = regexp.MustCompile(`(?is)\binsert\s+into\s+users\b[^)]*\bkind\b.*'(human|agent)'`)
 )
 

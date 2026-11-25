@@ -27,7 +27,7 @@ func ValidateUsername(username string) error {
 	if !usernamePattern.MatchString(username) {
 		return &ValidationError{Msg: "Use 2-32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter."}
 	}
-	if strings.HasPrefix(username, store.AgentUsernamePrefix) {
+	if store.IsReservedUsername(username) {
 		return &ValidationError{Msg: "That username is reserved."}
 	}
 	return nil

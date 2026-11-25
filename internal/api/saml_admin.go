@@ -521,7 +521,7 @@ func (s *Server) setBreakGlass(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -563,7 +563,7 @@ func (s *Server) setPendingLink(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid(nameIDMessage))
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -586,7 +586,7 @@ func (s *Server) clearPendingLink(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -606,7 +606,7 @@ func (s *Server) unlinkSSO(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return

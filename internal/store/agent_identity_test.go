@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,22 @@ func insertAgentRow(t *testing.T, st *store.Store, username string) int64 {
 		t.Fatalf("insert agent row: %v", err)
 	}
 	return id
+}
+
+// insertHumanRow adds a human directly, for names the store refuses to create (the reserved prefix).
+func insertHumanRow(t *testing.T, st *store.Store, username string) {
+	t.Helper()
+	if _, err := st.Pool.Exec(t.Context(), `insert into users (username, password_hash) values ($1, 'h')`, username); err != nil {
+		t.Fatalf("insert human row: %v", err)
+	}
+}
+
+// dropKindChecks lets a test make a row the shape and kind checks would refuse, in the test's own schema.
+func dropKindChecks(t *testing.T, st *store.Store) {
+	t.Helper()
+	if _, err := st.Pool.Exec(t.Context(), `alter table users drop constraint users_kind_check, drop constraint users_agent_shape`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEnsureAgentIdentity_CreatesOnceUnderConcurrency(t *testing.T) {
@@ -68,12 +85,8 @@ func TestEnsureAgentIdentity_SkipsATakenUsername(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := t.Context()
 	// A human already holds the first two reserved names (an older task, or a row created before the reservation).
-	if _, err := st.CreateUser(ctx, "harbormaster-agent", "h", false, false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.CreateUser(ctx, "Harbormaster-Agent-1", "h", false, false); err != nil {
-		t.Fatal(err)
-	}
+	insertHumanRow(t, st, "harbormaster-agent")
+	insertHumanRow(t, st, "Harbormaster-Agent-1")
 	u, err := st.EnsureAgentIdentity(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -95,9 +108,7 @@ func TestEnsureAgentIdentity_FailsWhenEveryReservedNameIsTaken(t *testing.T) {
 		names = append(names, "harbormaster-agent-"+string(rune('0'+i)))
 	}
 	for _, name := range names {
-		if _, err := st.CreateUser(ctx, name, "h", false, false); err != nil {
-			t.Fatal(err)
-		}
+		insertHumanRow(t, st, name)
 	}
 	if u, err := st.EnsureAgentIdentity(ctx); err == nil {
 		t.Fatalf("Ensure returned %+v with no free name, want an error", u)
@@ -200,56 +211,126 @@ func TestCreators_AlwaysCreateHumans(t *testing.T) {
 			t.Errorf("%s kind = %q, want human", u.Username, u.Kind)
 		}
 	}
-	insertAgentRow(t, st, "harbormaster-agent")
-	if _, err := st.CreateUser(ctx, "harbormaster-agent", "h", false, false); !errors.Is(err, store.ErrConflict) {
-		t.Errorf("CreateUser over the identity's name = %v, want ErrConflict", err)
+}
+
+func TestReservedUsername_RefusedByEveryCreator(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	for _, name := range []string{"harbormaster-agent", "Harbormaster-Agent-3", "harbormaster.agent", "harbormaster_agent", "harbormaster_agent.x", "harbormaster-agents"} {
+		if !store.IsReservedUsername(name) {
+			t.Errorf("IsReservedUsername(%q) = false", name)
+		}
+		if _, err := st.CreateUser(ctx, name, "h", false, false); !errors.Is(err, store.ErrReservedUsername) {
+			t.Errorf("CreateUser(%q) = %v, want ErrReservedUsername", name, err)
+		}
+		if _, err := st.CreateSAMLUser(ctx, store.NewSAMLUser{Username: name, IdPEntityID: "e", ExternalID: "n-" + name, ExternalIDFormat: "f"}); !errors.Is(err, store.ErrReservedUsername) {
+			t.Errorf("CreateSAMLUser(%q) = %v, want ErrReservedUsername", name, err)
+		}
+		if _, err := st.CreateBreakGlassAdmin(ctx, name, "h"); !errors.Is(err, store.ErrReservedUsername) {
+			t.Errorf("CreateBreakGlassAdmin(%q) = %v, want ErrReservedUsername", name, err)
+		}
+	}
+	for _, name := range []string{"harbormaster", "harbormaster-ag", "my-harbormaster-agent", "alice"} {
+		if store.IsReservedUsername(name) {
+			t.Errorf("IsReservedUsername(%q) = true", name)
+		}
+	}
+	if n, _ := st.CountUsers(ctx); n != 0 {
+		t.Fatalf("users created: %d", n)
 	}
 }
 
-// Every writer that is for humans answers ErrNotFound for the identity and leaves its row as it was.
-func TestHumanOnlyWrites_AnswerNotFoundForTheIdentity(t *testing.T) {
+func TestGetHumanUser(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := t.Context()
-	tag, _ := st.CreateTag(ctx, "Prod", "red", false)
-	st.CreateUser(ctx, "root", "h", true, false) // an admin, so "last admin" is not what refuses
-	id := insertAgentRow(t, st, "harbormaster-agent")
+	human, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	agent := insertAgentRow(t, st, "harbormaster-agent")
+	if u, err := st.GetHumanUser(ctx, human.ID); err != nil || u.ID != human.ID {
+		t.Fatalf("GetHumanUser(human) = %+v, %v", u, err)
+	}
+	for name, id := range map[string]int64{"the identity": agent, "absent": 999999} {
+		if u, err := st.GetHumanUser(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("GetHumanUser(%s) = %+v, %v; want ErrNotFound", name, u, err)
+		}
+	}
+	dropKindChecks(t, st)
+	var robot int64
+	st.Pool.QueryRow(ctx, `insert into users (username, password_hash, kind) values ('robot', 'h', 'robot') returning id`).Scan(&robot)
+	if u, err := st.GetHumanUser(ctx, robot); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("GetHumanUser(unknown kind) = %+v, %v; want ErrNotFound", u, err)
+	}
+}
+
+// Every writer that is for humans answers ErrNotFound for the identity and leaves its row as it was. Each case has its
+// own row, so one that wrongly succeeded cannot hide the next.
+func TestHumanOnlyWrites_AnswerNotFoundForTheIdentity(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	for _, tc := range []struct {
 		name string
-		call func() error
+		call func(st *store.Store, id int64, tag authz.TagID) error
 	}{
-		{"SetPassword", func() error { return st.SetPassword(ctx, id, "h", false) }},
-		{"SetPasswordEndingCredentials", func() error { return st.SetPasswordEndingCredentials(ctx, id, "h", true, "") }},
-		{"LockUser", func() error { return st.LockUser(ctx, id, exp) }},
-		{"TouchSignIn", func() error { return st.TouchSignIn(ctx, id, time.Now()) }},
-		{"SetUserAIChat", func() error { return st.SetUserAIChat(ctx, id, true) }},
-		{"ChangeUserAIChat", func() error { _, err := st.ChangeUserAIChat(ctx, id, true); return err }},
-		{"SetAdminChecked", func() error { _, err := st.SetAdminChecked(ctx, id, true); return err }},
-		{"SetBreakGlassChecked", func() error { _, err := st.SetBreakGlassChecked(ctx, id, true); return err }},
-		{"DeleteUserChecked", func() error { return st.DeleteUserChecked(ctx, id) }},
-		{"BindSSOIdentity", func() error {
-			_, err := st.BindSSOIdentity(ctx, store.BindSSO{UserID: id, IdPEntityID: "e", ExternalID: "n", ExternalIDFormat: "f"})
+		{"SetPassword", func(st *store.Store, id int64, _ authz.TagID) error {
+			return st.SetPassword(t.Context(), id, "h", false)
+		}},
+		{"SetPasswordEndingCredentials", func(st *store.Store, id int64, _ authz.TagID) error {
+			return st.SetPasswordEndingCredentials(t.Context(), id, "h", true, "")
+		}},
+		{"LockUser", func(st *store.Store, id int64, _ authz.TagID) error { return st.LockUser(t.Context(), id, exp) }},
+		{"TouchSignIn", func(st *store.Store, id int64, _ authz.TagID) error {
+			return st.TouchSignIn(t.Context(), id, time.Now())
+		}},
+		{"SetUserAIChat", func(st *store.Store, id int64, _ authz.TagID) error { return st.SetUserAIChat(t.Context(), id, true) }},
+		{"ChangeUserAIChat", func(st *store.Store, id int64, _ authz.TagID) error {
+			_, err := st.ChangeUserAIChat(t.Context(), id, true)
 			return err
 		}},
-		{"SetPendingLink", func() error { return st.SetPendingLink(ctx, id, "n", id, exp) }},
-		{"ClearPendingLink", func() error { return st.ClearPendingLink(ctx, id) }},
-		{"UnlinkSSO", func() error { _, _, err := st.UnlinkSSO(ctx, id, "h"); return err }},
-		{"UpdateSAMLProfile", func() error { e := "a@example.com"; return st.UpdateSAMLProfile(ctx, id, &e, nil) }},
-		{"SetPermission", func() error { return st.SetPermission(ctx, id, tag.ID, authz.ActionSet(authz.View)) }},
+		{"SetAdminChecked", func(st *store.Store, id int64, _ authz.TagID) error {
+			_, err := st.SetAdminChecked(t.Context(), id, true)
+			return err
+		}},
+		{"SetBreakGlassChecked", func(st *store.Store, id int64, _ authz.TagID) error {
+			_, err := st.SetBreakGlassChecked(t.Context(), id, true)
+			return err
+		}},
+		{"DeleteUserChecked", func(st *store.Store, id int64, _ authz.TagID) error { return st.DeleteUserChecked(t.Context(), id) }},
+		{"BindSSOIdentity", func(st *store.Store, id int64, _ authz.TagID) error {
+			_, err := st.BindSSOIdentity(t.Context(), store.BindSSO{UserID: id, IdPEntityID: "e", ExternalID: "n", ExternalIDFormat: "f"})
+			return err
+		}},
+		{"SetPendingLink", func(st *store.Store, id int64, _ authz.TagID) error {
+			return st.SetPendingLink(t.Context(), id, "n", id, exp)
+		}},
+		{"ClearPendingLink", func(st *store.Store, id int64, _ authz.TagID) error { return st.ClearPendingLink(t.Context(), id) }},
+		{"UnlinkSSO", func(st *store.Store, id int64, _ authz.TagID) error {
+			_, _, err := st.UnlinkSSO(t.Context(), id, "h")
+			return err
+		}},
+		{"UpdateSAMLProfile", func(st *store.Store, id int64, _ authz.TagID) error {
+			e := "a@example.com"
+			return st.UpdateSAMLProfile(t.Context(), id, &e, nil)
+		}},
+		{"SetPermission", func(st *store.Store, id int64, tag authz.TagID) error {
+			return st.SetPermission(t.Context(), id, tag, authz.ActionSet(authz.View))
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.call(); !errors.Is(err, store.ErrNotFound) {
+			st := storetest.Open(t)
+			ctx := t.Context()
+			tag, _ := st.CreateTag(ctx, "Prod", "red", false)
+			st.CreateUser(ctx, "root", "h", true, false) // an admin, so "last admin" is not what refuses
+			id := insertAgentRow(t, st, "harbormaster-agent")
+			if err := tc.call(st, id, tag.ID); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("err = %v, want ErrNotFound", err)
 			}
+			u, err := st.GetUser(ctx, id)
+			if err != nil || u.Admin || u.BreakGlass || u.AIChat || u.HasPassword() || u.LockedUntil != nil || u.LastSignInAt != nil ||
+				u.SSOLinked() || u.Email != nil || u.PendingLinkNameID != "" {
+				t.Fatalf("the identity changed or is gone: %+v, %v", u, err)
+			}
+			if perms, _ := st.PermissionsOf(ctx, id); len(perms) != 0 {
+				t.Fatalf("wrote permission rows for the identity: %v", perms)
+			}
 		})
-	}
-	u, err := st.GetUser(ctx, id)
-	if err != nil || u.Admin || u.BreakGlass || u.AIChat || u.HasPassword() || u.LockedUntil != nil || u.LastSignInAt != nil ||
-		u.SSOLinked() || u.Email != nil {
-		t.Fatalf("the identity changed: %+v, %v", u, err)
-	}
-	if perms, _ := st.PermissionsOf(ctx, id); len(perms) != 0 {
-		t.Fatalf("SetPermission wrote rows for the identity: %v", perms)
 	}
 }
 
@@ -502,5 +583,156 @@ func TestUsersWithView_IncludesTheIdentity(t *testing.T) {
 	users, err := st.UsersWithView(ctx, tag.ID)
 	if err != nil || len(users) != 1 || users[0].Username != id.Username {
 		t.Fatalf("UsersWithView = %+v, %v; want the identity named", users, err)
+	}
+}
+
+func TestSetAgentIdentityPermissions_ByMustBeAHuman(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	prod, _ := st.CreateTag(ctx, "Prod", "red", false)
+	root, _ := st.CreateUser(ctx, "root", "h", true, false)
+	id, err := st.EnsureAgentIdentity(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms := map[authz.TagID]authz.ActionSet{prod.ID: authz.ActionSet(authz.View)}
+	if err := st.SetAgentIdentityPermissions(ctx, perms, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	dropKindChecks(t, st)
+	var robot int64
+	if err := st.Pool.QueryRow(ctx, `insert into users (username, password_hash, kind) values ('robot', 'h', 'robot') returning id`).Scan(&robot); err != nil {
+		t.Fatal(err)
+	}
+	other := map[authz.TagID]authz.ActionSet{prod.ID: authz.ActionSet(authz.View | authz.Logs)}
+	for name, by := range map[string]int64{"absent": 999999, "zero": 0, "the identity": id.ID, "an unknown kind": robot} {
+		if err := st.SetAgentIdentityPermissions(ctx, other, by); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("by %s: err = %v, want ErrNotFound", name, err)
+		}
+	}
+	got, _ := st.PermissionsOf(ctx, id.ID)
+	if len(got) != 1 || got[prod.ID] != authz.ActionSet(authz.View) {
+		t.Fatalf("a refused call changed the rows: %v", got)
+	}
+	entries, _ := st.ListAudit(ctx, 10, 0)
+	n := 0
+	for _, e := range entries {
+		if e.Action == "agent_identity_update" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("agent_identity_update rows = %d, want 1 (the first, valid call)", n)
+	}
+}
+
+func TestSetAgentIdentityPermissions_UnknownTagIsNotFound(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	prod, _ := st.CreateTag(ctx, "Prod", "red", false)
+	root, _ := st.CreateUser(ctx, "root", "h", true, false)
+	id, _ := st.EnsureAgentIdentity(ctx)
+	if err := st.SetAgentIdentityPermissions(ctx, map[authz.TagID]authz.ActionSet{prod.ID: authz.ActionSet(authz.View)}, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	err := st.SetAgentIdentityPermissions(ctx, map[authz.TagID]authz.ActionSet{
+		prod.ID: authz.ActionSet(authz.View | authz.Logs), 424242: authz.ActionSet(authz.View)}, root.ID)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	got, _ := st.PermissionsOf(ctx, id.ID)
+	if len(got) != 1 || got[prod.ID] != authz.ActionSet(authz.View) {
+		t.Fatalf("a refused call changed the rows: %v", got)
+	}
+}
+
+func TestSetAgentIdentityPermissions_AuditNamesActions(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	prod, _ := st.CreateTag(ctx, "Prod", "red", false)
+	root, _ := st.CreateUser(ctx, "root", "h", true, false)
+	st.EnsureAgentIdentity(ctx)
+	if err := st.SetAgentIdentityPermissions(ctx, map[authz.TagID]authz.ActionSet{prod.ID: authz.ActionSet(authz.View | authz.Logs)}, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.ListAudit(ctx, 1, 0)
+	tags, _ := entries[0].Details["tags"].(map[string]any)
+	names, _ := tags[fmt.Sprint(int64(prod.ID))].([]any)
+	if len(names) != 2 || names[0] != "view" || names[1] != "logs" {
+		t.Fatalf("details = %v, want the action names [view logs] for the tag", entries[0].Details)
+	}
+}
+
+func TestLoadSubject_IdentityIsNeverAnAdmin(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	dropKindChecks(t, st)
+	var id int64
+	if err := st.Pool.QueryRow(ctx, `insert into users (username, is_admin, kind) values ('harbormaster-agent', true, 'agent') returning id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := st.LoadSubject(ctx, id)
+	if err != nil || sub.Admin {
+		t.Fatalf("subject = %+v, %v; want Admin false", sub, err)
+	}
+}
+
+func TestCreateRunToken_RefusesAnUnknownKind(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	dropKindChecks(t, st)
+	var id int64
+	if err := st.Pool.QueryRow(ctx, `insert into users (username, password_hash, kind) values ('robot', 'h', 'robot') returning id`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateRunToken(ctx, newRunToken(id, "hma_aaaaaaaaaaaa", uuid.New())); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("CreateRunToken = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRotateOAuthRefreshWithin_RefusesAUserWhoIsNoLongerHuman(t *testing.T) {
+	f := newOAuthFixture(t)
+	now := time.Now()
+	_, _, refresh := f.grant(t, f.user.ID, "password", now.Add(24*time.Hour), time.Hour)
+	dropKindChecks(t, f.st)
+	if _, err := f.st.Pool.Exec(t.Context(), `update users set kind = 'agent' where id = $1`, f.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.st.RotateOAuthRefreshWithin(t.Context(), refresh.PublicID, refresh.SecretHash,
+		f.token("oauth_access", now.Add(time.Hour)), f.token("oauth_refresh", now.Add(24*time.Hour)), now.Add(time.Minute), time.Minute,
+		func(store.User) time.Duration { return 7 * 24 * time.Hour })
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rotate = %v, want ErrNotFound", err)
+	}
+}
+
+// Owner's ruling P2-R18: background runs must not keep AWS polling awake.
+func TestLastSessionActivity_IgnoresATokenOfTheIdentity(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	agent := insertAgentRow(t, st, "harbormaster-agent")
+	runID := uuid.New()
+	tok := newRunToken(agent, "hma_aaaaaaaaaaaa", runID)
+	if _, err := st.CreateRunToken(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Pool.Exec(ctx, `update api_tokens set last_used_at = $1`, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := st.LastSessionActivity(ctx, now); err != nil || ok {
+		t.Fatalf("a run token of the identity counted as activity: ok=%v err=%v", ok, err)
+	}
+	human, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	if _, err := st.CreateRunToken(ctx, newRunToken(human.ID, "hma_bbbbbbbbbbbb", uuid.New())); err != nil {
+		t.Fatal(err)
+	}
+	seen := now.Add(-5 * time.Minute)
+	if _, err := st.Pool.Exec(ctx, `update api_tokens set last_used_at = $1 where user_id = $2`, seen, human.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := st.LastSessionActivity(ctx, now)
+	if err != nil || !ok || !got.Equal(seen) {
+		t.Fatalf("activity = %v, %v, %v; want the human's token at %v", got, ok, err, seen)
 	}
 }

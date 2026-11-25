@@ -102,7 +102,8 @@ func (a *Service) Logout(ctx context.Context, sessionID string) error {
 }
 
 // Authenticate resolves a raw session ID to its session and user, enforcing idle and absolute
-// timeouts and refreshing last-seen at most once a minute.
+// timeouts and refreshing last-seen at most once a minute. Only a human user holds a session: a row of any other kind is
+// deleted and answered as unauthenticated.
 func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Session, store.User, error) {
 	if sessionID == "" {
 		return store.Session{}, store.User{}, ErrUnauthenticated
@@ -148,7 +149,7 @@ func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Ses
 // ChangePassword verifies the current password, sets the new one and ends every session of the
 // user except the one carried in ctx (see SessionFrom), and every one of the user's access tokens.
 func (a *Service) ChangePassword(ctx context.Context, userID int64, current, next string) error {
-	user, err := a.humanUser(ctx, userID)
+	user, err := a.store.GetHumanUser(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -179,7 +180,7 @@ func (a *Service) ChangePassword(ctx context.Context, userID int64, current, nex
 // AdminResetPassword sets a new temporary password that must be changed at next sign-in and ends all sessions
 // and access tokens.
 func (a *Service) AdminResetPassword(ctx context.Context, userID int64) (string, error) {
-	if _, err := a.humanUser(ctx, userID); err != nil {
+	if _, err := a.store.GetHumanUser(ctx, userID); err != nil {
 		return "", err
 	}
 	temp := GenerateTemporaryPassword()
@@ -191,19 +192,6 @@ func (a *Service) AdminResetPassword(ctx context.Context, userID int64) (string,
 		return "", err
 	}
 	return temp, nil
-}
-
-// humanUser loads a user for an action that only a person can take. Any other kind, the agent identity included, is
-// answered as absent.
-func (a *Service) humanUser(ctx context.Context, userID int64) (store.User, error) {
-	user, err := a.store.GetUser(ctx, userID)
-	if err != nil {
-		return store.User{}, err
-	}
-	if user.Kind != store.UserKindHuman {
-		return store.User{}, store.ErrNotFound
-	}
-	return user, nil
 }
 
 // SetCookie writes the session cookie.

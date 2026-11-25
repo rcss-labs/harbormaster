@@ -1,13 +1,11 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -130,7 +128,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Use 2–32 lowercase letters, digits, dots, hyphens or underscores."))
 		return
 	}
-	if strings.HasPrefix(body.Username, store.AgentUsernamePrefix) {
+	if store.IsReservedUsername(body.Username) {
 		s.fail(w, invalid("That username is reserved."))
 		return
 	}
@@ -162,19 +160,6 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, CreateUserResponse{User: dtos[0], TemporaryPassword: temp})
 }
 
-// humanUser loads the user an admin action names. The agent identity is not a person: every route that edits a user
-// answers it as absent (404), and its access changes only through Store.SetAgentIdentityPermissions.
-func (s *Server) humanUser(ctx context.Context, id int64) (store.User, error) {
-	user, err := s.Store.GetUser(ctx, id)
-	if err != nil {
-		return store.User{}, err
-	}
-	if user.Kind != store.UserKindHuman {
-		return store.User{}, store.ErrNotFound
-	}
-	return user, nil
-}
-
 func pathID(r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
 	return id, err == nil
@@ -191,7 +176,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("You cannot delete yourself."))
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -214,7 +199,7 @@ func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -241,7 +226,7 @@ func (s *Server) setUserAdmin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	target, err := s.humanUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return

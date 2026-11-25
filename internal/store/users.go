@@ -75,9 +75,12 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode
 }
 
-// CreateUser inserts a human user, keeping the username as given. Duplicates that differ only in case, and the
-// username of the agent identity, return ErrConflict.
+// CreateUser inserts a human user, keeping the username as given. Duplicates that differ only in case return
+// ErrConflict; a reserved name (see IsReservedUsername) returns ErrReservedUsername.
 func (s *Store) CreateUser(ctx context.Context, username, passwordHash string, admin, mustChange bool) (User, error) {
+	if IsReservedUsername(username) {
+		return User{}, ErrReservedUsername
+	}
 	row := s.Pool.QueryRow(ctx,
 		`insert into users (username, password_hash, is_admin, must_change_password, kind)
 		 values ($1, $2, $3, $4, 'human') returning `+userColumns,
@@ -245,6 +248,9 @@ type NewSAMLUser struct {
 // CreateSAMLUser inserts a password-less, non-admin user bound to an SSO identity.
 // A taken username or identity returns ErrConflict.
 func (s *Store) CreateSAMLUser(ctx context.Context, n NewSAMLUser) (User, error) {
+	if IsReservedUsername(n.Username) {
+		return User{}, ErrReservedUsername
+	}
 	u, err := scanUser(s.Pool.QueryRow(ctx,
 		`insert into users (username, password_hash, is_admin, must_change_password,
 		                    idp_entity_id, external_id, external_id_format, email, display_name, kind)
@@ -460,6 +466,9 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 // single statement, so there is no window where the admin exists without the flag. Duplicates
 // (case-insensitive) return ErrConflict, like CreateUser.
 func (s *Store) CreateBreakGlassAdmin(ctx context.Context, username, passwordHash string) (User, error) {
+	if IsReservedUsername(username) {
+		return User{}, ErrReservedUsername
+	}
 	row := s.Pool.QueryRow(ctx,
 		`insert into users (username, password_hash, is_admin, must_change_password, break_glass, kind)
 		 values ($1, $2, true, true, true, 'human') returning `+userColumns,

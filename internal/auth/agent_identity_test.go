@@ -47,7 +47,7 @@ func insertTokenRow(t *testing.T, st *store.Store, userID int64, kind apitoken.K
 }
 
 func TestValidateUsername_ReservedPrefix(t *testing.T) {
-	for _, name := range []string{"harbormaster-agent", "harbormaster-agent-1", "harbormaster-agent2", "harbormaster-agents"} {
+	for _, name := range []string{"harbormaster-agent", "harbormaster-agent-1", "harbormaster-agent2", "harbormaster-agents", "harbormaster.agent", "harbormaster_agent-2"} {
 		var verr *ValidationError
 		if err := ValidateUsername(name); !errors.As(err, &verr) {
 			t.Errorf("ValidateUsername(%q) = %v, want a ValidationError", name, err)
@@ -394,5 +394,15 @@ func TestSSO_LoginNeverResolvesToTheIdentity(t *testing.T) {
 	res, outcome, err := svc.LoginSSO(t.Context(), ssoIdentity("dana@example.test", "dana@example.test"), ssoCfg(), "ip", "ua")
 	if err != nil || outcome != SSOCreate || res.User.Kind != store.UserKindHuman {
 		t.Fatalf("LoginSSO = %+v, %v, %v", res.User, outcome, err)
+	}
+}
+
+func TestMintAgentRunToken_RefusesWhenTheAgentIsOff(t *testing.T) {
+	svc, st := newTestService(t) // HM_AGENT_URL unset
+	if raw, _, err := svc.MintAgentRunToken(t.Context(), uuid.New(), true); err == nil || raw != "" {
+		t.Fatalf("MintAgentRunToken with the agent off = %q, %v; want a refusal", raw, err)
+	}
+	if _, err := st.GetAgentIdentity(t.Context()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an identity row was created with the agent off: %v", err)
 	}
 }

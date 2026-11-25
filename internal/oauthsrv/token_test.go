@@ -458,3 +458,21 @@ func TestToken_RefreshIsClampedToTheUsersCurrentMaximum(t *testing.T) {
 		t.Fatalf("a token outlives the SSO maximum: %+v", second)
 	}
 }
+
+// A code issued to a person is not honoured once its user is not a human any more: only a person holds an OAuth grant.
+func TestToken_CodeOfAUserWhoIsNotHumanIsRefused(t *testing.T) {
+	e := newOAuthEnv(t)
+	code := e.approve(e.user, e.request())
+	if _, err := e.st.Pool.Exec(t.Context(), `alter table users drop constraint users_agent_shape`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Pool.Exec(t.Context(), `update users set kind = 'agent' where id = $1`, e.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, terr := e.exchange(code, time.Now()); terr == nil || terr.Code != "invalid_grant" {
+		t.Fatalf("exchange = %+v, want invalid_grant", terr)
+	}
+	if n := e.count(`select count(*) from oauth_grants`); n != 0 {
+		t.Fatalf("grants = %d, want 0", n)
+	}
+}

@@ -97,7 +97,7 @@ func TestUsersList_OmitsTheIdentity(t *testing.T) {
 
 func TestCreateUser_RefusesTheReservedPrefix(t *testing.T) {
 	admin, st, _ := identityServer(t)
-	for _, name := range []string{"harbormaster-agent", "harbormaster-agent-1", "harbormaster-agent-7"} {
+	for _, name := range []string{"harbormaster-agent", "harbormaster-agent-1", "harbormaster-agent-7", "harbormaster.agent", "harbormaster_agent"} {
 		resp := admin.post("/api/users", map[string]any{"username": name, "admin": true})
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusUnprocessableEntity {

@@ -97,7 +97,8 @@ func (a *Service) authenticatesAPI(kind apitoken.Kind) bool {
 
 // AuthenticateToken resolves a raw bearer token to its stored row and user. It returns ErrUnauthenticated when the
 // token is malformed, unknown, expired, of a kind that may not call the API (see authenticatesAPI), not of the read
-// scope, its secret does not match, or its user is gone. It records last use at most once a minute, and for an OAuth
+// scope, its secret does not match, its user is gone, or the user's kind may not use it: a person's token is accepted as before,
+// the agent identity's only when it is a run token, and any other kind never. It records last use at most once a minute, and for an OAuth
 // access token its grant's last use with it. Errors never carry the token or its secret.
 func (a *Service) AuthenticateToken(ctx context.Context, raw, ip string) (store.APIToken, store.User, error) {
 	parsed, ok := apitoken.Parse(raw)

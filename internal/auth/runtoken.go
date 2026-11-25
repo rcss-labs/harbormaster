@@ -32,6 +32,10 @@ func (a *Service) MintRunToken(ctx context.Context, user store.User, runID uuid.
 // the source is "password" (the column allows only that and "saml"); the token lives minutes and is deleted when the
 // run ends.
 func (a *Service) MintAgentRunToken(ctx context.Context, runID uuid.UUID, redactEnv bool) (raw string, identity store.User, err error) {
+	// With HM_AGENT_URL unset no identity row may appear (phase 1 off switch), so refuse before the lazy create.
+	if !a.cfg.AgentEnabled() {
+		return "", store.User{}, errors.New("mint agent run token: the agent is off")
+	}
 	identity, err = a.store.EnsureAgentIdentity(ctx)
 	if err != nil {
 		return "", store.User{}, fmt.Errorf("mint agent run token: %w", err)
