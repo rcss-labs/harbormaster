@@ -2,12 +2,9 @@ import { Link } from 'react-router'
 import type { InvestigationDetailDTO } from '../../api/investigations'
 import { Ago } from '../../components/Ago'
 import { Pill, type PillKind } from '../../components/Pill'
+import { ResultBody } from '../agentresult/ResultBody'
 import { stateText } from './stateText'
 import styles from './investigations.module.css'
-
-const HIDDEN_EVIDENCE = 'Some evidence is not shown because you do not have permission to read it.'
-const CAPTION = 'Written by AI from what its identity may read. Check it before acting.'
-const ACTION_LABEL: Record<string, string> = { view: 'View', logs: 'Logs' }
 
 const pillKind = (state: string): PillKind => {
   if (state === 'done') return 'ok'
@@ -17,9 +14,7 @@ const pillKind = (state: string): PillKind => {
 }
 
 /**
- * One investigation: what it is about, the alert it followed, its state, the summary, then the evidence.
- * The summary, notes and excerpts come from a model reading untrusted logs, so each is a plain text node:
- * no Markdown, no link, no image, no HTML.
+ * One investigation: what it is about, the alert it followed, its state, then `ResultBody`.
  */
 export function InvestigationView({ investigation }: { investigation: InvestigationDetailDTO }) {
   const { subject, members, evidence } = investigation
@@ -59,33 +54,7 @@ export function InvestigationView({ investigation }: { investigation: Investigat
           </span>
         </p>
       </section>
-      {investigation.summary !== '' && (
-        <section className={styles.block} aria-label="Summary">
-          <p className={styles.summary}>{investigation.summary}</p>
-          {!investigation.summary_replaced && <p className={styles.muted}>{CAPTION}</p>}
-        </section>
-      )}
-      {(evidence.length > 0 || investigation.evidence_hidden > 0) && (
-        <section className={styles.block} aria-label="Evidence">
-          <h3 className={styles.heading}>Evidence</h3>
-          {evidence.map((item) => {
-            // An action this app does not know is shown without its text: the permission it needed is unknown.
-            const known = Object.hasOwn(ACTION_LABEL, item.action)
-            return (
-            <div key={item.ordinal} className={styles.item}>
-              <p className={styles.itemHead}>
-                <span className={styles.tool}>{item.tool}</span>
-                {known && <span className={styles.muted}>{ACTION_LABEL[item.action]}</span>}
-                {item.service !== '' && <span className={styles.muted}>{item.service}</span>}
-              </p>
-              {known && item.note !== '' && <p>{item.note}</p>}
-              {known && item.excerpt !== '' && <pre className={styles.excerpt}>{item.excerpt}</pre>}
-            </div>
-            )
-          })}
-          {investigation.evidence_hidden > 0 && <p className={styles.muted}>{HIDDEN_EVIDENCE}</p>}
-        </section>
-      )}
+      <ResultBody summary={investigation.summary} summaryReplaced={investigation.summary_replaced} evidence={evidence} evidenceHidden={investigation.evidence_hidden} />
     </div>
   )
 }

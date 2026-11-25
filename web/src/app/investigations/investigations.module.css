@@ -4,14 +4,7 @@
 .muted { color: var(--muted); font-size: 12px; }
 .alert { font-weight: 500; overflow-wrap: anywhere; }
 .state { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.summary { white-space: pre-wrap; overflow-wrap: anywhere; }
-.heading { margin: 0; font-size: 13px; font-weight: 600; }
 .members { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
-.item { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
-.item p { margin: 0; overflow-wrap: anywhere; }
-.itemHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-.tool { font: 500 12px var(--mono); }
-.excerpt { margin: 0; padding: 8px; max-height: 240px; overflow: auto; background: var(--raised); border-radius: var(--radius-sm); font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .list { display: grid; }
 .row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 8px 12px; border-bottom: 1px solid var(--border); }
