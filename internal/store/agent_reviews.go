@@ -368,7 +368,7 @@ func isSwitchOff(stored, next Review) bool {
 		return false
 	}
 	return a.Name == b.Name && a.Type == b.Type && a.Cadence == b.Cadence && a.AtMinute == b.AtMinute && a.Weekday == b.Weekday &&
-		a.MonthDay == b.MonthDay && a.Timezone == b.Timezone && a.Version == b.Version &&
+		a.MonthDay == b.MonthDay && a.Timezone == b.Timezone && a.Version == b.Version && a.Instructions == b.Instructions &&
 		slices.Equal(a.Scope, b.Scope) && slices.Equal(sortedUnique(a.RouteIDs), sortedUnique(b.RouteIDs))
 }
 

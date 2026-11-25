@@ -519,3 +519,129 @@ func TestMigrate_0223GivesUpOnALockInsteadOfQueueingEveryWriter(t *testing.T) {
 		t.Fatalf("retry once the reader is gone: %v", err)
 	}
 }
+
+// Turning a review off is exempt from the route checks only when nothing else changes, the text included.
+func TestCustomReview_TurningOffWhileEditingTheTextIsAFullSave(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	route := reviewRoute(t, s, "r")
+	rv := mustReview(t, s, newCustomReview("mine", customText, route.ID))
+	invExec(t, s, `update notification_routes set destination = 'pagerduty' where id = $1`, route.ID)
+	stored := func() store.Review {
+		t.Helper()
+		got, err := s.GetReview(ctx, rv.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	off := stored()
+	off.Enabled = false
+
+	edited := off
+	edited.Instructions = "A different request."
+	if _, err := s.UpdateReview(ctx, edited, 0); !errors.Is(err, store.ErrReviewInvalid) {
+		t.Fatalf("off and edited text with a PagerDuty route = %v, want ErrReviewInvalid", err)
+	}
+	if got := stored(); !got.Enabled || got.Version != 1 || got.Instructions != customText {
+		t.Fatalf("a refused update changed the row: %+v", got)
+	}
+	for name, text := range map[string]string{"empty": "", "over-long": strings.Repeat("a", 2001)} {
+		bad := off
+		bad.Instructions = text
+		if _, err := s.UpdateReview(ctx, bad, 0); !errors.Is(err, store.ErrReviewInvalid) {
+			t.Errorf("off with %s text = %v, want ErrReviewInvalid", name, err)
+		}
+	}
+	got, err := s.UpdateReview(ctx, off, 0)
+	if err != nil {
+		t.Fatalf("turning off alone: %v", err)
+	}
+	if got.Enabled || got.Instructions != customText || len(got.RouteIDs) != 1 || got.RouteIDs[0] != route.ID {
+		t.Fatalf("after turning off = %+v, want off with the text and routes kept", got)
+	}
+}
+
+// P4-R3: a test run is never shown to a reader of the review runs, which phase 3 code decides by covered tags.
+func TestTestRun_StoresNoCoveredTags(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	route := reviewRoute(t, s, "r")
+	a, b := oldReview(t, s, "a", route.ID), oldReview(t, s, "b", route.ID)
+	start := func(review store.Review, test bool, at time.Time) store.ReviewRun {
+		t.Helper()
+		if _, err := s.RequestManualReviewRun(ctx, review.ID, "by hand", test, at); err != nil {
+			t.Fatal(err)
+		}
+		run := claimReview(t, s, at)
+		if err := s.StartReviewRun(ctx, run.Claim(), store.ReviewStart{RunID: uuid.New(), Provider: "p", Model: "m", CoveredTags: []int64{7}}, at); err != nil {
+			t.Fatal(err)
+		}
+		return reviewRunState(t, s, run.ID)
+	}
+	test := start(a, true, revNow)
+	if len(test.CoveredTags) != 0 {
+		t.Fatalf("test run covered tags = %v, want none", test.CoveredTags)
+	}
+	invExec(t, s, `update agent_review_runs set state = 'done', finished_at = $1, summary = 's', claimed_until = null`, revNow)
+	normal := start(b, false, revNow.Add(time.Minute))
+	if len(normal.CoveredTags) != 1 || normal.CoveredTags[0] != 7 {
+		t.Fatalf("normal run covered tags = %v, want [7]", normal.CoveredTags)
+	}
+	runs, err := s.ListReadableReviewRuns(ctx, store.ReadableReviewRunFilter{ViewableTags: []int64{7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != normal.ID {
+		t.Fatalf("readable runs for a reader with View on the tag = %+v, want only the normal run %d", runs, normal.ID)
+	}
+}
+
+// The copy is made once even when another transaction wrote one first, and a free release does not undo it.
+func TestStartReview_CopyHoldsAgainstAnUncommittedCopyAndAFreeRelease(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	run, _ := startedCustomRun(t, s, "first text")
+	if err := s.ReleaseReviewRun(ctx, run.Claim(), time.Time{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewRunState(t, s, run.ID); got.Instructions != "first text" || got.Attempts != 0 {
+		t.Fatalf("after a free release: copy %q, attempts %d; want the copy kept", got.Instructions, got.Attempts)
+	}
+	again := claimReview(t, s, revNow.Add(time.Minute))
+	if again.Attempts != 1 {
+		t.Fatalf("attempts = %d, want the first attempt again", again.Attempts)
+	}
+	if err := s.StartReviewRun(ctx, again.Claim(), store.ReviewStart{RunID: uuid.New(), Provider: "p", Model: "m", Instructions: "second text"}, revNow); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewRunState(t, s, run.ID); got.Instructions != "first text" {
+		t.Fatalf("copy after a start on the re-claimed first attempt = %q, want the first", got.Instructions)
+	}
+
+	// Another transaction writes the copy and has not committed when the start arrives.
+	s2 := storetest.Open(t)
+	other, _ := startedCustomRun(t, s2, "")
+	if got := reviewRunState(t, s2, other.ID); got.Instructions != "" {
+		t.Fatalf("setup: copy = %q", got.Instructions)
+	}
+	tx, err := s2.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // already committed on the happy path
+	if _, err := tx.Exec(ctx, `update agent_review_runs set instructions = 'other writer' where id = $1`, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- s2.StartReviewRun(ctx, other.Claim(), store.ReviewStart{RunID: uuid.New(), Provider: "p", Model: "m", Instructions: "late"}, revNow)
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewRunState(t, s2, other.ID); got.Instructions != "other writer" {
+		t.Fatalf("copy = %q, want the other transaction's copy kept", got.Instructions)
+	}
+}

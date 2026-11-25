@@ -290,7 +290,8 @@ func (s *Store) fencedReviewUpdate(ctx context.Context, what string, c ReviewCla
 	return nil
 }
 
-// StartReviewRun records the agent run of the claimed attempt at now, copies start.Instructions to the row while its
+// StartReviewRun records the agent run of the claimed attempt at now, stores no covered tags for a test run (phase 3 readers
+// decide by tags and know no test runs, so only admins see it), copies start.Instructions to the row while its
 // copy is empty (a later start, by a retry or another holder, leaves the first copy), and keeps the first attempt's run id as
 // prev_run_id on the second, so both paid attempts are costed; a run given back free on the first attempt is not kept. ErrConflict when the claim is stale.
 func (s *Store) StartReviewRun(ctx context.Context, c ReviewClaim, start ReviewStart, now time.Time) error {
@@ -309,7 +310,7 @@ func (s *Store) StartReviewRun(ctx context.Context, c ReviewClaim, start ReviewS
 	return s.fencedReviewUpdate(ctx, "start review run", c, `prev_run_id = case when attempts = 2 and run_id is distinct from $4 then coalesce(prev_run_id, run_id)
 				when attempts = 2 then prev_run_id end,
 		run_id = $4, provider = $5, model = $6,
-		scope_label = $7, range = $8, covered_tags = $9, services_total = $10, started_at = $11,
+		scope_label = $7, range = $8, covered_tags = case when test then '{}'::bigint[] else $9::bigint[] end, services_total = $10, started_at = $11,
 		instructions = case when instructions = '' then $12 else instructions end`,
 		start.RunID, start.Provider, start.Model, start.ScopeLabel, start.Range, tags, start.ServicesTotal, now, start.Instructions)
 }
