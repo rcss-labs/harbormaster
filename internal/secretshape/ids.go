@@ -12,77 +12,25 @@ import (
 //	service id  account|region|cluster|service
 //	task id     account|region|<ECS task ARN of that account and region>
 //
-// They look random, but the model needs them to name a service in its next call. The long-run rule sets such a piece
-// aside; nothing else in this package treats them differently, so a name such as "password" or a value pattern still
-// hides one.
-// The smallest valid id is 32 characters, so only the upper bound needs a check.
+// They look random, but the model needs them to name a service in its next call. The long-run rule exempts a run that
+// is wholly an id; nothing else in this package treats them differently, so a name such as "password" or a value
+// pattern still hides one, and an id inside a longer run (a path) is judged as any run is.
+// maxIDLength bounds the decode. A run is at least 32 characters, so no lower bound is needed.
 const maxIDLength = 2048
 
 var (
 	idAccount = regexp.MustCompile(`^[0-9]{12}$`)
-	idName    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
+	// A region such as us-east-1 or eusc-de-east-1; the length is capped apart.
+	idRegion = regexp.MustCompile(`^[a-z]{2,4}(-[a-z]+)+-[0-9]{1,2}$`)
+	idName   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 	// idTaskARN has the region and the account as groups, for the check against fields 1 and 2.
-	idTaskARN = regexp.MustCompile(`^arn:aws[a-z-]*:ecs:([a-z0-9-]{1,30}):([0-9]{12}):task/[A-Za-z0-9_-]+(/[0-9a-f]+)?$`)
+	idTaskARN = regexp.MustCompile(`^arn:aws[a-z-]*:ecs:([a-z0-9-]+):([0-9]{12}):task/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$`)
 )
-
-// runIsRandom judges a long run. A run with no id piece (pieces split at "/") is judged by looksLikeRandomRun. A run
-// with one is kept only when every other piece is plain; otherwise the whole run, ids included, is judged as it was
-// before ids were known, so nothing but ids and plain pieces becomes visible.
-func runIsRandom(run string) bool {
-	if !strings.Contains(run, "/") {
-		return !isHarbormasterID(run) && looksLikeRandomRun(run)
-	}
-	hasID := false
-	for _, piece := range strings.Split(run, "/") {
-		switch {
-		case isHarbormasterID(piece):
-			hasID = true
-		case !isPlainPiece(piece):
-			return looksLikeRandomRun(run)
-		}
-	}
-	return !hasID && looksLikeRandomRun(run)
-}
-
-var (
-	lowerHex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	// idRegionPattern is the app's own (internal/api/notifications.go), so every region it accepts has working ids.
-	idRegionPattern = regexp.MustCompile(`^[a-z0-9-]{1,30}$`)
-)
-
-const (
-	plainPieceMax = 16 // a shorter piece holds too little to be a secret
-	plainWordsMax = 64
-)
-
-// isPlainPiece reports whether a piece beside an id cannot hide a secret: empty, short, a UUID, an ECS task id (32
-// lowercase hex), or plain words under 64 characters.
-func isPlainPiece(piece string) bool {
-	if len(piece) < plainPieceMax || uuid.MatchString(piece) || lowerHex32.MatchString(piece) {
-		return true
-	}
-	if len(piece) >= plainWordsMax {
-		return false
-	}
-	for _, word := range strings.FieldsFunc(piece, func(r rune) bool { return r == '-' || r == '_' }) {
-		// A long hex run is never plain, whatever wordySegment says of it.
-		if hexOnly.MatchString(word) || !wordySegment.MatchString(word) {
-			return false
-		}
-	}
-	return true
-}
 
 // isHarbormasterID reports whether piece is a well-formed id as described above whose decoded fields hold no secret.
 func isHarbormasterID(piece string) bool {
 	if len(piece) > maxIDLength {
 		return false
-	}
-	for i := 0; i < len(piece); i++ {
-		c := piece[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-			return false // padding, "+", "/" and anything the decoder would skip or reject
-		}
 	}
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(piece)
 	if err != nil {
@@ -98,7 +46,7 @@ func isHarbormasterID(piece string) bool {
 		return false
 	}
 	account, region := fields[0], fields[1]
-	if !idAccount.MatchString(account) || !idRegionPattern.MatchString(region) {
+	if !idAccount.MatchString(account) || len(region) > 30 || !idRegion.MatchString(region) {
 		return false
 	}
 	if len(fields) == 4 {

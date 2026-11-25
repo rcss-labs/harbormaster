@@ -327,7 +327,7 @@ func longRunSpans(text string) [][2]int {
 	var spans [][2]int
 	for _, m := range longRun.FindAllStringIndex(text, -1) {
 		run := text[m[0]:m[1]]
-		if !runIsRandom(run) {
+		if isHarbormasterID(run) || !looksLikeRandomRun(run) {
 			continue
 		}
 		if insideAny(arns, m) {

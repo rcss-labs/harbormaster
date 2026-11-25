@@ -46,6 +46,7 @@ func realIDs() map[string]string {
 		"long names":             serviceID(long, long),
 		"underscores":            serviceID("data_platform_cluster", "ingest_worker_v2"),
 		"sovereign region":       model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: idAccount, Region: "eusc-de-east-1", Cluster: "c1"}, Service: "svc"}.ID(),
+		"fake scanner task":      taskID("arn:aws:ecs:" + idRegion + ":" + idAccount + ":task/harbormaster/fake-1"),
 		"another region":         model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: idAccount, Region: "us-gov-west-1", Cluster: "c1"}, Service: "svc"}.ID(),
 	}
 }
@@ -84,8 +85,9 @@ func TestScrubText_HarbormasterIDsSurvive(t *testing.T) {
 			}
 			requireKept(t, "list", `{"services":[{"id":"`+id+`"},{"id":"`+id+`"}]}`, id)
 			requireKept(t, "plain list", id+"\n"+id+"\n", id)
-			requireKept(t, "url path", "GET /api/services/"+id+"/logs", id)
-			requireKept(t, "full url", "https://hm.example.test/services/"+id+"/logs?limit=5", id)
+			// Inside a path the run is more than the id, so it is judged as any run is.
+			requireRedacted(t, "url path", "GET /api/services/"+id+"/logs", id)
+			requireRedacted(t, "full url", "https://hm.example.test/services/"+id+"/logs?limit=5", id)
 			inner, _ := json.Marshal(map[string]string{"service_id": id})
 			outer, _ := json.Marshal(string(inner))
 			requireKept(t, "escaped JSON string", string(outer), id)
@@ -128,9 +130,12 @@ func TestScrubText_IDShapedTokensThatAreNotIDsStayRedacted(t *testing.T) {
 		"11 digit account":       rawID("12345678901", idRegion, "prod-cluster", "checkout-api"),
 		"13 digit account":       rawID("1234567890123", idRegion, "prod-cluster", "checkout-api"),
 		"letters in account":     rawID("12345678901x", idRegion, "prod-cluster", "checkout-api"),
+		"two letter region part": rawID(idAccount, "a-b", "prod-cluster", "checkout-api"),
+		"region without number":  rawID(idAccount, "eu-west", "prod-cluster", "checkout-api"),
+		"region of 5 letters":    rawID(idAccount, "abcde-west-1", "prod-cluster", "checkout-api"),
 		"region with a capital":  rawID(idAccount, "eu-West-1", "prod-cluster", "checkout-api"),
 		"region with underscore": rawID(idAccount, "eu_west_1", "prod-cluster", "checkout-api"),
-		"region of 31":           rawID(idAccount, strings.Repeat("a", 31), "prod-cluster", "checkout-api"),
+		"region of 31":           rawID(idAccount, "us-"+strings.Repeat("a", 26)+"-1", "prod-cluster", "checkout-api"),
 		"empty region":           rawID(idAccount, "", "prod-cluster", "checkout-api"),
 		"region in capitals":     rawID(idAccount, "EU-WEST-1", "prod-cluster", "checkout-api"),
 		"five fields":            rawID(idAccount, idRegion, "prod-cluster", "checkout-api", "extra-field"),
@@ -146,7 +151,7 @@ func TestScrubText_IDShapedTokensThatAreNotIDsStayRedacted(t *testing.T) {
 		"ARN of another region":  rawID(idAccount, idRegion, "arn:aws:ecs:us-east-1:"+idAccount+":task/prod-cluster/0123456789abcdef0123456789abcdef"),
 		"ARN of another acct":    rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":999999999999:task/prod-cluster/0123456789abcdef0123456789abcdef"),
 		"ARN of a service":       rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":service/prod-cluster/checkout-api-0123456789"),
-		"ARN with a bad task":    rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/NOTHEX0123456789abcdef0123456"),
+		"ARN with a bad task":    rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/bad!tail0123456789abcdef"),
 		"ARN with a long tail":   rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/0123456789abcdef/extra/segments"),
 		"cluster id, bad name":   rawID(idAccount, idRegion, "prod cluster name"),
 		"cluster id, slash":      rawID(idAccount, idRegion, "prod/cluster/name"),
@@ -244,59 +249,27 @@ func TestScrubText_RandomTokenGluedToAnIDStaysRedacted(t *testing.T) {
 	}
 }
 
-// A run with an id is kept only when every other piece is plain; otherwise the whole run is judged as it always was.
-func TestScrubText_RunsBesideAnIDKeepOnlyPlainPieces(t *testing.T) {
+// Only a whole run that is an id is exempt: an id inside a path, or with anything glued to it, is judged as any run is.
+func TestScrubText_IDsInsideLongerRunsStayRedacted(t *testing.T) {
 	id := serviceID("prod-cluster", "checkout-api")
-	other := serviceID("prod-cluster", "worker")
 	hex64 := "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-	hex40 := hex64[:40]
-	upper40 := strings.ToUpper(hex40)
-	random := func(n int) string { return (idRandom43 + idRandom43)[:n] }
-	for name, text := range map[string]string{
-		"64 hex in a path":       "/services/" + id + "/" + hex64,
-		"64 hex after":           id + "/" + hex64 + "/",
-		"64 hex before":          hex64 + "/" + id,
-		"40 capital hex":         "/" + id + "/" + upper40,
-		"40 hex after":           id + "/" + hex40,
-		"40 hex before":          hex40 + "/" + id,
-		"31 random after":        id + "/" + random(31),
-		"31 random before":       random(31) + "/" + id,
-		"25 random after":        id + "/" + random(25),
-		"25 random before":       random(25) + "/" + id,
-		"20 random after":        id + "/" + random(20),
-		"20 random before":       random(20) + "/" + id,
-		"random between ids":     id + "/" + random(25) + "/" + other,
-		"long words":             id + "/" + strings.Repeat("payments-", 8) + "worker",
-		"patterned hex 40":       "/services/" + id + "/0123456789abcdef0123456789abcdef01234567",
-		"patterned hex 40 first": "0123456789abcdef0123456789abcdef01234567/" + id,
-		"patterned hex 64":       "/services/" + id + "/" + strings.Repeat("0123456789abcdef", 4),
-		"patterned hex 64 first": strings.Repeat("0123456789abcdef", 4) + "/" + id + "/logs",
-		"hex part of a piece":    id + "/logs-0123456789abcdef0123456789abcdef01234567",
-		"hex of 33":              id + "/" + hex64[:33],
-		"hex of 31":              id + "/" + hex64[:31],
-		"43 random after":        id + "/" + idRandom43,
-	} {
-		t.Run(name, func(t *testing.T) { requireRedacted(t, name, text, id) })
-	}
 	uuid := "123e4567-e89b-12d3-a456-426614174000"
 	for name, text := range map[string]string{
 		"logs path":           "/services/" + id + "/logs",
 		"task path":           "/services/" + id + "/tasks/" + hex64[:32],
 		"cluster and service": clusterID("prod-cluster") + "/" + id,
+		"two ids":             id + "/" + serviceID("prod-cluster", "worker"),
 		"uuid beside":         id + "/" + uuid,
-		"uuid before":         uuid + "/" + id,
-		"short piece":         id + "/" + random(15),
-		"words":               "/api/services/" + id + "/task-definition/revisions",
 		"trailing slash":      "/services/" + id + "/",
+		"64 hex":              "/services/" + id + "/" + hex64,
+		"40 hex after":        id + "/" + hex64[:40],
+		"patterned hex":       "/services/" + id + "/0123456789abcdef0123456789abcdef01234567",
+		"25 random":           id + "/" + idRandom43[:25],
+		"43 random":           id + "/" + idRandom43,
+		"dash glued":          id + "-" + idRandom43,
 	} {
-		t.Run(name, func(t *testing.T) { requireKept(t, name, text, id) })
+		t.Run(name, func(t *testing.T) { requireRedacted(t, name, text, id) })
 	}
-}
-
-func TestScrubText_SeveralIDsInOneRun(t *testing.T) {
-	a, b := serviceID("prod-cluster", "checkout-api"), serviceID("prod-cluster", "worker")
-	requireKept(t, "two ids", "/services/"+a+"/compare/"+b+"/logs", a)
-	requireKept(t, "two ids in a list", `["`+a+`","`+b+`"]`, b)
 }
 
 // 200 KB of id-like text may not take quadratic time.
