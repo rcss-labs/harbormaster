@@ -80,6 +80,23 @@ An older release never sends a diagnosis row left behind. They stay in the deliv
 
 An older release can list and delete the agent identity. Its permissions go with it. The new release creates it again, with no permissions, so set its access again in **Settings > AI agent**.
 
+## The release that adds scheduled reviews
+
+This release adds migrations `0221_agent_reviews` (the reviews, their scopes and routes, their runs and their evidence) and `0222_notification_review` (the Review event, a run id column and its indexes on the notification delivery log). Both only add. Nothing changes for users until an admin adds a review and sets a model for reviews.
+
+**Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Until both are new, a due review waits up to `HM_AGENT_REVIEW_MAX_LATE` (6 hours by default) and is then recorded as `missed` (an older agent does not offer the reviewer role). Chat and investigations keep working throughout.
+
+**Migration 0222 takes a short exclusive lock** on the notification delivery log, with a lock timeout of 2 seconds, for the reason given for 0220 above. If a long transaction holds the table at that moment, the migration times out and rolls back whole, the task exits at start, and ECS starts another that tries again. Find and end the long transaction as described above if tasks keep exiting at start with a lock timeout in their log. Migration 0221 only adds tables.
+
+**During the rollout.** An older task never reads the review tables and never claims, renders or sends a review row. Its delivery summary and its "route failing" warning may count a failed review row as a failed delivery, until the row ages out of the delivery log. A manual retry of a failed review row on an older task fails. Alerts are not affected.
+
+**Roll back.** Do this in order:
+
+1. Turn reviews off: set `HM_AGENT_REVIEWS_PER_DAY=0`, or switch off each review under **Settings > AI agent > Reviews**. Nothing new starts.
+2. Roll the image back.
+
+Review rows left in the delivery log are inert and go after `HM_RETENTION_NOTIFICATION_LOG`. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
+
 ## Access role changes
 
 A release can add permissions to the `harbormaster-access` role. Features that need a new permission show a per-account message until you re-apply the access module in that account. Everything else keeps working. Known cases:

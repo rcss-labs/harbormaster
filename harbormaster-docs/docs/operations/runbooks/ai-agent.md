@@ -1,6 +1,6 @@
 # AI agent runbook
 
-Day-two operation of the AI agent: a rollout order, an acceptance check, what to do when chat is unavailable or the allowance runs out, how interrupted runs are repaired, key rotation, how to turn the agent off, and the automatic investigations of alerts (their states, an alert storm, upgrade and rollback). It is for operators who run it. To install it, see [Install the AI agent](../../install/ai-agent.md). For its Terraform inputs, see [Terraform module: harbormaster-agent](../../reference/terraform-agent.md).
+Day-two operation of the AI agent: a rollout order, an acceptance check, what to do when chat is unavailable or the allowance runs out, how interrupted runs are repaired, key rotation, how to turn the agent off, the automatic investigations of alerts (their states, an alert storm, upgrade and rollback), and scheduled reviews (their states, the budget, upgrade, rollback and time zones). It is for operators who run it. To install it, see [Install the AI agent](../../install/ai-agent.md). For its Terraform inputs, see [Terraform module: harbormaster-agent](../../reference/terraform-agent.md).
 
 Plans and applies run in your deployment system. Nothing below runs `terraform plan` or `terraform apply` locally. AWS commands are read-only and always take `--profile` and an explicit `--region`. Never paste a provider API key or a run token into a ticket, chat or shell history.
 
@@ -15,6 +15,7 @@ Plans and applies run in your deployment system. Nothing below runs `terraform p
 | 5 | Turn on **AI chat** for yourself or a small group first. Ask the acceptance questions in section 2 | Section 2 |
 | 6 | Widen access. Watch spend for a week before you raise the allowance | Section 4 |
 | 7 | Optional: set the investigator model and the agent identity's access, then switch one route to **Investigate with AI** | Section 9. An alert on a service the identity can see shows **Investigating**, then **Diagnosis ready**, and a Diagnosis message arrives |
+| 8 | Optional: set the reviewer model, then add one review with one route and use **Run now** | Section 13. A result appears under **Reviews** and a message arrives on the route |
 
 ## 2. Acceptance checklist
 
@@ -95,7 +96,7 @@ Running questions end early during the deployment. Keys are kept out of Postgres
 1. Remove `HM_AGENT_URL` from `extra_env` and apply. The agent routes answer `404`, the button and setting disappear, and run tokens stop authenticating. Saved conversations stay until retention removes them.
 2. Optionally set `desired_count = 0` on the agent module, or remove the module.
 
-To stop only one user, turn **AI chat** off for them. To stop only the investigator, see section 11.
+To stop only one user, turn **AI chat** off for them. To stop only the investigator, see section 11. To stop only reviews, see section 15.
 
 ## 8. What to alarm on
 
@@ -158,9 +159,69 @@ Any one of these works. Opened and other alert messages are never affected.
 - **Migration 0220** takes a short exclusive lock on the delivery log (2-second lock timeout). If a long transaction holds the table, the task exits at start and is retried. Find and end the long transaction. See [Upgrading](../../install/upgrading.md#the-release-that-adds-automatic-investigations).
 - **Rollback.** Clear **Investigate with AI** on the routes first, then roll back. An older version never sends a diagnosis row left behind. An older release can list and delete the agent identity, and its permissions go with it. The new release creates it again with none.
 
+## 13. Review states and reasons
+
+Scheduled reviews are described in [Scheduled AI reviews](../../guides/ai-agent-reviews.md). The coordinator runs them, under its lease, so coordinator tasks need `HM_AGENT_URL`. **Settings > AI agent > Reviews** lists each review with its last result, and **Reviews** in the sidebar lists the results.
+
+States: `requested` (waiting for its turn, or for a retry), `running`, `done`, `failed` and `skipped`. A skipped run ran nothing and cost nothing. A failed one may have cost something. Each run has at most two attempts. An attempt the agent refused as busy does not use one: it is retried after 1 minute, within `HM_AGENT_REVIEW_MAX_LATE`. After an agent that could not be reached, the next attempt waits 5 minutes. A run does not start while an investigation is waiting, and one review runs at a time.
+
+| Reason | State | Meaning | What to do |
+| --- | --- | --- | --- |
+| `budget` | skipped | The month's allowance would not still hold one chat run and one investigation after this review's worst case. An `agent_run` audit entry with outcome `skipped_budget` records it. The run is not retried in that period | Section 14 |
+| `not_visible` | skipped | The agent identity can View no service in the scope | Grant View on the tags to review under **Agent identity**, or change the scope |
+| `not_configured` | skipped | No reviewer model is set. Also see below for a model or role the agent does not offer | Choose a model in **Settings > AI agent** |
+| `rate_limited` | skipped | `HM_AGENT_REVIEWS_PER_DAY` runs already started in the last 24 hours | Raise it, or reduce the number of reviews. The cap can overshoot by one when two coordinator tasks overlap |
+| `missed` | skipped | The run could not start within `HM_AGENT_REVIEW_MAX_LATE` of its scheduled time: Harbormaster or the coordinator was down, the agent was busy or did not offer the role, or the queue was long | Find out why (see below). The next period runs as usual |
+| `disabled` | skipped | The review was switched off or deleted before its first attempt. A manual run of a switched-off review is not skipped for this | Switch the review on if that was a mistake |
+| `agent_unavailable` | failed | The agent could not be reached on both attempts | Section 3. Check the coordinator's security group is admitted by the agent's load balancer |
+| `limit_reached` | failed | A run ended without a summary because it reached its step, token or time limit | Narrow the scope or split the review. Raise the agent's per-run limits only if this is common, and it costs more |
+| `no_result` | failed | The model ended without submitting a summary even after one reminder | Try another model if it repeats |
+| `interrupted` | failed | The run was lost: the coordinator stopped on the last attempt, or the run's usage could not be recorded | Normally a restart. The cost is settled by the repair job (section 5) |
+| `error` | failed | Anything else, including a model that could not be reached on both attempts, or a refusal of the agent's request | Read the coordinator's log lines for the run. They carry the run id |
+
+Where a review is not offered. If the agent does not offer the reviewer role or the type (an older agent), or its catalogue cannot be read, the run is released without using an attempt and tried again after 5 minutes. It ends as `missed` once it is older than `HM_AGENT_REVIEW_MAX_LATE`. A review whose model has been removed from the agent's catalogue waits the same way. Check **Settings > AI agent** for the stale model warning.
+
+The coordinator's log lines for reviews carry ids and counts and never the summary, a note, an excerpt, a review name or a scope label. A review reads no logs, so there is nothing of that kind for them to carry.
+
+A review that is waiting stays in the database until it runs or is skipped. If you turn the agent off for good, such rows stay; retention does not remove a waiting or running one.
+
+## 14. The review budget
+
+Reviews spend from the month's allowance, which the chat and the investigations share. They are the first to be skipped when it runs short: a review run starts only if its worst case still leaves the worst case of one chat run and one investigation, at the models chosen for them.
+
+1. **Read the worst case.** **Settings > AI agent > Reviews** shows "Worst case of one run": what one review run reserves. The review editor shows "Worst case: $X a month at the current model": one reservation for each run the cadence can have in a month (31 for a daily review, 5 weekly, 1 monthly). Add the lines of all your reviews. It is the most that can be kept back, not what is spent, and it leaves out the retry (a second run for the period).
+2. **Compare it with the allowance.** Reviews that would not fit appear as `skipped` with reason `budget`. The chat and the investigations are unaffected: that is the point of the room they keep. A run in progress holds its reservation until it ends.
+3. **Raise the allowance** in **Settings > AI agent** to let them run, or reduce what they cost: fewer reviews, weekly instead of daily, a smaller scope, a cheaper reviewer model, or lower `limits.max_run_tokens` on the agent (it lowers every run).
+4. **Spend rises fast.** Look at the cost of recent results. `HM_AGENT_REVIEWS_PER_DAY` (24) caps how many reviews start in 24 hours. See section 4 for the allowance in general.
+
+## 15. Turn reviews off
+
+Any one of these works. Alert messages and investigations are never affected.
+
+1. Switch off a review (**Review is on** in its editor, or the switch in the list). It runs no more. A run of it that is already waiting is skipped as `disabled`.
+2. Set `HM_AGENT_REVIEWS_PER_DAY=0` and apply. No review is recorded or started, and the **Reviews** entry disappears for people.
+3. Clear the reviewer model in **Settings > AI agent**. Reviews end as `not_configured`.
+4. Unset `HM_AGENT_URL` (section 7). This also turns off the chat and the investigations.
+
+## 16. Reviews: upgrade and rollback
+
+- **Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Until both are new, a due review waits up to `HM_AGENT_REVIEW_MAX_LATE` and is then recorded as `missed`. Chat and investigations are not affected.
+- **Migrations 0221 and 0222** are additive. 0222 takes a short exclusive lock on the delivery log, with a lock timeout of 2 seconds. If a long transaction holds the table, the task exits at start and is started again, and the migration retries from the start at the next start. See [Upgrading](../../install/upgrading.md#the-release-that-adds-scheduled-reviews).
+- **Rollback.** Turn reviews off first: `HM_AGENT_REVIEWS_PER_DAY=0`, or disable each review. An older Harbormaster ignores the review tables and never sends a leftover review row. Its delivery log may count a failed review row toward "route failing" until the row expires, and a manual retry of such a row fails there. No migration is undone. The reviews and their results stay in the database, unread, until the new release runs again.
+
+## 17. Time zones
+
+- A review's schedule is read in its own IANA zone (for example `Europe/Berlin`), not in the server's. No part of the schedule uses the host's zone.
+- The zone's rules come from the time zone data in the container image, or from the copy built into Harbormaster when the image has none. A change in a country's rules (a new daylight saving date) reaches reviews when you run an image or release that has it. Until then reviews follow the old rule.
+- **When clocks go forward**, a scheduled local time that falls in the skipped hour runs when the gap ends (a review at 02:30 on a night when 02:00 becomes 03:00 runs at 03:00). If that moves it to the next date, it keeps the period of the date it was scheduled for.
+- **When clocks go back**, a local time that happens twice runs at the earlier of the two.
+- A period is one local day, one ISO week (Monday to Sunday) or one calendar month, named from the date the run was scheduled for. Editing a review's zone restarts its schedule: only a time after the edit counts, and a period never gets two scheduled runs.
+- Time shown in the editor ("Next run") is in the review's zone. The zone must be an IANA name. `Local` and similar names are refused.
+
 ## Next steps
 
 - [Automatic AI investigations](../../guides/ai-agent-investigator.md)
+- [Scheduled AI reviews](../../guides/ai-agent-reviews.md)
 - [AI chat](../../guides/ai-agent-chat.md)
 - [Security model](../../security/security-model.md#ai-agent)
 - [Throttling and limits](../throttling-and-limits.md)
