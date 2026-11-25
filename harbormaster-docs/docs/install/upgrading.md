@@ -55,6 +55,8 @@ To roll back, unset `HM_AGENT_URL` first, then roll the image back. Old tasks ig
 
 This release adds migrations `0218_agent_identity` (a `kind` column on `users` and its checks), `0219_agent_investigations` (investigations, their evidence and their links to alert incidents) and `0220_notification_diagnosis` (the Diagnosis event and a due-time column on the notification delivery log). All only add. No agent identity row is made by a migration: it is created when the agent is on. Nothing changes for users until a route has **Investigate with AI** on.
 
+**Check `HM_RETENTION_AGENT_RUNS` first.** This release checks it at start. A negative value (older releases read it as "keep everything") and any non-zero value below `48h` are refused: the task logs the setting's name and exits, so a rollout that still carries such a value fails at start, where you see it, instead of deleting history later. Use `0` to keep everything, or `48h` or more. The same setting covers finished chat runs as well as investigations, so it also decides how long the chat's run records (who, model, tokens, cost) are kept. The current UTC month's runs are never deleted.
+
 **Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Until both are new, investigations are skipped as `not_configured` (an older agent does not offer the investigator role). Chat keeps working throughout. In split mode, the agent module must also admit the coordinator's security group: see [Install the AI agent](ai-agent.md).
 
 **During the rollout.** While an older release still runs against the new schema:
@@ -95,7 +97,7 @@ This release adds migrations `0221_agent_reviews` (the reviews, their scopes and
 1. Turn reviews off: set `HM_AGENT_REVIEWS_PER_DAY=0`, or switch off each review under **Settings > AI agent > Reviews**. Nothing new starts.
 2. Roll the image back.
 
-Review rows left in the delivery log are inert and go after `HM_RETENTION_NOTIFICATION_LOG`. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
+Review rows still waiting in the delivery log are not sent by an older release, but they are not dead either. When the new release runs again with reviews on, it sends a waiting row if its result finished less than 48 hours ago, and cancels an older one with the note "The review result is too old to send." Rows go after `HM_RETENTION_NOTIFICATION_LOG` in any case. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
 
 ## The release that adds custom reviews
 

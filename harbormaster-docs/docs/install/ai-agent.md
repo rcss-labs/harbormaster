@@ -123,7 +123,7 @@ Bedrock needs no API key. List `bedrock` in `model_providers`, set `bedrock_regi
 
 ## Try it locally
 
-With a local Harbormaster (`HM_AGENT=1 make run`), run `make run-agent` in another terminal. It starts the agent on a canned model, so no provider key and no live model are involved. Then, as a global admin, choose the `fake` provider's model in **Settings > AI agent**, set an allowance and turn on AI chat for a user. `HM_AGENT_FAKE_PROVIDER=true` is accepted only when the upstream URL is a loopback address.
+With a local Harbormaster (`HM_AGENT=1 make run`), run `make run-agent` in another terminal. It starts the agent on a canned model, so no provider key and no live model are involved. On a new database, `HM_AGENT=1 make run` sets this up for you: AI chat for `sam`, an allowance, the `fake` model for chat and for investigations, View and Logs on every tag for the agent identity and, with the demo notification routes on (`HM_FAKE_NOTIFY_DEMO`, the default), a route named `Investigated alerts to the fake receiver` with **Investigate with AI** on. The seed runs only while the AI settings have never been saved, so a development database that an earlier build seeded for the chat, or whose AI settings you have saved, never gets the investigator demo. Recreate it: stop the server, run `docker rm -f hm-test-pg` and `make test-db`, or drop and recreate the schema you use, then start again. Otherwise, as a global admin, choose the `fake` provider's model for chat and for investigations in **Settings > AI agent**, set an allowance, turn on AI chat for a user, give the agent identity access, and switch **Investigate with AI** on in a route. `HM_AGENT_FAKE_PROVIDER=true` is accepted only when the upstream URL is a loopback address.
 
 ## Next steps
 

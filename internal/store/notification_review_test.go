@@ -712,8 +712,10 @@ func TestInsertReview_InATransactionRollsBackAndUsesOneConnection(t *testing.T) 
 	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where event = 'review'`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("review rows after rollback = %d, %v, want none", n, err)
 	}
-	if err := one.InTx(ctx, func(tx store.Tx) error {
-		ok, err := tx.InsertReviewDelivery(ctx, reviewDelivery(route), 7, notifyT0, nil)
+	againCtx, cancelAgain := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelAgain()
+	if err := one.InTx(againCtx, func(tx store.Tx) error {
+		ok, err := tx.InsertReviewDelivery(againCtx, reviewDelivery(route), 7, notifyT0, nil)
 		if err != nil || !ok {
 			t.Errorf("insert = %v, %v, want true", ok, err)
 		}

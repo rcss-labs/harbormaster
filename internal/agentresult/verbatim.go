@@ -34,7 +34,8 @@ func Normalize(text string) string {
 const valueSeparator = '\n'
 
 // Corpus indexes the text a run read, for the copy check. CorpusCap counts the raw bytes offered once; text that carries
-// JSON escapes is stored a second time with them decoded, so the stored size can reach twice the cap.
+// JSON escapes is stored a second time with them decoded and a few letters grow when lowercased, so the stored size can
+// reach three times the cap.
 type Corpus struct {
 	text []byte // normalised values, each followed by valueSeparator
 	raw  int    // raw bytes offered so far

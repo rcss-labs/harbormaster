@@ -794,6 +794,7 @@ export const ME_ADMIN: MeDTO = {
   display_name: 'Sam',
   agent_enabled: false,
   ai_chat: false,
+  reviews_enabled: false,
 }
 
 export const ME_OMER: MeDTO = {
@@ -813,6 +814,7 @@ export const ME_OMER: MeDTO = {
   display_name: null,
   agent_enabled: false,
   ai_chat: false,
+  reviews_enabled: false,
 }
 
 /** A user who signs in only through SSO: linked identity, no password. */
@@ -833,6 +835,7 @@ export const ME_SSO_USER: MeDTO = {
   display_name: 'Alex',
   agent_enabled: false,
   ai_chat: false,
+  reviews_enabled: false,
 }
 
 const plainTag = (t: TagDTO): TagDTO => ({ ...t, inherited: false })

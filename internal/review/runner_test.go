@@ -567,8 +567,8 @@ func TestJob_DailyCapSkips(t *testing.T) {
 
 func TestJob_OneReviewAtATimeAcrossTwoRunners(t *testing.T) {
 	f := newFixture(t)
-	release := make(chan struct{})
-	f.agent.set(func(c *call) { <-release; c.send(goodRun("Fine.")...) })
+	released, release := gate(t)
+	f.agent.set(func(c *call) { <-released; c.send(goodRun("Fine.")...) })
 	var ids []int64
 	for i := range 4 {
 		ids = append(ids, f.due(fmt.Sprintf("Review %d", i)))
@@ -584,7 +584,7 @@ func TestJob_OneReviewAtATimeAcrossTwoRunners(t *testing.T) {
 	if n := f.agent.count(); n != 1 {
 		t.Errorf("%d runs at once, want 1", n)
 	}
-	close(release)
+	release()
 	f.wait("all of them", func() bool {
 		return !slices.ContainsFunc(ids, func(id int64) bool { return f.row(id).State != "done" }) && !f.anyRunning()
 	})
@@ -1053,10 +1053,10 @@ func TestJob_CoordinatorChangeMidRunRetriesOnce(t *testing.T) {
 func TestJob_PausedHolderCannotOverwriteTheResult(t *testing.T) {
 	f := newFixture(t)
 	id := f.due("Daily spend")
-	resume := make(chan struct{})
+	resumed, resume := gate(t)
 	f.agent.set(func(c *call) {
 		c.send(usage(600))
-		<-resume
+		<-resumed
 		c.send(resultEvent(agentresult.Result{Summary: "From the paused holder."}), doneEvent)
 	})
 	stop := f.start(f.runner)
@@ -1069,7 +1069,7 @@ func TestJob_PausedHolderCannotOverwriteTheResult(t *testing.T) {
 	f.wait("the new holder to finish", func() bool { return f.row(id).State == "done" })
 	stopSecond()
 	kicks := f.kicks.Load()
-	close(resume)
+	resume()
 	f.wait("the paused holder to end", func() bool { return strings.Count(f.logs.String(), `"outcome":"done"`) >= 2 })
 	stop()
 	if v := f.row(id); v.Summary != "From the new holder." || v.State != "done" || f.kicks.Load() != kicks {
