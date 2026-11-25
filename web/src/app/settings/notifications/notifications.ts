@@ -524,6 +524,7 @@ export function eventLabel(event: NotificationDelivery['event']): string {
     resolved: 'Resolved',
     test: 'Test',
     diagnosis: 'Diagnosis',
+    review: 'Review',
   }
   return labels[event] ?? event
 }

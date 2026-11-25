@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../app/auth/AuthProvider'
 import { api, ApiError, getCsrfToken } from './client'
+import type { NotificationSelector } from './notifications'
 import type { AgentConversationDTO, AgentConversationSummaryDTO, AgentPageContext, AgentStatusDTO } from './types'
 
 const STATUS_KEY = ['agent', 'status'] as const
@@ -227,13 +228,26 @@ export interface AgentSettingsDTO {
   version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
-  role_models: { chat?: AgentChatModel; investigator?: AgentChatModel }
+  role_models: { chat?: AgentChatModel; investigator?: AgentChatModel; reviewer?: AgentChatModel }
   catalogue: { providers: { provider: string; models: AgentCatalogueModel[] }[] }
   agent_reachable: boolean
   spend: { month: string; settled_usd: string; reserved_usd: string }
   identity: AgentIdentityDTO
   /** Read-only: set by the operator's configuration. */
   investigator: AgentInvestigatorLimits
+  reviews: AgentReviewsInfo
+}
+export interface AgentReviewsInfo {
+  /** False when the operator turned reviews off (HM_AGENT_REVIEWS_PER_DAY is 0). */
+  enabled: boolean
+  per_day: number
+  max_late_minutes: number
+  max_reviews: number
+  types: { id: string; label: string }[]
+  /** The types the agent service offers now; empty while it is unreachable. */
+  supported_types: string[]
+  /** What one run reserves at the reviewer model, in dollars; null without a model or while the agent is unreachable. */
+  worst_case_run_usd: string | null
 }
 export interface AgentIdentityPermission {
   tag_id: number
@@ -278,7 +292,11 @@ export interface AgentSettingsUpdate {
   version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
-  role_models: { chat?: { provider: string; model: string }; investigator: { provider: string; model: string } | null }
+  role_models: {
+    chat?: { provider: string; model: string }
+    investigator: { provider: string; model: string } | null
+    reviewer: { provider: string; model: string } | null
+  }
 }
 export interface AgentTestResult {
   ok: boolean
@@ -339,3 +357,148 @@ export function useAgentUsage() {
 }
 
 export const setUserAiChat = (userId: number, on: boolean) => api.post(`/api/users/${userId}/ai-chat`, { on })
+
+// ---- Reviews ----
+
+export type ReviewCadence = 'daily' | 'weekly' | 'monthly'
+export interface ReviewSchedule {
+  cadence: ReviewCadence
+  /** Local minutes after midnight, 0 to 1439. */
+  at_minute: number
+  /** 1 to 7, Monday = 1; null unless weekly. */
+  weekday: number | null
+  /** 1 to 28; null unless monthly. */
+  month_day: number | null
+  timezone: string
+}
+export interface ReviewRouteDTO {
+  id: number
+  name: string
+  destination: string
+  enabled: boolean
+}
+export interface ReviewLastRun {
+  id: number
+  /** A state this version does not know is shown as text. */
+  state: string
+  reason: string
+  finished_at: string | null
+}
+export interface ReviewDTO {
+  id: number
+  name: string
+  type: string
+  enabled: boolean
+  schedule: ReviewSchedule
+  scope: NotificationSelector[]
+  routes: ReviewRouteDTO[]
+  version: number
+  /** Null when disabled, when reviews are off or when the schedule does not validate. */
+  next_run_at: string | null
+  last_run: ReviewLastRun | null
+  worst_case_month_usd: string | null
+}
+/** A scope entry of a review request: a tag, a cluster or an account, with no threshold. */
+export type ReviewScopeEntry = { kind: 'account'; account_id: string; region?: string } | { kind: 'cluster'; cluster_id: string } | { kind: 'harbormaster'; tag_id: number }
+export interface ReviewInput {
+  name: string
+  type: string
+  enabled: boolean
+  schedule: ReviewSchedule
+  scope: ReviewScopeEntry[]
+  route_ids: number[]
+  /** On update only. */
+  version?: number
+}
+export interface ReviewPreviewDTO {
+  services_total: number
+  services_unseen: number
+  next_run_at: string | null
+  worst_case_month_usd: string | null
+}
+export interface ReviewRunRow {
+  id: number
+  review_id: number | null
+  name: string
+  type: string
+  manual: boolean
+  state: string
+  reason: string
+  period_label: string
+  scope_label: string
+  services_total: number
+  scheduled_for: string
+  requested_at: string
+  started_at: string | null
+  finished_at: string | null
+  summary: string
+  summary_replaced: boolean
+  provider: string
+  model: string
+  attempts: number
+  /** Both attempts together; empty when unknown. */
+  cost_usd: string
+}
+export interface ReviewRunsPage {
+  items: ReviewRunRow[]
+  next_cursor: string
+}
+
+const REVIEWS_KEY = ['agent', 'reviews'] as const
+const REVIEW_RUNS_KEY = ['agent', 'review-runs'] as const
+
+export function useAgentReviews() {
+  return useQuery({ queryKey: REVIEWS_KEY, queryFn: () => api.get<{ items: ReviewDTO[] }>('/api/agent/reviews') })
+}
+
+function useInvalidateReviews() {
+  const queryClient = useQueryClient()
+  return () => queryClient.invalidateQueries({ queryKey: REVIEWS_KEY })
+}
+
+export function useCreateReview() {
+  const invalidate = useInvalidateReviews()
+  return useMutation({
+    mutationFn: (body: ReviewInput) => api.post<ReviewDTO>('/api/agent/reviews', body),
+    onSuccess: invalidate,
+  })
+}
+
+export function useUpdateReview() {
+  const invalidate = useInvalidateReviews()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: ReviewInput }) => api.put<ReviewDTO>(`/api/agent/reviews/${id}`, body),
+    onSuccess: invalidate,
+  })
+}
+
+export function useDeleteReview() {
+  const invalidate = useInvalidateReviews()
+  return useMutation({ mutationFn: (id: number) => api.del(`/api/agent/reviews/${id}`), onSuccess: invalidate })
+}
+
+export function useReviewPreview() {
+  return useMutation({ mutationFn: (body: ReviewInput) => api.post<ReviewPreviewDTO>('/api/agent/reviews/preview', body) })
+}
+
+export function useRunReviewNow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.post<{ run_id: number }>(`/api/agent/reviews/${id}/run`),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: REVIEWS_KEY })
+      void queryClient.invalidateQueries({ queryKey: REVIEW_RUNS_KEY })
+    },
+  })
+}
+
+/** Past results of one review, newest first, a page at a time. */
+export function useAgentReviewRuns(reviewId: number) {
+  return useInfiniteQuery({
+    queryKey: [...REVIEW_RUNS_KEY, reviewId],
+    queryFn: ({ pageParam }) =>
+      api.get<ReviewRunsPage>(`/api/agent/reviews/runs?review_id=${reviewId}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.next_cursor || undefined,
+  })
+}

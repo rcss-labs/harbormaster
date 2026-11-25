@@ -135,7 +135,7 @@ export interface NotificationDelivery {
   id: number
   at: string
   finished_at: string | null
-  event: 'opened' | 'repeat' | 'update' | 'resolved' | 'test' | 'diagnosis'
+  event: 'opened' | 'repeat' | 'update' | 'resolved' | 'test' | 'diagnosis' | 'review'
   /** The alert title, or "Test message". */
   alert: string
   service: string
@@ -156,6 +156,8 @@ export interface NotificationDelivery {
   cluster_id: string
   account_id: string
   region: string
+  /** The review result a `review` row points to; absent on every other event. */
+  review_run_id?: number | null
 }
 
 export interface NotificationTargetAccount {
