@@ -17,7 +17,7 @@ type Retention struct {
 	NotificationLog time.Duration
 	// AgentConversations prunes agent chats not active for that long; their runs and usage stay.
 	AgentConversations time.Duration
-	// AgentRuns prunes finished, audited agent runs and old investigations; this month's runs always stay.
+	// AgentRuns prunes finished, audited agent runs and old investigations and review runs; this month's runs always stay.
 	AgentRuns time.Duration
 }
 
@@ -109,6 +109,11 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 			return result, fmt.Errorf("retention agent_investigations: %w", err)
 		}
 		result["agent_investigations"] = n
+		n, err = s.DeleteReviewRunsBefore(ctx, now.Add(-r.AgentRuns), now)
+		if err != nil {
+			return result, fmt.Errorf("retention agent_review_runs: %w", err)
+		}
+		result["agent_review_runs"] = n
 		// Plan call 18: whatever the setting, the current UTC month's runs stay, so the month's spend cannot shrink.
 		monthStart, _ := utcMonthBounds(now)
 		n, err = s.DeleteAgentRunsBefore(ctx, now.Add(-r.AgentRuns), monthStart)
