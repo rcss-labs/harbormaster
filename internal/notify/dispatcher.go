@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/lease"
@@ -68,6 +69,14 @@ type Dispatcher struct {
 	// not send. Nil means always allowed. The coordinator sets it while it holds the lease.
 	Guard lease.Guard
 
+	// Investigate turns on the end-of-cycle step that records investigation requests and sends diagnosis messages.
+	// InvestigationWindow is the dedup window of a request; InvestigateTimeout bounds each statement group of the step
+	// (default 5 s). OnInvestigationRequested is called after a cycle created at least one investigation.
+	Investigate              bool
+	InvestigationWindow      time.Duration
+	InvestigateTimeout       time.Duration
+	OnInvestigationRequested func()
+
 	kickOnce sync.Once
 	kickCh   chan struct{}
 
@@ -75,6 +84,10 @@ type Dispatcher struct {
 	busyMu  sync.Mutex
 	busy    map[int64]bool
 	workers sync.WaitGroup
+
+	// diagnosisBusy is busy for diagnosis sends only (guarded by busyMu); the alert path never reads it.
+	diagnosisBusy       map[int64]bool
+	investigationErrors atomic.Int64
 }
 
 // Wait blocks until the send workers of earlier cycles are done.
@@ -250,6 +263,9 @@ func (d *Dispatcher) Cycle(ctx context.Context) error {
 	}
 	if err := d.sendDue(ctx, now, names); err != nil {
 		errs = append(errs, err)
+	}
+	if d.Investigate {
+		d.afterSend(ctx, now, names) // never adds to errs: the agent must not change what the cycle reports
 	}
 	return errors.Join(errs...)
 }
@@ -566,6 +582,13 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 	if !route.Enabled && row.Event != string(EventTest) {
 		return cancelRow(noteRouteOff)
 	}
+	isDiagnosis := row.Event == string(EventDiagnosis)
+	if isDiagnosis && !route.Investigate {
+		return cancelRow(noteInvestigateOff)
+	}
+	if isDiagnosis && route.Destination == DestPagerDuty {
+		return cancelRow(notePagerDutyNoMessage)
+	}
 
 	// An incident row is rendered from the incident as it is now: an alert that resolved while the row waited (a
 	// held row, a manual retry) is not announced, and an aggregate shows its current services, not the plan-time
@@ -603,6 +626,18 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		}
 	}
 
+	var diagnosis *Diagnosis
+	if isDiagnosis {
+		investigation, err := d.Store.GetInvestigation(sendCtx, row.Details.InvestigationID)
+		if errors.Is(err, store.ErrNotFound) || err == nil && (investigation.State != "done" || investigation.Summary == "") {
+			return cancelRow(noteInvestigationGone)
+		}
+		if err != nil {
+			return err
+		}
+		diagnosis = &Diagnosis{InvestigationID: investigation.ID, Summary: investigation.Summary}
+	}
+
 	var secret Secret
 	if len(route.SecretEnc) > 0 {
 		if d.Box == nil {
@@ -619,7 +654,10 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		name = row.Key.AccountID
 	}
 	subject.AccountName = name
-	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject}
+	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject, Diagnosis: diagnosis}
+	if row.Event == string(EventOpened) && row.IncidentID != nil {
+		message.Investigate, message.IncidentID = route.Investigate, *row.IncidentID
+	}
 	if d.Guard != nil {
 		// The lease may have been lost while this row waited, rendered or slept between sends. The unique delivery key
 		// and the claim keep a send from happening twice; this stops a paused holder from sending at all.
