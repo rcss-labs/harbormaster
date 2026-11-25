@@ -70,13 +70,17 @@ type Dispatcher struct {
 
 	// Investigate turns on the end-of-cycle step that records investigation requests and sends diagnosis messages.
 	// InvestigationWindow is the dedup window of a request; InvestigateTimeout (default 5 s) bounds the recording, the
-	// planning and claiming together, and the lookup of a diagnosis send. OnInvestigationRequested is called after a
-	// cycle created at least one investigation. It must not block: it runs on its own goroutine, no cycle waits for it,
-	// and while one call has not returned no other is started.
+	// planning and claiming together, and the lookups of a diagnosis or review send. OnInvestigationRequested is called
+	// after a cycle created at least one investigation. It must not block: it runs on its own goroutine, no cycle waits
+	// for it, and while one call has not returned no other is started.
 	Investigate              bool
 	InvestigationWindow      time.Duration
 	InvestigateTimeout       time.Duration
 	OnInvestigationRequested func()
+
+	// Reviews turns on the planning and sending of review messages in the same end-of-cycle step, after the diagnosis
+	// messages. It does not depend on Investigate: either may be off.
+	Reviews bool
 
 	kickOnce sync.Once
 	kickCh   chan struct{}
@@ -86,9 +90,9 @@ type Dispatcher struct {
 	busy    map[int64]bool
 	workers sync.WaitGroup
 
-	// diagnosisBusy is busy for diagnosis sends only (guarded by busyMu); the alert path never reads it.
-	diagnosisBusy       map[int64]bool
-	diagnosisRunning    int // claimed diagnosis rows being worked on (guarded by busyMu)
+	// followUpBusy is busy for diagnosis and review sends only (guarded by busyMu); the alert path never reads it.
+	followUpBusy        map[int64]bool
+	followUpRunning     int // claimed diagnosis and review rows being worked on (guarded by busyMu)
 	hookRunning         atomic.Bool
 	investigationErrors atomic.Int64
 }
@@ -267,7 +271,7 @@ func (d *Dispatcher) Cycle(ctx context.Context) error {
 	if err := d.sendDue(ctx, now, names); err != nil {
 		errs = append(errs, err)
 	}
-	if d.Investigate {
+	if d.Investigate || d.Reviews {
 		d.afterSend(ctx, now, names) // never adds to errs: the agent must not change what the cycle reports
 	}
 	return errors.Join(errs...)
@@ -566,9 +570,9 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		defer cancel()
 		return d.Store.FinishNotificationDelivery(writeCtx, row.ID, row.ClaimedUntil, attempts, o, d.now())
 	}
-	isDiagnosis := row.Event == string(EventDiagnosis)
+	isDiagnosis, isReview := row.Event == string(EventDiagnosis), row.Event == string(EventReview)
 	count := func(result string) {
-		if !isDiagnosis { // the series is about alerts; a diagnosis that fails must not look like one
+		if !isDiagnosis && !isReview { // the series is about alerts; an AI message that fails must not look like one
 			d.registry().CountNotification(row.Destination, result)
 		}
 	}
@@ -596,6 +600,9 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 	}
 	if isDiagnosis && route.Destination == DestPagerDuty {
 		return cancelRow(notePagerDutyNoMessage)
+	}
+	if isReview && route.Destination == DestPagerDuty {
+		return cancelRow(notePagerDutyNoReview)
 	}
 
 	// An incident row is rendered from the incident as it is now: an alert that resolved while the row waited (a
@@ -648,6 +655,17 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		diagnosis = &Diagnosis{InvestigationID: investigation.ID, Summary: investigation.Summary}
 	}
 
+	var review *Review
+	if isReview {
+		var note string
+		if review, note, err = d.reviewOf(sendCtx, row.Details.ReviewRunID, route.ID); err != nil {
+			return err
+		}
+		if review == nil {
+			return cancelRow(note)
+		}
+	}
+
 	var secret Secret
 	if len(route.SecretEnc) > 0 {
 		if d.Box == nil {
@@ -664,7 +682,7 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		name = row.Key.AccountID
 	}
 	subject.AccountName = name
-	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject, Diagnosis: diagnosis}
+	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject, Diagnosis: diagnosis, Review: review}
 	if d.Investigate && route.Investigate && row.Event == string(EventOpened) && row.IncidentID != nil {
 		message.Investigate, message.IncidentID = true, *row.IncidentID
 	}
