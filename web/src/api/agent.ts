@@ -291,8 +291,8 @@ export interface AgentUsageDTO {
 
 const SETTINGS_KEY = ['agent', 'settings'] as const
 
-export function useAgentSettings() {
-  return useQuery({ queryKey: SETTINGS_KEY, queryFn: () => api.get<AgentSettingsDTO>('/api/agent/settings') })
+export function useAgentSettings(enabled = true) {
+  return useQuery({ queryKey: SETTINGS_KEY, queryFn: () => api.get<AgentSettingsDTO>('/api/agent/settings'), enabled })
 }
 
 export function useSaveAgentSettings() {
@@ -300,7 +300,8 @@ export function useSaveAgentSettings() {
   return useMutation({
     mutationFn: (body: AgentSettingsUpdate) => api.put<AgentSettingsDTO>('/api/agent/settings', body),
     onSuccess: (saved) => {
-      queryClient.setQueryData(SETTINGS_KEY, saved)
+      // The identity has its own save; a settings answer made before it must not put the old access back.
+      queryClient.setQueryData<AgentSettingsDTO>(SETTINGS_KEY, (current) => (current ? { ...saved, identity: current.identity } : saved))
       void queryClient.invalidateQueries({ queryKey: STATUS_KEY })
     },
   })

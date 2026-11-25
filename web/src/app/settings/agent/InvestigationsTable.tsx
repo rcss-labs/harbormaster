@@ -41,11 +41,12 @@ function limitsSentence(limits: AgentInvestigatorLimits): string {
 export function InvestigationsTable({ limits }: { limits: AgentInvestigatorLimits }) {
   const query = useAgentInvestigations()
   const rows = query.data?.pages.flatMap((page) => page.items) ?? []
+
   return (
     <Panel
       title="Investigations"
       loading={query.isPending}
-      error={query.isError ? { message: 'Could not load the investigations.', detail: query.error.message, onRetry: () => void query.refetch() } : undefined}
+      error={query.isError && !query.isFetchNextPageError ? { message: 'Could not load the investigations.', detail: query.error.message, onRetry: () => void query.refetch() } : undefined}
     >
       <p className={styles.hint}>{limits.per_hour === 0 ? 'Background investigations are off.' : limitsSentence(limits)}</p>
       {rows.length === 0 ? (
@@ -62,8 +63,8 @@ export function InvestigationsTable({ limits }: { limits: AgentInvestigatorLimit
           </thead>
           <tbody>
             {rows.map((row) => {
-              const state = STATES[row.state]
-              const reason = REASONS[row.reason]
+              const state = STATES[row.state] ?? { label: 'Unknown', kind: 'mute' as const }
+              const reason = REASONS[row.reason] && state.label !== 'Unknown' ? REASONS[row.reason] : undefined
               return (
                 <tr key={row.id}>
                   <td>
@@ -81,10 +82,15 @@ export function InvestigationsTable({ limits }: { limits: AgentInvestigatorLimit
           </tbody>
         </Table>
       )}
+      {query.isFetchNextPageError && (
+        <p role="alert" className={styles.error}>
+          Could not load more investigations.
+        </p>
+      )}
       {query.hasNextPage && (
         <div className={styles.windowRow}>
           <button type="button" className={styles.btn} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
-            Load more
+            {query.isFetchNextPageError ? 'Try again' : 'Load more'}
           </button>
         </div>
       )}

@@ -468,6 +468,47 @@ describe('NotificationsPage investigate switch', () => {
     expect(screen.queryByText(/The agent cannot see/)).not.toBeInTheDocument()
   })
 
+  it('shows a saved switch as on and disabled while the agent is off', async () => {
+    const bodies: NotificationPreviewRequest[] = []
+    server.use(
+      http.get('/api/notifications/routes', () => HttpResponse.json({ ...NOTIFICATION_ROUTES, items: [{ ...ROUTE_CORE_SLACK, investigate: true }] })),
+    )
+    servePreviews(bodies)
+    renderApp(PAGE)
+    await openRoute('core-services to #core-alerts')
+    const toggle = screen.getByLabelText(SWITCH)
+    expect(toggle).toBeChecked()
+    expect(toggle).toBeDisabled()
+    expect(screen.getByText('The AI agent is off.')).toBeInTheDocument()
+    await waitFor(() => expect(bodies.length).toBeGreaterThan(0))
+    for (const body of bodies) expect(body).not.toHaveProperty('investigate')
+  })
+
+  it('says investigations are skipped until a model is set', async () => {
+    agentOn()
+    server.use(
+      http.get('/api/agent/settings', () => HttpResponse.json({ role_models: { chat: { provider: 'a', model: 'b', available: true } }, catalogue: { providers: [] } })),
+      http.get('/api/notifications/routes', () => HttpResponse.json({ ...NOTIFICATION_ROUTES, items: [{ ...ROUTE_CORE_SLACK, investigate: true }] })),
+    )
+    renderApp(PAGE)
+    await openRoute('core-services to #core-alerts')
+    expect(await screen.findByText(/Investigations are skipped until a model is set/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Settings, AI agent' })).toHaveAttribute('href', '/settings/agent')
+    expect(screen.getByLabelText(SWITCH)).toBeEnabled()
+  })
+
+  it('shows no model line when the investigator model is set', async () => {
+    agentOn()
+    server.use(
+      http.get('/api/agent/settings', () => HttpResponse.json({ role_models: { investigator: { provider: 'a', model: 'b', available: true } }, catalogue: { providers: [] } })),
+      http.get('/api/notifications/routes', () => HttpResponse.json({ ...NOTIFICATION_ROUTES, items: [{ ...ROUTE_CORE_SLACK, investigate: true }] })),
+    )
+    renderApp(PAGE)
+    await openRoute('core-services to #core-alerts')
+    await screen.findByText('Preview')
+    expect(screen.queryByText(/Investigations are skipped/)).not.toBeInTheDocument()
+  })
+
   it('shows the PagerDuty note', async () => {
     agentOn()
     renderApp(PAGE)
@@ -493,6 +534,12 @@ describe('NotificationsPage delivery log', () => {
     const table = await screen.findByRole('table', { name: 'Deliveries' })
     expect(within(table).getByText('Diagnosis')).toBeInTheDocument()
     expect(within(table).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('reads an unknown event as plain text without crashing', async () => {
+    server.use(http.get('/api/notifications/deliveries', () => HttpResponse.json({ ...NOTIFICATION_DELIVERIES, items: [{ ...DELIVERY_FAILED, event: 'brand_new' }] })))
+    renderApp(`${PAGE}?view=log`)
+    expect(await screen.findByRole('table', { name: 'Deliveries' })).toBeInTheDocument()
   })
 
   it('reads a pending diagnosis with a future release time as held', async () => {

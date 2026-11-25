@@ -16,7 +16,7 @@ interface Row {
 }
 
 const accessOf = (identity: AgentIdentityDTO, tagId: number): Access => {
-  const entry = identity.permissions.find((permission) => permission.tag_id === tagId)
+  const entry = (identity.permissions ?? []).find((permission) => permission.tag_id === tagId)
   return entry ? (entry.logs ? 'logs' : 'view') : 'none'
 }
 
@@ -26,10 +26,11 @@ export function IdentitySection({ identity }: { identity: AgentIdentityDTO }) {
   const save = useSaveAgentIdentity()
   const toast = useToast()
   const [edited, setEdited] = useState<Record<number, Access>>({})
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Every tag, plus any the identity still holds that the tag list no longer shows.
   const rows: Row[] = (tags.data?.harbormaster ?? []).map((tag) => ({ id: tag.id, name: tag.name }))
-  for (const permission of identity.permissions) {
+  for (const permission of identity.permissions ?? []) {
     if (!rows.some((row) => row.id === permission.tag_id)) rows.push({ id: permission.tag_id, name: permission.tag_name })
   }
   const current = (row: Row): Access => edited[row.id] ?? accessOf(identity, row.id)
@@ -37,6 +38,7 @@ export function IdentitySection({ identity }: { identity: AgentIdentityDTO }) {
 
   const submit = () => {
     const permissions = rows.filter((row) => current(row) !== 'none').map((row) => ({ tag_id: row.id, logs: current(row) === 'logs' }))
+    setSaveError(null)
     save.mutate(
       { permissions },
       {
@@ -44,7 +46,11 @@ export function IdentitySection({ identity }: { identity: AgentIdentityDTO }) {
           setEdited({})
           toast.show('Saved.', 'ok')
         },
-        onError: (error) => toast.show(error instanceof ApiError ? error.message : 'Could not save the access. Try again.', 'bad'),
+        onError: (error) => {
+          const message = error instanceof ApiError ? error.message : 'Could not save the access. Try again.'
+          setSaveError(message)
+          toast.show(message, 'bad')
+        },
       },
     )
   }
@@ -63,12 +69,12 @@ export function IdentitySection({ identity }: { identity: AgentIdentityDTO }) {
         <>
           {rows.map((row) => (
             <div key={row.id} className={styles.windowRow}>
-              <label htmlFor={`agent-access-${row.id}`}>{`Access to ${row.name}`}</label>
+              <label htmlFor={`agent-access-${row.id}`} style={{ minWidth: 160 }}>{`Access to ${row.name}`}</label>
               <select
                 id={`agent-access-${row.id}`}
                 className={styles.select}
                 value={current(row)}
-                onChange={(event) => setEdited({ ...edited, [row.id]: event.target.value as Access })}
+                onChange={(event) => setEdited((current) => ({ ...current, [row.id]: event.target.value as Access }))}
               >
                 {(Object.keys(ACCESS_LABELS) as Access[]).map((access) => (
                   <option key={access} value={access}>
@@ -82,7 +88,17 @@ export function IdentitySection({ identity }: { identity: AgentIdentityDTO }) {
             <button type="button" className={styles.btn} disabled={!dirty || save.isPending} onClick={submit}>
               Save access
             </button>
+            {dirty && (
+              <span className={styles.hint} data-access-cue="">
+                Unsaved changes
+              </span>
+            )}
           </div>
+          {saveError && (
+            <p role="alert" className={styles.error}>
+              {saveError}
+            </p>
+          )}
         </>
       )}
     </Panel>

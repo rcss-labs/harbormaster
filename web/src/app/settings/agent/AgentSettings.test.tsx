@@ -565,4 +565,67 @@ describe('AgentSettings', () => {
     renderApp('/settings/agent')
     expect(await screen.findByText('No investigations yet.')).toBeInTheDocument()
   })
+
+  it('keeps the saved access when the allowance is saved afterwards', async () => {
+    useAgentMocks()
+    server.use(
+      http.put('/api/agent/identity', () => HttpResponse.json({ username: 'harbormaster-agent', permissions: [{ tag_id: 3, tag_name: 'Prod', logs: true }] })),
+      http.put('/api/agent/settings', () => HttpResponse.json({ ...SETTINGS, monthly_budget_usd: '40.00' })),
+    )
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Access to Prod'), 'View and logs')
+    expect(screen.getByText('Unsaved changes', { selector: '[data-access-cue]' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Save access' }))
+    await screen.findByText('Saved.')
+    expect(document.querySelector('[data-access-cue]')).toBeNull()
+    const allowance = screen.getByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '40')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByLabelText('Monthly allowance in US dollars')).toHaveValue('40.00'))
+    expect(screen.getByLabelText('Access to Prod')).toHaveValue('logs')
+  })
+
+  it.each([
+    [422, 'validation_failed', 'That tag does not exist.'],
+    [403, 'forbidden', 'Only admins can change this.'],
+  ])('shows an identity save error %s inline', async (status, code, message) => {
+    useAgentMocks()
+    server.use(http.put('/api/agent/identity', () => HttpResponse.json({ error: { code, message } }, { status })))
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Access to Prod'), 'No access')
+    await userEvent.click(screen.getByRole('button', { name: 'Save access' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(screen.getByLabelText('Access to Prod')).toHaveValue('none')
+  })
+
+  it('keeps the loaded rows when Load more fails and offers Try again', async () => {
+    useAgentMocks()
+    let failing = true
+    server.use(
+      http.get('/api/agent/investigations', ({ request }) => {
+        if (!new URL(request.url).searchParams.get('cursor')) return HttpResponse.json({ items: [investigation(41)], next_cursor: 'abc' })
+        if (failing) return HttpResponse.json({ error: { code: 'internal', message: 'Something broke.' } }, { status: 500 })
+        return HttpResponse.json({ items: [investigation(40, { subject: { ...investigation(40).subject, service: 'auth' } })], next_cursor: '' })
+      }),
+    )
+    renderApp('/settings/agent')
+    await userEvent.click(await screen.findByRole('button', { name: 'Load more' }))
+    expect(await screen.findByText('Could not load more investigations.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'payments-api' })).toBeInTheDocument()
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('link', { name: 'auth' })).toBeInTheDocument()
+  })
+
+  it('shows an unknown state as plain text', async () => {
+    useAgentMocks()
+    server.use(
+      http.get('/api/agent/investigations', () =>
+        HttpResponse.json({ items: [{ ...investigation(41), state: 'brand_new', reason: 'odd' }], next_cursor: '' }),
+      ),
+    )
+    renderApp('/settings/agent')
+    expect(await screen.findByText('Unknown')).toBeInTheDocument()
+  })
 })

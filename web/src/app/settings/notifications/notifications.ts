@@ -497,12 +497,13 @@ export function statusPill(delivery: Pick<NotificationDelivery, 'status' | 'held
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
+const sameDay = (at: Date) => at.toDateString() === new Date().toDateString()
 
 /** The note under the result: the release time of a held row in the browser's zone, else what the API says. */
 export function deliveryNote(delivery: Pick<NotificationDelivery, 'status' | 'held_until' | 'note'>): string {
   if (isHeldPending(delivery)) {
     const at = new Date(delivery.held_until as string)
-    return `Held until ${pad2(at.getHours())}:${pad2(at.getMinutes())}`
+    return `Held until ${sameDay(at) ? '' : `${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, `}${pad2(at.getHours())}:${pad2(at.getMinutes())}`
   }
   if (delivery.status === 'held' && delivery.held_until) {
     const at = new Date(delivery.held_until)
@@ -524,5 +525,5 @@ export function eventLabel(event: NotificationDelivery['event']): string {
     test: 'Test',
     diagnosis: 'Diagnosis',
   }
-  return labels[event]
+  return labels[event] ?? event
 }
