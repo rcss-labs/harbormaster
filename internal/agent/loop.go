@@ -209,6 +209,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	r.system = system
 	if r.found != nil {
 		defer r.logFindings()
+		r.found.allowSubject(in.Task.Subject)
 		r.messages = []provider.Message{r.taskMessage(*in.Task)}
 	} else {
 		r.messages = textOnly(in.Messages)

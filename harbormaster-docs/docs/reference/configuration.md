@@ -233,7 +233,7 @@ The agent is off unless `HM_AGENT_URL` is set. Variables marked `harbormaster` g
 | `HM_AGENT_RUN_TOKEN_TTL` | `15m` | `harbormaster` | Lifetime of a run token. `1m` to `1h`. A shorter value than the run timeout plus a minute is logged once, because long runs may then lose their tools. |
 | `HM_AGENT_INVESTIGATION_WINDOW` | `15m` | `harbormaster` | Alerts for the same service, or the same cluster or account entry, that open within this time share one investigation. The Opened message of an alert must also have been planned within it for the alert to be investigated. `1m` to `24h`. See [Automatic AI investigations](../guides/ai-agent-investigator.md). |
 | `HM_AGENT_INVESTIGATIONS_CONCURRENT` | `2` | `harbormaster` | Investigations that run at the same time. `1` to `8`. |
-| `HM_AGENT_INVESTIGATIONS_PER_HOUR` | `20` | `harbormaster` | Investigations that may start in an hour. A start counts when its run begins; the cap can overshoot by up to the number of parallel runs. `0` turns the investigator off: nothing starts, and requests still waiting end as `rate_limited`. Not negative. |
+| `HM_AGENT_INVESTIGATIONS_PER_HOUR` | `20` | `harbormaster` | Investigations that may start in an hour. A start counts when its run begins; the cap can overshoot by up to the number of parallel runs. The cap is checked once, before the first start; a retry is not counted again. `0` turns the investigator off: nothing starts, no new request is recorded, no Diagnosis message is planned or sent, and requests still waiting end as `rate_limited`. Not negative. |
 | `HM_AGENT_INVESTIGATION_MAX_WAIT` | `15m` | `harbormaster` | A request that has waited longer than this before its first start is skipped as `expired`. `1m` to `24h`. |
 | `HM_AGENT_IDENTITY_RATE_PER_SECOND` | `5` | `harbormaster` | Requests per second the agent identity may make to Harbormaster, with a burst of 60 times that. `1` to `50`. |
 | `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` | `2` | `harbormaster` | Most GiB one log search by the agent identity may scan. `0` sets no cap of its own; `HM_LOG_SEARCH_MAX_GB` still applies when set. At most `1000000`. |
@@ -312,6 +312,6 @@ Startup fails when any of these hold:
 - `HM_SMTP_HOST` is set without a valid `HM_SMTP_FROM`, or only one of `HM_SMTP_USERNAME` and `HM_SMTP_PASSWORD` is set.
 - `HM_AGENT_URL` is not a valid base URL, `HM_AGENT_CA_PEM` holds no certificate, or `HM_AGENT_RUN_TOKEN_TTL` is outside 1 minute to 1 hour.
 - `HM_AGENT_INVESTIGATION_WINDOW` or `HM_AGENT_INVESTIGATION_MAX_WAIT` is outside 1 minute to 24 hours, `HM_AGENT_INVESTIGATIONS_CONCURRENT` is outside 1 to 8, `HM_AGENT_INVESTIGATIONS_PER_HOUR` is negative, `HM_AGENT_IDENTITY_RATE_PER_SECOND` is outside 1 to 50, or an `HM_AGENT_IDENTITY_LOG_SEARCH_*` value is negative or above 1000000. These are checked whether or not `HM_AGENT_URL` is set.
-- `HM_RETENTION_AGENT_RUNS` is non-zero and below 48 hours.
+- `HM_RETENTION_AGENT_RUNS` is negative, or non-zero and below 48 hours.
 - The agent has no `HM_AGENT_PROVIDERS`, a provider without its key or region (or the reverse), or `HM_AGENT_FAKE_PROVIDER=true` against a non-loopback upstream.
 - `HM_SCAN_ENABLED=true` (outside fake mode) on a coordinating task with any of the five launch settings missing.

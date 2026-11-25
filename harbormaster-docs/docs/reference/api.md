@@ -255,6 +255,30 @@ All are Admin-only.
 | `POST /api/notifications/deliveries/{id}/retry` | Retry a failed delivery. |
 | `GET /api/notifications/summary` | Delivery summary. |
 
+## AI agent and investigations
+
+These routes exist only while `HM_AGENT_URL` is set (`404` otherwise). All are session-only: access tokens and run tokens cannot call them. See [AI chat](../guides/ai-agent-chat.md) and [Automatic AI investigations](../guides/ai-agent-investigator.md).
+
+| Method and path | Needs | Purpose |
+| --- | --- | --- |
+| `GET /api/agent/status` | Signed in | Whether the agent is on and whether you may chat. |
+| `GET /api/agent/conversations` | AI chat | Your conversations. |
+| `POST /api/agent/conversations` | AI chat | Start a conversation. |
+| `GET /api/agent/conversations/{id}` | AI chat | One of your conversations. |
+| `DELETE /api/agent/conversations/{id}` | AI chat | Delete one of your conversations. |
+| `POST /api/agent/conversations/{id}/messages` | AI chat | Ask a question. The answer streams back. |
+| `GET /api/agent/settings`, `PUT /api/agent/settings` | Admin | Read or save the allowance, the models and the provider choices. |
+| `POST /api/agent/settings/test` | Admin | Test a model with one small paid call. |
+| `GET /api/agent/usage` | Admin | Spend this month. |
+| `PUT /api/agent/identity` | Admin | Set what the agent identity may read, per tag. |
+| `GET /api/agent/investigations` | Admin | Every investigation, newest first, with state, reason and cost. Paged by cursor. |
+| `POST /api/users/{id}/ai-chat` | Admin | Turn AI chat on or off for a user. |
+| `GET /api/services/{serviceId}/investigations` | Signed in, View | Investigations of a service, for the timeline. |
+| `GET /api/investigations/{id}` | Signed in | One investigation. The summary needs View on its subject; each evidence item needs View, and Logs for log text, on its own service, checked now. |
+| `GET /api/investigations/by-incident/{incidentId}` | Signed in | The investigation of an alert incident, with the same checks. |
+
+Chat access (**AI chat**) is a per-user flag; global admins can always chat. A reader without permission gets `404`, not `403`. The `investigate` field on a notification route turns **Investigate with AI** on for it, and each alert in the overview list carries an `investigation` object (`id`, `state`, `reason`) for signed-in people only.
+
 ## Users, tags, permissions, accounts, audit, SSO
 
 All are Admin-only.
