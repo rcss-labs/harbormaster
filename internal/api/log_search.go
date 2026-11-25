@@ -258,7 +258,7 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	var reservation tokenScanReservation
 	if viaToken {
 		var allowed bool
-		if reservation, allowed = s.reserveTokenLogScan(w, r, user.ID); !allowed {
+		if reservation, allowed = s.reserveTokenLogScan(w, r, user); !allowed {
 			return
 		}
 		searchMaxBytes = reservation.bytes
@@ -435,12 +435,12 @@ func (s *Server) postLogSearchEstimate(w http.ResponseWriter, r *http.Request) {
 	var budget, remaining *int64
 	if auth.IsToken(r.Context()) {
 		user, _ := auth.UserFrom(r.Context())
-		state, err := s.tokenLogSearchState(r.Context(), user.ID)
+		state, err := s.tokenLogSearchState(r.Context(), user)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		limit = s.tokenCapBytes()
+		limit = s.tokenCapBytes(user)
 		left := max(state.DailyBytes-state.UsedBytes, 0)
 		budget, remaining = &state.DailyBytes, &left
 	}
@@ -463,8 +463,8 @@ type tokenScanReservation struct {
 // searches cannot both take the same remaining budget, and a search dropped before any poll is still charged. When
 // the search may not run, it has already answered (403 with the budget at 0, 429 with Retry-After when the day's
 // budget is used up) and returns false.
-func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, userID int64) (tokenScanReservation, bool) {
-	state, err := s.tokenLogSearchState(r.Context(), userID)
+func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, user store.User) (tokenScanReservation, bool) {
+	state, err := s.tokenLogSearchState(r.Context(), user)
 	if err != nil {
 		s.fail(w, err)
 		return tokenScanReservation{}, false
@@ -474,7 +474,7 @@ func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, use
 		return tokenScanReservation{}, false
 	}
 	day := s.now()
-	reserved, err := s.Store.ReserveTokenLogScan(r.Context(), userID, day, state.DailyBytes, state.MaxBytesPerSearch)
+	reserved, err := s.Store.ReserveTokenLogScan(r.Context(), user.ID, day, state.DailyBytes, state.MaxBytesPerSearch)
 	if err != nil {
 		s.fail(w, err)
 		return tokenScanReservation{}, false

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"github.com/rcss-labs/harbormaster/internal/cost"
 	"log/slog"
@@ -167,6 +168,8 @@ const (
 	rateSAMLLogin  = "samllogin"
 	rateFocusOpen  = "focusopen"
 	rateAPIToken   = "apitoken"
+	// rateAgentIdentity is the bucket of the agent identity's run tokens, apart from every person's.
+	rateAgentIdentity = "agentidentity"
 )
 
 // The per-user bucket for requests authenticated by an access token (design: "Authentication"). Constants, not
@@ -175,6 +178,14 @@ const (
 	apiTokenBurst     = 120
 	apiTokenPerSecond = 2
 )
+
+// agentIdentityBurstSeconds is how many seconds of the identity's rate its bucket holds.
+const agentIdentityBurstSeconds = 60
+
+// agentIdentityRate is HM_AGENT_IDENTITY_RATE_PER_SECOND; a hand-built Config that leaves it unset gets the default.
+func (s *Server) agentIdentityRate() int {
+	return cmp.Or(s.Cfg.AgentIdentityRatePerSecond, 5)
+}
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
 // tried the per-task bucket, and a store problem must never block sign-in or a search.

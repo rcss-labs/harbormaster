@@ -168,6 +168,12 @@ type Config struct {
 	MCPPublicURL          string         // the MCP gateway's public base URL, shown in the UI's connect instructions
 	MCPGatewayCIDRs       []netip.Prefix // source ranges of the MCP gateway tasks; behind one, the client IP is the X-Forwarded-For entry to its left
 
+	// The agent identity (an unattended background run) has its own request rate and log search limits, so it cannot
+	// starve people or run up log search cost. Used only when the agent is on.
+	AgentIdentityRatePerSecond    int // HM_AGENT_IDENTITY_RATE_PER_SECOND: requests per second, 1 to 50; the burst is 60 times this
+	AgentIdentityLogSearchMaxGB   int // HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB: scan cap in GiB for one search; 0 = no cap of its own
+	AgentIdentityLogSearchDailyGB int // HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB: scan budget in GiB per UTC day; 0 turns its log search off
+
 	// OAuth for MCP connectors (MCP phase 4). Off unless OAuth is true, which needs APITokens and MCPPublicURL. The
 	// client host and redirect lists are configuration on purpose: what Claude's clients actually send was not yet
 	// verified against a real connector, and a finding should change a setting, not code.
@@ -416,6 +422,10 @@ func Load(getenv func(string) string) (Config, error) {
 		MCPPublicURL:          strings.TrimSpace(reader.text("HM_MCP_PUBLIC_URL", "")),
 		MCPGatewayCIDRs:       reader.prefixes("HM_MCP_GATEWAY_CIDRS"),
 
+		AgentIdentityRatePerSecond:    reader.integer("HM_AGENT_IDENTITY_RATE_PER_SECOND", 5),
+		AgentIdentityLogSearchMaxGB:   reader.integer("HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", 2),
+		AgentIdentityLogSearchDailyGB: reader.integer("HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", 20),
+
 		// MCP phase 4: OAuth for connectors
 		OAuth:             reader.boolean("HM_OAUTH", false),
 		OAuthAccessTTL:    reader.duration("HM_OAUTH_ACCESS_TTL", time.Hour),
@@ -545,6 +555,15 @@ func validateTokens(cfg Config) error {
 	}
 	if cfg.TokenLogSearchDailyGB < 0 {
 		return errors.New("HM_TOKEN_LOG_SEARCH_DAILY_GB: must be 0 (token log search off) or positive")
+	}
+	if cfg.AgentIdentityRatePerSecond < 1 || cfg.AgentIdentityRatePerSecond > 50 {
+		return errors.New("HM_AGENT_IDENTITY_RATE_PER_SECOND: must be between 1 and 50")
+	}
+	if cfg.AgentIdentityLogSearchMaxGB < 0 {
+		return errors.New("HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB: must be 0 or positive")
+	}
+	if cfg.AgentIdentityLogSearchDailyGB < 0 {
+		return errors.New("HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB: must be 0 (agent log search off) or positive")
 	}
 	if cfg.MCPPublicURL != "" && !isBaseURL(cfg.MCPPublicURL, false) {
 		return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
