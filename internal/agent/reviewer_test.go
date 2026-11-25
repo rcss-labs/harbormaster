@@ -664,3 +664,25 @@ func TestFake_DemoReviewerEveryType(t *testing.T) {
 		t.Errorf("investigator: %+v", res)
 	}
 }
+
+// What submit_result says names what the run is doing. An investigator's words are the ones it always had.
+func TestSubmitResult_WordsNameTheKindOfRun(t *testing.T) {
+	for noun, in := range map[string]RunInput{"investigation": investigatorInput(), "review": reviewerInput()} {
+		p := fake.New(
+			calls(costCall("c1"), submitCall(nil)),
+			fake.Text("Costs rose.", smallUsage), fake.Text("They rose.", smallUsage),
+		)
+		events := investigate(t, newLoop(p, &recordingRunner{}), p, in)
+		tools := requestAt(t, p, 0).Tools
+		if got, want := tools[len(tools)-1].Description, "Finish the "+noun+" with your conclusion and the evidence for it. Call it once, alone: nothing runs after it. "+
+			"The text of each piece of evidence is taken from what you read; you only name it."; got != want {
+			t.Errorf("%s: description %q, want %q", noun, got, want)
+		}
+		if got, want := resultText(t, requestAt(t, p, 1), "c1"), "This tool was not run: submit_result ends the "+noun+", so call it alone."; !strings.Contains(got, want) {
+			t.Errorf("%s: the call beside submit_result was answered with %q, want %q", noun, got, want)
+		}
+		if got, want := events[len(events)-1].Message, "The "+noun+" ended without a result."; got != want {
+			t.Errorf("%s: ended with %q, want %q", noun, got, want)
+		}
+	}
+}
