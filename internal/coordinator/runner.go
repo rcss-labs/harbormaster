@@ -1,6 +1,6 @@
 // Package coordinator runs the jobs that must have exactly one active instance: notifications, off-hours, image scans,
 // the ARM64 platform resolver, the deployment outcome log, the repair of AI agent runs, the AI investigations of alerts,
-// the daily rollups and retention.
+// the scheduled AI reviews, the daily rollups and retention.
 // They run only while this process holds the coordinator lease, and each is told to check that lease right before an
 // external side effect.
 package coordinator
@@ -20,6 +20,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/offhours"
 	"github.com/rcss-labs/harbormaster/internal/platforms"
+	"github.com/rcss-labs/harbormaster/internal/review"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/scanjob"
 	"github.com/rcss-labs/harbormaster/internal/signal"
@@ -45,6 +46,7 @@ type Runner struct {
 	Outcomes       *deploy.OutcomeLogger
 	AgentRuns      *agentrun.Reconciler // set only while the AI agent is on
 	Investigate    *investigate.Runner  // set only while the AI agent is on
+	Review         *review.Runner       // set only while the AI agent and its reviews are on
 	// Idle reports whether polling is idle; the image resolver stays quiet while it is.
 	Idle func() bool
 	// Bus carries kicks from web tasks. While this runner holds the lease it listens and wakes the named job; nil
@@ -86,8 +88,8 @@ func (r *Runner) log() *slog.Logger {
 }
 
 // Hold runs every job while the coordinator lease l is held: the scan runner, the off-hours reconciler, the image
-// resolver, the dispatcher, the outcome logger, the agent run reconciler and the investigator on their own goroutines,
-// and the rollups then retention at once and every RetentionEvery (rollups first, so retention never deletes rows a
+// resolver, the dispatcher, the outcome logger, the agent run reconciler, the investigator and the review job on their own
+// goroutines, and the rollups then retention at once and every RetentionEvery (rollups first, so retention never deletes rows a
 // rollup still needs). It sets each job's guard to a check of l, and returns when ctx ends and every job has stopped,
 // clearing the guards.
 func (r *Runner) Hold(ctx context.Context, l store.Lease) {
@@ -117,6 +119,10 @@ func (r *Runner) Hold(ctx context.Context, l store.Lease) {
 	if r.Investigate != nil {
 		r.Investigate.Guard = guard
 		defer func() { r.Investigate.Guard = nil }()
+	}
+	if r.Review != nil {
+		r.Review.Guard = guard
+		defer func() { r.Review.Guard = nil }()
 	}
 
 	var wg sync.WaitGroup
@@ -151,6 +157,9 @@ func (r *Runner) Hold(ctx context.Context, l store.Lease) {
 	}
 	if r.Investigate != nil {
 		start(r.Investigate.Run)
+	}
+	if r.Review != nil {
+		start(r.Review.Run)
 	}
 	if r.Bus != nil {
 		start(r.listenForKicks)

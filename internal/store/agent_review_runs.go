@@ -40,7 +40,7 @@ type ReviewRun struct {
 	ClaimedUntil                *time.Time
 	RunID, PrevRunID            *uuid.UUID
 	Provider, Model, ScopeLabel string
-	// CoveredTags holds every tag the agent identity could View when the run started (P3-R1).
+	// CoveredTags holds every tag the agent identity could View when the run started (P3-R1) or finished (P3-R16).
 	CoveredTags           []int64
 	ServicesTotal         int
 	Range                 string
@@ -332,8 +332,9 @@ func (s *Store) SkipReviewRun(ctx context.Context, c ReviewClaim, reason string,
 
 // FinishReviewRun settles the claimed attempt as done (no reason, a summary) or failed (a fixed reason), writes the
 // result and replaces the evidence in one transaction, and clears the lease. A review cites View evidence only.
+// alsoCovered joins the covered tags of the start, in the same fenced update (P3-R16); none leaves them as they are.
 // ErrConflict when the claim is stale; a refused result is an error. Nothing is written in either case.
-func (s *Store) FinishReviewRun(ctx context.Context, c ReviewClaim, state, reason string, result *InvestigationResult, now time.Time) error {
+func (s *Store) FinishReviewRun(ctx context.Context, c ReviewClaim, state, reason string, result *InvestigationResult, alsoCovered []int64, now time.Time) error {
 	switch state {
 	case InvestigationDone:
 		if reason != "" {
@@ -367,9 +368,10 @@ func (s *Store) FinishReviewRun(ctx context.Context, c ReviewClaim, state, reaso
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 	tag, err := tx.Exec(ctx, `update agent_review_runs set state = $4, reason = $5, summary = $6, summary_replaced = $7,
-		evidence_dropped = $8, finished_at = $9, claimed_until = null
+		evidence_dropped = $8, finished_at = $9, claimed_until = null,
+		covered_tags = array(select distinct t from unnest(covered_tags || $10::bigint[]) t order by t)
 		where `+fencedReviewRun,
-		c.RunID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now)
+		c.RunID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now, alsoCovered)
 	if err != nil {
 		return fmt.Errorf("finish review run: %w", err)
 	}

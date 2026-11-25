@@ -10,5 +10,5 @@ import (
 
 // Accept turns what the agent service answered into what is stored; see agentjob.Accept.
 func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action authz.Action) bool) store.InvestigationResult {
-	return agentjob.Accept(res, canRead)
+	return agentjob.Accept(res, canRead, agentjob.AcceptOptions{AllowLogs: true, Replacement: agentresult.ReplacementSummary})
 }
