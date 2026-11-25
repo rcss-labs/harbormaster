@@ -521,3 +521,46 @@ func TestCleanReviewName_IsTheOneCleaning(t *testing.T) {
 		t.Error("the message must use the exported cleaning")
 	}
 }
+
+func TestReview_CustomHeadlinePerDestination(t *testing.T) {
+	m := reviewMessage("Spend is flat.")
+	m.Review.Type = "custom"
+	m.Review.Name = "Team spend"
+	if want := "*Custom review: Team spend*\nNovember 2026\n" + aiNotice; slackReview(t, m).Blocks[0].Text.Text != want {
+		t.Errorf("slack headline = %q, want %q", slackReview(t, m).Blocks[0].Text.Text, want)
+	}
+	if got := TelegramText(m); !strings.Contains(got, "Custom review: Team spend") {
+		t.Errorf("telegram text has no custom headline: %.200q", got)
+	}
+	if subject, _ := Email(m, "hm@example.com", []string{"ops@example.com"}); subject != "[Harbormaster] Custom review: Team spend" {
+		t.Errorf("email subject = %q", subject)
+	}
+	body, err := WebhookBody(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["review_type"] != "custom" {
+		t.Errorf("review_type = %v: %s", got["review_type"], body)
+	}
+}
+
+func TestReview_UnknownTypeIsStillRefused(t *testing.T) {
+	m := reviewMessage("x")
+	m.Review.Type = "other"
+	if _, err := SlackBody(m); err == nil {
+		t.Error("a sixth type id built a slack message")
+	}
+	if _, err := WebhookBody(m); err == nil {
+		t.Error("a sixth type id built a webhook body")
+	}
+	if _, err := TelegramBody(m, "-100123", 0); err == nil {
+		t.Error("a sixth type id built a telegram message")
+	}
+	if _, err := RenderPreview(DestEmail, m); err == nil {
+		t.Error("a sixth type id rendered an email preview")
+	}
+}

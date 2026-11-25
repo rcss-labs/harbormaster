@@ -1124,3 +1124,19 @@ func TestLoad_AgentIdentityLimitsValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_CustomReviewsDefaultOffAndParses(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil || cfg.AgentCustomReviews {
+		t.Errorf("unset: AgentCustomReviews = %v, err = %v; want off and no error", cfg.AgentCustomReviews, err)
+	}
+	for raw, want := range map[string]bool{"true": true, "false": false} {
+		cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_CUSTOM_REVIEWS": raw}))
+		if err != nil || cfg.AgentCustomReviews != want {
+			t.Errorf("%s: AgentCustomReviews = %v, err = %v; want %v", raw, cfg.AgentCustomReviews, err, want)
+		}
+	}
+	if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_CUSTOM_REVIEWS": "sometimes"})); err == nil || !strings.Contains(err.Error(), "HM_AGENT_CUSTOM_REVIEWS") {
+		t.Errorf("a bad value: err = %v, want one naming HM_AGENT_CUSTOM_REVIEWS", err)
+	}
+}
