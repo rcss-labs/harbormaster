@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
@@ -680,5 +681,30 @@ func TestTestRun_StoresNoCoveredTagsAtTheFinish(t *testing.T) {
 				t.Errorf("covered = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// P4-R5: a task of phase 3 that claims a test row writes tags at its start; the check refuses that write.
+func TestTestRun_RawSQLRefusesTagsOnATestRow(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	route := reviewRoute(t, s, "r")
+	a, b := oldReview(t, s, "a", route.ID), oldReview(t, s, "b", route.ID)
+	test, err := s.RequestManualReviewRun(ctx, a.ID, "Test one", true, revNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal, err := s.RequestManualReviewRun(ctx, b.ID, "Run one", false, revNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pgErr *pgconn.PgError
+	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set covered_tags = '{7}' where id = $1`, test.ID); !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("tags on a test row = %v, want a check violation (23514)", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set covered_tags = '{}' where id = $1`, test.ID); err != nil {
+		t.Fatalf("no tags on a test row: %v", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set covered_tags = '{7}' where id = $1`, normal.ID); err != nil {
+		t.Fatalf("tags on a normal row: %v", err)
 	}
 }
