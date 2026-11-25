@@ -151,6 +151,21 @@ func (c Catalogue) Supports(role string) bool {
 	return slices.Contains(c.Roles, role)
 }
 
+// Find returns the model the agent offers under a provider and model id.
+func (c Catalogue) Find(provider, id string) (Model, bool) {
+	for _, p := range c.Providers {
+		if p.Provider != provider {
+			continue
+		}
+		for _, m := range p.Models {
+			if m.ID == id {
+				return m, true
+			}
+		}
+	}
+	return Model{}, false
+}
+
 // TestResult is the answer to a "Test model" call.
 type TestResult struct {
 	OK           bool   `json:"ok"`

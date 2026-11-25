@@ -101,6 +101,7 @@ func TestLoad_Defaults(t *testing.T) {
 		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
 		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
 		OAuthAccessTTL: time.Hour, AgentRunTokenTTL: 15 * time.Minute,
+		AgentInvestigationWindow: 15 * time.Minute, AgentInvestigationsConcurrent: 2, AgentInvestigationsPerHour: 20, AgentInvestigationMaxWait: 15 * time.Minute,
 		OAuthClientHosts: []string{"claude.ai"},
 		OAuthRedirectURIs: []string{
 			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
@@ -997,6 +998,32 @@ func TestLoad_AgentRunTokenTTLAndCAValidation(t *testing.T) {
 	cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_CA_PEM": testCertPEM(t)}))
 	if err != nil || cfg.AgentCAPEM == "" {
 		t.Errorf("valid PEM: cfg.AgentCAPEM set = %v, err = %v", cfg.AgentCAPEM != "", err)
+	}
+}
+
+func TestLoad_InvestigationSettingsValidation(t *testing.T) {
+	for name, values := range map[string]struct{ good, bad []string }{
+		"HM_AGENT_INVESTIGATION_WINDOW":      {[]string{"1m", "15m", "24h"}, []string{"0s", "59s", "24h1s", "-1m", "soon"}},
+		"HM_AGENT_INVESTIGATIONS_CONCURRENT": {[]string{"1", "8"}, []string{"0", "9", "-1", "two"}},
+		"HM_AGENT_INVESTIGATIONS_PER_HOUR":   {[]string{"0", "1", "500"}, []string{"-1", "many"}},
+		"HM_AGENT_INVESTIGATION_MAX_WAIT":    {[]string{"1m", "24h"}, []string{"0s", "59s", "24h1s", "-1m"}},
+	} {
+		for _, v := range values.good {
+			if _, err := Load(tokenEnv(map[string]string{name: v})); err != nil {
+				t.Errorf("%s=%s refused: %v", name, v, err)
+			}
+		}
+		for _, v := range values.bad {
+			if _, err := Load(tokenEnv(map[string]string{name: v})); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%s: err = %v, want one naming it", name, v, err)
+			}
+		}
+	}
+	cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_INVESTIGATION_WINDOW": "30m", "HM_AGENT_INVESTIGATIONS_CONCURRENT": "4",
+		"HM_AGENT_INVESTIGATIONS_PER_HOUR": "0", "HM_AGENT_INVESTIGATION_MAX_WAIT": "5m"}))
+	if err != nil || cfg.AgentInvestigationWindow != 30*time.Minute || cfg.AgentInvestigationsConcurrent != 4 ||
+		cfg.AgentInvestigationsPerHour != 0 || cfg.AgentInvestigationMaxWait != 5*time.Minute {
+		t.Errorf("cfg = %v %d %d %v, %v", cfg.AgentInvestigationWindow, cfg.AgentInvestigationsConcurrent, cfg.AgentInvestigationsPerHour, cfg.AgentInvestigationMaxWait, err)
 	}
 }
 
