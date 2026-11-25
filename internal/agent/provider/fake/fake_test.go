@@ -3,6 +3,7 @@ package fake_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -158,10 +159,11 @@ func TestFake_RecordedRequestsAreDeepCopies(t *testing.T) {
 	}
 }
 
-func TestDemoInvestigator_ReadsTheServiceThenCitesOneUnit(t *testing.T) {
+func TestDemoInvestigator_ReadsTheServiceThenCitesTheFirstAndTheLogUnit(t *testing.T) {
 	serviceID := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "123456789012", Region: "eu-west-1", Cluster: "prod-main"}, Service: "checkout-api"}.ID()
 	for name, p := range map[string]*fake.Provider{"investigator": fake.DemoInvestigator(), "either role": fake.Demo()} {
 		msgs := []provider.Message{{Role: provider.RoleUser, Text: `Subject: {"kind":"service","service_ids":["` + serviceID + `"]}`}}
+		reads := 0
 		next := func() provider.ToolCall {
 			t.Helper()
 			resp, err := p.Generate(context.Background(), provider.Request{Messages: msgs, Tools: []provider.ToolDef{{Name: "submit_result"}}}, nil)
@@ -169,18 +171,22 @@ func TestDemoInvestigator_ReadsTheServiceThenCitesOneUnit(t *testing.T) {
 				t.Fatalf("%s: %+v, %v", name, resp, err)
 			}
 			call := resp.ToolCalls[0]
+			// Units are numbered across the whole run: two to a result here.
+			text := fmt.Sprintf("<tool_result_x>\n[e%d] running: 0\n[e%d] desired: 3\n</tool_result_x>", 2*reads+1, 2*reads+2)
+			reads++
 			msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, ToolCalls: resp.ToolCalls},
-				provider.Message{Role: provider.RoleTool, ToolCallID: call.ID, ToolName: call.Name, Text: "<tool_result_x>\n[e1] running: 0\n[e2] desired: 3\n</tool_result_x>"})
+				provider.Message{Role: provider.RoleTool, ToolCallID: call.ID, ToolName: call.Name, Text: text})
 			return call
 		}
-		for _, want := range []string{"get_service", "get_service_timeline"} {
+		for _, want := range []string{"get_service", "get_service_timeline", "get_service_logs"} {
 			if call := next(); call.Name != want || call.Arguments["service_id"] != serviceID {
 				t.Fatalf("%s: call = %+v, want %s", name, call, want)
 			}
 		}
 		call := next()
 		evidence, _ := call.Arguments["evidence"].([]any)
-		if call.Name != "submit_result" || call.Arguments["summary"] == "" || len(evidence) != 1 || evidence[0].(map[string]any)["ref"] != "e1" {
+		if call.Name != "submit_result" || call.Arguments["summary"] == "" || len(evidence) != 2 ||
+			evidence[0].(map[string]any)["ref"] != "e1" || evidence[1].(map[string]any)["ref"] != "e5" {
 			t.Fatalf("%s: last call = %+v", name, call)
 		}
 

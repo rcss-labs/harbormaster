@@ -75,8 +75,9 @@ func Demo() *Provider {
 	}}
 }
 
-// DemoInvestigator returns a provider that reads the task's first service and
-// its timeline, then submits a result that cites the first piece it was shown.
+// DemoInvestigator returns a provider that reads the task's first service, its
+// timeline and its logs, then submits a result that cites the first piece it was
+// shown and the first log line.
 func DemoInvestigator() *Provider { return Func(investigatorStep) }
 
 var (
@@ -85,30 +86,36 @@ var (
 )
 
 func investigatorStep(req provider.Request) Step {
-	var serviceID, ref string
-	results := 0
+	var serviceID string
+	var firstUnit []string // the first unit id of each tool result, "" when it had none
 	for _, m := range req.Messages {
-		switch found := unitMarker.FindStringSubmatch(m.Text); {
+		switch {
 		case m.Role == provider.RoleTool:
-			results++
-			if ref == "" && found != nil {
-				ref = found[1]
+			unit := ""
+			if found := unitMarker.FindStringSubmatch(m.Text); found != nil {
+				unit = found[1]
 			}
+			firstUnit = append(firstUnit, unit)
 		case serviceID == "" && m.Role == provider.RoleUser:
 			if id := taskServiceID.FindStringSubmatch(m.Text); id != nil {
 				serviceID = id[1]
 			}
 		}
 	}
+	results := len(firstUnit)
 	// A user message after the task tells the model to finish.
 	told := len(req.Messages) > 1 && req.Messages[len(req.Messages)-1].Role == provider.RoleUser
-	if reads := []string{"get_service", "get_service_timeline"}; serviceID != "" && !told && results < len(reads) {
+	if reads := []string{"get_service", "get_service_timeline", "get_service_logs"}; serviceID != "" && !told && results < len(reads) {
 		return ToolCalls(provider.Usage{InputTokens: 80, OutputTokens: 12},
 			provider.ToolCall{ID: fmt.Sprintf("demo-read-%d", results+1), Name: reads[results], Arguments: map[string]any{"service_id": serviceID}})
 	}
+	// It cites the first thing it read and, when the service had log lines, the first line.
 	evidence := []any{}
-	if ref != "" {
-		evidence = append(evidence, map[string]any{"ref": ref, "note": "The first thing the demo model read."})
+	if len(firstUnit) > 0 && firstUnit[0] != "" {
+		evidence = append(evidence, map[string]any{"ref": firstUnit[0], "note": "The first thing the demo model read."})
+	}
+	if len(firstUnit) > 2 && firstUnit[2] != "" {
+		evidence = append(evidence, map[string]any{"ref": firstUnit[2], "note": "The first log line the demo model read."})
 	}
 	return ToolCalls(provider.Usage{InputTokens: 120, OutputTokens: 30}, provider.ToolCall{
 		ID: "demo-submit", Name: "submit_result",
