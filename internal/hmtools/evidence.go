@@ -3,7 +3,7 @@ package hmtools
 import (
 	"bytes"
 	"encoding/json"
-	"sort"
+	"strings"
 )
 
 // EvidenceKind says how a tool's answer is attributed to services.
@@ -102,16 +102,28 @@ func EvidenceRuleFor(tool string) (EvidenceRule, bool) {
 }
 
 // EvidenceAction is the action ("view" or "logs") Harbormaster uses to derive a label again from the tool name.
-// It is false for EvidenceNone tools and for unknown tools.
+// It is false for EvidenceNone tools, unknown tools, an unknown kind and an action other than view or logs.
 func EvidenceAction(tool string) (string, bool) {
 	rule, ok := evidenceRules[tool]
-	if !ok || rule.Kind == EvidenceNone || (rule.Action != EvidenceView && rule.Action != EvidenceLogs) {
+	if !ok || !citable(rule) {
 		return "", false
 	}
 	return rule.Action, true
 }
 
+// citable is true for a rule of a known, citable kind with a known action; every other rule gives no evidence.
+func citable(rule EvidenceRule) bool {
+	if rule.Kind != EvidenceServiceArg && rule.Kind != EvidencePerItem {
+		return false
+	}
+	return rule.Action == EvidenceView || rule.Action == EvidenceLogs
+}
+
 // Unit is one citable piece of a tool answer, labelled with the one service and action that govern it.
+// ServiceID is the caller's string, not a parsed id: for EvidenceServiceArg it is the call's own argument, for
+// EvidencePerItem the element's id member exactly as it appeared in the (possibly scrubbed) body. It is only known
+// to be non-empty, at most 512 bytes, free of control characters, edge spaces and "[" (the scrubber's marker); the
+// caller must still parse it (model.ParseServiceID) and check what the identity may read.
 type Unit struct {
 	ServiceID string
 	Action    string
@@ -120,20 +132,18 @@ type Unit struct {
 
 // Units splits a tool answer into citable units. It is pure and never panics. Anything it cannot attribute to
 // exactly one service is dropped: an unknown tool, a rule of kind none, an invalid or oversized body, a bad
-// service_id argument, or an element without a usable id. The service id of a EvidenceServiceArg unit is the
-// call's own argument, never a value found in the body.
+// service_id argument, a duplicate key where it would make the attribution ambiguous, or an element without a
+// usable id. The service id of a EvidenceServiceArg unit is the call's own argument, never a value found in the
+// body.
 func Units(tool string, args map[string]any, body string) []Unit {
 	rule, ok := evidenceRules[tool]
-	if !ok || len(body) > maxEvidenceBody || !json.Valid([]byte(body)) {
-		return nil
-	}
-	if rule.Action != EvidenceView && rule.Action != EvidenceLogs {
+	if !ok || !citable(rule) || len(body) > maxEvidenceBody || !json.Valid([]byte(body)) {
 		return nil
 	}
 	switch rule.Kind {
 	case EvidenceServiceArg:
 		serviceID, isString := args["service_id"].(string)
-		if !isString || serviceID == "" || len(serviceID) > maxEvidenceIDBytes {
+		if !isString || !usableServiceID(serviceID) {
 			return nil
 		}
 		return serviceArgUnits(serviceID, rule.Action, []byte(body))
@@ -143,45 +153,97 @@ func Units(tool string, args map[string]any, body string) []Unit {
 	return nil
 }
 
-// serviceArgUnits makes one unit per top-level member of an object (one per element when the member is an array),
-// one per element of a top-level array, or one for a scalar body.
+// usableServiceID accepts a non-empty id of at most 512 bytes without control characters, leading or trailing
+// space, or "[" (which the secret scrubber uses for its markers, so such an id was not the original).
+func usableServiceID(id string) bool {
+	if id == "" || len(id) > maxEvidenceIDBytes || strings.ContainsRune(id, '[') || strings.TrimSpace(id) != id {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < 0x20 || id[i] == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// member is one member of a JSON object, in document order.
+type member struct {
+	name  string
+	value json.RawMessage
+}
+
+// objectMembers reads a valid JSON object into its members in document order. It reports a repeated name, which
+// different readers resolve differently, so the caller decides what to do with it.
+func objectMembers(raw []byte) (members []member, duplicate, ok bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false, false
+	}
+	seen := map[string]struct{}{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		name, isName := token.(string)
+		if err != nil || !isName {
+			return nil, false, false
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return nil, false, false
+		}
+		if _, repeated := seen[name]; repeated {
+			duplicate = true
+		}
+		seen[name] = struct{}{}
+		members = append(members, member{name: name, value: value})
+	}
+	return members, duplicate, true
+}
+
+// arrayElements reads a valid JSON array into its elements.
+func arrayElements(raw []byte) ([]json.RawMessage, bool) {
+	var elements []json.RawMessage
+	if json.Unmarshal(raw, &elements) != nil {
+		return nil, false
+	}
+	return elements, true
+}
+
+// serviceArgUnits makes one unit per top-level member of an object (one per element, each prefixed with the member
+// name, when the member is an array), one per element of a top-level array, or one for a scalar body. A repeated
+// top-level member name gives no units.
 func serviceArgUnits(serviceID, action string, body []byte) []Unit {
 	var units []Unit
-	add := func(prefix string, raw json.RawMessage) bool {
+	add := func(prefix string, raw []byte) bool {
 		units = append(units, Unit{ServiceID: serviceID, Action: action, Text: prefix + compactJSON(raw)})
 		return len(units) < maxEvidenceUnits
 	}
 	switch firstByte(body) {
 	case '{':
-		var members map[string]json.RawMessage
-		if json.Unmarshal(body, &members) != nil {
+		members, duplicate, ok := objectMembers(body)
+		if !ok || duplicate {
 			return nil
 		}
-		names := make([]string, 0, len(members))
-		for name := range members {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if firstByte(members[name]) == '[' {
-				var elements []json.RawMessage
-				if json.Unmarshal(members[name], &elements) != nil {
-					continue
-				}
-				for _, element := range elements {
-					if !add("", element) {
-						return units
-					}
+		for _, m := range members {
+			if firstByte(m.value) != '[' {
+				if !add(m.name+": ", m.value) {
+					return units
 				}
 				continue
 			}
-			if !add(name+": ", members[name]) {
-				return units
+			elements, ok := arrayElements(m.value)
+			if !ok {
+				return nil
+			}
+			for _, element := range elements {
+				if !add(m.name+": ", element) {
+					return units
+				}
 			}
 		}
 	case '[':
-		var elements []json.RawMessage
-		if json.Unmarshal(body, &elements) != nil {
+		elements, ok := arrayElements(body)
+		if !ok {
 			return nil
 		}
 		for _, element := range elements {
@@ -196,37 +258,45 @@ func serviceArgUnits(serviceID, action string, body []byte) []Unit {
 }
 
 // perItemUnits turns the elements of the rule's array into units, each attributed to the id in its own member.
-// An element without a non-empty string id of at most 512 bytes is dropped, and so is everything outside the array.
+// An element without a usable string id, or with a repeated member name, is dropped, and so is everything outside
+// the array. A repeated top-level member name gives no units.
 func perItemUnits(rule EvidenceRule, body []byte) []Unit {
-	if firstByte(body) != '{' {
-		return nil
-	}
-	var top map[string]json.RawMessage
-	if json.Unmarshal(body, &top) != nil {
-		return nil
-	}
-	rawItems, present := top[rule.Items]
-	if !present || firstByte(rawItems) != '[' {
+	top, duplicate, ok := objectMembers(body)
+	if !ok || duplicate {
 		return nil
 	}
 	var elements []json.RawMessage
-	if json.Unmarshal(rawItems, &elements) != nil {
-		return nil
+	for _, m := range top {
+		if m.name != rule.Items {
+			continue
+		}
+		if firstByte(m.value) != '[' {
+			return nil
+		}
+		if elements, ok = arrayElements(m.value); !ok {
+			return nil
+		}
 	}
 	var units []Unit
 	for _, element := range elements {
 		if firstByte(element) != '{' {
 			continue
 		}
-		var members map[string]json.RawMessage
-		if json.Unmarshal(element, &members) != nil {
+		members, duplicate, ok := objectMembers(element)
+		if !ok || duplicate {
 			continue
 		}
-		var serviceID string
-		if json.Unmarshal(members[rule.IDField], &serviceID) != nil || serviceID == "" || len(serviceID) > maxEvidenceIDBytes {
-			continue
+		for _, m := range members {
+			if m.name != rule.IDField {
+				continue
+			}
+			var serviceID string
+			if json.Unmarshal(m.value, &serviceID) != nil || !usableServiceID(serviceID) {
+				break
+			}
+			units = append(units, Unit{ServiceID: serviceID, Action: rule.Action, Text: compactJSON(element)})
+			break
 		}
-		units = append(units, Unit{ServiceID: serviceID, Action: rule.Action, Text: compactJSON(element)})
 		if len(units) >= maxEvidenceUnits {
 			break
 		}

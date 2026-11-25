@@ -11,13 +11,14 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
 // evidenceRulesEnv is a server with two readers of the Prod tag: one holding View only and one holding View and Logs.
 type evidenceRulesEnv struct {
 	*logSearchEnv
 	viewOnly, viewAndLogs *apiClient
-	admin                 *apiClient
+	admin, noGrant        *apiClient
 	// args holds the arguments each service-scoped tool needs to answer 200 for the payments service.
 	args map[string]any
 }
@@ -33,13 +34,15 @@ func newEvidenceRulesEnv(t *testing.T) *evidenceRulesEnv {
 	for name, actions := range map[string]authz.ActionSet{
 		"ev-view-only": authz.ActionSet(authz.View),
 		"ev-view-logs": authz.ActionSet(authz.View | authz.Logs),
+		"ev-no-grant":  authz.ActionSet(authz.View),
 	} {
 		user, err := env.st.CreateUser(t.Context(), name, hash, false, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, tag := range tags {
-			if tag.Name == "Prod" {
+			// ev-no-grant reads Dev only, so it holds nothing on the payments service (a Prod service).
+			if (tag.Name == "Prod") == (name != "ev-no-grant") {
 				if err := env.st.SetPermission(t.Context(), user.ID, tag.ID, actions); err != nil {
 					t.Fatal(err)
 				}
@@ -48,6 +51,7 @@ func newEvidenceRulesEnv(t *testing.T) *evidenceRulesEnv {
 	}
 	env.viewOnly = login(t, env.srv, "ev-view-only", testPassword)
 	env.viewAndLogs = login(t, env.srv, "ev-view-logs", testPassword)
+	env.noGrant = login(t, env.srv, "ev-no-grant", testPassword)
 	env.admin = login(t, env.srv, "sam", testPassword)
 
 	// A task and a revision that really exist, for the two tools that take one.
@@ -203,6 +207,118 @@ func TestEvidenceRules_PerItemShapesMatchTheHandlers(t *testing.T) {
 			if unit.Action != rule.Action {
 				t.Errorf("%s: unit action %q, want %q", tool.Name, unit.Action, rule.Action)
 			}
+		}
+	}
+	if checked != 4 {
+		t.Errorf("checked %d per-item tools, want 4", checked)
+	}
+}
+
+func unitIDs(units []hmtools.Unit) []string {
+	var ids []string
+	for _, unit := range units {
+		ids = append(ids, unit.ServiceID)
+	}
+	return ids
+}
+
+// A reader with no grant on a service must get nothing citable about it: every service-scoped tool answers 404 and
+// no per-item answer holds it. A reader of Prod only must get units for Prod services only.
+func TestEvidenceRules_AReaderOnlyGetsEvidenceForTheirOwnServices(t *testing.T) {
+	env := newEvidenceRulesEnv(t)
+	adminIDs := map[string]bool{}
+	for _, tool := range hmtools.Tools() {
+		rule, _ := hmtools.EvidenceRuleFor(tool.Name)
+		switch rule.Kind {
+		case hmtools.EvidenceServiceArg:
+			if status, body := callTool(t, env.noGrant, tool, env.args); status != http.StatusNotFound {
+				t.Errorf("%s: a reader with no grant got %d: %.200s", tool.Name, status, body)
+			}
+		case hmtools.EvidencePerItem:
+			status, body := callTool(t, env.admin, tool, env.args)
+			if status != http.StatusOK {
+				t.Fatalf("%s: admin got %d", tool.Name, status)
+			}
+			for _, id := range unitIDs(hmtools.Units(tool.Name, env.args, string(body))) {
+				adminIDs[tool.Name+" "+id] = true
+			}
+			// The no-grant reader holds View on Dev only: nothing about the Prod payments service may reach it.
+			status, body = callTool(t, env.noGrant, tool, env.args)
+			switch {
+			case tool.Name == "search_logs" && status == http.StatusNotFound:
+			case status != http.StatusOK:
+				t.Errorf("%s: a reader with no grant on the service got %d: %.200s", tool.Name, status, body)
+			default:
+				for _, id := range unitIDs(hmtools.Units(tool.Name, env.args, string(body))) {
+					if id == paymentsID() || !adminIDs[tool.Name+" "+id] {
+						t.Errorf("%s: a reader with no grant on the service got a unit for %s", tool.Name, id)
+					}
+				}
+			}
+			reader := env.viewOnly
+			if rule.Action == hmtools.EvidenceLogs {
+				reader = env.viewAndLogs
+			}
+			status, body = callTool(t, reader, tool, env.args)
+			if status != http.StatusOK {
+				t.Errorf("%s: the Prod reader got %d: %.200s", tool.Name, status, body)
+				continue
+			}
+			readerIDs := unitIDs(hmtools.Units(tool.Name, env.args, string(body)))
+			if len(readerIDs) == 0 {
+				t.Errorf("%s: the Prod reader got no units", tool.Name)
+			}
+			for _, id := range readerIDs {
+				if id == stagingWebID() || (!adminIDs[tool.Name+" "+id] && tool.Name != "search_logs") {
+					t.Errorf("%s: the Prod reader got a unit for %s, which they may not read", tool.Name, id)
+				}
+				if tool.Name == "search_logs" && id != paymentsID() {
+					t.Errorf("search_logs: unit for %s, want only the requested service", id)
+				}
+			}
+			if tool.Name == "list_services" {
+				adminCount := 0
+				for key := range adminIDs {
+					if strings.HasPrefix(key, "list_services ") {
+						adminCount++
+					}
+				}
+				if len(readerIDs) >= adminCount {
+					t.Errorf("list_services: the Prod reader got %d units, admin %d: no narrowing", len(readerIDs), adminCount)
+				}
+			}
+		}
+	}
+}
+
+// Units reads the text the model is shown, which has been through the secret scrubber. The ids in it must survive
+// that, or no evidence could ever be cited. This stays red until the scrubber keeps Harbormaster's own service ids
+// (branch agent/ids); it is its own test so the failure is read for what it is.
+func TestEvidenceRules_UnitsKeepTheirIDsThroughTheScrubber(t *testing.T) {
+	env := newEvidenceRulesEnv(t)
+	checked := 0
+	for _, tool := range hmtools.Tools() {
+		rule, _ := hmtools.EvidenceRuleFor(tool.Name)
+		if rule.Kind != hmtools.EvidencePerItem {
+			continue
+		}
+		checked++
+		status, body := callTool(t, env.admin, tool, env.args)
+		if status != http.StatusOK {
+			t.Fatalf("%s: status %d", tool.Name, status)
+		}
+		want := unitIDs(hmtools.Units(tool.Name, env.args, string(body)))
+		if len(want) == 0 {
+			t.Fatalf("%s: the handler's own answer gave no units", tool.Name)
+		}
+		for _, id := range want {
+			if _, err := model.ParseServiceID(id); err != nil {
+				t.Fatalf("%s: handler id %q does not parse: %v", tool.Name, id, err)
+			}
+		}
+		got := unitIDs(hmtools.Units(tool.Name, env.args, secretshape.ScrubText(string(body))))
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("%s: after scrubbing %d units with ids %.300q, want the handler's %d ids %.300q", tool.Name, len(got), got, len(want), want)
 		}
 	}
 	if checked != 4 {

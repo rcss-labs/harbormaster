@@ -102,24 +102,16 @@ func TestEvidenceAction_NoneAndUnknownAreNotOK(t *testing.T) {
 
 func TestUnits_ServiceArgSplitsMembersAndArrays(t *testing.T) {
 	body := `{"name":"web", "tasks": [ {"id":1}, {"id": 2} ], "count": 3, "empty": []}`
-	units := Units("get_service", serviceArgs(svcA), body)
-	want := []string{`count: 3`, `name: "web"`, `{"id":1}`, `{"id":2}`}
-	got := unitTexts(units)
-	if len(got) != len(want) {
-		t.Fatalf("units %q, want %q", got, want)
-	}
-	seen := map[string]bool{}
-	for _, text := range got {
-		seen[text] = true
-	}
-	for _, text := range want {
-		if !seen[text] {
-			t.Errorf("missing unit %q in %q", text, got)
+	want := []string{`name: "web"`, `tasks: {"id":1}`, `tasks: {"id":2}`, `count: 3`}
+	for repeat := 0; repeat < 5; repeat++ {
+		units := Units("get_service", serviceArgs(svcA), body)
+		if got := unitTexts(units); fmt.Sprintf("%q", got) != fmt.Sprintf("%q", want) {
+			t.Fatalf("repeat %d: units %q, want exactly %q", repeat, got, want)
 		}
-	}
-	for _, u := range units {
-		if u.ServiceID != svcA || u.Action != "view" {
-			t.Errorf("unit %+v mislabelled", u)
+		for _, u := range units {
+			if u.ServiceID != svcA || u.Action != "view" {
+				t.Errorf("unit %+v mislabelled", u)
+			}
 		}
 	}
 
@@ -290,23 +282,28 @@ func TestUnits_CapsTheNumberOfUnits(t *testing.T) {
 }
 
 func TestUnits_LinearOnLargeBodies(t *testing.T) {
-	var rows []string
-	size := 0
-	for i := 0; size < 2_000_000 && i < 50_000; i++ {
-		row := fmt.Sprintf(`{"t":"2026-01-01T00:00:00Z","service_id":"s%d","message":"line %d"}`, i%7, i)
-		rows = append(rows, row)
-		size += len(row) + 1
+	const rowCount = 50_000
+	rows := make([]string, rowCount)
+	for i := range rows {
+		rows[i] = fmt.Sprintf(`{"service_id":"s%d","m":"line %d"}`, i%7, i)
 	}
 	body := `{"rows":[` + strings.Join(rows, ",") + `],"capped":false}`
-	if len(body) > 2<<20 {
-		t.Fatalf("test body is %d bytes", len(body))
+	if len(body) > 2<<20 || strings.Count(body, `"service_id"`) != rowCount {
+		t.Fatalf("test body is %d bytes with %d rows", len(body), strings.Count(body, `"service_id"`))
+	}
+	members := make([]string, 100_000)
+	for i := range members {
+		members[i] = fmt.Sprintf(`"k%d":1`, i)
 	}
 	adversarial := map[string]string{
 		"rows":          body,
 		"deep nesting":  strings.Repeat("[", 5000) + strings.Repeat("]", 5000),
-		"many members":  "{" + strings.Repeat(`"k":1,`, 100000) + `"z":1}`,
+		"many members":  "{" + strings.Join(members, ",") + "}",
 		"long string":   `{"m":"` + strings.Repeat(`\"`, 400000) + `"}`,
 		"wide id array": `{"items":[` + strings.Repeat(`{"id":"x"},`, 90000) + `{"id":"y"}]}`,
+	}
+	if len(adversarial["many members"]) > 2<<20 {
+		t.Fatalf("many members body is %d bytes", len(adversarial["many members"]))
 	}
 	for name, input := range adversarial {
 		for _, tool := range []string{"search_logs", "get_service", "list_services"} {
@@ -317,7 +314,12 @@ func TestUnits_LinearOnLargeBodies(t *testing.T) {
 			}
 		}
 	}
-	if units := Units("search_logs", nil, body); len(units) != 2000 {
+	start := time.Now()
+	units := Units("search_logs", nil, body)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("50,000 rows took %v", elapsed)
+	}
+	if len(units) != 2000 {
 		t.Errorf("log rows: %d units, want the 2000 cap", len(units))
 	}
 }
@@ -370,5 +372,79 @@ func TestUnits_NeverPanics(t *testing.T) {
 				Units(tool.Name, args, body)
 			}
 		}
+	}
+}
+
+func TestEvidenceRules_TableCoversExactlyTheTools(t *testing.T) {
+	tools := Tools()
+	if len(evidenceRules) != len(tools) {
+		t.Errorf("%d rules for %d tools", len(evidenceRules), len(tools))
+	}
+	for _, tool := range tools {
+		if _, ok := evidenceRules[tool.Name]; !ok {
+			t.Errorf("tool %s has no rule", tool.Name)
+		}
+	}
+}
+
+func TestEvidence_ABadActionOrAnUnknownKindFailsClosed(t *testing.T) {
+	bad := map[string]EvidenceRule{
+		"tmp_bad_action":   {Kind: EvidenceServiceArg, Action: "operate"},
+		"tmp_empty_action": {Kind: EvidencePerItem, Action: "", Items: "items", IDField: "id"},
+		"tmp_bad_kind":     {Kind: EvidenceKind(99), Action: "view", Items: "items", IDField: "id"},
+	}
+	for name, rule := range bad {
+		evidenceRules[name] = rule
+	}
+	defer func() {
+		for name := range bad {
+			delete(evidenceRules, name)
+		}
+	}()
+	for name := range bad {
+		if action, ok := EvidenceAction(name); ok || action != "" {
+			t.Errorf("%s: EvidenceAction gave %q, %v", name, action, ok)
+		}
+		if units := Units(name, serviceArgs(svcA), `{"items":[{"id":"s1"}],"a":1}`); len(units) != 0 {
+			t.Errorf("%s: gave %+v", name, units)
+		}
+	}
+}
+
+func TestUnits_DuplicateKeysFailClosed(t *testing.T) {
+	// A duplicate id key inside an element: Go keeps the last, other readers keep the first, so drop the element.
+	body := `{"items":[{"id":"s1","id":"s2"},{"id":"ok","name":"a","name":"b"},{"id":"fine"}]}`
+	units := Units("list_services", nil, body)
+	if len(units) != 1 || units[0].ServiceID != "fine" {
+		t.Errorf("duplicate keys in an element: %+v", units)
+	}
+	// A duplicate top-level list key: no unit is citable.
+	if units := Units("list_services", nil, `{"items":[{"id":"s1"}],"items":[{"id":"s2"}]}`); len(units) != 0 {
+		t.Errorf("duplicate list key: %+v", units)
+	}
+	if units := Units("get_service", serviceArgs(svcA), `{"a":1,"a":2}`); len(units) != 0 {
+		t.Errorf("duplicate top-level member of a service-arg body: %+v", units)
+	}
+}
+
+func TestUnits_PerItemDropsIDsThatAreScrubberMarkersOrUnusable(t *testing.T) {
+	for _, id := range []string{"[redacted]", "abc[1]", "[", " lead", "trail ", `a\u0000b`, `a\nb`} {
+		body := `{"items":[{"id":"` + id + `"},{"id":"keep"}]}`
+		units := Units("list_services", nil, body)
+		if len(units) != 1 || units[0].ServiceID != "keep" {
+			t.Errorf("id %q: units %+v, want only keep", id, units)
+		}
+	}
+	if units := Units("get_service", serviceArgs("[redacted]"), `{"a":1}`); len(units) != 0 {
+		t.Errorf("a marker as the service argument gave %+v", units)
+	}
+}
+
+func TestUnits_PerItemElementWithWhitespaceIsCompacted(t *testing.T) {
+	body := "{ \"items\" : [ {\n\t\"id\" :  \"s1\" ,\r\n \"tags\" : [ 1 , 2 ] , \"n\" : \"a b\" } ] }"
+	units := Units("list_services", nil, body)
+	want := `{"id":"s1","tags":[1,2],"n":"a b"}`
+	if len(units) != 1 || units[0].ServiceID != "s1" || units[0].Text != want {
+		t.Errorf("units %+v, want text %s", units, want)
 	}
 }
