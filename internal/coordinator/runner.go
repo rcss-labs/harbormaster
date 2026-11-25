@@ -71,6 +71,7 @@ func RetentionFrom(c config.Config) store.Retention {
 		ScanRuns:           c.Retention.ScanRuns,
 		NotificationLog:    c.Retention.NotificationLog,
 		AgentConversations: c.Retention.AgentConversations,
+		AgentRuns:          c.Retention.AgentRuns,
 	}
 }
 

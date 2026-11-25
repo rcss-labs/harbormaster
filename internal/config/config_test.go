@@ -77,6 +77,7 @@ func TestLoad_Defaults(t *testing.T) {
 			ScanRuns:           720 * time.Hour,
 			NotificationLog:    720 * time.Hour,
 			AgentConversations: 720 * time.Hour,
+			AgentRuns:          2160 * time.Hour,
 		},
 		Scan: ScanConfig{
 			RoleName:    "harbormaster-scan",
@@ -1016,4 +1017,21 @@ func testCertPEM(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func TestLoad_RetentionAgentRuns(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.AgentRuns != 2160*time.Hour {
+		t.Errorf("default Retention.AgentRuns = %v, want 2160h", cfg.Retention.AgentRuns)
+	}
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_RETENTION_AGENT_RUNS": "48h"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.AgentRuns != 48*time.Hour {
+		t.Errorf("Retention.AgentRuns = %v, want 48h", cfg.Retention.AgentRuns)
+	}
 }

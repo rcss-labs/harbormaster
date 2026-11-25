@@ -75,3 +75,25 @@ func TestRetention_PrunesOldAgentConversations(t *testing.T) {
 		t.Fatalf("result = %v, want agent_conversations 1", res)
 	}
 }
+
+// Agent runs and investigations are pruned by the configured retention, through RunRetention under the coordinator lease.
+func TestRetention_PrunesOldInvestigations(t *testing.T) {
+	cfg := config.Config{Retention: config.RetentionConfig{AgentRuns: 24 * time.Hour}}
+	r := coordinator.RetentionFrom(cfg)
+	if r.AgentRuns != 24*time.Hour {
+		t.Fatalf("RetentionFrom AgentRuns = %v, want 24h", r.AgentRuns)
+	}
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if _, err := st.Pool.Exec(ctx, `insert into agent_investigations (subject_kind, subject_key, account_id, alert_kind, alert_title, alert_text, alert_opened_at, requested_at)
+		values ('service', 'service/a/r/c/s', 'a', 'k', 't', 'x', now(), now() - interval '3 days')`); err != nil {
+		t.Fatal(err)
+	}
+	res, err := st.RunRetention(ctx, time.Now(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res["agent_investigations"] != 1 {
+		t.Fatalf("result = %v, want agent_investigations 1", res)
+	}
+}
