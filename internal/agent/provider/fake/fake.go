@@ -5,6 +5,7 @@ package fake
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -58,7 +59,8 @@ func New(script ...Step) *Provider { return &Provider{script: script} }
 func Func(respond func(provider.Request) Step) *Provider { return &Provider{respond: respond} }
 
 // Demo returns a provider that calls get_overview, then, once it has the
-// result, answers in two sentences. When it is offered submit_result it plays
+// result, answers in two sentences. A question that names a service in quotes
+// is answered from list_services and get_service instead. When it is offered submit_result it plays
 // DemoInvestigator instead, so one provider serves both roles.
 func Demo() *Provider {
 	return &Provider{respond: func(req provider.Request) Step {
@@ -67,12 +69,70 @@ func Demo() *Provider {
 				return investigatorStep(req)
 			}
 		}
+		if name := askedService(req.Messages); name != "" {
+			return serviceQuestionStep(req.Messages, name)
+		}
 		if n := len(req.Messages); n > 0 && req.Messages[n-1].Role == provider.RoleTool {
 			return Text("This is a canned answer from the demo model. It did not read your estate.", provider.Usage{InputTokens: 120, OutputTokens: 18})
 		}
 		return ToolCalls(provider.Usage{InputTokens: 80, OutputTokens: 12},
 			provider.ToolCall{ID: "demo-call-1", Name: "get_overview", Arguments: map[string]any{}})
 	}}
+}
+
+// askedServiceName finds the service a question names in quotes, as in: How is the service "payments-api" doing?
+var askedServiceName = regexp.MustCompile(`(?i)\bservice\s+"([a-z0-9][a-z0-9._-]{0,63})"`)
+
+// askedService is the service the latest user message names, or "" when it names none.
+func askedService(messages []provider.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == provider.RoleUser {
+			if found := askedServiceName.FindStringSubmatch(messages[i].Text); found != nil {
+				return found[1]
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
+// jsonObject decodes the JSON object inside a tool result's text, which is wrapped in tags.
+func jsonObject(text string, into any) bool {
+	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	return start >= 0 && end > start && json.Unmarshal([]byte(text[start:end+1]), into) == nil
+}
+
+// serviceQuestionStep lists the services, reads the one the question names by the id the list gave, and reports its
+// task counts: the chain a real model follows, so a wrong id shows up as a failed read.
+func serviceQuestionStep(messages []provider.Message, name string) Step {
+	usage := provider.Usage{InputTokens: 90, OutputTokens: 14}
+	var results []provider.Message // tool results after the question
+	for i := len(messages) - 1; i >= 0 && messages[i].Role != provider.RoleUser; i-- {
+		if messages[i].Role == provider.RoleTool {
+			results = append([]provider.Message{messages[i]}, results...)
+		}
+	}
+	switch len(results) {
+	case 0:
+		return ToolCalls(usage, provider.ToolCall{ID: "demo-call-1", Name: "list_services", Arguments: map[string]any{}})
+	case 1:
+		var list struct {
+			Items []struct{ ID, Name string } `json:"items"`
+		}
+		if !results[0].IsError && jsonObject(results[0].Text, &list) {
+			for _, item := range list.Items {
+				if item.Name == name {
+					return ToolCalls(usage, provider.ToolCall{ID: "demo-call-2", Name: "get_service", Arguments: map[string]any{"service_id": item.ID}})
+				}
+			}
+		}
+		return Text(fmt.Sprintf("The list has no service %q.", name), usage)
+	}
+	var detail struct{ Running, Desired int }
+	if last := results[len(results)-1]; last.IsError || !jsonObject(last.Text, &detail) {
+		return Text(fmt.Sprintf("I could not read the service %q.", name), usage)
+	}
+	return Text(fmt.Sprintf("%s is running %d of %d tasks.", name, detail.Running, detail.Desired), usage)
 }
 
 // DemoInvestigator returns a provider that reads the task's first service, its

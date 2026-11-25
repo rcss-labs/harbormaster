@@ -205,3 +205,46 @@ func TestFake_FuncAnswersFromTheRequest(t *testing.T) {
 		t.Fatalf("resp = %+v, %v", resp, err)
 	}
 }
+
+// A question that names a service in quotes is answered from list_services and then get_service, by the id the list
+// gave: the whole chain a real model follows.
+func TestDemo_AServiceNamedInTheQuestionIsReadByTheIDFromTheList(t *testing.T) {
+	p := fake.Demo()
+	const list = "<tool_result_x>\n" + `{"items":[{"id":"aWQtb25l","name":"web","running":1,"desired":1},{"id":"aWQtdHdv","name":"image-resizer","running":0,"desired":2}]}` + "\n</tool_result_x>"
+	msgs := []provider.Message{{Role: provider.RoleUser, Text: `What is the state of the service "image-resizer"?`}}
+	step := func() provider.Response {
+		t.Helper()
+		resp, err := p.Generate(context.Background(), provider.Request{Messages: msgs}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	first := step()
+	if len(first.ToolCalls) != 1 || first.ToolCalls[0].Name != "list_services" {
+		t.Fatalf("first turn = %+v, want list_services", first)
+	}
+	msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, ToolCalls: first.ToolCalls},
+		provider.Message{Role: provider.RoleTool, ToolCallID: first.ToolCalls[0].ID, ToolName: "list_services", Text: list})
+	second := step()
+	if len(second.ToolCalls) != 1 || second.ToolCalls[0].Name != "get_service" || second.ToolCalls[0].Arguments["service_id"] != "aWQtdHdv" {
+		t.Fatalf("second turn = %+v, want get_service with the id of image-resizer", second)
+	}
+	detail := "<tool_result_x>\n" + `{"id":"aWQtdHdv","name":"image-resizer","running":0,"desired":2}` + "\n</tool_result_x>"
+	msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, ToolCalls: second.ToolCalls},
+		provider.Message{Role: provider.RoleTool, ToolCallID: second.ToolCalls[0].ID, ToolName: "get_service", Text: detail})
+	if last := step(); len(last.ToolCalls) != 0 || !strings.Contains(last.Text, "image-resizer is running 0 of 2 tasks") {
+		t.Fatalf("last turn = %+v, want the counts from get_service", last)
+	}
+
+	// A service the list does not have, and a read that fails, are said so.
+	missing := []provider.Message{{Role: provider.RoleUser, Text: `How is the service "nope"?`}, {Role: provider.RoleAssistant, ToolCalls: first.ToolCalls},
+		{Role: provider.RoleTool, ToolCallID: "demo-call-1", ToolName: "list_services", Text: list}}
+	if resp, _ := p.Generate(context.Background(), provider.Request{Messages: missing}, nil); len(resp.ToolCalls) != 0 || !strings.Contains(resp.Text, `"nope"`) {
+		t.Fatalf("missing service = %+v", resp)
+	}
+	failed := append(append([]provider.Message(nil), msgs[:4]...), provider.Message{Role: provider.RoleTool, ToolCallID: "x", ToolName: "get_service", Text: "not found", IsError: true})
+	if resp, _ := p.Generate(context.Background(), provider.Request{Messages: failed}, nil); len(resp.ToolCalls) != 0 || !strings.Contains(resp.Text, "could not read") {
+		t.Fatalf("failed read = %+v", resp)
+	}
+}
