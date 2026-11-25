@@ -436,7 +436,7 @@ func (r *session) attempt(runCtx context.Context, c call, msgs []provider.Messag
 	r.emitUsage(usage, cost, true)
 
 	say := func(delta string) {
-		streamed = true
+		streamed = r.found == nil // an investigator's text is never shown, so its call may be retried
 		r.spoke = r.spoke || strings.TrimSpace(delta) != ""
 		r.emit(Event{Type: "text", Delta: delta})
 	}

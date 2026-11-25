@@ -59,7 +59,6 @@ func TestNumberUnits_PerItemToolShowsTheRestAsNotCitable(t *testing.T) {
 	}
 }
 
-// Needs the scrubber to keep a Harbormaster id that stands alone in a string.
 func TestInvestigator_PerItemUnitsCarryTheItemsOwnService(t *testing.T) {
 	body := `{"items":[{"service_id":"` + checkoutID + `","title":"down"},{"title":"account unreachable"},{"service_id":"` + paymentsID + `","title":"crash loop"}]}`
 	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "list_alerts", Arguments: map[string]any{}}), calls(submitCall(plainSummary, cite("e2"), cite("e1"))))
@@ -230,6 +229,67 @@ func TestInvestigator_UnitsAfterTheCutAreNotCitable(t *testing.T) {
 	// The unit the cut went through keeps its whole text.
 	if want := fmt.Sprintf(`events: {"n":%d,"message":"task stopped"}`, last-1); res.Evidence[0].Excerpt != want {
 		t.Errorf("excerpt = %q, want %q", res.Evidence[0].Excerpt, want)
+	}
+}
+
+// A cut inside a marker, such as after "[e12", shows no unit.
+func TestInvestigator_AUnitNeedsItsWholeMarker(t *testing.T) {
+	body := manyEvents(30)
+	args := map[string]any{"service_id": checkoutID}
+	shown, units := numberUnits("get_service_logs", args, body, 1)
+	twelfth := units[11]
+	start := twelfth.end - len("[e12]")
+	if shown[start:twelfth.end] != "[e12]" {
+		t.Fatalf("marker = %q", shown[start:twelfth.end])
+	}
+	for cut := start - 1; cut <= twelfth.end+1; cut++ {
+		want := cut >= twelfth.end
+		p := fake.New(tool("c1", "get_service_logs"), calls(submitCall(plainSummary, cite("e12"), cite("e11"))))
+		l := newLoop(p, replies(map[string]string{"get_service_logs": body}), func(l *Limits) { l.MaxResultBytes = cut })
+		res := requireResult(t, investigate(t, l, p, investigatorInput()))
+		if got := len(res.Evidence) == 2; got != want || res.Evidence[len(res.Evidence)-1].Excerpt != `events: {"n":10,"message":"task stopped"}` {
+			t.Errorf("result cut %d bytes after the marker's start: evidence %+v", cut-start, res.Evidence)
+		}
+
+		// The same when the final call is what cuts the result.
+		f := newFindings()
+		res2 := &toolResult{tag: "tool_result_aaa111", tool: "get_service_logs", data: shown, units: units}
+		f.unseen = []*toolResult{res2}
+		f.noteShown([]provider.Message{{Role: provider.RoleTool, Text: res2.render(cut)}})
+		if _, got := f.units["e12"]; got != want || len(f.units) != map[bool]int{false: 11, true: 12}[want] {
+			t.Errorf("shown %d bytes after the marker's start: %d units citable", cut-start, len(f.units))
+		}
+	}
+}
+
+func TestInvestigator_AFailedCallShowsNothing(t *testing.T) {
+	// The failed gathering call carries the whole result. The time it took makes its retry the final
+	// call, which has room for a part of the result only.
+	in := investigatorInput()
+	in.Model.ContextTokens = 45_000
+	var late time.Duration
+	var whole, cut int
+	p := fake.Func(func(req provider.Request) fake.Step {
+		switch {
+		case len(req.Messages) == 1:
+			return tool("c1", "get_service_logs")
+		case whole == 0:
+			whole = lastShownRef(t, resultText(t, req, "c1"))
+			late = 4 * time.Minute
+			return fake.Fail(&provider.Error{Kind: "unavailable", Retryable: true, Message: "down"})
+		}
+		cut = lastShownRef(t, resultText(t, req, "c1"))
+		return calls(submitCall(plainSummary, cite(fmt.Sprintf("e%d", whole)), cite(fmt.Sprintf("e%d", cut+1)), cite(fmt.Sprintf("e%d", cut))))
+	})
+	l := newLoop(p, replies(map[string]string{"get_service_logs": manyEvents(2500)}), func(l *Limits) { l.MaxResultBytes = 95_000 })
+	started := time.Now()
+	l.now = func() time.Time { return started.Add(late) }
+	res := requireResult(t, investigate(t, l, p, in))
+	if cut == 0 || cut >= whole {
+		t.Fatalf("the final call showed up to e%d, the failed one up to e%d", cut, whole)
+	}
+	if len(res.Evidence) != 1 || res.EvidenceDropped != 2 || !strings.Contains(res.Evidence[0].Excerpt, fmt.Sprintf(`"n":%d,`, cut-1)) {
+		t.Errorf("evidence %+v, dropped %d", res.Evidence, res.EvidenceDropped)
 	}
 }
 

@@ -70,6 +70,8 @@ func TestRuns_InvestigatorNeedsATaskAndNoMessages(t *testing.T) {
 		"null task":            func(b map[string]any) { b["task"] = nil },
 		"messages":             func(b map[string]any) { b["messages"] = []map[string]string{{"role": "user", "text": "hi"}} },
 		"a page":               func(b map[string]any) { b["page"] = map[string]string{"path": "/services"} },
+		"a page's service":     func(b map[string]any) { b["page"] = map[string]string{"service_id": checkoutID} },
+		"a page's cluster":     func(b map[string]any) { b["page"] = map[string]string{"cluster_id": prodCluster.ID()} },
 		"other kind":           edit(func(task, _, _ map[string]any) { task["kind"] = "summarise" }),
 		"no kind":              edit(func(task, _, _ map[string]any) { delete(task, "kind") }),
 		"unknown task member":  edit(func(task, _, _ map[string]any) { task["system"] = "x" }),

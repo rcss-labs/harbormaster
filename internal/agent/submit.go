@@ -85,8 +85,8 @@ func parseSubmission(call provider.ToolCall) (sub submission, problem string) {
 	if sub.summary, ok = call.Arguments["summary"].(string); !ok || strings.TrimSpace(sub.summary) == "" {
 		return submission{}, "submit_result needs a summary: a string that is not empty."
 	}
-	given, has := call.Arguments["evidence"]
-	if !has {
+	given := call.Arguments["evidence"]
+	if given == nil { // absent or null
 		return sub, ""
 	}
 	list, ok := given.([]any)
@@ -104,7 +104,7 @@ func parseSubmission(call provider.ToolCall) (sub submission, problem string) {
 			case "ref":
 				c.ref, _ = value.(string)
 			case "note":
-				if c.note, ok = value.(string); !ok {
+				if c.note, ok = value.(string); !ok && value != nil {
 					return submission{}, "The note of each entry in the evidence of submit_result must be a string."
 				}
 			default:

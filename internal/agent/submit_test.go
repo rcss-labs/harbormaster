@@ -152,6 +152,36 @@ func TestInvestigator_OtherCallsBesideSubmitResultAreNotRun(t *testing.T) {
 	if text := resultText(t, requestAt(t, p, 1), "c2"); !strings.Contains(text, "was not run") {
 		t.Errorf("c2 was answered with %q", text)
 	}
+	answered := 0
+	for _, m := range requestAt(t, p, 1).Messages {
+		if m.Role == provider.RoleTool {
+			answered++
+			if !m.IsError {
+				t.Errorf("call %s beside a refused submit is not answered with an error", m.ToolCallID)
+			}
+		}
+	}
+	if answered != 3 {
+		t.Errorf("%d calls were answered, want 3", answered)
+	}
+}
+
+func TestInvestigator_NullEvidenceAndNullNoteCountAsAbsent(t *testing.T) {
+	none := provider.ToolCall{ID: "submit", Name: "submit_result", Arguments: map[string]any{"summary": plainSummary, "evidence": nil}}
+	if res, _ := submitted(t, serviceBody, none); res.Summary != plainSummary || len(res.Evidence) != 0 || res.EvidenceDropped != 0 {
+		t.Errorf("null evidence: %+v", res)
+	}
+	res, _ := submitted(t, serviceBody, submitCall(plainSummary, map[string]any{"ref": "e1", "note": nil}, map[string]any{"ref": "e2"}))
+	if len(res.Evidence) != 2 || res.Evidence[0].Note != agentresult.ReplacementNote || res.Evidence[1].Note != agentresult.ReplacementNote {
+		t.Errorf("null note: %+v", res)
+	}
+}
+
+func TestInvestigator_ExcerptIsTheStoredTextNotTheLine(t *testing.T) {
+	res, _ := submitted(t, `{"message":"one`+"\u2028"+`two"}`, submitCall(plainSummary, cite("e1")))
+	if len(res.Evidence) != 1 || res.Evidence[0].Excerpt != "message: \"one\u2028two\"" {
+		t.Errorf("evidence = %+v", res.Evidence)
+	}
 }
 
 func TestInvestigator_MalformedSubmitIsAToolErrorAndCountsAStep(t *testing.T) {
@@ -166,7 +196,6 @@ func TestInvestigator_MalformedSubmitIsAToolErrorAndCountsAStep(t *testing.T) {
 		"summary is a number":     args(map[string]any{"summary": float64(3)}),
 		"unknown member":          args(map[string]any{"summary": plainSummary, "title": "x"}),
 		"evidence is a string":    args(map[string]any{"summary": plainSummary, "evidence": "e1"}),
-		"evidence is null":        args(map[string]any{"summary": plainSummary, "evidence": nil}),
 		"entry is a string":       args(map[string]any{"summary": plainSummary, "evidence": []any{"e1"}}),
 		"note is a number":        args(map[string]any{"summary": plainSummary, "evidence": []any{map[string]any{"ref": "e1", "note": float64(1)}}}),
 		"extra member past the cap": args(map[string]any{"summary": plainSummary, "evidence": func() []any {
