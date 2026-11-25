@@ -1,6 +1,7 @@
 // Types and hooks for the off-hours schedule endpoints. They mirror internal/api/offhours_dto.go.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
+import { LIVE_REFETCH_MS } from './polling'
 import type { TagDTO } from './types'
 
 /** Seven rows (Monday first) of 24 hourly flags; true means awake. */
@@ -160,6 +161,10 @@ export function useOffHoursSchedule(id: number | null) {
     queryKey: ['offhours', 'schedule', id],
     queryFn: () => api.get<OffHoursSchedule>(`/api/offhours/schedules/${id}`),
     enabled: id !== null,
+    // A saved schedule's rows stay pending until the reconciler takes them on; refresh until none is, then stop.
+    refetchInterval: (query: { state: { data: OffHoursSchedule | undefined } }) =>
+      query.state.data?.services.some((row) => row.state === 'pending') ? LIVE_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
   })
 }
 
