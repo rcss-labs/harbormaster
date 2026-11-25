@@ -332,7 +332,7 @@ func (s *Server) listUserTokens(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	if _, err := s.Store.GetUser(r.Context(), id); err != nil {
+	if _, err := s.Store.GetHumanUser(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -356,7 +356,7 @@ func (s *Server) deleteUserToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), userID)
+	target, err := s.Store.GetHumanUser(r.Context(), userID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -404,7 +404,7 @@ func (s *Server) deleteUserGrant(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), userID)
+	target, err := s.Store.GetHumanUser(r.Context(), userID)
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -15,9 +15,17 @@ type UserActions struct {
 	Actions  authz.ActionSet
 }
 
-// SetPermission stores the normalised action set for a user on a tag.
-// A normalised set of 0 deletes the row.
+// SetPermission stores the normalised action set for a human user on a tag.
+// A normalised set of 0 deletes the row. The agent identity's permissions change only through
+// SetAgentIdentityPermissions: for it, and for an absent user, this returns ErrNotFound and writes nothing.
 func (s *Store) SetPermission(ctx context.Context, userID int64, tag authz.TagID, actions authz.ActionSet) error {
+	var human bool
+	if err := s.Pool.QueryRow(ctx, `select exists (select 1 from users where id = $1 and kind = 'human')`, userID).Scan(&human); err != nil {
+		return fmt.Errorf("set permission: %w", err)
+	}
+	if !human {
+		return ErrNotFound
+	}
 	actions = authz.Normalize(actions)
 	if actions == 0 {
 		if _, err := s.Pool.Exec(ctx,
@@ -109,11 +117,17 @@ func (s *Store) UsersWithView(ctx context.Context, tag authz.TagID) ([]UserActio
 	return users, nil
 }
 
-// LoadSubject builds the authz subject for a user, or ErrNotFound if the user is gone.
+// agentIdentityActions is everything the agent identity may hold on a tag.
+const agentIdentityActions = authz.ActionSet(authz.View | authz.Logs)
+
+// LoadSubject builds the authz subject for a user, or ErrNotFound if the user is gone or of a kind this code does not
+// know. A human's permissions are returned as stored. The agent identity is never an admin and holds at most View and
+// Logs, whatever its rows say: an older task's permission editor can store more.
 func (s *Store) LoadSubject(ctx context.Context, userID int64) (authz.Subject, error) {
 	var sub authz.Subject
-	err := s.Pool.QueryRow(ctx, `select id, username, is_admin from users where id = $1`, userID).
-		Scan(&sub.UserID, &sub.Username, &sub.Admin)
+	var kind string
+	err := s.Pool.QueryRow(ctx, `select id, username, is_admin, kind from users where id = $1`, userID).
+		Scan(&sub.UserID, &sub.Username, &sub.Admin, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return authz.Subject{}, ErrNotFound
 	}
@@ -123,5 +137,20 @@ func (s *Store) LoadSubject(ctx context.Context, userID int64) (authz.Subject, e
 	if sub.Perms, err = s.PermissionsOf(ctx, userID); err != nil {
 		return authz.Subject{}, err
 	}
-	return sub, nil
+	switch kind {
+	case UserKindHuman:
+		return sub, nil
+	case UserKindAgent:
+		sub.Admin = false
+		for tag, actions := range sub.Perms {
+			if masked := actions & agentIdentityActions; masked != 0 {
+				sub.Perms[tag] = masked
+			} else {
+				delete(sub.Perms, tag)
+			}
+		}
+		return sub, nil
+	default:
+		return authz.Subject{}, ErrNotFound
+	}
 }

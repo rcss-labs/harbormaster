@@ -90,7 +90,7 @@ func (s *Service) exchangeCode(ctx context.Context, req TokenRequest, now time.T
 	if req.Resource != "" && req.Resource != code.Resource {
 		return TokenResponse{}, &TokenError{Code: "invalid_target", Description: "resource does not match the grant."}
 	}
-	user, err := s.Store.GetUser(ctx, code.UserID)
+	user, err := s.Store.GetHumanUser(ctx, code.UserID) // only a person holds an OAuth grant
 	if errors.Is(err, store.ErrNotFound) {
 		return TokenResponse{}, invalidGrant()
 	}

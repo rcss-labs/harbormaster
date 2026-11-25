@@ -53,7 +53,7 @@ func scanAPIToken(row pgx.Row) (APIToken, error) {
 // CreateAPIToken stores a new token and returns it with its id and creation time. In one transaction it locks the
 // user's row (so concurrent creates serialise), counts the user's unexpired personal tokens and returns ErrTokenLimit
 // when maxPerUser are already held. An empty AuthSource is stored as "password". Returns ErrNotFound when the user
-// is absent.
+// is absent or is not a human: the agent identity holds no personal token.
 func (s *Store) CreateAPIToken(ctx context.Context, t APIToken, maxPerUser int) (APIToken, error) {
 	return s.CreateAPITokenWithin(ctx, t, maxPerUser, nil)
 }
@@ -69,7 +69,7 @@ func (s *Store) CreateAPITokenWithin(ctx context.Context, t APIToken, maxPerUser
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	locked, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 for update`, t.UserID))
+	locked, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 and kind = 'human' for update`, t.UserID))
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return APIToken{}, ErrNotFound
@@ -105,14 +105,15 @@ func (s *Store) CreateAPITokenWithin(ctx context.Context, t APIToken, maxPerUser
 }
 
 // CreateRunToken stores a run token (kind "run", with RunID). It takes no per-user limit and does not touch the
-// personal-token count: run tokens are not the user's to list or revoke. Returns ErrNotFound when the user is absent.
+// personal-token count: run tokens are not the user's to list or revoke. It accepts the two kinds of user, a person
+// chatting and the agent identity, and no other. Returns ErrNotFound when the user is absent or of another kind.
 func (s *Store) CreateRunToken(ctx context.Context, t APIToken) (APIToken, error) {
 	if t.Kind != "run" || t.RunID == nil {
 		return APIToken{}, errors.New("create run token: needs kind run and a run id")
 	}
 	created, err := scanAPIToken(s.Pool.QueryRow(ctx,
 		`insert into api_tokens (public_id, user_id, kind, name, secret_hash, scope, auth_source, expires_at, run_id, redact_env)
-		 select $1, id, $3, $4, $5, $6, coalesce(nullif($7, ''), 'password'), $8, $9, $10 from users where id = $2
+		 select $1, id, $3, $4, $5, $6, coalesce(nullif($7, ''), 'password'), $8, $9, $10 from users where id = $2 and kind in ('human', 'agent')
 		 returning `+apiTokenColumns,
 		t.PublicID, t.UserID, t.Kind, t.Name, t.SecretHash, t.Scope, t.AuthSource, t.ExpiresAt, t.RunID, t.RedactEnv))
 	if errors.Is(err, pgx.ErrNoRows) {
