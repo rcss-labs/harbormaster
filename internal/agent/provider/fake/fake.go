@@ -59,11 +59,15 @@ func Func(respond func(provider.Request) Step) *Provider { return &Provider{resp
 
 // Demo returns a provider that calls get_overview, then, once it has the
 // result, answers in two sentences. When it is offered submit_result it plays
-// DemoInvestigator instead, so one provider serves both roles.
+// DemoReviewer or DemoInvestigator instead, by the task, so one provider serves
+// every role.
 func Demo() *Provider {
 	return &Provider{respond: func(req provider.Request) Step {
 		for _, tool := range req.Tools {
 			if tool.Name == "submit_result" {
+				if reviewTask.MatchString(req.Messages[0].Text) {
+					return reviewerStep(req)
+				}
 				return investigatorStep(req)
 			}
 		}
@@ -79,10 +83,55 @@ func Demo() *Provider {
 // its timeline, then submits a result that cites the first piece it was shown.
 func DemoInvestigator() *Provider { return Func(investigatorStep) }
 
+// DemoReviewer returns a provider that reads the analytics of the review it is
+// asked for, or the list of services when that gave nothing to cite, then
+// submits a result that cites the first piece it was shown.
+func DemoReviewer() *Provider { return Func(reviewerStep) }
+
 var (
 	taskServiceID = regexp.MustCompile(`"service_ids":\["([^"\\]+)"`)
 	unitMarker    = regexp.MustCompile(`(?m)^\[(e[0-9]{1,5})\] `)
+	// reviewTask is how a review's first message begins.
+	reviewTask = regexp.MustCompile(`\AWrite this review and submit it\.\n\nReview: ([A-Za-z ]+)\nRange: ([0-9]+[hd])\n`)
 )
+
+var reviewReads = map[string]string{
+	"Cost": "get_cost_analytics", "Security findings": "list_security",
+	"Reliability": "get_reliability_analytics", "Capacity": "get_capacity_analytics",
+}
+
+func reviewerStep(req provider.Request) Step {
+	var label, rng, ref string
+	results := 0
+	for i, m := range req.Messages {
+		if found := reviewTask.FindStringSubmatch(m.Text); i == 0 && found != nil {
+			label, rng = found[1], found[2]
+		}
+		if m.Role == provider.RoleTool {
+			results++
+			if found := unitMarker.FindStringSubmatch(m.Text); ref == "" && found != nil {
+				ref = found[1]
+			}
+		}
+	}
+	// A user message after the task tells the model to finish.
+	told := len(req.Messages) > 1 && req.Messages[len(req.Messages)-1].Role == provider.RoleUser
+	read := func(tool string, args map[string]any) Step {
+		return ToolCalls(provider.Usage{InputTokens: 80, OutputTokens: 12},
+			provider.ToolCall{ID: fmt.Sprintf("demo-read-%d", results+1), Name: tool, Arguments: args})
+	}
+	if first := reviewReads[label]; first != "" && !told {
+		switch {
+		case results == 0 && first == "list_security": // it takes no range
+			return read(first, map[string]any{})
+		case results == 0:
+			return read(first, map[string]any{"range": rng})
+		case results == 1 && ref == "":
+			return read("list_services", map[string]any{})
+		}
+	}
+	return demoSubmit("This is a canned review from the demo model. It did not judge the services.", ref)
+}
 
 func investigatorStep(req provider.Request) Step {
 	var serviceID, ref string
@@ -106,13 +155,18 @@ func investigatorStep(req provider.Request) Step {
 		return ToolCalls(provider.Usage{InputTokens: 80, OutputTokens: 12},
 			provider.ToolCall{ID: fmt.Sprintf("demo-read-%d", results+1), Name: reads[results], Arguments: map[string]any{"service_id": serviceID}})
 	}
+	return demoSubmit("This is a canned conclusion from the demo model. It did not judge the service.", ref)
+}
+
+// demoSubmit submits summary and cites ref, or nothing when ref is "".
+func demoSubmit(summary, ref string) Step {
 	evidence := []any{}
 	if ref != "" {
 		evidence = append(evidence, map[string]any{"ref": ref, "note": "The first thing the demo model read."})
 	}
 	return ToolCalls(provider.Usage{InputTokens: 120, OutputTokens: 30}, provider.ToolCall{
 		ID: "demo-submit", Name: "submit_result",
-		Arguments: map[string]any{"summary": "This is a canned conclusion from the demo model. It did not judge the service.", "evidence": evidence},
+		Arguments: map[string]any{"summary": summary, "evidence": evidence},
 	})
 }
 

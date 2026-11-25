@@ -36,12 +36,40 @@ type Event struct {
 	Result *agentresult.Result `json:"result,omitempty"`
 }
 
-// Task is what an investigator run works on. It takes the place of a chat's
-// messages.
+// Task is what an investigator or reviewer run works on. It takes the place of
+// a chat's messages.
 type Task struct {
-	Kind    string      `json:"kind"`
+	Kind string `json:"kind"`
+	// Subject and Alert are for an investigation.
 	Subject TaskSubject `json:"subject"`
 	Alert   TaskAlert   `json:"alert"`
+	// Review and Scope are for a review.
+	Review *TaskReview `json:"review"`
+	Scope  *TaskScope  `json:"scope"`
+}
+
+// TaskReview is what a review run writes.
+type TaskReview struct {
+	Type   string `json:"type"`
+	Range  string `json:"range"`
+	Period string `json:"period"`
+}
+
+// TaskScope is where a review looks. It is a focus, not an access rule. No
+// entries means everything the run's identity may see.
+type TaskScope struct {
+	Entries       []ScopeEntry `json:"entries"`
+	ServicesTotal int          `json:"services_total"`
+}
+
+// ScopeEntry is one tag, cluster or account of a review's scope.
+type ScopeEntry struct {
+	Kind      string `json:"kind"`
+	TagID     string `json:"tag_id"`
+	Name      string `json:"name"`
+	ClusterID string `json:"cluster_id"`
+	AccountID string `json:"account_id"`
+	Region    string `json:"region"`
 }
 
 // TaskSubject is what an investigation is about.
@@ -71,7 +99,7 @@ type RunInput struct {
 	Page            PageContext
 	Bearer          string
 	MaxCostMicroUSD int64
-	// Task is set for an investigator run, which has no Messages.
+	// Task is set for an investigator or reviewer run, which has no Messages.
 	Task *Task
 }
 
@@ -90,7 +118,7 @@ type Loop struct {
 	Tools    ToolRunner
 	Limits   Limits
 	// Log, when set, gets one line for each failed model call and one, with
-	// counts only, at the end of an investigator run.
+	// counts only, at the end of an investigator or reviewer run.
 	Log *slog.Logger
 
 	// Test seams: nonce makes each of the run's two random codes, newTimer makes the wait
@@ -145,11 +173,12 @@ type session struct {
 	timedOut bool // the run ended because its time ran out
 	spoke    bool // the reply in progress, or the last one, has text for the user
 
-	// For an investigator run only.
-	found    *findings          // nil for a chat
-	reminded bool               // the reminder turn was used
-	reminder []provider.Message // extra messages of the next gathering call
-	result   *agentresult.Result
+	// For an investigator or reviewer run only.
+	found     *findings          // nil for a chat
+	reminded  bool               // the reminder turn was used
+	reminder  []provider.Message // extra messages of the next gathering call
+	toolCalls int                // how many the model made, submit_result apart
+	result    *agentresult.Result
 }
 
 // Run drives one conversation turn to its end, reporting through emit. It
@@ -159,7 +188,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	r := &session{l: l, in: in, emit: emit, results: map[int]*toolResult{}, started: l.clock()}
 	r.tagCode, r.loopCode = l.newNonce(), l.newNonce()
 	r.codes = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(r.tagCode) + `|` + regexp.QuoteMeta(r.loopCode))
-	if in.Role == roleInvestigator {
+	if in.Role == roleInvestigator || in.Role == roleReviewer {
 		// Its answer is the result event: its text is for nobody.
 		r.found, in.Page = newFindings(), PageContext{}
 		r.emit = func(ev Event) {
@@ -168,7 +197,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			}
 		}
 	}
-	if (in.Task != nil) != (r.found != nil) {
+	if !taskFits(in.Role, in.Task) {
 		r.fail("invalid_request", "This kind of run is not supported.")
 		return nil
 	}
@@ -189,6 +218,9 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 		return nil
 	}
 	for _, tool := range hmtools.Tools() {
+		if _, offered := r.lookupTool(tool.Name); !offered {
+			continue
+		}
 		r.tools = append(r.tools, provider.ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema()})
 	}
 	if r.found != nil {
@@ -279,7 +311,8 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			} else {
 				// The final call shows its results too, so only the time kept for
 				// it can stop a tool.
-				msg, res = r.runTool(runCtx, call, i >= maxToolCallsPerTurn, r.lowTime())
+				overLimit := r.pastCallCap() || i >= maxToolCallsPerTurn
+				msg, res = r.runTool(runCtx, call, overLimit, r.lowTime())
 			}
 			r.messages = append(r.messages, msg)
 			r.results[len(r.messages)-1] = res
@@ -436,7 +469,7 @@ func (r *session) attempt(runCtx context.Context, c call, msgs []provider.Messag
 	r.emitUsage(usage, cost, true)
 
 	say := func(delta string) {
-		streamed = r.found == nil // an investigator's text is never shown, so its call may be retried
+		streamed = r.found == nil // a background run's text is never shown, so its call may be retried
 		r.spoke = r.spoke || strings.TrimSpace(delta) != ""
 		r.emit(Event{Type: "text", Delta: delta})
 	}
@@ -488,7 +521,7 @@ func (r *session) emitUsage(usage provider.Usage, cost int64, provisional bool) 
 // for it. Every failure here is a result for the model, not the end of the
 // run. With skip, the tool is not run at all and nothing is reported.
 func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit, skip bool) (provider.Message, *toolResult) {
-	tool, known := lookupTool(call.Name)
+	tool, known := r.lookupTool(call.Name)
 	name := "unknown_tool"
 	if known {
 		name = tool.Name
