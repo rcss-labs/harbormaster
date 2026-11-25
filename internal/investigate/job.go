@@ -3,14 +3,13 @@ package investigate
 import (
 	"context"
 	"errors"
-	"math"
-	"slices"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentjob"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
@@ -28,10 +27,6 @@ const (
 	// storeTry is how long each write that stores a result may take; three of them fit in the time the end of a run
 	// gives the saving of an answer (10 s).
 	storeTry = 3 * time.Second
-
-	// Codes of the agent's error event that mean something here.
-	codeNoResult    = "no_result"
-	codeUnavailable = "unavailable" // the model could not be reached
 
 	// Fixed reasons: what is stored of an investigation that ended without a result.
 	reasonBudget        = "budget"
@@ -70,33 +65,21 @@ func failed(reason string) ending  { return ending{kind: endFailed, reason: reas
 func skipped(reason string) ending { return ending{kind: endSkipped, reason: reason, word: reason} }
 
 // job is one claimed investigation. One goroutine owns it; however it ends, finish runs once. It never logs or audits
-// alert text, the agent's message or anything of the result.
+// alert text, the agent's message or anything of the result. The paid run itself is the driver's.
 type job struct {
 	r     *Runner
 	inv   store.Investigation
 	claim store.Claim
-	runs  *agentrun.Runner
+	drv   *agentjob.Driver
 
 	identity store.User
-	run      store.AgentRun
-	reserved bool // run is in the store and must be ended
-	refused  bool // run was refused for the budget
-	meter    *agentrun.Meter
-	turn     agentrun.Turn
+	prepared agentjob.Prepared
+	task     agentclient.Task
+	outcome  *agentjob.Outcome   // set once the driver has run
 	result   *agentresult.Result // the first one the agent sent
-	agentErr error               // why a call to the agent ended without an end event
-	cancel   context.CancelFunc
 
 	end  ending
 	once sync.Once
-}
-
-// plan is what a run needs to start.
-type plan struct {
-	task      agentclient.Task
-	timeout   time.Duration
-	redactEnv bool
-	token     string
 }
 
 // execute runs the job to its end. A panic before the end makes it a failed one; none ends the process.
@@ -113,11 +96,35 @@ func (j *job) execute(ctx context.Context) {
 }
 
 func (j *job) work(ctx context.Context) ending {
-	p, stop := j.setUp(ctx)
-	if stop != nil {
+	// Set-ups go one at a time, so that two of them cannot both take the last start the hourly cap allows. Until the
+	// reservation nothing is spent; the driver ends a run that was reserved whatever follows.
+	select {
+	case j.r.setUpCh <- struct{}{}:
+	case <-ctx.Done():
+		return j.notStarted()
+	}
+	setUpOver := sync.OnceFunc(func() { <-j.r.setUpCh })
+	defer setUpOver()
+	if stop := j.prepare(ctx); stop != nil {
 		return *stop
 	}
-	return j.stream(ctx, p)
+	out := j.drv.Run(ctx, j.prepared, agentjob.Job{
+		Role: roleName, Task: j.task, Details: j.details(),
+		Started: func(ctx context.Context, runID uuid.UUID, provider, model string) error {
+			return j.r.Store.StartInvestigationRun(ctx, j.claim, runID, provider, model, j.r.now())
+		},
+		// The claim was taken before the run timeout was known; from here it covers the whole run.
+		Renew: func(ctx context.Context, timeout time.Duration) error {
+			return j.r.Store.RenewInvestigation(ctx, j.claim, j.r.now(), runLease(timeout))
+		},
+		SetUpOver: setUpOver,
+		Conclude:  j.conclude,
+	})
+	j.outcome = &out
+	if !out.Finished { // nothing was reserved: the claim is ended here
+		j.end = j.endOf(out)
+	}
+	return j.end
 }
 
 func (j *job) logError(what string, err error) {
@@ -153,38 +160,31 @@ func (j *job) unready(ctx context.Context, what string, err error) *ending {
 	return &end
 }
 
-// setUp does everything up to the call of the agent. Set-ups go one at a time, so that two of them cannot both take
-// the last start the hourly cap allows. Until the reservation nothing is spent; a run that was reserved is ended by
-// finish whatever follows.
-func (j *job) setUp(ctx context.Context) (p plan, stop *ending) {
-	select {
-	case j.r.setUpCh <- struct{}{}:
-		defer func() { <-j.r.setUpCh }()
-	case <-ctx.Done():
-		end := j.notStarted()
-		return p, &end
+// unreadyByDriver ends a set-up that the driver could not finish and has logged.
+func (j *job) unreadyByDriver(ctx context.Context) *ending {
+	end := j.notStarted()
+	if ctx.Err() == nil {
+		end = j.retryOrFail(reasonError, retryUnavailable)
 	}
-	if p, stop = j.prepare(ctx); stop != nil {
-		return p, stop
-	}
-	return j.begin(ctx, p)
+	return &end
 }
 
 // prepare decides, without spending anything, whether there is something to run.
-func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
-	skip := func(reason string) (plan, *ending) {
+func (j *job) prepare(ctx context.Context) *ending {
+	skip := func(reason string) *ending {
 		end := skipped(reason)
-		return plan{}, &end
+		return &end
 	}
-	var err error
-	if j.identity, err = within(ctx, j.r.Store.EnsureAgentIdentity); err != nil {
-		return p, j.unready(ctx, "load the agent identity", err)
+	identity, kind := j.drv.Identify(ctx)
+	if kind != agentjob.Ready {
+		return j.unreadyByDriver(ctx)
 	}
+	j.identity = identity
 	if err := j.endPreviousRun(ctx); err != nil {
 		// It may still hold its reservation, or cost more: no second run beside it.
 		j.logError("investigate: the previous run is not settled", err)
 		end := ending{kind: endReleased, word: reasonInterrupted, retryIn: retryUnavailable}
-		return p, &end
+		return &end
 	}
 
 	now := j.r.now()
@@ -195,236 +195,116 @@ func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
 		if j.r.MaxWait > 0 && now.Sub(j.inv.RequestedAt) > j.r.MaxWait {
 			return skip(reasonExpired)
 		}
-		started, err := within(ctx, func(ctx context.Context) (int, error) {
+		started, err := agentjob.Within(ctx, func(ctx context.Context) (int, error) {
 			return j.r.Store.InvestigationsStartedSince(ctx, now.Add(-time.Hour))
 		})
 		if err != nil {
-			return p, j.unready(ctx, "count the last hour's investigations", err)
+			return j.unready(ctx, "count the last hour's investigations", err)
 		}
 		if started >= j.r.PerHour {
 			return skip(reasonRateLimited)
 		}
 	}
 
-	seen, err := within(ctx, j.scope)
+	seen, err := agentjob.Within(ctx, j.scope)
 	if err != nil {
-		return p, j.unready(ctx, "work out what the identity can see", err)
+		return j.unready(ctx, "work out what the identity can see", err)
 	}
 	if len(seen.visible) == 0 {
 		return skip(reasonNotVisible)
 	}
 
-	settings, err := within(ctx, j.r.Store.GetAgentSettings)
-	if err != nil {
-		return p, j.unready(ctx, "load the agent settings", err)
-	}
-	ref, chosen := settings.RoleModels[roleName]
-	if !chosen {
+	prepared, kind := j.drv.PrepareWith(ctx, identity, roleName)
+	switch kind {
+	case agentjob.Ready:
+	case agentjob.NotConfigured, agentjob.RoleNotOffered, agentjob.ModelUnavailable:
 		return skip(reasonNotConfigured)
-	}
-	cat, err := j.r.Agent.Catalogue(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			end := j.notStarted()
-			return p, &end
+	case agentjob.AgentUnavailable:
+		end := j.notStarted()
+		if ctx.Err() == nil {
+			end = j.retryOrFail(reasonUnavailable, retryUnavailable)
 		}
-		j.logError("investigate: agent catalogue unavailable", err)
-		end := j.retryOrFail(reasonUnavailable, retryUnavailable)
-		return p, &end
+		return &end
+	default:
+		return j.unreadyByDriver(ctx)
 	}
-	chosenModel, offered := cat.Find(ref.Provider, ref.Model)
-	reservation, known := worstCase(chosenModel, cat.MaxRunTokens)
-	if !offered || !cat.Supports(roleName) || !known {
-		return skip(reasonNotConfigured)
-	}
-
-	j.run = store.AgentRun{ID: uuid.New(), Role: roleName, UserID: &j.identity.ID, Provider: ref.Provider, Model: ref.Model, ReservedMicroUSD: reservation}
-	return plan{
-		task:      agentclient.Task{Kind: "investigate", Subject: seen.subject, Alert: taskAlert(j.inv, seen.visible)},
-		timeout:   agentrun.RunTimeout(cat.RunTimeout),
-		redactEnv: !slices.Contains(settings.UnredactedProviders, ref.Provider),
-	}, nil
-}
-
-// worstCase is the most a run can cost. It is not known, and such a run must not start, when the agent states no
-// price or no limit, or a product of the two that no sum can hold.
-func worstCase(m agentclient.Model, maxRunTokens int64) (microUSD int64, known bool) {
-	price := max(m.InputMicroUSDPerMTok, m.OutputMicroUSDPerMTok)
-	if maxRunTokens <= 0 || price <= 0 || price > math.MaxInt64/maxRunTokens {
-		return 0, false
-	}
-	microUSD = m.MaxRunCostMicroUSD(maxRunTokens)
-	return microUSD, microUSD > 0
+	j.prepared = prepared
+	j.task = agentclient.Task{Kind: "investigate", Subject: seen.subject, Alert: taskAlert(j.inv, seen.visible)}
+	return nil
 }
 
 func agentText(text string) string { return agentresult.CutExcerpt(secretshape.ScrubText(text)) }
 
-// endPreviousRun ends the run of an earlier holder that did not live to do it: it keeps the figures last recorded.
-// One that was ended already, or is gone, stays as it is. An error means that it may still be running.
+// endPreviousRun ends the run of an earlier holder that did not live to do it. An error means that it may still be
+// running.
 func (j *job) endPreviousRun(ctx context.Context) error {
 	if j.inv.RunID == nil {
 		return nil
 	}
 	run := store.AgentRun{ID: *j.inv.RunID, Role: roleName, UserID: &j.identity.ID, Provider: j.inv.Provider, Model: j.inv.Model}
-	err := j.runs.End(ctx, run, j.actor(), "", agentrun.Ending{Outcome: reasonInterrupted}, j.details()).SettleErr
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
-	}
-	return err
+	return j.drv.EndEarlier(ctx, j.identity, run, j.details())
 }
-
-func (j *job) actor() agentrun.Actor { return agentrun.Actor{Name: j.identity.Username} }
 
 // details are what the audit row of a run says besides the run: ids and fixed words only.
 func (j *job) details() map[string]any {
 	return map[string]any{"investigation_id": j.inv.ID, "subject_kind": j.inv.SubjectKind}
 }
 
-// begin reserves the run and gets it ready to start, with the lease and the claim confirmed on both sides of the
-// reservation, which is made even when ctx ends meanwhile.
-func (j *job) begin(ctx context.Context, p plan) (plan, *ending) {
-	if err := j.r.confirm(ctx); err != nil {
-		return p, j.unconfirmed(ctx, err)
-	}
-	if err := j.runs.Reserve(ctx, j.run, p.timeout); err != nil {
-		if errors.Is(err, agentrun.ErrAllowanceUsedUp) || errors.Is(err, agentrun.ErrAllowanceTooSmall) {
-			j.refused = true
-			end := skipped(reasonBudget)
-			return p, &end
-		}
-		return p, j.unready(ctx, "reserve the run", err)
-	}
-	j.reserved = true
-	j.meter = &agentrun.Meter{Store: j.r.Store, RunID: j.run.ID, Now: j.r.now, Draining: ctx.Done()}
-	if err := j.r.confirm(ctx); err != nil {
-		return p, j.unconfirmed(ctx, err)
-	}
-	if err := step(ctx, func(ctx context.Context) error {
-		return j.r.Store.StartInvestigationRun(ctx, j.claim, j.run.ID, j.run.Provider, j.run.Model, j.r.now())
-	}); err != nil {
-		return p, j.unready(ctx, "start the run", err)
-	}
-	var err error
-	if p.token, err = within(ctx, func(ctx context.Context) (string, error) {
-		token, _, err := j.r.Auth.MintAgentRunToken(ctx, j.run.ID, p.redactEnv)
-		return token, err
-	}); err != nil {
-		return p, j.unready(ctx, "mint the run token", err)
-	}
-	// The claim was taken before the run timeout was known; from here it covers the whole run.
-	if err := step(ctx, func(ctx context.Context) error {
-		return j.r.Store.RenewInvestigation(ctx, j.claim, j.r.now(), runLease(p.timeout))
-	}); err != nil {
-		return p, j.unready(ctx, "renew the claim", err)
-	}
-	if ctx.Err() != nil {
-		end := j.notStarted()
-		return p, &end
-	}
-	return p, nil
+// conclude is what the driver asks, once, of a run that was reserved: what becomes of the investigation, and the
+// write that does it.
+func (j *job) conclude(out agentjob.Outcome) agentjob.Conclusion {
+	j.result = out.Result
+	j.end = j.safeEndOf(out)
+	return agentjob.Conclusion{Word: j.end.word, Save: j.settle}
 }
 
-func (j *job) unconfirmed(ctx context.Context, err error) *ending {
-	if ctx.Err() == nil {
-		j.logError("investigate: coordinator lease not confirmed, not starting", err)
-	}
-	end := j.notStarted()
-	return &end
-}
-
-// stream runs the agent until its stream has ended and says what that means.
-func (j *job) stream(ctx context.Context, p plan) ending {
-	slack := j.r.slack
-	if slack == 0 {
-		slack = defaultSlack
-	}
-	runCtx, cancel := context.WithTimeout(ctx, p.timeout+slack)
-	defer cancel()
-	j.cancel = cancel
-	err := j.r.Agent.Run(runCtx, p.token, agentclient.RunRequest{
-		RunID: j.run.ID, Role: j.run.Role, Provider: j.run.Provider, Model: j.run.Model,
-		MaxCostMicroUSD: j.run.ReservedMicroUSD, Task: &p.task,
-	}, func(ev agentclient.Event) { j.apply(ctx, ev) })
-	if !j.turn.Ended() {
-		switch {
-		case ctx.Err() != nil:
-			j.turn.End(agentrun.Draining)
-		case runCtx.Err() != nil:
-			j.turn.End(agentrun.TimedOut)
-		default:
-			j.agentErr = err
-			j.turn.Fail("", "")
-		}
-	}
-	if err != nil {
-		j.runs.LogRunError(j.run.ID, "investigate: agent run failed", err) // never any model text
-	}
-	return j.outcome()
-}
-
-// apply takes one event. Once the turn has ended only what the run costs still counts. A panic ends the turn.
-func (j *job) apply(ctx context.Context, ev agentclient.Event) {
+// safeEndOf is endOf, except that a panic in it ends the investigation as failed: the run is paid for and is being
+// settled, so the claim must not be left running for a second one.
+func (j *job) safeEndOf(out agentjob.Outcome) (end ending) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			j.logError("investigate: panic", agentrun.NewPanicError(rec))
-			j.perform(ctx, j.turn.End(agentrun.Panicked))
+			end = failed(reasonError)
 		}
 	}()
-	if j.r.onEvent != nil && !j.turn.Ended() {
-		j.r.onEvent(ev)
-	}
-	if ev.Type == "result" && !j.turn.Ended() {
-		if j.result == nil {
-			j.result = ev.Result
-		} else {
-			j.r.log().Warn("investigate: the agent sent more than one result; the first one stands", "investigation_id", j.inv.ID)
-		}
-	}
-	j.perform(ctx, j.turn.Apply(ev))
+	return j.endOf(out)
 }
 
-func (j *job) perform(ctx context.Context, effects []agentrun.Effect) {
-	for _, e := range effects {
-		switch e.Kind {
-		case agentrun.KeepUsage:
-			j.meter.See(e.Usage)
-		case agentrun.RecordUsage:
-			j.meter.See(e.Usage)
-			if err := j.meter.Record(ctx); err != nil { // it can no longer be billed, so it must stop
-				j.runs.LogRunError(j.run.ID, "investigate: usage not recorded, stopping the run", err)
-				j.perform(ctx, j.turn.End(agentrun.RunLost))
-			}
-		case agentrun.Cancel:
-			j.cancel()
-		}
-	}
-}
-
-// outcome is what the end of the agent run means for the investigation.
-func (j *job) outcome() ending {
-	switch j.turn.Reason() {
-	case agentrun.Done:
-		if j.result == nil {
-			return failed(reasonLimitReached)
-		}
+// endOf is what the way a run came out means for the investigation.
+func (j *job) endOf(out agentjob.Outcome) ending {
+	switch out.Kind {
+	case agentjob.Done:
 		return ending{kind: endDone, word: "done"}
-	case agentrun.Draining:
-		return ending{kind: endReleased, word: reasonInterrupted, counted: true}
-	case agentrun.RunLost:
-		return failed(reasonInterrupted)
-	case agentrun.AgentFailed:
-		switch code, _ := j.turn.Failure(); {
-		case errors.Is(j.agentErr, agentclient.ErrAgentBusy):
-			return j.busy()
-		case errors.Is(j.agentErr, agentclient.ErrAgentUnavailable):
-			return j.retryOrFail(reasonUnavailable, retryUnavailable)
-		case code == codeNoResult:
-			return failed(reasonNoResult)
-		case code == codeUnavailable:
-			return j.retryOrFail(reasonError, retryVendor)
+	case agentjob.Budget:
+		return skipped(reasonBudget)
+	case agentjob.NotConfigured, agentjob.RoleNotOffered, agentjob.ModelUnavailable:
+		return skipped(reasonNotConfigured)
+	case agentjob.LimitReached:
+		return failed(reasonLimitReached)
+	case agentjob.NoResult:
+		return failed(reasonNoResult)
+	case agentjob.AgentBusy:
+		return j.busy()
+	case agentjob.AgentUnavailable:
+		return j.retryOrFail(reasonUnavailable, retryUnavailable)
+	case agentjob.Cancelled:
+		if !out.Called {
+			return j.notStarted()
 		}
+		return ending{kind: endReleased, word: reasonInterrupted, counted: true}
+	case agentjob.Interrupted:
+		return failed(reasonInterrupted)
+	case agentjob.Conflict:
+		return ending{kind: endLost, word: reasonInterrupted}
 	}
-	return failed(reasonError)
+	switch {
+	case out.ModelUnreachable:
+		return j.retryOrFail(reasonError, retryVendor)
+	case out.Called || out.Panicked:
+		return failed(reasonError)
+	default: // a set-up step failed before the agent was called
+		return j.retryOrFail(reasonError, retryUnavailable)
+	}
 }
 
 // busy gives the attempt back: the agent refused before it did anything. A first attempt that waited too long is
@@ -438,41 +318,27 @@ func (j *job) busy() ending {
 	return ending{kind: endReleased, word: "agent_busy", retryIn: retryBusy}
 }
 
-// finish ends the job once; later calls do nothing. Every step runs on a context that the end of ctx does not cut
-// off, each under its own limit, and whatever became of the one before it.
+// finish ends the job once; later calls do nothing. A run that was reserved has been settled by the driver, with the
+// write below as its save; otherwise the claim is ended here. Every step runs on a context that the end of ctx does
+// not cut off.
 func (j *job) finish(ctx context.Context) {
 	j.once.Do(func() {
 		var err error
-		if j.reserved {
-			ops := j.runs.Ops(j.run, j.actor(), "", j.meter, agentrun.Ending{Success: j.end.kind == endDone, Outcome: j.end.word})
-			ops.Tools = slices.Clone(j.turn.Tools())
-			ops.Details = j.details()
-			ops.SaveAnswer = func(ctx context.Context) (int64, error) { return 0, j.settle(ctx) }
-			err = j.runs.Finish(ctx, ops).SaveErr
-		} else if err = step(ctx, j.settle); err != nil {
+		if j.outcome != nil && j.outcome.Finished {
+			err = j.outcome.SaveErr
+		} else if err = agentjob.Step(ctx, j.settle); err != nil {
 			j.logError("investigate: could not end the investigation", err)
 		}
 		if err != nil {
 			return
 		}
-		if j.refused {
-			j.auditRefusal(ctx)
+		if j.outcome != nil && j.outcome.Kind == agentjob.Budget {
+			j.drv.AuditSkippedBudget(ctx, j.prepared, *j.outcome, roleName, j.details())
 		}
 		if j.end.kind == endDone && j.r.KickNotify != nil {
 			j.r.KickNotify()
 		}
 	})
-}
-
-// auditRefusal records a run that the budget refused. It has no run row, so it is an ordinary audit entry.
-func (j *job) auditRefusal(ctx context.Context) {
-	entry := store.AgentRunAudit(j.run, j.identity.Username, "skipped_budget")
-	for k, v := range j.details() {
-		entry.Details[k] = v
-	}
-	if err := step(ctx, func(ctx context.Context) error { return j.r.Store.Audit(ctx, entry) }); err != nil {
-		j.logError("investigate: could not audit the refused run", err)
-	}
 }
 
 // settle writes what becomes of the investigation, fenced by the claim.
@@ -519,13 +385,13 @@ func (j *job) inTime(ctx context.Context, fn func(ctx context.Context) error) er
 }
 
 func (j *job) storeOnce(ctx context.Context) error {
-	see, err := j.r.sightOf(ctx, j.identity.ID)
+	see, err := agentjob.SightOf(ctx, j.r.Store, j.identity.ID)
 	if err != nil {
 		return err
 	}
-	accepted := Accept(*j.result, see.can)
-	if see.err != nil {
-		return see.err
+	accepted := Accept(*j.result, see.Can)
+	if err := see.Err(); err != nil {
+		return err
 	}
 	return j.r.Store.FinishInvestigation(ctx, j.claim, store.InvestigationDone, "", &accepted, j.r.now())
 }

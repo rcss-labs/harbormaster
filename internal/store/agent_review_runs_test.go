@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -392,7 +393,7 @@ func fenceFixtures() map[string]fenceFixture {
 					"release": func() error { return s.ReleaseReviewRun(ctx, c, now, true) },
 					"skip":    func() error { return s.SkipReviewRun(ctx, c, "budget", now) },
 					"finish": func() error {
-						return s.FinishReviewRun(ctx, c, "done", "", &store.InvestigationResult{Summary: "stale", Evidence: []store.InvestigationEvidence{viewEvidence("x")}}, now)
+						return s.FinishReviewRun(ctx, c, "done", "", &store.InvestigationResult{Summary: "stale", Evidence: []store.InvestigationEvidence{viewEvidence("x")}}, nil, now)
 					},
 				}
 			},
@@ -400,7 +401,7 @@ func fenceFixtures() map[string]fenceFixture {
 				return s.ReleaseReviewRun(ctx, store.ReviewClaim{RunID: id, Attempt: attempt, Seq: seq}, time.Time{}, false)
 			},
 			failNow: func(s *store.Store, id int64, attempt int, seq int64, now time.Time) error {
-				return s.FinishReviewRun(ctx, store.ReviewClaim{RunID: id, Attempt: attempt, Seq: seq}, "failed", "error", nil, now)
+				return s.FinishReviewRun(ctx, store.ReviewClaim{RunID: id, Attempt: attempt, Seq: seq}, "failed", "error", nil, nil, now)
 			},
 		},
 	}
@@ -492,7 +493,7 @@ func TestFinishReview_EvidenceAndStateAreOneTransaction(t *testing.T) {
 	invExec(t, s, `alter table agent_review_evidence add constraint test_refuse_boom check (tool <> 'boom')`)
 	ev := viewEvidence("x")
 	ev.Tool = "boom"
-	err := s.FinishReviewRun(ctx, c, "done", "", &store.InvestigationResult{Summary: "s", Evidence: []store.InvestigationEvidence{viewEvidence("first"), ev}}, invNow)
+	err := s.FinishReviewRun(ctx, c, "done", "", &store.InvestigationResult{Summary: "s", Evidence: []store.InvestigationEvidence{viewEvidence("first"), ev}}, nil, invNow)
 	if err == nil || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrInvestigationText) {
 		t.Fatalf("err = %v, want the database's refusal", err)
 	}
@@ -506,7 +507,7 @@ func TestFinishReview_StoresTheResultAndReplacesEvidence(t *testing.T) {
 	run, c := claimedReview(t, s)
 	res := &store.InvestigationResult{Summary: "Spend is flat.", SummaryReplaced: true, EvidenceDropped: 2,
 		Evidence: []store.InvestigationEvidence{viewEvidence("one"), viewEvidence("two")}}
-	if err := s.FinishReviewRun(ctx, c, "done", "", res, invNow); err != nil {
+	if err := s.FinishReviewRun(ctx, c, "done", "", res, nil, invNow); err != nil {
 		t.Fatal(err)
 	}
 	got := reviewRunState(t, s, run.ID)
@@ -525,7 +526,7 @@ func TestFinishReview_RefusesLogsEvidence(t *testing.T) {
 	before := reviewSnapshot(t, s, run.ID)
 	logs := viewEvidence("x")
 	logs.Action = "logs"
-	err := s.FinishReviewRun(ctx, c, "done", "", &store.InvestigationResult{Summary: "s", Evidence: []store.InvestigationEvidence{viewEvidence("a"), logs}}, invNow)
+	err := s.FinishReviewRun(ctx, c, "done", "", &store.InvestigationResult{Summary: "s", Evidence: []store.InvestigationEvidence{viewEvidence("a"), logs}}, nil, invNow)
 	if err == nil || errors.Is(err, store.ErrConflict) {
 		t.Fatalf("err = %v, want a refusal of logs evidence", err)
 	}
@@ -565,7 +566,7 @@ func TestFinishReview_RefusesAnInconsistentStateOrReason(t *testing.T) {
 			s := storetest.Open(t)
 			run, c := claimedReview(t, s)
 			before := reviewSnapshot(t, s, run.ID)
-			err := s.FinishReviewRun(context.Background(), c, tc.state, tc.reason, tc.result, invNow)
+			err := s.FinishReviewRun(context.Background(), c, tc.state, tc.reason, tc.result, nil, invNow)
 			if err == nil || errors.Is(err, store.ErrConflict) {
 				t.Fatalf("err = %v, want a refusal", err)
 			}
@@ -576,7 +577,7 @@ func TestFinishReview_RefusesAnInconsistentStateOrReason(t *testing.T) {
 	}
 	s := storetest.Open(t)
 	_, c := claimedReview(t, s)
-	if err := s.FinishReviewRun(context.Background(), c, "failed", "no_result", nil, invNow); err != nil {
+	if err := s.FinishReviewRun(context.Background(), c, "failed", "no_result", nil, nil, invNow); err != nil {
 		t.Fatalf("a failed run with a fixed reason: %v", err)
 	}
 }
@@ -611,7 +612,7 @@ func TestReviewText_RefusedBeforeAnySQL(t *testing.T) {
 		return func(s *store.Store, c store.ReviewClaim) error {
 			r := &store.InvestigationResult{Summary: "s", Evidence: []store.InvestigationEvidence{viewEvidence("x")}}
 			mut(r)
-			return s.FinishReviewRun(context.Background(), c, "done", "", r, invNow)
+			return s.FinishReviewRun(context.Background(), c, "done", "", r, nil, invNow)
 		}
 	}
 	start := func(mut func(*store.ReviewStart)) func(*store.Store, store.ReviewClaim) error {
@@ -921,5 +922,43 @@ func TestReconcile_ReviewerRunIsAuditedAsTheIdentity(t *testing.T) {
 	// The review run row that held this agent run is not touched by the pass: the claim rules settle it after its lease.
 	if res := reconcile(t, st, now.Add(time.Hour)); res != (store.AgentReconcileResult{}) {
 		t.Fatalf("the second pass repaired something: %+v", res)
+	}
+}
+
+// The tags a finish adds join those of the start, once each and in order; none adds none, and a lost claim adds none.
+func TestFinishReview_AddsCoveredTags(t *testing.T) {
+	for name, tc := range map[string]struct {
+		start, finish, want []int64
+		state, reason       string
+	}{
+		"more":                   {[]int64{3, 1}, []int64{7, 3, 2, 7}, []int64{1, 2, 3, 7}, "done", ""},
+		"fewer at the finish":    {[]int64{1, 3}, []int64{1}, []int64{1, 3}, "done", ""},
+		"none given":             {[]int64{1, 3}, nil, []int64{1, 3}, "done", ""},
+		"covered nothing at all": {nil, nil, []int64{}, "done", ""},
+		"a failure":              {[]int64{1}, nil, []int64{1}, "failed", "error"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, ctx := storetest.Open(t), context.Background()
+			seedReviewRuns(t, s, revNow)
+			run := claimReview(t, s, revNow)
+			if err := s.StartReviewRun(ctx, run.Claim(), store.ReviewStart{RunID: uuid.New(), Provider: "p", Model: "m", CoveredTags: tc.start}, revNow); err != nil {
+				t.Fatal(err)
+			}
+			var res *store.InvestigationResult
+			if tc.state == "done" {
+				res = &store.InvestigationResult{Summary: "s"}
+			}
+			stale := run.Claim()
+			stale.Seq++
+			if err := s.FinishReviewRun(ctx, stale, tc.state, tc.reason, res, []int64{99}, revNow); !errors.Is(err, store.ErrConflict) {
+				t.Fatalf("stale = %v, want ErrConflict", err)
+			}
+			if err := s.FinishReviewRun(ctx, run.Claim(), tc.state, tc.reason, res, tc.finish, revNow); err != nil {
+				t.Fatal(err)
+			}
+			if got := reviewRunState(t, s, run.ID).CoveredTags; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("covered = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

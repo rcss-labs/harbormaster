@@ -20,6 +20,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentjob"
 	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/api"
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -39,6 +40,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/platforms"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/registry"
+	"github.com/rcss-labs/harbormaster/internal/review"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
@@ -382,9 +384,12 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	}
 	// The investigator runs under the coordinator lease, as the agent's own identity.
 	var investigator *investigate.Runner
+	var reviewer *review.Runner // the scheduled reviews run beside it
 	if role.Coordinates() {
 		investigator = newInvestigator(ctx, cfg, st, agentClient, notifyDispatcher.Kick, log)
 		wireInvestigations(notifyDispatcher, cfg, investigator)
+		reviewer = newReviewer(cfg, st, agentClient, notifyDispatcher.Kick, log)
+		wireReviews(notifyDispatcher, reviewer)
 	}
 	telemetry.Default.SetBuildInfo(version) // plan 06
 
@@ -485,6 +490,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 				coordinatorRunner.AgentRuns = &agentrun.Reconciler{Store: st, Now: time.Now, Log: log}
 			}
 			coordinatorRunner.Investigate = investigator
+			coordinatorRunner.Review = reviewer
 			pollerConfig.Coordinator = coordinatorRunner
 		}
 		pollerInstance = poller.New(st, clients, pollerConfig, log)
@@ -612,6 +618,26 @@ func wireInvestigations(d *notify.Dispatcher, cfg config.Config, investigator *i
 	d.Investigate = cfg.AgentInvestigationsPerHour > 0
 	d.InvestigationWindow = cfg.AgentInvestigationWindow
 	d.OnInvestigationRequested = investigator.Kick
+}
+
+// newReviewer builds the job that runs the scheduled AI reviews, as the same identity, or returns nil while the agent
+// is off or HM_AGENT_REVIEWS_PER_DAY is 0: nothing is recorded or run then.
+func newReviewer(cfg config.Config, st *store.Store, agent *agentclient.Client, kickNotify func(), log *slog.Logger) *review.Runner {
+	if !cfg.AgentEnabled() || cfg.AgentReviewsPerDay <= 0 {
+		return nil
+	}
+	return &review.Runner{
+		Store: st, Driver: &agentjob.Driver{Store: st, Auth: auth.NewService(st, cfg), Agent: agent}, Scopes: st,
+		PerDay: cfg.AgentReviewsPerDay, MaxLate: cfg.AgentReviewMaxLate, InvestigationMaxWait: cfg.AgentInvestigationMaxWait,
+		KickNotify: kickNotify, Now: time.Now, Log: log,
+	}
+}
+
+// wireReviews has the alert dispatcher send the results of reviews while there is a job that makes them.
+func wireReviews(d *notify.Dispatcher, reviewer *review.Runner) {
+	if d != nil {
+		d.Reviews = reviewer != nil
+	}
 }
 
 // demoSeedOptions picks the extras fake AWS mode seeds: the demo notification routes, and the AI agent demo only when
