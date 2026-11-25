@@ -1,10 +1,12 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { REVIEW_RUN_DONE, mockReviews } from '../../test/reviewFixtures'
 import { renderApp } from '../../test/renderApp'
 
 const run = (id: number, overrides: object = {}) => ({ ...REVIEW_RUN_DONE, id, name: `Review ${id}`, ...overrides })
+
+afterEach(() => vi.useRealTimers())
 
 describe('ReviewsPage', () => {
   it('lists results and loads more', async () => {
@@ -51,5 +53,24 @@ describe('ReviewsPage', () => {
 
     expect(await screen.findByText('Page not found.')).toBeInTheDocument()
     expect(requested).toEqual([])
+  })
+
+  it('refreshes every 15 s while a row is waiting or running, and not otherwise', async () => {
+    const listCalls = (requested: string[]) => requested.filter((url) => url.startsWith('/api/reviews/runs?') || url === '/api/reviews/runs').length
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+
+    const busy = mockReviews([run(2, { state: 'running', summary: '' }), run(1)])
+    const first = renderApp('/reviews')
+    await screen.findByRole('link', { name: 'Review 2' })
+    expect(listCalls(busy)).toBe(1)
+    await vi.advanceTimersByTimeAsync(15_100)
+    await waitFor(() => expect(listCalls(busy)).toBe(2))
+    first.unmount()
+
+    const idle = mockReviews([run(2), run(1)])
+    renderApp('/reviews')
+    await screen.findByRole('link', { name: 'Review 2' })
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(listCalls(idle)).toBe(1)
   })
 })

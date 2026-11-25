@@ -70,6 +70,23 @@ describe('ReviewRunView', () => {
     expect(calls).toBe(settled)
   })
 
+  it.each(['failed', 'archived'])('never polls a %s run', async (state) => {
+    let calls = 0
+    server.use(
+      http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true, reviews_enabled: true })),
+      http.get('/api/reviews/runs/:id', () => {
+        calls++
+        return HttpResponse.json({ ...REVIEW_RUN_DONE, state, summary: '', evidence: [] })
+      }),
+    )
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
+
+    await waitFor(() => expect(calls).toBe(1))
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(calls).toBe(1)
+  })
+
   it('not found', async () => {
     mockReviews()
     renderApp('/reviews/runs/999')
