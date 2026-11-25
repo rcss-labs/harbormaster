@@ -43,7 +43,9 @@ func (n *Names) Add(ids ...string) {
 // Empty reports whether no name is kept.
 func (n Names) Empty() bool { return len(n.set) == 0 }
 
-// NamedIn returns those of the ids, each once and in the order given, of which a kept name is a whole run of text.
+// NamedIn returns those of the ids, each once and in the order given, of which a kept name is a whole run of text. It
+// reads the text as it stands, so it misses a name that only a decoded JSON string shows whole, as one right after an
+// escape, and it also reports a name that another rule hides.
 func (n Names) NamedIn(text string, ids ...string) []string {
 	if n.Empty() || len(ids) == 0 {
 		return nil

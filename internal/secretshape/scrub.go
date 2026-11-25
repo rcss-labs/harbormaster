@@ -27,7 +27,7 @@ func ScrubText(text string) string {
 }
 
 // ScrubTextKeeping is ScrubText that leaves a long run alone when the whole run is a name in keep. Every other rule
-// hides such a name as ever.
+// hides such a name as ever. As with ScrubText, a later pass only hides more.
 func ScrubTextKeeping(text string, keep Names) string {
 	edits := scrub(text, keep, 0)
 	if len(edits) == 0 {

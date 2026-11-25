@@ -374,6 +374,15 @@ func agreement(t *testing.T, seed int64, n int) {
 			}
 		}
 		stripped := agentresult.StripForeignURLs(summary, namesBase)
+		// What a send with every id that Accept used makes of the summary; without a foreign link, the summary itself.
+		fullSend := func() string {
+			full := slices.DeleteFunc(append(slices.Clone(taskIDs), got.NameIDs...), func(id string) bool { return id == gone.ID() && !slices.Contains(taskIDs, id) })
+			want := clean(summary, namesBase, secretshape.NamesOf(full...))
+			if stripped == summary && want != summary {
+				fail("a send with every id replaces a summary without links")
+			}
+			return want
+		}
 		named := !got.SummaryReplaced && secretshape.ScrubText(summary) != summary
 		switch {
 		case got.SummaryReplaced:
@@ -388,7 +397,7 @@ func agreement(t *testing.T, seed int64, n int) {
 			if got.Summary != summary || accepted.Summary != summary || accepted.SummaryReplaced {
 				fail("kept at the agent and not when stored")
 			}
-			if sent != stripped && !(stripped != summary && sent == replacement) {
+			if sent != fullSend() {
 				fail("stored and not sent")
 			}
 			if named {
@@ -419,7 +428,7 @@ func agreement(t *testing.T, seed int64, n int) {
 			}
 			count["replaced when stored"]++
 		default:
-			if accepted.Summary != summary || sent != stripped && !(stripped != summary && sent == replacement) {
+			if accepted.Summary != summary || sent != fullSend() {
 				fail("stored without the id that is gone and not sent")
 			}
 			count["kept without the id that is gone"]++

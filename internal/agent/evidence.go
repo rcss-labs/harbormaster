@@ -85,7 +85,9 @@ func isResourceID(id string) bool {
 }
 
 // learn lets the run see and write the names of the services that code attributes the units of a raw answer to. An id
-// anywhere else in the answer teaches nothing, and neither does an answer that may be log text or is cut.
+// anywhere else in the answer teaches nothing, and neither does an answer that may be log text or is cut. The argument of
+// a call is the model's own: that it names a service the identity may View rests on Harbormaster's API, which answers a
+// call for any other as failed, and a failed call does not come here.
 func (f *findings) learn(tool string, args map[string]any, raw string) {
 	if hmtools.ReadsLogs(tool) || strings.HasSuffix(raw, answerTooLargeNote) {
 		return

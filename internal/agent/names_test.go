@@ -14,6 +14,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
@@ -148,6 +149,15 @@ func TestInvestigator_NamesOutsideTheSubjectStayRedacted(t *testing.T) {
 		}
 	}
 
+	// A cluster that no service of the subject is in is the subject's own too.
+	task := cdkTask()
+	task.Subject = TaskSubject{Kind: "cluster", ServiceIDs: []string{checkoutID}, ClusterID: cdkCluster.ID()}
+	p := fake.New(calls(serviceCall("c1", "get_service")), calls(submitCall("Nothing runs in "+cdkCluster.Cluster+".")))
+	res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_service": `{"cluster":"` + cdkCluster.Cluster + `"}`})), p, withTask(investigatorInput(), task)))
+	if got := resultText(t, lastRequest(p), "c1"); got != envelope("get_service", `[e1] cluster: "`+cdkCluster.Cluster+`"`) || res.SummaryReplaced {
+		t.Errorf("a cluster: sent %s, result %+v", got, res)
+	}
+
 	// A subject gives names by the ids of its clusters and services and by nothing else.
 	taskID := model.TaskID("123456789012", "eu-west-1", "arn:aws:ecs:eu-west-1:123456789012:task/"+cdkService+"/0123456789abcdef0123456789abcdef")
 	if cluster, _, ok := secretshape.IDNames(taskID); !ok || cluster != cdkService {
@@ -239,6 +249,9 @@ func TestReviewer_SeesAndNamesTheClusterOfItsScope(t *testing.T) {
 			if reviewType == "custom" {
 				task.Review.Instructions = growthRequest
 			}
+			if scoped { // not only the first entry of a scope
+				task.Scope.Entries = append([]ScopeEntry{{Kind: "cluster", ClusterID: prodCluster.ID(), Name: "prod-main"}}, task.Scope.Entries...)
+			}
 			task.Subject = TaskSubject{ServiceIDs: []string{serviceIDOf(cdkCluster, "api")}} // a review has none
 			p := fake.New(calls(callWith("c1", "get_cluster", map[string]any{"cluster_id": cdkCluster.ID()})), calls(submitCall(summary)))
 			res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cluster": body})), p, withTask(reviewerInput(), task)))
@@ -264,7 +277,7 @@ func listed(t *testing.T, task Task, cluster model.ClusterKey, services []string
 }
 
 func TestReviewer_ReportsTheIDsItsResultUses(t *testing.T) {
-	names := cdkNames(t, 40)
+	names := cdkNames(t, 45)
 	ids := make([]string, len(names))
 	inCDK := make([]string, len(names))
 	for i, name := range names {
@@ -281,15 +294,15 @@ func TestReviewer_ReportsTheIDsItsResultUses(t *testing.T) {
 		"nothing":                 {reviewTask("cost"), prodCluster, submitCall(plainSummary), nil, false},
 		"in the order read":       {reviewTask("cost"), prodCluster, submitCall("First " + names[4] + ", then " + names[1] + " and again " + names[4] + "."), []string{ids[1], ids[4]}, false},
 		"an excerpt":              {reviewTask("cost"), prodCluster, submitCall(plainSummary, cite("e6")), []string{ids[5]}, false},
-		"an excerpt that is none": {reviewTask("cost"), prodCluster, submitCall(plainSummary, cite("e41")), nil, false},
+		"an excerpt that is none": {reviewTask("cost"), prodCluster, submitCall(plainSummary, cite("e46")), nil, false},
 		"a glued name":            {reviewTask("cost"), prodCluster, submitCall("It is " + names[4] + "-2 and " + names[1] + "."), []string{ids[1]}, true},
 		"a note":                  {reviewTask("cost"), prodCluster, submitCall("It is "+names[1]+".", noteOf("e6", "It is "+names[8])), []string{ids[1], ids[5], ids[8]}, false},
 		"a replaced note":         {reviewTask("cost"), prodCluster, submitCall("It is "+names[1]+".", noteOf("e6", "It is "+names[8]+strings.Repeat(" again", 50))), []string{ids[1], ids[5]}, false},
 		"thirty-two":              {reviewTask("cost"), prodCluster, submitCall(strings.Join(names[:32], ", ")), ids[:32], false},
 		"thirty-three":            {reviewTask("cost"), prodCluster, submitCall(strings.Join(names[:33], ", ")), ids[:32], true},
-		"the last of them":        {reviewTask("cost"), prodCluster, submitCall("It is " + names[39] + "."), ids[39:], false},
+		"the last of them":        {reviewTask("cost"), prodCluster, submitCall("It is " + names[44] + "."), ids[44:], false},
 		"a cluster, unscoped":     {reviewTask("cost"), cdkCluster, submitCall("It is " + names[39] + " in " + cdkCluster.Cluster + "."), []string{inCDK[0], inCDK[39]}, false},
-		"a cluster, scoped":       {cdkReview("cost"), cdkCluster, submitCall("It is " + names[39] + " in " + cdkCluster.Cluster + "."), inCDK[39:], false},
+		"a cluster, scoped":       {cdkReview("cost"), cdkCluster, submitCall("It is " + names[39] + " in " + cdkCluster.Cluster + "."), inCDK[39:40], false},
 		"a cluster's row":         {reviewTask("cost"), cdkCluster, submitCall("It is "+names[39]+".", cite("e8")), []string{inCDK[0], inCDK[7], inCDK[39]}, false},
 		"the cluster alone":       {cdkReview("cost"), cdkCluster, submitCall("It is " + cdkCluster.Cluster + "."), nil, false},
 	} {
@@ -458,5 +471,43 @@ func TestSummariesNamingCDKServices_NoneReplaced(t *testing.T) {
 	}
 	if runs != 20 || kept != 20 {
 		t.Errorf("%d of %d summaries kept", kept, runs)
+	}
+}
+
+// Whether the service a call names exists and may be seen is Harbormaster's to say: an answer it gives teaches the name of
+// the call's own argument, for every tool that is asked about one service, and a refusal teaches nothing.
+func TestReviewer_LearnsTheArgumentOfAnAnsweredCallOnly(t *testing.T) {
+	tried := 0
+	for _, tool := range hmtools.Tools() {
+		rule, known := hmtools.EvidenceRuleFor(tool.Name)
+		if !known || rule.Kind != hmtools.EvidenceServiceArg || hmtools.ReadsLogs(tool.Name) {
+			continue
+		}
+		tried++
+		for _, refused := range []bool{false, true} {
+			call := cdkServiceCall("c1", tool.Name)
+			for _, param := range tool.Params {
+				if param.Required && param.Name != "service_id" {
+					call.Arguments[param.Name] = map[bool]any{true: 3, false: "0123456789abcdef0123456789abcdef"}[param.Type == hmtools.TypeInteger]
+				}
+			}
+			p := fake.New(calls(call), calls(callWith("c2", "get_overview", nil)), calls(submitCall(plainSummary)))
+			runner := &recordingRunner{reply: func(name string) (string, bool) {
+				if name == "get_overview" {
+					return `{"text":"` + cdkService + `"}`, false
+				}
+				return `{"error":{"code":"not_found"}}`, refused
+			}}
+			requireResult(t, investigate(t, newLoop(p, runner), p, reviewerInput()))
+			if len(runner.Calls()) != 2 {
+				t.Fatalf("%s: %d calls were run", tool.Name, len(runner.Calls()))
+			}
+			if got := resultText(t, lastRequest(p), "c2"); strings.Contains(got, cdkService) == refused {
+				t.Errorf("%s, refused %v: sent %s", tool.Name, refused, got)
+			}
+		}
+	}
+	if tried < 5 {
+		t.Errorf("only %d tools are asked about one service", tried)
 	}
 }

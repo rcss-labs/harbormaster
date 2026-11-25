@@ -76,7 +76,9 @@ func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action au
 	return out
 }
 
-// namingIDs returns those of the ids, each once and in order, that give a name the scrubber would hide.
+// namingIDs returns those of the ids, each once and in order, that give a name the scrubber would hide. An id that could
+// not be stored gives none: the ids a review learns have the same bound (hmtools.Units), but the agent service does not
+// bound the task's own, of which no cluster's id and, by scope, no service's is as long.
 func namingIDs(ids []string) (naming []string) {
 	for _, id := range ids {
 		if len(id) <= store.MaxSummaryNameIDBytes && !slices.Contains(naming, id) && !secretshape.NamesOf(id).Empty() {

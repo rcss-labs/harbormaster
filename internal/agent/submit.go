@@ -158,7 +158,8 @@ func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult
 	return result
 }
 
-// reportedIDs returns the first of the learned ids whose names stand in text, at most maxNameIDs. One that stands there
+// reportedIDs returns the first of the learned ids whose names stand in text, at most maxNameIDs, in the order they were
+// learned and not that of their use. One that stands there
 // by its cluster alone is left out when the task or an earlier one gives that name: every service of a cluster would
 // count for the cluster's name otherwise, and leave no room for those whose own names are used.
 func reportedIDs(text string, keep secretshape.Names, taskIDs, learned []string) (ids []string) {

@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -351,13 +352,28 @@ func TestRuns_WithoutKeptNamesSendTheSameBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(want) < namesBaseBatches*len(baseKinds) || len(got.lines) < namesBaseDefault*len(baseKinds) {
-		t.Fatalf("%d hashes recorded, %d made", len(want), len(got.lines))
+	recorded := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	// The whole record, but for the batches that were not run.
+	want := slices.DeleteFunc(slices.Clone(recorded), func(line string) bool {
+		label, _, _ := strings.Cut(line, " ")
+		_, number, isBatch := strings.Cut(label, ".batch")
+		n, err := strconv.Atoi(number)
+		return isBatch && (err != nil || n >= batches)
+	})
+	if len(recorded) < namesBaseBatches*len(baseKinds) || len(want) < namesBaseDefault*len(baseKinds) {
+		t.Fatalf("%d hashes recorded, %d of them to compare", len(recorded), len(want))
 	}
-	for _, line := range got.lines {
-		if !slices.Contains(want, line) {
-			t.Errorf("not what was sent before: %s", line)
+	if !slices.Equal(got.lines, want) {
+		for _, line := range got.lines {
+			if !slices.Contains(want, line) {
+				t.Errorf("not what was sent before: %s", line)
+			}
 		}
+		for _, line := range want {
+			if !slices.Contains(got.lines, line) {
+				t.Errorf("sent before and not now: %s", line)
+			}
+		}
+		t.Errorf("%d hashes made, %d recorded", len(got.lines), len(want))
 	}
 }

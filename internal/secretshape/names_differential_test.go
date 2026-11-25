@@ -545,7 +545,9 @@ func TestScrubTextKeeping_RevealsOnlyKeptNames(t *testing.T) {
 				for i < len(text) && old[i] && !now[i] {
 					i++
 				}
-				// The stretch is a name, or part of a name written with escapes, beside bytes that are hidden still.
+				// The stretch is a whole name, or a part: it lies inside one name that is written with escapes and was
+				// hidden to its last byte before, and a byte beside the stretch is hidden still. Another reading of the
+				// escapes took that byte for a longer run.
 				whole := slices.Contains(names, [2]int{start, i})
 				part := (start > 0 && now[start-1] || i < len(text) && now[i]) && slices.ContainsFunc(names, func(name [2]int) bool {
 					return name[0] <= start && i <= name[1] && strings.IndexByte(text[name[0]:name[1]], '\\') >= 0 && !slices.Contains(old[name[0]:name[1]], false)
@@ -570,7 +572,7 @@ func TestScrubTextKeeping_RevealsOnlyKeptNames(t *testing.T) {
 	}
 }
 
-// Scrubbing again changes nothing where scrubbing again without names changes nothing.
+// A later pass only hides more, and it hides more only where it does so without names too.
 func TestScrubTextKeeping_Idempotent(t *testing.T) {
 	keep, _ := diffKept(t)
 	var texts, compared atomic.Int64
@@ -648,6 +650,21 @@ func TestMayBeKept_EachCondition(t *testing.T) {
 	} {
 		if got := mayBeKept(name); got != want {
 			t.Errorf("%q: got %v", name, got)
+		}
+	}
+}
+
+// Below the depth that JSON in JSON strings is walked to, the plain-text rules get the set too.
+func TestScrubTextKeeping_BelowTheDepthLimit(t *testing.T) {
+	name := diffKeptNames[0]
+	keep := NamesOf(diffServiceID("prod-cluster", name))
+	for depth := range maxJSONDepth + 3 {
+		text := encode(t, name, depth)
+		if got := ScrubTextKeeping(text, keep); got != text {
+			t.Errorf("depth %d: %s became %s", depth, text, got)
+		}
+		if got := ScrubText(text); strings.Contains(got, name) {
+			t.Errorf("depth %d, without the name: %s", depth, got)
 		}
 	}
 }
