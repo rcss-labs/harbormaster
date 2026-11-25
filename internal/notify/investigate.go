@@ -201,7 +201,7 @@ func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review
 	if !reviewOn && !run.Manual {
 		return nil, noteReviewOff, nil
 	}
-	return &Review{RunID: run.ID, Name: run.ReviewName, Type: run.ReviewType, PeriodLabel: run.PeriodLabel, Summary: run.Summary}, "", nil
+	return &Review{RunID: run.ID, Name: run.ReviewName, Type: run.ReviewType, PeriodLabel: run.PeriodLabel, Summary: run.Summary, NameIDs: run.SummaryNameIDs}, "", nil
 }
 
 // heldAt is HeldUntil at a fixed time.

@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
 var (
@@ -37,22 +38,23 @@ const (
 // because the placeholder is longer than a short link and could push it past the cap. A failure at either check
 // replaces the whole text. The result is a fixed point, CleanSummary(CleanSummary(x)) == CleanSummary(x), and at
 // most 1200 runes. It runs at send time, so a text stored before a rule was tightened is still held to the current
-// rule. Callers pass the stored summary through unchanged.
-func CleanSummary(summary, baseURL string) string {
-	return cleanSummaryAs(summary, baseURL, agentresult.ReplacementSummary)
+// rule. Callers pass the stored summary through unchanged. Both checks let the names in keep stand: those decoded from
+// the ids stored with the summary. No permission is asked again, the message is the stored result.
+func CleanSummary(summary, baseURL string, keep secretshape.Names) string {
+	return cleanSummaryAs(summary, baseURL, agentresult.ReplacementSummary, keep)
 }
 
 // CleanReviewSummary is CleanSummary with the review sentence as the replacement, under the same order of checks.
-func CleanReviewSummary(summary, baseURL string) string {
-	return cleanSummaryAs(summary, baseURL, agentresult.ReplacementReviewSummary)
+func CleanReviewSummary(summary, baseURL string, keep secretshape.Names) string {
+	return cleanSummaryAs(summary, baseURL, agentresult.ReplacementReviewSummary, keep)
 }
 
-func cleanSummaryAs(summary, baseURL, replacement string) string {
-	raw, replaced := agentresult.RecheckSummaryAs(summary, replacement)
+func cleanSummaryAs(summary, baseURL, replacement string, keep secretshape.Names) string {
+	raw, replaced := agentresult.RecheckSummaryNaming(summary, replacement, keep)
 	if replaced {
 		return raw
 	}
-	clean, _ := agentresult.RecheckSummaryAs(agentresult.StripForeignURLs(raw, baseURL), replacement)
+	clean, _ := agentresult.RecheckSummaryNaming(agentresult.StripForeignURLs(raw, baseURL), replacement, keep)
 	return clean
 }
 
@@ -90,12 +92,12 @@ func (m Message) reviewLabel() string {
 func (m Message) summary() string {
 	switch {
 	case m.isDiagnosis() && m.Diagnosis != nil:
-		if clean := CleanSummary(m.Diagnosis.Summary, m.BaseURL); clean != "" {
+		if clean := CleanSummary(m.Diagnosis.Summary, m.BaseURL, secretshape.NamesOf(m.Diagnosis.NameIDs...)); clean != "" {
 			return clean
 		}
 		return agentresult.ReplacementSummary
 	case m.isReview() && m.Review != nil:
-		if clean := CleanReviewSummary(m.Review.Summary, m.BaseURL); clean != "" {
+		if clean := CleanReviewSummary(m.Review.Summary, m.BaseURL, secretshape.NamesOf(m.Review.NameIDs...)); clean != "" {
 			return clean
 		}
 		return agentresult.ReplacementReviewSummary

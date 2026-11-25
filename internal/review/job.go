@@ -481,7 +481,7 @@ func (j *job) storeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	accepted := agentjob.Accept(*j.result, see.Can, agentjob.AcceptOptions{Replacement: agentresult.ReplacementReviewSummary, Echo: j.text})
+	accepted := agentjob.Accept(*j.result, see.Can, agentjob.AcceptOptions{Replacement: agentresult.ReplacementReviewSummary, Echo: j.text, TaskIDs: agentjob.TaskIDs(j.task)})
 	if err := see.Err(); err != nil {
 		return err
 	}

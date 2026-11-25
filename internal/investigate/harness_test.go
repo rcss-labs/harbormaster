@@ -130,7 +130,11 @@ func resultEvent(res agentresult.Result) map[string]any {
 	if evidence == nil {
 		evidence = []agentresult.Evidence{}
 	}
-	return map[string]any{"type": "result", "summary": res.Summary, "summary_replaced": res.SummaryReplaced, "evidence": evidence, "evidence_dropped": res.EvidenceDropped}
+	ev := map[string]any{"type": "result", "summary": res.Summary, "summary_replaced": res.SummaryReplaced, "evidence": evidence, "evidence_dropped": res.EvidenceDropped}
+	if len(res.NameIDs) > 0 {
+		ev["name_ids"] = res.NameIDs
+	}
+	return ev
 }
 
 func agentError(code string) map[string]any {

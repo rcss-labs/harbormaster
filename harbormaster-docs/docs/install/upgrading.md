@@ -103,6 +103,8 @@ Review rows still waiting in the delivery log are not sent by an older release, 
 
 This release adds migration `0223_agent_custom_reviews`: a fifth review type, `custom`, a text column on reviews and on their runs, and a test flag on runs. It adds a setting, `HM_AGENT_CUSTOM_REVIEWS`, off by default. Nothing changes for users until the operator turns it on and an admin writes a custom review. The text sent for the four built-in types is the same bytes as before.
 
+**Migration 0224 takes a short exclusive lock** on the investigations and the review runs, with the same 2 second lock timeout and the same retry at the next start. It adds a column for the ids of the services and clusters a stored summary names.
+
 **Migration 0223 takes a short exclusive lock** on the review tables, with a lock timeout of 2 seconds, for the reason given for 0220 above. If a long transaction holds one of them at that moment, the migration times out and rolls back whole, the task exits at start, and ECS starts another that tries again. Find and end the long transaction as described above if tasks keep exiting at start with a lock timeout in their log.
 
 **Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Create custom reviews after the deploy has finished: until both are new, a custom review waits up to `HM_AGENT_REVIEW_MAX_LATE` and is then recorded as `missed`, or is refused by the agent before any model call. Built-in reviews and the chat keep working throughout.

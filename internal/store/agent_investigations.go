@@ -40,6 +40,9 @@ const (
 	maxEvidenceExcerptBytes  = 1500
 	maxEvidenceNoteRunes     = 300
 	maxInvestigationSummary  = 1200
+	// MaxSummaryNameIDs and MaxSummaryNameIDBytes bound the ids stored with a summary; the second is in Go only.
+	MaxSummaryNameIDs     = 64
+	MaxSummaryNameIDBytes = 512
 )
 
 // minInvestigationRetention is the youngest a settled investigation can be and still be deleted, whatever the
@@ -88,6 +91,7 @@ type Investigation struct {
 	Provider, Model       string
 	Summary               string
 	SummaryReplaced       bool
+	SummaryNameIDs        []string // the ids whose names the summary uses, as the holder stored them
 	EvidenceDropped       int
 	RequestedAt           time.Time
 	StartedAt, FinishedAt *time.Time
@@ -105,6 +109,7 @@ type InvestigationEvidence struct {
 type InvestigationResult struct {
 	Summary         string
 	SummaryReplaced bool
+	NameIDs         []string // ids of the clusters and services whose random-looking names the summary uses
 	Evidence        []InvestigationEvidence
 	EvidenceDropped int
 }
@@ -125,7 +130,7 @@ type InvestigationKey struct {
 
 const investigationColumnNames = `id, subject_kind, subject_key, account_id, region, cluster_name, service_name, members,
 	alert_kind, alert_title, alert_text, alert_opened_at, state, reason, attempts, claim_seq, claimed_until, run_id, provider, model,
-	summary, summary_replaced, evidence_dropped, requested_at, started_at, finished_at`
+	summary, summary_replaced, summary_name_ids, evidence_dropped, requested_at, started_at, finished_at`
 
 var investigationColumns = investigationColumnList("")
 
@@ -145,7 +150,7 @@ func scanInvestigationWith(row pgx.Row, lead ...any) (Investigation, error) {
 	var members []byte
 	dest := append(lead, &v.ID, &v.SubjectKind, &v.SubjectKey, &v.AccountID, &v.Region, &v.ClusterName, &v.ServiceName, &members,
 		&v.AlertKind, &v.AlertTitle, &v.AlertText, &v.AlertOpenedAt, &v.State, &v.Reason, &v.Attempts, &v.ClaimSeq, &v.ClaimedUntil, &v.RunID,
-		&v.Provider, &v.Model, &v.Summary, &v.SummaryReplaced, &v.EvidenceDropped, &v.RequestedAt, &v.StartedAt, &v.FinishedAt)
+		&v.Provider, &v.Model, &v.Summary, &v.SummaryReplaced, &v.SummaryNameIDs, &v.EvidenceDropped, &v.RequestedAt, &v.StartedAt, &v.FinishedAt)
 	if err := row.Scan(dest...); err != nil {
 		return Investigation{}, err
 	}
@@ -390,7 +395,31 @@ func validateInvestigationResult(state string, r *InvestigationResult) error {
 	if err := checkInvestigationText("summary", r.Summary, maxInvestigationSummary, 0); err != nil {
 		return err
 	}
+	if err := checkNameIDs("finish investigation", r.NameIDs); err != nil {
+		return err
+	}
 	return checkEvidenceItems("finish investigation", r.Evidence, r.EvidenceDropped, "view", "logs")
+}
+
+// checkNameIDs is the one rule for the ids stored with the summary of a finished run. what prefixes the error.
+func checkNameIDs(what string, ids []string) error {
+	if len(ids) > MaxSummaryNameIDs {
+		return fmt.Errorf("%s: %d ids of names, at most %d", what, len(ids), MaxSummaryNameIDs)
+	}
+	for i, id := range ids {
+		if err := checkInvestigationText(fmt.Sprintf("id %d of a name", i+1), id, MaxSummaryNameIDBytes, MaxSummaryNameIDBytes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// notNull is ids as a list column takes them: nil would be null.
+func notNull(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // checkEvidenceItems is the one rule for the evidence rows of a finished run, shared by investigations and reviews:
@@ -453,9 +482,9 @@ func (s *Store) FinishInvestigation(ctx context.Context, c Claim, state, reason 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 	tag, err := tx.Exec(ctx, `update agent_investigations set state = $4, reason = $5, summary = $6, summary_replaced = $7,
-		evidence_dropped = $8, finished_at = $9, claimed_until = null
+		evidence_dropped = $8, finished_at = $9, claimed_until = null, summary_name_ids = $10
 		where `+fencedInvestigation,
-		c.InvestigationID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now)
+		c.InvestigationID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now, notNull(result.NameIDs))
 	if err != nil {
 		return fmt.Errorf("finish investigation: %w", err)
 	}

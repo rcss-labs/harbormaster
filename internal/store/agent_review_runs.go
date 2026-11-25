@@ -46,6 +46,7 @@ type ReviewRun struct {
 	Range                 string
 	Summary               string
 	SummaryReplaced       bool
+	SummaryNameIDs        []string // as Investigation's
 	EvidenceDropped       int
 	DeliveryPlannedAt     *time.Time
 	RequestedAt           time.Time
@@ -100,13 +101,13 @@ type ReviewStart struct {
 
 const reviewRunColumns = `id, review_id, review_name, review_type, period_key, period_label, scheduled_for, manual, state, reason,
 	attempts, claim_seq, claimed_until, run_id, prev_run_id, provider, model, scope_label, covered_tags, services_total, range,
-	summary, summary_replaced, evidence_dropped, delivery_planned_at, requested_at, started_at, finished_at, instructions, test`
+	summary, summary_replaced, evidence_dropped, delivery_planned_at, requested_at, started_at, finished_at, instructions, test, summary_name_ids`
 
 func scanReviewRun(row pgx.Row) (ReviewRun, error) {
 	var r ReviewRun
 	err := row.Scan(&r.ID, &r.ReviewID, &r.ReviewName, &r.ReviewType, &r.PeriodKey, &r.PeriodLabel, &r.ScheduledFor, &r.Manual, &r.State, &r.Reason,
 		&r.Attempts, &r.ClaimSeq, &r.ClaimedUntil, &r.RunID, &r.PrevRunID, &r.Provider, &r.Model, &r.ScopeLabel, &r.CoveredTags, &r.ServicesTotal, &r.Range,
-		&r.Summary, &r.SummaryReplaced, &r.EvidenceDropped, &r.DeliveryPlannedAt, &r.RequestedAt, &r.StartedAt, &r.FinishedAt, &r.Instructions, &r.Test)
+		&r.Summary, &r.SummaryReplaced, &r.EvidenceDropped, &r.DeliveryPlannedAt, &r.RequestedAt, &r.StartedAt, &r.FinishedAt, &r.Instructions, &r.Test, &r.SummaryNameIDs)
 	if r.CoveredTags == nil {
 		r.CoveredTags = []int64{}
 	}
@@ -373,6 +374,9 @@ func (s *Store) FinishReviewRun(ctx context.Context, c ReviewClaim, state, reaso
 	if err := checkInvestigationText("summary", result.Summary, maxInvestigationSummary, 0); err != nil {
 		return err
 	}
+	if err := checkNameIDs("finish review run", result.NameIDs); err != nil {
+		return err
+	}
 	if err := checkEvidenceItems("finish review run", result.Evidence, result.EvidenceDropped, "view"); err != nil {
 		return err
 	}
@@ -382,10 +386,10 @@ func (s *Store) FinishReviewRun(ctx context.Context, c ReviewClaim, state, reaso
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 	tag, err := tx.Exec(ctx, `update agent_review_runs set state = $4, reason = $5, summary = $6, summary_replaced = $7,
-		evidence_dropped = $8, finished_at = $9, claimed_until = null,
+		evidence_dropped = $8, finished_at = $9, claimed_until = null, summary_name_ids = $11,
 		covered_tags = case when test then '{}'::bigint[] else array(select distinct t from unnest(covered_tags || $10::bigint[]) t order by t) end
 		where `+fencedReviewRun,
-		c.RunID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now, alsoCovered)
+		c.RunID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now, alsoCovered, notNull(result.NameIDs))
 	if err != nil {
 		return fmt.Errorf("finish review run: %w", err)
 	}

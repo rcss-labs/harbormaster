@@ -246,6 +246,15 @@ A custom review is a review of type `custom` whose instructions an admin wrote. 
 
 Check it worked: after a rollback with custom reviews disabled or deleted, no `custom` run appears in **Settings > AI agent > Reviews**, and the delivery log shows no failing review rows.
 
+**Rollback to the release before random-looking names.** Migration 0224 adds one column to the investigations and one to the review runs, with a default, and is not undone.
+
+| What meets a summary that holds a random-looking service name | What happens |
+| --- | --- |
+| The older dispatcher, a stored summary that is still to be sent | It sends the fixed sentence instead. The page shows the stored summary. |
+| The older Harbormaster, an answer of the current agent | It ignores the reported ids and replaces the summary. |
+| The current Harbormaster, an answer of an older agent | The agent has already replaced the summary. |
+| A result the older Harbormaster stores on the new schema | It has no ids. Nothing else differs. |
+
 ## 19. Time zones
 
 - A review's schedule is read in its own IANA zone (for example `Europe/Berlin`), not in the server's. No part of the schedule uses the host's zone.
