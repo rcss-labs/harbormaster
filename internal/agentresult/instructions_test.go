@@ -109,33 +109,92 @@ func TestInstructionsHash_StableAndOfTheCleanText(t *testing.T) {
 	}
 }
 
-const echoSource = "The quick brown fox jumps over the lazy dog while the cat watches quietly"
+const echoSource = "Review the services with the most stopped tasks in the last 7 days, and say which of them " +
+	"run a single task with no autoscaling. Flag secrets as plain environment variables, and name the owner of each finding."
 
-func TestEchoes_ThirtyTwoCharactersInARow(t *testing.T) {
-	norm := Normalize(echoSource)
-	run32 := norm[10:42]
-	if len(run32) != 32 {
-		t.Fatalf("test setup: run is %d characters", len(run32))
+// echoRun returns n normalised characters of text, starting at its start.
+func echoRun(t *testing.T, text string, n int) string {
+	t.Helper()
+	norm := Normalize(text)
+	if len(norm) < n {
+		t.Fatalf("test setup: %d normalised characters, need %d", len(norm), n)
 	}
-	if Echoes("9"+run32[:31]+"9", echoSource) {
-		t.Error("31 characters in a row reported as an echo")
+	return norm[:n]
+}
+
+func TestEchoes_EightyCharactersInARow(t *testing.T) {
+	run80 := echoRun(t, echoSource, EchoRun)
+	if len(run80) != 80 {
+		t.Fatalf("test setup: run is %d characters", len(run80))
 	}
-	if !Echoes("Intro: "+run32+" and more", echoSource) {
-		t.Error("32 characters in a row not reported as an echo")
+	if !Echoes("Intro: "+run80+" and more", echoSource) {
+		t.Error("80 characters in a row not reported as an echo")
 	}
-	if !Echoes(strings.ToUpper(strings.ReplaceAll(run32, " ", " \t\n,; ")), echoSource) {
+	if Echoes("9"+run80[:79]+"9", echoSource) {
+		t.Error("79 characters in a row reported as an echo")
+	}
+	if !Echoes(strings.ToUpper(strings.ReplaceAll(run80, " ", " \t\n,; ")), echoSource) {
 		t.Error("same words in other case and spacing not reported as an echo")
+	}
+	if !Echoes(strings.ReplaceAll("x "+run80, "\n", "\\n"), echoSource) {
+		t.Error("a copy with JSON escapes not reported as an echo")
+	}
+}
+
+func TestEchoes_NameIsNeverAnEcho(t *testing.T) {
+	name := "payments-settlement-reconciliation-worker-eu-central-prod-blue-green-canary-shard_07"
+	if len(Normalize(name)) < EchoRun {
+		t.Fatalf("test setup: name is %d normalised characters", len(Normalize(name)))
+	}
+	source := "Look first at " + name + " and its siblings."
+	for _, candidate := range []string{name, "The service " + name + " is idle.", strings.ToUpper(name), name + ", " + name} {
+		if Echoes(candidate, source) {
+			t.Errorf("a name alone reported as an echo: %q", candidate)
+		}
+	}
+}
+
+func TestEchoes_NameWithTextBesideItIsAnEcho(t *testing.T) {
+	name := "payments-settlement-reconciliation-worker-eu-central-prod-blue-green-canary-shard_07"
+	source := "Please look first at " + name + " and its siblings, then report."
+	// 80 normalised characters that run across the edge of the name and into the text beside it.
+	if !Echoes("Please look first at "+name+" and its siblings", source) {
+		t.Error("name plus text on both sides not reported as an echo")
+	}
+	if !Echoes(name+" and its siblings, then report", source) {
+		t.Error("name plus text after it not reported as an echo")
+	}
+	if !Echoes("Please look first at payments settlement reconciliation worker eu central prod blue", source) {
+		t.Error("the start of a name plus text before it not reported as an echo")
 	}
 }
 
 func TestEchoes_OwnWordsAreNotAnEcho(t *testing.T) {
-	if Echoes("Three databases sit idle and cost money; stop them after checking owners.", echoSource) {
-		t.Error("own words reported as an echo")
+	pairs := [][2]string{
+		{"Look at the services with the most stopped tasks in the last 7 days.", "Three services stopped tasks often in the last 7 days; checkout stopped the most."},
+		{"Tell me which services run a single task with no autoscaling.", "Two services run one task and have no autoscaling: checkout and search."},
+		{"Find secrets as plain environment variables.", "The worker keeps its settings as plain environment variables; no secret values are shown."},
+		{"Focus on idle databases and say which ones to stop.", "Four databases were idle for the whole period. Stopping them would save money each month."},
+		{"Compare the cost of this week with last week.", "Spending went up this week against last week, mostly in data transfer."},
+		{"Check that every service has an owner tag.", "Five services have no owner tag, so nobody is named to act on them."},
+		{"List the queues with old messages and name each owner.", "Two queues hold old messages. The payments team owns one and the search team the other."},
+		{"Look for load balancers with no healthy targets.", "One load balancer has no healthy targets, and it has had none since Monday."},
+		{"Report services that deploy more than twice a day.", "Only checkout deploys more than twice a day; the rest deploy weekly."},
+		{"Say which tasks use more than 90 percent of their memory.", "The report task uses 93 percent of its memory and was stopped twice for it."},
+		{"Review public buckets and say who made them public.", "Two buckets are public. Their audit entries show the same person made both public."},
+		{"Find services without health checks.", "Three services have no health check, so a stuck task is not replaced for a long time."},
+		{"Summarize the largest cost changes by service.", "The largest rise is in search, followed by checkout; the other services moved little."},
+		{"Point out anything that changed since the last review.", "Since the last review one new service appeared and two tasks were stopped more often."},
+	}
+	for _, p := range pairs {
+		if Echoes(p[1], p[0]) || Echoes(p[0], p[1]) {
+			t.Errorf("own words reported as an echo: %q", p[1])
+		}
 	}
 }
 
 func TestEchoes_EmptyOrShortSourceIsFalse(t *testing.T) {
-	for _, source := range []string{"", "   ", "short text of 20 chars", strings.Repeat("a", 31)} {
+	for _, source := range []string{"", "   ", "short text of 20 chars", strings.Repeat("a ", 39) + "a"} {
 		if Echoes(source+" "+source, source) {
 			t.Errorf("source %q: reported as an echo", source)
 		}
@@ -143,8 +202,9 @@ func TestEchoes_EmptyOrShortSourceIsFalse(t *testing.T) {
 	if Echoes("", echoSource) {
 		t.Error("empty candidate reported as an echo")
 	}
-	if !Echoes(strings.Repeat("a", 32), strings.Repeat("a", 32)) {
-		t.Error("exactly 32 normalised characters in both not reported")
+	exact := echoRun(t, echoSource, EchoRun)
+	if !Echoes(exact, exact) {
+		t.Error("exactly 80 normalised characters in both not reported")
 	}
 }
 
@@ -183,6 +243,7 @@ func TestEchoes_LinearOn200KB(t *testing.T) {
 		{strings.Repeat("ab ", 70<<10), strings.Repeat("ab ", 70<<10)},
 		{adversarialText(200 << 10), adversarialText(200 << 10)},
 		{strings.Repeat("x", 2000), big},
+		{strings.Repeat("ab-", 70<<10), strings.Repeat("ab-", 70<<10)},
 	}
 	for i, in := range inputs {
 		start := time.Now()
