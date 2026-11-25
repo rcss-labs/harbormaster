@@ -152,7 +152,7 @@ describe('AgentSettings', () => {
     await userEvent.type(allowance, '40')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ monthly_budget_usd: '40', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'model-b' } }, version: 3 }]),
+      expect(bodies).toEqual([{ monthly_budget_usd: '40', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'model-b' }, investigator: null }, version: 3 }]),
     )
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   })
@@ -175,7 +175,7 @@ describe('AgentSettings', () => {
     await userEvent.type(allowance, '30')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' } }, version: 3 }]),
+      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' }, investigator: null }, version: 3 }]),
     )
   })
 
@@ -194,7 +194,7 @@ describe('AgentSettings', () => {
     await userEvent.clear(allowance)
     await userEvent.type(allowance, '12.50')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: {}, version: 3 }]))
+    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: { investigator: null }, version: 3 }]))
   })
 
   it('on a conflict shows the message, loads the stored settings and keeps what was typed', async () => {
@@ -282,7 +282,7 @@ describe('AgentSettings', () => {
       version: 4,
       monthly_budget_usd: '30.00',
       unredacted_providers: ['anthropic'],
-      role_models: { chat: { provider: 'anthropic', model: 'model-b' } },
+      role_models: { chat: { provider: 'anthropic', model: 'model-b' }, investigator: null },
     })
   })
 
@@ -493,6 +493,51 @@ describe('AgentSettings', () => {
         },
       ]),
     )
+  })
+
+  describe('the investigator key of a save', () => {
+    const withInvestigator = {
+      ...SETTINGS,
+      role_models: { ...SETTINGS.role_models, investigator: { provider: 'openai', model: 'model-c', available: true, max_question_usd: '0.60', allowance_below_question: false } },
+    }
+    // The caller has set up the mocks with useAgentMocks.
+    const saveAllowance = async (settings: AgentSettingsDTO, before?: () => Promise<void>) => {
+      const bodies: { role_models: Record<string, unknown> }[] = []
+      server.use(
+        http.put('/api/agent/settings', async ({ request }) => {
+          bodies.push((await request.json()) as { role_models: Record<string, unknown> })
+          return HttpResponse.json(settings)
+        }),
+      )
+      renderApp('/settings/agent')
+      const allowance = await screen.findByLabelText('Monthly allowance in US dollars')
+      await before?.()
+      await userEvent.clear(allowance)
+      await userEvent.type(allowance, '31')
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(bodies).toHaveLength(1))
+      return bodies[0].role_models
+    }
+
+    it('sends null when the choice is cleared', async () => {
+      useAgentMocks(withInvestigator)
+      const roles = await saveAllowance(withInvestigator, async () => {
+        await userEvent.selectOptions(screen.getByLabelText('Investigation provider'), '')
+      })
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null })
+    })
+
+    it('sends the stored model unchanged when other settings are saved', async () => {
+      useAgentMocks(withInvestigator)
+      const roles = await saveAllowance(withInvestigator)
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: { provider: 'openai', model: 'model-c' } })
+    })
+
+    it('sends null when none was ever set', async () => {
+      useAgentMocks(SETTINGS)
+      const roles = await saveAllowance(SETTINGS)
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null })
+    })
   })
 
   it('warns when the investigator model is no longer offered', async () => {

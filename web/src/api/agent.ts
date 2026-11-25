@@ -278,7 +278,7 @@ export interface AgentSettingsUpdate {
   version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
-  role_models: { chat?: { provider: string; model: string }; investigator?: { provider: string; model: string } }
+  role_models: { chat?: { provider: string; model: string }; investigator: { provider: string; model: string } | null }
 }
 export interface AgentTestResult {
   ok: boolean
