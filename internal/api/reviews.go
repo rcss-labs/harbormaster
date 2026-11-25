@@ -15,8 +15,6 @@ import (
 const (
 	// reviewRunPageSize is the most runs one page holds.
 	reviewRunPageSize = 50
-	// reviewRunWindow is how many recent runs one list request reads before it keeps the ones the reader may read.
-	reviewRunWindow = 500
 )
 
 // knownReviewType is the closed set of review types this code renders. Any other type is answered as not found for
@@ -50,6 +48,17 @@ func (s *Server) newReviewReader(r *http.Request) (reviewReader, error) {
 		existing[int64(tag.ID)] = true
 	}
 	return reviewReader{investigationReader: base, existingTags: existing}, nil
+}
+
+// viewableTags are the tags that exist now and that the reader may View: the set a readable run must be covered by.
+func (rd reviewReader) viewableTags() []int64 {
+	out := make([]int64, 0, len(rd.existingTags))
+	for tag := range rd.existingTags {
+		if authz.Can(rd.subject, authz.View, authz.TagID(tag)) {
+			out = append(out, tag)
+		}
+	}
+	return out
 }
 
 // mayRead applies the read rule of a run: an unknown state or type is for nobody; an admin reads everything else; any
@@ -97,8 +106,8 @@ func parseReviewCursor(raw string) (time.Time, int64, bool) {
 	return time.UnixMicro(at).UTC(), runID, true
 }
 
-// listReviewRuns answers GET /api/reviews/runs: the newest runs the caller may read. It reads a window of recent
-// runs and keeps the readable ones, so no run is counted or sent that the caller may not read.
+// listReviewRuns answers GET /api/reviews/runs: the newest runs the caller may read. The reader rule is part of the
+// query, so a page holds readable runs only and a cursor is always the position of one of them.
 func (s *Server) listReviewRuns(w http.ResponseWriter, r *http.Request) {
 	limit := reviewRunPageSize
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -109,7 +118,7 @@ func (s *Server) listReviewRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = min(n, reviewRunPageSize)
 	}
-	filter := store.ReviewRunFilter{Limit: reviewRunWindow}
+	filter := store.ReadableReviewRunFilter{Limit: limit + 1}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		at, id, ok := parseReviewCursor(raw)
 		if !ok {
@@ -123,14 +132,17 @@ func (s *Server) listReviewRuns(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	runs, err := s.Store.ListReviewRuns(r.Context(), filter)
+	filter.Admin = reader.subject.Admin
+	filter.ViewableTags = reader.viewableTags()
+	runs, err := s.Store.ListReadableReviewRuns(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	out := ReviewRunsDTO{Items: make([]ReviewRunDTO, 0, limit)}
+	out := ReviewRunsDTO{Items: make([]ReviewRunDTO, 0, min(limit, len(runs)))}
 	var last store.ReviewRun
 	for _, v := range runs {
+		// The query applied the same rule; the check here is the final word on each row.
 		if !reader.mayRead(v) {
 			continue
 		}

@@ -417,3 +417,142 @@ func TestMe_ReviewsEnabled(t *testing.T) {
 		t.Error("plain reader: reviews_enabled false, want true")
 	}
 }
+
+// seedRunsBulk writes n done runs with the given covered tags, requested one second apart from first, in one statement.
+func (e *invEnv) seedRunsBulk(t *testing.T, n int, first time.Time, covered authz.TagID) {
+	t.Helper()
+	if _, err := e.st.Pool.Exec(t.Context(), `insert into agent_review_runs
+		(review_name, review_type, period_key, period_label, scheduled_for, state, summary, covered_tags, requested_at, finished_at)
+		select 'Weekly cost', 'cost', 'x:' || gen_random_uuid()::text, 'Week 47', ts, 'done', 'Findings.', array[$3::bigint], ts, ts
+		from (select $2::timestamptz + (i || ' seconds')::interval as ts from generate_series(0, $1::int - 1) i) s`,
+		n, first, int64(covered)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// readableRunIDs lists, newest first, the ids of the runs covering only the tag.
+func (e *invEnv) runIDsCovering(t *testing.T, tag authz.TagID) []int64 {
+	t.Helper()
+	rows, err := e.st.Pool.Query(t.Context(), `select id from agent_review_runs where covered_tags = array[$1::bigint] order by requested_at desc, id desc`, int64(tag))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// walkReviewRuns follows next_cursor to the end and returns every id in order and the number of pages.
+func walkReviewRuns(t *testing.T, c *apiClient, query string, start ...string) ([]int64, int) {
+	t.Helper()
+	var ids []int64
+	cursor, pages := strings.Join(start, ""), 0
+	for {
+		path := query
+		if cursor != "" {
+			path += "&cursor=" + cursor
+		}
+		page := listReviewRunsPage(t, c, path)
+		pages++
+		ids = append(ids, runIDs(page.Items)...)
+		if page.NextCursor == "" {
+			return ids, pages
+		}
+		cursor = page.NextCursor
+		if pages > 200 {
+			t.Fatal("paging does not end")
+		}
+	}
+}
+
+func TestReviewRuns_WalkFindsEveryReadableRunAmongHiddenOnes(t *testing.T) {
+	e := newInvEnv(t)
+	dev, prod := e.tagID(t, "Dev"), e.tagID(t, "Prod")
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	base := time.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
+	e.seedRunsBulk(t, 60, base, dev)
+	e.seedRunsBulk(t, 500, base.Add(time.Hour), prod)
+	e.seedRunsBulk(t, 1440, base.Add(2*time.Hour), dev)
+	want := e.runIDsCovering(t, dev)
+	got, pages := walkReviewRuns(t, reader, "?limit=50")
+	if len(want) != 1500 || !slices.Equal(got, want) || pages != 30 {
+		t.Fatalf("walk: %d runs in %d pages, want all 1500 readable runs in order in 30 pages (in order: %v)", len(got), pages, slices.Equal(got, want))
+	}
+}
+
+func TestReviewRuns_HiddenNewestRunsDoNotHideTheFirstPage(t *testing.T) {
+	e := newInvEnv(t)
+	dev, prod := e.tagID(t, "Dev"), e.tagID(t, "Prod")
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	base := time.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
+	e.seedRunsBulk(t, 60, base, dev)
+	e.seedRunsBulk(t, 500, base.Add(time.Hour), prod)
+	want := e.runIDsCovering(t, dev)
+	first := listReviewRunsPage(t, reader, "")
+	if !slices.Equal(runIDs(first.Items), want[:50]) || first.NextCursor == "" {
+		t.Fatalf("first page: %d items, cursor %q, want the 50 newest readable runs and a cursor", len(first.Items), first.NextCursor)
+	}
+}
+
+func TestReviewRuns_CraftedCursorOnlyMovesTheStartingPoint(t *testing.T) {
+	e := newInvEnv(t)
+	dev, prod := e.tagID(t, "Dev"), e.tagID(t, "Prod")
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	base := time.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
+	e.seedRunsBulk(t, 20, base, dev)
+	e.seedRunsBulk(t, 20, base.Add(time.Hour), prod)
+	e.seedRunsBulk(t, 20, base.Add(2*time.Hour), dev)
+	readable := map[int64]bool{}
+	for _, id := range e.runIDsCovering(t, dev) {
+		readable[id] = true
+	}
+	hidden := e.runIDsCovering(t, prod)
+	in, err := e.st.GetReviewRun(t.Context(), hidden[5])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursors := []string{fmt.Sprintf("%d.%d", in.RequestedAt.UnixMicro(), in.ID), fmt.Sprintf("%d.%d", time.Now().Add(time.Hour).UnixMicro(), int64(1)<<40), "1.1"}
+	for _, cursor := range cursors {
+		ids, _ := walkReviewRuns(t, reader, "?limit=7", cursor)
+		for _, id := range ids {
+			if !readable[id] {
+				t.Errorf("cursor %s: the list holds run %d, which the reader may not read", cursor, id)
+			}
+		}
+	}
+	ids, _ := walkReviewRuns(t, reader, "?limit=7", cursors[0])
+	if len(ids) != 20 {
+		t.Errorf("cursor inside the hidden block: %d runs, want the 20 older readable ones", len(ids))
+	}
+}
+
+func TestReviewRuns_CursorIsTheLastReadableRunOfThePage(t *testing.T) {
+	e := newInvEnv(t)
+	dev, prod := e.tagID(t, "Dev"), e.tagID(t, "Prod")
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	base := time.Now().UTC().Truncate(time.Second).Add(-48 * time.Hour)
+	// Oldest first: H4 H3 R6 H2 R5 R4 R3 H1 R2 R1, so the newest-first order is R1 R2 H1 R3 R4 R5 H2 R6 H3 H4.
+	var order []int64
+	for i, tag := range []authz.TagID{prod, prod, dev, prod, dev, dev, dev, prod, dev, dev} {
+		order = append([]int64{e.seedRun(t, reviewSeed{covered: []authz.TagID{tag}, requested: base.Add(time.Duration(i) * time.Minute)})}, order...)
+	}
+	r1, r2, r3, r4, r5, r6 := order[0], order[1], order[3], order[4], order[5], order[7]
+	first := listReviewRunsPage(t, reader, "?limit=3")
+	if !slices.Equal(runIDs(first.Items), []int64{r1, r2, r3}) || first.NextCursor != fmt.Sprintf("%d.%d", first.Items[2].RequestedAt.UnixMicro(), r3) {
+		t.Fatalf("first page: ids %v cursor %q, want [R1 R2 R3] and the cursor of R3", runIDs(first.Items), first.NextCursor)
+	}
+	second := listReviewRunsPage(t, reader, "?limit=3&cursor="+first.NextCursor)
+	if !slices.Equal(runIDs(second.Items), []int64{r4, r5, r6}) || second.NextCursor != "" {
+		t.Fatalf("second page: ids %v cursor %q, want [R4 R5 R6] and no cursor, only hidden runs follow", runIDs(second.Items), second.NextCursor)
+	}
+	if ids, _ := walkReviewRuns(t, reader, "?limit=2"); !slices.Equal(ids, []int64{r1, r2, r3, r4, r5, r6}) {
+		t.Errorf("walk with limit 2: %v, want every readable run and nothing else", ids)
+	}
+}
