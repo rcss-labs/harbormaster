@@ -230,12 +230,13 @@ A custom review is a review of type `custom` whose instructions an admin wrote. 
 | What meets a custom review | What happens |
 | --- | --- |
 | The older web and API | It lists the review with a note that its type is unknown. It cannot save it (an update is refused) and can delete it. |
-| The older job, a custom review that is due | A run row may be recorded. With an older agent, the agent does not offer the type: the run waits without an attempt and is `missed` at `HM_AGENT_REVIEW_MAX_LATE`. With a current agent, the task has no instructions and the agent refuses it with 400 before any model call, the reservation is settled at zero and the run fails. |
+| The older job, a custom review that is due | A run row is recorded each period and the older job ends it as `not_configured` before it calls the agent. Nothing is reserved, paid or sent. The Settings list shows it as "Not run: no model is set up for reviews", which is misleading. Disable or delete the review to stop it. |
 | The older read API | A custom result answers `404` to everyone, admins included. It is visible again after you roll forward. |
 | The older dispatcher, a custom result's message | It is not sent: the message has no label for the type and every sender refuses it. The row fails and may count toward "route failing" until it expires. |
 | The older dispatcher, a test run | Never planned: the run was marked planned when it was made. |
-| The older agent, a task from the current release | `400` for the unknown member, so nothing is paid. |
+| The older agent, a task from the current release | The new job waits for an agent that offers the type and never sends the task, so nothing is paid. |
 | A test run under the older code | It shows no covered tags, so only admins read it. |
+| An older coordinator, a test run it starts during a rolling deploy or a rollback | A database check makes the run fail before any call to the agent, as failed with an error. Nothing is paid. |
 | The current agent, a built-in task from the older release | The same bytes as before. |
 
 Check it worked: after a rollback with custom reviews disabled or deleted, no `custom` run appears in **Settings > AI agent > Reviews**, and the delivery log shows no failing review rows.

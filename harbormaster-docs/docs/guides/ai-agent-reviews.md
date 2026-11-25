@@ -92,7 +92,7 @@ A save is refused, and nothing is stored or audited, when the instructions:
 | Problem | Code | What to do |
 | --- | --- | --- |
 | Are empty | `instructions_required` | Write what the review should look at. |
-| Hold more than 2000 characters or 8000 bytes | `instructions_too_long` | Shorten them. The limit counts characters (code points), so an emoji is one character, and bytes of the text after cleaning. |
+| Hold more than 2000 characters or 8000 bytes | `instructions_too_long` | Shorten them. The limit counts code points after cleaning, so a letter with an accent is one character, but an emoji can be two or more. Emoji that use a variation selector or a joiner are refused as hidden characters. The 8000-byte limit counts the bytes of the cleaned text. |
 | Hold a NUL character | `instructions_not_text` | Type them again. |
 | Hold hidden characters: controls other than line feed and tab, zero-width and other invisible format characters, variation selectors | `instructions_hidden` | Paste them as plain text. Text in a script that needs a zero-width joiner cannot be saved. |
 | Look like a secret: a key, a token, a password, or a long random-looking name | `instructions_secret` | Remove it. To name a service whose name looks random, use its tag or the scope. |
