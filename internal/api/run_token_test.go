@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/limits"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -51,16 +53,24 @@ func runTokenClientRedacting(t *testing.T, srv *httptest.Server, api *Server, st
 	return c
 }
 
+// unlimitedRate never empties a bucket. The route walk below makes as many requests as the registry has routes, and
+// that count grows with the product; the shared per-user bucket is covered by TestRunToken_SharesTheUsersRateBucket.
+type unlimitedRate struct{ limits.Rate }
+
+func (unlimitedRate) Allow(context.Context, string, string, int, float64) (bool, error) {
+	return true, nil
+}
+
 // Every route that is not marked for tokens refuses a run token, an admin's included: with the agent on alone, and with
 // access tokens and OAuth on beside it so every optional route is registered. Public routes count too.
 func TestRunToken_RefusedOnEveryUnmarkedRoute(t *testing.T) {
 	for name, mutate := range map[string]func(*Server){
-		"agent only": withAgent(nil),
+		"agent only": withAgent(func(s *Server) { s.Rates = unlimitedRate{} }),
 		"agent, access tokens and OAuth": withTokens(func(c *config.Config) {
 			c.AgentURL, c.AgentRunTokenTTL = testAgentURL, 15*time.Minute
 			c.OAuth, c.MCPPublicURL = true, "https://mcp.example.com"
 			c.OAuthClientHosts, c.OAuthRedirectURIs = config.DefaultOAuthClientHosts(), config.DefaultOAuthRedirectURIs()
-		}, nil),
+		}, func(s *Server) { s.Rates = unlimitedRate{} }),
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv, api, _, st, _ := newServerCustomAPI(t, true, mutate)
@@ -273,6 +283,7 @@ func TestRunToken_SharesTheUsersRateBucket(t *testing.T) {
 		c.AgentURL, c.AgentRunTokenTTL = testAgentURL, 15*time.Minute
 	}, nil))
 	personal := tokenClient(t, srv, st, "sam")
+	runClient := runTokenClient(t, srv, api, st, "sam") // minted first: minting is not what this test measures
 	limited := false
 	for i := 0; i < 300 && !limited; i++ {
 		resp := personal.get("/api/tokens/current")
@@ -282,7 +293,7 @@ func TestRunToken_SharesTheUsersRateBucket(t *testing.T) {
 	if !limited {
 		t.Fatal("the personal token was never rate limited")
 	}
-	if resp := runTokenClient(t, srv, api, st, "sam").get("/api/tokens/current"); resp.StatusCode != http.StatusTooManyRequests {
+	if resp := runClient.get("/api/tokens/current"); resp.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("run token of the same user: status %d, want 429 from the shared bucket", resp.StatusCode)
 	}
 	if resp := runTokenClient(t, srv, api, st, "omer").get("/api/tokens/current"); resp.StatusCode != http.StatusOK {
