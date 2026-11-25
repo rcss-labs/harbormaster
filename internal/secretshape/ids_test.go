@@ -45,6 +45,7 @@ func realIDs() map[string]string {
 		"CloudFormation service": serviceID("prod-EcsCluster-AbCdEfGh1234", "prod-WebService-9ZyXwVuT8sRq"),
 		"long names":             serviceID(long, long),
 		"underscores":            serviceID("data_platform_cluster", "ingest_worker_v2"),
+		"sovereign region":       model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: idAccount, Region: "eusc-de-east-1", Cluster: "c1"}, Service: "svc"}.ID(),
 		"another region":         model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: idAccount, Region: "us-gov-west-1", Cluster: "c1"}, Service: "svc"}.ID(),
 	}
 }
@@ -124,36 +125,38 @@ func TestScrubText_IDShapedTokensThatAreNotIDsStayRedacted(t *testing.T) {
 	}
 	wide := strings.Repeat("a", 256)
 	tests := map[string]string{
-		"11 digit account":      rawID("12345678901", idRegion, "prod-cluster", "checkout-api"),
-		"13 digit account":      rawID("1234567890123", idRegion, "prod-cluster", "checkout-api"),
-		"letters in account":    rawID("12345678901x", idRegion, "prod-cluster", "checkout-api"),
-		"bad region":            rawID(idAccount, "europe", "prod-cluster", "checkout-api"),
-		"region in capitals":    rawID(idAccount, "EU-WEST-1", "prod-cluster", "checkout-api"),
-		"region without number": rawID(idAccount, "eu-west", "prod-cluster", "checkout-api"),
-		"five fields":           rawID(idAccount, idRegion, "prod-cluster", "checkout-api", "extra-field"),
-		"two fields":            rawID(idAccount, idRegion+"-padding-padding-padding"),
-		"empty cluster":         rawID(idAccount, idRegion, "", "checkout-api"),
-		"empty service":         rawID(idAccount, idRegion, "prod-cluster", ""),
-		"NUL in a name":         rawID(idAccount, idRegion, "prod-cluster", "checkout\x00api"),
-		"non-ASCII name":        rawID(idAccount, idRegion, "prod-cluster", "checkout-api-é-é"),
-		"space in a name":       rawID(idAccount, idRegion, "prod-cluster", "checkout api service"),
-		"slash in a name":       rawID(idAccount, idRegion, "prod-cluster", "checkout/api/service"),
-		"cluster too long":      rawID(idAccount, idRegion, wide+"a", "checkout-api"),
-		"service too long":      rawID(idAccount, idRegion, "prod-cluster", wide+"a"),
-		"ARN of another region": rawID(idAccount, idRegion, "arn:aws:ecs:us-east-1:"+idAccount+":task/prod-cluster/0123456789abcdef0123456789abcdef"),
-		"ARN of another acct":   rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":999999999999:task/prod-cluster/0123456789abcdef0123456789abcdef"),
-		"ARN of a service":      rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":service/prod-cluster/checkout-api-0123456789"),
-		"ARN with a bad task":   rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/NOTHEX0123456789abcdef0123456"),
-		"ARN with a long tail":  rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/0123456789abcdef/extra/segments"),
-		"cluster id, bad name":  rawID(idAccount, idRegion, "prod cluster name"),
-		"cluster id, slash":     rawID(idAccount, idRegion, "prod/cluster/name"),
-		"cluster id, colon":     rawID(idAccount, idRegion, "prod:cluster:name:x"),
-		"cluster id, too long":  rawID(idAccount, idRegion, wide+"a"),
-		"task longer than 2048": rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/"+strings.Repeat("payments-", 300)+"worker"),
-		"padding":               good + "=",
-		"padding on odd length": oddLength + "=",
-		"trailing bits set":     flipped(oddLength),
-		"not base64url":         strings.Replace(good, good[10:11], "+", 1),
+		"11 digit account":       rawID("12345678901", idRegion, "prod-cluster", "checkout-api"),
+		"13 digit account":       rawID("1234567890123", idRegion, "prod-cluster", "checkout-api"),
+		"letters in account":     rawID("12345678901x", idRegion, "prod-cluster", "checkout-api"),
+		"region with a capital":  rawID(idAccount, "eu-West-1", "prod-cluster", "checkout-api"),
+		"region with underscore": rawID(idAccount, "eu_west_1", "prod-cluster", "checkout-api"),
+		"region of 31":           rawID(idAccount, strings.Repeat("a", 31), "prod-cluster", "checkout-api"),
+		"empty region":           rawID(idAccount, "", "prod-cluster", "checkout-api"),
+		"region in capitals":     rawID(idAccount, "EU-WEST-1", "prod-cluster", "checkout-api"),
+		"five fields":            rawID(idAccount, idRegion, "prod-cluster", "checkout-api", "extra-field"),
+		"two fields":             rawID(idAccount, idRegion+"-padding-padding-padding"),
+		"empty cluster":          rawID(idAccount, idRegion, "", "checkout-api"),
+		"empty service":          rawID(idAccount, idRegion, "prod-cluster", ""),
+		"NUL in a name":          rawID(idAccount, idRegion, "prod-cluster", "checkout\x00api"),
+		"non-ASCII name":         rawID(idAccount, idRegion, "prod-cluster", "checkout-api-é-é"),
+		"space in a name":        rawID(idAccount, idRegion, "prod-cluster", "checkout api service"),
+		"slash in a name":        rawID(idAccount, idRegion, "prod-cluster", "checkout/api/service"),
+		"cluster too long":       rawID(idAccount, idRegion, wide+"a", "checkout-api"),
+		"service too long":       rawID(idAccount, idRegion, "prod-cluster", wide+"a"),
+		"ARN of another region":  rawID(idAccount, idRegion, "arn:aws:ecs:us-east-1:"+idAccount+":task/prod-cluster/0123456789abcdef0123456789abcdef"),
+		"ARN of another acct":    rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":999999999999:task/prod-cluster/0123456789abcdef0123456789abcdef"),
+		"ARN of a service":       rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":service/prod-cluster/checkout-api-0123456789"),
+		"ARN with a bad task":    rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/NOTHEX0123456789abcdef0123456"),
+		"ARN with a long tail":   rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/prod-cluster/0123456789abcdef/extra/segments"),
+		"cluster id, bad name":   rawID(idAccount, idRegion, "prod cluster name"),
+		"cluster id, slash":      rawID(idAccount, idRegion, "prod/cluster/name"),
+		"cluster id, colon":      rawID(idAccount, idRegion, "prod:cluster:name:x"),
+		"cluster id, too long":   rawID(idAccount, idRegion, wide+"a"),
+		"task longer than 2048":  rawID(idAccount, idRegion, "arn:aws:ecs:"+idRegion+":"+idAccount+":task/"+strings.Repeat("payments-", 300)+"worker"),
+		"padding":                good + "=",
+		"padding on odd length":  oddLength + "=",
+		"trailing bits set":      flipped(oddLength),
+		"not base64url":          strings.Replace(good, good[10:11], "+", 1),
 	}
 	for name, token := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -241,15 +244,48 @@ func TestScrubText_RandomTokenGluedToAnIDStaysRedacted(t *testing.T) {
 	}
 }
 
-// What is left beside an id is judged as any run is: below 32 characters it is not one.
-func TestScrubText_ShortRemainderBesideAnIDIsNotARun(t *testing.T) {
+// A run with an id is kept only when every other piece is plain; otherwise the whole run is judged as it always was.
+func TestScrubText_RunsBesideAnIDKeepOnlyPlainPieces(t *testing.T) {
 	id := serviceID("prod-cluster", "checkout-api")
-	short := "kQ9xTz3Lm8vWb2Nc7Yd4Re1Uf" // 25 characters, three classes
-	if secretshape.ScrubText(short) != short {
-		t.Fatal("test setup: the short token alone must not be a run")
+	other := serviceID("prod-cluster", "worker")
+	hex64 := "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+	hex40 := hex64[:40]
+	upper40 := strings.ToUpper(hex40)
+	random := func(n int) string { return (idRandom43 + idRandom43)[:n] }
+	for name, text := range map[string]string{
+		"64 hex in a path":   "/services/" + id + "/" + hex64,
+		"64 hex after":       id + "/" + hex64 + "/",
+		"64 hex before":      hex64 + "/" + id,
+		"40 capital hex":     "/" + id + "/" + upper40,
+		"40 hex after":       id + "/" + hex40,
+		"40 hex before":      hex40 + "/" + id,
+		"31 random after":    id + "/" + random(31),
+		"31 random before":   random(31) + "/" + id,
+		"25 random after":    id + "/" + random(25),
+		"25 random before":   random(25) + "/" + id,
+		"20 random after":    id + "/" + random(20),
+		"20 random before":   random(20) + "/" + id,
+		"random between ids": id + "/" + random(25) + "/" + other,
+		"long words":         id + "/" + strings.Repeat("payments-", 8) + "worker",
+		"hex of 33":          id + "/" + hex64[:33],
+		"hex of 31":          id + "/" + hex64[:31],
+		"43 random after":    id + "/" + idRandom43,
+	} {
+		t.Run(name, func(t *testing.T) { requireRedacted(t, name, text, id) })
 	}
-	requireKept(t, "short token after", id+"/"+short, id)
-	requireKept(t, "short token before", short+"/"+id, id)
+	uuid := "123e4567-e89b-12d3-a456-426614174000"
+	for name, text := range map[string]string{
+		"logs path":           "/services/" + id + "/logs",
+		"task path":           "/services/" + id + "/tasks/" + hex64[:32],
+		"cluster and service": clusterID("prod-cluster") + "/" + id,
+		"uuid beside":         id + "/" + uuid,
+		"uuid before":         uuid + "/" + id,
+		"short piece":         id + "/" + random(15),
+		"words":               "/api/services/" + id + "/task-definition/revisions",
+		"trailing slash":      "/services/" + id + "/",
+	} {
+		t.Run(name, func(t *testing.T) { requireKept(t, name, text, id) })
+	}
 }
 
 func TestScrubText_SeveralIDsInOneRun(t *testing.T) {

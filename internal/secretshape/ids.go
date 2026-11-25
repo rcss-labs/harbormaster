@@ -20,33 +20,56 @@ const maxIDLength = 2048
 
 var (
 	idAccount = regexp.MustCompile(`^[0-9]{12}$`)
-	idRegion  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]$`)
 	idName    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 	// idTaskARN has the region and the account as groups, for the check against fields 1 and 2.
-	idTaskARN = regexp.MustCompile(`^arn:aws[a-z-]*:ecs:([a-z0-9-]+):([0-9]{12}):task/[A-Za-z0-9_-]+(/[0-9a-f]+)?$`)
+	idTaskARN = regexp.MustCompile(`^arn:aws[a-z-]*:ecs:([a-z0-9-]{1,30}):([0-9]{12}):task/[A-Za-z0-9_-]+(/[0-9a-f]+)?$`)
 )
 
-// runIsRandom judges a long run: pieces between slashes that are Harbormaster ids are set aside, and what is left,
-// rejoined with slashes, is judged as any run is. A run with no id is judged as it is.
+// runIsRandom judges a long run. A run with no id piece (pieces split at "/") is judged by looksLikeRandomRun. A run
+// with one is kept only when every other piece is plain; otherwise the whole run, ids included, is judged as it was
+// before ids were known, so nothing but ids and plain pieces becomes visible.
 func runIsRandom(run string) bool {
 	if !strings.Contains(run, "/") {
-		if isHarbormasterID(run) {
+		return !isHarbormasterID(run) && looksLikeRandomRun(run)
+	}
+	hasID := false
+	for _, piece := range strings.Split(run, "/") {
+		switch {
+		case isHarbormasterID(piece):
+			hasID = true
+		case !isPlainPiece(piece):
+			return looksLikeRandomRun(run)
+		}
+	}
+	return !hasID && looksLikeRandomRun(run)
+}
+
+var (
+	lowerHex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	// idRegionPattern is the app's own (internal/api/notifications.go), so every region it accepts has working ids.
+	idRegionPattern = regexp.MustCompile(`^[a-z0-9-]{1,30}$`)
+)
+
+const (
+	plainPieceMax = 16 // a shorter piece holds too little to be a secret
+	plainWordsMax = 64
+)
+
+// isPlainPiece reports whether a piece beside an id cannot hide a secret: empty, short, a UUID, an ECS task id (32
+// lowercase hex), or plain words under 64 characters.
+func isPlainPiece(piece string) bool {
+	if len(piece) < plainPieceMax || uuid.MatchString(piece) || lowerHex32.MatchString(piece) {
+		return true
+	}
+	if len(piece) >= plainWordsMax {
+		return false
+	}
+	for _, word := range strings.FieldsFunc(piece, func(r rune) bool { return r == '-' || r == '_' }) {
+		if !wordySegment.MatchString(word) {
 			return false
 		}
-		return looksLikeRandomRun(run)
 	}
-	pieces := strings.Split(run, "/")
-	kept := pieces[:0]
-	for _, piece := range pieces {
-		if !isHarbormasterID(piece) {
-			kept = append(kept, piece)
-		}
-	}
-	if len(kept) == len(pieces) {
-		return looksLikeRandomRun(run)
-	}
-	rest := strings.Join(kept, "/")
-	return len(rest) >= 32 && looksLikeRandomRun(rest)
+	return true
 }
 
 // isHarbormasterID reports whether piece is a well-formed id as described above whose decoded fields hold no secret.
@@ -74,7 +97,7 @@ func isHarbormasterID(piece string) bool {
 		return false
 	}
 	account, region := fields[0], fields[1]
-	if !idAccount.MatchString(account) || !idRegion.MatchString(region) {
+	if !idAccount.MatchString(account) || !idRegionPattern.MatchString(region) {
 		return false
 	}
 	if len(fields) == 4 {
