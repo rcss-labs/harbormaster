@@ -21,17 +21,29 @@ type toolResult struct {
 	tool    string
 	data    string // scrubbed, the run's codes removed, cut to the result cap
 	omitted int    // bytes of the scrubbed answer that are not in data
-	readCap bool   // the answer reached the upstream read cap: more existed than was read
+	units   []numberedUnit
+	readCap bool // the answer reached the upstream read cap: more existed than was read
 }
 
 // newResult prepares a tool answer: scrub, then remove the run's codes,
 // and only then cut, so a cut cannot split a secret and the cap holds for what is
 // sent.
 func (r *session) newResult(tool, text string) *toolResult {
-	limit := r.l.Limits.MaxResultBytes
-	if limit <= 0 {
-		limit = defaultResultBytes
+	res, clean := r.cleanResult(tool, text)
+	res.keep(clean, r.resultLimit())
+	return res
+}
+
+func (r *session) resultLimit() int {
+	if limit := r.l.Limits.MaxResultBytes; limit > 0 {
+		return limit
 	}
+	return defaultResultBytes
+}
+
+// cleanResult returns the answer's text scrubbed and without the run's codes,
+// and a result that does not hold it yet.
+func (r *session) cleanResult(tool, text string) (*toolResult, string) {
 	res := &toolResult{tag: "tool_result_" + r.tagCode, tool: tool}
 	if strings.HasSuffix(text, answerTooLargeNote) {
 		text = strings.TrimSuffix(text, answerTooLargeNote)
@@ -40,10 +52,13 @@ func (r *session) newResult(tool, text string) *toolResult {
 	// An invalid byte travels as a three-byte replacement, so it is replaced
 	// before anything is counted.
 	text = secretshape.ScrubText(strings.ToValidUTF8(text, "\uFFFD"))
-	text = r.codes.ReplaceAllString(text, "[removed]")
+	return res, r.codes.ReplaceAllString(text, "[removed]")
+}
+
+// keep stores clean text, cut to limit bytes.
+func (res *toolResult) keep(text string, limit int) {
 	cut := cutAt(text, limit)
 	res.data, res.omitted = text[:cut], len(text)-cut
-	return res
 }
 
 // render is the tool message text: the first n bytes of the data (less when
@@ -51,8 +66,10 @@ func (r *session) newResult(tool, text string) *toolResult {
 // the loop's own words when anything was left out.
 func (res *toolResult) render(n int) string {
 	shown := cutAt(res.data, n)
-	return "<" + res.tag + " tool=\"" + res.tool + "\">\n" + res.data[:shown] + res.note(shown) + "\n</" + res.tag + ">"
+	return res.header() + res.data[:shown] + res.note(shown) + "\n</" + res.tag + ">"
 }
+
+func (res *toolResult) header() string { return "<" + res.tag + " tool=\"" + res.tool + "\">\n" }
 
 // renderSize is len(render(n)) without building it.
 func (res *toolResult) renderSize(n int) int {
