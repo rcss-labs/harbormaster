@@ -79,7 +79,8 @@ func TestAgentClientAgainstTheHandler(t *testing.T) {
 	if err := client.Run(ctx, h.token, unknown, func(agentclient.Event) {}); !errors.Is(err, agentclient.ErrUnknownModel) {
 		t.Errorf("unknown model: err = %v", err)
 	}
-	if _, err := client.Test(ctx, h.token, "fake", "nope"); !errors.Is(err, agentclient.ErrUnknownModel) {
+	// A 404 on Test is a free refusal, not an unknown model (only Run maps it so).
+	if _, err := client.Test(ctx, h.token, "fake", "nope"); !errors.Is(err, agentclient.ErrNoPaidCall) || errors.Is(err, agentclient.ErrUnknownModel) {
 		t.Errorf("unknown model on Test: err = %v", err)
 	}
 	other, _, _ := apitoken.Generate(apitoken.KindRun)

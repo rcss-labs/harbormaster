@@ -212,7 +212,7 @@ func (c *Client) do(req *http.Request, notFoundIsUnknownModel bool) (*http.Respo
 		if ctxErr := req.Context().Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		return nil, fmt.Errorf("%w: %v", ErrAgentUnavailable, errors.Unwrap(err))
+		return nil, fmt.Errorf("%w: %v", ErrAgentUnavailable, err)
 	}
 	if resp.StatusCode == http.StatusOK {
 		return resp, nil
