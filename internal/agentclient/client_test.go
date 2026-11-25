@@ -752,3 +752,19 @@ func TestCatalogue_ReviewTypesAndSupportsReview(t *testing.T) {
 		})
 	}
 }
+
+// A 400 is told apart by a sentinel of its own and is still an unavailable agent to who does not ask.
+func TestRun_ABadRequestHasItsOwnSentinel(t *testing.T) {
+	for status, bad := range map[int]bool{http.StatusBadRequest: true, http.StatusBadGateway: false, http.StatusUnauthorized: false} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+		client, err := New(srv.URL, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = client.Run(context.Background(), "hma_x", RunRequest{RunID: uuid.New(), Role: "reviewer"}, func(Event) {})
+		srv.Close()
+		if !errors.Is(err, ErrAgentUnavailable) || errors.Is(err, ErrBadRequest) != bad {
+			t.Errorf("%d: %v", status, err)
+		}
+	}
+}

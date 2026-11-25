@@ -19,12 +19,20 @@ const (
 	maxDroppedCount = 1_000_000
 )
 
+// AcceptOptions are the differences between the kinds of result.
+type AcceptOptions struct {
+	// AllowLogs keeps evidence that Logs shows; without it only View evidence is kept.
+	AllowLogs bool
+	// Replacement is the sentence that stands in for a summary that failed a check.
+	Replacement string
+}
+
 // Accept turns what the agent service answered into what is stored. Nothing it says about permissions is taken as
 // given: an item is kept only when its action, derived again from its tool, is the one it states, its service id
 // names a service, and the identity may take that action on that service now (canRead). Summary, notes and excerpts
-// pass the checks that need no logs once more. Items that fail are counted.
-func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action authz.Action) bool) store.InvestigationResult {
-	summary, replaced := agentresult.RecheckSummary(res.Summary)
+// pass the checks that need no logs once more. Items that fail, or that the options do not allow, are counted.
+func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action authz.Action) bool, opts AcceptOptions) store.InvestigationResult {
+	summary, replaced := agentresult.RecheckSummaryAs(res.Summary, opts.Replacement)
 	out := store.InvestigationResult{Summary: summary, SummaryReplaced: res.SummaryReplaced || replaced}
 	dropped := min(max(res.EvidenceDropped, 0), maxDroppedCount)
 	for _, item := range res.Evidence {
@@ -32,7 +40,7 @@ func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action au
 			dropped++
 			continue
 		}
-		kept, ok := acceptItem(item, canRead)
+		kept, ok := acceptItem(item, canRead, opts)
 		if !ok {
 			dropped++
 			continue
@@ -44,10 +52,13 @@ func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action au
 	return out
 }
 
-func acceptItem(item agentresult.Evidence, canRead func(key model.ServiceKey, action authz.Action) bool) (store.InvestigationEvidence, bool) {
+func acceptItem(item agentresult.Evidence, canRead func(key model.ServiceKey, action authz.Action) bool, opts AcceptOptions) (store.InvestigationEvidence, bool) {
 	var none store.InvestigationEvidence
 	derived, ok := hmtools.EvidenceAction(item.Tool)
 	if !ok || derived != item.Action {
+		return none, false
+	}
+	if derived != hmtools.EvidenceView && !opts.AllowLogs {
 		return none, false
 	}
 	action, ok := actionOf(derived)

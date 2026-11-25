@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/agentjob"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -256,11 +257,11 @@ func TestJob_AFailedLookupIsNotInvisible(t *testing.T) {
 // The identity is read-only whatever it may hold: the second, independent layer, shown on a subject that holds all.
 func TestSight_IsReadOnly(t *testing.T) {
 	f := newFixture(t)
-	see, err := f.runner.sightOf(context.Background(), f.admin.ID)
+	see, err := agentjob.SightOf(context.Background(), f.st, f.admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !see.can(checkoutKey, authz.View) || !see.can(checkoutKey, authz.Logs) || see.can(checkoutKey, authz.Operate) || see.can(checkoutKey, authz.Deploy) {
+	if !see.Can(checkoutKey, authz.View) || !see.Can(checkoutKey, authz.Logs) || see.Can(checkoutKey, authz.Operate) || see.Can(checkoutKey, authz.Deploy) {
 		t.Error("what the job may ask for is not View and Logs alone")
 	}
 }
