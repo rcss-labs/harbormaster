@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -653,5 +654,74 @@ func TestMigration0222_LockTimeoutLetsAnOldSenderFinish(t *testing.T) {
 	}
 	if err := <-migrated; err == nil {
 		t.Fatal("the migration succeeded under an open reader, want a lock timeout")
+	}
+}
+
+func TestClaimFollowUp_RefusesAnyEventButTheTwoConstants(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	mustInsertReview(t, s, route, 1, notifyT0)
+	mustInsertDiagnosis(t, s, diagnosisDelivery(route, incident), notifyT0)
+	for _, event := range []string{"opened", "", "'review'", "review' or 'a' = 'a", "diagnosis'; --"} {
+		rows, err := s.ClaimFollowUpDeliveriesForTest(ctx, event, notifyT0, time.Minute, store.ClaimFilter{Limit: 10})
+		if err == nil || len(rows) != 0 {
+			t.Errorf("claim of event %q = %+v, %v, want an error and no rows", event, rows, err)
+		}
+	}
+	var leased int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where claimed_until is not null`).Scan(&leased); err != nil || leased != 0 {
+		t.Fatalf("leased rows = %d, %v, want none: a refused event must not lease anything", leased, err)
+	}
+}
+
+func TestInsertReview_InATransactionRollsBackAndUsesOneConnection(t *testing.T) {
+	ctx := context.Background()
+	s := storetest.Open(t)
+	route := newReviewRoute(t, s, "a")
+	var schema string
+	if err := s.Pool.QueryRow(ctx, `select current_schema()`).Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	one, err := store.OpenWithOptions(ctx, os.Getenv("HM_TEST_DATABASE_URL"), store.OpenOptions{
+		RuntimeParams: map[string]string{"search_path": schema + ", pg_catalog"}, MaxConns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer one.Close()
+
+	errRollBack := errors.New("roll back")
+	// A second connection would wait for the only one, which the transaction holds: the short deadline turns that
+	// deadlock into a failure.
+	txCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err = one.InTx(txCtx, func(tx store.Tx) error {
+		ok, err := tx.InsertReviewDelivery(txCtx, reviewDelivery(route), 7, notifyT0, nil)
+		if err != nil || !ok {
+			t.Errorf("insert in the transaction = %v, %v, want true", ok, err)
+		}
+		if again, err := tx.InsertReviewDelivery(txCtx, reviewDelivery(route), 7, notifyT0, nil); err != nil || again {
+			t.Errorf("second insert in the transaction = %v, %v, want false, nil", again, err)
+		}
+		return errRollBack
+	})
+	if !errors.Is(err, errRollBack) {
+		t.Fatalf("InTx = %v, want the rollback error", err)
+	}
+	var n int
+	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where event = 'review'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("review rows after rollback = %d, %v, want none", n, err)
+	}
+	if err := one.InTx(ctx, func(tx store.Tx) error {
+		ok, err := tx.InsertReviewDelivery(ctx, reviewDelivery(route), 7, notifyT0, nil)
+		if err != nil || !ok {
+			t.Errorf("insert = %v, %v, want true", ok, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where event = 'review' and review_run_id = 7`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("review rows after commit = %d, %v, want 1", n, err)
 	}
 }

@@ -12,6 +12,16 @@ import (
 // (quiet hours are already part of dueAt). It returns false when the route and run already have a review row, so a
 // row exists at most once; it is sent at least once.
 func (s *Store) InsertReviewDelivery(ctx context.Context, d NotificationDelivery, runID int64, dueAt time.Time, heldUntil *time.Time) (bool, error) {
+	return insertReviewDelivery(ctx, s.Pool, d, runID, dueAt, heldUntil)
+}
+
+// InsertReviewDelivery is Store.InsertReviewDelivery inside the caller's transaction, on its connection: the row is
+// planned together with, and only if, the caller's other writes (for example under a lock on the run row).
+func (t Tx) InsertReviewDelivery(ctx context.Context, d NotificationDelivery, runID int64, dueAt time.Time, heldUntil *time.Time) (bool, error) {
+	return insertReviewDelivery(ctx, t.tx, d, runID, dueAt, heldUntil)
+}
+
+func insertReviewDelivery(ctx context.Context, q execer, d NotificationDelivery, runID int64, dueAt time.Time, heldUntil *time.Time) (bool, error) {
 	if d.RouteID == nil {
 		return false, fmt.Errorf("insert review delivery: a route is required")
 	}
@@ -19,7 +29,7 @@ func (s *Store) InsertReviewDelivery(ctx context.Context, d NotificationDelivery
 	d.NextAttemptAt, d.HeldUntil = nil, heldUntil
 	d.ClaimedUntil, d.FinishedAt, d.StatusCode, d.DurationMS, d.Attempts = nil, nil, nil, nil, 0
 	d.Details.ReviewRunID = runID
-	tag, err := s.Pool.Exec(ctx, `insert into notification_deliveries
+	tag, err := q.Exec(ctx, `insert into notification_deliveries
 		(route_id, route_name, destination, target, incident_id, event, seq, severity, alert_title, alert_text,
 		 account_id, region, cluster_name, service_name, kind, status, attempts, next_attempt_at, held_until,
 		 status_code, duration_ms, note, created_at, finished_at, details, claimed_until, diagnosis_due_at, review_run_id)
