@@ -108,7 +108,7 @@ Retention applies to the coordinator's cleanup job. See [Data retention](../oper
 | `HM_RETENTION_SCAN_RUNS` | `720h` | `harbormaster` | How long image scan run records are kept. |
 | `HM_RETENTION_NOTIFICATION_LOG` | `720h` | `harbormaster` | How long the notification delivery log and resolved alert incidents are kept. |
 | `HM_RETENTION_AGENT_CONVERSATIONS` | `720h` | `harbormaster` | How long an AI chat conversation is kept after its last activity. Its runs and usage stay. |
-| `HM_RETENTION_AGENT_RUNS` | `2160h` | `harbormaster` | How long finished AI investigations (summaries and stored evidence) and finished agent run records are kept. `0` keeps everything. A non-zero value must be at least `48h`; a shorter or negative one stops startup. Investigations that are waiting, running or younger than 48 hours, and every run of the current UTC month, are never deleted, whatever the value. |
+| `HM_RETENTION_AGENT_RUNS` | `2160h` | `harbormaster` | How long finished AI investigations and review results (summaries and stored evidence) and finished agent run records are kept. `0` keeps everything. A non-zero value must be at least `48h`; a shorter or negative one stops startup. Investigations and review results that are waiting, running or younger than 48 hours, the newest scheduled result of each review, and every run of the current UTC month, are never deleted, whatever the value. |
 
 ## Image security
 
@@ -235,6 +235,8 @@ The agent is off unless `HM_AGENT_URL` is set. Variables marked `harbormaster` g
 | `HM_AGENT_INVESTIGATIONS_CONCURRENT` | `2` | `harbormaster` | Investigations that run at the same time. `1` to `8`. |
 | `HM_AGENT_INVESTIGATIONS_PER_HOUR` | `20` | `harbormaster` | Investigations that may start in an hour. A start counts when its run begins; the cap can overshoot by up to the number of parallel runs. `0` turns the investigator off: nothing starts, and requests still waiting end as `rate_limited`. Not negative. |
 | `HM_AGENT_INVESTIGATION_MAX_WAIT` | `15m` | `harbormaster` | A request that has waited longer than this before its first start is skipped as `expired`. `1m` to `24h`. |
+| `HM_AGENT_REVIEWS_PER_DAY` | `24` | `harbormaster` | Scheduled AI reviews that may start in 24 hours. `0` to `200`. `0` turns reviews off: none is recorded or run. A review past the cap is skipped as `rate_limited`. The cap can overshoot by one when two coordinator tasks overlap. See [Scheduled AI reviews](../guides/ai-agent-reviews.md). |
+| `HM_AGENT_REVIEW_MAX_LATE` | `6h` | `harbormaster` | How late a review may start. A run that is due and is older than this is recorded as `missed` and does not run. `15m` to `12h`. |
 | `HM_AGENT_IDENTITY_RATE_PER_SECOND` | `5` | `harbormaster` | Requests per second the agent identity may make to Harbormaster, with a burst of 60 times that. `1` to `50`. |
 | `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` | `2` | `harbormaster` | Most GiB one log search by the agent identity may scan. `0` sets no cap of its own; `HM_LOG_SEARCH_MAX_GB` still applies when set. At most `1000000`. |
 | `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` | `20` | `harbormaster` | GiB the agent identity may scan per UTC day. `0` turns its log search off. At most `1000000`. |
@@ -311,7 +313,7 @@ Startup fails when any of these hold:
 - `HM_OAUTH=true` without `HM_API_TOKENS=true` or `HM_MCP_PUBLIC_URL`.
 - `HM_SMTP_HOST` is set without a valid `HM_SMTP_FROM`, or only one of `HM_SMTP_USERNAME` and `HM_SMTP_PASSWORD` is set.
 - `HM_AGENT_URL` is not a valid base URL, `HM_AGENT_CA_PEM` holds no certificate, or `HM_AGENT_RUN_TOKEN_TTL` is outside 1 minute to 1 hour.
-- `HM_AGENT_INVESTIGATION_WINDOW` or `HM_AGENT_INVESTIGATION_MAX_WAIT` is outside 1 minute to 24 hours, `HM_AGENT_INVESTIGATIONS_CONCURRENT` is outside 1 to 8, `HM_AGENT_INVESTIGATIONS_PER_HOUR` is negative, `HM_AGENT_IDENTITY_RATE_PER_SECOND` is outside 1 to 50, or an `HM_AGENT_IDENTITY_LOG_SEARCH_*` value is negative or above 1000000. These are checked whether or not `HM_AGENT_URL` is set.
+- `HM_AGENT_INVESTIGATION_WINDOW` or `HM_AGENT_INVESTIGATION_MAX_WAIT` is outside 1 minute to 24 hours, `HM_AGENT_INVESTIGATIONS_CONCURRENT` is outside 1 to 8, `HM_AGENT_INVESTIGATIONS_PER_HOUR` is negative, `HM_AGENT_IDENTITY_RATE_PER_SECOND` is outside 1 to 50, or an `HM_AGENT_IDENTITY_LOG_SEARCH_*` value is negative or above 1000000, `HM_AGENT_REVIEWS_PER_DAY` is outside 0 to 200, or `HM_AGENT_REVIEW_MAX_LATE` is outside 15 minutes to 12 hours. These are checked whether or not `HM_AGENT_URL` is set.
 - `HM_RETENTION_AGENT_RUNS` is non-zero and below 48 hours.
 - The agent has no `HM_AGENT_PROVIDERS`, a provider without its key or region (or the reverse), or `HM_AGENT_FAKE_PROVIDER=true` against a non-loopback upstream.
 - `HM_SCAN_ENABLED=true` (outside fake mode) on a coordinating task with any of the five launch settings missing.

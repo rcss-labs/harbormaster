@@ -2,7 +2,7 @@
 
 How to deploy the Harbormaster AI agent with the `harbormaster-agent` Terraform module and switch the chat on. For the engineer who owns the Harbormaster deployment. To use the chat, see [AI chat](../guides/ai-agent-chat.md).
 
-The agent is a separate service. Harbormaster calls it for chat runs, and its coordinator calls it for [automatic investigations](../guides/ai-agent-investigator.md) of alerts. The agent calls a model provider and reads Harbormaster through its internal load balancer with a short-lived, read-only run token. It has no database, cache, SAML or AWS estate access. It is off by default: with `HM_AGENT_URL` unset there are no agent routes, no setting, no button, and a run token does not authenticate.
+The agent is a separate service. Harbormaster calls it for chat runs, and its coordinator calls it for [automatic investigations](../guides/ai-agent-investigator.md) of alerts and for [scheduled reviews](../guides/ai-agent-reviews.md). The agent calls a model provider and reads Harbormaster through its internal load balancer with a short-lived, read-only run token. It has no database, cache, SAML or AWS estate access. It is off by default: with `HM_AGENT_URL` unset there are no agent routes, no setting, no button, and a run token does not authenticate.
 
 ## Before you begin
 
@@ -94,6 +94,14 @@ The agent is a separate service. Harbormaster calls it for chat runs, and its co
 
     Read [Automatic AI investigations](../guides/ai-agent-investigator.md) first: it spends from the same allowance as the chat, sends log text to the model provider and puts the model's text into your notification destinations. An agent that is older than Harbormaster does not offer the investigator role: investigations are skipped as `not_configured` until both are new. See [Upgrading](upgrading.md#the-release-that-adds-automatic-investigations).
 
+7. Optional: scheduled reviews. They are off until you do all of this, and each step can be left for later.
+
+    1. In **Settings > AI agent**, choose **Model for reviews**. Without it, reviews are skipped as `not_configured`.
+    2. In **Agent identity** on the same page, give the agent identity View on the tags to review. A review never reads logs, so it needs no Logs. With no access, every review is skipped as `not_visible`.
+    3. In **Settings > AI agent > Reviews**, add a review with a type, a scope, a schedule and 1 to 5 routes, and switch it on.
+
+    Read [Scheduled AI reviews](../guides/ai-agent-reviews.md) first: it spends from the same allowance as the chat and puts the model's text into your notification destinations on a timetable. Both the web and the coordinator tasks need `HM_AGENT_URL`, as above, because the coordinator runs the reviews. An agent that is older than Harbormaster does not offer the reviewer role: a due review waits up to `HM_AGENT_REVIEW_MAX_LATE` and is then recorded as `missed` until both are new. Set `HM_AGENT_REVIEWS_PER_DAY=0` to turn reviews off. See [Upgrading](upgrading.md#the-release-that-adds-scheduled-reviews).
+
 ## Bedrock
 
 Bedrock needs no API key. List `bedrock` in `model_providers`, set `bedrock_region` and list the model or inference profile ARNs in `bedrock_model_arns`. The module gives the task role only `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on those ARNs.
@@ -109,6 +117,7 @@ Bedrock needs no API key. List `bedrock` in `model_providers`, set `bedrock_regi
 - `GET /api/agent/status` answers `404` while `HM_AGENT_URL` is unset.
 - The audit log shows `agent_settings_update` for your save and `agent_run` for each question.
 - With investigations on, an alert on a service the identity can see shows **Investigating** and then **Diagnosis ready** in **Needs attention**, and `agent_run` rows with the agent identity as actor appear.
+- With reviews on, **Run now** on a review in **Settings > AI agent > Reviews** produces a result under **Reviews**, a message on each of its routes, and an `agent_run` row with the role `reviewer`.
 
 ## Try it locally
 

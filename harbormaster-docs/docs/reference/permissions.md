@@ -77,11 +77,11 @@ The AI agent calls Harbormaster with a run token (prefix `hma_`), minted for one
 
 ## The AI chat flag
 
-Using the AI chat needs a per-user flag, **AI chat**, set by a global admin in **Settings > Users**. It is off for new users. Global admins can chat without it. The flag grants no data access: the chat sees only what the user's own tags allow. Only global admins can change the flag, the chat and investigation models, the allowance, the redaction setting and the [agent identity](#the-agent-identity)'s access. See [AI chat](../guides/ai-agent-chat.md).
+Using the AI chat needs a per-user flag, **AI chat**, set by a global admin in **Settings > Users**. It is off for new users. Global admins can chat without it. The flag grants no data access: the chat sees only what the user's own tags allow. Only global admins can change the flag, the chat, investigation and review models, the allowance, the redaction setting, the [scheduled reviews](#who-reads-a-review) and the [agent identity](#the-agent-identity)'s access. See [AI chat](../guides/ai-agent-chat.md).
 
 ## The agent identity
 
-Automatic AI investigations run as the **agent identity**, a built-in user of a separate kind that is not a person. Its username is `harbormaster-agent` (the first free of that and `harbormaster-agent-1` to `-9`). The prefix `harbormaster-agent` is reserved: no user can be created with a name that starts with it, whatever the case (`_` and `.` count as `-`), and a single sign-on sign-in whose derived name would start with it fails.
+Automatic AI investigations and scheduled AI reviews run as the **agent identity**, a built-in user of a separate kind that is not a person. Its username is `harbormaster-agent` (the first free of that and `harbormaster-agent-1` to `-9`). The prefix `harbormaster-agent` is reserved: no user can be created with a name that starts with it, whatever the case (`_` and `.` count as `-`), and a single sign-on sign-in whose derived name would start with it fails.
 
 - **What it holds.** Only View, and Logs where an admin grants it, on the tags an admin picks in **Settings > AI agent > Agent identity** (**No access**, **View**, **View and logs**). It starts with no access. Every other action is masked off, even if a row for it were stored, and it can never be a global admin.
 - **What it can never do.** Sign in by password or single sign-on, hold a session, a personal access token or an OAuth grant, be an admin or a break-glass admin, have the AI chat flag, or use Operate, Deploy, Edit, Terminal or Accept risk. It is not listed on **Settings > Users**, and the user routes answer `404` for it. It cannot be deleted or edited there.
@@ -102,6 +102,19 @@ A person's access to an investigation is checked on every request, from their cu
 | The list of all investigations in Settings | Global admin. |
 
 Access tokens and run tokens cannot read investigations. See [Automatic AI investigations](../guides/ai-agent-investigator.md#who-sees-what).
+
+### Who reads a review
+
+Scheduled reviews run as the same agent identity. A review reads what the identity may View, with Logs never used, and the identity's access is the only boundary: the scope of a review is a focus, not a permission. Each run stores the tags the identity could View when it started and when it finished (its covered tags). A tag granted and removed again during one run is not covered. A person's access to a review result is checked on every request, from their current permissions:
+
+| Item | Needs |
+| --- | --- |
+| The summary of a result | Global admin, or View on every covered tag of the run. A run that covered no tag, or a tag that has been deleted since: global admin only. |
+| One evidence item | View on its service. A review cites View evidence only, so an item stored with any other action is hidden from everyone, admins included. Hidden items are counted, not described. |
+| The list of results (**Reviews**) | Signed in. It holds only the results the person may read. |
+| Creating, changing, switching, running or deleting a review, the model for reviews, and the list in **Settings > AI agent** | Global admin. |
+
+Access tokens and run tokens cannot read reviews or manage them. An unknown or unreadable result answers `404`, never `403`. See [Scheduled AI reviews](../guides/ai-agent-reviews.md#who-sees-what).
 
 ## How tags match clusters, services and tasks
 
@@ -137,7 +150,7 @@ List routes accept `?tag=` filters, and the web app has account, region and tag 
 | Register a task definition revision | Edit |
 | Terminal | Terminal |
 | Vulnerability and package acceptances | Accept risk |
-| Users, tags, permissions, accounts, audit, SSO, off-hours schedules, notification routes (including the **Investigate with AI** switch), instance settings, the agent identity's access and the list of all investigations | Global admin |
+| Users, tags, permissions, accounts, audit, SSO, off-hours schedules, notification routes (including the **Investigate with AI** switch), instance settings, the agent identity's access, the list of all investigations, and scheduled AI reviews (their definitions, the model for reviews, running one) | Global admin |
 
 The full route list with required actions is in the [API reference](api.md).
 

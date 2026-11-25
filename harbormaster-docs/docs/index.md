@@ -14,6 +14,7 @@ Harbormaster is a web control center for AWS ECS. It gives a DevOps team one pla
 | Use the web app day to day | [User guides](guides/navigating.md) |
 | Ask an AI chat about your estate, read-only | [AI chat](guides/ai-agent-chat.md) and [Install the AI agent](install/ai-agent.md) |
 | Have an AI investigate a failure alert and add a diagnosis to the notification | [Automatic AI investigations](guides/ai-agent-investigator.md) |
+| Have an AI write a scheduled cost, security, reliability or capacity review and send it to a channel | [Scheduled AI reviews](guides/ai-agent-reviews.md) |
 | Run it in production | [Operations](operations/health-and-metrics.md) and the [hardening checklist](security/hardening.md) |
 | Look up a setting, flag, endpoint or Terraform input | [Reference](reference/configuration.md) |
 | Contribute code or docs | [Contributing](community/contributing.md) and [Development environment](development/dev-environment.md) |
