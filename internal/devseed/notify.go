@@ -22,6 +22,7 @@ type options struct {
 	notifyDemo    bool
 	agentDemo     bool
 	reviewBox     *secretbox.Box
+	customReviews bool
 	reviewBaseURL string
 }
 

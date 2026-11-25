@@ -651,6 +651,9 @@ func demoSeedOptions(cfg config.Config, notifyBox *secretbox.Box) []devseed.Opti
 		options = append(options, devseed.WithAgentDemo())
 		if notifyBox != nil {
 			options = append(options, devseed.WithReviewReceiver(notifyBox, cfg.BaseURL))
+			if cfg.AgentCustomReviews {
+				options = append(options, devseed.WithCustomReviewDemo())
+			}
 		}
 	}
 	return options

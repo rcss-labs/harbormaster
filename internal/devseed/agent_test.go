@@ -2,6 +2,7 @@ package devseed_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
@@ -324,5 +325,77 @@ func TestDevseed_ReviewDemo_NothingWithTheAgentOff(t *testing.T) {
 	}
 	if routes, err := st.ListNotificationRoutes(ctx); err != nil || len(routes) != 0 {
 		t.Fatalf("routes = %+v, %v; want none", routes, err)
+	}
+}
+
+func customReviewOptions(t *testing.T) []devseed.Option {
+	t.Helper()
+	return append(reviewReceiverOptions(t), devseed.WithCustomReviewDemo())
+}
+
+// With the custom switch on the demo also has a disabled custom review, "Idle services", with three lines of
+// instructions on the receiver route, and one finished run of it that keeps its copy of the text, a summary and two
+// pieces of evidence a real run could cite. The run is not a test run. A restart adds nothing.
+func TestDevseed_CustomReviewDemo_SeedsADisabledReviewAndAFinishedRun(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	opts := customReviewOptions(t)
+	if err := devseed.Apply(ctx, st, true, opts...); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	reviews, err := st.ListReviews(ctx)
+	if err != nil || len(reviews) != 2 {
+		t.Fatalf("reviews = %+v, %v; want the cost review and the custom one", reviews, err)
+	}
+	var custom store.Review
+	for _, review := range reviews {
+		if review.Name == "Idle services" {
+			custom = review
+		}
+	}
+	if custom.ID == 0 || custom.Type != "custom" || custom.Enabled || len(custom.RouteIDs) != 1 || len(custom.Scope) != 0 {
+		t.Fatalf("custom review = %+v, want a disabled custom review over everything with one route", custom)
+	}
+	if lines := strings.Split(custom.Instructions, "\n"); len(lines) != 3 {
+		t.Fatalf("instructions = %q, want three lines", custom.Instructions)
+	}
+	runs, err := st.ListReviewRuns(ctx, store.ReviewRunFilter{ReviewID: &custom.ID, Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs of the custom review = %+v, %v; want one", runs, err)
+	}
+	run := runs[0]
+	if run.State != store.InvestigationDone || run.Summary == "" || run.Test || run.ReviewType != "custom" || run.Instructions != custom.Instructions {
+		t.Fatalf("run = %+v, want a finished run, not a test run, holding the review's text", run)
+	}
+	evidence, err := st.ListReviewRunEvidence(ctx, run.ID)
+	if err != nil || len(evidence) != 2 {
+		t.Fatalf("evidence = %+v, %v; want two items", evidence, err)
+	}
+	for _, item := range evidence {
+		if item.Tool != "list_services" && item.Tool != "get_service" {
+			t.Errorf("evidence tool %q, want one a real run can cite", item.Tool)
+		}
+	}
+
+	if err := devseed.Apply(ctx, st, true, opts...); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if again, err := st.ListReviewRuns(ctx, store.ReviewRunFilter{ReviewID: &custom.ID, Limit: 10}); err != nil || len(again) != 1 {
+		t.Fatalf("runs after a restart = %d, %v; want 1", len(again), err)
+	}
+	if reviews, err = st.ListReviews(ctx); err != nil || len(reviews) != 2 {
+		t.Fatalf("reviews after a restart = %d, %v; want 2", len(reviews), err)
+	}
+}
+
+// Without the option the review demo is the one cost review, as before.
+func TestDevseed_CustomReviewDemo_NothingWithoutTheOption(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	if err := devseed.Apply(ctx, st, true, reviewReceiverOptions(t)...); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if reviews, err := st.ListReviews(ctx); err != nil || len(reviews) != 1 || reviews[0].Type != "cost" {
+		t.Fatalf("reviews = %+v, %v; want only the cost review", reviews, err)
 	}
 }

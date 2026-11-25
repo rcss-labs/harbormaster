@@ -24,6 +24,13 @@ import (
 // HM_AGENT_FAKE_PROVIDER, and returns its URL. upstream is the Harbormaster that run tokens are redeemed against.
 func startFakeAgent(t *testing.T, upstream string) string {
 	t.Helper()
+	url, _ := startRecordedFakeAgent(t, upstream)
+	return url
+}
+
+// startRecordedFakeAgent is startFakeAgent that also returns the scripted model, which keeps every request it was sent.
+func startRecordedFakeAgent(t *testing.T, upstream string) (string, *fake.Provider) {
+	t.Helper()
 	env := map[string]string{"HM_AGENT_UPSTREAM_URL": upstream, "HM_AGENT_FAKE_PROVIDER": "true", "HM_AGENT_TRUSTED_PROXY": "false"}
 	cfg, err := agent.LoadConfig(func(k string) string { return env[k] })
 	if err != nil {
@@ -33,9 +40,10 @@ func startFakeAgent(t *testing.T, upstream string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(agent.NewHandler(cfg, up, map[string]provider.Provider{"fake": fake.Demo()}, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	model := fake.Demo()
+	server := httptest.NewServer(agent.NewHandler(cfg, up, map[string]provider.Provider{"fake": model}, slog.New(slog.NewTextHandler(io.Discard, nil))))
 	t.Cleanup(server.Close)
-	return server.URL
+	return server.URL, model
 }
 
 type reviewRunRow struct {

@@ -31,6 +31,12 @@ func WithReviewReceiver(box *secretbox.Box, baseURL string) Option {
 	return func(o *options) { o.reviewBox, o.reviewBaseURL = box, strings.TrimRight(baseURL, "/") }
 }
 
+// WithCustomReviewDemo adds one disabled custom review and a finished run of it to the review demo. Pass it only when
+// HM_AGENT_CUSTOM_REVIEWS is on; it needs WithReviewReceiver as well.
+func WithCustomReviewDemo() Option {
+	return func(o *options) { o.customReviews = true }
+}
+
 const (
 	demoAgentBudgetMicroUSD = 5_000_000
 	// untouchedSettingsVersion is the version the migration gives the settings row; every save raises it.
@@ -138,6 +144,9 @@ func seedInvestigator(ctx context.Context, st *store.Store, o options, samID int
 const (
 	reviewRouteName = "Reviews to the fake receiver"
 	reviewName      = "Weekly cost"
+
+	customReviewName         = "Idle services"
+	customReviewInstructions = "List the services that run but carry no traffic.\nName the five that cost the most while idle.\nKeep the summary to three short sentences."
 )
 
 // seedReviews adds the demo review, the route it is sent to and one finished result, so the reviews page has
@@ -171,7 +180,48 @@ func seedReviews(ctx context.Context, st *store.Store, o options, samID int64) e
 			return fmt.Errorf("seed review: %w", err)
 		}
 	}
-	return seedReviewResult(ctx, st, review)
+	if err := seedReviewResult(ctx, st, review, costReviewResult()); err != nil {
+		return err
+	}
+	if !o.customReviews {
+		return nil
+	}
+	return seedCustomReview(ctx, st, routeID, samID)
+}
+
+// seedCustomReview adds the disabled custom review and one finished run of it. The run holds its own copy of the text,
+// as a real run does from its first start, and is no test run. Its evidence is what a run can cite: the service list
+// and one service. Like the cost review it is found by name and a review with a run gets no second.
+func seedCustomReview(ctx context.Context, st *store.Store, routeID, samID int64) error {
+	reviews, err := st.ListReviews(ctx)
+	if err != nil {
+		return err
+	}
+	var review store.Review
+	for _, existing := range reviews {
+		if existing.Name == customReviewName {
+			review = existing
+		}
+	}
+	if review.ID == 0 {
+		review, err = st.CreateReview(ctx, store.Review{
+			Name: customReviewName, Type: store.ReviewTypeCustom, Enabled: false, Cadence: "weekly", AtMinute: 9 * 60, Weekday: 1,
+			Timezone: "Europe/Berlin", RouteIDs: []int64{routeID}, Instructions: customReviewInstructions,
+		}, samID)
+		if err != nil {
+			return fmt.Errorf("seed custom review: %w", err)
+		}
+	}
+	sandbox := accountIDByName(fake.MockupEstate(time.Now), "sandbox-admin")
+	return seedReviewResult(ctx, st, review, reviewResult{
+		summary: "This is a canned review from the demo model. It did not judge the services.",
+		evidence: []store.InvestigationEvidence{
+			{Ordinal: 1, Tool: "list_services", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "background-jobs", ServiceName: "image-resizer",
+				Note: "A service the demo model listed."},
+			{Ordinal: 2, Tool: "get_service", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "core-services", ServiceName: "payments-api",
+				Note: "The one service the demo model opened.", Excerpt: "payments-api: running, 3 of 3 tasks"},
+		},
+	})
 }
 
 func seedReviewRoute(ctx context.Context, st *store.Store, o options, samID int64) (int64, error) {
@@ -206,9 +256,29 @@ func seedReviewRoute(ctx context.Context, st *store.Store, o options, samID int6
 	return route.ID, nil
 }
 
+// reviewResult is the canned outcome a seeded run stores.
+type reviewResult struct {
+	summary  string
+	evidence []store.InvestigationEvidence
+}
+
+// costReviewResult is the weekly cost review's first result.
+func costReviewResult() reviewResult {
+	sandbox := accountIDByName(fake.MockupEstate(time.Now), "sandbox-admin")
+	return reviewResult{
+		summary: "This is a canned review from the demo model. It did not judge the services.",
+		evidence: []store.InvestigationEvidence{
+			{Ordinal: 1, Tool: "get_cost_analytics", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "core-services", ServiceName: "payments-api",
+				Note: "The first thing the demo model read.", Excerpt: "payments-api: the highest cost of the week"},
+			{Ordinal: 2, Tool: "list_services", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "background-jobs", ServiceName: "image-resizer",
+				Note: "A second service the demo model looked at."},
+		},
+	}
+}
+
 // seedReviewResult stores one finished run of the review, made the way the job makes one: requested, claimed,
 // started, finished.
-func seedReviewResult(ctx context.Context, st *store.Store, review store.Review) error {
+func seedReviewResult(ctx context.Context, st *store.Store, review store.Review, result reviewResult) error {
 	existing, err := st.ListReviewRuns(ctx, store.ReviewRunFilter{ReviewID: &review.ID, Limit: 1})
 	if err != nil {
 		return err
@@ -226,19 +296,12 @@ func seedReviewResult(ctx context.Context, st *store.Store, review store.Review)
 		return fmt.Errorf("seed review result: claim run %d: %v, %w", run.ID, claimed.ID, err)
 	}
 	if err := st.StartReviewRun(ctx, claim, store.ReviewStart{
-		RunID: uuid.New(), Provider: "fake", Model: "fake-1", ScopeLabel: "Everything the agent can see", Range: "7d", ServicesTotal: 12,
+		RunID: uuid.New(), Provider: "fake", Model: "fake-1", ScopeLabel: "Everything the agent can see", Range: "7d", ServicesTotal: 12, Instructions: review.Instructions,
 	}, now); err != nil {
 		return fmt.Errorf("seed review result: %w", err)
 	}
-	sandbox := accountIDByName(fake.MockupEstate(time.Now), "sandbox-admin")
 	err = st.FinishReviewRun(ctx, claim, store.InvestigationDone, "", &store.InvestigationResult{
-		Summary: "This is a canned review from the demo model. It did not judge the services.",
-		Evidence: []store.InvestigationEvidence{
-			{Ordinal: 1, Tool: "get_cost_analytics", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "core-services", ServiceName: "payments-api",
-				Note: "The first thing the demo model read.", Excerpt: "payments-api: the highest cost of the week"},
-			{Ordinal: 2, Tool: "list_services", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "background-jobs", ServiceName: "image-resizer",
-				Note: "A second service the demo model looked at."},
-		},
+		Summary: result.summary, Evidence: result.evidence,
 	}, nil, now)
 	if err != nil {
 		return fmt.Errorf("seed review result: %w", err)
