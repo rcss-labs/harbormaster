@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentjob"
 	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/lease"
@@ -24,8 +25,6 @@ const (
 	// given and the end of it.
 	minRunLease = 5 * time.Minute
 	leaseMargin = time.Minute
-	// defaultSlack is how long past the agent's own run timeout a run is waited for.
-	defaultSlack = 30 * time.Second
 )
 
 // Runner claims and runs investigations. Run it under the coordinator lease only.
@@ -153,7 +152,7 @@ func (r *Runner) claim(ctx context.Context) (*job, bool) {
 		}
 		return nil, false
 	}
-	v, err := within(ctx, func(ctx context.Context) (store.Investigation, error) {
+	v, err := agentjob.Within(ctx, func(ctx context.Context) (store.Investigation, error) {
 		v, _, err := r.Store.ClaimInvestigation(ctx, r.now(), runLease(0))
 		return v, err
 	})
@@ -165,20 +164,16 @@ func (r *Runner) claim(ctx context.Context) (*job, bool) {
 	}
 	return &job{
 		r: r, inv: v, claim: v.Claim(),
-		runs: &agentrun.Runner{Store: r.Store, Now: r.now, Log: r.log(), Draining: ctx.Done()},
+		drv: &agentjob.Driver{
+			Store: r.Store, Auth: r.Auth, Agent: r.Agent,
+			Runs:  &agentrun.Runner{Store: r.Store, Now: r.now, Log: r.log(), Draining: ctx.Done()},
+			Guard: r.Guard, Now: r.now, Log: r.log(), OnEvent: r.onEvent, Slack: r.slack,
+		},
 	}, true
 }
 
 // confirm reports why nothing may be started: the job is being stopped, or the lease is not certain.
-func (r *Runner) confirm(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if r.Guard == nil {
-		return nil
-	}
-	return r.Guard(ctx)
-}
+func (r *Runner) confirm(ctx context.Context) error { return agentjob.Confirm(ctx, r.Guard) }
 
 // logError logs err, of a panic only its type and stack.
 func (r *Runner) logError(what string, err error, args ...any) {
@@ -188,16 +183,4 @@ func (r *Runner) logError(what string, err error, args ...any) {
 		return
 	}
 	r.log().Warn(what, append(args, "err", err)...)
-}
-
-// within makes a store step that is not cut off by the end of ctx, which would leave unknown whether it was made:
-// it is bounded by its own limit, a short one once ctx has ended.
-func within[T any](ctx context.Context, fn func(ctx context.Context) (T, error)) (T, error) {
-	return agentrun.Within(context.WithoutCancel(ctx), agentrun.SetUpLimit, ctx.Done(), fn)
-}
-
-// step is within for a step that returns nothing.
-func step(ctx context.Context, fn func(ctx context.Context) error) error {
-	_, err := within(ctx, func(ctx context.Context) (struct{}, error) { return struct{}{}, fn(ctx) })
-	return err
 }
