@@ -22,6 +22,7 @@ type settingsAgent struct {
 	srv *httptest.Server
 
 	mu      sync.Mutex
+	body    string // the catalogue served; fakeCatalogue when empty
 	tests   int
 	bearers []string
 	// onTest answers a test call; the default answers ok at a cost of 1234 micro-dollars.
@@ -34,7 +35,13 @@ func newSettingsAgent(t *testing.T) *settingsAgent {
 	sa.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/catalogue":
-			_, _ = w.Write([]byte(fakeCatalogue))
+			sa.mu.Lock()
+			body := sa.body
+			sa.mu.Unlock()
+			if body == "" {
+				body = fakeCatalogue
+			}
+			_, _ = w.Write([]byte(body))
 		case "/v1/test":
 			sa.mu.Lock()
 			sa.tests++
@@ -1109,6 +1116,34 @@ func TestAgentSettings_ReportsWhatOneQuestionReserves(t *testing.T) {
 	setChatSettings(t, env.st, 1_000_000, "fake", "fake-1", nil)
 	seedRun(t, env.st, "chat", "done", 500_000, env.api.now())
 	check("what is left is smaller than a question", true)
+}
+
+// A model that costs nothing still cannot be asked while the allowance is 0 (the store refuses it), and sums that
+// reach the int64 cap must not wrap into room that is not there.
+func TestAgentSettings_AllowanceBelowQuestionAtTheEdges(t *testing.T) {
+	const freeCatalogue = `{"providers":[{"provider":"fake","models":[{"id":"fake-free","input_per_mtok_micro_usd":0,"output_per_mtok_micro_usd":0,"context_tokens":8000}]}],"limits":{"max_run_tokens":200000,"run_timeout_seconds":300}}`
+	env := newSettingsEnv(t, false)
+	env.agent.mu.Lock()
+	env.agent.body = freeCatalogue
+	env.agent.mu.Unlock()
+	setChatSettings(t, env.st, 0, "fake", "fake-free", nil)
+	if chat := getSettings(t, env.sam).RoleModels["chat"]; chat["allowance_below_question"] != true {
+		t.Errorf("free model, allowance 0: chat = %v, want allowance_below_question true", chat)
+	}
+
+	// A running run holding the whole cap and a finished one that cost it: together they wrap an int64.
+	const maxInt64 = int64(^uint64(0) >> 1)
+	setChatSettings(t, env.st, maxInt64, "fake", "fake-free", nil)
+	now := env.api.now()
+	running := store.AgentRun{ID: uuid.New(), Role: "chat", Provider: "fake", Model: "fake-free", ReservedMicroUSD: maxInt64}
+	if err := env.st.ReserveAgentRun(t.Context(), running, time.Hour, now); err != nil {
+		t.Fatal(err)
+	}
+	seedRun(t, env.st, "chat", "done", maxInt64, now)
+	setChatSettings(t, env.st, 1_000_000, "fake", "fake-free", nil)
+	if chat := getSettings(t, env.sam).RoleModels["chat"]; chat["allowance_below_question"] != true {
+		t.Errorf("settled and reserved at the cap: chat = %v, want allowance_below_question true", chat)
+	}
 }
 
 func TestAgentSettings_NothingToReserveWhenTheModelIsNotKnown(t *testing.T) {

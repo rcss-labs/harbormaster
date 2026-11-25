@@ -22,15 +22,7 @@ const (
 	// The agent refuses a request of more than 500 messages or 1 MiB; these leave margin.
 	historyMaxMessages = 400
 	historyMaxBytes    = 700 << 10
-	// defaultRunTimeout stands in when the catalogue states none.
-	defaultRunTimeout = 5 * time.Minute
-	// A reservation that may have been made is looked for this many times, this far apart.
-	lostReservationLooks     = 4
-	lostReservationLookAgain = 250 * time.Millisecond
 )
-
-// setUpLimit bounds each database step before a run starts, the reservation included.
-var setUpLimit = agentrun.Limit{Normal: 10 * time.Second, Draining: 2 * time.Second}
 
 var errorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 
@@ -45,30 +37,28 @@ func startSSE(w http.ResponseWriter) {
 	_ = http.NewResponseController(w).Flush()
 }
 
-// turnResult is what the end of a turn means outside it.
+// turnResult is what the end of a turn means outside it: the part any run shares, and the words for the browser.
 type turnResult struct {
-	success bool
-	// outcome is the audit label: done, error or interrupted.
-	outcome string
+	agentrun.Ending
 	// code and message become the error event; an empty code sends none (the browser is gone).
 	code, message string
 }
 
 func resultOf(turn *agentrun.Turn) turnResult {
+	res := turnResult{Ending: turn.Ending()}
 	switch turn.Reason() {
-	case agentrun.Done:
-		return turnResult{success: true, outcome: "done"}
+	case agentrun.Done, agentrun.BrowserGone:
 	case agentrun.AgentFailed:
 		code, message := turn.Failure()
-		return turnResult{outcome: "error", code: errorCodeFrom(code), message: errorMessageFrom(message)}
+		res.code, res.message = errorCodeFrom(code), errorMessageFrom(message)
 	case agentrun.TimedOut:
-		return turnResult{outcome: "error", code: "timeout", message: "The agent took too long and was stopped."}
-	case agentrun.BrowserGone:
-		return turnResult{outcome: "interrupted"}
+		res.code, res.message = "timeout", "The agent took too long and was stopped."
 	case agentrun.Draining, agentrun.RunLost:
-		return turnResult{outcome: "interrupted", code: "interrupted", message: "This question was stopped before it finished. Try again."}
+		res.code, res.message = "interrupted", "This question was stopped before it finished. Try again."
+	default:
+		res.code, res.message = "agent_unavailable", agentUnavailableMsg
 	}
-	return turnResult{outcome: "error", code: "agent_unavailable", message: agentUnavailableMsg}
+	return res
 }
 
 // chatTurn is one question and its answer. One goroutine, the handler's, owns it: it alone decides why the turn
@@ -122,7 +112,7 @@ func (t *chatTurn) execute(w http.ResponseWriter) {
 		}
 	}()
 	var err error
-	if t.start, err = agentrun.Within(t.r.Context(), setUpLimit, t.s.draining, t.prepare); err != nil {
+	if t.start, err = agentrun.Within(t.r.Context(), agentrun.SetUpLimit, t.s.draining, t.prepare); err != nil {
 		t.turn.Fail("internal", "")
 		t.finish()
 		t.s.fail(w, err)
@@ -332,11 +322,11 @@ func (t *chatTurn) finish() {
 	ops := t.s.runOps(t.r, t.run, t.user, t.meter, res)
 	ops.Tools, ops.SlotToRelease = tools, t.release
 	ops.SaveAnswer = func(ctx context.Context) (int64, error) {
-		if !res.success && answer == "" && len(tools) == 0 {
+		if !res.Success && answer == "" && len(tools) == 0 {
 			return 0, nil
 		}
 		saved, err := t.s.Store.AppendAgentMessage(ctx, t.user.ID, store.AgentMessage{
-			ConversationID: *t.run.ConversationID, Role: "assistant", Text: answer, Tools: tools, Interrupted: !res.success,
+			ConversationID: *t.run.ConversationID, Role: "assistant", Text: answer, Tools: tools, Interrupted: !res.Success,
 		})
 		return saved.ID, err
 	}
@@ -346,110 +336,45 @@ func (t *chatTurn) finish() {
 		return
 	}
 	switch {
-	case res.success && ended.SaveErr != nil:
+	case res.Success && ended.SaveErr != nil:
 		t.bw.event("error", map[string]string{"code": "internal", "message": "The answer could not be saved. Try again."})
-	case res.success:
+	case res.Success:
 		t.bw.event("done", map[string]int64{"message_id": ended.MessageID})
 	case res.code != "":
 		t.bw.event("error", map[string]string{"code": res.code, "message": res.message})
 	}
 }
 
+// runner is the part of a run's life that does not depend on HTTP.
+func (s *Server) runner() *agentrun.Runner {
+	return &agentrun.Runner{Store: s.Store, Now: s.now, Log: s.log(), Draining: s.draining}
+}
+
 // runOps is how a run of any role ends in the store.
 func (s *Server) runOps(r *http.Request, run store.AgentRun, user store.User, meter *agentrun.Meter, res turnResult) *agentrun.StoreOps {
-	state := "failed"
-	if res.success {
-		state = "done"
-	}
-	return &agentrun.StoreOps{Store: s.Store, Run: run, Meter: meter, State: state, Outcome: res.outcome,
-		Tools: []string{}, Username: user.Username, IP: s.clientIP(r), Now: s.now}
+	return s.runner().Ops(run, agentrun.Actor{Name: user.Username}, s.clientIP(r), meter, res.Ending)
 }
 
 // finishRun ends a run of any role.
 func (s *Server) finishRun(r *http.Request, ops *agentrun.StoreOps) agentrun.Result {
-	f := agentrun.Finisher{Ops: ops, Draining: s.draining, Log: func(step string, err error) {
-		s.logRunError(ops.Run.ID, "agent run: could not "+step, err)
-	}}
-	ended := f.Finish(r.Context())
-	u, _ := ops.Meter.Last()
-	s.log().Info("agent run finished", "run_id", ops.Run.ID, "role", ops.Run.Role, "user_id", ops.Run.UserID, "outcome", ops.Outcome,
-		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens, "cost_micro_usd", u.CostMicroUSD)
-	return ended
+	return s.runner().Finish(r.Context(), ops)
 }
 
-// reserveRun reserves a run. The reservation commits on a context of its own: a browser that leaves mid-call must not
-// leave a half-known state behind, and a run that was reserved is settled by its turn, or here when the reservation
-// failed without saying whether it was made (or at the latest by the reconcile pass).
+// reserveRun reserves a run and turns a refusal for the budget into the words for the browser.
 func (s *Server) reserveRun(r *http.Request, run store.AgentRun, runTimeout time.Duration) error {
-	_, err := agentrun.Within(context.WithoutCancel(r.Context()), setUpLimit, s.draining, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, s.Store.ReserveAgentRun(ctx, run, max(2*runTimeout, minRunStaleAfter), s.now())
-	})
+	err := s.runner().Reserve(r.Context(), run, runTimeout)
 	switch {
-	case err == nil || errors.Is(err, store.ErrNotFound):
-		return err
-	case errors.Is(err, store.ErrBudgetExhausted):
-		return s.budgetRefusal(r, run)
-	}
-	s.settleLostReservation(r, run.ID)
-	return err
-}
-
-// budgetRefusal logs a refused reservation and picks the words for it. An allowance that is itself smaller than one
-// question's reservation says so: nothing may have been spent, and "used up" would send an admin looking for spend.
-func (s *Server) budgetRefusal(r *http.Request, run store.AgentRun) error {
-	ctx := context.WithoutCancel(r.Context())
-	var userID int64
-	if run.UserID != nil {
-		userID = *run.UserID
-	}
-	settings, err := s.Store.GetAgentSettings(ctx)
-	if err != nil {
-		s.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD)
-		return errBudget
-	}
-	settled, reserved, err := s.Store.AgentSpend(ctx, s.now())
-	if err != nil {
-		s.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD)
-		return errBudget
-	}
-	s.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD,
-		"left_micro_usd", max(settings.MonthlyBudgetMicroUSD-settled-reserved, 0))
-	if settings.MonthlyBudgetMicroUSD < run.ReservedMicroUSD {
+	case errors.Is(err, agentrun.ErrAllowanceTooSmall):
 		return errBudgetTooSmall
+	case errors.Is(err, agentrun.ErrAllowanceUsedUp):
+		return errBudget
 	}
-	return errBudget
-}
-
-// settleLostReservation settles a run whose reservation failed in a way that does not say whether it was made. The
-// commit may still be under way, so a run that is not there is looked for a few more times. Its audit row is the
-// reconcile pass's to write.
-func (s *Server) settleLostReservation(r *http.Request, runID uuid.UUID) {
-	_, err := agentrun.Within(context.WithoutCancel(r.Context()), setUpLimit, s.draining, func(ctx context.Context) (struct{}, error) {
-		for looks := 1; ; looks++ {
-			err := s.Store.SettleAgentRun(ctx, runID, "failed", nil, nil, s.now())
-			if !errors.Is(err, store.ErrNotFound) || looks == lostReservationLooks {
-				return struct{}{}, err
-			}
-			select {
-			case <-ctx.Done():
-				return struct{}{}, ctx.Err()
-			case <-time.After(lostReservationLookAgain):
-			}
-		}
-	})
-	if err != nil && !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrAgentRunNotRunning) {
-		s.logRunError(runID, "agent run: could not settle a reservation that may have been made", err)
-	}
+	return err
 }
 
 // logRunError logs err against a run, with the stack when it was a panic.
 func (s *Server) logRunError(runID uuid.UUID, what string, err error) {
-	var p *agentrun.PanicError
-	if errors.As(err, &p) {
-		s.log().Error(what, "run_id", runID, "panic_type", p.Type, "stack", p.Stack)
-		return
-	}
-	s.log().Warn(what, "run_id", runID, "error", err)
+	s.runner().LogRunError(runID, what, err)
 }
 
 func errorCodeFrom(code string) string {

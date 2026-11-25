@@ -184,3 +184,14 @@ func CleanText(s string) string {
 		return r
 	}, s)
 }
+
+// Ending is what the end of the turn means outside it, whoever asked for the run.
+func (t *Turn) Ending() Ending {
+	switch t.reason {
+	case Done:
+		return Ending{Success: true, Outcome: "done"}
+	case BrowserGone, Draining, RunLost:
+		return Ending{Outcome: "interrupted"}
+	}
+	return Ending{Outcome: "error"} // a failed or timed out run, a panic, and a turn that has not ended
+}
