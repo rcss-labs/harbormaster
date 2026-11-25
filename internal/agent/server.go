@@ -182,11 +182,16 @@ func (s *server) serveCatalogue(w http.ResponseWriter, _ *http.Request) {
 	out := struct {
 		Providers []providerEntry `json:"providers"`
 		Roles     []string        `json:"roles"`
-		Limits    struct {
+		// ReviewTypes are the kinds of review the reviewer role knows.
+		ReviewTypes []string `json:"review_types"`
+		Limits      struct {
 			MaxRunTokens int64 `json:"max_run_tokens"`
 			Timeout      int64 `json:"run_timeout_seconds"`
 		} `json:"limits"`
-	}{Providers: []providerEntry{}, Roles: []string{roleChat, roleInvestigator, "test"}}
+	}{Providers: []providerEntry{}, Roles: []string{roleChat, roleInvestigator, roleReviewer, "test"}}
+	for _, rt := range reviewTypes {
+		out.ReviewTypes = append(out.ReviewTypes, rt.id)
+	}
 	for _, entry := range s.cfg.Catalogue {
 		if _, ok := s.providers[entry.Provider]; !ok {
 			continue
@@ -420,8 +425,11 @@ func validateRun(req *runRequest) string {
 	if req.MaxCostMicroUSD <= 0 {
 		return "max_cost_micro_usd must be positive."
 	}
-	if req.Role == roleInvestigator {
+	switch req.Role {
+	case roleInvestigator:
 		return validateInvestigation(req)
+	case roleReviewer:
+		return validateReview(req)
 	}
 	if req.Task != nil {
 		return "This kind of run takes no task."
@@ -448,6 +456,9 @@ func validateInvestigation(req *runRequest) string {
 	}
 	if req.Task == nil || req.Task.Kind != "investigate" {
 		return "task must be of kind investigate."
+	}
+	if req.Task.Review != nil || req.Task.Scope != nil {
+		return "An investigation takes no review or scope."
 	}
 	subject, alert := req.Task.Subject, req.Task.Alert
 	switch subject.Kind {

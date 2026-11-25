@@ -7,7 +7,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 )
 
-// submitTool is how an investigator finishes. The loop handles the call itself:
+// submitTool is how an investigator or a reviewer finishes. The loop handles the call itself:
 // it is in no tool table and never reaches Harbormaster.
 const submitTool = "submit_result"
 
@@ -58,7 +58,7 @@ type citation struct {
 	note string
 }
 
-// findSubmit returns the first submit_result call of an investigator's turn.
+// findSubmit returns the first submit_result call of an investigator's or a reviewer's turn.
 func (r *session) findSubmit(calls []provider.ToolCall) (provider.ToolCall, bool) {
 	if r.found != nil {
 		for _, call := range calls {
@@ -118,10 +118,11 @@ func parseSubmission(call provider.ToolCall) (sub submission, problem string) {
 
 // buildResult makes the result of a run. The model's words reach it only as the
 // checked summary and notes; the rest comes from units. A reference that is not
-// a unit the model was shown, or is repeated, is dropped.
-func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.Corpus) agentresult.Result {
+// a unit the model was shown, or is repeated, is dropped. replacement stands in for
+// a summary that failed its check.
+func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.Corpus, replacement string) agentresult.Result {
 	result := agentresult.Result{Evidence: []agentresult.Evidence{}}
-	result.Summary, result.SummaryReplaced = agentresult.CheckSummary(sub.summary, corpus)
+	result.Summary, result.SummaryReplaced = agentresult.CheckSummaryAs(sub.summary, corpus, replacement)
 	cited := map[string]bool{}
 	for _, c := range sub.evidence {
 		unit, known := units[c.ref]
@@ -145,7 +146,7 @@ func (r *session) submit(call provider.ToolCall) (problem string) {
 	if problem != "" {
 		return problem
 	}
-	result := buildResult(sub, r.found.units, &r.found.corpus)
+	result := buildResult(sub, r.found.units, &r.found.corpus, r.replacementSummary())
 	r.result = &result
 	r.emit(Event{Type: "result", Result: &result})
 	r.emit(Event{Type: "done"})
@@ -158,7 +159,7 @@ func (r *session) refuse(call provider.ToolCall, problem string) (provider.Messa
 		return r.resultMessage(call, submitTool, problem, true)
 	}
 	name := "unknown_tool"
-	if tool, known := lookupTool(call.Name); known {
+	if tool, known := r.lookupTool(call.Name); known {
 		name = tool.Name
 	}
 	return r.resultMessage(call, name, notRunBesideSubmit, true)
@@ -185,15 +186,21 @@ func (r *session) remind(resp provider.Response) (again bool) {
 	return true
 }
 
-// logFindings writes the one line an investigator run leaves in the agent log:
-// counts, never content.
+// logFindings writes the one line an investigator or reviewer run leaves in the
+// agent log: the type of a review and counts, never content.
 func (r *session) logFindings() {
 	if r.l.Log == nil {
 		return
 	}
+	message := "investigation finished"
 	attrs := []any{"run_id", r.in.RunID, "units", len(r.found.units), "result", r.result != nil}
+	if r.reviewing() {
+		message = "review finished"
+		attrs = append(attrs, "review_type", r.in.Task.Review.Type, "scope_entries", len(r.in.Task.Scope.Entries),
+			"services_total", r.in.Task.Scope.ServicesTotal, "tool_calls", r.toolCalls)
+	}
 	if r.result != nil {
 		attrs = append(attrs, "evidence", len(r.result.Evidence), "evidence_dropped", r.result.EvidenceDropped, "summary_replaced", r.result.SummaryReplaced)
 	}
-	r.l.Log.Info("investigation finished", attrs...)
+	r.l.Log.Info(message, attrs...)
 }
