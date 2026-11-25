@@ -286,6 +286,26 @@ func TestPlanReview_StaleOrOrphanedRunIsMarkedWithoutRows(t *testing.T) {
 	}
 }
 
+func TestPlanReview_AReviewThatIsOffSendsOnlyManualRuns(t *testing.T) {
+	f := newReviewPlanFixture(t)
+	a := f.route("a")
+	off := f.review("Off", a)
+	scheduled, manual := f.done(off, "Off"), f.done(off, "Off")
+	f.exec(`update agent_review_runs set manual = true where id = $1`, manual)
+	f.exec(`update agent_reviews set enabled = false where id = $1`, off)
+	on := f.done(f.review("On", a), "On")
+	if n := f.plan(); n != 2 || f.hasRow(scheduled, a) || !f.hasRow(manual, a) || !f.hasRow(on, a) {
+		t.Fatalf("planned %d (rows %d), want the manual run and the run of the review that is on", n, f.rows())
+	}
+	if f.plannedAt(scheduled) == nil {
+		t.Fatal("the scheduled run was not marked: it would be sent when the review is turned on again")
+	}
+	f.exec(`update agent_reviews set enabled = true`)
+	if n := f.plan(); n != 0 || f.hasRow(scheduled, a) {
+		t.Fatalf("planned %d once the review was on again, want 0", n)
+	}
+}
+
 // One poisoned run leaves nothing behind (its rows and its mark are one transaction) and does not stop the others.
 func TestPlanReview_OneFailingRunDoesNotStopTheRest(t *testing.T) {
 	f := newReviewPlanFixture(t)
@@ -394,16 +414,20 @@ func TestReviewHasRoute(t *testing.T) {
 	f := newReviewPlanFixture(t)
 	a, b := f.route("a"), f.route("b")
 	review := f.review("Monthly spend", a)
-	check := func(reviewID, routeID int64, want bool) {
+	check := func(reviewID, routeID int64, wantHas, wantEnabled bool) {
 		t.Helper()
-		if got, err := f.s.ReviewHasRoute(context.Background(), reviewID, routeID); err != nil || got != want {
-			t.Errorf("review %d, route %d = %v, %v, want %v", reviewID, routeID, got, err, want)
+		has, enabled, err := f.s.ReviewHasRoute(context.Background(), reviewID, routeID)
+		if err != nil || has != wantHas || enabled != wantEnabled {
+			t.Errorf("review %d, route %d = %v, %v, %v, want %v, %v", reviewID, routeID, has, enabled, err, wantHas, wantEnabled)
 		}
 	}
-	check(review, a.ID, true)
-	check(review, b.ID, false)
+	f.review("Another", b)
+	check(review, a.ID, true, true)
+	check(review, b.ID, false, true)
+	f.exec(`update agent_reviews set enabled = false where id = $1`, review)
+	check(review, a.ID, true, false)
 	if err := f.s.DeleteReview(context.Background(), review); err != nil {
 		t.Fatal(err)
 	}
-	check(review, a.ID, false)
+	check(review, a.ID, false, false)
 }

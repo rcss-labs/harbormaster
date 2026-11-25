@@ -843,6 +843,38 @@ func TestDispatcher_ReviewDeletedBeforeSendCancels(t *testing.T) {
 	e.cancelledReview("This route is no longer on the review.")
 }
 
+func TestDispatcher_ReviewTurnedOffBeforeSendCancels(t *testing.T) {
+	e := newReviewEnv(t)
+	review, _ := e.stageReview(e.route("one"))
+	e.review("Another", e.route("two")) // it stays on: that does not count
+	e.exec(`update agent_reviews set enabled = false where id = $1`, review)
+	e.cancelledReview("The review is off.")
+}
+
+// "Run now" works on a review that is off, and its result is sent.
+func TestDispatcher_ManualRunOfAReviewThatIsOffIsSent(t *testing.T) {
+	e := newReviewEnv(t)
+	review := e.review("Monthly spend", e.route("one"))
+	run := e.finishReview(review)
+	e.exec(`update agent_review_runs set manual = true where id = $1`, run)
+	e.exec(`update agent_reviews set enabled = false where id = $1`, review)
+	e.cycle()
+	if row := e.reviewRow(); row.Status != "delivered" || e.reviewsSent("one") != 1 {
+		t.Fatalf("row = %+v, sent %d, want it delivered", row, e.reviewsSent("one"))
+	}
+}
+
+// A manual run is excused from the switch only: the route must still be on the review.
+func TestDispatcher_ManualRunOfADeletedReviewIsCancelled(t *testing.T) {
+	e := newReviewEnv(t)
+	review, run := e.stageReview(e.route("one"))
+	e.exec(`update agent_review_runs set manual = true where id = $1`, run)
+	if err := e.st.DeleteReview(context.Background(), review); err != nil {
+		t.Fatal(err)
+	}
+	e.cancelledReview("This route is no longer on the review.")
+}
+
 func TestDispatcher_RunDeletedBeforeSendCancels(t *testing.T) {
 	for name, change := range map[string]string{
 		"deleted":    `delete from agent_review_runs`,

@@ -30,6 +30,7 @@ const (
 	noteReviewGone         = "The review result is no longer available."
 	noteReviewTooOld       = "The review result is too old to send."
 	noteRouteOffReview     = "This route is no longer on the review."
+	noteReviewOff          = "The review is off."
 	noteFollowUpPanicked   = "The message could not be prepared."
 )
 
@@ -173,7 +174,8 @@ func (d *Dispatcher) reviewStep(ctx context.Context, deadline, now time.Time, na
 }
 
 // reviewOf reads what a review message to the route reports, or a note saying why it is not sent: the run or its
-// result is gone or too old, or its review is gone or no longer sends to the route. Both lookups share one timeout.
+// result is gone or too old, or its review is gone, no longer sends to the route, or is off and the run was not started
+// by hand. Both lookups share one timeout.
 func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review *Review, note string, err error) {
 	lookupCtx, cancel := context.WithTimeout(ctx, d.investigateTimeout())
 	defer cancel()
@@ -187,14 +189,17 @@ func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review
 	if run.FinishedAt == nil || d.now().Sub(*run.FinishedAt) > reviewSendMaxAge {
 		return nil, noteReviewTooOld, nil
 	}
-	onReview := false
+	onReview, reviewOn := false, false
 	if run.ReviewID != nil {
-		if onReview, err = d.Store.ReviewHasRoute(lookupCtx, *run.ReviewID, routeID); err != nil {
+		if onReview, reviewOn, err = d.Store.ReviewHasRoute(lookupCtx, *run.ReviewID, routeID); err != nil {
 			return nil, "", err
 		}
 	}
 	if !onReview {
 		return nil, noteRouteOffReview, nil
+	}
+	if !reviewOn && !run.Manual {
+		return nil, noteReviewOff, nil
 	}
 	return &Review{RunID: run.ID, Name: run.ReviewName, Type: run.ReviewType, PeriodLabel: run.PeriodLabel, Summary: run.Summary}, "", nil
 }
