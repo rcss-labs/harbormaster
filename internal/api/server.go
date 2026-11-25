@@ -2,6 +2,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"github.com/rcss-labs/harbormaster/internal/cost"
 	"log/slog"
@@ -167,6 +168,8 @@ const (
 	rateSAMLLogin  = "samllogin"
 	rateFocusOpen  = "focusopen"
 	rateAPIToken   = "apitoken"
+	// rateAgentIdentity is the bucket of the agent identity's run tokens, apart from every person's.
+	rateAgentIdentity = "agentidentity"
 )
 
 // The per-user bucket for requests authenticated by an access token (design: "Authentication"). Constants, not
@@ -175,6 +178,12 @@ const (
 	apiTokenBurst     = 120
 	apiTokenPerSecond = 2
 )
+
+// agentIdentityBurstSeconds is how many seconds of the identity's rate its bucket holds.
+const agentIdentityBurstSeconds = 60
+
+// defaultAgentIdentityRate is what a hand-built Config that leaves HM_AGENT_IDENTITY_RATE_PER_SECOND unset gets.
+const defaultAgentIdentityRate = 5
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
 // tried the per-task bucket, and a store problem must never block sign-in or a search.
@@ -512,4 +521,19 @@ func (s *Server) BeginDrain() {
 		return
 	}
 	s.beginDrainOne.Do(func() { close(s.draining) })
+}
+
+// tokenBucketFor picks the rate bucket a token request of this user draws from: a person's (burst 120, 2 per second),
+// or the agent identity's (burst 60 x its rate, refilled at its rate). ok is false for a kind it does not know, which
+// the caller refuses.
+func tokenBucketFor(user store.User, cfg config.Config) (name string, burst int, perSecond float64, ok bool) {
+	switch user.Kind {
+	case store.UserKindHuman:
+		return rateAPIToken, apiTokenBurst, apiTokenPerSecond, true
+	case store.UserKindAgent:
+		rate := cmp.Or(cfg.AgentIdentityRatePerSecond, defaultAgentIdentityRate)
+		return rateAgentIdentity, agentIdentityBurstSeconds * rate, float64(rate), true
+	default:
+		return "", 0, 0, false
+	}
 }

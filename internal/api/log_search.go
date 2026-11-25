@@ -103,9 +103,13 @@ var (
 	errSearchRateLimited = &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "You are searching too fast. Try again in a few seconds."}
 	errSearchRunning     = &APIError{Status: http.StatusConflict, Code: "conflict", Message: "You already have a log search running."}
 	errTokenSearchOff    = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Log search is turned off for access tokens."}
+	errAgentSearchOff    = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "The AI agent's log search is turned off."}
 )
 
-const budgetExhaustedMessage = "Today's log search budget for access tokens is used up. It resets at 00:00 UTC."
+const (
+	budgetExhaustedMessage      = "Today's log search budget for access tokens is used up. It resets at 00:00 UTC."
+	agentBudgetExhaustedMessage = "The AI agent's log search budget for today is used up. It resets at 00:00 UTC."
+)
 
 // validLogSearchRange reports whether name is a range a log search or a saved search may use.
 // The saved-searches API calls it so both accept exactly the same values.
@@ -258,7 +262,7 @@ func (s *Server) postLogSearch(w http.ResponseWriter, r *http.Request) {
 	var reservation tokenScanReservation
 	if viaToken {
 		var allowed bool
-		if reservation, allowed = s.reserveTokenLogScan(w, r, user.ID); !allowed {
+		if reservation, allowed = s.reserveTokenLogScan(w, r, user); !allowed {
 			return
 		}
 		searchMaxBytes = reservation.bytes
@@ -435,12 +439,12 @@ func (s *Server) postLogSearchEstimate(w http.ResponseWriter, r *http.Request) {
 	var budget, remaining *int64
 	if auth.IsToken(r.Context()) {
 		user, _ := auth.UserFrom(r.Context())
-		state, err := s.tokenLogSearchState(r.Context(), user.ID)
+		state, err := s.tokenLogSearchState(r.Context(), user)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		limit = s.tokenCapBytes()
+		limit = s.tokenCapBytes(user)
 		left := max(state.DailyBytes-state.UsedBytes, 0)
 		budget, remaining = &state.DailyBytes, &left
 	}
@@ -463,18 +467,22 @@ type tokenScanReservation struct {
 // searches cannot both take the same remaining budget, and a search dropped before any poll is still charged. When
 // the search may not run, it has already answered (403 with the budget at 0, 429 with Retry-After when the day's
 // budget is used up) and returns false.
-func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, userID int64) (tokenScanReservation, bool) {
-	state, err := s.tokenLogSearchState(r.Context(), userID)
+func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, user store.User) (tokenScanReservation, bool) {
+	state, err := s.tokenLogSearchState(r.Context(), user)
 	if err != nil {
 		s.fail(w, err)
 		return tokenScanReservation{}, false
 	}
 	if state.DailyBytes == 0 {
+		if user.Kind == store.UserKindAgent {
+			s.fail(w, errAgentSearchOff)
+			return tokenScanReservation{}, false
+		}
 		s.fail(w, errTokenSearchOff)
 		return tokenScanReservation{}, false
 	}
 	day := s.now()
-	reserved, err := s.Store.ReserveTokenLogScan(r.Context(), userID, day, state.DailyBytes, state.MaxBytesPerSearch)
+	reserved, err := s.Store.ReserveTokenLogScan(r.Context(), user.ID, day, state.DailyBytes, state.MaxBytesPerSearch)
 	if err != nil {
 		s.fail(w, err)
 		return tokenScanReservation{}, false
@@ -482,7 +490,11 @@ func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, use
 	if reserved <= 0 {
 		retry := max(int(state.ResetsAt.Sub(s.now()).Seconds()), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
-		writeError(w, http.StatusTooManyRequests, "log_search_budget_exhausted", budgetExhaustedMessage)
+		message := budgetExhaustedMessage
+		if user.Kind == store.UserKindAgent {
+			message = agentBudgetExhaustedMessage
+		}
+		writeError(w, http.StatusTooManyRequests, "log_search_budget_exhausted", message)
 		return tokenScanReservation{}, false
 	}
 	return tokenScanReservation{bytes: reserved, day: day}, true

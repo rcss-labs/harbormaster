@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
+	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
 // statusRecorder captures the response status for the request log. It forwards Flush and Hijack so
@@ -92,9 +93,10 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 }
 
 // tokenRequests runs after auth.Middleware. For a request authenticated by an access token it records the token's
-// public id for the request log and takes one unit from the user's token bucket (120 burst, 2 per second, shared
-// across web tasks through Rates); an empty bucket is 429 rate_limited with Retry-After. Session and anonymous
-// requests pass untouched.
+// public id for the request log and takes one unit from a token bucket shared across web tasks through Rates: the
+// user's own (120 burst, 2 per second), or for the agent identity its separate bucket, so a background run neither
+// starves people nor is starved by them. An empty bucket is 429 rate_limited with Retry-After; a user of an unknown
+// kind is refused with 403. Session and anonymous requests pass untouched.
 func (s *Server) tokenRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cred, ok := auth.CredentialFrom(r.Context())
@@ -106,8 +108,17 @@ func (s *Server) tokenRequests(next http.Handler) http.Handler {
 			info.tokenID = cred.TokenPublicID
 		}
 		user, _ := auth.UserFrom(r.Context())
-		if !s.allowRate(r.Context(), rateAPIToken, strconv.FormatInt(user.ID, 10), apiTokenBurst, apiTokenPerSecond) {
+		bucket, burst, perSecond, known := tokenBucketFor(user, s.Cfg)
+		if !known {
+			writeError(w, http.StatusForbidden, "forbidden", "This account cannot use access tokens.")
+			return
+		}
+		if !s.allowRate(r.Context(), bucket, strconv.FormatInt(user.ID, 10), burst, perSecond) {
 			w.Header().Set("Retry-After", "1")
+			if user.Kind == store.UserKindAgent {
+				writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests from the AI agent. Wait a moment and try again.")
+				return
+			}
 			writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests with access tokens. Wait a moment and try again.")
 			return
 		}
