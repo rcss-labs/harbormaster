@@ -2,7 +2,6 @@ package review
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -22,59 +21,7 @@ const (
 	maxEntryNameBytes = 255
 	// maxLabelRunes is the longest scope label the store takes.
 	maxLabelRunes = 300
-	// maxSightLookups bounds the services looked up for one decision; any further one counts as not visible.
-	maxSightLookups = 64
 )
-
-// sight is what the agent identity may read, as of now. It is asked anew for each decision and never kept.
-type sight struct {
-	ctx     context.Context
-	st      *store.Store
-	subject authz.Subject
-	tags    authz.Tags
-	exists  map[model.ServiceKey]bool
-	err     error // why a service could not be looked up; every answer since is no
-}
-
-func readOnlySubject(ctx context.Context, st *store.Store, userID int64) (authz.Subject, error) {
-	subject, err := st.LoadSubject(ctx, userID)
-	subject.ReadOnly = true
-	return subject, err
-}
-
-// sightOf loads the identity's permissions and the current tags.
-func sightOf(ctx context.Context, st *store.Store, identityID int64) (*sight, error) {
-	subject, err := readOnlySubject(ctx, st, identityID)
-	if err != nil {
-		return nil, err
-	}
-	tags, err := st.TagsSnapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &sight{ctx: ctx, st: st, subject: subject, tags: tags, exists: map[model.ServiceKey]bool{}}, nil
-}
-
-// can reports whether the service exists and the identity holds the action on its current tag.
-func (s *sight) can(key model.ServiceKey, action authz.Action) bool {
-	if s.err != nil || !authz.Can(s.subject, action, authz.EffectiveServiceTag(s.tags, key)) {
-		return false
-	}
-	known, asked := s.exists[key]
-	if asked {
-		return known
-	}
-	if len(s.exists) >= maxSightLookups {
-		return false
-	}
-	_, err := s.st.GetService(s.ctx, key)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.err = err
-		return false
-	}
-	s.exists[key] = err == nil
-	return err == nil
-}
 
 // Covered is what a review covers as of now.
 type Covered struct {

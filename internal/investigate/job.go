@@ -385,13 +385,13 @@ func (j *job) inTime(ctx context.Context, fn func(ctx context.Context) error) er
 }
 
 func (j *job) storeOnce(ctx context.Context) error {
-	see, err := j.r.sightOf(ctx, j.identity.ID)
+	see, err := agentjob.SightOf(ctx, j.r.Store, j.identity.ID)
 	if err != nil {
 		return err
 	}
-	accepted := Accept(*j.result, see.can)
-	if see.err != nil {
-		return see.err
+	accepted := Accept(*j.result, see.Can)
+	if err := see.Err(); err != nil {
+		return err
 	}
 	return j.r.Store.FinishInvestigation(ctx, j.claim, store.InvestigationDone, "", &accepted, j.r.now())
 }

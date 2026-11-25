@@ -151,21 +151,29 @@ func (j *job) notStarted() ending {
 	return ending{kind: endReleased, word: reasonInterrupted, retryIn: j.r.interval()}
 }
 
-// giveBack gives the claim back without counting the attempt. The wait is bounded by the late limit: a row that no run
-// was started for is skipped as missed when it is claimed next, and one that had a run, whose age is not looked at
-// there any more, ends here with reason.
-func (j *job) giveBack(word, reason string, in time.Duration) ending {
+// giveBack gives the claim back without counting the attempt: the agent is away, busy or cannot make this review. The
+// wait is bounded by the late limit: a row that no run was started for is skipped as missed when it is claimed next,
+// and one that had a run ends here.
+func (j *job) giveBack(word string, in time.Duration) ending {
 	if j.run.StartedAt != nil && j.r.now().Add(in).Sub(j.run.ScheduledFor) > j.r.MaxLate {
-		return failed(reason)
+		return failed(reasonUnavailable)
 	}
 	return ending{kind: endReleased, word: word, retryIn: in}
+}
+
+// retryOrFail gives a first attempt back to be tried once more; a second one fails.
+func (j *job) retryOrFail(reason string) ending {
+	if j.claim.Attempt >= maxAttempts {
+		return failed(reason)
+	}
+	return ending{kind: endReleased, word: reason, retryIn: retryLater, counted: true}
 }
 
 // unready ends a set-up that a failed step stopped before anything was spent.
 func (j *job) unready(ctx context.Context) *ending {
 	end := j.notStarted()
 	if ctx.Err() == nil {
-		end = j.giveBack(reasonError, reasonError, retryLater)
+		end = j.retryOrFail(reasonError)
 	}
 	return &end
 }
@@ -202,11 +210,11 @@ func (j *job) prepare(ctx context.Context) *ending {
 	if err != nil {
 		return failedStep("load the review", err)
 	}
+	if !rv.Enabled && !j.run.Manual {
+		return skip(reasonDisabled)
+	}
+	now := j.r.now()
 	if j.run.StartedAt == nil { // no run was ever started for it, whatever became of its attempts
-		now := j.r.now()
-		if !rv.Enabled && !j.run.Manual {
-			return skip(reasonDisabled)
-		}
 		if now.Sub(j.run.ScheduledFor) > j.r.MaxLate {
 			return skip(reasonMissed)
 		}
@@ -231,13 +239,20 @@ func (j *job) prepare(ctx context.Context) *ending {
 	default:
 		return j.unready(ctx)
 	}
+	// A row that had a run is claimed again within the lease of it. One that is claimed later than that would pay for
+	// another period's data.
+	latest := j.r.MaxLate + runLease(agentrun.RunTimeout(prepared.Catalogue.RunTimeout))
+	if j.run.StartedAt != nil && now.Sub(j.run.ScheduledFor) > latest {
+		end := failed(reasonInterrupted)
+		return &end
+	}
 	if !prepared.Catalogue.SupportsReview(j.run.ReviewType) {
 		return j.waitForTheAgent()
 	}
 	j.prepared = prepared
 
 	covered, err := agentjob.Within(ctx, func(ctx context.Context) (Covered, error) {
-		subject, err := readOnlySubject(ctx, j.r.Store, identity.ID)
+		subject, err := agentjob.ReadOnlySubject(ctx, j.r.Store, identity.ID)
 		if err != nil {
 			return Covered{}, err
 		}
@@ -273,7 +288,7 @@ func (j *job) review(ctx context.Context) (store.Review, error) {
 // waitForTheAgent gives the row back while the agent cannot make this review: it is away, or older than the role, the
 // type or the model.
 func (j *job) waitForTheAgent() *ending {
-	end := j.giveBack(reasonUnavailable, reasonUnavailable, retryLater)
+	end := j.giveBack(reasonUnavailable, retryLater)
 	return &end
 }
 
@@ -332,15 +347,12 @@ func (j *job) endOf(out agentjob.Outcome) ending {
 	case agentjob.NoResult:
 		return failed(reasonNoResult)
 	case agentjob.AgentBusy:
-		return j.giveBack("agent_busy", reasonUnavailable, retryBusy)
+		return j.giveBack("agent_busy", retryBusy)
 	case agentjob.AgentUnavailable:
-		switch {
-		case out.Refused: // the request is wrong, and would be again
+		if out.Refused { // the request is wrong, and would be again
 			return failed(reasonError)
-		case j.claim.Attempt >= maxAttempts:
-			return failed(reasonUnavailable)
 		}
-		return ending{kind: endReleased, word: reasonUnavailable, retryIn: retryLater, counted: true}
+		return j.retryOrFail(reasonUnavailable)
 	case agentjob.Cancelled:
 		if !out.Called {
 			return j.notStarted()
@@ -354,7 +366,7 @@ func (j *job) endOf(out agentjob.Outcome) ending {
 	if out.Called || out.Panicked || errors.Is(j.startErr, store.ErrInvestigationText) {
 		return failed(reasonError)
 	}
-	return j.giveBack(reasonError, reasonError, retryLater) // a set-up step failed before the agent was called
+	return j.retryOrFail(reasonError) // a set-up step failed before the agent was called
 }
 
 // finish ends the job once; later calls do nothing. A run that was reserved has been settled by the driver, with the
@@ -387,7 +399,7 @@ func (j *job) endUnsaved(ctx context.Context) {
 		return
 	}
 	err := agentjob.Step(ctx, func(ctx context.Context) error {
-		return j.r.Store.FinishReviewRun(ctx, j.claim, store.InvestigationFailed, reasonError, nil, j.r.now())
+		return j.r.Store.FinishReviewRun(ctx, j.claim, store.InvestigationFailed, reasonError, nil, nil, j.r.now())
 	})
 	if err != nil && !errors.Is(err, store.ErrConflict) {
 		j.logError("review: could not end the review run", err)
@@ -411,7 +423,7 @@ func (j *job) settle(ctx context.Context) error {
 	case endLost:
 		return nil
 	default:
-		return st.FinishReviewRun(ctx, j.claim, store.InvestigationFailed, j.end.reason, nil, now)
+		return st.FinishReviewRun(ctx, j.claim, store.InvestigationFailed, j.end.reason, nil, nil, now)
 	}
 }
 
@@ -430,7 +442,7 @@ func (j *job) storeResult(ctx context.Context) error {
 		}
 	}
 	return errors.Join(err, j.inTime(ctx, func(ctx context.Context) error {
-		return j.r.Store.FinishReviewRun(ctx, j.claim, store.InvestigationFailed, reasonError, nil, j.r.now())
+		return j.r.Store.FinishReviewRun(ctx, j.claim, store.InvestigationFailed, reasonError, nil, nil, j.r.now())
 	}))
 }
 
@@ -441,15 +453,15 @@ func (j *job) inTime(ctx context.Context, fn func(ctx context.Context) error) er
 }
 
 func (j *job) storeOnce(ctx context.Context) error {
-	see, err := sightOf(ctx, j.r.Store, j.identity.ID)
+	see, err := agentjob.SightOf(ctx, j.r.Store, j.identity.ID)
 	if err != nil {
 		return err
 	}
-	accepted := agentjob.Accept(*j.result, see.can, agentjob.AcceptOptions{Replacement: agentresult.ReplacementReviewSummary})
-	if see.err != nil {
-		return see.err
+	accepted := agentjob.Accept(*j.result, see.Can, agentjob.AcceptOptions{Replacement: agentresult.ReplacementReviewSummary})
+	if err := see.Err(); err != nil {
+		return err
 	}
-	return j.r.Store.FinishReviewRun(ctx, j.claim, store.InvestigationDone, "", &accepted, j.r.now())
+	return j.r.Store.FinishReviewRun(ctx, j.claim, store.InvestigationDone, "", &accepted, see.ViewTags(), j.r.now())
 }
 
 var weekKey = regexp.MustCompile(`^w:(\d{4})-W(\d{2})$`)

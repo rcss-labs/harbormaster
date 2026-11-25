@@ -16,7 +16,6 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
-	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
@@ -517,7 +516,8 @@ func TestJob_ReclaimSettlesThePreviousRunFirst(t *testing.T) {
 		f.want(f.runTo(id, "skipped"), "skipped", "not_visible")
 		f.settled("failed 3300")
 	})
-	// While the previous run cannot be settled no second one is made beside it, and no attempt is used.
+	// While the previous run cannot be settled no second one is made beside it; the row ends and the run is left to the
+	// repair of abandoned runs.
 	t.Run("not when it cannot be settled", func(t *testing.T) {
 		f := newFixture(t)
 		id := f.due("Daily spend")
@@ -525,20 +525,19 @@ func TestJob_ReclaimSettlesThePreviousRunFirst(t *testing.T) {
 		f.exec(`create function no_settle() returns trigger language plpgsql as $$ begin raise exception 'not now'; end $$`)
 		f.exec(`create trigger no_settle before update on agent_runs for each row execute function no_settle()`)
 		f.clock.advance(6*time.Minute + time.Second)
-		before := f.row(id).ClaimSeq
 		stop := f.start(f.runner)
-		f.waitLong("the claim to be given back", func() bool {
-			v := f.row(id)
-			return v.State == "requested" && v.ClaimSeq > before || f.agent.count() > 0
-		})
+		f.waitLong("the row to end", func() bool { return f.row(id).State == "failed" || f.agent.count() > 0 })
 		stop()
-		if runs := f.runs(); len(runs) != 1 || runs[0].id != old || f.agent.count() != 0 || f.row(id).Attempts != 1 {
-			t.Errorf("runs %+v, %d agent calls, attempts %d", runs, f.agent.count(), f.row(id).Attempts)
+		f.want(f.row(id), "failed", "error")
+		if runs := f.runs(); len(runs) != 1 || runs[0].id != old || f.agent.count() != 0 {
+			t.Errorf("runs %+v, %d agent calls", runs, f.agent.count())
 		}
 		f.exec(`drop trigger no_settle on agent_runs`)
-		f.clock.advance(6 * time.Minute)
-		f.want(f.runTo(id, "done"), "done", "")
-		f.settled("failed 3300", "done 4200")
+		f.clock.advance(61 * time.Minute)
+		if res, err := f.st.ReconcileAgentRuns(context.Background(), time.Hour, f.clock.now()); err != nil || res.Settled != 1 {
+			t.Fatalf("reconcile = %+v, %v", res, err)
+		}
+		f.settled("failed 3300")
 	})
 }
 
@@ -736,33 +735,78 @@ func TestJob_UnknownTypeIsNeverRun(t *testing.T) {
 	f.unspent()
 }
 
-// What fails before the agent is called costs no attempt: the row waits, within the late limit.
-func TestJob_ASetUpThatFailsCostsNoAttempt(t *testing.T) {
+// What fails before the agent is called costs an attempt: it is tried once more, and then the row fails unpaid.
+func TestJob_ASetUpThatFailsCostsAnAttempt(t *testing.T) {
 	for name, c := range map[string]struct {
 		break_, mend string
-		runs         int
+		reserved     bool
 	}{
+		"identity": {break_: `alter table users rename to users_gone`, mend: `alter table users_gone rename to users`},
+		"review":   {break_: `alter table agent_review_scopes rename to scopes_gone`, mend: `alter table scopes_gone rename to agent_review_scopes`},
 		"settings": {break_: `alter table agent_settings rename to agent_settings_gone`, mend: `alter table agent_settings_gone rename to agent_settings`},
 		"services": {break_: `alter table services rename to services_gone`, mend: `alter table services_gone rename to services`},
-		"start":    {break_: `alter table agent_review_runs add constraint no_run check (run_id is null)`, mend: `alter table agent_review_runs drop constraint no_run`, runs: 1},
-		"mint":     {break_: `alter table api_tokens add constraint no_token check (kind <> 'run')`, mend: `alter table api_tokens drop constraint no_token`, runs: 1},
+		"reserve":  {break_: `alter table agent_runs add constraint no_reserve check (role <> 'reviewer')`, mend: `alter table agent_runs drop constraint no_reserve`},
+		"start":    {break_: `alter table agent_review_runs add constraint no_run check (run_id is null)`, mend: `alter table agent_review_runs drop constraint no_run`, reserved: true},
+		"mint":     {break_: `alter table api_tokens add constraint no_token check (kind <> 'run')`, mend: `alter table api_tokens drop constraint no_token`, reserved: true},
+		"renew": {break_: `create function no_renew() returns trigger language plpgsql as $$ begin
+			if old.state = 'running' and new.state = 'running' and old.run_id is not null and new.run_id = old.run_id then raise exception 'not now'; end if; return new; end $$;
+			create trigger no_renew before update of claimed_until on agent_review_runs for each row execute function no_renew()`,
+			mend: `drop trigger no_renew on agent_review_runs`, reserved: true},
 	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFixture(t)
-			id := f.due("Daily spend")
-			f.exec(c.break_)
-			v := f.runToRelease(id)
-			f.exec(c.mend)
-			if v.Attempts != 0 || v.StartedAt != nil || f.agent.count() != 0 || len(f.runs()) != c.runs {
-				t.Errorf("attempts %d, started %v, %d agent calls, runs %+v", v.Attempts, v.StartedAt, f.agent.count(), f.runs())
-			}
-			if v.ClaimedUntil == nil || !v.ClaimedUntil.Equal(f.clock.now().Add(5*time.Minute)) {
-				t.Errorf("retry at %v", v.ClaimedUntil)
-			}
-			f.clock.advance(5*time.Minute + time.Second)
-			f.want(f.runTo(id, "done"), "done", "")
-		})
+		for _, mended := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, mended %v", name, mended), func(t *testing.T) {
+				f := newFixture(t)
+				id := f.due("Daily spend")
+				f.exec(c.break_)
+				v := f.runToRelease(id)
+				if v.Attempts != 1 || v.ClaimedUntil == nil || !v.ClaimedUntil.Equal(f.clock.now().Add(5*time.Minute)) {
+					t.Errorf("attempts %d, retry at %v", v.Attempts, v.ClaimedUntil)
+				}
+				f.clock.advance(5*time.Minute + time.Second)
+				want, calls := "done", 1
+				if mended {
+					f.exec(c.mend)
+				} else {
+					want, calls = "failed", 0
+				}
+				v = f.runTo(id, want)
+				if !mended {
+					f.want(v, "failed", "error")
+				}
+				if f.agent.count() != calls || v.Attempts != 2 {
+					t.Errorf("%d agent calls, attempts %d", f.agent.count(), v.Attempts)
+				}
+				runs := f.runs()
+				if reserved := map[bool]int{true: 2, false: calls}[c.reserved]; len(runs) != reserved {
+					t.Errorf("runs = %+v, want %d", runs, reserved)
+				}
+				for _, r := range runs[:max(len(runs)-calls, 0)] {
+					if r.state != "failed" || r.cost != 0 || r.tokens != 0 || r.audits != 1 {
+						t.Errorf("a run that was not paid = %+v", r)
+					}
+				}
+			})
+		}
 	}
+}
+
+// A job that is stopped while it prepares gives the claim back as if it had not been made.
+func TestJob_StoppedInsidePrepareCostsNoAttempt(t *testing.T) {
+	f := newFixture(t)
+	id := f.due("Daily spend")
+	asked := make(chan struct{}, 4)
+	f.agent.onCatalogue = func(r *http.Request) { asked <- struct{}{}; <-r.Context().Done() }
+	stop := f.start(f.runner)
+	select {
+	case <-asked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the catalogue was never asked for")
+	}
+	stop()
+	if v := f.row(id); v.State != "requested" || v.Attempts != 0 || v.ClaimSeq != 1 || v.StartedAt != nil {
+		t.Errorf("review run = %+v", v)
+	}
+	f.unspent()
 }
 
 // A start that the store refuses for its text would be refused again.
@@ -826,20 +870,48 @@ func TestJob_CoveredTagsAndCountAreStored(t *testing.T) {
 	}
 }
 
+// The identity may read more or less when the run ends than when it started: what it could read at either time is
+// covered (P3-R16), so a tag granted during the run does not show its evidence to readers without it.
+func TestJob_CoveredTagsHoldThoseOfTheStartAndTheFinish(t *testing.T) {
+	f := newFixture(t)
+	finance, payments := f.tag("finance"), f.tag("payments")
+	f.services(batchKey)
+	f.tagService(batchKey, finance)
+	f.grant(f.dev, payments)
+	id := f.due("Daily spend")
+	var atCall []int64
+	f.agent.set(func(c *call) {
+		atCall = f.row(id).CoveredTags
+		f.grant(payments, finance)
+		item := viewItem("3 tasks")
+		item.ServiceID = batchKey.ID()
+		c.send(usage(700), resultEvent(agentresult.Result{Summary: "Fine.", Evidence: []agentresult.Evidence{item}}), doneEvent)
+	})
+	v := f.runTo(id, "done")
+	ev, err := f.st.ListReviewRunEvidence(context.Background(), id)
+	if err != nil || len(ev) != 1 || ev[0].ServiceName != batchKey.Service {
+		t.Fatalf("evidence = %+v, %v", ev, err)
+	}
+	if start, want := []int64{int64(f.dev), int64(payments)}, []int64{int64(f.dev), int64(finance), int64(payments)}; !sameTags(atCall, start) || !sameTags(v.CoveredTags, want) {
+		t.Errorf("covered %v at the start and %v at the finish; want %v and %v", atCall, v.CoveredTags, start, want)
+	}
+}
+
+func sameTags(got, want []int64) bool {
+	return slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want)))
+}
+
 // ---- lifecycle ------------------------------------------------------------------------------------------------------
 
 func TestJob_ReviewDisabledWhileWaitingIsSkipped(t *testing.T) {
-	for name, c := range map[string]struct {
-		sql   string
-		first bool // only before the first run
-	}{
-		"disabled": {sql: `update agent_reviews set enabled = false`, first: true},
-		"deleted":  {sql: `delete from agent_reviews`},
+	for name, sql := range map[string]string{
+		"disabled": `update agent_reviews set enabled = false`,
+		"deleted":  `delete from agent_reviews`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			id := f.due("Daily spend")
-			f.exec(c.sql)
+			f.exec(sql)
 			f.want(f.runTo(id, "skipped"), "skipped", "disabled")
 			f.unspent()
 		})
@@ -847,14 +919,75 @@ func TestJob_ReviewDisabledWhileWaitingIsSkipped(t *testing.T) {
 			f := newFixture(t)
 			id := f.due("Daily spend")
 			f.crashed(id, 100)
-			f.exec(c.sql)
+			f.exec(sql)
 			f.clock.advance(6*time.Minute + time.Second)
-			if c.first {
+			f.want(f.runTo(id, "skipped"), "skipped", "disabled")
+			f.settled("failed 100")
+			if f.agent.count() != 0 {
+				t.Errorf("%d agent calls", f.agent.count())
+			}
+		})
+	}
+	t.Run("an unreachable agent, then disabled for a month", func(t *testing.T) {
+		f := newFixture(t)
+		id := f.due("Daily spend")
+		f.agent.set(func(c *call) { c.w.WriteHeader(http.StatusBadGateway) })
+		f.runToRelease(id)
+		f.exec(`update agent_reviews set enabled = false`)
+		f.clock.advance(30 * 24 * time.Hour)
+		f.want(f.runTo(id, "skipped"), "skipped", "disabled")
+		if f.agent.count() != 1 {
+			t.Errorf("%d agent calls, want the first alone", f.agent.count())
+		}
+	})
+	t.Run("a manual run goes on", func(t *testing.T) {
+		f := newFixture(t)
+		rv := f.review("Daily spend", func(r *store.Review) { r.Enabled = false })
+		run, err := f.st.RequestManualReviewRun(context.Background(), rv.ID, "Run on 25 Nov 2026, 07:45 UTC", f.clock.now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.crashed(run.ID, 100)
+		f.clock.advance(6*time.Minute + time.Second)
+		f.want(f.runTo(run.ID, "done"), "done", "")
+		f.settled("failed 100", "done 4200")
+	})
+}
+
+// A later attempt is not made once the row is past the late limit and the lease: it would pay for a review of another
+// period's data. An ordinary reclaim near the limit still runs.
+func TestJob_ALaterAttemptIsNotRunLate(t *testing.T) {
+	const limit = 6 * time.Hour
+	for name, c := range map[string]struct {
+		crashAt, back time.Duration // after the occurrence
+		timeout       time.Duration
+		done          bool
+	}{
+		"an ordinary reclaim near the limit": {crashAt: limit - 2*time.Minute, back: limit + 4*time.Minute + time.Second, timeout: time.Minute, done: true},
+		"the last moment":                    {crashAt: limit - time.Minute, back: limit + 6*time.Minute, timeout: time.Minute, done: true},
+		"past it":                            {crashAt: limit - time.Minute, back: limit + 6*time.Minute + time.Second, timeout: time.Minute},
+		"the lease of a long run":            {crashAt: limit - 2*time.Minute, back: limit + 18*time.Minute, timeout: 20 * time.Minute, done: true},
+		"past the lease of a long run":       {crashAt: limit - 2*time.Minute, back: limit + 21*time.Minute + time.Second, timeout: 20 * time.Minute},
+		"an hour dark":                       {crashAt: 45 * time.Minute, back: limit + time.Hour, timeout: time.Minute},
+		"ten days dark":                      {crashAt: 45 * time.Minute, back: 10 * 24 * time.Hour, timeout: time.Minute},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.agent.runTimeout = c.timeout
+			f.clock.at = dueAt.Add(c.crashAt)
+			id := f.due("Daily spend")
+			f.crashed(id, 3300)
+			f.clock.at = dueAt.Add(c.back)
+			if c.done {
 				f.want(f.runTo(id, "done"), "done", "")
+				f.settled("failed 3300", "done 4200")
 				return
 			}
-			f.want(f.runTo(id, "skipped"), "skipped", "disabled") // its scope is gone with it
-			f.settled("failed 100")
+			f.want(f.runTo(id, "failed"), "failed", "interrupted")
+			f.settled("failed 3300")
+			if f.agent.count() != 0 {
+				t.Errorf("%d agent calls", f.agent.count())
+			}
 		})
 	}
 }
@@ -1186,6 +1319,18 @@ func TestJob_OnlyViewEvidenceTheIdentityMayReadNowIsStored(t *testing.T) {
 	}
 }
 
+// A service that cannot be looked up is not one that cannot be seen: no result is stored on a failed read.
+func TestJob_AFailedLookupStoresNoResult(t *testing.T) {
+	f := newFixture(t)
+	id := f.due("Daily spend")
+	f.agent.set(func(c *call) {
+		f.exec(`alter table services rename to services_gone`)
+		c.send(goodRun("Fine.")...)
+	})
+	f.want(f.runTo(id, "failed"), "failed", "error")
+	f.settled("done 4200")
+}
+
 func TestJob_AReplacedSummaryIsTheReviewSentence(t *testing.T) {
 	f := newFixture(t)
 	id := f.due("Daily spend")
@@ -1194,18 +1339,6 @@ func TestJob_AReplacedSummaryIsTheReviewSentence(t *testing.T) {
 	})
 	if v := f.runTo(id, "done"); v.Summary != agentresult.ReplacementReviewSummary || !v.SummaryReplaced {
 		t.Errorf("summary = %q, replaced %v", v.Summary, v.SummaryReplaced)
-	}
-}
-
-// The identity is read-only whatever it may hold, shown on a subject that holds all.
-func TestSight_IsReadOnly(t *testing.T) {
-	f := newFixture(t)
-	see, err := sightOf(context.Background(), f.st, f.admin.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !see.can(checkoutKey, authz.View) || see.can(checkoutKey, authz.Operate) || see.can(checkoutKey, authz.Deploy) {
-		t.Error("what the job may ask for is not reading alone")
 	}
 }
 

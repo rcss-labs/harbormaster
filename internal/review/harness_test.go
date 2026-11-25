@@ -154,13 +154,17 @@ type fakeAgent struct {
 	maxRunTokens    int64
 	outputPrice     int64
 	active, most    int
-	refused         []string // why a task was answered with 400
+	onCatalogue     func(r *http.Request) // before the catalogue is answered
+	refused         []string              // why a task was answered with 400
 }
 
 func newFakeAgent(t *testing.T) *fakeAgent {
 	a := &fakeAgent{roles: []string{"chat", "investigator", "reviewer", "test"}, reviewTypes: []string{"cost", "security", "reliability", "capacity"}, models: []string{testModel}, catalogueStatus: http.StatusOK, runTimeout: time.Minute, maxRunTokens: 200_000, outputPrice: 15_000_000}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/catalogue", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/catalogue", func(w http.ResponseWriter, r *http.Request) {
+		if a.onCatalogue != nil {
+			a.onCatalogue(r)
+		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if a.catalogueStatus != http.StatusOK {

@@ -138,8 +138,9 @@ type Outcome struct {
 	Tools    []string
 	Result   *agentresult.Result // of a Done run only
 
-	// Called: the agent was called. A run with Called false never reached the agent, so a caller must not count it
-	// as an attempt; a Cancelled one that was not called was not started at all.
+	// Called: the agent was called. A run with Called false never reached the agent and cost nothing. The job decides
+	// whether it counts as an attempt: a Cancelled one that was not called was not started at all and does not; a
+	// set-up that failed may.
 	Called bool
 	// Panicked: the run was ended by a panic.
 	Panicked bool
