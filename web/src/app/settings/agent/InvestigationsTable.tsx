@@ -33,6 +33,12 @@ function subjectName(row: AgentInvestigationDTO): string {
   return subject.service || subject.cluster || subject.account_id || row.alert.title
 }
 
+/** Empty means no run row (skipped, or deleted by retention); after a retry the figure is the last attempt only. */
+function costText(row: AgentInvestigationDTO): string {
+  if (row.cost_usd === '') return 'n/a'
+  return row.attempts > 1 ? `$${row.cost_usd} (last attempt)` : `$${row.cost_usd}`
+}
+
 /** The window and limits are set by the operator; this page only shows them. */
 function limitsSentence(limits: AgentInvestigatorLimits): string {
   return `Alerts for the same service within ${count(limits.window_minutes, 'minute', 'minutes')} share one investigation. At most ${limits.per_hour} start an hour, ${limits.concurrent} run at a time, and none waits longer than ${count(limits.max_wait_minutes, 'minute', 'minutes')}.`
@@ -75,7 +81,7 @@ export function InvestigationsTable({ limits }: { limits: AgentInvestigatorLimit
                     <Link to={`/investigations/${row.id}`}>{subjectName(row)}</Link>
                   </td>
                   <td>{new Date(row.requested_at).toLocaleString()}</td>
-                  <td className={tableClass.num}>${row.cost_usd}</td>
+                  <td className={tableClass.num}>{costText(row)}</td>
                 </tr>
               )
             })}

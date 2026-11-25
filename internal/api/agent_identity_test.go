@@ -140,7 +140,7 @@ func TestAgentIdentity_Audited(t *testing.T) {
 		t.Fatalf("%d agent_identity_update rows, want exactly 1 (the store writes it)", len(rows))
 	}
 	tags, _ := rows[0].Details["tags"].(map[string]any)
-	if rows[0].ActorUsername != "sam" || fmt.Sprint(tags[fmt.Sprint(int64(prod.ID))]) != "[view logs]" {
+	if rows[0].ActorUsername != "sam" || fmt.Sprint(tags[fmt.Sprint(int64(prod.ID))]) != "[View Logs]" {
 		t.Errorf("audit row = %+v", rows[0])
 	}
 	// A refused save writes no row.
@@ -202,6 +202,10 @@ func TestAgentInvestigations_AdminListWithCost(t *testing.T) {
 		return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "111111111111", Region: "us-east-1", Cluster: "core"}, Service: name}
 	}
 	oldest := seedInvestigation(t, env, key("alpha"), "failed", "agent_unavailable", base, 0)
+	// A run row that retention deleted: the investigation still points at it.
+	if _, err := env.st.Pool.Exec(t.Context(), `update agent_investigations set run_id = $1 where id = $2`, uuid.New(), oldest); err != nil {
+		t.Fatal(err)
+	}
 	middle := seedInvestigation(t, env, key("beta"), "done", "", base.Add(time.Minute), 1_500_000)
 	newest := seedInvestigation(t, env, key("gamma"), "skipped", "budget", base.Add(2*time.Minute), 0)
 
@@ -248,13 +252,13 @@ func TestAgentInvestigations_AdminListWithCost(t *testing.T) {
 		done.Alert.Kind != "service_failing" || done.Alert.Title != "beta: failing" || done.Summary != "summary of beta" {
 		t.Errorf("item = %+v", done)
 	}
-	if first.Items[0].State != "skipped" || first.Items[0].Reason != "budget" || first.Items[0].CostUSD != "0.00" {
+	if first.Items[0].State != "skipped" || first.Items[0].Reason != "budget" || first.Items[0].CostUSD != "" {
 		t.Errorf("item without a run = %+v", first.Items[0])
 	}
 
 	var second page
 	decode(t, env.sam.get("/api/agent/investigations?limit=2&cursor="+first.NextCursor), &second)
-	if len(second.Items) != 1 || second.Items[0].ID != oldest || second.NextCursor != "" {
+	if len(second.Items) != 1 || second.Items[0].ID != oldest || second.NextCursor != "" || second.Items[0].CostUSD != "" {
 		t.Errorf("last page = %+v, want the oldest and an empty cursor", second)
 	}
 
@@ -265,6 +269,18 @@ func TestAgentInvestigations_AdminListWithCost(t *testing.T) {
 	for _, item := range body["items"].([]any) {
 		if _, ok := item.(map[string]any)["evidence"]; ok {
 			t.Error("an item carries evidence")
+		}
+	}
+	// A huge limit is clamped, not refused and not overflowed.
+	for _, q := range []string{"limit=1000000", "limit=9223372036854775807"} {
+		var big page
+		resp := env.sam.get("/api/agent/investigations?" + q)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("?%s: status %d, want 200", q, resp.StatusCode)
+		}
+		decode(t, resp, &big)
+		if len(big.Items) != 3 || big.NextCursor != "" {
+			t.Errorf("?%s: %d items, cursor %q", q, len(big.Items), big.NextCursor)
 		}
 	}
 	for _, q := range []string{"cursor=!!", "limit=0", "limit=abc"} {

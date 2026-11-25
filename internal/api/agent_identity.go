@@ -183,7 +183,8 @@ type AgentInvestigationDTO struct {
 	Provider        string     `json:"provider"`
 	Model           string     `json:"model"`
 	Attempts        int        `json:"attempts"`
-	// CostUSD is what the latest run of the investigation cost; "0.00" when it has none.
+	// CostUSD is what the latest run cost, in dollars; empty when there is no run row (skipped before any run, or the run
+	// was deleted by retention). After a retry it is the last attempt only.
 	CostUSD string `json:"cost_usd"`
 }
 
@@ -211,6 +212,14 @@ func decodeInvestigationCursor(token string) (time.Time, int64, error) {
 	return time.Unix(0, n).UTC(), i, nil
 }
 
+// maxInvestigationPage is the configured page maximum, or 200 when none is set.
+func maxInvestigationPage(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	return 200
+}
+
 // listAgentInvestigations answers GET /api/agent/investigations?cursor=&limit=, newest first.
 func (s *Server) listAgentInvestigations(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
@@ -232,9 +241,7 @@ func (s *Server) listAgentInvestigations(w http.ResponseWriter, r *http.Request)
 		}
 		limit = n
 	}
-	if max := s.Cfg.PageSizeMax; max > 0 && limit > max {
-		limit = max
-	}
+	limit = min(limit, maxInvestigationPage(s.Cfg.PageSizeMax))
 	filter.Limit = limit + 1 // one more than the page says whether there is a next one
 	rows, err := s.Store.ListInvestigations(r.Context(), filter)
 	if err != nil {
@@ -259,20 +266,22 @@ func (s *Server) listAgentInvestigations(w http.ResponseWriter, r *http.Request)
 	}
 	out := AgentInvestigationsDTO{Items: make([]AgentInvestigationDTO, 0, len(rows)), NextCursor: next}
 	for _, row := range rows {
-		var cost int64
+		cost := ""
 		if row.RunID != nil {
-			cost = costs[*row.RunID]
+			if micro, ok := costs[*row.RunID]; ok {
+				cost = formatUSD(micro, true)
+			}
 		}
 		out.Items = append(out.Items, investigationRowDTO(row, cost))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-func investigationRowDTO(v store.Investigation, costMicroUSD int64) AgentInvestigationDTO {
+func investigationRowDTO(v store.Investigation, costUSD string) AgentInvestigationDTO {
 	dto := AgentInvestigationDTO{
 		ID: v.ID, State: v.State, Reason: v.Reason, RequestedAt: v.RequestedAt, StartedAt: v.StartedAt, FinishedAt: v.FinishedAt,
 		Summary: v.Summary, SummaryReplaced: v.SummaryReplaced, Provider: v.Provider, Model: v.Model, Attempts: v.Attempts,
-		CostUSD: formatUSD(costMicroUSD, true),
+		CostUSD: costUSD,
 	}
 	dto.Subject.Kind, dto.Subject.AccountID, dto.Subject.Region = v.SubjectKind, v.AccountID, v.Region
 	dto.Subject.Cluster, dto.Subject.Service = v.ClusterName, v.ServiceName

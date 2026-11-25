@@ -3,8 +3,11 @@ package api
 import (
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 func (e *notifyEnv) devTag() store.Tag {
@@ -20,6 +23,22 @@ func (e *notifyEnv) devTag() store.Tag {
 	}
 	e.t.Fatal("no built-in tag")
 	return store.Tag{}
+}
+
+// seedTaggedServices makes the services ACTIVE, each with the given value of the AWS tag "env" (none when empty).
+func (e *notifyEnv) seedTaggedServices(envs map[model.ServiceKey]string) {
+	e.t.Helper()
+	var rows []model.Service
+	for k, env := range envs {
+		raw := `{"Tags":[]}`
+		if env != "" {
+			raw = `{"Tags":[{"Key":"env","Value":"` + env + `"}]}`
+		}
+		rows = append(rows, model.Service{Key: k, Status: "ACTIVE", Raw: []byte(raw), PolledAt: time.Now()})
+	}
+	if _, err := storetest.Seed(e.st).UpsertServices(e.t.Context(), rows); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 func investigateInput(e *notifyEnv, name string, on any) map[string]any {
@@ -145,7 +164,7 @@ func previewAgent(t *testing.T, e *notifyEnv, in map[string]any) *NotificationPr
 
 func TestPreview_CountsServicesTheIdentityCannotSee(t *testing.T) {
 	e := newNotifyEnv(t, notifyEnvOptions{agent: true})
-	e.seedActiveServices(nxKey, nyKey, nzKey)
+	e.seedTaggedServices(map[model.ServiceKey]string{nxKey: "prod", nyKey: "", nzKey: "prod"})
 	prod, err := e.st.CreateTag(t.Context(), "Prod", "red", false)
 	if err != nil {
 		t.Fatal(err)
@@ -184,12 +203,34 @@ func TestPreview_CountsServicesTheIdentityCannotSee(t *testing.T) {
 		t.Errorf("account entry = %+v, want 3 and 1", byAccount)
 	}
 
+	// Tag selectors resolve through the existing resolver, then the same count applies.
+	byAWS := previewAgent(t, e, e.webhookInput("draft", func(in map[string]any) {
+		in["investigate"] = true
+		in["scope"] = []any{map[string]any{"kind": "aws", "key": "env", "value": "prod"}}
+	}))
+	if byAWS == nil || byAWS.ServicesTotal != 2 || byAWS.ServicesUnseen != 1 {
+		t.Errorf("aws tag entry = %+v, want 2 and 1", byAWS)
+	}
+	byHarbormaster := previewAgent(t, e, e.webhookInput("draft", func(in map[string]any) {
+		in["investigate"] = true
+		in["scope"] = []any{map[string]any{"kind": "harbormaster", "tag_id": int64(prod.ID)}}
+	}))
+	if byHarbormaster == nil || byHarbormaster.ServicesTotal != 1 || byHarbormaster.ServicesUnseen != 1 {
+		t.Errorf("harbormaster tag entry = %+v, want 1 and 1", byHarbormaster)
+	}
+
 	// Giving the identity Prod as well leaves nothing unseen.
 	if resp := putIdentity(e.admin, []map[string]any{{"tag_id": int64(e.devTag().ID), "logs": false}, {"tag_id": int64(prod.ID), "logs": true}}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT identity: status %d", resp.StatusCode)
 	}
 	if got := previewAgent(t, e, investigateInput(e, "draft", true)); got == nil || got.ServicesUnseen != 0 || got.ServicesTotal != 3 {
 		t.Errorf("after granting Prod = %+v, want 3 and 0 unseen", got)
+	}
+	if got := previewAgent(t, e, e.webhookInput("draft", func(in map[string]any) {
+		in["investigate"] = true
+		in["scope"] = []any{map[string]any{"kind": "harbormaster", "tag_id": int64(prod.ID)}}
+	})); got == nil || got.ServicesUnseen != 0 {
+		t.Errorf("harbormaster tag entry after granting Prod = %+v, want 0 unseen", got)
 	}
 }
 

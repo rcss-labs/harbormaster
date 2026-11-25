@@ -658,8 +658,32 @@ func TestSetAgentIdentityPermissions_AuditNamesActions(t *testing.T) {
 	entries, _ := st.ListAudit(ctx, 1, 0)
 	tags, _ := entries[0].Details["tags"].(map[string]any)
 	names, _ := tags[fmt.Sprint(int64(prod.ID))].([]any)
-	if len(names) != 2 || names[0] != "view" || names[1] != "logs" {
-		t.Fatalf("details = %v, want the action names [view logs] for the tag", entries[0].Details)
+	if len(names) != 2 || names[0] != "View" || names[1] != "Logs" {
+		t.Fatalf("details = %v, want the action names [View Logs] for the tag", entries[0].Details)
+	}
+}
+
+func TestSetAgentIdentityPermissions_AuditHoldsTheStateBefore(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	prod, _ := st.CreateTag(ctx, "Prod", "red", false)
+	stage, _ := st.CreateTag(ctx, "Staging", "blue", false)
+	root, _ := st.CreateUser(ctx, "root", "h", true, false)
+	st.EnsureAgentIdentity(ctx)
+	first := map[authz.TagID]authz.ActionSet{prod.ID: authz.ActionSet(authz.View | authz.Logs)}
+	second := map[authz.TagID]authz.ActionSet{stage.ID: authz.ActionSet(authz.View)}
+	for _, perms := range []map[authz.TagID]authz.ActionSet{first, second} {
+		if err := st.SetAgentIdentityPermissions(ctx, perms, root.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, _ := st.ListAudit(ctx, 2, 0) // newest first
+	before, _ := entries[0].Details["before"].(map[string]any)
+	if fmt.Sprint(before) != fmt.Sprintf("map[%d:[View Logs]]", prod.ID) {
+		t.Errorf("second save before = %v, want the first save's access", before)
+	}
+	if b, ok := entries[1].Details["before"].(map[string]any); !ok || len(b) != 0 {
+		t.Errorf("first save before = %v, want an empty object", entries[1].Details["before"])
 	}
 }
 

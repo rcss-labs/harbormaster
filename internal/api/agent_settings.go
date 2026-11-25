@@ -223,10 +223,10 @@ type agentModelChoice struct {
 // agentSettingsUpdate is the PUT body. A null or missing list, map or version decodes to nil, which is refused: a
 // save always states the whole form, so a client that forgets a field cannot silently clear it.
 type agentSettingsUpdate struct {
-	MonthlyBudgetUSD    string                      `json:"monthly_budget_usd"`
-	UnredactedProviders []string                    `json:"unredacted_providers"`
-	RoleModels          map[string]agentModelChoice `json:"role_models"`
-	Version             *int64                      `json:"version"`
+	MonthlyBudgetUSD    string                       `json:"monthly_budget_usd"`
+	UnredactedProviders []string                     `json:"unredacted_providers"`
+	RoleModels          map[string]*agentModelChoice `json:"role_models"`
+	Version             *int64                       `json:"version"`
 }
 
 var errSettingsChanged = &APIError{Status: http.StatusConflict, Code: "settings_changed",
@@ -246,7 +246,9 @@ func modelLabel(ref store.AgentModelRef, ok bool) string {
 // A role model or provider that is new must be in the agent's catalogue; one already stored may stay as it is
 // although the operator no longer offers it, so an admin can still change the allowance, and a removed provider can
 // be dropped. While the agent cannot be asked, additions and changes are refused (503); removals still go through.
-// A role the form leaves out is cleared, for the investigator as for chat: a save states the whole form.
+// A chat model the form leaves out is cleared (a save states the whole form). The investigator is newer: a body
+// without the key keeps the stored model, so an older browser bundle cannot wipe it during a deploy, and an explicit
+// null clears it.
 func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	var body agentSettingsUpdate
 	if err := decodeStrictJSON(w, r, &body); err != nil {
@@ -268,7 +270,10 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, invalid("Unknown role: "+role+"."))
 			return
 		}
-		if choice.Provider == "" || choice.Model == "" {
+		if choice == nil && role == investigatorRoleName {
+			continue // explicit null: clear it (absent from wantRoles, present in the body)
+		}
+		if choice == nil || choice.Provider == "" || choice.Model == "" {
 			s.fail(w, invalid("Choose a provider and a model."))
 			return
 		}
@@ -316,6 +321,9 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 			next.RoleModels[role] = ref
 		}
 		for _, role := range settingsRoles {
+			if _, stated := body.RoleModels[role]; !stated && role == investigatorRoleName {
+				continue
+			}
 			delete(next.RoleModels, role)
 			if want, ok := wantRoles[role]; ok {
 				next.RoleModels[role] = want
@@ -333,6 +341,9 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	oldChat, hadChat := old.RoleModels[chatRoleName]
 	oldInvestigator, hadInvestigator := old.RoleModels[investigatorRoleName]
 	wantChat, wantInvestigator := wantRoles[chatRoleName], wantRoles[investigatorRoleName]
+	if _, stated := body.RoleModels[investigatorRoleName]; !stated {
+		wantInvestigator = oldInvestigator // kept
+	}
 	s.auditAdmin(r, "agent_settings_update", "agent:settings", "Changed the AI agent settings.", map[string]any{
 		"old_budget_usd":           formatUSD(old.MonthlyBudgetMicroUSD, false),
 		"new_budget_usd":           formatUSD(budget, false),

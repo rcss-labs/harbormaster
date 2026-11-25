@@ -542,7 +542,7 @@ describe('AgentSettings', () => {
         cursors.push(cursor)
         return HttpResponse.json(
           cursor
-            ? { items: [investigation(40, { state: 'skipped', reason: 'budget', cost_usd: '0.00', subject: { ...investigation(40).subject, service: 'auth' } })], next_cursor: '' }
+            ? { items: [investigation(40, { state: 'skipped', reason: 'budget', cost_usd: '', subject: { ...investigation(40).subject, service: 'auth' } })], next_cursor: '' }
             : { items: [investigation(41)], next_cursor: 'abc' },
         )
       }),
@@ -556,8 +556,16 @@ describe('AgentSettings', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Load more' }))
     expect(await screen.findByRole('link', { name: 'auth' })).toHaveAttribute('href', '/investigations/40')
     expect(table.getByText('Skipped')).toBeInTheDocument()
+    expect(table.getByText('n/a')).toBeInTheDocument()
     expect(cursors).toContain('abc')
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument()
+  })
+
+  it('marks the cost of a retried investigation as the last attempt', async () => {
+    useAgentMocks()
+    server.use(http.get('/api/agent/investigations', () => HttpResponse.json({ items: [investigation(42, { attempts: 2, cost_usd: '0.30' })], next_cursor: '' })))
+    renderApp('/settings/agent')
+    expect(await screen.findByText('$0.30 (last attempt)')).toBeInTheDocument()
   })
 
   it('says when there are no investigations yet', async () => {

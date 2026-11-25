@@ -835,6 +835,7 @@ func TestAgentSettings_BodyIsStrictAndComplete(t *testing.T) {
 var agentSettingsRoutes = []struct{ method, path string }{
 	{"GET", "/api/agent/settings"}, {"PUT", "/api/agent/settings"}, {"POST", "/api/agent/settings/test"},
 	{"GET", "/api/agent/usage"}, {"POST", "/api/users/2/ai-chat"},
+	{"PUT", "/api/agent/identity"}, {"GET", "/api/agent/investigations"},
 }
 
 func TestAgentSettingsRoutes_AbsentWhenDisabled(t *testing.T) {
@@ -1224,15 +1225,33 @@ func TestAgentSettings_InvestigatorModelRoundTrip(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// Leaving it out clears it, as for chat.
-	resp = putSettingsRoles(env.sam, "30", map[string]any{"chat": fakeChat()})
+	// A body without the key (an older bundle) keeps it; an explicit null clears it.
+	resp = putSettingsRoles(env.sam, "31", map[string]any{"chat": fakeChat()})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT without the investigator: status %d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	if _, ok := getSettings(t, env.sam).RoleModels["investigator"]; ok {
-		t.Error("investigator model still set")
+	kept := getSettings(t, env.sam)
+	if kept.Budget != "31.00" || kept.RoleModels["investigator"]["model"] != "fake-1" {
+		t.Errorf("after a save without the key: %+v, want the investigator kept", kept)
 	}
+	if rows := settingsAuditRows(t, env.st, "agent_settings_update"); rows[0].Details["new_investigator_model"] != "fake/fake-1" {
+		t.Errorf("audit of a kept model = %v", rows[0].Details)
+	}
+	resp = putSettingsRoles(env.sam, "31", map[string]any{"chat": fakeChat(), "investigator": nil})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT with a null investigator: status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if _, ok := getSettings(t, env.sam).RoleModels["investigator"]; ok {
+		t.Error("investigator model still set after null")
+	}
+	// A null chat is still refused, as before.
+	resp = putSettingsRoles(env.sam, "31", map[string]any{"chat": nil})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("null chat: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
 
 func TestAgentSettings_InvestigatorChangeIsRefusedWhileTheAgentIsDown(t *testing.T) {
@@ -1253,7 +1272,7 @@ func TestAgentSettings_InvestigatorChangeIsRefusedWhileTheAgentIsDown(t *testing
 		t.Errorf("unchanged investigator with the agent down: status %d, want 200", resp.StatusCode)
 	}
 	resp.Body.Close()
-	resp = putSettingsRoles(env.sam, "11", map[string]any{"chat": fakeChat()})
+	resp = putSettingsRoles(env.sam, "11", map[string]any{"chat": fakeChat(), "investigator": nil})
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("dropping the investigator with the agent down: status %d, want 200", resp.StatusCode)
 	}
